@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.{ Result, TryOps }
 
+import scala.concurrent.duration.*
 import scala.util.Try
 
 /**
@@ -55,7 +56,7 @@ object ProviderModelListers:
           baseUrl = normalized.baseUrlOrDefault(defaultBaseUrl)
           headers = requestHeaders(normalized, apiKey, sectionHeaders(normalized), extraHeaders)
           response <- httpClient
-            .getResult(s"${baseUrl.asUrl}$modelsPath", headers = headers, timeout = 10000)
+            .get(s"${baseUrl.asUrl}$modelsPath", headers = headers, timeout = 10.seconds)
             .mapServiceError(provider.asString, "Failed to discover models")
           okResponse   <- response.ensureSuccess(provider.asString)
           jsonResponse <- okResponse.toJson("responseBody")

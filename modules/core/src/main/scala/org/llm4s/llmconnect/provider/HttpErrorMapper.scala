@@ -1,8 +1,11 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, ValidationError }
+import org.llm4s.http.HttpHeaders
 import org.llm4s.types.Result
 
+import java.time.{ Clock, Duration, ZonedDateTime }
+import java.time.format.DateTimeFormatter
 import scala.util.Try
 
 /**
@@ -20,20 +23,72 @@ object HttpErrorMapper {
   /**
    * Maps an HTTP error response to a typed [[org.llm4s.error.LLMError]].
    *
+   * | Status      | Error                                                                 |
+   * |-------------|-----------------------------------------------------------------------|
+   * | 401, 403    | [[org.llm4s.error.AuthenticationError]]                               |
+   * | 429         | [[org.llm4s.error.RateLimitError]], with `retryAfter` from `Retry-After` |
+   * | 400         | [[org.llm4s.error.ValidationError]]                                   |
+   * | other       | [[org.llm4s.error.ServiceError]]                                      |
+   *
+   * A 429's `Retry-After` header (delta-seconds or an HTTP-date, name matched
+   * case-insensitively) becomes the error's `retryAfter` in milliseconds; an absent,
+   * unparseable or negative value leaves it unset, so the error's default backoff applies.
+   *
    * @param statusCode the HTTP status code (must be outside 2xx range)
    * @param body       the raw response body (may be JSON or plain text)
    * @param provider   short provider label used in error messages (e.g. `"gemini"`)
+   * @param headers    the response headers, as carried by `org.llm4s.http.HttpResponse`;
+   *                   pass them whenever the response is available
    * @return `Left` containing the appropriate `LLMError` subtype
    */
-  def mapHttpError(statusCode: Int, body: String, provider: String): Result[Nothing] = {
+  def mapHttpError(
+    statusCode: Int,
+    body: String,
+    provider: String,
+    headers: Map[String, Seq[String]] = Map.empty
+  ): Result[Nothing] =
+    mapHttpError(statusCode, body, provider, headers, Clock.systemUTC())
+
+  /** As the public overload, with the clock an HTTP-date `Retry-After` is measured against. */
+  private[provider] def mapHttpError(
+    statusCode: Int,
+    body: String,
+    provider: String,
+    headers: Map[String, Seq[String]],
+    clock: Clock
+  ): Result[Nothing] = {
     val details = extractErrorDetails(body, statusCode, provider)
     statusCode match {
       case 401 | 403 => Left(AuthenticationError(provider, details))
-      case 429       => Left(RateLimitError(provider))
-      case 400       => Left(ValidationError("request", details))
-      case s         => Left(ServiceError(s, provider, details))
+      case 429 =>
+        retryAfterMillis(headers, clock) match {
+          case Some(millis) => Left(RateLimitError(provider, millis))
+          case None         => Left(RateLimitError(provider))
+        }
+      case 400 => Left(ValidationError("request", details))
+      case s   => Left(ServiceError(s, provider, details))
     }
   }
+
+  /**
+   * The delay a `Retry-After` header asks for, in milliseconds.
+   *
+   * Accepts delta-seconds (`"120"`) or an RFC 1123 HTTP-date, which is measured against
+   * `clock` (a date already past gives zero). Returns `None` when the header is absent,
+   * unparseable or negative.
+   */
+  private[provider] def retryAfterMillis(headers: Map[String, Seq[String]], clock: Clock): Option[Long] =
+    HttpHeaders.first(headers, "Retry-After").map(_.trim).flatMap { value =>
+      if (value.nonEmpty && value.forall(_.isDigit))
+        value.toLongOption.filter(_ <= MaxRetryAfterSeconds).map(_ * 1000L)
+      else
+        Try(ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME)).toOption.map { date =>
+          math.max(0L, Duration.between(clock.instant(), date.toInstant).toMillis)
+        }
+    }
+
+  /** Guards the seconds-to-millis conversion against overflow. */
+  private val MaxRetryAfterSeconds = Long.MaxValue / 1000L
 
   /**
    * Attempts to extract a human-readable error message from a JSON response

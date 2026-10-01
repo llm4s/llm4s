@@ -4,6 +4,7 @@ package org.llm4s.toolapi.builtin.search
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
 import upickle.default._
+import scala.concurrent.duration.*
 
 import scala.util.control.NonFatal
 
@@ -181,36 +182,19 @@ object DuckDuckGoSearchTool {
       "safesearch"    -> safeSearch
     )
 
-    // Catch only non-fatal exceptions. Fatal errors (OOM, StackOverflow, etc.) will crash fast.
-    // InterruptedException is handled explicitly to restore the interrupt flag.
+    // The client reports a transport failure as a Left; turn it into a user-facing message.
     val responseEither: Either[String, HttpResponse] =
-      try
-        Right(
-          httpClient.get(
-            url = apiUrl,
-            headers = Map(
-              "User-Agent" -> "llm4s-duckduckgo-search/1.0"
-            ),
-            params = params,
-            timeout = config.timeoutMs
-          )
+      httpClient
+        .get(
+          url = apiUrl,
+          headers = Map(
+            "User-Agent" -> "llm4s-duckduckgo-search/1.0"
+          ),
+          params = params,
+          timeout = config.timeoutMs.millis
         )
-      catch {
-        case _: InterruptedException =>
-          // Restore interrupt flag for proper thread shutdown and timeout semantics
-          restoreInterrupt()
-          Left("Search request was cancelled or interrupted.")
-        case _: java.net.http.HttpTimeoutException =>
-          Left(s"Search request timed out after ${config.timeoutMs}ms. Please try again with a simpler query.")
-        case _: java.net.UnknownHostException =>
-          Left("Unable to reach search service. Please check network connectivity.")
-        case _: java.net.ConnectException =>
-          Left("Failed to connect to search service. The service may be temporarily unavailable.")
-        case NonFatal(_) =>
-          // Catch all other non-fatal exceptions (IOException, etc.)
-          // Fatal errors (OutOfMemoryError, StackOverflowError, etc.) will propagate
-          Left("Search request failed due to a network error. Please try again.")
-      }
+        .left
+        .map(describeTransportFailure(_, config.timeoutMs))
 
     responseEither.flatMap { response =>
       if (response.statusCode == 200) {

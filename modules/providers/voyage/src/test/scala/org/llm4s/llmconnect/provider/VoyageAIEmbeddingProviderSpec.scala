@@ -37,7 +37,7 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
     val mockHttp = stub[Llm4sHttpClient]
     val body =
       """{"data":[{"embedding":[0.1,0.2,0.3]},{"embedding":[0.4,0.5,0.6]}]}"""
-    (mockHttp.post _).when(*, *, *, *).returns(httpOk(body))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(body)))
 
     val provider = VoyageAIEmbeddingProvider.forTest(cfg, mockHttp)
     val result   = provider.embed(req)
@@ -51,7 +51,7 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
 
   it should "post to <baseUrl>/embeddings, as the default base URL already ends in /v1" in {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(httpOk("""{"data":[{"embedding":[0.1]}]}"""))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk("""{"data":[{"embedding":[0.1]}]}""")))
 
     val provider = VoyageAIEmbeddingProvider.forTest(cfg.copy(baseUrl = "https://api.voyageai.com/v1"), mockHttp)
     provider.embed(req)
@@ -63,7 +63,7 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
     val mockHttp = stub[Llm4sHttpClient]
     val body =
       """{"data":[{"embedding":[1.0]},{"embedding":[2.0]},{"embedding":[3.0]}]}"""
-    (mockHttp.post _).when(*, *, *, *).returns(httpOk(body))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(body)))
 
     val multiReq = EmbeddingRequest(Seq("a", "b", "c"), modelCfg)
     val provider = VoyageAIEmbeddingProvider.forTest(cfg, mockHttp)
@@ -79,7 +79,7 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
   it should "include model metadata in the response" in {
     val mockHttp = stub[Llm4sHttpClient]
     val body     = """{"data":[{"embedding":[0.1]},{"embedding":[0.2]}]}"""
-    (mockHttp.post _).when(*, *, *, *).returns(httpOk(body))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(body)))
 
     val provider = VoyageAIEmbeddingProvider.forTest(cfg, mockHttp)
     val result   = provider.embed(req)
@@ -91,7 +91,7 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
 
   it should "return EmbeddingError with code '401' on HTTP 401" in {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(httpErr(401, "Unauthorized"))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpErr(401, "Unauthorized")))
 
     val provider = VoyageAIEmbeddingProvider.forTest(cfg, mockHttp)
     val result   = provider.embed(req)
@@ -103,7 +103,7 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
 
   it should "return EmbeddingError with code '500' on HTTP 500" in {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(httpErr(500, "Internal Server Error"))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpErr(500, "Internal Server Error")))
 
     val provider = VoyageAIEmbeddingProvider.forTest(cfg, mockHttp)
     val result   = provider.embed(req)
@@ -114,7 +114,7 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
 
   it should "return EmbeddingError on malformed JSON response" in {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(httpOk("not-json{{{"))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk("not-json{{{")))
 
     val provider = VoyageAIEmbeddingProvider.forTest(cfg, mockHttp)
     val result   = provider.embed(req)
@@ -125,11 +125,23 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
 
   it should "return EmbeddingError on missing 'data' field in JSON" in {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(httpOk("""{"result": []}"""))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk("""{"result": []}""")))
 
     val provider = VoyageAIEmbeddingProvider.forTest(cfg, mockHttp)
     val result   = provider.embed(req)
 
     result.isLeft shouldBe true
+  }
+
+  it should "return EmbeddingError, not throw, on a transport failure" in {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _)
+      .when(*, *, *, *)
+      .returns(Left(org.llm4s.error.NetworkError("connection refused", None, "http://voyage-test/embeddings")))
+
+    val result = VoyageAIEmbeddingProvider.forTest(cfg, mockHttp).embed(req)
+
+    result.left.toOption.get.message should include("connection refused")
+    result.left.toOption.get.context.get("provider") shouldBe Some("voyage")
   }
 }

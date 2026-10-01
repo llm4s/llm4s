@@ -542,10 +542,12 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
     (error should not).include("unexpected internal error")
   }
 
-  it should "call restoreInterrupt and return sanitized error on InterruptedException" in {
+  it should "return sanitized error when the HTTP client reports an interruption" in {
+    // The HTTP client restores the interrupt flag itself and reports an ExecutionError, so the
+    // tool only describes it; restoreInterrupt is left for an interruption while parsing.
     var interruptRestored = false
     val mockRestore       = () => interruptRestored = true
-    val failingClient     = new FailingHttpClient(new InterruptedException("interrupted"))
+    val failingClient     = new FailingHttpClient(org.llm4s.error.ExecutionError("interrupted", "http.GET"))
 
     val result = BraveSearchTool.search(
       "test",
@@ -559,6 +561,6 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
     result.isLeft shouldBe true
     val error = result.swap.getOrElse("")
     error should (include("cancelled").or(include("interrupted")))
-    interruptRestored shouldBe true
+    interruptRestored shouldBe false
   }
 }

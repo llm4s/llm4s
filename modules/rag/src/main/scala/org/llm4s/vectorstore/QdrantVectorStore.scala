@@ -338,64 +338,66 @@ final class QdrantVectorStore private (
    * and an empty store counts 0 rather than erroring. Writes keep the 404 as an error.
    */
   private def httpGetOptional(url: String): Result[Option[ujson.Value]] =
-    Try(httpClient.get(url, headers = authHeaders)).toEither.left
-      .map(e => ProcessingError("qdrant-store", s"HTTP GET failed: ${e.getMessage}"))
+    httpClient
+      .get(url, headers = authHeaders)
+      .left
+      .map(e => ProcessingError("qdrant-store", s"HTTP GET failed: ${e.message}"))
       .flatMap {
         case response if response.statusCode == 404 => Right(None)
         case response                               => handleResponse(response).map(Some(_))
       }
 
   private def httpPostOptional(url: String, body: ujson.Value): Result[Option[ujson.Value]] =
-    Try(
-      httpClient.post(
+    httpClient
+      .post(
         url,
         headers = authHeaders ++ Map("Content-Type" -> "application/json"),
         body = ujson.write(body)
       )
-    ).toEither.left
-      .map(e => ProcessingError("qdrant-store", s"HTTP POST failed: ${e.getMessage}"))
+      .left
+      .map(e => ProcessingError("qdrant-store", s"HTTP POST failed: ${e.message}"))
       .flatMap {
         case response if response.statusCode == 404 => Right(None)
         case response                               => handleResponse(response).map(Some(_))
       }
 
   private def httpGet(url: String): Result[ujson.Value] =
-    Try {
-      httpClient.get(url, headers = authHeaders)
-    }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"HTTP GET failed: ${e.getMessage}"))
+    httpClient
+      .get(url, headers = authHeaders)
+      .left
+      .map(e => ProcessingError("qdrant-store", s"HTTP GET failed: ${e.message}"))
       .flatMap(handleResponse)
 
   private def httpPost(url: String, body: ujson.Value): Result[ujson.Value] =
-    Try {
-      httpClient.post(
+    httpClient
+      .post(
         url,
         headers = authHeaders ++ Map("Content-Type" -> "application/json"),
         body = ujson.write(body)
       )
-    }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"HTTP POST failed: ${e.getMessage}"))
+      .left
+      .map(e => ProcessingError("qdrant-store", s"HTTP POST failed: ${e.message}"))
       .flatMap(handleResponse)
 
   private def httpPut(url: String, body: ujson.Value): Result[Unit] =
-    Try {
-      httpClient.put(
+    httpClient
+      .put(
         url,
         headers = authHeaders ++ Map("Content-Type" -> "application/json"),
         body = ujson.write(body)
       )
-    }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"HTTP PUT failed: ${e.getMessage}"))
+      .left
+      .map(e => ProcessingError("qdrant-store", s"HTTP PUT failed: ${e.message}"))
       .flatMap { response =>
         if (response.statusCode >= 200 && response.statusCode < 300) Right(())
         else Left(ProcessingError("qdrant-store", s"HTTP PUT failed: ${response.statusCode} - ${response.body}"))
       }
 
   private def httpDelete(url: String): Result[Unit] =
-    Try {
-      httpClient.delete(url, headers = authHeaders)
-    }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"HTTP DELETE failed: ${e.getMessage}"))
+    httpClient
+      .delete(url, headers = authHeaders)
+      .left
+      .map(e => ProcessingError("qdrant-store", s"HTTP DELETE failed: ${e.message}"))
       .flatMap { response =>
         if (response.statusCode >= 200 && response.statusCode < 300) Right(())
         else Left(ProcessingError("qdrant-store", s"HTTP DELETE failed: ${response.statusCode}"))

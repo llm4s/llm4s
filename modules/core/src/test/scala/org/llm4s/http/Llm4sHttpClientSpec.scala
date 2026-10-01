@@ -1,6 +1,7 @@
 package org.llm4s.http
 
-import org.llm4s.error.{ ServiceError, ValidationError }
+import org.llm4s.error.{ ExecutionError, NetworkError, ServiceError, TimeoutError, UnknownError, ValidationError }
+import org.llm4s.types.Result
 import org.llm4s.http.HttpResponse.*
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -9,12 +10,17 @@ import com.sun.net.httpserver.{ HttpExchange, HttpHandler, HttpServer }
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import scala.concurrent.duration.*
 
 class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
   private var server: HttpServer = _
   private var baseUrl: String    = _
   private val client             = Llm4sHttpClient.create()
+  private val executor           = java.util.concurrent.Executors.newCachedThreadPool()
+
+  extension [A](result: Result[A])
+    private def ok: A = result.fold(err => fail(s"Expected a response, got error: ${err.message}"), identity)
 
   override def beforeAll(): Unit = {
     server = HttpServer.create(new InetSocketAddress(0), 0)
@@ -113,13 +119,48 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
       }
     )
 
-    server.setExecutor(null)
+    // Slow handler — sleeps past the client's timeout before answering
+    server.createContext(
+      "/slow",
+      new HttpHandler {
+        override def handle(exchange: HttpExchange): Unit = {
+          Thread.sleep(2000)
+          val responseBytes = "late".getBytes(StandardCharsets.UTF_8)
+          scala.util.Try {
+            exchange.sendResponseHeaders(200, responseBytes.length.toLong)
+            exchange.getResponseBody.write(responseBytes)
+            exchange.getResponseBody.close()
+          }
+        }
+      }
+    )
+
+    // Headers handler — answers 429 with Retry-After and a multi-valued header
+    server.createContext(
+      "/headers",
+      new HttpHandler {
+        override def handle(exchange: HttpExchange): Unit = {
+          exchange.getRequestBody.readAllBytes()
+          val responseBytes = "line-1\nline-2\n".getBytes(StandardCharsets.UTF_8)
+          exchange.getResponseHeaders.add("Retry-After", "7")
+          exchange.getResponseHeaders.add("X-Multi", "a")
+          exchange.getResponseHeaders.add("X-Multi", "b")
+          exchange.sendResponseHeaders(429, responseBytes.length.toLong)
+          exchange.getResponseBody.write(responseBytes)
+          exchange.getResponseBody.close()
+        }
+      }
+    )
+
+    server.setExecutor(executor)
     server.start()
     baseUrl = s"http://localhost:${server.getAddress.getPort}"
   }
 
-  override def afterAll(): Unit =
+  override def afterAll(): Unit = {
     if (server != null) server.stop(0)
+    executor.shutdownNow()
+  }
 
   // ============================================================
   // HttpResponse model tests
@@ -220,13 +261,13 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   // ============================================================
 
   "JdkHttpClient.get" should "send a GET request and return response" in {
-    val response = client.get(s"$baseUrl/echo")
+    val response = client.get(s"$baseUrl/echo").ok
     response.statusCode shouldBe 200
     response.body should startWith("method=GET")
   }
 
-  it should "return Result from getResult for successful requests" in {
-    val result = client.getResult(s"$baseUrl/echo")
+  it should "return a Right for successful requests" in {
+    val result = client.get(s"$baseUrl/echo")
 
     result match
       case Right(response) =>
@@ -237,50 +278,48 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   }
 
   it should "pass custom headers" in {
-    val response = client.get(
-      s"$baseUrl/echo",
-      headers = Map("User-Agent" -> "llm4s-test/1.0")
-    )
+    val response = client
+      .get(
+        s"$baseUrl/echo",
+        headers = Map("User-Agent" -> "llm4s-test/1.0")
+      )
+      .ok
     response.body should include("user-agent=llm4s-test/1.0")
   }
 
   it should "encode and append query params" in {
-    val response = client.get(
-      s"$baseUrl/params",
-      params = Map("q" -> "hello world", "count" -> "5")
-    )
+    val response = client
+      .get(
+        s"$baseUrl/params",
+        params = Map("q" -> "hello world", "count" -> "5")
+      )
+      .ok
     response.body should include("q=hello+world")
     response.body should include("count=5")
   }
 
   it should "append query params to URL that already has params" in {
-    val response = client.get(
-      s"$baseUrl/params?existing=true",
-      params = Map("extra" -> "yes")
-    )
+    val response = client
+      .get(
+        s"$baseUrl/params?existing=true",
+        params = Map("extra" -> "yes")
+      )
+      .ok
     response.body should include("existing=true")
     response.body should include("extra=yes")
   }
 
   it should "return response headers with lowercase keys" in {
-    val response = client.get(s"$baseUrl/echo")
+    val response = client.get(s"$baseUrl/echo").ok
     response.headers.get("x-custom-header") shouldBe Some(Seq("test-value"))
   }
 
-  it should "return Left from getResult when transport fails" in {
-    val failing = new FailingHttpClient(new RuntimeException("boom"))
+  it should "return Left from a failing test double rather than throwing" in {
+    val failing = new FailingHttpClient(new java.net.ConnectException("refused"))
 
-    val result = failing.getResult("http://localhost:1/unreachable")
-
-    result match
-      case Left(err: ServiceError) =>
-        err.provider shouldBe "http"
-        err.httpStatus shouldBe 500
-        err.message should include("GET request failed")
-      case Left(err) =>
-        fail(s"Expected ServiceError, got: ${err.message}")
-      case Right(response) =>
-        fail(s"Expected transport failure, got response: $response")
+    failing.get("http://localhost:1/unreachable") match
+      case Left(err: NetworkError) => err.message should include("connection failed")
+      case other                   => fail(s"Expected NetworkError, got: $other")
   }
 
   // ============================================================
@@ -288,11 +327,13 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   // ============================================================
 
   "JdkHttpClient.post" should "send a POST request with string body" in {
-    val response = client.post(
-      s"$baseUrl/echo",
-      headers = Map("Content-Type" -> "application/json"),
-      body = """{"key":"value"}"""
-    )
+    val response = client
+      .post(
+        s"$baseUrl/echo",
+        headers = Map("Content-Type" -> "application/json"),
+        body = """{"key":"value"}"""
+      )
+      .ok
     response.statusCode shouldBe 200
     response.body should include("method=POST")
     response.body should include("""body={"key":"value"}""")
@@ -304,7 +345,7 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
 
   "JdkHttpClient.postBytes" should "send a POST request with byte array body" in {
     val data     = "binary-content".getBytes(StandardCharsets.UTF_8)
-    val response = client.postBytes(s"$baseUrl/echo", data = data)
+    val response = client.postBytes(s"$baseUrl/echo", data = data).ok
     response.statusCode shouldBe 200
     response.body should include("method=POST")
     response.body should include("body=binary-content")
@@ -315,11 +356,13 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   // ============================================================
 
   "JdkHttpClient.put" should "send a PUT request with string body" in {
-    val response = client.put(
-      s"$baseUrl/echo",
-      headers = Map("Content-Type" -> "application/json"),
-      body = """{"updated":true}"""
-    )
+    val response = client
+      .put(
+        s"$baseUrl/echo",
+        headers = Map("Content-Type" -> "application/json"),
+        body = """{"updated":true}"""
+      )
+      .ok
     response.statusCode shouldBe 200
     response.body should include("method=PUT")
     response.body should include("""body={"updated":true}""")
@@ -330,7 +373,7 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   // ============================================================
 
   "JdkHttpClient.delete" should "send a DELETE request" in {
-    val response = client.delete(s"$baseUrl/echo")
+    val response = client.delete(s"$baseUrl/echo").ok
     response.statusCode shouldBe 200
     response.body should include("method=DELETE")
   }
@@ -340,12 +383,12 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   // ============================================================
 
   "JdkHttpClient.postRaw" should "return an HttpRawResponse with the correct status code" in {
-    val response = client.postRaw(s"$baseUrl/binary", body = "{}")
+    val response = client.postRaw(s"$baseUrl/binary", body = "{}").ok
     response.statusCode shouldBe 200
   }
 
   it should "return body as exact raw bytes without charset corruption" in {
-    val response = client.postRaw(s"$baseUrl/binary", body = "{}")
+    val response = client.postRaw(s"$baseUrl/binary", body = "{}").ok
     // These bytes contain invalid UTF-8 sequences (0xFF, 0xD8, 0x80, 0xC0, 0xFE).
     // BodyHandlers.ofString() would replace them with U+FFFD then ISO_8859_1 would
     // map U+FFFD to '?' (0x3F), corrupting the payload.
@@ -365,18 +408,20 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   }
 
   it should "send the POST body to the server" in {
-    val response = client.postRaw(
-      s"$baseUrl/echo",
-      headers = Map("Content-Type" -> "application/json"),
-      body = """{"ping":"pong"}"""
-    )
+    val response = client
+      .postRaw(
+        s"$baseUrl/echo",
+        headers = Map("Content-Type" -> "application/json"),
+        body = """{"ping":"pong"}"""
+      )
+      .ok
     response.statusCode shouldBe 200
     // /echo returns a UTF-8 text response — decode it to verify the body was sent
     new String(response.body, StandardCharsets.UTF_8) should include("""body={"ping":"pong"}""")
   }
 
   it should "return the correct status code for non-2xx responses" in {
-    val response = client.postRaw(s"$baseUrl/status/429", body = "")
+    val response = client.postRaw(s"$baseUrl/status/429", body = "").ok
     response.statusCode shouldBe 429
   }
 
@@ -385,13 +430,13 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   // ============================================================
 
   "JdkHttpClient" should "not throw on 404 status" in {
-    val response = client.get(s"$baseUrl/status/404")
+    val response = client.get(s"$baseUrl/status/404").ok
     response.statusCode shouldBe 404
     response.body shouldBe "status=404"
   }
 
   it should "not throw on 500 status" in {
-    val response = client.get(s"$baseUrl/status/500")
+    val response = client.get(s"$baseUrl/status/500").ok
     response.statusCode shouldBe 500
     response.body shouldBe "status=500"
   }
@@ -405,7 +450,7 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
       MultipartPart.TextField("name", "test"),
       MultipartPart.TextField("value", "hello")
     )
-    val response = client.postMultipart(s"$baseUrl/multipart", parts = parts)
+    val response = client.postMultipart(s"$baseUrl/multipart", parts = parts).ok
     response.statusCode shouldBe 200
     response.body should include("content-type=multipart/form-data; boundary=")
     response.body should include("body-contains-boundary=true")
@@ -420,9 +465,136 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
         MultipartPart.TextField("prompt", "describe this"),
         MultipartPart.FilePart("file", tempFile, "test.txt")
       )
-      val response = client.postMultipart(s"$baseUrl/multipart", parts = parts)
+      val response = client.postMultipart(s"$baseUrl/multipart", parts = parts).ok
       response.statusCode shouldBe 200
       response.body should include("content-type=multipart/form-data; boundary=")
     } finally Files.deleteIfExists(tempFile)
+  }
+
+  // ============================================================
+  // Response headers on raw and streaming responses
+  // ============================================================
+
+  "JdkHttpClient.postRaw" should "carry response headers, looked up case-insensitively" in {
+    val response = client.postRaw(s"$baseUrl/headers", body = "{}").ok
+    response.statusCode shouldBe 429
+    response.headers.get("retry-after") shouldBe Some(Seq("7"))
+    response.header("Retry-After") shouldBe Some("7")
+    response.header("RETRY-AFTER") shouldBe Some("7")
+    response.headers.get("x-multi").map(_.toSet) shouldBe Some(Set("a", "b"))
+    response.header("X-Absent") shouldBe None
+  }
+
+  "JdkHttpClient.postStream" should "return the status, headers and a readable body" in {
+    val response = client.postStream(s"$baseUrl/headers", body = "{}").ok
+    val body =
+      scala.util.Using.resource(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8))
+    response.statusCode shouldBe 429
+    response.header("retry-after") shouldBe Some("7")
+    body shouldBe "line-1\nline-2\n"
+  }
+
+  "HttpHeaders.first" should "match names case-insensitively whatever the stored case" in {
+    val headers = Map("Retry-After" -> Seq("1", "2"), "x-empty" -> Seq.empty)
+    HttpHeaders.first(headers, "retry-after") shouldBe Some("1")
+    HttpHeaders.first(headers, "Retry-After") shouldBe Some("1")
+    HttpHeaders.first(headers, "x-empty") shouldBe None
+    HttpHeaders.first(headers, "missing") shouldBe None
+    HttpResponse(200, "", headers).header("RETRY-after") shouldBe Some("1")
+    JsonHttpResponse(200, ujson.Null, headers).header("retry-after") shouldBe Some("1")
+  }
+
+  // ============================================================
+  // Transport failures are a Left, never a throw
+  // ============================================================
+
+  private def unusedPort(): Int =
+    scala.util.Using.resource(new java.net.ServerSocket(0))(_.getLocalPort)
+
+  "JdkHttpClient" should "return Left(NetworkError) when the connection is refused" in {
+    val url = s"http://localhost:${unusedPort()}/nothing?key=secret-value"
+    client.get(url) match
+      case Left(err: NetworkError) =>
+        err.endpoint should startWith("http://localhost:")
+        (err.message should not).include("secret-value")
+        (err.endpoint should not).include("secret-value")
+      case other => fail(s"Expected NetworkError, got: $other")
+  }
+
+  it should "return Left for every method when the connection is refused" in {
+    val url = s"http://localhost:${unusedPort()}/nothing"
+    client.post(url).isLeft shouldBe true
+    client.postBytes(url).isLeft shouldBe true
+    client.put(url).isLeft shouldBe true
+    client.delete(url).isLeft shouldBe true
+    client.postRaw(url).isLeft shouldBe true
+    client.postStream(url).isLeft shouldBe true
+    client.postMultipart(url, parts = Seq(MultipartPart.TextField("a", "b"))).isLeft shouldBe true
+  }
+
+  it should "return Left(TimeoutError) when the server is slower than the timeout" in {
+    client.get(s"$baseUrl/slow", timeout = 200.millis) match
+      case Left(err: TimeoutError) =>
+        err.timeoutDuration shouldBe 200.millis
+        err.operation shouldBe "http.GET"
+      case other => fail(s"Expected TimeoutError, got: $other")
+  }
+
+  it should "return Left(TimeoutError) from postStream when no response arrives in time" in {
+    client.postStream(s"$baseUrl/slow", body = "{}", timeout = 200.millis) match
+      case Left(_: TimeoutError) => succeed
+      case other                 => fail(s"Expected TimeoutError, got: $other")
+  }
+
+  it should "return Left(ValidationError) for an invalid URL" in {
+    client.get("not a url") match
+      case Left(err: ValidationError) => err.field shouldBe "request"
+      case other                      => fail(s"Expected ValidationError, got: $other")
+  }
+
+  it should "return Left(ValidationError) for an unsupported scheme or a non-positive timeout" in {
+    client.post("ftp://example.com/x").left.toOption.get shouldBe a[ValidationError]
+    client.get(s"$baseUrl/echo", timeout = Duration.Zero).left.toOption.get shouldBe a[ValidationError]
+  }
+
+  it should "return Left(ValidationError) when a multipart file cannot be read" in {
+    val missing = java.nio.file.Paths.get("/definitely/not/here.bin")
+    client.postMultipart(s"$baseUrl/multipart", parts = Seq(MultipartPart.FilePart("f", missing, "here.bin"))) match
+      case Left(err: ValidationError) => err.field shouldBe "parts"
+      case other                      => fail(s"Expected ValidationError, got: $other")
+  }
+
+  it should "return Left(ExecutionError) and keep the interrupt flag when interrupted" in {
+    Thread.currentThread().interrupt()
+    val result      = client.get(s"$baseUrl/slow", timeout = 5.seconds)
+    val interrupted = Thread.interrupted() // reads and clears the flag
+    result match
+      case Left(err: ExecutionError) => err.operation shouldBe "http.GET"
+      case other                     => fail(s"Expected ExecutionError, got: $other")
+    interrupted shouldBe true
+  }
+
+  "HttpFailures.toLLMError" should "map each transport failure to its error type" in {
+    val url               = "https://user:pw@api.example.com:8443/v1/x?key=secret#frag"
+    def map(t: Throwable) = HttpFailures.toLLMError(t, "POST", url, 3.seconds)
+
+    map(new java.net.http.HttpConnectTimeoutException("ct")) shouldBe a[TimeoutError]
+    map(new java.net.http.HttpTimeoutException("t")) shouldBe a[TimeoutError]
+    map(new java.net.SocketTimeoutException("st")) shouldBe a[TimeoutError]
+    map(new InterruptedException("i")) shouldBe a[ExecutionError]
+    map(new IllegalArgumentException("bad")) shouldBe a[ValidationError]
+    map(new java.net.ConnectException("refused")) shouldBe a[NetworkError]
+    map(new java.net.UnknownHostException("nohost")) shouldBe a[NetworkError]
+    map(new java.io.IOException("reset")) shouldBe a[NetworkError]
+    map(new RuntimeException()) shouldBe a[UnknownError]
+
+    map(new java.io.IOException("reset")) match
+      case err: NetworkError => err.endpoint shouldBe "https://api.example.com:8443/v1/x"
+      case other             => fail(s"Expected NetworkError, got: $other")
+  }
+
+  "HttpFailures.safeEndpoint" should "fall back to stripping the query from an unparseable URL" in {
+    HttpFailures.safeEndpoint("not a url?key=secret") shouldBe "not a url"
+    HttpFailures.safeEndpoint("http://h/p?q=1") shouldBe "http://h/p"
   }
 }

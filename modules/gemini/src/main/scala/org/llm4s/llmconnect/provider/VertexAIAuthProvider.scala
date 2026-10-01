@@ -1,7 +1,7 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoSystemGetenv
+// scalafix:off DisableSyntax.NoSystemGetenv
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.AuthenticationError
+import org.llm4s.error.{ AuthenticationError, NetworkError }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.Result
@@ -14,7 +14,8 @@ import java.security.KeyFactory
 import java.security.Signature
 import java.security.spec.PKCS8EncodedKeySpec
 import java.util.Base64
-import scala.util.{ Failure, Success, Try }
+import scala.concurrent.duration.*
+import scala.util.Try
 
 /**
  * Provides Google Cloud OAuth2 access tokens for Vertex AI via ADC.
@@ -120,28 +121,31 @@ class VertexAIAuthProvider(
       s"client_id=${enc(clientId)}&client_secret=${enc(clientSecret)}" +
         s"&grant_type=refresh_token&refresh_token=${enc(refreshToken)}"
 
-    val response = httpClient.post(
-      TOKEN_ENDPOINT,
-      Map("Content-Type" -> "application/x-www-form-urlencoded"),
-      body
-    )
-
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      Try {
-        val respJson  = ujson.read(response.body)
-        val token     = respJson("access_token").str
-        val expiresIn = Try(respJson("expires_in").num.toInt).getOrElse(3600)
-        val expiresAt = System.currentTimeMillis() + (expiresIn.toLong - 60) * 1000
-        CachedToken(token, expiresAt)
-      }.toEither.left.map(_.toLLMError)
-    } else {
-      Left(
-        AuthenticationError(
-          "vertexai",
-          s"Token refresh failed (HTTP ${response.statusCode}): ${response.body}"
-        )
+    httpClient
+      .post(
+        TOKEN_ENDPOINT,
+        Map("Content-Type" -> "application/x-www-form-urlencoded"),
+        body,
+        timeout = TokenRequestTimeout
       )
-    }
+      .flatMap { response =>
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          Try {
+            val respJson  = ujson.read(response.body)
+            val token     = respJson("access_token").str
+            val expiresIn = Try(respJson("expires_in").num.toInt).getOrElse(3600)
+            val expiresAt = System.currentTimeMillis() + (expiresIn.toLong - 60) * 1000
+            CachedToken(token, expiresAt)
+          }.toEither.left.map(_.toLLMError)
+        } else {
+          Left(
+            AuthenticationError(
+              "vertexai",
+              s"Token refresh failed (HTTP ${response.statusCode}): ${response.body}"
+            )
+          )
+        }
+      }
   }
 
   private def serviceAccountFlow(json: ujson.Value): Result[CachedToken] = {
@@ -199,36 +203,39 @@ class VertexAIAuthProvider(
 
   private def exchangeJwtForToken(jwt: String, tokenUri: String): Result[CachedToken] = {
     val body = s"grant_type=${enc("urn:ietf:params:oauth:grant-type:jwt-bearer")}&assertion=${enc(jwt)}"
-    val response = httpClient.post(
-      tokenUri,
-      Map("Content-Type" -> "application/x-www-form-urlencoded"),
-      body
-    )
-
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      Try {
-        val respJson  = ujson.read(response.body)
-        val token     = respJson("access_token").str
-        val expiresIn = Try(respJson("expires_in").num.toInt).getOrElse(3600)
-        val expiresAt = System.currentTimeMillis() + (expiresIn.toLong - 60) * 1000
-        CachedToken(token, expiresAt)
-      }.toEither.left.map(_.toLLMError)
-    } else {
-      Left(
-        AuthenticationError(
-          "vertexai",
-          s"JWT token exchange failed (HTTP ${response.statusCode}): ${response.body}"
-        )
+    httpClient
+      .post(
+        tokenUri,
+        Map("Content-Type" -> "application/x-www-form-urlencoded"),
+        body,
+        timeout = TokenRequestTimeout
       )
-    }
+      .flatMap { response =>
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          Try {
+            val respJson  = ujson.read(response.body)
+            val token     = respJson("access_token").str
+            val expiresIn = Try(respJson("expires_in").num.toInt).getOrElse(3600)
+            val expiresAt = System.currentTimeMillis() + (expiresIn.toLong - 60) * 1000
+            CachedToken(token, expiresAt)
+          }.toEither.left.map(_.toLLMError)
+        } else {
+          Left(
+            AuthenticationError(
+              "vertexai",
+              s"JWT token exchange failed (HTTP ${response.statusCode}): ${response.body}"
+            )
+          )
+        }
+      }
   }
 
   private def fetchTokenFromMetadataServer(): Result[CachedToken] = {
     logger.debug("[VertexAI] Attempting to fetch token from GCE metadata server")
     // The metadata server is only reachable on GCE/GKE. An unresolved host means we are
     // off-GCP (no credentials), while other failures are transient and must stay retryable.
-    Try(httpClient.get(METADATA_TOKEN_URL, Map("Metadata-Flavor" -> "Google"))) match {
-      case Success(response) if response.statusCode >= 200 && response.statusCode < 300 =>
+    httpClient.get(METADATA_TOKEN_URL, Map("Metadata-Flavor" -> "Google"), timeout = TokenRequestTimeout) match {
+      case Right(response) if response.statusCode >= 200 && response.statusCode < 300 =>
         Try {
           val json      = ujson.read(response.body)
           val token     = json("access_token").str
@@ -236,20 +243,20 @@ class VertexAIAuthProvider(
           val expiresAt = System.currentTimeMillis() + (expiresIn.toLong - 60) * 1000
           CachedToken(token, expiresAt)
         }.toEither.left.map(_.toLLMError)
-      case Success(response) =>
+      case Right(response) =>
         logger.debug(s"[VertexAI] Metadata server returned HTTP ${response.statusCode}")
         Left(noCredentialsError)
-      case Failure(e) if isUnknownHost(e) =>
+      case Left(e: NetworkError) if e.cause.exists(isUnknownHost) =>
         // Host does not resolve, so this process is not on GCE/GKE — there genuinely are no
         // credentials. Give actionable guidance (non-recoverable) rather than a network error.
-        logger.debug(s"[VertexAI] Metadata server host unresolved (not on GCE/GKE): ${e.getMessage}")
+        logger.debug(s"[VertexAI] Metadata server host unresolved (not on GCE/GKE): ${e.message}")
         Left(noCredentialsError)
-      case Failure(e) =>
+      case Left(e) =>
         // Host resolved but the request failed transiently (timeout, connection refused).
-        // Preserve it as a recoverable error so LLMClientRetry can retry through a momentary
-        // metadata-server outage on GCE/GKE.
-        logger.debug(s"[VertexAI] Metadata server request failed transiently: ${e.getMessage}")
-        Left(e.toLLMError)
+        // The HTTP client reports it as a recoverable error, so LLMClientRetry can retry
+        // through a momentary metadata-server outage on GCE/GKE.
+        logger.debug(s"[VertexAI] Metadata server request failed transiently: ${e.message}")
+        Left(e)
     }
   }
 
@@ -269,6 +276,9 @@ class VertexAIAuthProvider(
 
 object VertexAIAuthProvider {
   private[provider] val TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+
+  /** Timeout for token-endpoint and metadata-server requests (the client's default). */
+  private val TokenRequestTimeout: FiniteDuration = 10.seconds
   private[provider] val METADATA_TOKEN_URL =
     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
 

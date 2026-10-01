@@ -126,7 +126,7 @@ object FixtureModelLister extends ProviderModelLister:
     for
       section  <- config.requireProvider(FixtureChatProvider.id)
       _        <- section.requireApiKey
-      response <- httpClient.getResult(s"${section.baseUrlOrDefault(FixtureChatProvider.DefaultBaseUrl).asUrl}/models")
+      response <- httpClient.get(s"${section.baseUrlOrDefault(FixtureChatProvider.DefaultBaseUrl).asUrl}/models")
       ids <- scala.util
         .Try(ujson.read(response.body)("data").arr.toList.flatMap(_.obj.get("id").flatMap(_.strOpt)))
         .toOption

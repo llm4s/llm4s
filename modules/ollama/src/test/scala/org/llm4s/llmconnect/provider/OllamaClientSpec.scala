@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.error.{ NetworkError, RateLimitError, TimeoutError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.OllamaConfig
@@ -10,6 +11,7 @@ import org.scalatest.funsuite.AnyFunSuite
 
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
+import scala.concurrent.duration.*
 import scala.collection.mutable.ListBuffer
 import org.llm4s.model.ModelRegistryService
 
@@ -133,7 +135,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
   test("complete() parses message.content from a 200 response") {
     val mockHttp = stub[Llm4sHttpClient]
     val body     = """{"message":{"content":"Hi there!"},"prompt_eval_count":10,"eval_count":5}"""
-    (mockHttp.post _).when(*, *, *, *).returns(httpOk(body))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(body)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hello"), CompletionOptions())
@@ -145,7 +147,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
   test("complete() parses token usage from the response") {
     val mockHttp = stub[Llm4sHttpClient]
     val body     = """{"message":{"content":"OK"},"prompt_eval_count":12,"eval_count":8}"""
-    (mockHttp.post _).when(*, *, *, *).returns(httpOk(body))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(body)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hello"), CompletionOptions())
@@ -165,7 +167,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       override def record(exchange: ProviderExchange): Unit =
         recorded += exchange
 
-    (mockHttp.post _).when(*, *, *, *).returns(httpOk(body))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(body)))
 
     val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
     val result = client.complete(conversation("Hello"), CompletionOptions())
@@ -186,7 +188,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
   test("complete() returns None usage when token counts are absent") {
     val mockHttp = stub[Llm4sHttpClient]
     val body     = """{"message":{"content":"OK"}}"""
-    (mockHttp.post _).when(*, *, *, *).returns(httpOk(body))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk(body)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hello"), CompletionOptions())
@@ -199,7 +201,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
 
   test("complete() returns AuthenticationError on HTTP 401") {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(HttpResponse(401, "Unauthorized", Map.empty))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(401, "Unauthorized", Map.empty)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hello"), CompletionOptions())
@@ -210,7 +212,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
 
   test("complete() returns RateLimitError on HTTP 429") {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(HttpResponse(429, "Too Many Requests", Map.empty))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(429, "Too Many Requests", Map.empty)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hello"), CompletionOptions())
@@ -221,7 +223,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
 
   test("complete() returns ServiceError on HTTP 500") {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(HttpResponse(500, "Internal Server Error", Map.empty))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(500, "Internal Server Error", Map.empty)))
 
     val client = mkClient(mockHttp)
     val result = client.complete(conversation("Hello"), CompletionOptions())
@@ -230,44 +232,52 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(result.left.toOption.get.isInstanceOf[org.llm4s.error.ServiceError])
   }
 
-  test("complete() maps IOException to NetworkError and records the exchange") {
+  test("complete() passes a transport failure through and records the exchange") {
     val mockHttp = stub[Llm4sHttpClient]
     val recorded = ListBuffer.empty[ProviderExchange]
     val sink = new ProviderExchangeSink:
       override def record(exchange: ProviderExchange): Unit =
         recorded += exchange
-    (mockHttp.post _).when(*, *, *, *).throws(new java.io.IOException("connection reset"))
+    val failure = NetworkError("connection reset", None, "http://localhost:11434/api/chat")
+    (mockHttp.post _).when(*, *, *, *).returns(Left(failure))
 
     val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
     val result = client.complete(conversation("Hello"), CompletionOptions())
 
-    assert(result.isLeft)
-    assert(result.left.toOption.get.isInstanceOf[org.llm4s.error.NetworkError])
+    assert(result == Left(failure))
     assert(recorded.size == 1)
     assert(recorded.head.errorMessage.isDefined)
   }
 
-  test("complete() maps InterruptedException to ExecutionError and restores the interrupt flag") {
+  test("complete() passes a transport timeout through unchanged") {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).throws(new InterruptedException("interrupted"))
+    val failure  = TimeoutError("timed out", 120.seconds, "http.POST")
+    (mockHttp.post _).when(*, *, *, *).returns(Left(failure))
 
-    val client = mkClient(mockHttp)
-    val result = client.complete(conversation("Hello"), CompletionOptions())
+    val result = mkClient(mockHttp).complete(conversation("Hello"), CompletionOptions())
 
-    assert(result.isLeft)
-    assert(result.left.toOption.get.isInstanceOf[org.llm4s.error.ExecutionError])
-    assert(Thread.interrupted(), "interrupt flag should have been restored")
+    assert(result == Left(failure))
   }
 
-  test("complete() maps an unexpected exception to ServiceError") {
+  test("complete() asks for a 120 second timeout") {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).throws(new RuntimeException("boom"))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(httpOk("""{"message":{"content":"OK"}}""")))
 
-    val client = mkClient(mockHttp)
-    val result = client.complete(conversation("Hello"), CompletionOptions())
+    mkClient(mockHttp).complete(conversation("Hello"), CompletionOptions())
 
-    assert(result.isLeft)
-    assert(result.left.toOption.get.isInstanceOf[org.llm4s.error.ServiceError])
+    (mockHttp.post _).verify(*, *, *, 120.seconds).once()
+  }
+
+  test("complete() carries a 429's Retry-After into the RateLimitError") {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _)
+      .when(*, *, *, *)
+      .returns(Right(HttpResponse(429, "slow down", Map("retry-after" -> Seq("5")))))
+
+    mkClient(mockHttp).complete(conversation("Hello"), CompletionOptions()) match {
+      case Left(err: RateLimitError) => assert(err.retryDelay.contains(5000L))
+      case other                     => fail(s"Expected RateLimitError, got: $other")
+    }
   }
 
   // ── request body tests via OllamaRequestBodyTestHelper ──────────────────
@@ -328,7 +338,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val inputStream = new ByteArrayInputStream(jsonLines.getBytes(StandardCharsets.UTF_8))
 
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(StreamingHttpResponse(200, inputStream))
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val chunks = scala.collection.mutable.Buffer[StreamedChunk]()
     val client = mkClient(mockHttp)
@@ -346,7 +356,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val inputStream = new ByteArrayInputStream(jsonLines.getBytes(StandardCharsets.UTF_8))
 
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(StreamingHttpResponse(200, inputStream))
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val client = mkClient(mockHttp)
     val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
@@ -369,7 +379,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       override def record(exchange: ProviderExchange): Unit =
         recorded += exchange
 
-    (mockHttp.postStream _).when(*, *, *, *).returns(StreamingHttpResponse(200, inputStream))
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, inputStream)))
 
     val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
     val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
@@ -391,7 +401,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val inputStream = new ByteArrayInputStream(errorBody.getBytes(StandardCharsets.UTF_8))
 
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).returns(StreamingHttpResponse(401, inputStream))
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(401, inputStream)))
 
     val client = mkClient(mockHttp)
     val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
@@ -400,43 +410,119 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(result.left.toOption.get.isInstanceOf[org.llm4s.error.AuthenticationError])
   }
 
-  test("streamComplete() maps IOException to NetworkError and records the exchange") {
+  test("streamComplete() passes a transport failure through and records the exchange") {
     val mockHttp = stub[Llm4sHttpClient]
     val recorded = ListBuffer.empty[ProviderExchange]
     val sink = new ProviderExchangeSink:
       override def record(exchange: ProviderExchange): Unit =
         recorded += exchange
-    (mockHttp.postStream _).when(*, *, *, *).throws(new java.io.IOException("connection reset"))
+    val failure = NetworkError("connection reset", None, "http://localhost:11434/api/chat")
+    (mockHttp.postStream _).when(*, *, *, *).returns(Left(failure))
 
     val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
     val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
 
-    assert(result.isLeft)
-    assert(result.left.toOption.get.isInstanceOf[org.llm4s.error.NetworkError])
+    assert(result == Left(failure))
     assert(recorded.size == 1)
     assert(recorded.head.errorMessage.isDefined)
   }
 
-  test("streamComplete() maps InterruptedException to ExecutionError and restores the interrupt flag") {
+  test("streamComplete() carries a 429's Retry-After into the RateLimitError") {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).throws(new InterruptedException("interrupted"))
+    val body     = new ByteArrayInputStream("slow down".getBytes(StandardCharsets.UTF_8))
+    (mockHttp.postStream _)
+      .when(*, *, *, *)
+      .returns(Right(StreamingHttpResponse(429, body, Map("retry-after" -> Seq("9")))))
 
-    val client = mkClient(mockHttp)
-    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
-
-    assert(result.isLeft)
-    assert(result.left.toOption.get.isInstanceOf[org.llm4s.error.ExecutionError])
-    assert(Thread.interrupted(), "interrupt flag should have been restored")
+    mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), _ => ()) match {
+      case Left(err: RateLimitError) => assert(err.retryDelay.contains(9000L))
+      case other                     => fail(s"Expected RateLimitError, got: $other")
+    }
   }
 
-  test("streamComplete() maps an unexpected exception to ServiceError") {
+  test("streamComplete() returns an error for a malformed JSON line, and records what it read") {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.postStream _).when(*, *, *, *).throws(new RuntimeException("boom"))
+    val recorded = ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink:
+      override def record(exchange: ProviderExchange): Unit =
+        recorded += exchange
+    val body =
+      new ByteArrayInputStream("{\"message\":{\"content\":\"a\"}}\nnot-json\n".getBytes(StandardCharsets.UTF_8))
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, body)))
 
-    val client = mkClient(mockHttp)
-    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+    val result = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
+      .streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
 
     assert(result.isLeft)
-    assert(result.left.toOption.get.isInstanceOf[org.llm4s.error.ServiceError])
+    assert(recorded.head.responseBody.exists(_.contains("not-json")))
+  }
+
+}
+
+// ============================================================
+// End to end over real HTTP: a 429's Retry-After reaches the caller
+// ============================================================
+class OllamaClientRateLimitSpec extends AnyFunSuite with org.scalatest.BeforeAndAfterAll {
+  import com.sun.net.httpserver.HttpServer
+  import java.net.InetSocketAddress
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+
+  private val server = HttpServer.create(new InetSocketAddress("localhost", 0), 0)
+  server.createContext(
+    "/api/chat",
+    exchange => {
+      exchange.getRequestBody.readAllBytes()
+      val body = """{"error":"rate limited"}""".getBytes(StandardCharsets.UTF_8)
+      exchange.getResponseHeaders.add("Retry-After", "5")
+      exchange.sendResponseHeaders(429, body.length.toLong)
+      exchange.getResponseBody.write(body)
+      exchange.close()
+    }
+  )
+
+  override def beforeAll(): Unit = server.start()
+  override def afterAll(): Unit  = server.stop(0)
+
+  private def client: OllamaClient =
+    new OllamaClient(
+      OllamaConfig(
+        model = "llama3.1",
+        baseUrl = s"http://localhost:${server.getAddress.getPort}",
+        contextWindow = 4096,
+        reserveCompletion = 512
+      )
+    )
+
+  test("complete() turns a 429 with Retry-After: 5 into a RateLimitError with a 5 second delay") {
+    client.complete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions()) match {
+      case Left(err: RateLimitError) =>
+        assert(err.retryAfter.contains(5000L))
+        assert(err.retryDelay.contains(5000L))
+      case other => fail(s"Expected RateLimitError, got: $other")
+    }
+  }
+
+  test("streamComplete() turns a 429 with Retry-After: 5 into a RateLimitError with a 5 second delay") {
+    client.streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions(), _ => ()) match {
+      case Left(err: RateLimitError) => assert(err.retryDelay.contains(5000L))
+      case other                     => fail(s"Expected RateLimitError, got: $other")
+    }
+  }
+
+  test("complete() returns a NetworkError, not an exception, when nothing is listening") {
+    val port = scala.util.Using.resource(new java.net.ServerSocket(0))(_.getLocalPort)
+    val unreachable = new OllamaClient(
+      OllamaConfig(
+        model = "llama3.1",
+        baseUrl = s"http://localhost:$port",
+        contextWindow = 4096,
+        reserveCompletion = 512
+      )
+    )
+    unreachable.complete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions()) match {
+      case Left(_: NetworkError) => succeed
+      case other                 => fail(s"Expected NetworkError, got: $other")
+    }
   }
 }

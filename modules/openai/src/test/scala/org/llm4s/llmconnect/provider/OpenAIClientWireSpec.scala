@@ -353,7 +353,18 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     assertLabelled("openai", reported)
   }
 
-  it should "name the provider in the already-closed error" in {
+  "OpenAIClient.mapError" should "carry a 429's Retry-After from the SDK exception into the RateLimitError" in {
+    val limited = com.openai.errors.RateLimitException
+      .builder()
+      .headers(com.openai.core.http.Headers.builder().put("Retry-After", "5").build())
+      .build()
+    OpenAIClient.mapError(limited, "openai") match {
+      case err: org.llm4s.error.RateLimitError => err.retryDelay shouldBe Some(5000L)
+      case other                               => fail(s"Expected RateLimitError, got: $other")
+    }
+  }
+
+  "OpenAIClient's provider label" should "name the provider in the already-closed error" in {
     val azure  = AzureConfig.fromValues("my-deploy", "https://r.openai.azure.com", "k", "2024-10-21").value
     val client = OpenAIClient(azure).value
     client.close()

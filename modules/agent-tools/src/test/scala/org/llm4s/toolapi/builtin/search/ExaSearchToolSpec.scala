@@ -849,11 +849,13 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     error should (include("invalid").or(include("try again")))
   }
 
-  it should "call restoreInterrupt function when HTTP request is interrupted" in {
+  it should "describe an interruption the HTTP client reports" in {
+    // The HTTP client restores the interrupt flag itself and reports an ExecutionError.
     var interruptRestored = false
     val mockRestore       = () => interruptRestored = true
 
-    val interruptingClient = new FailingHttpClient(new InterruptedException("Request interrupted"))
+    val interruptingClient =
+      new FailingHttpClient(org.llm4s.error.ExecutionError("Request interrupted", "http.POST"))
     val toolConfig = ExaSearchToolConfig(
       apiKey = "test-key",
       apiUrl = "https://api.exa.ai",
@@ -862,8 +864,6 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       maxCharacters = 500
     )
 
-    // The restoreInterrupt function is called, but we don't actually restore the flag in tests
-    // to avoid affecting the test framework
     val result = ExaSearchTool.search(
       "test",
       ExaSearchConfig(),
@@ -876,8 +876,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     val error = result.swap.getOrElse("")
     error should (include("cancelled").or(include("interrupted")))
 
-    // Verify restoreInterrupt was called - this is the key test!
-    interruptRestored shouldBe true
+    interruptRestored shouldBe false
   }
 
   "Override config validation" should "reject invalid numResults in override config" in {

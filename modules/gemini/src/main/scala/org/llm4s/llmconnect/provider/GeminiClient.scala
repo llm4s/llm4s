@@ -1,4 +1,3 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.util.Redaction
@@ -21,7 +20,8 @@ import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.UUID
-import scala.util.Try
+import scala.concurrent.duration.*
+import scala.util.{ Try, Using }
 
 /**
  * [[LLMClient]] implementation for Google Gemini models.
@@ -101,17 +101,18 @@ class GeminiClient(
 
         val headers = Map("Content-Type" -> "application/json")
 
-        val attempt = Try {
-          val response = httpClient.post(url, headers, requestText, timeout = 120000)
-          val result =
-            if (response.statusCode >= 200 && response.statusCode < 300) parseCompletionResponse(response.body)
-            else handleErrorResponse(response.statusCode, response.body)
-          recordingExchange(startedAt, requestText)(result)(Some(response.body))
-        }.toEither.left
-          .map(e => e.toLLMError)
-          .flatten
-
-        attempt
+        httpClient.post(url, headers, requestText, timeout = 120.seconds) match {
+          case Left(error) =>
+            recordingExchange(startedAt, requestText)(Left(error))(None)
+          case Right(response) =>
+            val result = Try {
+              if (response.statusCode >= 200 && response.statusCode < 300) parseCompletionResponse(response.body)
+              else handleErrorResponse(response.statusCode, response.body, response.headers)
+            }.toEither.left
+              .map(e => e.toLLMError)
+              .flatten
+            recordingExchange(startedAt, requestText)(result)(Some(response.body))
+        }
       }
   }
 
@@ -138,63 +139,58 @@ class GeminiClient(
         // Note: URL contains API key as query param - do not log full URL
         logger.debug(s"[Gemini] Starting stream to ${config.baseUrl}/models/${config.model}:streamGenerateContent")
 
-        val headers  = Map("Content-Type" -> "application/json")
-        val response = httpClient.postStream(url, headers, requestText, timeout = 600000)
+        val headers = Map("Content-Type" -> "application/json")
 
-        if (response.statusCode < 200 || response.statusCode >= 300) {
-          val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
-          response.body.close()
-          recordingExchange(startedAt, requestText)(handleErrorResponse(response.statusCode, err))(Some(err))
-        } else {
-          val accumulator = StreamingAccumulator.create()
-          val messageId   = UUID.randomUUID().toString
-          val reader      = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
-          val rawStream   = StringBuilder()
+        httpClient.postStream(url, headers, requestText, timeout = 10.minutes) match {
+          case Left(error) =>
+            recordingExchange(startedAt, requestText)(Left(error))(None)
+          case Right(response) if response.statusCode < 200 || response.statusCode >= 300 =>
+            val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
+            recordingExchange(startedAt, requestText)(
+              handleErrorResponse(response.statusCode, err, response.headers)
+            )(Some(err))
+          case Right(response) =>
+            val accumulator = StreamingAccumulator.create()
+            val messageId   = UUID.randomUUID().toString
+            val rawStream   = StringBuilder()
 
-          val result = Try {
-            try {
-              var line: String = null
-              while ({ line = reader.readLine(); line != null }) {
-                rawStream.append(line).append('\n')
-                val trimmed = line.trim
-                // SSE format: lines starting with "data: " contain JSON
-                if (trimmed.startsWith("data: ")) {
-                  val jsonStr = trimmed.stripPrefix("data: ").trim
-                  if (jsonStr.nonEmpty) {
-                    Try(ujson.read(jsonStr)).foreach { json =>
-                      parseStreamChunk(json, messageId).foreach { chunk =>
-                        accumulator.addChunk(chunk)
-                        onChunk(chunk)
+            val result = Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) {
+              reader =>
+                Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
+                  rawStream.append(line).append('\n')
+                  val trimmed = line.trim
+                  // SSE format: lines starting with "data: " contain JSON
+                  if (trimmed.startsWith("data: ")) {
+                    val jsonStr = trimmed.stripPrefix("data: ").trim
+                    if (jsonStr.nonEmpty) {
+                      Try(ujson.read(jsonStr)).foreach { json =>
+                        parseStreamChunk(json, messageId).foreach { chunk =>
+                          accumulator.addChunk(chunk)
+                          onChunk(chunk)
+                        }
+                        // Extract token usage from usageMetadata if present
+                        for {
+                          usage      <- Try(json("usageMetadata")).toOption
+                          prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
+                          completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
+                        } accumulator.updateTokens(prompt, completion)
                       }
-                      // Extract token usage from usageMetadata if present
-                      for {
-                        usage      <- Try(json("usageMetadata")).toOption
-                        prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
-                        completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
-                      } accumulator.updateTokens(prompt, completion)
                     }
                   }
                 }
-              }
+            }.toEither.left
+              .map(_.toLLMError)
+              .flatMap(_ =>
+                accumulator.toCompletion.map { c =>
+                  val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+                  c.copy(model = config.model, estimatedCost = cost)
+                }
+              )
 
-              // Close resources INSIDE Try block
-            } finally {
-              Try(reader.close())
-              Try(response.body.close())
-            }
-          }.toEither.left
-            .map(_.toLLMError)
-            .flatMap(_ =>
-              accumulator.toCompletion.map { c =>
-                val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-                c.withModel(config.model).withEstimatedCost(cost)
-              }
+            recordingExchange(startedAt, requestText)(result)(
+              successResponse = Some(rawStream.result()),
+              failureResponse = Option.when(rawStream.nonEmpty)(rawStream.result())
             )
-
-          recordingExchange(startedAt, requestText)(result)(
-            successResponse = Some(rawStream.result()),
-            failureResponse = Option.when(rawStream.nonEmpty)(rawStream.result())
-          )
         }
       }
   }
@@ -474,11 +470,15 @@ class GeminiClient(
       }
     }.toOption.flatten
 
-  private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
+  private def handleErrorResponse(
+    statusCode: Int,
+    body: String,
+    headers: Map[String, Seq[String]]
+  ): Result[Nothing] = {
     logger.error(s"[Gemini] Error response: $statusCode")
     val details = HttpErrorMapper.extractErrorDetails(body, statusCode, providerName)
     if statusCode == 400 && isInvalidApiKey(details) then Left(AuthenticationError(providerName, details))
-    else HttpErrorMapper.mapHttpError(statusCode, body, providerName)
+    else HttpErrorMapper.mapHttpError(statusCode, body, providerName, headers)
   }
 
   private def isInvalidApiKey(details: String): Boolean = {

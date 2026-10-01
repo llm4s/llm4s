@@ -41,7 +41,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
   // Helper to create a QdrantVectorStore with mocked HTTP client
   private def createStore(mockClient: Llm4sHttpClient): QdrantVectorStore = {
     // Mock the initial collection check in ensureCollection()
-    (mockClient.get _).when(collectionsUrl, *, *, *).returns(httpResponse(404, "Not found"))
+    (mockClient.get _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(404, "Not found")))
 
     QdrantVectorStore(testConfig, mockClient) match {
       case Right(store) => store
@@ -70,7 +70,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     (mockClient.get _)
       .when(testPointUrl, *, *, *)
-      .returns(httpResponse(200, responseJson))
+      .returns(Right(httpResponse(200, responseJson)))
 
     val result = store.get("test-1")
     result.isRight shouldBe true
@@ -83,7 +83,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     (mockClient.get _)
       .when(testPointUrl, *, *, *)
-      .returns(httpResponse(404, "Not found"))
+      .returns(Right(httpResponse(404, "Not found")))
 
     // Qdrant 404s for a point that does not exist, and for a collection not created yet.
     // `get` returns an Option precisely so that absence has somewhere to go other than Left.
@@ -96,7 +96,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     (mockClient.get _)
       .when(testPointUrl, *, *, *)
-      .returns(httpResponse(500, "Internal server error"))
+      .returns(Right(httpResponse(500, "Internal server error")))
 
     val result = store.get("test-1")
     result.isLeft shouldBe true
@@ -112,7 +112,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     (mockClient.get _)
       .when(testPointUrl, *, *, *)
-      .returns(httpResponse(403, "Forbidden"))
+      .returns(Right(httpResponse(403, "Forbidden")))
 
     val result = store.get("test-1")
     result.isLeft shouldBe true
@@ -128,7 +128,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     (mockClient.get _)
       .when(testPointUrl, *, *, *)
-      .throws(new RuntimeException("Connection timeout"))
+      .returns(Left(org.llm4s.error.NetworkError("Connection timeout", None, "http://localhost:6333")))
 
     val result = store.get("test-1")
     result.isLeft shouldBe true
@@ -145,9 +145,10 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     (mockClient.get _)
       .when(collectionsUrl, *, *, *)
       .returns(
-        httpResponse(
-          200,
-          """{
+        Right(
+          httpResponse(
+            200,
+            """{
       "result": {
         "vectors_count": 42,
         "points_count": 42,
@@ -160,6 +161,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
         }
       }
     }"""
+          )
         )
       )
       .anyNumberOfTimes()
@@ -184,14 +186,14 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val store      = createStore(mockClient)
 
     // The store creates the collection first, since the mocked existence check 404s.
-    (mockClient.put _).when(collectionsUrl, *, *, *).returns(httpResponse(200, """{"result": "ok"}"""))
-    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(httpResponse(200, """{"result": "ok"}"""))
+    (mockClient.put _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, """{"result": "ok"}""")))
+    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(Right(httpResponse(200, """{"result": "ok"}""")))
 
     store.upsert(VectorRecord("test-1", Array(0.1f, 0.2f, 0.3f), Some("Test content"))) shouldBe Right(())
 
     (mockClient.put _).verify(
       // Guard on the URL first: the collection-creation PUT above carries no points array.
-      where { (url: String, _: Map[String, String], body: String, _: Int) =>
+      where { (url: String, _: Map[String, String], body: String, _: scala.concurrent.duration.FiniteDuration) =>
         url == s"$pointsUrl?wait=true" && {
           val point = ujson.read(body)("points").arr.head
           point("id").str == testPointId && point("payload")("llm4s_id").str == "test-1"
@@ -207,7 +209,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     (mockClient.get _)
       .when(s"$pointsUrl/$uuid?with_payload=true&with_vector=true", *, *, *)
-      .returns(httpResponse(404, "Not found"))
+      .returns(Right(httpResponse(404, "Not found")))
 
     // Reaching the stub at all is the assertion: an unmapped URL would not match it.
     store.get(uuid) shouldBe Right(None)
@@ -226,19 +228,23 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     (mockClient.get _)
       .when(testPointUrl, *, *, *)
       .returns(
-        httpResponse(
-          200,
-          s"""{"result": {"id": "$testPointId", "vector": [0.1],
+        Right(
+          httpResponse(
+            200,
+            s"""{"result": {"id": "$testPointId", "vector": [0.1],
                                      "payload": {"llm4s_id": "test-1"}}}"""
+          )
         )
       )
     (mockClient.get _)
       .when(s"$pointsUrl/$itsPoint?with_payload=true&with_vector=true", *, *, *)
       .returns(
-        httpResponse(
-          200,
-          s"""{"result": {"id": "$itsPoint", "vector": [0.2],
+        Right(
+          httpResponse(
+            200,
+            s"""{"result": {"id": "$itsPoint", "vector": [0.2],
                                      "payload": {"llm4s_id": "$literalUuidRecord"}}}"""
+          )
         )
       )
 
@@ -261,7 +267,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
       }
     }"""
 
-    (mockClient.get _).when(testPointUrl, *, *, *).returns(httpResponse(200, responseJson))
+    (mockClient.get _).when(testPointUrl, *, *, *).returns(Right(httpResponse(200, responseJson)))
 
     store.get("test-1").toOption.flatten.map(_.id) shouldBe Some("test-1")
   }
@@ -275,9 +281,11 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     (mockClient.post _)
       .when(s"$pointsUrl/search", *, *, *)
       .returns(
-        httpResponse(
-          200,
-          """{"result": [{ "id": 7, "score": 0.5, "vector": [0.1], "payload": { "content": "foreign" } }]}"""
+        Right(
+          httpResponse(
+            200,
+            """{"result": [{ "id": 7, "score": 0.5, "vector": [0.1], "payload": { "content": "foreign" } }]}"""
+          )
         )
       )
 
@@ -292,7 +300,9 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     // from throwing inside what is otherwise a total read path.
     (mockClient.post _)
       .when(s"$pointsUrl/search", *, *, *)
-      .returns(httpResponse(200, """{"result": [{ "id": null, "score": 0.5, "vector": [0.1], "payload": {} }]}"""))
+      .returns(
+        Right(httpResponse(200, """{"result": [{ "id": null, "score": 0.5, "vector": [0.1], "payload": {} }]}"""))
+      )
 
     store.search(Array(0.1f), topK = 1).toOption.flatMap(_.headOption).map(_.record.id) shouldBe Some("null")
   }
@@ -303,12 +313,12 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     (mockClient.post _)
       .when(s"$pointsUrl/delete?wait=true", *, *, *)
-      .returns(httpResponse(200, """{"result": "ok"}"""))
+      .returns(Right(httpResponse(200, """{"result": "ok"}""")))
 
     store.deleteBatch(Seq("test-1", "test-2")) shouldBe Right(())
 
     (mockClient.post _).verify(
-      where { (url: String, _: Map[String, String], body: String, _: Int) =>
+      where { (url: String, _: Map[String, String], body: String, _: scala.concurrent.duration.FiniteDuration) =>
         url == s"$pointsUrl/delete?wait=true" &&
         ujson.read(body)("points").arr.map(_.str).toSeq ==
           Seq(testPointId, QdrantVectorStore.derivedPointId("test-2"))
@@ -326,7 +336,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     // `clear()` deletes the collection outright and the next upsert recreates it, so an
     // empty store legitimately 404s.
-    (mockClient.post _).when(s"$pointsUrl/count", *, *, *).returns(httpResponse(404, "Not found"))
+    (mockClient.post _).when(s"$pointsUrl/count", *, *, *).returns(Right(httpResponse(404, "Not found")))
 
     store.count() shouldBe Right(0L)
   }
@@ -335,8 +345,8 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.post _).when(s"$pointsUrl/search", *, *, *).returns(httpResponse(404, "Not found"))
-    (mockClient.post _).when(s"$pointsUrl/scroll", *, *, *).returns(httpResponse(404, "Not found"))
+    (mockClient.post _).when(s"$pointsUrl/search", *, *, *).returns(Right(httpResponse(404, "Not found")))
+    (mockClient.post _).when(s"$pointsUrl/scroll", *, *, *).returns(Right(httpResponse(404, "Not found")))
 
     store.search(Array(0.1f, 0.2f, 0.3f), topK = 5) shouldBe Right(Seq.empty)
     store.list(limit = 10, offset = 0) shouldBe Right(Seq.empty)
@@ -356,7 +366,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     }"""
 
     val freshClient = stub[Llm4sHttpClient]
-    (freshClient.get _).when(collectionsUrl, *, *, *).returns(httpResponse(200, namedVectors))
+    (freshClient.get _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, namedVectors)))
     val namedStore = QdrantVectorStore(testConfig, freshClient) match {
       case Right(s)  => s
       case Left(err) => fail(s"Failed to create store: ${err.formatted}")
@@ -393,13 +403,15 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
       }
     }"""
 
-    (mockClient.post _).when(s"$pointsUrl/scroll", *, *, *).returns(httpResponse(200, scrollJson))
-    (mockClient.post _).when(s"$pointsUrl/delete?wait=true", *, *, *).returns(httpResponse(200, """{"result": "ok"}"""))
+    (mockClient.post _).when(s"$pointsUrl/scroll", *, *, *).returns(Right(httpResponse(200, scrollJson)))
+    (mockClient.post _)
+      .when(s"$pointsUrl/delete?wait=true", *, *, *)
+      .returns(Right(httpResponse(200, """{"result": "ok"}""")))
 
     store.deleteByPrefix("doc-") shouldBe Right(1L)
 
     (mockClient.post _).verify(
-      where { (url: String, _: Map[String, String], body: String, _: Int) =>
+      where { (url: String, _: Map[String, String], body: String, _: scala.concurrent.duration.FiniteDuration) =>
         url == s"$pointsUrl/delete?wait=true" && ujson.read(body)("points") == ujson.Arr(ujson.Num(7))
       }
     )
@@ -426,7 +438,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
       ]
     }"""
 
-    (mockClient.post _).when(s"$pointsUrl/search", *, *, *).returns(httpResponse(200, searchResponseJson))
+    (mockClient.post _).when(s"$pointsUrl/search", *, *, *).returns(Right(httpResponse(200, searchResponseJson)))
 
     val result = store.search(Array(0.1f, 0.2f, 0.3f), topK = 1)
     result match {
@@ -446,7 +458,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     (mockClient.post _)
       .when(s"$pointsUrl/search", *, *, *)
-      .returns(httpResponse(400, "Bad Request: Invalid vector dimensions"))
+      .returns(Right(httpResponse(400, "Bad Request: Invalid vector dimensions")))
 
     val result = store.search(Array(0.1f, 0.2f), topK = 1)
     result.isLeft shouldBe true
@@ -460,7 +472,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.post _).when(s"$pointsUrl/search", *, *, *).returns(httpResponse(500, "Internal server error"))
+    (mockClient.post _).when(s"$pointsUrl/search", *, *, *).returns(Right(httpResponse(500, "Internal server error")))
 
     val result = store.search(Array(0.1f, 0.2f, 0.3f), topK = 1)
     result.isLeft shouldBe true
@@ -471,7 +483,9 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.post _).when(s"$pointsUrl/search", *, *, *).throws(new RuntimeException("Network error"))
+    (mockClient.post _)
+      .when(s"$pointsUrl/search", *, *, *)
+      .returns(Left(org.llm4s.error.NetworkError("Network error", None, "http://localhost:6333")))
 
     val result = store.search(Array(0.1f, 0.2f, 0.3f), topK = 1)
     result.isLeft shouldBe true
@@ -491,7 +505,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
       }
     }"""
 
-    (mockClient.post _).when(s"$pointsUrl/count", *, *, *).returns(httpResponse(200, countResponseJson))
+    (mockClient.post _).when(s"$pointsUrl/count", *, *, *).returns(Right(httpResponse(200, countResponseJson)))
 
     val result = store.count()
     result shouldBe Right(42L)
@@ -501,7 +515,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.post _).when(s"$pointsUrl/count", *, *, *).returns(httpResponse(503, "Service unavailable"))
+    (mockClient.post _).when(s"$pointsUrl/count", *, *, *).returns(Right(httpResponse(503, "Service unavailable")))
 
     val result = store.count()
     result.isLeft shouldBe true
@@ -527,7 +541,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
       ]
     }"""
 
-    (mockClient.post _).when(pointsUrl, *, *, *).returns(httpResponse(200, getBatchResponseJson))
+    (mockClient.post _).when(pointsUrl, *, *, *).returns(Right(httpResponse(200, getBatchResponseJson)))
 
     val result = store.getBatch(Seq("test-1", "test-2"))
     result match {
@@ -545,9 +559,9 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val store      = createStore(mockClient)
 
     // Mock collection creation PUT
-    (mockClient.put _).when(collectionsUrl, *, *, *).returns(httpResponse(200, """{"result": true}"""))
+    (mockClient.put _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, """{"result": true}""")))
     // Mock successful PUT for upsert
-    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(httpResponse(200, """{"result": "ok"}"""))
+    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(Right(httpResponse(200, """{"result": "ok"}""")))
 
     val record = VectorRecord("test-1", Array(0.1f, 0.2f, 0.3f), Some("Test content"))
     val result = store.upsert(record)
@@ -558,8 +572,10 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.put _).when(collectionsUrl, *, *, *).returns(httpResponse(200, """{"result": true}"""))
-    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(httpResponse(201, """{"result": "created"}"""))
+    (mockClient.put _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, """{"result": true}""")))
+    (mockClient.put _)
+      .when(s"$pointsUrl?wait=true", *, *, *)
+      .returns(Right(httpResponse(201, """{"result": "created"}""")))
 
     val record = VectorRecord("test-1", Array(0.1f, 0.2f, 0.3f))
     val result = store.upsert(record)
@@ -570,8 +586,8 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.put _).when(collectionsUrl, *, *, *).returns(httpResponse(200, """{"result": true}"""))
-    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(httpResponse(204, ""))
+    (mockClient.put _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, """{"result": true}""")))
+    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(Right(httpResponse(204, "")))
 
     val record = VectorRecord("test-1", Array(0.1f, 0.2f, 0.3f))
     val result = store.upsert(record)
@@ -582,10 +598,10 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.put _).when(collectionsUrl, *, *, *).returns(httpResponse(200, """{"result": true}"""))
+    (mockClient.put _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, """{"result": true}""")))
     (mockClient.put _)
       .when(s"$pointsUrl?wait=true", *, *, *)
-      .returns(httpResponse(400, "Bad Request: Invalid vector size"))
+      .returns(Right(httpResponse(400, "Bad Request: Invalid vector size")))
 
     val record = VectorRecord("test-1", Array(0.1f))
     val result = store.upsert(record)
@@ -600,8 +616,8 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.put _).when(collectionsUrl, *, *, *).returns(httpResponse(200, """{"result": true}"""))
-    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(httpResponse(401, "Unauthorized"))
+    (mockClient.put _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, """{"result": true}""")))
+    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(Right(httpResponse(401, "Unauthorized")))
 
     val record = VectorRecord("test-1", Array(0.1f, 0.2f, 0.3f))
     val result = store.upsert(record)
@@ -613,8 +629,8 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.put _).when(collectionsUrl, *, *, *).returns(httpResponse(200, """{"result": true}"""))
-    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(httpResponse(500, "Internal error"))
+    (mockClient.put _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, """{"result": true}""")))
+    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(Right(httpResponse(500, "Internal error")))
 
     val record = VectorRecord("test-1", Array(0.1f, 0.2f, 0.3f))
     val result = store.upsert(record)
@@ -626,10 +642,10 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.put _).when(collectionsUrl, *, *, *).returns(httpResponse(200, """{"result": true}"""))
+    (mockClient.put _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, """{"result": true}""")))
     (mockClient.put _)
       .when(s"$pointsUrl?wait=true", *, *, *)
-      .returns(httpResponse(503, "Service temporarily unavailable"))
+      .returns(Right(httpResponse(503, "Service temporarily unavailable")))
 
     val record = VectorRecord("test-1", Array(0.1f, 0.2f, 0.3f))
     val result = store.upsert(record)
@@ -641,8 +657,10 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.put _).when(collectionsUrl, *, *, *).returns(httpResponse(200, """{"result": true}"""))
-    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).throws(new RuntimeException("Connection refused"))
+    (mockClient.put _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, """{"result": true}""")))
+    (mockClient.put _)
+      .when(s"$pointsUrl?wait=true", *, *, *)
+      .returns(Left(org.llm4s.error.NetworkError("Connection refused", None, "http://localhost:6333")))
 
     val record = VectorRecord("test-1", Array(0.1f, 0.2f, 0.3f))
     val result = store.upsert(record)
@@ -658,7 +676,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.delete _).when(collectionsUrl, *, *).returns(httpResponse(200, """{"result": true}"""))
+    (mockClient.delete _).when(collectionsUrl, *, *).returns(Right(httpResponse(200, """{"result": true}""")))
 
     val result = store.clear()
     result shouldBe Right(())
@@ -668,7 +686,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.delete _).when(collectionsUrl, *, *).returns(httpResponse(204, ""))
+    (mockClient.delete _).when(collectionsUrl, *, *).returns(Right(httpResponse(204, "")))
 
     val result = store.clear()
     result shouldBe Right(())
@@ -678,7 +696,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.delete _).when(collectionsUrl, *, *).returns(httpResponse(400, "Bad Request"))
+    (mockClient.delete _).when(collectionsUrl, *, *).returns(Right(httpResponse(400, "Bad Request")))
 
     val result = store.clear()
     result.isLeft shouldBe true
@@ -689,7 +707,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.delete _).when(collectionsUrl, *, *).returns(httpResponse(401, "Unauthorized"))
+    (mockClient.delete _).when(collectionsUrl, *, *).returns(Right(httpResponse(401, "Unauthorized")))
 
     val result = store.clear()
     result.isLeft shouldBe true
@@ -700,7 +718,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.delete _).when(collectionsUrl, *, *).returns(httpResponse(403, "Forbidden"))
+    (mockClient.delete _).when(collectionsUrl, *, *).returns(Right(httpResponse(403, "Forbidden")))
 
     val result = store.clear()
     result.isLeft shouldBe true
@@ -711,7 +729,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.delete _).when(collectionsUrl, *, *).returns(httpResponse(404, "Collection not found"))
+    (mockClient.delete _).when(collectionsUrl, *, *).returns(Right(httpResponse(404, "Collection not found")))
 
     val result = store.clear()
     result.isLeft shouldBe true
@@ -722,7 +740,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.delete _).when(collectionsUrl, *, *).returns(httpResponse(500, "Internal error"))
+    (mockClient.delete _).when(collectionsUrl, *, *).returns(Right(httpResponse(500, "Internal error")))
 
     val result = store.clear()
     result.isLeft shouldBe true
@@ -733,7 +751,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
-    (mockClient.delete _).when(collectionsUrl, *, *).returns(httpResponse(503, "Service unavailable"))
+    (mockClient.delete _).when(collectionsUrl, *, *).returns(Right(httpResponse(503, "Service unavailable")))
 
     val result = store.clear()
     result.isLeft shouldBe true
@@ -744,12 +762,14 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val mockClient = createMockClient()
 
     // Mock the initial GET in constructor
-    (mockClient.get _).when(collectionsUrl, *, *, *).returns(httpResponse(404, "Not found"))
+    (mockClient.get _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(404, "Not found")))
 
     // Create a fresh mock for delete that will throw
     val throwingClient = stub[Llm4sHttpClient]
-    (throwingClient.get _).when(collectionsUrl, *, *, *).returns(httpResponse(404, "Not found"))
-    (throwingClient.delete _).when(collectionsUrl, *, *).throws(new RuntimeException("Network timeout"))
+    (throwingClient.get _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(404, "Not found")))
+    (throwingClient.delete _)
+      .when(collectionsUrl, *, *)
+      .returns(Left(org.llm4s.error.NetworkError("Network timeout", None, "http://localhost:6333")))
 
     val store = QdrantVectorStore(testConfig, throwingClient) match {
       case Right(s)  => s
@@ -773,8 +793,10 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val store      = createStore(mockClient)
 
     // Test 202 Accepted via upsert (which uses httpPut that checks 200-299 range)
-    (mockClient.put _).when(collectionsUrl, *, *, *).returns(httpResponse(200, """{"result": true}"""))
-    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(httpResponse(202, """{"result": "accepted"}"""))
+    (mockClient.put _).when(collectionsUrl, *, *, *).returns(Right(httpResponse(200, """{"result": true}""")))
+    (mockClient.put _)
+      .when(s"$pointsUrl?wait=true", *, *, *)
+      .returns(Right(httpResponse(202, """{"result": "accepted"}""")))
 
     val record = VectorRecord("test-1", Array(0.1f, 0.2f, 0.3f))
     val result = store.upsert(record)
@@ -788,7 +810,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     // Test 405 Method Not Allowed
     (mockClient.get _)
       .when(testPointUrl, *, *, *)
-      .returns(httpResponse(405, "Method Not Allowed"))
+      .returns(Right(httpResponse(405, "Method Not Allowed")))
 
     val result = store.get("test-1")
     result.isLeft shouldBe true
@@ -802,7 +824,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     // Return invalid JSON
     (mockClient.get _)
       .when(testPointUrl, *, *, *)
-      .returns(httpResponse(200, "not valid json"))
+      .returns(Right(httpResponse(200, "not valid json")))
 
     val result = store.get("test-1")
     result.isLeft shouldBe true

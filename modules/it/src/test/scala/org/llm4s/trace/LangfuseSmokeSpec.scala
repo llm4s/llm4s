@@ -134,8 +134,11 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
         s"$apiBase/api/public/traces",
         headers = Map("Authorization" -> auth),
         params = Map("name" -> "LLM4S Agent Run", "limit" -> "50"),
-        timeout = 30000
-      )
+        timeout = scala.concurrent.duration.Duration(30, "seconds")
+      ) match {
+        case Right(r)    => r
+        case Left(error) => fail(s"GET /api/public/traces failed: ${error.message}")
+      }
       withClue(s"GET /api/public/traces returned ${response.statusCode}: ") {
         response.statusCode shouldBe 200
       }

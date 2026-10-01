@@ -1,7 +1,6 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.trace
 
-import org.llm4s.error.UnknownError
+import org.llm4s.error.{ ExecutionError, UnknownError }
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.Result
@@ -11,7 +10,7 @@ import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.{ Base64, UUID }
-import scala.util.control.NonFatal
+import scala.concurrent.duration.*
 
 /**
  * Langfuse [[Tracing]] implementation for production observability.
@@ -109,21 +108,27 @@ class LangfuseTracing(
     val batchPayload = ujson.Obj("batch" -> ujson.Arr(events: _*))
     val credentials  = Base64.getEncoder.encodeToString(s"$publicKey:$secretKey".getBytes(StandardCharsets.UTF_8))
 
-    // Catch only non-fatal exceptions. Fatal errors (OOM, StackOverflow, etc.) will crash fast.
-    // InterruptedException is handled explicitly to restore the interrupt flag.
-    try {
-      val response = httpClient.post(
-        url = apiUrl,
-        headers = Map(
-          "Content-Type"  -> "application/json",
-          "User-Agent"    -> "llm4s-scala/1.0.0",
-          "Authorization" -> s"Basic $credentials"
-        ),
-        body = batchPayload.render(),
-        timeout = 30000
-      )
-
-      if (response.statusCode == 207) {
+    httpClient.post(
+      url = apiUrl,
+      headers = Map(
+        "Content-Type"  -> "application/json",
+        "User-Agent"    -> "llm4s-scala/1.0.0",
+        "Authorization" -> s"Basic $credentials"
+      ),
+      body = batchPayload.render(),
+      timeout = 30.seconds
+    ) match {
+      case Left(error: ExecutionError) =>
+        // The HTTP client reports an interrupted request as an ExecutionError, having restored
+        // the interrupt flag; restoreInterrupt keeps the hook callers rely on.
+        restoreInterrupt()
+        logger.warn("[Langfuse] Batch export was interrupted.")
+        Left(error)
+      case Left(error) =>
+        logger.error(s"[Langfuse] Batch export failed: ${error.message}")
+        logger.error(s"[Langfuse] Request URL: $langfuseUrl")
+        Left(error)
+      case Right(response) if response.statusCode == 207 =>
         // Multi-Status: per-event results. Events listed under `errors` were dropped.
         LangfuseIngestionResponse.rejections(response.body) match {
           case Right(rejected) if rejected.nonEmpty =>
@@ -138,27 +143,14 @@ class LangfuseTracing(
             logger.warn(s"[Langfuse] Batch export returned 207 with an $reason; treating it as accepted")
             Right(())
         }
-      } else if (response.statusCode >= 200 && response.statusCode < 300) {
+      case Right(response) if response.statusCode >= 200 && response.statusCode < 300 =>
         logger.info(s"[Langfuse] Batch export successful: ${response.statusCode}")
         Right(())
-      } else {
+      case Right(response) =>
         logger.error(s"[Langfuse] Batch export failed: ${response.statusCode}")
         logger.error(s"[Langfuse] Response body: ${org.llm4s.util.Redaction.truncateForLog(response.body)}")
         val runtimeException = new RuntimeException(s"Langfuse export failed: ${response.statusCode}")
         Left(UnknownError(runtimeException.getMessage, runtimeException))
-      }
-    } catch {
-      case _: InterruptedException =>
-        // Restore interrupt flag for proper thread shutdown and timeout semantics
-        restoreInterrupt()
-        logger.warn("[Langfuse] Batch export was interrupted.")
-        Left(UnknownError("Batch export was interrupted", new InterruptedException()))
-      case NonFatal(e) =>
-        // Catch all non-fatal exceptions (network errors, etc.)
-        // Fatal errors (OutOfMemoryError, StackOverflowError, etc.) will propagate
-        logger.error(s"[Langfuse] Batch export failed with exception: ${e.getMessage}", e)
-        logger.error(s"[Langfuse] Request URL: $langfuseUrl")
-        Left(UnknownError(e.getMessage, e))
     }
   }
 

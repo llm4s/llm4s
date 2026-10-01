@@ -45,11 +45,11 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
     val tokenBody = """{"access_token":"ya29.test-token","expires_in":3600}"""
     val sseBody   = """data: {"candidates":[{"content":{"parts":[{"text":"Hi"}]}}]}""" + "\n\n"
     val mockHttp  = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(HttpResponse(200, tokenBody, Map.empty))
-    (mockHttp.get _).when(*, *, *, *).returns(HttpResponse(200, tokenBody, Map.empty))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
     (mockHttp.postStream _)
       .when(*, *, *, *)
-      .returns(StreamingHttpResponse(200, new ByteArrayInputStream(sseBody.getBytes(StandardCharsets.UTF_8))))
+      .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(sseBody.getBytes(StandardCharsets.UTF_8)))))
     new VertexAIClient(config, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
   }
 

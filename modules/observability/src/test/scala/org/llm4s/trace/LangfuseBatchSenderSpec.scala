@@ -35,7 +35,7 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
     sender.sendBatch(testEvents, testConfig)
 
     mockClient.lastUrl shouldBe Some("https://cloud.langfuse.com/api/public/ingestion")
-    mockClient.lastTimeout shouldBe Some(30000)
+    mockClient.lastTimeout shouldBe Some(scala.concurrent.duration.Duration(30, "seconds"))
 
     // Verify Basic auth header
     val expectedCredentials = Base64.getEncoder.encodeToString("pk-lf-test-key:sk-lf-test-secret".getBytes)
@@ -112,8 +112,8 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
   it should "call restoreInterrupt on InterruptedException" in {
     var interruptRestored = false
     val mockRestore       = () => interruptRestored = true
-    val failingClient     = new FailingHttpClient(new InterruptedException("interrupted"))
-    val sender            = new DefaultLangfuseBatchSender(httpClient = failingClient, restoreInterrupt = mockRestore)
+    val failingClient = new FailingHttpClient(org.llm4s.error.ExecutionError("POST request interrupted", "http.POST"))
+    val sender        = new DefaultLangfuseBatchSender(httpClient = failingClient, restoreInterrupt = mockRestore)
 
     noException should be thrownBy {
       withLangfuseBatchSenderLoggerSilenced {

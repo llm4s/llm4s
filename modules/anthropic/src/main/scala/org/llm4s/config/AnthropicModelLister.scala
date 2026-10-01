@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName }
 import org.llm4s.types.{ Result, TryOps }
 
+import scala.concurrent.duration.*
 import scala.util.Try
 
 /**
@@ -39,14 +40,14 @@ object AnthropicModelLister extends ProviderModelLister:
   ): Result[List[DiscoveredModel]] =
     for
       response <- httpClient
-        .getResult(
+        .get(
           s"${baseUrl.asUrl}/v1/models",
           headers = Map(
             "x-api-key"         -> apiKey.asKey,
             "anthropic-version" -> AnthropicVersion
           ),
           params = Map("limit" -> DefaultLimit) ++ afterId.map("after_id" -> _),
-          timeout = 10000
+          timeout = 10.seconds
         )
         .mapServiceError("anthropic", "Failed to discover models")
       okResponse   <- response.ensureSuccess("anthropic")

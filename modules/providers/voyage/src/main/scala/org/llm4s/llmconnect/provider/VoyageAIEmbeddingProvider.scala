@@ -1,4 +1,3 @@
-// scalafix:off DisableSyntax.NoKeywordCatch
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.VoyageConfigKeys
@@ -12,8 +11,8 @@ import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
 import ujson.{ Arr, Obj }
 
+import scala.concurrent.duration.*
 import scala.util.Try
-import scala.util.control.NonFatal
 
 /**
  * Embedding provider implementation for the Voyage AI embedding API.
@@ -99,19 +98,8 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
         )
 
         val respEither: Either[EmbeddingError, Llm4sHttpResponse] =
-          try Right(httpClient.post(url, headers, payload.render(), timeout = 120000))
-          catch {
-            case e: InterruptedException =>
-              Thread.currentThread().interrupt()
-              Left(
-                EmbeddingError(
-                  code = None,
-                  message = s"HTTP request interrupted: ${e.getMessage}",
-                  provider = "voyage"
-                )
-              )
-            case NonFatal(e) =>
-              Left(EmbeddingError(code = None, message = s"HTTP request failed: ${e.getMessage}", provider = "voyage"))
+          httpClient.post(url, headers, payload.render(), timeout = 120.seconds).left.map { err =>
+            EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "voyage")
           }
 
         respEither.flatMap { response =>

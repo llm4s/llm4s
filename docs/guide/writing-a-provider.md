@@ -376,21 +376,55 @@ in the request body you record; send them in headers.
 ### `Llm4sHttpClient`
 
 `org.llm4s.http.Llm4sHttpClient` is the JDK-backed HTTP client (`Llm4sHttpClient.create()`), with
-`get`, `post`, `postBytes`, `postMultipart`, `put`, `delete`, `postRaw` and `postStream`
-(timeouts in milliseconds). Take one as a constructor parameter so tests can inject a stub.
-Non-2xx statuses are returned, not thrown, but I/O failures **do** throw, so wrap each call in
-`Try(...).toResult` (only `getResult` does that for you).
+`get`, `post`, `postBytes`, `postMultipart`, `put`, `delete`, `postRaw` and `postStream`. Take one
+as a constructor parameter so tests can inject a stub.
+
+```scala
+def post(
+  url: String,
+  headers: Map[String, String] = Map.empty,
+  body: String = "",
+  timeout: FiniteDuration = 10.seconds
+): Result[HttpResponse]
+```
+
+Every method returns a `Result` and never throws for a transport failure, so there is no
+`try`/`catch` to write:
+
+| Failure | `Left` |
+|---|---|
+| request or connection timed out | `TimeoutError` (carries the timeout) |
+| connection refused, unknown host, other I/O error | `NetworkError` |
+| invalid URL, header or timeout; unreadable multipart file | `ValidationError` |
+| thread interrupted (the interrupt flag is restored) | `ExecutionError` |
+
+A non-2xx status is **not** an error at this layer: it is a `Right` response for you to inspect
+(`HttpResponse.ensureSuccess`, or `HttpErrorMapper` below). Timeouts are
+`scala.concurrent.duration.FiniteDuration`; the default is 10 seconds, and 10 minutes for
+`postStream`. `HttpResponse`, `HttpRawResponse` and `StreamingHttpResponse` all carry `headers`
+(lower-case keys); `response.header("Retry-After")` looks one up case-insensitively. A
+`StreamingHttpResponse`'s body is yours to close, on an error status too.
+
+Methods added to the trait after 1.0 will have default implementations, so a test double that
+implements it keeps compiling.
 
 ### `HttpErrorMapper`
 
 ```scala
-HttpErrorMapper.mapHttpError(statusCode: Int, body: String, provider: String): Result[Nothing]
+HttpErrorMapper.mapHttpError(
+  statusCode: Int,
+  body: String,
+  provider: String,
+  headers: Map[String, Seq[String]] = Map.empty
+): Result[Nothing]
 ```
 
 Maps a non-2xx response to the standard error types - 401/403 `AuthenticationError`, 429
 `RateLimitError`, 400 `ValidationError`, anything else `ServiceError` - pulling a message out of
 common JSON error shapes, redacted and truncated. Retry and fallback logic keys off these types,
-so use it rather than inventing your own.
+so use it rather than inventing your own. Pass the response's `headers`: a 429's `Retry-After`
+(delta-seconds or an HTTP-date) becomes the `RateLimitError`'s retry delay, in milliseconds, so
+retries wait as long as the provider asked rather than a guessed backoff.
 
 ### `CostEstimator`
 
@@ -511,10 +545,10 @@ final class AcmeClient(
 
   private def send(requestText: String): Result[Completion] =
     val startedAt = Instant.now()
-    val response  = Try(http.post(s"${config.baseUrl}/chat", headers, requestText, timeout = 120000)).toResult
+    val response  = http.post(s"${config.baseUrl}/chat", headers, requestText, timeout = 120.seconds)
     val result = response.flatMap { r =>
       if r.statusCode / 100 == 2 then AcmeWire.decode(r.body).map(withCost)
-      else HttpErrorMapper.mapHttpError(r.statusCode, r.body, providerName)
+      else HttpErrorMapper.mapHttpError(r.statusCode, r.body, providerName, r.headers)
     }
     ProviderExchangeRecorder.record(
       clientOptions.exchangeLogging, providerName, Some(config.model), startedAt,

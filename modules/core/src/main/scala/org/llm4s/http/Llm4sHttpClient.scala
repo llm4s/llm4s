@@ -1,17 +1,54 @@
 package org.llm4s.http
 
-import org.llm4s.error.{ ServiceError, ValidationError }
+import org.llm4s.error.{
+  ExecutionError,
+  LLMError,
+  NetworkError,
+  ServiceError,
+  TimeoutError,
+  UnknownError,
+  ValidationError
+}
 import org.llm4s.types.{ Result, TryOps }
 
+import java.io.IOException
 import java.net.URI
 import java.net.URLEncoder
-import java.net.http.{ HttpClient => JHttpClient, HttpRequest, HttpResponse => JHttpResponse }
+import java.net.http.{
+  HttpClient => JHttpClient,
+  HttpConnectTimeoutException,
+  HttpHeaders => JHttpHeaders,
+  HttpRequest,
+  HttpResponse => JHttpResponse,
+  HttpTimeoutException
+}
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.time.Duration
-import java.util.UUID
+import java.util.{ Locale, UUID }
+import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
-import scala.jdk.CollectionConverters._
+import scala.util.control.NonFatal
+
+/**
+ * Case-insensitive lookup over a multi-valued header map, as carried by every response type
+ * in this package.
+ */
+object HttpHeaders {
+
+  /**
+   * The first value of header `name`, matched case-insensitively, if present.
+   *
+   * @param headers response headers, as carried by [[HttpResponse]] and its siblings
+   * @param name    header name in any case, e.g. `"Retry-After"`
+   */
+  def first(headers: Map[String, Seq[String]], name: String): Option[String] =
+    headers.get(name).orElse(headers.get(name.toLowerCase(Locale.ROOT))) match {
+      case Some(values) => values.headOption
+      case None         => headers.collectFirst { case (k, v) if k.equalsIgnoreCase(name) && v.nonEmpty => v.head }
+    }
+}
 
 /**
  * HTTP response wrapper exposing status code, body, and headers.
@@ -24,13 +61,21 @@ case class HttpResponse(
   statusCode: Int,
   body: String,
   headers: Map[String, Seq[String]] = Map.empty
-)
+) {
+
+  /** First value of header `name`, matched case-insensitively. */
+  def header(name: String): Option[String] = HttpHeaders.first(headers, name)
+}
 
 final case class JsonHttpResponse(
   statusCode: Int,
   body: ujson.Value,
   headers: Map[String, Seq[String]] = Map.empty
-)
+) {
+
+  /** First value of header `name`, matched case-insensitively. */
+  def header(name: String): Option[String] = HttpHeaders.first(headers, name)
+}
 
 object HttpResponse:
   extension (response: HttpResponse)
@@ -62,8 +107,17 @@ object HttpResponse:
  *
  * @param statusCode HTTP status code
  * @param body       Raw response bytes — exact wire representation, no charset conversion
+ * @param headers    Response headers as a multi-valued map (lowercase keys)
  */
-case class HttpRawResponse(statusCode: Int, body: Array[Byte])
+case class HttpRawResponse(
+  statusCode: Int,
+  body: Array[Byte],
+  headers: Map[String, Seq[String]] = Map.empty
+) {
+
+  /** First value of header `name`, matched case-insensitively. */
+  def header(name: String): Option[String] = HttpHeaders.first(headers, name)
+}
 
 /**
  * HTTP response wrapper for streaming (InputStream-based) response bodies.
@@ -72,9 +126,19 @@ case class HttpRawResponse(statusCode: Int, body: Array[Byte])
  * incrementally (e.g. server-sent events, JSON lines).
  *
  * @param statusCode HTTP status code
- * @param body       Response body as an InputStream — caller is responsible for closing it
+ * @param body       Response body as an InputStream — caller is responsible for closing it,
+ *                   on error statuses too
+ * @param headers    Response headers as a multi-valued map (lowercase keys)
  */
-case class StreamingHttpResponse(statusCode: Int, body: java.io.InputStream)
+case class StreamingHttpResponse(
+  statusCode: Int,
+  body: java.io.InputStream,
+  headers: Map[String, Seq[String]] = Map.empty
+) {
+
+  /** First value of header `name`, matched case-insensitively. */
+  def header(name: String): Option[String] = HttpHeaders.first(headers, name)
+}
 
 /**
  * Represents a single part in a multipart/form-data request.
@@ -93,11 +157,27 @@ object MultipartPart {
 }
 
 /**
- * Abstraction for HTTP client to enable dependency injection and testing.
+ * The HTTP client provider modules and built-in tools use, abstracted so it can be
+ * injected and replaced by a test double.
  *
- * All methods accept timeout in milliseconds. Headers are passed as
- * single-valued maps. The implementation never throws on non-2xx status
- * codes — callers inspect `HttpResponse.statusCode` themselves.
+ * Every request method returns a `Result` and never throws for a transport failure:
+ *
+ *  - a request that times out is a `Left(`[[org.llm4s.error.TimeoutError]]`)`;
+ *  - a connection failure, unknown host or other I/O error is a `Left(`[[org.llm4s.error.NetworkError]]`)`;
+ *  - an invalid URL, header or timeout, or an unreadable multipart file, is a
+ *    `Left(`[[org.llm4s.error.ValidationError]]`)`;
+ *  - an interrupted request is a `Left(`[[org.llm4s.error.ExecutionError]]`)`, with the
+ *    thread's interrupt flag restored.
+ *
+ * A non-2xx status is '''not''' an error at this layer: it is a `Right` response, which the
+ * caller inspects (`HttpResponse.ensureSuccess`, or
+ * [[org.llm4s.llmconnect.provider.HttpErrorMapper.mapHttpError]] with the response headers).
+ *
+ * Headers are passed as single-valued maps. Response headers are multi-valued, keyed in
+ * lower case; look one up with `header(name)`.
+ *
+ * The trait is deliberately not sealed, so tests can implement it. Methods added to it
+ * after 1.0 will have default implementations, so a test double keeps compiling.
  */
 trait Llm4sHttpClient {
 
@@ -105,51 +185,42 @@ trait Llm4sHttpClient {
     url: String,
     headers: Map[String, String] = Map.empty,
     params: Map[String, String] = Map.empty,
-    timeout: Int = 10000
-  ): HttpResponse
-
-  def getResult(
-    url: String,
-    headers: Map[String, String] = Map.empty,
-    params: Map[String, String] = Map.empty,
-    timeout: Int = 10000
-  ): Result[HttpResponse] =
-    Try(get(url, headers, params, timeout)).toResult.left
-      .map(err => ServiceError(500, "http", s"GET request failed: ${err.message}"))
+    timeout: FiniteDuration = 10.seconds
+  ): Result[HttpResponse]
 
   def post(
     url: String,
     headers: Map[String, String] = Map.empty,
     body: String = "",
-    timeout: Int = 10000
-  ): HttpResponse
+    timeout: FiniteDuration = 10.seconds
+  ): Result[HttpResponse]
 
   def postBytes(
     url: String,
     headers: Map[String, String] = Map.empty,
     data: Array[Byte] = Array.empty,
-    timeout: Int = 10000
-  ): HttpResponse
+    timeout: FiniteDuration = 10.seconds
+  ): Result[HttpResponse]
 
   def postMultipart(
     url: String,
     headers: Map[String, String] = Map.empty,
     parts: Seq[MultipartPart] = Seq.empty,
-    timeout: Int = 10000
-  ): HttpResponse
+    timeout: FiniteDuration = 10.seconds
+  ): Result[HttpResponse]
 
   def put(
     url: String,
     headers: Map[String, String] = Map.empty,
     body: String = "",
-    timeout: Int = 10000
-  ): HttpResponse
+    timeout: FiniteDuration = 10.seconds
+  ): Result[HttpResponse]
 
   def delete(
     url: String,
     headers: Map[String, String] = Map.empty,
-    timeout: Int = 10000
-  ): HttpResponse
+    timeout: FiniteDuration = 10.seconds
+  ): Result[HttpResponse]
 
   /**
    * POST with a string body and return the response as raw bytes, bypassing charset decoding.
@@ -161,14 +232,16 @@ trait Llm4sHttpClient {
     url: String,
     headers: Map[String, String] = Map.empty,
     body: String = "",
-    timeout: Int = 10000
-  ): HttpRawResponse
+    timeout: FiniteDuration = 10.seconds
+  ): Result[HttpRawResponse]
 
   /**
    * POST with a string body and return the response as a streaming InputStream.
    *
    * Use this for server-sent events or JSON-lines endpoints where the body must be
-   * consumed incrementally.  The caller is responsible for closing the InputStream.
+   * consumed incrementally. The caller is responsible for closing the InputStream,
+   * including on a non-2xx status. A failure while reading the stream surfaces as an
+   * `IOException` from the stream itself, not through the returned `Result`.
    *
    * Default timeout is 10 minutes to accommodate long-running streams.
    */
@@ -176,8 +249,8 @@ trait Llm4sHttpClient {
     url: String,
     headers: Map[String, String] = Map.empty,
     body: String = "",
-    timeout: Int = 600000
-  ): StreamingHttpResponse
+    timeout: FiniteDuration = 10.minutes
+  ): Result[StreamingHttpResponse]
 }
 
 object Llm4sHttpClient {
@@ -187,11 +260,90 @@ object Llm4sHttpClient {
 }
 
 /**
+ * Maps a transport-level `Throwable` raised while sending a request to an [[LLMError]].
+ * Shared by [[JdkHttpClient]] and by test doubles that want the same mapping.
+ */
+private[llm4s] object HttpFailures {
+
+  /**
+   * @param t       what the transport threw
+   * @param method  HTTP method, for the message
+   * @param url     request URL; only its scheme, host, port and path reach the error, so a
+   *                key carried in the query string is never surfaced
+   * @param timeout the request's timeout, carried on a [[TimeoutError]]
+   */
+  def toLLMError(t: Throwable, method: String, url: String, timeout: FiniteDuration): LLMError = {
+    val endpoint = safeEndpoint(url)
+    val detail   = Option(t.getMessage).filter(_.nonEmpty).getOrElse(t.getClass.getSimpleName)
+    t match {
+      case e: HttpConnectTimeoutException =>
+        TimeoutError(s"$method $endpoint: connection timed out after $timeout", timeout, s"http.$method", Some(e))
+          .withContext("endpoint", endpoint)
+      case e: HttpTimeoutException =>
+        TimeoutError(s"$method $endpoint: request timed out after $timeout", timeout, s"http.$method", Some(e))
+          .withContext("endpoint", endpoint)
+      case e: java.net.SocketTimeoutException =>
+        TimeoutError(s"$method $endpoint: socket timed out after $timeout", timeout, s"http.$method", Some(e))
+          .withContext("endpoint", endpoint)
+      case e: InterruptedException =>
+        ExecutionError(s"$method $endpoint: request interrupted", s"http.$method", cause = Some(e))
+          .withContext("endpoint", endpoint)
+      case _: IllegalArgumentException =>
+        ValidationError("request", s"Invalid $method request to $endpoint: $detail")
+      case e: java.net.ConnectException =>
+        NetworkError(s"$method $endpoint: connection failed: $detail", Some(e), endpoint)
+      case e: java.net.UnknownHostException =>
+        NetworkError(s"$method $endpoint: unknown host: $detail", Some(e), endpoint)
+      case e: IOException =>
+        NetworkError(s"$method $endpoint: I/O error: $detail", Some(e), endpoint)
+      case e =>
+        UnknownError(s"$method $endpoint: unexpected HTTP client failure: $detail", e)
+    }
+  }
+
+  /** Scheme, host, port and path of `url`; never its query string or user info. */
+  def safeEndpoint(url: String): String =
+    Try(URI.create(url)).toOption
+      .filter(u => u.getScheme != null && u.getHost != null)
+      .map { u =>
+        val port = if (u.getPort >= 0) s":${u.getPort}" else ""
+        s"${u.getScheme}://${u.getHost}$port${Option(u.getRawPath).getOrElse("")}"
+      }
+      .getOrElse(url.takeWhile(c => c != '?' && c != '#'))
+
+  /**
+   * Runs `thunk`, catching non-fatal throwables and `InterruptedException` (which `NonFatal`
+   * excludes, as do `Try` and `scala.util.control.Exception`) and mapping them with
+   * [[toLLMError]]. An interruption restores the thread's interrupt flag before returning.
+   *
+   * This is the one place transport exceptions become `Result`s, so no caller of
+   * [[Llm4sHttpClient]] needs a `try`/`catch` of its own.
+   */
+  // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
+  def attempt[A](method: String, url: String, timeout: FiniteDuration)(thunk: => A): Result[A] =
+    try Right(thunk)
+    catch
+      case e: InterruptedException =>
+        Thread.currentThread().interrupt()
+        Left(toLLMError(e, method, url, timeout))
+      case NonFatal(e) => Left(toLLMError(e, method, url, timeout))
+  // scalafix:on DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
+
+  /** JDK response headers as an immutable multi-valued map with lower-case keys. */
+  def headerMap(headers: JHttpHeaders): Map[String, Seq[String]] =
+    headers
+      .map()
+      .asScala
+      .map { case (key, values) => key.toLowerCase(Locale.ROOT) -> values.asScala.toSeq }
+      .toMap
+}
+
+/**
  * JDK 11+ `java.net.http.HttpClient` implementation of [[Llm4sHttpClient]].
  *
  * Uses a single shared `HttpClient` instance for connection pooling.
- * Never throws on non-2xx responses — the caller is responsible for
- * checking `HttpResponse.statusCode`.
+ * Never fails on non-2xx responses — the caller is responsible for
+ * checking `statusCode`.
  */
 private[llm4s] class JdkHttpClient extends Llm4sHttpClient {
   private val client = JHttpClient.newHttpClient()
@@ -200,104 +352,93 @@ private[llm4s] class JdkHttpClient extends Llm4sHttpClient {
     url: String,
     headers: Map[String, String],
     params: Map[String, String],
-    timeout: Int
-  ): HttpResponse = {
+    timeout: FiniteDuration
+  ): Result[HttpResponse] = {
     val fullUrl = appendQueryParams(url, params)
-    val request = buildRequest(fullUrl, headers, timeout)
-      .GET()
-      .build()
-    execute(request)
+    sendString("GET", fullUrl, timeout)(buildRequest(fullUrl, headers, timeout).GET().build())
   }
 
   override def post(
     url: String,
     headers: Map[String, String],
     body: String,
-    timeout: Int
-  ): HttpResponse = {
-    val request = buildRequest(url, headers, timeout)
-      .POST(HttpRequest.BodyPublishers.ofString(body))
-      .build()
-    execute(request)
-  }
+    timeout: FiniteDuration
+  ): Result[HttpResponse] =
+    sendString("POST", url, timeout)(
+      buildRequest(url, headers, timeout).POST(HttpRequest.BodyPublishers.ofString(body)).build()
+    )
 
   override def postBytes(
     url: String,
     headers: Map[String, String],
     data: Array[Byte],
-    timeout: Int
-  ): HttpResponse = {
-    val request = buildRequest(url, headers, timeout)
-      .POST(HttpRequest.BodyPublishers.ofByteArray(data))
-      .build()
-    execute(request)
-  }
+    timeout: FiniteDuration
+  ): Result[HttpResponse] =
+    sendString("POST", url, timeout)(
+      buildRequest(url, headers, timeout).POST(HttpRequest.BodyPublishers.ofByteArray(data)).build()
+    )
 
   override def postMultipart(
     url: String,
     headers: Map[String, String],
     parts: Seq[MultipartPart],
-    timeout: Int
-  ): HttpResponse = {
+    timeout: FiniteDuration
+  ): Result[HttpResponse] = {
     val boundary = UUID.randomUUID().toString
-    val body     = buildMultipartBody(parts, boundary)
-
-    val allHeaders = headers + ("Content-Type" -> s"multipart/form-data; boundary=$boundary")
-
-    val request = buildRequest(url, allHeaders, timeout)
-      .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-      .build()
-    execute(request)
+    Try(buildMultipartBody(parts, boundary)).toEither.left
+      .map(e => ValidationError("parts", s"Failed to read multipart body: ${e.getMessage}"))
+      .flatMap { body =>
+        val allHeaders = headers + ("Content-Type" -> s"multipart/form-data; boundary=$boundary")
+        sendString("POST", url, timeout)(
+          buildRequest(url, allHeaders, timeout).POST(HttpRequest.BodyPublishers.ofByteArray(body)).build()
+        )
+      }
   }
 
   override def put(
     url: String,
     headers: Map[String, String],
     body: String,
-    timeout: Int
-  ): HttpResponse = {
-    val request = buildRequest(url, headers, timeout)
-      .PUT(HttpRequest.BodyPublishers.ofString(body))
-      .build()
-    execute(request)
-  }
+    timeout: FiniteDuration
+  ): Result[HttpResponse] =
+    sendString("PUT", url, timeout)(
+      buildRequest(url, headers, timeout).PUT(HttpRequest.BodyPublishers.ofString(body)).build()
+    )
 
   override def delete(
     url: String,
     headers: Map[String, String],
-    timeout: Int
-  ): HttpResponse = {
-    val request = buildRequest(url, headers, timeout)
-      .DELETE()
-      .build()
-    execute(request)
-  }
+    timeout: FiniteDuration
+  ): Result[HttpResponse] =
+    sendString("DELETE", url, timeout)(buildRequest(url, headers, timeout).DELETE().build())
 
   override def postRaw(
     url: String,
     headers: Map[String, String],
     body: String,
-    timeout: Int
-  ): HttpRawResponse = {
-    val request = buildRequest(url, headers, timeout)
-      .POST(HttpRequest.BodyPublishers.ofString(body))
-      .build()
-    val response = client.send(request, JHttpResponse.BodyHandlers.ofByteArray())
-    HttpRawResponse(statusCode = response.statusCode(), body = response.body())
-  }
+    timeout: FiniteDuration
+  ): Result[HttpRawResponse] =
+    HttpFailures.attempt("POST", url, timeout) {
+      val request = buildRequest(url, headers, timeout)
+        .POST(HttpRequest.BodyPublishers.ofString(body))
+        .build()
+      val response = client.send(request, JHttpResponse.BodyHandlers.ofByteArray())
+      HttpRawResponse(response.statusCode(), response.body(), HttpFailures.headerMap(response.headers()))
+    }
 
   override def postStream(
     url: String,
     headers: Map[String, String],
     body: String,
-    timeout: Int
-  ): StreamingHttpResponse = {
-    val request = buildRequest(url, headers, timeout)
-      .POST(HttpRequest.BodyPublishers.ofString(body))
-      .build()
-    val response = client.send(request, JHttpResponse.BodyHandlers.ofInputStream())
-    StreamingHttpResponse(statusCode = response.statusCode(), body = response.body())
-  }
+    timeout: FiniteDuration
+  ): Result[StreamingHttpResponse] =
+    HttpFailures.attempt("POST", url, timeout) {
+      val request = buildRequest(url, headers, timeout)
+        .POST(HttpRequest.BodyPublishers.ofString(body))
+        .build()
+      val response = client.send(request, JHttpResponse.BodyHandlers.ofInputStream())
+      StreamingHttpResponse(response.statusCode(), response.body(), HttpFailures.headerMap(response.headers()))
+    }
 
   // ============================================================
   // Internal helpers
@@ -306,12 +447,12 @@ private[llm4s] class JdkHttpClient extends Llm4sHttpClient {
   private def buildRequest(
     url: String,
     headers: Map[String, String],
-    timeout: Int
+    timeout: FiniteDuration
   ): HttpRequest.Builder = {
     val builder = HttpRequest
       .newBuilder()
       .uri(URI.create(url))
-      .timeout(Duration.ofMillis(timeout.toLong))
+      .timeout(Duration.ofNanos(timeout.toNanos))
 
     headers.foreach { case (key, value) =>
       builder.header(key, value)
@@ -320,22 +461,18 @@ private[llm4s] class JdkHttpClient extends Llm4sHttpClient {
     builder
   }
 
-  private def execute(request: HttpRequest): HttpResponse = {
-    val response = client.send(request, JHttpResponse.BodyHandlers.ofString())
-
-    val headers = response
-      .headers()
-      .map()
-      .asScala
-      .map { case (key, values) => key.toLowerCase(java.util.Locale.ROOT) -> values.asScala.toSeq }
-      .toMap
-
-    HttpResponse(
-      statusCode = response.statusCode(),
-      body = response.body(),
-      headers = headers
-    )
-  }
+  /** Builds the request inside the guarded block, so an invalid URL or header is a `Left` too. */
+  private def sendString(method: String, url: String, timeout: FiniteDuration)(
+    request: => HttpRequest
+  ): Result[HttpResponse] =
+    HttpFailures.attempt(method, url, timeout) {
+      val response = client.send(request, JHttpResponse.BodyHandlers.ofString())
+      HttpResponse(
+        statusCode = response.statusCode(),
+        body = response.body(),
+        headers = HttpFailures.headerMap(response.headers())
+      )
+    }
 
   private def appendQueryParams(url: String, params: Map[String, String]): String =
     if (params.isEmpty) url

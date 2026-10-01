@@ -231,12 +231,9 @@ class ContainerisedWorkspace(
     val httpClient = Llm4sHttpClient.create()
     var attempts   = 0
     while (attempts < MaxStartupAttempts) {
-      val ok = scala.util
-        .Try {
-          val httpResponse = httpClient.get(s"http://localhost:$hostPort/", timeout = 1000)
-          httpResponse.statusCode == 200 && connectWebSocket()
-        }
-        .getOrElse(false)
+      val ok = httpClient
+        .get(s"http://localhost:$hostPort/", timeout = scala.concurrent.duration.Duration(1, "second"))
+        .exists(_.statusCode == 200) && connectWebSocket()
       if (ok) {
         logger.info("WebSocket connection established successfully")
         return true

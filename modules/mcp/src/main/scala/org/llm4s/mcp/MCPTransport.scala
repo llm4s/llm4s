@@ -94,6 +94,12 @@ class StreamableHTTPTransportImpl(
   private val requestId                    = new AtomicLong(0)
   private var mcpSessionId: Option[String] = None
 
+  // The HTTP client takes a finite timeout; an infinite one becomes the longest it accepts.
+  private val requestTimeout: FiniteDuration = timeout match {
+    case finite: FiniteDuration => finite
+    case _                      => Int.MaxValue.millis
+  }
+
   logger.info(s"StreamableHTTPTransport($name) initialized for URL: $url with timeout: $timeout")
 
   override def sendRequest(request: JsonRpcRequest): Either[String, JsonRpcResponse] = {
@@ -109,20 +115,22 @@ class StreamableHTTPTransportImpl(
       logger.debug(s"StreamableHTTPTransport($name) using URL: '$url'")
 
       // POST to MCP endpoint (single endpoint, no /sse suffix)
-      val response = httpClient.post(
-        url = url,
-        headers = headers,
-        body = requestJson,
-        timeout = timeout.toMillis.toInt
-      )
-
-      logger.debug(s"StreamableHTTPTransport($name) received HTTP response: status=${response.statusCode}")
-      response
-    } match {
-      case Failure(exception) =>
-        logger.error(s"StreamableHTTPTransport($name) transport error for $url: ${exception.getMessage}", exception)
-        Left(s"Transport error: ${exception.getMessage}")
-      case Success(response) =>
+      httpClient
+        .post(
+          url = url,
+          headers = headers,
+          body = requestJson,
+          timeout = requestTimeout
+        )
+        .map { response =>
+          logger.debug(s"StreamableHTTPTransport($name) received HTTP response: status=${response.statusCode}")
+          response
+        }
+    }.toEither.left.map(e => e.getMessage).flatMap(_.left.map(_.message)) match {
+      case Left(error) =>
+        logger.error(s"StreamableHTTPTransport($name) transport error for $url: $error")
+        Left(s"Transport error: $error")
+      case Right(response) =>
         // Handle session management during initialization according to MCP spec : the server may or may not include a session id
         if (request.method == "initialize" && response.statusCode >= 200 && response.statusCode < 300) {
           // Look for mcp-session-id header in response (lowercase per spec)
@@ -307,23 +315,25 @@ class StreamableHTTPTransportImpl(
       val headers = buildNotificationHeaders()
 
       // POST to MCP endpoint
-      val response = httpClient.post(
-        url = url,
-        headers = headers,
-        body = notificationJson,
-        timeout = timeout.toMillis.toInt
-      )
+      httpClient
+        .post(
+          url = url,
+          headers = headers,
+          body = notificationJson,
+          timeout = requestTimeout
+        )
+        .map { response =>
+          logger.debug(
+            s"StreamableHTTPTransport($name) received HTTP response for notification: status=${response.statusCode}"
+          )
 
-      logger.debug(
-        s"StreamableHTTPTransport($name) received HTTP response for notification: status=${response.statusCode}"
-      )
-
-      response
-    } match {
-      case Failure(exception) =>
-        logger.error(s"StreamableHTTPTransport($name) notification error for $url: ${exception.getMessage}", exception)
-        Left(s"Notification error: ${exception.getMessage}")
-      case Success(response) =>
+          response
+        }
+    }.toEither.left.map(e => e.getMessage).flatMap(_.left.map(_.message)) match {
+      case Left(error) =>
+        logger.error(s"StreamableHTTPTransport($name) notification error for $url: $error")
+        Left(s"Notification error: $error")
+      case Right(response) =>
         // Handle HTTP errors (notifications still use HTTP)
         if (response.statusCode >= 400) {
           val errorMsg =
@@ -360,17 +370,17 @@ class StreamableHTTPTransportImpl(
 
     // Send DELETE request to explicitly terminate session if we have one
     mcpSessionId.foreach { sessionId =>
-      Try {
-        httpClient.delete(
-          url = url,
-          headers = Map("mcp-session-id" -> sessionId), // lowercase per spec
-          timeout = timeout.toMillis.toInt
-        )
-        logger.debug(s"StreamableHTTPTransport($name) sent session termination request")
-      }.recover { case e =>
-        logger.debug(
-          s"StreamableHTTPTransport($name) session termination failed (server may return 405): ${e.getMessage}"
-        )
+      httpClient.delete(
+        url = url,
+        headers = Map("mcp-session-id" -> sessionId), // lowercase per spec
+        timeout = requestTimeout
+      ) match {
+        case Right(_) =>
+          logger.debug(s"StreamableHTTPTransport($name) sent session termination request")
+        case Left(e) =>
+          logger.debug(
+            s"StreamableHTTPTransport($name) session termination failed (server may return 405): ${e.message}"
+          )
       }
     }
 
@@ -394,6 +404,12 @@ class SSETransportImpl(
   private var mcpSessionId: Option[String] = None
   private val protocolVersion              = "2024-11-05"
 
+  // The HTTP client takes a finite timeout; an infinite one becomes the longest it accepts.
+  private val requestTimeout: FiniteDuration = timeout match {
+    case finite: FiniteDuration => finite
+    case _                      => Int.MaxValue.millis
+  }
+
   logger.info(s"SSETransport($name) initialized for URL: $url with timeout: $timeout")
 
   // Sends JSON-RPC request via HTTP POST
@@ -407,20 +423,22 @@ class SSETransportImpl(
       // Build headers according to MCP 2024-11-05 specification
       val headers = buildHeaders(request)
 
-      val response = httpClient.post(
-        url = url, // Remove /sse suffix - MCP servers use base URL
-        headers = headers,
-        body = requestJson,
-        timeout = timeout.toMillis.toInt
-      )
-
-      logger.debug(s"SSETransport($name) received HTTP response: status=${response.statusCode}")
-      response
-    } match {
-      case Failure(exception) =>
-        logger.error(s"SSETransport($name) transport error for $url: ${exception.getMessage}", exception)
-        Left(s"Transport error: ${exception.getMessage}")
-      case Success(response) =>
+      httpClient
+        .post(
+          url = url, // Remove /sse suffix - MCP servers use base URL
+          headers = headers,
+          body = requestJson,
+          timeout = requestTimeout
+        )
+        .map { response =>
+          logger.debug(s"SSETransport($name) received HTTP response: status=${response.statusCode}")
+          response
+        }
+    }.toEither.left.map(e => e.getMessage).flatMap(_.left.map(_.message)) match {
+      case Left(error) =>
+        logger.error(s"SSETransport($name) transport error for $url: $error")
+        Left(s"Transport error: $error")
+      case Right(response) =>
         // Handle session management during initialization
         if (request.method == "initialize" && response.statusCode >= 200 && response.statusCode < 300) {
           // Look for mcp-session-id header in response (lowercase per spec)
@@ -543,20 +561,22 @@ class SSETransportImpl(
       // Build headers for notification
       val headers = buildNotificationHeaders()
 
-      val response = httpClient.post(
-        url = url,
-        headers = headers,
-        body = notificationJson,
-        timeout = timeout.toMillis.toInt
-      )
-
-      logger.debug(s"SSETransport($name) received HTTP response for notification: status=${response.statusCode}")
-      response
-    } match {
-      case Failure(exception) =>
-        logger.error(s"SSETransport($name) notification error for $url: ${exception.getMessage}", exception)
-        Left(s"Notification error: ${exception.getMessage}")
-      case Success(response) =>
+      httpClient
+        .post(
+          url = url,
+          headers = headers,
+          body = notificationJson,
+          timeout = requestTimeout
+        )
+        .map { response =>
+          logger.debug(s"SSETransport($name) received HTTP response for notification: status=${response.statusCode}")
+          response
+        }
+    }.toEither.left.map(e => e.getMessage).flatMap(_.left.map(_.message)) match {
+      case Left(error) =>
+        logger.error(s"SSETransport($name) notification error for $url: $error")
+        Left(s"Notification error: $error")
+      case Right(response) =>
         // Handle HTTP errors
         if (response.statusCode >= 400) {
           val errorMsg =
@@ -594,17 +614,15 @@ class SSETransportImpl(
 
     // Send DELETE request to explicitly terminate session if we have one
     mcpSessionId.foreach { sessionId =>
-      Try {
-        httpClient.delete(
-          url = url,
-          headers = Map("mcp-session-id" -> sessionId), // lowercase per spec
-          timeout = timeout.toMillis.toInt
-        )
-        logger.debug(s"SSETransport($name) sent session termination request")
-      }.recover { case e =>
-        logger.debug(
-          s"SSETransport($name) session termination failed (server may return 405): ${e.getMessage}"
-        )
+      httpClient.delete(
+        url = url,
+        headers = Map("mcp-session-id" -> sessionId), // lowercase per spec
+        timeout = requestTimeout
+      ) match {
+        case Right(_) =>
+          logger.debug(s"SSETransport($name) sent session termination request")
+        case Left(e) =>
+          logger.debug(s"SSETransport($name) session termination failed (server may return 405): ${e.message}")
       }
     }
 

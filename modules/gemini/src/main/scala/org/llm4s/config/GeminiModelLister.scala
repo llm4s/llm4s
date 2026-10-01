@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName }
 import org.llm4s.types.{ Result, TryOps }
 
+import scala.concurrent.duration.*
 import scala.util.Try
 
 /**
@@ -36,11 +37,11 @@ object GeminiModelLister extends ProviderModelLister:
   ): Result[List[DiscoveredModel]] =
     for
       response <- httpClient
-        .getResult(
+        .get(
           s"${baseUrl.asUrl}/models",
           headers = Map("x-goog-api-key" -> apiKey.asKey),
           params = Map("pageSize" -> "1000") ++ pageToken.map("pageToken" -> _),
-          timeout = 10000
+          timeout = 10.seconds
         )
         .mapServiceError("gemini", "Failed to discover models")
       okResponse   <- response.ensureSuccess("gemini")

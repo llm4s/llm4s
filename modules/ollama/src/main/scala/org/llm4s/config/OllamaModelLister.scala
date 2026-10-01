@@ -7,6 +7,7 @@ import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.{ Result, TryOps }
 
+import scala.concurrent.duration.*
 import scala.util.Try
 
 /**
@@ -31,7 +32,7 @@ object OllamaModelLister extends ProviderModelLister:
   private def listOllamaModels(baseUrl: BaseUrl, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
     for
       response <- httpClient
-        .getResult(s"${baseUrl.asUrl}/api/tags", timeout = 10000)
+        .get(s"${baseUrl.asUrl}/api/tags", timeout = 10.seconds)
         .mapServiceError("ollama", "Failed to discover models")
       okResponse   <- response.ensureSuccess("ollama")
       jsonResponse <- okResponse.toJson("responseBody")

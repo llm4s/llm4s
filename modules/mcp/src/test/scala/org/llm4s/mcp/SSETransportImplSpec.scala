@@ -112,9 +112,9 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
             "Accept"       -> "application/json, text/event-stream"
           ),
           *,
-          testTimeout.toMillis.toInt
+          testTimeout
         )
-        .returns(httpResponse(200, responseJson))
+        .returns(Right(httpResponse(200, responseJson)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -131,9 +131,11 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       var capturedHeaders: Map[String, String] = Map.empty
       (mockHttp.post _)
         .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: Int) =>
-          capturedHeaders = headers
-          httpResponse(200, responseJson)
+        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+          Right {
+            capturedHeaders = headers
+            httpResponse(200, responseJson)
+          }
         }
 
       transport.sendRequest(request)
@@ -156,15 +158,17 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockHttp.post _)
         .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: Int) =>
-          callCount += 1
-          if (callCount == 1) {
-            // First call: initialize
-            httpResponse(200, initResponseJson)
-          } else {
-            // Second call: capture headers
-            secondCallHeaders = headers
-            httpResponse(200, responseJson)
+        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+          Right {
+            callCount += 1
+            if (callCount == 1) {
+              // First call: initialize
+              httpResponse(200, initResponseJson)
+            } else {
+              // Second call: capture headers
+              secondCallHeaders = headers
+              httpResponse(200, responseJson)
+            }
           }
         }
 
@@ -187,7 +191,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val request      = createRequest("initialize", "1")
       val responseJson = createResponse("1", Some(ujson.Obj("serverInfo" -> ujson.Obj("name" -> "test"))))
 
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, responseJson))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, responseJson)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -203,7 +207,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val sseResponse    = createSSEResponse(responseJson)
       val contentTypeSSE = Map("content-type" -> Seq("text/event-stream; charset=utf-8"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, sseResponse, contentTypeSSE))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentTypeSSE)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -219,7 +223,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val sseResponse  = createSSEResponse(responseJson, eventType = Some("message"), id = Some("event-1"))
       val contentType  = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, sseResponse, contentType))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -240,15 +244,17 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockHttp.post _)
         .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: Int) =>
-          callCount += 1
-          if (callCount == 1) {
-            // First call: initialize with session
-            httpResponse(200, responseJson, Map("mcp-session-id" -> Seq("session-123")))
-          } else {
-            // Second call: capture headers
-            secondCallHeaders = headers
-            httpResponse(200, responseJson2)
+        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+          Right {
+            callCount += 1
+            if (callCount == 1) {
+              // First call: initialize with session
+              httpResponse(200, responseJson, Map("mcp-session-id" -> Seq("session-123")))
+            } else {
+              // Second call: capture headers
+              secondCallHeaders = headers
+              httpResponse(200, responseJson2)
+            }
           }
         }
 
@@ -270,7 +276,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val responseJson = createResponse("1")
       val headers      = Map.empty[String, Seq[String]] // No session header
 
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, responseJson, headers))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, responseJson, headers)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -282,9 +288,11 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockHttp.post _)
         .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: Int) =>
-          capturedHeaders = headers
-          httpResponse(200, responseJson2)
+        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+          Right {
+            capturedHeaders = headers
+            httpResponse(200, responseJson2)
+          }
         }
 
       transport.sendRequest(request2)
@@ -312,7 +320,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val contentType = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, sseResponse, contentType))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -334,14 +342,16 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       var callCount = 0
       (mockHttp.post _)
         .when(*, *, *, *)
-        .onCall { (_: String, _: Map[String, String], _: String, _: Int) =>
-          callCount += 1
-          if (callCount == 1) {
-            // First call: initialize with session
-            httpResponse(200, initResponseJson, Map("mcp-session-id" -> Seq("session-123")))
-          } else {
-            // Second call: 404
-            httpResponse(404, "Not Found")
+        .onCall { (_: String, _: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+          Right {
+            callCount += 1
+            if (callCount == 1) {
+              // First call: initialize with session
+              httpResponse(200, initResponseJson, Map("mcp-session-id" -> Seq("session-123")))
+            } else {
+              // Second call: 404
+              httpResponse(404, "Not Found")
+            }
           }
         }
 
@@ -357,7 +367,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request = createRequest("initialize", "1")
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(500, "Internal Server Error: Database down"))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(500, "Internal Server Error: Database down")))
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
@@ -371,7 +381,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val request       = createRequest("initialize", "1")
       val errorResponse = createErrorResponse("1", -32600, "Invalid Request")
 
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, errorResponse))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, errorResponse)))
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
@@ -384,7 +394,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request = createRequest("initialize", "1")
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, "{invalid-json"))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, "{invalid-json")))
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
@@ -396,7 +406,9 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request = createRequest("initialize", "1")
-      (mockHttp.post _).when(*, *, *, *).throws(new java.net.SocketTimeoutException("Connection timed out"))
+      (mockHttp.post _)
+        .when(*, *, *, *)
+        .returns(Left(org.llm4s.error.TimeoutError("Connection timed out", testTimeout, "http.POST")))
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
@@ -408,7 +420,9 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val transport = new SSETransportImpl(testUrl, testName, testTimeout, mockHttp)
 
       val request = createRequest("initialize", "1")
-      (mockHttp.post _).when(*, *, *, *).throws(new java.net.ConnectException("Connection refused"))
+      (mockHttp.post _)
+        .when(*, *, *, *)
+        .returns(Left(org.llm4s.error.NetworkError("Connection refused", None, testUrl)))
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
@@ -431,7 +445,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val contentType = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, sseResponse, contentType))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
@@ -456,7 +470,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val contentType = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, sseResponse, contentType))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -478,7 +492,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val contentType = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, sseResponse, contentType))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -500,7 +514,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val contentType = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, sseResponse, contentType))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -524,7 +538,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val contentType = Map("content-type" -> Seq("text/event-stream"))
 
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, sseResponse, contentType))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, sseResponse, contentType)))
 
       val result = transport.sendRequest(request)
       result.isRight shouldBe true
@@ -547,9 +561,11 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockHttp.post _)
         .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: Int) =>
-          capturedHeaders = headers
-          httpResponse(200, "")
+        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+          Right {
+            capturedHeaders = headers
+            httpResponse(200, "")
+          }
         }
 
       val result = transport.sendNotification(notification)
@@ -573,9 +589,11 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockHttp.post _)
         .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: Int) =>
-          capturedHeaders = headers
-          httpResponse(200, "")
+        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+          Right {
+            capturedHeaders = headers
+            httpResponse(200, "")
+          }
         }
 
       val result = transport.sendNotification(notification)
@@ -603,15 +621,17 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       var notificationHeaders: Map[String, String] = Map.empty
       (mockHttp.post _)
         .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: Int) =>
-          callCount += 1
-          if (callCount == 1) {
-            // First call: initialize with session
-            httpResponse(200, initResponseJson, Map("mcp-session-id" -> Seq("session-123")))
-          } else {
-            // Second call: notification - capture headers
-            notificationHeaders = headers
-            httpResponse(200, "")
+        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+          Right {
+            callCount += 1
+            if (callCount == 1) {
+              // First call: initialize with session
+              httpResponse(200, initResponseJson, Map("mcp-session-id" -> Seq("session-123")))
+            } else {
+              // Second call: notification - capture headers
+              notificationHeaders = headers
+              httpResponse(200, "")
+            }
           }
         }
 
@@ -635,7 +655,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
         params = None
       )
 
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(500, "Server Error"))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(500, "Server Error")))
 
       val result = transport.sendNotification(notification)
       result.isLeft shouldBe true
@@ -653,16 +673,18 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val initRequest      = createRequest("initialize", "1")
       val initResponseJson = createResponse("1")
       val headers          = Map("mcp-session-id" -> Seq("session-123"))
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, initResponseJson, headers))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, initResponseJson, headers)))
       transport.sendRequest(initRequest)
 
       // Expect DELETE on close - capture headers
       var capturedHeaders: Map[String, String] = Map.empty
       (mockHttp.delete _)
         .when(*, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: Int) =>
-          capturedHeaders = headers
-          httpResponse(200, "")
+        .onCall { (_: String, headers: Map[String, String], _: scala.concurrent.duration.FiniteDuration) =>
+          Right {
+            capturedHeaders = headers
+            httpResponse(200, "")
+          }
         }
 
       transport.close()
@@ -680,10 +702,10 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val initRequest      = createRequest("initialize", "1")
       val initResponseJson = createResponse("1")
       val headers          = Map("mcp-session-id" -> Seq("session-123"))
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, initResponseJson, headers))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, initResponseJson, headers)))
       transport.sendRequest(initRequest)
 
-      (mockHttp.delete _).when(*, *, *).returns(httpResponse(200, ""))
+      (mockHttp.delete _).when(*, *, *).returns(Right(httpResponse(200, "")))
 
       transport.close()
 
@@ -694,9 +716,11 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockHttp.post _)
         .when(*, *, *, *)
-        .onCall { (_: String, headers: Map[String, String], _: String, _: Int) =>
-          capturedHeaders = headers
-          httpResponse(200, responseJson2)
+        .onCall { (_: String, headers: Map[String, String], _: String, _: scala.concurrent.duration.FiniteDuration) =>
+          Right {
+            capturedHeaders = headers
+            httpResponse(200, responseJson2)
+          }
         }
 
       transport.sendRequest(request2)
@@ -713,11 +737,11 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
       val initRequest      = createRequest("initialize", "1")
       val initResponseJson = createResponse("1")
       val headers          = Map("mcp-session-id" -> Seq("session-123"))
-      (mockHttp.post _).when(*, *, *, *).returns(httpResponse(200, initResponseJson, headers))
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpResponse(200, initResponseJson, headers)))
       transport.sendRequest(initRequest)
 
       // DELETE fails with 405
-      (mockHttp.delete _).when(*, *, *).throws(new RuntimeException("405 Method Not Allowed"))
+      (mockHttp.delete _).when(*, *, *).returns(Right(httpResponse(405, "Method Not Allowed")))
 
       // Should not throw
       noException should be thrownBy transport.close()

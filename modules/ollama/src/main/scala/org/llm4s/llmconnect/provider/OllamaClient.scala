@@ -1,7 +1,5 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch, DisableSyntax.NoKeywordFinally
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ ExecutionError, NetworkError, ServiceError }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
@@ -11,10 +9,11 @@ import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
 
-import java.io.{ BufferedReader, IOException, InputStreamReader }
+import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import java.time.Instant
-import scala.util.Try
+import scala.concurrent.duration.*
+import scala.util.{ Try, Using }
 
 /**
  * [[LLMClient]] implementation for locally-hosted Ollama models.
@@ -72,33 +71,18 @@ class OllamaClient(
     val url         = s"${config.baseUrl}/api/chat"
     val headers     = Map("Content-Type" -> "application/json")
     val startedAt   = Instant.now()
-    try {
-      val response = httpClient.post(url, headers, requestText, timeout = 120000)
-      val result =
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          Try(ujson.read(response.body)).toResult
-            .flatMap(json => Try(parseCompletion(json)).toResult)
-        } else {
-          HttpErrorMapper.mapHttpError(response.statusCode, response.body, providerName)
-        }
-      recordingExchange(startedAt, requestText, response.body)(result)
-    } catch {
-      case e: InterruptedException =>
-        Thread.currentThread().interrupt()
-        val error = ExecutionError(
-          s"Ollama request interrupted: ${e.getMessage}",
-          operation = "ollama.chat",
-          exitCode = None,
-          cause = Some(e),
-          context = Map.empty
-        )
+    httpClient.post(url, headers, requestText, timeout = 120.seconds) match {
+      case Left(error) =>
         recordingExchange(startedAt, requestText, "")(Left(error))
-      case e: IOException =>
-        val error = NetworkError("Failed to connect to Ollama", Some(e), config.baseUrl)
-        recordingExchange(startedAt, requestText, "")(Left(error))
-      case scala.util.control.NonFatal(e) =>
-        val error = ServiceError(500, "ollama", s"Unexpected error: ${e.getMessage}")
-        recordingExchange(startedAt, requestText, "")(Left(error))
+      case Right(response) =>
+        val result =
+          if (response.statusCode >= 200 && response.statusCode < 300) {
+            Try(ujson.read(response.body)).toResult
+              .flatMap(json => Try(parseCompletion(json)).toResult)
+          } else {
+            HttpErrorMapper.mapHttpError(response.statusCode, response.body, providerName, response.headers)
+          }
+        recordingExchange(startedAt, requestText, response.body)(result)
     }
   }
 
@@ -144,21 +128,19 @@ class OllamaClient(
     val startedAt   = Instant.now()
     val rawResponse = new StringBuilder
 
-    try {
-      val response = httpClient.postStream(url, headers, requestText, timeout = 600000)
-      if (response.statusCode != 200) {
-        val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
-        response.body.close()
+    httpClient.postStream(url, headers, requestText, timeout = 10.minutes) match {
+      case Left(error) =>
+        recordingExchange(startedAt, requestText, "")(Left(error))
+      case Right(response) if response.statusCode != 200 =>
+        val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
         recordingExchange(startedAt, requestText, err)(
-          HttpErrorMapper.mapHttpError(response.statusCode, err, providerName)
+          HttpErrorMapper.mapHttpError(response.statusCode, err, providerName, response.headers)
         )
-      } else {
+      case Right(response) =>
         val accumulator = StreamingAccumulator.create()
-        val reader      = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
-        val processResult = Try {
-          try {
-            var line: String = null
-            while ({ line = reader.readLine(); line != null }) {
+        val processResult = Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) {
+          reader =>
+            Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
               rawResponse.append(line).append('\n')
               val trimmed = line.trim
               if (trimmed.nonEmpty) {
@@ -189,10 +171,6 @@ class OllamaClient(
                 }
               }
             }
-          } finally {
-            Try(reader.close())
-            Try(response.body.close())
-          }
         }.toResult
 
         val result = processResult
@@ -203,24 +181,6 @@ class OllamaClient(
           }
 
         recordingExchange(startedAt, requestText, rawResponse.result())(result)
-      }
-    } catch {
-      case e: InterruptedException =>
-        Thread.currentThread().interrupt()
-        val error = ExecutionError(
-          s"Ollama streaming request interrupted: ${e.getMessage}",
-          operation = "ollama.stream",
-          exitCode = None,
-          cause = Some(e),
-          context = Map.empty
-        )
-        recordingExchange(startedAt, requestText, rawResponse.result())(Left(error))
-      case e: IOException =>
-        val error = NetworkError("Failed to connect to Ollama stream", Some(e), config.baseUrl)
-        recordingExchange(startedAt, requestText, rawResponse.result())(Left(error))
-      case scala.util.control.NonFatal(e) =>
-        val error = ServiceError(500, "ollama", s"Unexpected streaming error: ${e.getMessage}")
-        recordingExchange(startedAt, requestText, rawResponse.result())(Left(error))
     }
   }
 

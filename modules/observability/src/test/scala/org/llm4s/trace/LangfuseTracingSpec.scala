@@ -47,7 +47,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
     mockClient.postCallCount shouldBe 1
     mockClient.lastUrl shouldBe Some("https://cloud.langfuse.com/api/public/ingestion")
-    mockClient.lastTimeout shouldBe Some(30000)
+    mockClient.lastTimeout shouldBe Some(scala.concurrent.duration.Duration(30, "seconds"))
 
     // Verify Basic auth header
     val expectedCredentials = Base64.getEncoder.encodeToString("pk-lf-test:sk-lf-secret".getBytes)
@@ -171,8 +171,8 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   it should "call restoreInterrupt and return Left on InterruptedException" in {
     var interruptRestored = false
     val mockRestore       = () => interruptRestored = true
-    val failingClient     = new FailingHttpClient(new InterruptedException("interrupted"))
-    val tracing           = makeTracing(failingClient, restoreInterrupt = mockRestore)
+    val failingClient = new FailingHttpClient(org.llm4s.error.ExecutionError("POST request interrupted", "http.POST"))
+    val tracing       = makeTracing(failingClient, restoreInterrupt = mockRestore)
 
     val result = withLangfuseLoggerSilenced {
       tracing.traceEvent(simpleEvent)

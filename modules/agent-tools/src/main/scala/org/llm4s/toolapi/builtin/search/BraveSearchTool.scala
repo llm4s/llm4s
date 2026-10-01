@@ -5,6 +5,7 @@ import org.llm4s.toolapi._
 import org.llm4s.types.Result
 import upickle.default._
 import org.llm4s.config.BraveSearchToolConfig
+import scala.concurrent.duration.*
 
 import scala.util.control.NonFatal
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
@@ -372,39 +373,22 @@ object BraveSearchTool {
 
     val url = s"${braveTool.apiUrl}/${category.endpoint}"
 
-    // Catch only non-fatal exceptions. Fatal errors (OOM, StackOverflow, etc.) will crash fast.
-    // InterruptedException is handled explicitly to restore the interrupt flag.
+    // The client reports a transport failure as a Left; turn it into a user-facing message.
     val responseEither: Either[String, HttpResponse] =
-      try
-        Right(
-          httpClient.get(
-            url = url,
-            params = params,
-            headers = Map(
-              "Accept"               -> "application/json",
-              "Accept-Encoding"      -> "gzip",
-              "X-Subscription-Token" -> braveTool.apiKey,
-              "User-Agent"           -> "llm4s-brave-search/1.0"
-            ),
-            timeout = config.timeoutMs
-          )
+      httpClient
+        .get(
+          url = url,
+          params = params,
+          headers = Map(
+            "Accept"               -> "application/json",
+            "Accept-Encoding"      -> "gzip",
+            "X-Subscription-Token" -> braveTool.apiKey,
+            "User-Agent"           -> "llm4s-brave-search/1.0"
+          ),
+          timeout = config.timeoutMs.millis
         )
-      catch {
-        case _: InterruptedException =>
-          // Restore interrupt flag for proper thread shutdown and timeout semantics
-          restoreInterrupt()
-          Left("Search request was cancelled or interrupted.")
-        case _: java.net.http.HttpTimeoutException =>
-          Left(s"Search request timed out after ${config.timeoutMs}ms. Please try again with a simpler query.")
-        case _: java.net.UnknownHostException =>
-          Left("Unable to reach search service. Please check network connectivity.")
-        case _: java.net.ConnectException =>
-          Left("Failed to connect to search service. The service may be temporarily unavailable.")
-        case NonFatal(_) =>
-          // Catch all other non-fatal exceptions (IOException, etc.)
-          // Fatal errors (OutOfMemoryError, StackOverflowError, etc.) will propagate
-          Left("Search request failed due to a network error. Please try again.")
-      }
+        .left
+        .map(describeTransportFailure(_, config.timeoutMs))
 
     responseEither.flatMap { response =>
       if (response.statusCode == 200) {

@@ -39,7 +39,7 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
 
   it should "cache the token and not call HTTP again" in {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.get _).when(*, *, *, *).returns(HttpResponse(200, tokenResponseBody, Map.empty))
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenResponseBody, Map.empty)))
 
     val provider = new VertexAIAuthProvider(
       credentialFilePath = None,
@@ -57,7 +57,7 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
 
   it should "return AuthenticationError on metadata server non-200" in {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.get _).when(*, *, *, *).returns(HttpResponse(404, "Not Found", Map.empty))
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(404, "Not Found", Map.empty)))
 
     val provider = new VertexAIAuthProvider(
       credentialFilePath = None,
@@ -81,7 +81,7 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
         |}""".stripMargin
 
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(HttpResponse(200, tokenResponseBody, Map.empty))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenResponseBody, Map.empty)))
 
     val provider = new VertexAIAuthProvider(
       credentialFilePath = Some("/fake/path/creds.json"),
@@ -106,7 +106,7 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
         |}""".stripMargin
 
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.post _).when(*, *, *, *).returns(HttpResponse(401, "Unauthorized", Map.empty))
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(401, "Unauthorized", Map.empty)))
 
     val provider = new VertexAIAuthProvider(
       credentialFilePath = Some("/fake/path/creds.json"),
@@ -157,7 +157,7 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
 
   it should "fall back to metadata server when no credentials are configured" in {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.get _).when(*, *, *, *).returns(HttpResponse(200, tokenResponseBody, Map.empty))
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenResponseBody, Map.empty)))
 
     val provider = new VertexAIAuthProvider(
       credentialFilePath = None,
@@ -173,7 +173,7 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
 
   it should "return AuthenticationError when metadata server is not available" in {
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.get _).when(*, *, *, *).returns(HttpResponse(503, "Service Unavailable", Map.empty))
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(503, "Service Unavailable", Map.empty)))
 
     val provider = new VertexAIAuthProvider(
       credentialFilePath = None,
@@ -188,10 +188,14 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
   }
 
   it should "return actionable no-credentials guidance when the metadata host does not resolve" in {
-    // Off-GCP the metadata host does not resolve, so the HTTP call throws UnknownHostException.
-    // That signals "not on GCP" → the user should get the helpful no-credentials message.
-    val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.get _).when(*, *, *, *).throws(new java.net.UnknownHostException("metadata.google.internal"))
+    // Off-GCP the metadata host does not resolve, so the HTTP client reports a NetworkError
+    // caused by UnknownHostException. That signals "not on GCP" → the user should get the
+    // helpful no-credentials message.
+    val mockHttp   = stub[Llm4sHttpClient]
+    val unresolved = new java.net.UnknownHostException("metadata.google.internal")
+    (mockHttp.get _)
+      .when(*, *, *, *)
+      .returns(Left(NetworkError("unknown host", Some(new java.net.ConnectException("x").initCause(unresolved)), "")))
 
     val provider = new VertexAIAuthProvider(
       credentialFilePath = None,
@@ -211,7 +215,8 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
     // On GCE/GKE the host resolves but may momentarily time out; that must stay retryable
     // (RecoverableError) rather than being reported as missing credentials.
     val mockHttp = stub[Llm4sHttpClient]
-    (mockHttp.get _).when(*, *, *, *).throws(new java.net.SocketTimeoutException("metadata timeout"))
+    val timedOut = NetworkError("metadata timeout", Some(new java.net.ConnectException("refused")), "")
+    (mockHttp.get _).when(*, *, *, *).returns(Left(timedOut))
 
     val provider = new VertexAIAuthProvider(
       credentialFilePath = None,
@@ -233,9 +238,11 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
     (mockHttp.get _)
       .when(*, *, *, *)
       .onCall { (_, _, _, _) =>
-        fetchCount.incrementAndGet()
-        Thread.sleep(50)
-        HttpResponse(200, tokenResponseBody, Map.empty)
+        Right {
+          fetchCount.incrementAndGet()
+          Thread.sleep(50)
+          HttpResponse(200, tokenResponseBody, Map.empty)
+        }
       }
 
     val provider = new VertexAIAuthProvider(

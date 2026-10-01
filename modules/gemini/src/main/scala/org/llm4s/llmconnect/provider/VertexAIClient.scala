@@ -1,4 +1,3 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ThrowableOps._
@@ -18,7 +17,8 @@ import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.UUID
-import scala.util.Try
+import scala.concurrent.duration.*
+import scala.util.{ Try, Using }
 
 /**
  * [[LLMClient]] implementation for Google Cloud Vertex AI.
@@ -94,18 +94,18 @@ class VertexAIClient(
         for {
           token <- authProvider.getAccessToken()
           headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
-          attempt <- Try {
-            val response = httpClient.post(url, headers, requestText, timeout = 120000)
-            if (response.statusCode >= 200 && response.statusCode < 300) {
-              val completionResult = parseCompletionResponse(response.body)
-              recordExchange(startedAt, requestText, Some(response.body), completionResult)
-              completionResult
-            } else {
-              val errorResult = handleErrorResponse(response.statusCode, response.body)
-              recordExchange(startedAt, requestText, Some(response.body), errorResult)
-              errorResult
-            }
-          }.toEither.left.map(e => e.toLLMError).flatten
+          attempt <- httpClient.post(url, headers, requestText, timeout = 120.seconds) match {
+            case Left(error) =>
+              recordExchange(startedAt, requestText, None, Left(error))
+              Left(error)
+            case Right(response) =>
+              val result = Try {
+                if (response.statusCode >= 200 && response.statusCode < 300) parseCompletionResponse(response.body)
+                else handleErrorResponse(response.statusCode, response.body, response.headers)
+              }.toEither.left.map(e => e.toLLMError).flatten
+              recordExchange(startedAt, requestText, Some(response.body), result)
+              result
+          }
         } yield attempt
       }
   }
@@ -135,47 +135,40 @@ class VertexAIClient(
         for {
           token <- authProvider.getAccessToken()
           headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
-          result <- {
-            val response = httpClient.postStream(url, headers, requestText, timeout = 600000)
-
-            if (response.statusCode < 200 || response.statusCode >= 300) {
-              val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
-              response.body.close()
-              val errorResult = handleErrorResponse(response.statusCode, err)
+          result <- httpClient.postStream(url, headers, requestText, timeout = 10.minutes) match {
+            case Left(error) =>
+              recordExchange(startedAt, requestText, None, Left(error))
+              Left(error)
+            case Right(response) if response.statusCode < 200 || response.statusCode >= 300 =>
+              val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
+              val errorResult = handleErrorResponse(response.statusCode, err, response.headers)
               recordExchange(startedAt, requestText, Some(err), errorResult)
               errorResult
-            } else {
+            case Right(response) =>
               val accumulator = StreamingAccumulator.create()
               val messageId   = UUID.randomUUID().toString
-              val reader      = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
               val rawStream   = StringBuilder()
 
-              Try {
-                try {
-                  var line: String = null
-                  while ({ line = reader.readLine(); line != null }) {
-                    rawStream.append(line).append('\n')
-                    val trimmed = line.trim
-                    if (trimmed.startsWith("data: ")) {
-                      val jsonStr = trimmed.stripPrefix("data: ").trim
-                      if (jsonStr.nonEmpty) {
-                        Try(ujson.read(jsonStr)).foreach { json =>
-                          parseStreamChunk(json, messageId).foreach { chunk =>
-                            accumulator.addChunk(chunk)
-                            onChunk(chunk)
-                          }
-                          for {
-                            usage      <- Try(json("usageMetadata")).toOption
-                            prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
-                            completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
-                          } accumulator.updateTokens(prompt, completion)
+              Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) { reader =>
+                Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
+                  rawStream.append(line).append('\n')
+                  val trimmed = line.trim
+                  if (trimmed.startsWith("data: ")) {
+                    val jsonStr = trimmed.stripPrefix("data: ").trim
+                    if (jsonStr.nonEmpty) {
+                      Try(ujson.read(jsonStr)).foreach { json =>
+                        parseStreamChunk(json, messageId).foreach { chunk =>
+                          accumulator.addChunk(chunk)
+                          onChunk(chunk)
                         }
+                        for {
+                          usage      <- Try(json("usageMetadata")).toOption
+                          prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
+                          completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
+                        } accumulator.updateTokens(prompt, completion)
                       }
                     }
                   }
-                } finally {
-                  Try(reader.close())
-                  Try(response.body.close())
                 }
               }.toEither.left
                 .map(_.toLLMError)
@@ -195,7 +188,6 @@ class VertexAIClient(
                     Left(error)
                   )
                 )
-            }
           }
         } yield result
       }
@@ -374,9 +366,13 @@ class VertexAIClient(
       } else None
     }.toOption.flatten
 
-  private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
+  private def handleErrorResponse(
+    statusCode: Int,
+    body: String,
+    headers: Map[String, Seq[String]]
+  ): Result[Nothing] = {
     logger.error(s"[VertexAI] Error response: $statusCode")
-    HttpErrorMapper.mapHttpError(statusCode, body, providerName)
+    HttpErrorMapper.mapHttpError(statusCode, body, providerName, headers)
   }
 
   private def recordExchange(

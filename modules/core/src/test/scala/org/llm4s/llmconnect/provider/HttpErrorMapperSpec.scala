@@ -7,6 +7,7 @@ import org.scalatest.matchers.should.Matchers
 class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
 
   private val provider = "test-provider"
+  private val clock = java.time.Clock.fixed(java.time.Instant.parse("2026-10-01T12:00:00Z"), java.time.ZoneOffset.UTC)
 
   // ── Status code mapping ──────────────────────────────────────────
 
@@ -217,5 +218,58 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   it should "include provider name in ServiceError" in {
     val Left(err) = HttpErrorMapper.mapHttpError(503, "{}", "ollama"): @unchecked
     err.asInstanceOf[ServiceError].provider shouldBe "ollama"
+  }
+
+  // ── Retry-After on 429 ───────────────────────────────────────────
+
+  private def rateLimit(headers: Map[String, Seq[String]]): RateLimitError =
+    HttpErrorMapper.mapHttpError(429, "{}", provider, headers, clock) match {
+      case Left(err: RateLimitError) => err
+      case other                     => fail(s"Expected RateLimitError, got: $other")
+    }
+
+  "HttpErrorMapper.mapHttpError on 429" should "turn Retry-After delta-seconds into a delay in milliseconds" in {
+    val err = rateLimit(Map("retry-after" -> Seq("5")))
+    err.retryAfter shouldBe Some(5000L)
+    err.retryDelay shouldBe Some(5000L)
+  }
+
+  it should "use the public overload with headers" in {
+    val Left(err) = HttpErrorMapper.mapHttpError(429, "{}", provider, Map("retry-after" -> Seq("2"))): @unchecked
+    err.asInstanceOf[RateLimitError].retryAfter shouldBe Some(2000L)
+  }
+
+  it should "match the header name case-insensitively and trim the value" in {
+    rateLimit(Map("Retry-After" -> Seq(" 3 "))).retryAfter shouldBe Some(3000L)
+    rateLimit(Map("RETRY-AFTER" -> Seq("4"))).retryAfter shouldBe Some(4000L)
+  }
+
+  it should "measure an HTTP-date against the clock" in {
+    rateLimit(Map("retry-after" -> Seq("Thu, 1 Oct 2026 12:00:30 GMT"))).retryAfter shouldBe Some(30000L)
+  }
+
+  it should "treat an HTTP-date already past as no wait" in {
+    rateLimit(Map("retry-after" -> Seq("Thu, 1 Oct 2026 11:59:00 GMT"))).retryAfter shouldBe Some(0L)
+  }
+
+  it should "ignore an unparseable, negative or empty Retry-After" in {
+    Seq("soon", "-5", "", "1.5", "99999999999999999999").foreach { value =>
+      withClue(s"Retry-After: '$value'") {
+        rateLimit(Map("retry-after" -> Seq(value))).retryAfter shouldBe None
+      }
+    }
+  }
+
+  it should "leave the delay unset without the header, so the default backoff applies" in {
+    val err = rateLimit(Map.empty)
+    err.retryAfter shouldBe None
+    err.retryDelay shouldBe Some(30000L)
+  }
+
+  it should "not read Retry-After for other statuses" in {
+    HttpErrorMapper.mapHttpError(503, "{}", provider, Map("retry-after" -> Seq("5")), clock) match {
+      case Left(err: ServiceError) => err.httpStatus shouldBe 503
+      case other                   => fail(s"Expected ServiceError, got: $other")
+    }
   }
 }
