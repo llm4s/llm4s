@@ -1,5 +1,63 @@
 # Migration Guide
 
+## Pre-baseline API cleanup, pass 5
+
+Not in a release yet; continues pass 4 below. It settles the provider-author SPI's API quality
+before the binary-compatibility baseline.
+
+### Growth-prone data types: construct with named arguments, change with `with*`
+
+A case class cannot gain a field without breaking binary compatibility - its constructor,
+`apply` and `copy` all change - so the types the library will plausibly extend now have a private
+constructor, a public companion `apply` carrying the defaults, and `with*` setters:
+`CompletionOptions`, `Completion`, `StreamedChunk`, `TokenUsage`, `ModelCapabilities`,
+`ModelMetadata`, `ProviderConfigSpec`, `EmbeddingConfigSpec`, `ProviderFeatures`,
+`NamedProviderConfig`, `ReliabilityConfig`, `CircuitBreakerConfig`, `RateLimitConfig`,
+`ContextConfig`.
+
+Construction is unchanged. `.copy(...)` is no longer available outside the type:
+
+```scala
+// before
+val opts = CompletionOptions(temperature = 0.2).copy(maxTokens = Some(500))
+
+// after
+val opts = CompletionOptions(temperature = 0.2).withMaxTokens(500)
+```
+
+Every field has a `withX`. An `Option` field's setter takes either the value or an `Option`
+(`withMaxTokens(500)`, `withMaxTokens(None)`). Match these types by name (`c.usage`), not by
+position: a positional pattern breaks when a field is added.
+
+### `StreamingAccumulator`
+
+| Before | After |
+|---|---|
+| `new StreamingAccumulator()` | `StreamingAccumulator.create()` (the class is `final`) |
+| `getCurrentContent`, `getCurrentThinking`, `getCurrentToolCalls` | `currentContent`, `currentThinking`, `currentToolCalls` |
+| `snapshot()`, `AccumulatorSnapshot` | `toCompletion(created)` |
+| `StreamingAccumulator.withInitialState(...)` | `create()`, then `addChunk` / `updateTokens` |
+
+### `RequestTransformer` and `TransformationResult`
+
+- `TransformationResult.warnings` is removed: nothing ever filled it.
+- `TransformationResult.transform(modelId, options, messages, transformer, dropUnsupported = true)`
+  - the required `transformer` now comes before the defaulted flag.
+- `RequestTransformer#getDisallowedParams` is now `disallowedParams`.
+
+### `llm4s-provider-testkit`
+
+New, Beta. A provider module's spec mixes in `org.llm4s.testkit.ProviderModuleChecks`; see
+[Writing a provider](../guide/writing-a-provider#testing). In this repository,
+`CredentialsRoundTrip` and `LocalProviderTestServer` moved from core's test sources to
+`org.llm4s.testkit`.
+
+### Internal now
+
+`Llm4sConfig.providerFrom(source)` and `apiKeySourcesFrom(source)` took a pureconfig
+`ConfigSource`, which is not part of llm4s's API; they are `private[llm4s]`. Load configuration
+with `Llm4sConfig.provider(name)` / `defaultProvider()` / `apiKeySources()`.
+
 ## Pre-baseline API cleanup, pass 4
 
 Not in a release yet; continues pass 3 below. Vendor fields leave `NamedProviderConfig`.

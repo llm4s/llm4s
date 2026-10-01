@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`llm4s-provider-testkit`** (Beta, new published module, `org.llm4s.testkit`)
+  ([#1133](https://github.com/llm4s/llm4s/issues/1133)): the checks every provider module's
+  `Llm4s<Name>ModuleSpec` makes, so a provider published outside this repository can prove itself
+  the way the built-in ones do - discovery through `META-INF/services`, sole ownership of its ids,
+  explicit `ProviderRegistry.ofModules` registration, the config-to-client round trip, refusing
+  another provider's config, real streaming, and that `reference.conf` binds each `apiKeyEnv`
+  variable to `llm4s.credentials.<id>.apiKey` (`ProviderModuleChecks`); config loading from a
+  HOCON string with an injected environment (`ProviderTestConfig`, `CredentialsRoundTrip`); and a
+  local stub HTTP server (`LocalProviderTestServer`). Every in-repo provider module uses it.
 - **Vendor credentials: `llm4s.credentials.<provider>.apiKey`**
   ([#1132](https://github.com/llm4s/llm4s/issues/1132), [#1126](https://github.com/llm4s/llm4s/issues/1126)).
   Credentials belong to a vendor, keyed by provider id; clients belong to a use. Each provider
@@ -797,6 +806,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules inseparable; moving that one file broke the cycle.
 
 ### Removed
+- **Pre-baseline API cleanup, pass 5** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
+  The growth-prone data types (`CompletionOptions`, `Completion`, `StreamedChunk`, `TokenUsage`,
+  `ModelCapabilities`, `ModelMetadata`, `ProviderConfigSpec`, `EmbeddingConfigSpec`,
+  `ProviderFeatures`, `NamedProviderConfig`, `ReliabilityConfig`, `CircuitBreakerConfig`,
+  `RateLimitConfig`, `ContextConfig`) get private constructors, defaulted companion `apply`s and
+  `with*` setters, so a field can be added after the baseline without a binary break; `.copy` is
+  no longer public. `StreamingAccumulator` is `final` (`create()`), its getters drop the `get`
+  prefix, and `snapshot()`/`AccumulatorSnapshot`/`withInitialState` go.
+  `TransformationResult.warnings` (never filled) goes, `transform` takes `transformer` before
+  `dropUnsupported`, and `getDisallowedParams` is `disallowedParams`. `Llm4sConfig.providerFrom` /
+  `apiKeySourcesFrom`, which exposed pureconfig, are internal. See the
+  [migration note](docs/reference/migration.md#pre-baseline-api-cleanup-pass-5).
 - **`NamedProviderConfig` carries no vendor-specific fields** - pre-baseline API cleanup, pass 4
   ([#1133](https://github.com/llm4s/llm4s/issues/1133)). `organization`, `endpoint`, `apiVersion`,
   `contextWindow` and `reserveCompletion` are removed from `NamedProviderConfig` and are now

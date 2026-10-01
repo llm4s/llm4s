@@ -420,12 +420,12 @@ example - the o-series take temperature 1 only and no system message, whatever t
 
 ```scala
 RequestTransformer.adjusted(service) { (modelId, caps) =>
-  if modelId.startsWith("acme-reasoner") then caps.copy(supportsSystemMessages = Some(false))
+  if modelId.startsWith("acme-reasoner") then caps.withSupportsSystemMessages(false)
   else caps
 }
 ```
 
-`TransformationResult.transform(modelId, options, messages, dropUnsupported, transformer)` runs
+`TransformationResult.transform(modelId, options, messages, transformer, dropUnsupported)` runs
 the option and message transforms in one call and returns the transformed `options`, `messages`
 and `requiresFakeStreaming`.
 
@@ -495,7 +495,7 @@ final class AcmeClient(
   def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     completeWithMetrics {
       TransformationResult
-        .transform(config.model, options, conversation.messages, dropUnsupported = true, transformer = transformer)
+        .transform(config.model, options, conversation.messages, transformer)
         .flatMap(t => send(AcmeWire.encode(config.model, t.messages, t.options)))
     }
 
@@ -523,7 +523,7 @@ final class AcmeClient(
     result
 
   private def withCost(c: Completion): Completion =
-    c.copy(estimatedCost = c.usage.flatMap(CostEstimator.estimate(config.model, _)))
+    c.withEstimatedCost(c.usage.flatMap(CostEstimator.estimate(config.model, _)))
 ```
 
 `AcmeWire` stands for your own request encoding and response decoding.
@@ -617,7 +617,7 @@ class Llm4sAcmeModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
 
     "really stream" in {
       withServer("/v1/chat")(exchange => sendSseResponse(exchange, streamBody)) { baseUrl =>
-        assertStreams(assertBuildsClient(AcmeProvider, section.copy(baseUrl = Some(BaseUrl(baseUrl)))))
+        assertStreams(assertBuildsClient(AcmeProvider, section.withBaseUrl(BaseUrl(baseUrl))))
       }
     }
 

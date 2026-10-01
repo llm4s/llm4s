@@ -263,7 +263,17 @@ into descriptor-declared extras with unchanged HOCON names - `endpoint` (require
 `model`, `baseUrl`, `apiKey`, `headers` and `requiresEndpoint` is gone; and moved
 `ProviderModelListers` to `llm4s-openai-compatible` (`sectionHeaders` derives headers such as
 `OpenAI-Organization` from a section). **A field only some providers read is that provider's
-extra, never a field of `NamedProviderConfig`.**
+extra, never a field of `NamedProviderConfig`.** Pass 5 settled the SPI's API quality. **The
+growth-prone data types** (`CompletionOptions`, `Completion`, `StreamedChunk`, `TokenUsage`,
+`ModelCapabilities`, `ModelMetadata`, `ProviderConfigSpec`, `EmbeddingConfigSpec`,
+`ProviderFeatures`, `NamedProviderConfig`, `ReliabilityConfig`, `CircuitBreakerConfig`,
+`RateLimitConfig`, `ContextConfig`) are `final case class X private (...)` with a public companion
+`apply` carrying the defaults and `with*` setters (an `Option` field's setter takes the value or an
+`Option`); `.copy` is private. **To add a field after the baseline**: add it to the constructor and,
+with a default, to `apply`; keep the previous `apply` as an overload *without* defaults that
+forwards to the new one; add `withX`. Never re-expose `copy`. A type with an upickle `macroRW`
+(`ModelCapabilities`) keeps its constructor defaults too - the reader fills missing keys from them.
+A new frozen data type that may grow follows the same pattern from the start.
 
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must
