@@ -9,8 +9,13 @@ import scala.util.Try
 /**
  * Accumulates streaming chunks into a complete response.
  * Handles content accumulation, tool call accumulation, thinking content, and token tracking.
+ *
+ * Mutable and not thread-safe: use one accumulator per stream, fed from the thread that reads
+ * it. Tool calls are keyed by id, so every chunk of a streamed tool call - continuations
+ * included - must carry its call's id; a tool-call chunk with an empty id is ignored. Clients
+ * whose wire format identifies continuations only by index must map them back to the id first.
  */
-class StreamingAccumulator {
+final class StreamingAccumulator private () {
 
   private val contentBuilder               = new StringBuilder()
   private val thinkingBuilder              = new StringBuilder()
@@ -81,18 +86,18 @@ class StreamingAccumulator {
   /**
    * Get the current accumulated content
    */
-  def getCurrentContent: String = contentBuilder.toString
+  def currentContent: String = contentBuilder.toString
 
   /**
    * Get the current accumulated thinking content
    */
-  def getCurrentThinking: Option[String] =
+  def currentThinking: Option[String] =
     if (thinkingBuilder.isEmpty) None else Some(thinkingBuilder.toString)
 
   /**
    * Get the current tool calls, in the order each was first seen in the stream
    */
-  def getCurrentToolCalls: Seq[ToolCall] = {
+  def currentToolCalls: Seq[ToolCall] = {
     val completed = toolCalls.toSeq
     val partial = partialToolCalls.values.map { p =>
       val args =
@@ -131,7 +136,7 @@ class StreamingAccumulator {
    * so the conversion itself is testable without a real clock.
    */
   def toCompletion(created: Long): Result[Completion] = {
-    val finalToolCalls = getCurrentToolCalls
+    val finalToolCalls = currentToolCalls
 
     val message = AssistantMessage(
       contentOpt = if (contentBuilder.isEmpty) None else Some(contentBuilder.toString),
@@ -145,7 +150,7 @@ class StreamingAccumulator {
       )
     } else None
 
-    val thinking = getCurrentThinking
+    val thinking = currentThinking
 
     Right(
       Completion(
@@ -193,21 +198,6 @@ class StreamingAccumulator {
   }
 
   /**
-   * Get a snapshot of the current state
-   */
-  def snapshot(): AccumulatorSnapshot =
-    AccumulatorSnapshot(
-      content = getCurrentContent,
-      thinking = getCurrentThinking,
-      toolCalls = getCurrentToolCalls,
-      messageId = messageId,
-      finishReason = finishReason,
-      promptTokens = promptTokens,
-      completionTokens = completionTokens,
-      thinkingTokens = thinkingTokens
-    )
-
-  /**
    * Helper class for partial tool call accumulation
    */
   private case class PartialToolCall(
@@ -216,20 +206,6 @@ class StreamingAccumulator {
     argumentsBuilder: StringBuilder
   )
 }
-
-/**
- * Snapshot of accumulator state
- */
-case class AccumulatorSnapshot(
-  content: String,
-  thinking: Option[String],
-  toolCalls: Seq[ToolCall],
-  messageId: Option[String],
-  finishReason: Option[String],
-  promptTokens: Int,
-  completionTokens: Int,
-  thinkingTokens: Int = 0
-)
 
 /**
  * Factory for creating accumulators
@@ -241,18 +217,4 @@ object StreamingAccumulator {
    */
   def create(): StreamingAccumulator = new StreamingAccumulator()
 
-  /**
-   * Create an accumulator with initial state
-   */
-  def withInitialState(
-    messageId: Option[String] = None,
-    promptTokens: Int = 0
-  ): StreamingAccumulator = {
-    val accumulator = new StreamingAccumulator()
-    messageId.foreach(id => accumulator.addChunk(StreamedChunk(id, None, None, None)))
-    if (promptTokens > 0) {
-      accumulator.updateTokens(promptTokens, 0)
-    }
-    accumulator
-  }
 }

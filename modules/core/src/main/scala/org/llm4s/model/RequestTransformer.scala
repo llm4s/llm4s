@@ -73,7 +73,7 @@ trait RequestTransformer {
    * @param modelId The model identifier
    * @return Set of disallowed parameter names, empty if all are allowed
    */
-  def getDisallowedParams(modelId: String): Set[String]
+  def disallowedParams(modelId: String): Set[String]
 }
 
 object RequestTransformer {
@@ -246,7 +246,7 @@ final private[model] class DefaultRequestTransformer(
     !capabilities.supportsNativeStreaming.getOrElse(true)
   }
 
-  override def getDisallowedParams(modelId: String): Set[String] = {
+  override def disallowedParams(modelId: String): Set[String] = {
     val capabilities = getCapabilities(modelId)
     capabilities.disallowedParams.getOrElse(Set.empty)
   }
@@ -263,12 +263,11 @@ final private[model] class DefaultRequestTransformer(
 }
 
 /**
- * Transformation result containing both transformed options and any warnings.
+ * Transformed options and messages for one request, and whether the client must fake streaming.
  */
 case class TransformationResult(
   options: CompletionOptions,
   messages: Seq[Message],
-  warnings: Seq[String] = Seq.empty,
   requiresFakeStreaming: Boolean = false
 )
 
@@ -281,8 +280,8 @@ object TransformationResult {
     modelId: String,
     options: CompletionOptions,
     messages: Seq[Message],
-    dropUnsupported: Boolean = true,
-    transformer: RequestTransformer
+    transformer: RequestTransformer,
+    dropUnsupported: Boolean = true
   ): Result[TransformationResult] =
     transformer.transformOptions(modelId, options, dropUnsupported).map { transformedOptions =>
       TransformationResult(

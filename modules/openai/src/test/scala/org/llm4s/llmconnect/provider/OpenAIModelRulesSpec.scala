@@ -274,7 +274,7 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val disallowed = transformer(service).getDisallowedParams("o1")
+        val disallowed = transformer(service).disallowedParams("o1")
 
         disallowed should contain("top_p")
         disallowed should contain("presence_penalty")
@@ -287,7 +287,7 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
       case Left(error) =>
         fail(error.message)
       case Right(service) =>
-        val disallowed = transformer(service).getDisallowedParams("gpt-4o")
+        val disallowed = transformer(service).disallowedParams("gpt-4o")
 
         disallowed shouldBe empty
   }
@@ -311,8 +311,8 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
           "o1",
           options,
           messages,
-          dropUnsupported = true,
-          transformer(service)
+          transformer(service),
+          dropUnsupported = true
         )
 
         result.isRight shouldBe true
@@ -337,8 +337,8 @@ class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
           "o1",
           options,
           messages,
-          dropUnsupported = false,
-          transformer(service)
+          transformer(service),
+          dropUnsupported = false
         )
 
         result.isLeft shouldBe true

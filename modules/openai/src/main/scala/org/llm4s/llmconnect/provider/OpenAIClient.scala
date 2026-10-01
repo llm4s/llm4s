@@ -165,8 +165,8 @@ class OpenAIClient private[provider] (
         model,
         options,
         conversation.messages,
-        dropUnsupported = true,
-        OpenAIModelRules.transformer(registryService)
+        OpenAIModelRules.transformer(registryService),
+        dropUnsupported = true
       )
       transformedConversation = conversation.copy(messages = transformed.messages)
       params <- buildParams(
@@ -202,8 +202,8 @@ class OpenAIClient private[provider] (
         model,
         options,
         conversation.messages,
-        dropUnsupported = true,
-        OpenAIModelRules.transformer(registryService)
+        OpenAIModelRules.transformer(registryService),
+        dropUnsupported = true
       )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)

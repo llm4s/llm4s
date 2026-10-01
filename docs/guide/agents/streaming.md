@@ -231,7 +231,7 @@ println(s"Tool calls: ${toolCalls.map(_.toolName).mkString(", ")}")
 ```scala
 import org.llm4s.agent.streaming.StreamingAccumulator
 
-val accumulator = new StreamingAccumulator()
+val accumulator = StreamingAccumulator.create()
 
 agent.runWithEvents(query, tools) { event =>
   accumulator.record(event)

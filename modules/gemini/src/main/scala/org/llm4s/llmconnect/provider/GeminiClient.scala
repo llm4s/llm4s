@@ -86,8 +86,8 @@ class GeminiClient(
         config.model,
         options,
         conversation.messages,
-        dropUnsupported = true,
-        org.llm4s.model.RequestTransformer.default(registryService)
+        org.llm4s.model.RequestTransformer.default(registryService),
+        dropUnsupported = true
       )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
@@ -126,8 +126,8 @@ class GeminiClient(
         config.model,
         options,
         conversation.messages,
-        dropUnsupported = true,
-        org.llm4s.model.RequestTransformer.default(registryService)
+        org.llm4s.model.RequestTransformer.default(registryService),
+        dropUnsupported = true
       )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)

@@ -13,7 +13,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-1", Some("world"), None, None))
     accumulator.addChunk(StreamedChunk("msg-1", Some("!"), None, None))
 
-    accumulator.getCurrentContent shouldBe "Hello world!"
+    accumulator.currentContent shouldBe "Hello world!"
   }
 
   test("should handle chunks with no content") {
@@ -23,7 +23,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-1", Some("test"), None, None))
     accumulator.addChunk(StreamedChunk("msg-1", None, None, None))
 
-    accumulator.getCurrentContent shouldBe "test"
+    accumulator.currentContent shouldBe "test"
   }
 
   test("should track message ID") {
@@ -46,7 +46,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-1", Some("text"), None, None))
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(toolCall2), None))
 
-    val toolCalls = accumulator.getCurrentToolCalls
+    val toolCalls = accumulator.currentToolCalls
     (toolCalls should have).length(2)
     toolCalls.head.name shouldBe "function1"
     toolCalls(1).name shouldBe "function2"
@@ -101,26 +101,25 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
     accumulator.updateTokens(10, 5)
 
-    accumulator.getCurrentContent shouldBe "content"
+    accumulator.currentContent shouldBe "content"
 
     accumulator.clear()
 
-    accumulator.getCurrentContent shouldBe ""
+    accumulator.currentContent shouldBe ""
     accumulator.isComplete shouldBe false
   }
 
-  test("should create snapshot of current state") {
+  test("should carry message id, content and tokens into the completion") {
     val accumulator = StreamingAccumulator.create()
 
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None))
     accumulator.updateTokens(10, 5)
 
-    val snapshot = accumulator.snapshot()
+    val completion = accumulator.toCompletion(0L).toOption.get
 
-    snapshot.content shouldBe "content"
-    snapshot.messageId shouldBe Some("msg-1")
-    snapshot.promptTokens shouldBe 10
-    snapshot.completionTokens shouldBe 5
+    completion.content shouldBe "content"
+    completion.id shouldBe "msg-1"
+    completion.usage.map(u => (u.promptTokens, u.completionTokens)) shouldBe Some((10, 5))
   }
 
   test("should handle partial tool call accumulation") {
@@ -133,7 +132,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partialCall1), None))
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partialCall2), None))
 
-    val toolCalls = accumulator.getCurrentToolCalls
+    val toolCalls = accumulator.currentToolCalls
     (toolCalls should have).length(1)
     toolCalls.head.id shouldBe "tool-1"
     toolCalls.head.name shouldBe "get_weather"
@@ -146,7 +145,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     val sentinelCall = ToolCall("tool-1", "get_weather", ujson.Obj())
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(sentinelCall), None))
 
-    val toolCalls = accumulator.getCurrentToolCalls
+    val toolCalls = accumulator.currentToolCalls
     (toolCalls should have).length(1)
     // Arguments should parse back to empty Obj since nothing was appended
     toolCalls.head.arguments shouldBe ujson.Obj()
@@ -162,7 +161,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partial1), None))
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partial2), None))
 
-    val toolCalls = accumulator.getCurrentToolCalls
+    val toolCalls = accumulator.currentToolCalls
     (toolCalls should have).length(1)
     toolCalls.head.arguments("query").str shouldBe "hello world"
   }
@@ -176,7 +175,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partialCall1), None))
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partialCall2), None))
 
-    val toolCalls = accumulator.getCurrentToolCalls
+    val toolCalls = accumulator.currentToolCalls
     (toolCalls should have).length(1)
     toolCalls.head.arguments("location").str shouldBe "SF"
   }
@@ -192,7 +191,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-1", None, None, None, Some("think about ")))
     accumulator.addChunk(StreamedChunk("msg-1", None, None, None, Some("this...")))
 
-    accumulator.getCurrentThinking shouldBe Some("Let me think about this...")
+    accumulator.currentThinking shouldBe Some("Let me think about this...")
     accumulator.hasThinking shouldBe true
   }
 
@@ -201,7 +200,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
 
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None, None))
 
-    accumulator.getCurrentThinking shouldBe None
+    accumulator.currentThinking shouldBe None
     accumulator.hasThinking shouldBe false
   }
 
@@ -213,8 +212,8 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     // Then content
     accumulator.addChunk(StreamedChunk("msg-1", Some("The answer is 42."), None, None, None))
 
-    accumulator.getCurrentThinking shouldBe Some("Thinking...")
-    accumulator.getCurrentContent shouldBe "The answer is 42."
+    accumulator.currentThinking shouldBe Some("Thinking...")
+    accumulator.currentContent shouldBe "The answer is 42."
   }
 
   test("should include thinking in completion") {
@@ -239,7 +238,7 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addThinkingDelta("First part. ")
     accumulator.addThinkingDelta("Second part.")
 
-    accumulator.getCurrentThinking shouldBe Some("First part. Second part.")
+    accumulator.currentThinking shouldBe Some("First part. Second part.")
   }
 
   test("should track thinking tokens") {
@@ -260,17 +259,17 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     usage.get.totalTokens shouldBe 350
   }
 
-  test("should include thinking tokens in snapshot") {
+  test("should include thinking tokens in the completion") {
     val accumulator = StreamingAccumulator.create()
 
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None, Some("thinking")))
     accumulator.updateTokensWithThinking(10, 5, 20)
 
-    val snapshot = accumulator.snapshot()
+    val completion = accumulator.toCompletion(0L).toOption.get
 
-    snapshot.content shouldBe "content"
-    snapshot.thinking shouldBe Some("thinking")
-    snapshot.thinkingTokens shouldBe 20
+    completion.content shouldBe "content"
+    completion.thinking shouldBe Some("thinking")
+    completion.usage.flatMap(_.thinkingTokens) shouldBe Some(20)
   }
 
   test("should clear thinking content on clear") {
@@ -279,12 +278,12 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     accumulator.addChunk(StreamedChunk("msg-1", Some("content"), None, None, Some("thinking")))
     accumulator.updateTokensWithThinking(10, 5, 20)
 
-    accumulator.getCurrentThinking shouldBe Some("thinking")
+    accumulator.currentThinking shouldBe Some("thinking")
     accumulator.hasThinking shouldBe true
 
     accumulator.clear()
 
-    accumulator.getCurrentThinking shouldBe None
+    accumulator.currentThinking shouldBe None
     accumulator.hasThinking shouldBe false
   }
 
@@ -312,12 +311,12 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
       )
     }
 
-    accumulator.getCurrentToolCalls.map(_.id) shouldBe ids
-    accumulator.getCurrentToolCalls.map(_.name) shouldBe ids.indices.map(i => s"tool_$i")
-    accumulator.getCurrentToolCalls.map(_.arguments("n").num.toInt) shouldBe ids.indices
+    accumulator.currentToolCalls.map(_.id) shouldBe ids
+    accumulator.currentToolCalls.map(_.name) shouldBe ids.indices.map(i => s"tool_$i")
+    accumulator.currentToolCalls.map(_.arguments("n").num.toInt) shouldBe ids.indices
 
     val completion = accumulator.toCompletion.toOption.get
     completion.message.toolCalls.map(_.id) shouldBe ids
-    accumulator.snapshot().toolCalls.map(_.id) shouldBe ids
+    accumulator.toCompletion(0L).toOption.get.message.toolCalls.map(_.id) shouldBe ids
   }
 }

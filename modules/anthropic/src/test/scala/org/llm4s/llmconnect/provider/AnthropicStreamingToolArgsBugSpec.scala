@@ -47,7 +47,7 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
     acc.addChunk(argFragmentChunk("msg_1", "toolu_01A", ": \"Paris\"}"))
     acc.addChunk(stopChunk("msg_1"))
 
-    val calls = acc.getCurrentToolCalls
+    val calls = acc.currentToolCalls
     calls should have size 1
     calls.head.name shouldBe "get_weather"
     calls.head.arguments shouldBe ujson.Obj("location" -> "Paris")
@@ -61,7 +61,7 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
     acc.addChunk(argFragmentChunk("msg_1", "toolu_01B", "{\"tz\":\"UTC\"}"))
     acc.addChunk(stopChunk("msg_1"))
 
-    val calls = acc.getCurrentToolCalls
+    val calls = acc.currentToolCalls
     calls should have size 2
     val byName = calls.map(c => c.name -> c).toMap
     byName("get_weather").arguments shouldBe ujson.Obj("city" -> "London")
@@ -76,7 +76,7 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
     fullJson.foreach(ch => acc.addChunk(argFragmentChunk("msg_1", "toolu_01A", ch.toString)))
     acc.addChunk(stopChunk("msg_1"))
 
-    val calls = acc.getCurrentToolCalls
+    val calls = acc.currentToolCalls
     calls should have size 1
     calls.head.arguments shouldBe ujson.Obj("query" -> "hello world")
   }
@@ -86,7 +86,7 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
     acc.addChunk(toolStartChunk("msg_1", "toolu_01A", "no_args_tool"))
     acc.addChunk(stopChunk("msg_1"))
 
-    val calls = acc.getCurrentToolCalls
+    val calls = acc.currentToolCalls
     calls should have size 1
     calls.head.arguments shouldBe ujson.Obj()
   }
@@ -101,8 +101,8 @@ class AnthropicStreamingToolArgsBugSpec extends AnyFlatSpec with Matchers {
     acc.addChunk(argFragmentChunk("msg_1", "toolu_01A", "{\"city\":\"NYC\"}"))
     acc.addChunk(stopChunk("msg_1"))
 
-    acc.getCurrentContent shouldBe "Let me check the weather."
-    val calls = acc.getCurrentToolCalls
+    acc.currentContent shouldBe "Let me check the weather."
+    val calls = acc.currentToolCalls
     calls should have size 1
     calls.head.arguments shouldBe ujson.Obj("city" -> "NYC")
   }
