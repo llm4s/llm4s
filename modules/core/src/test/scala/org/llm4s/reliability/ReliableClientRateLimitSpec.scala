@@ -163,9 +163,13 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     val client = new ReliableClient(underlying, "test-provider", config)
 
     client.complete(conversation).isRight shouldBe true
-    val start = System.nanoTime()
+    // The bucket is now empty: the retry is scheduled for the next token (~100ms), not the
+    // 30s a RateLimitError otherwise suggests.
+    client.decideRetry(1, RateLimitError.local("test-provider")) match {
+      case RetryDecision.Retry(delay) => delay.toMillis should be <= 100L
+      case other                      => fail(s"expected a retry, got $other")
+    }
     client.complete(conversation).isRight shouldBe true
-    (System.nanoTime() - start).nanos should be < 5.seconds
     underlying.callCount.get() shouldBe 2
   }
 
