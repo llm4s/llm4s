@@ -184,8 +184,7 @@ it to `ProviderRegistry.of`/`.withProvider`, and a provider spec proving it refu
 config uses a `FixtureChatConfig`. When a stand-in test checked a real provider's own facts in
 passing, those move to that provider's spec (`DeepSeekNamedProviderSpec`, now in
 `llm4s-openai-compatible`). Strings that do not reach a client
-(`ToolRegistry`'s `"openai"`/`"anthropic"`/`"gemini"` cases, model-registry data, config-policy
-allow-lists, secret patterns) stay. `llm4s-rag`'s
+(model-registry data, config-policy allow-lists, secret patterns) stay. `llm4s-rag`'s
 `RAGConfig.default` embeds with `openai`, so `rag` has a **test-only** dependency on `openai`;
 never make it a compile one - that would put the OpenAI SDK on every RAG user's classpath.
 
@@ -239,11 +238,15 @@ the newtypes the library takes), every `@deprecated` member of core and `Agent`,
 legacy field, `ClientStatus`, `StreamingOptions`, `RuntimeId`/`ModelId`, and cats `Show`/`Validated`
 on the API. Do not add them back: **a frozen module gains no speculative public types and no
 `@deprecated` members before the baseline** - delete instead, with a migration note - and a
-helper only llm4s modules use is `private[llm4s]`. Later passes take the open decisions on #1133:
-`NamedProviderConfig`'s OpenAI/Azure fields, OpenAI rules in `DefaultRequestTransformer` and
-`ProviderModelLister`, the `ToolRegistry` provider switch, single-consumer utilities
-(`SqlIdentifier`, `ChunkingUtils`, `SimilarityUtils`, `ManagedResource`), the `middleware`
-package, and whether the provider-plumbing classes are a frozen provider-author SPI.
+helper only llm4s modules use is `private[llm4s]`. Pass 2 removed `ToolRegistry`'s provider switch
+(`getToolDefinitionsSafe`; tool definitions are `getOpenAITools()`, the format every client
+takes), replaced `CancellationToken`'s exception-throwing members with `whenCancelled:
+Future[Unit]`, and moved single-consumer utilities to their consumer, keeping packages:
+`SqlIdentifier`, `ChunkingUtils` and `RateLimitedLogger` to `llm4s-rag`, `ManagedResource` to
+`llm4s-speech`, `LiftToResult` to `llm4s-observability`. **A utility with one consuming module
+lives in that module, not core.** The open decisions on #1133: `NamedProviderConfig`'s
+OpenAI/Azure fields, OpenAI rules in `DefaultRequestTransformer` and `ProviderModelLister`, the
+`middleware` package and `ReliableProviders`, and the scope of the provider-author SPI.
 
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must

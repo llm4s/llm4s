@@ -8,8 +8,8 @@ import scala.concurrent.{ Future, Promise }
  * Token for cancelling long-running orchestration operations.
  * Thread-safe and can be checked from any thread.
  *
- * @note For operations with many nodes, use `cachedCancellationFuture` instead of
- *       `cancellationFuture` to avoid callback accumulation.
+ * @note [[whenCancelled]] is one shared future, so racing many operations against it adds
+ *       no callbacks per operation.
  * @example
  * {{{
  * val token = CancellationToken()
@@ -65,37 +65,18 @@ class CancellationToken {
   }
 
   /**
-   * Create a Future that fails with CancellationException when cancelled.
-   * Note: For long-running operations with many nodes, consider caching this
-   * future to avoid accumulating callbacks.
+   * A future that completes successfully once cancellation is requested, and never otherwise.
+   *
+   * Race an operation against it to stop waiting on cancel, mapping it to the error the
+   * operation should report: `Future.firstCompletedOf(List(op, token.whenCancelled.map(_ => Left(...))))`.
+   * It is created once per token, so racing many operations against it is cheap.
    */
-  def cancellationFuture: Future[Nothing] = {
-    val promise = Promise[Nothing]()
-    onCancel {
-      promise.tryFailure(new CancellationException("Operation cancelled"))
-    }
+  lazy val whenCancelled: Future[Unit] = {
+    val promise = Promise[Unit]()
+    onCancel { promise.trySuccess(()); () }
     promise.future
   }
-
-  /**
-   * Create a cached cancellation future that can be reused across multiple operations
-   * to avoid callback accumulation.
-   */
-  lazy val cachedCancellationFuture: Future[Nothing] = cancellationFuture
-
-  /**
-   * Check cancellation and throw if cancelled
-   */
-  def throwIfCancelled(): Unit =
-    if (isCancelled) {
-      throw new CancellationException("Operation cancelled")
-    }
 }
-
-/**
- * Exception thrown when an operation is cancelled
- */
-class CancellationException(message: String) extends RuntimeException(message)
 
 object CancellationToken {
 

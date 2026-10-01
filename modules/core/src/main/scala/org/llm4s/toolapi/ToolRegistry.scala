@@ -1,8 +1,5 @@
 package org.llm4s.toolapi
 
-import org.llm4s.error.ValidationError
-import org.llm4s.types.Result
-
 import scala.concurrent.{ Await, ExecutionContext, Future, Promise, blocking }
 import scala.concurrent.duration._
 import java.util.concurrent.atomic.AtomicInteger
@@ -350,22 +347,6 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
    */
   def getOpenAITools(strict: Boolean = true): ujson.Arr =
     ujson.Arr.from(tools.map(_.toOpenAITool(strict)))
-
-  /**
-   * Generate tool definitions in the format expected by a specific LLM provider.
-   *
-   * Currently all supported providers (`openai`, `anthropic`, `gemini`) use the
-   * same OpenAI-compatible format.
-   *
-   * @param provider Provider name (case-insensitive): `"openai"`, `"anthropic"`, `"gemini"`
-   * @return `Right(tools)` for supported providers, `Left(ValidationError)` for unsupported ones
-   */
-  def getToolDefinitionsSafe(provider: String): Result[ujson.Value] = provider.toLowerCase match {
-    case "openai"    => Right(getOpenAITools())
-    case "anthropic" => Right(getOpenAITools())
-    case "gemini"    => Right(getOpenAITools())
-    case _           => Left(ValidationError("provider", s"Unsupported LLM provider: $provider"))
-  }
 }
 
 object ToolRegistry {

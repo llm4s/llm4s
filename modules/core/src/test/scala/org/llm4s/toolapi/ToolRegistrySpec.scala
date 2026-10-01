@@ -856,48 +856,4 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
       }
     )
   }
-
-  "ToolRegistry.getToolDefinitionsSafe" should "return OpenAI format for openai provider" in {
-    createAddTool().fold(
-      e => fail(s"Tool creation failed: ${e.formatted}"),
-      addTool => {
-        val registry = new ToolRegistry(Seq(addTool))
-        val tools    = registry.getToolDefinitionsSafe("openai").getOrElse(fail("getToolDefinitionsSafe failed"))
-        tools shouldBe a[ujson.Arr]
-        tools.arr should have size 1
-      }
-    )
-  }
-
-  it should "return OpenAI format for anthropic provider" in {
-    createAddTool().fold(
-      e => fail(s"Tool creation failed: ${e.formatted}"),
-      addTool => {
-        val registry = new ToolRegistry(Seq(addTool))
-        val tools    = registry.getToolDefinitionsSafe("anthropic").getOrElse(fail("getToolDefinitionsSafe failed"))
-        tools shouldBe a[ujson.Arr]
-      }
-    )
-  }
-
-  it should "return OpenAI format for gemini provider" in {
-    createAddTool().fold(
-      e => fail(s"Tool creation failed: ${e.formatted}"),
-      addTool => {
-        val registry = new ToolRegistry(Seq(addTool))
-        val tools    = registry.getToolDefinitionsSafe("gemini").getOrElse(fail("getToolDefinitionsSafe failed"))
-        tools shouldBe a[ujson.Arr]
-      }
-    )
-  }
-
-  it should "return Left for unsupported provider" in {
-    createAddTool().fold(
-      e => fail(s"Tool creation failed: ${e.formatted}"),
-      addTool => {
-        val registry = new ToolRegistry(Seq(addTool))
-        registry.getToolDefinitionsSafe("unsupported_provider") shouldBe a[Left[_, _]]
-      }
-    )
-  }
 }

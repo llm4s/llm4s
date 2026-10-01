@@ -33,15 +33,8 @@ object WeatherToolExample {
       }
 
       // Generate tool definitions for OpenAI
-      toolRegistry
-        .getToolDefinitionsSafe("openai")
-        .fold(
-          err => logger.error("Failed to get tool definitions: {}", err.formatted),
-          openaiTools => {
-            logger.info("OpenAI tool definition:")
-            logger.info("{}", openaiTools.render(indent = 2))
-          }
-        )
+      logger.info("OpenAI tool definition:")
+      logger.info("{}", toolRegistry.getOpenAITools().render(indent = 2))
     }
 
     result.left.foreach(err => logger.error("Failed to load weather tool: {}", err.formatted))

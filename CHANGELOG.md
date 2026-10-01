@@ -797,6 +797,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules inseparable; moving that one file broke the cycle.
 
 ### Removed
+- **Pre-baseline API cleanup, pass 2** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
+  `ToolRegistry#getToolDefinitionsSafe(provider)`, core's last switch over provider names, is
+  removed: use `getOpenAITools()`. `CancellationToken`'s `cancellationFuture`,
+  `cachedCancellationFuture`, `throwIfCancelled()` and `CancellationException` give way to
+  `whenCancelled: Future[Unit]`. `SqlIdentifier`, `ChunkingUtils` and `RateLimitedLogger` move to
+  `llm4s-rag`, `ManagedResource` to `llm4s-speech` and `LiftToResult` to `llm4s-observability`,
+  their only consumers, with unchanged packages. Source break (pre-MiMa); see the
+  [migration note](docs/reference/migration.md#pre-baseline-api-cleanup-pass-2).
 - **Pre-baseline API cleanup, pass 1: dead, deprecated and accidental public API leaves the
   spine** ([#1133](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540)). Before
   0.5.0 sets the MiMa baseline, `llm4s-core` and `llm4s-agent` drop what nothing used or what was
@@ -854,6 +862,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **A `PlanRunner` node cancelled while running is reported as cancelled**
+  ([#1133](https://github.com/llm4s/llm4s/issues/1133)). The race against cancellation mapped a
+  future that only ever failed, so the "Node <id> cancelled" `PlanExecutionError` was never
+  produced and callers got a `NodeExecutionError` wrapping an exception instead.
 - **A Langfuse batch that was only partly accepted was reported as a successful export.** The
   ingestion endpoint answers `207 Multi-Status` with a result per event, and events listed under
   `errors` are dropped; `LangfuseTracing` returned `Right(())` and `DefaultLangfuseBatchSender`

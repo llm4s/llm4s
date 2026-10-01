@@ -36,7 +36,7 @@ object OpenAIToolHelper {
    * @return The tool definitions
    */
   def convertToolRegistryToOpenAITools(toolRegistry: ToolRegistry): java.util.List[ChatCompletionTool] = {
-    val toolsJson = toolRegistry.getToolDefinitionsSafe("openai").getOrElse(ujson.Arr())
+    val toolsJson = toolRegistry.getOpenAITools()
     val mapper    = ObjectMappers.jsonMapper()
     toolsJson.arr.map(tool => mapper.readValue(ujson.write(tool), classOf[ChatCompletionTool])).toSeq.asJava
   }

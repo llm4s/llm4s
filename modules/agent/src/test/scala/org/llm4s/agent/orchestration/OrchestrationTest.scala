@@ -31,6 +31,33 @@ class OrchestrationTest extends AnyFunSuite with Matchers {
     finalResult shouldBe Right(Map("n1" -> 10, "n2" -> "Result: 10"))
   }
 
+  test("PlanRunner should report a node cancelled mid-flight as cancelled") {
+    import org.llm4s.types.AsyncResult
+    import scala.concurrent.Promise
+
+    val started = Promise[Unit]()
+    val never = new TypedAgent[Int, Int] {
+      val id: org.llm4s.types.AgentId = org.llm4s.types.AgentId.generate()
+      def name: String                = "never"
+      def execute(input: Int)(implicit ec: ExecutionContext): AsyncResult[Int] = {
+        started.trySuccess(())
+        Promise[org.llm4s.types.Result[Int]]().future
+      }
+    }
+    val node = Node("blocked", never)
+    val plan = Plan.builder.addNode(node).build
+
+    val token  = CancellationToken()
+    val result = new PlanRunner().execute(plan, Map("blocked" -> 1), token)
+    Await.result(started.future, 5.seconds)
+    token.cancel()
+
+    Await.result(result, 5.seconds) match {
+      case Left(e: OrchestrationError.PlanExecutionError) => e.message should include("cancelled")
+      case other                                          => fail(s"expected a cancellation error, got $other")
+    }
+  }
+
   test("Policies should use non-blocking delays") {
     var attempts = 0
     val flakyAgent = TypedAgent.fromFunction[String, String]("flaky") { input =>

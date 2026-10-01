@@ -1,5 +1,30 @@
 # Migration Guide
 
+## Pre-baseline API cleanup, pass 2
+
+Not in a release yet; continues pass 1 below.
+
+| Removed | Use instead |
+|---|---|
+| `ToolRegistry#getToolDefinitionsSafe(provider)` | `getOpenAITools()`. It returned the same JSON for every provider it accepted and failed for the rest; every client takes this format |
+| `CancellationToken#cancellationFuture`, `cachedCancellationFuture` | `whenCancelled`, a shared `Future[Unit]` that *succeeds* on cancel: `token.whenCancelled.map(_ => Left(myError))` |
+| `CancellationToken#throwIfCancelled()`, `orchestration.CancellationException` | `if (token.isCancelled) Left(...)` |
+
+Behaviour fix: a `PlanRunner` node cancelled while running now fails the plan with
+`OrchestrationError.PlanExecutionError("Node <id> cancelled", ...)`. It used to surface as a
+`NodeExecutionError` wrapping `CancellationException`, because the cancellation future only ever
+failed and the mapping to the cancelled error never ran.
+
+These utilities moved to the one module that uses them. Package names are unchanged, so code that
+already depends on that module needs nothing; code that used them through `llm4s-core` alone adds
+the module:
+
+| Utility | Now in |
+|---|---|
+| `org.llm4s.util.SqlIdentifier`, `org.llm4s.llmconnect.utils.ChunkingUtils` | `llm4s-rag` |
+| `org.llm4s.resource.ManagedResource` | `llm4s-speech` |
+| `org.llm4s.util.LiftToResult` | `llm4s-observability` |
+
 ## Pre-baseline API cleanup, pass 1
 
 Not in a release yet; from the

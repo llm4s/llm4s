@@ -5,8 +5,8 @@ import scala.util.Try
 import org.llm4s.types.TryOps
 
 /**
- * Managed resource abstraction for safe resource handling.
- * Builds on the existing bracket functionality in types.package.
+ * A resource acquired and released around a computation, returning `Result` throughout.
+ * Used by `llm4s-speech`'s audio I/O.
  */
 trait ManagedResource[R] {
 
@@ -55,39 +55,12 @@ object ManagedResource {
   }
 
   /**
-   * Managed FileInputStream
-   */
-  def fileInputStream(path: java.nio.file.Path): ManagedResource[java.io.FileInputStream] =
-    fromTry(
-      () => Try(new java.io.FileInputStream(path.toFile)),
-      (fis: java.io.FileInputStream) => Try(fis.close())
-    )
-
-  /**
    * Managed FileOutputStream
    */
   def fileOutputStream(path: java.nio.file.Path): ManagedResource[java.io.FileOutputStream] =
     fromTry(
       () => Try(new java.io.FileOutputStream(path.toFile)),
       (fos: java.io.FileOutputStream) => Try(fos.close())
-    )
-
-  /**
-   * Managed DataOutputStream
-   */
-  def dataOutputStream(path: java.nio.file.Path): ManagedResource[java.io.DataOutputStream] =
-    fromTry(
-      () => Try(new java.io.DataOutputStream(new java.io.FileOutputStream(path.toFile))),
-      (dos: java.io.DataOutputStream) => Try(dos.close())
-    )
-
-  /**
-   * Managed ByteArrayInputStream
-   */
-  def byteArrayInputStream(data: Array[Byte]): ManagedResource[java.io.ByteArrayInputStream] =
-    fromTry(
-      () => Try(new java.io.ByteArrayInputStream(data)),
-      (bais: java.io.ByteArrayInputStream) => Try(bais.close())
     )
 
   /**
@@ -115,25 +88,4 @@ object ManagedResource {
       (path: java.nio.file.Path) => Try(java.nio.file.Files.deleteIfExists(path)).map(_ => ())
     )
 
-  /**
-   * Extension methods for easier resource composition
-   */
-  implicit class ManagedResourceOps[R](resource: ManagedResource[R]) {
-
-    /**
-     * Map over the resource
-     */
-    def map[S](f: R => S): ManagedResource[S] = new ManagedResource[S] {
-      def acquire(): Result[S]        = resource.acquire().map(f)
-      def release(s: S): Result[Unit] = Right(()) // Mapped resources don't need explicit release
-    }
-
-    /**
-     * FlatMap for resource composition
-     */
-    def flatMap[S](f: R => ManagedResource[S]): ManagedResource[S] = new ManagedResource[S] {
-      def acquire(): Result[S]        = resource.acquire().flatMap(r => f(r).acquire())
-      def release(s: S): Result[Unit] = Right(()) // Composed resources handle their own cleanup
-    }
-  }
 }

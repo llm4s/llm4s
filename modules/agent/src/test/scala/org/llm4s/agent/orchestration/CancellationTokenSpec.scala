@@ -78,44 +78,26 @@ class CancellationTokenSpec extends AnyFlatSpec with Matchers {
   }
 
   // ==========================================================================
-  // throwIfCancelled
+  // whenCancelled
   // ==========================================================================
 
-  "CancellationToken.throwIfCancelled" should "not throw when not cancelled" in {
-    val token = CancellationToken()
-    noException should be thrownBy token.throwIfCancelled()
-  }
-
-  it should "throw CancellationException when cancelled" in {
-    val token = CancellationToken()
-    token.cancel()
-    a[CancellationException] should be thrownBy token.throwIfCancelled()
-  }
-
-  // ==========================================================================
-  // cancellationFuture
-  // ==========================================================================
-
-  "CancellationToken.cancellationFuture" should "fail when cancelled" in {
+  "CancellationToken.whenCancelled" should "complete successfully when cancelled" in {
     val token  = CancellationToken()
-    val future = token.cancellationFuture
+    val future = token.whenCancelled
+    future.isCompleted shouldBe false
     token.cancel()
-
-    val thrown = intercept[CancellationException] {
-      Await.result(future, 1.second)
-    }
-    thrown.getMessage should include("cancelled")
+    Await.result(future, 1.second) shouldBe (())
   }
 
-  // ==========================================================================
-  // cachedCancellationFuture
-  // ==========================================================================
-
-  "CancellationToken.cachedCancellationFuture" should "return same future on multiple calls" in {
+  it should "already be complete for a token cancelled before it was asked for" in {
     val token = CancellationToken()
-    val f1    = token.cachedCancellationFuture
-    val f2    = token.cachedCancellationFuture
-    f1 shouldBe theSameInstanceAs(f2)
+    token.cancel()
+    Await.result(token.whenCancelled, 1.second) shouldBe (())
+  }
+
+  it should "return the same future on every call" in {
+    val token = CancellationToken()
+    token.whenCancelled shouldBe theSameInstanceAs(token.whenCancelled)
   }
 
   // ==========================================================================
@@ -129,17 +111,9 @@ class CancellationTokenSpec extends AnyFlatSpec with Matchers {
     token.isCancelled shouldBe false
   }
 
-  it should "not throw on throwIfCancelled" in {
-    noException should be thrownBy CancellationToken.none.throwIfCancelled()
-  }
-
-  // ==========================================================================
-  // CancellationException
-  // ==========================================================================
-
-  "CancellationException" should "carry a message" in {
-    val ex = new CancellationException("test cancelled")
-    ex.getMessage shouldBe "test cancelled"
-    ex shouldBe a[RuntimeException]
+  it should "never complete whenCancelled" in {
+    val token = CancellationToken.none
+    token.cancel()
+    token.whenCancelled.isCompleted shouldBe false
   }
 }
