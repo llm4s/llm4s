@@ -22,6 +22,12 @@ class WorkspaceSandboxConfigSpec extends AnyFlatSpec with Matchers {
     WorkspaceSandboxConfig.validate(bad) shouldBe Left("limits.maxFileSize must be positive")
   }
 
+  it should "keep the defaultCommandTimeoutSeconds JSON key, in whole seconds" in {
+    val json = upickle.default.write(WorkspaceSandboxConfig(defaultCommandTimeout = 45.seconds))
+    ujson.read(json)("defaultCommandTimeoutSeconds").num shouldBe 45
+    upickle.default.read[WorkspaceSandboxConfig](json).defaultCommandTimeout shouldBe 45.seconds
+  }
+
   it should "reject invalid defaultCommandTimeout" in {
     val bad = WorkspaceSandboxConfig.Permissive.copy(defaultCommandTimeout = Duration.Zero)
     WorkspaceSandboxConfig.validate(bad) shouldBe Left("defaultCommandTimeout must be positive")

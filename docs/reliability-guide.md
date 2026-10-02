@@ -861,7 +861,7 @@ final case class ReliabilityConfig(
   retryPolicy: RetryPolicy = RetryPolicy.exponentialBackoff(),
   circuitBreaker: CircuitBreakerConfig = CircuitBreakerConfig.default,
   rateLimit: RateLimitConfig = RateLimitConfig.disabled,
-  deadline: Option[Duration] = Some(5.minutes),
+  deadline: Option[FiniteDuration] = Some(5.minutes),
   enabled: Boolean = true
 )
 ```
@@ -880,7 +880,7 @@ final case class ReliabilityConfig(
 ```scala
 sealed trait RetryPolicy {
   def maxAttempts: Int
-  def delayFor(attemptNumber: Int, error: LLMError): Duration
+  def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration
   def isRetryable(error: LLMError): Boolean // default: rate limit, timeout, 5xx/408/429, network
 }
 ```
@@ -897,7 +897,7 @@ sealed trait RetryPolicy {
 ```scala
 final case class CircuitBreakerConfig(
   failureThreshold: Int = 5,
-  recoveryTimeout: Duration = 30.seconds,
+  recoveryTimeout: FiniteDuration = 30.seconds,
   successThreshold: Int = 2
 )
 ```

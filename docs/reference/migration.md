@@ -1,5 +1,64 @@
 # Migration Guide
 
+## Pre-baseline API cleanup, pass 6
+
+Not in a release yet; continues pass 5 below. A time the caller supplies is typed: a duration is
+a `scala.concurrent.duration.FiniteDuration` and a point in time a `java.time.Instant`, never a
+raw `Int`/`Long` whose unit lives in its name or its Scaladoc. Names lose their unit suffix
+(`timeoutMs` becomes `timeout`). Defaults are unchanged, and so are the wire formats: HOCON keys,
+JSON sent to Exa and the workspace runner, and HTTP headers.
+
+```scala
+import scala.concurrent.duration.*
+
+// before
+Left(RateLimitError("openai", 1000L))              // milliseconds, documented as seconds
+CrawlerConfig(delayMs = 500, timeoutMs = 30000)
+// after
+Left(RateLimitError("openai", 1.second))
+CrawlerConfig(delay = 500.millis, timeout = 30.seconds)
+```
+
+### `llm4s-core` errors, retry and reliability
+
+- `RecoverableError.retryDelay`, `RateLimitError.retryAfter`/`retryDelay` and
+  `ServiceError.retryDelay` are `Option[FiniteDuration]`; `RateLimitError(provider, retryAfter)`
+  takes a `FiniteDuration` and the `RateLimitError(message, retryAfter, provider)` extractor yields
+  one. `RateLimitError.resetTime` is an `Option[Instant]`. The fallback delay is named
+  `RateLimitError.DefaultRetryDelay` (30 seconds, as before).
+- `TimeoutError.timeoutDuration`, `ReliabilityConfig.deadline`/`withDeadline`,
+  `CircuitBreakerConfig.recoveryTimeout`/`withRecoveryTimeout`, every `RetryPolicy` delay
+  (`exponentialBackoff`, `linearBackoff`, `fixedDelay`, `custom`'s function, `delayFor`'s result)
+  and `ErrorRecovery`'s `recoveryTimeout` were `Duration` and are `FiniteDuration`: an infinite
+  delay or deadline could not be slept or added to a clock. Code passing `5.seconds` is unchanged.
+- `ReliableClient` and `ErrorRecovery.CircuitBreaker` take `clock: () => Instant` (was
+  milliseconds since the epoch); `ReliableClient`'s `sleep`, `ErrorRecovery`'s and
+  `LLMClientRetry`'s `sleepFn` take a `FiniteDuration` (was a `Long` of milliseconds).
+  `ErrorRecovery.recoverWithBackoff`'s `baseDelay` is a `FiniteDuration`.
+
+### `llm4s-agent`
+
+`OrchestrationError.AgentTimeoutError` carries `timeout: FiniteDuration` (was `timeoutMs: Long`).
+
+### Beta modules
+
+| Module | Before | After |
+|---|---|---|
+| `llm4s-agent-tools` | `ExaSearchToolConfig`/`BraveSearchToolConfig`/`DuckDuckGoSearchToolConfig` `timeoutMs: Int`, `ShellConfig.timeoutMs: Long`, `HttpConfig.timeoutMs: Int` | `timeout` |
+| | `ExaSearchToolConfig.livecrawlTimeout: Option[Int]` (ms) | `Option[FiniteDuration]`, still sent to Exa in ms |
+| `llm4s-rag` | `CrawlerConfig.delayMs`/`timeoutMs`, `withDelay(ms)`/`withTimeout(ms)` (also on `WebCrawlerLoader`), `UrlLoader.timeoutMs`/`withTimeout(ms)` | `delay`/`timeout`, `withDelay(FiniteDuration)`/`withTimeout(FiniteDuration)` |
+| | `RobotsTxtParser.isAllowed`/`getRules` `timeoutMs`, `RobotsTxt.crawlDelay: Option[Int]` (s) | `timeout`, `Option[FiniteDuration]` (fractional `Crawl-delay` values are now kept) |
+| | `EvaluatorOptions.timeoutMs`, `ChunkingUtils` `windowSeconds`/`clipSeconds`, `RateLimitedLogger` `throttleSeconds` | `timeout`, `window`/`clip`, `throttle` |
+| | `HikariDefaults.CONNECTION_TIMEOUT_MS`/`IDLE_TIMEOUT_MS`/`MAX_LIFETIME_MS` | `ConnectionTimeout`/`IdleTimeout`/`MaxLifetime` |
+| `llm4s-mcp` | `MCPServerConfig`/transport `timeout: Duration`, `MCPToolRegistry` `cacheTTL: Duration`, `MCPServer.stop(delay: Int)` | `FiniteDuration` |
+| | `StdioTransportImpl` `startupTimeoutMs: Int` | `startupTimeout` |
+| `llm4s-image` | `ImageGenerationConfig.timeout: Int` (ms), the `imagegeneration.provider.HttpClient` methods' `timeout: Int` | `FiniteDuration` |
+| | OpenAI/Anthropic vision configs' `connectTimeoutSeconds`/`requestTimeoutSeconds` | `connectTimeout`/`requestTimeout` |
+| workspace | `executeCommand` `timeout: Option[Int]` (s), `WorkspaceSandboxConfig.defaultCommandTimeoutSeconds` | `Option[FiniteDuration]`, `defaultCommandTimeout`; the JSON still carries whole seconds under the old keys |
+
+**Test doubles** of `imagegeneration.provider.HttpClient` type the timeout as `FiniteDuration`; a
+ScalaMock `onCall` lambda typed `_: Int` compiles but fails at runtime.
+
 ## Pre-baseline API cleanup, pass 5
 
 Not in a release yet; continues pass 4 below. It settles the provider-author SPI's API quality

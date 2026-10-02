@@ -9,7 +9,7 @@ import org.llm4s.metrics.{ MetricsCollector, ErrorKind }
 
 import java.time.Instant
 import scala.annotation.tailrec
-import scala.concurrent.duration.{ Duration, MILLISECONDS }
+import scala.concurrent.duration.{ FiniteDuration, MILLISECONDS }
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference }
 
 /**
@@ -39,7 +39,7 @@ final class ReliableClient(
   config: ReliabilityConfig,
   collector: Option[MetricsCollector] = None,
   clock: () => Instant = () => Instant.now(),
-  sleep: Duration => Unit = delay => Thread.sleep(delay.toMillis)
+  sleep: FiniteDuration => Unit = delay => Thread.sleep(delay.toMillis)
 ) extends LLMClient {
 
   // Deadline and circuit-breaker arithmetic is in epoch milliseconds internally
@@ -149,7 +149,7 @@ final class ReliableClient(
    * Execute operation with deadline enforcement and retry logic combined.
    * Single retry loop that checks deadline before each attempt.
    */
-  private def executeWithDeadlineAndRetry[A](operation: () => Result[A], deadline: Duration): Result[A] = {
+  private def executeWithDeadlineAndRetry[A](operation: () => Result[A], deadline: FiniteDuration): Result[A] = {
     val startTime  = nowMillis()
     val deadlineMs = startTime + deadline.toMillis
 
@@ -296,7 +296,7 @@ final class ReliableClient(
           rateLimiter.flatMap(_.nanosUntilNextToken) match {
             // Rounded up: the retry sleeps whole milliseconds, and waking a fraction early
             // finds the bucket still empty
-            case Some(nanos) => RetryDecision.Retry(Duration(math.ceil(nanos / 1e6).toLong, MILLISECONDS))
+            case Some(nanos) => RetryDecision.Retry(FiniteDuration(math.ceil(nanos / 1e6).toLong, MILLISECONDS))
             case None        => RetryDecision.DoNotRetry
           }
         case _ => RetryDecision.Retry(config.retryPolicy.delayFor(attemptNumber, error))
@@ -325,7 +325,11 @@ final class ReliableClient(
    * returned as itself: no provider call failed, so it must not read as a provider timeout
    * (which would count against the circuit).
    */
-  private def deadlineExceeded[A](attemptNumber: Int, lastError: Option[LLMError], deadline: Duration): Result[A] =
+  private def deadlineExceeded[A](
+    attemptNumber: Int,
+    lastError: Option[LLMError],
+    deadline: FiniteDuration
+  ): Result[A] =
     lastError match {
       case Some(e) if isLocalThrottle(e) => Left(e)
       case _ =>
@@ -498,6 +502,6 @@ object CircuitState {
  */
 sealed private[reliability] trait RetryDecision
 private[reliability] object RetryDecision {
-  final case class Retry(delay: Duration) extends RetryDecision
-  case object DoNotRetry                  extends RetryDecision
+  final case class Retry(delay: FiniteDuration) extends RetryDecision
+  case object DoNotRetry                        extends RetryDecision
 }

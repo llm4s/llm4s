@@ -1,7 +1,7 @@
 package org.llm4s.reliability
 
 import org.llm4s.error._
-import scala.concurrent.duration.{ Duration, DurationInt }
+import scala.concurrent.duration.{ Duration, DurationInt, FiniteDuration, NANOSECONDS }
 
 /**
  * Retry policy for transient failures.
@@ -20,7 +20,7 @@ sealed trait RetryPolicy {
    * @param error The error that triggered the retry
    * @return Delay duration before next attempt
    */
-  def delayFor(attemptNumber: Int, error: LLMError): Duration
+  def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration
 
   /**
    * Check if an error is retryable.
@@ -57,8 +57,8 @@ object RetryPolicy {
    */
   def exponentialBackoff(
     maxAttempts: Int = 3,
-    baseDelay: Duration = 1.second,
-    maxDelay: Duration = 32.seconds
+    baseDelay: FiniteDuration = 1.second,
+    maxDelay: FiniteDuration = 32.seconds
   ): RetryPolicy = new ExponentialBackoff(maxAttempts, baseDelay, maxDelay)
 
   /**
@@ -68,7 +68,7 @@ object RetryPolicy {
    */
   def linearBackoff(
     maxAttempts: Int = 3,
-    baseDelay: Duration = 2.seconds
+    baseDelay: FiniteDuration = 2.seconds
   ): RetryPolicy = new LinearBackoff(maxAttempts, baseDelay)
 
   /**
@@ -78,7 +78,7 @@ object RetryPolicy {
    */
   def fixedDelay(
     maxAttempts: Int = 3,
-    delay: Duration = 2.seconds
+    delay: FiniteDuration = 2.seconds
   ): RetryPolicy = new FixedDelay(maxAttempts, delay)
 
   /**
@@ -91,7 +91,7 @@ object RetryPolicy {
    */
   def custom(
     attempts: Int,
-    delayFn: (Int, LLMError) => Duration,
+    delayFn: (Int, LLMError) => FiniteDuration,
     retryableFn: LLMError => Boolean = {
       case _: RateLimitError => true
       case _: TimeoutError   => true
@@ -107,11 +107,11 @@ object RetryPolicy {
  */
 private class ExponentialBackoff(
   val maxAttempts: Int,
-  baseDelay: Duration,
-  maxDelay: Duration
+  baseDelay: FiniteDuration,
+  maxDelay: FiniteDuration
 ) extends RetryPolicy {
 
-  override def delayFor(attemptNumber: Int, error: LLMError): Duration = {
+  override def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration = {
     // Check for server-provided retry delay (e.g., Retry-After header)
     val serverDelay = error match {
       case re: RateLimitError => re.retryDelay
@@ -119,8 +119,10 @@ private class ExponentialBackoff(
     }
 
     serverDelay.getOrElse {
-      val exponentialDelay = baseDelay * Math.pow(2, attemptNumber - 1).toLong.toDouble
-      exponentialDelay.min(maxDelay)
+      // In nanoseconds as a Double, so a large attempt number caps at maxDelay instead of overflowing
+      val exponentialNanos = baseDelay.toNanos * Math.pow(2, attemptNumber - 1)
+      if (exponentialNanos >= maxDelay.toNanos) maxDelay
+      else FiniteDuration(exponentialNanos.toLong, NANOSECONDS).toCoarsest
     }
   }
 }
@@ -130,10 +132,10 @@ private class ExponentialBackoff(
  */
 private class LinearBackoff(
   val maxAttempts: Int,
-  baseDelay: Duration
+  baseDelay: FiniteDuration
 ) extends RetryPolicy {
 
-  override def delayFor(attemptNumber: Int, error: LLMError): Duration = {
+  override def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration = {
     // Check for server-provided retry delay
     val serverDelay = error match {
       case re: RateLimitError => re.retryDelay
@@ -149,10 +151,10 @@ private class LinearBackoff(
  */
 private class FixedDelay(
   val maxAttempts: Int,
-  delay: Duration
+  delay: FiniteDuration
 ) extends RetryPolicy {
 
-  override def delayFor(attemptNumber: Int, error: LLMError): Duration = {
+  override def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration = {
     // Check for server-provided retry delay
     val serverDelay = error match {
       case re: RateLimitError => re.retryDelay
@@ -169,7 +171,7 @@ private class FixedDelay(
 private class NoRetry extends RetryPolicy {
   val maxAttempts: Int = 1
 
-  override def delayFor(attemptNumber: Int, error: LLMError): Duration =
+  override def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration =
     Duration.Zero
 
   override def isRetryable(error: LLMError): Boolean = false
@@ -180,11 +182,11 @@ private class NoRetry extends RetryPolicy {
  */
 private class CustomRetryPolicy(
   val maxAttempts: Int,
-  delayFn: (Int, LLMError) => Duration,
+  delayFn: (Int, LLMError) => FiniteDuration,
   retryableFn: LLMError => Boolean
 ) extends RetryPolicy {
 
-  override def delayFor(attemptNumber: Int, error: LLMError): Duration =
+  override def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration =
     delayFn(attemptNumber, error)
 
   override def isRetryable(error: LLMError): Boolean =

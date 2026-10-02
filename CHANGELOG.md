@@ -806,6 +806,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules inseparable; moving that one file broke the cycle.
 
 ### Removed
+- **Pre-baseline API cleanup, pass 6: typed times** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
+  A time the caller supplies is a `FiniteDuration` (a point in time an `Instant`), and names drop
+  their unit suffix. `RateLimitError.retryAfter` - documented as seconds, used as milliseconds -
+  `RecoverableError.retryDelay` and every retry consumer carry a `FiniteDuration`
+  (`RateLimitError("openai", 1.second)`); `resetTime` is an `Instant`; `ReliableClient` and
+  `ErrorRecovery.CircuitBreaker` take an `Instant` clock and sleep a `FiniteDuration`; the
+  reliability config, `RetryPolicy` delays and `TimeoutError` narrow `Duration` to
+  `FiniteDuration`; `AgentTimeoutError` carries a `FiniteDuration`. The Beta modules follow
+  (`timeoutMs` -> `timeout`, `delayMs` -> `delay`, `throttleSeconds` -> `throttle`, ...) in
+  `llm4s-agent-tools`, `llm4s-rag`, `llm4s-mcp`, `llm4s-image` and the workspace. Defaults,
+  HOCON keys and wire formats are unchanged. See the
+  [migration note](docs/reference/migration.md#pre-baseline-api-cleanup-pass-6).
 - **Pre-baseline API cleanup, pass 5** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
   The growth-prone data types (`CompletionOptions`, `Completion`, `StreamedChunk`, `TokenUsage`,
   `ModelCapabilities`, `ModelMetadata`, `ProviderConfigSpec`, `EmbeddingConfigSpec`,

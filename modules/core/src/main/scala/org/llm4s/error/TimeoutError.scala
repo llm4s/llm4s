@@ -1,6 +1,6 @@
 package org.llm4s.error
 
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * Raised when an operation exceeds its specified time limit.
@@ -25,7 +25,7 @@ import scala.concurrent.duration.Duration
  */
 final case class TimeoutError private (
   message: String,
-  timeoutDuration: Duration,
+  timeoutDuration: FiniteDuration,
   operation: String,
   cause: Option[Throwable],
   override val context: Map[String, String]
@@ -48,12 +48,12 @@ final case class TimeoutError private (
 object TimeoutError {
   def apply(
     message: String,
-    timeoutDuration: Duration,
+    timeoutDuration: FiniteDuration,
     operation: String,
     cause: Option[Throwable] = None,
     context: Map[String, String] = Map.empty
   ): TimeoutError = new TimeoutError(message, timeoutDuration, operation, cause, context)
 
-  def unapply(error: TimeoutError): Option[(String, Duration, String, Option[Throwable], Map[String, String])] =
+  def unapply(error: TimeoutError): Option[(String, FiniteDuration, String, Option[Throwable], Map[String, String])] =
     Some((error.message, error.timeoutDuration, error.operation, error.cause, error.context))
 }

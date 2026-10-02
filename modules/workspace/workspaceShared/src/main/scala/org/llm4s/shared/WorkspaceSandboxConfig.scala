@@ -31,7 +31,8 @@ final case class WorkspaceSandboxConfig(
   limits: WorkspaceLimits = WorkspaceSandboxConfig.DefaultLimits,
   excludePatterns: List[String] = WorkspaceSandboxConfig.DefaultExclusions,
   shellAllowed: Boolean = true,
-  defaultCommandTimeout: FiniteDuration = 30.seconds,
+  // The JSON key keeps its name and whole-second value, so client and runner versions interoperate
+  @upickle.implicits.key("defaultCommandTimeoutSeconds") defaultCommandTimeout: FiniteDuration = 30.seconds,
   readOnlyPaths: List[String] = Nil,
   allowedPaths: List[String] = Nil,
   networkAllowed: Boolean = false,

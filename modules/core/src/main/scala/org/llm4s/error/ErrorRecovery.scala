@@ -5,7 +5,7 @@ import org.llm4s.types._
 
 import scala.annotation.tailrec
 import java.time.Instant
-import scala.concurrent.duration.{ Duration, DurationInt, FiniteDuration }
+import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 
 /**
  * Advanced pattern matching for error recovery and intelligent retry logic.
@@ -83,7 +83,7 @@ object ErrorRecovery {
    */
   class CircuitBreaker[A](
     failureThreshold: Int = 5,
-    recoveryTimeout: Duration = 30.seconds,
+    recoveryTimeout: FiniteDuration = 30.seconds,
     clock: () => Instant = () => Instant.now()
   ) {
 

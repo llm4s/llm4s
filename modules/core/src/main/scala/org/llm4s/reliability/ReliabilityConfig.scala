@@ -1,6 +1,6 @@
 package org.llm4s.reliability
 
-import scala.concurrent.duration.{ Duration, DurationInt }
+import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 
 /**
  * Configuration for reliable LLM provider calls.
@@ -18,7 +18,7 @@ final case class ReliabilityConfig private (
   retryPolicy: RetryPolicy,
   circuitBreaker: CircuitBreakerConfig,
   rateLimit: RateLimitConfig,
-  deadline: Option[Duration],
+  deadline: Option[FiniteDuration],
   enabled: Boolean
 ) {
   def withEnabled(enabled: Boolean): ReliabilityConfig = copy(enabled = enabled)
@@ -40,10 +40,10 @@ final case class ReliabilityConfig private (
     copy(rateLimit = config)
 
   /** Set operation deadline */
-  def withDeadline(duration: Duration): ReliabilityConfig =
+  def withDeadline(duration: FiniteDuration): ReliabilityConfig =
     copy(deadline = Some(duration))
 
-  def withDeadline(deadline: Option[Duration]): ReliabilityConfig = copy(deadline = deadline)
+  def withDeadline(deadline: Option[FiniteDuration]): ReliabilityConfig = copy(deadline = deadline)
 
   /** Remove deadline */
   def withoutDeadline: ReliabilityConfig =
@@ -57,7 +57,7 @@ object ReliabilityConfig {
     retryPolicy: RetryPolicy = RetryPolicy.exponentialBackoff(),
     circuitBreaker: CircuitBreakerConfig = CircuitBreakerConfig.default,
     rateLimit: RateLimitConfig = RateLimitConfig.disabled,
-    deadline: Option[Duration] = Some(5.minutes),
+    deadline: Option[FiniteDuration] = Some(5.minutes),
     enabled: Boolean = true
   ): ReliabilityConfig =
     new ReliabilityConfig(retryPolicy, circuitBreaker, rateLimit, deadline, enabled)
@@ -101,7 +101,7 @@ object ReliabilityConfig {
  */
 final case class CircuitBreakerConfig private (
   failureThreshold: Int,
-  recoveryTimeout: Duration,
+  recoveryTimeout: FiniteDuration,
   successThreshold: Int
 ) {
 
@@ -110,7 +110,7 @@ final case class CircuitBreakerConfig private (
     copy(failureThreshold = threshold)
 
   /** Set recovery timeout */
-  def withRecoveryTimeout(timeout: Duration): CircuitBreakerConfig =
+  def withRecoveryTimeout(timeout: FiniteDuration): CircuitBreakerConfig =
     copy(recoveryTimeout = timeout)
 
   /** Set success threshold */
@@ -123,7 +123,7 @@ object CircuitBreakerConfig {
   /** Creates a [[CircuitBreakerConfig]]. Named arguments are the supported way to construct one. */
   def apply(
     failureThreshold: Int = 5,
-    recoveryTimeout: Duration = 30.seconds,
+    recoveryTimeout: FiniteDuration = 30.seconds,
     successThreshold: Int = 2
   ): CircuitBreakerConfig =
     new CircuitBreakerConfig(failureThreshold, recoveryTimeout, successThreshold)
