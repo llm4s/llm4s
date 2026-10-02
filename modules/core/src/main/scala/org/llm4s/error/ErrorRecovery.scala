@@ -49,8 +49,8 @@ object ErrorRecovery {
               sleepFn(delay)
               attempt(attemptNumber + 1)
 
-            case _: ServiceError with RecoverableError =>
-              sleepFn(baseDelay * attemptNumber.toLong)
+            case se: ServiceError =>
+              sleepFn(se.retryAfter.getOrElse(baseDelay * attemptNumber.toLong))
               attempt(attemptNumber + 1)
 
             case _: TimeoutError =>

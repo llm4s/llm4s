@@ -1,7 +1,7 @@
-// scalafix:off DisableSyntax.NoKeywordCatch
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.OpenAIConfigKeys
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -11,12 +11,8 @@ import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
 import ujson.{ Arr, Obj, read }
 
-import java.net.URI
-import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
-import java.nio.charset.StandardCharsets
-import java.time.Duration
+import scala.concurrent.duration.DurationInt
 import scala.util.Try
-import scala.util.control.NonFatal
 
 /**
  * OpenAI embedding provider implementation.
@@ -73,7 +69,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
    * @return configured EmbeddingProvider instance
    */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider = new EmbeddingProvider {
-    private val httpClient = HttpClient.newHttpClient()
+    private val httpClient = Llm4sHttpClient.create()
     private val logger     = LoggerFactory.getLogger(getClass)
 
     override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] = {
@@ -87,32 +83,20 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
       val url = s"${cfg.baseUrl}/v1/embeddings"
       logger.debug(s"[OpenAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
 
-      val httpRequest = HttpRequest
-        .newBuilder()
-        .uri(URI.create(url))
-        .header("Authorization", s"Bearer ${cfg.apiKey}")
-        .header("Content-Type", "application/json")
-        .timeout(Duration.ofMinutes(2))
-        .POST(HttpRequest.BodyPublishers.ofString(payload.render()))
-        .build()
+      val headers = Map("Authorization" -> s"Bearer ${cfg.apiKey}", "Content-Type" -> "application/json")
 
-      val respEither: Either[EmbeddingError, HttpResponse[String]] =
-        try Right(httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)))
-        catch {
-          case e: InterruptedException =>
-            Thread.currentThread().interrupt()
-            Left(
-              EmbeddingError(code = None, message = s"HTTP request interrupted: ${e.getMessage}", provider = "openai")
-            )
-          case NonFatal(e) =>
-            Left(EmbeddingError(code = None, message = s"HTTP request failed: ${e.getMessage}", provider = "openai"))
-        }
+      // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left
+      val respEither: Either[EmbeddingError, org.llm4s.http.HttpResponse] =
+        httpClient
+          .post(url, headers, payload.render(), timeout = 2.minutes)
+          .left
+          .map(e => EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "openai"))
 
       respEither.flatMap { response =>
-        response.statusCode() match {
+        response.statusCode match {
           case 200 =>
             Try {
-              val json     = read(response.body())
+              val json     = read(response.body)
               val vectors  = json("data").arr.map(r => r("embedding").arr.map(_.num).toVector).toSeq
               val metadata = Map("provider" -> "openai", "model" -> model, "count" -> input.size.toString)
 
@@ -132,7 +116,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
                 EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "openai")
               }
           case status =>
-            val body = Redaction.truncateForLog(response.body())
+            val body = Redaction.truncateForLog(response.body)
             logger.error(s"[OpenAIEmbeddingProvider] HTTP error: $body")
             Left(EmbeddingError(code = Some(status.toString), message = body, provider = "openai"))
         }

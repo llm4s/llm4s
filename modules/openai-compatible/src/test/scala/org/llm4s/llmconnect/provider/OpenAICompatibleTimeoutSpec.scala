@@ -8,8 +8,8 @@ import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.time.Duration
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
+import scala.concurrent.duration.*
 
 /**
  * Request timeouts on the shared client (#1132 follow-up).
@@ -27,15 +27,15 @@ class OpenAICompatibleTimeoutSpec extends AnyFlatSpec with Matchers with EitherV
     OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", baseUrl, None))
 
   "OpenAICompatibleClient" should "default to a two-minute request timeout and a five-minute stream timeout" in {
-    OpenAICompatibleClient.RequestTimeout shouldBe Duration.ofMinutes(2)
-    OpenAICompatibleClient.StreamTimeout shouldBe Duration.ofMinutes(5)
+    OpenAICompatibleClient.RequestTimeout shouldBe 2.minutes
+    OpenAICompatibleClient.StreamTimeout shouldBe 5.minutes
   }
 
-  it should "put the request timeout on complete's HTTP request" in {
+  it should "use those timeouts for its requests" in {
+    // That they reach the wire is shown below, against a server that never answers
     val client = new OpenAICompatibleClient(settings("http://localhost:1/v1"), OpenAICompatibleDialect.Standard)
     client.requestTimeout shouldBe OpenAICompatibleClient.RequestTimeout
-    client.buildRequest("{}", client.requestTimeout).timeout().get shouldBe Duration.ofMinutes(2)
-    client.buildRequest("{}", client.streamTimeout).timeout().get shouldBe Duration.ofMinutes(5)
+    client.streamTimeout shouldBe OpenAICompatibleClient.StreamTimeout
   }
 
   it should "give every dialect's client the same timeouts" in {
@@ -47,8 +47,8 @@ class OpenAICompatibleTimeoutSpec extends AnyFlatSpec with Matchers with EitherV
   /** A client whose timeouts are short enough to exercise in a test. */
   private def impatientClient(baseUrl: String) =
     new OpenAICompatibleClient(settings(baseUrl), OpenAICompatibleDialect.Standard) {
-      override protected[provider] def requestTimeout: Duration = Duration.ofMillis(300)
-      override protected[provider] def streamTimeout: Duration  = Duration.ofMillis(300)
+      override protected[provider] def requestTimeout: FiniteDuration = 300.millis
+      override protected[provider] def streamTimeout: FiniteDuration  = 300.millis
     }
 
   /** Runs `test` against a server that accepts each request and never answers it. */
@@ -65,11 +65,11 @@ class OpenAICompatibleTimeoutSpec extends AnyFlatSpec with Matchers with EitherV
     withSilentServer { baseUrl =>
       val started = System.nanoTime()
       val result  = impatientClient(baseUrl).complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions())
-      val elapsed = Duration.ofNanos(System.nanoTime() - started)
+      val elapsed = (System.nanoTime() - started).nanos
 
       result.isLeft shouldBe true
       result.left.value.message.toLowerCase should include("timed out")
-      elapsed should be < Duration.ofSeconds(5)
+      elapsed should be < 5.seconds
     }
   }
 

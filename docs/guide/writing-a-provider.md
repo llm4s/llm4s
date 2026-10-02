@@ -422,9 +422,10 @@ HttpErrorMapper.mapHttpError(
 Maps a non-2xx response to the standard error types - 401/403 `AuthenticationError`, 429
 `RateLimitError`, 400 `ValidationError`, anything else `ServiceError` - pulling a message out of
 common JSON error shapes, redacted and truncated. Retry and fallback logic keys off these types,
-so use it rather than inventing your own. Pass the response's `headers`: a 429's `Retry-After`
-(delta-seconds or an HTTP-date) becomes the `RateLimitError`'s `retryAfter`, a `FiniteDuration`, so
-retries wait as long as the provider asked rather than a guessed backoff.
+so use it rather than inventing your own. Pass the response's `headers`: a `Retry-After`
+(delta-seconds or an HTTP-date) becomes the error's `retryAfter`, a `FiniteDuration` - on a 429's
+`RateLimitError`, or a 503's (any other status's) `ServiceError` - so retries wait as long as the
+provider asked rather than a guessed backoff.
 
 ### `CostEstimator`
 

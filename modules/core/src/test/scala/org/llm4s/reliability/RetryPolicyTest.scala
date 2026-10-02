@@ -163,4 +163,19 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
 
     policy.isRetryable(error) shouldBe false
   }
+
+  test("every policy waits as long as a service error's Retry-After asks") {
+    val hinted = ServiceError(503, "test", "unavailable").withRetryAfter(7.seconds)
+    Seq(
+      RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second),
+      RetryPolicy.linearBackoff(maxAttempts = 3, baseDelay = 1.second),
+      RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.second)
+    ).foreach(policy => policy.delayFor(1, hinted) shouldBe 7.seconds)
+  }
+
+  test("a service error without Retry-After gets the policy's own backoff, not its 2s default") {
+    val unhinted = ServiceError(503, "test", "unavailable")
+    RetryPolicy.exponentialBackoff(maxAttempts = 4, baseDelay = 1.second).delayFor(3, unhinted) shouldBe 4.seconds
+    RetryPolicy.fixedDelay(maxAttempts = 3, delay = 5.seconds).delayFor(1, unhinted) shouldBe 5.seconds
+  }
 }

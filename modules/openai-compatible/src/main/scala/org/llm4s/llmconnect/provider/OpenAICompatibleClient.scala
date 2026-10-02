@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ValidationError
+import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
@@ -14,11 +15,9 @@ import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.util.Redaction
 
 import java.io.{ BufferedReader, InputStream, InputStreamReader }
-import java.net.URI
-import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
-import java.time.{ Duration, Instant }
-import scala.jdk.CollectionConverters.*
+import java.time.Instant
+import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 import scala.util.{ Try, Using }
 
 /**
@@ -55,7 +54,7 @@ class OpenAICompatibleClient(
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
-  private val httpClient = HttpClient.newHttpClient()
+  private val httpClient = Llm4sHttpClient.create()
   private val logger     = org.slf4j.LoggerFactory.getLogger(getClass)
   private val endpoint   = s"${settings.baseUrl}/chat/completions"
 
@@ -69,16 +68,17 @@ class OpenAICompatibleClient(
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
     renderRequest(conversation, options, stream = false).flatMap { requestText =>
-      send(requestText, HttpResponse.BodyHandlers.ofString(), requestTimeout)
+      httpClient
+        .post(endpoint, requestHeaders, requestText, requestTimeout)
         .tapLeft(error => recordExchange(startedAt, requestText, None, Left(error)))
         .flatMap { response =>
-          val body = response.body()
-          logger.debug(s"Response status: ${response.statusCode()}")
+          val body = response.body
+          logger.debug(s"Response status: ${response.statusCode}")
           logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
           val result =
-            if (response.statusCode() >= 200 && response.statusCode() < 300)
+            if (response.statusCode >= 200 && response.statusCode < 300)
               Try(parseCompletion(ujson.read(body))).toResult
-            else HttpErrorMapper.mapHttpError(response.statusCode(), body, providerName, headerMap(response))
+            else HttpErrorMapper.mapHttpError(response.statusCode, body, providerName, response.headers)
           recordExchange(startedAt, requestText, Some(body), result)
           result
         }
@@ -94,10 +94,9 @@ class OpenAICompatibleClient(
     renderRequest(conversation, options, stream = true).flatMap { requestText =>
       val rawStream = new StringBuilder
       val result =
-        send(requestText, HttpResponse.BodyHandlers.ofInputStream(), streamTimeout)
-          .flatMap(response =>
-            consumeStream(response.statusCode(), response.body(), rawStream, onChunk, headerMap(response))
-          )
+        httpClient
+          .postStream(endpoint, requestHeaders, requestText, streamTimeout)
+          .flatMap(response => consumeStream(response.statusCode, response.body, rawStream, onChunk, response.headers))
       recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), result)
       result
     }
@@ -122,7 +121,11 @@ class OpenAICompatibleClient(
           .getOrElse("<error body unreadable>")
       rawStream.append(errorBody)
       HttpErrorMapper.mapHttpError(statusCode, errorBody, providerName, headers)
-    } else Try(Using.resource(body)(readStream(_, rawStream, onChunk))).toResult.flatten
+    } else
+      // A failure while reading the open body is classified as a transport failure would be
+      Try(Using.resource(body)(readStream(_, rawStream, onChunk))).toEither.left
+        .map(HttpFailures.streamReadError(_, endpoint, streamTimeout))
+        .flatten
 
   /** Reads an SSE body to `[DONE]` or end of stream; the caller closes it. */
   private def readStream(
@@ -203,33 +206,16 @@ class OpenAICompatibleClient(
    * `OpenRouterClient` had not (#912), so an endpoint that accepted the connection and never
    * answered hung the caller. Scoped to the provider package so specs can shorten it.
    */
-  protected[provider] def requestTimeout: Duration = OpenAICompatibleClient.RequestTimeout
+  protected[provider] def requestTimeout: FiniteDuration = OpenAICompatibleClient.RequestTimeout
 
   /** The timeout `streamComplete` sends with its request. See [[requestTimeout]]. */
-  protected[provider] def streamTimeout: Duration = OpenAICompatibleClient.StreamTimeout
+  protected[provider] def streamTimeout: FiniteDuration = OpenAICompatibleClient.StreamTimeout
 
-  /** The HTTP request carrying `requestText`. Scoped to the provider package so specs can inspect it. */
-  protected[provider] def buildRequest(requestText: String, timeout: Duration): HttpRequest = {
-    val builder = HttpRequest
-      .newBuilder()
-      .uri(URI.create(endpoint))
-      .header("Content-Type", "application/json")
-      .timeout(timeout)
-    settings.apiKey.foreach(key => builder.header("Authorization", s"Bearer $key"))
-    dialect.headers.foreach((name, value) => builder.header(name, value))
-    builder.POST(HttpRequest.BodyPublishers.ofString(requestText)).build()
-  }
-
-  /** A JDK response's headers as the multi-valued map `HttpErrorMapper` reads. */
-  private def headerMap(response: HttpResponse[?]): Map[String, Seq[String]] =
-    response.headers().map().asScala.map((name, values) => name -> values.asScala.toSeq).toMap
-
-  private def send[T](
-    requestText: String,
-    bodyHandler: HttpResponse.BodyHandler[T],
-    timeout: Duration
-  ): Result[HttpResponse[T]] =
-    Try(httpClient.send(buildRequest(requestText, timeout), bodyHandler)).toResult
+  /** The headers every request carries. Scoped to the provider package so specs can inspect them. */
+  protected[provider] def requestHeaders: Map[String, String] =
+    Map("Content-Type" -> "application/json") ++
+      settings.apiKey.map(key => "Authorization" -> s"Bearer $key") ++
+      dialect.headers
 
   /**
    * The messages of `conversation` that go into a request: all of them, except an assistant
@@ -422,10 +408,10 @@ object OpenAICompatibleClient {
    * single internal default for now; configurable timeouts are
    * [[https://github.com/llm4s/llm4s/issues/712 #712]].
    */
-  val RequestTimeout: Duration = Duration.ofMinutes(2)
+  val RequestTimeout: FiniteDuration = 2.minutes
 
   /** The timeout on `streamComplete`'s request: five minutes, as in the clients this one replaced. */
-  val StreamTimeout: Duration = Duration.ofMinutes(5)
+  val StreamTimeout: FiniteDuration = 5.minutes
 
   /**
    * The tool calls seen so far in one stream, by their `index`.

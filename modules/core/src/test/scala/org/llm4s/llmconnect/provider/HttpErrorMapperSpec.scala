@@ -221,6 +221,31 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
     err.asInstanceOf[ServiceError].provider shouldBe "ollama"
   }
 
+  // ── Retry-After on 503 ───────────────────────────────────────────
+
+  private def serviceError(status: Int, headers: Map[String, Seq[String]]): ServiceError =
+    HttpErrorMapper.mapHttpError(status, "{}", provider, headers, clock) match {
+      case Left(err: ServiceError) => err
+      case other                   => fail(s"Expected ServiceError, got: $other")
+    }
+
+  "HttpErrorMapper.mapHttpError on 503" should "carry Retry-After as the service error's delay" in {
+    val err = serviceError(503, Map("Retry-After" -> Seq("120")))
+    err.retryAfter shouldBe Some(120.seconds)
+    err.retryDelay shouldBe Some(120.seconds)
+    err.context("retryAfter") shouldBe "120s"
+  }
+
+  it should "accept an HTTP-date Retry-After" in {
+    serviceError(503, Map("Retry-After" -> Seq("Thu, 01 Oct 2026 12:00:30 GMT"))).retryAfter shouldBe Some(30.seconds)
+  }
+
+  it should "keep the default delay, and no hint, without Retry-After" in {
+    val err = serviceError(503, Map.empty)
+    err.retryAfter shouldBe None
+    err.retryDelay shouldBe Some(ServiceError.DefaultRetryDelay)
+  }
+
   // ── Retry-After on 429 ───────────────────────────────────────────
 
   private def rateLimit(headers: Map[String, Seq[String]]): RateLimitError =

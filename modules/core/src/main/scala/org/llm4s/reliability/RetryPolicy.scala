@@ -51,6 +51,18 @@ sealed trait RetryPolicy {
 object RetryPolicy {
 
   /**
+   * The delay the provider asked for before retrying `error`, if it gave one: a rate limit's
+   * `retryDelay` (its `Retry-After`, else [[RateLimitError.DefaultRetryDelay]]), or a service
+   * error's explicit `retryAfter`. A service error without one gets the policy's own backoff,
+   * not its generic default.
+   */
+  private[reliability] def serverDelay(error: LLMError): Option[FiniteDuration] = error match {
+    case re: RateLimitError => re.retryDelay
+    case se: ServiceError   => se.retryAfter
+    case _                  => None
+  }
+
+  /**
    * Exponential backoff: 2^n * baseDelay.
    *
    * Example: baseDelay=1s → 1s, 2s, 4s, 8s, ...
@@ -111,20 +123,13 @@ private class ExponentialBackoff(
   maxDelay: FiniteDuration
 ) extends RetryPolicy {
 
-  override def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration = {
-    // Check for server-provided retry delay (e.g., Retry-After header)
-    val serverDelay = error match {
-      case re: RateLimitError => re.retryDelay
-      case _                  => None
-    }
-
-    serverDelay.getOrElse {
+  override def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration =
+    RetryPolicy.serverDelay(error).getOrElse {
       // In nanoseconds as a Double, so a large attempt number caps at maxDelay instead of overflowing
       val exponentialNanos = baseDelay.toNanos * Math.pow(2, attemptNumber - 1)
       if (exponentialNanos >= maxDelay.toNanos) maxDelay
       else FiniteDuration(exponentialNanos.toLong, NANOSECONDS).toCoarsest
     }
-  }
 }
 
 /**
@@ -135,15 +140,8 @@ private class LinearBackoff(
   baseDelay: FiniteDuration
 ) extends RetryPolicy {
 
-  override def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration = {
-    // Check for server-provided retry delay
-    val serverDelay = error match {
-      case re: RateLimitError => re.retryDelay
-      case _                  => None
-    }
-
-    serverDelay.getOrElse(baseDelay * attemptNumber)
-  }
+  override def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration =
+    RetryPolicy.serverDelay(error).getOrElse(baseDelay * attemptNumber)
 }
 
 /**
@@ -154,15 +152,8 @@ private class FixedDelay(
   delay: FiniteDuration
 ) extends RetryPolicy {
 
-  override def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration = {
-    // Check for server-provided retry delay
-    val serverDelay = error match {
-      case re: RateLimitError => re.retryDelay
-      case _                  => None
-    }
-
-    serverDelay.getOrElse(delay)
-  }
+  override def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration =
+    RetryPolicy.serverDelay(error).getOrElse(delay)
 }
 
 /**

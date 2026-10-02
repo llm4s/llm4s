@@ -67,7 +67,9 @@ object HttpErrorMapper {
           case None        => Left(RateLimitError(provider))
         }
       case 400 => Left(ValidationError("request", details))
-      case s   => Left(ServiceError(s, provider, details))
+      case s =>
+        val error = ServiceError(s, provider, details)
+        Left(retryAfter(headers, clock).fold(error)(error.withRetryAfter))
     }
   }
 

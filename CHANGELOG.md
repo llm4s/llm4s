@@ -113,6 +113,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **Every client sends through `Llm4sHttpClient`, and a 503's `Retry-After` is honoured**
+  ([#1133](https://github.com/llm4s/llm4s/issues/1133)). `CohereReranker`, the OpenAI and Ollama
+  embedding providers, the OpenAI and Anthropic vision clients and `OpenAICompatibleClient` called
+  the JDK `HttpClient` directly with their own error handling; they now share the one transport, so
+  a timeout, I/O failure or interruption is a `Left` (interrupt flag restored), and a stream that
+  fails mid-read is classified as `OllamaClient`'s and `GeminiClient`'s are. Their error types and
+  messages are unchanged. `ServiceError` gains `retryAfter` (and `withRetryAfter`), which
+  `HttpErrorMapper` fills from the response's `Retry-After`; every `RetryPolicy`, `ErrorRecovery`
+  and `LLMClientRetry` wait for it, and a service error without one keeps the policy's own backoff.
+  `Llm4sHttpClient.create(connectTimeout)` limits connecting separately from each request.
+  `OpenAICompatibleClient.RequestTimeout` and `StreamTimeout` are `FiniteDuration` (were
+  `java.time.Duration`).
 - **`llm4s-agent`: the agent runtime leaves `llm4s-core`** - the second slice 7 carve
   ([#1242](https://github.com/llm4s/llm4s/issues/1242), decision D4). `org.llm4s.agent` - `Agent`,
   `AgentState`, `AgentContext`, guardrails, handoffs, orchestration and streaming events - and

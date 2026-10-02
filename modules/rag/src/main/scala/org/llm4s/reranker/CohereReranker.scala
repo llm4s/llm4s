@@ -1,17 +1,13 @@
-// scalafix:off DisableSyntax.NoKeywordCatch
 package org.llm4s.reranker
 
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
 import ujson.{ Arr, Obj, read }
 
-import java.net.URI
-import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
-import java.nio.charset.StandardCharsets
-import java.time.Duration
+import scala.concurrent.duration.DurationInt
 import scala.util.Try
-import scala.util.control.NonFatal
 
 /**
  * Cohere Rerank API implementation.
@@ -27,7 +23,7 @@ import scala.util.control.NonFatal
  */
 class CohereReranker(config: RerankProviderConfig) extends Reranker {
 
-  private val httpClient = HttpClient.newHttpClient()
+  private val httpClient = Llm4sHttpClient.create()
   private val logger     = LoggerFactory.getLogger(getClass)
 
   override def rerank(request: RerankRequest): Result[RerankResponse] = {
@@ -45,30 +41,20 @@ class CohereReranker(config: RerankProviderConfig) extends Reranker {
 
     logger.debug(s"[CohereReranker] POST $url model=${config.model} docs=${request.documents.size} topN=$topN")
 
-    val httpRequest = HttpRequest
-      .newBuilder()
-      .uri(URI.create(url))
-      .header("Authorization", s"Bearer ${config.apiKey}")
-      .header("Content-Type", "application/json")
-      .timeout(Duration.ofMinutes(2))
-      .POST(HttpRequest.BodyPublishers.ofString(payload.render()))
-      .build()
+    val headers = Map("Authorization" -> s"Bearer ${config.apiKey}", "Content-Type" -> "application/json")
 
-    val respEither: Either[RerankError, HttpResponse[String]] =
-      try Right(httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)))
-      catch {
-        case e: InterruptedException =>
-          Thread.currentThread().interrupt()
-          Left(RerankError(code = None, message = s"HTTP request interrupted: ${e.getMessage}", provider = "cohere"))
-        case NonFatal(e) =>
-          Left(RerankError(code = None, message = s"HTTP request failed: ${e.getMessage}", provider = "cohere"))
-      }
+    // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left
+    val respEither: Either[RerankError, org.llm4s.http.HttpResponse] =
+      httpClient
+        .post(url, headers, payload.render(), timeout = 2.minutes)
+        .left
+        .map(e => RerankError(code = None, message = s"HTTP request failed: ${e.message}", provider = "cohere"))
 
     respEither.flatMap { response =>
-      response.statusCode() match {
+      response.statusCode match {
         case 200 =>
           Try {
-            val json = read(response.body())
+            val json = read(response.body)
             val results = json("results").arr.map { r =>
               val index = r("index").num.toInt
               val score = r("relevance_score").num
@@ -98,7 +84,7 @@ class CohereReranker(config: RerankProviderConfig) extends Reranker {
               )
             }
         case status =>
-          val body = Redaction.truncateForLog(response.body())
+          val body = Redaction.truncateForLog(response.body)
           logger.error(s"[CohereReranker] HTTP error: $body")
           Left(
             RerankError(

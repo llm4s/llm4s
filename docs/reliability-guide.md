@@ -334,7 +334,7 @@ The reliability layer automatically retries these errors:
 
 - ✅ `RateLimitError` - Respects `Retry-After` header
 - ✅ `TimeoutError` - Network timeouts
-- ✅ `ServiceError` - 5xx server errors
+- ✅ `ServiceError` - 5xx server errors; respects a 503's `Retry-After` header
 - ✅ `NetworkError` - Connection failures
 
 Non-retryable errors (fail immediately):

@@ -256,7 +256,13 @@ trait Llm4sHttpClient {
 object Llm4sHttpClient {
 
   /** Creates the default JDK-backed HTTP client. */
-  def create(): Llm4sHttpClient = new JdkHttpClient()
+  def create(): Llm4sHttpClient = new JdkHttpClient(None)
+
+  /**
+   * Creates the JDK-backed HTTP client with a limit on establishing each connection, separate
+   * from every request's own `timeout`.
+   */
+  def create(connectTimeout: FiniteDuration): Llm4sHttpClient = new JdkHttpClient(Some(connectTimeout))
 }
 
 /**
@@ -358,8 +364,11 @@ private[llm4s] object HttpFailures {
  * Never fails on non-2xx responses — the caller is responsible for
  * checking `statusCode`.
  */
-private[llm4s] class JdkHttpClient extends Llm4sHttpClient {
-  private val client = JHttpClient.newHttpClient()
+private[llm4s] class JdkHttpClient(connectTimeout: Option[FiniteDuration]) extends Llm4sHttpClient {
+  private val client =
+    connectTimeout.fold(JHttpClient.newHttpClient())(t =>
+      JHttpClient.newBuilder().connectTimeout(java.time.Duration.ofNanos(t.toNanos)).build()
+    )
 
   override def get(
     url: String,

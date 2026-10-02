@@ -1,4 +1,3 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.imageprocessing.provider.anthropicclient
 
 import org.llm4s.imageprocessing._
@@ -6,17 +5,13 @@ import org.llm4s.imageprocessing.config.AnthropicVisionConfig
 import org.llm4s.imageprocessing.provider.LocalImageProcessor
 import org.llm4s.media.{ ImageMediaType, MediaType }
 import org.llm4s.error.LLMError
+import org.llm4s.http.Llm4sHttpClient
 import ujson.read
 
-import java.net.URI
-import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
-import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Paths }
 import java.time.Instant
-import scala.jdk.DurationConverters.*
 import java.util.Base64
 import scala.util.Try
-import scala.util.control.NonFatal
 
 /**
  * Anthropic Claude Vision client for AI-powered image analysis.
@@ -28,10 +23,7 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
-  private val httpClient = HttpClient
-    .newBuilder()
-    .connectTimeout(config.connectTimeout.toJava)
-    .build()
+  private val httpClient = Llm4sHttpClient.create(connectTimeout = config.connectTimeout)
 
   /**
    * Analyzes an image using Anthropic's Claude Vision API.
@@ -191,62 +183,51 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
     prompt: String,
     mediaType: ImageMediaType
   ): Try[String] =
-    try {
-      // Use type-safe serialization
-      val requestBody = AnthropicRequestBody.serialize(
+    // Serializing is the only step that can throw; the HTTP client returns failures as a Left
+    Try(
+      AnthropicRequestBody.serialize(
         model = config.model,
         maxTokens = 1000,
         prompt = prompt,
         base64Image = base64Image,
         mediaType = mediaType
       )
+    ).flatMap { requestBody =>
+      val headers =
+        Map("Content-Type" -> "application/json", "x-api-key" -> config.apiKey, "anthropic-version" -> "2023-06-01")
+      httpClient.post(s"${config.baseUrl}/v1/messages", headers, requestBody, config.requestTimeout) match {
+        case Left(error) =>
+          scala.util.Failure(new RuntimeException(s"Anthropic API call failed - ${error.message}"))
+        case Right(response) =>
+          response.statusCode match {
+            case 200 =>
+              scala.util.Success(extractContentFromResponse(response.body))
+            case statusCode =>
+              val responseBody = response.body
+              val errorMessage =
+                Try(read(responseBody)).toOption
+                  .flatMap(js => js.obj.get("error"))
+                  .map { err =>
+                    val message   = err.obj.get("message").flatMap(_.strOpt)
+                    val errorType = err.obj.get("type").flatMap(_.strOpt)
+                    (message, errorType) match {
+                      case (Some(msg), Some(typ)) => s"$typ: $msg"
+                      case (Some(msg), None)      => msg
+                      case _                      => org.llm4s.util.Redaction.truncateForLog(responseBody)
+                    }
+                  }
+                  .map(d => s"Status $statusCode: $d")
+                  .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.truncateForLog(responseBody)}")
 
-      val httpRequest = HttpRequest
-        .newBuilder()
-        .uri(URI.create(s"${config.baseUrl}/v1/messages"))
-        .header("Content-Type", "application/json")
-        .header("x-api-key", config.apiKey)
-        .header("anthropic-version", "2023-06-01")
-        .timeout(config.requestTimeout.toJava)
-        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-        .build()
-
-      val response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-
-      response.statusCode() match {
-        case 200 =>
-          scala.util.Success(extractContentFromResponse(response.body()))
-        case statusCode =>
-          val responseBody = response.body()
-          val errorMessage =
-            Try(read(responseBody)).toOption
-              .flatMap(js => js.obj.get("error"))
-              .map { err =>
-                val message   = err.obj.get("message").flatMap(_.strOpt)
-                val errorType = err.obj.get("type").flatMap(_.strOpt)
-                (message, errorType) match {
-                  case (Some(msg), Some(typ)) => s"$typ: $msg"
-                  case (Some(msg), None)      => msg
-                  case _                      => org.llm4s.util.Redaction.truncateForLog(responseBody)
-                }
-              }
-              .map(d => s"Status $statusCode: $d")
-              .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.truncateForLog(responseBody)}")
-
-          // Log a truncated version to avoid leaking very large or sensitive payloads
-          logger.error(
-            "[AnthropicVisionClient] HTTP error {}: {}",
-            statusCode.asInstanceOf[AnyRef],
-            org.llm4s.util.Redaction.truncateForLog(responseBody)
-          )
-          scala.util.Failure(new RuntimeException(s"Anthropic API call failed - $errorMessage"))
+              // Log a truncated version to avoid leaking very large or sensitive payloads
+              logger.error(
+                "[AnthropicVisionClient] HTTP error {}: {}",
+                statusCode.asInstanceOf[AnyRef],
+                org.llm4s.util.Redaction.truncateForLog(responseBody)
+              )
+              scala.util.Failure(new RuntimeException(s"Anthropic API call failed - $errorMessage"))
+          }
       }
-    } catch {
-      case e: InterruptedException =>
-        Thread.currentThread().interrupt()
-        scala.util.Failure(e)
-      case NonFatal(e) =>
-        scala.util.Failure(e)
     }
 
   private def extractContentFromResponse(jsonResponse: String): String =

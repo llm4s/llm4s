@@ -1,6 +1,6 @@
-// scalafix:off DisableSyntax.NoKeywordCatch
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -10,12 +10,8 @@ import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
 import ujson.{ Obj, read }
 
-import java.net.URI
-import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
-import java.nio.charset.StandardCharsets
-import java.time.Duration
+import scala.concurrent.duration.DurationInt
 import scala.util.Try
-import scala.util.control.NonFatal
 
 /**
  * Embedding provider implementation for Ollama, a local model inference server.
@@ -67,7 +63,7 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   /** Creates an [[EmbeddingProvider]] backed by Ollama using the given configuration. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider = new EmbeddingProvider {
-    private val httpClient = HttpClient.newHttpClient()
+    private val httpClient = Llm4sHttpClient.create()
     private val logger     = LoggerFactory.getLogger(getClass)
 
     override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] = {
@@ -105,36 +101,23 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
 
       logger.debug(s"[OllamaEmbeddingProvider] POST $url model=$model text_length=${text.length}")
 
-      val builder = HttpRequest
-        .newBuilder()
-        .uri(URI.create(url))
-        .header("Content-Type", "application/json")
-        .timeout(Duration.ofMinutes(2))
-        .POST(HttpRequest.BodyPublishers.ofString(payload.render()))
+      val auth =
+        if (cfg.apiKey.nonEmpty && cfg.apiKey != "not-required") Map("Authorization" -> s"Bearer ${cfg.apiKey}")
+        else Map.empty
+      val headers = Map("Content-Type" -> "application/json") ++ auth
 
-      if (cfg.apiKey.nonEmpty && cfg.apiKey != "not-required") {
-        builder.header("Authorization", s"Bearer ${cfg.apiKey}")
-      }
-
-      val httpRequest = builder.build()
-
-      val respEither: Either[EmbeddingError, HttpResponse[String]] =
-        try Right(httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)))
-        catch {
-          case e: InterruptedException =>
-            Thread.currentThread().interrupt()
-            Left(
-              EmbeddingError(code = None, message = s"HTTP request interrupted: ${e.getMessage}", provider = "ollama")
-            )
-          case NonFatal(e) =>
-            Left(EmbeddingError(code = None, message = s"HTTP request failed: ${e.getMessage}", provider = "ollama"))
-        }
+      // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left
+      val respEither: Either[EmbeddingError, org.llm4s.http.HttpResponse] =
+        httpClient
+          .post(url, headers, payload.render(), timeout = 2.minutes)
+          .left
+          .map(e => EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "ollama"))
 
       respEither.flatMap { response =>
-        response.statusCode() match {
+        response.statusCode match {
           case 200 =>
             Try {
-              val json   = read(response.body())
+              val json   = read(response.body)
               val vector = json("embedding").arr.map(_.num).toVector
               vector
             }.toEither.left
@@ -143,7 +126,7 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
                 EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "ollama")
               }
           case status =>
-            val body = Redaction.truncateForLog(response.body())
+            val body = Redaction.truncateForLog(response.body)
             logger.error(s"[OllamaEmbeddingProvider] HTTP error: $body")
             Left(
               EmbeddingError(
