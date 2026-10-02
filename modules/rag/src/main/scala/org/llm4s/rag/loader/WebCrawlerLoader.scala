@@ -1,5 +1,7 @@
 package org.llm4s.rag.loader
 
+import org.llm4s.util.DurationRounding
+
 import org.llm4s.core.safety.NetworkSecurity
 import org.llm4s.error.NetworkError
 import org.llm4s.rag.loader.internal._
@@ -219,7 +221,7 @@ final case class WebCrawlerLoader(
       val connResult = Try {
         val uri           = new URI(url)
         val conn          = uri.toURL.openConnection().asInstanceOf[HttpURLConnection]
-        val timeoutMillis = math.min(config.timeout.toMillis, Int.MaxValue.toLong).toInt
+        val timeoutMillis = DurationRounding.ceilMillisInt(config.timeout)
         conn.setConnectTimeout(timeoutMillis)
         conn.setReadTimeout(timeoutMillis)
         conn.setRequestProperty("User-Agent", config.userAgent)

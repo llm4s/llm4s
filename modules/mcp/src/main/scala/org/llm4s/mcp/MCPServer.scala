@@ -1,5 +1,7 @@
 package org.llm4s.mcp
 
+import org.llm4s.util.DurationRounding
+
 import com.sun.net.httpserver.{ HttpExchange, HttpHandler, HttpServer }
 import org.llm4s.toolapi.ToolFunction
 import org.slf4j.LoggerFactory
@@ -167,7 +169,7 @@ class MCPServer(
       // Close all open SSE connections gracefully
       sseConnections.values().forEach(conn => Try(conn.queue.put(None)))
       sseConnections.clear()
-      s.stop(math.min(math.ceil(delay.toMillis / 1000.0), Int.MaxValue.toDouble).toInt)
+      s.stop(DurationRounding.ceilSecondsInt(delay))
       if (executorService != null) {
         executorService.shutdown()
         Try {

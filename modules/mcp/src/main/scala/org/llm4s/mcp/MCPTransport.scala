@@ -1,6 +1,8 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch, DisableSyntax.NoKeywordFinally
 package org.llm4s.mcp
 
+import org.llm4s.util.DurationRounding
+
 import scala.util.{ Try, Success, Failure }
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.{ CompletableFuture, ConcurrentHashMap, TimeUnit }
@@ -657,7 +659,7 @@ class StdioTransportImpl(
   // Timeout for server responses (30 seconds)
   private val RESPONSE_TIMEOUT_MS = 30000L
   // Timeout for server startup
-  private val STARTUP_TIMEOUT_MS = startupTimeout.toMillis
+  private val STARTUP_TIMEOUT_MS = DurationRounding.ceilMillis(startupTimeout)
 
   logger.info(s"StdioTransport($name) initialized with command: ${command.mkString(" ")}")
 

@@ -18,4 +18,10 @@ private[llm4s] object WireDurations {
     val seconds = d.toSeconds
     if (d > seconds.seconds) seconds + 1 else seconds
   }
+
+  /** `d` in whole milliseconds, rounded up, so a positive timeout never becomes `waitFor(0)`. */
+  def toWholeMillis(d: FiniteDuration): Long = {
+    val millis = d.toMillis
+    if (d > millis.millis) millis + 1 else millis
+  }
 }

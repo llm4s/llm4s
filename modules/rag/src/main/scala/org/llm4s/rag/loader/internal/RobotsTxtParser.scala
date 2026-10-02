@@ -1,5 +1,7 @@
 package org.llm4s.rag.loader.internal
 
+import org.llm4s.util.DurationRounding
+
 import java.net.{ HttpURLConnection, URI }
 import java.util.regex.Pattern
 import scala.collection.mutable
@@ -174,7 +176,7 @@ object RobotsTxtParser {
       val uri  = new URI(parsed.scheme, null, parsed.host, parsed.port, "/robots.txt", null, null)
       val conn = uri.toURL.openConnection().asInstanceOf[HttpURLConnection]
 
-      val timeoutMillis = math.min(timeout.toMillis, Int.MaxValue.toLong).toInt
+      val timeoutMillis = DurationRounding.ceilMillisInt(timeout)
       conn.setConnectTimeout(timeoutMillis)
       conn.setReadTimeout(timeoutMillis)
       conn.setRequestProperty("User-Agent", userAgent)

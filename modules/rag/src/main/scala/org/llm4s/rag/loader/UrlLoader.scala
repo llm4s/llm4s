@@ -1,5 +1,7 @@
 package org.llm4s.rag.loader
 
+import org.llm4s.util.DurationRounding
+
 import org.llm4s.core.safety.NetworkSecurity
 import org.llm4s.error.NetworkError
 
@@ -94,7 +96,7 @@ final case class UrlLoader(
     scala.util.Try {
       val uri           = new URI(url)
       val conn          = uri.toURL.openConnection().asInstanceOf[HttpURLConnection]
-      val timeoutMillis = math.min(timeout.toMillis, Int.MaxValue.toLong).toInt
+      val timeoutMillis = DurationRounding.ceilMillisInt(timeout)
       conn.setConnectTimeout(timeoutMillis)
       conn.setReadTimeout(timeoutMillis)
       conn.setInstanceFollowRedirects(false)

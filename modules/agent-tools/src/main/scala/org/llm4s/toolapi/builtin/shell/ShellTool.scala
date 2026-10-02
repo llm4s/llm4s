@@ -1,5 +1,7 @@
 package org.llm4s.toolapi.builtin.shell
 
+import org.llm4s.util.DurationRounding
+
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
 import upickle.default._
@@ -165,7 +167,7 @@ object ShellTool {
       stderrReader.start()
 
       // Wait for process to complete with timeout
-      val completed = process.waitFor(config.timeout.toMillis, TimeUnit.MILLISECONDS)
+      val completed = process.waitFor(DurationRounding.ceilMillis(config.timeout), TimeUnit.MILLISECONDS)
 
       val (exitCode, timedOut) = if (!completed) {
         process.destroyForcibly()

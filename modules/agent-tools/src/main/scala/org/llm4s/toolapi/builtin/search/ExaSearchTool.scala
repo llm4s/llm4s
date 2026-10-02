@@ -1,6 +1,8 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.toolapi.builtin.search
 
+import org.llm4s.util.DurationRounding
+
 import org.llm4s.toolapi._
 import upickle.default._
 import org.llm4s.config.ExaSearchToolConfig
@@ -469,7 +471,9 @@ object ExaSearchTool {
       "text" -> ujson.Obj("maxCharacters" -> ujson.Num(config.maxCharacters))
     )
     contents("maxAgeHours") = ujson.Num(config.maxAgeHours)
-    config.livecrawlTimeout.foreach(timeout => contents("livecrawlTimeout") = ujson.Num(timeout.toMillis.toDouble))
+    config.livecrawlTimeout.foreach(timeout =>
+      contents("livecrawlTimeout") = ujson.Num(DurationRounding.ceilMillis(timeout).toDouble)
+    )
 
     val body = ujson.Obj(
       "query"      -> ujson.Str(query),

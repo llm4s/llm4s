@@ -777,7 +777,7 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
-    val timeoutMs = timeout.getOrElse(config.defaultCommandTimeout).toMillis
+    val timeoutMs = org.llm4s.shared.WireDurations.toWholeMillis(timeout.getOrElse(config.defaultCommandTimeout))
     val env       = environment.getOrElse(Map.empty)
 
     // --- Security fix (Issue #787): direct argument-vector execution ----------

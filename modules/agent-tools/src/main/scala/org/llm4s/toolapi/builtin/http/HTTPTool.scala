@@ -1,5 +1,7 @@
 package org.llm4s.toolapi.builtin.http
 
+import org.llm4s.util.DurationRounding
+
 import org.llm4s.core.safety.UsingOps.using
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
@@ -250,7 +252,7 @@ object HTTPTool {
 
       // Configure connection
       connection.setRequestMethod(method.toUpperCase)
-      val timeoutMillis = math.min(config.timeout.toMillis, Int.MaxValue.toLong).toInt
+      val timeoutMillis = DurationRounding.ceilMillisInt(config.timeout)
       connection.setConnectTimeout(timeoutMillis)
       connection.setReadTimeout(timeoutMillis)
       // Auto-redirects are always disabled; the makeRequest loop handles
