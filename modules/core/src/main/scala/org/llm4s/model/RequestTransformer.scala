@@ -124,103 +124,93 @@ final private[model] class DefaultRequestTransformer(
     options: CompletionOptions,
     dropUnsupported: Boolean
   ): Result[CompletionOptions] = {
-
-    val capabilities = getCapabilities(modelId)
-    var transformed  = options
-    val errors       = scala.collection.mutable.ListBuffer[String]()
-
-    // 1. Check temperature constraints
-    capabilities.temperatureConstraint.foreach { case (min, max) =>
-      if (options.temperature < min || options.temperature > max) {
-        if (dropUnsupported) {
-          logger.debug(
-            s"Model $modelId: adjusting temperature from ${options.temperature} to $min (allowed range: $min-$max)"
-          )
-          transformed = transformed.withTemperature(min)
-        } else {
-          errors += s"Temperature ${options.temperature} not allowed for $modelId (must be between $min and $max)"
-        }
+    val found = violations(modelId, options, getCapabilities(modelId))
+    if (dropUnsupported)
+      Right(found.foldLeft(options) { (adjusted, violation) =>
+        logger.debug(s"Model $modelId: ${violation.dropping}")
+        violation.drop(adjusted)
+      })
+    else
+      found.flatMap(_.error) match {
+        case Nil    => Right(options)
+        case errors => Left(ValidationError(errors.mkString("; "), "options"))
       }
+  }
+
+  /**
+   * An option the model does not support.
+   *
+   * @param drop     removes or adjusts it, when unsupported options may be dropped
+   * @param dropping describes `drop`, for the debug log
+   * @param error    why the options are invalid when they may not be dropped; `None` when the
+   *                 option is sent anyway
+   */
+  final private case class Violation(
+    drop: CompletionOptions => CompletionOptions,
+    dropping: String,
+    error: Option[String]
+  )
+
+  /** The options `capabilities` rule out, in the order their errors are reported. */
+  private def violations(
+    modelId: String,
+    options: CompletionOptions,
+    capabilities: ModelCapabilities
+  ): List[Violation] = {
+    val disallowed = capabilities.disallowedParams.getOrElse(Set.empty)
+
+    val temperature = capabilities.temperatureConstraint.collect {
+      case (min, max) if options.temperature < min || options.temperature > max =>
+        Violation(
+          _.withTemperature(min),
+          s"adjusting temperature from ${options.temperature} to $min (allowed range: $min-$max)",
+          Some(s"Temperature ${options.temperature} not allowed for $modelId (must be between $min and $max)")
+        )
     }
 
-    // 2. Check disallowed parameters
-    capabilities.disallowedParams.foreach { disallowed =>
-      // Check top_p
-      if (disallowed.contains("top_p") && options.topP != 1.0) {
-        if (dropUnsupported) {
-          logger.debug(s"Model $modelId: dropping top_p (not supported)")
-          transformed = transformed.withTopP(1.0)
-        } else {
-          errors += s"top_p parameter not supported for $modelId"
-        }
-      }
+    val topP = Option.when(disallowed.contains("top_p") && options.topP != 1.0)(
+      Violation(_.withTopP(1.0), "dropping top_p (not supported)", Some(s"top_p parameter not supported for $modelId"))
+    )
 
-      // Check presence_penalty
-      if (disallowed.contains("presence_penalty") && options.presencePenalty != 0.0) {
-        if (dropUnsupported) {
-          logger.debug(s"Model $modelId: dropping presence_penalty (not supported)")
-          transformed = transformed.withPresencePenalty(0.0)
-        } else {
-          errors += s"presence_penalty parameter not supported for $modelId"
-        }
-      }
+    val presencePenalty = Option.when(disallowed.contains("presence_penalty") && options.presencePenalty != 0.0)(
+      Violation(
+        _.withPresencePenalty(0.0),
+        "dropping presence_penalty (not supported)",
+        Some(s"presence_penalty parameter not supported for $modelId")
+      )
+    )
 
-      // Check frequency_penalty
-      if (disallowed.contains("frequency_penalty") && options.frequencyPenalty != 0.0) {
-        if (dropUnsupported) {
-          logger.debug(s"Model $modelId: dropping frequency_penalty (not supported)")
-          transformed = transformed.withFrequencyPenalty(0.0)
-        } else {
-          errors += s"frequency_penalty parameter not supported for $modelId"
-        }
-      }
-    }
+    val frequencyPenalty = Option.when(disallowed.contains("frequency_penalty") && options.frequencyPenalty != 0.0)(
+      Violation(
+        _.withFrequencyPenalty(0.0),
+        "dropping frequency_penalty (not supported)",
+        Some(s"frequency_penalty parameter not supported for $modelId")
+      )
+    )
 
-    // 3. Check function calling support
-    if (options.tools.nonEmpty && !capabilities.supportsFunctionCalling.getOrElse(true)) {
-      if (dropUnsupported) {
-        logger.debug(s"Model $modelId: dropping tools (function calling not supported)")
-        transformed = transformed.withTools(Seq.empty)
-      } else {
-        errors += s"Function calling not supported for $modelId"
-      }
-    }
+    val tools = Option.when(options.tools.nonEmpty && !capabilities.supportsFunctionCalling.getOrElse(true))(
+      Violation(
+        _.withTools(Seq.empty),
+        "dropping tools (function calling not supported)",
+        Some(s"Function calling not supported for $modelId")
+      )
+    )
 
-    // 4. Check response format (structured output) support.
-    //    Validation policy (explicit and consistent):
-    //    - Json: allowed fallback — when provider does not support structured output, we either drop (if dropUnsupported)
-    //      or keep and send (if !dropUnsupported). No validation error for Json so callers can still get best-effort.
-    //    - JsonSchema: strict — when provider does not support it and dropUnsupported=false, we return a validation
-    //      error so the caller knows the constraint was not applied. When dropUnsupported=true we drop it.
-    options.responseFormat.foreach {
+    // Structured output. Json is a best-effort fallback: when the model does not support it, it
+    // is dropped if allowed, else sent anyway with no error. JsonSchema is strict: the caller is
+    // told the constraint cannot be applied.
+    val responseFormat = options.responseFormat.filter(_ => capabilities.supportsResponseSchema.contains(false)).map {
       case ResponseFormat.Json =>
-        capabilities.supportsResponseSchema match {
-          case Some(false) =>
-            if (dropUnsupported) {
-              logger.debug(s"Model $modelId: dropping responseFormat (structured output not supported)")
-              transformed = transformed.withResponseFormat(None)
-            }
-          // else: keep and send (Json is allowed fallback; provider may ignore or accept)
-          case _ => () // true or None: keep and send
-        }
+        Violation(_.withResponseFormat(None), "dropping responseFormat (structured output not supported)", None)
       case _: ResponseFormat.JsonSchema =>
-        capabilities.supportsResponseSchema match {
-          case Some(false) =>
-            if (dropUnsupported) {
-              logger.debug(s"Model $modelId: dropping JsonSchema responseFormat (not supported)")
-              transformed = transformed.withResponseFormat(None)
-            } else {
-              errors += s"Structured output (JSON schema) not supported for model $modelId"
-            }
-          case _ => () // true or None: keep and send
-        }
+        Violation(
+          _.withResponseFormat(None),
+          "dropping JsonSchema responseFormat (not supported)",
+          Some(s"Structured output (JSON schema) not supported for model $modelId")
+        )
     }
 
-    if (errors.nonEmpty) {
-      Left(ValidationError(errors.mkString("; "), "options"))
-    } else {
-      Right(transformed)
-    }
+    List(temperature, topP, presencePenalty, frequencyPenalty, tools, responseFormat).flatten
   }
 
   override def transformMessages(

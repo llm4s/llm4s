@@ -1,6 +1,7 @@
 package org.llm4s.model
 
 import org.llm4s.llmconnect.model.{ CompletionOptions, ResponseFormat, SystemMessage, UserMessage }
+import org.llm4s.toolapi.{ Schema, ToolBuilder }
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -311,6 +312,42 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
   // ============================================
   // Response format (structured output) tests
   // ============================================
+
+  // ============================================
+  // Function calling tests
+  // ============================================
+
+  private def withPingTool: Either[String, CompletionOptions] =
+    ToolBuilder[Map[String, Any], String]("ping", "Answers pong", Schema.`object`[Map[String, Any]]("No parameters"))
+      .withHandler(_ => Right("pong"))
+      .buildSafe()
+      .left
+      .map(_.message)
+      .map(tool => CompletionOptions().withTools(Seq(tool)))
+
+  private def noFunctionCalling(service: ModelRegistryService): RequestTransformer =
+    RequestTransformer.withOverrides(
+      Map("test-model" -> ModelCapabilities(supportsFunctionCalling = Some(false))),
+      service
+    )
+
+  test("should reject tools when the model does not support function calling and dropUnsupported=false") {
+    val result = for {
+      service <- ModelRegistryTestSupport.defaultServiceResult().left.map(_.message)
+      options <- withPingTool
+    } yield noFunctionCalling(service).transformOptions("test-model", options, dropUnsupported = false)
+
+    result.value.left.value.message should include("Function calling not supported for test-model")
+  }
+
+  test("should drop tools when the model does not support function calling and dropUnsupported=true") {
+    val result = for {
+      service <- ModelRegistryTestSupport.defaultServiceResult().left.map(_.message)
+      options <- withPingTool
+    } yield noFunctionCalling(service).transformOptions("test-model", options, dropUnsupported = true)
+
+    result.value.value.tools shouldBe empty
+  }
 
   test("should drop Json responseFormat when supportsResponseSchema=false and dropUnsupported=true") {
     org.llm4s.model.ModelRegistryTestSupport.defaultServiceResult() match
