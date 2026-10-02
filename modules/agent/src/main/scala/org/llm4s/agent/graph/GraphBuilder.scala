@@ -1,11 +1,12 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.types.Result
+import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import scala.collection.mutable
+import scala.util.Try
 
 /**
  * Builds a typed graph. The builder issues every handle - nodes, joins - and validates the whole
@@ -38,11 +39,16 @@ final class GraphBuilder private (val id: String, val version: String):
   private val readKeys     = mutable.ArrayBuffer.empty[StateKey[?, ?]]
   private val problems     = mutable.ArrayBuffer.empty[String]
 
-  /** Issues a handle for a node consuming `I`; implement it before compiling. */
-  def declare[I](nodeId: String)(using codec: ReadWriter[I]): NodeRef[I] =
+  /**
+   * Issues a handle for a node consuming `I`; implement it before compiling. `inputVersion` is
+   * the version of `I`'s JSON shape in checkpoints, with migrations from earlier versions.
+   */
+  def declare[I](nodeId: String, inputVersion: SchemaVersion = SchemaVersion.initial)(using
+    codec: ReadWriter[I]
+  ): NodeRef[I] =
     if nodeId.isEmpty then problems += "a node id is empty"
     if declared.contains(NodeId(nodeId)) then problems += s"node '$nodeId' is declared twice"
-    val ref = new NodeRef[I](NodeId(nodeId), owner, codec)
+    val ref = new NodeRef[I](NodeId(nodeId), owner, codec, inputVersion)
     declared.update(ref.id, ref)
     ref
 
@@ -53,10 +59,12 @@ final class GraphBuilder private (val id: String, val version: String):
     else implemented.update(ref.id, NodeDef(ref, writes, node))
 
   /** Declares and implements a node in one step. */
-  def node[I](nodeId: String, writes: Set[StateKey[?, ?]] = Set.empty)(node: GraphNode[I])(using
-    codec: ReadWriter[I]
-  ): NodeRef[I] =
-    val ref = declare[I](nodeId)
+  def node[I](
+    nodeId: String,
+    writes: Set[StateKey[?, ?]] = Set.empty,
+    inputVersion: SchemaVersion = SchemaVersion.initial
+  )(node: GraphNode[I])(using codec: ReadWriter[I]): NodeRef[I] =
+    val ref = declare[I](nodeId, inputVersion)
     implement(ref, writes)(node)
     ref
 
@@ -164,8 +172,12 @@ object GraphBuilder:
 final private[graph] case class NodeDef[I](ref: NodeRef[I], writes: Set[StateKey[?, ?]], behaviour: GraphNode[I]):
   def run(input: Any, state: ThreadState, context: NodeContext): NodeResult =
     behaviour.run(input.asInstanceOf[I], state, context)
-  def encode(input: Any): ujson.Value = upickle.default.writeJs(input.asInstanceOf[I])(using ref.codec)
-  def decode(json: ujson.Value): Any  = upickle.default.read[I](json)(using ref.codec)
+  def encode(input: Any): VersionedJson =
+    VersionedJson(ref.inputVersion.current, upickle.default.writeJs(input.asInstanceOf[I])(using ref.codec))
+  def decode(json: VersionedJson): Result[Any] =
+    ref.inputVersion
+      .upgrade(json.version, json.value)
+      .flatMap(v => Try(upickle.default.read[I](v)(using ref.codec)).toResult)
 
 /** Runs a superstep's tasks; results come back in task order however the tasks interleave. */
 private[graph] trait TaskExecutor:

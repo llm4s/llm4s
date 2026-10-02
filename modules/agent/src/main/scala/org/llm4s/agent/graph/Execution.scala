@@ -52,14 +52,15 @@ enum Step[+O]:
  * state values are encoded with the codecs of the graph that wrote them, and decoded and checked
  * against the graph that restores them.
  *
- * This is the #1267 prototype's restore format; the versioned checkpoint DTO is #1268's.
+ * Each value records its codec's version and is migrated on restore; the snapshot itself is
+ * versioned by the [[Checkpoint]] that carries it.
  */
 final case class GraphSnapshot(
   graphId: String,
   graphVersion: String,
   fingerprint: String,
   superstep: Int,
-  state: Map[String, ujson.Value],
+  state: Map[String, VersionedJson],
   frontier: Vector[GraphSnapshot.PendingTask],
   staticJoins: Vector[GraphSnapshot.StaticArrivals],
   dynamicJoins: Vector[GraphSnapshot.Activation]
@@ -69,7 +70,7 @@ object GraphSnapshot:
   final case class PendingTask(
     taskId: String,
     nodeId: String,
-    input: ujson.Value,
+    input: VersionedJson,
     joinId: Option[String],
     fanOutTask: Option[String]
   ) derives ReadWriter

@@ -48,3 +48,34 @@ object GraphError:
   /** A snapshot does not match this compiled graph; every problem is listed. */
   final case class RestoreRejected(graphId: String, problems: List[String]) extends GraphError:
     override val message: String = s"Snapshot cannot be restored into graph '$graphId': ${problems.mkString("; ")}"
+
+  /** A checkpoint was written in a format this build does not read. */
+  final case class UnsupportedCheckpointFormat(found: Int, supported: Int) extends GraphError:
+    override val message: String = s"Checkpoint format $found is not supported; this build reads up to $supported"
+
+  /** A new checkpoint's parent is not the thread's latest: another writer advanced the thread. */
+  final case class CheckpointConflict(threadId: String, expected: Option[String], actual: Option[String])
+      extends GraphError:
+    override val message: String =
+      s"Thread '$threadId' is at checkpoint ${actual.getOrElse("<none>")}, not ${expected.getOrElse("<none>")}"
+
+  /** A commit is malformed, such as a pending write naming a checkpoint other than the latest. */
+  final case class InvalidCommit(threadId: String, reason: String) extends GraphError:
+    override val message: String = s"Invalid commit to thread '$threadId': $reason"
+
+  /** Events before `earliestSeq` were compacted away and cannot be replayed. */
+  final case class ReplayUnavailable(threadId: String, earliestSeq: Long) extends GraphError:
+    override val message: String = s"Thread '$threadId' can replay events from sequence $earliestSeq only"
+
+  /** `start` was called on a thread whose latest checkpoint is mid-execution; use `recover`. */
+  final case class IncompleteRun(threadId: String, checkpointId: String) extends GraphError:
+    override val message: String =
+      s"Thread '$threadId' has an incomplete execution at checkpoint $checkpointId; recover it before starting a new run"
+
+  /** `recover` was called on a thread with no incomplete execution. */
+  final case class NothingToRecover(threadId: String) extends GraphError:
+    override val message: String = s"Thread '$threadId' has no incomplete execution to recover"
+
+  /** The checkpointer refused or failed a commit; the run stops at its last durable checkpoint. */
+  final case class CheckpointWriteFailed(threadId: String, cause: LLMError) extends GraphError:
+    override val message: String = s"Checkpoint write for thread '$threadId' failed: ${cause.message}"

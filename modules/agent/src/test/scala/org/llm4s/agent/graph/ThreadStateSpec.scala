@@ -87,7 +87,7 @@ class ThreadStateSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   "StateKey" should "round-trip values through its state codec" in {
-    log.decode(log.encode(Vector("a", "b"))) shouldBe Vector("a", "b")
+    log.decode(log.encode(Vector("a", "b"))).value shouldBe Vector("a", "b")
     count.toString shouldBe "StateKey(count)"
   }
 }

@@ -87,10 +87,10 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
       GraphSnapshot.Activation("workers", "0.0", Vector("1.0", "1.1", "1.2"), Vector.empty)
     )
     atFanOut.frontier.map(t => (t.nodeId, t.input, t.joinId)) shouldBe Vector(
-      ("worker", ujson.Str("x"), Some("workers")),
-      ("worker", ujson.Str("y"), Some("workers")),
-      ("worker", ujson.Str("z"), Some("workers")),
-      ("c1", ujson.Null, None)
+      ("worker", VersionedJson(1, ujson.Str("x")), Some("workers")),
+      ("worker", VersionedJson(1, ujson.Str("y")), Some("workers")),
+      ("worker", VersionedJson(1, ujson.Str("z")), Some("workers")),
+      ("c1", VersionedJson(1, ujson.Null), None)
     )
     snapshotAt(3).staticJoins shouldBe Vector(GraphSnapshot.StaticArrivals("both", Vector("summarize")))
   }
@@ -112,10 +112,12 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
 
   it should "reject state that is unregistered or does not decode" in {
     val snapshot = snapshotAt(3)
-    problems(graph().restore(snapshot.copy(state = snapshot.state + ("ghost" -> ujson.Num(1))))) shouldBe
+    problems(
+      graph().restore(snapshot.copy(state = snapshot.state + ("ghost" -> VersionedJson(1, ujson.Num(1)))))
+    ) shouldBe
       List("state key 'ghost' is not registered with this graph")
     problems(
-      graph().restore(snapshot.copy(state = snapshot.state.updated("log", ujson.Str("not-a-list"))))
+      graph().restore(snapshot.copy(state = snapshot.state.updated("log", VersionedJson(1, ujson.Str("not-a-list")))))
     ).loneElement should startWith("state key 'log' does not decode")
   }
 
@@ -126,7 +128,7 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
       problems(graph().restore(snapshot.copy(frontier = tasks.toVector)))
 
     withFrontier(w0, w1, w2, c1.copy(nodeId = "gone")) shouldBe List("pending task 1.3 targets unknown node 'gone'")
-    withFrontier(w0, w1, w2.copy(input = ujson.Arr(3)), c1).loneElement should
+    withFrontier(w0, w1, w2.copy(input = VersionedJson(1, ujson.Arr(3))), c1).loneElement should
       startWith("pending task 1.2 input does not decode for node 'worker'")
     withFrontier(w0, w1, w2, c1.copy(joinId = Some("workers"))) should contain(
       "pending task 1.3 has half a join slot"

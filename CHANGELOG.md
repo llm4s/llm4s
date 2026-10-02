@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Durable graph runs: checkpoints and commit-gated event replay** (Experimental,
+  `org.llm4s.agent.graph`, [#1268](https://github.com/llm4s/llm4s/issues/1268)):
+  `GraphRuntime.start`/`recover`/`subscribe` over a `Checkpointer` SPI that owns each thread's latest
+  checkpoint, its per-task pending writes and a durable event log, committed atomically
+  (`InMemoryCheckpointer` is the reference store). Checkpoints are versioned JSON
+  (`Checkpoint.fromJson`), and state, update and node-input codecs carry a `SchemaVersion` with
+  migrations. Per-thread event sequence numbers are allocated in the commit, durable events are
+  delivered only after it in every durability mode (`Sync`, `Async`, `OnExit`), and live-only
+  progress is never replayed. `recover` continues an incomplete execution without re-running
+  completed siblings. Design: `docs/design/typed-agent-runtime-design.md` §4.3.
 - **Typed graph kernel prototype in `llm4s-agent`** (Experimental, `org.llm4s.agent.graph`)
   ([#1267](https://github.com/llm4s/llm4s/issues/1267), Stage 0 of
   [#1266](https://github.com/llm4s/llm4s/issues/1266)): typed state keys with operation-valued

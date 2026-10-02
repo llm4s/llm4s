@@ -27,3 +27,17 @@ object JoinId:
 object StateKeyId:
   def apply(value: String): StateKeyId         = value
   extension (id: StateKeyId) def value: String = id
+
+/** A conversation or workflow thread: the address of its checkpoints and event log. */
+opaque type ThreadId = String
+
+/** One execution attempt on a thread; `start`, `recover` and (later) `resume` each begin a new run. */
+opaque type RunId = String
+
+object ThreadId:
+  def apply(value: String): ThreadId         = value
+  extension (id: ThreadId) def value: String = id
+
+object RunId:
+  def apply(value: String): RunId         = value
+  extension (id: RunId) def value: String = id

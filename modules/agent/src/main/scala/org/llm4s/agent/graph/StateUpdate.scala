@@ -10,7 +10,7 @@ import org.llm4s.types.Result
  * an operation-valued key both operations apply. Updates from different tasks in one superstep
  * are never combined; the scheduler applies them task by task in frontier order.
  */
-final class StateUpdate private (private[graph] val operations: Vector[StateOperation]):
+final class StateUpdate private[graph] (private[graph] val operations: Vector[StateOperation]):
 
   /** Appends an update operation for `key`. */
   def update[A, U](key: StateKey[A, U], value: U): StateUpdate =

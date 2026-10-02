@@ -45,15 +45,7 @@ final class CompiledGraph[I, O] private[graph] (
   def run(input: I): RunResult[O] = runFrom(start(input))
 
   /** An execution with only the entry task ready, before any superstep has run. */
-  def start(input: I): Execution =
-    new Execution(
-      owner,
-      0,
-      ThreadState.empty(keys),
-      Vector(Task(TaskId("0.0"), entry.id, input, None)),
-      Map.empty,
-      Vector.empty
-    )
+  def start(input: I): Execution = startAt(0, ThreadState.empty(keys), input)
 
   /** Runs supersteps from `execution` to completion or failure. */
   @tailrec def runFrom(execution: Execution): RunResult[O] =
@@ -161,26 +153,110 @@ final class CompiledGraph[I, O] private[graph] (
       next
     )
 
+  private[graph] def taskExecutor: TaskExecutor = executor
+
+  private[graph] def isOwnerOf(execution: Execution): Boolean = execution.owner eq owner
+
+  /** An execution at `superstep` over `state` with only the entry task ready. */
+  private[graph] def startAt(superstep: Int, state: ThreadState, input: I): Execution =
+    new Execution(
+      owner,
+      superstep,
+      state,
+      Vector(Task(TaskId(s"$superstep.0"), entry.id, input, None)),
+      Map.empty,
+      Vector.empty
+    )
+
   private def superstep(execution: Execution): Result[Execution] =
-    val outcomes = executor.runAll(execution.frontier.map(task => () => runTask(task, execution)))
-    for
-      completed <- outcomes.foldLeft[Result[Vector[(Task, Command)]]](Right(Vector.empty))((done, outcome) =>
+    val outcomes = executor.runAll(execution.frontier.map { task => () =>
+      executeTask(task, execution, NodeEventSink.none).map(task -> _)
+    })
+    outcomes
+      .foldLeft[Result[Vector[(Task, Command)]]](Right(Vector.empty))((done, outcome) =>
         done.flatMap(cs => outcome.map(cs :+ _))
       )
-      _ <- completed.foldLeft[Result[Unit]](Right(()))((ok, tc) => ok.flatMap(_ => validate(tc._1, tc._2)))
-      state <- completed.foldLeft[Result[ThreadState]](Right(execution.state))((state, tc) =>
-        state.flatMap(_.applyUpdate(tc._2.update))
-      )
-    yield schedule(execution, completed, state)
+      .flatMap(commitSuperstep(execution, _))
 
-  private def runTask(task: Task, execution: Execution): Result[(Task, Command)] =
+  /** Runs one task against the committed snapshot and checks its command. */
+  private[graph] def executeTask(task: Task, execution: Execution, sink: NodeEventSink): Result[Command] =
     nodes.get(task.node) match
       case None => Left(GraphError.InvalidRoute(task.node, task.id, "node is not part of this graph"))
       case Some(node) =>
-        Try(node.run(task.input, execution.state, NodeContext(task.id, task.node, execution.superstep))).toResult match
-          case Left(thrown)                       => Left(GraphError.NodeFailed(task.node, task.id, thrown))
-          case Right(NodeResult.Fail(error))      => Left(GraphError.NodeFailed(task.node, task.id, error))
-          case Right(NodeResult.Continue(result)) => Right(task -> result)
+        val context = new NodeContext(task.id, task.node, execution.superstep, sink)
+        Try(node.run(task.input, execution.state, context)).toResult match
+          case Left(thrown)                        => Left(GraphError.NodeFailed(task.node, task.id, thrown))
+          case Right(NodeResult.Fail(error))       => Left(GraphError.NodeFailed(task.node, task.id, error))
+          case Right(NodeResult.Continue(command)) => validate(task, command).map(_ => command)
+
+  /**
+   * Applies every task's checked command in frontier order and schedules the next frontier.
+   * `completed` holds a command for every frontier task, in frontier order.
+   */
+  private[graph] def commitSuperstep(execution: Execution, completed: Vector[(Task, Command)]): Result[Execution] =
+    completed
+      .foldLeft[Result[ThreadState]](Right(execution.state))((state, tc) => state.flatMap(_.applyUpdate(tc._2.update)))
+      .map(schedule(execution, completed, _))
+
+  /** Completes a quiescent execution: checks joins and projects the output. */
+  private[graph] def finish(execution: Execution): RunResult[O] = complete(execution)
+
+  /** A completed task's command as data, for a checkpoint's pending writes. */
+  private[graph] def encodeWrite(checkpointId: String, task: Task, command: Command): Result[PendingWrite] =
+    Try(
+      PendingWrite(
+        checkpointId,
+        task.id.value,
+        task.node.value,
+        command.update.operations.map {
+          case update: StateOperation.Update[?, ?] =>
+            EncodedOperation.Update(update.key.id.value, update.key.encodeUpdate(update.value))
+          case StateOperation.Remove(key) => EncodedOperation.Remove(key.id.value)
+        },
+        command.routes.toVector.map {
+          case Route.Goto(to)       => EncodedRoute.Goto(to.id.value)
+          case Route.Send(to, data) => EncodedRoute.Send(to.id.value, nodes(to.id).encode(data))
+          case Route.FanOut(join, to, payloads) =>
+            EncodedRoute.FanOut(join.id.value, to.id.value, payloads.map(nodes(to.id).encode))
+        }
+      )
+    ).toResult
+
+  /** Rebinds a pending write to this graph's keys, nodes and joins, migrating encoded values. */
+  private[graph] def decodeWrite(write: PendingWrite): Result[Command] =
+    def problem(reason: String) =
+      GraphError.RestoreRejected(id, List(s"pending write for task ${write.taskId}: $reason"))
+    def node(nodeId: String) = nodes.get(NodeId(nodeId)).toRight(problem(s"unknown node '$nodeId'"))
+    def key(keyId: String)   = keys.get(StateKeyId(keyId)).toRight(problem(s"unknown state key '$keyId'"))
+    def sequence[A](results: Vector[Result[A]]): Result[Vector[A]] =
+      results.foldLeft[Result[Vector[A]]](Right(Vector.empty))((acc, r) => acc.flatMap(as => r.map(as :+ _)))
+    val operations = sequence(write.operations.map {
+      case EncodedOperation.Update(keyId, update) =>
+        key(keyId).flatMap { k =>
+          k.decodeUpdate(update)
+            .left
+            .map(e => problem(s"update to '$keyId' does not decode: ${e.message}"))
+            .map(u => StateOperation.Update(k.asInstanceOf[StateKey[Any, Any]], u): StateOperation)
+        }
+      case EncodedOperation.Remove(keyId) => key(keyId).map(StateOperation.Remove(_))
+    })
+    def payload(target: NodeDef[?], json: VersionedJson) =
+      target.decode(json).left.map(e => problem(s"input for '${target.ref.id.value}' does not decode: ${e.message}"))
+    val routes = sequence(write.routes.map {
+      case EncodedRoute.Goto(to) => node(to).map(n => Route.Goto(n.ref.asInstanceOf[NodeRef[Unit]]): Route)
+      case EncodedRoute.Send(to, data) =>
+        node(to).flatMap(n => payload(n, data).map(p => Route.Send(n.ref.asInstanceOf[NodeRef[Any]], p)))
+      case EncodedRoute.FanOut(joinId, to, payloads) =>
+        for
+          join <- dynamicJoins.get(JoinId(joinId)).toRight(problem(s"unknown dynamic join '$joinId'"))
+          n    <- node(to)
+          ps   <- sequence(payloads.map(payload(n, _)))
+        yield Route.FanOut(join, n.ref.asInstanceOf[NodeRef[Any]], ps)
+    })
+    for
+      ops <- operations
+      rs  <- routes
+    yield Command(new StateUpdate(ops), rs.toList)
 
   private def validate(task: Task, command: Command): Result[Unit] =
     val writes = nodes.get(task.node).fold(Set.empty[StateKey[?, ?]])(_.writes)
@@ -264,13 +340,15 @@ final class CompiledGraph[I, O] private[graph] (
         Try(output(execution.state)).toResult.flatten
           .fold(RunResult.Failed(execution.state, _), RunResult.Completed(execution.state, _, execution.superstep))
 
-  private def restoreValue(entry: (String, ujson.Value)): Either[String, (StateKeyId, Any)] =
+  private def restoreValue(entry: (String, VersionedJson)): Either[String, (StateKeyId, Any)] =
     val (keyId, json) = entry
     keys.get(StateKeyId(keyId)) match
       case None => Left(s"state key '$keyId' is not registered with this graph")
       case Some(key) =>
-        Try(key.decode(json)).toEither.left
-          .map(e => s"state key '$keyId' does not decode: ${e.getMessage}")
+        key
+          .decode(json)
+          .left
+          .map(e => s"state key '$keyId' does not decode: ${e.message}")
           .map(key.id -> _)
 
   private def restoreTask(pending: GraphSnapshot.PendingTask): Either[String, Task] =
@@ -278,8 +356,8 @@ final class CompiledGraph[I, O] private[graph] (
       node <- nodes
         .get(NodeId(pending.nodeId))
         .toRight(s"pending task ${pending.taskId} targets unknown node '${pending.nodeId}'")
-      input <- Try(node.decode(pending.input)).toEither.left.map { e =>
-        s"pending task ${pending.taskId} input does not decode for node '${pending.nodeId}': ${e.getMessage}"
+      input <- node.decode(pending.input).left.map { e =>
+        s"pending task ${pending.taskId} input does not decode for node '${pending.nodeId}': ${e.message}"
       }
       slot <- (pending.joinId, pending.fanOutTask) match
         case (None, None) => Right(None)
