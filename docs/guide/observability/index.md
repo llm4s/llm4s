@@ -415,6 +415,7 @@ LLM4S exposes a `Tracing` trait for custom instrumentation:
 
 ```scala
 import org.llm4s.trace.{Tracing, TraceEvent}
+import scala.concurrent.duration.*
 
 // Trace custom events
 tracing.traceEvent(TraceEvent.CustomEvent("cache_hit", ujson.Obj("key" -> "query_123")))

@@ -93,6 +93,8 @@ final case class Transcription(
 
 **Example:**
 ```scala
+import scala.concurrent.duration.*
+
 val trans = Transcription(
   text = "Hello world",
   language = Some("en"),
@@ -298,6 +300,8 @@ Providers now populate additional metadata:
 
 **Example of updated provider result:**
 ```scala
+import scala.concurrent.duration.*
+
 val transcription = Transcription(
   text = "Hello world",
   language = Some("en"),
