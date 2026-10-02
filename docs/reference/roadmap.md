@@ -157,6 +157,8 @@ Detailed technical designs are in [docs/design](https://github.com/llm4s/llm4s/t
 | Document | Purpose |
 |----------|---------|
 | [Agent Framework Roadmap](https://github.com/llm4s/llm4s/blob/main/docs/design/agent-framework-roadmap.md) | Agent feature comparison and implementation history. |
+| [Typed Agent Runtime Design](https://github.com/llm4s/llm4s/blob/main/docs/design/typed-agent-runtime-design.md) | Proposed graph runtime, Deep Agents capability roadmap, and compatibility/migration strategy. |
+| [Agent Framework Gap Analysis](https://github.com/llm4s/llm4s/blob/main/docs/design/agent-framework-gap-analysis-deepagents-2026.md) | Current LLM4S capability inventory and comparison with LangGraph and Deep Agents. |
 | [Phase 1.1: Conversations](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.1-functional-conversation-management.md) | Functional conversation management design. |
 | [Phase 1.2: Guardrails](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.2-guardrails-framework.md) | Input/output validation framework. |
 | [Phase 1.3: Handoffs](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.3-handoff-mechanism.md) | Agent-to-agent delegation. |
