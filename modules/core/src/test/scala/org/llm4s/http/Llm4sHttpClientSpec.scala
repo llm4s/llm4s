@@ -256,6 +256,13 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     instance.getClass.getSimpleName shouldBe "JdkHttpClient"
   }
 
+  "Llm4sHttpClient.close" should "shut the JDK client down, so a later request is a Left, not an exception" in {
+    val closing = Llm4sHttpClient.create()
+    closing.get(s"$baseUrl/echo").ok.statusCode shouldBe 200
+    closing.close()
+    closing.get(s"$baseUrl/echo").isLeft shouldBe true
+  }
+
   "Llm4sHttpClient.create(connectTimeout)" should "return a working client" in {
     val withConnectTimeout = Llm4sHttpClient.create(connectTimeout = 5.seconds)
     withConnectTimeout.get(s"$baseUrl/echo").ok.statusCode shouldBe 200

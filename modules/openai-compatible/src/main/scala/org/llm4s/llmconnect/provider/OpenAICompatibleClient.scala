@@ -54,9 +54,10 @@ class OpenAICompatibleClient(
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
-  private val httpClient = Llm4sHttpClient.create()
-  private val logger     = org.slf4j.LoggerFactory.getLogger(getClass)
-  private val endpoint   = s"${settings.baseUrl}/chat/completions"
+  // Scoped to the provider package so specs can substitute one
+  protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
+  private val logger                                  = org.slf4j.LoggerFactory.getLogger(getClass)
+  private val endpoint                                = s"${settings.baseUrl}/chat/completions"
 
   protected def clientDescription: String = s"${settings.displayName} client for model ${settings.model}"
   protected def providerName: String      = settings.providerName
@@ -211,11 +212,15 @@ class OpenAICompatibleClient(
   /** The timeout `streamComplete` sends with its request. See [[requestTimeout]]. */
   protected[provider] def streamTimeout: FiniteDuration = OpenAICompatibleClient.StreamTimeout
 
-  /** The headers every request carries. Scoped to the provider package so specs can inspect them. */
+  /**
+   * The headers every request carries. A header the dialect repeats is sent once, its values
+   * comma-joined in order, which HTTP defines as equivalent (RFC 9110 section 5.3). Scoped to the
+   * provider package so specs can inspect them.
+   */
   protected[provider] def requestHeaders: Map[String, String] =
     Map("Content-Type" -> "application/json") ++
       settings.apiKey.map(key => "Authorization" -> s"Bearer $key") ++
-      dialect.headers
+      OpenAICompatibleClient.combineRepeated(dialect.headers)
 
   /**
    * The messages of `conversation` that go into a request: all of them, except an assistant
@@ -393,14 +398,18 @@ class OpenAICompatibleClient(
 
   override def getReserveCompletion(): Int = settings.reserveCompletion
 
-  override protected def releaseResources(): Unit =
-    (httpClient: Any) match {
-      case c: AutoCloseable => c.close()
-      case _                => ()
-    }
+  override protected def releaseResources(): Unit = httpClient.close()
 }
 
 object OpenAICompatibleClient {
+
+  /** `headers` with each repeated name (matched case-insensitively) sent once, its values comma-joined in order. */
+  private[provider] def combineRepeated(headers: Seq[(String, String)]): Seq[(String, String)] =
+    headers
+      .groupBy(_._1.toLowerCase)
+      .values
+      .map(group => group.head._1 -> group.map(_._2).mkString(", "))
+      .toSeq
 
   /**
    * The timeout on `complete`'s request: two minutes, what the old `MistralClient` and

@@ -186,4 +186,131 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
       error.formatted should include("Anthropic API call failed")
     }
   }
+
+  // ── Replies the vision clients parse ───────────────────────────────
+
+  private def openAI(port: Int) =
+    new org.llm4s.imageprocessing.provider.OpenAIVisionClient(
+      org.llm4s.imageprocessing.config.OpenAIVisionConfig(
+        apiKey = "x",
+        baseUrl = s"http://localhost:$port",
+        requestTimeout = RequestTimeout,
+        connectTimeout = ConnectTimeout
+      )
+    )
+
+  private def anthropic(port: Int) =
+    new org.llm4s.imageprocessing.provider.anthropicclient.AnthropicVisionClient(
+      org.llm4s.imageprocessing.config.AnthropicVisionConfig(
+        apiKey = "x",
+        baseUrl = s"http://localhost:$port",
+        requestTimeout = RequestTimeout,
+        connectTimeout = ConnectTimeout
+      )
+    )
+
+  private val Description = """A person walks a dog past a car. The sign text says "open late"."""
+
+  test("OpenAIVisionClient: a 200 is parsed into description, tags, objects and text") {
+    val reply = ujson.Obj("choices" -> ujson.Arr(ujson.Obj("message" -> ujson.Obj("content" -> Description)))).render()
+    withTestServer(0, status = 200, body = reply, path = "/chat/completions") { port =>
+      withTempImageFile { imagePath =>
+        val client = openAI(port)
+        val result = client.analyzeImage(imagePath, Some("p")).getOrElse(fail("expected a result"))
+        result.description shouldBe Description
+        (result.tags should contain).allOf("person", "dog", "car")
+        (result.objects.map(_.label) should contain).allOf("person", "dog", "car")
+        result.text shouldBe Some("open late")
+        client.extractText(imagePath) shouldBe Right("open late")
+        client.detectObjects(imagePath).map(_.map(_.label).toSet) shouldBe Right(Set("person", "dog", "car"))
+        client.generateTags(imagePath).map(_.contains("dog")) shouldBe Right(true)
+      }
+    }
+  }
+
+  test("OpenAIVisionClient: a 200 whose body is not JSON is reported in the description") {
+    withTestServer(0, status = 200, body = "not json", path = "/chat/completions") { port =>
+      withTempImageFile { imagePath =>
+        openAI(port).analyzeImage(imagePath, Some("p")).map(_.description) shouldBe
+          Right("Could not parse response from OpenAI Vision API")
+      }
+    }
+  }
+
+  test("OpenAIVisionClient: a 200 without choices is a failure, not an exception") {
+    withTestServer(0, status = 200, body = """{"unexpected":true}""", path = "/chat/completions") { port =>
+      withTempImageFile { imagePath =>
+        val error = openAI(port).analyzeImage(imagePath, Some("p")).left.getOrElse(fail("expected a failure"))
+        error.formatted should include("choices")
+      }
+    }
+  }
+
+  test("OpenAIVisionClient: an error reply's code, type or message is reported") {
+    val cases = Seq(
+      """{"error":{"message":"bad image","code":"invalid_image"}}"""         -> "invalid_image: bad image",
+      """{"error":{"message":"bad image","type":"invalid_request_error"}}""" -> "invalid_request_error: bad image",
+      """{"error":{"message":"bad image"}}"""                                -> "Status 400: bad image",
+      """not json"""                                                         -> "Status 400: not json"
+    )
+    cases.foreach { case (body, expected) =>
+      withTestServer(0, status = 400, body = body, path = "/chat/completions") { port =>
+        withTempImageFile { imagePath =>
+          val error = openAI(port).analyzeImage(imagePath, Some("p")).left.getOrElse(fail("expected a failure"))
+          withClue(body)(error.formatted should include(expected))
+        }
+      }
+    }
+  }
+
+  test("AnthropicVisionClient: a 200 is parsed into description, tags, objects and text") {
+    val reply = ujson.Obj("content" -> ujson.Arr(ujson.Obj("type" -> "text", "text" -> Description))).render()
+    withTestServer(0, status = 200, body = reply, path = "/v1/messages") { port =>
+      withTempImageFile { imagePath =>
+        val client = anthropic(port)
+        val result = client.analyzeImage(imagePath, Some("p")).getOrElse(fail("expected a result"))
+        result.description shouldBe Description
+        (result.tags should contain).allOf("person", "dog", "car")
+        (result.objects.map(_.label) should contain).allOf("person", "dog", "car")
+        result.text shouldBe Some("open late")
+        client.extractText(imagePath) shouldBe Right("open late")
+        client.detectObjects(imagePath).map(_.map(_.label).toSet) shouldBe Right(Set("person", "dog", "car"))
+        client.generateTags(imagePath).map(_.contains("dog")) shouldBe Right(true)
+      }
+    }
+  }
+
+  test("AnthropicVisionClient: a 200 whose body is not JSON is reported in the description") {
+    withTestServer(0, status = 200, body = "not json", path = "/v1/messages") { port =>
+      withTempImageFile { imagePath =>
+        anthropic(port).analyzeImage(imagePath, Some("p")).map(_.description) shouldBe
+          Right("Could not parse response from Anthropic Vision API")
+      }
+    }
+  }
+
+  test("AnthropicVisionClient: a 200 without content is a failure, not an exception") {
+    withTestServer(0, status = 200, body = """{"unexpected":true}""", path = "/v1/messages") { port =>
+      withTempImageFile { imagePath =>
+        val error = anthropic(port).analyzeImage(imagePath, Some("p")).left.getOrElse(fail("expected a failure"))
+        error.formatted should include("content")
+      }
+    }
+  }
+
+  test("AnthropicVisionClient: an error reply's type or message is reported") {
+    val cases = Seq(
+      """{"error":{"type":"invalid_request_error","message":"bad image"}}""" -> "invalid_request_error: bad image",
+      """{"error":{"message":"bad image"}}"""                                -> "Status 400: bad image",
+      """not json"""                                                         -> "Status 400: not json"
+    )
+    cases.foreach { case (body, expected) =>
+      withTestServer(0, status = 400, body = body, path = "/v1/messages") { port =>
+        withTempImageFile { imagePath =>
+          val error = anthropic(port).analyzeImage(imagePath, Some("p")).left.getOrElse(fail("expected a failure"))
+          withClue(body)(error.formatted should include(expected))
+        }
+      }
+    }
+  }
 }

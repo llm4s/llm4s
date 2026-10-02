@@ -179,7 +179,7 @@ object MultipartPart {
  * The trait is deliberately not sealed, so tests can implement it. Methods added to it
  * after 1.0 will have default implementations, so a test double keeps compiling.
  */
-trait Llm4sHttpClient {
+trait Llm4sHttpClient extends AutoCloseable {
 
   def get(
     url: String,
@@ -251,6 +251,12 @@ trait Llm4sHttpClient {
     body: String = "",
     timeout: FiniteDuration = 10.minutes
   ): Result[StreamingHttpResponse]
+
+  /**
+   * Releases the connections and threads this client holds. A no-op unless the implementation
+   * holds any; a client that owns one of these closes it when it is itself closed.
+   */
+  override def close(): Unit = ()
 }
 
 object Llm4sHttpClient {
@@ -369,6 +375,13 @@ private[llm4s] class JdkHttpClient(connectTimeout: Option[FiniteDuration]) exten
     connectTimeout.fold(JHttpClient.newHttpClient())(t =>
       JHttpClient.newBuilder().connectTimeout(java.time.Duration.ofNanos(t.toNanos)).build()
     )
+
+  /** Closes the JDK client where the running JDK supports it (21+): its pool and executor. */
+  override def close(): Unit =
+    (client: Any) match {
+      case c: AutoCloseable => c.close()
+      case _                => ()
+    }
 
   override def get(
     url: String,
