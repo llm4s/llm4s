@@ -370,7 +370,14 @@ lazy val rag = (project in file("modules/rag"))
   // `llm4s-rag` itself does not depend on it - a user names whichever provider they ship.
   // `observability` is for `RAGASLangfuseObserver`, which sends through Langfuse's batch sender;
   // it carries no third-party dependency, so it costs a RAG user nothing (#1133).
-  .dependsOn(media, core % "compile->compile;test->test", knowledgegraph, observability, openai % "test->compile", providerTestkit % Test)
+  .dependsOn(
+    media,
+    core % "compile->compile;test->test",
+    knowledgegraph,
+    observability,
+    openai          % "test->compile",
+    providerTestkit % Test
+  )
   .settings(
     name := "llm4s-rag",
     commonSettings,
