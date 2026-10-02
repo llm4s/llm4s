@@ -297,6 +297,10 @@ final class CompiledGraph[I, O] private[graph] (
         val strays  = (arrived -- join.sources).map(_.value).toVector.sorted
         if strays.nonEmpty then
           Left(s"static join '${saved.joinId}' records arrivals from non-sources ${strays.mkString(", ")}")
+        // the scheduler keeps only partial activations: none is not open, all would have released
+        else if arrived.isEmpty then Left(s"static join '${saved.joinId}' records no arrivals")
+        else if arrived == join.sources then
+          Left(s"static join '${saved.joinId}' records every source, so it has already released")
         else Right(join.id -> arrived)
 
   private def restoreActivation(
@@ -320,7 +324,11 @@ final class CompiledGraph[I, O] private[graph] (
             .contains(saved.fanOutTask)
         }
       }
-      if unexpected.nonEmpty then
+      if activation.isComplete then
+        Left(
+          s"dynamic join '${saved.joinId}' (fan-out ${saved.fanOutTask}) has every arrival, so it has already released"
+        )
+      else if unexpected.nonEmpty then
         Left(
           s"dynamic join '${saved.joinId}' records unexpected arrivals ${unexpected.map(_.value).toVector.sorted.mkString(", ")}"
         )

@@ -150,6 +150,15 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
     error shouldBe a[GraphError.StateUpdateFailed]
   }
 
+  it should "fail, not throw, when a key's update function throws" in {
+    val b      = GraphBuilder("throwing-reducer", "v1")
+    val parsed = StateKey[Int, String]("parsed", 0)((_, raw) => Right(raw.toInt))
+    val start  = b.node[Unit]("start", writes = Set(parsed))((_, _, _) => continue(Command.empty.update(parsed, "x")))
+    val (state, error) = b.compile(start)(_.get(parsed)).value.run(()).failed
+    error shouldBe a[GraphError.StateUpdateFailed]
+    state.get(parsed).value shouldBe 0
+  }
+
   it should "reject routes to another graph's nodes and joins" in {
     val other     = GraphBuilder("other", "v1")
     val alien     = other.node[Unit]("alien")((_, _, _) => continue(Command.empty))

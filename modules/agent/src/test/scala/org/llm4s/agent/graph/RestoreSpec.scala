@@ -137,7 +137,7 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
     withFrontier(w0, w1, w2, w2, c1) shouldBe List("task 1.2 is pending more than once")
   }
 
-  it should "reject a dynamic activation that waits for work nothing will do" in {
+  it should "reject a dynamic activation that waits for work nothing will do, or has already released" in {
     val snapshot = snapshotAt(1)
     val dropped  = snapshot.copy(frontier = snapshot.frontier.filterNot(_.taskId == "1.1"))
     problems(graph().restore(dropped)) shouldBe List(
@@ -155,12 +155,18 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
       "pending task 1.1 belongs to no open activation of dynamic join 'workers'",
       "pending task 1.2 belongs to no open activation of dynamic join 'workers'"
     )
+    problems(
+      graph().restore(snapshot.copy(dynamicJoins = Vector(activation.copy(arrived = activation.expected))))
+    ) shouldBe
+      List("dynamic join 'workers' (fan-out 0.0) has every arrival, so it has already released")
+    problems(graph().restore(snapshot.copy(dynamicJoins = Vector(activation.copy(expected = Vector.empty))))) should
+      contain("dynamic join 'workers' (fan-out 0.0) has every arrival, so it has already released")
     problems(graph().restore(snapshot.copy(dynamicJoins = Vector(activation, activation)))) shouldBe List(
       "dynamic join 'workers' has more than one activation for fan-out 0.0"
     )
   }
 
-  it should "reject static arrivals for unknown joins or from non-sources" in {
+  it should "reject static arrivals for unknown joins, from non-sources, or that are not partial" in {
     val snapshot = snapshotAt(3)
     problems(
       graph().restore(snapshot.copy(staticJoins = Vector(GraphSnapshot.StaticArrivals("nope", Vector("c3")))))
@@ -171,5 +177,11 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
         snapshot.copy(staticJoins = Vector(GraphSnapshot.StaticArrivals("both", Vector("c1", "summarize"))))
       )
     ) shouldBe List("static join 'both' records arrivals from non-sources c1")
+    def withArrivals(arrived: String*) =
+      problems(
+        graph().restore(snapshot.copy(staticJoins = Vector(GraphSnapshot.StaticArrivals("both", arrived.toVector))))
+      )
+    withArrivals() shouldBe List("static join 'both' records no arrivals")
+    withArrivals("c3", "summarize") shouldBe List("static join 'both' records every source, so it has already released")
   }
 }

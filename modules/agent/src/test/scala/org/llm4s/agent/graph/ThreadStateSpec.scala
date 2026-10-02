@@ -67,6 +67,13 @@ class ThreadStateSpec extends AnyFlatSpec with Matchers with EitherValues {
     error.asInstanceOf[GraphError.StateUpdateFailed].keyId shouldBe bounded.id
   }
 
+  it should "turn an update function that throws into a failed update" in {
+    val throwing = StateKey[Int, String]("parsed", 0)((_, raw) => Right(raw.toInt))
+    val error    = state(throwing).applyUpdate(StateUpdate.update(throwing, "not a number")).left.value
+    error shouldBe a[GraphError.StateUpdateFailed]
+    error.message should include("not a number")
+  }
+
   it should "reject reads and writes of an unregistered key" in {
     val s = state(count)
     s.get(log).left.value shouldBe GraphError.UnknownStateKey(log.id)

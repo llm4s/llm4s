@@ -1,6 +1,8 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.types.Result
+import org.llm4s.types.{ Result, TryOps }
+
+import scala.util.Try
 
 /**
  * The committed state of a graph thread: a typed key/value store over the graph's registered
@@ -30,9 +32,8 @@ final class ThreadState private[graph] (
     else
       operation match
         case update: StateOperation.Update[?, ?] =>
-          update
-            .applyTo(values.getOrElse(update.key.id, update.key.initial))
-            .left
+          // the update function is user code: a throw is a failed update, not an escaped exception
+          Try(update.applyTo(values.getOrElse(update.key.id, update.key.initial))).toResult.flatten.left
             .map(cause => GraphError.StateUpdateFailed(update.key.id, cause))
             .map(next => new ThreadState(keys, values.updated(update.key.id, next)))
         case StateOperation.Remove(key) =>
