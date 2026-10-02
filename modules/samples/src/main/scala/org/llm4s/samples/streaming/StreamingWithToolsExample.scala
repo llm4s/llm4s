@@ -88,9 +88,9 @@ object StreamingWithToolsExample extends App {
     case ToolCallStarted(_, toolName, arguments, _) =>
       logger.info("[Tool] Calling '{}' with args: {}", toolName, arguments)
 
-    case ToolCallCompleted(_, toolName, result, success, durationMs, _) =>
+    case ToolCallCompleted(_, toolName, result, success, duration, _) =>
       val status = if (success) "SUCCESS" else "FAILED"
-      logger.info("[Tool] '{}' {} in {}ms", toolName, status, durationMs)
+      logger.info("[Tool] '{}' {} in {}ms", toolName, status, duration.toMillis)
       logger.info("[Tool] Result: {}", result)
 
     case ToolCallFailed(_, toolName, error, _) =>
@@ -101,9 +101,9 @@ object StreamingWithToolsExample extends App {
         logger.info("[Step {}] Completed (tool calls processed)", stepNumber)
       }
 
-    case AgentCompleted(state, totalSteps, durationMs, _) =>
+    case AgentCompleted(state, totalSteps, duration, _) =>
       logger.info("=" * 60)
-      logger.info("[Agent] Completed in {} steps, {}ms", totalSteps, durationMs)
+      logger.info("[Agent] Completed in {} steps, {}ms", totalSteps, duration.toMillis)
       logger.info("[Agent] Final status: {}", state.status)
       logger.info("=" * 60)
 

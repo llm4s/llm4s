@@ -2,31 +2,31 @@ package org.llm4s.rag.benchmark
 
 import org.llm4s.rag.evaluation.EvalSummary
 
+import java.time.Instant
+import scala.concurrent.duration.{ Duration, FiniteDuration }
+
 /**
  * Timing information for a benchmark phase.
  *
  * @param phase Name of the phase (e.g., "indexing", "search", "evaluation")
- * @param durationMs Duration in milliseconds
+ * @param duration How long the phase took
  * @param itemCount Number of items processed
  */
 final case class TimingInfo(
   phase: String,
-  durationMs: Long,
+  duration: FiniteDuration,
   itemCount: Int = 0
 ) {
 
-  /** Duration in seconds with 2 decimal places */
-  def durationSeconds: Double = durationMs / 1000.0
-
-  /** Average time per item in milliseconds (if itemCount > 0) */
-  def avgPerItemMs: Option[Double] =
-    if (itemCount > 0) Some(durationMs.toDouble / itemCount) else None
+  /** Average time per item (if itemCount > 0) */
+  def avgPerItem: Option[FiniteDuration] =
+    if (itemCount > 0) Some(duration / itemCount.toLong) else None
 
   /** Human-readable duration string */
   def formatted: String = {
-    val avgStr = avgPerItemMs.map(avg => f" (${avg}%.1fms/item)").getOrElse("")
-    if (durationMs < 1000) s"${durationMs}ms$avgStr"
-    else f"${durationSeconds}%.2fs$avgStr"
+    val avgStr = avgPerItem.map(avg => f" (${avg.toNanos / 1e6}%.1fms/item)").getOrElse("")
+    if (duration.toMillis < 1000) s"${duration.toMillis}ms$avgStr"
+    else f"${duration.toMillis / 1000.0}%.2fs$avgStr"
   }
 }
 
@@ -34,10 +34,9 @@ object TimingInfo {
 
   /** Create timing info with a measured block */
   def measure[A](phase: String, itemCount: Int = 0)(block: => A): (A, TimingInfo) = {
-    val start  = System.currentTimeMillis()
+    val start  = System.nanoTime()
     val result = block
-    val end    = System.currentTimeMillis()
-    (result, TimingInfo(phase, end - start, itemCount))
+    (result, TimingInfo(phase, Duration.fromNanos(System.nanoTime() - start), itemCount))
   }
 }
 
@@ -86,10 +85,7 @@ final case class ExperimentResult(
   def contextRecall: Option[Double] = metricScore("context_recall")
 
   /** Total time across all phases */
-  def totalTimeMs: Long = timings.map(_.durationMs).sum
-
-  /** Total time in seconds */
-  def totalTimeSeconds: Double = totalTimeMs / 1000.0
+  def totalTime: FiniteDuration = timings.map(_.duration).foldLeft(Duration.Zero)(_ + _)
 
   /** Get timing for a specific phase */
   def getTiming(phase: String): Option[TimingInfo] = timings.find(_.phase == phase)
@@ -139,15 +135,12 @@ object ExperimentResult {
 final case class BenchmarkResults(
   suite: BenchmarkSuite,
   results: Seq[ExperimentResult],
-  startTime: Long = System.currentTimeMillis(),
-  endTime: Long = System.currentTimeMillis()
+  startTime: Instant = Instant.now(),
+  endTime: Instant = Instant.now()
 ) {
 
-  /** Total benchmark duration in milliseconds */
-  def totalDurationMs: Long = endTime - startTime
-
-  /** Total benchmark duration in seconds */
-  def totalDurationSeconds: Double = totalDurationMs / 1000.0
+  /** Total benchmark duration */
+  def totalDuration: FiniteDuration = Duration.fromNanos(java.time.Duration.between(startTime, endTime).toNanos)
 
   /** Number of successful experiments */
   def successCount: Int = results.count(_.success)

@@ -8,7 +8,7 @@ import java.nio.file.{ Files, Path }
 import java.util.Base64
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Await
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.*
 
 /**
  * Comprehensive test suite for the Image Generation API.
@@ -83,7 +83,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
           status = HealthStatus.Healthy,
           message = "Mock service is always healthy",
           queueLength = Some(0),
-          averageGenerationTime = Some(100)
+          averageGenerationTime = Some(100.millis)
         )
       )
   }
@@ -386,7 +386,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
         status.status shouldBe HealthStatus.Healthy
         status.message shouldBe "Mock service is always healthy"
         status.queueLength shouldBe Some(0)
-        status.averageGenerationTime shouldBe Some(100)
+        status.averageGenerationTime shouldBe Some(100.millis)
       case Left(error) =>
         fail(s"Expected healthy status, but got error: $error")
     }

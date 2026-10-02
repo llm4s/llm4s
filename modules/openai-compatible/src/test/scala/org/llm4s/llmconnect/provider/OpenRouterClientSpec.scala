@@ -22,6 +22,7 @@ import org.scalatest.OptionValues._
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration.*
 
 class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
@@ -175,7 +176,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     exchange.responseBody.get should include("chatcmpl-openrouter-1")
     exchange.responseBody.get should include("logged via openrouter")
     exchange.errorMessage shouldBe empty
-    exchange.durationMs should be >= 0L
+    exchange.duration should be >= Duration.Zero
   }
 
   // ==========================================================================

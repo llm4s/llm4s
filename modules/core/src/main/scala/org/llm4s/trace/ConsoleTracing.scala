@@ -83,7 +83,7 @@ class ConsoleTracing extends Tracing {
           println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
           println(s"${CYAN}Tool: ${e.name}$RESET")
           println(s"${CYAN}Success: ${e.success}$RESET")
-          println(s"${CYAN}Duration: ${e.duration}ms$RESET")
+          println(s"${CYAN}Duration: ${e.duration.toMillis}ms$RESET")
           println(s"${YELLOW}Input: ${formatJson(e.input, 100)}$RESET")
           println(s"${GREEN}Output: ${formatJson(e.output, 100)}$RESET")
           println()
@@ -172,7 +172,7 @@ class ConsoleTracing extends Tracing {
           println(s"${GREEN}Images: ${e.imageCount}$RESET")
           println(s"${GREEN}Size: ${e.size}$RESET")
           println(s"${GREEN}Quality: ${e.quality}$RESET")
-          println(s"${GREEN}Duration: ${e.durationMs}ms$RESET")
+          println(s"${GREEN}Duration: ${e.duration.toMillis}ms$RESET")
           println(s"${GREEN}Success: ${e.success}$RESET")
           e.costUsd.foreach(c => println(s"${YELLOW}Cost (USD): $$${f"$c%.6f"}$RESET"))
           e.errorMessage.foreach(m => println(s"${RED}Error: $m$RESET"))
@@ -183,7 +183,7 @@ class ConsoleTracing extends Tracing {
           printSubHeader("RAG OPERATION COMPLETED", CYAN)
           println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
           println(s"${CYAN}Operation: ${e.operation}$RESET")
-          println(s"${CYAN}Duration: ${e.durationMs}ms$RESET")
+          println(s"${CYAN}Duration: ${e.duration.toMillis}ms$RESET")
           e.embeddingTokens.foreach(t => println(s"${CYAN}Embedding Tokens: $t$RESET"))
           e.llmPromptTokens.foreach(t => println(s"${CYAN}LLM Prompt Tokens: $t$RESET"))
           e.llmCompletionTokens.foreach(t => println(s"${CYAN}LLM Completion Tokens: $t$RESET"))
@@ -193,7 +193,7 @@ class ConsoleTracing extends Tracing {
     }.toEither.left.map(error => UnknownError(error.getMessage, error))
 
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
-    val event = TraceEvent.ToolExecuted(toolName, input, output, 0, true)
+    val event = TraceEvent.ToolExecuted(toolName, input, output, scala.concurrent.duration.Duration.Zero, true)
     traceEvent(event)
   }
 

@@ -2,6 +2,7 @@ package org.llm4s.speech.stt
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import scala.concurrent.duration.*
 
 /**
  * Integration tests for STT provider adapters validating metadata population.
@@ -9,7 +10,7 @@ import org.scalatest.matchers.should.Matchers
 class STTProviderAdapterIntegrationSpec extends AnyFlatSpec with Matchers {
 
   // ===== Whisper Provider Metadata Tests =====
-  "WhisperSpeechToText" should "populate processingTimeMs" in {
+  "WhisperSpeechToText" should "populate processingTime" in {
     val adapter = new WhisperSpeechToText()
     // Configure for mock testing
     // In production: the provider would track actual transcription time
@@ -34,7 +35,7 @@ class STTProviderAdapterIntegrationSpec extends AnyFlatSpec with Matchers {
   }
 
   // ===== Vosk Provider Metadata Tests =====
-  "VoskSpeechToText" should "populate processingTimeMs" in {
+  "VoskSpeechToText" should "populate processingTime" in {
     // VoskSpeechToText should track transcription time
     val adapter = new VoskSpeechToText()
     adapter.name shouldBe "vosk"
@@ -63,7 +64,7 @@ class STTProviderAdapterIntegrationSpec extends AnyFlatSpec with Matchers {
         WordTimestamp("world", 0.6, 1.0, speakerId = Some(1), confidence = Some(0.94))
       ),
       meta = None,
-      processingTimeMs = Some(245) // Time in milliseconds
+      processingTime = Some(245.millis) // Time in milliseconds
     )
 
     trans.text shouldBe "Hello world"
@@ -71,7 +72,7 @@ class STTProviderAdapterIntegrationSpec extends AnyFlatSpec with Matchers {
     trans.confidence shouldBe Some(0.95)
     trans.hasTimestamps shouldBe true
     trans.timestamps.length shouldBe 2
-    trans.processingTimeMs shouldBe Some(245)
+    trans.processingTime shouldBe Some(245.millis)
     trans.totalDuration shouldBe Some(1.0)
     trans.uniqueSpeakers shouldBe Set(1)
   }
@@ -86,7 +87,7 @@ class STTProviderAdapterIntegrationSpec extends AnyFlatSpec with Matchers {
     trans.language shouldBe None
     trans.confidence shouldBe None
     trans.timestamps shouldBe Nil
-    trans.processingTimeMs shouldBe None
+    trans.processingTime shouldBe None
   }
 
   // ===== Error Handling in Adapters =====
@@ -131,14 +132,14 @@ class STTProviderAdapterIntegrationSpec extends AnyFlatSpec with Matchers {
 
   // ===== Backward Compatibility =====
   "STT domain model" should "support construction without new fields" in {
-    // Old code creating STTOptions without processingTimeMs should still work
+    // Old code creating STTOptions without processingTime should still work
     val transOld = Transcription(
       text = "Hello",
       language = Some("en")
     )
 
     transOld.text shouldBe "Hello"
-    transOld.processingTimeMs shouldBe None
+    transOld.processingTime shouldBe None
   }
 
   it should "support optional fields independently" in {
@@ -186,38 +187,35 @@ class STTProviderAdapterIntegrationSpec extends AnyFlatSpec with Matchers {
 
   // ===== Performance Metrics =====
   "Processing time tracking" should "capture transcription duration" in {
-    val startTime        = System.currentTimeMillis()
-    val endTime          = startTime + 500 // Simulate 500ms transcription
-    val processingTimeMs = Some(endTime - startTime)
+    val processingTime = Some(500.millis) // Simulate a 500ms transcription
 
     val trans = Transcription(
       text = "Hello",
       language = None,
-      processingTimeMs = processingTimeMs
+      processingTime = processingTime
     )
 
-    trans.processingTimeMs shouldBe processingTimeMs
-    trans.processingTimeMs.get shouldBe 500L +- 100L // Allow some variance
+    trans.processingTime shouldBe processingTime
   }
 
   it should "track zero processing time" in {
     val trans = Transcription(
       text = "Hello",
       language = None,
-      processingTimeMs = Some(0)
+      processingTime = Some(0.millis)
     )
 
-    trans.processingTimeMs shouldBe Some(0)
+    trans.processingTime shouldBe Some(Duration.Zero)
   }
 
   it should "handle very long processing times" in {
-    val longTime = Some(3600000L) // 1 hour in milliseconds
+    val longTime = Some(1.hour)
     val trans = Transcription(
       text = "Hello",
       language = None,
-      processingTimeMs = longTime
+      processingTime = longTime
     )
 
-    trans.processingTimeMs shouldBe longTime
+    trans.processingTime shouldBe longTime
   }
 }

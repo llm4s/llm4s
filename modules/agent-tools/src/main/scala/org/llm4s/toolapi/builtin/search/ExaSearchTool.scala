@@ -1,9 +1,8 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.toolapi.builtin.search
 
-import org.llm4s.util.DurationRounding
-
 import org.llm4s.toolapi._
+import org.llm4s.util.DurationRounding
 import upickle.default._
 import org.llm4s.config.ExaSearchToolConfig
 import org.llm4s.error.{ ConfigurationError, ValidationError }

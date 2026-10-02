@@ -56,7 +56,7 @@ class BenchmarkRunner(
     logger.info(s"Starting benchmark suite: ${suite.name}")
     logger.info(s"Running ${suite.experiments.size} experiments")
 
-    val startTime = System.currentTimeMillis()
+    val startTime = java.time.Instant.now()
 
     // Load dataset
     val datasetResult = datasetManager.load(suite.datasetPath, suite.subsetSize, suite.seed)
@@ -79,7 +79,7 @@ class BenchmarkRunner(
         }
       }
 
-      val endTime = System.currentTimeMillis()
+      val endTime = java.time.Instant.now()
 
       Right(
         BenchmarkResults(
@@ -133,12 +133,16 @@ class BenchmarkRunner(
     val documents = extractDocuments(dataset)
 
     // Index documents
-    val indexStart = System.currentTimeMillis()
+    val indexStart = System.nanoTime()
     pipeline.indexDocuments(documents) match {
       case Left(error) =>
         Left(error)
       case Right(chunkCount) =>
-        val indexTiming = TimingInfo("indexing", System.currentTimeMillis() - indexStart, documents.size)
+        val indexTiming = TimingInfo(
+          "indexing",
+          scala.concurrent.duration.Duration.fromNanos(System.nanoTime() - indexStart),
+          documents.size
+        )
         timings += indexTiming
 
         // Generate answers for each sample

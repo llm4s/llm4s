@@ -66,16 +66,16 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
   private val everyEvent: Seq[TraceEvent] = Seq(
     TraceEvent.AgentInitialized("What is 1 + 2?", Vector("calculator")),
     TraceEvent.CompletionReceived("completion-1", "test-model", toolCalls = 1, content = ""),
-    TraceEvent.ToolExecuted("calculator", """{"a":1,"b":2}""", "3", duration = 5L, success = true),
-    TraceEvent.ToolExecuted("calculator", "{}", "missing argument 'a'", duration = 1L, success = false),
+    TraceEvent.ToolExecuted("calculator", """{"a":1,"b":2}""", "3", duration = 5.millis, success = true),
+    TraceEvent.ToolExecuted("calculator", "{}", "missing argument 'a'", duration = 1.millis, success = false),
     TraceEvent.ErrorOccurred(new IllegalStateException("boom", new RuntimeException("cause")), "agent step"),
     TraceEvent.TokenUsageRecorded(usage, "test-model", "completion"),
     agentStateEvent,
     TraceEvent.CustomEvent("custom", ujson.Obj("nested" -> ujson.Arr(1, 2, 3))),
     TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(100, 100), "embed-model", "indexing", inputCount = 4),
     TraceEvent.CostRecorded(0.002, "test-model", "completion", tokenCount = 20, costType = "total"),
-    TraceEvent.RAGOperationCompleted("answer", 150L, Some(100), Some(12), Some(8), Some(0.003)),
-    TraceEvent.ImageGenerationCompleted("image-model", "provider", "generate", 1, "1024x1024", "hd", 900L),
+    TraceEvent.RAGOperationCompleted("answer", 150.millis, Some(100), Some(12), Some(8), Some(0.003)),
+    TraceEvent.ImageGenerationCompleted("image-model", "provider", "generate", 1, "1024x1024", "hd", 900.millis),
     TraceEvent.CacheHit(similarity = 0.97, threshold = 0.9),
     TraceEvent.CacheMiss(TraceEvent.CacheMissReason.TtlExpired)
   )
@@ -105,7 +105,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
       tracing.traceTokenUsage(TokenUsage(Int.MaxValue, Int.MaxValue, Int.MaxValue), "test-model", "completion"),
       tracing.traceEmbeddingUsage(EmbeddingUsage(100, 100), "embed-model", "query", 1),
       tracing.traceCost(0.002, "test-model", "completion", 20, "total"),
-      tracing.traceRAGOperation("search", 12L, embeddingTokens = Some(10))
+      tracing.traceRAGOperation("search", 12.millis, embeddingTokens = Some(10))
     )
 
   /** Runs `body` capturing Scala's stdout and stderr, and every `org.llm4s.trace` log event at any level. */
@@ -148,7 +148,9 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
   it should "succeed for failed tool calls and empty tool call arguments" in {
     val tracing = new NoOpTracing()
 
-    tracing.traceEvent(TraceEvent.ToolExecuted("calculator", "{}", "error", 1L, success = false)) shouldBe Right(())
+    tracing.traceEvent(TraceEvent.ToolExecuted("calculator", "{}", "error", 1.millis, success = false)) shouldBe Right(
+      ()
+    )
     tracing.traceToolCall("", "", "") shouldBe Right(())
   }
 

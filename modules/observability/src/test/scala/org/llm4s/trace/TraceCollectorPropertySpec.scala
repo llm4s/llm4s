@@ -10,6 +10,7 @@ import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
+import scala.concurrent.duration.*
 
 import java.time.Instant
 
@@ -80,7 +81,7 @@ class TraceCollectorPropertySpec
       output   <- Gen.alphaStr
       duration <- Gen.choose(0L, 10000L)
       ts       <- genInstant
-    } yield TraceEvent.ToolExecuted(name, input, output, duration, success = true, ts)
+    } yield TraceEvent.ToolExecuted(name, input, output, duration.millis, success = true, ts)
 
   val genToolExecutedFailure: Gen[TraceEvent] =
     for {
@@ -89,7 +90,7 @@ class TraceCollectorPropertySpec
       output   <- Gen.alphaStr
       duration <- Gen.choose(0L, 10000L)
       ts       <- genInstant
-    } yield TraceEvent.ToolExecuted(name, input, output, duration, success = false, ts)
+    } yield TraceEvent.ToolExecuted(name, input, output, duration.millis, success = false, ts)
 
   val genErrorOccurred: Gen[TraceEvent] =
     for {
@@ -138,7 +139,7 @@ class TraceCollectorPropertySpec
       operation  <- genNonEmptyString
       durationMs <- Gen.choose(0L, 60000L)
       ts         <- genInstant
-    } yield TraceEvent.RAGOperationCompleted(operation, durationMs, timestamp = ts)
+    } yield TraceEvent.RAGOperationCompleted(operation, durationMs.millis, timestamp = ts)
 
   val genCacheHit: Gen[TraceEvent] =
     for {

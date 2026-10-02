@@ -7,6 +7,7 @@ import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import scala.concurrent.duration.*
 
 class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
   private val registryService        = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
@@ -70,14 +71,14 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
       correlationId = Some("corr-1"),
       startedAt = startedAt,
       completedAt = completedAt,
-      durationMs = 2000L,
+      duration = 2000.millis,
       outcome = ProviderExchangeOutcome.Success,
       requestBody = """{"prompt":"hello"}""",
       responseBody = Some("""{"response":"hi"}"""),
       errorMessage = None
     )
 
-    exchange.durationMs shouldBe 2000L
+    exchange.duration shouldBe 2000.millis
     exchange.outcome shouldBe ProviderExchangeOutcome.Success
     exchange.requestId shouldBe Some("req-1")
     exchange.correlationId shouldBe Some("corr-1")

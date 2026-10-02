@@ -39,7 +39,7 @@ object BenchmarkReport {
     // Summary
     sb.append(s"Started:     ${formatTime(results.startTime)}\n")
     sb.append(s"Completed:   ${formatTime(results.endTime)}\n")
-    sb.append(f"Duration:    ${results.totalDurationSeconds}%.2fs\n")
+    sb.append(f"Duration:    ${results.totalDuration.toMillis / 1000.0}%.2fs\n")
     sb.append(
       s"Experiments: ${results.results.size} (${results.successCount} passed, ${results.failureCount} failed)\n"
     )
@@ -116,7 +116,7 @@ object BenchmarkReport {
       // Timing
       sb.append("Timing:\n")
       result.timings.foreach(t => sb.append(f"  ${t.phase}%-15s ${t.formatted}\n"))
-      sb.append(f"  ${"Total"}%-15s ${result.totalTimeSeconds}%.2fs\n")
+      sb.append(f"  ${"Total"}%-15s ${result.totalTime.toMillis / 1000.0}%.2fs\n")
       sb.append("\n")
 
       // Stats
@@ -157,7 +157,7 @@ object BenchmarkReport {
       val timingsArr = ujson.Arr(result.timings.map { t =>
         ujson.Obj(
           "phase"      -> t.phase,
-          "durationMs" -> t.durationMs,
+          "durationMs" -> t.duration.toMillis,
           "itemCount"  -> t.itemCount
         )
       }: _*)
@@ -181,9 +181,9 @@ object BenchmarkReport {
         "datasetPath" -> results.suite.datasetPath
       ),
       "summary" -> ujson.Obj(
-        "startTime"       -> results.startTime,
-        "endTime"         -> results.endTime,
-        "durationMs"      -> results.totalDurationMs,
+        "startTime"       -> results.startTime.toEpochMilli,
+        "endTime"         -> results.endTime.toEpochMilli,
+        "durationMs"      -> results.totalDuration.toMillis,
         "experimentCount" -> results.results.size,
         "successCount"    -> results.successCount,
         "failureCount"    -> results.failureCount,
@@ -213,7 +213,7 @@ object BenchmarkReport {
     sb.append(s"| Metric | Value |\n")
     sb.append(s"|--------|-------|\n")
     sb.append(s"| Started | ${formatTime(results.startTime)} |\n")
-    sb.append(s"| Duration | ${results.totalDurationSeconds}s |\n")
+    sb.append(s"| Duration | ${results.totalDuration.toMillis / 1000.0}s |\n")
     sb.append(s"| Experiments | ${results.results.size} |\n")
     sb.append(s"| Passed | ${results.successCount} |\n")
     sb.append(s"| Failed | ${results.failureCount} |\n")
@@ -254,7 +254,7 @@ object BenchmarkReport {
       sb.append(s"- **Top K**: ${result.config.topK}\n")
       sb.append(s"- **Documents**: ${result.documentCount}\n")
       sb.append(s"- **Chunks**: ${result.chunkCount}\n")
-      sb.append(f"- **Total Time**: ${result.totalTimeSeconds}%.2fs\n")
+      sb.append(f"- **Total Time**: ${result.totalTime.toMillis / 1000.0}%.2fs\n")
       sb.append("\n")
     }
 
@@ -320,8 +320,8 @@ object BenchmarkReport {
     sb.toString()
   }
 
-  private def formatTime(timestamp: Long): String =
-    dateFormatter.format(Instant.ofEpochMilli(timestamp))
+  private def formatTime(timestamp: Instant): String =
+    dateFormatter.format(timestamp)
 }
 
 /**

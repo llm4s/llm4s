@@ -8,10 +8,11 @@ import org.llm4s.llmconnect.model.TokenUsage
 import org.slf4j.LoggerFactory
 
 import java.util.Base64
+import scala.concurrent.duration.*
 
 class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
 
-  private def simpleEvent = TraceEvent.ToolExecuted("test-tool", """{"q":"hello"}""", "result", 100, true)
+  private def simpleEvent = TraceEvent.ToolExecuted("test-tool", """{"q":"hello"}""", "result", 100.millis, true)
 
   private def withLangfuseLoggerSilenced[A](body: => A): A = {
     val logger   = LoggerFactory.getLogger(classOf[LangfuseTracing]).asInstanceOf[LBLogger]

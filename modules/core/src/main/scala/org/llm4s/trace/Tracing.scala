@@ -120,7 +120,7 @@ trait Tracing {
    * Trace completion of a RAG operation with metrics.
    *
    * @param operation Type: "index", "search", "answer", "evaluate"
-   * @param durationMs Duration in milliseconds
+   * @param duration Wall-clock duration
    * @param embeddingTokens Optional embedding token count
    * @param llmPromptTokens Optional LLM prompt tokens
    * @param llmCompletionTokens Optional LLM completion tokens
@@ -128,7 +128,7 @@ trait Tracing {
    */
   final def traceRAGOperation(
     operation: String,
-    durationMs: Long,
+    duration: scala.concurrent.duration.FiniteDuration,
     embeddingTokens: Option[Int] = None,
     llmPromptTokens: Option[Int] = None,
     llmCompletionTokens: Option[Int] = None,
@@ -136,7 +136,7 @@ trait Tracing {
   ): Result[Unit] = {
     val event = TraceEvent.RAGOperationCompleted(
       operation,
-      durationMs,
+      duration,
       embeddingTokens,
       llmPromptTokens,
       llmCompletionTokens,
@@ -218,7 +218,7 @@ private class CompositeTracing(tracers: Vector[Tracing]) extends Tracing {
   }
 
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
-    val event = TraceEvent.ToolExecuted(toolName, input, output, 0, true)
+    val event = TraceEvent.ToolExecuted(toolName, input, output, scala.concurrent.duration.Duration.Zero, true)
     traceEvent(event)
   }
 

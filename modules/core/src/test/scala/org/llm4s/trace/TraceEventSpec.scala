@@ -5,6 +5,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.time.Instant
+import scala.concurrent.duration.*
 
 /**
  * Tests for TraceEvent sealed trait and all event subtypes
@@ -69,18 +70,18 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
   // ============ ToolExecuted ============
 
   "TraceEvent.ToolExecuted" should "have correct event type" in {
-    val event = TraceEvent.ToolExecuted("calculator", "{\"a\": 1}", "3", 150L, true, fixedTimestamp)
+    val event = TraceEvent.ToolExecuted("calculator", "{\"a\": 1}", "3", 150.millis, true, fixedTimestamp)
 
     event.eventType shouldBe "tool_executed"
     event.name shouldBe "calculator"
     event.input shouldBe "{\"a\": 1}"
     event.output shouldBe "3"
-    event.duration shouldBe 150L
+    event.duration shouldBe 150.millis
     event.success shouldBe true
   }
 
   it should "serialize to JSON correctly" in {
-    val event = TraceEvent.ToolExecuted("calc", "input", "output", 100L, true, fixedTimestamp)
+    val event = TraceEvent.ToolExecuted("calc", "input", "output", 100.millis, true, fixedTimestamp)
 
     val json = event.toJson
 
@@ -93,7 +94,7 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "track failed executions" in {
-    val event = TraceEvent.ToolExecuted("tool", "input", "error", 50L, false, fixedTimestamp)
+    val event = TraceEvent.ToolExecuted("tool", "input", "error", 50.millis, false, fixedTimestamp)
 
     event.success shouldBe false
     event.toJson("success").bool shouldBe false
@@ -258,17 +259,17 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
   // ============ RAGOperationCompleted ============
 
   "TraceEvent.RAGOperationCompleted" should "have correct event type" in {
-    val event = TraceEvent.RAGOperationCompleted("search", 150L, timestamp = fixedTimestamp)
+    val event = TraceEvent.RAGOperationCompleted("search", 150.millis, timestamp = fixedTimestamp)
 
     event.eventType shouldBe "rag_operation_completed"
     event.operation shouldBe "search"
-    event.durationMs shouldBe 150L
+    event.duration shouldBe 150.millis
   }
 
   it should "serialize to JSON with optional fields" in {
     val event = TraceEvent.RAGOperationCompleted(
       "answer",
-      500L,
+      500.millis,
       Some(100),
       Some(200),
       Some(50),
@@ -288,7 +289,7 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "omit optional fields when not provided" in {
-    val event = TraceEvent.RAGOperationCompleted("index", 200L, timestamp = fixedTimestamp)
+    val event = TraceEvent.RAGOperationCompleted("index", 200.millis, timestamp = fixedTimestamp)
 
     val json = event.toJson
 
@@ -307,14 +308,14 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
     val events: Seq[TraceEvent] = Seq(
       TraceEvent.AgentInitialized("q", Vector.empty, fixedTimestamp),
       TraceEvent.CompletionReceived("id", "model", 0, "c", fixedTimestamp),
-      TraceEvent.ToolExecuted("t", "i", "o", 0L, true, fixedTimestamp),
+      TraceEvent.ToolExecuted("t", "i", "o", 0.millis, true, fixedTimestamp),
       TraceEvent.ErrorOccurred(new Exception(), "", fixedTimestamp),
       TraceEvent.TokenUsageRecorded(TokenUsage(0, 0, 0), "m", "o", fixedTimestamp),
       TraceEvent.AgentStateUpdated("s", 0, 0, timestamp = fixedTimestamp),
       TraceEvent.CustomEvent("n", ujson.Obj(), fixedTimestamp),
       TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(0, 0), "m", "o", 0, fixedTimestamp),
       TraceEvent.CostRecorded(0.0, "m", "o", 0, "t", fixedTimestamp),
-      TraceEvent.RAGOperationCompleted("o", 0L, timestamp = fixedTimestamp)
+      TraceEvent.RAGOperationCompleted("o", 0.millis, timestamp = fixedTimestamp)
     )
 
     events.foreach(event => event.timestamp shouldBe fixedTimestamp)
@@ -324,14 +325,14 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
     val events: Seq[TraceEvent] = Seq(
       TraceEvent.AgentInitialized("q", Vector.empty),
       TraceEvent.CompletionReceived("id", "model", 0, "c"),
-      TraceEvent.ToolExecuted("t", "i", "o", 0L, true),
+      TraceEvent.ToolExecuted("t", "i", "o", 0.millis, true),
       TraceEvent.ErrorOccurred(new Exception("e"), ""),
       TraceEvent.TokenUsageRecorded(TokenUsage(0, 0, 0), "m", "o"),
       TraceEvent.AgentStateUpdated("s", 0, 0),
       TraceEvent.CustomEvent("n", ujson.Obj()),
       TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(0, 0), "m", "o", 0),
       TraceEvent.CostRecorded(0.0, "m", "o", 0, "t"),
-      TraceEvent.RAGOperationCompleted("o", 0L)
+      TraceEvent.RAGOperationCompleted("o", 0.millis)
     )
 
     events.foreach { event =>

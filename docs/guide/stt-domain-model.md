@@ -74,7 +74,7 @@ final case class Transcription(
   confidence: Option[Double] = None,         // Overall confidence
   timestamps: List[WordTimestamp] = Nil,     // Word-level timings
   meta: Option[AudioMeta] = None,            // Source audio metadata
-  processingTimeMs: Option[Long] = None      // Transcription duration
+  processingTime: Option[FiniteDuration] = None  // Transcription duration
 )
 ```
 
@@ -101,7 +101,7 @@ val trans = Transcription(
     WordTimestamp("Hello", 0.0, 0.5, speakerId = Some(1), confidence = Some(0.92)),
     WordTimestamp("world", 0.6, 1.1, speakerId = Some(1), confidence = Some(0.84))
   ),
-  processingTimeMs = Some(245)
+  processingTime = Some(245.millis)
 )
 
 // Use helper methods
@@ -290,7 +290,7 @@ Providers now populate additional metadata:
 
 ```scala
 // WhisperSpeechToText and VoskSpeechToText
-// - Track processingTimeMs during transcription
+// - Track processingTime during transcription
 // - Extract confidence scores from output (when available)
 // - Extract word-level timestamps (when enableTimestamps=true)
 // - Handle diarization metadata (when available)
@@ -306,7 +306,7 @@ val transcription = Transcription(
     WordTimestamp("Hello", 0.0, 0.5, confidence = Some(0.92)),
     WordTimestamp("world", 0.6, 1.1, confidence = Some(0.84))
   ),
-  processingTimeMs = Some(234)       // Tracked by provider
+  processingTime = Some(234.millis)  // Tracked by provider
 )
 ```
 
@@ -387,9 +387,9 @@ result.map { trans =>
 val result = provider.transcribe(audio, options)
 
 result.map { trans =>
-  trans.processingTimeMs.foreach { ms =>
-    println(s"Transcription took ${ms}ms")
-    println(s"Average time per second of audio: ${ms / trans.totalDuration.getOrElse(1.0)}")
+  trans.processingTime.foreach { took =>
+    println(s"Transcription took ${took.toMillis}ms")
+    println(s"Average time per second of audio: ${took.toMillis / trans.totalDuration.getOrElse(1.0)}ms")
   }
 }
 ```
@@ -476,6 +476,6 @@ result match {
 | WordTimestamp.speakerId | Option[Int] | No | None |
 | WordTimestamp.confidence | Option[Double] | No | None |
 | Transcription.confidence | Option[Double] | No | None |
-| Transcription.processingTimeMs | Option[Long] | No | None |
+| Transcription.processingTime | Option[FiniteDuration] | No | None |
 | STTError.retryable | Boolean | Always | Variant-specific |
 | STTError.userFriendly | String | Always | Variant-specific |

@@ -7,6 +7,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable
+import scala.concurrent.duration.*
 
 /**
  * Tests for Tracing trait and implementations
@@ -81,7 +82,7 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     tracing.traceEvent("custom event string") shouldBe Right(())
     tracing.traceEmbeddingUsage(EmbeddingUsage(500, 500), "text-embedding-3-small", "indexing", 10) shouldBe Right(())
     tracing.traceCost(0.005, "gpt-4", "completion", 1000, "total") shouldBe Right(())
-    tracing.traceRAGOperation("search", 150L) shouldBe Right(())
+    tracing.traceRAGOperation("search", 150.millis) shouldBe Right(())
   }
 
   // ============ ConsoleTracing ============
@@ -120,13 +121,13 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     // Test each event type
     tracing.traceEvent(TraceEvent.AgentInitialized("query", Vector("tool1"))).isRight shouldBe true
     tracing.traceEvent(TraceEvent.CompletionReceived("id", "model", 0, "content")).isRight shouldBe true
-    tracing.traceEvent(TraceEvent.ToolExecuted("tool", "in", "out", 100L, true)).isRight shouldBe true
+    tracing.traceEvent(TraceEvent.ToolExecuted("tool", "in", "out", 100.millis, true)).isRight shouldBe true
     tracing.traceEvent(TraceEvent.ErrorOccurred(new Exception("e"), "ctx")).isRight shouldBe true
     tracing.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "o")).isRight shouldBe true
     tracing.traceEvent(TraceEvent.AgentStateUpdated("running", 5, 10)).isRight shouldBe true
     tracing.traceEvent(TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(100, 100), "m", "o", 5)).isRight shouldBe true
     tracing.traceEvent(TraceEvent.CostRecorded(0.001, "m", "o", 100, "t")).isRight shouldBe true
-    tracing.traceEvent(TraceEvent.RAGOperationCompleted("search", 150L)).isRight shouldBe true
+    tracing.traceEvent(TraceEvent.RAGOperationCompleted("search", 150.millis)).isRight shouldBe true
   }
 
   // ============ Tracing.create ============
@@ -277,13 +278,13 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val events = mutable.Buffer.empty[TraceEvent]
     val tracer = new TestTracing(events)
 
-    tracer.traceRAGOperation("search", 150L, Some(100), Some(200), Some(50), Some(0.003)) shouldBe Right(())
+    tracer.traceRAGOperation("search", 150.millis, Some(100), Some(200), Some(50), Some(0.003)) shouldBe Right(())
 
     events should have size 1
     events.head match {
       case recorded: TraceEvent.RAGOperationCompleted =>
         recorded.operation shouldBe "search"
-        recorded.durationMs shouldBe 150L
+        recorded.duration shouldBe 150.millis
         recorded.embeddingTokens shouldBe Some(100)
         recorded.llmPromptTokens shouldBe Some(200)
         recorded.llmCompletionTokens shouldBe Some(50)
@@ -320,7 +321,7 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     }
 
     def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
-      events += TraceEvent.ToolExecuted(toolName, input, output, 0L, true)
+      events += TraceEvent.ToolExecuted(toolName, input, output, 0.millis, true)
       Right(())
     }
 

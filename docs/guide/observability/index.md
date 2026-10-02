@@ -437,7 +437,7 @@ tracing.traceCost(
 // Trace RAG operations
 tracing.traceRAGOperation(
   operation = "search",
-  durationMs = 150,
+  duration = 150.millis,
   embeddingTokens = Some(128),
   llmPromptTokens = None,
   llmCompletionTokens = None,

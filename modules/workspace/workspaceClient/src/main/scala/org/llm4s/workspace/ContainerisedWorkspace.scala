@@ -113,8 +113,8 @@ class ContainerisedWorkspace(
           case CommandStartedMessage(commandId, command) =>
             logger.debug(s"Command started: $commandId - $command")
 
-          case CommandCompletedMessage(commandId, exitCode, durationMs) =>
-            logger.debug(s"Command completed: $commandId, exit=$exitCode, duration=${durationMs}ms")
+          case CommandCompletedMessage(commandId, exitCode, duration) =>
+            logger.debug(s"Command completed: $commandId, exit=$exitCode, duration=${duration.toMillis}ms")
 
           case ErrorMessage(error, code, commandId) =>
             logger.error(s"Received error message: $error (code: $code, commandId: $commandId)")

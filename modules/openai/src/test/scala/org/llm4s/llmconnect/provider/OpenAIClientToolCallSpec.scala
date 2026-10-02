@@ -11,6 +11,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration.*
 
 final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with EitherValues {
 
@@ -169,6 +170,6 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
     exchange.responseBody.get should include("chatcmpl-1")
     exchange.responseBody.get should include("logged ok")
     exchange.errorMessage shouldBe empty
-    exchange.durationMs should be >= 0L
+    exchange.duration should be >= Duration.Zero
   }
 }

@@ -241,14 +241,21 @@ class WorkspaceAgentProtocolSpec extends AnyFlatSpec with Matchers {
       stderr = "",
       exitCode = 0,
       isOutputTruncated = false,
-      durationMs = 150L
+      duration = 150.millis
     )
     val json   = write(response)
     val parsed = read[ExecuteCommandResponse](json)
 
     parsed.stdout shouldBe "output"
     parsed.exitCode shouldBe 0
-    parsed.durationMs shouldBe 150L
+    parsed.duration shouldBe 150.millis
+    ujson.read(json)("durationMs").num shouldBe 150
+  }
+
+  "CommandCompletedMessage" should "carry its duration as durationMs, in milliseconds" in {
+    val json = write(CommandCompletedMessage("cmd-1", 0, 2500.millis))
+    ujson.read(json)("durationMs").num shouldBe 2500
+    read[CommandCompletedMessage](json).duration shouldBe 2500.millis
   }
 
   "WorkspaceAgentErrorResponse" should "serialize with details" in {

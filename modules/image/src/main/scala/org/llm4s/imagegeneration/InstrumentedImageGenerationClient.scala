@@ -104,17 +104,17 @@ class InstrumentedImageGenerationClient(
   override def health(): Either[ImageGenerationError, ServiceStatus] =
     delegate.health()
 
-  /** Runs `operation`, pairing its result with the elapsed wall time in milliseconds. */
-  private def timed[A](operation: => A): (A, Long) = {
+  /** Runs `operation`, pairing its result with the elapsed wall time. */
+  private def timed[A](operation: => A): (A, FiniteDuration) = {
     val startNanos = System.nanoTime()
     val result     = operation
-    (result, Duration.fromNanos(System.nanoTime() - startNanos).toMillis)
+    (result, Duration.fromNanos(System.nanoTime() - startNanos))
   }
 
-  /** Runs a `Future`-producing `operation`, pairing its result with the elapsed wall time in milliseconds. */
-  private def timedAsync[A](operation: => Future[A])(implicit ec: ExecutionContext): Future[(A, Long)] = {
+  /** Runs a `Future`-producing `operation`, pairing its result with the elapsed wall time. */
+  private def timedAsync[A](operation: => Future[A])(implicit ec: ExecutionContext): Future[(A, FiniteDuration)] = {
     val startNanos = System.nanoTime()
-    operation.map(result => (result, Duration.fromNanos(System.nanoTime() - startNanos).toMillis))
+    operation.map(result => (result, Duration.fromNanos(System.nanoTime() - startNanos)))
   }
 
   private def errorKindFromImageError(err: ImageGenerationError): ErrorKind = err match {
@@ -133,9 +133,8 @@ class InstrumentedImageGenerationClient(
     result: Either[ImageGenerationError, Seq[GeneratedImage]],
     size: Option[ImageSize],
     quality: Option[String],
-    durationMs: Long
+    duration: FiniteDuration
   ): Unit = {
-    val durationFD = FiniteDuration(durationMs, MILLISECONDS)
     val qualityStr = quality.getOrElse("standard")
     val sizeStr    = size.map(_.description).getOrElse("unknown")
     val model      = config.model
@@ -146,7 +145,7 @@ class InstrumentedImageGenerationClient(
       case Left(err) => Outcome.Error(errorKindFromImageError(err))
     }
 
-    metrics.observeImageGeneration(providerName, model, operation, outcome, durationFD, imageCount)
+    metrics.observeImageGeneration(providerName, model, operation, outcome, duration, imageCount)
 
     // Cost estimation uses the requested size, not the actual provider-billed dimensions.
     // For models like dall-e-3 that normalize sizes, the estimate may differ from actual billing.
@@ -175,7 +174,7 @@ class InstrumentedImageGenerationClient(
       imageCount = imageCount,
       size = sizeStr,
       quality = qualityStr,
-      durationMs = durationMs,
+      duration = duration,
       costUsd = costUsd,
       success = result.isRight,
       errorMessage = result.left.toOption.map(_.message)

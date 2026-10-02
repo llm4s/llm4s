@@ -2,6 +2,7 @@ package org.llm4s.speech.stt
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import scala.concurrent.duration.*
 
 /**
  * Tests for extended STT domain model features:
@@ -493,10 +494,10 @@ class STTDomainExtensionsSpec extends AnyFlatSpec with Matchers {
     val trans = Transcription(
       text = "hello",
       language = Some("en"),
-      processingTimeMs = Some(150)
+      processingTime = Some(150.millis)
     )
     trans.text shouldBe "hello"
-    trans.processingTimeMs shouldBe Some(150)
+    trans.processingTime shouldBe Some(150.millis)
   }
 
   // ===== Edge Cases =====

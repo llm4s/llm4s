@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory
 import java.time.Instant
 import scala.annotation.tailrec
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration.DurationLong
 import scala.util.{ Failure, Success, Try }
 
 /**
@@ -247,7 +248,7 @@ final private[agent] class AgentStreamingExecutor(
                 onEvent(AgentEvent.stepCompleted(currentStep, hasToolCalls = false))
 
                 val finalState = updatedState.withStatus(AgentStatus.Complete)
-                onEvent(AgentEvent.agentCompleted(finalState, currentStep + 1, totalDuration))
+                onEvent(AgentEvent.agentCompleted(finalState, currentStep + 1, totalDuration.millis))
 
                 context.traceLogPath.foreach(path => AgentTraceFormatter.writeTraceLog(finalState, path))
                 safeTrace(context.tracing)(_.traceEvent(finalState.toTraceEvent))

@@ -136,14 +136,14 @@ class TraceCollectorTracing[F[_]](
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.ToolCall,
-          startTime = ts.minusMillis(duration),
+          startTime = ts.minusMillis(duration.toMillis),
           endTime = Some(ts),
           status = if (success) SpanStatus.Ok else SpanStatus.Error(s"Tool $name failed"),
           attributes = Map(
             "tool_name"   -> SpanValue.StringValue(name),
             "input"       -> SpanValue.StringValue(input),
             "output"      -> SpanValue.StringValue(output),
-            "duration_ms" -> SpanValue.LongValue(duration),
+            "duration_ms" -> SpanValue.LongValue(duration.toMillis),
             "success"     -> SpanValue.BooleanValue(success)
           )
         )
@@ -264,7 +264,7 @@ class TraceCollectorTracing[F[_]](
 
       case TraceEvent.RAGOperationCompleted(
             operation,
-            durationMs,
+            duration,
             embeddingTokens,
             llmPromptTokens,
             llmCompletionTokens,
@@ -273,7 +273,7 @@ class TraceCollectorTracing[F[_]](
           ) =>
         val baseAttrs: Map[String, SpanValue] = Map(
           "operation"   -> SpanValue.StringValue(operation),
-          "duration_ms" -> SpanValue.LongValue(durationMs)
+          "duration_ms" -> SpanValue.LongValue(duration.toMillis)
         )
         val embeddingAttr  = embeddingTokens.map(v => "embedding_tokens" -> SpanValue.LongValue(v.toLong))
         val promptAttr     = llmPromptTokens.map(v => "llm_prompt_tokens" -> SpanValue.LongValue(v.toLong))
@@ -286,7 +286,7 @@ class TraceCollectorTracing[F[_]](
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.Rag,
-          startTime = ts.minusMillis(durationMs),
+          startTime = ts.minusMillis(duration.toMillis),
           endTime = Some(ts),
           status = SpanStatus.Ok,
           attributes = attrs
@@ -332,7 +332,7 @@ class TraceCollectorTracing[F[_]](
             imageCount,
             size,
             quality,
-            durationMs,
+            duration,
             costUsd,
             success,
             errorMessage,
@@ -345,7 +345,7 @@ class TraceCollectorTracing[F[_]](
           "image_count" -> SpanValue.LongValue(imageCount.toLong),
           "size"        -> SpanValue.StringValue(size),
           "quality"     -> SpanValue.StringValue(quality),
-          "duration_ms" -> SpanValue.LongValue(durationMs),
+          "duration_ms" -> SpanValue.LongValue(duration.toMillis),
           "success"     -> SpanValue.BooleanValue(success)
         )
         val costAttr  = costUsd.map(v => "cost_usd" -> SpanValue.DoubleValue(v))
@@ -357,7 +357,7 @@ class TraceCollectorTracing[F[_]](
           parentSpanId = None,
           name = spanName,
           kind = SpanKind.Internal,
-          startTime = ts.minusMillis(durationMs),
+          startTime = ts.minusMillis(duration.toMillis),
           endTime = Some(ts),
           status = if (success) SpanStatus.Ok else SpanStatus.Error(errorMessage.getOrElse("Image generation failed")),
           attributes = attrs

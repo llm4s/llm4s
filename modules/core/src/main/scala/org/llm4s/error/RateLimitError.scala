@@ -2,7 +2,6 @@ package org.llm4s.error
 
 import org.llm4s.util.DurationText
 
-import java.time.Instant
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 
 /**
@@ -26,8 +25,6 @@ enum RateLimitOrigin {
  * @param retryAfter optional delay the provider asked for before retrying (e.g. an HTTP
  *                   `Retry-After` header)
  * @param provider the name of the LLM provider (e.g., "openai", "anthropic")
- * @param requestsRemaining optional number of requests remaining in the current window
- * @param resetTime optional instant at which the rate limit window resets
  * @param origin whether this was rejected locally (never reached the provider) or by the
  *               provider itself; defaults to [[RateLimitOrigin.UpstreamProvider]] since every
  *               existing constructor call maps a provider-side rejection
@@ -36,8 +33,6 @@ final case class RateLimitError private (
   override val message: String,
   retryAfter: Option[FiniteDuration],
   provider: String,
-  requestsRemaining: Option[Int] = None,
-  resetTime: Option[Instant] = None,
   origin: RateLimitOrigin = RateLimitOrigin.UpstreamProvider
 ) extends LLMError
     with RecoverableError {
@@ -49,9 +44,7 @@ final case class RateLimitError private (
 
   override val context: Map[String, String] = Map(
     "provider" -> provider
-  ) ++ retryAfter.map(d => "retryAfter" -> DurationText(d)) ++
-    requestsRemaining.map("requestsRemaining" -> _.toString) ++
-    resetTime.map("resetTime" -> _.toString)
+  ) ++ retryAfter.map(d => "retryAfter" -> DurationText(d))
 }
 
 object RateLimitError {
@@ -68,11 +61,10 @@ object RateLimitError {
     RateLimitError(s"Rate limited by $provider. Retry after ${DurationText(retryAfter)}", Some(retryAfter), provider)
 
   /**
-   * Create a rate limit error for a request rejected locally (e.g. by a token-bucket
-   * middleware) before it ever reached `provider`. Tagged with [[RateLimitOrigin.LocalThrottle]]
-   * so a wrapping component that already recorded a metrics event for the rejection -
-   * such as `ReliableClient` composed around a rate-limiting middleware - can recognize
-   * that and avoid recording it again.
+   * Create a rate limit error for a request rejected locally - by `ReliableClient`'s own token
+   * bucket - before it ever reached `provider`. Tagged with [[RateLimitOrigin.LocalThrottle]] so
+   * that `ReliableClient` keeps it out of the circuit breaker and does not record its metrics
+   * event twice.
    */
   def local(provider: String): RateLimitError =
     RateLimitError(

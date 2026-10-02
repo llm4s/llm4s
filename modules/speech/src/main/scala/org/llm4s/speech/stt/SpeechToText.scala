@@ -4,6 +4,8 @@ import org.llm4s.error.LLMError
 import org.llm4s.types.Result
 import org.llm4s.speech.{ AudioInput, AudioMeta }
 
+import scala.concurrent.duration.FiniteDuration
+
 /**
  * Options for speech-to-text transcription.
  *
@@ -234,7 +236,7 @@ object WordTimestamp {
  *                   (e.g. derived from segment/word metadata while `STTOptions.enableTimestamps` is false).
  * @param timestamps Word-level timing information (only if enabled)
  * @param meta Source audio metadata
- * @param processingTimeMs Time taken to process (for metrics/monitoring)
+ * @param processingTime Time taken to process (for metrics/monitoring)
  */
 final case class Transcription(
   text: String,
@@ -242,7 +244,7 @@ final case class Transcription(
   confidence: Option[Double] = None,
   timestamps: List[WordTimestamp] = Nil,
   meta: Option[AudioMeta] = None,
-  processingTimeMs: Option[Long] = None
+  processingTime: Option[FiniteDuration] = None
 ) {
   require(text.nonEmpty, "Transcription text must not be empty")
 

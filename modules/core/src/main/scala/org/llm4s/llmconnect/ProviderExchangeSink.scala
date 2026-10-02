@@ -108,7 +108,7 @@ private object ProviderExchangeJson:
       "correlation_id" -> exchange.correlationId.getOrElse(""),
       "started_at"     -> exchange.startedAt.toString,
       "completed_at"   -> exchange.completedAt.toString,
-      "duration_ms"    -> exchange.durationMs,
+      "duration_ms"    -> exchange.duration.toMillis,
       "outcome"        -> exchange.outcome.toString,
       "request_body"   -> Redaction.redactForLogging(exchange.requestBody),
       "response_body"  -> exchange.responseBody.map(body => Redaction.redactForLogging(body)).getOrElse(""),

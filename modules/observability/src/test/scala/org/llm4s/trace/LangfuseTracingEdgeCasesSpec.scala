@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import scala.concurrent.duration.*
 
 class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
@@ -224,7 +225,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracing = makeTracing(mock)
 
     val result = tracing.traceEvent(
-      TraceEvent.RAGOperationCompleted("search", 200L, Some(100), Some(200), Some(50), Some(0.003))
+      TraceEvent.RAGOperationCompleted("search", 200.millis, Some(100), Some(200), Some(50), Some(0.003))
     )
 
     result.isRight shouldBe true
@@ -242,7 +243,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val result = tracing.traceEvent(TraceEvent.RAGOperationCompleted("index", 500L))
+    val result = tracing.traceEvent(TraceEvent.RAGOperationCompleted("index", 500.millis))
 
     result.isRight shouldBe true
     val body   = ujson.read(mock.lastBody.get)

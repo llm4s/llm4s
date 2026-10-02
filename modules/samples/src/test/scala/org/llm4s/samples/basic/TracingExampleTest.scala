@@ -5,6 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import org.llm4s.trace.{ Tracing, TracingComposer, TraceEvent, TracingMode }
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.llmconnect.config.TracingSettings
+import scala.concurrent.duration.*
 
 class TracingExampleTest extends AnyFunSuite with Matchers {
 
@@ -164,7 +165,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
     val events = Seq(
       TraceEvent.AgentInitialized("test", Vector("tool")),
       TraceEvent.CompletionReceived("id", "model", 0, "content"),
-      TraceEvent.ToolExecuted("tool", "input", "output", 100, true),
+      TraceEvent.ToolExecuted("tool", "input", "output", 100.millis, true),
       TraceEvent.ErrorOccurred(new RuntimeException("error"), "context"),
       TraceEvent.TokenUsageRecorded(TokenUsage(1, 2, 3), "model", "op"),
       TraceEvent.AgentStateUpdated("status", 5, 3),

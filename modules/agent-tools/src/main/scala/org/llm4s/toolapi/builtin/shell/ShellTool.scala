@@ -1,13 +1,13 @@
 package org.llm4s.toolapi.builtin.shell
 
-import org.llm4s.util.DurationRounding
-
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
+import org.llm4s.util.DurationRounding
 import upickle.default._
 
 import java.io.File
 import java.util.concurrent.TimeUnit
+import scala.concurrent.duration.{ DurationLong, FiniteDuration }
 import scala.util.Try
 
 /**
@@ -18,12 +18,13 @@ case class ShellResult(
   exitCode: Int,
   stdout: String,
   stderr: String,
-  executionTimeMs: Long,
+  @upickle.implicits.key("executionTimeMs") executionTime: FiniteDuration,
   truncated: Boolean,
   timedOut: Boolean
 )
 
 object ShellResult {
+  import org.llm4s.util.DurationJson.millisRW
   implicit val shellResultRW: ReadWriter[ShellResult] = macroRW[ShellResult]
 }
 
@@ -199,7 +200,7 @@ object ShellTool {
         exitCode = exitCode,
         stdout = stdout,
         stderr = stderr,
-        executionTimeMs = endTime - startTime,
+        executionTime = (endTime - startTime).millis,
         truncated = truncated,
         timedOut = timedOut
       )

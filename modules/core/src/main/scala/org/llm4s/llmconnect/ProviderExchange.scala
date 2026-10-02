@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect
 
 import java.time.Instant
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * Runtime configuration for capturing raw LLM provider exchanges.
@@ -37,7 +38,7 @@ final case class ProviderExchange(
   correlationId: Option[String],
   startedAt: Instant,
   completedAt: Instant,
-  durationMs: Long,
+  duration: FiniteDuration,
   outcome: ProviderExchangeOutcome,
   requestBody: String,
   responseBody: Option[String],

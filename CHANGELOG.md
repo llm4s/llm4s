@@ -806,6 +806,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules inseparable; moving that one file broke the cycle.
 
 ### Removed
+- **Pre-baseline API cleanup, pass 7: typed reported times** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
+  Times the library reports are a `FiniteDuration` (a point in time an `Instant`) with no unit in
+  the name: `TraceEvent`'s `ToolExecuted`/`RAGOperationCompleted`/`ImageGenerationCompleted`,
+  `Tracing.traceRAGOperation`, `ProviderExchange`, `AgentEvent`'s `ToolCallCompleted`/
+  `AgentCompleted`, the shell and HTTP tool results, `llm4s-rag`'s benchmark timings,
+  `ServiceStatus.averageGenerationTime`, `Transcription.processingTime` and the workspace
+  protocol's command durations. JSON, trace and wire formats keep their keys and millisecond
+  values. `RateLimitError.requestsRemaining` and `resetTime`, which nothing could set, are removed.
+  See the [migration note](docs/reference/migration.md#pre-baseline-api-cleanup-pass-7).
 - **Pre-baseline API cleanup, pass 6: typed times** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
   A time the caller supplies is a `FiniteDuration` (a point in time an `Instant`), and names drop
   their unit suffix. `RateLimitError.retryAfter` - documented as seconds, used as milliseconds -

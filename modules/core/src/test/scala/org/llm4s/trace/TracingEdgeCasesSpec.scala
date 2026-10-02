@@ -7,6 +7,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable
+import scala.concurrent.duration.*
 
 class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
@@ -59,12 +60,12 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val events = mutable.Buffer.empty[TraceEvent]
     val tracer = new RecordingTracing(events)
 
-    tracer.traceRAGOperation("index", 500L) shouldBe Right(())
+    tracer.traceRAGOperation("index", 500.millis) shouldBe Right(())
 
     events should have size 1
     val e = events.head.asInstanceOf[TraceEvent.RAGOperationCompleted]
     e.operation shouldBe "index"
-    e.durationMs shouldBe 500L
+    e.duration shouldBe 500.millis
     e.embeddingTokens shouldBe None
     e.llmPromptTokens shouldBe None
     e.llmCompletionTokens shouldBe None
@@ -269,7 +270,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracing = new ConsoleTracing()
     val event = TraceEvent.RAGOperationCompleted(
       "evaluate",
-      2500L,
+      2500.millis,
       Some(100),
       Some(200),
       Some(50),
@@ -314,7 +315,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   private class RecordingTracing(events: mutable.Buffer[TraceEvent]) extends Tracing {
     def traceEvent(event: TraceEvent): Result[Unit] = { events += event; Right(()) }
     def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
-      events += TraceEvent.ToolExecuted(toolName, input, output, 0L, true)
+      events += TraceEvent.ToolExecuted(toolName, input, output, 0.millis, true)
       Right(())
     }
     def traceError(error: Throwable, context: String): Result[Unit] = {

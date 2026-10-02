@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentState
 import org.llm4s.error.LLMError
 
 import java.time.Instant
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * Events emitted during streaming agent execution.
@@ -99,7 +100,7 @@ object AgentEvent {
    * @param toolName Name of the tool that was invoked
    * @param result The result returned by the tool (as string)
    * @param success Whether the tool executed successfully
-   * @param durationMs Execution time in milliseconds
+   * @param duration Execution time
    * @param timestamp When the tool completed
    */
   final case class ToolCallCompleted(
@@ -107,7 +108,7 @@ object AgentEvent {
     toolName: String,
     result: String,
     success: Boolean,
-    durationMs: Long,
+    duration: FiniteDuration,
     timestamp: Instant
   ) extends AgentEvent
 
@@ -177,13 +178,13 @@ object AgentEvent {
    *
    * @param finalState The final agent state
    * @param totalSteps Total number of steps taken
-   * @param durationMs Total execution time in milliseconds
+   * @param duration Total execution time
    * @param timestamp When execution completed
    */
   final case class AgentCompleted(
     finalState: AgentState,
     totalSteps: Int,
-    durationMs: Long,
+    duration: FiniteDuration,
     timestamp: Instant
   ) extends AgentEvent
 
@@ -314,9 +315,9 @@ object AgentEvent {
     toolName: String,
     result: String,
     success: Boolean,
-    durationMs: Long
+    duration: FiniteDuration
   ): ToolCallCompleted =
-    ToolCallCompleted(toolCallId, toolName, result, success, durationMs, Instant.now())
+    ToolCallCompleted(toolCallId, toolName, result, success, duration, Instant.now())
 
   /**
    * Create an AgentStarted event with current timestamp.
@@ -339,8 +340,8 @@ object AgentEvent {
   /**
    * Create an AgentCompleted event with current timestamp.
    */
-  def agentCompleted(finalState: AgentState, totalSteps: Int, durationMs: Long): AgentCompleted =
-    AgentCompleted(finalState, totalSteps, durationMs, Instant.now())
+  def agentCompleted(finalState: AgentState, totalSteps: Int, duration: FiniteDuration): AgentCompleted =
+    AgentCompleted(finalState, totalSteps, duration, Instant.now())
 
   /**
    * Create an AgentFailed event with current timestamp.

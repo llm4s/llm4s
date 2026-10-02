@@ -54,7 +54,7 @@ package org.llm4s.agent
  *       println(s"[Tool $$name returned: $$result]")
  *
  *     case AgentCompleted(state, steps, duration, _) =>
- *       println(s"\n[Done in $$steps steps, $${duration}ms]")
+ *       println(s"\n[Done in $$steps steps, $${duration.toMillis}ms]")
  *
  *     case AgentFailed(error, _, _) =>
  *       println(s"\n[Error: $$error]")

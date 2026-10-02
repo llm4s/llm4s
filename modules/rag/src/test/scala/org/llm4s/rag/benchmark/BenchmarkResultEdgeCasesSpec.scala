@@ -3,6 +3,8 @@ package org.llm4s.rag.benchmark
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.rag.evaluation.EvalSummary
+import java.time.Instant
+import scala.concurrent.duration.*
 
 class BenchmarkResultEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
@@ -11,30 +13,30 @@ class BenchmarkResultEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // =========================================================================
 
   "TimingInfo" should "handle zero duration" in {
-    val info = TimingInfo("instant", 0)
+    val info = TimingInfo("instant", 0.millis)
     info.formatted shouldBe "0ms"
-    info.durationSeconds shouldBe 0.0
+    info.duration shouldBe Duration.Zero
   }
 
   it should "format exactly 1000ms as seconds" in {
-    val info = TimingInfo("boundary", 1000)
+    val info = TimingInfo("boundary", 1000.millis)
     info.formatted should include("1.00s")
   }
 
   it should "format 999ms as milliseconds" in {
-    val info = TimingInfo("just-under", 999)
+    val info = TimingInfo("just-under", 999.millis)
     info.formatted shouldBe "999ms"
   }
 
   it should "include per-item average in formatted output for seconds" in {
-    val info = TimingInfo("slow", 5000, 10)
+    val info = TimingInfo("slow", 5000.millis, 10)
     info.formatted should include("500.0ms/item")
     info.formatted should include("5.00s")
   }
 
   it should "handle large durations" in {
-    val info = TimingInfo("long", 3600000) // 1 hour
-    info.durationSeconds shouldBe 3600.0
+    val info = TimingInfo("long", 3600000.millis) // 1 hour
+    info.duration shouldBe 1.hour
     info.formatted should include("3600.00s")
   }
 
@@ -60,15 +62,14 @@ class BenchmarkResultEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   it should "return 0.0 total time when no timings" in {
     val result = ExperimentResult(RAGExperimentConfig("test"), None)
-    result.totalTimeMs shouldBe 0
-    result.totalTimeSeconds shouldBe 0.0
+    result.totalTime shouldBe Duration.Zero
   }
 
   it should "return None for getTiming with unrecognized phase" in {
     val result = ExperimentResult(
       RAGExperimentConfig("test"),
       None,
-      timings = Seq(TimingInfo("indexing", 100))
+      timings = Seq(TimingInfo("indexing", 100.millis))
     )
     result.getTiming("nonexistent") shouldBe None
     result.searchTime shouldBe None
@@ -123,12 +124,11 @@ class BenchmarkResultEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val results = BenchmarkResults(
       suite = suite,
       results = Seq.empty,
-      startTime = 1000L,
-      endTime = 6000L
+      startTime = Instant.ofEpochMilli(1000L),
+      endTime = Instant.ofEpochMilli(6000L)
     )
 
-    results.totalDurationMs shouldBe 5000
-    results.totalDurationSeconds shouldBe 5.0
+    results.totalDuration shouldBe 5.seconds
   }
 
   it should "return None for compare when one experiment is failed" in {

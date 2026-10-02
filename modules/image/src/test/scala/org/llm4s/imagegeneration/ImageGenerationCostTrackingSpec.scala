@@ -89,7 +89,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
       imageCount = 2,
       size = "1024x1024",
       quality = "hd",
-      durationMs = 3500,
+      duration = 3500.millis,
       costUsd = Some(0.160),
       success = true
     )
@@ -116,7 +116,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
       imageCount = 1,
       size = "1024x1024",
       quality = "standard",
-      durationMs = 2000
+      duration = 2000.millis
     )
 
     val json = event.toJson
@@ -132,7 +132,7 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
       imageCount = 0,
       size = "1024x1024",
       quality = "standard",
-      durationMs = 500,
+      duration = 500.millis,
       success = false,
       errorMessage = Some("Service unavailable")
     )

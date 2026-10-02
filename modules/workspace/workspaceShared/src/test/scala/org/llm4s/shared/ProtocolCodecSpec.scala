@@ -123,7 +123,7 @@ class ProtocolCodecSpec extends AnyFlatSpec with Matchers {
       stderr = "error",
       exitCode = 1,
       isOutputTruncated = true,
-      durationMs = 500L
+      duration = 500.millis
     )
     val json    = ProtocolCodec.encodeAgentResponse(response)
     val decoded = ProtocolCodec.decodeAgentResponse(json)
@@ -132,7 +132,7 @@ class ProtocolCodecSpec extends AnyFlatSpec with Matchers {
     val exec = decoded.asInstanceOf[ExecuteCommandResponse]
     exec.stdout shouldBe "output"
     exec.exitCode shouldBe 1
-    exec.durationMs shouldBe 500L
+    exec.duration shouldBe 500.millis
   }
 
   it should "decode GetWorkspaceInfoResponse" in {
@@ -176,7 +176,7 @@ class ProtocolCodecSpec extends AnyFlatSpec with Matchers {
       ReadFileResponse("1", "content", metadata, isTruncated = false, 1, 1),
       WriteFileResponse("2", success = true, "/path", 100L),
       ExploreFilesResponse("3", List(), isTruncated = false, 0),
-      ExecuteCommandResponse("4", "out", "err", 0, isOutputTruncated = false, 100L),
+      ExecuteCommandResponse("4", "out", "err", 0, isOutputTruncated = false, 100.millis),
       GetWorkspaceInfoResponse("5", "/root", List(), limits),
       ModifyFileResponse("6", success = true, "/file"),
       SearchFilesResponse("7", List(), isTruncated = false, 0),

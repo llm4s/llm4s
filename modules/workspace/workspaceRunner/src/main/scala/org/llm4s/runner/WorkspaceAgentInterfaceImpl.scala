@@ -1,7 +1,7 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
 package org.llm4s.runner
 
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.{ DurationLong, FiniteDuration }
 
 import org.llm4s.shared._
 import org.slf4j.LoggerFactory
@@ -939,7 +939,7 @@ class WorkspaceAgentInterfaceImpl(
       stderr = stderr.toString(),
       exitCode = exitCode,
       isOutputTruncated = isStdoutTruncated || isStderrTruncated,
-      durationMs = duration
+      duration = duration.millis
     )
   }
 

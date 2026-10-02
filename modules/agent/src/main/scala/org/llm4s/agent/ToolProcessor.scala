@@ -291,7 +291,7 @@ private[agent] object ToolProcessor {
       )
 
       if (success) {
-        onEvent(AgentEvent.toolCompleted(toolCall.id, toolCall.name, resultContent, success = true, duration))
+        onEvent(AgentEvent.toolCompleted(toolCall.id, toolCall.name, resultContent, success = true, duration.millis))
       } else {
         import java.time.Instant
         onEvent(AgentEvent.ToolCallFailed(toolCall.id, toolCall.name, resultContent, Instant.now()))

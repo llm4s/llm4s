@@ -71,7 +71,7 @@ object EventCollectionExample extends App {
 
       // Show timing if available
       completions.headOption.foreach { completion =>
-        logger.info("Total duration: {}ms", completion.durationMs)
+        logger.info("Total duration: {}ms", completion.duration.toMillis)
         logger.info("Total steps: {}", completion.totalSteps)
       }
 
@@ -86,9 +86,9 @@ object EventCollectionExample extends App {
           case AgentStarted(query, _, _)               => s"'${query.take(30)}'"
           case StepStarted(n, _)                       => s"step $n"
           case StepCompleted(n, hasTc, _)              => s"step $n (toolCalls: $hasTc)"
-          case AgentCompleted(_, steps, ms, _)         => s"$steps steps, ${ms}ms"
+          case AgentCompleted(_, steps, ms, _)         => s"$steps steps, ${ms.toMillis}ms"
           case ToolCallStarted(_, name, _, _)          => s"calling $name"
-          case ToolCallCompleted(_, name, _, _, ms, _) => s"$name completed in ${ms}ms"
+          case ToolCallCompleted(_, name, _, _, ms, _) => s"$name completed in ${ms.toMillis}ms"
           case _                                       => ""
         }
         logger.info(f"  $idx%3d. $eventType%-25s $summary")

@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.model.TokenUsage
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.it.tags.Local
+import scala.concurrent.duration.*
 
 @Local
 class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
@@ -25,7 +26,7 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
     tracing.getSpanKind(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "model", "op")) shouldBe SpanKind.INTERNAL
 
     tracing.getSpanKind(TraceEvent.CompletionReceived("id", "model", 0, "content")) shouldBe SpanKind.CLIENT
-    tracing.getSpanKind(TraceEvent.ToolExecuted("tool", "in", "out", 100, true)) shouldBe SpanKind.CLIENT
+    tracing.getSpanKind(TraceEvent.ToolExecuted("tool", "in", "out", 100.millis, true)) shouldBe SpanKind.CLIENT
     tracing.getSpanKind(TraceEvent.ErrorOccurred(new Exception(""), "")) shouldBe SpanKind.CLIENT
   }
 

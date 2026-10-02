@@ -44,11 +44,11 @@ agent.runWithEvents(query, tools) {
   case ToolCallStarted(_, name, _, _) =>
     println(s"\nCalling $name...")
 
-  case ToolCallCompleted(_, name, result, _, durationMs, _) =>
-    println(s"$name completed in ${durationMs}ms")
+  case ToolCallCompleted(_, name, result, _, duration, _) =>
+    println(s"$name completed in ${duration.toMillis}ms")
 
-  case AgentCompleted(state, steps, totalMs, _) =>
-    println(s"\nDone in $steps steps (${totalMs}ms)")
+  case AgentCompleted(state, steps, duration, _) =>
+    println(s"\nDone in $steps steps (${duration.toMillis}ms)")
 
   case _ => ()  // Ignore other events
 }
@@ -81,15 +81,15 @@ case TextComplete(fullText, timestamp) =>
 | Event | Description | Fields |
 |-------|-------------|--------|
 | `ToolCallStarted` | Tool execution beginning | `toolCallId`, `toolName`, `arguments`, `timestamp` |
-| `ToolCallCompleted` | Tool finished successfully | `toolCallId`, `toolName`, `result`, `success`, `durationMs`, `timestamp` |
+| `ToolCallCompleted` | Tool finished successfully | `toolCallId`, `toolName`, `result`, `success`, `duration` (a `FiniteDuration`), `timestamp` |
 | `ToolCallFailed` | Tool execution failed | `toolCallId`, `toolName`, `error`, `timestamp` |
 
 ```scala
 case ToolCallStarted(id, name, args, _) =>
   println(s"[$id] Starting $name with args: $args")
 
-case ToolCallCompleted(id, name, result, success, durationMs, _) =>
-  println(s"[$id] $name: $result (${durationMs}ms)")
+case ToolCallCompleted(id, name, result, success, duration, _) =>
+  println(s"[$id] $name: $result (${duration.toMillis}ms)")
 
 case ToolCallFailed(id, name, error, _) =>
   println(s"[$id] $name FAILED: $error")
@@ -102,7 +102,7 @@ case ToolCallFailed(id, name, error, _) =>
 | `AgentStarted` | Agent execution beginning | `query`, `toolCount`, `timestamp` |
 | `StepStarted` | New reasoning step | `stepNumber`, `timestamp` |
 | `StepCompleted` | Step finished | `stepNumber`, `hasToolCalls`, `timestamp` |
-| `AgentCompleted` | Agent finished successfully | `finalState`, `totalSteps`, `durationMs`, `timestamp` |
+| `AgentCompleted` | Agent finished successfully | `finalState`, `totalSteps`, `duration` (a `FiniteDuration`), `timestamp` |
 | `AgentFailed` | Agent execution failed | `error`, `stepNumber`, `timestamp` |
 
 ```scala
@@ -115,8 +115,8 @@ case StepStarted(stepNum, _) =>
 case StepCompleted(stepNum, hasToolCalls, _) =>
   println(s"Step $stepNum done, tools called: $hasToolCalls")
 
-case AgentCompleted(state, steps, durationMs, _) =>
-  println(s"Completed in $steps steps (${durationMs}ms)")
+case AgentCompleted(state, steps, duration, _) =>
+  println(s"Completed in $steps steps (${duration.toMillis}ms)")
   println(s"Final answer: ${state.lastAssistantMessage}")
 
 case AgentFailed(error, stepNum, _) =>
@@ -175,8 +175,8 @@ agent.runWithEvents(query, tools) { event =>
       print(text)
       System.out.flush()
 
-    case AgentCompleted(_, steps, ms, _) =>
-      println(s"\n\n✓ Completed in $steps steps (${ms}ms)")
+    case AgentCompleted(_, steps, duration, _) =>
+      println(s"\n\n✓ Completed in $steps steps (${duration.toMillis}ms)")
 
     case AgentFailed(error, step, _) =>
       println(s"\n\n✗ Failed at step $step: $error")
@@ -200,11 +200,11 @@ agent.runWithEvents(query, tools) { event =>
     case ToolCallStarted(_, name, _, _) =>
       print(s"\rStep $currentStep: $name...")
 
-    case ToolCallCompleted(_, name, _, _, ms, _) =>
-      print(s"\rStep $currentStep: $name ✓ (${ms}ms)")
+    case ToolCallCompleted(_, name, _, _, duration, _) =>
+      print(s"\rStep $currentStep: $name ✓ (${duration.toMillis}ms)")
 
-    case AgentCompleted(_, steps, ms, _) =>
-      println(s"\rCompleted in $steps steps (${ms}ms)      ")
+    case AgentCompleted(_, steps, duration, _) =>
+      println(s"\rCompleted in $steps steps (${duration.toMillis}ms)      ")
 
     case _ => ()
   }
@@ -216,13 +216,15 @@ agent.runWithEvents(query, tools) { event =>
 Collect all events for post-processing:
 
 ```scala
+import scala.concurrent.duration.Duration
+
 val (state, events) = agent.runCollectingEvents(query, tools)
 
 // Analyze events
 val toolCalls = events.collect { case e: ToolCallCompleted => e }
-val totalToolTime = toolCalls.map(_.durationMs).sum
+val totalToolTime = toolCalls.map(_.duration).foldLeft(Duration.Zero)(_ + _)
 
-println(s"Total tool execution time: ${totalToolTime}ms")
+println(s"Total tool execution time: ${totalToolTime.toMillis}ms")
 println(s"Tool calls: ${toolCalls.map(_.toolName).mkString(", ")}")
 ```
 
@@ -317,11 +319,11 @@ def handleWebSocketQuery(query: String, socket: WebSocket): Unit = {
       case ToolCallStarted(id, name, _, _) =>
         s"""{"type":"tool_start","id":"$id","name":"$name"}"""
 
-      case ToolCallCompleted(id, name, result, _, ms, _) =>
-        s"""{"type":"tool_complete","id":"$id","name":"$name","result":"$result","ms":$ms}"""
+      case ToolCallCompleted(id, name, result, _, duration, _) =>
+        s"""{"type":"tool_complete","id":"$id","name":"$name","result":"$result","ms":${duration.toMillis}}"""
 
-      case AgentCompleted(state, steps, ms, _) =>
-        s"""{"type":"complete","steps":$steps,"ms":$ms}"""
+      case AgentCompleted(state, steps, duration, _) =>
+        s"""{"type":"complete","steps":$steps,"ms":${duration.toMillis}}"""
 
       case AgentFailed(error, step, _) =>
         s"""{"type":"error","message":"$error","step":$step}"""

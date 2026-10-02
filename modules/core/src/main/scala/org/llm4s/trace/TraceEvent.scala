@@ -3,6 +3,7 @@ package org.llm4s.trace
 import org.llm4s.llmconnect.model.{ EmbeddingUsage, Message, TokenUsage }
 
 import java.time.Instant
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * Type-safe, sealed hierarchy of trace events emitted during LLM agent execution.
@@ -67,7 +68,7 @@ object TraceEvent {
     name: String,
     input: String,
     output: String,
-    duration: Long,
+    duration: FiniteDuration,
     success: Boolean,
     timestamp: Instant = Instant.now()
   ) extends TraceEvent {
@@ -78,7 +79,7 @@ object TraceEvent {
       "tool_name"   -> name,
       "input"       -> input,
       "output"      -> output,
-      "duration_ms" -> duration,
+      "duration_ms" -> duration.toMillis,
       "success"     -> success
     )
   }
@@ -224,7 +225,7 @@ object TraceEvent {
    * Tracks completion of a RAG operation with full metrics.
    *
    * @param operation Type: "index", "search", "answer", "evaluate"
-   * @param durationMs Wall-clock duration in milliseconds
+   * @param duration Wall-clock duration
    * @param embeddingTokens Optional token count for embedding operations
    * @param llmPromptTokens Optional prompt tokens for LLM operations
    * @param llmCompletionTokens Optional completion tokens for LLM operations
@@ -232,7 +233,7 @@ object TraceEvent {
    */
   case class RAGOperationCompleted(
     operation: String,
-    durationMs: Long,
+    duration: FiniteDuration,
     embeddingTokens: Option[Int] = None,
     llmPromptTokens: Option[Int] = None,
     llmCompletionTokens: Option[Int] = None,
@@ -245,7 +246,7 @@ object TraceEvent {
         "event_type"  -> eventType,
         "timestamp"   -> timestamp.toString,
         "operation"   -> operation,
-        "duration_ms" -> durationMs
+        "duration_ms" -> duration.toMillis
       )
       embeddingTokens.foreach(t => base("embedding_tokens") = t)
       llmPromptTokens.foreach(t => base("llm_prompt_tokens") = t)
@@ -264,7 +265,7 @@ object TraceEvent {
    * @param imageCount Number of images generated
    * @param size Image size descriptor (e.g., "1024x1024")
    * @param quality Quality level (e.g., "standard", "hd")
-   * @param durationMs Wall-clock duration in milliseconds
+   * @param duration Wall-clock duration
    * @param costUsd Estimated cost in USD, if available
    * @param success Whether the operation succeeded
    * @param errorMessage Error message if the operation failed
@@ -276,7 +277,7 @@ object TraceEvent {
     imageCount: Int,
     size: String,
     quality: String,
-    durationMs: Long,
+    duration: FiniteDuration,
     costUsd: Option[Double] = None,
     success: Boolean = true,
     errorMessage: Option[String] = None,
@@ -293,7 +294,7 @@ object TraceEvent {
         "image_count" -> imageCount,
         "size"        -> size,
         "quality"     -> quality,
-        "duration_ms" -> durationMs.toDouble,
+        "duration_ms" -> duration.toMillis.toDouble,
         "success"     -> success
       )
       costUsd.foreach(c => base("cost_usd") = c)

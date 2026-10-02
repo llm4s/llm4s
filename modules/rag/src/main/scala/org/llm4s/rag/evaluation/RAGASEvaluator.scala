@@ -101,11 +101,11 @@ class RAGASEvaluator(
 
     // Emit trace event for evaluation completion
     evalResult.foreach { _ =>
-      val durationMs = (System.nanoTime() - startTime) / 1_000_000
+      val duration = scala.concurrent.duration.Duration.fromNanos(System.nanoTime() - startTime)
       tracer.foreach(
         _.traceRAGOperation(
           operation = "evaluate",
-          durationMs = durationMs
+          duration = duration
         )
       )
     }

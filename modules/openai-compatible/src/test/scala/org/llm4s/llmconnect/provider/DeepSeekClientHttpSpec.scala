@@ -83,7 +83,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       exchange.responseBody.get should include("chatcmpl-test")
       exchange.responseBody.get should include("DeepSeek logged response")
       exchange.errorMessage shouldBe empty
-      exchange.durationMs should be >= 0L
+      exchange.duration should be >= Duration.Zero
     }
 
   // ==========================================================================

@@ -230,7 +230,7 @@ class LangfuseTracing(
             "output"    -> ujson.Obj("result" -> e.output),
             "metadata" -> ujson.Obj(
               "tool_name" -> e.name,
-              "duration"  -> e.duration,
+              "duration"  -> e.duration.toMillis,
               "success"   -> e.success
             )
           )
@@ -443,7 +443,7 @@ class LangfuseTracing(
           "image_count" -> e.imageCount,
           "size"        -> e.size,
           "quality"     -> e.quality,
-          "duration_ms" -> e.durationMs,
+          "duration_ms" -> e.duration.toMillis,
           "success"     -> e.success
         )
         e.costUsd.foreach(c => outputObj("cost_usd") = c)
@@ -472,7 +472,7 @@ class LangfuseTracing(
       case e: TraceEvent.RAGOperationCompleted =>
         val outputObj = ujson.Obj(
           "operation"   -> e.operation,
-          "duration_ms" -> e.durationMs
+          "duration_ms" -> e.duration.toMillis
         )
         e.embeddingTokens.foreach(t => outputObj("embedding_tokens") = t)
         e.llmPromptTokens.foreach(t => outputObj("llm_prompt_tokens") = t)
@@ -481,7 +481,7 @@ class LangfuseTracing(
 
         val metadataObj = ujson.Obj(
           "operation"   -> e.operation,
-          "duration_ms" -> e.durationMs
+          "duration_ms" -> e.duration.toMillis
         )
         e.embeddingTokens.foreach(t => metadataObj("embedding_tokens") = t)
         e.llmPromptTokens.foreach(t => metadataObj("llm_prompt_tokens") = t)
@@ -595,7 +595,7 @@ class LangfuseTracing(
   }
 
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
-    val event = TraceEvent.ToolExecuted(toolName, input, output, 0, true)
+    val event = TraceEvent.ToolExecuted(toolName, input, output, scala.concurrent.duration.Duration.Zero, true)
     traceEvent(event)
   }
 

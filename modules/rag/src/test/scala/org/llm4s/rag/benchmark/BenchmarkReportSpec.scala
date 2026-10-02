@@ -3,6 +3,8 @@ package org.llm4s.rag.benchmark
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.rag.evaluation.EvalSummary
+import java.time.Instant
+import scala.concurrent.duration.*
 
 class BenchmarkReportSpec extends AnyFlatSpec with Matchers {
 
@@ -15,8 +17,8 @@ class BenchmarkReportSpec extends AnyFlatSpec with Matchers {
         createResult("experiment-a", 0.85, Map("faithfulness" -> 0.9, "answer_relevancy" -> 0.8)),
         createResult("experiment-b", 0.75, Map("faithfulness" -> 0.7, "answer_relevancy" -> 0.8))
       ),
-      startTime = 1000000L,
-      endTime = 1005000L
+      startTime = Instant.ofEpochMilli(1000000L),
+      endTime = Instant.ofEpochMilli(1005000L)
     )
 
   "BenchmarkReport.console" should "produce readable output" in {
@@ -157,9 +159,9 @@ class BenchmarkReportSpec extends AnyFlatSpec with Matchers {
       config = config,
       evalSummary = Some(summary),
       timings = Seq(
-        TimingInfo("indexing", 1000, 5),
-        TimingInfo("search", 500, 10),
-        TimingInfo("evaluation", 2000, 10)
+        TimingInfo("indexing", 1000.millis, 5),
+        TimingInfo("search", 500.millis, 10),
+        TimingInfo("evaluation", 2000.millis, 10)
       ),
       documentCount = 5,
       chunkCount = 25,

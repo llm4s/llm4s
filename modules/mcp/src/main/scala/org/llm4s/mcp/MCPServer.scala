@@ -1,9 +1,8 @@
 package org.llm4s.mcp
 
-import org.llm4s.util.DurationRounding
-
 import com.sun.net.httpserver.{ HttpExchange, HttpHandler, HttpServer }
 import org.llm4s.toolapi.ToolFunction
+import org.llm4s.util.DurationRounding
 import org.slf4j.LoggerFactory
 import ujson.Obj
 import upickle.default.{ read => upickleRead, write => upickleWrite }

@@ -4,6 +4,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.time.Instant
+import scala.concurrent.duration.*
 
 class AgentEventSpec extends AnyFlatSpec with Matchers {
 
@@ -33,13 +34,13 @@ class AgentEventSpec extends AnyFlatSpec with Matchers {
       toolName = "get_weather",
       result = """{"temp": 20}""",
       success = true,
-      durationMs = 150
+      duration = 150.millis
     )
     event.toolCallId shouldBe "call-123"
     event.toolName shouldBe "get_weather"
     event.result shouldBe """{"temp": 20}"""
     event.success shouldBe true
-    event.durationMs shouldBe 150
+    event.duration shouldBe 150.millis
   }
 
   "AgentEvent.ToolCallFailed" should "capture error information" in {
@@ -145,7 +146,7 @@ class AgentEventSpec extends AnyFlatSpec with Matchers {
       AgentEvent.textDelta("delta"),
       AgentEvent.textComplete("complete"),
       AgentEvent.toolStarted("id", "name", "{}"),
-      AgentEvent.toolCompleted("id", "name", "result", success = true, 100),
+      AgentEvent.toolCompleted("id", "name", "result", success = true, 100.millis),
       AgentEvent.ToolCallFailed("id", "name", "error", Instant.now()),
       AgentEvent.agentStarted("query", 1),
       AgentEvent.stepStarted(0),

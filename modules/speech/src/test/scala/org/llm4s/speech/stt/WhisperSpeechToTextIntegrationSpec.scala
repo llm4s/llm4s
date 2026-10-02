@@ -8,6 +8,7 @@ import org.llm4s.speech.AudioInput
 import org.llm4s.error.ProcessingError
 import java.io.ByteArrayInputStream
 import java.nio.file.Paths
+import scala.concurrent.duration.*
 
 object Integration extends Tag("integration")
 
@@ -99,7 +100,7 @@ class WhisperSpeechToTextIntegrationSpec extends AnyFlatSpec with Matchers with 
     }
   }
 
-  it should "populate processingTimeMs when available" taggedAs Integration in {
+  it should "populate processingTime when available" taggedAs Integration in {
     val whisper = new WhisperSpeechToText()
     val bytes   = Array[Byte](0, 1, 2, 3)
     val input   = AudioInput.BytesAudio(bytes, sampleRate = 16000, numChannels = 1)
@@ -107,8 +108,8 @@ class WhisperSpeechToTextIntegrationSpec extends AnyFlatSpec with Matchers with 
     val result = whisper.transcribe(input, STTOptions())
 
     result.foreach { transcription =>
-      transcription.processingTimeMs shouldBe defined
-      transcription.processingTimeMs.get should be >= 0L
+      transcription.processingTime shouldBe defined
+      transcription.processingTime.get should be >= Duration.Zero
     }
   }
 

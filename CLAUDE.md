@@ -273,11 +273,15 @@ growth-prone data types** (`CompletionOptions`, `Completion`, `StreamedChunk`, `
 with a default, to `apply`; keep the previous `apply` as an overload *without* defaults that
 forwards to the new one; add `withX`. Never re-expose `copy`. A type with an upickle `macroRW`
 (`ModelCapabilities`) keeps its constructor defaults too - the reader fills missing keys from them.
-A new frozen data type that may grow follows the same pattern from the start. Pass 6 typed the
-public API's times: **a duration a caller supplies is a `FiniteDuration`, a point in time an
-`Instant`** - never a raw `Int`/`Long` with its unit in the name (`timeoutMs`) or the Scaladoc,
-and never a plain `Duration`, which admits `Duration.Inf`. Wire formats keep their units and keys
-(convert at the boundary; pin a renamed upickle field with `@upickle.implicits.key`).
+A new frozen data type that may grow follows the same pattern from the start. Passes 6 and 7 typed
+the public API's times: **a duration, supplied or reported, is a `FiniteDuration`, a point in time
+an `Instant`** - never a raw `Int`/`Long` with its unit in the name (`timeoutMs`, `durationMs`) or
+the Scaladoc, and never a plain `Duration`, which admits `Duration.Inf`. Wire formats keep their
+units and keys: convert at the boundary (`.toMillis` into a JSON field; `DurationJson.millisRW` or
+`WireDurations` for a `macroRW`, with `@upickle.implicits.key` pinning a renamed field), and round
+up with `DurationRounding` when a whole-unit API reads `0` as "no timeout" or "now". A
+`FiniteDuration` interpolated as `s"${d}ms"` compiles and prints `150 millisecondsms` - use
+`d.toMillis`.
 
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must

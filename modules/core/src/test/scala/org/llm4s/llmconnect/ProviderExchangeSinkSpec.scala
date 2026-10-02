@@ -7,7 +7,7 @@ import java.time.Instant
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.*
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -26,7 +26,7 @@ class ProviderExchangeSinkSpec extends AnyFunSuite with Matchers:
       correlationId = None,
       startedAt = Instant.parse("2026-03-22T10:10:00Z"),
       completedAt = Instant.parse("2026-03-22T10:10:01Z"),
-      durationMs = 1000L,
+      duration = 1000.millis,
       outcome = ProviderExchangeOutcome.Error,
       requestBody = """{"apiKey":"sk-secret","prompt":"hello"}""",
       responseBody = Some("""{"message":"failed"}"""),
@@ -42,6 +42,7 @@ class ProviderExchangeSinkSpec extends AnyFunSuite with Matchers:
     json("exchange_id").str shouldBe "ex-2"
     json("provider").str shouldBe "openai"
     json("outcome").str shouldBe "Error"
+    ujson.write(json("duration_ms")) shouldBe "\"1000\""
     (json("request_body").str should not).include("sk-secret")
     (json("error_message").str should not).include("sk-secret")
   }

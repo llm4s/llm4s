@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import scala.jdk.DurationConverters.JavaDurationOps
+
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeOutcome }
 import org.llm4s.types.Result
 
@@ -32,7 +34,7 @@ object ProviderExchangeRecorder {
           correlationId = correlationId,
           startedAt = startedAt,
           completedAt = completedAt,
-          durationMs = java.time.Duration.between(startedAt, completedAt).toMillis,
+          duration = java.time.Duration.between(startedAt, completedAt).toScala,
           outcome = result.fold(_ => ProviderExchangeOutcome.Error, _ => ProviderExchangeOutcome.Success),
           requestBody = requestBody,
           responseBody = responseBody,

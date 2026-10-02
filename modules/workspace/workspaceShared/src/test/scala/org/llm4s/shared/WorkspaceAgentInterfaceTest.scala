@@ -3,6 +3,7 @@ package org.llm4s.shared
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.OptionValues
+import scala.concurrent.duration.*
 
 class WorkspaceAgentInterfaceTest extends AnyFlatSpec with Matchers with OptionValues {
 
@@ -47,7 +48,7 @@ class WorkspaceAgentInterfaceTest extends AnyFlatSpec with Matchers with OptionV
           stderr = "",
           exitCode = 0,
           isOutputTruncated = false,
-          durationMs = 100
+          duration = 100.millis
         )
 
       case cmd: ExploreFilesCommand =>

@@ -76,7 +76,7 @@ final class VoskSpeechToText(
   }
 
   override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] = {
-    val startTime = System.currentTimeMillis()
+    val startTime = System.nanoTime()
     for {
       audioBytes <- prepareAudioForVosk(input)
       model      <- getOrLoadModel()
@@ -92,8 +92,8 @@ final class VoskSpeechToText(
           ProcessingError.audioValidation("Vosk transcription failed", Some(e))
         }
     } yield {
-      val processingTimeMs = System.currentTimeMillis() - startTime
-      transcription.copy(processingTimeMs = Some(processingTimeMs))
+      val processingTime = scala.concurrent.duration.Duration.fromNanos(System.nanoTime() - startTime)
+      transcription.copy(processingTime = Some(processingTime))
     }
   }
 

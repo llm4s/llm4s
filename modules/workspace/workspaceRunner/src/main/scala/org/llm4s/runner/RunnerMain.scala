@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicLong }
 import java.util.concurrent.{ ConcurrentHashMap, Executors, ScheduledExecutorService, TimeUnit }
 import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.util.{ Failure, Success, Try }
+import scala.concurrent.duration.DurationLong
 
 /**
  * WebSocket-based Workspace Runner service using Cask's native WebSocket support.
@@ -177,7 +178,7 @@ object RunnerMain extends cask.MainRoutes {
             // Acknowledge cancellation as completion, not as an error.
             if (running.completionSent.compareAndSet(false, true)) {
               val durationMs = System.currentTimeMillis() - running.startTimeMs
-              sendMessage(channel, CommandCompletedMessage(commandId, 143, durationMs))
+              sendMessage(channel, CommandCompletedMessage(commandId, 143, durationMs.millis))
             }
 
           case None =>
@@ -302,7 +303,7 @@ object RunnerMain extends cask.MainRoutes {
     durationMs: Long
   ): Unit = {
     sendMessage(channel, ResponseMessage(WorkspaceAgentErrorResponse(commandId, error, code, details)))
-    sendMessage(channel, CommandCompletedMessage(commandId, exitCode, durationMs))
+    sendMessage(channel, CommandCompletedMessage(commandId, exitCode, durationMs.millis))
   }
 
   /**
@@ -489,12 +490,15 @@ object RunnerMain extends cask.MainRoutes {
                             stderr = stderrAccumulator.result(),
                             exitCode = effectiveExitCode,
                             isOutputTruncated = isOutputTruncated,
-                            durationMs = durationMs
+                            duration = durationMs.millis
                           )
                         )
                       )
                       if (running.completionSent.compareAndSet(false, true)) {
-                        sendMessage(channel, CommandCompletedMessage(cmd.commandId, effectiveExitCode, durationMs))
+                        sendMessage(
+                          channel,
+                          CommandCompletedMessage(cmd.commandId, effectiveExitCode, durationMs.millis)
+                        )
                       }
                     case Failure(ex) =>
                       sendCommandFailure(

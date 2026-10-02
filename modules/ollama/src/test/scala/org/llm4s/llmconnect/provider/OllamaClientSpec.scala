@@ -182,7 +182,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(exchange.requestBody.contains("\"stream\":false"))
     assert(exchange.responseBody.contains(body))
     assert(exchange.errorMessage.isEmpty)
-    assert(exchange.durationMs >= 0)
+    assert(exchange.duration >= Duration.Zero)
   }
 
   test("complete() returns None usage when token counts are absent") {
@@ -411,7 +411,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(exchange.requestBody.contains("\"stream\":true"))
     assert(exchange.responseBody.exists(_.contains(""""done":true""")))
     assert(exchange.errorMessage.isEmpty)
-    assert(exchange.durationMs >= 0)
+    assert(exchange.duration >= Duration.Zero)
   }
 
   test("streamComplete() returns error on non-200 status") {

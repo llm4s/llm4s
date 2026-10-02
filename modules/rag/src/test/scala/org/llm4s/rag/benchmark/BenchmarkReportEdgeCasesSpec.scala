@@ -5,6 +5,8 @@ import org.scalatest.matchers.should.Matchers
 import org.llm4s.rag.evaluation.EvalSummary
 
 import java.nio.file.Files
+import java.time.Instant
+import scala.concurrent.duration.*
 
 class BenchmarkReportEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
@@ -21,8 +23,8 @@ class BenchmarkReportEdgeCasesSpec extends AnyFlatSpec with Matchers {
         ExperimentResult.failed(RAGExperimentConfig("f1"), "Error 1"),
         ExperimentResult.failed(RAGExperimentConfig("f2"), "Error 2")
       ),
-      startTime = 1000L,
-      endTime = 2000L
+      startTime = Instant.ofEpochMilli(1000L),
+      endTime = Instant.ofEpochMilli(2000L)
     )
 
     val report = BenchmarkReport.console(results)
@@ -38,8 +40,8 @@ class BenchmarkReportEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val results = BenchmarkResults(
       suite = testSuite,
       results = Seq.empty,
-      startTime = 1000L,
-      endTime = 1000L
+      startTime = Instant.ofEpochMilli(1000L),
+      endTime = Instant.ofEpochMilli(1000L)
     )
 
     val report = BenchmarkReport.console(results)
@@ -52,8 +54,8 @@ class BenchmarkReportEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val results = BenchmarkResults(
       suite = testSuite,
       results = Seq(result),
-      startTime = 1000L,
-      endTime = 2000L
+      startTime = Instant.ofEpochMilli(1000L),
+      endTime = Instant.ofEpochMilli(2000L)
     )
 
     val report = BenchmarkReport.console(results)
@@ -69,8 +71,8 @@ class BenchmarkReportEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val results = BenchmarkResults(
       suite = testSuite,
       results = Seq(ExperimentResult.failed(RAGExperimentConfig("failed"), "Test error")),
-      startTime = 1000L,
-      endTime = 2000L
+      startTime = Instant.ofEpochMilli(1000L),
+      endTime = Instant.ofEpochMilli(2000L)
     )
 
     val json   = BenchmarkReport.json(results)
@@ -87,9 +89,14 @@ class BenchmarkReportEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val result = ExperimentResult(
       RAGExperimentConfig("timed"),
       Some(EvalSummary(Seq.empty, Map.empty, 0.5, 1)),
-      timings = Seq(TimingInfo("indexing", 500, 10), TimingInfo("search", 200, 5))
+      timings = Seq(TimingInfo("indexing", 500.millis, 10), TimingInfo("search", 200.millis, 5))
     )
-    val results = BenchmarkResults(suite = testSuite, results = Seq(result), startTime = 0L, endTime = 1000L)
+    val results = BenchmarkResults(
+      suite = testSuite,
+      results = Seq(result),
+      startTime = Instant.ofEpochMilli(0L),
+      endTime = Instant.ofEpochMilli(1000L)
+    )
 
     val json   = BenchmarkReport.json(results)
     val parsed = ujson.read(json)
@@ -109,8 +116,8 @@ class BenchmarkReportEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val results = BenchmarkResults(
       suite = testSuite,
       results = Seq(ExperimentResult.failed(RAGExperimentConfig("f1"), "err")),
-      startTime = 1000L,
-      endTime = 2000L
+      startTime = Instant.ofEpochMilli(1000L),
+      endTime = Instant.ofEpochMilli(2000L)
     )
 
     val md = BenchmarkReport.markdown(results)
@@ -122,7 +129,12 @@ class BenchmarkReportEdgeCasesSpec extends AnyFlatSpec with Matchers {
   it should "show metrics as dashes when not available" in {
     val summary = EvalSummary(Seq.empty, Map("faithfulness" -> 0.9), 0.9, 1)
     val result  = ExperimentResult(RAGExperimentConfig("partial"), Some(summary))
-    val results = BenchmarkResults(suite = testSuite, results = Seq(result), startTime = 0L, endTime = 1000L)
+    val results = BenchmarkResults(
+      suite = testSuite,
+      results = Seq(result),
+      startTime = Instant.ofEpochMilli(0L),
+      endTime = Instant.ofEpochMilli(1000L)
+    )
 
     val md = BenchmarkReport.markdown(results)
     md should include("0.900")
@@ -217,8 +229,8 @@ class BenchmarkReportEdgeCasesSpec extends AnyFlatSpec with Matchers {
     BenchmarkResults(
       suite = testSuite,
       results = Seq(ExperimentResult(RAGExperimentConfig("test-exp"), Some(summary))),
-      startTime = 1000L,
-      endTime = 2000L
+      startTime = Instant.ofEpochMilli(1000L),
+      endTime = Instant.ofEpochMilli(2000L)
     )
   }
 }

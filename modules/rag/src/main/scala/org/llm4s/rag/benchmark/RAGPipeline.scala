@@ -129,11 +129,11 @@ final class RAGPipeline private (
 
       // Emit RAG operation completed event
       result.foreach { _ =>
-        val durationMs = (System.nanoTime() - startTime) / 1_000_000
+        val duration = scala.concurrent.duration.Duration.fromNanos(System.nanoTime() - startTime)
         tracer.foreach(
           _.traceRAGOperation(
             operation = "index",
-            durationMs = durationMs,
+            duration = duration,
             embeddingTokens = embeddingTokens
           )
         )
@@ -184,11 +184,11 @@ final class RAGPipeline private (
 
     // Emit RAG operation completed event
     result.foreach { _ =>
-      val durationMs = (System.nanoTime() - startTime) / 1_000_000
+      val duration = scala.concurrent.duration.Duration.fromNanos(System.nanoTime() - startTime)
       tracer.foreach(
         _.traceRAGOperation(
           operation = "search",
-          durationMs = durationMs,
+          duration = duration,
           embeddingTokens = embeddingTokens
         )
       )
@@ -229,11 +229,11 @@ final class RAGPipeline private (
 
     // Emit RAG operation completed event for answer generation
     result.foreach { _ =>
-      val durationMs = (System.nanoTime() - startTime) / 1_000_000
+      val duration = scala.concurrent.duration.Duration.fromNanos(System.nanoTime() - startTime)
       tracer.foreach(
         _.traceRAGOperation(
           operation = "answer",
-          durationMs = durationMs,
+          duration = duration,
           llmPromptTokens = llmPromptTokens,
           llmCompletionTokens = llmCompletionTokens
         )

@@ -19,6 +19,14 @@ private[llm4s] object WireDurations {
     if (d > seconds.seconds) seconds + 1 else seconds
   }
 
+  /**
+   * A duration the protocol carries as whole milliseconds, such as a command's `durationMs`.
+   * Not implicit at the top level of a file that also uses [[wholeSecondsRW]]: import it in the
+   * companion that needs it.
+   */
+  val millisRW: ReadWriter[FiniteDuration] =
+    readwriter[Long].bimap[FiniteDuration](_.toMillis, _.millis)
+
   /** `d` in whole milliseconds, rounded up, so a positive timeout never becomes `waitFor(0)`. */
   def toWholeMillis(d: FiniteDuration): Long = {
     val millis = d.toMillis

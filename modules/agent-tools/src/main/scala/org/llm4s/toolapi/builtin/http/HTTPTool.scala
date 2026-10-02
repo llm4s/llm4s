@@ -1,15 +1,15 @@
 package org.llm4s.toolapi.builtin.http
 
-import org.llm4s.util.DurationRounding
-
 import org.llm4s.core.safety.UsingOps.using
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
+import org.llm4s.util.DurationRounding
 import upickle.default._
 
 import java.net.{ HttpURLConnection, URI }
 import java.nio.charset.StandardCharsets
 import scala.io.Source
+import scala.concurrent.duration.{ DurationLong, FiniteDuration }
 import scala.util.Try
 
 /**
@@ -25,10 +25,11 @@ case class HTTPResult(
   contentType: Option[String],
   contentLength: Long,
   truncated: Boolean,
-  responseTimeMs: Long
+  @upickle.implicits.key("responseTimeMs") responseTime: FiniteDuration
 )
 
 object HTTPResult {
+  import org.llm4s.util.DurationJson.millisRW
   implicit val httpResultRW: ReadWriter[HTTPResult] = macroRW[HTTPResult]
 }
 
@@ -327,7 +328,7 @@ object HTTPTool {
         contentType = responseContentType,
         contentLength = responseContentLength,
         truncated = truncated,
-        responseTimeMs = endTime - startTime
+        responseTime = (endTime - startTime).millis
       )
     }.toEither.left.map(e => s"HTTP request failed: ${e.getMessage}")
   }

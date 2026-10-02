@@ -27,7 +27,7 @@ final class WhisperSpeechToText(
   override val supportedFormats: List[String] = List("audio/wav", "audio/mp3", "audio/m4a", "audio/flac", "audio/ogg")
 
   override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] = {
-    val startTime             = System.currentTimeMillis()
+    val startTime             = System.nanoTime()
     val wavResult             = inputToWavPath(input)
     val effectiveOutputFormat = WhisperSpeechToText.effectiveOutputFormat(outputFormat, options)
 
@@ -51,8 +51,8 @@ final class WhisperSpeechToText(
         }
       output = WhisperSpeechToText.resolveCliOutput(wavAndTemp._1, effectiveOutputFormat, stdout)
       transcription <- {
-        val processingTimeMs = System.currentTimeMillis() - startTime
-        parseWhisperOutput(output, options).map(_.copy(processingTimeMs = Some(processingTimeMs)))
+        val processingTime = scala.concurrent.duration.Duration.fromNanos(System.nanoTime() - startTime)
+        parseWhisperOutput(output, options).map(_.copy(processingTime = Some(processingTime)))
       }
     } yield transcription
 

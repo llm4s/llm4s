@@ -1,5 +1,36 @@
 # Migration Guide
 
+## Pre-baseline API cleanup, pass 7
+
+Not in a release yet; continues pass 6 below, which typed the times a caller supplies. This pass
+types the times the library **reports**: an elapsed time is a `FiniteDuration`, a point in time an
+`Instant`, and the unit leaves the name. Every JSON, trace and wire format keeps its keys and
+millisecond values (`duration_ms`, `durationMs`, `executionTimeMs`, ...).
+
+```scala
+// before
+case AgentCompleted(state, steps, durationMs, _) => println(s"Done in ${durationMs}ms")
+// after
+case AgentCompleted(state, steps, duration, _) => println(s"Done in ${duration.toMillis}ms")
+```
+
+Check string interpolation in particular: `s"${duration}ms"` still compiles, but prints
+`150 millisecondsms`.
+
+| Module | Before | After |
+|---|---|---|
+| `llm4s-core` | `TraceEvent.ToolExecuted.duration: Long`, `RAGOperationCompleted.durationMs`, `ImageGenerationCompleted.durationMs`, `Tracing.traceRAGOperation(durationMs)` | `duration: FiniteDuration` |
+| | `ProviderExchange.durationMs: Long` | `duration: FiniteDuration` |
+| | `RateLimitError.requestsRemaining`, `RateLimitError.resetTime` | removed: no constructor could set them, so they were always `None` |
+| `llm4s-agent` | `AgentEvent.ToolCallCompleted.durationMs`, `AgentCompleted.durationMs`, `AgentEvent.toolCompleted`/`agentCompleted`'s `durationMs` | `duration: FiniteDuration` |
+| `llm4s-agent-tools` | `ShellResult.executionTimeMs`, `HTTPResult.responseTimeMs` | `executionTime`, `responseTime` (the tool's JSON keeps the `...Ms` keys) |
+| `llm4s-rag` | `TimingInfo.durationMs`, `durationSeconds`, `avgPerItemMs` | `duration`, `avgPerItem: Option[FiniteDuration]` |
+| | `ExperimentResult.totalTimeMs`/`totalTimeSeconds` | `totalTime: FiniteDuration` |
+| | `BenchmarkResults.startTime`/`endTime: Long` (epoch ms), `totalDurationMs`/`totalDurationSeconds` | `Instant`s, `totalDuration: FiniteDuration` |
+| `llm4s-image` | `ServiceStatus.averageGenerationTime: Option[Long]` (ms) | `Option[FiniteDuration]` |
+| `llm4s-speech` | `Transcription.processingTimeMs: Option[Long]` | `processingTime: Option[FiniteDuration]` |
+| workspace | `ExecuteCommandResponse.durationMs`, `CommandCompletedMessage.durationMs` | `duration: FiniteDuration` (the protocol keeps `durationMs`) |
+
 ## Pre-baseline API cleanup, pass 6
 
 Not in a release yet; continues pass 5 below. A time the caller supplies is typed: a duration is

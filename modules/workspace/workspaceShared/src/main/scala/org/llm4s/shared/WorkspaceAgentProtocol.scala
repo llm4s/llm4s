@@ -1,6 +1,5 @@
 package org.llm4s.shared
 
-import org.llm4s.shared.WireDurations.wholeSecondsRW
 import upickle.default.{ ReadWriter, macroRW }
 
 import scala.concurrent.duration.FiniteDuration
@@ -291,6 +290,7 @@ case class ExecuteCommandCommand(
 ) extends WorkspaceAgentCommand
 
 object ExecuteCommandCommand {
+  import WireDurations.wholeSecondsRW
   implicit val rw: ReadWriter[ExecuteCommandCommand] = macroRW
 }
 
@@ -300,11 +300,12 @@ case class ExecuteCommandResponse(
   stderr: String,
   exitCode: Int,
   isOutputTruncated: Boolean,
-  durationMs: Long
+  @upickle.implicits.key("durationMs") duration: FiniteDuration
 ) extends WorkspaceAgentResponse
 
 object ExecuteCommandResponse {
-  implicit val rw: ReadWriter[ExecuteCommandResponse] = macroRW
+  implicit private val durationRW: ReadWriter[FiniteDuration] = WireDurations.millisRW
+  implicit val rw: ReadWriter[ExecuteCommandResponse]         = macroRW
 }
 
 // 7. GetWorkspaceInfo Command and Response
@@ -414,11 +415,12 @@ object CommandStartedMessage {
 case class CommandCompletedMessage(
   commandId: String,
   exitCode: Int,
-  durationMs: Long
+  @upickle.implicits.key("durationMs") duration: FiniteDuration
 ) extends WebSocketMessage
 
 object CommandCompletedMessage {
-  implicit val rw: ReadWriter[CommandCompletedMessage] = macroRW
+  implicit private val durationRW: ReadWriter[FiniteDuration] = WireDurations.millisRW
+  implicit val rw: ReadWriter[CommandCompletedMessage]        = macroRW
 }
 
 // Cancellation message for terminating running commands

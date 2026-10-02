@@ -5,6 +5,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.io.ByteArrayOutputStream
+import scala.concurrent.duration.*
 
 /**
  * Tests for ConsoleTracing.
@@ -252,7 +253,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "show the tool, its outcome and its duration for ToolExecuted" in {
     val output = printed {
-      new ConsoleTracing().traceEvent(TraceEvent.ToolExecuted("echo", """{"message":"hi"}""", "hi", 42L, false))
+      new ConsoleTracing().traceEvent(TraceEvent.ToolExecuted("echo", """{"message":"hi"}""", "hi", 42.millis, false))
     }
 
     output should include("--- TOOL EXECUTED ---")

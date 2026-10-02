@@ -150,7 +150,7 @@ class OpenTelemetryTracing(
             .put(TraceAttributes.ToolName, e.name)
             .put("tool.input", e.input.take(1000))
             .put("tool.output", e.output.take(1000))
-            .put("duration_ms", e.duration)
+            .put("duration_ms", e.duration.toMillis)
             .put("success", e.success)
             .build()
         )
@@ -238,7 +238,7 @@ class OpenTelemetryTracing(
             .builder()
             .put(TraceAttributes.EventType, "rag-operation")
             .put("operation", e.operation)
-            .put("duration_ms", e.durationMs)
+            .put("duration_ms", e.duration.toMillis)
             .put("embedding_tokens", e.embeddingTokens.map(_.toLong).getOrElse(0L))
             .put("llm_prompt_tokens", e.llmPromptTokens.map(_.toLong).getOrElse(0L))
             .put("llm_completion_tokens", e.llmCompletionTokens.map(_.toLong).getOrElse(0L))
@@ -279,7 +279,7 @@ class OpenTelemetryTracing(
           .put("image_count", e.imageCount.toLong)
           .put("size", e.size)
           .put("quality", e.quality)
-          .put("duration_ms", e.durationMs)
+          .put("duration_ms", e.duration.toMillis)
           .put("success", e.success)
         e.costUsd.foreach(c => builder.put("cost.usd", c))
         e.errorMessage.foreach(m => builder.put("error.message", m))
@@ -291,7 +291,7 @@ class OpenTelemetryTracing(
   }
 
   override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
-    val event = TraceEvent.ToolExecuted(toolName, input, output, 0, true)
+    val event = TraceEvent.ToolExecuted(toolName, input, output, scala.concurrent.duration.Duration.Zero, true)
     traceEvent(event)
   }
 

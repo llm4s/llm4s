@@ -133,7 +133,7 @@ case class ServiceStatus(
   message: String,
   lastChecked: Instant = Instant.now(),
   queueLength: Option[Int] = None,
-  averageGenerationTime: Option[Long] = None // in milliseconds
+  averageGenerationTime: Option[FiniteDuration] = None
 )
 
 /** Represents a generated image */

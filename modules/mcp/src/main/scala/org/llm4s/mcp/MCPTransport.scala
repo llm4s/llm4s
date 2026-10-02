@@ -2,7 +2,6 @@
 package org.llm4s.mcp
 
 import org.llm4s.util.DurationRounding
-
 import scala.util.{ Try, Success, Failure }
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.{ CompletableFuture, ConcurrentHashMap, TimeUnit }

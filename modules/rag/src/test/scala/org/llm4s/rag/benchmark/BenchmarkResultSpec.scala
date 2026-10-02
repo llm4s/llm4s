@@ -3,27 +3,28 @@ package org.llm4s.rag.benchmark
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.rag.evaluation.EvalSummary
+import scala.concurrent.duration.*
 
 class BenchmarkResultSpec extends AnyFlatSpec with Matchers {
 
   "TimingInfo" should "format milliseconds correctly" in {
-    TimingInfo("test", 500).formatted shouldBe "500ms"
+    TimingInfo("test", 500.millis).formatted shouldBe "500ms"
   }
 
   it should "format seconds correctly" in {
-    val info = TimingInfo("test", 2500)
-    info.durationSeconds shouldBe 2.5
+    val info = TimingInfo("test", 2500.millis)
+    info.duration shouldBe 2500.millis
     info.formatted should include("2.50s")
   }
 
   it should "calculate average per item" in {
-    val info = TimingInfo("test", 1000, 10)
-    info.avgPerItemMs shouldBe Some(100.0)
+    val info = TimingInfo("test", 1000.millis, 10)
+    info.avgPerItem shouldBe Some(100.millis)
     info.formatted should include("100.0ms/item")
   }
 
   it should "return None for avgPerItem when itemCount is 0" in {
-    TimingInfo("test", 1000, 0).avgPerItemMs shouldBe None
+    TimingInfo("test", 1000.millis, 0).avgPerItem shouldBe None
   }
 
   it should "measure execution time" in {
@@ -33,7 +34,7 @@ class BenchmarkResultSpec extends AnyFlatSpec with Matchers {
     }
     result shouldBe "done"
     timing.phase shouldBe "computation"
-    timing.durationMs should be >= 50L
+    timing.duration should be >= 50.millis
   }
 
   "ExperimentResult" should "create failed result" in {
@@ -77,17 +78,16 @@ class BenchmarkResultSpec extends AnyFlatSpec with Matchers {
       config = config,
       evalSummary = None,
       timings = Seq(
-        TimingInfo("indexing", 1000),
-        TimingInfo("search", 500),
-        TimingInfo("evaluation", 2000)
+        TimingInfo("indexing", 1000.millis),
+        TimingInfo("search", 500.millis),
+        TimingInfo("evaluation", 2000.millis)
       )
     )
 
-    result.totalTimeMs shouldBe 3500
-    result.totalTimeSeconds shouldBe 3.5
-    result.indexingTime.map(_.durationMs) shouldBe Some(1000)
-    result.searchTime.map(_.durationMs) shouldBe Some(500)
-    result.evaluationTime.map(_.durationMs) shouldBe Some(2000)
+    result.totalTime shouldBe 3500.millis
+    result.indexingTime.map(_.duration) shouldBe Some(1000.millis)
+    result.searchTime.map(_.duration) shouldBe Some(500.millis)
+    result.evaluationTime.map(_.duration) shouldBe Some(2000.millis)
   }
 
   "BenchmarkResults" should "calculate rankings" in {

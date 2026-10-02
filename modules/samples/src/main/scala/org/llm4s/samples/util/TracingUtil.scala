@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentState
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.trace.{ Tracing, TraceEvent }
 
+import scala.concurrent.duration.*
 import scala.util.Try
 
 /**
@@ -47,7 +48,7 @@ object TracingUtil {
     parameters: Map[String, String],
     result: String,
     expression: String,
-    duration: Long = 10
+    duration: FiniteDuration = 10.millis
   ): Unit = {
     val paramString = parameters.map { case (k, v) => s"$k=$v" }.mkString(", ")
     val input       = if (paramString.nonEmpty) s"$operation: $paramString" else operation
