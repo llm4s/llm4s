@@ -9,6 +9,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{ Seconds, Span }
 import scala.util.Success
 import java.io.File
 import java.awt.image.BufferedImage
@@ -21,6 +22,9 @@ class ImageGenerationClientsTest
     with MockFactory
     with EitherValues
     with ScalaFutures {
+
+  // The 150ms default is too tight for a loaded CI runner (it failed on Windows)
+  implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(5, Seconds))
 
   // Common test data
   val prompt            = "a beautiful sunset"

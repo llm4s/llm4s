@@ -3,6 +3,7 @@ package org.llm4s.imagegeneration.provider
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{ Seconds, Span }
 import org.llm4s.imagegeneration._
 import org.llm4s.http.{ HttpResponse, MultipartPart }
 import java.nio.file.{ Files, Paths }
@@ -12,6 +13,9 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.util.{ Try, Success, Failure }
 
 class StableDiffusionClientTest extends AnyFunSuite with Matchers with ScalaFutures {
+
+  // The 150ms default is too tight for a loaded CI runner (it failed on Windows)
+  implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(5, Seconds))
 
   val config = StableDiffusionConfig("http://localhost:7860")
 

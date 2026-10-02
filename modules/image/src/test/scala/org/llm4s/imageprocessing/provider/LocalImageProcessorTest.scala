@@ -3,6 +3,7 @@ package org.llm4s.imageprocessing.provider
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.time.{ Seconds, Span }
 import org.llm4s.imageprocessing._
 import org.llm4s.media.MediaType
 
@@ -14,6 +15,9 @@ import javax.imageio.ImageIO
 import scala.concurrent.ExecutionContext.Implicits.global
 
 class LocalImageProcessorTest extends AnyFlatSpec with Matchers with ScalaFutures {
+
+  // The 150ms default is too tight for a loaded CI runner (it failed on Windows)
+  implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(5, Seconds))
 
   val processor = new LocalImageProcessor()
 
