@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Typed graph kernel prototype in `llm4s-agent`** (Experimental, `org.llm4s.agent.graph`)
+  ([#1267](https://github.com/llm4s/llm4s/issues/1267), Stage 0 of
+  [#1266](https://github.com/llm4s/llm4s/issues/1266)): typed state keys with operation-valued
+  updates (`StateKey[A, U]`, `StateUpdate`, `ThreadState`); builder-issued typed node handles and
+  routes (`GraphBuilder`, `NodeRef[I]`, `Route.Goto`/`Send`/`FanOut`); declared write sets;
+  static and dynamic join barriers; a superstep scheduler that commits updates in deterministic
+  task and emission order; and `GraphSnapshot` restore with validation against the compiled graph.
+  It prototypes the contracts in `docs/design/typed-agent-runtime-design.md` §4.2. The existing agent loop does not
+  use it yet, and the API will change as the remaining Stage 0 issues land.
 - **`llm4s-provider-testkit`** (Beta, new published module, `org.llm4s.testkit`)
   ([#1133](https://github.com/llm4s/llm4s/issues/1133)): the checks every provider module's
   `Llm4s<Name>ModuleSpec` makes, so a provider published outside this repository can prove itself
