@@ -85,3 +85,24 @@ object GraphError:
     override val message: String =
       s"Checkpoint write for thread '$threadId' failed: ${cause.message}" +
         runError.fold("")(e => s" (while recording the run's failure: ${e.message})")
+
+  /** A resume was refused: no answers, an interrupt that is not parked, or an answer that does not decode. */
+  final case class InvalidResume(graphId: String, problems: List[String]) extends GraphError:
+    override val message: String = s"Cannot resume graph '$graphId': ${problems.mkString("; ")}"
+
+  /** `start` or `recover` was called on a suspended thread; answer its interrupts with `resume`. */
+  final case class PendingInterrupts(threadId: String, interrupts: List[String]) extends GraphError:
+    override val message: String =
+      s"Thread '$threadId' is suspended on ${interrupts.mkString(", ")}; resume it with answers"
+
+  /** `resume` was called on a thread that is not suspended. */
+  final case class NotSuspended(threadId: String) extends GraphError:
+    override val message: String = s"Thread '$threadId' has no suspended run to resume"
+
+  /**
+   * Another run claimed the thread between this call reading it and claiming it. Nothing was
+   * accepted or discarded - retry once that run has suspended or completed.
+   */
+  final case class ThreadBusy(threadId: String, latestCheckpoint: Option[String]) extends GraphError:
+    override val message: String =
+      s"Thread '$threadId' was advanced by another run (now at ${latestCheckpoint.getOrElse("<none>")}); retry"

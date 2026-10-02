@@ -374,7 +374,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues {
     Seq("a", "b", "c", "d").map(f.callsOf) shouldBe Seq(1, 1, 2, 2)
   }
 
-  "OnExit durability" should "write nothing until the run ends, then commit it all at once" in {
+  "OnExit durability" should "write only its claim until the run ends, then commit the rest at once" in {
     val f          = Fixture()
     val store      = InMemoryCheckpointer()
     val runtime    = GraphRuntime(store)
@@ -384,12 +384,14 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues {
     f.onWorker = _ => synchronized(seenMidRun += (store.latest(thread).value -> recorder.durable.size))
 
     runtime.start(thread, f.graph, Vector("a", "b"), RunId("run-1"), Durability.OnExit).value.completed
-    seenMidRun.toVector shouldBe Vector(None -> 0, None -> 0)
+    // mid-run the store holds just the claim - the starting checkpoint - and its RunStarted
+    seenMidRun.toVector.map((stored, seen) => stored.map(_.checkpoint.id) -> seen) shouldBe
+      Vector(Some("run-1/1") -> 1, Some("run-1/1") -> 1)
     recorder.live.size shouldBe 2
     contiguous(recorder.durable)
     kinds(recorder.durable).last shouldBe "RunCompleted"
     store.latest(thread).value.map(s => s.checkpoint.status -> s.checkpoint.parent) shouldBe
-      Some(CheckpointStatus.Completed -> None)
+      Some(CheckpointStatus.Completed -> Some("run-1/1"))
   }
 
   it should "persist a failed run's completed siblings at exit so recovery skips them" in {
@@ -402,7 +404,9 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues {
     f.failOnce.add("b")
     runtime.start(thread, f.graph, Vector("a", "b"), RunId("run-1"), Durability.OnExit).value.failed
     val stored = store.latest(thread).value.get
-    stored.checkpoint.parent shouldBe Some(previous)
+    // the exit commit sits on the run's claim, which sits on the previous run's completion
+    stored.checkpoint.parent shouldBe Some("run-1/1")
+    previous shouldBe "run-0/5"
     stored.pendingWrites.map(_.taskId) shouldBe Vector(s"${stored.checkpoint.snapshot.superstep}.0")
 
     runtime.recover(f.graph, thread, RunId("run-2"), Durability.OnExit).value.completed._2 shouldBe Vector(

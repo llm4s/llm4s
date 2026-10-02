@@ -41,3 +41,10 @@ object ThreadId:
 object RunId:
   def apply(value: String): RunId         = value
   extension (id: RunId) def value: String = id
+
+/** Identifies a parked continuation awaiting an answer; stable across processes. */
+opaque type InterruptId = String
+
+object InterruptId:
+  def apply(value: String): InterruptId         = value
+  extension (id: InterruptId) def value: String = id

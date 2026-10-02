@@ -422,18 +422,69 @@ Decisions:
 - **The store numbers events.** Per-thread sequence numbers are allocated inside the commit, contiguously, and are never reused. A refused commit consumes none. `eventsAfter(afterSeq, limit)` pages the log. `compactEvents(beforeSeq)` raises a floor that never moves back, and replay from before it fails with `ReplayUnavailable(earliestSeq)`.
 - **Delivery follows commit in every mode.** The runtime commits and delivers under one lock, so subscribers receive durable events in commit order, only after the commit succeeds, and at most once each. `subscribe(afterSeq)` replays the log and then continues live, without gaps or duplicates, even when it joins mid-run. Live-only `NodeContext.progress` bypasses the log and is delivered immediately. `NodeContext.emit` custom events are committed with the task's pending write and discarded if the task fails.
 - **Durable events.** The durable events are `RunStarted`, `RunRecovered`, `TaskCompleted`, `TaskFailed`, `CheckpointCommitted`, `RunCompleted`, `RunFailed`, and `Custom(name, version, payload)`. Each record carries the thread, run, checkpoint, task, and node IDs, a timestamp, and its sequence number.
-- **Durability modes.** In `Sync`, every pending write and checkpoint is committed before the run proceeds. In `Async`, commits go through a single ordered writer while the run continues. The first failed commit stops the queue, so nothing lands on top of a lost write; the run drains the queue before returning and reports `CheckpointWriteFailed`. In `OnExit`, the run buffers everything and commits once at exit: the last checkpoint, re-parented to the durable latest, plus its pending writes and every event. A failed `OnExit` run therefore still keeps its completed siblings. All three modes share the delivery rule above, so the crash spec shows that an Async subscriber's events are a prefix of what a later process replays.
+- **Durability modes.** In `Sync`, every pending write and checkpoint is committed before the run proceeds. In `Async`, commits go through a single ordered writer while the run continues. The first failed commit stops the queue, so nothing lands on top of a lost write; the run drains the queue before returning and reports `CheckpointWriteFailed`. In `OnExit`, the run buffers everything after its claim (§4.5) and commits once at exit: the last checkpoint, re-parented to the claim, plus its pending writes and every event. A failed `OnExit` run therefore still keeps its completed siblings. If the commit that records a run's failure fails too, in any mode, the result is `CheckpointWriteFailed`, with the run's own error kept as `runError`, so the caller knows the failure was not made durable. All three modes share the delivery rule above, so the crash spec shows that an Async subscriber's events are a prefix of what a later process replays.
 - **`start` and `recover`.** `start` creates a thread, or applies its input to a `Completed` thread's state. It refuses a `Running` thread with `IncompleteRun`. A failed run leaves its latest checkpoint `Running` with its pending writes. `recover` restores it with no new input, reuses every pending write, and runs only failed or unstarted tasks. Each call is a new run ID, and the superstep limit counts per run.
 
 Limits:
 
-- **Suspension:** suspension is not modelled yet, so "persist every suspension synchronously" is a contract for [#1269](https://github.com/llm4s/llm4s/issues/1269) to implement.
+- **Suspension:** suspension was not modelled in this step. [#1269](https://github.com/llm4s/llm4s/issues/1269) implemented it (§4.5), including persisting every suspension before it is returned.
 - **Retry:** `recover` retries a failed task once; per-node retry policy is Stage 1.
 - **Retention:** the store keeps only the latest checkpoint and compacts events only when asked. Checkpoint history, fork, retention by age or size, and claim fencing are Stage 2.
 - **Delivery threads and queues:** events are delivered on the committing thread. Subscribers have unbounded queues and are registered per runtime instance.
 - **Run API:** runs return `Result[RunResult]` synchronously. The dispatcher, bounded queues, `RunHandle`, and `RunConfig` belong to [#1271](https://github.com/llm4s/llm4s/issues/1271).
 
-### 4.4 Durable workflow API
+### 4.5 Stage 0 prototype: resumable approval and tool-call barriers ([#1269](https://github.com/llm4s/llm4s/issues/1269))
+
+The kernel gains typed suspension, and `org.llm4s.agent.graph.toolloop` proves the model/tool loop on top of it. The specs are `SuspendSpec` (kernel) and `ToolLoopSpec` (loop, in memory and durable).
+
+Kernel decisions:
+
+- **Suspension is a node result.** `NodeResult.Suspend(update, question: Q, resumeAt: ResumeRef[Q, A])` replaces the sketch's `TypedInterrupt`. `GraphBuilder.declareResume[Q, A]` issues a `ResumeRef` whose node consumes `Resumed[Q, A]` and carries the question and answer codecs. A checkpoint therefore stores the question as `VersionedJson`, and a resume supplies the answer as JSON; both are decoded by the compiled graph. The interrupt ID is the suspended task's ID: one suspension per task, stable across processes and re-runs.
+- **A continuation stands in for its task.** The parked continuation inherits the suspended task's dynamic join slot, and its *origin* (task and node). When it completes, it fills that task's dynamic arrival under the original task ID and makes the static arrival as the original node. The barrier never waits on the continuation's own scheduler ID. A continuation that suspends again keeps the original origin. The suspended task makes no arrival and fires none of its node's static edges.
+- **The whole run pauses after the superstep.** Siblings finish and their updates commit, along with the suspending task's own update. `Execution.paused` stops the next superstep. `CompiledGraph.resume(execution, answers)` accepts any non-empty subset. It rejects unknown IDs and undecodable answers without changing anything (`InvalidResume`), and appends each answered continuation to the frontier in parking order. Unanswered ones stay parked. At quiescence, a join that is waiting only for parked continuations reports `Suspended`. A join waiting for an arrival that nothing can make fails with `UnsatisfiedJoin`, even while unrelated continuations are parked.
+- **Snapshots carry parked continuations.** `GraphSnapshot` gains `parked`, `paused`, and task origins, and restore validates them. A dynamic join's expected arrival may be satisfied by a pending task or by a parked continuation in its slot. The checkpoint format moves to 2, with a real 1 -> 2 migration. `PendingWrite.suspension` defaults to `None`, so writes recorded against a format-1 checkpoint still read.
+
+Runtime decisions:
+
+- **Checkpoint status.** `Suspended` joins `Running` and `Completed`. `start` and `recover` refuse a suspended thread with `PendingInterrupts`. `resume` requires one, and returns `NotSuspended` otherwise. `recover` still accepts a `Running` thread that has parked continuations, such as a resumed run that crashed: it runs what is runnable and suspends again.
+- **Every run claims its thread.** Before running anything, `start`, `recover`, and `resume` synchronously commit a checkpoint whose parent is the latest checkpoint they read; `recover` also carries the pending writes over to it. If another run claimed the thread first, the call returns `ThreadBusy` and its input or answers are neither accepted nor discarded. This also makes "persist every suspension before returning it" hold in every mode, because each mode drains its commits before a run returns. Claim fencing against a stale worker is still Stage 2.
+- **Suspension events.** `TaskSuspended(interruptId)` is committed with the suspended task's pending write, so recovery does not re-run a task that suspended. `RunSuspended(interrupts)` and `RunResumed(answered)` mark the run boundaries.
+
+Tool-loop decisions (`ToolLoop`):
+
+- **One task per call.** `model` appends the assistant message and fans its calls out to `call-tool`, one task each, behind a dynamic join named `tool-batch`. `collect` runs only when that barrier releases. It requires exactly one result per call, appends the `ToolMessage`s in call order, clears the results key, and routes back to `model`. The model therefore never sees a partial batch, and `model` re-checks `Message.validateConversation` before every call.
+- **The loop writes every result.** A tool returns `ToolOutcome.Completed`, `Failed`, or `NeedsApproval`, never a message. The loop records the single `ToolResult` per call for success, failure, a thrown tool, policy denial, rejection, an unknown tool, and a tool that asks again after approval. The results key refuses a second result for the same call.
+- **Approvals converge on one node.** A policy `RequireApproval` and a tool's `NeedsApproval` both suspend with an `ApprovalRequest` (call, reason, source) and resume at the one `approval` node. `Approve` runs the call with `approved = true`. `Reject` records an error result. `Edit(arguments)` first applies `MessageUpdate.EditToolCall` to the source assistant message, then runs the edited call. The policy can still deny edited arguments; it is not asked to approve them again.
+- **Edits are an operation.** `MessageUpdate.EditToolCall` changes one call's arguments in place, so two approvals that edit calls of the same message in one superstep both apply. Under the sketch's whole-message `Replace`, the second edit would overwrite the first.
+- **Message IDs.** Each `StoredMessage` ID is derived from the task that wrote it, so a re-run writes the same IDs. Core `Message` stays ID-free, as §4 requires.
+
+Limits (owners in §4.6):
+
+- `LoopTool`, `ToolCallPolicy`, and `ModelStep` are prototype contracts.
+- Tool-argument schema validation is not implemented.
+- A thrown tool is always a tool-level failure.
+
+### 4.6 Stage 0 carry-forward
+
+Work the Stage 0 prototypes deliberately left out, and where each item is owned:
+
+| Item | Left by | Owner |
+|---|---|---|
+| Ox structured concurrency replacing the private `TaskExecutor` seam; interruption as the cancellation contract; provider interruption checks in provider-testkit | #1267 | [#1270](https://github.com/llm4s/llm4s/issues/1270) |
+| `RunContext`/`RunConfig`/`RunBudgets` replacing `NodeContext` and `compile(maxSupersteps)`; `RunHandle` with `await`/`status`/`cancel` | #1267, #1268 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
+| Ordered per-subscriber dispatcher with bounded queues and lagging-subscriber disconnect, instead of delivery on the committing thread | #1268 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
+| `AgentTool[A]` + `AgentToolSpec[A]` replacing `LoopTool`; `ToolArgumentValidator` (schema validation before policy or side effects); infrastructure-fatal versus tool-level failure | #1269 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
+| `AgentMiddleware` (ordered hooks, `wrapModelCall`/`wrapToolCall`) replacing `ToolCallPolicy`; guardrails as middleware | #1269 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
+| `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop`; `ModelStep` streaming through live progress; `PlanRunner` rebuilt or removed; `AgentEvent` replaced | #1269 | Stage 1 |
+| Per-node retry and cache policy (recovery currently retries a failed task once) | #1268 | Stage 1 |
+| Mermaid export | #1267 | Stage 1 |
+| Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
+| Run-claim fencing tokens on every commit (today: the optimistic parent check and `ThreadBusy`) | #1268, #1269 | Stage 2 |
+| Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction) | #1268 | Stage 2 |
+| Static `interruptBefore`/`interruptAfter` breakpoints | #1269 | Stage 2 |
+| Known limit, not planned: the structural fingerprint does not cover node input types; a changed input type is caught when a pending input fails to decode | #1267 | - |
+
+### 4.7 Durable workflow API
 
 Explore a Scala `Workflow[A]`/`Durable[A]` for-comprehension as a peer frontend to the graph DSL. It should compile to the same runtime/checkpoint kernel, not create a second durable engine. Durable boundaries must be explicit named steps with serializable inputs/outputs; arbitrary Scala closures are not replayable. The workflow API can express sequence, parallel composition, retry, timeout, and typed suspension in direct Scala style. Prototype after the superstep kernel exists, and adopt only if it substantially improves ordinary Scala ergonomics.
 

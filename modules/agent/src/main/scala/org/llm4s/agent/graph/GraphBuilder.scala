@@ -37,6 +37,7 @@ final class GraphBuilder private (val id: String, val version: String):
   private val staticJoins  = mutable.ArrayBuffer.empty[StaticJoin]
   private val dynamicJoins = mutable.ArrayBuffer.empty[DynamicJoin]
   private val readKeys     = mutable.ArrayBuffer.empty[StateKey[?, ?]]
+  private val resumes      = mutable.LinkedHashMap.empty[NodeId, ResumeRef[?, ?]]
   private val problems     = mutable.ArrayBuffer.empty[String]
 
   /**
@@ -66,6 +67,30 @@ final class GraphBuilder private (val id: String, val version: String):
   )(node: GraphNode[I])(using codec: ReadWriter[I]): NodeRef[I] =
     val ref = declare[I](nodeId, inputVersion)
     implement(ref, writes)(node)
+    ref
+
+  /**
+   * Issues a handle for a node that continues suspended work, consuming `Resumed[Q, A]`; implement
+   * `ref.node` like any other node. `questionVersion` versions the question's JSON in checkpoints;
+   * `inputVersion` versions the `Resumed` payload of a scheduled continuation.
+   */
+  def declareResume[Q, A](
+    nodeId: String,
+    questionVersion: SchemaVersion = SchemaVersion.initial,
+    inputVersion: SchemaVersion = SchemaVersion.initial
+  )(using question: ReadWriter[Q], answer: ReadWriter[A]): ResumeRef[Q, A] =
+    val node = declare[Resumed[Q, A]](nodeId, inputVersion)(using ResumeRef.resumedCodec[Q, A])
+    val ref  = new ResumeRef[Q, A](node, question, answer, questionVersion)
+    resumes.update(node.id, ref)
+    ref
+
+  /** Declares and implements a resume node in one step. */
+  def resumeNode[Q, A](nodeId: String, writes: Set[StateKey[?, ?]] = Set.empty)(node: GraphNode[Resumed[Q, A]])(using
+    question: ReadWriter[Q],
+    answer: ReadWriter[A]
+  ): ResumeRef[Q, A] =
+    val ref = declareResume[Q, A](nodeId)
+    implement(ref.node, writes)(node)
     ref
 
   /** Registers a key that nodes read but none writes, such as one seeded by a restored snapshot. */
@@ -134,6 +159,7 @@ final class GraphBuilder private (val id: String, val version: String):
           edges = edges.toVector.groupMap(_._1)(_._2),
           staticJoins = staticJoins.toVector,
           dynamicJoins = dynamicJoins.map(j => j.id -> j).toMap,
+          resumes = resumes.toMap,
           keys = keys.map(k => k.id -> k).toMap,
           output = output,
           maxSupersteps = maxSupersteps,
@@ -157,6 +183,7 @@ final class GraphBuilder private (val id: String, val version: String):
         s"static:${j.id.value}:${j.sources.map(_.value).toVector.sorted.mkString(",")}->${j.target.id.value}"
       ) ++
       dynamicJoins.map(j => s"dynamic:${j.id.value}->${j.target.id.value}") ++
+      resumes.keys.map(n => s"resume:${n.value}").toVector.sorted ++
       keys.map(k => s"key:${k.id.value}").sorted
     MessageDigest
       .getInstance("SHA-256")

@@ -11,6 +11,9 @@ enum CheckpointStatus derives ReadWriter:
   /** Work is scheduled, or the run stopped before completing; continue with `recover`. */
   case Running
 
+  /** The run paused on parked continuations; continue with `resume`. */
+  case Suspended
+
   /** The run completed; a new `start` applies its input to this state. */
   case Completed
 
@@ -39,10 +42,27 @@ final case class Checkpoint(
 object Checkpoint:
 
   /** The format this build writes. */
-  val CurrentFormat: Int = 1
+  val CurrentFormat: Int = 2
 
-  /** Migrations of the checkpoint format itself, keyed by the version they upgrade from. */
-  private val formatVersion: SchemaVersion = SchemaVersion.initial
+  /**
+   * Migrations of the checkpoint format itself, keyed by the version they upgrade from.
+   * 1 -> 2: suspension (#1269) added parked continuations, the paused flag and task origins.
+   */
+  private val formatVersion: SchemaVersion = SchemaVersion(2)(1 -> addSuspension)
+
+  private def addSuspension(json: ujson.Value): Result[ujson.Value] =
+    Try {
+      val upgraded = ujson.copy(json)
+      val snapshot = upgraded("snapshot")
+      snapshot("parked") = ujson.Arr()
+      snapshot("paused") = false
+      snapshot("frontier").arr.foreach { task =>
+        task("originTask") = upickle.default.writeJs(Option.empty[String])
+        task("originNode") = upickle.default.writeJs(Option.empty[String])
+      }
+      upgraded("formatVersion") = 2
+      upgraded
+    }.toResult
 
   private given ReadWriter[Instant] = upickle.default.readwriter[String].bimap(_.toString, Instant.parse)
 
@@ -59,7 +79,7 @@ object Checkpoint:
       .flatMap(upgraded => Try(upickle.default.read[Checkpoint](upgraded)).toResult)
 
 /**
- * A completed task's result, recorded against the checkpoint whose frontier it ran in, before the
+ * A completed (or suspended) task's result, recorded against the checkpoint whose frontier it ran in, before the
  * superstep commits. On recovery the task is not run again: its command is decoded from here.
  */
 final case class PendingWrite(
@@ -67,8 +87,13 @@ final case class PendingWrite(
   taskId: String,
   nodeId: String,
   operations: Vector[EncodedOperation],
-  routes: Vector[EncodedRoute]
+  routes: Vector[EncodedRoute],
+  // defaulted so writes recorded against a format-1 checkpoint still read
+  suspension: Option[EncodedSuspension] = None
 ) derives ReadWriter
+
+/** A suspended task's parked continuation: where it resumes and the question, as data. */
+final case class EncodedSuspension(resumeNode: String, question: VersionedJson) derives ReadWriter
 
 /** A state operation as data: updates are encoded with the key's update codec. */
 enum EncodedOperation derives ReadWriter:

@@ -30,6 +30,11 @@ object GraphTestSupport {
     def completed: (ThreadState, O) = result match {
       case RunResult.Completed(state, output, _) => (state, output)
       case RunResult.Failed(_, error)            => fail(s"run failed: ${error.message}")
+      case suspended: RunResult.Suspended        => fail(s"run suspended on ${suspended.interrupts.map(_.id.value)}")
+    }
+    def suspended: RunResult.Suspended = result match {
+      case suspended: RunResult.Suspended => suspended
+      case other                          => fail(s"run did not suspend: $other")
     }
     def failed: (ThreadState, org.llm4s.error.LLMError) = result match {
       case RunResult.Failed(state, error) => (state, error)

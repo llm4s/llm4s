@@ -20,7 +20,7 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
       "run",
       CheckpointStatus.Running,
       now,
-      GraphSnapshot("g", "v1", "f", 0, Map.empty, Vector.empty, Vector.empty, Vector.empty)
+      GraphSnapshot("g", "v1", "f", 0, Map.empty, Vector.empty, Vector.empty, Vector.empty, Vector.empty, false)
     )
   private def event(name: String) = EventDraft("run", None, None, None, now, RunEvent.Custom(name, 1, ujson.Null))
   private def write(checkpointId: String, taskId: String) =

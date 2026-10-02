@@ -47,10 +47,13 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
       superstep = 3,
       state = Map("items" -> VersionedJson(1, ujson.Arr(ujson.Obj("label" -> "old")))),
       frontier = Vector(
-        GraphSnapshot.PendingTask("3.0", "sink", VersionedJson(1, ujson.Obj("label" -> "pending")), None, None)
+        GraphSnapshot
+          .PendingTask("3.0", "sink", VersionedJson(1, ujson.Obj("label" -> "pending")), None, None, None, None)
       ),
       staticJoins = Vector.empty,
-      dynamicJoins = Vector.empty
+      dynamicJoins = Vector.empty,
+      parked = Vector.empty,
+      paused = false
     )
     graph.runFrom(graph.restore(written).value).completed._2 shouldBe Vector(Item("old"), Item("pending"))
 
@@ -76,9 +79,47 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     Checkpoint.fromJson(Checkpoint.toJson(checkpoint)).value shouldBe checkpoint
   }
 
+  it should "migrate a format-1 checkpoint, written before suspension existed" in {
+    val b     = GraphBuilder("g", "v1")
+    val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty))
+    val graph = b.compile(start)(_ => Right(())).value
+    val formatOne = ujson.Obj(
+      "formatVersion" -> 1,
+      "id"            -> "run-1/1",
+      "parent"        -> upickle.default.writeJs(Option.empty[String]),
+      "threadId"      -> "thread",
+      "runId"         -> "run-1",
+      "status"        -> upickle.default.writeJs[CheckpointStatus](CheckpointStatus.Running),
+      "createdAt"     -> "2026-10-02T12:00:00Z",
+      "snapshot" -> ujson.Obj(
+        "graphId"      -> graph.id,
+        "graphVersion" -> graph.version,
+        "fingerprint"  -> graph.fingerprint,
+        "superstep"    -> 0,
+        "state"        -> ujson.Obj(),
+        "frontier" -> ujson.Arr(
+          ujson.Obj(
+            "taskId"     -> "0.0",
+            "nodeId"     -> "start",
+            "input"      -> upickle.default.writeJs(VersionedJson(1, ujson.Null)),
+            "joinId"     -> upickle.default.writeJs(Option.empty[String]),
+            "fanOutTask" -> upickle.default.writeJs(Option.empty[String])
+          )
+        ),
+        "staticJoins"  -> ujson.Arr(),
+        "dynamicJoins" -> ujson.Arr()
+      )
+    )
+    val migrated = Checkpoint.fromJson(formatOne).value
+    migrated.formatVersion shouldBe 2
+    migrated.snapshot.parked shouldBe empty
+    migrated.snapshot.paused shouldBe false
+    graph.runFrom(graph.restore(migrated.snapshot).value).completed
+  }
+
   it should "refuse a format it does not know" in {
-    val newer = ujson.Obj("formatVersion" -> 2, "id" -> "x")
-    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(2, Checkpoint.CurrentFormat)
+    val newer = ujson.Obj("formatVersion" -> 3, "id" -> "x")
+    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(3, Checkpoint.CurrentFormat)
     Checkpoint.fromJson(ujson.Obj("id" -> "x")).left.value shouldBe
       GraphError.UnsupportedCheckpointFormat(0, Checkpoint.CurrentFormat)
   }
@@ -101,11 +142,14 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
       .send(worker, "w")
       .fanOut(join, worker, Vector("x", "y"))
     val task  = Task(TaskId("0.0"), start.id, (), None)
-    val write = graph.encodeWrite("cp", task, command).value
+    val write = graph.encodeWrite("cp", task, TaskResult.Done(command)).value
     upickle.default.read[PendingWrite](upickle.default.write(write)) shouldBe write
-    val decoded = graph.decodeWrite(write).value
-    decoded.routes shouldBe command.routes
-    decoded.update.operations shouldBe command.update.operations
+    graph.decodeWrite(write).value match {
+      case TaskResult.Done(decoded) =>
+        decoded.routes shouldBe command.routes
+        decoded.update.operations shouldBe command.update.operations
+      case other => fail(other.toString)
+    }
   }
 
   it should "report keys, nodes, joins and payloads the graph does not know" in {

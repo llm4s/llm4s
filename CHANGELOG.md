@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Resumable approval and tool-call barriers for graph runs** (Experimental,
+  `org.llm4s.agent.graph`, [#1269](https://github.com/llm4s/llm4s/issues/1269)): nodes can suspend
+  with a typed question (`NodeResult.Suspend`, `GraphBuilder.declareResume`, `ResumeRef`). The run
+  pauses after that superstep, and `CompiledGraph.resume` / `GraphRuntime.resume` answer any subset
+  of the parked interrupts. A continuation fills the suspended task's join arrival, so a barrier stays
+  closed until every parked call is answered. Checkpoints gain a `Suspended` status and format 2,
+  with a migration from format 1. Every run now claims its thread with a synchronous commit, so a
+  racing `start`/`resume`/`recover` fails with `ThreadBusy`, and every returned suspension has been
+  persisted. `org.llm4s.agent.graph.toolloop.ToolLoop` prototypes the model/tool loop on the
+  runtime: one task per call; exactly one runtime-written result per call, including denial,
+  rejection, unknown tools and failures; policy- and tool-raised approvals both resuming at one
+  approval node; and edited approvals amending the source assistant message. Design:
+  `docs/design/typed-agent-runtime-design.md` §4.5, with the Stage 0 carry-forward in §4.6.
 - **Durable graph runs: checkpoints and commit-gated event replay** (Experimental,
   `org.llm4s.agent.graph`, [#1268](https://github.com/llm4s/llm4s/issues/1268)):
   `GraphRuntime.start`/`recover`/`subscribe` over a `Checkpointer` SPI that owns each thread's latest

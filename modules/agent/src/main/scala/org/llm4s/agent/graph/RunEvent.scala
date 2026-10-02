@@ -10,8 +10,17 @@ enum RunEvent derives ReadWriter:
   case RunRecovered(fromCheckpoint: String)
   case TaskCompleted
   case TaskFailed(message: String)
+
+  /** The task parked a continuation; its pending write holds the question. */
+  case TaskSuspended(interruptId: String)
   case CheckpointCommitted(superstep: Int)
   case RunCompleted
+
+  /** The run paused; these interrupts await answers. */
+  case RunSuspended(interrupts: Vector[String])
+
+  /** A run began by answering these interrupts. */
+  case RunResumed(answered: Vector[String])
   case RunFailed(message: String)
 
   /** A node's own event, from [[NodeContext.emit]]; `name` and `version` identify its payload. */
