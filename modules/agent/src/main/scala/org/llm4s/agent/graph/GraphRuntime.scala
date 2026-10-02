@@ -110,7 +110,20 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           Left(
             GraphError.RestoreRejected(graph.id, List(s"pending write for task ${write.taskId}, which is not pending"))
           )
-        else graph.decodeWrite(write).map(command => reused.updated(TaskId(write.taskId), command))
+        else
+          val task = execution.frontier.find(_.id == TaskId(write.taskId)).get
+          for
+            _ <- Either.cond(
+              write.nodeId == task.node.value,
+              (),
+              GraphError.RestoreRejected(
+                graph.id,
+                List(s"pending write for task ${write.taskId} names node '${write.nodeId}', not '${task.node.value}'")
+              )
+            )
+            command <- graph.decodeWrite(write)
+            _       <- graph.checkCommand(task, command)
+          yield reused.updated(task.id, command)
       }
     }
 
@@ -286,9 +299,18 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       committer.submit(Commit(None, Vector.empty, Vector(draft(None, None, RunEvent.RunFailed(error.message)))))
       stop(execution, error)
 
+    /**
+     * Closes the committer and fails the run. If closing reveals that a commit failed - an Async
+     * queue, or OnExit's one exit commit - the run was not made durable, and the result says so
+     * ([[GraphError.CheckpointWriteFailed]], keeping `error` as the run's own failure).
+     */
     private def stop(execution: Execution, error: LLMError): RunResult[O] =
       committer.close()
-      RunResult.Failed(execution.state, error)
+      val reported = (error, committer.failure) match
+        case (already: GraphError.CheckpointWriteFailed, _) => already
+        case (_, Some(storeError)) => GraphError.CheckpointWriteFailed(threadId.value, storeError, Some(error))
+        case (_, None)             => error
+      RunResult.Failed(execution.state, reported)
 
     private def draft(checkpointId: Option[String], task: Option[Task], event: RunEvent): EventDraft =
       EventDraft(runId.value, checkpointId, task.map(_.id.value), task.map(_.node.value), clock.instant(), event)

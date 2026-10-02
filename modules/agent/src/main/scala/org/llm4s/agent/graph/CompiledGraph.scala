@@ -189,6 +189,9 @@ final class CompiledGraph[I, O] private[graph] (
           case Right(NodeResult.Fail(error))       => Left(GraphError.NodeFailed(task.node, task.id, error))
           case Right(NodeResult.Continue(command)) => validate(task, command).map(_ => command)
 
+  /** Checks a command - such as one decoded from a pending write - as if `task` had just returned it. */
+  private[graph] def checkCommand(task: Task, command: Command): Result[Unit] = validate(task, command)
+
   /**
    * Applies every task's checked command in frontier order and schedules the next frontier.
    * `completed` holds a command for every frontier task, in frontier order.

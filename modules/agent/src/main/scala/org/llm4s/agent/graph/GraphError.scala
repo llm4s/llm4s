@@ -76,6 +76,12 @@ object GraphError:
   final case class NothingToRecover(threadId: String) extends GraphError:
     override val message: String = s"Thread '$threadId' has no incomplete execution to recover"
 
-  /** The checkpointer refused or failed a commit; the run stops at its last durable checkpoint. */
-  final case class CheckpointWriteFailed(threadId: String, cause: LLMError) extends GraphError:
-    override val message: String = s"Checkpoint write for thread '$threadId' failed: ${cause.message}"
+  /**
+   * The checkpointer refused or failed a commit; the run stops at its last durable checkpoint.
+   * `runError` is the run's own failure when the commit failed while recording it.
+   */
+  final case class CheckpointWriteFailed(threadId: String, cause: LLMError, runError: Option[LLMError] = None)
+      extends GraphError:
+    override val message: String =
+      s"Checkpoint write for thread '$threadId' failed: ${cause.message}" +
+        runError.fold("")(e => s" (while recording the run's failure: ${e.message})")

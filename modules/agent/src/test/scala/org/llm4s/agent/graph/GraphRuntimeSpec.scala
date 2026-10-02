@@ -35,7 +35,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues {
         calls.computeIfAbsent(item, _ => new AtomicInteger()).incrementAndGet()
         onWorker(item)
         context.progress(ujson.Str(s"working on $item"))
-        context.emit("worked", 1, ujson.Str(item))
+        context.emit("worked", 1, ujson.Obj("item" -> item))
         if failOnce.remove(item) then NodeResult.Fail(ValidationError("worker", s"$item failed"))
         else continue(Command.empty.update(results, item.toUpperCase))
       }
@@ -227,6 +227,74 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues {
     val (_, error) = GraphRuntime(store).start(thread, f.graph, Vector("a"), RunId("run-1")).value.failed
     error shouldBe a[GraphError.CheckpointWriteFailed]
     store.underlying.latest(thread).value.get.checkpoint.snapshot.superstep shouldBe 1
+  }
+
+  it should "reject a recovered pending write attributed to another node or writing undeclared keys" in {
+    val f     = Fixture()
+    val store = InMemoryCheckpointer()
+    f.failOnce.add("b")
+    GraphRuntime(store).start(thread, f.graph, Vector("a", "b"), RunId("run-1")).value.failed
+
+    def tampered(change: PendingWrite => PendingWrite): Checkpointer = new Checkpointer {
+      def commit(threadId: ThreadId, commit: Commit) = store.commit(threadId, commit)
+      def latest(threadId: ThreadId) =
+        store.latest(threadId).map(_.map(s => s.copy(pendingWrites = s.pendingWrites.map(change))))
+      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = store.eventsAfter(threadId, afterSeq, limit)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long)          = store.compactEvents(threadId, beforeSeq)
+    }
+    GraphRuntime(tampered(_.copy(nodeId = "summarize")))
+      .recover(f.graph, thread, RunId("run-2"))
+      .left
+      .value
+      .message should
+      include("names node 'summarize', not 'worker'")
+    val logWrite = EncodedOperation.Update("log", VersionedJson(1, ujson.Str("forged")))
+    GraphRuntime(tampered(w => w.copy(operations = w.operations :+ logWrite)))
+      .recover(f.graph, thread, RunId("run-3"))
+      .left
+      .value shouldBe a[GraphError.UndeclaredWrite]
+    // the genuine writes still recover
+    GraphRuntime(store).recover(f.graph, thread, RunId("run-4")).value.completed._2 shouldBe Vector("A", "B")
+  }
+
+  it should "keep durable events detached from what subscribers and readers are handed" in {
+    val f       = Fixture()
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    runtime
+      .subscribe(thread) {
+        case StreamEvent.Durable(record) =>
+          record.event match {
+            case RunEvent.Custom(_, _, payload) => payload("item") = "tampered"
+            case _                              => ()
+          }
+        case _ => ()
+      }
+      .value
+    runtime.start(thread, f.graph, Vector("a"), RunId("run-1")).value.completed
+    def customs =
+      store.eventsAfter(thread, 0L, 100).value.collect { case EventRecord(_, _, _, _, _, _, _, c: RunEvent.Custom) =>
+        c.payload
+      }
+    customs shouldBe Vector(ujson.Obj("item" -> "a"))
+    customs.head("item") = "tampered again"
+    customs shouldBe Vector(ujson.Obj("item" -> "a"))
+  }
+
+  it should "report a failed exit commit rather than only the run's own failure" in {
+    Seq(Durability.OnExit, Durability.Async).foreach { durability =>
+      val f     = Fixture()
+      val store = ControlledCheckpointer()
+      f.failOnce.add("a")
+      f.onWorker = _ => store.crashed.set(true)
+      val (_, error) = GraphRuntime(store).start(thread, f.graph, Vector("a"), RunId("run-1"), durability).value.failed
+      error match {
+        case GraphError.CheckpointWriteFailed(_, cause, Some(runError)) =>
+          cause.message should include("simulated crash")
+          runError shouldBe a[GraphError.NodeFailed]
+        case other => fail(s"$durability: $other")
+      }
+    }
   }
 
   "Async durability" should "run ahead of its commits but deliver durable events only once committed" in {

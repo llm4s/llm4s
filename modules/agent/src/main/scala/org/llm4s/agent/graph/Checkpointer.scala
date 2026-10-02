@@ -45,7 +45,7 @@ final class InMemoryCheckpointer extends Checkpointer:
   final private case class ThreadRecord(
     checkpoint: Option[ujson.Value],
     pendingWrites: Vector[ujson.Value],
-    events: Vector[EventRecord],
+    events: Vector[(Long, ujson.Value)],
     nextSeq: Long,
     earliestSeq: Long
   )
@@ -69,17 +69,21 @@ final class InMemoryCheckpointer extends Checkpointer:
       )
     }
     conflict.orElse(misdirected).toLeft(()).map { _ =>
-      val records = commit.events.zipWithIndex.map { (draft, i) =>
-        EventRecord.committed(threadId.value, current.nextSeq + i, draft)
+      // events are stored as JSON, like checkpoints, so neither the caller's payloads nor the
+      // records handed back can alias what is durable
+      val stored = commit.events.zipWithIndex.map { (draft, i) =>
+        val seq = current.nextSeq + i
+        seq -> upickle.default.writeJs(EventRecord.committed(threadId.value, seq, draft))
       }
-      val writes = commit.pendingWrites.map(upickle.default.writeJs(_))
+      val records = stored.map((_, json) => upickle.default.read[EventRecord](json))
+      val writes  = commit.pendingWrites.map(upickle.default.writeJs(_))
       threads.update(
         threadId.value,
         current.copy(
           checkpoint = commit.checkpoint.map(Checkpoint.toJson).orElse(current.checkpoint),
           pendingWrites = if commit.checkpoint.isDefined then writes else current.pendingWrites ++ writes,
-          events = current.events ++ records,
-          nextSeq = current.nextSeq + records.size
+          events = current.events ++ stored,
+          nextSeq = current.nextSeq + stored.size
         )
       )
       records
@@ -100,12 +104,15 @@ final class InMemoryCheckpointer extends Checkpointer:
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = synchronized {
     val current = record(threadId)
     if afterSeq + 1 < current.earliestSeq then Left(GraphError.ReplayUnavailable(threadId.value, current.earliestSeq))
-    else Right(current.events.filter(_.seq > afterSeq).take(limit))
+    else
+      Try(
+        current.events.filter(_._1 > afterSeq).take(limit).map((_, json) => upickle.default.read[EventRecord](json))
+      ).toResult
   }
 
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = synchronized {
     val current = record(threadId)
     val floor   = math.max(current.earliestSeq, math.min(beforeSeq, current.nextSeq))
-    threads.update(threadId.value, current.copy(events = current.events.filter(_.seq >= floor), earliestSeq = floor))
+    threads.update(threadId.value, current.copy(events = current.events.filter(_._1 >= floor), earliestSeq = floor))
     Right(())
   }
