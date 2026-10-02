@@ -9,9 +9,10 @@ import scala.io.StdIn
 import scala.util.Try
 
 /**
- * Immutable configuration for console interface
+ * Immutable configuration for console interface. Internal to the assistant: its colours are
+ * fansi types, which `llm4s-agent`'s public API does not expose.
  */
-case class ConsoleConfig(
+final private[assistant] case class ConsoleConfig(
   promptSymbol: String = "User> ",
   assistantSymbol: String = "Assistant> ",
   colorScheme: Map[MessageType, Attrs] = Map(
@@ -24,7 +25,7 @@ case class ConsoleConfig(
   styles: ConsoleConfig.StyleConfig = ConsoleConfig.StyleConfig()
 )
 
-object ConsoleConfig {
+private[assistant] object ConsoleConfig {
   case class StyleConfig(
     prompt: Attrs = Color.Cyan,
     highlight: Attrs = Bold.On ++ Color.Green,
@@ -37,7 +38,7 @@ object ConsoleConfig {
 /**
  * Handles console-based user interface using functional programming principles
  */
-class ConsoleInterface(
+private[assistant] class ConsoleInterface(
   tools: ToolRegistry,
   sessionManager: SessionManager,
   config: ConsoleConfig = ConsoleConfig()
@@ -185,8 +186,8 @@ ${config.styles.bold("Tips:")}
 /**
  * Enumeration for different message types
  */
-sealed trait MessageType
-object MessageType {
+sealed private[assistant] trait MessageType
+private[assistant] object MessageType {
   case object Info              extends MessageType
   case object Success           extends MessageType
   case object Warning           extends MessageType

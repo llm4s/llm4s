@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.utils
 
 /** Vector similarity utilities for embedding comparison. */
-object SimilarityUtils {
+private[llm4s] object SimilarityUtils {
 
   /**
    * Compute the cosine similarity between two vectors.

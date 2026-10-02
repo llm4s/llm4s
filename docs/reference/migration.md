@@ -1,5 +1,26 @@
 # Migration Guide
 
+## Pre-baseline API cleanup, pass 8
+
+Not in a release yet; continues pass 7 below. It closes the last gaps in the frozen modules'
+public API found by checking the [re-audit](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540)
+against `main`.
+
+- **`llm4s-agent`'s console UI is internal.** `ConsoleInterface`, `ConsoleConfig` (and its
+  `StyleConfig`) and `MessageType` are `private[assistant]`: `ConsoleConfig`'s colours were fansi
+  `Attrs` and `MessageType` carried a public `cats.Show`, which would have frozen both libraries
+  into `llm4s-agent`'s API. `AssistantAgent` loses its `consoleConfig` parameter and the
+  four-argument compatibility constructor; construct it with named arguments:
+
+  ```scala
+  new AssistantAgent(client, tools, sessionDir = "./sessions", agentContext = AgentContext.Default)
+  ```
+
+- `SessionState.localDateTimeRW`, a public implicit upickle codec for `java.time.LocalDateTime`
+  that any `import SessionState._` picked up, is `private[assistant]`.
+- `org.llm4s.llmconnect.utils.SimilarityUtils` is `private[llm4s]`: only core's caching client
+  and `llm4s-rag` use it. Applications needing cosine similarity can compute it directly.
+
 ## Pre-baseline API cleanup, pass 7
 
 Not in a release yet; continues pass 6 below, which typed the times a caller supplies. This pass

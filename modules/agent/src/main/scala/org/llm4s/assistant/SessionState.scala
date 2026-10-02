@@ -36,7 +36,7 @@ case class SessionState(
 
 object SessionState {
   // Custom ReadWriter for LocalDateTime
-  implicit val localDateTimeRW: ReadWriter[LocalDateTime] =
+  implicit private[assistant] val localDateTimeRW: ReadWriter[LocalDateTime] =
     readwriter[String].bimap[LocalDateTime](_.toString, LocalDateTime.parse(_))
 
   // We can't automatically serialize SessionState because it contains AgentState with ToolRegistry

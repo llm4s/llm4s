@@ -806,6 +806,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules inseparable; moving that one file broke the cycle.
 
 ### Removed
+- **Pre-baseline API cleanup, pass 8** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
+  `llm4s-agent`'s console UI (`ConsoleInterface`, `ConsoleConfig`, `MessageType`) is internal, so
+  fansi and cats stay out of its public API; `AssistantAgent` loses its `consoleConfig` parameter
+  and its compatibility constructor. `SessionState.localDateTimeRW` and core's `SimilarityUtils`
+  are narrowed to llm4s. See the
+  [migration note](docs/reference/migration.md#pre-baseline-api-cleanup-pass-8).
 - **Pre-baseline API cleanup, pass 7: typed reported times** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
   Times the library reports are a `FiniteDuration` (a point in time an `Instant`) with no unit in
   the name: `TraceEvent`'s `ToolExecuted`/`RAGOperationCompleted`/`ImageGenerationCompleted`,

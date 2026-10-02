@@ -49,22 +49,13 @@ class AssistantAgent(
   client: LLMClient,
   tools: ToolRegistry,
   sessionDir: String = "./sessions",
-  consoleConfig: ConsoleConfig = ConsoleConfig(),
   agentContext: AgentContext = AgentContext.Default
 ) {
-  // Preserves the pre-AgentContext 4-arg <init> signature so callers compiled
-  // against the prior artifact keep linking without recompilation.
-  def this(
-    client: LLMClient,
-    tools: ToolRegistry,
-    sessionDir: String,
-    consoleConfig: ConsoleConfig
-  ) = this(client, tools, sessionDir, consoleConfig, AgentContext.Default)
 
   private val logger         = LoggerFactory.getLogger(getClass)
   private val agent          = new Agent(client)
   private val sessionManager = new SessionManager(DirectoryPath(sessionDir), agent)
-  private val console        = new ConsoleInterface(tools, sessionManager, consoleConfig)
+  private val console        = new ConsoleInterface(tools, sessionManager)
 
   /**
    * Starts the interactive session loop
