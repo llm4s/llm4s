@@ -286,6 +286,45 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     collector.quiet()
   }
 
+  it should "deliver each progress and custom payload as it was when emitted, though the node reuses it" in {
+    val store     = Watched()
+    val runtime   = GraphRuntime(store)
+    val collector = Collector()
+    val entered   = new CountDownLatch(1)
+    val release   = new CountDownLatch(1)
+    runtime
+      .subscribe(thread) { event =>
+        collector.listener(event)
+        if entered.getCount > 0 then {
+          entered.countDown()
+          release.await(10, TimeUnit.SECONDS): Unit
+        }
+      }
+      .value
+    store.awaitSwitch()
+
+    // the listener holds RunStarted, so every progress event is still queued when the node mutates
+    // the one payload it reuses; custom events are buffered until the task's commit
+    val graph = chain(1) { (_, context) =>
+      entered.await(10, TimeUnit.SECONDS): Unit
+      val payload = ujson.Obj("i" -> 0)
+      (1 to 3).foreach { i =>
+        payload("i") = i
+        context.progress(payload)
+        context.emit("e", 1, payload)
+      }
+      payload("i") = 99
+    }
+    runtime.start(thread, graph, "go").awaited.value.completed
+    release.countDown()
+
+    val received = collector.untilRunEnds()
+    received.collect { case StreamEvent.Live(_, _, _, _, p) => p("i").num.toInt } shouldBe Vector(1, 2, 3)
+    received.collect { case StreamEvent.Durable(r) => r.event }.collect { case RunEvent.Custom(_, _, p) =>
+      p("i").num.toInt
+    } shouldBe Vector(1, 2, 3)
+  }
+
   it should "disconnect a listener that throws, without delivering anything after" in {
     val runtime   = GraphRuntime.inMemory()
     val collector = Collector()

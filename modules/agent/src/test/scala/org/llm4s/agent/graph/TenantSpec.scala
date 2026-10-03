@@ -228,6 +228,39 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       GraphError.ThreadBusy("t", winner)
   }
 
+  it should "refuse another tenant while a first admission on a new thread is still reading it" in {
+    val f          = Fixture()
+    val underlying = InMemoryCheckpointer()
+    val reading    = new CountDownLatch(1)
+    val release    = new CountDownLatch(1)
+    val armed      = new AtomicBoolean(true)
+    // the first read blocks, holding tenant a's admission inside its reservation
+    val slow = new Checkpointer {
+      def commit(threadId: ThreadId, commit: Commit) = underlying.commit(threadId, commit)
+      def latest(threadId: ThreadId) = {
+        if armed.compareAndSet(true, false) then {
+          reading.countDown()
+          release.await(10, TimeUnit.SECONDS): Unit
+        }
+        underlying.latest(threadId)
+      }
+      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+        underlying.eventsAfter(threadId, afterSeq, limit)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    }
+    val runtime = GraphRuntime(slow)
+    val first   = new java.util.concurrent.LinkedBlockingQueue[org.llm4s.types.Result[RunResult[Vector[String]]]]()
+    Thread.ofVirtual().start(() => first.put(runtime.start(thread, f.graph, "x", tenant("a")).awaited))
+    reading.await(10, TimeUnit.SECONDS) shouldBe true
+
+    runtime.start(thread, f.graph, "y", tenant("b")).left.value shouldBe GraphError.TenantMismatch("t", Some("b"))
+    runtime.start(thread, f.graph, "y").left.value shouldBe GraphError.TenantMismatch("t", None)
+    runtime.start(thread, f.graph, "y", tenant("a")).left.value shouldBe GraphError.ThreadBusy("t", None)
+
+    release.countDown()
+    Option(first.poll(10, TimeUnit.SECONDS)).value.value.completed._2 shouldBe Vector("x")
+  }
+
   it should "accept any tenant when it has no checkpoint" in {
     val f       = Fixture()
     val runtime = GraphRuntime(InMemoryCheckpointer())

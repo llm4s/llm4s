@@ -107,7 +107,11 @@ object EventRecord:
       draft.event
     )
 
-/** What a subscriber receives. */
+/**
+ * What a subscriber receives. A payload - of a [[StreamEvent.Live]] or a [[RunEvent.Custom]] - is
+ * a snapshot taken when the node emitted it, and one value may be shared by every subscriber: a
+ * listener must not mutate it, and copies it (`ujson.copy`) to change it.
+ */
 enum StreamEvent:
   /** A committed durable event, in ascending `seq` order. */
   case Durable(record: EventRecord)

@@ -102,8 +102,12 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
   private val hub        = EventHub(checkpointer)
   private val commitLock = new java.util.concurrent.locks.ReentrantLock()
 
-  /** Threads with a run executing in this runtime; guarded by `activeLock`. */
-  private val active     = mutable.Set.empty[String]
+  /**
+   * Threads with a run admitting or executing in this runtime, each with that run's tenant, so a
+   * caller from another tenant is refused even before the thread's first checkpoint exists;
+   * guarded by `activeLock`.
+   */
+  private val active     = mutable.Map.empty[String, Option[String]]
   private val activeLock = new java.util.concurrent.locks.ReentrantLock()
 
   /**
@@ -231,27 +235,34 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
   private def exclusively[I, O](threadId: ThreadId, config: RunConfig)(
     admit: AtomicReference[Option[StopCause]] => Result[Run[I, O]]
   ): Result[RunHandle[O]] = admission(threadId) {
-    if !withLock(activeLock)(active.add(threadId.value)) then busy(threadId, config)
-    else
-      val cause    = AtomicReference[Option[StopCause]](None)
-      var launched = false
-      // released on every exit but a launch, including an InterruptedException, which `Try` would not catch
-      Using.resource(new AutoCloseable {
-        def close(): Unit = if !launched then release(threadId)
-      }) { _ =>
-        admit(cause).map { run =>
-          val handle = DefaultRunHandle[O](
-            threadId,
-            run.runId,
-            run.claimSeq,
-            cause,
-            (afterSeq, capacity, listener) => subscribe(threadId, afterSeq, capacity)(listener)
-          )
-          handle.launch(() => run.execute(), run.crashed, () => release(threadId), run.deadline)
-          launched = true
-          handle
+    val reserving = config.tenantId.map(_.value)
+    val holder = withLock(activeLock) {
+      val existing = active.get(threadId.value)
+      if existing.isEmpty then active.update(threadId.value, reserving)
+      existing
+    }
+    holder match
+      case Some(holderTenant) => busy(threadId, config, holderTenant)
+      case None =>
+        val cause    = AtomicReference[Option[StopCause]](None)
+        var launched = false
+        // released on every exit but a launch, including an InterruptedException, which `Try` would not catch
+        Using.resource(new AutoCloseable {
+          def close(): Unit = if !launched then release(threadId)
+        }) { _ =>
+          admit(cause).map { run =>
+            val handle = DefaultRunHandle[O](
+              threadId,
+              run.runId,
+              run.claimSeq,
+              cause,
+              (afterSeq, capacity, listener) => subscribe(threadId, afterSeq, capacity)(listener)
+            )
+            handle.launch(() => run.execute(), run.crashed, () => release(threadId), run.deadline)
+            launched = true
+            handle
+          }
         }
-      }
   }
 
   /**
@@ -272,11 +283,19 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     RunEvent.RunStarted(config.tenantId.map(_.value), config.principal.map(_.value))
 
   /**
-   * [[GraphError.ThreadBusy]] naming the thread's latest checkpoint - unless that checkpoint belongs
-   * to another tenant: then [[GraphError.TenantMismatch]], so that a caller from another tenant
-   * learns nothing about the thread, not even that a run is live on it.
+   * [[GraphError.ThreadBusy]] naming the thread's latest checkpoint - unless the run holding the
+   * thread, or that checkpoint, belongs to another tenant: then [[GraphError.TenantMismatch]], so
+   * that a caller from another tenant learns nothing about the thread, not even that a run is live
+   * on it. The holder's tenant is checked first, because a first admission on a new thread holds it
+   * before any checkpoint exists.
    */
-  private def busy(threadId: ThreadId, config: RunConfig): Result[Nothing] =
+  private def busy(threadId: ThreadId, config: RunConfig, holder: Option[String]): Result[Nothing] =
+    val requested = config.tenantId.map(_.value)
+    if holder != requested then Left(GraphError.TenantMismatch(threadId.value, requested))
+    else busyAt(threadId, config)
+
+  /** [[busy]]'s store half: the thread's latest checkpoint, tenant-checked. */
+  private def busyAt(threadId: ThreadId, config: RunConfig): Result[Nothing] =
     checkpointer.latest(threadId).flatMap {
       case None => Left(GraphError.ThreadBusy(threadId.value, None))
       case Some(stored) =>
@@ -481,7 +500,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           // checkpoint is not named, but the conflict's own `latest` is the authoritative one. A
           // re-read that fails or throws falls back to that ThreadBusy rather than a store error.
           case Left(GraphError.CheckpointConflict(_, _, latest)) =>
-            Try(busy(threadId, config)).toResult.flatten.left.map {
+            Try(busyAt(threadId, config)).toResult.flatten.left.map {
               case mismatch: GraphError.TenantMismatch => mismatch
               case _                                   => GraphError.ThreadBusy(threadId.value, latest)
             }
@@ -729,8 +748,14 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       private val buffered                 = mutable.ArrayBuffer.empty[EventDraft]
       private val lock                     = new java.util.concurrent.locks.ReentrantLock()
       def customEvents: Vector[EventDraft] = withLock(lock)(buffered.toVector)
-      def custom(name: String, version: Int, payload: ujson.Value): Unit = withLock(lock) {
-        buffered += draft(Some(checkpointId), Some(task), RunEvent.Custom(name, version, payload))
-      }
+      // payloads are copied at the call: ujson values are mutable, and a node may reuse one
+      def custom(name: String, version: Int, payload: ujson.Value): Unit =
+        val snapshot = ujson.copy(payload)
+        withLock(lock) {
+          buffered += draft(Some(checkpointId), Some(task), RunEvent.Custom(name, version, snapshot))
+        }
       def progress(payload: ujson.Value): Unit =
-        hub.live(threadId, StreamEvent.Live(threadId.value, runId.value, task.id.value, task.node.value, payload))
+        hub.live(
+          threadId,
+          StreamEvent.Live(threadId.value, runId.value, task.id.value, task.node.value, ujson.copy(payload))
+        )

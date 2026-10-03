@@ -96,8 +96,11 @@ final class RunContext private[graph] (
   val position: RunPosition,
   sink: NodeEventSink
 ):
+  /** Records a durable custom event; `payload` is snapshotted at the call, so the node may reuse it. */
   def emit(name: String, version: Int, payload: ujson.Value): Unit = sink.custom(name, version, payload)
-  def progress(payload: ujson.Value): Unit                         = sink.progress(payload)
+
+  /** Offers live progress; `payload` is snapshotted at the call, so the node may reuse it. */
+  def progress(payload: ujson.Value): Unit = sink.progress(payload)
 
   /** The task thread's interrupt flag, read without clearing it. */
   def isCancelled: Boolean = Thread.currentThread().isInterrupted
