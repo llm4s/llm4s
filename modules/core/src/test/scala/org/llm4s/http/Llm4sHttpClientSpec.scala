@@ -1,6 +1,6 @@
 package org.llm4s.http
 
-import org.llm4s.error.{ ExecutionError, NetworkError, ServiceError, TimeoutError, UnknownError, ValidationError }
+import org.llm4s.error.{ NetworkError, ServiceError, TimeoutError, UnknownError, ValidationError }
 import org.llm4s.types.Result
 import org.llm4s.http.HttpResponse.*
 import org.scalatest.flatspec.AnyFlatSpec
@@ -576,14 +576,29 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
       case other                      => fail(s"Expected ValidationError, got: $other")
   }
 
-  it should "return Left(ExecutionError) and keep the interrupt flag when interrupted" in {
+  it should "return Left(CancelledError) and keep the interrupt flag when interrupted" in {
     Thread.currentThread().interrupt()
     val result      = client.get(s"$baseUrl/slow", timeout = 5.seconds)
     val interrupted = Thread.interrupted() // reads and clears the flag
     result match
-      case Left(err: ExecutionError) => err.operation shouldBe "http.GET"
-      case other                     => fail(s"Expected ExecutionError, got: $other")
+      case Left(err: org.llm4s.error.CancelledError) => err.operation shouldBe "http.GET"
+      case other                                     => fail(s"Expected CancelledError, got: $other")
     interrupted shouldBe true
+  }
+
+  it should "return Left(CancelledError) when interrupted while the request is in flight on a virtual thread" in {
+    @volatile var outcome: Option[(Result[HttpResponse], Boolean)] = None
+    val worker = Thread.ofVirtual().start { () =>
+      val r = client.get(s"$baseUrl/slow", timeout = 30.seconds)
+      outcome = Some(r -> Thread.currentThread().isInterrupted)
+    }
+    Thread.sleep(200)
+    worker.interrupt()
+    worker.join(5000)
+    worker.isAlive shouldBe false
+    val (result, flag) = outcome.get
+    result.left.toOption.get shouldBe a[org.llm4s.error.CancelledError]
+    flag shouldBe true
   }
 
   "HttpFailures.streamReadError" should "classify a body read failure as the transport would" in {
@@ -598,6 +613,10 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     HttpFailures.streamReadError(new java.net.SocketTimeoutException("read timed out"), url, 3.seconds) shouldBe a[
       org.llm4s.error.TimeoutError
     ]
+    HttpFailures.streamReadError(new java.io.IOException(new InterruptedException), url, 3.seconds) shouldBe a[
+      org.llm4s.error.CancelledError
+    ]
+    Thread.interrupted()
     // Not an I/O failure (e.g. a malformed chunk): the default mapping, unchanged
     HttpFailures.streamReadError(new IllegalStateException("bad chunk"), url, 3.seconds) shouldBe a[
       org.llm4s.error.UnknownError
@@ -611,7 +630,8 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     map(new java.net.http.HttpConnectTimeoutException("ct")) shouldBe a[TimeoutError]
     map(new java.net.http.HttpTimeoutException("t")) shouldBe a[TimeoutError]
     map(new java.net.SocketTimeoutException("st")) shouldBe a[TimeoutError]
-    map(new InterruptedException("i")) shouldBe a[ExecutionError]
+    map(new InterruptedException("i")) shouldBe a[org.llm4s.error.CancelledError]
+    Thread.interrupted()
     map(new IllegalArgumentException("bad")) shouldBe a[ValidationError]
     map(new java.net.ConnectException("refused")) shouldBe a[NetworkError]
     map(new java.net.UnknownHostException("nohost")) shouldBe a[NetworkError]

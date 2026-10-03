@@ -1,7 +1,7 @@
 package org.llm4s.http
 
 import org.llm4s.error.{
-  ExecutionError,
+  CancelledError,
   LLMError,
   NetworkError,
   ServiceError,
@@ -166,8 +166,8 @@ object MultipartPart {
  *  - a connection failure, unknown host or other I/O error is a `Left(`[[org.llm4s.error.NetworkError]]`)`;
  *  - an invalid URL, header or timeout, or an unreadable multipart file, is a
  *    `Left(`[[org.llm4s.error.ValidationError]]`)`;
- *  - an interrupted request is a `Left(`[[org.llm4s.error.ExecutionError]]`)`, with the
- *    thread's interrupt flag restored.
+ *  - an interrupted request, or a stream read interrupted mid-body, is a
+ *    `Left(`[[org.llm4s.error.CancelledError]]`)`, with the thread's interrupt flag kept.
  *
  * A non-2xx status is '''not''' an error at this layer: it is a `Right` response, which the
  * caller inspects (`HttpResponse.ensureSuccess`, or
@@ -288,6 +288,9 @@ private[llm4s] object HttpFailures {
     val endpoint = safeEndpoint(url)
     val detail   = Option(t.getMessage).filter(_.nonEmpty).getOrElse(t.getClass.getSimpleName)
     t match {
+      case e if CancelledError.isCancellation(e) =>
+        Thread.currentThread().interrupt()
+        CancelledError(s"http.$method", Some(e))
       case e: HttpConnectTimeoutException =>
         TimeoutError(s"$method $endpoint: connection timed out after $timeout", timeout, s"http.$method", Some(e))
           .withContext("endpoint", endpoint)
@@ -296,9 +299,6 @@ private[llm4s] object HttpFailures {
           .withContext("endpoint", endpoint)
       case e: java.net.SocketTimeoutException =>
         TimeoutError(s"$method $endpoint: socket timed out after $timeout", timeout, s"http.$method", Some(e))
-          .withContext("endpoint", endpoint)
-      case e: InterruptedException =>
-        ExecutionError(s"$method $endpoint: request interrupted", s"http.$method", cause = Some(e))
           .withContext("endpoint", endpoint)
       case _: IllegalArgumentException =>
         ValidationError("request", s"Invalid $method request to $endpoint: $detail")
@@ -322,8 +322,9 @@ private[llm4s] object HttpFailures {
    */
   def streamReadError(t: Throwable, url: String, timeout: FiniteDuration): LLMError =
     t match {
-      case e: IOException => toLLMError(e, "POST", url, timeout)
-      case e              => org.llm4s.error.ThrowableOps.RichThrowable(e).toLLMError
+      case e if CancelledError.isCancellation(e) => toLLMError(e, "POST", url, timeout)
+      case e: IOException                        => toLLMError(e, "POST", url, timeout)
+      case e                                     => org.llm4s.error.ThrowableOps.RichThrowable(e).toLLMError
     }
 
   /** Scheme, host, port and path of `url`; never its query string or user info. */
