@@ -4,7 +4,13 @@ import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.ContextWindowResolver
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
-import org.llm4s.testkit.LocalProviderTestServer.{ openAISseBody, sendSseResponse, withServer }
+import org.llm4s.testkit.LocalProviderTestServer.{
+  holdOpen,
+  openAISseBody,
+  sendSseResponse,
+  streamThenHold,
+  withServer
+}
 import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
@@ -108,6 +114,34 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
         withClue(s"${descriptor.id.asString}: ") {
           withServer("/")(exchange => sendSseResponse(exchange, openAISseBody(Seq("Hi")))) { baseUrl =>
             assertStreams(assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl)))))
+          }
+        }
+      }
+    }
+  }
+
+  "a client built by each openai-compatible descriptor, against a server that stalls" should {
+
+    "return CancelledError when a call is interrupted" in {
+      expectations.foreach { (descriptor, _, _) =>
+        withClue(s"${descriptor.id.asString}: ") {
+          withServer("/")(holdOpen) { baseUrl =>
+            assertCancelsWhenInterrupted(
+              assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))))
+            )
+          }
+        }
+      }
+    }
+
+    "return CancelledError when a stream is interrupted after its first event" in {
+      val firstEvent = openAISseBody(Seq("Hel", "lo")).split("\n\n").head + "\n\n"
+      expectations.foreach { (descriptor, _, _) =>
+        withClue(s"${descriptor.id.asString}: ") {
+          withServer("/")(streamThenHold(_, firstEvent)) { baseUrl =>
+            assertCancelsStreamWhenInterrupted(
+              assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))))
+            )
           }
         }
       }

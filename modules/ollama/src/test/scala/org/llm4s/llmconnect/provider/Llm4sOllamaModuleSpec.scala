@@ -1,8 +1,9 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
+import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendJsonResponse, streamThenHold, withServer }
 import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
@@ -29,6 +30,9 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     """{"message":{"role":"assistant","content":"Hi"},"done":false}""",
     """{"message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":1}"""
   ).mkString("", "\n", "\n")
+
+  private def clientAt(baseUrl: String): LLMClient =
+    assertBuildsClient(OllamaProvider, section.withBaseUrl(Some(BaseUrl(baseUrl))))
 
   "the llm4s-ollama services entry" should {
 
@@ -72,7 +76,18 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
 
     "actually stream, not silently fall back to complete()" in {
       withServer("/")(exchange => sendJsonResponse(exchange, 200, ndjsonBody)) { baseUrl =>
-        assertStreams(assertBuildsClient(OllamaProvider, section.withBaseUrl(Some(BaseUrl(baseUrl)))))
+        assertStreams(clientAt(baseUrl))
+      }
+    }
+
+    "return CancelledError when a call is interrupted" in {
+      withServer("/")(holdOpen)(baseUrl => assertCancelsWhenInterrupted(clientAt(baseUrl)))
+    }
+
+    "return CancelledError when a stream is interrupted after its first event" in {
+      val firstEvent = ndjsonBody.linesIterator.next() + "\n"
+      withServer("/")(streamThenHold(_, firstEvent, "application/x-ndjson")) { baseUrl =>
+        assertCancelsStreamWhenInterrupted(clientAt(baseUrl))
       }
     }
   }

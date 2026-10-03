@@ -3,18 +3,20 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.config.GeminiConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
-import org.llm4s.llmconnect.ProviderExchangeLogging
+import org.llm4s.error.CancelledError
+import org.llm4s.llmconnect.{ LLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, VertexAIConfig }
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.testkit.LocalProviderTestServer.{ sendSseResponse, withServer }
+import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendSseResponse, streamThenHold, withServer }
 import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.io.ByteArrayInputStream
+import java.io.{ ByteArrayInputStream, InputStream, InterruptedIOException }
+import java.util.concurrent.CountDownLatch
 import java.nio.charset.StandardCharsets
 
 /**
@@ -52,6 +54,52 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
       .returns(Right(StreamingHttpResponse(200, new ByteArrayInputStream(sseBody.getBytes(StandardCharsets.UTF_8)))))
     new VertexAIClient(config, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
   }
+
+  /**
+   * A `VertexAIClient` whose model calls never answer: the token endpoints answer, but
+   * `generateContent` blocks forever, and the stream delivers one event and then blocks. Both
+   * block the way a socket read does - until the thread is interrupted.
+   */
+  private def vertexClientThatStalls(config: VertexAIConfig): VertexAIClient = {
+    val tokenBody = """{"access_token":"ya29.test-token","expires_in":3600}"""
+    val never     = new CountDownLatch(1)
+    val stalling: InputStream = new InputStream {
+      private val first = new ByteArrayInputStream(geminiSseBody.getBytes(StandardCharsets.UTF_8))
+      // Like a socket: hand over what has arrived, block only when nothing has.
+      override def read(): Int =
+        first.read() match
+          case -1 => stall()
+          case b  => b
+      override def read(buffer: Array[Byte], offset: Int, length: Int): Int =
+        first.read(buffer, offset, length) match
+          case -1 => stall()
+          case n  => n
+      private def stall(): Int =
+        CancelledError.catchInterrupt(never.await()) match
+          case Left(_) =>
+            Thread.currentThread().interrupt()
+            throw new InterruptedIOException("interrupted")
+          case Right(_) => -1
+    }
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).onCall { (url, _, _, _) =>
+      if url.contains("aiplatform") then
+        never.await()
+        Right(HttpResponse(200, "{}", Map.empty))
+      else Right(HttpResponse(200, tokenBody, Map.empty))
+    }
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, stalling)))
+    new VertexAIClient(config, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
+  }
+
+  private def vertexConfig: VertexAIConfig =
+    VertexAIProvider.buildConfig("test-instance", section(VertexAIProvider).withApiKey(None)) match
+      case Right(c: VertexAIConfig) => c
+      case other                    => fail(s"expected a VertexAIConfig, got $other")
+
+  private def geminiClientAt(baseUrl: String): LLMClient =
+    assertBuildsClient(GeminiProvider, section(GeminiProvider).withBaseUrl(Some(BaseUrl(baseUrl))))
 
   /** Descriptor, the config class it builds, and the client class that config produces. */
   private val expectations: Seq[(ProviderDescriptor, String, String)] = Seq(
@@ -115,9 +163,17 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
 
     "actually stream, not silently fall back to complete()" in {
       withServer("/")(exchange => sendSseResponse(exchange, geminiSseBody)) { baseUrl =>
-        assertStreams(
-          assertBuildsClient(GeminiProvider, section(GeminiProvider).withBaseUrl(Some(BaseUrl(baseUrl))))
-        )
+        assertStreams(geminiClientAt(baseUrl))
+      }
+    }
+
+    "return CancelledError when a call is interrupted" in {
+      withServer("/")(holdOpen)(baseUrl => assertCancelsWhenInterrupted(geminiClientAt(baseUrl)))
+    }
+
+    "return CancelledError when a stream is interrupted after its first event" in {
+      withServer("/")(streamThenHold(_, geminiSseBody)) { baseUrl =>
+        assertCancelsStreamWhenInterrupted(geminiClientAt(baseUrl))
       }
     }
   }
@@ -132,6 +188,14 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory w
         case other                    => fail(s"expected a VertexAIConfig, got $other")
 
       assertStreams(vertexClientWithStubbedAuth(config))
+    }
+
+    "return CancelledError when a call is interrupted" in {
+      assertCancelsWhenInterrupted(vertexClientThatStalls(vertexConfig))
+    }
+
+    "return CancelledError when a stream is interrupted after its first event" in {
+      assertCancelsStreamWhenInterrupted(vertexClientThatStalls(vertexConfig))
     }
   }
 
