@@ -1,6 +1,7 @@
 package org.llm4s.toolapi
 
 import org.llm4s.types.Result
+import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._
@@ -12,7 +13,7 @@ import scala.concurrent.duration._
 /**
  * Tests for ToolRegistry and tool execution
  */
-class ToolRegistrySpec extends AnyFlatSpec with Matchers {
+class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
 
   implicit val ec: ExecutionContext = ExecutionContext.global
 
@@ -855,5 +856,81 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
         nonStrictTools.arr.head("function")("strict").bool shouldBe false
       }
     )
+  }
+
+  "ToolRegistry.execute cancellation" should "return Cancelled, keeping the flag, when the caller is interrupted during a timed call" in {
+    val workerInterrupted = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val blocking = ToolBuilder[Map[String, Any], MathResult](
+      "blocker",
+      "Blocks",
+      Schema.`object`[Map[String, Any]]("p")
+    ).withHandler { _ =>
+      // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
+      try Thread.sleep(30_000)
+      catch { case _: InterruptedException => workerInterrupted.set(true) }
+      // scalafix:on
+      Right(MathResult(0.0))
+    }.buildSafe()
+      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+    val registry                                                                 = new ToolRegistry(Seq(blocking))
+    @volatile var outcome: Option[(Either[ToolCallError, ujson.Value], Boolean)] = None
+    val caller = Thread.ofVirtual().start { () =>
+      val r = registry.execute(ToolCallRequest("blocker", ujson.Obj()), ToolExecutionConfig(timeout = Some(20.seconds)))
+      outcome = Some(r -> Thread.currentThread().isInterrupted)
+    }
+    Thread.sleep(200)
+    caller.interrupt()
+    caller.join(5000)
+    val (result, flag) = outcome.get
+    result shouldBe Left(ToolCallError.Cancelled("blocker"))
+    flag shouldBe true
+    eventually(workerInterrupted.get() shouldBe true)
+  }
+
+  it should "return Cancelled when the tool throws InterruptedException" in {
+    val thrower = ToolBuilder[Map[String, Any], MathResult](
+      "thrower",
+      "Throws",
+      Schema.`object`[Map[String, Any]]("p")
+    ).withHandler(_ => throw new InterruptedException("stop"))
+      .buildSafe()
+      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+    val registry = new ToolRegistry(Seq(thrower))
+    val result   = registry.execute(ToolCallRequest("thrower", ujson.Obj()))
+    Thread.interrupted() shouldBe true
+    result shouldBe Left(ToolCallError.Cancelled("thrower"))
+  }
+
+  it should "return Cancelled, not retry, when a retry sleep is interrupted" in {
+    val attempts = new java.util.concurrent.atomic.AtomicInteger(0)
+    val failing = ToolBuilder[Map[String, Any], MathResult](
+      "flaky",
+      "Fails with IO",
+      Schema.`object`[Map[String, Any]]("p")
+    ).withHandler { _ =>
+      attempts.incrementAndGet()
+      throw new java.io.IOException("transient")
+    }.buildSafe()
+      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+    val registry = new ToolRegistry(Seq(failing))
+    val config = ToolExecutionConfig(
+      retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 30.seconds))
+    )
+    @volatile var outcome: Option[(Either[ToolCallError, ujson.Value], Boolean)] = None
+    val caller = Thread.ofVirtual().start { () =>
+      val r = registry.execute(ToolCallRequest("flaky", ujson.Obj()), config)
+      outcome = Some(r -> Thread.currentThread().isInterrupted)
+    }
+    Thread.sleep(300)
+    caller.interrupt()
+    caller.join(5000)
+    outcome.map(_._1) shouldBe Some(Left(ToolCallError.Cancelled("flaky")))
+    outcome.map(_._2) shouldBe Some(true)
+    attempts.get() shouldBe 1
+  }
+
+  "ToolCallError.Cancelled" should "not be retryable and serialise as cancelled" in {
+    ToolCallError.isRetryable(ToolCallError.Cancelled("t")) shouldBe false
+    ToolCallErrorJson.toJson(ToolCallError.Cancelled("t"))("errorType").str shouldBe "cancelled"
   }
 }

@@ -2,6 +2,7 @@ package org.llm4s.toolapi
 
 import scala.concurrent.{ Await, ExecutionContext, Future, Promise, blocking }
 import scala.concurrent.duration._
+import org.llm4s.error.CancelledError
 import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.unused
 import scala.util.control.NonFatal
@@ -104,10 +105,16 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   private def runOneAttempt(request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
     tools.find(_.name == request.functionName) match {
       case Some(tool) =>
-        scala.util.Try(tool.execute(request.arguments)) match {
-          case scala.util.Success(Right(v)) => Right(v)
-          case scala.util.Success(Left(e))  => Left(e)
-          case scala.util.Failure(t)        => Left(ToolCallError.ExecutionError(request.functionName, t))
+        CancelledError.catchInterrupt(scala.util.Try(tool.execute(request.arguments))) match {
+          case Left(_) =>
+            // The throw cleared the flag; restore it so the caller still sees the cancellation.
+            Thread.currentThread().interrupt()
+            Left(ToolCallError.Cancelled(request.functionName))
+          case Right(_) if Thread.currentThread().isInterrupted =>
+            Left(ToolCallError.Cancelled(request.functionName))
+          case Right(scala.util.Success(Right(v))) => Right(v)
+          case Right(scala.util.Success(Left(e)))  => Left(e)
+          case Right(scala.util.Failure(t))        => Left(ToolCallError.ExecutionError(request.functionName, t))
         }
       case None => Left(ToolCallError.UnknownFunction(request.functionName, tools.map(_.name)))
     }
@@ -130,8 +137,10 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
               attempt += 1
               val delay = policy.delayBeforeAttempt(attempt)
               if (delay.toMillis > 0) {
-                blocking {
-                  Thread.sleep(delay.toMillis)
+                val slept = CancelledError.catchInterrupt(blocking(Thread.sleep(delay.toMillis)))
+                if (slept.isLeft) {
+                  Thread.currentThread().interrupt()
+                  return Left(ToolCallError.Cancelled(request.functionName))
                 }
               }
             case _ => return lastResult
@@ -207,23 +216,34 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
             )
           }
 
-        workerThread.join(duration.toMillis)
-        if (workerThread.isAlive) {
-          // Claim the promise for Timeout *before* interrupting the worker. If the interrupt
-          // were sent first, the worker's own catch block could race ahead and call
-          // promise.trySuccess(ExecutionError(InterruptedException)) before this thread's
-          // trySuccess(Timeout) runs - whichever call reaches the promise first wins, and
-          // interrupt delivery has no ordering guarantee relative to this thread's next line.
-          // Claiming first makes the outcome deterministic: the worker's later trySuccess is
-          // then always the no-op, regardless of how quickly it reacts to the interrupt.
-          promise.trySuccess(Left(ToolCallError.Timeout(request.functionName, duration))): Unit
+        val joined = CancelledError.catchInterrupt(workerThread.join(duration.toMillis))
+        if (joined.isLeft) {
+          // The caller was interrupted while waiting. Claim the promise for Cancelled before
+          // interrupting the worker, for the same ordering reason as the timeout below, then
+          // restore the flag the throw cleared. No Await: it would throw on an interrupted thread.
+          val cancelled = Left(ToolCallError.Cancelled(request.functionName))
+          promise.trySuccess(cancelled): Unit
           workerThread.interrupt()
-        }
+          Thread.currentThread().interrupt()
+          cancelled
+        } else {
+          if (workerThread.isAlive) {
+            // Claim the promise for Timeout *before* interrupting the worker. If the interrupt
+            // were sent first, the worker's own catch block could race ahead and call
+            // promise.trySuccess(ExecutionError(InterruptedException)) before this thread's
+            // trySuccess(Timeout) runs - whichever call reaches the promise first wins, and
+            // interrupt delivery has no ordering guarantee relative to this thread's next line.
+            // Claiming first makes the outcome deterministic: the worker's later trySuccess is
+            // then always the no-op, regardless of how quickly it reacts to the interrupt.
+            promise.trySuccess(Left(ToolCallError.Timeout(request.functionName, duration))): Unit
+            workerThread.interrupt()
+          }
 
-        // The promise is already completed by this point - either the worker resolved it
-        // before the join deadline, or the timeout branch above just did. This Await is a
-        // formality that returns immediately; its duration is a defensive upper bound only.
-        Await.result(promise.future, 1.second)
+          // The promise is already completed by this point - either the worker resolved it
+          // before the join deadline, or the timeout branch above just did. This Await is a
+          // formality that returns immediately; its duration is a defensive upper bound only.
+          Await.result(promise.future, 1.second)
+        }
     }
 
   /**

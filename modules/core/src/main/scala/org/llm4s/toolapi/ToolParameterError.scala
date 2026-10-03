@@ -113,11 +113,11 @@ object ToolCallError {
 
   /**
    * Whether this error is considered retryable (e.g. timeout, transient execution failure).
-   * UnknownFunction, NullArguments, InvalidArguments, HandlerError are not retryable.
+   * UnknownFunction, NullArguments, InvalidArguments, HandlerError and Cancelled are not retryable.
    * ExecutionError is retryable when the cause is IOException or TimeoutException (transient).
    */
   def isRetryable(error: ToolCallError): Boolean = error match {
-    case _: UnknownFunction | _: NullArguments | _: InvalidArguments | _: HandlerError =>
+    case _: UnknownFunction | _: NullArguments | _: InvalidArguments | _: HandlerError | _: Cancelled =>
       false
     case _: Timeout =>
       true
@@ -196,6 +196,11 @@ object ToolCallError {
   ) extends ToolCallError {
     def getMessage: String = s"$toolName timed out after $duration"
   }
+
+  /** The call was cancelled by interrupting its thread; the interrupt flag is kept. */
+  case class Cancelled(toolName: String) extends ToolCallError {
+    def getMessage: String = "was cancelled"
+  }
 }
 
 /**
@@ -210,7 +215,7 @@ object ToolCallError {
  * {
  *   "isError": true,
  *   "toolName": "<string>",
- *   "errorType": "<unknown_function|null_arguments|invalid_arguments|handler_error|execution_error>",
+ *   "errorType": "<unknown_function|null_arguments|invalid_arguments|handler_error|execution_error|timeout|cancelled>",
  *   "message": "<human readable summary>",
  *   "parameterErrors": [   // optional: only present for invalid_arguments
  *     {
@@ -332,6 +337,10 @@ object ToolCallErrorJson {
         base("errorType") = "timeout"
         base("code") = "timeout"
         base("duration") = duration.toString
+        base
+
+      case ToolCallError.Cancelled(_) =>
+        base("errorType") = "cancelled"
         base
     }
   }
