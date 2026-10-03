@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.error.{ CancelledError, LLMError }
+import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.types.Result
 
 import java.time.Clock
@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ ExecutorService, Executors, TimeUnit }
 import scala.annotation.tailrec
 import scala.collection.mutable
-import scala.util.{ Try, Using }
+import scala.util.Using
 
 /**
  * When a run's checkpoints and events become durable. In every mode a durable event is delivered
@@ -71,8 +71,10 @@ object GraphRuntime:
  *
  * `subscribe` replays a thread's committed events after a sequence number and then delivers new
  * ones as their commits succeed, in ascending order with no gaps or duplicates, followed by live
- * progress as it happens. Events are delivered on the committing thread; a dedicated ordered
- * dispatcher with bounded queues is part of the run API (#1271).
+ * progress as it happens. Each subscription has its own dispatcher thread and a queue of
+ * `capacity` events, so a slow listener never holds up a run: one that falls behind by more than
+ * `capacity` durable events is disconnected ([[DisconnectReason.Lagging]]), and live events that
+ * do not fit are dropped and counted ([[StreamEvent.LiveGap]]). See [[EventHub]].
  */
 final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.systemUTC()):
 
@@ -82,9 +84,18 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
   /** Threads with a run executing in this runtime; guarded by itself. */
   private val active = mutable.Set.empty[String]
 
-  /** Replays events with `seq > afterSeq`, then delivers new events until cancelled. */
-  def subscribe(threadId: ThreadId, afterSeq: Long = 0L)(listener: StreamEvent => Unit): Result[Subscription] =
-    hub.subscribe(threadId, afterSeq, listener)
+  /**
+   * Replays events with `seq > afterSeq`, then delivers new events until cancelled or
+   * disconnected. Returns at once: replay runs on the subscription's dispatcher thread, the only
+   * thread `listener` is called on, and a failed replay ends it with
+   * [[DisconnectReason.ReplayFailed]]. A listener that throws is disconnected
+   * ([[DisconnectReason.ListenerFailed]]). `capacity` must be at least one.
+   */
+  def subscribe(threadId: ThreadId, afterSeq: Long = 0L, capacity: Int = 1024)(
+    listener: StreamEvent => Unit
+  ): Result[Subscription] =
+    if capacity <= 0 then Left(ValidationError("capacity", s"must be at least 1, was $capacity"))
+    else hub.subscribe(threadId, afterSeq, capacity, listener)
 
   /** Starts a run on `threadId` with `input`; see the class description. */
   def start[I, O](
@@ -524,47 +535,3 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       }
       def progress(payload: ujson.Value): Unit =
         hub.live(threadId, StreamEvent.Live(threadId.value, runId.value, task.id.value, task.node.value, payload))
-
-/**
- * Delivers a runtime's events to subscribers: committed durable events in ascending `seq`, each at
- * most once per subscriber, and live progress as it happens.
- */
-final private class EventHub(checkpointer: Checkpointer):
-  final private class Subscriber(val listener: StreamEvent => Unit, var lastSeq: Long)
-
-  private val subscribers = mutable.Map.empty[String, Vector[Subscriber]]
-
-  def subscribe(threadId: ThreadId, afterSeq: Long, listener: StreamEvent => Unit): Result[Subscription] =
-    synchronized {
-      val subscriber = Subscriber(listener, afterSeq)
-      replay(threadId, subscriber).map { _ =>
-        subscribers.update(threadId.value, subscribers.getOrElse(threadId.value, Vector.empty) :+ subscriber)
-        new Subscription:
-          def cancel(): Unit = EventHub.this.synchronized {
-            subscribers.updateWith(threadId.value)(_.map(_.filterNot(_ eq subscriber)))
-            ()
-          }
-      }
-    }
-
-  def durable(threadId: ThreadId, records: Vector[EventRecord]): Unit = synchronized {
-    subscribers.getOrElse(threadId.value, Vector.empty).foreach { subscriber =>
-      records.filter(_.seq > subscriber.lastSeq).foreach(deliver(subscriber, _))
-    }
-  }
-
-  def live(threadId: ThreadId, event: StreamEvent.Live): Unit = synchronized {
-    subscribers.getOrElse(threadId.value, Vector.empty).foreach(s => Try(s.listener(event)))
-  }
-
-  @tailrec private def replay(threadId: ThreadId, subscriber: Subscriber): Result[Unit] =
-    checkpointer.eventsAfter(threadId, subscriber.lastSeq, 500) match
-      case Left(error)                 => Left(error)
-      case Right(page) if page.isEmpty => Right(())
-      case Right(page) =>
-        page.foreach(deliver(subscriber, _))
-        replay(threadId, subscriber)
-
-  private def deliver(subscriber: Subscriber, record: EventRecord): Unit =
-    Try(subscriber.listener(StreamEvent.Durable(record)))
-    subscriber.lastSeq = record.seq

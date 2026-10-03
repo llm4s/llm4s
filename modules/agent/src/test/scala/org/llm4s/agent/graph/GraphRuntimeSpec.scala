@@ -7,10 +7,9 @@ import org.scalatest.{ EitherValues, LoneElement, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, LinkedBlockingQueue, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.collection.mutable
-import scala.jdk.CollectionConverters.*
 
 class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues with LoneElement {
 
@@ -50,12 +49,56 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     def callsOf(item: String): Int = Option(calls.get(item)).fold(0)(_.get)
   }
 
-  /** Records what a subscriber receives. */
+  /**
+   * Records what a subscriber receives. Listeners run on the subscription's dispatcher thread, so
+   * the test thread takes events from a queue, waiting up to 5s for each.
+   */
   final private class Recorder {
-    val received                       = new java.util.concurrent.CopyOnWriteArrayList[StreamEvent]()
-    def listener: StreamEvent => Unit  = received.add(_)
-    def durable: Vector[EventRecord]   = received.asScala.toVector.collect { case StreamEvent.Durable(r) => r }
-    def live: Vector[StreamEvent.Live] = received.asScala.toVector.collect { case l: StreamEvent.Live => l }
+    private val queue = new LinkedBlockingQueue[StreamEvent]()
+    private val taken = mutable.ArrayBuffer.empty[StreamEvent]
+
+    /** Durable events delivered so far; readable from any thread. */
+    val delivered = new AtomicInteger()
+
+    def listener: StreamEvent => Unit = { event =>
+      if event.isInstanceOf[StreamEvent.Durable] then delivered.incrementAndGet(): Unit
+      queue.put(event)
+    }
+
+    def next(): StreamEvent = Option(queue.poll(5, TimeUnit.SECONDS)).getOrElse(fail("no event within 5s"))
+
+    /** Takes events until the durable event numbered `seq` has arrived. */
+    def through(seq: Long): Recorder = {
+      while durable.lastOption.forall(_.seq < seq) do taken += next()
+      this
+    }
+
+    /** Takes events until everything `store` holds for the thread has arrived. */
+    def caughtUp(store: Checkpointer): Recorder = through(lastSeq(store))
+
+    /** Nothing more arrives within a short wait. */
+    def quiet(): Unit = Option(queue.poll(200, TimeUnit.MILLISECONDS)) shouldBe None
+
+    /** No further durable event arrives within a short wait; live ones may. */
+    def noMoreDurable(): Unit =
+      Iterator
+        .continually(Option(queue.poll(200, TimeUnit.MILLISECONDS)))
+        .takeWhile(_.isDefined)
+        .flatten
+        .collect { case d: StreamEvent.Durable => d }
+        .toVector shouldBe empty
+
+    def durable: Vector[EventRecord]   = taken.toVector.collect { case StreamEvent.Durable(r) => r }
+    def live: Vector[StreamEvent.Live] = taken.toVector.collect { case l: StreamEvent.Live => l }
+  }
+
+  /** The thread's last committed `seq`, read from the earliest event the store still holds. */
+  private def lastSeq(store: Checkpointer): Long = {
+    val events = store.eventsAfter(thread, 0L, 1000) match {
+      case Left(GraphError.ReplayUnavailable(_, earliest)) => store.eventsAfter(thread, earliest - 1, 1000)
+      case other                                           => other
+    }
+    events.value.lastOption.fold(0L)(_.seq)
   }
 
   /** A store whose commits can be slowed down, or made to fail as if the process had died. */
@@ -92,7 +135,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       ._2 shouldBe Vector("A", "B")
 
     store.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Completed)
-    val events = recorder.durable
+    val events = recorder.caughtUp(store).durable
     contiguous(events)
     kinds(events) shouldBe Vector(
       "RunStarted",
@@ -199,6 +242,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
         "C"
       )
       (f.callsOf("a"), f.callsOf("b"), f.callsOf("c")) shouldBe ((1, 2, 1))
+      recorder.caughtUp(store)
       kinds(recorder.durable).take(3) shouldBe Vector("RunRecovered", "TaskCompleted@worker", "Custom@worker")
       recorder.durable.map(_.runId).distinct shouldBe Vector("run-2")
       contiguous(store.eventsAfter(thread, 0L, 1000).value)
@@ -221,28 +265,33 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
   it should "replay from a sequence, then continue live without gaps or duplicates" in {
     val f       = Fixture()
-    val runtime = GraphRuntime(InMemoryCheckpointer())
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
     val late    = Recorder()
     // subscribe from inside a worker, while the run is committing
     f.onWorker = item => if item == "b" then runtime.subscribe(thread)(late.listener).value
     val early = Recorder()
     runtime.subscribe(thread)(early.listener).value
     runtime.start(thread, f.graph, Vector("a", "b", "c"), RunConfig().withRunId(RunId("run-1"))).value.completed
-    contiguous(late.durable)
-    late.durable shouldBe early.durable
+    contiguous(late.caughtUp(store).durable)
+    late.durable shouldBe early.caughtUp(store).durable
 
     val tail = Recorder()
     runtime.subscribe(thread, afterSeq = 5L)(tail.listener).value
-    tail.durable shouldBe early.durable.drop(5)
+    tail.caughtUp(store).durable shouldBe early.durable.drop(5)
   }
 
   it should "stop delivering to a cancelled subscription" in {
     val f        = Fixture()
-    val runtime  = GraphRuntime(InMemoryCheckpointer())
+    val store    = InMemoryCheckpointer()
+    val runtime  = GraphRuntime(store)
     val recorder = Recorder()
     runtime.subscribe(thread)(recorder.listener).value.cancel()
     runtime.start(thread, f.graph, Vector("a"), RunConfig().withRunId(RunId("run-1"))).value.completed
-    recorder.received.isEmpty shouldBe true
+    val witness = Recorder()
+    runtime.subscribe(thread)(witness.listener).value
+    witness.caughtUp(store)
+    recorder.quiet()
   }
 
   it should "report the replay floor after compaction" in {
@@ -251,10 +300,15 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val runtime = GraphRuntime(store)
     runtime.start(thread, f.graph, Vector("a"), RunConfig().withRunId(RunId("run-1"))).value.completed
     store.compactEvents(thread, 5L).value
-    runtime.subscribe(thread)(_ => ()).left.value shouldBe GraphError.ReplayUnavailable(thread.value, 5L)
+    val refused = Recorder()
+    runtime.subscribe(thread)(refused.listener).value
+    refused.next() shouldBe StreamEvent.Disconnected(
+      0L,
+      DisconnectReason.ReplayFailed(GraphError.ReplayUnavailable(thread.value, 5L))
+    )
     val recorder = Recorder()
     runtime.subscribe(thread, afterSeq = 4L)(recorder.listener).value
-    recorder.durable.head.seq shouldBe 5L
+    recorder.caughtUp(store).durable.head.seq shouldBe 5L
   }
 
   it should "reject a completed thread's checkpoint written by a different graph" in {
@@ -309,20 +363,26 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
   }
 
   it should "keep durable events detached from what subscribers and readers are handed" in {
-    val f       = Fixture()
-    val store   = InMemoryCheckpointer()
-    val runtime = GraphRuntime(store)
+    val f        = Fixture()
+    val store    = InMemoryCheckpointer()
+    val runtime  = GraphRuntime(store)
+    val tamperer = Recorder()
     runtime
-      .subscribe(thread) {
-        case StreamEvent.Durable(record) =>
-          record.event match {
-            case RunEvent.Custom(_, _, payload) => payload("item") = "tampered"
-            case _                              => ()
-          }
-        case _ => ()
+      .subscribe(thread) { event =>
+        event match {
+          case StreamEvent.Durable(record) =>
+            record.event match {
+              case RunEvent.Custom(_, _, payload) => payload("item") = "tampered"
+              case _                              => ()
+            }
+          case _ => ()
+        }
+        tamperer.listener(event)
       }
       .value
     runtime.start(thread, f.graph, Vector("a"), RunConfig().withRunId(RunId("run-1"))).value.completed
+    // the listener has tampered with everything it was handed
+    tamperer.caughtUp(store)
     def customs =
       store.eventsAfter(thread, 0L, 100).value.collect { case EventRecord(_, _, _, _, _, _, _, c: RunEvent.Custom) =>
         c.payload
@@ -374,7 +434,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val committedSuperstep  = mutable.ArrayBuffer.empty[Int]
     f.onWorker = _ =>
       synchronized {
-        durableSeenByWorker += recorder.durable.size
+        durableSeenByWorker += recorder.delivered.get
         committedSuperstep += store.underlying.latest(thread).value.fold(-1)(_.checkpoint.snapshot.superstep)
       }
 
@@ -388,6 +448,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     // workers run in superstep 1 while the superstep-1 checkpoint is still queued
     committedSuperstep.forall(_ < 1) shouldBe true
     durableSeenByWorker.forall(_ < 3) shouldBe true
+    recorder.caughtUp(store.underlying)
     deliveredBeforeCommit.get shouldBe 0
     // live progress is not held back behind commits
     recorder.live.size shouldBe 2
@@ -421,7 +482,8 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
         .failed
     error shouldBe a[GraphError.CheckpointWriteFailed]
     val durable = store.underlying.eventsAfter(thread, 0L, 1000).value
-    before.durable shouldBe durable
+    before.caughtUp(store.underlying).durable shouldBe durable
+    before.noMoreDurable()
 
     // a new process over the same store
     store.crashed.set(false)
@@ -430,7 +492,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       Vector("A", "B", "C", "D")
     val after = Recorder()
     second.subscribe(thread)(after.listener).value
-    contiguous(after.durable)
+    contiguous(after.caughtUp(store.underlying).durable)
     after.durable.take(durable.size) shouldBe durable
     after.durable.drop(durable.size).map(_.runId).distinct shouldBe Vector("run-2")
     // results durable before the crash are not recomputed
@@ -438,13 +500,23 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
   }
 
   "OnExit durability" should "write only its claim until the run ends, then commit the rest at once" in {
-    val f          = Fixture()
-    val store      = InMemoryCheckpointer()
-    val runtime    = GraphRuntime(store)
-    val recorder   = Recorder()
-    val seenMidRun = mutable.ArrayBuffer.empty[(Option[StoredCheckpoint], Int)]
-    runtime.subscribe(thread)(recorder.listener).value
-    f.onWorker = _ => synchronized(seenMidRun += (store.latest(thread).value -> recorder.durable.size))
+    val f              = Fixture()
+    val store          = InMemoryCheckpointer()
+    val runtime        = GraphRuntime(store)
+    val recorder       = Recorder()
+    val seenMidRun     = mutable.ArrayBuffer.empty[(Option[StoredCheckpoint], Int)]
+    val claimDelivered = new CountDownLatch(1)
+    runtime
+      .subscribe(thread) { event =>
+        recorder.listener(event)
+        claimDelivered.countDown()
+      }
+      .value
+    // delivery is asynchronous: wait for the claim's RunStarted, then see that nothing follows it
+    f.onWorker = _ => {
+      claimDelivered.await(5, TimeUnit.SECONDS): Unit
+      synchronized(seenMidRun += (store.latest(thread).value -> recorder.delivered.get))
+    }
 
     runtime
       .start(thread, f.graph, Vector("a", "b"), RunConfig().withRunId(RunId("run-1")), Durability.OnExit)
@@ -453,7 +525,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     // mid-run the store holds just the claim - the starting checkpoint - and its RunStarted
     seenMidRun.toVector.map((stored, seen) => stored.map(_.checkpoint.id) -> seen) shouldBe
       Vector(Some("run-1/1") -> 1, Some("run-1/1") -> 1)
-    recorder.live.size shouldBe 2
+    recorder.caughtUp(store).live.size shouldBe 2
     contiguous(recorder.durable)
     kinds(recorder.durable).last shouldBe "RunCompleted"
     store.latest(thread).value.map(s => s.checkpoint.status -> s.checkpoint.parent) shouldBe

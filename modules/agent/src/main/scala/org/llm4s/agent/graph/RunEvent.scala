@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.error.LLMError
 import upickle.default.ReadWriter
 
 import java.time.Instant
@@ -111,6 +112,30 @@ enum StreamEvent:
   /** Live-only progress from [[RunContext.progress]]: never persisted, never replayed, no `seq`. */
   case Live(threadId: String, runId: String, taskId: String, nodeId: String, payload: ujson.Value)
 
+  /** `dropped` live events were discarded at this point because the subscriber's queue was full. */
+  case LiveGap(dropped: Int)
+
+  /**
+   * The subscription has ended; always the last event. `lastSeq` is the last durable `seq` the
+   * listener returned from: resubscribe with `afterSeq = lastSeq` to continue without a gap.
+   */
+  case Disconnected(lastSeq: Long, reason: DisconnectReason)
+
+/** Why a subscription ended with [[StreamEvent.Disconnected]]. */
+enum DisconnectReason:
+  /** A durable event did not fit in the subscriber's queue: the listener fell too far behind. */
+  case Lagging
+
+  /** The listener threw `cause`; the event it threw on is not counted as delivered. */
+  case ListenerFailed(cause: Throwable)
+
+  /** Reading the thread's event log failed while replaying. */
+  case ReplayFailed(error: LLMError)
+
 /** A registration with [[GraphRuntime.subscribe]]. */
 trait Subscription:
+  /**
+   * Stops the subscription's dispatcher. No delivery starts after this returns - not even
+   * [[StreamEvent.Disconnected]]; a listener call already running is interrupted.
+   */
   def cancel(): Unit
