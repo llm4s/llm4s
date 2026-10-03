@@ -73,9 +73,13 @@ object GraphRuntime:
  * and joined, tasks that finished first keep their pending writes, an interrupted task records
  * nothing, and the run ends `Failed` with [[GraphError.Cancelled]] - naming the last checkpoint,
  * which a [[RunEvent.RunCancelled]] event is committed against. The checkpoint stays `Running`, so
- * `recover` continues the run. A cancel that arrives once the run has submitted its completed or
- * suspended checkpoint does not undo it: the run waits for that checkpoint to be durable and ends
- * with its outcome. Interrupting a thread blocked in [[RunHandle.await]] does not cancel the run.
+ * `recover` continues the run. A cancel that interrupts a superstep's commit ends the run the same
+ * way even if the store reports that commit as failed (as a JDBC store may, rather than throwing
+ * `InterruptedException`): the run is cancelled, not failed by its store, and the error names the
+ * last checkpoint that was durable. Once the run has begun committing its completed or suspended
+ * checkpoint, a cancel is ignored - it sends no interrupt, so that commit is not disturbed - and the
+ * run ends with its outcome. Interrupting a thread blocked in [[RunHandle.await]] does not cancel
+ * the run.
  *
  * A run whose `RunBudgets.timeout` is set has a deadline, fixed when its claim commits. When it
  * passes, the run stops the same way, but ends with [[GraphError.DeadlineExceeded]] and commits
@@ -329,6 +333,14 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     def submit(commit: Commit): Unit
     def failure: Option[LLMError]
 
+    /**
+     * Forgets a failed commit, so that the next is tried. Called only when the run is stopped,
+     * because the stop's interrupt can fail a synchronous commit on the run thread; a commit that
+     * fails again is reported as before. Async and OnExit commits are never made on an
+     * interruptible run thread, so they keep their failure.
+     */
+    def forgetInterruptedFailure(): Unit = ()
+
     /** Makes everything submitted durable (or fails), and releases resources. */
     def close(): Unit
 
@@ -337,8 +349,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     def submit(commit: Commit): Unit =
       if failed.get.isEmpty then
         commitAndDeliver(threadId, commit).left.foreach(e => failed.compareAndSet(None, Some(e)))
-    def failure: Option[LLMError] = failed.get
-    def close(): Unit             = ()
+    def failure: Option[LLMError]                 = failed.get
+    def close(): Unit                             = ()
+    override def forgetInterruptedFailure(): Unit = failed.set(None)
 
   final private class AsyncCommitter(threadId: ThreadId) extends Committer:
     private val failed = AtomicReference[Option[LLMError]](None)
@@ -473,43 +486,54 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       DefaultRunHandle.guarded(committer.close()).left.foreach(thrown.addSuppressed)
       RunResult.Failed(position._1.state, GraphError.RunCrashed(threadId.value, thrown))
 
+    /**
+     * Drives supersteps. `position` advances only once the previous turn's commits are known to
+     * have succeeded, so a run stopped after a failed commit names the last durable checkpoint.
+     */
     @tailrec private def loop(
       execution: Execution,
       checkpointId: String,
       reused: Map[TaskId, TaskResult]
     ): RunResult[O] =
-      position = execution -> checkpointId
       committer.failure match
-        case Some(error) => stop(execution, GraphError.CheckpointWriteFailed(threadId.value, error))
-        case None if execution.paused || execution.isQuiescent => end(execution, checkpointId)
-        case None if execution.superstep - firstSuperstep >= config.budgets.maxSupersteps =>
-          fail(execution, GraphError.SuperstepLimitExceeded(config.budgets.maxSupersteps))
-        case None if Thread.currentThread().isInterrupted || overdue() => cancelled()
+        // a commit the stop's interrupt broke: the run was stopped, not failed by its store
+        case Some(_) if stopRecorded => cancelled()
+        case Some(error)             => stop(execution, GraphError.CheckpointWriteFailed(threadId.value, error))
         case None =>
-          val outcomes = graph
-            .executorFor(config.budgets)
-            .runAll(execution.frontier.map { task => () =>
-              reused.get(task.id).fold(runTask(task, execution, checkpointId))(Right(_)).map(task -> _)
-            })
-          // a cancelled task cancels the run, even if an earlier task failed
-          if outcomes.exists { case Left(_: CancelledError) => true; case _ => false } then cancelled()
+          position = execution -> checkpointId
+          if execution.paused || execution.isQuiescent then end(execution, checkpointId)
+          else if execution.superstep - firstSuperstep >= config.budgets.maxSupersteps then
+            fail(execution, GraphError.SuperstepLimitExceeded(config.budgets.maxSupersteps))
+          else if Thread.currentThread().isInterrupted || overdue() then cancelled()
           else
-            val completed =
-              outcomes.foldLeft[Result[Vector[(Task, TaskResult)]]](Right(Vector.empty))((done, outcome) =>
-                done.flatMap(cs => outcome.map(cs :+ _))
-              )
-            completed.flatMap(graph.commitSuperstep(execution, _)) match
-              case Left(error)                => fail(execution, error)
-              case Right(next) if next.paused => end(next, checkpointId)
-              case Right(next) =>
-                checkpoint(
-                  next,
-                  Some(checkpointId),
-                  CheckpointStatus.Running,
-                  RunEvent.CheckpointCommitted(next.superstep)
-                ) match
-                  case Left(error) => fail(execution, error)
-                  case Right(id)   => loop(next, id, Map.empty)
+            val outcomes = graph
+              .executorFor(config.budgets)
+              .runAll(execution.frontier.map { task => () =>
+                reused.get(task.id).fold(runTask(task, execution, checkpointId))(Right(_)).map(task -> _)
+              })
+            // a cancelled task cancels the run, even if an earlier task failed
+            if outcomes.exists { case Left(_: CancelledError) => true; case _ => false } then cancelled()
+            else
+              val completed =
+                outcomes.foldLeft[Result[Vector[(Task, TaskResult)]]](Right(Vector.empty))((done, outcome) =>
+                  done.flatMap(cs => outcome.map(cs :+ _))
+                )
+              completed.flatMap(graph.commitSuperstep(execution, _)) match
+                case Left(error)                => fail(execution, error)
+                case Right(next) if next.paused => end(next, checkpointId)
+                case Right(next) =>
+                  checkpoint(
+                    next,
+                    Some(checkpointId),
+                    CheckpointStatus.Running,
+                    RunEvent.CheckpointCommitted(next.superstep)
+                  ) match
+                    case Left(error) => fail(execution, error)
+                    case Right(id)   => loop(next, id, Map.empty)
+
+    /** Whether a cancel or expiry has been recorded, and so may have interrupted a commit. */
+    private def stopRecorded: Boolean =
+      cause.get.exists(c => c == StopCause.Cancelled || c == StopCause.Expired)
 
     /**
      * Whether the deadline has passed, recording `Expired` unless a cause is already recorded. The
@@ -521,7 +545,12 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       if due then cause.compareAndSet(None, Some(StopCause.Expired)): Unit
       due
 
-    /** Ends a run that cannot advance: completed, suspended (persisted before returning) or failed. */
+    /**
+     * Ends a run that cannot advance: completed, suspended (persisted before returning) or failed.
+     * Before submitting the completed or suspended checkpoint it records [[StopCause.Finishing]], so
+     * no cancel or expiry can interrupt that commit; if a cancel or expiry was recorded first, the
+     * run is stopped instead and its outcome is not committed.
+     */
     private def end(execution: Execution, checkpointId: String): RunResult[O] =
       graph.finish(execution) match
         case RunResult.Failed(_, error) => fail(execution, error)
@@ -530,9 +559,11 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
             case suspended: RunResult.Suspended =>
               CheckpointStatus.Suspended -> RunEvent.RunSuspended(suspended.interrupts.map(_.id.value))
             case _ => CheckpointStatus.Completed -> RunEvent.RunCompleted
-          checkpoint(execution, Some(checkpointId), status, event) match
-            case Left(error) => fail(execution, error)
-            case Right(_) =>
+          newCheckpoint(execution, Some(checkpointId), status) match
+            case Left(error)                                                       => fail(execution, error)
+            case Right(_) if !cause.compareAndSet(None, Some(StopCause.Finishing)) => cancelled()
+            case Right(saved) =>
+              submit(saved, event)
               committer.close()
               committer.failure.fold(result)(e =>
                 RunResult.Failed(execution.state, GraphError.CheckpointWriteFailed(threadId.value, e))
@@ -597,16 +628,21 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       event: RunEvent
     ): Result[String] =
       newCheckpoint(execution, parent, status).map { saved =>
-        committer.submit(Commit(Some(saved), Vector.empty, Vector(draft(Some(saved.id), None, event))))
+        submit(saved, event)
         saved.id
       }
+
+    private def submit(saved: Checkpoint, event: RunEvent): Unit =
+      committer.submit(Commit(Some(saved), Vector.empty, Vector(draft(Some(saved.id), None, event))))
 
     /**
      * Ends a cancelled or expired run, by its recorded cause: [[RunEvent.RunCancelled]] and
      * [[GraphError.Cancelled]], or [[RunEvent.RunTimedOut]] and [[GraphError.DeadlineExceeded]]. The
      * interrupt is cleared so the closing commits can complete, then set again before returning, so
-     * the caller still sees it. The checkpoint stays `Running`, and the error names it - the
-     * checkpoint `recover` continues from, also under OnExit, whose exit commit keeps its id.
+     * the caller still sees it. A synchronous commit that the interrupt failed is forgotten, so the
+     * closing commits are tried; if they fail too, the run reports `CheckpointWriteFailed`. The
+     * checkpoint stays `Running`, and the error names it - the last durable checkpoint, which
+     * `recover` continues from, also under OnExit, whose exit commit keeps its id.
      */
     private def cancelled(): RunResult[O] =
       val (execution, checkpointId) = position
@@ -615,8 +651,10 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       // Recording it makes a later cancel or expiry fail its compare-and-set and send no interrupt,
       // which would otherwise land on the closing commits below.
       cause.compareAndSet(None, Some(StopCause.Cancelled)): Unit
+      committer.forgetInterruptedFailure()
       val (event, error) = cause.get.getOrElse(StopCause.Cancelled) match
-        case StopCause.Cancelled =>
+        // `Finishing` here means an interrupt from inside the run reached the outcome's commit
+        case StopCause.Cancelled | StopCause.Finishing =>
           RunEvent.RunCancelled -> GraphError.Cancelled(Some(threadId.value), Some(checkpointId))
         case StopCause.Expired =>
           RunEvent.RunTimedOut -> GraphError.DeadlineExceeded(threadId.value, Some(checkpointId))

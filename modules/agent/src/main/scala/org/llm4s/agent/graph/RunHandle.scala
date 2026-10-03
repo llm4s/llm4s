@@ -33,8 +33,10 @@ trait RunHandle[O]:
 
   /**
    * Cancels the run by interrupting its thread; see [[GraphError.Cancelled]]. Returns at once and
-   * is idempotent. A no-op once the run has ended, and a run that has already submitted its
-   * completed or suspended checkpoint still finishes with that outcome.
+   * is idempotent. A no-op once the run has ended, and once it has begun committing its completed
+   * or suspended checkpoint: that commit is not interrupted, and the run ends with its outcome. A
+   * cancel that interrupts a superstep's commit still ends the run `Cancelled`, even if the store
+   * reports that commit as failed.
    */
   def cancel(): Unit
 
@@ -44,9 +46,15 @@ trait RunHandle[O]:
    */
   def subscribe(capacity: Int = 1024)(listener: StreamEvent => Unit): Result[Subscription]
 
-/** Why a run was stopped from outside: the first cause recorded wins. */
+/**
+ * Why a run stops, recorded once: the first cause recorded wins. `Cancelled` and `Expired` are
+ * recorded by [[DefaultRunHandle.stop]], which interrupts the run only if its cause was the first.
+ * `Finishing` is recorded by the run itself just before it submits its completed or suspended
+ * checkpoint, so a later cancel or expiry records nothing and sends no interrupt into that commit;
+ * a run that finds `Cancelled` or `Expired` already recorded is stopped instead.
+ */
 private[graph] enum StopCause:
-  case Cancelled, Expired
+  case Cancelled, Expired, Finishing
 
 /**
  * The runtime's [[RunHandle]]. [[launch]] starts the run thread, which completes `result` on every
@@ -81,7 +89,10 @@ final private[graph] class DefaultRunHandle[O](
 
   def cancel(): Unit = stop(StopCause.Cancelled)
 
-  /** Records `stopCause` unless a cause is already recorded, and interrupts a live run. */
+  /**
+   * Records `stopCause` unless a cause is already recorded - including the run's own
+   * [[StopCause.Finishing]] - and only then interrupts a live run.
+   */
   private[graph] def stop(stopCause: StopCause): Unit =
     // the thread is started before the handle is returned, and an interrupt on a started thread
     // that has not yet run sets its flag, which the loop checks before every superstep

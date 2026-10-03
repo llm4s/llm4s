@@ -359,6 +359,92 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     awaitResult(handle).value.failed._2 shouldBe a[GraphError.Cancelled]
   }
 
+  /**
+   * A store that holds the first commit matching `gate` until `release` opens, as a database call
+   * blocks, and reacts to an interrupt during it as a JDBC driver might: by returning a failed
+   * commit (`failOnInterrupt`) or by throwing `InterruptedException`. Every other commit, and a
+   * held one that is released without an interrupt, goes straight to an in-memory store.
+   */
+  final private class GatedStore(gate: Commit => Boolean, failOnInterrupt: Boolean) extends Checkpointer {
+    val underlying    = InMemoryCheckpointer()
+    val arrived       = new CountDownLatch(1)
+    val release       = new CountDownLatch(1)
+    private val armed = new AtomicBoolean(true)
+    def commit(threadId: ThreadId, commit: Commit) =
+      if gate(commit) && armed.compareAndSet(true, false) then {
+        arrived.countDown()
+        // an interrupt that lands with the release still counts, whichever the latch saw first
+        val waited      = CancelledError.catchInterrupt(release.await(10, TimeUnit.SECONDS))
+        val interrupted = waited.isLeft || Thread.interrupted()
+        if !interrupted then underlying.commit(threadId, commit)
+        else if failOnInterrupt then Left(ValidationError("store", "interrupted"))
+        else throw new InterruptedException("store interrupted")
+      } else underlying.commit(threadId, commit)
+    def latest(threadId: ThreadId) = underlying.latest(threadId)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+      underlying.eventsAfter(threadId, afterSeq, limit)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+  }
+
+  private def eventsOf(store: Checkpointer): Vector[EventRecord] = store.eventsAfter(thread, 0L, 1000).value
+
+  /** The first superstep checkpoint; on a new thread only the claim has no parent. */
+  private def superstepCommit: Commit => Boolean =
+    _.checkpoint.exists(c => c.status == CheckpointStatus.Running && c.parent.isDefined)
+
+  "A cancel during the terminal commit" should "lose: the run ends with the outcome it was committing" in {
+    for failOnInterrupt <- Seq(true, false) do
+      withClue(s"failOnInterrupt = $failOnInterrupt: ") {
+        val store = GatedStore(_.checkpoint.exists(_.status == CheckpointStatus.Completed), failOnInterrupt)
+        val handle =
+          GraphRuntime(store).start(thread, Fixture(Set.empty).graph, Vector("a"), RunConfig()).value
+        store.arrived.await(10, TimeUnit.SECONDS) shouldBe true
+        handle.cancel() // the run has submitted its Completed checkpoint: this cancel must not interrupt it
+        store.release.countDown()
+        awaitResult(handle).value.completed._2 shouldBe Vector("A")
+        store.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Completed)
+        eventsOf(store).map(_.event) should not contain RunEvent.RunCancelled
+      }
+  }
+
+  "A cancel during a superstep's commit" should "end the run Cancelled, commit RunCancelled and stay recoverable" in {
+    for failOnInterrupt <- Seq(true, false) do
+      withClue(s"failOnInterrupt = $failOnInterrupt: ") {
+        val store   = GatedStore(superstepCommit, failOnInterrupt)
+        val runtime = GraphRuntime(store)
+        val handle  = runtime.start(thread, Fixture(Set.empty).graph, Vector("a"), RunConfig()).value
+        store.arrived.await(10, TimeUnit.SECONDS) shouldBe true
+        handle.cancel()
+        store.release.countDown()
+        val error = awaitResult(handle).value.failed._2
+        val claim = store.latest(thread).value.get.checkpoint // the interrupted commit never landed
+        claim.status shouldBe CheckpointStatus.Running
+        error shouldBe GraphError.Cancelled(Some(thread.value), Some(claim.id))
+        val last = eventsOf(store).last
+        last.event shouldBe RunEvent.RunCancelled
+        last.checkpointId shouldBe Some(claim.id)
+        runtime.recover(Fixture(Set.empty).graph, thread).awaited.value.completed._2 shouldBe Vector("A")
+      }
+  }
+
+  "A deadline during a superstep's commit" should "end the run DeadlineExceeded, commit RunTimedOut and stay recoverable" in {
+    for failOnInterrupt <- Seq(true, false) do
+      withClue(s"failOnInterrupt = $failOnInterrupt: ") {
+        // the held commit is never released: only the deadline's interrupt ends the wait
+        val store   = GatedStore(superstepCommit, failOnInterrupt)
+        val runtime = GraphRuntime(store)
+        val config  = RunConfig().withBudgets(RunBudgets(timeout = Some(300.millis)))
+        val handle  = runtime.start(thread, Fixture(Set.empty).graph, Vector("a"), config).value
+        val error   = awaitResult(handle).value.failed._2
+        val claim   = store.latest(thread).value.get.checkpoint
+        error shouldBe GraphError.DeadlineExceeded(thread.value, Some(claim.id))
+        org.llm4s.error.LLMError.isRecoverable(error) shouldBe true
+        eventsOf(store).last.event shouldBe RunEvent.RunTimedOut
+        eventsOf(store).map(_.event) should not contain RunEvent.RunCancelled
+        runtime.recover(Fixture(Set.empty).graph, thread).awaited.value.completed._2 shouldBe Vector("A")
+      }
+  }
+
   "TaskExecutor.bounded" should "return results in task order" in {
     val tasks = (1 to 20).toVector.map(i => () => { Thread.sleep((20 - i).toLong); i })
     TaskExecutor.bounded(4).runAll(tasks) shouldBe (1 to 20).toVector
