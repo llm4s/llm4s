@@ -249,6 +249,42 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     runtime.start(thread, f.graph, Vector("z"), RunId("run-2")).left.value shouldBe a[GraphError.IncompleteRun]
   }
 
+  it should "drain an Async queue before returning when interrupted after its last superstep" in {
+    // the writer holds the run's final (Completed) checkpoint commit until the caller has been
+    // interrupted, so the interrupt lands while the queue is not yet drained
+    val arrived = new CountDownLatch(1)
+    val release = new CountDownLatch(1)
+    val slow = new Checkpointer {
+      val underlying = InMemoryCheckpointer()
+      def commit(threadId: ThreadId, commit: Commit) =
+        if commit.checkpoint.exists(_.status == CheckpointStatus.Completed) then {
+          arrived.countDown()
+          release.await(10, TimeUnit.SECONDS)
+        }
+        underlying.commit(threadId, commit)
+      def latest(threadId: ThreadId) = underlying.latest(threadId)
+      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+        underlying.eventsAfter(threadId, afterSeq, limit)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    }
+    val f       = Fixture(blockOn = Set.empty)
+    val runtime = GraphRuntime(slow)
+    @volatile var outcome: Option[(RunResult[Vector[String]], Option[CheckpointStatus], Boolean)] = None
+    val runner = Thread.ofVirtual().start { () =>
+      val result = runtime.start(thread, f.graph, Vector("a"), RunId("run-1"), Durability.Async).value
+      outcome = Some((result, slow.latest(thread).value.map(_.checkpoint.status), Thread.currentThread().isInterrupted))
+    }
+    arrived.await(10, TimeUnit.SECONDS) shouldBe true
+    runner.interrupt() // the run has submitted its last commit and is closing the committer
+    release.countDown()
+    runner.join(10_000)
+    runner.isAlive shouldBe false
+    val (result, latestStatus, flag) = outcome.get
+    result.completed._2 shouldBe Vector("A") // not CheckpointWriteFailed: an interrupt is not a write failure
+    latestStatus shouldBe Some(CheckpointStatus.Completed) // durable before start returned
+    flag shouldBe true
+  }
+
   "TaskExecutor.bounded" should "return results in task order" in {
     val tasks = (1 to 20).toVector.map(i => () => { Thread.sleep((20 - i).toLong); i })
     TaskExecutor.bounded(4).runAll(tasks) shouldBe (1 to 20).toVector

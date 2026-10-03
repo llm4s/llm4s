@@ -256,13 +256,18 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       }
     def failure: Option[LLMError] = failed.get
 
-    /** Waits for the queue to drain. Never throws: an interrupt is recorded as a failure, flag kept. */
+    /**
+     * Waits for the queue to drain, even if interrupted: returning earlier would release the thread
+     * claim while queued commits are still landing. Never throws; an interrupt is not a commit
+     * failure, so it is only remembered and the flag set again once the queue has drained.
+     */
     def close(): Unit =
       writer.shutdown()
-      CancelledError.catchInterrupt(writer.awaitTermination(Long.MaxValue, TimeUnit.NANOSECONDS)).left.foreach { e =>
-        Thread.currentThread().interrupt()
-        failed.compareAndSet(None, Some(CancelledError("checkpoint writer", Some(e))))
-      }
+      @tailrec def drain(interrupted: Boolean): Boolean =
+        CancelledError.catchInterrupt(writer.awaitTermination(Long.MaxValue, TimeUnit.NANOSECONDS)) match
+          case Right(_) => interrupted
+          case Left(_)  => drain(interrupted = true)
+      if drain(interrupted = false) then Thread.currentThread().interrupt()
 
   final private class OnExitCommitter(threadId: ThreadId) extends Committer:
     private var durableParent: Option[Option[String]] = None
