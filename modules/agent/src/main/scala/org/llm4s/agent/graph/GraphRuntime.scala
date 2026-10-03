@@ -77,6 +77,11 @@ object GraphRuntime:
  * suspended checkpoint does not undo it: the run waits for that checkpoint to be durable and ends
  * with its outcome. Interrupting a thread blocked in [[RunHandle.await]] does not cancel the run.
  *
+ * A run whose `RunBudgets.timeout` is set has a deadline, fixed when its claim commits. When it
+ * passes, the run stops the same way, but ends with [[GraphError.DeadlineExceeded]] and commits
+ * [[RunEvent.RunTimedOut]]. The first of cancel and expiry to be recorded wins, so a run reports
+ * exactly one. `DeadlineExceeded` is recoverable: `recover` with a new budget continues the run.
+ *
  * `subscribe` replays a thread's committed events after a sequence number and then delivers new
  * ones as their commits succeed, in ascending order with no gaps or duplicates, followed by live
  * progress as it happens. Each subscription has its own dispatcher thread and a queue of
@@ -225,7 +230,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
             cause,
             (afterSeq, capacity, listener) => subscribe(threadId, afterSeq, capacity)(listener)
           )
-          handle.launch(() => run.execute(), run.crashed, () => release(threadId))
+          handle.launch(() => run.execute(), run.crashed, () => release(threadId), run.deadline)
           launched = true
           handle
         }
@@ -269,7 +274,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     firstSuperstep: Int,
     cause: AtomicReference[Option[StopCause]]
   ): Run[I, O] =
-    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, () => cause.get)
+    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, cause)
 
   private def reusableWrites(
     graph: CompiledGraph[?, ?],
@@ -392,7 +397,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     config: RunConfig,
     committer: Committer,
     firstSuperstep: Int,
-    stopCause: () => Option[StopCause]
+    cause: AtomicReference[Option[StopCause]]
   ):
     val runId               = config.runId
     private var checkpoints = 0
@@ -405,6 +410,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
 
     /** The sequence number of the claim's event; set by the claim. */
     var claimSeq: Long = 0L
+
+    /** When `budgets.timeout` expires, as a `System.nanoTime` value; fixed by the claim. */
+    var deadline: Option[Long] = None
 
     /**
      * Claims the thread with a synchronous commit of `execution` as a new checkpoint whose parent
@@ -446,6 +454,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         position = execution -> claimed.id
         claimedReused = reused
         claimSeq = seq
+        deadline = config.budgets.timeout.map(timeout => System.nanoTime() + timeout.toNanos)
         this
 
     /** Runs the claimed execution to its end; on the run thread. */
@@ -473,7 +482,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         case None if execution.paused || execution.isQuiescent => end(execution, checkpointId)
         case None if execution.superstep - firstSuperstep >= config.budgets.maxSupersteps =>
           fail(execution, GraphError.SuperstepLimitExceeded(config.budgets.maxSupersteps))
-        case None if Thread.currentThread().isInterrupted => cancelled()
+        case None if Thread.currentThread().isInterrupted || overdue() => cancelled()
         case None =>
           val outcomes = graph
             .executorFor(config.budgets)
@@ -499,6 +508,16 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
                 ) match
                   case Left(error) => fail(execution, error)
                   case Right(id)   => loop(next, id, Map.empty)
+
+    /**
+     * Whether the deadline has passed, recording `Expired` unless a cause is already recorded. The
+     * deadline thread interrupts the run when it expires; this catches a deadline that passed before
+     * the loop started, or between that interrupt's check and the next superstep.
+     */
+    private def overdue(): Boolean =
+      val due = deadline.exists(d => System.nanoTime() - d >= 0)
+      if due then cause.compareAndSet(None, Some(StopCause.Expired)): Unit
+      due
 
     /** Ends a run that cannot advance: completed, suspended (persisted before returning) or failed. */
     private def end(execution: Execution, checkpointId: String): RunResult[O] =
@@ -581,18 +600,21 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       }
 
     /**
-     * Ends a cancelled run. The interrupt is cleared so the closing commits can complete, then set
-     * again before returning, so the caller still sees it. The checkpoint stays `Running`, and the
-     * error names it - the checkpoint `recover` continues from, also under OnExit, whose exit commit
-     * keeps its id.
+     * Ends a cancelled or expired run, by its recorded cause: [[RunEvent.RunCancelled]] and
+     * [[GraphError.Cancelled]], or [[RunEvent.RunTimedOut]] and [[GraphError.DeadlineExceeded]]. The
+     * interrupt is cleared so the closing commits can complete, then set again before returning, so
+     * the caller still sees it. The checkpoint stays `Running`, and the error names it - the
+     * checkpoint `recover` continues from, also under OnExit, whose exit commit keeps its id.
      */
     private def cancelled(): RunResult[O] =
       val (execution, checkpointId) = position
       Thread.interrupted(): Unit
       // an interrupt with no recorded cause came from inside the run, such as a node; it cancels too
-      val (event, error) = stopCause().getOrElse(StopCause.Cancelled) match
-        case StopCause.Cancelled | StopCause.Expired =>
+      val (event, error) = cause.get.getOrElse(StopCause.Cancelled) match
+        case StopCause.Cancelled =>
           RunEvent.RunCancelled -> GraphError.Cancelled(Some(threadId.value), Some(checkpointId))
+        case StopCause.Expired =>
+          RunEvent.RunTimedOut -> GraphError.DeadlineExceeded(threadId.value, Some(checkpointId))
       committer.submit(Commit(None, Vector.empty, Vector(draft(Some(checkpointId), None, event))))
       val result = stop(execution, error)
       Thread.currentThread().interrupt()

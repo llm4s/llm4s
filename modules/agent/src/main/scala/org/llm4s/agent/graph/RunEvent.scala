@@ -32,6 +32,9 @@ enum RunEvent derives ReadWriter:
   /** The run was cancelled by interrupting its thread; its checkpoint stays `Running` for `recover`. */
   case RunCancelled
 
+  /** The run's deadline expired, stopping it as a cancel does; its checkpoint stays `Running` for `recover`. */
+  case RunTimedOut
+
   /** A node's own event, from [[RunContext.emit]]; `name` and `version` identify its payload. */
   case Custom(name: String, version: Int, payload: ujson.Value)
 

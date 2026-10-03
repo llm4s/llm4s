@@ -3,7 +3,7 @@ package org.llm4s.agent.graph
 import org.llm4s.error.CancelledError
 import org.llm4s.types.Result
 
-import java.util.concurrent.CompletableFuture
+import java.util.concurrent.{ CompletableFuture, TimeUnit, TimeoutException }
 import java.util.concurrent.atomic.AtomicReference
 import scala.util.Using
 import scala.util.control.Exception.allCatch
@@ -92,16 +92,35 @@ final private[graph] class DefaultRunHandle[O](
 
   /**
    * Starts the run thread, running `body`. A throwable escaping it becomes `crashed(throwable)`;
-   * `release` runs before the result is set, on every exit.
+   * `release` runs before the result is set, on every exit. With a `deadline` (a `System.nanoTime`
+   * value), it then starts a virtual thread named `llm4s-deadline-<threadId>` that stops the run
+   * with [[StopCause.Expired]] when the deadline passes; see [[expireAt]].
    */
   private[graph] def launch(
     body: () => RunResult[O],
     crashed: Throwable => RunResult[O],
-    release: () => Unit
+    release: () => Unit,
+    deadline: Option[Long] = None
   ): Unit =
     val thread = Thread.ofVirtual().name(s"llm4s-run-${threadId.value}").unstarted(() => run(body, crashed, release))
     runThread = thread
     thread.start()
+    // armed only once the run thread is started, so `stop` always has a thread to interrupt
+    deadline.foreach { at =>
+      Thread.ofVirtual().name(s"llm4s-deadline-${threadId.value}").start(() => expireAt(at)): Unit
+    }
+
+  /**
+   * The deadline thread's body: waits for the run's result until `deadline`, and stops the run if
+   * it has not ended by then. The wait ends as soon as the result is set - which the run thread
+   * does on every exit - so this thread never outlives the run by more than that, and it holds
+   * nothing the run needs, such as the thread claim.
+   */
+  private def expireAt(deadline: Long): Unit =
+    val remaining = math.max(0L, deadline - System.nanoTime())
+    DefaultRunHandle.guarded(result.get(remaining, TimeUnit.NANOSECONDS)) match
+      case Left(_: TimeoutException) => stop(StopCause.Expired)
+      case _                         => ()
 
   /**
    * The run thread's body. `crashed` must not throw (see [[DefaultRunHandle.guarded]]). `result` is
