@@ -9,6 +9,11 @@ import org.slf4j.LoggerFactory
  * `TraceEvent.CustomEvent` named `graph.<event>` (`RunStarted` is `graph.run_started`), stamped with
  * the record's timestamp. Its data holds `threadId`, `runId`, `seq`, `checkpointId`, `taskId` and
  * `nodeId` (`null` when absent) and the event's own fields. Live progress is not traced.
+ *
+ * A subscription that falls behind is disconnected like any other: a
+ * `StreamEvent.Disconnected(lastSeq, DisconnectReason.Lagging)` ends tracing, and is only logged.
+ * Nothing re-attaches by itself: to keep tracing, the caller attaches again with
+ * `afterSeq = lastSeq`, which replays from the first event not traced.
  */
 object TracingSubscriber:
 
@@ -29,7 +34,9 @@ object TracingSubscriber:
           )
         }
       case StreamEvent.Disconnected(lastSeq, reason) =>
-        logger.warn(s"Tracing subscription to ${threadId.value} ended after seq $lastSeq: $reason")
+        logger.warn(
+          s"Tracing subscription to ${threadId.value} ended after seq $lastSeq: $reason; attach again with afterSeq = $lastSeq to resume"
+        )
       case _ => ()
     }
 

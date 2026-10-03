@@ -313,6 +313,30 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     blocked.quiet()
   }
 
+  it should "not interrupt a listener that cancels its own subscription" in {
+    val runtime = GraphRuntime.inMemory()
+    runtime.start(thread, emitting(1), "go").awaited.value.completed
+    val subscription = new java.util.concurrent.atomic.AtomicReference[Subscription]()
+    val subscribed   = new CountDownLatch(1)
+    val flags        = new LinkedBlockingQueue[Boolean]()
+    val received     = Collector()
+    val sub = runtime
+      .subscribe(thread) { event =>
+        received.listener(event)
+        if flags.isEmpty then {
+          subscribed.await(5, TimeUnit.SECONDS): Unit
+          subscription.get.cancel()
+          flags.offer(Thread.currentThread().isInterrupted): Unit
+        }
+      }
+      .value
+    subscription.set(sub)
+    subscribed.countDown()
+    Option(flags.poll(5, TimeUnit.SECONDS)) shouldBe Some(false) // the rest of the call runs uninterrupted
+    received.next() shouldBe a[StreamEvent.Durable]
+    received.quiet() // and nothing is delivered after it
+  }
+
   /**
    * Cancels while `listener` is inside a call that ignores interrupts until released; `cancel` must
    * not return before that call ends, and nothing is delivered after.

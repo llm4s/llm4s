@@ -42,7 +42,9 @@ trait RunHandle[O]:
 
   /**
    * Subscribes to the run's thread from just before this run's claim event, so it replays this run
-   * from its start whenever it is called; see [[GraphRuntime.subscribe]].
+   * from its start whenever it is called; see [[GraphRuntime.subscribe]]. The subscription is the
+   * thread's, not the run's: it keeps delivering later runs on the same thread, and holds its parked
+   * dispatcher thread until [[Subscription.cancel]] is called.
    */
   def subscribe(capacity: Int = 1024)(listener: StreamEvent => Unit): Result[Subscription]
 

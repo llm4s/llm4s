@@ -110,7 +110,8 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     /**
      * Stops the dispatcher. Off the dispatcher thread, waits for a listener call in progress to end
      * (interrupting it first), so that once this returns no call is running and none will start.
-     * From the listener itself it returns at once; the dispatcher stops when the call returns.
+     * From the listener itself it neither interrupts nor waits: it returns at once, the rest of the
+     * call runs with the flag as it was, and the dispatcher stops when the call returns.
      */
     def cancel(): Unit =
       withLock(lock) {
@@ -118,16 +119,15 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
         notEmpty.signalAll()
       }
       leave(threadId, this)
-      thread.foreach { dispatcher =>
+      thread.filterNot(_ eq Thread.currentThread()).foreach { dispatcher =>
         dispatcher.interrupt()
-        if !(dispatcher eq Thread.currentThread()) then
-          withLock(lock) {
-            @tailrec def awaitIdle(): Unit =
-              if delivering then
-                idle.awaitUninterruptibly()
-                awaitIdle()
-            awaitIdle()
-          }
+        withLock(lock) {
+          @tailrec def awaitIdle(): Unit =
+            if delivering then
+              idle.awaitUninterruptibly()
+              awaitIdle()
+          awaitIdle()
+        }
       }
 
     def offerDurable(record: EventRecord): Unit = withLock(lock) {

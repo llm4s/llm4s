@@ -135,12 +135,19 @@ enum DisconnectReason:
   /** Reading the thread's event log failed while replaying. */
   case ReplayFailed(error: LLMError)
 
-/** A registration with [[GraphRuntime.subscribe]]. */
+/**
+ * A registration with [[GraphRuntime.subscribe]] or [[RunHandle.subscribe]]. It is scoped to a
+ * thread, not a run: it keeps delivering the events of every later run on the same thread, and its
+ * dispatcher - a virtual thread, parked while there is nothing to deliver - lives until [[cancel]]
+ * is called or the subscription is disconnected. Cancel every subscription you no longer need.
+ */
 trait Subscription:
   /**
    * Stops the subscription's dispatcher. A listener call already running is interrupted and
    * waited for, so once this returns no call is in progress and none will start - not even
-   * [[StreamEvent.Disconnected]]. Called from the listener itself, it returns at once and the
+   * [[StreamEvent.Disconnected]]. It therefore blocks for as long as a running listener ignores
+   * its interrupt, and two listeners that each cancel the other's subscription can deadlock. Called
+   * from the listener itself, it neither interrupts nor waits: it returns at once and the
    * dispatcher stops when the call returns.
    */
   def cancel(): Unit
