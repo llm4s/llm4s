@@ -534,6 +534,7 @@ Limits (owners in §4.7):
 - `RunContext` has no dependency accessor, by decision (§9).
 - `RunPosition` has no fencing token; fencing is Stage 2, with run-claim leases.
 - A `Subscription` dropped without `cancel()` keeps its dispatcher's virtual thread parked for the life of the runtime.
+- A subscription is fed live only by commits made through its own `GraphRuntime`. Commits by another runtime or process sharing the `Checkpointer` are seen only by subscribing again, which replays the log.
 - `Subscription.cancel()` blocks while a listener ignores its interrupt, and two listeners that cancel each other's subscriptions deadlock.
 - The hub lock is runtime-wide, so a long catch-up during a replay-to-live switch briefly delays commits on other threads.
 - If the caller is interrupted after a slow store has saved the claim, admission returns `Left(CancelledError)` and the thread is left with a `Running` claim, which `recover` continues.
@@ -555,6 +556,7 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 | Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
 | Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit and in `RunPosition` (today: the optimistic parent check, and `ThreadBusy` for a run still executing in the same runtime) | #1268, #1269, #1277 | Stage 2 |
 | Cancelling a run cancels the child runs it started | #1277 | Stage 3 |
+| Store-level change notification (or polling), so a subscription sees live commits made by another `GraphRuntime` or process sharing the checkpointer (today: live delivery only for commits through the subscribing runtime; others by resubscribing and replaying) | #1277 | Stage 2 |
 | Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction) | #1268 | Stage 2 |
 | Static `interruptBefore`/`interruptAfter` breakpoints | #1269 | Stage 2 |
 | `DefaultRunHandle.stop` does its CAS and `interrupt()` in two steps; `cancelled()` can clear the flag between them, so the interrupt may land on the closing `RunCancelled`/OnExit commit and misreport the outcome (`CheckpointWriteFailed`/`RunCrashed`; the result still completes and the checkpoint stays recoverable). Needs a stop handshake. | #1277 | [#1278](https://github.com/llm4s/llm4s/issues/1278) |

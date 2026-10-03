@@ -110,7 +110,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
    * Replays events with `seq > afterSeq`, then delivers new events until cancelled or
    * disconnected. The subscription is scoped to the thread, so it delivers every later run on it,
    * and its dispatcher (a virtual thread, parked while idle) lives until [[Subscription.cancel]];
-   * see there for how cancel waits on a running listener. Returns at once: replay runs on the
+   * see there for how cancel waits on a running listener. Only commits made through this runtime are
+   * delivered live; another runtime or process sharing the checkpointer is seen only by subscribing
+   * again, which replays the log (store-level change notification is Stage 2). Returns at once: replay runs on the
    * subscription's dispatcher thread, the only thread `listener` is called on, and a failed replay
    * ends it with [[DisconnectReason.ReplayFailed]]. A listener that throws is disconnected
    * ([[DisconnectReason.ListenerFailed]]). `capacity` must be at least two: a live event is queued

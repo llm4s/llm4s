@@ -165,23 +165,30 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
         ending match
           case End.Disconnect(reason) =>
             leave(threadId, this)
-            if reportPendingGap(reason) then call(StreamEvent.Disconnected(lastDeliveredSeq, reason)): Unit
+            reportPendingGap(reason).foreach(ending => call(StreamEvent.Disconnected(lastDeliveredSeq, ending)): Unit)
           case End.Cancelled => ()
       }
 
     /**
      * A lagging subscriber can end with live events dropped since its last gap marker - the durable
      * event that did not fit needed a slot for that marker too. They are reported as a
-     * [[StreamEvent.LiveGap]] just before `Disconnected`, so the count is never lost. Returns
-     * whether `Disconnected` should still follow: not if the subscription was cancelled meanwhile.
+     * [[StreamEvent.LiveGap]] just before `Disconnected`, so the count is never lost. Returns the
+     * reason the final `Disconnected` carries: `reason`, or [[DisconnectReason.ListenerFailed]] if
+     * the listener throws on that gap, as on any other event; `None` - no `Disconnected` - if the
+     * subscription was cancelled meanwhile.
      */
-    private def reportPendingGap(reason: DisconnectReason): Boolean =
+    private def reportPendingGap(reason: DisconnectReason): Option[DisconnectReason] =
       val dropped = withLock(lock) {
         val pending = if reason == DisconnectReason.Lagging then droppedLive else 0
         droppedLive = 0
         pending
       }
-      dropped == 0 || (call(StreamEvent.LiveGap(dropped)).isDefined && !cancelled)
+      if dropped == 0 then Some(reason)
+      else
+        deliver(StreamEvent.LiveGap(dropped)) match
+          case Right(_)                      => Some(reason)
+          case Left(End.Disconnect(failure)) => Some(failure)
+          case Left(End.Cancelled)           => None
 
     /** Delivers committed events directly until a read finds none. */
     @tailrec private def replay(): Either[End, Unit] =

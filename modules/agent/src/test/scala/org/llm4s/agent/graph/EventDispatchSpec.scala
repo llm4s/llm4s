@@ -249,6 +249,43 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     collector.quiet()
   }
 
+  it should "end with ListenerFailed, not Lagging, when the listener throws on the final gap" in {
+    val store     = Watched()
+    val runtime   = GraphRuntime(store)
+    val collector = Collector()
+    val entered   = new CountDownLatch(1)
+    val release   = new CountDownLatch(1)
+    val boom      = new IllegalStateException("boom")
+    runtime
+      .subscribe(thread, capacity = 2) { event =>
+        collector.listener(event)
+        event match {
+          case _: StreamEvent.LiveGap => throw boom
+          case _ if entered.getCount > 0 =>
+            entered.countDown()
+            release.await(10, TimeUnit.SECONDS): Unit
+          case _ => ()
+        }
+      }
+      .value
+    store.awaitSwitch()
+
+    // as above: the subscriber lags with two dropped live events still to report
+    val graph = chain(1) { (_, context) =>
+      entered.await(10, TimeUnit.SECONDS): Unit
+      (1 to 3).foreach(i => context.progress(ujson.Obj("i" -> i)))
+    }
+    runtime.start(thread, graph, "go").awaited.value.completed
+    release.countDown()
+
+    val received = collector.untilRunEnds()
+    received.drop(2) shouldBe Vector(
+      StreamEvent.LiveGap(2),
+      StreamEvent.Disconnected(1L, DisconnectReason.ListenerFailed(boom))
+    )
+    collector.quiet()
+  }
+
   it should "disconnect a listener that throws, without delivering anything after" in {
     val runtime   = GraphRuntime.inMemory()
     val collector = Collector()

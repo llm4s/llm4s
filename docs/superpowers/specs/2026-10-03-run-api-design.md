@@ -268,6 +268,9 @@ enum DisconnectReason:
   subscriptions can deadlock. From the listener itself it neither interrupts nor waits.
 - **Lifetime.** A subscription is scoped to the thread and holds its dispatcher (a parked virtual
   thread while idle) until it is cancelled or disconnected.
+- **One runtime.** Live delivery covers only commits made through the subscribing `GraphRuntime`;
+  another runtime or process sharing the checkpointer is seen by resubscribing (replay). Store-level
+  change notification is Stage 2, with the durable checkpointer backends.
 - Unchanged guarantees: ascending `seq`, no gaps or duplicates, delivery only after the commit that
   numbered an event, in every durability mode.
 

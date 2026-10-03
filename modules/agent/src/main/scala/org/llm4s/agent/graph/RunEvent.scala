@@ -140,6 +140,11 @@ enum DisconnectReason:
  * thread, not a run: it keeps delivering the events of every later run on the same thread, and its
  * dispatcher - a virtual thread, parked while there is nothing to deliver - lives until [[cancel]]
  * is called or the subscription is disconnected. Cancel every subscription you no longer need.
+ *
+ * Live delivery covers only commits made through the [[GraphRuntime]] it was made on. Commits by
+ * another runtime or process sharing the same [[Checkpointer]] are not pushed to it; they become
+ * visible by subscribing again, which replays the log. Store-level change notification arrives with
+ * Stage 2's durable checkpointer backends.
  */
 trait Subscription:
   /**
