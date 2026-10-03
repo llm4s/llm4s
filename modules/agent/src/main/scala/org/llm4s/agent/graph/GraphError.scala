@@ -136,14 +136,15 @@ object GraphError:
 
   /**
    * The run's tenant is not the thread's: a thread belongs to the tenant recorded on its latest
-   * checkpoint. `None` and `Some` differ. Nothing was changed.
+   * checkpoint, and `requested` (the caller's `RunConfig.tenantId`) is not it. `None` and `Some`
+   * differ. Nothing was changed. The owning tenant is deliberately not carried or printed, so a
+   * caller from another tenant learns nothing about the thread.
    */
-  final case class TenantMismatch(threadId: String, expected: Option[String], actual: Option[String])
+  final case class TenantMismatch(threadId: String, requested: Option[String])
       extends GraphError
       with NonRecoverableError:
     override val message: String =
-      s"Thread '$threadId' belongs to tenant ${expected.fold("<none>")(t => s"'$t'")}, " +
-        s"not ${actual.fold("<none>")(t => s"'$t'")}"
+      s"Thread '$threadId' does not belong to tenant ${requested.fold("<none>")(t => s"'$t'")}"
 
   /** `resume` was called on a thread that is not suspended. */
   final case class NotSuspended(threadId: String) extends GraphError with NonRecoverableError:

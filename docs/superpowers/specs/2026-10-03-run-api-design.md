@@ -111,7 +111,8 @@ not part of `RunPosition`.
 `Checkpoint` gains `tenantId: Option[String]`, and `Checkpoint.CurrentFormat` is incremented, with a
 migration that reads earlier checkpoints as `tenantId = None`. Every checkpoint a run writes records
 that run's tenant. Admission compares the run's `tenantId` with the latest checkpoint's and refuses a
-difference with `GraphError.TenantMismatch(threadId, expected: Option[String], actual: Option[String])`;
+difference with `GraphError.TenantMismatch(threadId, requested: Option[String])` - it names only the
+caller's tenant, never the owner's, so a wrong-tenant caller learns nothing about the thread;
 `None` and `Some` differ. A thread with no checkpoint accepts any tenant.
 
 `RunEvent.RunStarted`, `RunRecovered` and `RunResumed` gain `principal: Option[String]` and
@@ -176,7 +177,8 @@ In order; any `Left` leaves the thread unchanged:
 3. Check its status (`IncompleteRun`, `PendingInterrupts`, `NothingToRecover`, `NotSuspended`).
 4. Restore, decode the answers (`resume`), re-check reused pending writes (`recover`).
 5. Commit the claim (`ThreadBusy` on a lost claim - `TenantMismatch` if the thread, re-read, belongs
-   to another tenant - and `CheckpointWriteFailed` otherwise).
+   to another tenant; `ThreadBusy` with the conflict's checkpoint if the re-read fails - and
+   `CheckpointWriteFailed` otherwise).
 
 The thread stays in the runtime's `active` set from step 1 until the run thread exits - not until
 admission returns - so `recover` cannot mistake a live run's `Running` checkpoint for an abandoned one.
@@ -192,7 +194,8 @@ returns `Failed(Cancelled(threadId, lastCheckpoint))`. The superstep limit is
 `budgets.maxSupersteps`, counted per run.
 
 - `cancel()` interrupts the run thread. It is idempotent and a no-op once the run has ended.
-- **Finishing.** Before the run submits its completed or suspended checkpoint it records the cause
+- **Finishing.** Before the run commits its outcome - its completed or suspended checkpoint, or a
+  failed run's `RunFailed` (under `OnExit`, the exit commit carrying it) - it records the cause
   `Finishing` (the same compare-and-set as `Cancelled` and `Expired`). A later `cancel()` or expiry
   then fails its compare-and-set and sends no interrupt, so a store that reacts to interrupts (a
   database driver on a virtual thread) cannot fail or abandon the outcome's commit; the run ends with
@@ -333,7 +336,8 @@ One CHANGELOG entry, and the same list in the design doc section:
   honoured (latch-counting nodes); the superstep limit is per run; `cancel` racing a deadline reports
   exactly one cause; `RunBudgets.of`, `apply` and every `with*` setter reject non-positive values
   (`RunConfigSpec`).
-- **`CancellationSpec`:** a cancel during the terminal commit loses (the run completes); a cancel or
+- **`CancellationSpec`:** a cancel during the terminal commit loses (the run completes), as does one
+  during a failing run's `RunFailed` or OnExit exit commit (the run reports its own failure); a cancel or
   deadline during a superstep commit - whether the store throws or returns `Left` - ends `Cancelled`
   or `DeadlineExceeded` with `RunCancelled` or `RunTimedOut` committed, and `recover` completes.
 - **`TenantSpec`:** mismatch refused by `start`, `recover` and `resume`, before any status error and

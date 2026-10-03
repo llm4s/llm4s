@@ -20,13 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RunBudgets` (`maxSupersteps`, `timeout`, `maxConcurrency`, each validated by `apply`, `of` and the
   `with*` setters); a timeout is measured from the claim and ends the run with the recoverable
   `GraphError.DeadlineExceeded` and a new `RunEvent.RunTimedOut`, and the first of cancel and expiry
-  wins. Once a run has begun committing its completed or suspended checkpoint, a cancel or expiry
-  sends no interrupt into that commit and the run ends with its outcome; a cancel or expiry that
+  wins. Once a run has begun committing its outcome (completed, suspended or failed), a cancel or
+  expiry sends no interrupt into that commit and the run ends with its outcome; a cancel or expiry that
   interrupts a superstep's commit ends the run `Cancelled` or `DeadlineExceeded`, even if the store
   reports that commit as failed. `RunContext(config, position)`
   replaces `NodeContext`, with `emit`, `progress` and `isCancelled`; dependencies stay captured by
   node closures. The tenant is recorded on every checkpoint (format 3, with a migration) and a
-  mismatch is refused at admission with `GraphError.TenantMismatch`, before any status error and in
+  mismatch is refused at admission with `GraphError.TenantMismatch(threadId, requested)`, which never
+  names the owning tenant, before any status error and in
   place of `ThreadBusy`, so a caller from another tenant learns nothing about the thread; `RunStarted`, `RunRecovered`
   and `RunResumed` record `tenantId` and `principal`. Each subscription has its own ordered
   dispatcher thread and a queue of `capacity` (at least 2) entries: a lagging subscriber is

@@ -51,10 +51,12 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     runtime.start(thread, f.graph, "x", tenant("a")).awaited.value.completed
 
     untouched(store)(runtime.start(thread, f.graph, "y", tenant("b")).awaited).left.value shouldBe
-      GraphError.TenantMismatch("t", Some("a"), Some("b"))
+      GraphError.TenantMismatch("t", Some("b"))
     untouched(store)(runtime.start(thread, f.graph, "y", RunConfig()).awaited).left.value shouldBe
-      GraphError.TenantMismatch("t", Some("a"), None)
-    GraphError.TenantMismatch("t", Some("a"), None).message should (include("'a'").and(include("<none>")))
+      GraphError.TenantMismatch("t", None)
+    // the owning tenant is neither carried nor printed
+    GraphError.TenantMismatch("t", None).message shouldBe "Thread 't' does not belong to tenant <none>"
+    GraphError.TenantMismatch("t", Some("b")).message shouldBe "Thread 't' does not belong to tenant 'b'"
   }
 
   it should "refuse a tenant when it has none" in {
@@ -64,7 +66,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     runtime.start(thread, f.graph, "x").awaited.value.completed
 
     untouched(store)(runtime.start(thread, f.graph, "y", tenant("a")).awaited).left.value shouldBe
-      GraphError.TenantMismatch("t", None, Some("a"))
+      GraphError.TenantMismatch("t", Some("a"))
   }
 
   it should "refuse recover by another tenant" in {
@@ -76,7 +78,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     store.latest(thread).value.value.checkpoint.status shouldBe CheckpointStatus.Running
 
     untouched(store)(runtime.recover(thread, f.graph, tenant("b")).awaited).left.value shouldBe
-      GraphError.TenantMismatch("t", Some("a"), Some("b"))
+      GraphError.TenantMismatch("t", Some("b"))
     runtime.recover(thread, f.graph, tenant("a")).awaited.value.completed
   }
 
@@ -88,9 +90,9 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val answers = Map(parked.interrupts.head.id -> f.approve.answer("yes"))
 
     untouched(store)(runtime.resume(thread, f.graph, answers, tenant("b")).awaited).left.value shouldBe
-      GraphError.TenantMismatch("t", Some("a"), Some("b"))
+      GraphError.TenantMismatch("t", Some("b"))
     untouched(store)(runtime.resume(thread, f.graph, answers).awaited).left.value shouldBe
-      GraphError.TenantMismatch("t", Some("a"), None)
+      GraphError.TenantMismatch("t", None)
     runtime.resume(thread, f.graph, answers, tenant("a")).awaited.value.completed._2 shouldBe Vector("yes")
   }
 
@@ -138,7 +140,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val f        = Fixture()
     val store    = InMemoryCheckpointer()
     val runtime  = GraphRuntime(store)
-    val mismatch = GraphError.TenantMismatch("t", Some("a"), Some("b"))
+    val mismatch = GraphError.TenantMismatch("t", Some("b"))
 
     // Completed: recover and resume would otherwise say NothingToRecover and NotSuspended
     runtime.start(thread, f.graph, "x", tenant("a")).awaited.value.completed
@@ -175,7 +177,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val store    = InMemoryCheckpointer()
     val runtime  = GraphRuntime(store)
     val handle   = runtime.start(thread, g, "x", tenant("a")).value
-    val mismatch = GraphError.TenantMismatch("t", Some("a"), Some("b"))
+    val mismatch = GraphError.TenantMismatch("t", Some("b"))
     started.await(10, TimeUnit.SECONDS) shouldBe true
 
     untouched(store)(runtime.start(thread, g, "y", tenant("b"))).left.value shouldBe mismatch
@@ -201,10 +203,29 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
     }
     GraphRuntime(racing).start(thread, f.graph, "y", tenant("b")).awaited.left.value shouldBe
-      GraphError.TenantMismatch("t", Some("a"), Some("b"))
+      GraphError.TenantMismatch("t", Some("b"))
     stale.set(true)
     GraphRuntime(racing).start(thread, f.graph, "y", tenant("a")).awaited.left.value shouldBe
       a[GraphError.ThreadBusy]
+  }
+
+  it should "report a lost claim as ThreadBusy when the thread cannot be re-read" in {
+    val f          = Fixture()
+    val underlying = InMemoryCheckpointer()
+    GraphRuntime(underlying).start(thread, f.graph, "x", tenant("a")).awaited.value.completed
+    val winner = underlying.latest(thread).value.map(_.checkpoint.id)
+    val reads  = new java.util.concurrent.atomic.AtomicInteger()
+    // the first read misses the winner, so the claim conflicts; the re-read then fails
+    val failing = new Checkpointer {
+      def commit(threadId: ThreadId, commit: Commit) = underlying.commit(threadId, commit)
+      def latest(threadId: ThreadId) =
+        if reads.incrementAndGet() == 1 then Right(None) else Left(ValidationError("store", "down"))
+      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+        underlying.eventsAfter(threadId, afterSeq, limit)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    }
+    GraphRuntime(failing).start(thread, f.graph, "y", tenant("a")).awaited.left.value shouldBe
+      GraphError.ThreadBusy("t", winner)
   }
 
   it should "accept any tenant when it has no checkpoint" in {

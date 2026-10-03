@@ -10,6 +10,7 @@ import org.scalatest.matchers.should.Matchers
 import java.time.{ Clock, Instant, ZoneId, ZoneOffset }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import java.util.concurrent.{ CountDownLatch, LinkedBlockingQueue, TimeUnit }
+import scala.concurrent.duration.DurationInt
 
 class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
 
@@ -153,7 +154,11 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     val outcome = new LinkedBlockingQueue[(Result[RunResult[String]], Boolean)]()
     val waiter =
       Thread.ofVirtual().start(() => outcome.offer(handle.await() -> Thread.currentThread().isInterrupted): Unit)
-    while waiter.getState != Thread.State.WAITING do Thread.onSpinWait()
+    val parkedBy = System.nanoTime() + 5.seconds.toNanos
+    while waiter.getState != Thread.State.WAITING do {
+      if System.nanoTime() - parkedBy > 0 then fail("the waiter did not block in await within 5s")
+      Thread.onSpinWait()
+    }
     waiter.interrupt()
     val (awaited, flag) = Option(outcome.poll(5, TimeUnit.SECONDS)).getOrElse(fail("await did not return"))
     awaited.left.value shouldBe a[CancelledError]

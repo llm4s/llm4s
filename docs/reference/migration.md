@@ -24,8 +24,8 @@ shims. Design: `docs/design/typed-agent-runtime-design.md` §4.6.
   `Result[RunHandle[O]]`; the run id is `config.runId`. Call `handle.await()` for the
   `RunResult`. Cancel with `handle.cancel()`: interrupting the caller no longer cancels the run,
   and interrupting a thread blocked in `await` returns `Left(CancelledError)` while the run
-  continues. A cancel that arrives once the run has begun committing its completed or suspended
-  checkpoint is ignored, and the run ends with its outcome.
+  continues. A cancel that arrives once the run has begun committing its outcome - completed,
+  suspended or failed - is ignored, and the run ends with that outcome.
 - **`recover` and `resume` take the thread first, as `start` does.** `recover(graph, threadId, ...)`
   becomes `recover(threadId, graph, ...)`, and `resume(graph, threadId, answers, ...)` becomes
   `resume(threadId, graph, answers, ...)`. Both arguments have different types, so the compiler
@@ -39,7 +39,8 @@ shims. Design: `docs/design/typed-agent-runtime-design.md` §4.6.
   subscription belongs to the thread, not one run, and keeps a parked dispatcher thread until
   `cancel()`; cancel subscriptions you no longer need.
 - **Tenants are checked.** A run whose `RunConfig.tenantId` differs from the one on the thread's
-  latest checkpoint is refused with `GraphError.TenantMismatch`; `None` and `Some` differ. The check
+  latest checkpoint is refused with `GraphError.TenantMismatch(threadId, requested)`, which names
+  only the caller's tenant, never the owner's; `None` and `Some` differ. The check
   comes first: a wrong-tenant call gets `TenantMismatch` rather than `IncompleteRun`,
   `PendingInterrupts`, `NothingToRecover`, `NotSuspended` or `ThreadBusy`.
   Checkpoints move to format 3, and earlier checkpoints read as having no tenant.

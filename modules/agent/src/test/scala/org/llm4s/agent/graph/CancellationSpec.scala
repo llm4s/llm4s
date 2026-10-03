@@ -445,6 +445,32 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
       }
   }
 
+  "A cancel during a failing run's closing commit" should "lose: the run reports its own failure" in {
+    val b      = GraphBuilder("failing", "v1")
+    val node   = b.node[Unit]("n")((_, _, _) => NodeResult.Fail(ValidationError("work", "boom")))
+    val g      = b.compile(node)(_ => Right(())).value
+    val failed = (c: Commit) => c.events.exists(_.event.isInstanceOf[RunEvent.RunFailed])
+    // Sync commits RunFailed on its own; OnExit carries it in the exit commit
+    for
+      durability      <- Seq(Durability.Sync, Durability.OnExit)
+      failOnInterrupt <- Seq(true, false)
+    do
+      withClue(s"$durability, failOnInterrupt = $failOnInterrupt: ") {
+        val store  = GatedStore(failed, failOnInterrupt)
+        val handle = GraphRuntime(store).start(thread, g, (), RunConfig(), durability).value
+        store.arrived.await(10, TimeUnit.SECONDS) shouldBe true
+        handle.cancel() // the run has decided its outcome: this cancel must not interrupt its commit
+        store.release.countDown()
+        awaitResult(handle).value.failed._2 match {
+          case GraphError.NodeFailed(_, _, cause) => cause shouldBe ValidationError("work", "boom")
+          case other                              => fail(s"expected the node's own failure, got $other")
+        }
+        val events = eventsOf(store).map(_.event)
+        events.collect { case f: RunEvent.RunFailed => f } should not be empty
+        events should not contain RunEvent.RunCancelled
+      }
+  }
+
   "TaskExecutor.bounded" should "return results in task order" in {
     val tasks = (1 to 20).toVector.map(i => () => { Thread.sleep((20 - i).toLong); i })
     TaskExecutor.bounded(4).runAll(tasks) shouldBe (1 to 20).toVector

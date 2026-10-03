@@ -56,7 +56,8 @@ object GraphRuntime:
  * [[GraphError.NothingToRecover]], [[GraphError.NotSuspended]]) without changing the thread. A
  * thread belongs to the tenant on its latest checkpoint, and a call with another `tenantId` is
  * refused with [[GraphError.TenantMismatch]] before anything else is reported - the thread's
- * status, or that a run is live on it - so it learns nothing about the thread. Each
+ * status, or that a run is live on it - and the error names only the caller's tenant, so it
+ * learns nothing about the thread. Each
  * call is a new run: it claims the thread by committing a checkpoint whose parent is the latest
  * it read, and if another run got there first it fails with [[GraphError.ThreadBusy]] - its input
  * or answers neither accepted nor discarded. A call on a thread whose run is still executing in
@@ -79,8 +80,8 @@ object GraphRuntime:
  * `recover` continues the run. A cancel that interrupts a superstep's commit ends the run the same
  * way even if the store reports that commit as failed (as a JDBC store may, rather than throwing
  * `InterruptedException`): the run is cancelled, not failed by its store, and the error names the
- * last checkpoint that was durable. Once the run has begun committing its completed or suspended
- * checkpoint, a cancel is ignored - it sends no interrupt, so that commit is not disturbed - and the
+ * last checkpoint that was durable. Once the run has begun committing its outcome - its completed
+ * or suspended checkpoint, or the `RunFailed` of a failed run - a cancel is ignored - it sends no interrupt, so that commit is not disturbed - and the
  * run ends with its outcome. Interrupting a thread blocked in [[RunHandle.await]] does not cancel
  * the run.
  *
@@ -288,7 +289,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     Either.cond(
       stored.checkpoint.tenantId == requested,
       (),
-      GraphError.TenantMismatch(threadId.value, stored.checkpoint.tenantId, requested)
+      GraphError.TenantMismatch(threadId.value, requested)
     )
 
   private def pendingInterrupts(threadId: ThreadId, stored: StoredCheckpoint): GraphError =
@@ -475,11 +476,12 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           )
         ) match
           // another run advanced the thread first: the thread is re-read so that another tenant's
-          // checkpoint is not named, but the conflict's own `latest` is the authoritative one
+          // checkpoint is not named, but the conflict's own `latest` is the authoritative one. A
+          // re-read that fails or throws falls back to that ThreadBusy rather than a store error.
           case Left(GraphError.CheckpointConflict(_, _, latest)) =>
-            busy(threadId, config).left.map {
-              case _: GraphError.ThreadBusy => GraphError.ThreadBusy(threadId.value, latest)
-              case other                    => other
+            Try(busy(threadId, config)).toResult.flatten.left.map {
+              case mismatch: GraphError.TenantMismatch => mismatch
+              case _                                   => GraphError.ThreadBusy(threadId.value, latest)
             }
           case Left(other)    => Left(GraphError.CheckpointWriteFailed(threadId.value, other))
           case Right(records) => Right(records)
@@ -692,9 +694,17 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       Thread.currentThread().interrupt()
       result
 
+    /**
+     * Fails the run with `error`, committing [[RunEvent.RunFailed]]. Like [[end]], it records
+     * [[StopCause.Finishing]] first, so a later cancel or expiry sends no interrupt into that commit
+     * (or OnExit's exit commit); if a cancel or expiry was recorded first, the run is stopped
+     * instead.
+     */
     private def fail(execution: Execution, error: LLMError): RunResult[O] =
-      committer.submit(Commit(None, Vector.empty, Vector(draft(None, None, RunEvent.RunFailed(error.message)))))
-      stop(execution, error)
+      if !cause.compareAndSet(None, Some(StopCause.Finishing)) then cancelled()
+      else
+        committer.submit(Commit(None, Vector.empty, Vector(draft(None, None, RunEvent.RunFailed(error.message)))))
+        stop(execution, error)
 
     /**
      * Closes the committer and fails the run. If closing reveals that a commit failed - an Async
