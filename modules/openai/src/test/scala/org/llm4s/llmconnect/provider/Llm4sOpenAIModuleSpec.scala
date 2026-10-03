@@ -7,6 +7,8 @@ import org.llm4s.llmconnect.contract.LLMClientContractBehaviors
 import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ chunk, stream, transport }
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.testkit.LocalProviderTestServer
 import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
@@ -135,6 +137,29 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     honoursStreaming(() =>
       OpenAIClient.forTest("test-model", transport(streaming = _ => stream(contentChunk, stopChunk)), config)
     )
+  }
+
+  "an OpenAIClient against a local server" should {
+
+    def openAIClientAt(baseUrl: String): LLMClient =
+      OpenAIConfig
+        .fromValues("gpt-4o", "sk-test", None, baseUrl)
+        .flatMap(OpenAIClient(_)) match
+        case Right(client) => client
+        case Left(error)   => fail(s"could not build an OpenAIClient: ${error.message}")
+
+    "return CancelledError when a call is interrupted" in {
+      LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
+        assertCancelsWhenInterrupted(openAIClientAt(baseUrl))
+      }
+    }
+
+    "return CancelledError when a stream is interrupted after its first event" in {
+      val firstEvent = LocalProviderTestServer.openAISseBody(Seq("Hel", "lo")).split("\n\n").head + "\n\n"
+      LocalProviderTestServer.withServer("/")(LocalProviderTestServer.streamThenHold(_, firstEvent)) { baseUrl =>
+        assertCancelsStreamWhenInterrupted(openAIClientAt(baseUrl))
+      }
+    }
   }
 
   "the llm4s-openai reference.conf" should {
