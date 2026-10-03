@@ -1,5 +1,14 @@
 # Migration Guide
 
+## Cancellation by interrupt
+
+Not in a release yet ([#1270](https://github.com/llm4s/llm4s/issues/1270)). An interrupted call
+now returns `Left(CancelledError)` with the thread's interrupt flag still set. Code that matched
+`ExecutionError`, `TimeoutError` or `SimpleError` to detect an interrupted call should match
+`CancelledError` instead, and `ToolCallError.Cancelled` for a tool call. `CancelledError` is
+non-recoverable and is never retried. Chat clients no longer throw `InterruptedException` or report
+`UnknownError` for an interrupt.
+
 ## Pre-baseline API cleanup, pass 8
 
 Not in a release yet; continues pass 7 below. It closes the last gaps in the frozen modules'

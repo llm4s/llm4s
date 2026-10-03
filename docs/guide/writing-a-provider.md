@@ -396,7 +396,7 @@ Every method returns a `Result` and never throws for a transport failure, so the
 | request or connection timed out | `TimeoutError` (carries the timeout) |
 | connection refused, unknown host, other I/O error | `NetworkError` |
 | invalid URL, header or timeout; unreadable multipart file | `ValidationError` |
-| thread interrupted (the interrupt flag is restored) | `ExecutionError` |
+| thread interrupted (the interrupt flag is kept) | `CancelledError` |
 
 A non-2xx status is **not** an error at this layer: it is a `Right` response for you to inspect
 (`HttpResponse.ensureSuccess`, or `HttpErrorMapper` below). Timeouts are
@@ -612,10 +612,10 @@ It has four parts, all in `org.llm4s.testkit`:
 
 | | What it gives you |
 |---|---|
-| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
+| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
 | `ProviderTestConfig` | `loadSection`, `loadProvider` and `loadEmbeddings`: config loaded as an application loads it, from a HOCON string over every `reference.conf` on the classpath, with `${?VAR}` resolved against a `Map` you pass - never the real environment, so an exported `ACME_API_KEY` on your machine cannot make a test pass that fails in CI. |
 | `CredentialsRoundTrip` | `chatSectionKey`, `chatBindings`, `embeddingsKey`, `embeddingBindings`: which key a section or embeddings block with no `apiKey` of its own ends up with, for cases the assertions do not cover - an alias, two variables in precedence order, a variable that must *not* be picked up. |
-| `LocalProviderTestServer` | `withServer(path)(handler)(baseUrl => ...)`, `sendJsonResponse`, `sendSseResponse`, and OpenAI-format bodies: the JDK's HTTP server on an ephemeral port, to point a client at. |
+| `LocalProviderTestServer` | `withServer(path)(handler)(baseUrl => ...)`, `sendJsonResponse`, `sendSseResponse`, `holdOpen` / `streamThenHold` (requests that never finish, released when `withServer` ends), and OpenAI-format bodies: the JDK's HTTP server on an ephemeral port, to point a client at. |
 
 ```scala
 package com.acme.llm4s
@@ -685,6 +685,15 @@ class Llm4sAcmeModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
 with only that variable set, so the shared credential is the only place a key can come from; when
 it fails it names the `reference.conf` line that is missing. Test the client itself against
 `LocalProviderTestServer` too, including that an error status maps to the right `LLMError`.
+
+### Cancellation
+
+A provider must return `Left(CancelledError)`, with the interrupt flag kept, when its thread is
+interrupted. It must not throw `InterruptedException` or clear the flag. A client that extends
+`BaseLifecycleLLMClient` gets this from `completeWithMetrics`; `Llm4sHttpClient` already returns
+`CancelledError` for an interrupted request or stream read. Your module spec should run
+`assertCancelsWhenInterrupted` and `assertCancelsStreamWhenInterrupted` against
+`LocalProviderTestServer.holdOpen` and `streamThenHold`.
 
 ## Stability
 

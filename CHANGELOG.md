@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Cancellation by interrupt for graph runs and providers** (Experimental, `org.llm4s.agent.graph`,
+  [#1270](https://github.com/llm4s/llm4s/issues/1270)): each superstep runs in a bounded Ox scope on
+  virtual threads (Ox is a new implementation dependency of `llm4s-agent`). Interrupting the thread
+  that called `start`/`recover`/`resume` or `CompiledGraph.run` interrupts and joins every task and
+  returns `Failed(GraphError.Cancelled)` with the interrupt flag set; tasks that finished first keep
+  their results, an interrupted task records nothing, and `recover` continues the run. The thread
+  claim is always released, and an interrupted Async close still drains its queue first. New
+  `RunEvent.RunCancelled`. The provider testkit gains `assertCancelsWhenInterrupted` and
+  `assertCancelsStreamWhenInterrupted`, and `LocalProviderTestServer.holdOpen`/`streamThenHold`.
+  Design: `docs/design/typed-agent-runtime-design.md` §4.4.
 - **Resumable approval and tool-call barriers for graph runs** (Experimental,
   `org.llm4s.agent.graph`, [#1269](https://github.com/llm4s/llm4s/issues/1269)): nodes can suspend
   with a typed question (`NodeResult.Suspend`, `GraphBuilder.declareResume`, `ResumeRef`). The run
@@ -146,6 +156,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **An interrupted call returns `CancelledError`** ([#1270](https://github.com/llm4s/llm4s/issues/1270)):
+  new `org.llm4s.error.CancelledError` (non-recoverable, never retried) with the interrupt flag kept.
+  A `SocketTimeoutException` on its own stays a timeout. `Llm4sHttpClient` returns it where it
+  returned `ExecutionError` (and `NetworkError` mid-stream); `ReliableClient`, `LLMClientRetry` and
+  `ErrorRecovery` return it instead of `TimeoutError`, `ExecutionError` or `SimpleError` and do not
+  count it against the circuit breaker; every chat client returns it instead of throwing
+  `InterruptedException` or reporting `UnknownError`; `ToolRegistry` returns
+  `ToolCallError.Cancelled`. New `ErrorKind.Cancelled` metric label `cancelled`. Anthropic streams
+  are now closed on every path.
 - **Every client sends through `Llm4sHttpClient`, and a 503's `Retry-After` is honoured**
   ([#1133](https://github.com/llm4s/llm4s/issues/1133)). `CohereReranker`, the OpenAI and Ollama
   embedding providers, the OpenAI and Anthropic vision clients and `OpenAICompatibleClient` called
