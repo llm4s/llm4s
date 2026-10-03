@@ -38,9 +38,11 @@ object GraphError:
       s"Join '${joinId.value}' can never release; still waiting for ${missing.mkString(", ")}"
 
   /**
-   * The run was cancelled by interrupting its thread. Every task was interrupted and joined; tasks
-   * that finished first keep their results. A durable run's checkpoint stays `Running`, so
-   * `recover` continues it. The interrupt flag is set when this is returned.
+   * The run was cancelled by interrupting its thread. Every task was interrupted and joined. In a
+   * durable run, tasks that finished first keep their results as pending writes, and the
+   * checkpoint stays `Running`, so `recover` continues it without re-running them. An in-memory
+   * `CompiledGraph.run` keeps nothing from the cancelled superstep: its state is the state before
+   * that superstep. The interrupt flag is set when this is returned.
    */
   final case class Cancelled(threadId: Option[String], lastCheckpoint: Option[String]) extends GraphError:
     override val message: String =

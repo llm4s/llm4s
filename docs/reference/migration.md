@@ -9,6 +9,23 @@ now returns `Left(CancelledError)` with the thread's interrupt flag still set. C
 non-recoverable and is never retried. Chat clients no longer throw `InterruptedException` or report
 `UnknownError` for an interrupt.
 
+- **New cases break exhaustive matches.** `ErrorKind.Cancelled` (metric label `cancelled`),
+  `RunEvent.RunCancelled` and `ToolCallError.Cancelled` are new; a `match` over `ErrorKind`,
+  `RunEvent` or `ToolCallError` needs a case for each.
+- **Mid-stream, `NetworkError` becomes `CancelledError`.** A stream read cut off by an interrupt
+  used to be a recoverable `NetworkError`; code that retried it should stop on `CancelledError`.
+- **`DefaultErrorMapper` and `Try(...).toResult` classify cancellations.** An exception mapped while
+  the thread is interrupted, or caused by `InterruptedException` or `ClosedByInterruptException`,
+  becomes `CancelledError` rather than `UnknownError` or `NetworkError`. A bare
+  `InterruptedIOException` - OkHttp's call timeout is one - stays a timeout. Mapping never sets the
+  interrupt flag; code that catches an `InterruptedException` itself must restore it.
+- **`ReliableClient`** returns `CancelledError`, not the local `RateLimitError`, when interrupted
+  while waiting for a local rate-limit token.
+- **Graph supersteps run concurrently.** The default executor ran a superstep's tasks one after
+  another; it now runs them concurrently on virtual threads, at most 16 at a time. Node code must be
+  thread-safe, a task does not inherit the caller's `ThreadLocal` or MDC context, and in `Sync`
+  durability, durable events and live progress are delivered on the task threads, not the caller's.
+
 ## Pre-baseline API cleanup, pass 8
 
 Not in a release yet; continues pass 7 below. It closes the last gaps in the frozen modules'
