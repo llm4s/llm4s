@@ -343,7 +343,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     mockClient.callCount.get() shouldBe 0
   }
 
-  test("Deadline path treats InterruptedException from the operation as a TimeoutError") {
+  test("Deadline path treats InterruptedException from the operation as a cancellation") {
     val mockClient = new MockClient(() => throw new InterruptedException("boom"))
 
     val config = ReliabilityConfig(
@@ -355,13 +355,14 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     val reliableClient = new ReliableClient(mockClient, "test", config, None)
     val result         = reliableClient.complete(testConversation)
 
+    Thread.interrupted() shouldBe true
     result match {
-      case Left(_: TimeoutError) => succeed
-      case _                     => fail("Expected TimeoutError for an interrupted operation")
+      case Left(_: CancelledError) => succeed
+      case other                   => fail(s"Expected CancelledError for an interrupted operation, got $other")
     }
   }
 
-  test("Deadline path treats an interrupted retry delay as a TimeoutError") {
+  test("Deadline path treats an interrupted retry delay as a cancellation") {
     val mockClient = new MockClient(() => {
       Thread.currentThread().interrupt()
       Left(TimeoutError("timeout", 1.second, "test"))
@@ -376,9 +377,10 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     val reliableClient = new ReliableClient(mockClient, "test", config, None)
     val result         = reliableClient.complete(testConversation)
 
+    Thread.interrupted() shouldBe true
     result match {
-      case Left(_: TimeoutError) => succeed
-      case _                     => fail("Expected TimeoutError for an interrupted retry delay")
+      case Left(_: CancelledError) => succeed
+      case other                   => fail(s"Expected CancelledError for an interrupted retry delay, got $other")
     }
     mockClient.callCount.get() shouldBe 1
   }
@@ -404,7 +406,25 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     mockClient.callCount.get() shouldBe 1
   }
 
-  test("No-deadline path treats InterruptedException from the operation as an ExecutionError") {
+  test("A failure returned while interrupted is a cancellation: not retried, circuit untouched") {
+    val mockClient = new MockClient(() => {
+      Thread.currentThread().interrupt()
+      Left(NetworkError("reset", None, "x"))
+    })
+    val config = ReliabilityConfig.default
+      .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
+      .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1))
+      .withoutDeadline
+    val client = new ReliableClient(mockClient, "test-provider", config)
+    val result = client.complete(testConversation)
+    val flag   = Thread.interrupted()
+    flag shouldBe true
+    result.left.toOption.get shouldBe a[CancelledError]
+    mockClient.callCount.get() shouldBe 1
+    client.currentCircuitState shouldBe CircuitState.Closed
+  }
+
+  test("No-deadline path treats InterruptedException from the operation as a cancellation") {
     val mockClient = new MockClient(() => throw new InterruptedException("boom"))
 
     val config = ReliabilityConfig(
@@ -416,13 +436,14 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     val reliableClient = new ReliableClient(mockClient, "test", config, None)
     val result         = reliableClient.complete(testConversation)
 
+    Thread.interrupted() shouldBe true
     result match {
-      case Left(_: ExecutionError) => succeed
-      case _                       => fail("Expected ExecutionError for an interrupted operation")
+      case Left(_: CancelledError) => succeed
+      case other                   => fail(s"Expected CancelledError for an interrupted operation, got $other")
     }
   }
 
-  test("No-deadline path treats an interrupted retry delay as an ExecutionError") {
+  test("No-deadline path treats an interrupted retry delay as a cancellation") {
     val mockClient = new MockClient(() => {
       Thread.currentThread().interrupt()
       Left(TimeoutError("timeout", 1.second, "test"))
@@ -437,9 +458,10 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     val reliableClient = new ReliableClient(mockClient, "test", config, None)
     val result         = reliableClient.complete(testConversation)
 
+    Thread.interrupted() shouldBe true
     result match {
-      case Left(_: ExecutionError) => succeed
-      case _                       => fail("Expected ExecutionError for an interrupted retry delay")
+      case Left(_: CancelledError) => succeed
+      case other                   => fail(s"Expected CancelledError for an interrupted retry delay, got $other")
     }
     mockClient.callCount.get() shouldBe 1
   }

@@ -240,7 +240,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     )
     val result = client.complete(conversation)
     Thread.interrupted() shouldBe true
-    result.left.toOption.get shouldBe a[org.llm4s.error.ExecutionError]
+    result.left.toOption.get shouldBe a[org.llm4s.error.CancelledError]
   }
 
   private def waitsForToken = ReliabilityConfig.default

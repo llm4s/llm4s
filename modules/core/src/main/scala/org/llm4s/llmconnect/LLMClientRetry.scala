@@ -1,7 +1,7 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.llmconnect
 
-import org.llm4s.error.{ LLMError, RateLimitError, RecoverableError, ServiceError, SimpleError, ValidationError }
+import org.llm4s.error.{ CancelledError, LLMError, RateLimitError, RecoverableError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
@@ -61,7 +61,7 @@ object LLMClientRetry {
       case Right(()) =>
         @tailrec
         def attempt(attemptNumber: Int): Result[Completion] =
-          client.complete(conversation, options) match {
+          CancelledError.attempt("llm-retry")(client.complete(conversation, options)) match {
             case Right(c) => Right(c)
             case Left(e) =>
               if (attemptNumber >= maxAttempts)
@@ -122,7 +122,7 @@ object LLMClientRetry {
 
         @tailrec
         def attempt(attemptNumber: Int): Result[Completion] =
-          client.streamComplete(conversation, options, wrappedOnChunk) match {
+          CancelledError.attempt("llm-retry")(client.streamComplete(conversation, options, wrappedOnChunk)) match {
             case Right(c) => Right(c)
             case Left(e) =>
               if (chunkEmitted)
@@ -145,6 +145,7 @@ object LLMClientRetry {
     e.httpStatus >= 500 || e.httpStatus == 429 || e.httpStatus == 408
 
   private def isRetryable(e: LLMError): Boolean = e match {
+    case _: CancelledError   => false
     case s: ServiceError     => isRetryableServiceError(s)
     case _: RecoverableError => true
     case _                   => false
@@ -181,8 +182,8 @@ object LLMClientRetry {
   }
 
   /**
-   * Sleep for retry delay. Catches InterruptedException, restores interrupt flag, and returns a typed error
-   * so the method never throws and the Result contract is preserved.
+   * Sleep for retry delay. Catches InterruptedException, restores interrupt flag, and returns
+   * [[org.llm4s.error.CancelledError]] so the method never throws and the Result contract is preserved.
    */
   private def sleepForRetry(
     e: LLMError,
@@ -195,13 +196,9 @@ object LLMClientRetry {
       sleepFn(delay)
       Right(())
     } catch {
-      case _: InterruptedException =>
+      case ie: InterruptedException =>
         Thread.currentThread().interrupt()
-        Left(
-          SimpleError(
-            s"Retry interrupted during attempt $attemptNumber after ${e.getClass.getSimpleName}: ${e.message}"
-          )
-        )
+        Left(CancelledError("llm-retry", Some(ie)))
     }
   }
 

@@ -29,6 +29,31 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     callCount shouldBe 1
   }
 
+  it should "return a cancellation without retrying or wrapping it" in {
+    var calls = 0
+    val result = ErrorRecovery.recoverWithBackoff[Int](
+      () => { calls += 1; Thread.currentThread().interrupt(); Left(TimeoutError("t", 1.second, "op")) },
+      maxAttempts = 3,
+      baseDelay = 1.millis
+    )
+    val flag = Thread.interrupted()
+    flag shouldBe true
+    result.left.toOption.get shouldBe a[CancelledError]
+    calls shouldBe 1
+  }
+
+  it should "return a cancellation when the backoff sleep is interrupted" in {
+    val result = ErrorRecovery.recoverWithBackoff[Int](
+      () => Left(TimeoutError("t", 1.second, "op")),
+      maxAttempts = 3,
+      baseDelay = 1.millis,
+      sleepFn = _ => throw new InterruptedException("cancelled")
+    )
+    val flag = Thread.interrupted()
+    flag shouldBe true
+    result.left.toOption.get shouldBe a[CancelledError]
+  }
+
   it should "retry on recoverable errors" in {
     var callCount = 0
     val operation = () => {

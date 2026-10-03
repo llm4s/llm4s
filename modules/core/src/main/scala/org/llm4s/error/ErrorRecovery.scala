@@ -35,27 +35,42 @@ object ErrorRecovery {
     sleepFn: FiniteDuration => Unit = threadSleep
   ): Result[A] = {
 
+    def sleepOrCancel(delay: FiniteDuration): Result[Unit] =
+      CancelledError.catchInterrupt(sleepFn(delay)).left.map { e =>
+        Thread.currentThread().interrupt()
+        CancelledError("error-recovery", Some(e))
+      }
+
     @tailrec
     def attempt(attemptNumber: Int): Result[A] =
-      operation() match {
+      CancelledError.attempt("error-recovery")(operation()) match {
         // Success - return immediately
         case success @ Right(_) => success
+
+        // Cancellation - never retried, never wrapped
+        case cancelled @ Left(_: CancelledError) => cancelled
 
         // Recoverable errors - retry with backoff
         case Left(error) if attemptNumber < maxAttempts =>
           error match {
             case re: RateLimitError =>
               val delay = re.retryDelay.getOrElse(baseDelay * Math.pow(2, attemptNumber).toLong)
-              sleepFn(delay)
-              attempt(attemptNumber + 1)
+              sleepOrCancel(delay) match {
+                case Right(())   => attempt(attemptNumber + 1)
+                case Left(error) => Left(error)
+              }
 
             case se: ServiceError =>
-              sleepFn(se.retryAfter.getOrElse(baseDelay * attemptNumber.toLong))
-              attempt(attemptNumber + 1)
+              sleepOrCancel(se.retryAfter.getOrElse(baseDelay * attemptNumber.toLong)) match {
+                case Right(())   => attempt(attemptNumber + 1)
+                case Left(error) => Left(error)
+              }
 
             case _: TimeoutError =>
-              sleepFn(baseDelay)
-              attempt(attemptNumber + 1)
+              sleepOrCancel(baseDelay) match {
+                case Right(())   => attempt(attemptNumber + 1)
+                case Left(error) => Left(error)
+              }
 
             case _ => Left(error) // Non-recoverable
           }

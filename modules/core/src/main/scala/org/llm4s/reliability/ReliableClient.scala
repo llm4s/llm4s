@@ -42,6 +42,8 @@ final class ReliableClient(
   sleep: FiniteDuration => Unit = delay => Thread.sleep(delay.toMillis)
 ) extends LLMClient {
 
+  private val cancelledOperation = "reliable-client.complete"
+
   // Deadline and circuit-breaker arithmetic is in epoch milliseconds internally
   private def nowMillis(): Long = clock().toEpochMilli
 
@@ -137,7 +139,10 @@ final class ReliableClient(
       case Right(_) =>
         onSuccess()
       case Left(e) if isLocalThrottle(e) && !providerFailed.get() =>
-        onLocallyThrottled()
+        onNeutralOutcome()
+      // A cancelled call says nothing about the provider's health
+      case Left(_: CancelledError) =>
+        onNeutralOutcome()
       case Left(_) =>
         onFailure()
     }
@@ -163,20 +168,16 @@ final class ReliableClient(
       }
 
       // Execute operation with interruption handling
-      val result =
+      val result = CancelledError.whenInterrupted(
         try
           operation()
         catch {
-          case _: InterruptedException =>
+          case e: InterruptedException =>
             Thread.currentThread().interrupt()
-            Left(
-              TimeoutError(
-                message = s"Operation interrupted after $attemptNumber attempts",
-                timeoutDuration = deadline,
-                operation = "reliable-client.complete"
-              )
-            )
-        }
+            Left(CancelledError(cancelledOperation, Some(e)))
+        },
+        cancelledOperation
+      )
 
       result match {
         case success @ Right(_) =>
@@ -198,14 +199,8 @@ final class ReliableClient(
                 try
                   sleep(delay)
                 catch {
-                  case _: InterruptedException =>
-                    return interruptedDuringRetryDelay(error) {
-                      TimeoutError(
-                        message = s"Operation interrupted during retry delay after $attemptNumber attempts",
-                        timeoutDuration = deadline,
-                        operation = "reliable-client.complete"
-                      )
-                    }
+                  case e: InterruptedException =>
+                    return interruptedDuringRetryDelay(error)(CancelledError(cancelledOperation, Some(e)))
                 }
                 loop(attemptNumber + 1, Some(error))
               }
@@ -232,19 +227,16 @@ final class ReliableClient(
     operation: () => Result[A],
     attemptNumber: Int
   ): Result[A] = {
-    val result =
+    val result = CancelledError.whenInterrupted(
       try
         operation()
       catch {
-        case _: InterruptedException =>
+        case e: InterruptedException =>
           Thread.currentThread().interrupt()
-          Left(
-            ExecutionError(
-              message = s"Operation interrupted after $attemptNumber attempts",
-              operation = "reliable-client.complete"
-            )
-          )
-      }
+          Left(CancelledError(cancelledOperation, Some(e)))
+      },
+      cancelledOperation
+    )
 
     result match {
       case success @ Right(_) =>
@@ -259,13 +251,8 @@ final class ReliableClient(
             try
               sleep(delay)
             catch {
-              case _: InterruptedException =>
-                return interruptedDuringRetryDelay(error) {
-                  ExecutionError(
-                    message = s"Operation interrupted during retry delay after $attemptNumber attempts",
-                    operation = "reliable-client.complete"
-                  )
-                }
+              case e: InterruptedException =>
+                return interruptedDuringRetryDelay(error)(CancelledError(cancelledOperation, Some(e)))
             }
 
             // Retry
@@ -288,7 +275,8 @@ final class ReliableClient(
    * directly testable calculation with no clock reads or sleeping.
    */
   private[reliability] def decideRetry(attemptNumber: Int, error: LLMError): RetryDecision =
-    if (attemptNumber < config.retryPolicy.maxAttempts && config.retryPolicy.isRetryable(error))
+    if (error.isInstanceOf[CancelledError]) RetryDecision.DoNotRetry
+    else if (attemptNumber < config.retryPolicy.maxAttempts && config.retryPolicy.isRetryable(error))
       error match {
         // Our own bucket knows exactly when the next token arrives; a provider-style backoff
         // does not. A bucket that never refills is not worth retrying.
@@ -359,6 +347,7 @@ final class ReliableClient(
    */
   private def recordTerminalError(error: LLMError): Unit =
     error match {
+      case _: CancelledError                                                  => ()
       case rle: RateLimitError if rle.origin == RateLimitOrigin.LocalThrottle => ()
       case _ => collector.foreach(_.recordError(ErrorKind.fromLLMError(error), providerName))
     }
@@ -435,8 +424,8 @@ final class ReliableClient(
       // Should not happen
     }
 
-  /** A call the local rate limit rejected never reached the provider: release a half-open probe. */
-  private def onLocallyThrottled(): Unit =
+  /** An outcome that says nothing about the provider: hands back a half-open probe permit. */
+  private def onNeutralOutcome(): Unit =
     if (circuitState.get() == CircuitState.HalfOpen) probePermit.set(false)
 
   /**

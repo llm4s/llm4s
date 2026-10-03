@@ -1,6 +1,15 @@
 package org.llm4s.llmconnect
 
-import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, SimpleError, TimeoutError, ValidationError }
+import org.llm4s.error.{
+  AuthenticationError,
+  CancelledError,
+  NetworkError,
+  RateLimitError,
+  ServiceError,
+  SimpleError,
+  TimeoutError,
+  ValidationError
+}
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -228,7 +237,7 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
     result.left.toOption.get.asInstanceOf[ValidationError].field shouldBe "baseDelay"
   }
 
-  it should "return SimpleError when sleep is interrupted" in {
+  it should "return CancelledError when sleep is interrupted" in {
     val client = stubClient(
       completeResults = Seq(Left(RateLimitError("p")), Right(stubCompletion)),
       streamBehaviors = Seq.empty
@@ -247,11 +256,27 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
     t.interrupt()
     t.join(2000)
     result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[SimpleError]
-    val msg = result.left.toOption.get.asInstanceOf[SimpleError].message
-    msg should include("interrupted")
-    msg should include("attempt 1")
-    msg should include("RateLimitError")
+    result.left.toOption.get shouldBe a[CancelledError]
+  }
+
+  it should "not retry a failure returned while the thread is interrupted" in {
+    var calls = 0
+    val client = new LLMClient {
+      override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
+        calls += 1
+        Thread.currentThread().interrupt()
+        Left(NetworkError("reset", None, "x"))
+      }
+      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit) =
+        complete(c, o)
+      override def getContextWindow(): Int     = 4096
+      override def getReserveCompletion(): Int = 1024
+    }
+    val result = LLMClientRetry.completeWithRetry(client, conv, maxAttempts = 3, baseDelay = 1.millis)
+    val flag   = Thread.interrupted()
+    flag shouldBe true
+    result.left.toOption.get shouldBe a[CancelledError]
+    calls shouldBe 1
   }
 
   // ---- streamCompleteWithRetry ----
