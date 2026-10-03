@@ -609,7 +609,10 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     private def cancelled(): RunResult[O] =
       val (execution, checkpointId) = position
       Thread.interrupted(): Unit
-      // an interrupt with no recorded cause came from inside the run, such as a node; it cancels too
+      // an interrupt with no recorded cause came from inside the run, such as a node; it cancels too.
+      // Recording it makes a later cancel or expiry fail its compare-and-set and send no interrupt,
+      // which would otherwise land on the closing commits below.
+      cause.compareAndSet(None, Some(StopCause.Cancelled)): Unit
       val (event, error) = cause.get.getOrElse(StopCause.Cancelled) match
         case StopCause.Cancelled =>
           RunEvent.RunCancelled -> GraphError.Cancelled(Some(threadId.value), Some(checkpointId))

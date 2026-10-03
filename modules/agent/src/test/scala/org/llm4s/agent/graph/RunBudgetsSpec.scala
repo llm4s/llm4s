@@ -114,24 +114,59 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "report exactly one cause when cancel races expiry" in {
+    var cancelled, expired = 0
     (1 to 100).foreach { i =>
       val store   = InMemoryCheckpointer()
       val runtime = GraphRuntime(store)
       val g       = blockingGraph(new AtomicInteger(), new AtomicBoolean(true))
       val handle  = runtime.start(thread, g, "x", budgets(RunBudgets(timeout = Some(50.millis)))).value
+      // offsets of 0 to 100ms around the 50ms deadline: the earliest cancels win, the latest lose
+      val offset = (i % 5) * 25L
       val canceller = Thread.ofVirtual().start { () =>
-        Thread.sleep(50)
+        Thread.sleep(offset)
         handle.cancel()
       }
       val result = await(handle)
       canceller.join(5_000)
       val stops = events(store).filter(e => e == RunEvent.RunCancelled || e == RunEvent.RunTimedOut)
       result.failed._2 match {
-        case _: GraphError.Cancelled        => stops shouldBe Vector(RunEvent.RunCancelled)
-        case _: GraphError.DeadlineExceeded => stops shouldBe Vector(RunEvent.RunTimedOut)
-        case other                          => fail(s"iteration $i: $other")
+        case _: GraphError.Cancelled =>
+          cancelled += 1
+          stops shouldBe Vector(RunEvent.RunCancelled)
+        case _: GraphError.DeadlineExceeded =>
+          expired += 1
+          stops shouldBe Vector(RunEvent.RunTimedOut)
+        case other => fail(s"iteration $i: $other")
       }
     }
+    cancelled should be > 0
+    expired should be > 0
+  }
+
+  it should "not interrupt the closing commits of a run a node cancelled from inside" in {
+    val underlying = InMemoryCheckpointer()
+    // the exit commit holding RunCancelled outlasts the deadline; an interrupt would throw out of it
+    val slow = new Checkpointer {
+      def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = {
+        if commit.events.exists(_.event == RunEvent.RunCancelled) then Thread.sleep(300)
+        underlying.commit(threadId, commit)
+      }
+      def latest(threadId: ThreadId) = underlying.latest(threadId)
+      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+        underlying.eventsAfter(threadId, afterSeq, limit)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    }
+    val b = GraphBuilder("self-interrupt", "v1")
+    val node = b.node[Unit]("n") { (_, _, _) =>
+      Thread.currentThread().interrupt()
+      continue(Command.empty)
+    }
+    val g      = b.compile(node)(_ => Right(())).value
+    val config = budgets(RunBudgets(timeout = Some(100.millis)))
+    val result = await(GraphRuntime(slow).start(thread, g, (), config, Durability.OnExit).value)
+    result.failed._2 shouldBe a[GraphError.Cancelled]
+    val stops = events(underlying).filter(e => e == RunEvent.RunCancelled || e == RunEvent.RunTimedOut)
+    stops shouldBe Vector(RunEvent.RunCancelled)
   }
 
   "maxConcurrency" should "bound the tasks of a superstep that run at once" in {

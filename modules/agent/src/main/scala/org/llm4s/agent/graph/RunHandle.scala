@@ -120,7 +120,9 @@ final private[graph] class DefaultRunHandle[O](
     val remaining = math.max(0L, deadline - System.nanoTime())
     DefaultRunHandle.guarded(result.get(remaining, TimeUnit.NANOSECONDS)) match
       case Left(_: TimeoutException) => stop(StopCause.Expired)
-      case _                         => ()
+      // the run ended first; any other failure is impossible: `result` is only ever completed
+      // normally and nothing interrupts this thread
+      case _ => ()
 
   /**
    * The run thread's body. `crashed` must not throw (see [[DefaultRunHandle.guarded]]). `result` is
