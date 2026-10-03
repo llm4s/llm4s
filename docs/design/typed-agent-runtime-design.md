@@ -52,7 +52,7 @@ Filesystem, shell, memory writes, remote tools, and subagent delegation are capa
 
 ### 2.7 Use Scala 3 and structured concurrency directly
 
-The target is Scala 3 only, JDK 21, and Scala 3 idioms (`enum`, opaque IDs, context parameters, and derives) without a Scala 2.13 or Java-source-compatibility constraint. Use SoftwareMill Ox as the initial internal execution substrate for direct-style structured concurrency over blocking provider/tool APIs. Scope child work to a run/superstep, interrupt and join sibling virtual threads on failure or cancellation, and expose `Future`/Cats Effect/ZIO bridges only as optional adapters rather than making `ExecutionContext` the runtime's control plane. Interruption is the cancellation contract: providers must preserve interruption and surface it as a cancellation/error result. `Llm4sHttpClient` already does this; audit the OpenAI and Anthropic SDK clients, then add provider-testkit checks and fix clients that do not honor it.
+The target is Scala 3 only, JDK 21, and Scala 3 idioms (`enum`, opaque IDs, context parameters, and derives) without a Scala 2.13 or Java-source-compatibility constraint. Use SoftwareMill Ox as the initial internal execution substrate for direct-style structured concurrency over blocking provider/tool APIs. Scope child work to a run/superstep, interrupt and join sibling virtual threads on failure or cancellation, and expose `Future`/Cats Effect/ZIO bridges only as optional adapters rather than making `ExecutionContext` the runtime's control plane. Interruption is the cancellation contract: providers must preserve interruption and surface it as a cancellation/error result. §4.4 settles that contract (`CancelledError`, interrupt flag kept), brings core and every chat client under it, and adds a provider-testkit check.
 
 Ox is an implementation choice to validate in the first runtime prototype, not a new public runtime type in the API. Its current project describes Scala 3/JDK 21 support and structured concurrency ([Ox](https://github.com/softwaremill/ox)).
 
@@ -405,7 +405,7 @@ Decisions, including where the prototype refines the §4 sketch:
 - **A superstep commits atomically.** If any task fails, writes an undeclared key, returns an invalid route, or has an update rejected by its key, nothing from that superstep commits. The run fails with the first error in frontier order, and `RunResult.Failed` carries the last committed state. Under `GraphRuntime`, each completed task's result is also recorded as a pending write before the superstep commits, so `recover` keeps completed siblings (§4.3).
 - **`UnsatisfiedJoin` is detected at quiescence.** Routes are values computed at run time, so the scheduler cannot prove early that a source is unreachable. A join that is still open when the frontier empties fails the run. With suspension ([#1269](https://github.com/llm4s/llm4s/issues/1269)), the same check must also treat parked continuations as possible arrivals.
 - **Restore validates against the compiled graph and reports every problem.** It checks the graph ID and the caller-supplied `version`, which names behaviour. It also checks a SHA-256 structural fingerprint over nodes, entry, edges, joins, and key IDs. It then checks that every state value and pending input decodes with this graph's codec, that each join exists with the right kind, that static arrivals come from sources, that every open join is partial (an empty or fully arrived activation would already have released), and that every arrival a dynamic activation still expects is pending in that fan-out. An in-memory `Execution` is bound to the `CompiledGraph` instance that created or restored it (`ForeignExecution`). Another instance of the same definition, including one in another process, goes through `snapshot`/`restore`.
-- **Concurrency is behind a private seam.** `TaskExecutor` runs a frontier and returns results in task order. The default is sequential. The specs run every ordering scenario with tasks executed last-first and concurrently with random delays, and commit order does not change. Ox replaces this seam in [#1270](https://github.com/llm4s/llm4s/issues/1270).
+- **Concurrency is behind a private seam.** `TaskExecutor` runs a frontier and returns results in task order. The default was sequential; since §4.4 it is a bounded Ox scope. The specs run every ordering scenario with tasks executed last-first and concurrently with random delays, and commit order does not change.
 
 Limits that later Stage 0 issues resolve: `NodeResult` has no `Suspend` yet ([#1269](https://github.com/llm4s/llm4s/issues/1269)). Versioned checkpoints and codec migrations followed in §4.3 ([#1268](https://github.com/llm4s/llm4s/issues/1268)). `NodeContext` (task, node, superstep) and `compile(maxSupersteps)` stand in for `RunContext` and `RunBudgets` ([#1271](https://github.com/llm4s/llm4s/issues/1271)). The fingerprint does not cover node input types; a changed input type is caught when a pending input fails to decode. The message key, retries/cache policy, and Mermaid export are Stage 1 work.
 
@@ -432,6 +432,41 @@ Limits:
 - **Retention:** the store keeps only the latest checkpoint and compacts events only when asked. Checkpoint history, fork, retention by age or size, and claim fencing are Stage 2.
 - **Delivery threads and queues:** events are delivered on the committing thread. Subscribers have unbounded queues and are registered per runtime instance.
 - **Run API:** runs return `Result[RunResult]` synchronously. The dispatcher, bounded queues, `RunHandle`, and `RunConfig` belong to [#1271](https://github.com/llm4s/llm4s/issues/1271).
+
+### 4.4 Stage 0 prototype: Ox cancellation and provider interruption ([#1270](https://github.com/llm4s/llm4s/issues/1270))
+
+Interrupting a thread is how a run is cancelled. This step defines what an interrupted provider or tool call returns, makes core and every chat client follow that rule, and runs each superstep in a bounded Ox scope so that a cancelled run leaves no task running. The specs are `CancellationSpec` (graph and runtime), the core error and retry-layer specs, and `assertHonoursInterruption` in each chat provider's module spec.
+
+Contract decisions:
+
+- **An interrupted call returns `Left(CancelledError)` with the interrupt flag still set.** `org.llm4s.error.CancelledError(context)` is a `NonRecoverableError`, so no retry layer retries it. The call does not throw `InterruptedException`, which keeps `Result[A]` as the only failure channel, and it does not clear the flag, so the caller can still see that it was interrupted.
+- **One rule decides what counts as a cancellation.** A failure is a cancellation if the current thread's interrupt flag is set when the failure is mapped, or if the failure is caused by `InterruptedException`, `InterruptedIOException` or `ClosedByInterruptException`. The flag test is what makes the rule work: on a JDK 21 virtual thread, an interrupt during a blocking socket read closes the socket, so the client sees an ordinary `SocketException`. `CancelledError` exposes the rule as a public helper, because external provider authors must follow the same contract and the testkit checks it.
+- **Core follows the rule throughout.** `Llm4sHttpClient` returns `CancelledError` for an interrupt before the response or during a stream read, where it used to return a recoverable `ExecutionError` or `NetworkError`. `ReliableClient`, `LLMClientRetry` and `ErrorRecovery` return it, including for an interrupt during a backoff sleep, and never retry it. `DefaultErrorMapper` applies the rule, so code that maps exceptions with `Try(...).toResult` inherits it. When the thread waiting on `ToolRegistry`'s timeout join is interrupted, that is a cancellation, not a timeout: the registry interrupts the worker and returns a cancelled tool error.
+- **Every chat client follows the rule.**
+  - **OpenAI and Anthropic** apply the rule in their error mapping. They also catch the `InterruptedException` that the SDK's retry sleep throws once its own retry of the interrupted request fails.
+  - **Anthropic** closes its stream on every path.
+  - **Gemini, Vertex AI, Ollama and the OpenAI-compatible clients** inherit `Llm4sHttpClient`'s behaviour. Their error-body reads no longer turn an interrupt into an empty body.
+- **Interrupts are prompt on virtual threads.** JDK 21 makes blocking socket I/O interruptible on a virtual thread, and the runtime runs every task on one. On a platform thread, OkHttp's socket read cannot be interrupted, so an SDK client still returns `CancelledError` but only once its read completes or times out.
+
+Runtime decisions:
+
+- **A superstep is a bounded Ox scope.** The private `TaskExecutor` seam stays, so specs can still impose orderings. Its default is now Ox `parLimit` on virtual threads, with a private default limit of 16. `CompiledGraph.run` and `GraphRuntime` both use it. Ox is an implementation dependency of `llm4s-agent`, and no Ox type appears in a public signature.
+- **A run is cancelled by interrupting its calling thread.** That is the thread that called `start`, `recover`, `resume` or `CompiledGraph.run`. Ox interrupts every task in the superstep and joins them before the interrupt reaches the run loop, so no task outlives the call. A task that ignores its interrupt therefore delays the cancellation.
+- **An interrupted task records nothing.** If a task's thread is interrupted when it finishes, the task is cancelled whatever its node returned. It submits no pending write and no task event, so a cancelled tool call never records a result, and `recover` runs the task again. Siblings that finished before the interrupt keep their pending writes in `Sync` and `Async`, as a failed sibling's do.
+- **A cancelled run ends cleanly and reports it.** Once the scope has unwound, the run loop clears the interrupt flag so that its final commits can complete. It then commits a `RunCancelled` event, leaves the checkpoint `Running`, closes the committer, and releases the thread claim. Finally it sets the flag again and returns `RunResult.Failed(state, GraphError.Cancelled(threadId, lastCheckpoint))`. The interrupt is caught with `scala.util.control.Exception.catching`. The thread claim is now always released, so an interrupted run no longer leaves its thread `ThreadBusy`. If the closing commit fails, the result is `CheckpointWriteFailed`, keeping the cancellation as its `runError`.
+- **A timeout is an interrupt from outside.** Until `RunBudgets` ([#1271](https://github.com/llm4s/llm4s/issues/1271)), a deadline is applied by wrapping the call, for example with Ox `timeout`. The specs check that every sibling has stopped by the time the timeout returns, and that `recover` then completes the run without re-running finished work.
+
+Testkit decisions:
+
+- **`LocalProviderTestServer` can hold a request open.** It runs handlers on their own executor, and gives a test a way to release a held handler, so a request held open by a test cannot block the server's shutdown.
+- **`ProviderModuleChecks.assertHonoursInterruption(client)`** runs on a virtual thread against two servers: one that never answers, and one that streams a single chunk and then stalls. For `complete` and `streamComplete` it interrupts the call and asserts that the call returns promptly with `Left(CancelledError)` and the interrupt flag set. For the stream it also asserts that the first chunk was delivered. Every chat provider's module spec calls it: OpenAI, Anthropic, Gemini, Vertex AI, Ollama and OpenAI-compatible.
+
+Limits (owners in §4.6):
+
+- Embedding, reranker, MCP, image and speech clients are not yet brought under the cancellation contract. Some of them flatten every error into their own type.
+- On a platform thread, cancelling an SDK client call is not prompt.
+- Cancellation, the concurrency limit and deadlines have no public API until `RunHandle`, `RunConfig` and `RunBudgets`.
+- `CancellationToken` remains for `PlanRunner` until it is rebuilt.
 
 ### 4.5 Stage 0 prototype: resumable approval and tool-call barriers ([#1269](https://github.com/llm4s/llm4s/issues/1269))
 
@@ -470,13 +505,16 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 
 | Item | Left by | Owner |
 |---|---|---|
-| Ox structured concurrency replacing the private `TaskExecutor` seam; interruption as the cancellation contract; provider interruption checks in provider-testkit | #1267 | [#1270](https://github.com/llm4s/llm4s/issues/1270) |
+| Public cancellation (`RunHandle.cancel` interrupting the run's calling thread), a configurable superstep concurrency limit, and deadlines in `RunBudgets` | #1270 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
 | `RunContext`/`RunConfig`/`RunBudgets` replacing `NodeContext` and `compile(maxSupersteps)`; `RunHandle` with `await`/`status`/`cancel` | #1267, #1268 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
 | Ordered per-subscriber dispatcher with bounded queues and lagging-subscriber disconnect, instead of delivery on the committing thread | #1268 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
 | `AgentTool[A]` + `AgentToolSpec[A]` replacing `LoopTool`; `ToolArgumentValidator` (schema validation before policy or side effects); infrastructure-fatal versus tool-level failure | #1269 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
 | `AgentMiddleware` (ordered hooks, `wrapModelCall`/`wrapToolCall`) replacing `ToolCallPolicy`; guardrails as middleware | #1269 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
 | `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop`; `ModelStep` streaming through live progress; `PlanRunner` rebuilt or removed; `AgentEvent` replaced | #1269 | Stage 1 |
 | Per-node retry and cache policy (recovery currently retries a failed task once) | #1268 | Stage 1 |
+| Delete `CancellationToken` with the `PlanRunner` rebuild | #1270 | Stage 1 |
+| Embedding, reranker, MCP, image and speech clients under the `CancelledError` contract (today: chat clients and core only) | #1270 | Stage 1 |
+| Prompt cancellation of SDK client calls on platform threads (today: prompt on virtual threads, where the runtime runs tasks) | #1270 | - |
 | Mermaid export | #1267 | Stage 1 |
 | Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
 | Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit (today: the optimistic parent check, and `ThreadBusy` for a run still executing in the same runtime) | #1268, #1269 | Stage 2 |
