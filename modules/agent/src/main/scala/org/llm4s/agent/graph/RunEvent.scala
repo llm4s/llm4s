@@ -135,7 +135,9 @@ enum DisconnectReason:
 /** A registration with [[GraphRuntime.subscribe]]. */
 trait Subscription:
   /**
-   * Stops the subscription's dispatcher. No delivery starts after this returns - not even
-   * [[StreamEvent.Disconnected]]; a listener call already running is interrupted.
+   * Stops the subscription's dispatcher. A listener call already running is interrupted and
+   * waited for, so once this returns no call is in progress and none will start - not even
+   * [[StreamEvent.Disconnected]]. Called from the listener itself, it returns at once and the
+   * dispatcher stops when the call returns.
    */
   def cancel(): Unit

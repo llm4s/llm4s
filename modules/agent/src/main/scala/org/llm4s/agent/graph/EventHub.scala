@@ -85,12 +85,18 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     private val lock                = new ReentrantLock()
     private val notEmpty: Condition = lock.newCondition()
 
+    /** Signalled when a listener call ends. */
+    private val idle: Condition = lock.newCondition()
+
     // guarded by `lock`; `lastQueuedSeq` is also advanced by replay, before the dispatcher joins
     private val queue               = new java.util.ArrayDeque[StreamEvent]()
     private var lastQueuedSeq       = afterSeq
     private var droppedLive         = 0
     private var lagging             = false
     @volatile private var cancelled = false
+
+    /** A listener call is in progress; set, with `cancelled` checked, under `lock`. */
+    private var delivering = false
 
     /** The highest durable `seq` the listener returned from; written only by the dispatcher thread. */
     @volatile private var lastDeliveredSeq = afterSeq
@@ -101,13 +107,28 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     def start(): Unit =
       thread = Some(Thread.ofVirtual().name(s"llm4s-subscriber-${threadId.value}").start(() => run()))
 
+    /**
+     * Stops the dispatcher. Off the dispatcher thread, waits for a listener call in progress to end
+     * (interrupting it first), so that once this returns no call is running and none will start.
+     * From the listener itself it returns at once; the dispatcher stops when the call returns.
+     */
     def cancel(): Unit =
       withLock(lock) {
         cancelled = true
         notEmpty.signalAll()
       }
       leave(threadId, this)
-      thread.foreach(_.interrupt())
+      thread.foreach { dispatcher =>
+        dispatcher.interrupt()
+        if !(dispatcher eq Thread.currentThread()) then
+          withLock(lock) {
+            @tailrec def awaitIdle(): Unit =
+              if delivering then
+                idle.awaitUninterruptibly()
+                awaitIdle()
+            awaitIdle()
+          }
+      }
 
     def offerDurable(record: EventRecord): Unit = withLock(lock) {
       if !cancelled && !lagging && record.seq > lastQueuedSeq then
@@ -140,10 +161,10 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
       Using.resource(new AutoCloseable { def close(): Unit = leave(threadId, Dispatcher.this) }) { _ =>
         val ending = replay().flatMap(_ => switchToLive()).fold(identity, _ => drain())
         ending match
-          case End.Disconnect(reason) if !cancelled =>
+          case End.Disconnect(reason) =>
             leave(threadId, this)
-            CancelledError.catchInterrupt(Try(listener(StreamEvent.Disconnected(lastDeliveredSeq, reason)))): Unit
-          case _ => ()
+            call(StreamEvent.Disconnected(lastDeliveredSeq, reason)): Unit
+          case End.Cancelled => ()
       }
 
     /** Delivers committed events directly until a read finds none. */
@@ -203,11 +224,10 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
 
     /** Calls the listener; a throw ends the subscription, and a delivered durable event advances `lastDeliveredSeq`. */
     private def deliver(event: StreamEvent): Either[End, Unit] =
-      if cancelled then Left(End.Cancelled)
-      else
-        val outcome = CancelledError.catchInterrupt(Try(listener(event)))
-        if cancelled then Left(End.Cancelled)
-        else
+      call(event) match
+        case None                 => Left(End.Cancelled)
+        case Some(_) if cancelled => Left(End.Cancelled)
+        case Some(outcome) =>
           outcome match
             case Right(Success(_)) =>
               event match
@@ -216,6 +236,25 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
               Right(())
             case Right(Failure(cause)) => Left(End.Disconnect(DisconnectReason.ListenerFailed(cause)))
             case Left(interrupted)     => Left(End.Disconnect(DisconnectReason.ListenerFailed(interrupted)))
+
+    /**
+     * Calls the listener unless cancelled - checked, and the call marked as in progress, atomically
+     * under `lock`, so a `cancel` that returns has either prevented the call or waited for it.
+     * `None` if cancelled first.
+     */
+    private def call(event: StreamEvent): Option[Either[InterruptedException, Try[Unit]]] =
+      val admitted = withLock(lock) {
+        if !cancelled then delivering = true
+        delivering
+      }
+      Option.when(admitted) {
+        Using.resource(new AutoCloseable {
+          def close(): Unit = withLock(lock) {
+            delivering = false
+            idle.signalAll()
+          }
+        })(_ => CancelledError.catchInterrupt(Try(listener(event))))
+      }
 
     /** The next page after `lastQueuedSeq`; a failed or interrupted read ends the subscription. */
     private def read(): Either[End, Vector[EventRecord]] =

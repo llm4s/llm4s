@@ -313,6 +313,48 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     blocked.quiet()
   }
 
+  /**
+   * Cancels while `listener` is inside a call that ignores interrupts until released; `cancel` must
+   * not return before that call ends, and nothing is delivered after.
+   */
+  private def cancelDuringCall(blockOn: StreamEvent => Boolean, failOnFirstDurable: Boolean): Unit = {
+    val t         = ThreadId(s"cancel-during-${blockOn.hashCode}")
+    val runtime   = GraphRuntime.inMemory()
+    val collector = Collector()
+    val entered   = new CountDownLatch(1)
+    val released  = new AtomicBoolean(false)
+    val ended     = new AtomicBoolean(false)
+    runtime.start(t, emitting(1), "go").value.completed
+    val sub = runtime
+      .subscribe(t) { event =>
+        collector.listener(event)
+        if blockOn(event) && entered.getCount > 0 then {
+          entered.countDown()
+          while !released.get do Thread.onSpinWait()
+          ended.set(true)
+        } else if failOnFirstDurable && event.isInstanceOf[StreamEvent.Durable] then
+          throw new IllegalStateException("x")
+      }
+      .value
+    entered.await(5, TimeUnit.SECONDS) shouldBe true
+    val cancelling = Future { sub.cancel(); ended.get }
+    a[java.util.concurrent.TimeoutException] should be thrownBy Await.ready(cancelling, 200.millis)
+    released.set(true)
+    Await.result(cancelling, 5.seconds) shouldBe true
+    val before = Iterator.continually(Option(collector.queue.poll())).takeWhile(_.isDefined).flatten.toVector
+    before.lastOption.exists(blockOn) shouldBe true
+    runtime.start(t, emitting(1), "again").value.completed
+    collector.quiet()
+  }
+
+  it should "make cancel wait for a listener call in progress, then deliver nothing" in {
+    cancelDuringCall(_.isInstanceOf[StreamEvent.Durable], failOnFirstDurable = false)
+  }
+
+  it should "make cancel wait for a Disconnected delivery in progress, then deliver nothing" in {
+    cancelDuringCall(_.isInstanceOf[StreamEvent.Disconnected], failOnFirstDurable = true)
+  }
+
   it should "refuse a capacity below two, which leaves no room for a gap marker" in {
     val runtime = GraphRuntime.inMemory()
     Seq(-1, 0, 1).foreach { capacity =>
