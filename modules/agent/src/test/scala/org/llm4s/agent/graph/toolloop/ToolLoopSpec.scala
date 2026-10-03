@@ -298,6 +298,47 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     echoes.get shouldBe 1
   }
 
+  it should "write no result for a cancelled call, and recover runs only that call" in {
+    val started    = new java.util.concurrent.CountDownLatch(1)
+    val slowRuns   = new AtomicInteger()
+    val echoThread = new java.util.concurrent.LinkedBlockingQueue[Thread]()
+    // echo records its thread; slow waits for that thread to end, so c1's result is certainly
+    // committed before the interrupt (the technique of CancellationSpec.afterOthers, copied here)
+    val echo = LoopTool("echo") { (call, _) =>
+      echoThread.put(Thread.currentThread())
+      ToolOutcome.Completed(call.arguments("text").str)
+    }
+    val slow = LoopTool("slow") { (_, _) =>
+      if slowRuns.incrementAndGet() == 1 then
+        echoThread.take().join()
+        started.countDown()
+        Thread.sleep(60_000) // interrupted: InterruptedException propagates out of the tool
+      ToolOutcome.Completed("slow done")
+    }
+    val model = ScriptedModel(calls(("c1", "echo", ujson.Obj("text" -> "hi")), ("c2", "slow", ujson.Obj())), summarise)
+    val l     = ToolLoop.build("assistant", "v1", model, Seq(echo, slow), policy).value
+    val store = InMemoryCheckpointer()
+
+    @volatile var outcome: Option[RunResult[String]] = None
+    val runner = Thread
+      .ofVirtual()
+      .start(() => outcome = Some(GraphRuntime(store).start(thread, l.graph, "go", RunId("run-1")).value))
+    started.await(10, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+    runner.interrupt()
+    runner.join(10_000)
+    runner.isAlive shouldBe false
+    outcome.get.failed._2 shouldBe a[GraphError.Cancelled]
+
+    // c1's result was committed; c2 has none
+    val pending = store.latest(thread).value.get.pendingWrites
+    pending.size shouldBe 1
+
+    val (_, answer) = GraphRuntime(store).recover(l.graph, thread, RunId("run-2")).value.completed
+    answer shouldBe "done: c1=hi | c2=slow done"
+    slowRuns.get shouldBe 2
+    model.calls shouldBe 2
+  }
+
   "Messages" should "apply operations to the current history and refuse impossible ones" in {
     val user = StoredMessage("u", UserMessage("hi"))
     val assistant = StoredMessage(
