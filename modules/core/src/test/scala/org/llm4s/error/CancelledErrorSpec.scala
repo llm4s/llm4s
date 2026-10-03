@@ -66,6 +66,13 @@ class CancelledErrorSpec extends AnyFlatSpec with Matchers {
     an[IllegalStateException] should be thrownBy CancelledError.attempt[Int]("op")(throw new IllegalStateException)
   }
 
+  "catchInterrupt" should "return Left for an InterruptedException, Right for a value, and propagate others" in {
+    val e = new InterruptedException
+    CancelledError.catchInterrupt(throw e) shouldBe Left(e)
+    CancelledError.catchInterrupt(42) shouldBe Right(42)
+    an[IllegalStateException] should be thrownBy CancelledError.catchInterrupt(throw new IllegalStateException)
+  }
+
   "DefaultErrorMapper" should "map an interruption to CancelledError and keep the flag" in {
     val (error, flag) = withFlag(interrupted = false)(DefaultErrorMapper(new java.io.InterruptedIOException("i")))
     error shouldBe a[CancelledError]

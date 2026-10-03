@@ -56,15 +56,26 @@ object CancelledError {
    * Runs `body`, returning a thrown `InterruptedException` as `Left(CancelledError)` with the flag
    * set, and applying [[whenInterrupted]] to what it returns. Other exceptions propagate.
    */
-  def attempt[A](operation: String)(body: => Result[A]): Result[A] = {
-    // Not scala.util.control.Exception.catching: it rethrows InterruptedException by design.
+  def attempt[A](operation: String)(body: => Result[A]): Result[A] =
+    catchInterrupt(body) match {
+      case Right(result) => whenInterrupted(result, operation)
+      case Left(e) =>
+        Thread.currentThread().interrupt()
+        Left(CancelledError(operation, Some(e)))
+    }
+
+  /**
+   * Runs `body`, returning a thrown `InterruptedException` as `Left`; the flag is left as the throw
+   * left it (cleared). llm4s modules use this instead of `try`/`catch`.
+   *
+   * Not `scala.util.control.Exception.catching`, which rethrows `InterruptedException` by design.
+   */
+  private[llm4s] def catchInterrupt[A](body: => A): Either[InterruptedException, A] = {
     // scalafix:off DisableSyntax.NoKeywordCatch
-    val outcome: Result[A] =
-      try whenInterrupted(body, operation)
+    val outcome: Either[InterruptedException, A] =
+      try Right(body)
       catch {
-        case e: InterruptedException =>
-          Thread.currentThread().interrupt()
-          Left(CancelledError(operation, Some(e)))
+        case e: InterruptedException => Left(e)
       }
     // scalafix:on DisableSyntax.NoKeywordCatch
     outcome
