@@ -36,19 +36,22 @@ final case class Checkpoint(
   runId: String,
   status: CheckpointStatus,
   createdAt: Instant,
-  snapshot: GraphSnapshot
+  snapshot: GraphSnapshot,
+  /** The tenant the thread belongs to; checked at admission. */
+  tenantId: Option[String] = None
 )
 
 object Checkpoint:
 
   /** The format this build writes. */
-  val CurrentFormat: Int = 2
+  val CurrentFormat: Int = 3
 
   /**
    * Migrations of the checkpoint format itself, keyed by the version they upgrade from.
    * 1 -> 2: suspension (#1269) added parked continuations, the paused flag and task origins.
+   * 2 -> 3: the tenant (#1277) became part of a thread's identity; earlier checkpoints have none.
    */
-  private val formatVersion: SchemaVersion = SchemaVersion(2)(1 -> addSuspension)
+  private val formatVersion: SchemaVersion = SchemaVersion(3)(1 -> addSuspension, 2 -> addTenant)
 
   private def addSuspension(json: ujson.Value): Result[ujson.Value] =
     Try {
@@ -61,6 +64,14 @@ object Checkpoint:
         task("originNode") = upickle.default.writeJs(Option.empty[String])
       }
       upgraded("formatVersion") = 2
+      upgraded
+    }.toResult
+
+  private def addTenant(json: ujson.Value): Result[ujson.Value] =
+    Try {
+      val upgraded = ujson.copy(json)
+      upgraded("tenantId") = upickle.default.writeJs(Option.empty[String])
+      upgraded("formatVersion") = 3
       upgraded
     }.toResult
 

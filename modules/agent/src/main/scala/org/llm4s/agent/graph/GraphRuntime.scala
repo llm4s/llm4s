@@ -95,20 +95,22 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     durability: Durability = Durability.Sync
   ): Result[RunResult[O]] = exclusively(threadId) {
     checkpointer.latest(threadId).flatMap {
-      case None => newRun(graph, threadId, config, durability, 0).claim(graph.start(input), None, RunEvent.RunStarted)
+      case None => newRun(graph, threadId, config, durability, 0).claim(graph.start(input), None, started(config))
       case Some(stored) =>
         stored.checkpoint.status match
           case CheckpointStatus.Running   => Left(GraphError.IncompleteRun(threadId.value, stored.checkpoint.id))
           case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
           case CheckpointStatus.Completed =>
-            graph.restore(stored.checkpoint.snapshot).flatMap { done =>
-              newRun(graph, threadId, config, durability, done.superstep)
-                .claim(
-                  graph.startAt(done.superstep, done.state, input),
-                  Some(stored.checkpoint.id),
-                  RunEvent.RunStarted
-                )
-            }
+            checkTenant(threadId, stored, config)
+              .flatMap(_ => graph.restore(stored.checkpoint.snapshot))
+              .flatMap { done =>
+                newRun(graph, threadId, config, durability, done.superstep)
+                  .claim(
+                    graph.startAt(done.superstep, done.state, input),
+                    Some(stored.checkpoint.id),
+                    started(config)
+                  )
+              }
     }
   }
 
@@ -122,12 +124,13 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     checkpointer.latest(threadId).flatMap {
       case Some(stored) if stored.checkpoint.status == CheckpointStatus.Running =>
         for
+          _         <- checkTenant(threadId, stored, config)
           execution <- graph.restore(stored.checkpoint.snapshot)
           reused    <- reusableWrites(graph, execution, stored)
           result <- newRun(graph, threadId, config, durability, execution.superstep).claim(
             execution,
             Some(stored.checkpoint.id),
-            RunEvent.RunRecovered(stored.checkpoint.id),
+            RunEvent.RunRecovered(stored.checkpoint.id, config.tenantId.map(_.value), config.principal.map(_.value)),
             stored.pendingWrites,
             reused
           )
@@ -152,12 +155,17 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     checkpointer.latest(threadId).flatMap {
       case Some(stored) if stored.checkpoint.status == CheckpointStatus.Suspended =>
         for
+          _         <- checkTenant(threadId, stored, config)
           suspended <- graph.restore(stored.checkpoint.snapshot)
           resumed   <- graph.resume(suspended, answers)
           result <- newRun(graph, threadId, config, durability, resumed.superstep).claim(
             resumed,
             Some(stored.checkpoint.id),
-            RunEvent.RunResumed(suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value))
+            RunEvent.RunResumed(
+              suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value),
+              config.tenantId.map(_.value),
+              config.principal.map(_.value)
+            )
           )
         yield result
       case _ => Left(GraphError.NotSuspended(threadId.value))
@@ -179,6 +187,18 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       Using.resource(new AutoCloseable {
         def close(): Unit = active.synchronized(active.remove(threadId.value)): Unit
       })(_ => call)
+
+  private def started(config: RunConfig): RunEvent =
+    RunEvent.RunStarted(config.tenantId.map(_.value), config.principal.map(_.value))
+
+  /** A thread belongs to the tenant on its latest checkpoint; `None` and `Some` differ. */
+  private def checkTenant(threadId: ThreadId, stored: StoredCheckpoint, config: RunConfig): Result[Unit] =
+    val requested = config.tenantId.map(_.value)
+    Either.cond(
+      stored.checkpoint.tenantId == requested,
+      (),
+      GraphError.TenantMismatch(threadId.value, stored.checkpoint.tenantId, requested)
+    )
 
   private def pendingInterrupts(threadId: ThreadId, stored: StoredCheckpoint): GraphError =
     GraphError.PendingInterrupts(threadId.value, stored.checkpoint.snapshot.parked.map(_.interruptId).toList)
@@ -437,7 +457,17 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       graph.snapshot(execution).map { snapshot =>
         checkpoints += 1
         val id = s"${runId.value}/$checkpoints"
-        Checkpoint(Checkpoint.CurrentFormat, id, parent, threadId.value, runId.value, status, clock.instant(), snapshot)
+        Checkpoint(
+          Checkpoint.CurrentFormat,
+          id,
+          parent,
+          threadId.value,
+          runId.value,
+          status,
+          clock.instant(),
+          snapshot,
+          config.tenantId.map(_.value)
+        )
       }
 
     private def checkpoint(

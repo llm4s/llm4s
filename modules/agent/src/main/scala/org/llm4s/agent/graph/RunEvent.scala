@@ -4,10 +4,15 @@ import upickle.default.ReadWriter
 
 import java.time.Instant
 
-/** What happened in a run. Durable: persisted in the thread's event log and replayable. */
+/**
+ * What happened in a run. Durable: persisted in the thread's event log and replayable.
+ *
+ * The three events that begin a run record the run's `tenantId` and `principal` (as supplied in its
+ * [[RunConfig]]); the log reads events written before they existed as having neither.
+ */
 enum RunEvent derives ReadWriter:
-  case RunStarted
-  case RunRecovered(fromCheckpoint: String)
+  case RunStarted(tenantId: Option[String], principal: Option[String])
+  case RunRecovered(fromCheckpoint: String, tenantId: Option[String], principal: Option[String])
   case TaskCompleted
   case TaskFailed(message: String)
 
@@ -20,7 +25,7 @@ enum RunEvent derives ReadWriter:
   case RunSuspended(interrupts: Vector[String])
 
   /** A run began by answering these interrupts. */
-  case RunResumed(answered: Vector[String])
+  case RunResumed(answered: Vector[String], tenantId: Option[String], principal: Option[String])
   case RunFailed(message: String)
 
   /** The run was cancelled by interrupting its thread; its checkpoint stays `Running` for `recover`. */
@@ -56,7 +61,35 @@ final case class EventRecord(
 
 object EventRecord:
   private given ReadWriter[Instant] = upickle.default.readwriter[String].bimap(_.toString, Instant.parse)
-  given ReadWriter[EventRecord]     = upickle.default.macroRW
+
+  private val identified = Set("RunStarted", "RunRecovered", "RunResumed")
+
+  /**
+   * Events written before tenants: `RunStarted` was a bare string, and none of the three events that
+   * begin a run had identity fields. A durable log is read through this, so it keeps reading.
+   */
+  private[graph] def upgradedEvent(json: ujson.Value): ujson.Value =
+    val tagged = json match
+      case ujson.Str("RunStarted") => ujson.Obj("$type" -> "RunStarted")
+      case other                   => other
+    tagged match
+      case o: ujson.Obj if o.value.get("$type").exists(_.strOpt.exists(identified)) =>
+        val copy = ujson.copy(o)
+        Seq("tenantId", "principal").foreach(k => if !copy.obj.contains(k) then copy(k) = ujson.Null)
+        copy
+      case other => other
+
+  given ReadWriter[EventRecord] =
+    val derived: ReadWriter[EventRecord] = upickle.default.macroRW
+    upickle.default
+      .readwriter[ujson.Value]
+      .bimap[EventRecord](
+        record => upickle.default.writeJs(record)(using derived),
+        json =>
+          val upgraded = ujson.copy(json)
+          upgraded.objOpt.foreach(o => o.get("event").foreach(e => o("event") = upgradedEvent(e)))
+          upickle.default.read[EventRecord](upgraded)(using derived)
+      )
 
   def committed(threadId: String, seq: Long, draft: EventDraft): EventRecord =
     EventRecord(

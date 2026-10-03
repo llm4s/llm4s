@@ -111,15 +111,39 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
       )
     )
     val migrated = Checkpoint.fromJson(formatOne).value
-    migrated.formatVersion shouldBe 2
+    migrated.formatVersion shouldBe Checkpoint.CurrentFormat
+    migrated.tenantId shouldBe None
     migrated.snapshot.parked shouldBe empty
     migrated.snapshot.paused shouldBe false
     drive(graph, graph.restore(migrated.snapshot).value).completed
   }
 
+  it should "migrate a format-2 checkpoint, written before tenants existed" in {
+    val b     = GraphBuilder("g", "v1")
+    val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty))
+    val graph = b.compile(start)(_ => Right(())).value
+    val current = Checkpoint(
+      2,
+      "run-1/1",
+      None,
+      "thread",
+      "run-1",
+      CheckpointStatus.Running,
+      Instant.parse("2026-10-02T12:00:00Z"),
+      graph.snapshot(graph.start(())).value
+    )
+    val formatTwo = ujson.copy(Checkpoint.toJson(current))
+    formatTwo.obj.remove("tenantId")
+    val migrated = Checkpoint.fromJson(formatTwo).value
+    migrated.formatVersion shouldBe 3
+    migrated.tenantId shouldBe None
+    migrated shouldBe current.copy(formatVersion = 3)
+    Checkpoint.CurrentFormat shouldBe 3
+  }
+
   it should "refuse a format it does not know" in {
-    val newer = ujson.Obj("formatVersion" -> 3, "id" -> "x")
-    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(3, Checkpoint.CurrentFormat)
+    val newer = ujson.Obj("formatVersion" -> 4, "id" -> "x")
+    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(4, Checkpoint.CurrentFormat)
     Checkpoint.fromJson(ujson.Obj("id" -> "x")).left.value shouldBe
       GraphError.UnsupportedCheckpointFormat(0, Checkpoint.CurrentFormat)
   }

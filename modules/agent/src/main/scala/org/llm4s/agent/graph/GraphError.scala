@@ -106,6 +106,16 @@ object GraphError:
     override val message: String =
       s"Thread '$threadId' is suspended on ${interrupts.mkString(", ")}; resume it with answers"
 
+  /**
+   * The run's tenant is not the thread's: a thread belongs to the tenant recorded on its latest
+   * checkpoint. `None` and `Some` differ. Nothing was changed.
+   */
+  final case class TenantMismatch(threadId: String, expected: Option[String], actual: Option[String])
+      extends GraphError:
+    override val message: String =
+      s"Thread '$threadId' belongs to tenant ${expected.fold("<none>")(t => s"'$t'")}, " +
+        s"not ${actual.fold("<none>")(t => s"'$t'")}"
+
   /** `resume` was called on a thread that is not suspended. */
   final case class NotSuspended(threadId: String) extends GraphError:
     override val message: String = s"Thread '$threadId' has no suspended run to resume"
