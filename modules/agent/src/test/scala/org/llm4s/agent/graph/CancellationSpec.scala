@@ -1,15 +1,19 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.agent.graph.GraphTestSupport.*
-import org.llm4s.error.CancelledError
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, TimeUnit }
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, LinkedBlockingQueue, TimeUnit, TimeoutException }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
+import scala.concurrent.duration.DurationInt
+import scala.util.Try
 
 class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
+
+  private val thread = ThreadId("t-1")
 
   /**
    * plan fans out to workers; a worker whose item is in `blockOn` runs `onBlock`, then waits
@@ -138,6 +142,111 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     flag shouldBe true
     error shouldBe GraphError.Cancelled(None, None)
     state.get(seen).value shouldBe empty
+  }
+
+  /**
+   * A fixture whose one blocked worker first waits for the threads of `others` unblocked workers
+   * to end, so their results are recorded before the run is interrupted.
+   */
+  private def afterOthers(blockOn: Set[String], others: Int, onBlock: () => Unit = () => ()): Fixture = {
+    val threads = new LinkedBlockingQueue[Thread]()
+    Fixture(
+      blockOn,
+      onBlock = () => {
+        (1 to others).foreach(_ => threads.take().join())
+        onBlock()
+      },
+      work = () => threads.put(Thread.currentThread())
+    )
+  }
+
+  "A durable run" should "cancel cleanly in every durability mode, and recover without re-running finished work" in {
+    for durability <- Durability.values do
+      withClue(s"$durability: ") {
+        val f       = afterOthers(blockOn = Set("b"), others = 1)
+        val store   = InMemoryCheckpointer()
+        val runtime = GraphRuntime(store)
+        val (result, flag) =
+          interruptWhen(f.started)(runtime.start(thread, f.graph, Vector("a", "b"), RunId("run-1"), durability).value)
+
+        val (_, error) = result.failed
+        error shouldBe a[GraphError.Cancelled]
+        flag shouldBe true
+        val latest = store.latest(thread).value.get
+        latest.checkpoint.status shouldBe CheckpointStatus.Running
+        val last = store.eventsAfter(thread, 0L, 100).value.last
+        last.event shouldBe RunEvent.RunCancelled
+        last.checkpointId shouldBe Some(latest.checkpoint.id)
+        error shouldBe GraphError.Cancelled(Some(thread.value), Some(latest.checkpoint.id))
+
+        // the claim was released, and recovery finishes the run without running "a" again
+        val g = Fixture(blockOn = Set.empty)
+        runtime.recover(g.graph, thread, RunId("run-2")).value.completed._2 shouldBe Vector("A", "B")
+        g.finished.toArray.toSet shouldBe Set("b")
+      }
+  }
+
+  it should "record nothing for a task interrupted mid-run" in {
+    val f       = afterOthers(blockOn = Set("b"), others = 1)
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    interruptWhen(f.started)(runtime.start(thread, f.graph, Vector("a", "b"), RunId("run-1")).value)
+    store.latest(thread).value.get.pendingWrites.map(_.nodeId) shouldBe Vector("worker") // a's only
+    store.eventsAfter(thread, 0L, 100).value.map(_.event).collect { case e: RunEvent.TaskFailed => e } shouldBe empty
+  }
+
+  it should "be stopped by a timeout wrapped around the call, with no task left running" in {
+    val f       = Fixture(blockOn = Set("b", "c"))
+    val runtime = GraphRuntime(InMemoryCheckpointer())
+    val outcome = Try(ox.timeout(2.seconds)(runtime.start(thread, f.graph, Vector("a", "b", "c"), RunId("run-1"))))
+    outcome.failed.get shouldBe a[TimeoutException]
+    f.interrupted.toArray.toSet shouldBe Set("b", "c") // both stopped and joined before timeout returned
+    runtime.recover(Fixture(Set.empty).graph, thread, RunId("run-2")).value.completed._2 shouldBe Vector("A", "B", "C")
+  }
+
+  it should "still cancel when a task swallows its interrupt" in {
+    val results = StateKey.appending[String]("results")
+    val started = new CountDownLatch(1)
+    val b       = GraphBuilder("swallow", "v1")
+    val stubborn = b.node[String]("stubborn", writes = Set(results)) { (item, _, _) =>
+      started.countDown()
+      CancelledError.catchInterrupt(Thread.sleep(60_000)): Unit // returns normally, the flag cleared
+      continue(Command.empty.update(results, item))
+    }
+    val done = b.node[Unit]("done")((_, _, _) => continue(Command.empty))
+    val join = b.dynamicJoin("j", done)
+    val plan = b.node[Vector[String]]("plan")((items, _, _) => continue(Command.empty.fanOut(join, stubborn, items)))
+    val g    = b.compile(plan)(_.get(results)).value
+    val (result, flag) =
+      interruptWhen(started)(GraphRuntime(InMemoryCheckpointer()).start(thread, g, Vector("x", "y"), RunId("r")).value)
+    result.failed._2 shouldBe a[GraphError.Cancelled]
+    flag shouldBe true
+  }
+
+  it should "report a failed drain of an Async queue as CheckpointWriteFailed, keeping the cancellation" in {
+    // a store that starts failing once the blocked worker is running: the claim and the first
+    // superstep commit, then the queue cannot drain after cancellation
+    val broken = new AtomicBoolean(false)
+    val failing = new Checkpointer {
+      val underlying = InMemoryCheckpointer()
+      def commit(threadId: ThreadId, commit: Commit) =
+        if broken.get then Left(ValidationError("store", "down")) else underlying.commit(threadId, commit)
+      def latest(threadId: ThreadId) = underlying.latest(threadId)
+      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+        underlying.eventsAfter(threadId, afterSeq, limit)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    }
+    val f       = afterOthers(blockOn = Set("b"), others = 1, onBlock = () => broken.set(true))
+    val runtime = GraphRuntime(failing)
+    val (result, flag) =
+      interruptWhen(f.started)(runtime.start(thread, f.graph, Vector("a", "b"), RunId("run-1"), Durability.Async).value)
+    result.failed._2 match {
+      case GraphError.CheckpointWriteFailed(_, _, Some(_: GraphError.Cancelled)) => succeed
+      case other => fail(s"expected CheckpointWriteFailed with the cancellation, got $other")
+    }
+    flag shouldBe true
+    // the thread claim was released: the next call is refused for the thread's state, not ThreadBusy
+    runtime.start(thread, f.graph, Vector("z"), RunId("run-2")).left.value shouldBe a[GraphError.IncompleteRun]
   }
 
   "TaskExecutor.bounded" should "return results in task order" in {

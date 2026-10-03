@@ -23,6 +23,9 @@ enum RunEvent derives ReadWriter:
   case RunResumed(answered: Vector[String])
   case RunFailed(message: String)
 
+  /** The run was cancelled by interrupting its thread; its checkpoint stays `Running` for `recover`. */
+  case RunCancelled
+
   /** A node's own event, from [[NodeContext.emit]]; `name` and `version` identify its payload. */
   case Custom(name: String, version: Int, payload: ujson.Value)
 

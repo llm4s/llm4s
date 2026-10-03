@@ -85,9 +85,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val recorder = Recorder()
     runtime.subscribe(thread)(recorder.listener).value
 
-    // sequential, so the workers' events interleave in one order; concurrency is covered below
-    val graph = f.graph.withExecutor(TaskExecutor.sequential)
-    runtime.start(thread, graph, Vector("a", "b"), RunId("run-1")).value.completed._2 shouldBe Vector("A", "B")
+    runtime.start(thread, f.graph, Vector("a", "b"), RunId("run-1")).value.completed._2 shouldBe Vector("A", "B")
 
     store.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Completed)
     val events = recorder.durable
@@ -107,7 +105,9 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     )
     events.map(_.runId).distinct shouldBe Vector("run-1")
     store.eventsAfter(thread, 0L, 100).value shouldBe events
-    recorder.live.map(_.payload) shouldBe Vector(ujson.Str("working on a"), ujson.Str("working on b"))
+    // the workers run concurrently, so their live progress arrives in either order
+    recorder.live.map(_.payload).toSet shouldBe Set(ujson.Str("working on a"), ujson.Str("working on b"))
+    recorder.live should have size 2
   }
 
   it should "apply a new input to a completed thread's state" in {

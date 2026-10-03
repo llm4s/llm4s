@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.error.LLMError
+import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.types.Result
 
 import java.time.Clock
@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ ExecutorService, Executors, TimeUnit }
 import scala.annotation.tailrec
 import scala.collection.mutable
-import scala.util.Try
+import scala.util.{ Try, Using }
 
 /**
  * When a run's checkpoints and events become durable. In every mode a durable event is delivered
@@ -55,6 +55,12 @@ enum Durability:
  * this runtime fails the same way, before reading the thread, so `recover` cannot mistake a live
  * run's `Running` checkpoint for an abandoned one. Across processes nothing yet tells a live run
  * from a dead one: claim leases and fencing a claim against a stale worker are Stage 2.
+ *
+ * Interrupting the thread that called `start`, `recover` or `resume` cancels the run: every task
+ * is interrupted and joined, tasks that finished first keep their pending writes, an interrupted
+ * task records nothing, and the call returns `Failed` with [[GraphError.Cancelled]] - naming the
+ * last checkpoint, which a [[RunEvent.RunCancelled]] event is committed against - with the
+ * interrupt flag set. The checkpoint stays `Running`, so `recover` continues the run.
  *
  * `subscribe` replays a thread's committed events after a sequence number and then delivers new
  * ones as their commits succeed, in ascending order with no gaps or duplicates, followed by live
@@ -162,9 +168,10 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         .latest(threadId)
         .flatMap(latest => Left(GraphError.ThreadBusy(threadId.value, latest.map(_.checkpoint.id))))
     else
-      val outcome = Try(call)
-      active.synchronized(active.remove(threadId.value))
-      outcome.get
+      // released on every exit, including an InterruptedException, which `Try` would not catch
+      Using.resource(new AutoCloseable {
+        def close(): Unit = active.synchronized(active.remove(threadId.value)): Unit
+      })(_ => call)
 
   private def pendingInterrupts(threadId: ThreadId, stored: StoredCheckpoint): GraphError =
     GraphError.PendingInterrupts(threadId.value, stored.checkpoint.snapshot.parked.map(_.interruptId).toList)
@@ -248,10 +255,14 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           commitAndDeliver(threadId, commit).left.foreach(e => failed.compareAndSet(None, Some(e)))
       }
     def failure: Option[LLMError] = failed.get
+
+    /** Waits for the queue to drain. Never throws: an interrupt is recorded as a failure, flag kept. */
     def close(): Unit =
       writer.shutdown()
-      writer.awaitTermination(Long.MaxValue, TimeUnit.NANOSECONDS)
-      ()
+      CancelledError.catchInterrupt(writer.awaitTermination(Long.MaxValue, TimeUnit.NANOSECONDS)).left.foreach { e =>
+        Thread.currentThread().interrupt()
+        failed.compareAndSet(None, Some(CancelledError("checkpoint writer", Some(e))))
+      }
 
   final private class OnExitCommitter(threadId: ThreadId) extends Committer:
     private var durableParent: Option[Option[String]] = None
@@ -286,6 +297,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
   ):
     private var checkpoints = 0
 
+    /** Where the run is: the execution `loop` is at and its checkpoint; set before anything runs. */
+    private var position: (Execution, String) = null
+
     /**
      * Claims the thread with a synchronous commit of `execution` as a new checkpoint whose parent
      * is `parent`, carrying `carried` pending writes over to it, then runs. A conflicting claim
@@ -311,37 +325,46 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           case GraphError.CheckpointConflict(_, _, latest) => GraphError.ThreadBusy(threadId.value, latest)
           case other                                       => GraphError.CheckpointWriteFailed(threadId.value, other)
         }
-      yield loop(execution, claimed.id, reused)
+      yield
+        position = execution -> claimed.id
+        // an interrupt thrown from anywhere in the loop, such as joining a superstep's tasks
+        CancelledError.catchInterrupt(loop(execution, claimed.id, reused)).fold(_ => cancelled(), identity)
 
     @tailrec private def loop(
       execution: Execution,
       checkpointId: String,
       reused: Map[TaskId, TaskResult]
     ): RunResult[O] =
+      position = execution -> checkpointId
       committer.failure match
         case Some(error) => stop(execution, GraphError.CheckpointWriteFailed(threadId.value, error))
         case None if execution.paused || execution.isQuiescent => end(execution, checkpointId)
         case None if execution.superstep - firstSuperstep >= graph.maxSupersteps =>
           fail(execution, GraphError.SuperstepLimitExceeded(graph.maxSupersteps))
+        case None if Thread.currentThread().isInterrupted => cancelled()
         case None =>
           val outcomes = graph.taskExecutor.runAll(execution.frontier.map { task => () =>
             reused.get(task.id).fold(runTask(task, execution, checkpointId))(Right(_)).map(task -> _)
           })
-          val completed = outcomes.foldLeft[Result[Vector[(Task, TaskResult)]]](Right(Vector.empty))((done, outcome) =>
-            done.flatMap(cs => outcome.map(cs :+ _))
-          )
-          completed.flatMap(graph.commitSuperstep(execution, _)) match
-            case Left(error)                => fail(execution, error)
-            case Right(next) if next.paused => end(next, checkpointId)
-            case Right(next) =>
-              checkpoint(
-                next,
-                Some(checkpointId),
-                CheckpointStatus.Running,
-                RunEvent.CheckpointCommitted(next.superstep)
-              ) match
-                case Left(error) => fail(execution, error)
-                case Right(id)   => loop(next, id, Map.empty)
+          // a cancelled task cancels the run, even if an earlier task failed
+          if outcomes.exists { case Left(_: CancelledError) => true; case _ => false } then cancelled()
+          else
+            val completed =
+              outcomes.foldLeft[Result[Vector[(Task, TaskResult)]]](Right(Vector.empty))((done, outcome) =>
+                done.flatMap(cs => outcome.map(cs :+ _))
+              )
+            completed.flatMap(graph.commitSuperstep(execution, _)) match
+              case Left(error)                => fail(execution, error)
+              case Right(next) if next.paused => end(next, checkpointId)
+              case Right(next) =>
+                checkpoint(
+                  next,
+                  Some(checkpointId),
+                  CheckpointStatus.Running,
+                  RunEvent.CheckpointCommitted(next.superstep)
+                ) match
+                  case Left(error) => fail(execution, error)
+                  case Right(id)   => loop(next, id, Map.empty)
 
     /** Ends a run that cannot advance: completed, suspended (persisted before returning) or failed. */
     private def end(execution: Execution, checkpointId: String): RunResult[O] =
@@ -365,6 +388,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       graph
         .executeTask(task, execution, sink)
         .flatMap(result => graph.encodeWrite(checkpointId, task, result).map(result -> _)) match
+        // no write and no event: `recover` runs the task again
+        case Left(cancelled: CancelledError)                  => Left(cancelled)
+        case Right(_) if Thread.currentThread().isInterrupted => Left(CancelledError(s"task ${task.id.value}"))
         case Right((result, write)) =>
           val event = result match
             case TaskResult.Done(_)         => RunEvent.TaskCompleted
@@ -404,6 +430,20 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         committer.submit(Commit(Some(saved), Vector.empty, Vector(draft(Some(saved.id), None, event))))
         saved.id
       }
+
+    /**
+     * Ends a cancelled run. The interrupt is cleared so the closing commits can complete, then set
+     * again before returning, so the caller still sees it. The checkpoint stays `Running`, and the
+     * error names it - the checkpoint `recover` continues from, also under OnExit, whose exit commit
+     * keeps its id.
+     */
+    private def cancelled(): RunResult[O] =
+      val (execution, checkpointId) = position
+      Thread.interrupted(): Unit
+      committer.submit(Commit(None, Vector.empty, Vector(draft(Some(checkpointId), None, RunEvent.RunCancelled))))
+      val result = stop(execution, GraphError.Cancelled(Some(threadId.value), Some(checkpointId)))
+      Thread.currentThread().interrupt()
+      result
 
     private def fail(execution: Execution, error: LLMError): RunResult[O] =
       committer.submit(Commit(None, Vector.empty, Vector(draft(None, None, RunEvent.RunFailed(error.message)))))
