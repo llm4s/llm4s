@@ -313,9 +313,11 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     blocked.quiet()
   }
 
-  it should "refuse a capacity below one" in {
+  it should "refuse a capacity below two, which leaves no room for a gap marker" in {
     val runtime = GraphRuntime.inMemory()
-    runtime.subscribe(thread, capacity = 0)(_ => ()).left.value shouldBe a[ValidationError]
-    runtime.subscribe(thread, capacity = -1)(_ => ()).left.value shouldBe a[ValidationError]
+    Seq(-1, 0, 1).foreach { capacity =>
+      runtime.subscribe(thread, capacity = capacity)(_ => ()).left.value shouldBe a[ValidationError]
+    }
+    runtime.subscribe(thread, capacity = 2)(_ => ()).value.cancel()
   }
 }

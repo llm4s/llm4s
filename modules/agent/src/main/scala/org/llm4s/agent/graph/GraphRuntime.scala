@@ -89,12 +89,16 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
    * disconnected. Returns at once: replay runs on the subscription's dispatcher thread, the only
    * thread `listener` is called on, and a failed replay ends it with
    * [[DisconnectReason.ReplayFailed]]. A listener that throws is disconnected
-   * ([[DisconnectReason.ListenerFailed]]). `capacity` must be at least one.
+   * ([[DisconnectReason.ListenerFailed]]). `capacity` must be at least two: a live event is queued
+   * only while two slots are free, one being reserved for the [[StreamEvent.LiveGap]] marker that
+   * precedes it, so with one slot no live event could ever be accepted and the next durable event,
+   * needing a slot for the pending gap too, would disconnect the subscriber.
    */
   def subscribe(threadId: ThreadId, afterSeq: Long = 0L, capacity: Int = 1024)(
     listener: StreamEvent => Unit
   ): Result[Subscription] =
-    if capacity <= 0 then Left(ValidationError("capacity", s"must be at least 1, was $capacity"))
+    if capacity < 2 then
+      Left(ValidationError("capacity", s"must be at least 2 (one slot is reserved for a LiveGap), was $capacity"))
     else hub.subscribe(threadId, afterSeq, capacity, listener)
 
   /** Starts a run on `threadId` with `input`; see the class description. */
