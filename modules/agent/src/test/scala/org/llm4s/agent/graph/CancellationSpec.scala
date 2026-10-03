@@ -85,7 +85,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     f.running.get shouldBe 2 // the blocked tasks threw before decrementing
   }
 
-  it should "cancel a single-task superstep, which runs inline on the calling thread" in {
+  it should "cancel a single-task superstep" in {
     val started     = new CountDownLatch(1)
     val interrupted = new AtomicInteger()
     val b           = GraphBuilder("inline", "v1")
@@ -102,6 +102,26 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     result.failed._2 shouldBe GraphError.Cancelled(None, None)
     flag shouldBe true
     interrupted.get shouldBe 1
+  }
+
+  /** A one-node graph whose node swallows its interrupt and returns normally. */
+  private def swallowingGraph(started: CountDownLatch, swallowed: AtomicInteger): CompiledGraph[Unit, Unit] = {
+    val b = GraphBuilder("swallow", "v1")
+    val node = b.node[Unit]("n") { (_, _, _) =>
+      started.countDown()
+      CancelledError.catchInterrupt(Thread.sleep(60_000)).left.foreach(_ => swallowed.incrementAndGet())
+      continue(Command.empty)
+    }
+    b.compile(node)(_ => Right(())).value
+  }
+
+  it should "stay cancelled when a lone task swallows its interrupt" in {
+    val started        = new CountDownLatch(1)
+    val swallowed      = new AtomicInteger()
+    val (result, flag) = interruptWhen(started)(swallowingGraph(started, swallowed).run(()))
+    result.failed._2 shouldBe GraphError.Cancelled(None, None)
+    flag shouldBe true
+    swallowed.get shouldBe 1
   }
 
   it should "run a superstep's tasks concurrently, bounded by the default limit" in {
@@ -184,6 +204,17 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
         runtime.recover(g.graph, thread, RunId("run-2")).value.completed._2 shouldBe Vector("A", "B")
         g.finished.toArray.toSet shouldBe Set("b")
       }
+  }
+
+  it should "stay cancelled when a lone task swallows its interrupt" in {
+    val started   = new CountDownLatch(1)
+    val swallowed = new AtomicInteger()
+    val runtime   = GraphRuntime(InMemoryCheckpointer())
+    val (result, flag) =
+      interruptWhen(started)(runtime.start(thread, swallowingGraph(started, swallowed), (), RunId("run-1")).value)
+    result.failed._2 shouldBe a[GraphError.Cancelled]
+    flag shouldBe true
+    swallowed.get shouldBe 1
   }
 
   it should "record nothing for a task interrupted mid-run" in {

@@ -220,12 +220,13 @@ private[graph] object TaskExecutor:
   val DefaultLimit = 16
 
   /**
-   * At most `limit` tasks at a time, in an Ox scope. A single task runs inline: no scope cost, and
-   * an interrupt still reaches it on the calling thread.
+   * At most `limit` tasks at a time, in an Ox scope. Every task is forked, a lone one included: a
+   * task run inline on the calling thread could catch the caller's interrupt and return normally,
+   * clearing the caller's flag, and the run would carry on as if never cancelled.
    */
   def bounded(limit: Int): TaskExecutor = new TaskExecutor:
     def runAll[R](tasks: Vector[() => R]): Vector[R] =
-      if tasks.sizeIs <= 1 then tasks.map(_())
+      if tasks.isEmpty then Vector.empty
       else ox.parLimit(limit)(tasks).toVector
 
   val default: TaskExecutor = bounded(DefaultLimit)
