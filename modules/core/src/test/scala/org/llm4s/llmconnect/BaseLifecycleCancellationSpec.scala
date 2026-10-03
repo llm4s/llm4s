@@ -46,13 +46,27 @@ class BaseLifecycleCancellationSpec extends AnyFlatSpec with Matchers {
     result.left.toOption.get shouldBe a[CancelledError]
   }
 
-  it should "cancel immediately when called with the flag already set" in {
+  it should "cancel immediately, without calling the provider, when called with the flag already set" in {
+    val calls = new java.util.concurrent.atomic.AtomicInteger(0)
+    // A provider that ignores the flag (an SDK on a platform thread) would send a paid request
+    val stub = new Stub({ () =>
+      calls.incrementAndGet()
+      Right(
+        Completion(
+          id = "id",
+          created = 0L,
+          content = "answer",
+          model = "stub-model",
+          message = AssistantMessage("answer")
+        )
+      )
+    })
     Thread.currentThread().interrupt()
-    val result =
-      new Stub(() => Left(NetworkError("never reached", None, "x"))).complete(conversation, CompletionOptions())
+    val result  = stub.complete(conversation, CompletionOptions())
     val flagged = Thread.interrupted()
     flagged shouldBe true
     result.left.toOption.get shouldBe a[CancelledError]
+    calls.get() shouldBe 0
   }
 
   it should "leave uninterrupted failures alone" in {
