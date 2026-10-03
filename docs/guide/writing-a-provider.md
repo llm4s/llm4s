@@ -693,7 +693,7 @@ interrupted. It must not throw `InterruptedException` or clear the flag. A clien
 `BaseLifecycleLLMClient` gets this from `completeWithMetrics`; `Llm4sHttpClient` already returns
 `CancelledError` for an interrupted request or stream read. Your module spec should run
 `assertCancelsWhenInterrupted` and `assertCancelsStreamWhenInterrupted` against
-`LocalProviderTestServer.holdOpen` and `streamThenHold`.
+`LocalProviderTestServer.holdOpen` and `streamThenHold`. A client that does not extend `BaseLifecycleLLMClient` can use the public helpers `CancelledError.attempt`, `CancelledError.whenInterrupted`, `CancelledError.fromThrowable` and `CancelledError.isCancellation`.
 
 ## Stability
 
