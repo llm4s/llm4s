@@ -67,6 +67,50 @@ class InterruptionChecksSpec extends AnyFlatSpec with Matchers with ProviderModu
     }
   }
 
+  /** A client whose every call waits to be interrupted, then does `afterInterrupt` with the flag cleared. */
+  final private class Misbehaving(afterInterrupt: () => Result[Completion]) extends LLMClient:
+    private def waitThen(): Result[Completion] =
+      CancelledError.catchInterrupt(Thread.sleep(30_000)): Unit
+      afterInterrupt()
+
+    def complete(c: Conversation, o: CompletionOptions): Result[Completion] = waitThen()
+    def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+      waitThen()
+    def getContextWindow(): Int     = 1000
+    def getReserveCompletion(): Int = 100
+
+  private def failureOf(check: => Any): String =
+    intercept[TestFailedException](check).getMessage
+
+  private def completion =
+    Completion("c", 0L, "late", "m", AssistantMessage("late"))
+
+  "assertCancelsWhenInterrupted" should "say so when a client clears the interrupt flag" in {
+    failureOf(assertCancelsWhenInterrupted(Misbehaving(() => Left(CancelledError("stub"))))) should include(
+      "cleared the thread's interrupt flag"
+    )
+  }
+
+  it should "say so when an interrupted client returns a result" in {
+    failureOf(assertCancelsWhenInterrupted(Misbehaving(() => Right(completion)))) should include(
+      "returned Right("
+    )
+  }
+
+  it should "say so when an interrupted client throws" in {
+    failureOf(assertCancelsWhenInterrupted(Misbehaving(() => throw new IllegalStateException("boom")))) should include(
+      "threw instead of returning a Result"
+    )
+  }
+
+  "assertCancelsStreamWhenInterrupted" should "say so when no chunk arrives before the server stalls" in {
+    LocalProviderTestServer.withServer("/s")(LocalProviderTestServer.holdOpen) { base =>
+      failureOf(assertCancelsStreamWhenInterrupted(HttpStub(s"$base/s", honour = true))) should include(
+        "delivered no chunk"
+      )
+    }
+  }
+
   "withServer" should "stop promptly while a handler is still holding a request open" in {
     val started = System.nanoTime()
     LocalProviderTestServer.withServer("/x")(LocalProviderTestServer.holdOpen) { base =>

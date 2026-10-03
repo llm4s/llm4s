@@ -901,6 +901,25 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     result shouldBe Left(ToolCallError.Cancelled("thrower"))
   }
 
+  it should "return Cancelled, not retry, when the tool throws a wrapped interruption with the flag cleared" in {
+    val attempts = new java.util.concurrent.atomic.AtomicInteger(0)
+    val wrapping = ToolBuilder[Map[String, Any], MathResult](
+      "wrapper",
+      "Wraps its interruption in an IOException",
+      Schema.`object`[Map[String, Any]]("p")
+    ).withHandler { _ =>
+      attempts.incrementAndGet()
+      throw new java.io.IOException("read aborted", new InterruptedException("stop"))
+    }.buildSafe()
+      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+    val registry = new ToolRegistry(Seq(wrapping))
+    val config   = ToolExecutionConfig(retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 1.millis)))
+    val result   = registry.execute(ToolCallRequest("wrapper", ujson.Obj()), config)
+    Thread.interrupted() shouldBe false // classifying the failure does not set the flag
+    result shouldBe Left(ToolCallError.Cancelled("wrapper"))
+    attempts.get shouldBe 1
+  }
+
   it should "return Cancelled, not retry, when a retry sleep is interrupted" in {
     val attempts = new java.util.concurrent.atomic.AtomicInteger(0)
     val failing = ToolBuilder[Map[String, Any], MathResult](

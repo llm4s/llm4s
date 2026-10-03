@@ -711,7 +711,7 @@ lazy val providerTestkit = (project in file("modules/provider-testkit"))
   .settings(
     name := "llm4s-provider-testkit",
     commonSettings,
-    // Measured 91.54% statement coverage (`sbt coverage providerTestkit/test
+    // Measured 92.10% statement coverage (`sbt coverage providerTestkit/test
     // providerTestkit/coverageReport`). Floor is the measured value rounded down to the nearest
     // 5. Never lower it.
     coverageFloor(90),

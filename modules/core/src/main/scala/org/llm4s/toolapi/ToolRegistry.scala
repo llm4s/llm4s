@@ -114,7 +114,10 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
             Left(ToolCallError.Cancelled(request.functionName))
           case Right(scala.util.Success(Right(v))) => Right(v)
           case Right(scala.util.Success(Left(e)))  => Left(e)
-          case Right(scala.util.Failure(t))        => Left(ToolCallError.ExecutionError(request.functionName, t))
+          // an interruption the tool wrapped (and so cleared) is still a cancellation, never retried
+          case Right(scala.util.Failure(t)) if CancelledError.isCancellation(t) =>
+            Left(ToolCallError.Cancelled(request.functionName))
+          case Right(scala.util.Failure(t)) => Left(ToolCallError.ExecutionError(request.functionName, t))
         }
       case None => Left(ToolCallError.UnknownFunction(request.functionName, tools.map(_.name)))
     }

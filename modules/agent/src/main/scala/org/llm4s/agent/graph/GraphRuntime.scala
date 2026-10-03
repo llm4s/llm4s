@@ -60,7 +60,9 @@ enum Durability:
  * is interrupted and joined, tasks that finished first keep their pending writes, an interrupted
  * task records nothing, and the call returns `Failed` with [[GraphError.Cancelled]] - naming the
  * last checkpoint, which a [[RunEvent.RunCancelled]] event is committed against - with the
- * interrupt flag set. The checkpoint stays `Running`, so `recover` continues the run.
+ * interrupt flag set. The checkpoint stays `Running`, so `recover` continues the run. An interrupt
+ * that arrives once the run has submitted its completed or suspended checkpoint does not undo it:
+ * the run waits for that checkpoint to be durable and returns its outcome, with the flag set.
  *
  * `subscribe` replays a thread's committed events after a sequence number and then delivers new
  * ones as their commits succeed, in ascending order with no gaps or duplicates, followed by live
