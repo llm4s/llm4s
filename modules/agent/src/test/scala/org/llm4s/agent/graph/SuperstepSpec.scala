@@ -17,7 +17,7 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
     val start = b.node[String]("start")((s, _, _) => continue(Command.empty.send(end, s.length)))
     val graph = b.compile(start)(_.get(total)).value
 
-    val result = graph.run("four")
+    val result = runInMemory(graph, "four")
     result.completed._2 shouldBe 8
     result match {
       case RunResult.Completed(_, _, supersteps) => supersteps shouldBe 2
@@ -35,7 +35,7 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
         if n + 1 < 5 then next.goto(tick) else next
       })
     }
-    b.compile(tick)(_.get(count)).value.run(()).completed._2 shouldBe 5
+    runInMemory(b.compile(tick)(_.get(count)).value, ()).completed._2 shouldBe 5
   }
 
   it should "fail a run that exceeds its superstep limit, keeping the last committed state" in {
@@ -45,7 +45,11 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
     b.implement(tick, writes = Set(count)) { (_, state, _) =>
       NodeResult.fromResult(state.get(count).map(n => Command.empty.update(count, n + 1).goto(tick)))
     }
-    val (state, error) = b.compile(tick, maxSupersteps = 3)(_.get(count)).value.run(()).failed
+    val (state, error) = runInMemory(
+      b.compile(tick)(_.get(count)).value,
+      (),
+      RunConfig().withBudgets(RunBudgets(maxSupersteps = 3))
+    ).failed
     error shouldBe GraphError.SuperstepLimitExceeded(3)
     state.get(count).value shouldBe 3
   }
@@ -59,7 +63,7 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
     val left       = b.node[Unit]("left", writes = Set(count, seen))(read)
     val right      = b.node[Unit]("right", writes = Set(count, seen))(read)
     val fork       = b.node[Unit]("fork")((_, _, _) => continue(Command.empty.goto(left).goto(right)))
-    val (state, _) = b.compile(fork)(_ => Right(())).value.run(()).completed
+    val (state, _) = runInMemory(b.compile(fork)(_ => Right(())).value, ()).completed
     state.get(seen).value shouldBe Vector(10, 10)
     state.get(count).value shouldBe 11 // both replaced 10 with 11; the later task in order wins
   }
@@ -76,9 +80,9 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
       b.compile(fork)(_.get(log)).value
     }
     val expected = Vector("a.1", "a.2", "b.1", "b.2", "c.1", "c.2", "d.1", "d.2")
-    graph.run(()).completed._2 shouldBe expected
-    graph.withExecutor(reversed).run(()).completed._2 shouldBe expected
-    (1L to 20L).foreach(seed => graph.withExecutor(concurrent(seed)).run(()).completed._2 shouldBe expected)
+    runInMemory(graph, ()).completed._2 shouldBe expected
+    runInMemory(graph.withExecutor(reversed), ()).completed._2 shouldBe expected
+    (1L to 20L).foreach(seed => runInMemory(graph.withExecutor(concurrent(seed)), ()).completed._2 shouldBe expected)
   }
 
   it should "schedule static edges before command routes, in declaration order" in {
@@ -92,22 +96,27 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
     b.edge(start, e1)
     val graph = b.compile(start)(_.get(log)).value
 
-    val first = graph.step(graph.start(())) match {
+    val first = graph.step(ThreadId("t"), graph.start(()), RunConfig()) match {
       case Step.Next(next) => next
       case other           => fail(other.toString)
     }
     first.pendingTasks.map(_._2.value) shouldBe Vector("e2", "e1", "r1", "e1")
     first.pendingTasks.map(_._1.value) shouldBe Vector("1.0", "1.1", "1.2", "1.3")
-    graph.runFrom(first).completed._2 shouldBe Vector("e2", "e1", "r1", "e1")
+    drive(graph, first).completed._2 shouldBe Vector("e2", "e1", "r1", "e1")
   }
 
   it should "give each task its own identity" in {
     val b = GraphBuilder("ids", "v1")
     val where = b.node[Unit]("where", writes = Set(log)) { (_, _, context) =>
-      continue(Command.empty.update(log, s"${context.nodeId.value}@${context.taskId.value}/${context.superstep}"))
+      continue(
+        Command.empty.update(
+          log,
+          s"${context.position.nodeId.value}@${context.position.taskId.value}/${context.position.superstep}"
+        )
+      )
     }
     val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty.goto(where).goto(where)))
-    b.compile(start)(_.get(log)).value.run(()).completed._2 shouldBe Vector("where@1.0/1", "where@1.1/1")
+    runInMemory(b.compile(start)(_.get(log)).value, ()).completed._2 shouldBe Vector("where@1.0/1", "where@1.1/1")
   }
 
   it should "reject an update to a key outside the node's write set and commit nothing" in {
@@ -117,7 +126,7 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
       b.node[Unit]("sneaky", writes = Set(log))((_, _, _) => continue(Command.empty.update(log, "x").update(other, 1)))
     val honest = b.node[Unit]("honest", writes = Set(other))((_, _, _) => continue(Command.empty.update(other, 2)))
     val start  = b.node[Unit]("start")((_, _, _) => continue(Command.empty.goto(honest).goto(sneaky)))
-    val (state, error) = b.compile(start)(_.get(log)).value.run(()).failed
+    val (state, error) = runInMemory(b.compile(start)(_.get(log)).value, ()).failed
     error shouldBe GraphError.UndeclaredWrite(NodeId("sneaky"), TaskId("1.1"), other.id)
     state.get(log).value shouldBe Vector.empty
     state.get(other).value shouldBe 0
@@ -132,7 +141,7 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
     val graph = b.compile(start)(_.get(log)).value
 
     Seq(graph, graph.withExecutor(reversed)).foreach { g =>
-      val (state, error) = g.run(()).failed
+      val (state, error) = runInMemory(g, ()).failed
       error shouldBe a[GraphError.NodeFailed]
       val failed = error.asInstanceOf[GraphError.NodeFailed]
       failed.nodeId shouldBe NodeId("worse")
@@ -146,7 +155,7 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
     val strict =
       StateKey[Int, Int]("strict", 0)((_, n) => if n < 0 then Left(ValidationError("strict", "negative")) else Right(n))
     val start = b.node[Unit]("start", writes = Set(strict))((_, _, _) => continue(Command.empty.update(strict, -1)))
-    val (_, error) = b.compile(start)(_.get(strict)).value.run(()).failed
+    val (_, error) = runInMemory(b.compile(start)(_.get(strict)).value, ()).failed
     error shouldBe a[GraphError.StateUpdateFailed]
   }
 
@@ -154,7 +163,7 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
     val b      = GraphBuilder("throwing-reducer", "v1")
     val parsed = StateKey[Int, String]("parsed", 0)((_, raw) => Right(raw.toInt))
     val start  = b.node[Unit]("start", writes = Set(parsed))((_, _, _) => continue(Command.empty.update(parsed, "x")))
-    val (state, error) = b.compile(start)(_.get(parsed)).value.run(()).failed
+    val (state, error) = runInMemory(b.compile(start)(_.get(parsed)).value, ()).failed
     error shouldBe a[GraphError.StateUpdateFailed]
     state.get(parsed).value shouldBe 0
   }
@@ -171,7 +180,7 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
     val toAlienTgt =
       b.node[Unit]("to-alien-target")((_, _, _) => continue(Command.empty.fanOut(alienTgt, alien, Vector(()))))
 
-    def errorOf(entry: NodeRef[Unit]) = b.compile(entry)(_ => Right(())).value.run(()).failed._2
+    def errorOf(entry: NodeRef[Unit]) = runInMemory(b.compile(entry)(_ => Right(())).value, ()).failed._2
     errorOf(toNode) shouldBe GraphError.InvalidRoute(
       NodeId("to-node"),
       TaskId("0.0"),
@@ -192,9 +201,12 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "fail when the output projection fails" in {
     val b     = GraphBuilder("projection", "v1")
     val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty))
-    b.compile(start)(_ => Left(ValidationError("output", "missing"))).value.run(()).failed._2 shouldBe
+    runInMemory(b.compile(start)(_ => Left(ValidationError("output", "missing"))).value, ()).failed._2 shouldBe
       ValidationError("output", "missing")
-    b.compile(start)(_ => throw new IllegalStateException("projection threw")).value.run(()).failed._2.message should
+    runInMemory(
+      b.compile(start)(_ => throw new IllegalStateException("projection threw")).value,
+      ()
+    ).failed._2.message should
       include("projection threw")
   }
 
@@ -205,7 +217,7 @@ class SuperstepSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
     val mine   = graph("mine")
     val theirs = graph("theirs").start(())
-    mine.step(theirs) match {
+    mine.step(ThreadId("t"), theirs, RunConfig()) match {
       case Step.Done(RunResult.Failed(_, error)) => error shouldBe GraphError.ForeignExecution("mine")
       case other                                 => fail(other.toString)
     }

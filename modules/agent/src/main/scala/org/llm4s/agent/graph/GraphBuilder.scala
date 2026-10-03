@@ -126,7 +126,7 @@ final class GraphBuilder private (val id: String, val version: String):
    * Validates the graph and compiles it. `output` projects the final committed state when the
    * run goes quiescent.
    */
-  def compile[I, O](entry: NodeRef[I], maxSupersteps: Int = 1000)(
+  def compile[I, O](entry: NodeRef[I])(
     output: ThreadState => Result[O]
   ): Result[CompiledGraph[I, O]] =
     val keys     = (readKeys ++ implemented.values.flatMap(_.writes)).distinct.toVector
@@ -134,7 +134,6 @@ final class GraphBuilder private (val id: String, val version: String):
     val found    = Vector.newBuilder[String]
     found ++= problems
     if id.isEmpty then found += "the graph id is empty"
-    if maxSupersteps <= 0 then found += s"maxSupersteps must be positive, was $maxSupersteps"
     if !owns(entry) then found += s"entry node '${entry.id.value}' was issued by another builder"
     declared.keys.filterNot(implemented.contains).foreach(n => found += s"node '${n.value}' is never implemented")
     edges.foreach { (from, to) =>
@@ -162,8 +161,7 @@ final class GraphBuilder private (val id: String, val version: String):
           resumes = resumes.toMap,
           keys = keys.map(k => k.id -> k).toMap,
           output = output,
-          maxSupersteps = maxSupersteps,
-          executor = TaskExecutor.default
+          executorOverride = None
         )
       )
 
@@ -197,7 +195,7 @@ object GraphBuilder:
 
 /** A node's handle, write set and behaviour, with its input erased at the scheduler boundary. */
 final private[graph] case class NodeDef[I](ref: NodeRef[I], writes: Set[StateKey[?, ?]], behaviour: GraphNode[I]):
-  def run(input: Any, state: ThreadState, context: NodeContext): NodeResult =
+  def run(input: Any, state: ThreadState, context: RunContext): NodeResult =
     behaviour.run(input.asInstanceOf[I], state, context)
   def encode(input: Any): VersionedJson =
     VersionedJson(ref.inputVersion.current, upickle.default.writeJs(input.asInstanceOf[I])(using ref.codec))
@@ -209,16 +207,13 @@ final private[graph] case class NodeDef[I](ref: NodeRef[I], writes: Set[StateKey
 /**
  * Runs a superstep's tasks and returns their results in task order, however the tasks interleave.
  * The default runs them concurrently on virtual threads in an Ox scope, at most
- * [[TaskExecutor.DefaultLimit]] at a time; if the calling thread is interrupted, Ox interrupts every
+ * [[RunBudgets.maxConcurrency]] at a time; if the calling thread is interrupted, Ox interrupts every
  * task and joins them all before the `InterruptedException` reaches the caller.
  */
 private[graph] trait TaskExecutor:
   def runAll[R](tasks: Vector[() => R]): Vector[R]
 
 private[graph] object TaskExecutor:
-  /** Superstep concurrency until `RunConfig` makes it configurable (#1271). */
-  val DefaultLimit = 16
-
   /**
    * At most `limit` tasks at a time, in an Ox scope. Every task is forked, a lone one included: a
    * task run inline on the calling thread could catch the caller's interrupt and return normally,
@@ -228,8 +223,6 @@ private[graph] object TaskExecutor:
     def runAll[R](tasks: Vector[() => R]): Vector[R] =
       if tasks.isEmpty then Vector.empty
       else ox.parLimit(limit)(tasks).toVector
-
-  val default: TaskExecutor = bounded(DefaultLimit)
 
   val sequential: TaskExecutor = new TaskExecutor:
     def runAll[R](tasks: Vector[() => R]): Vector[R] = tasks.map(_())

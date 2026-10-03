@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.agent.graph.GraphTestSupport.*
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -26,7 +27,6 @@ class GraphBuilderSpec extends AnyFlatSpec with Matchers with EitherValues {
     val graph = build()
     graph.id shouldBe "g"
     graph.version shouldBe "v1"
-    graph.maxSupersteps shouldBe 1000
     graph.fingerprint shouldBe build().fingerprint
   }
 
@@ -57,7 +57,7 @@ class GraphBuilderSpec extends AnyFlatSpec with Matchers with EitherValues {
     b.dynamicJoin("", alien)
     b.staticJoin("k", Set(alien), a)
 
-    val found = problems(b.compile(alien, maxSupersteps = 0)(_ => Right(())))
+    val found = problems(b.compile(alien)(_ => Right(())))
     (found should contain).allOf(
       "node 'a' is declared twice",
       "node 'unimplemented' is never implemented",
@@ -72,7 +72,6 @@ class GraphBuilderSpec extends AnyFlatSpec with Matchers with EitherValues {
       "dynamic join '' uses a node from another builder",
       "static join 'k' uses a node from another builder",
       "the graph id is empty",
-      "maxSupersteps must be positive, was 0",
       "entry node 'alien' was issued by another builder"
     )
   }
@@ -95,7 +94,7 @@ class GraphBuilderSpec extends AnyFlatSpec with Matchers with EitherValues {
     val seeded = StateKey.replace[String]("seeded", "default")
     b.stateKey(seeded)
     val a = b.node[Unit]("a")(done)
-    b.compile(a)(_.get(seeded)).value.run(()) match {
+    runInMemory(b.compile(a)(_.get(seeded)).value, ()) match {
       case RunResult.Completed(_, output, _) => output shouldBe "default"
       case other                             => fail(other.toString)
     }

@@ -52,7 +52,7 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "A suspension" should "pause the whole run after its superstep, committing its siblings and its own update" in {
     val f         = Fixture(ask = Set("b"))
-    val suspended = f.graph.run(Vector("a", "b", "c")).suspended
+    val suspended = runInMemory(f.graph, Vector("a", "b", "c")).suspended
     suspended.interrupts shouldBe Vector(PendingInterrupt(InterruptId("1.1"), NodeId("approve"), ujson.Str("b")))
     suspended.state.get(results).value shouldBe Vector("A", "C")
     suspended.state.get(asked).value shouldBe Vector("b")
@@ -60,7 +60,7 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
     suspended.execution.isPaused shouldBe true
     suspended.execution.pendingInterrupts shouldBe Vector(InterruptId("1.1"))
     // stepping a paused execution does not advance it
-    f.graph.step(suspended.execution) match {
+    f.graph.step(ThreadId("t"), suspended.execution, RunConfig()) match {
       case Step.Done(RunResult.Suspended(_, interrupts, _)) => interrupts.map(_.id) shouldBe Vector(InterruptId("1.1"))
       case other                                            => fail(other.toString)
     }
@@ -68,16 +68,16 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "keep the barrier closed until every parked call is answered, in separate resumes" in {
     val f     = Fixture(ask = Set("b", "c"))
-    val first = f.graph.run(Vector("a", "b", "c", "d")).suspended
+    val first = runInMemory(f.graph, Vector("a", "b", "c", "d")).suspended
     first.interrupts.map(_.id.value) shouldBe Vector("1.1", "1.2")
 
-    val second = f.graph.runFrom(f.graph.resume(first.execution, f.answers("1.2" -> "yes")).value).suspended
+    val second = drive(f.graph, f.graph.resume(first.execution, f.answers("1.2" -> "yes")).value).suspended
     second.interrupts.map(_.id.value) shouldBe Vector("1.1")
     second.state.get(results).value shouldBe Vector("A", "D", "c!")
     second.state.get(log).value shouldBe empty // summarize has not run
     second.execution.isPaused shouldBe false   // quiescent, waiting only on a parked continuation
 
-    val (state, summary) = f.graph.runFrom(f.graph.resume(second.execution, f.answers("1.1" -> "no")).value).completed
+    val (state, summary) = drive(f.graph, f.graph.resume(second.execution, f.answers("1.1" -> "no")).value).completed
     summary shouldBe Vector("A,D,c!,b-no")
     state.get(asked).value shouldBe Vector("b", "c")
     Seq("a", "b", "c", "d").map(f.callsOf) shouldBe Seq(1, 1, 1, 1) // continuations do not re-run the worker
@@ -85,15 +85,15 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "let a continuation suspend again in the name of the original task" in {
     val f       = Fixture(ask = Set("a"))
-    val first   = f.graph.run(Vector("a", "b")).suspended
-    val again   = f.graph.runFrom(f.graph.resume(first.execution, f.answers("1.0" -> "again")).value).suspended
+    val first   = runInMemory(f.graph, Vector("a", "b")).suspended
+    val again   = drive(f.graph, f.graph.resume(first.execution, f.answers("1.0" -> "again")).value).suspended
     val reasked = again.interrupts.loneElementOr(fail("one interrupt"))
     reasked.question shouldBe ujson.Str("a")
     reasked.id should not be InterruptId("1.0")
-    f.graph
-      .runFrom(f.graph.resume(again.execution, Map(reasked.id -> f.approve.answer("yes"))).value)
-      .completed
-      ._2 shouldBe
+    drive(
+      f.graph,
+      f.graph.resume(again.execution, Map(reasked.id -> f.approve.answer("yes"))).value
+    ).completed._2 shouldBe
       Vector("B,a!")
   }
 
@@ -109,12 +109,12 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
     b.staticJoin("both", Set(left, right), merge)
     val graph = b.compile(start)(_.get(log)).value
 
-    val suspended = graph.run(()).suspended
+    val suspended = runInMemory(graph, ()).suspended
     suspended.state.get(log).value shouldBe Vector("right")
-    graph
-      .runFrom(graph.resume(suspended.execution, Map(InterruptId("1.0") -> done.answer("ok"))).value)
-      .completed
-      ._2 shouldBe
+    drive(
+      graph,
+      graph.resume(suspended.execution, Map(InterruptId("1.0") -> done.answer("ok"))).value
+    ).completed._2 shouldBe
       Vector("right", "left:ok", "merge")
   }
 
@@ -129,11 +129,11 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
     b.staticJoin("never", Set(y, z), merge)
     val graph = b.compile(start)(_ => Right(())).value
 
-    val suspended = graph.run(()).suspended
-    graph
-      .runFrom(graph.resume(suspended.execution, Map(InterruptId("1.0") -> resumeX.answer("go"))).value)
-      .failed
-      ._2 shouldBe
+    val suspended = runInMemory(graph, ()).suspended
+    drive(
+      graph,
+      graph.resume(suspended.execution, Map(InterruptId("1.0") -> resumeX.answer("go"))).value
+    ).failed._2 shouldBe
       GraphError.UnsatisfiedJoin(JoinId("never"), List("node 'z'"))
   }
 
@@ -145,7 +145,7 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
     val sneaky  = b.node[Unit]("sneaky")((_, _, _) => NodeResult.Suspend(StateUpdate.update(log, "x"), "q", mine))
     val astray  = b.node[Unit]("astray")((_, _, _) => NodeResult.Suspend(StateUpdate.empty, "q", foreign))
     b.stateKey(log)
-    def errorOf(entry: NodeRef[Unit]) = b.compile(entry)(_ => Right(())).value.run(()).failed._2
+    def errorOf(entry: NodeRef[Unit]) = runInMemory(b.compile(entry)(_ => Right(())).value, ()).failed._2
     errorOf(sneaky) shouldBe GraphError.UndeclaredWrite(NodeId("sneaky"), TaskId("0.0"), log.id)
     errorOf(astray) shouldBe
       GraphError.InvalidRoute(NodeId("astray"), TaskId("0.0"), "resume node 'foreign' is not part of this graph")
@@ -153,7 +153,7 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "Resume" should "refuse no answers, unknown interrupts and answers that do not decode, changing nothing" in {
     val f         = Fixture(ask = Set("a"))
-    val execution = f.graph.run(Vector("a")).suspended.execution
+    val execution = runInMemory(f.graph, Vector("a")).suspended.execution
     def problems(answers: Map[InterruptId, ujson.Value]) = f.graph.resume(execution, answers).left.value match {
       case GraphError.InvalidResume(_, found) => found
       case other                              => fail(other.toString)
@@ -171,7 +171,7 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "A suspended snapshot" should "restore in another graph instance, through JSON, and resume there" in {
     val f        = Fixture(ask = Set("b", "c"))
-    val first    = f.graph.run(Vector("a", "b", "c")).suspended
+    val first    = runInMemory(f.graph, Vector("a", "b", "c")).suspended
     val json     = upickle.default.write(f.graph.snapshot(first.execution).value)
     val snapshot = upickle.default.read[GraphSnapshot](json)
     snapshot.paused shouldBe true
@@ -183,20 +183,20 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
     val elsewhere = Fixture(ask = Set("b", "c"))
     val restored  = elsewhere.graph.restore(snapshot).value
     val partly =
-      elsewhere.graph.runFrom(elsewhere.graph.resume(restored, elsewhere.answers("1.1" -> "yes")).value).suspended
+      drive(elsewhere.graph, elsewhere.graph.resume(restored, elsewhere.answers("1.1" -> "yes")).value).suspended
     val resnap = elsewhere.graph.snapshot(partly.execution).value
     resnap.frontier shouldBe empty
     val again = Fixture(ask = Set("b", "c"))
-    again.graph
-      .runFrom(again.graph.resume(again.graph.restore(resnap).value, again.answers("1.2" -> "yes")).value)
-      .completed
-      ._2 shouldBe
+    drive(
+      again.graph,
+      again.graph.resume(again.graph.restore(resnap).value, again.answers("1.2" -> "yes")).value
+    ).completed._2 shouldBe
       Vector("A,b!,c!")
   }
 
   it should "reject parked continuations the graph cannot resume" in {
     val f        = Fixture(ask = Set("b"))
-    val snapshot = f.graph.snapshot(f.graph.run(Vector("a", "b")).suspended.execution).value
+    val snapshot = f.graph.snapshot(runInMemory(f.graph, Vector("a", "b")).suspended.execution).value
     val parked   = snapshot.parked.head
     def problems(changed: GraphSnapshot) = f.graph.restore(changed).left.value match {
       case GraphError.RestoreRejected(_, found) => found
@@ -220,7 +220,7 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "reject a pending continuation task with a broken origin" in {
     val f        = Fixture(ask = Set("b"))
-    val first    = f.graph.run(Vector("a", "b")).suspended
+    val first    = runInMemory(f.graph, Vector("a", "b")).suspended
     val resumed  = f.graph.resume(first.execution, f.answers("1.1" -> "yes")).value
     val snapshot = f.graph.snapshot(resumed).value
     val task     = snapshot.frontier.head
@@ -234,7 +234,7 @@ class SuspendSpec extends AnyFlatSpec with Matchers with EitherValues {
     problems(task.copy(originNode = Some("gone"))) should contain(
       s"pending task ${task.taskId} continues unknown node 'gone'"
     )
-    f.graph.runFrom(f.graph.restore(snapshot).value).completed._2 shouldBe Vector("A,b!")
+    drive(f.graph, f.graph.restore(snapshot).value).completed._2 shouldBe Vector("A,b!")
   }
 
   extension [A](values: Vector[A])

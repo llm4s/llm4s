@@ -34,6 +34,11 @@ enum Durability:
    */
   case OnExit
 
+/** Runs compiled graphs on durable threads; see [[GraphRuntime]]. */
+object GraphRuntime:
+  /** A runtime over a new [[InMemoryCheckpointer]]. */
+  def inMemory(clock: Clock = Clock.systemUTC()): GraphRuntime = new GraphRuntime(new InMemoryCheckpointer, clock)
+
 /**
  * Runs compiled graphs on durable threads.
  *
@@ -86,18 +91,18 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     threadId: ThreadId,
     graph: CompiledGraph[I, O],
     input: I,
-    runId: RunId,
+    config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync
   ): Result[RunResult[O]] = exclusively(threadId) {
     checkpointer.latest(threadId).flatMap {
-      case None => newRun(graph, threadId, runId, durability, 0).claim(graph.start(input), None, RunEvent.RunStarted)
+      case None => newRun(graph, threadId, config, durability, 0).claim(graph.start(input), None, RunEvent.RunStarted)
       case Some(stored) =>
         stored.checkpoint.status match
           case CheckpointStatus.Running   => Left(GraphError.IncompleteRun(threadId.value, stored.checkpoint.id))
           case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
           case CheckpointStatus.Completed =>
             graph.restore(stored.checkpoint.snapshot).flatMap { done =>
-              newRun(graph, threadId, runId, durability, done.superstep)
+              newRun(graph, threadId, config, durability, done.superstep)
                 .claim(
                   graph.startAt(done.superstep, done.state, input),
                   Some(stored.checkpoint.id),
@@ -111,7 +116,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
   def recover[I, O](
     graph: CompiledGraph[I, O],
     threadId: ThreadId,
-    runId: RunId,
+    config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync
   ): Result[RunResult[O]] = exclusively(threadId) {
     checkpointer.latest(threadId).flatMap {
@@ -119,7 +124,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         for
           execution <- graph.restore(stored.checkpoint.snapshot)
           reused    <- reusableWrites(graph, execution, stored)
-          result <- newRun(graph, threadId, runId, durability, execution.superstep).claim(
+          result <- newRun(graph, threadId, config, durability, execution.superstep).claim(
             execution,
             Some(stored.checkpoint.id),
             RunEvent.RunRecovered(stored.checkpoint.id),
@@ -141,7 +146,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     graph: CompiledGraph[I, O],
     threadId: ThreadId,
     answers: Map[InterruptId, ujson.Value],
-    runId: RunId,
+    config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync
   ): Result[RunResult[O]] = exclusively(threadId) {
     checkpointer.latest(threadId).flatMap {
@@ -149,7 +154,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         for
           suspended <- graph.restore(stored.checkpoint.snapshot)
           resumed   <- graph.resume(suspended, answers)
-          result <- newRun(graph, threadId, runId, durability, resumed.superstep).claim(
+          result <- newRun(graph, threadId, config, durability, resumed.superstep).claim(
             resumed,
             Some(stored.checkpoint.id),
             RunEvent.RunResumed(suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value))
@@ -181,11 +186,11 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
   private def newRun[I, O](
     graph: CompiledGraph[I, O],
     threadId: ThreadId,
-    runId: RunId,
+    config: RunConfig,
     durability: Durability,
     firstSuperstep: Int
   ): Run[I, O] =
-    new Run(graph, threadId, runId, committer(threadId, durability), firstSuperstep)
+    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep)
 
   private def reusableWrites(
     graph: CompiledGraph[?, ?],
@@ -298,10 +303,11 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
   final private class Run[I, O](
     graph: CompiledGraph[I, O],
     threadId: ThreadId,
-    runId: RunId,
+    config: RunConfig,
     committer: Committer,
     firstSuperstep: Int
   ):
+    private val runId       = config.runId
     private var checkpoints = 0
 
     /** Where the run is: the execution `loop` is at and its checkpoint; set before anything runs. */
@@ -346,13 +352,15 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       committer.failure match
         case Some(error) => stop(execution, GraphError.CheckpointWriteFailed(threadId.value, error))
         case None if execution.paused || execution.isQuiescent => end(execution, checkpointId)
-        case None if execution.superstep - firstSuperstep >= graph.maxSupersteps =>
-          fail(execution, GraphError.SuperstepLimitExceeded(graph.maxSupersteps))
+        case None if execution.superstep - firstSuperstep >= config.budgets.maxSupersteps =>
+          fail(execution, GraphError.SuperstepLimitExceeded(config.budgets.maxSupersteps))
         case None if Thread.currentThread().isInterrupted => cancelled()
         case None =>
-          val outcomes = graph.taskExecutor.runAll(execution.frontier.map { task => () =>
-            reused.get(task.id).fold(runTask(task, execution, checkpointId))(Right(_)).map(task -> _)
-          })
+          val outcomes = graph
+            .executorFor(config.budgets)
+            .runAll(execution.frontier.map { task => () =>
+              reused.get(task.id).fold(runTask(task, execution, checkpointId))(Right(_)).map(task -> _)
+            })
           // a cancelled task cancels the run, even if an earlier task failed
           if outcomes.exists { case Left(_: CancelledError) => true; case _ => false } then cancelled()
           else
@@ -392,8 +400,13 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
 
     private def runTask(task: Task, execution: Execution, checkpointId: String): Result[TaskResult] =
       val sink = TaskSink(task, checkpointId)
+      val context = new RunContext(
+        config,
+        RunPosition(threadId, runId, checkpointId, task.id, task.node, execution.superstep),
+        sink
+      )
       graph
-        .executeTask(task, execution, sink)
+        .executeTask(task, execution, context)
         .flatMap(result => graph.encodeWrite(checkpointId, task, result).map(result -> _)) match
         // no write and no event: `recover` runs the task again
         case Left(cancelled: CancelledError)                  => Left(cancelled)

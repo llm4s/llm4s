@@ -88,24 +88,6 @@ enum NodeResult:
 object NodeResult:
   def fromResult(result: Result[Command]): NodeResult = result.fold(Fail(_), Continue(_))
 
-/**
- * The running task's identity, for attribution and idempotency keys, and its event channels.
- *
- * `emit` records a durable custom event: it is committed with this task's result, given a
- * per-thread sequence number in that commit, delivered only after the commit and replayed to
- * later subscribers. It is discarded if the task fails. `progress` is live-only, for token deltas
- * and similar high-volume progress: delivered at once to current subscribers, never persisted or
- * replayed. Outside a [[GraphRuntime]] both are no-ops.
- */
-final class NodeContext private[graph] (
-  val taskId: TaskId,
-  val nodeId: NodeId,
-  val superstep: Int,
-  sink: NodeEventSink
-):
-  def emit(name: String, version: Int, payload: ujson.Value): Unit = sink.custom(name, version, payload)
-  def progress(payload: ujson.Value): Unit                         = sink.progress(payload)
-
 /** Where a task's events go; the runtime gives each task its own. */
 private[graph] trait NodeEventSink:
   def custom(name: String, version: Int, payload: ujson.Value): Unit
@@ -121,7 +103,7 @@ private[graph] object NodeEventSink:
  * uncommitted writes - and returns its effects as data.
  */
 trait GraphNode[I]:
-  def run(input: I, state: ThreadState, context: NodeContext): NodeResult
+  def run(input: I, state: ThreadState, context: RunContext): NodeResult
 
 /** A suspended task's question with the answer it was resumed with. */
 final case class Resumed[Q, A](question: Q, answer: A)

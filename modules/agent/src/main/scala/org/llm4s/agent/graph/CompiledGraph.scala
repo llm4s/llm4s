@@ -3,7 +3,6 @@ package org.llm4s.agent.graph
 import org.llm4s.error.CancelledError
 import org.llm4s.types.{ Result, TryOps }
 
-import scala.annotation.tailrec
 import scala.util.Try
 
 /**
@@ -45,31 +44,24 @@ final class CompiledGraph[I, O] private[graph] (
   resumes: Map[NodeId, ResumeRef[?, ?]],
   keys: Map[StateKeyId, StateKey[?, ?]],
   output: ThreadState => Result[O],
-  val maxSupersteps: Int,
-  executor: TaskExecutor
+  executorOverride: Option[TaskExecutor]
 ):
-
-  /** Runs the graph from `input` to completion, suspension or failure. */
-  def run(input: I): RunResult[O] = runFrom(start(input))
 
   /** An execution with only the entry task ready, before any superstep has run. */
   def start(input: I): Execution = startAt(0, ThreadState.empty(keys), input)
 
-  /** Runs supersteps from `execution` to completion, suspension or failure. */
-  @tailrec def runFrom(execution: Execution): RunResult[O] =
-    step(execution) match
-      case Step.Next(next)   => runFrom(next)
-      case Step.Done(result) => result
-
-  /** Runs one superstep, or finishes or suspends the run if `execution` cannot advance. */
-  def step(execution: Execution): Step[O] =
+  /**
+   * Runs one superstep, or finishes or suspends the run if `execution` cannot advance. The superstep
+   * runs at most `config.budgets.maxConcurrency` tasks at a time. No superstep limit is checked:
+   * a caller driving `step` owns its loop. Outside a [[GraphRuntime]], `emit` and `progress` are
+   * no-ops and each task's `checkpointId` is `""`.
+   */
+  def step(threadId: ThreadId, execution: Execution, config: RunConfig): Step[O] =
     if execution.owner ne owner then Step.Done(RunResult.Failed(execution.state, GraphError.ForeignExecution(id)))
     else if execution.paused then Step.Done(suspended(execution))
     else if execution.isQuiescent then Step.Done(complete(execution))
-    else if execution.superstep >= maxSupersteps then
-      Step.Done(RunResult.Failed(execution.state, GraphError.SuperstepLimitExceeded(maxSupersteps)))
     else
-      CancelledError.catchInterrupt(superstep(execution)) match
+      CancelledError.catchInterrupt(superstep(threadId, execution, config)) match
         case Left(_)                        => Step.Done(cancelled(execution))
         case Right(Left(_: CancelledError)) => Step.Done(cancelled(execution))
         case Right(Left(error))             => Step.Done(RunResult.Failed(execution.state, error))
@@ -244,11 +236,12 @@ final class CompiledGraph[I, O] private[graph] (
       resumes,
       keys,
       output,
-      maxSupersteps,
-      next
+      Some(next)
     )
 
-  private[graph] def taskExecutor: TaskExecutor = executor
+  /** The executor a run with `budgets` uses: a test override, else bounded by `maxConcurrency`. */
+  private[graph] def executorFor(budgets: RunBudgets): TaskExecutor =
+    executorOverride.getOrElse(TaskExecutor.bounded(budgets.maxConcurrency))
 
   /** An execution at `superstep` over `state` with only the entry task ready. */
   private[graph] def startAt(superstep: Int, state: ThreadState, input: I): Execution =
@@ -263,9 +256,10 @@ final class CompiledGraph[I, O] private[graph] (
       paused = false
     )
 
-  private def superstep(execution: Execution): Result[Execution] =
-    val outcomes = executor.runAll(execution.frontier.map { task => () =>
-      executeTask(task, execution, NodeEventSink.none).map(task -> _)
+  private def superstep(threadId: ThreadId, execution: Execution, config: RunConfig): Result[Execution] =
+    val outcomes = executorFor(config.budgets).runAll(execution.frontier.map { task => () =>
+      val position = RunPosition(threadId, config.runId, "", task.id, task.node, execution.superstep)
+      executeTask(task, execution, new RunContext(config, position, NodeEventSink.none)).map(task -> _)
     })
     // A cancelled task wins over an earlier task's failure: the run was cancelled, not failed.
     outcomes
@@ -277,11 +271,10 @@ final class CompiledGraph[I, O] private[graph] (
    * throws `InterruptedException`, or whose thread is interrupted when its node returns, is
    * cancelled: `Left(CancelledError)` with the flag set, whatever the node returned.
    */
-  private[graph] def executeTask(task: Task, execution: Execution, sink: NodeEventSink): Result[TaskResult] =
+  private[graph] def executeTask(task: Task, execution: Execution, context: RunContext): Result[TaskResult] =
     nodes.get(task.node) match
       case None => Left(GraphError.InvalidRoute(task.node, task.id, "node is not part of this graph"))
       case Some(node) =>
-        val context   = new NodeContext(task.id, task.node, execution.superstep, sink)
         val operation = s"task ${task.id.value}"
         CancelledError.attempt(operation)(Try(node.run(task.input, execution.state, context)).toResult) match
           case Left(cancelled: CancelledError)                  => Left(cancelled)

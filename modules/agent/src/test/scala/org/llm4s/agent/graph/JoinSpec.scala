@@ -20,7 +20,7 @@ class JoinSpec extends AnyFlatSpec with Matchers with EitherValues {
     val merge = b.node[Unit]("merge", writes = Set(log))(record("merge"))
     val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty.goto(a1).goto(bOnly)))
     b.staticJoin("both", Set(a2, bOnly), merge)
-    b.compile(start)(_.get(log)).value.run(()).completed._2 shouldBe Vector("a1", "b", "a2", "merge")
+    runInMemory(b.compile(start)(_.get(log)).value, ()).completed._2 shouldBe Vector("a1", "b", "a2", "merge")
   }
 
   it should "count each source once per activation, and re-arm after releasing" in {
@@ -43,7 +43,7 @@ class JoinSpec extends AnyFlatSpec with Matchers with EitherValues {
       })
     }
     b.staticJoin("both", Set(left, right), merge)
-    b.compile(left)(_.get(log)).value.run(()).completed._2 shouldBe
+    runInMemory(b.compile(left)(_.get(log)).value, ()).completed._2 shouldBe
       Vector("left0", "left1", "right", "merge", "left2", "right", "merge", "left3", "right", "merge")
   }
 
@@ -54,7 +54,7 @@ class JoinSpec extends AnyFlatSpec with Matchers with EitherValues {
     val merge = b.node[Unit]("merge")(record("merge"))
     val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty.goto(ran)))
     b.staticJoin("both", Set(ran, never), merge)
-    val (state, error) = b.compile(start)(_.get(log)).value.run(()).failed
+    val (state, error) = runInMemory(b.compile(start)(_.get(log)).value, ()).failed
     error shouldBe GraphError.UnsatisfiedJoin(JoinId("both"), List("node 'never'"))
     state.get(log).value shouldBe Vector("ran")
   }
@@ -73,9 +73,11 @@ class JoinSpec extends AnyFlatSpec with Matchers with EitherValues {
         b.node[Unit]("plan")((_, _, _) => continue(Command.empty.fanOut(join, worker, Vector("a", "b", "c", "d"))))
       b.compile(plan)(_.get(log)).value
     }
-    graph.run(()).completed._2 shouldBe Vector("A,B,C,D")
-    graph.withExecutor(reversed).run(()).completed._2 shouldBe Vector("A,B,C,D")
-    (1L to 20L).foreach(seed => graph.withExecutor(concurrent(seed)).run(()).completed._2 shouldBe Vector("A,B,C,D"))
+    runInMemory(graph, ()).completed._2 shouldBe Vector("A,B,C,D")
+    runInMemory(graph.withExecutor(reversed), ()).completed._2 shouldBe Vector("A,B,C,D")
+    (1L to 20L).foreach(seed =>
+      runInMemory(graph.withExecutor(concurrent(seed)), ()).completed._2 shouldBe Vector("A,B,C,D")
+    )
   }
 
   it should "order children by emitting task, route, then item, and release each activation separately" in {
@@ -99,7 +101,7 @@ class JoinSpec extends AnyFlatSpec with Matchers with EitherValues {
     val afterChildren = graph.runSteps(3)
     afterChildren.pendingTasks.map(_._2.value) shouldBe Vector("summarize", "summarize")
 
-    val (_, (ordered, summaries)) = graph.withExecutor(reversed).run(()).completed
+    val (_, (ordered, summaries)) = runInMemory(graph.withExecutor(reversed), ()).completed
     ordered shouldBe Vector("1a", "1b", "2a", "2b", "2c")
     summaries shouldBe Vector("other", "summary(5)", "summary(5)")
   }
@@ -113,7 +115,7 @@ class JoinSpec extends AnyFlatSpec with Matchers with EitherValues {
     val plan      = b.node[Unit]("plan")((_, _, _) => continue(Command.empty.fanOut(join, worker, Vector.empty)))
     val graph     = b.compile(plan)(_.get(log)).value
     graph.runSteps(1).pendingTasks shouldBe Vector(TaskId("1.0") -> NodeId("summarize"))
-    graph.run(()).completed._2 shouldBe Vector("summarize")
+    runInMemory(graph, ()).completed._2 shouldBe Vector("summarize")
   }
 
   it should "count a child's arrival when it completes, not when its own routes finish" in {
@@ -125,7 +127,7 @@ class JoinSpec extends AnyFlatSpec with Matchers with EitherValues {
     val summarize = b.node[Unit]("summarize", writes = Set(log))(record("summarize"))
     val join      = b.dynamicJoin("workers", summarize)
     val plan      = b.node[Unit]("plan")((_, _, _) => continue(Command.empty.fanOut(join, worker, Vector("x", "y"))))
-    b.compile(plan)(_.get(log)).value.run(()).completed._2 shouldBe
+    runInMemory(b.compile(plan)(_.get(log)).value, ()).completed._2 shouldBe
       Vector("x", "y", "after-x", "after-y", "summarize")
   }
 
@@ -137,7 +139,7 @@ class JoinSpec extends AnyFlatSpec with Matchers with EitherValues {
     val plan = b.node[Unit]("plan") { (_, _, _) =>
       continue(Command.empty.fanOut(join, worker, Vector("a")).fanOut(join, worker, Vector("b")))
     }
-    b.compile(plan)(_ => Right(())).value.run(()).failed._2 shouldBe
+    runInMemory(b.compile(plan)(_ => Right(())).value, ()).failed._2 shouldBe
       GraphError.InvalidRoute(NodeId("plan"), TaskId("0.0"), "it fans out to join 'workers' more than once")
   }
 
@@ -145,7 +147,7 @@ class JoinSpec extends AnyFlatSpec with Matchers with EitherValues {
     /** The execution after `n` supersteps. */
     private def runSteps(n: Int): Execution =
       (1 to n).foldLeft(graph.start(())) { (execution, _) =>
-        graph.step(execution) match {
+        graph.step(ThreadId("t"), execution, RunConfig()) match {
           case Step.Next(next) => next
           case other           => fail(s"run ended early: $other")
         }

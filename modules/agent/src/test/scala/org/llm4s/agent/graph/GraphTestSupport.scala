@@ -8,6 +8,31 @@ import scala.util.Random
 
 object GraphTestSupport {
 
+  /** Runs `graph` from `input` in a fresh in-memory runtime and returns its result. */
+  def runInMemory[I, O](
+    graph: CompiledGraph[I, O],
+    input: I,
+    config: RunConfig = RunConfig(),
+    thread: String = "t"
+  ): RunResult[O] =
+    GraphRuntime.inMemory().start(ThreadId(thread), graph, input, config) match {
+      case Right(result) => result
+      case Left(error)   => fail(s"run refused: ${error.message}")
+    }
+
+  /** Steps `execution` to completion, suspension or failure, in memory; no checkpoints, no events. */
+  @scala.annotation.tailrec
+  def drive[O](
+    graph: CompiledGraph[?, O],
+    execution: Execution,
+    config: RunConfig = RunConfig(),
+    thread: String = "t"
+  ): RunResult[O] =
+    graph.step(ThreadId(thread), execution, config) match {
+      case Step.Next(next)   => drive(graph, next, config, thread)
+      case Step.Done(result) => result
+    }
+
   /** Runs a superstep's tasks last-first, so commit order cannot follow execution order. */
   val reversed: TaskExecutor = new TaskExecutor {
     def runAll[R](tasks: Vector[() => R]): Vector[R] = tasks.reverse.map(_()).reverse

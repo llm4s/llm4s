@@ -131,8 +131,7 @@ object ToolLoop:
     version: String,
     model: ModelStep,
     tools: Seq[LoopTool],
-    policy: ToolCallPolicy = ToolCallPolicy.allowAll,
-    maxSupersteps: Int = 200
+    policy: ToolCallPolicy = ToolCallPolicy.allowAll
   ): Result[ToolLoop] =
     val byName   = tools.map(t => t.name -> t).toMap
     val messages = Messages.key
@@ -200,7 +199,7 @@ object ToolLoop:
         _         <- Message.validateConversation(history.map(_.message).toList)
         assistant <- model.next(history.map(_.message))
       yield
-        val stored   = StoredMessage(s"${context.taskId.value}/assistant", assistant)
+        val stored   = StoredMessage(s"${context.position.taskId.value}/assistant", assistant)
         val appended = Command.empty.update(messages, MessageUpdate.Append(stored))
         if assistant.toolCalls.isEmpty then appended
         else appended.fanOut(batch, callTool, assistant.toolCalls.toVector.map(ToolTask(stored.id, _)))
@@ -233,7 +232,7 @@ object ToolLoop:
       yield
         val toolMessages = ordered.map { r =>
           val content = if r.isError then ujson.Obj("error" -> r.content).render() else r.content
-          StoredMessage(s"${context.taskId.value}/tool/${r.toolCallId}", ToolMessage(content, r.toolCallId))
+          StoredMessage(s"${context.position.taskId.value}/tool/${r.toolCallId}", ToolMessage(content, r.toolCallId))
         }
         toolMessages
           .foldLeft(Command.empty)((command, m) => command.update(messages, MessageUpdate.Append(m)))
@@ -245,12 +244,15 @@ object ToolLoop:
     val input = b.node[String]("input", writes = Set(messages)) { (text, _, context) =>
       NodeResult.Continue(
         Command.empty
-          .update(messages, MessageUpdate.Append(StoredMessage(s"${context.taskId.value}/user", UserMessage(text))))
+          .update(
+            messages,
+            MessageUpdate.Append(StoredMessage(s"${context.position.taskId.value}/user", UserMessage(text)))
+          )
           .goto(modelNode)
       )
     }
 
-    b.compile(input, maxSupersteps) { state =>
+    b.compile(input) { state =>
       state.get(messages).flatMap { history =>
         history.lastOption.map(_.message) match
           case Some(answer: AssistantMessage) if answer.toolCalls.isEmpty => Right(answer.content)

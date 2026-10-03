@@ -40,6 +40,7 @@ object ThreadId:
 
 object RunId:
   def apply(value: String): RunId         = value
+  def random(): RunId                     = java.util.UUID.randomUUID().toString
   extension (id: RunId) def value: String = id
 
 /** Identifies a parked continuation awaiting an answer; stable across processes. */
@@ -48,3 +49,17 @@ opaque type InterruptId = String
 object InterruptId:
   def apply(value: String): InterruptId         = value
   extension (id: InterruptId) def value: String = id
+
+/** The tenant a thread belongs to. */
+opaque type TenantId = String
+
+object TenantId:
+  def apply(value: String): TenantId         = value
+  extension (id: TenantId) def value: String = id
+
+/** Who a run acts for. */
+opaque type Principal = String
+
+object Principal:
+  def apply(value: String): Principal         = value
+  extension (id: Principal) def value: String = id

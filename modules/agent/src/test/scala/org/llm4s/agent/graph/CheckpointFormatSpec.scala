@@ -55,7 +55,7 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
       parked = Vector.empty,
       paused = false
     )
-    graph.runFrom(graph.restore(written).value).completed._2 shouldBe Vector(Item("old"), Item("pending"))
+    drive(graph, graph.restore(written).value).completed._2 shouldBe Vector(Item("old"), Item("pending"))
 
     val resnapshot = graph.snapshot(graph.restore(written).value).value
     resnapshot.state("items").version shouldBe 2
@@ -114,7 +114,7 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     migrated.formatVersion shouldBe 2
     migrated.snapshot.parked shouldBe empty
     migrated.snapshot.paused shouldBe false
-    graph.runFrom(graph.restore(migrated.snapshot).value).completed
+    drive(graph, graph.restore(migrated.snapshot).value).completed
   }
 
   it should "refuse a format it does not know" in {

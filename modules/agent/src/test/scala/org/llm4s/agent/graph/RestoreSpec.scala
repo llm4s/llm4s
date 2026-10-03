@@ -44,7 +44,7 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
     Iterator
       .iterate(Option(g.start(()))) {
         case Some(e) =>
-          g.step(e) match {
+          g.step(ThreadId("t"), e, RunConfig()) match {
             case Step.Next(next) => Some(next)
             case Step.Done(_)    => None
           }
@@ -66,7 +66,7 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
     }
 
   "A snapshot" should "restore at every superstep boundary, through JSON, and finish as an uninterrupted run would" in {
-    graph().run(()).completed._2 shouldBe expected
+    runInMemory(graph(), ()).completed._2 shouldBe expected
     val original = graph()
     val all      = executions(original)
     all.size shouldBe 6
@@ -77,7 +77,7 @@ class RestoreSpec extends AnyFlatSpec with Matchers with EitherValues with LoneE
       val restored  = elsewhere.restore(upickle.default.read[GraphSnapshot](json)).value
       restored.superstep shouldBe execution.superstep
       restored.pendingTasks shouldBe execution.pendingTasks
-      elsewhere.runFrom(restored).completed._2 shouldBe expected
+      drive(elsewhere, restored).completed._2 shouldBe expected
     }
   }
 

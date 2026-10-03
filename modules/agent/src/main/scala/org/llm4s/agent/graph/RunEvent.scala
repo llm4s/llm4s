@@ -26,7 +26,7 @@ enum RunEvent derives ReadWriter:
   /** The run was cancelled by interrupting its thread; its checkpoint stays `Running` for `recover`. */
   case RunCancelled
 
-  /** A node's own event, from [[NodeContext.emit]]; `name` and `version` identify its payload. */
+  /** A node's own event, from [[RunContext.emit]]; `name` and `version` identify its payload. */
   case Custom(name: String, version: Int, payload: ujson.Value)
 
 /** A durable event before its commit assigns it a sequence number. */
@@ -75,7 +75,7 @@ enum StreamEvent:
   /** A committed durable event, in ascending `seq` order. */
   case Durable(record: EventRecord)
 
-  /** Live-only progress from [[NodeContext.progress]]: never persisted, never replayed, no `seq`. */
+  /** Live-only progress from [[RunContext.progress]]: never persisted, never replayed, no `seq`. */
   case Live(threadId: String, runId: String, taskId: String, nodeId: String, payload: ujson.Value)
 
 /** A registration with [[GraphRuntime.subscribe]]. */
