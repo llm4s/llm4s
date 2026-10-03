@@ -248,16 +248,16 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
     .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1))
 
-  it should "keep an interrupted wait for a local token out of the circuit, and keep the interrupt" in {
+  it should "report an interrupted wait for a local token as a cancellation, out of the circuit, keeping the interrupt" in {
     val (result, interrupted, state) = interruptedWhileWaitingForToken(waitsForToken.withoutDeadline)
-    result.left.toOption.get shouldBe a[RateLimitError]
+    result.left.toOption.get shouldBe a[org.llm4s.error.CancelledError]
     interrupted shouldBe true
     state shouldBe CircuitState.Closed
   }
 
   it should "do the same under a deadline" in {
     val (result, interrupted, state) = interruptedWhileWaitingForToken(waitsForToken.withDeadline(30.seconds))
-    result.left.toOption.get shouldBe a[RateLimitError]
+    result.left.toOption.get shouldBe a[org.llm4s.error.CancelledError]
     interrupted shouldBe true
     state shouldBe CircuitState.Closed
   }
@@ -269,12 +269,17 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
     .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1))
 
-  private def circuitAfterProviderFailure(config: ReliabilityConfig, sleep: Duration => Unit = _ => ()) = {
+  private def circuitAfterProviderFailure(
+    config: ReliabilityConfig,
+    sleep: Duration => Unit = _ => (),
+    cancelled: Boolean = false
+  ) = {
     val underlying = new CountingClient(timingOut)
     val client     = new ReliableClient(underlying, "test-provider", config, sleep = sleep)
     val result     = client.complete(conversation)
     underlying.callCount.get() shouldBe 1
-    result.left.toOption.get shouldBe a[RateLimitError]
+    if (cancelled) result.left.toOption.get shouldBe a[org.llm4s.error.CancelledError]
+    else result.left.toOption.get shouldBe a[RateLimitError]
     client.currentCircuitState
   }
 
@@ -291,7 +296,8 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     // The provider backoff (1ms) sleeps; the ~1s wait for a token is interrupted
     val state = circuitAfterProviderFailure(
       providerFailsThenThrottled(60).withoutDeadline,
-      sleep = delay => if (delay > 100.millis) throw new InterruptedException("cancelled")
+      sleep = delay => if (delay > 100.millis) throw new InterruptedException("cancelled"),
+      cancelled = true
     )
     Thread.interrupted() shouldBe true
     state shouldBe CircuitState.Open
