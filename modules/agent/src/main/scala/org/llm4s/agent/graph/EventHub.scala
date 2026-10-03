@@ -20,7 +20,9 @@ private[graph] def withLock[A](lock: ReentrantLock)(body: => A): A =
  * Durable events reach each subscriber in ascending `seq`, at most once, and only after the commit
  * that numbered them. A durable event that does not fit disconnects the subscriber as lagging once
  * what is already queued has been delivered. A live event is accepted only while two slots are
- * free, so a [[StreamEvent.LiveGap]] counting the live events dropped before it always fits.
+ * free, so a [[StreamEvent.LiveGap]] counting the live events dropped before it always fits. A
+ * lagging subscriber with dropped live events still pending gets that `LiveGap` after its queue
+ * drains and just before `Disconnected(lastSeq, Lagging)`.
  */
 final private[graph] class EventHub(checkpointer: Checkpointer):
 
@@ -163,9 +165,23 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
         ending match
           case End.Disconnect(reason) =>
             leave(threadId, this)
-            call(StreamEvent.Disconnected(lastDeliveredSeq, reason)): Unit
+            if reportPendingGap(reason) then call(StreamEvent.Disconnected(lastDeliveredSeq, reason)): Unit
           case End.Cancelled => ()
       }
+
+    /**
+     * A lagging subscriber can end with live events dropped since its last gap marker - the durable
+     * event that did not fit needed a slot for that marker too. They are reported as a
+     * [[StreamEvent.LiveGap]] just before `Disconnected`, so the count is never lost. Returns
+     * whether `Disconnected` should still follow: not if the subscription was cancelled meanwhile.
+     */
+    private def reportPendingGap(reason: DisconnectReason): Boolean =
+      val dropped = withLock(lock) {
+        val pending = if reason == DisconnectReason.Lagging then droppedLive else 0
+        droppedLive = 0
+        pending
+      }
+      dropped == 0 || (call(StreamEvent.LiveGap(dropped)).isDefined && !cancelled)
 
     /** Delivers committed events directly until a read finds none. */
     @tailrec private def replay(): Either[End, Unit] =

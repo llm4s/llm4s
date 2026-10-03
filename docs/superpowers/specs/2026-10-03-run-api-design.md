@@ -249,7 +249,8 @@ enum DisconnectReason:
   without blocking. Commit and hand-off happen under one lock, so each queue receives events in
   commit order.
 - **Durable overflow:** a durable event that does not fit marks the subscriber disconnected; nothing
-  further is queued for it. The dispatcher delivers what is already queued (contiguous), then
+  further is queued for it. The dispatcher delivers what is already queued (contiguous), then a
+  `LiveGap(n)` for any live events dropped since the last marker, then
   `Disconnected(lastSeq, Lagging)`, where `lastSeq` is the last durable `seq` delivered, and stops.
 - **Live overflow:** a live event is accepted only while at least two slots are free, so the gap
   marker always fits; otherwise it is dropped and counted. The next accepted event (live or durable)

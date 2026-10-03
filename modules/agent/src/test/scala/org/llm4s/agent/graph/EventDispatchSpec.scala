@@ -208,6 +208,47 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
   }
 
+  it should "report a pending live gap before disconnecting a lagging subscriber" in {
+    val store     = Watched()
+    val runtime   = GraphRuntime(store)
+    val collector = Collector()
+    val entered   = new CountDownLatch(1)
+    val release   = new CountDownLatch(1)
+    runtime
+      .subscribe(thread, capacity = 2) { event =>
+        collector.listener(event)
+        if entered.getCount > 0 then {
+          entered.countDown()
+          release.await(10, TimeUnit.SECONDS): Unit
+        }
+      }
+      .value
+    store.awaitSwitch()
+
+    // the listener holds RunStarted, so the queue is empty: the first live event fits, the next two
+    // are dropped, and the task's commit then needs two slots (gap and event) where one is free
+    val graph = chain(1) { (_, context) =>
+      entered.await(10, TimeUnit.SECONDS): Unit
+      (1 to 3).foreach(i => context.progress(ujson.Obj("i" -> i)))
+    }
+    runtime.start(thread, graph, "go").awaited.value.completed
+    release.countDown()
+
+    val received = collector.untilRunEnds()
+    received.size shouldBe 4
+    received(0) match {
+      case StreamEvent.Durable(r) => r.event shouldBe a[RunEvent.RunStarted]
+      case other                  => fail(s"expected RunStarted, got $other")
+    }
+    received(1) match {
+      case StreamEvent.Live(_, _, _, _, payload) => payload("i").num.toInt shouldBe 1
+      case other                                 => fail(s"expected the first live event, got $other")
+    }
+    received(2) shouldBe StreamEvent.LiveGap(2) // 1 delivered + 2 reported = 3 sent
+    received(3) shouldBe StreamEvent.Disconnected(1L, DisconnectReason.Lagging)
+    collector.quiet()
+  }
+
   it should "disconnect a listener that throws, without delivering anything after" in {
     val runtime   = GraphRuntime.inMemory()
     val collector = Collector()
