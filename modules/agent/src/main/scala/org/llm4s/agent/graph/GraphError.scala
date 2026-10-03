@@ -100,9 +100,10 @@ object GraphError:
     override val message: String = s"Thread '$threadId' has no suspended run to resume"
 
   /**
-   * Another run claimed the thread between this call reading it and claiming it. Nothing was
-   * accepted or discarded - retry once that run has suspended or completed.
+   * Another run holds the thread: it is still executing in this runtime, or it claimed the thread
+   * between this call reading it and claiming it. Nothing was accepted or discarded - retry once
+   * that run has suspended or completed.
    */
   final case class ThreadBusy(threadId: String, latestCheckpoint: Option[String]) extends GraphError:
     override val message: String =
-      s"Thread '$threadId' was advanced by another run (now at ${latestCheckpoint.getOrElse("<none>")}); retry"
+      s"Thread '$threadId' is held by another run (now at ${latestCheckpoint.getOrElse("<none>")}); retry"

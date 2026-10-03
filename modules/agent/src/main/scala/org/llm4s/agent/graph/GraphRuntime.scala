@@ -51,7 +51,10 @@ enum Durability:
  * [[GraphError.NothingToRecover]], [[GraphError.NotSuspended]]) without changing the thread. Each
  * call is a new run: it claims the thread by committing a checkpoint whose parent is the latest
  * it read, and if another run got there first it fails with [[GraphError.ThreadBusy]] - its input
- * or answers neither accepted nor discarded. Fencing a claim against a stale worker is Stage 2.
+ * or answers neither accepted nor discarded. A call on a thread whose run is still executing in
+ * this runtime fails the same way, before reading the thread, so `recover` cannot mistake a live
+ * run's `Running` checkpoint for an abandoned one. Across processes nothing yet tells a live run
+ * from a dead one: claim leases and fencing a claim against a stale worker are Stage 2.
  *
  * `subscribe` replays a thread's committed events after a sequence number and then delivers new
  * ones as their commits succeed, in ascending order with no gaps or duplicates, followed by live
@@ -62,6 +65,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
 
   private val hub        = EventHub(checkpointer)
   private val commitLock = new Object
+
+  /** Threads with a run executing in this runtime; guarded by itself. */
+  private val active = mutable.Set.empty[String]
 
   /** Replays events with `seq > afterSeq`, then delivers new events until cancelled. */
   def subscribe(threadId: ThreadId, afterSeq: Long = 0L)(listener: StreamEvent => Unit): Result[Subscription] =
@@ -74,7 +80,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     input: I,
     runId: RunId,
     durability: Durability = Durability.Sync
-  ): Result[RunResult[O]] =
+  ): Result[RunResult[O]] = exclusively(threadId) {
     checkpointer.latest(threadId).flatMap {
       case None => newRun(graph, threadId, runId, durability, 0).claim(graph.start(input), None, RunEvent.RunStarted)
       case Some(stored) =>
@@ -91,6 +97,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
                 )
             }
     }
+  }
 
   /** Continues the incomplete execution on `threadId`; see the class description. */
   def recover[I, O](
@@ -98,7 +105,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     threadId: ThreadId,
     runId: RunId,
     durability: Durability = Durability.Sync
-  ): Result[RunResult[O]] =
+  ): Result[RunResult[O]] = exclusively(threadId) {
     checkpointer.latest(threadId).flatMap {
       case Some(stored) if stored.checkpoint.status == CheckpointStatus.Running =>
         for
@@ -116,6 +123,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         Left(pendingInterrupts(threadId, stored))
       case _ => Left(GraphError.NothingToRecover(threadId.value))
     }
+  }
 
   /**
    * Answers some of the suspended thread's interrupts and continues; see the class description.
@@ -127,7 +135,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     answers: Map[InterruptId, ujson.Value],
     runId: RunId,
     durability: Durability = Durability.Sync
-  ): Result[RunResult[O]] =
+  ): Result[RunResult[O]] = exclusively(threadId) {
     checkpointer.latest(threadId).flatMap {
       case Some(stored) if stored.checkpoint.status == CheckpointStatus.Suspended =>
         for
@@ -141,6 +149,22 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         yield result
       case _ => Left(GraphError.NotSuspended(threadId.value))
     }
+  }
+
+  /**
+   * Runs `call` as the only call on `threadId` in this runtime. While a run executes, its thread's
+   * latest checkpoint is `Running`, which `recover` would otherwise take for an abandoned run and
+   * run the same frontier again, repeating its side effects.
+   */
+  private def exclusively[O](threadId: ThreadId)(call: => Result[RunResult[O]]): Result[RunResult[O]] =
+    if !active.synchronized(active.add(threadId.value)) then
+      checkpointer
+        .latest(threadId)
+        .flatMap(latest => Left(GraphError.ThreadBusy(threadId.value, latest.map(_.checkpoint.id))))
+    else
+      val outcome = Try(call)
+      active.synchronized(active.remove(threadId.value))
+      outcome.get
 
   private def pendingInterrupts(threadId: ThreadId, stored: StoredCheckpoint): GraphError =
     GraphError.PendingInterrupts(threadId.value, stored.checkpoint.snapshot.parked.map(_.interruptId).toList)

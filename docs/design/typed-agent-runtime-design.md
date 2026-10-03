@@ -447,7 +447,7 @@ Kernel decisions:
 Runtime decisions:
 
 - **Checkpoint status.** `Suspended` joins `Running` and `Completed`. `start` and `recover` refuse a suspended thread with `PendingInterrupts`. `resume` requires one, and returns `NotSuspended` otherwise. `recover` still accepts a `Running` thread that has parked continuations, such as a resumed run that crashed: it runs what is runnable and suspends again.
-- **Every run claims its thread.** Before running anything, `start`, `recover`, and `resume` synchronously commit a checkpoint whose parent is the latest checkpoint they read; `recover` also carries the pending writes over to it. If another run claimed the thread first, the call returns `ThreadBusy` and its input or answers are neither accepted nor discarded. This also makes "persist every suspension before returning it" hold in every mode, because each mode drains its commits before a run returns. Claim fencing against a stale worker is still Stage 2.
+- **Every run claims its thread.** Before running anything, `start`, `recover`, and `resume` synchronously commit a checkpoint whose parent is the latest checkpoint they read; `recover` also carries the pending writes over to it. If another run claimed the thread first, the call returns `ThreadBusy` and its input or answers are neither accepted nor discarded. This also makes "persist every suspension before returning it" hold in every mode, because each mode drains its commits before a run returns. A runtime also refuses any call on a thread whose run it is still executing with `ThreadBusy`, before reading the thread: an executing run's latest checkpoint is `Running`, which `recover` would otherwise take for an abandoned run and execute again, repeating its side effects. Across processes a live run is not yet distinguishable from a dead one; claim leases and fencing against a stale worker are Stage 2.
 - **Suspension events.** `TaskSuspended(interruptId)` is committed with the suspended task's pending write, so recovery does not re-run a task that suspended. `RunSuspended(interrupts)` and `RunResumed(answered)` mark the run boundaries.
 
 Tool-loop decisions (`ToolLoop`):
@@ -479,7 +479,7 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 | Per-node retry and cache policy (recovery currently retries a failed task once) | #1268 | Stage 1 |
 | Mermaid export | #1267 | Stage 1 |
 | Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
-| Run-claim fencing tokens on every commit (today: the optimistic parent check and `ThreadBusy`) | #1268, #1269 | Stage 2 |
+| Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit (today: the optimistic parent check, and `ThreadBusy` for a run still executing in the same runtime) | #1268, #1269 | Stage 2 |
 | Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction) | #1268 | Stage 2 |
 | Static `interruptBefore`/`interruptAfter` breakpoints | #1269 | Stage 2 |
 | Known limit, not planned: the structural fingerprint does not cover node input types; a changed input type is caught when a pending input fails to decode | #1267 | - |

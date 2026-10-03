@@ -3,7 +3,7 @@ package org.llm4s.agent.graph
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
-import org.scalatest.EitherValues
+import org.scalatest.{ EitherValues, LoneElement, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 
-class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues {
+class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues with LoneElement {
 
   private val thread = ThreadId("thread-1")
 
@@ -131,6 +131,28 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues {
 
     runtime.recover(f.graph, thread, RunId("run-3")).value.completed
     runtime.recover(f.graph, thread, RunId("run-4")).left.value shouldBe GraphError.NothingToRecover(thread.value)
+  }
+
+  it should "refuse every call on a thread whose run is still executing, rather than recover it" in {
+    val f       = Fixture()
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    val during  = mutable.ArrayBuffer.empty[(Option[String], Vector[Result[RunResult[Vector[String]]]])]
+    f.onWorker = _ =>
+      during += store.latest(thread).value.map(_.checkpoint.id) -> Vector(
+        runtime.recover(f.graph, thread, RunId("thief")),
+        runtime.start(thread, f.graph, Vector("x"), RunId("thief")),
+        runtime.resume(f.graph, thread, Map.empty, RunId("thief"))
+      )
+
+    runtime.start(thread, f.graph, Vector("a"), RunId("run-1")).value.completed._2 shouldBe Vector("A")
+
+    val (latest, results) = during.loneElement
+    latest.value should startWith("run-1/")
+    results.map(_.left.value) shouldBe Vector.fill(3)(GraphError.ThreadBusy(thread.value, latest))
+    f.callsOf("a") shouldBe 1
+    f.callsOf("x") shouldBe 0
+    runtime.recover(f.graph, thread, RunId("run-2")).left.value shouldBe GraphError.NothingToRecover(thread.value)
   }
 
   it should "recover without re-running siblings whose results were committed" in {

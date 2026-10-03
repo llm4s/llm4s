@@ -15,8 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the parked interrupts. A continuation fills the suspended task's join arrival, so a barrier stays
   closed until every parked call is answered. Checkpoints gain a `Suspended` status and format 2,
   with a migration from format 1. Every run now claims its thread with a synchronous commit, so a
-  racing `start`/`resume`/`recover` fails with `ThreadBusy`, and every returned suspension has been
-  persisted. `org.llm4s.agent.graph.toolloop.ToolLoop` prototypes the model/tool loop on the
+  racing `start`/`resume`/`recover` fails with `ThreadBusy` - as does any call on a thread whose run
+  is still executing in the same `GraphRuntime`, so `recover` cannot re-run a live run's work - and
+  every returned suspension has been persisted. `org.llm4s.agent.graph.toolloop.ToolLoop` prototypes the model/tool loop on the
   runtime: one task per call; exactly one runtime-written result per call, including denial,
   rejection, unknown tools and failures; policy- and tool-raised approvals both resuming at one
   approval node; and edited approvals amending the source assistant message. Design:
