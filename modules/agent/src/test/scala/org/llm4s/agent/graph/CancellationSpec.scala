@@ -62,6 +62,14 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     outcome.get
   }
 
+  /** Admits a run, cancels it once `ready` opens, and returns its result. */
+  private def cancelWhen[O](ready: CountDownLatch)(admitted: org.llm4s.types.Result[RunHandle[O]]): RunResult[O] = {
+    val handle = admitted.value
+    ready.await(10, TimeUnit.SECONDS) shouldBe true
+    handle.cancel()
+    handle.await().value
+  }
+
   /** Runs `body` on a virtual thread, so an interrupt flag it leaves cannot reach the test thread. */
   private def onVirtualThread[A](body: => A): (A, Boolean) = {
     @volatile var outcome: Option[(A, Boolean)] = None
@@ -187,14 +195,13 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
         val f       = afterOthers(blockOn = Set("b"), others = 1)
         val store   = InMemoryCheckpointer()
         val runtime = GraphRuntime(store)
-        val (result, flag) =
-          interruptWhen(f.started)(
-            runtime.start(thread, f.graph, Vector("a", "b"), RunConfig().withRunId(RunId("run-1")), durability).value
+        val result =
+          cancelWhen(f.started)(
+            runtime.start(thread, f.graph, Vector("a", "b"), RunConfig().withRunId(RunId("run-1")), durability)
           )
 
         val (_, error) = result.failed
         error shouldBe a[GraphError.Cancelled]
-        flag shouldBe true
         val latest = store.latest(thread).value.get
         latest.checkpoint.status shouldBe CheckpointStatus.Running
         val last = store.eventsAfter(thread, 0L, 100).value.last
@@ -204,7 +211,12 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
 
         // the claim was released, and recovery finishes the run without running "a" again
         val g = Fixture(blockOn = Set.empty)
-        runtime.recover(g.graph, thread, RunConfig().withRunId(RunId("run-2"))).value.completed._2 shouldBe Vector(
+        runtime
+          .recover(g.graph, thread, RunConfig().withRunId(RunId("run-2")))
+          .awaited
+          .value
+          .completed
+          ._2 shouldBe Vector(
           "A",
           "B"
         )
@@ -216,12 +228,11 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     val started   = new CountDownLatch(1)
     val swallowed = new AtomicInteger()
     val runtime   = GraphRuntime(InMemoryCheckpointer())
-    val (result, flag) =
-      interruptWhen(started)(
-        runtime.start(thread, swallowingGraph(started, swallowed), (), RunConfig().withRunId(RunId("run-1"))).value
+    val result =
+      cancelWhen(started)(
+        runtime.start(thread, swallowingGraph(started, swallowed), (), RunConfig().withRunId(RunId("run-1")))
       )
     result.failed._2 shouldBe a[GraphError.Cancelled]
-    flag shouldBe true
     swallowed.get shouldBe 1
   }
 
@@ -229,25 +240,25 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     val f       = afterOthers(blockOn = Set("b"), others = 1)
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)
-    interruptWhen(f.started)(
-      runtime.start(thread, f.graph, Vector("a", "b"), RunConfig().withRunId(RunId("run-1"))).value
-    )
+    cancelWhen(f.started)(runtime.start(thread, f.graph, Vector("a", "b"), RunConfig().withRunId(RunId("run-1"))))
     store.latest(thread).value.get.pendingWrites.map(_.nodeId) shouldBe Vector("worker") // a's only
     store.eventsAfter(thread, 0L, 100).value.map(_.event).collect { case e: RunEvent.TaskFailed => e } shouldBe empty
   }
 
-  it should "be stopped by a timeout wrapped around the call, with no task left running" in {
+  it should "keep running when a timeout around await expires, until cancelled, with no task left running" in {
     val f       = Fixture(blockOn = Set("b", "c"))
     val runtime = GraphRuntime(InMemoryCheckpointer())
-    val outcome = Try(
-      ox.timeout(2.seconds)(
-        runtime.start(thread, f.graph, Vector("a", "b", "c"), RunConfig().withRunId(RunId("run-1")))
-      )
-    )
-    outcome.failed.get shouldBe a[TimeoutException]
-    f.interrupted.toArray.toSet shouldBe Set("b", "c") // both stopped and joined before timeout returned
+    val handle  = runtime.start(thread, f.graph, Vector("a", "b", "c"), RunConfig().withRunId(RunId("run-1"))).value
+    f.started.await(10, TimeUnit.SECONDS) shouldBe true
+    Try(ox.timeout(100.millis)(handle.await())).failed.get shouldBe a[TimeoutException]
+    handle.status shouldBe RunStatus.Running // interrupting the awaiting thread did not cancel the run
+    f.interrupted.isEmpty shouldBe true
+    handle.cancel()
+    handle.await().value.failed._2 shouldBe a[GraphError.Cancelled]
+    f.interrupted.toArray.toSet shouldBe Set("b", "c") // both stopped and joined before the run ended
     runtime
       .recover(Fixture(Set.empty).graph, thread, RunConfig().withRunId(RunId("run-2")))
+      .awaited
       .value
       .completed
       ._2 shouldBe Vector("A", "B", "C")
@@ -266,12 +277,11 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     val join = b.dynamicJoin("j", done)
     val plan = b.node[Vector[String]]("plan")((items, _, _) => continue(Command.empty.fanOut(join, stubborn, items)))
     val g    = b.compile(plan)(_.get(results)).value
-    val (result, flag) =
-      interruptWhen(started)(
-        GraphRuntime(InMemoryCheckpointer()).start(thread, g, Vector("x", "y"), RunConfig().withRunId(RunId("r"))).value
+    val result =
+      cancelWhen(started)(
+        GraphRuntime(InMemoryCheckpointer()).start(thread, g, Vector("x", "y"), RunConfig().withRunId(RunId("r")))
       )
     result.failed._2 shouldBe a[GraphError.Cancelled]
-    flag shouldBe true
   }
 
   it should "report a failed drain of an Async queue as CheckpointWriteFailed, keeping the cancellation" in {
@@ -289,15 +299,14 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
     val f       = afterOthers(blockOn = Set("b"), others = 1, onBlock = () => broken.set(true))
     val runtime = GraphRuntime(failing)
-    val (result, flag) =
-      interruptWhen(f.started)(
-        runtime.start(thread, f.graph, Vector("a", "b"), RunConfig().withRunId(RunId("run-1")), Durability.Async).value
+    val result =
+      cancelWhen(f.started)(
+        runtime.start(thread, f.graph, Vector("a", "b"), RunConfig().withRunId(RunId("run-1")), Durability.Async)
       )
     result.failed._2 match {
       case GraphError.CheckpointWriteFailed(_, _, Some(_: GraphError.Cancelled)) => succeed
       case other => fail(s"expected CheckpointWriteFailed with the cancellation, got $other")
     }
-    flag shouldBe true
     // the thread claim was released: the next call is refused for the thread's state, not ThreadBusy
     runtime
       .start(thread, f.graph, Vector("z"), RunConfig().withRunId(RunId("run-2")))
@@ -305,9 +314,9 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
       .value shouldBe a[GraphError.IncompleteRun]
   }
 
-  it should "drain an Async queue before returning when interrupted after its last superstep" in {
-    // the writer holds the run's final (Completed) checkpoint commit until the caller has been
-    // interrupted, so the interrupt lands while the queue is not yet drained
+  it should "drain an Async queue before ending when cancelled after its last superstep" in {
+    // the writer holds the run's final (Completed) checkpoint commit until the run has been
+    // cancelled, so the interrupt lands while the queue is not yet drained
     val arrived = new CountDownLatch(1)
     val release = new CountDownLatch(1)
     val slow = new Checkpointer {
@@ -325,21 +334,27 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
     val f       = Fixture(blockOn = Set.empty)
     val runtime = GraphRuntime(slow)
-    @volatile var outcome: Option[(RunResult[Vector[String]], Option[CheckpointStatus], Boolean)] = None
-    val runner = Thread.ofVirtual().start { () =>
-      val result =
-        runtime.start(thread, f.graph, Vector("a"), RunConfig().withRunId(RunId("run-1")), Durability.Async).value
-      outcome = Some((result, slow.latest(thread).value.map(_.checkpoint.status), Thread.currentThread().isInterrupted))
-    }
+    val handle =
+      runtime.start(thread, f.graph, Vector("a"), RunConfig().withRunId(RunId("run-1")), Durability.Async).value
     arrived.await(10, TimeUnit.SECONDS) shouldBe true
-    runner.interrupt() // the run has submitted its last commit and is closing the committer
+    handle.cancel() // the run has submitted its last commit and is closing the committer
     release.countDown()
-    runner.join(10_000)
-    runner.isAlive shouldBe false
-    val (result, latestStatus, flag) = outcome.get
-    result.completed._2 shouldBe Vector("A") // not CheckpointWriteFailed: an interrupt is not a write failure
-    latestStatus shouldBe Some(CheckpointStatus.Completed) // durable before start returned
+    // not CheckpointWriteFailed: an interrupt is not a write failure
+    handle.await().value.completed._2 shouldBe Vector("A")
+    slow.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Completed)
+  }
+
+  it should "not be cancelled by interrupting a thread awaiting it" in {
+    val f               = Fixture(blockOn = Set("b"))
+    val runtime         = GraphRuntime(InMemoryCheckpointer())
+    val handle          = runtime.start(thread, f.graph, Vector("a", "b"), RunConfig().withRunId(RunId("run-1"))).value
+    val (awaited, flag) = interruptWhen(f.started)(handle.await())
+    awaited.left.value shouldBe a[CancelledError]
     flag shouldBe true
+    f.interrupted.isEmpty shouldBe true
+    handle.status shouldBe RunStatus.Running
+    handle.cancel()
+    handle.await().value.failed._2 shouldBe a[GraphError.Cancelled]
   }
 
   "TaskExecutor.bounded" should "return results in task order" in {

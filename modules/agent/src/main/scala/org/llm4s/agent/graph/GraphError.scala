@@ -38,11 +38,11 @@ object GraphError:
       s"Join '${joinId.value}' can never release; still waiting for ${missing.mkString(", ")}"
 
   /**
-   * The run was cancelled by interrupting its thread. Every task was interrupted and joined. In a
-   * durable run, tasks that finished first keep their results as pending writes, and the
-   * checkpoint stays `Running`, so `recover` continues it without re-running them. An in-memory
-   * `CompiledGraph.run` keeps nothing from the cancelled superstep: its state is the state before
-   * that superstep. The interrupt flag is set when this is returned.
+   * The run was cancelled by interrupting its thread - [[RunHandle.cancel]] in a runtime, or
+   * interrupting the thread driving [[CompiledGraph.step]]. Every task was interrupted and joined.
+   * In a runtime, tasks that finished first keep their results as pending writes, and the
+   * checkpoint stays `Running`, so `recover` continues it without re-running them. A step keeps
+   * nothing from the cancelled superstep, and returns this with the interrupt flag set.
    */
   final case class Cancelled(threadId: Option[String], lastCheckpoint: Option[String]) extends GraphError:
     override val message: String =
@@ -128,3 +128,11 @@ object GraphError:
   final case class ThreadBusy(threadId: String, latestCheckpoint: Option[String]) extends GraphError:
     override val message: String =
       s"Thread '$threadId' is held by another run (now at ${latestCheckpoint.getOrElse("<none>")}); retry"
+
+  /**
+   * The run ended with an unexpected throwable - such as a checkpointer that threw rather than
+   * returning `Left` - and was stopped where it was. Its thread claim is released; whatever the
+   * store holds for the thread stands.
+   */
+  final case class RunCrashed(threadId: String, cause: Throwable) extends GraphError:
+    override val message: String = s"Run on thread '$threadId' crashed: $cause"

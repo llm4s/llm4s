@@ -47,11 +47,11 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val f       = Fixture()
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)
-    runtime.start(thread, f.graph, "x", tenant("a")).value.completed
+    runtime.start(thread, f.graph, "x", tenant("a")).awaited.value.completed
 
-    untouched(store)(runtime.start(thread, f.graph, "y", tenant("b"))).left.value shouldBe
+    untouched(store)(runtime.start(thread, f.graph, "y", tenant("b")).awaited).left.value shouldBe
       GraphError.TenantMismatch("t", Some("a"), Some("b"))
-    untouched(store)(runtime.start(thread, f.graph, "y", RunConfig())).left.value shouldBe
+    untouched(store)(runtime.start(thread, f.graph, "y", RunConfig()).awaited).left.value shouldBe
       GraphError.TenantMismatch("t", Some("a"), None)
     GraphError.TenantMismatch("t", Some("a"), None).message should (include("'a'").and(include("<none>")))
   }
@@ -60,9 +60,9 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val f       = Fixture()
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)
-    runtime.start(thread, f.graph, "x").value.completed
+    runtime.start(thread, f.graph, "x").awaited.value.completed
 
-    untouched(store)(runtime.start(thread, f.graph, "y", tenant("a"))).left.value shouldBe
+    untouched(store)(runtime.start(thread, f.graph, "y", tenant("a")).awaited).left.value shouldBe
       GraphError.TenantMismatch("t", None, Some("a"))
   }
 
@@ -71,40 +71,41 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)
     f.failing.set(true)
-    runtime.start(thread, f.graph, "x", tenant("a")).value.failed
+    runtime.start(thread, f.graph, "x", tenant("a")).awaited.value.failed
     store.latest(thread).value.value.checkpoint.status shouldBe CheckpointStatus.Running
 
-    untouched(store)(runtime.recover(f.graph, thread, tenant("b"))).left.value shouldBe
+    untouched(store)(runtime.recover(f.graph, thread, tenant("b")).awaited).left.value shouldBe
       GraphError.TenantMismatch("t", Some("a"), Some("b"))
-    runtime.recover(f.graph, thread, tenant("a")).value.completed
+    runtime.recover(f.graph, thread, tenant("a")).awaited.value.completed
   }
 
   it should "refuse resume by another tenant" in {
     val f       = Fixture()
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)
-    val parked  = runtime.start(thread, f.graph, "ask", tenant("a")).value.suspended
+    val parked  = runtime.start(thread, f.graph, "ask", tenant("a")).awaited.value.suspended
     val answers = Map(parked.interrupts.head.id -> f.approve.answer("yes"))
 
-    untouched(store)(runtime.resume(f.graph, thread, answers, tenant("b"))).left.value shouldBe
+    untouched(store)(runtime.resume(f.graph, thread, answers, tenant("b")).awaited).left.value shouldBe
       GraphError.TenantMismatch("t", Some("a"), Some("b"))
-    untouched(store)(runtime.resume(f.graph, thread, answers)).left.value shouldBe
+    untouched(store)(runtime.resume(f.graph, thread, answers).awaited).left.value shouldBe
       GraphError.TenantMismatch("t", Some("a"), None)
-    runtime.resume(f.graph, thread, answers, tenant("a")).value.completed._2 shouldBe Vector("yes")
+    runtime.resume(f.graph, thread, answers, tenant("a")).awaited.value.completed._2 shouldBe Vector("yes")
   }
 
   it should "continue for a matching tenant, recording it on every checkpoint" in {
     val f       = Fixture()
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)
-    val parked  = runtime.start(thread, f.graph, "ask", tenant("a")).value.suspended
+    val parked  = runtime.start(thread, f.graph, "ask", tenant("a")).awaited.value.suspended
     store.latest(thread).value.value.checkpoint.tenantId shouldBe Some("a")
     runtime
       .resume(f.graph, thread, Map(parked.interrupts.head.id -> f.approve.answer("yes")), tenant("a"))
+      .awaited
       .value
       .completed
     store.latest(thread).value.value.checkpoint.tenantId shouldBe Some("a")
-    runtime.start(thread, f.graph, "again", tenant("a")).value.completed
+    runtime.start(thread, f.graph, "again", tenant("a")).awaited.value.completed
     store.latest(thread).value.value.checkpoint.tenantId shouldBe Some("a")
     store.latest(thread).value.value.checkpoint.formatVersion shouldBe Checkpoint.CurrentFormat
   }
@@ -114,7 +115,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)
     val first   = tenant("a").withPrincipal(Principal("alice"))
-    val parked  = runtime.start(thread, f.graph, "ask", first).value.suspended
+    val parked  = runtime.start(thread, f.graph, "ask", first).awaited.value.suspended
     runtime
       .resume(
         f.graph,
@@ -122,6 +123,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
         Map(parked.interrupts.head.id -> f.approve.answer("yes")),
         tenant("a").withPrincipal(Principal("bob"))
       )
+      .awaited
       .value
       .completed
 
@@ -134,7 +136,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
   it should "accept any tenant when it has no checkpoint" in {
     val f       = Fixture()
     val runtime = GraphRuntime(InMemoryCheckpointer())
-    runtime.start(ThreadId("fresh"), f.graph, "x", tenant("zzz")).value.completed
+    runtime.start(ThreadId("fresh"), f.graph, "x", tenant("zzz")).awaited.value.completed
   }
 
   "The event log" should "read events written before tenants existed" in {

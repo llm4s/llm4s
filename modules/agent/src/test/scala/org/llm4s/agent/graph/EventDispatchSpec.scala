@@ -103,7 +103,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
         collector.listener(event)
       }
       .value
-    runtime.start(thread, graph, "go").value.completed
+    runtime.start(thread, graph, "go").awaited.value.completed
 
     val received = durableSeqs(collector.untilRunEnds())
     received shouldBe (1L to store.eventsAfter(thread, 0L, 1000).value.size.toLong).toVector
@@ -129,7 +129,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       .value
     store.awaitSwitch()
 
-    val run = Future(runtime.start(thread, emitting(2), "go"))
+    val run = Future(runtime.start(thread, emitting(2), "go").awaited)
     Await.result(run, 5.seconds).value.completed
     val total = store.underlying.eventsAfter(thread, 0L, 1000).value.size.toLong
     total should be > 6L
@@ -189,7 +189,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
         }
       ticksSent.set(tick(0))
     }
-    runtime.start(thread, graph, "go").value.completed
+    runtime.start(thread, graph, "go").awaited.value.completed
 
     val received = collector.untilRunEnds()
     received.collect { case d: StreamEvent.Disconnected => d } shouldBe empty
@@ -219,14 +219,14 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
         case other                                                     => collector.listener(other)
       }
       .value
-    runtime.start(thread, emitting(1), "go").value.completed
+    runtime.start(thread, emitting(1), "go").awaited.value.completed
 
     collector.next() match {
       case StreamEvent.Durable(r) => r.seq shouldBe 1L
       case other                  => fail(s"expected seq 1, got $other")
     }
     collector.next() shouldBe StreamEvent.Disconnected(1L, DisconnectReason.ListenerFailed(boom))
-    runtime.start(thread, emitting(1), "again").value.completed
+    runtime.start(thread, emitting(1), "again").awaited.value.completed
     collector.quiet()
   }
 
@@ -238,7 +238,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       val t         = ThreadId(s"race-$i")
       val collector = Collector()
       val sub       = runtime.subscribe(t)(collector.listener).value
-      val run       = Future(runtime.start(t, graph, "go"))
+      val run       = Future(runtime.start(t, graph, "go").awaited)
       val seqs      = durableSeqs(collector.untilRunEnds())
       Await.result(run, 5.seconds).value.completed
       withClue(s"thread $i: ")(seqs shouldBe (1L to store.eventsAfter(t, 0L, 1000).value.size.toLong).toVector)
@@ -252,9 +252,9 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     val runtime = GraphRuntime(store)
     (1 to 50).foreach { i =>
       val t = ThreadId(s"replay-$i")
-      runtime.start(t, graph, "first").value.completed
+      runtime.start(t, graph, "first").awaited.value.completed
       val collector = Collector()
-      val run       = Future(runtime.start(t, graph, "second"))
+      val run       = Future(runtime.start(t, graph, "second").awaited)
       runtime.subscribe(t, afterSeq = 0L)(collector.listener).value
       val seqs = durableSeqs(collector.untilRunEnds(runs = 2))
       Await.result(run, 5.seconds).value.completed
@@ -286,7 +286,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     val runtime   = GraphRuntime.inMemory()
     val cancelled = Collector()
     runtime.subscribe(thread)(cancelled.listener).value.cancel()
-    runtime.start(thread, emitting(1), "go").value.completed
+    runtime.start(thread, emitting(1), "go").awaited.value.completed
     val witness = Collector()
     runtime.subscribe(thread)(witness.listener).value
     witness.untilRunEnds()
@@ -308,7 +308,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     entered.await(5, TimeUnit.SECONDS) shouldBe true
     sub.cancel()
     release.countDown()
-    runtime.start(thread, emitting(1), "again").value.completed
+    runtime.start(thread, emitting(1), "again").awaited.value.completed
     blocked.next() shouldBe a[StreamEvent.Durable]
     blocked.quiet()
   }
@@ -324,7 +324,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     val entered   = new CountDownLatch(1)
     val released  = new AtomicBoolean(false)
     val ended     = new AtomicBoolean(false)
-    runtime.start(t, emitting(1), "go").value.completed
+    runtime.start(t, emitting(1), "go").awaited.value.completed
     val sub = runtime
       .subscribe(t) { event =>
         collector.listener(event)
@@ -343,7 +343,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     Await.result(cancelling, 5.seconds) shouldBe true
     val before = Iterator.continually(Option(collector.queue.poll())).takeWhile(_.isDefined).flatten.toVector
     before.lastOption.exists(blockOn) shouldBe true
-    runtime.start(t, emitting(1), "again").value.completed
+    runtime.start(t, emitting(1), "again").awaited.value.completed
     collector.quiet()
   }
 

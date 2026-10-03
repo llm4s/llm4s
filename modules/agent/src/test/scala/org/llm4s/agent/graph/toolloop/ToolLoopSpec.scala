@@ -180,6 +180,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val first =
       GraphRuntime(store)
         .start(thread, loop(model, tools).graph, "go", RunConfig().withRunId(RunId("run-1")), Durability.Async)
+        .awaited
         .value
     val requests = loop(model, tools).requests(first.suspended).value.map((id, r) => r.call.id -> id).toMap
     store.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Suspended)
@@ -188,14 +189,17 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val again = loop(model, tools)
     GraphRuntime(store)
       .start(thread, again.graph, "more", RunConfig().withRunId(RunId("run-x")))
+      .awaited
       .left
       .value shouldBe a[GraphError.PendingInterrupts]
     GraphRuntime(store)
       .recover(again.graph, thread, RunConfig().withRunId(RunId("run-x")))
+      .awaited
       .left
       .value shouldBe a[GraphError.PendingInterrupts]
     GraphRuntime(store)
       .resume(again.graph, thread, Map(InterruptId("nope") -> ujson.Null), RunConfig().withRunId(RunId("run-x")))
+      .awaited
       .left
       .value shouldBe
       a[GraphError.InvalidResume]
@@ -209,6 +213,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
         RunConfig().withRunId(RunId("run-2")),
         Durability.OnExit
       )
+      .awaited
       .value
     second.suspended.interrupts.map(_.id) shouldBe Vector(requests("c2"))
     store.latest(thread).value.map(s => s.checkpoint.status -> s.checkpoint.runId) shouldBe
@@ -222,6 +227,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
         last.answers(requests("c2") -> ApprovalDecision.Approve),
         RunConfig().withRunId(RunId("run-3"))
       )
+      .awaited
       .value
       .completed
       ._2 shouldBe "done: c1=found x | c2=deployed to prod | c3=hi"
@@ -235,6 +241,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
         last.answers(requests("c2") -> ApprovalDecision.Approve),
         RunConfig().withRunId(RunId("run-4"))
       )
+      .awaited
       .left
       .value shouldBe
       GraphError.NotSuspended(thread.value)
@@ -263,12 +270,14 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val model = threeCalls
     val store = InMemoryCheckpointer()
     val l     = loop(model)
-    val first = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).value.suspended
+    val first =
+      GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited.value.suspended
     val ids   = l.requests(first).value.map((id, r) => r.call.id -> id).toMap
     val stale = store.latest(thread).value
 
     GraphRuntime(store)
       .resume(l.graph, thread, l.answers(ids("c1") -> ApprovalDecision.Approve), RunConfig().withRunId(RunId("run-2")))
+      .awaited
       .value
       .suspended
     val afterWinner = store.latest(thread).value.map(_.checkpoint.id)
@@ -282,6 +291,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
     GraphRuntime(racing)
       .resume(l.graph, thread, l.answers(ids("c2") -> ApprovalDecision.Approve), RunConfig().withRunId(RunId("run-3")))
+      .awaited
       .left
       .value shouldBe
       GraphError.ThreadBusy(thread.value, afterWinner)
@@ -303,12 +313,14 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
     val l     = ToolLoop.build("assistant", "v1", model, Seq(flaky, counting, tools.deploy), policy).value
     val store = InMemoryCheckpointer()
-    val first = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).value.suspended
-    val ids   = l.requests(first).value.map((id, r) => r.call.id -> id).toMap
+    val first =
+      GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited.value.suspended
+    val ids     = l.requests(first).value.map((id, r) => r.call.id -> id).toMap
     val answers = l.answers(ids("c1") -> ApprovalDecision.Approve, ids("c2") -> ApprovalDecision.Approve)
     // a thrown tool is a tool-level failure, not a failed run: it becomes that call's error result
     GraphRuntime(store)
       .resume(l.graph, thread, answers, RunConfig().withRunId(RunId("run-2")))
+      .awaited
       .value
       .completed
       ._2 shouldBe
@@ -337,24 +349,17 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val l     = ToolLoop.build("assistant", "v1", model, Seq(echo, slow), policy).value
     val store = InMemoryCheckpointer()
 
-    @volatile var outcome: Option[RunResult[String]] = None
-    val runner = Thread
-      .ofVirtual()
-      .start(() =>
-        outcome = Some(GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).value)
-      )
+    val handle = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).value
     started.await(10, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
-    runner.interrupt()
-    runner.join(10_000)
-    runner.isAlive shouldBe false
-    outcome.get.failed._2 shouldBe a[GraphError.Cancelled]
+    handle.cancel()
+    handle.await().value.failed._2 shouldBe a[GraphError.Cancelled]
 
     // c1's result was committed; c2 has none
     val pending = store.latest(thread).value.get.pendingWrites
     pending.size shouldBe 1
 
     val (_, answer) =
-      GraphRuntime(store).recover(l.graph, thread, RunConfig().withRunId(RunId("run-2"))).value.completed
+      GraphRuntime(store).recover(l.graph, thread, RunConfig().withRunId(RunId("run-2"))).awaited.value.completed
     answer shouldBe "done: c1=hi | c2=slow done"
     slowRuns.get shouldBe 2
     model.calls shouldBe 2

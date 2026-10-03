@@ -15,7 +15,7 @@ object GraphTestSupport {
     config: RunConfig = RunConfig(),
     thread: String = "t"
   ): RunResult[O] =
-    GraphRuntime.inMemory().start(ThreadId(thread), graph, input, config) match {
+    GraphRuntime.inMemory().start(ThreadId(thread), graph, input, config).flatMap(_.await()) match {
       case Right(result) => result
       case Left(error)   => fail(s"run refused: ${error.message}")
     }
@@ -50,6 +50,10 @@ object GraphTestSupport {
   }
 
   def continue(command: Command): NodeResult = NodeResult.Continue(command)
+
+  extension [O](admitted: org.llm4s.types.Result[RunHandle[O]])
+    /** The run's result once it ends; a refusal stays a `Left`. */
+    def awaited: org.llm4s.types.Result[RunResult[O]] = admitted.flatMap(_.await())
 
   extension [O](result: RunResult[O])
     def completed: (ThreadState, O) = result match {
