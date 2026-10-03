@@ -24,7 +24,7 @@ import org.llm4s.error.ThrowableOps.*
 
 import java.time.Instant
 import scala.jdk.CollectionConverters.*
-import scala.util.Try
+import scala.util.{ Try, Using }
 
 /**
  * [[LLMClient]] implementation for Anthropic Claude models.
@@ -147,7 +147,7 @@ class AnthropicClient(
           case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
           case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
           case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
-          case e: Exception                                          => e.toLLMError
+          case e                                                     => e.toLLMError
         }
         val result       = attempt.map(convertFromAnthropicResponse)
         val responseBody = attempt.toOption.map(serializeResponseBody)
@@ -233,11 +233,9 @@ curl https://api.anthropic.com/v1/messages \
         // Process the stream
         val attempt = Try {
           val messageService = client.messages()
-          val streamResponse = messageService.createStreaming(messageParams)
-
-          import scala.jdk.StreamConverters._
-          val stream: Iterator[RawMessageStreamEvent] = streamResponse.stream().toScala(Iterator)
-          val loopTry = Try {
+          Using.resource(messageService.createStreaming(messageParams)) { streamResponse =>
+            import scala.jdk.StreamConverters._
+            val stream: Iterator[RawMessageStreamEvent] = streamResponse.stream().toScala(Iterator)
             stream.foreach { event =>
               rawStream.append(serializeStreamEvent(event)).append('\n')
               // Process different event types using the event's accessor methods
@@ -359,14 +357,12 @@ curl https://api.anthropic.com/v1/messages \
               }
             }
           }
-          Try(streamResponse.close());
-          loopTry.get
         }.toEither.left
           .map {
             case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
             case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
             case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
-            case e: Exception                                          => e.toLLMError
+            case e                                                     => e.toLLMError
           }
 
         // Return the accumulated completion

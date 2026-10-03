@@ -4,7 +4,8 @@ import org.llm4s.config.AnthropicConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.testkit.LocalProviderTestServer.{ sendSseResponse, withServer }
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendSseResponse, streamThenHold, withServer }
 import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
@@ -49,6 +50,9 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
       baseUrl = AnthropicProvider.configSpec.defaultBaseUrl.map(BaseUrl(_)),
       apiKey = Some(ApiKey("test-key")),
     )
+
+  private def clientAt(baseUrl: String): LLMClient =
+    assertBuildsClient(AnthropicProvider, section.withBaseUrl(Some(BaseUrl(baseUrl))))
 
   "the llm4s-anthropic services entry" should {
 
@@ -96,7 +100,19 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderMo
 
     "actually stream, not silently fall back to complete()" in {
       withServer("/v1/messages")(exchange => sendSseResponse(exchange, streamingBody)) { baseUrl =>
-        assertStreams(assertBuildsClient(AnthropicProvider, section.withBaseUrl(Some(BaseUrl(baseUrl)))))
+        assertStreams(clientAt(baseUrl))
+      }
+    }
+
+    "return CancelledError when a call is interrupted" in {
+      withServer("/v1/messages")(holdOpen)(baseUrl => assertCancelsWhenInterrupted(clientAt(baseUrl)))
+    }
+
+    "return CancelledError when a stream is interrupted after its first event" in {
+      // events up to and including the first content_block_delta, which yields a chunk
+      val firstEvent = streamingBody.split("\n\n").take(3).mkString("", "\n\n", "\n\n")
+      withServer("/v1/messages")(streamThenHold(_, firstEvent)) { baseUrl =>
+        assertCancelsStreamWhenInterrupted(clientAt(baseUrl))
       }
     }
   }
