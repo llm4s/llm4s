@@ -103,17 +103,24 @@ final private[graph] class DefaultRunHandle[O](
     runThread = thread
     thread.start()
 
+  /**
+   * The run thread's body. `crashed` must not throw (see [[DefaultRunHandle.guarded]]). `result` is
+   * completed on every exit: by `close`, after `release`, even if `release` throws or something
+   * escapes [[DefaultRunHandle.guarded]] (a `ControlThrowable`).
+   */
   private def run(body: () => RunResult[O], crashed: Throwable => RunResult[O], release: () => Unit): Unit =
     var outcome: Option[RunResult[O]] = None
-    // `close` runs on every exit, even a fatal error that nothing below catches
     Using.resource(new AutoCloseable {
       def close(): Unit =
-        release()
+        DefaultRunHandle.guarded(release()): Unit
         result.complete(outcome.getOrElse(crashed(new IllegalStateException("run thread ended abnormally")))): Unit
-    }) { _ =>
-      outcome = Some(CancelledError.catchInterrupt(allCatch.either(body())) match
-        case Right(Right(done))  => done
-        case Right(Left(thrown)) => crashed(thrown)
-        case Left(interrupted)   => crashed(interrupted)
-      )
-    }
+    })(_ => outcome = Some(DefaultRunHandle.guarded(body()).fold(crashed, identity)))
+
+private[graph] object DefaultRunHandle:
+
+  /**
+   * Runs `body`, returning anything it throws - an `InterruptedException` or a fatal error included -
+   * as `Left`; only a `ControlThrowable` propagates. An interrupt's flag is left cleared.
+   */
+  def guarded[A](body: => A): Either[Throwable, A] =
+    CancelledError.catchInterrupt(allCatch.either(body)).fold(Left(_), identity)

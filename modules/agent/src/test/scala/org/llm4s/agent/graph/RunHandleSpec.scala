@@ -8,7 +8,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.time.{ Clock, Instant, ZoneId, ZoneOffset }
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import java.util.concurrent.{ CountDownLatch, LinkedBlockingQueue, TimeUnit }
 
 class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
@@ -39,7 +39,12 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     b.compile(ask)(_.get(out).map(_.mkString)).value
   }
 
-  private def await[O](handle: RunHandle[O]): RunResult[O] = handle.await().value
+  /** The run's result, awaited on another thread so that a hung run fails the test within 5s. */
+  private def await[O](handle: RunHandle[O]): RunResult[O] = {
+    val done = new LinkedBlockingQueue[Result[RunResult[O]]]()
+    Thread.ofVirtual().start(() => done.offer(handle.await()): Unit)
+    Option(done.poll(5, TimeUnit.SECONDS)).getOrElse(fail("await did not return within 5s")).value
+  }
 
   /** The thread's latest checkpoint and event log, to show a refused call changed nothing. */
   private def snapshot(store: Checkpointer): (Option[String], Vector[EventRecord]) =
@@ -113,12 +118,12 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
       val runtime = GraphRuntime.inMemory()
       val handle  = runtime.start(thread, instant, "x").value
       handle.cancel()
-      handle.await().value match {
+      await(handle) match {
         case RunResult.Failed(_, _: GraphError.Cancelled) =>
-          runtime.recover(instant, thread).value.await().value.completed._2 shouldBe "x"
+          await(runtime.recover(instant, thread).value).completed._2 shouldBe "x"
         case RunResult.Completed(_, output, _) =>
           output shouldBe "x"
-          runtime.start(thread, instant, "y").value.await().value.completed._2 shouldBe "xy"
+          await(runtime.start(thread, instant, "y").value).completed._2 shouldBe "xy"
         case other => fail(s"iteration $i: $other")
       }
     }
@@ -163,9 +168,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
 
     handle.status shouldBe RunStatus.Running
     release.countDown()
-    val again = new LinkedBlockingQueue[RunResult[String]]()
-    Thread.ofVirtual().start(() => again.put(await(handle)))
-    Option(again.poll(5, TimeUnit.SECONDS)).getOrElse(fail("no result")).completed._2 shouldBe "x"
+    await(handle).completed._2 shouldBe "x" // from another thread
   }
 
   "status" should "be Running while a node blocks, then follow the result" in {
@@ -237,21 +240,25 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
   }
 
+  /** A clock that throws while `failing` says so for the read numbered by its argument (from 1). */
+  private def clock(failing: Int => Boolean): Clock = new Clock {
+    private val reads                          = new AtomicInteger()
+    def getZone: ZoneId                        = ZoneOffset.UTC
+    override def withZone(zone: ZoneId): Clock = this
+    override def instant(): Instant =
+      if failing(reads.incrementAndGet()) then throw new IllegalStateException("clock exploded") else Instant.EPOCH
+  }
+
+  private def crashedBy(error: LLMError, message: String) = error match {
+    case GraphError.RunCrashed("t", cause) => cause.getMessage shouldBe message
+    case other                             => fail(s"expected RunCrashed, got $other")
+  }
+
   "A run" should "fail with RunCrashed when something unexpected throws, and release its thread" in {
     // the claim reads the clock twice on the caller's thread; the run thread's first read throws
-    val reads = new AtomicInteger()
-    val clock = new Clock {
-      def getZone: ZoneId                        = ZoneOffset.UTC
-      override def withZone(zone: ZoneId): Clock = this
-      override def instant(): Instant =
-        if reads.incrementAndGet() > 2 then throw new IllegalStateException("clock exploded") else Instant.EPOCH
-    }
-    val runtime = GraphRuntime(InMemoryCheckpointer(), clock)
+    val runtime = GraphRuntime(InMemoryCheckpointer(), clock(_ > 2))
     val handle  = runtime.start(thread, instant, "x").value
-    await(handle).failed._2 match {
-      case GraphError.RunCrashed("t", cause) => cause.getMessage shouldBe "clock exploded"
-      case other                             => fail(s"expected RunCrashed, got $other")
-    }
+    crashedBy(await(handle).failed._2, "clock exploded")
     handle.status shouldBe RunStatus.Failed
     // released: refused for the thread's state, not ThreadBusy
     runtime.start(thread, instant, "y").left.value shouldBe a[GraphError.IncompleteRun]
@@ -275,5 +282,85 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
       case other                                              => fail(s"expected CheckpointWriteFailed, got $other")
     }
     await(runtime.start(thread, instant, "y").value).completed._2 shouldBe "y" // the store works now
+  }
+
+  it should "refuse a claim whose clock throws, releasing the thread" in {
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store, clock(_ == 1))
+    crashedBy(runtime.start(thread, instant, "x").left.value, "clock exploded")
+    store.latest(thread).value shouldBe None
+    await(runtime.start(thread, instant, "y").value).completed._2 shouldBe "y"
+  }
+
+  /** A store whose `latest` runs `onLatest` first, while `armed` is set. */
+  private def latestStore(onLatest: () => Unit): (Checkpointer, AtomicBoolean) = {
+    val armed = new AtomicBoolean(true)
+    val store = new Checkpointer {
+      val underlying                                 = InMemoryCheckpointer()
+      def commit(threadId: ThreadId, commit: Commit) = underlying.commit(threadId, commit)
+      def latest(threadId: ThreadId) = {
+        if armed.get then onLatest()
+        underlying.latest(threadId)
+      }
+      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+        underlying.eventsAfter(threadId, afterSeq, limit)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    }
+    (store, armed)
+  }
+
+  it should "refuse a call whose read of the thread throws, on every path, releasing the thread" in {
+    val (store, armed) = latestStore(() => throw new IllegalStateException("read exploded"))
+    val runtime        = GraphRuntime(store)
+    crashedBy(runtime.start(thread, instant, "x").left.value, "read exploded")
+    crashedBy(runtime.recover(instant, thread).left.value, "read exploded")
+    crashedBy(runtime.resume(asking, thread, Map.empty).left.value, "read exploded")
+
+    // the ThreadBusy path reads the thread too
+    armed.set(false)
+    val started = new CountDownLatch(1)
+    val handle  = runtime.start(thread, blocking(started), "x").value
+    started.await(5, TimeUnit.SECONDS) shouldBe true
+    armed.set(true)
+    crashedBy(runtime.start(thread, instant, "y").left.value, "read exploded")
+    armed.set(false)
+    handle.cancel()
+    await(handle).failed._2 shouldBe a[GraphError.Cancelled]
+    await(runtime.recover(instant, thread).value).completed._2 shouldBe "x"
+  }
+
+  it should "refuse an interrupted admission with CancelledError and the flag set, releasing the thread" in {
+    val (store, armed) = latestStore(() => throw new InterruptedException("admission interrupted"))
+    val runtime        = GraphRuntime(store)
+    val outcome        = new LinkedBlockingQueue[(Result[RunHandle[String]], Boolean)]()
+    Thread.ofVirtual().start { () =>
+      outcome.offer(runtime.start(thread, instant, "x") -> Thread.currentThread().isInterrupted): Unit
+    }
+    val (refused, flag) = Option(outcome.poll(5, TimeUnit.SECONDS)).getOrElse(fail("start did not return"))
+    refused.left.value shouldBe a[CancelledError]
+    flag shouldBe true
+    armed.set(false)
+    await(runtime.start(thread, instant, "y").value).completed._2 shouldBe "y"
+  }
+
+  it should "refuse a claim whose commit returns no event, releasing the thread" in {
+    val store = new Checkpointer {
+      val underlying = InMemoryCheckpointer()
+      def commit(threadId: ThreadId, commit: Commit) =
+        underlying
+          .commit(threadId, commit)
+          .map(records => if commit.checkpoint.isDefined then Vector.empty else records)
+      def latest(threadId: ThreadId) = underlying.latest(threadId)
+      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+        underlying.eventsAfter(threadId, afterSeq, limit)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    }
+    val runtime = GraphRuntime(store)
+    runtime.start(thread, instant, "x").left.value match {
+      case GraphError.CheckpointWriteFailed("t", _: GraphError.InvalidCommit, None) => succeed
+      case other => fail(s"expected CheckpointWriteFailed(InvalidCommit), got $other")
+    }
+    // released; the claim itself was stored, so the thread is refused for its state
+    runtime.start(thread, instant, "y").left.value shouldBe a[GraphError.IncompleteRun]
   }
 }

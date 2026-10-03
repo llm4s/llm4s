@@ -62,10 +62,12 @@ object GraphRuntime:
  * from a dead one: claim leases and fencing a claim against a stale worker are Stage 2.
  *
  * Admission - the checks above, restoring the thread and committing the claim - runs on the
- * caller's thread, and a `Left` means no run exists. The run itself executes on a virtual thread
- * owned by the runtime, named `llm4s-run-<threadId>`, behind the returned [[RunHandle]]; the
- * thread stays busy until that run thread exits. An unexpected throwable escaping the run ends it
- * with [[GraphError.RunCrashed]].
+ * caller's thread and never throws: a `Left` means no run exists, and the thread is free again. A
+ * throwable from the store, the clock or the graph during admission is [[GraphError.RunCrashed]],
+ * and an interrupt is `CancelledError` with the flag set. The run itself executes on a virtual
+ * thread owned by the runtime, named `llm4s-run-<threadId>`, behind the returned [[RunHandle]];
+ * the thread stays busy until that run thread exits. An unexpected throwable escaping the run ends
+ * it with [[GraphError.RunCrashed]].
  *
  * [[RunHandle.cancel]] cancels the run by interrupting its run thread: every task is interrupted
  * and joined, tasks that finished first keep their pending writes, an interrupted task records
@@ -203,7 +205,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
    */
   private def exclusively[I, O](threadId: ThreadId)(
     admit: AtomicReference[Option[StopCause]] => Result[Run[I, O]]
-  ): Result[RunHandle[O]] =
+  ): Result[RunHandle[O]] = admission(threadId) {
     if !active.synchronized(active.add(threadId.value)) then
       checkpointer
         .latest(threadId)
@@ -228,6 +230,19 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           handle
         }
       }
+  }
+
+  /**
+   * Runs an admission, so that it never throws: a non-fatal throwable - from the store, the clock or
+   * restoring the graph - is `Left(RunCrashed)`, and an `InterruptedException` is
+   * `Left(CancelledError)` with the interrupt flag set again.
+   */
+  private def admission[A](threadId: ThreadId)(body: => Result[A]): Result[A] =
+    CancelledError.catchInterrupt(Try(body)) match
+      case Right(attempt) => attempt.fold(t => Left(GraphError.RunCrashed(threadId.value, t)), identity)
+      case Left(interrupted) =>
+        Thread.currentThread().interrupt()
+        Left(CancelledError("graph run admission", Some(interrupted)))
 
   private def release(threadId: ThreadId): Unit = active.synchronized(active.remove(threadId.value)): Unit
 
@@ -416,10 +431,21 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           case GraphError.CheckpointConflict(_, _, latest) => GraphError.ThreadBusy(threadId.value, latest)
           case other                                       => GraphError.CheckpointWriteFailed(threadId.value, other)
         }
+        seq <- records.headOption
+          .map(_.seq)
+          .toRight(
+            GraphError.CheckpointWriteFailed(
+              threadId.value,
+              GraphError.InvalidCommit(
+                threadId.value,
+                "the store returned no event for the claim's RunStarted, RunRecovered or RunResumed"
+              )
+            )
+          )
       yield
         position = execution -> claimed.id
         claimedReused = reused
-        claimSeq = records.head.seq
+        claimSeq = seq
         this
 
     /** Runs the claimed execution to its end; on the run thread. */
@@ -433,7 +459,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
      * run fails where it was, recording nothing more.
      */
     def crashed(thrown: Throwable): RunResult[O] =
-      Try(committer.close()): Unit
+      DefaultRunHandle.guarded(committer.close()).left.foreach(thrown.addSuppressed)
       RunResult.Failed(position._1.state, GraphError.RunCrashed(threadId.value, thrown))
 
     @tailrec private def loop(

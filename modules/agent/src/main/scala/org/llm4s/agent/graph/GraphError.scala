@@ -130,8 +130,9 @@ object GraphError:
       s"Thread '$threadId' is held by another run (now at ${latestCheckpoint.getOrElse("<none>")}); retry"
 
   /**
-   * The run ended with an unexpected throwable - such as a `Clock` that threw; a checkpointer that
-   * throws is reported as [[CheckpointWriteFailed]] - and was stopped where it was. Its thread claim is released; whatever the
+   * An unexpected throwable - such as a `Clock` that threw - refused the run at admission, or
+   * ended it where it was; a checkpointer whose commit throws is reported as
+   * [[CheckpointWriteFailed]] instead. Its thread claim is released; whatever the
    * store holds for the thread stands.
    */
   final case class RunCrashed(threadId: String, cause: Throwable) extends GraphError:
