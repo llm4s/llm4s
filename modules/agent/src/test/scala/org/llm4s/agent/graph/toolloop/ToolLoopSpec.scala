@@ -193,12 +193,12 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       .left
       .value shouldBe a[GraphError.PendingInterrupts]
     GraphRuntime(store)
-      .recover(again.graph, thread, RunConfig().withRunId(RunId("run-x")))
+      .recover(thread, again.graph, RunConfig().withRunId(RunId("run-x")))
       .awaited
       .left
       .value shouldBe a[GraphError.PendingInterrupts]
     GraphRuntime(store)
-      .resume(again.graph, thread, Map(InterruptId("nope") -> ujson.Null), RunConfig().withRunId(RunId("run-x")))
+      .resume(thread, again.graph, Map(InterruptId("nope") -> ujson.Null), RunConfig().withRunId(RunId("run-x")))
       .awaited
       .left
       .value shouldBe
@@ -207,8 +207,8 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
 
     val second = GraphRuntime(store)
       .resume(
-        again.graph,
         thread,
+        again.graph,
         again.answers(requests("c1") -> ApprovalDecision.Approve),
         RunConfig().withRunId(RunId("run-2")),
         Durability.OnExit
@@ -222,8 +222,8 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val last = loop(model, tools)
     GraphRuntime(store)
       .resume(
-        last.graph,
         thread,
+        last.graph,
         last.answers(requests("c2") -> ApprovalDecision.Approve),
         RunConfig().withRunId(RunId("run-3"))
       )
@@ -236,8 +236,8 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
 
     GraphRuntime(store)
       .resume(
-        last.graph,
         thread,
+        last.graph,
         last.answers(requests("c2") -> ApprovalDecision.Approve),
         RunConfig().withRunId(RunId("run-4"))
       )
@@ -276,7 +276,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val stale = store.latest(thread).value
 
     GraphRuntime(store)
-      .resume(l.graph, thread, l.answers(ids("c1") -> ApprovalDecision.Approve), RunConfig().withRunId(RunId("run-2")))
+      .resume(thread, l.graph, l.answers(ids("c1") -> ApprovalDecision.Approve), RunConfig().withRunId(RunId("run-2")))
       .awaited
       .value
       .suspended
@@ -290,7 +290,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       def compactEvents(threadId: ThreadId, beforeSeq: Long)          = store.compactEvents(threadId, beforeSeq)
     }
     GraphRuntime(racing)
-      .resume(l.graph, thread, l.answers(ids("c2") -> ApprovalDecision.Approve), RunConfig().withRunId(RunId("run-3")))
+      .resume(thread, l.graph, l.answers(ids("c2") -> ApprovalDecision.Approve), RunConfig().withRunId(RunId("run-3")))
       .awaited
       .left
       .value shouldBe
@@ -319,7 +319,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val answers = l.answers(ids("c1") -> ApprovalDecision.Approve, ids("c2") -> ApprovalDecision.Approve)
     // a thrown tool is a tool-level failure, not a failed run: it becomes that call's error result
     GraphRuntime(store)
-      .resume(l.graph, thread, answers, RunConfig().withRunId(RunId("run-2")))
+      .resume(thread, l.graph, answers, RunConfig().withRunId(RunId("run-2")))
       .awaited
       .value
       .completed
@@ -359,7 +359,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     pending.size shouldBe 1
 
     val (_, answer) =
-      GraphRuntime(store).recover(l.graph, thread, RunConfig().withRunId(RunId("run-2"))).awaited.value.completed
+      GraphRuntime(store).recover(thread, l.graph, RunConfig().withRunId(RunId("run-2"))).awaited.value.completed
     answer shouldBe "done: c1=hi | c2=slow done"
     slowRuns.get shouldBe 2
     model.calls shouldBe 2

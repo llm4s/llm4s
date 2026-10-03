@@ -59,30 +59,30 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     started.await(5, TimeUnit.SECONDS) shouldBe true
     // ThreadBusy while it is live, for every entry point
     refusedUnchanged(incomplete)(rt1.start(thread, instant, "y")) shouldBe a[GraphError.ThreadBusy]
-    refusedUnchanged(incomplete)(rt1.recover(instant, thread)) shouldBe a[GraphError.ThreadBusy]
-    refusedUnchanged(incomplete)(rt1.resume(asking, thread, Map.empty)) shouldBe a[GraphError.ThreadBusy]
+    refusedUnchanged(incomplete)(rt1.recover(thread, instant)) shouldBe a[GraphError.ThreadBusy]
+    refusedUnchanged(incomplete)(rt1.resume(thread, asking, Map.empty)) shouldBe a[GraphError.ThreadBusy]
     handle.cancel()
     await(handle).failed._2 shouldBe a[GraphError.Cancelled]
     refusedUnchanged(incomplete)(rt1.start(thread, instant, "y")) shouldBe a[GraphError.IncompleteRun]
-    refusedUnchanged(incomplete)(rt1.resume(asking, thread, Map.empty)) shouldBe a[GraphError.NotSuspended]
+    refusedUnchanged(incomplete)(rt1.resume(thread, asking, Map.empty)) shouldBe a[GraphError.NotSuspended]
 
     // PendingInterrupts and TenantMismatch on a suspended thread
     val suspendedStore = InMemoryCheckpointer()
     val rt2            = GraphRuntime(suspendedStore)
     await(rt2.start(thread, asking, "q?").value).suspended
     refusedUnchanged(suspendedStore)(rt2.start(thread, asking, "again")) shouldBe a[GraphError.PendingInterrupts]
-    refusedUnchanged(suspendedStore)(rt2.recover(asking, thread)) shouldBe a[GraphError.PendingInterrupts]
+    refusedUnchanged(suspendedStore)(rt2.recover(thread, asking)) shouldBe a[GraphError.PendingInterrupts]
     refusedUnchanged(suspendedStore)(
-      rt2.resume(asking, thread, Map(InterruptId("0.1") -> ujson.Str("a")), RunConfig().withTenantId(TenantId("x")))
+      rt2.resume(thread, asking, Map(InterruptId("0.1") -> ujson.Str("a")), RunConfig().withTenantId(TenantId("x")))
     ) shouldBe a[GraphError.TenantMismatch]
 
     // NothingToRecover and TenantMismatch on a completed thread
     val completed = InMemoryCheckpointer()
     val rt3       = GraphRuntime(completed)
-    refusedUnchanged(completed)(rt3.recover(instant, thread)) shouldBe a[GraphError.NothingToRecover]
+    refusedUnchanged(completed)(rt3.recover(thread, instant)) shouldBe a[GraphError.NothingToRecover]
     await(rt3.start(thread, instant, "a").value).completed._2 shouldBe "a"
-    refusedUnchanged(completed)(rt3.recover(instant, thread)) shouldBe a[GraphError.NothingToRecover]
-    refusedUnchanged(completed)(rt3.resume(asking, thread, Map.empty)) shouldBe a[GraphError.NotSuspended]
+    refusedUnchanged(completed)(rt3.recover(thread, instant)) shouldBe a[GraphError.NothingToRecover]
+    refusedUnchanged(completed)(rt3.resume(thread, asking, Map.empty)) shouldBe a[GraphError.NotSuspended]
     refusedUnchanged(completed)(
       rt3.start(thread, instant, "b", RunConfig().withTenantId(TenantId("x")))
     ) shouldBe a[GraphError.TenantMismatch]
@@ -103,7 +103,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     latest.checkpoint.status shouldBe CheckpointStatus.Running
     store.eventsAfter(thread, 0L, 100).value.last.event shouldBe RunEvent.RunCancelled
 
-    await(runtime.recover(instant, thread).value).completed._2 shouldBe "x"
+    await(runtime.recover(thread, instant).value).completed._2 shouldBe "x"
   }
 
   it should "end a run cancelled straight after start, as cancelled or completed, and free the thread" in {
@@ -113,7 +113,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
       handle.cancel()
       await(handle) match {
         case RunResult.Failed(_, _: GraphError.Cancelled) =>
-          await(runtime.recover(instant, thread).value).completed._2 shouldBe "x"
+          await(runtime.recover(thread, instant).value).completed._2 shouldBe "x"
         case RunResult.Completed(_, output, _) =>
           output shouldBe "x"
           await(runtime.start(thread, instant, "y").value).completed._2 shouldBe "xy"
@@ -306,8 +306,8 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     val (store, armed) = latestStore(() => throw new IllegalStateException("read exploded"))
     val runtime        = GraphRuntime(store)
     crashedBy(runtime.start(thread, instant, "x").left.value, "read exploded")
-    crashedBy(runtime.recover(instant, thread).left.value, "read exploded")
-    crashedBy(runtime.resume(asking, thread, Map.empty).left.value, "read exploded")
+    crashedBy(runtime.recover(thread, instant).left.value, "read exploded")
+    crashedBy(runtime.resume(thread, asking, Map.empty).left.value, "read exploded")
 
     // the ThreadBusy path reads the thread too
     armed.set(false)
@@ -319,7 +319,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     armed.set(false)
     handle.cancel()
     await(handle).failed._2 shouldBe a[GraphError.Cancelled]
-    await(runtime.recover(instant, thread).value).completed._2 shouldBe "x"
+    await(runtime.recover(thread, instant).value).completed._2 shouldBe "x"
   }
 
   it should "refuse an interrupted admission with CancelledError and the flag set, releasing the thread" in {

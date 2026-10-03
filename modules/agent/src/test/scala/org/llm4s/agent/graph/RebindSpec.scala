@@ -33,7 +33,7 @@ class RebindSpec extends AnyFlatSpec with Matchers with EitherValues {
     val suspended = runtime.start(thread, build(_ => "A"), "question").awaited.value.suspended
     val answers   = suspended.interrupts.map(_.id -> ujson.Str("go")).toMap
     runtime
-      .resume(build(_ => "B"), thread, answers)
+      .resume(thread, build(_ => "B"), answers)
       .awaited
       .value
       .completed
@@ -52,7 +52,7 @@ class RebindSpec extends AnyFlatSpec with Matchers with EitherValues {
     val runtime = GraphRuntime.inMemory()
 
     runtime.start(thread, graph, "x").awaited.value.failed
-    runtime.recover(graph, thread).awaited.value.completed._2 shouldBe "x"
+    runtime.recover(thread, graph).awaited.value.completed._2 shouldBe "x"
     counters(ThreadId("t")).get shouldBe 2
     counters(ThreadId("other")).get shouldBe 0
   }

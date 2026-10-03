@@ -96,7 +96,7 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     events(store) should not contain RunEvent.RunCancelled
 
     f.blocking.set(false)
-    await(runtime.recover(f.graph, thread).value).completed._2.toSet shouldBe Set("A", "B", "C")
+    await(runtime.recover(thread, f.graph).value).completed._2.toSet shouldBe Set("A", "B", "C")
     f.ran("a") shouldBe 1 // its pending write survived the deadline
     f.ran("b") shouldBe 2
   }
@@ -110,7 +110,7 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     result.failed._2 shouldBe a[GraphError.DeadlineExceeded]
     runs.get shouldBe 0
     events(store) should contain(RunEvent.RunTimedOut)
-    await(runtime.recover(g, thread).value).completed._2 shouldBe "x"
+    await(runtime.recover(thread, g).value).completed._2 shouldBe "x"
     runs.get shouldBe 1
   }
 
@@ -195,7 +195,7 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val (first, error) = await(runtime.start(thread, g, (), limit).value).failed
     error shouldBe GraphError.SuperstepLimitExceeded(3)
     first.get(count).value shouldBe 3
-    val (second, again) = await(runtime.recover(g, thread, limit).value).failed
+    val (second, again) = await(runtime.recover(thread, g, limit).value).failed
     again shouldBe GraphError.SuperstepLimitExceeded(3)
     second.get(count).value shouldBe 6
   }

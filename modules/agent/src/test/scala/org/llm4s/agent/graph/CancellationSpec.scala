@@ -214,7 +214,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
         // the claim was released, and recovery finishes the run without running "a" again
         val g = Fixture(blockOn = Set.empty)
         runtime
-          .recover(g.graph, thread, RunConfig().withRunId(RunId("run-2")))
+          .recover(thread, g.graph, RunConfig().withRunId(RunId("run-2")))
           .awaited
           .value
           .completed
@@ -259,7 +259,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     awaitResult(handle).value.failed._2 shouldBe a[GraphError.Cancelled]
     f.interrupted.toArray.toSet shouldBe Set("b", "c") // both stopped and joined before the run ended
     runtime
-      .recover(Fixture(Set.empty).graph, thread, RunConfig().withRunId(RunId("run-2")))
+      .recover(thread, Fixture(Set.empty).graph, RunConfig().withRunId(RunId("run-2")))
       .awaited
       .value
       .completed
@@ -423,7 +423,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
         val last = eventsOf(store).last
         last.event shouldBe RunEvent.RunCancelled
         last.checkpointId shouldBe Some(claim.id)
-        runtime.recover(Fixture(Set.empty).graph, thread).awaited.value.completed._2 shouldBe Vector("A")
+        runtime.recover(thread, Fixture(Set.empty).graph).awaited.value.completed._2 shouldBe Vector("A")
       }
   }
 
@@ -441,7 +441,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
         org.llm4s.error.LLMError.isRecoverable(error) shouldBe true
         eventsOf(store).last.event shouldBe RunEvent.RunTimedOut
         eventsOf(store).map(_.event) should not contain RunEvent.RunCancelled
-        runtime.recover(Fixture(Set.empty).graph, thread).awaited.value.completed._2 shouldBe Vector("A")
+        runtime.recover(thread, Fixture(Set.empty).graph).awaited.value.completed._2 shouldBe Vector("A")
       }
   }
 

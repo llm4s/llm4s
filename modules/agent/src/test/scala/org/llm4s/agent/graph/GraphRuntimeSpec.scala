@@ -177,7 +177,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val f       = Fixture()
     val store   = InMemoryCheckpointer()
     val runtime = GraphRuntime(store)
-    runtime.recover(f.graph, thread, RunConfig().withRunId(RunId("r0"))).awaited.left.value shouldBe GraphError
+    runtime.recover(thread, f.graph, RunConfig().withRunId(RunId("r0"))).awaited.left.value shouldBe GraphError
       .NothingToRecover(thread.value)
 
     f.failOnce.add("b")
@@ -186,8 +186,8 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     runtime.start(thread, f.graph, Vector("c"), RunConfig().withRunId(RunId("run-2"))).awaited.left.value shouldBe
       GraphError.IncompleteRun(thread.value, incomplete)
 
-    runtime.recover(f.graph, thread, RunConfig().withRunId(RunId("run-3"))).awaited.value.completed
-    runtime.recover(f.graph, thread, RunConfig().withRunId(RunId("run-4"))).awaited.left.value shouldBe GraphError
+    runtime.recover(thread, f.graph, RunConfig().withRunId(RunId("run-3"))).awaited.value.completed
+    runtime.recover(thread, f.graph, RunConfig().withRunId(RunId("run-4"))).awaited.left.value shouldBe GraphError
       .NothingToRecover(thread.value)
   }
 
@@ -198,9 +198,9 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val during  = mutable.ArrayBuffer.empty[(Option[String], Vector[Result[RunResult[Vector[String]]]])]
     f.onWorker = _ =>
       during += store.latest(thread).value.map(_.checkpoint.id) -> Vector(
-        runtime.recover(f.graph, thread, RunConfig().withRunId(RunId("thief"))).awaited,
+        runtime.recover(thread, f.graph, RunConfig().withRunId(RunId("thief"))).awaited,
         runtime.start(thread, f.graph, Vector("x"), RunConfig().withRunId(RunId("thief"))).awaited,
-        runtime.resume(f.graph, thread, Map.empty, RunConfig().withRunId(RunId("thief"))).awaited
+        runtime.resume(thread, f.graph, Map.empty, RunConfig().withRunId(RunId("thief"))).awaited
       )
 
     runtime
@@ -215,7 +215,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     results.map(_.left.value) shouldBe Vector.fill(3)(GraphError.ThreadBusy(thread.value, latest))
     f.callsOf("a") shouldBe 1
     f.callsOf("x") shouldBe 0
-    runtime.recover(f.graph, thread, RunConfig().withRunId(RunId("run-2"))).awaited.left.value shouldBe GraphError
+    runtime.recover(thread, f.graph, RunConfig().withRunId(RunId("run-2"))).awaited.left.value shouldBe GraphError
       .NothingToRecover(thread.value)
   }
 
@@ -239,7 +239,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
       val recorder = Recorder()
       runtime.subscribe(thread, afterSeq = store.eventsAfter(thread, 0L, 1000).value.size.toLong)(recorder.listener)
-      runtime.recover(graph, thread, RunConfig().withRunId(RunId("run-2"))).awaited.value.completed._2 shouldBe Vector(
+      runtime.recover(thread, graph, RunConfig().withRunId(RunId("run-2"))).awaited.value.completed._2 shouldBe Vector(
         "A",
         "B",
         "C"
@@ -360,7 +360,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       def compactEvents(threadId: ThreadId, beforeSeq: Long)          = store.compactEvents(threadId, beforeSeq)
     }
     GraphRuntime(tampered(_.copy(nodeId = "summarize")))
-      .recover(f.graph, thread, RunConfig().withRunId(RunId("run-2")))
+      .recover(thread, f.graph, RunConfig().withRunId(RunId("run-2")))
       .awaited
       .left
       .value
@@ -368,13 +368,13 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       include("names node 'summarize', not 'worker'")
     val logWrite = EncodedOperation.Update("log", VersionedJson(1, ujson.Str("forged")))
     GraphRuntime(tampered(w => w.copy(operations = w.operations :+ logWrite)))
-      .recover(f.graph, thread, RunConfig().withRunId(RunId("run-3")))
+      .recover(thread, f.graph, RunConfig().withRunId(RunId("run-3")))
       .awaited
       .left
       .value shouldBe a[GraphError.UndeclaredWrite]
     // the genuine writes still recover
     GraphRuntime(store)
-      .recover(f.graph, thread, RunConfig().withRunId(RunId("run-4")))
+      .recover(thread, f.graph, RunConfig().withRunId(RunId("run-4")))
       .awaited
       .value
       .completed
@@ -511,7 +511,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     store.crashed.set(false)
     val second = GraphRuntime(store)
     second
-      .recover(graph, thread, RunConfig().withRunId(RunId("run-2")), Durability.Async)
+      .recover(thread, graph, RunConfig().withRunId(RunId("run-2")), Durability.Async)
       .awaited
       .value
       .completed
@@ -584,7 +584,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     stored.pendingWrites.map(_.taskId) shouldBe Vector(s"${stored.checkpoint.snapshot.superstep}.0")
 
     runtime
-      .recover(f.graph, thread, RunConfig().withRunId(RunId("run-2")), Durability.OnExit)
+      .recover(thread, f.graph, RunConfig().withRunId(RunId("run-2")), Durability.OnExit)
       .awaited
       .value
       .completed

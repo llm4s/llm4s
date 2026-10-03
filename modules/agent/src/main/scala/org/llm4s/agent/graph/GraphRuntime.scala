@@ -155,8 +155,8 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
 
   /** Continues the incomplete execution on `threadId`; see the class description. */
   def recover[I, O](
-    graph: CompiledGraph[I, O],
     threadId: ThreadId,
+    graph: CompiledGraph[I, O],
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync
   ): Result[RunHandle[O]] = exclusively(threadId, config) { cause =>
@@ -189,8 +189,8 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
    * Encode a typed answer with [[ResumeRef.answer]].
    */
   def resume[I, O](
-    graph: CompiledGraph[I, O],
     threadId: ThreadId,
+    graph: CompiledGraph[I, O],
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync

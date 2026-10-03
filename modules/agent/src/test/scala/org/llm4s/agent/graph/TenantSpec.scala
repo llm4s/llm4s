@@ -75,9 +75,9 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     runtime.start(thread, f.graph, "x", tenant("a")).awaited.value.failed
     store.latest(thread).value.value.checkpoint.status shouldBe CheckpointStatus.Running
 
-    untouched(store)(runtime.recover(f.graph, thread, tenant("b")).awaited).left.value shouldBe
+    untouched(store)(runtime.recover(thread, f.graph, tenant("b")).awaited).left.value shouldBe
       GraphError.TenantMismatch("t", Some("a"), Some("b"))
-    runtime.recover(f.graph, thread, tenant("a")).awaited.value.completed
+    runtime.recover(thread, f.graph, tenant("a")).awaited.value.completed
   }
 
   it should "refuse resume by another tenant" in {
@@ -87,11 +87,11 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val parked  = runtime.start(thread, f.graph, "ask", tenant("a")).awaited.value.suspended
     val answers = Map(parked.interrupts.head.id -> f.approve.answer("yes"))
 
-    untouched(store)(runtime.resume(f.graph, thread, answers, tenant("b")).awaited).left.value shouldBe
+    untouched(store)(runtime.resume(thread, f.graph, answers, tenant("b")).awaited).left.value shouldBe
       GraphError.TenantMismatch("t", Some("a"), Some("b"))
-    untouched(store)(runtime.resume(f.graph, thread, answers).awaited).left.value shouldBe
+    untouched(store)(runtime.resume(thread, f.graph, answers).awaited).left.value shouldBe
       GraphError.TenantMismatch("t", Some("a"), None)
-    runtime.resume(f.graph, thread, answers, tenant("a")).awaited.value.completed._2 shouldBe Vector("yes")
+    runtime.resume(thread, f.graph, answers, tenant("a")).awaited.value.completed._2 shouldBe Vector("yes")
   }
 
   it should "continue for a matching tenant, recording it on every checkpoint" in {
@@ -101,7 +101,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val parked  = runtime.start(thread, f.graph, "ask", tenant("a")).awaited.value.suspended
     store.latest(thread).value.value.checkpoint.tenantId shouldBe Some("a")
     runtime
-      .resume(f.graph, thread, Map(parked.interrupts.head.id -> f.approve.answer("yes")), tenant("a"))
+      .resume(thread, f.graph, Map(parked.interrupts.head.id -> f.approve.answer("yes")), tenant("a"))
       .awaited
       .value
       .completed
@@ -119,8 +119,8 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     val parked  = runtime.start(thread, f.graph, "ask", first).awaited.value.suspended
     runtime
       .resume(
-        f.graph,
         thread,
+        f.graph,
         Map(parked.interrupts.head.id -> f.approve.answer("yes")),
         tenant("a").withPrincipal(Principal("bob"))
       )
@@ -142,15 +142,15 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
 
     // Completed: recover and resume would otherwise say NothingToRecover and NotSuspended
     runtime.start(thread, f.graph, "x", tenant("a")).awaited.value.completed
-    untouched(store)(runtime.recover(f.graph, thread, tenant("b")).awaited).left.value shouldBe mismatch
-    untouched(store)(runtime.resume(f.graph, thread, Map.empty, tenant("b")).awaited).left.value shouldBe mismatch
+    untouched(store)(runtime.recover(thread, f.graph, tenant("b")).awaited).left.value shouldBe mismatch
+    untouched(store)(runtime.resume(thread, f.graph, Map.empty, tenant("b")).awaited).left.value shouldBe mismatch
 
     // Suspended: start and recover would otherwise say PendingInterrupts
     val parked = runtime.start(thread, f.graph, "ask", tenant("a")).awaited.value.suspended
     untouched(store)(runtime.start(thread, f.graph, "y", tenant("b")).awaited).left.value shouldBe mismatch
-    untouched(store)(runtime.recover(f.graph, thread, tenant("b")).awaited).left.value shouldBe mismatch
+    untouched(store)(runtime.recover(thread, f.graph, tenant("b")).awaited).left.value shouldBe mismatch
     runtime
-      .resume(f.graph, thread, Map(parked.interrupts.head.id -> f.approve.answer("yes")), tenant("a"))
+      .resume(thread, f.graph, Map(parked.interrupts.head.id -> f.approve.answer("yes")), tenant("a"))
       .awaited
       .value
       .completed
@@ -159,7 +159,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     f.failing.set(true)
     runtime.start(thread, f.graph, "z", tenant("a")).awaited.value.failed
     untouched(store)(runtime.start(thread, f.graph, "y", tenant("b")).awaited).left.value shouldBe mismatch
-    untouched(store)(runtime.resume(f.graph, thread, Map.empty, tenant("b")).awaited).left.value shouldBe mismatch
+    untouched(store)(runtime.resume(thread, f.graph, Map.empty, tenant("b")).awaited).left.value shouldBe mismatch
   }
 
   it should "refuse another tenant rather than report a live run as ThreadBusy" in {
@@ -179,8 +179,8 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     started.await(10, TimeUnit.SECONDS) shouldBe true
 
     untouched(store)(runtime.start(thread, g, "y", tenant("b"))).left.value shouldBe mismatch
-    untouched(store)(runtime.recover(g, thread, tenant("b"))).left.value shouldBe mismatch
-    untouched(store)(runtime.resume(g, thread, Map.empty, tenant("b"))).left.value shouldBe mismatch
+    untouched(store)(runtime.recover(thread, g, tenant("b"))).left.value shouldBe mismatch
+    untouched(store)(runtime.resume(thread, g, Map.empty, tenant("b"))).left.value shouldBe mismatch
     untouched(store)(runtime.start(thread, g, "y", tenant("a"))).left.value shouldBe a[GraphError.ThreadBusy]
 
     release.countDown()
