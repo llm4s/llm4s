@@ -1,7 +1,7 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
-import org.llm4s.types.Result
+import org.llm4s.types.{ Result, TryOps }
 
 import java.time.Clock
 import java.util.concurrent.atomic.AtomicReference
@@ -291,10 +291,14 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       case Durability.Async  => AsyncCommitter(threadId)
       case Durability.OnExit => OnExitCommitter(threadId)
 
-  /** Commits and delivers under one lock, so delivery order is commit order; returns the committed events. */
+  /**
+   * Commits and delivers under one lock, so delivery order is commit order; returns the committed
+   * events. A store that throws (non-fatally) rather than returning `Left` fails the commit the
+   * same way; an `InterruptedException` is not a store failure and propagates.
+   */
   private def commitAndDeliver(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
     commitLock.synchronized {
-      checkpointer.commit(threadId, commit).map { records =>
+      Try(checkpointer.commit(threadId, commit)).toResult.flatten.map { records =>
         hub.durable(threadId, records)
         records
       }

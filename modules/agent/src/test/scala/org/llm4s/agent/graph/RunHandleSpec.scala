@@ -7,6 +7,7 @@ import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.time.{ Clock, Instant, ZoneId, ZoneOffset }
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ CountDownLatch, LinkedBlockingQueue, TimeUnit }
 
@@ -223,26 +224,56 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     seen.head.seq shouldBe store.eventsAfter(thread, 0L, 100).value.find(_.runId == "second").get.seq
   }
 
-  "A run" should "fail with RunCrashed when the store throws, and release its thread" in {
-    val commits = new AtomicInteger()
-    val crashing = new Checkpointer {
-      val underlying = InMemoryCheckpointer()
-      def commit(threadId: ThreadId, commit: Commit) =
-        if commits.incrementAndGet() == 3 then throw new RuntimeException("store exploded")
-        else underlying.commit(threadId, commit)
-      def latest(threadId: ThreadId) = underlying.latest(threadId)
-      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
-        underlying.eventsAfter(threadId, afterSeq, limit)
-      def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+  /** A store whose `commit` throws on the commits numbered in `throwOn`. */
+  private def throwingStore(throwOn: Int*): Checkpointer = new Checkpointer {
+    private val commits = new AtomicInteger()
+    val underlying      = InMemoryCheckpointer()
+    def commit(threadId: ThreadId, commit: Commit) =
+      if throwOn.contains(commits.incrementAndGet()) then throw new RuntimeException("store exploded")
+      else underlying.commit(threadId, commit)
+    def latest(threadId: ThreadId) = underlying.latest(threadId)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+      underlying.eventsAfter(threadId, afterSeq, limit)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+  }
+
+  "A run" should "fail with RunCrashed when something unexpected throws, and release its thread" in {
+    // the claim reads the clock twice on the caller's thread; the run thread's first read throws
+    val reads = new AtomicInteger()
+    val clock = new Clock {
+      def getZone: ZoneId                        = ZoneOffset.UTC
+      override def withZone(zone: ZoneId): Clock = this
+      override def instant(): Instant =
+        if reads.incrementAndGet() > 2 then throw new IllegalStateException("clock exploded") else Instant.EPOCH
     }
-    val runtime = GraphRuntime(crashing)
+    val runtime = GraphRuntime(InMemoryCheckpointer(), clock)
     val handle  = runtime.start(thread, instant, "x").value
     await(handle).failed._2 match {
-      case GraphError.RunCrashed("t", cause) => cause.getMessage shouldBe "store exploded"
+      case GraphError.RunCrashed("t", cause) => cause.getMessage shouldBe "clock exploded"
       case other                             => fail(s"expected RunCrashed, got $other")
     }
     handle.status shouldBe RunStatus.Failed
     // released: refused for the thread's state, not ThreadBusy
     runtime.start(thread, instant, "y").left.value shouldBe a[GraphError.IncompleteRun]
+  }
+
+  it should "report a store that throws as CheckpointWriteFailed in every durability mode" in {
+    for durability <- Durability.values do
+      withClue(s"$durability: ") {
+        // OnExit commits only the claim and its exit commit, so its 2nd commit is the one that throws
+        val runtime = GraphRuntime(throwingStore(if durability == Durability.OnExit then 2 else 3))
+        val handle  = runtime.start(thread, instant, "x", durability = durability).value
+        await(handle).failed._2 shouldBe a[GraphError.CheckpointWriteFailed]
+        runtime.start(thread, instant, "y").left.value shouldBe a[GraphError.IncompleteRun]
+      }
+  }
+
+  "Admission" should "refuse a claim whose commit throws, releasing the thread" in {
+    val runtime = GraphRuntime(throwingStore(1))
+    runtime.start(thread, instant, "x").left.value match {
+      case GraphError.CheckpointWriteFailed("t", cause, None) => cause.message should include("store exploded")
+      case other                                              => fail(s"expected CheckpointWriteFailed, got $other")
+    }
+    await(runtime.start(thread, instant, "y").value).completed._2 shouldBe "y" // the store works now
   }
 }
