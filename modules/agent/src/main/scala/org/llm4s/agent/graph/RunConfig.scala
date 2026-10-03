@@ -5,12 +5,16 @@ import org.llm4s.types.Result
 
 import scala.concurrent.duration.FiniteDuration
 
-/** Limits on one run; each `start`, `recover` or `resume` brings its own. */
+/**
+ * Limits on one run; each `start`, `recover` or `resume` brings its own. Every value is validated
+ * on the way in: `apply` and the `with*` setters throw `IllegalArgumentException` for a
+ * non-positive one, and [[RunBudgets.of]] returns it as a `ValidationError`.
+ */
 final case class RunBudgets private (maxSupersteps: Int, timeout: Option[FiniteDuration], maxConcurrency: Int):
-  def withMaxSupersteps(n: Int): RunBudgets              = copy(maxSupersteps = n)
-  def withTimeout(t: FiniteDuration): RunBudgets         = copy(timeout = Some(t))
-  def withTimeout(t: Option[FiniteDuration]): RunBudgets = copy(timeout = t)
-  def withMaxConcurrency(n: Int): RunBudgets             = copy(maxConcurrency = n)
+  def withMaxSupersteps(n: Int): RunBudgets              = RunBudgets(n, timeout, maxConcurrency)
+  def withTimeout(t: FiniteDuration): RunBudgets         = RunBudgets(maxSupersteps, Some(t), maxConcurrency)
+  def withTimeout(t: Option[FiniteDuration]): RunBudgets = RunBudgets(maxSupersteps, t, maxConcurrency)
+  def withMaxConcurrency(n: Int): RunBudgets             = RunBudgets(maxSupersteps, timeout, n)
 
 object RunBudgets:
   private def problems(maxSupersteps: Int, timeout: Option[FiniteDuration], maxConcurrency: Int): List[String] =
@@ -39,7 +43,10 @@ object RunBudgets:
 
 /**
  * The identity and limits of one run. `RunConfig()` is evaluated per call, so each gets a fresh
- * [[RunId]]. `tenantId` and `principal` are carried for later tasks; they are not yet checked.
+ * [[RunId]]. The tenant is part of the thread's identity: it is recorded on every checkpoint, and
+ * admission refuses a run whose `tenantId` differs from the latest checkpoint's
+ * ([[GraphError.TenantMismatch]]; `None` and `Some` differ). The principal is recorded on the run's
+ * `RunStarted`, `RunRecovered` and `RunResumed` events and is never checked.
  */
 final case class RunConfig private (
   runId: RunId,

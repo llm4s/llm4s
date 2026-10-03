@@ -30,6 +30,21 @@ class RunConfigSpec extends AnyFlatSpec with Matchers {
     RunBudgets(timeout = Some(1.second)).withTimeout(None).timeout shouldBe None
   }
 
+  it should "refuse a non-positive value from every with* setter, as apply does" in {
+    def refused(set: => RunBudgets): String = intercept[IllegalArgumentException](set).getMessage
+    refused(RunBudgets.default.withMaxSupersteps(0)) shouldBe
+      "requirement failed: maxSupersteps must be positive, was 0"
+    refused(RunBudgets.default.withMaxConcurrency(0)) shouldBe
+      "requirement failed: maxConcurrency must be positive, was 0"
+    refused(RunBudgets.default.withMaxConcurrency(-2)) shouldBe
+      "requirement failed: maxConcurrency must be positive, was -2"
+    refused(RunBudgets.default.withTimeout(0.millis)) shouldBe
+      "requirement failed: timeout must be positive, was 0 milliseconds"
+    refused(RunBudgets.default.withTimeout(Some(-1.second))) shouldBe
+      "requirement failed: timeout must be positive, was -1 seconds"
+    refused(RunBudgets.default.withMaxSupersteps(0)) shouldBe refused(RunBudgets(maxSupersteps = 0))
+  }
+
   "RunConfig" should "generate a fresh run id per call" in {
     RunConfig().runId should not be RunConfig().runId
   }
