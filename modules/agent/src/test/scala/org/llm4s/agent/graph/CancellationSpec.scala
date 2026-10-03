@@ -67,7 +67,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     val handle = admitted.value
     ready.await(10, TimeUnit.SECONDS) shouldBe true
     handle.cancel()
-    handle.await().value
+    awaitResult(handle).value
   }
 
   /** Runs `body` on a virtual thread, so an interrupt flag it leaves cannot reach the test thread. */
@@ -81,9 +81,11 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "An in-memory run" should "stop and join every task when its thread is interrupted" in {
     // The blocked workers wait for "a" to finish before signalling, so the interrupt cannot overtake it.
-    lazy val f: Fixture = Fixture(
+    val aDone = new CountDownLatch(1)
+    val f = Fixture(
       blockOn = Set("b", "c"),
-      onBlock = () => while !f.finished.contains("a") do Thread.onSpinWait()
+      onBlock = () => aDone.await(10, TimeUnit.SECONDS): Unit,
+      work = () => aDone.countDown()
     )
     val (result, flag) = interruptWhen(f.started)(drive(f.graph, f.graph.start(Vector("a", "b", "c"))))
     result.failed._2 shouldBe GraphError.Cancelled(None, None)
@@ -254,7 +256,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     handle.status shouldBe RunStatus.Running // interrupting the awaiting thread did not cancel the run
     f.interrupted.isEmpty shouldBe true
     handle.cancel()
-    handle.await().value.failed._2 shouldBe a[GraphError.Cancelled]
+    awaitResult(handle).value.failed._2 shouldBe a[GraphError.Cancelled]
     f.interrupted.toArray.toSet shouldBe Set("b", "c") // both stopped and joined before the run ended
     runtime
       .recover(Fixture(Set.empty).graph, thread, RunConfig().withRunId(RunId("run-2")))
@@ -340,7 +342,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     handle.cancel() // the run has submitted its last commit and is closing the committer
     release.countDown()
     // not CheckpointWriteFailed: an interrupt is not a write failure
-    handle.await().value.completed._2 shouldBe Vector("A")
+    awaitResult(handle).value.completed._2 shouldBe Vector("A")
     slow.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Completed)
   }
 
@@ -354,7 +356,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     f.interrupted.isEmpty shouldBe true
     handle.status shouldBe RunStatus.Running
     handle.cancel()
-    handle.await().value.failed._2 shouldBe a[GraphError.Cancelled]
+    awaitResult(handle).value.failed._2 shouldBe a[GraphError.Cancelled]
   }
 
   "TaskExecutor.bounded" should "return results in task order" in {

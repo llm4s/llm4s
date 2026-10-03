@@ -39,13 +39,6 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     b.compile(ask)(_.get(out).map(_.mkString)).value
   }
 
-  /** The run's result, awaited on another thread so that a hung run fails the test within 5s. */
-  private def await[O](handle: RunHandle[O]): RunResult[O] = {
-    val done = new LinkedBlockingQueue[Result[RunResult[O]]]()
-    Thread.ofVirtual().start(() => done.offer(handle.await()): Unit)
-    Option(done.poll(5, TimeUnit.SECONDS)).getOrElse(fail("await did not return within 5s")).value
-  }
-
   /** The thread's latest checkpoint and event log, to show a refused call changed nothing. */
   private def snapshot(store: Checkpointer): (Option[String], Vector[EventRecord]) =
     (store.latest(thread).value.map(_.checkpoint.id), store.eventsAfter(thread, 0L, 1000).value)

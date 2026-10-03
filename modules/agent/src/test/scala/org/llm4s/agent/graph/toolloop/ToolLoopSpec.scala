@@ -352,7 +352,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val handle = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).value
     started.await(10, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
     handle.cancel()
-    handle.await().value.failed._2 shouldBe a[GraphError.Cancelled]
+    awaitResult(handle).value.failed._2 shouldBe a[GraphError.Cancelled]
 
     // c1's result was committed; c2 has none
     val pending = store.latest(thread).value.get.pendingWrites

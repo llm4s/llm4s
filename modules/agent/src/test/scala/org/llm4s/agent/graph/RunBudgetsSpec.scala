@@ -8,19 +8,12 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
-import java.util.concurrent.{ ConcurrentHashMap, LinkedBlockingQueue, TimeUnit }
+import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, TimeUnit }
 import scala.concurrent.duration.*
 
 class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private val thread = ThreadId("t")
-
-  /** The run's result, awaited on another thread so that a hung run fails the test within 5s. */
-  private def await[O](handle: RunHandle[O]): RunResult[O] = {
-    val done = new LinkedBlockingQueue[Result[RunResult[O]]]()
-    Thread.ofVirtual().start(() => done.offer(handle.await()): Unit)
-    Option(done.poll(5, TimeUnit.SECONDS)).getOrElse(fail("await did not return within 5s")).value
-  }
 
   private def events(store: Checkpointer): Vector[RunEvent] =
     store.eventsAfter(thread, 0L, 10_000).value.map(_.event)
@@ -29,8 +22,9 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   /**
    * plan fans out to workers; while `blocking` is set, a worker whose item is in `blockOn` waits
-   * for every other item to finish, then blocks until interrupted, recording that it saw the
-   * interrupt. Every worker counts its runs and its concurrency.
+   * (interruptibly, on a latch the others count down) for every other item to finish, then blocks
+   * until interrupted, recording that it saw the interrupt. Every worker counts its runs and its
+   * concurrency.
    */
   final private class FanOut(blockOn: Set[String], items: Vector[String], work: () => Unit = () => ()) {
     val blocking    = new AtomicBoolean(true)
@@ -39,6 +33,7 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
     val finished    = ConcurrentHashMap.newKeySet[String]()
     val running     = new AtomicInteger()
     val maxRunning  = new AtomicInteger()
+    val othersDone  = new CountDownLatch(items.count(i => !blockOn(i)))
     val results     = StateKey.appending[String]("results")
 
     def ran(item: String): Int = Option(runs.get(item)).fold(0)(_.get)
@@ -49,15 +44,21 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
         runs.computeIfAbsent(item, _ => new AtomicInteger()).incrementAndGet()
         maxRunning.accumulateAndGet(running.incrementAndGet(), math.max)
         if blocking.get && blockOn(item) then
-          while items.filterNot(blockOn).exists(i => !finished.contains(i)) do Thread.onSpinWait()
-          CancelledError.catchInterrupt(Thread.sleep(60_000)).left.foreach { e =>
-            interrupted.add(item)
-            running.decrementAndGet()
-            throw e
-          }
+          CancelledError
+            .catchInterrupt {
+              othersDone.await(10, TimeUnit.SECONDS): Unit
+              Thread.sleep(60_000)
+            }
+            .left
+            .foreach { e =>
+              interrupted.add(item)
+              running.decrementAndGet()
+              throw e
+            }
         work()
         running.decrementAndGet()
         finished.add(item)
+        if !blockOn(item) then othersDone.countDown()
         continue(Command.empty.update(results, item.toUpperCase))
       }
       val done = b.node[Unit]("done")((_, _, _) => continue(Command.empty))

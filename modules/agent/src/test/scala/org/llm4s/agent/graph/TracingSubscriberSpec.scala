@@ -93,17 +93,34 @@ class TracingSubscriberSpec extends AnyFlatSpec with Matchers with EitherValues 
     TracingSubscriber.snake("Custom") shouldBe "custom"
   }
 
+  /** `source` without its `//` line comments and its `/* */` (and Scaladoc) blocks. */
+  private def code(source: String): String =
+    source.replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("//[^\n]*", "")
+
+  private def usesSynchronized(source: String): Boolean =
+    "\\bsynchronized\\b".r.findFirstIn(code(source)).isDefined
+
+  "The synchronized check" should "match the word in code, not in comments or longer names" in {
+    usesSynchronized("def f = lock.synchronized { 1 }") shouldBe true
+    usesSynchronized("synchronized(x)") shouldBe true
+    usesSynchronized("// never use synchronized here\nval a = 1") shouldBe false
+    usesSynchronized("/** synchronized pins a carrier */ val a = 1") shouldBe false
+    usesSynchronized("/* a\n synchronized \n*/ val a = 1") shouldBe false
+    usesSynchronized("val unsynchronizedCount = 1") shouldBe false
+  }
+
   "The graph runtime sources" should "not use synchronized, which pins a virtual thread's carrier" in {
     val rel = "src/main/scala/org/llm4s/agent/graph"
-    val dir = Seq(new java.io.File(rel), new java.io.File("modules/agent/" + rel)).find(_.isDirectory).getOrElse(null)
-    if dir == null then cancel("graph sources not found from " + new java.io.File(".").getAbsolutePath)
-    val offenders = java.nio.file.Files
+    val dir = Seq(new java.io.File(rel), new java.io.File("modules/agent/" + rel))
+      .find(_.isDirectory)
+      .getOrElse(fail("graph sources not found from " + new java.io.File(".").getAbsolutePath))
+    val sources = java.nio.file.Files
       .walk(dir.toPath)
       .iterator()
       .asScala
       .filter(_.toString.endsWith(".scala"))
-      .filter(p => java.nio.file.Files.readString(p).contains("synchronized"))
       .toList
-    offenders shouldBe empty
+    sources should not be empty
+    sources.filter(p => usesSynchronized(java.nio.file.Files.readString(p))) shouldBe empty
   }
 }
