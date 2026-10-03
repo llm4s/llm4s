@@ -53,7 +53,10 @@ object GraphRuntime:
  *    stay parked, and the run suspends again if nothing else can proceed.
  *
  * Any other call is refused ([[GraphError.IncompleteRun]], [[GraphError.PendingInterrupts]],
- * [[GraphError.NothingToRecover]], [[GraphError.NotSuspended]]) without changing the thread. Each
+ * [[GraphError.NothingToRecover]], [[GraphError.NotSuspended]]) without changing the thread. A
+ * thread belongs to the tenant on its latest checkpoint, and a call with another `tenantId` is
+ * refused with [[GraphError.TenantMismatch]] before anything else is reported - the thread's
+ * status, or that a run is live on it - so it learns nothing about the thread. Each
  * call is a new run: it claims the thread by committing a checkpoint whose parent is the latest
  * it read, and if another run got there first it fails with [[GraphError.ThreadBusy]] - its input
  * or answers neither accepted nor discarded. A call on a thread whose run is still executing in
@@ -128,18 +131,17 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     input: I,
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync
-  ): Result[RunHandle[O]] = exclusively(threadId) { cause =>
+  ): Result[RunHandle[O]] = exclusively(threadId, config) { cause =>
     checkpointer.latest(threadId).flatMap {
       case None =>
         newRun(graph, threadId, config, durability, 0, cause).admit(graph.start(input), None, started(config))
       case Some(stored) =>
-        stored.checkpoint.status match
-          case CheckpointStatus.Running   => Left(GraphError.IncompleteRun(threadId.value, stored.checkpoint.id))
-          case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
-          case CheckpointStatus.Completed =>
-            checkTenant(threadId, stored, config)
-              .flatMap(_ => graph.restore(stored.checkpoint.snapshot))
-              .flatMap { done =>
+        checkTenant(threadId, stored, config).flatMap { _ =>
+          stored.checkpoint.status match
+            case CheckpointStatus.Running   => Left(GraphError.IncompleteRun(threadId.value, stored.checkpoint.id))
+            case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
+            case CheckpointStatus.Completed =>
+              graph.restore(stored.checkpoint.snapshot).flatMap { done =>
                 newRun(graph, threadId, config, durability, done.superstep, cause)
                   .admit(
                     graph.startAt(done.superstep, done.state, input),
@@ -147,6 +149,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
                     started(config)
                   )
               }
+        }
     }
   }
 
@@ -156,24 +159,28 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     threadId: ThreadId,
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync
-  ): Result[RunHandle[O]] = exclusively(threadId) { cause =>
+  ): Result[RunHandle[O]] = exclusively(threadId, config) { cause =>
     checkpointer.latest(threadId).flatMap {
-      case Some(stored) if stored.checkpoint.status == CheckpointStatus.Running =>
-        for
-          _         <- checkTenant(threadId, stored, config)
-          execution <- graph.restore(stored.checkpoint.snapshot)
-          reused    <- reusableWrites(graph, execution, stored)
-          run <- newRun(graph, threadId, config, durability, execution.superstep, cause).admit(
-            execution,
-            Some(stored.checkpoint.id),
-            RunEvent.RunRecovered(stored.checkpoint.id, config.tenantId.map(_.value), config.principal.map(_.value)),
-            stored.pendingWrites,
-            reused
-          )
-        yield run
-      case Some(stored) if stored.checkpoint.status == CheckpointStatus.Suspended =>
-        Left(pendingInterrupts(threadId, stored))
-      case _ => Left(GraphError.NothingToRecover(threadId.value))
+      case None => Left(GraphError.NothingToRecover(threadId.value))
+      case Some(stored) =>
+        checkTenant(threadId, stored, config).flatMap { _ =>
+          stored.checkpoint.status match
+            case CheckpointStatus.Running =>
+              for
+                execution <- graph.restore(stored.checkpoint.snapshot)
+                reused    <- reusableWrites(graph, execution, stored)
+                run <- newRun(graph, threadId, config, durability, execution.superstep, cause).admit(
+                  execution,
+                  Some(stored.checkpoint.id),
+                  RunEvent
+                    .RunRecovered(stored.checkpoint.id, config.tenantId.map(_.value), config.principal.map(_.value)),
+                  stored.pendingWrites,
+                  reused
+                )
+              yield run
+            case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
+            case CheckpointStatus.Completed => Left(GraphError.NothingToRecover(threadId.value))
+        }
     }
   }
 
@@ -187,24 +194,27 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync
-  ): Result[RunHandle[O]] = exclusively(threadId) { cause =>
+  ): Result[RunHandle[O]] = exclusively(threadId, config) { cause =>
     checkpointer.latest(threadId).flatMap {
-      case Some(stored) if stored.checkpoint.status == CheckpointStatus.Suspended =>
-        for
-          _         <- checkTenant(threadId, stored, config)
-          suspended <- graph.restore(stored.checkpoint.snapshot)
-          resumed   <- graph.resume(suspended, answers)
-          run <- newRun(graph, threadId, config, durability, resumed.superstep, cause).admit(
-            resumed,
-            Some(stored.checkpoint.id),
-            RunEvent.RunResumed(
-              suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value),
-              config.tenantId.map(_.value),
-              config.principal.map(_.value)
-            )
-          )
-        yield run
-      case _ => Left(GraphError.NotSuspended(threadId.value))
+      case None => Left(GraphError.NotSuspended(threadId.value))
+      case Some(stored) =>
+        checkTenant(threadId, stored, config).flatMap { _ =>
+          if stored.checkpoint.status != CheckpointStatus.Suspended then Left(GraphError.NotSuspended(threadId.value))
+          else
+            for
+              suspended <- graph.restore(stored.checkpoint.snapshot)
+              resumed   <- graph.resume(suspended, answers)
+              run <- newRun(graph, threadId, config, durability, resumed.superstep, cause).admit(
+                resumed,
+                Some(stored.checkpoint.id),
+                RunEvent.RunResumed(
+                  suspended.parked.map(_.interrupt).filter(answers.contains).map(_.value),
+                  config.tenantId.map(_.value),
+                  config.principal.map(_.value)
+                )
+              )
+            yield run
+        }
     }
   }
 
@@ -215,13 +225,10 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
    * released here if admission fails or throws; once launched, the run thread releases it when it
    * exits, before the run's result is set.
    */
-  private def exclusively[I, O](threadId: ThreadId)(
+  private def exclusively[I, O](threadId: ThreadId, config: RunConfig)(
     admit: AtomicReference[Option[StopCause]] => Result[Run[I, O]]
   ): Result[RunHandle[O]] = admission(threadId) {
-    if !withLock(activeLock)(active.add(threadId.value)) then
-      checkpointer
-        .latest(threadId)
-        .flatMap(latest => Left(GraphError.ThreadBusy(threadId.value, latest.map(_.checkpoint.id))))
+    if !withLock(activeLock)(active.add(threadId.value)) then busy(threadId, config)
     else
       val cause    = AtomicReference[Option[StopCause]](None)
       var launched = false
@@ -260,6 +267,20 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
 
   private def started(config: RunConfig): RunEvent =
     RunEvent.RunStarted(config.tenantId.map(_.value), config.principal.map(_.value))
+
+  /**
+   * [[GraphError.ThreadBusy]] naming the thread's latest checkpoint - unless that checkpoint belongs
+   * to another tenant: then [[GraphError.TenantMismatch]], so that a caller from another tenant
+   * learns nothing about the thread, not even that a run is live on it.
+   */
+  private def busy(threadId: ThreadId, config: RunConfig): Result[Nothing] =
+    checkpointer.latest(threadId).flatMap {
+      case None => Left(GraphError.ThreadBusy(threadId.value, None))
+      case Some(stored) =>
+        checkTenant(threadId, stored, config).flatMap(_ =>
+          Left(GraphError.ThreadBusy(threadId.value, Some(stored.checkpoint.id)))
+        )
+    }
 
   /** A thread belongs to the tenant on its latest checkpoint; `None` and `Some` differ. */
   private def checkTenant(threadId: ThreadId, stored: StoredCheckpoint, config: RunConfig): Result[Unit] =
@@ -452,10 +473,16 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
             carried.map(_.copy(checkpointId = claimed.id)),
             Vector(draft(Some(claimed.id), None, event))
           )
-        ).left.map {
-          case GraphError.CheckpointConflict(_, _, latest) => GraphError.ThreadBusy(threadId.value, latest)
-          case other                                       => GraphError.CheckpointWriteFailed(threadId.value, other)
-        }
+        ) match
+          // another run advanced the thread first: the thread is re-read so that another tenant's
+          // checkpoint is not named, but the conflict's own `latest` is the authoritative one
+          case Left(GraphError.CheckpointConflict(_, _, latest)) =>
+            busy(threadId, config).left.map {
+              case _: GraphError.ThreadBusy => GraphError.ThreadBusy(threadId.value, latest)
+              case other                    => other
+            }
+          case Left(other)    => Left(GraphError.CheckpointWriteFailed(threadId.value, other))
+          case Right(records) => Right(records)
         seq <- records.headOption
           .map(_.seq)
           .toRight(

@@ -7,6 +7,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.{ CountDownLatch, TimeUnit }
 
 class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
 
@@ -131,6 +132,79 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
     events should contain(RunEvent.RunStarted(Some("a"), Some("alice")))
     events.collect { case r: RunEvent.RunResumed => r }.loneElement shouldBe
       RunEvent.RunResumed(Vector("0.0"), Some("a"), Some("bob"))
+  }
+
+  it should "refuse another tenant before revealing the thread's state" in {
+    val f        = Fixture()
+    val store    = InMemoryCheckpointer()
+    val runtime  = GraphRuntime(store)
+    val mismatch = GraphError.TenantMismatch("t", Some("a"), Some("b"))
+
+    // Completed: recover and resume would otherwise say NothingToRecover and NotSuspended
+    runtime.start(thread, f.graph, "x", tenant("a")).awaited.value.completed
+    untouched(store)(runtime.recover(f.graph, thread, tenant("b")).awaited).left.value shouldBe mismatch
+    untouched(store)(runtime.resume(f.graph, thread, Map.empty, tenant("b")).awaited).left.value shouldBe mismatch
+
+    // Suspended: start and recover would otherwise say PendingInterrupts
+    val parked = runtime.start(thread, f.graph, "ask", tenant("a")).awaited.value.suspended
+    untouched(store)(runtime.start(thread, f.graph, "y", tenant("b")).awaited).left.value shouldBe mismatch
+    untouched(store)(runtime.recover(f.graph, thread, tenant("b")).awaited).left.value shouldBe mismatch
+    runtime
+      .resume(f.graph, thread, Map(parked.interrupts.head.id -> f.approve.answer("yes")), tenant("a"))
+      .awaited
+      .value
+      .completed
+
+    // Running, after a failed run: start and resume would otherwise say IncompleteRun and NotSuspended
+    f.failing.set(true)
+    runtime.start(thread, f.graph, "z", tenant("a")).awaited.value.failed
+    untouched(store)(runtime.start(thread, f.graph, "y", tenant("b")).awaited).left.value shouldBe mismatch
+    untouched(store)(runtime.resume(f.graph, thread, Map.empty, tenant("b")).awaited).left.value shouldBe mismatch
+  }
+
+  it should "refuse another tenant rather than report a live run as ThreadBusy" in {
+    val started = new CountDownLatch(1)
+    val release = new CountDownLatch(1)
+    val b       = GraphBuilder("held", "v1")
+    val held = b.node[String]("held", writes = Set(log)) { (input, _, _) =>
+      started.countDown()
+      release.await(10, TimeUnit.SECONDS): Unit
+      continue(Command.empty.update(log, input))
+    }
+    val g        = b.compile(held)(_.get(log)).value
+    val store    = InMemoryCheckpointer()
+    val runtime  = GraphRuntime(store)
+    val handle   = runtime.start(thread, g, "x", tenant("a")).value
+    val mismatch = GraphError.TenantMismatch("t", Some("a"), Some("b"))
+    started.await(10, TimeUnit.SECONDS) shouldBe true
+
+    untouched(store)(runtime.start(thread, g, "y", tenant("b"))).left.value shouldBe mismatch
+    untouched(store)(runtime.recover(g, thread, tenant("b"))).left.value shouldBe mismatch
+    untouched(store)(runtime.resume(g, thread, Map.empty, tenant("b"))).left.value shouldBe mismatch
+    untouched(store)(runtime.start(thread, g, "y", tenant("a"))).left.value shouldBe a[GraphError.ThreadBusy]
+
+    release.countDown()
+    await(handle).completed._2 shouldBe Vector("x")
+  }
+
+  it should "refuse another tenant whose claim lost a race, rather than name the winner's checkpoint" in {
+    val f          = Fixture()
+    val underlying = InMemoryCheckpointer()
+    GraphRuntime(underlying).start(thread, f.graph, "x", tenant("a")).awaited.value.completed
+    // a read that misses tenant a's run, as one racing its claim would: the claim then conflicts
+    val stale = new AtomicBoolean(true)
+    val racing = new Checkpointer {
+      def commit(threadId: ThreadId, commit: Commit) = underlying.commit(threadId, commit)
+      def latest(threadId: ThreadId) = if stale.getAndSet(false) then Right(None) else underlying.latest(threadId)
+      def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+        underlying.eventsAfter(threadId, afterSeq, limit)
+      def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    }
+    GraphRuntime(racing).start(thread, f.graph, "y", tenant("b")).awaited.left.value shouldBe
+      GraphError.TenantMismatch("t", Some("a"), Some("b"))
+    stale.set(true)
+    GraphRuntime(racing).start(thread, f.graph, "y", tenant("a")).awaited.left.value shouldBe
+      a[GraphError.ThreadBusy]
   }
 
   it should "accept any tenant when it has no checkpoint" in {
