@@ -31,10 +31,10 @@ The agent loop is model → tool proposals → policy/tool execution → model r
 - **Agent definition:** reusable prompt, model policy, tools, graph, policies, and configured capabilities.
 - **Run:** one execution attempt, with a run ID, budgets, cancellation, and outcome.
 - **Thread state:** serializable working state for a conversation/workflow, including graph cursor and pending work. It contains no tool registry, Agent, callback, client, or closure.
-- **Run context:** non-serialized services bound for one invocation, such as caller identity, provider clients, tool/backend registries, clock, cancellation signal, and request-scoped dependencies.
+- **Run context:** the identity and limits of one invocation - run, tenant and principal identity, budgets, metadata, the task's position - plus its cancellation signal and event channels. Provider clients, tool/backend registries, clocks and other services are not in it: node closures capture them when the graph is built, and per-tenant or per-thread resources come from captured resolvers keyed by the run's identity (§4.6).
 - **Long-term store:** cross-thread knowledge or preferences scoped to a user, tenant, or agent.
 
-Replace `AgentState` with the data-only graph/thread state used by the runtime. It currently contains a live `ToolRegistry`, and `AgentStatus.HandoffRequested` contains a live `Handoff`/`Agent` reference; neither belongs in persisted state. The replacement stores stable agent/handoff IDs, while tool functions, provider clients, and other executable values are rebound from `RunContext` after restore. Provide one migration note for users moving existing conversation/session data; imported conversation history does not imply resumable execution.
+Replace `AgentState` with the data-only graph/thread state used by the runtime. It currently contains a live `ToolRegistry`, and `AgentStatus.HandoffRequested` contains a live `Handoff`/`Agent` reference; neither belongs in persisted state. The replacement stores stable agent/handoff IDs, while tool functions, provider clients, and other executable values are rebound after restore: the caller supplies a freshly built graph whose node closures capture them, and per-tenant or per-thread resources come from resolvers keyed by run identity (`RunContext.position`, `config.tenantId`). Provide one migration note for users moving existing conversation/session data; imported conversation history does not imply resumable execution.
 
 ### 2.4 Persist execution, not only conversation history
 
@@ -144,17 +144,12 @@ enum NodeResult:
   )
   case Fail(error: AgentError)
 
-final case class RunContext(
-  config: RunConfig,
-  dependencies: RunDependencies,
-  position: RunPosition,
-  cancellation: ThreadInterruption,
-  emit: CustomRunEvent => Unit
-)
-
-trait ThreadInterruption {
-  /** View of the current worker thread's interrupt bit; this does not clear it. */
-  def isInterrupted: Boolean
+/** Identities, limits and event channels only; services are captured by node closures (§2.3, §4.6). */
+final class RunContext(val config: RunConfig, val position: RunPosition) {
+  def emit(name: String, version: Int, payload: ujson.Value): Unit
+  def progress(payload: ujson.Value): Unit
+  /** View of the current task thread's interrupt bit; this does not clear it. */
+  def isCancelled: Boolean
 }
 
 final case class RunConfig(
@@ -193,14 +188,12 @@ enum RunResult[+O]:
 sealed trait AgentError extends LLMError
 
 trait RunHandle[O] {
-  def await(): RunResult[O]
-  def events: RunEventStream
+  def threadId: ThreadId
+  def runId: RunId
   def status: RunStatus
-  def cancel(reason: String): Unit
-}
-
-trait RunEventStream {
-  def subscribe(fromSeq: Long)(onEvent: RunEvent => Unit): Subscription
+  def await(): Result[RunResult[O]]
+  def cancel(): Unit
+  def subscribe(capacity: Int = 1024)(listener: StreamEvent => Unit): Result[Subscription]
 }
 
 opaque type CompiledGraph[I, O] = CompiledGraphHandle[I, O]
@@ -329,26 +322,26 @@ trait AgentRuntime {
     graph: CompiledGraph[I, O],
     input: I,
     config: RunConfig
-  ): RunHandle[O]
+  ): Result[RunHandle[O]]
 
   def resume[I, O](
     graph: CompiledGraph[I, O],
     threadId: ThreadId,
     answers: ResumeInput,
     config: RunConfig
-  ): RunHandle[O]
+  ): Result[RunHandle[O]]
 
   def recover[I, O](
     graph: CompiledGraph[I, O],
     threadId: ThreadId,
     config: RunConfig
-  ): RunHandle[O]
+  ): Result[RunHandle[O]]
 }
 ```
 
 `start` creates a new thread when no checkpoint exists. If the thread has a completed checkpoint and no pending interrupts, it applies the new input to the latest committed state (normally through the message-key update) and starts a new run. If the thread has an incomplete execution checkpoint, `start` rejects with `IncompleteRun`; callers use `recover` to continue that execution without adding a new input. If the thread has pending interrupts, `start` and `recover` reject; callers use `resume`. `resume` accepts a non-empty subset of pending interrupt answers, rejects unknown IDs, and leaves unanswered continuations pending. `recover` acquires the thread claim and continues runnable work from the latest durable checkpoint, reusing successful pending writes so completed siblings do not run again; it retries failed or unstarted tasks according to their node policies. It uses a new run ID and caller-supplied budgets. If an interrupt remains pending, recovery rejects and requires `resume`; a still-active thread claim returns retryable `ThreadBusy`. Concurrent active runs or stale versions for the same thread are rejected by the thread claim/version check. A concurrent resume receives a retryable `ThreadBusy` result identifying the active run; its answers are not accepted or discarded, and the caller retries after that run suspends or completes.
 
-The runtime owns thread interruption: `RunHandle.cancel` interrupts the run's structured-concurrency scope, and `ThreadInterruption.isInterrupted` observes the current task's thread status without clearing it. Delete the separate orchestration `CancellationToken` as the graph runtime replaces orchestration; do not retain a second cancellation contract. Cancellation surfaces as a typed run outcome/error.
+The runtime owns thread interruption: `RunHandle.cancel` interrupts the run's thread, whose structured-concurrency scope interrupts every task, and `RunContext.isCancelled` observes the current task's thread status without clearing it. A `Left` from `start`, `resume` or `recover` means no run exists and the thread is unchanged. Delete the separate orchestration `CancellationToken` as the graph runtime replaces orchestration; do not retain a second cancellation contract. Cancellation surfaces as a typed run outcome/error.
 
 `beforeModel` and `afterModel` use `HookResult` to return a transformed request/response and state update, route with a `Command`, suspend with a typed continuation, or fail. A non-`Continue` result prevents the wrapped model call or ends the current model phase, respectively.
 
@@ -407,7 +400,7 @@ Decisions, including where the prototype refines the §4 sketch:
 - **Restore validates against the compiled graph and reports every problem.** It checks the graph ID and the caller-supplied `version`, which names behaviour. It also checks a SHA-256 structural fingerprint over nodes, entry, edges, joins, and key IDs. It then checks that every state value and pending input decodes with this graph's codec, that each join exists with the right kind, that static arrivals come from sources, that every open join is partial (an empty or fully arrived activation would already have released), and that every arrival a dynamic activation still expects is pending in that fan-out. An in-memory `Execution` is bound to the `CompiledGraph` instance that created or restored it (`ForeignExecution`). Another instance of the same definition, including one in another process, goes through `snapshot`/`restore`.
 - **Concurrency is behind a private seam.** `TaskExecutor` runs a frontier and returns results in task order. The default was sequential; since §4.4 it is a bounded Ox scope. The specs run every ordering scenario with tasks executed last-first and concurrently with random delays, and commit order does not change.
 
-Limits that later Stage 0 issues resolve: `NodeResult` has no `Suspend` yet ([#1269](https://github.com/llm4s/llm4s/issues/1269)). Versioned checkpoints and codec migrations followed in §4.3 ([#1268](https://github.com/llm4s/llm4s/issues/1268)). `NodeContext` (task, node, superstep) and `compile(maxSupersteps)` stand in for `RunContext` and `RunBudgets` ([#1271](https://github.com/llm4s/llm4s/issues/1271)). The fingerprint does not cover node input types; a changed input type is caught when a pending input fails to decode. The message key, retries/cache policy, and Mermaid export are Stage 1 work.
+Limits that later Stage 0 issues resolve: `NodeResult` has no `Suspend` yet ([#1269](https://github.com/llm4s/llm4s/issues/1269)). Versioned checkpoints and codec migrations followed in §4.3 ([#1268](https://github.com/llm4s/llm4s/issues/1268)). `NodeContext` (task, node, superstep) and `compile(maxSupersteps)` stood in for `RunContext` and `RunBudgets`, which replaced them in §4.6. The fingerprint does not cover node input types; a changed input type is caught when a pending input fails to decode. The message key, retries/cache policy, and Mermaid export are Stage 1 work.
 
 ### 4.3 Stage 0 prototype: checkpoints and commit-gated event replay ([#1268](https://github.com/llm4s/llm4s/issues/1268))
 
@@ -430,8 +423,8 @@ Limits:
 - **Suspension:** suspension was not modelled in this step. [#1269](https://github.com/llm4s/llm4s/issues/1269) implemented it (§4.5), including persisting every suspension before it is returned.
 - **Retry:** `recover` retries a failed task once; per-node retry policy is Stage 1.
 - **Retention:** the store keeps only the latest checkpoint and compacts events only when asked. Checkpoint history, fork, retention by age or size, and claim fencing are Stage 2.
-- **Delivery threads and queues:** events are delivered on the committing thread. Subscribers have unbounded queues and are registered per runtime instance.
-- **Run API:** runs return `Result[RunResult]` synchronously. The dispatcher, bounded queues, `RunHandle`, and `RunConfig` belong to [#1271](https://github.com/llm4s/llm4s/issues/1271).
+- **Delivery threads and queues:** events are delivered on the committing thread. Subscribers have unbounded queues and are registered per runtime instance. §4.6 replaced this with an ordered dispatcher and a bounded queue per subscription.
+- **Run API:** runs return `Result[RunResult]` synchronously. §4.6 added the dispatcher, bounded queues, `RunHandle`, and `RunConfig`.
 
 ### 4.4 Stage 0 prototype: Ox cancellation and provider interruption ([#1270](https://github.com/llm4s/llm4s/issues/1270))
 
@@ -452,21 +445,21 @@ Contract decisions:
 Runtime decisions:
 
 - **A superstep is a bounded Ox scope.** The private `TaskExecutor` seam stays, so specs can still impose orderings. Its default is now Ox `parLimit` on virtual threads, with a private default limit of 16; it used to run a superstep's tasks one after another. Every task is forked, a lone one included: run inline on the calling thread, a task that caught the interrupt and returned normally would clear the caller's flag and the run would carry on. `CompiledGraph.run` and `GraphRuntime` both use it. Because tasks now run concurrently, node code must be thread-safe, a task does not inherit the caller's `ThreadLocal` or MDC context, and `Sync`-mode durable events and live progress are delivered on task threads. Ox is an implementation dependency of `llm4s-agent`, and no Ox type appears in a public signature.
-- **A run is cancelled by interrupting its calling thread.** That is the thread that called `start`, `recover`, `resume` or `CompiledGraph.run`. Ox interrupts every task in the superstep and joins them before the interrupt reaches the run loop, so no task outlives the call. A task that ignores its interrupt therefore delays the cancellation, and in a durable run its completed result is kept (an in-memory run keeps nothing from the cancelled superstep).
+- **A run is cancelled by interrupting its calling thread.** That is the thread that called `start`, `recover`, `resume` or `CompiledGraph.run`. (§4.6 moves the run to a thread the runtime owns, cancelled through `RunHandle.cancel`.) Ox interrupts every task in the superstep and joins them before the interrupt reaches the run loop, so no task outlives the call. A task that ignores its interrupt therefore delays the cancellation, and in a durable run its completed result is kept (an in-memory run keeps nothing from the cancelled superstep).
 - **An interrupted task records nothing.** If a task's thread is interrupted when it finishes, the task is cancelled whatever its node returned. It submits no pending write and no task event, so a cancelled tool call never records a result, and `recover` runs the task again. Siblings that finished before the interrupt keep their pending writes in `Sync` and `Async`, as a failed sibling's do.
 - **A cancelled run ends cleanly and reports it.** Once the scope has unwound, the run loop clears the interrupt flag so that its final commits can complete. It then commits a `RunCancelled` event, leaves the checkpoint `Running`, closes the committer, and releases the thread claim. Finally it sets the flag again and returns `RunResult.Failed(state, GraphError.Cancelled(threadId: Option[String], lastCheckpoint: Option[String]))` (both `None` for an in-memory `CompiledGraph.run`). The interrupt is caught with the private `CancelledError.catchInterrupt`, which llm4s uses in place of `scala.util.control.Exception.catching`, because `catching` rethrows `InterruptedException`. The thread claim is now always released, so an interrupted run no longer leaves its thread `ThreadBusy`. Closing an `Async` queue after an interrupt still waits for it to drain, so the claim never fences a run whose commits are still landing. If the closing commit fails, the result is `CheckpointWriteFailed`, keeping the cancellation as its `runError`.
-- **A timeout is an interrupt from outside.** Until `RunBudgets` ([#1271](https://github.com/llm4s/llm4s/issues/1271)), a deadline is applied by wrapping the call, for example with Ox `timeout`. The specs check that every sibling has stopped by the time the timeout returns, and that `recover` then completes the run without re-running finished work.
+- **A timeout is an interrupt from outside.** Until `RunBudgets` (§4.6), a deadline is applied by wrapping the call, for example with Ox `timeout`. The specs check that every sibling has stopped by the time the timeout returns, and that `recover` then completes the run without re-running finished work.
 
 Testkit decisions:
 
 - **`LocalProviderTestServer` can hold a request open.** It runs handlers on their own executor, and gives a test a way to release a held handler, so a request held open by a test cannot block the server's shutdown.
 - **`ProviderModuleChecks.assertCancelsWhenInterrupted` and `assertCancelsStreamWhenInterrupted`** run on a virtual thread against two servers: one that never answers, and one that streams a single chunk and then stalls. For `complete` and `streamComplete` it interrupts the call and asserts that the call returns promptly with `Left(CancelledError)` and the interrupt flag set. For the stream it also asserts that the first chunk was delivered. Every chat provider's module spec calls them: OpenAI, Anthropic, Gemini, Vertex AI, Ollama and OpenAI-compatible. Vertex AI's runs against a stalled mock HTTP client, because its base URL derives from `location`.
 
-Limits (owners in §4.6):
+Limits (owners in §4.7):
 
 - Embedding, reranker, MCP, image and speech clients are not yet brought under the cancellation contract. Some of them flatten every error into their own type.
 - On a platform thread, cancelling an SDK client call is not prompt.
-- Cancellation, the concurrency limit and deadlines have no public API until `RunHandle`, `RunConfig` and `RunBudgets`.
+- Cancellation, the concurrency limit and deadlines have no public API until `RunHandle`, `RunConfig` and `RunBudgets`, which §4.6 added.
 - `CancellationToken` remains for `PlanRunner` until it is rebuilt.
 
 ### 4.5 Stage 0 prototype: resumable approval and tool-call barriers ([#1269](https://github.com/llm4s/llm4s/issues/1269))
@@ -494,37 +487,79 @@ Tool-loop decisions (`ToolLoop`):
 - **Edits are an operation.** `MessageUpdate.EditToolCall` changes one call's arguments in place, so two approvals that edit calls of the same message in one superstep both apply. Under the sketch's whole-message `Replace`, the second edit would overwrite the first.
 - **Message IDs.** Each `StoredMessage` ID is derived from the task that wrote it, so a re-run writes the same IDs. Core `Message` stays ID-free, as §4 requires.
 
-Limits (owners in §4.6):
+Limits (owners in §4.7):
 
 - `LoopTool`, `ToolCallPolicy`, and `ModelStep` are prototype contracts.
 - Tool-argument schema validation is not implemented.
 - A thrown tool is always a tool-level failure.
 
-### 4.6 Stage 0 carry-forward
+### 4.6 Stage 0 prototype: run API and event dispatch ([#1277](https://github.com/llm4s/llm4s/issues/1277))
+
+`start`, `recover` and `resume` now admit a run on the caller's thread and return a `RunHandle` as soon as the thread is claimed; the run executes on a thread the runtime owns. `RunConfig` carries the run's identity and its `RunBudgets`, `RunContext` replaces `NodeContext`, each subscription has its own ordered dispatcher with a bounded queue, and `TracingSubscriber` bridges durable run events to core's `Tracing`. `GraphRuntime.inMemory()` replaces `CompiledGraph.run`. The specs are `RunHandleSpec`, `RunBudgetsSpec`, `RunConfigSpec`, `TenantSpec`, `RebindSpec`, `EventDispatchSpec` and `TracingSubscriberSpec`, with the earlier graph and tool-loop specs ported to the new signatures.
+
+Contract decisions:
+
+- **A run is a handle, and admission never throws.** `start`, `recover` and `resume` take a `RunConfig` and a `Durability` and return `Result[RunHandle[O]]`. Admission runs on the caller's thread, in order: in-process exclusivity (`ThreadBusy`), the latest checkpoint's status (`IncompleteRun`, `PendingInterrupts`, `NothingToRecover`, `NotSuspended`), the tenant check (`TenantMismatch`), restoring the graph and decoding answers or reused pending writes, and the claim commit. A `Left` means no run exists and the thread is free again. A non-fatal throwable during admission - from the store, the clock or restoring the graph - is `Left(GraphError.RunCrashed)`, and an interrupt is `Left(CancelledError)` with the flag set again. A checkpointer whose `commit` throws rather than returning `Left` is reported as `CheckpointWriteFailed`, at the claim and in every durability mode. `RunHandle` has `threadId`, `runId`, `status`, `await`, `cancel` and `subscribe(capacity)`. `CompiledGraph.step(threadId, execution, config)` stays as the low-level stepping API; it runs at most `maxConcurrency` tasks at a time, checks no superstep limit, and outside a runtime `emit` and `progress` are no-ops and `checkpointId` is `""`.
+- **Budgets and deadlines are per run.** `RunBudgets(maxSupersteps, timeout, maxConcurrency)` is part of `RunConfig`; there are no graph-level defaults, and `compile` no longer takes a superstep limit. `RunBudgets.apply` rejects a non-positive value with `IllegalArgumentException`, as a programming error; `RunBudgets.of` returns `Left(ValidationError)` for untrusted input. The superstep limit counts the supersteps of this run. A timeout is measured from the claim commit. When it passes, the run stops exactly as a cancelled run does, commits `RunEvent.RunTimedOut` instead of `RunCancelled`, and ends with `GraphError.DeadlineExceeded`. A deadline that has already passed when the run thread starts ends the run that way before any superstep. `cancel()` and expiry each record a stop cause with a compare-and-set, and the first one wins, so a run reports exactly one. `DeadlineExceeded` is the only `GraphError` that is a `RecoverableError` (the trait now extends `LLMError`, and every other case is a `NonRecoverableError`): `recover` with a new budget continues the run without re-running finished work.
+- **The tenant is part of a thread's identity.** `RunConfig` carries `tenantId: Option[TenantId]` and `principal: Option[Principal]`. Every checkpoint records the run's tenant (checkpoint format 3; earlier checkpoints read as `tenantId = None`). Admission compares the run's tenant with the latest checkpoint's and refuses a difference with `TenantMismatch(threadId, expected, actual)`; `None` and `Some` differ, and a thread with no checkpoint accepts any tenant. `RunStarted`, `RunRecovered` and `RunResumed` record both `tenantId` and `principal`. The principal is recorded, never checked: authorisation belongs to the caller. Events written before this change, including the old `RunStarted` encoding, still read.
+- **Dependencies are captured, not carried.** `RunContext` is `(config, position)` with `emit`, `progress` and `isCancelled`; `RunPosition` is the thread, run, checkpoint, task, node and superstep. Clients, tools and other services are captured by node closures when the graph is built. A per-tenant or per-thread resource comes from a captured resolver keyed by `config.tenantId` or `position`. A restored run rebinds because checkpoints are data and the caller supplies a freshly built graph, so a thread suspended under one client resumes under another (`RebindSpec`). See §9 for why there is no dependency bag or context type parameter.
+
+Runtime decisions:
+
+- **A run has its own thread.** After the claim, the run loop runs on a virtual thread named `llm4s-run-<threadId>`. The thread stays in the runtime's active set from the start of admission until that run thread exits, so `recover` cannot mistake a live run's `Running` checkpoint for an abandoned one. The run thread releases the thread before it sets the result, on every exit, so a caller that has seen the result can start the next run at once. An unexpected throwable escaping the run loop ends it with `RunCrashed`; no terminal event is committed and the checkpoint stays `Running`. #1270's cancellation semantics apply unchanged to this thread.
+- **`cancel` interrupts the run thread; `await` interrupts nothing.** `cancel()` returns at once, is idempotent, and is a no-op once the run has ended; a run that has already submitted its completed or suspended checkpoint still finishes with that outcome. `await()` blocks until the run ends, and the result is retained, so every call returns the same value. If the awaiting thread is interrupted, `await` returns `Left(CancelledError)` with the flag still set, and the run continues. `status` never blocks: `Running` until the result is set, then the result's case. An interrupt from inside the run, such as one a node raises, cancels it too and records `Cancelled` as its cause, so a deadline that passes later sends no interrupt into the run's closing commits.
+- **One dispatcher per subscription.** Each subscription has a queue of `capacity` entries drained in order by its own virtual thread, the only thread its listener is called on - never a task, run, writer or committing thread. Commit and hand-off happen under one lock, and the commit path offers events to each queue without blocking, so a slow listener never holds up a run and each queue receives events in commit order. Durable events keep #1268's guarantees: ascending `seq`, no gaps or duplicates, delivery only after the commit that numbered them, in every durability mode. `handle.subscribe` subscribes from just before the run's claim event, so it replays the run from its start whenever it is called.
+- **Overflow policies differ by event kind.** A durable event that does not fit marks the subscriber lagging: what is already queued is delivered, then `Disconnected(lastSeq, Lagging)`, where `lastSeq` is the last durable `seq` delivered, and resubscribing with `afterSeq = lastSeq` continues with no gap. A live event is accepted only while two slots are free, so the gap marker always fits; otherwise it is dropped and counted, and the next accepted event is preceded by `LiveGap(n)`. `subscribe` therefore requires `capacity >= 2` and returns `Left(ValidationError)` below that.
+- **Replay, then switch.** `subscribe` returns at once and replay runs on the dispatcher thread, reading pages of 500 until one is empty. Then, under the hub lock, it reads pages until one is not full, queues them, and joins the live set. Commits hand events over under the same lock, so none lands between the last read and joining, and de-duplication by `seq` delivers a commit that landed during the switch exactly once. A failed read ends the subscription with `Disconnected(lastSeq, ReplayFailed(error))`.
+- **A throwing listener is disconnected.** It ends its subscription with `Disconnected(lastSeq, ListenerFailed(cause))`, where `lastSeq` excludes the event that threw; #1268 swallowed the exception. `Subscription.cancel()` stops the dispatcher and nothing is delivered after it returns, not even `Disconnected`. Called from another thread, it interrupts a listener call in progress and waits for it to end; called from inside the listener, it returns at once and the dispatcher stops when the call returns.
+- **Tracing is a subscriber.** `TracingSubscriber.attach(runtime, threadId, tracing, afterSeq)` projects each durable event onto `TraceEvent.CustomEvent("graph.<event>", data, timestamp)`, where `<event>` is the `RunEvent` case in snake case (`graph.run_started`, `graph.run_timed_out`) and `data` holds the thread, run, sequence, checkpoint, task and node IDs and the event's own fields. Failures are custom events too, because `ErrorOccurred` needs a `Throwable` that the event log does not keep. Live events are not traced, a `Disconnected` is logged at WARN, and a `Left` from the backend is logged at WARN without ending the subscription. `RunEvent` stays in `llm4s-agent` and core gains no `TraceEvent` case until Stage 1 shows a need.
+- **No lock pins a carrier.** Every lock a task or run thread can take - the commit lock, the active set, the event hub, the subscription dispatchers, `OnExitCommitter`, the task sink and `InMemoryCheckpointer` - is a `ReentrantLock` rather than `synchronized`, which pins a virtual thread's carrier on JDK 21. A source check in `GraphRuntimeSpec` keeps `synchronized` out of `org.llm4s.agent.graph`.
+
+Source breaks, with no shims (the CHANGELOG lists the same):
+
+- `NodeContext` becomes `RunContext`; `context.taskId`, `context.nodeId` and `context.superstep` become `context.position.taskId`, `.nodeId` and `.superstep`.
+- `compile(entry, maxSupersteps)` becomes `compile(entry)`, and `ToolLoop.build` drops `maxSupersteps`; limits are `RunBudgets` in `RunConfig`.
+- `CompiledGraph.run(input)` becomes `GraphRuntime.inMemory().start(threadId, graph, input).flatMap(_.await())`.
+- `step(execution)` becomes `step(threadId, execution, config)`.
+- `GraphRuntime.start`/`recover`/`resume(..., runId, durability)` become `(..., config, durability)` and return `Result[RunHandle[O]]`; a run is cancelled with `handle.cancel()`, not by interrupting the caller.
+- `subscribe` gains `capacity` (at least 2); listeners run on a dispatcher thread; a throwing listener is disconnected; `StreamEvent` gains `LiveGap` and `Disconnected`.
+- `GraphError` no longer extends `NonRecoverableError`: it extends `LLMError`, and each case is a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`; `GraphError.RunCrashed`, `TenantMismatch` and `DeadlineExceeded`, and `RunEvent.RunTimedOut`, are new cases, and `RunStarted`, `RunRecovered` and `RunResumed` gain `tenantId` and `principal`.
+
+Limits (owners in §4.7):
+
+- Cancelling a run does not reach child runs it started; nested runs and their cancellation are Stage 3.
+- `RunContext` has no dependency accessor, by decision (§9).
+- `RunPosition` has no fencing token; fencing is Stage 2, with run-claim leases.
+- A `Subscription` dropped without `cancel()` keeps its dispatcher's virtual thread parked for the life of the runtime.
+- `Subscription.cancel()` blocks while a listener ignores its interrupt, and two listeners that cancel each other's subscriptions deadlock.
+- The hub lock is runtime-wide, so a long catch-up during a replay-to-live switch briefly delays commits on other threads.
+- If the caller is interrupted after a slow store has saved the claim, admission returns `Left(CancelledError)` and the thread is left with a `Running` claim, which `recover` continues.
+
+### 4.7 Stage 0 carry-forward
 
 Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 
 | Item | Left by | Owner |
 |---|---|---|
-| Public cancellation (`RunHandle.cancel` interrupting the run's calling thread), a configurable superstep concurrency limit, and deadlines in `RunBudgets` | #1270 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
-| `RunContext`/`RunConfig`/`RunBudgets` replacing `NodeContext` and `compile(maxSupersteps)`; `RunHandle` with `await`/`status`/`cancel` | #1267, #1268 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
-| Ordered per-subscriber dispatcher with bounded queues and lagging-subscriber disconnect, instead of delivery on the committing thread | #1268 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
-| `AgentTool[A]` + `AgentToolSpec[A]` replacing `LoopTool`; `ToolArgumentValidator` (schema validation before policy or side effects); infrastructure-fatal versus tool-level failure | #1269 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
-| `AgentMiddleware` (ordered hooks, `wrapModelCall`/`wrapToolCall`) replacing `ToolCallPolicy`; guardrails as middleware | #1269 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
+| `AgentTool[A]` + `AgentToolSpec[A]` replacing `LoopTool`; `ToolArgumentValidator` (schema validation before policy or side effects); infrastructure-fatal versus tool-level failure | #1269 | [#1278](https://github.com/llm4s/llm4s/issues/1278) |
+| `AgentMiddleware` (ordered hooks, `wrapModelCall`/`wrapToolCall`) replacing `ToolCallPolicy`; guardrails as middleware | #1269 | [#1279](https://github.com/llm4s/llm4s/issues/1279) |
 | `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop`; `ModelStep` streaming through live progress; `PlanRunner` rebuilt or removed; `AgentEvent` replaced | #1269 | Stage 1 |
 | Per-node retry and cache policy (recovery currently retries a failed task once) | #1268 | Stage 1 |
 | Delete `CancellationToken` with the `PlanRunner` rebuild | #1270 | Stage 1 |
 | Embedding, reranker, MCP, image and speech clients under the `CancelledError` contract (today: chat clients and core only) | #1270 | Stage 1 |
 | Prompt cancellation of SDK client calls on platform threads (today: prompt on virtual threads, where the runtime runs tasks) | #1270 | - |
-| Sync-mode commits and `EventHub` delivery use `synchronized`, which pins a virtual thread's carrier on JDK 21 (JEP 491 removes this in JDK 24); revisit when the concurrency limit becomes configurable | #1270 | [#1271](https://github.com/llm4s/llm4s/issues/1271) |
 | Mermaid export | #1267 | Stage 1 |
 | Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
-| Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit (today: the optimistic parent check, and `ThreadBusy` for a run still executing in the same runtime) | #1268, #1269 | Stage 2 |
+| Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit and in `RunPosition` (today: the optimistic parent check, and `ThreadBusy` for a run still executing in the same runtime) | #1268, #1269, #1277 | Stage 2 |
+| Cancelling a run cancels the child runs it started | #1277 | Stage 3 |
 | Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction) | #1268 | Stage 2 |
 | Static `interruptBefore`/`interruptAfter` breakpoints | #1269 | Stage 2 |
+| Known limits, not planned: a `Subscription` dropped without `cancel()` keeps a parked virtual thread; `cancel()` blocks while a listener ignores its interrupt; the hub lock is runtime-wide; `RunContext` has no dependency accessor (by decision) | #1277 | - |
 | Known limit, not planned: the structural fingerprint does not cover node input types; a changed input type is caught when a pending input fails to decode | #1267 | - |
 
-### 4.7 Durable workflow API
+Closed by [#1277](https://github.com/llm4s/llm4s/issues/1277) (§4.6): public cancellation (`RunHandle.cancel`), a configurable superstep concurrency limit and deadlines in `RunBudgets` (left by #1270); `RunContext`/`RunConfig`/`RunBudgets` replacing `NodeContext` and `compile(maxSupersteps)`, and `RunHandle` with `await`/`status`/`cancel` (left by #1267 and #1268); the ordered per-subscriber dispatcher with bounded queues and lagging-subscriber disconnect (left by #1268); and the `synchronized` locks that pinned a virtual thread's carrier on JDK 21 (left by #1270).
+
+### 4.8 Durable workflow API
 
 Explore a Scala `Workflow[A]`/`Durable[A]` for-comprehension as a peer frontend to the graph DSL. It should compile to the same runtime/checkpoint kernel, not create a second durable engine. Durable boundaries must be explicit named steps with serializable inputs/outputs; arbitrary Scala closures are not replayable. The workflow API can express sequence, parallel composition, retry, timeout, and typed suspension in direct Scala style. Prototype after the superstep kernel exists, and adopt only if it substantially improves ordinary Scala ergonomics.
 
@@ -669,6 +704,8 @@ The migration note should give direct replacements for existing state/event/Plan
 | Tool argument validation | **Accepted.** Validate raw arguments against the exact provider-facing JSON Schema generated from core `SchemaDefinition` before decoding, policy, or side effects. Use an agent-local validator SPI that fails closed for unsupported constraints, then decode and run optional semantic validation; do not change core for this runtime requirement. |
 | Stable core boundary and module wiring | **Clarified.** `llm4s-core` is the designated stable spine for 1.0, though MiMa is not active yet. Keep graph/harness APIs in `llm4s-agent`; register future checkpoint adapter projects in `hooks/pre-commit` alongside build, docs, coverage, Codecov, and IT-tier wiring. |
 | Objective parity measure | **Accepted.** Port a Deep Agents-style research workflow and coding/workspace workflow as acceptance suites, and score the same capabilities across both. |
+| Run dependencies | **Accepted.** Node closures capture dependencies when the graph is built; per-tenant or per-thread resources come from captured resolvers keyed by `RunContext` identity (`position`, `config.tenantId`). No `RunDependencies` bag: it is a service locator, and a missing key is found only at run time. No context type parameter: it would spread through every graph, node and tool type. Rebinding after restore follows from data-only checkpoints and a freshly built graph (§4.6). |
+| Tenant identity | **Accepted.** The tenant is part of a thread's identity: recorded on every checkpoint, and a mismatch is refused at admission (`TenantMismatch`). The principal is recorded on run events, not checked (§4.6). |
 
 ## 10. Main risks and remaining prototypes
 

@@ -1,5 +1,46 @@
 # Migration Guide
 
+## Run API for graph runs
+
+Not in a release yet ([#1277](https://github.com/llm4s/llm4s/issues/1277)). `GraphRuntime.start`,
+`recover` and `resume` return a `RunHandle` once the thread is claimed, and the run executes on a
+thread the runtime owns. The graph runtime is Experimental, so these are source breaks with no
+shims. Design: `docs/design/typed-agent-runtime-design.md` §4.6.
+
+- **`NodeContext` is `RunContext`.** `context.taskId`, `context.nodeId` and `context.superstep`
+  become `context.position.taskId`, `.nodeId` and `.superstep`; `emit` and `progress` are
+  unchanged, and `isCancelled` is new. Clients and tools stay captured by node closures; resolve
+  per-tenant or per-thread resources from `context.config.tenantId` or `context.position`.
+- **Limits are per run.** `compile(entry, maxSupersteps)` becomes `compile(entry)`, and
+  `ToolLoop.build` drops `maxSupersteps`. Pass
+  `RunConfig(budgets = RunBudgets(maxSupersteps = ..., timeout = ..., maxConcurrency = ...))` to
+  each run; `RunBudgets.of` validates untrusted values as a `Result`.
+- **`CompiledGraph.run(input)` is removed.** Use
+  `GraphRuntime.inMemory().start(threadId, graph, input).flatMap(_.await())`.
+- **`step(execution)` is `step(threadId, execution, config)`.** It runs at most
+  `config.budgets.maxConcurrency` tasks at a time and checks no superstep limit.
+- **`start`/`recover`/`resume(..., runId, durability)` become `(..., config, durability)`** and return
+  `Result[RunHandle[O]]`; the run id is `config.runId`. Call `handle.await()` for the
+  `RunResult`. Cancel with `handle.cancel()`: interrupting the caller no longer cancels the run,
+  and interrupting a thread blocked in `await` returns `Left(CancelledError)` while the run
+  continues.
+- **Subscribers have their own thread.** `subscribe` gains `capacity` (default 1024, at least 2).
+  Listeners run on the subscription's dispatcher thread, not a task or committing thread. A
+  listener that falls behind by more than `capacity` durable events is disconnected; a listener
+  that throws is disconnected rather than ignored. `StreamEvent` gains `LiveGap(dropped)` and
+  `Disconnected(lastSeq, reason)`; resubscribe with `afterSeq = lastSeq` to continue without a gap.
+- **Tenants are checked.** A run whose `RunConfig.tenantId` differs from the one on the thread's
+  latest checkpoint is refused with `GraphError.TenantMismatch`; `None` and `Some` differ.
+  Checkpoints move to format 3, and earlier checkpoints read as having no tenant.
+- **`GraphError` is classified per case.** It extends `LLMError` rather than
+  `NonRecoverableError`; every case is still a `NonRecoverableError` except the new
+  `DeadlineExceeded`, which is a `RecoverableError` - `recover` it with a new budget. Code that
+  relied on `GraphError <: NonRecoverableError` should match the case.
+- **New cases break exhaustive matches.** `GraphError.DeadlineExceeded`, `TenantMismatch` and
+  `RunCrashed`, `RunEvent.RunTimedOut`, and `StreamEvent.LiveGap` and `Disconnected` are new.
+  `RunStarted` is now a case class, and it, `RunRecovered` and `RunResumed` gain `tenantId` and
+  `principal`; events in the old encoding still read.
+
 ## Cancellation by interrupt
 
 Not in a release yet ([#1270](https://github.com/llm4s/llm4s/issues/1270)). An interrupted call
@@ -25,6 +66,8 @@ non-recoverable and is never retried. Chat clients no longer throw `InterruptedE
   another; it now runs them concurrently on virtual threads, at most 16 at a time. Node code must be
   thread-safe, a task does not inherit the caller's `ThreadLocal` or MDC context, and in `Sync`
   durability, durable events and live progress are delivered on the task threads, not the caller's.
+  Since [#1277](https://github.com/llm4s/llm4s/issues/1277) they are delivered on each
+  subscription's dispatcher thread instead (see above).
 
 ## Pre-baseline API cleanup, pass 8
 

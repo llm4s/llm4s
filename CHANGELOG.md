@@ -8,6 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Run API and event dispatch for graph runs** (Experimental, `org.llm4s.agent.graph`,
+  [#1277](https://github.com/llm4s/llm4s/issues/1277)): `GraphRuntime.start`/`recover`/`resume`
+  admit a run on the caller's thread and return `Result[RunHandle[O]]` once the thread is claimed;
+  the run executes on a runtime-owned virtual thread. `RunHandle` has `await` (retained result; an
+  interrupted waiter gets `Left(CancelledError)` and the run continues), non-blocking `status`,
+  idempotent `cancel()` and `subscribe(capacity)`, which replays the run from its start. Admission
+  never throws: a non-fatal throwable is `Left(GraphError.RunCrashed)`, an interrupt is
+  `Left(CancelledError)` with the flag set, and a checkpointer whose commit throws is
+  `CheckpointWriteFailed`. `RunConfig` carries the run id, tenant, principal, metadata and
+  `RunBudgets` (`maxSupersteps`, `timeout`, `maxConcurrency`); a timeout is measured from the claim
+  and ends the run with the recoverable `GraphError.DeadlineExceeded` and a new
+  `RunEvent.RunTimedOut`, and the first of cancel and expiry wins. `RunContext(config, position)`
+  replaces `NodeContext`, with `emit`, `progress` and `isCancelled`; dependencies stay captured by
+  node closures. The tenant is recorded on every checkpoint (format 3, with a migration) and a
+  mismatch is refused at admission with `GraphError.TenantMismatch`; `RunStarted`, `RunRecovered`
+  and `RunResumed` record `tenantId` and `principal`. Each subscription has its own ordered
+  dispatcher thread and a queue of `capacity` (at least 2) entries: a lagging subscriber is
+  disconnected with its last delivered `seq`, dropped live events are reported as `LiveGap(n)`, and
+  a throwing listener is disconnected, so a listener never runs on, or holds up, a committing
+  thread. `TracingSubscriber.attach` projects durable run events onto core's
+  `TraceEvent.CustomEvent` (`graph.run_started`, ...). Every lock in the runtime is a
+  `ReentrantLock`, so none pins a virtual thread's carrier. Migration: `NodeContext` ->
+  `RunContext`, and `context.taskId`/`nodeId`/`superstep` -> `context.position.*`;
+  `compile(entry, maxSupersteps)` -> `compile(entry)` and `ToolLoop.build` drops `maxSupersteps`
+  (limits are `RunBudgets` in `RunConfig`); `CompiledGraph.run(input)` ->
+  `GraphRuntime.inMemory().start(threadId, graph, input).flatMap(_.await())`; `step(execution)` ->
+  `step(threadId, execution, config)`; `GraphRuntime.start/recover/resume(..., runId, durability)`
+  -> `(..., config, durability)`, returning `Result[RunHandle[O]]`, cancelled with
+  `handle.cancel()` rather than by interrupting the caller; `subscribe` gains `capacity`, listeners
+  run on a dispatcher thread, a throwing listener is disconnected, and `StreamEvent` gains `LiveGap`
+  and `Disconnected`; `GraphError` now extends `LLMError` rather than `NonRecoverableError` - every
+  case is still a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`;
+  new `GraphError` and `RunEvent` cases break exhaustive matches. Design:
+  `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.7.
 - **Cancellation by interrupt for graph runs and providers** (Experimental, `org.llm4s.agent.graph`,
   [#1270](https://github.com/llm4s/llm4s/issues/1270)): each superstep runs in a bounded Ox scope on
   virtual threads (Ox is a new implementation dependency of `llm4s-agent`). Interrupting the thread
@@ -32,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime: one task per call; exactly one runtime-written result per call, including denial,
   rejection, unknown tools and failures; policy- and tool-raised approvals both resuming at one
   approval node; and edited approvals amending the source assistant message. Design:
-  `docs/design/typed-agent-runtime-design.md` §4.5, with the Stage 0 carry-forward in §4.6.
+  `docs/design/typed-agent-runtime-design.md` §4.5, with the Stage 0 carry-forward in §4.7.
 - **Durable graph runs: checkpoints and commit-gated event replay** (Experimental,
   `org.llm4s.agent.graph`, [#1268](https://github.com/llm4s/llm4s/issues/1268)):
   `GraphRuntime.start`/`recover`/`subscribe` over a `Checkpointer` SPI that owns each thread's latest

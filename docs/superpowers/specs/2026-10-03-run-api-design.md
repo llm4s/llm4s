@@ -231,9 +231,9 @@ enum DisconnectReason:
 - **Live overflow:** a live event is accepted only while at least two slots are free, so the gap
   marker always fits; otherwise it is dropped and counted. The next accepted event (live or durable)
   is preceded by `LiveGap(n)`.
-- **Replay, then switch.** `subscribe` validates `capacity > 0` and returns at once; replay runs on
+- **Replay, then switch.** `subscribe` validates `capacity >= 2` (one slot is reserved for the `LiveGap` marker) and returns at once; replay runs on
   the dispatcher thread. It reads pages (`eventsAfter`, 500 at a time) until a page is empty, then,
-  under the hub lock, reads one final page and joins the live set. Durable events are de-duplicated
+  under the hub lock, reads pages until one is not full and joins the live set. Durable events are de-duplicated
   by `seq`, so a commit landing during the switch is delivered exactly once. Live events begin after
   the switch. A failed read ends the subscription with `Disconnected(lastSeq, ReplayFailed(error))`.
 - **A throwing listener** ends its subscription with `Disconnected(lastSeq, ListenerFailed(cause))`

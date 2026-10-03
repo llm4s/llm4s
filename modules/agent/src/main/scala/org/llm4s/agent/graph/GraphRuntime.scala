@@ -94,7 +94,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
   private val hub        = EventHub(checkpointer)
   private val commitLock = new java.util.concurrent.locks.ReentrantLock()
 
-  /** Threads with a run executing in this runtime; guarded by itself. */
+  /** Threads with a run executing in this runtime; guarded by `activeLock`. */
   private val active     = mutable.Set.empty[String]
   private val activeLock = new java.util.concurrent.locks.ReentrantLock()
 
