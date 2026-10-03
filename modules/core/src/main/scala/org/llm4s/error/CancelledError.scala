@@ -2,9 +2,8 @@ package org.llm4s.error
 
 import org.llm4s.types.Result
 
-import java.io.InterruptedIOException
 import java.nio.channels.ClosedByInterruptException
-import scala.annotation.tailrec
+import java.util.{ Collections, IdentityHashMap }
 
 /**
  * The operation was cancelled by interrupting its thread.
@@ -31,18 +30,26 @@ object CancelledError {
 
   /**
    * Whether `t` is a cancellation: the current thread is interrupted, or `t` or one of its causes
-   * is an interruption. The flag test matters on a virtual thread, where an interrupt during a
-   * blocking socket read closes the socket and surfaces as an ordinary `SocketException`.
+   * is an `InterruptedException` or a `ClosedByInterruptException`.
+   *
+   * The flag test matters on a virtual thread, where an interrupt during a blocking socket read
+   * closes the socket and surfaces as an ordinary `SocketException`. A bare
+   * `java.io.InterruptedIOException` (including `SocketTimeoutException`) is not enough on its
+   * own: OkHttp reports its call timeout as `InterruptedIOException("timeout")`, and a timeout
+   * stays a timeout. It counts only through the flag or an `InterruptedException` beneath it.
    */
   def isCancellation(t: Throwable): Boolean =
     Thread.currentThread().isInterrupted || causedByInterruption(t)
 
-  /** `Some(CancelledError)` if `t` is a cancellation, with the interrupt flag set; otherwise `None`. */
+  /**
+   * `Some(CancelledError)` if `t` is a cancellation (see [[isCancellation]]); otherwise `None`.
+   *
+   * Classifies only: it never sets the interrupt flag. The flag belongs to the thread that was
+   * interrupted, and the code mapping `t` may be running on another one - a `Future` callback on
+   * a pool thread, say. Code that itself caught an `InterruptedException` restores the flag.
+   */
   def fromThrowable(t: Throwable, operation: String): Option[CancelledError] =
-    Option.when(isCancellation(t)) {
-      Thread.currentThread().interrupt()
-      CancelledError(operation, Some(t))
-    }
+    Option.when(isCancellation(t))(CancelledError(operation, Some(t)))
 
   /** A failure that ends while the current thread is interrupted is a cancellation. */
   def whenInterrupted[A](result: Result[A], operation: String): Result[A] =
@@ -81,18 +88,17 @@ object CancelledError {
     outcome
   }
 
-  @tailrec private def causedByInterruption(t: Throwable): Boolean =
-    if t == null then false
-    else {
-      // A SocketTimeoutException is an InterruptedIOException by inheritance only: it is a timeout.
-      val interruption = t match {
-        case _: java.net.SocketTimeoutException                                                  => false
-        case _: InterruptedException | _: InterruptedIOException | _: ClosedByInterruptException => true
-        case _                                                                                   => false
+  /** Whether `t`'s cause chain holds an interruption; a cause cycle is walked once. */
+  private def causedByInterruption(t: Throwable): Boolean = {
+    val seen = Collections.newSetFromMap(new IdentityHashMap[Throwable, java.lang.Boolean]())
+    Iterator
+      .iterate(t)(_.getCause)
+      .takeWhile(c => c != null && seen.add(c))
+      .exists {
+        case _: InterruptedException | _: ClosedByInterruptException => true
+        case _                                                       => false
       }
-      val next = t.getCause
-      interruption || (next != null && (next ne t) && causedByInterruption(next))
-    }
+  }
 
   private def causeOf(error: LLMError): Option[Throwable] =
     error match {

@@ -273,7 +273,16 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
     request: ToolCallRequest,
     config: ToolExecutionConfig
   )(implicit ec: ExecutionContext): Future[Either[ToolCallError, ujson.Value]] =
-    Future(blocking(execute(request, config)))
+    Future(blocking {
+      val result = execute(request, config)
+      // A Cancelled call left the flag set on this pool thread; the Future carries the outcome,
+      // and a flag left behind would cancel the next, unrelated task the pool runs here.
+      result match {
+        case Left(_: ToolCallError.Cancelled) => Thread.interrupted(): Unit
+        case _                                => ()
+      }
+      result
+    })
 
   /**
    * Execute multiple tool calls with a configurable strategy.

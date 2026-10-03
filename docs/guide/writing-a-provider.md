@@ -693,7 +693,7 @@ interrupted. It must not throw `InterruptedException` or clear the flag. A clien
 `BaseLifecycleLLMClient` gets this from `completeWithMetrics`; `Llm4sHttpClient` already returns
 `CancelledError` for an interrupted request or stream read. Your module spec should run
 `assertCancelsWhenInterrupted` and `assertCancelsStreamWhenInterrupted` against
-`LocalProviderTestServer.holdOpen` and `streamThenHold`. A client that does not extend `BaseLifecycleLLMClient` can use the public helpers `CancelledError.attempt`, `CancelledError.whenInterrupted`, `CancelledError.fromThrowable` and `CancelledError.isCancellation`.
+`LocalProviderTestServer.holdOpen` and `streamThenHold`. A client that does not extend `BaseLifecycleLLMClient` can use the public helpers `CancelledError.attempt`, `CancelledError.whenInterrupted`, `CancelledError.fromThrowable` and `CancelledError.isCancellation`. `fromThrowable` and `isCancellation` only classify: they never set the flag, so if your code catches an `InterruptedException` itself, restore the flag with `Thread.currentThread().interrupt()`. A bare `InterruptedIOException`, such as OkHttp's call timeout, is not a cancellation unless the thread is interrupted or an `InterruptedException` lies beneath it.
 
 ## Stability
 

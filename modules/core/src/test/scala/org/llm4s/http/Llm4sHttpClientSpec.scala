@@ -616,11 +616,27 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     HttpFailures.streamReadError(new java.io.IOException(new InterruptedException), url, 3.seconds) shouldBe a[
       org.llm4s.error.CancelledError
     ]
-    Thread.interrupted()
+    Thread.interrupted() shouldBe false // mapping classifies; it never sets the flag
     // Not an I/O failure (e.g. a malformed chunk): the default mapping, unchanged
     HttpFailures.streamReadError(new IllegalStateException("bad chunk"), url, 3.seconds) shouldBe a[
       org.llm4s.error.UnknownError
     ]
+  }
+
+  it should "keep the flag of a reading thread that was interrupted" in {
+    // On a virtual thread an interrupt closes the socket: the read fails with a plain I/O error
+    // and the JDK leaves the flag set, which is what makes it a cancellation
+    @volatile var outcome: Option[(org.llm4s.error.LLMError, Boolean)] = None
+    val reader = Thread.ofVirtual().start { () =>
+      Thread.currentThread().interrupt()
+      val error =
+        HttpFailures.streamReadError(new java.net.SocketException("Closed by interrupt"), "http://x", 3.seconds)
+      outcome = Some(error -> Thread.currentThread().isInterrupted)
+    }
+    reader.join(5000)
+    val (error, flag) = outcome.get
+    error shouldBe a[org.llm4s.error.CancelledError]
+    flag shouldBe true
   }
 
   "HttpFailures.toLLMError" should "map each transport failure to its error type" in {
@@ -631,7 +647,7 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     map(new java.net.http.HttpTimeoutException("t")) shouldBe a[TimeoutError]
     map(new java.net.SocketTimeoutException("st")) shouldBe a[TimeoutError]
     map(new InterruptedException("i")) shouldBe a[org.llm4s.error.CancelledError]
-    Thread.interrupted()
+    Thread.interrupted() shouldBe false // mapping classifies; it never sets the flag
     map(new IllegalArgumentException("bad")) shouldBe a[ValidationError]
     map(new java.net.ConnectException("refused")) shouldBe a[NetworkError]
     map(new java.net.UnknownHostException("nohost")) shouldBe a[NetworkError]

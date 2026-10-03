@@ -929,6 +929,40 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers with Eventually {
     attempts.get() shouldBe 1
   }
 
+  "ToolRegistry.executeAsync" should "not leave a Cancelled call's interrupt flag on its pool thread" in {
+    val thrower = ToolBuilder[Map[String, Any], MathResult](
+      "thrower",
+      "Throws",
+      Schema.`object`[Map[String, Any]]("p")
+    ).withHandler(_ => throw new InterruptedException("stop"))
+      .buildSafe()
+      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+    val sleeper = ToolBuilder[Map[String, Any], MathResult](
+      "sleeper",
+      "Sleeps briefly",
+      Schema.`object`[Map[String, Any]]("p")
+    ).withHandler { _ =>
+      Thread.sleep(10) // throws at once if a leaked flag is still set
+      Right(MathResult(1.0))
+    }.buildSafe()
+      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+    val registry = new ToolRegistry(Seq(thrower, sleeper))
+    // One fork-join worker, so the second call runs on the thread the first was cancelled on. Unlike
+    // a ThreadPoolExecutor, a ForkJoinPool does not clear a worker's flag between tasks.
+    val pool   = new java.util.concurrent.ForkJoinPool(1)
+    val single = ExecutionContext.fromExecutorService(pool)
+    val results = Await.result(
+      registry.executeAll(
+        Seq(ToolCallRequest("thrower", ujson.Obj()), ToolCallRequest("sleeper", ujson.Obj())),
+        ToolExecutionStrategy.Sequential
+      )(using single),
+      10.seconds
+    )
+    pool.shutdownNow(): Unit
+    results.head shouldBe Left(ToolCallError.Cancelled("thrower"))
+    results(1).isRight shouldBe true
+  }
+
   "ToolCallError.Cancelled" should "not be retryable and serialise as cancelled" in {
     ToolCallError.isRetryable(ToolCallError.Cancelled("t")) shouldBe false
     ToolCallErrorJson.toJson(ToolCallError.Cancelled("t"))("errorType").str shouldBe "cancelled"

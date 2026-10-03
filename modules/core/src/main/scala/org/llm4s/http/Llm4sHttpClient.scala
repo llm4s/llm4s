@@ -278,6 +278,11 @@ object Llm4sHttpClient {
 private[llm4s] object HttpFailures {
 
   /**
+   * Classifies only: a cancellation becomes a [[CancelledError]], but this never sets the
+   * interrupt flag. [[attempt]] restores it when it catches an `InterruptedException`; an
+   * interrupt that closes a socket (a virtual thread) or that the JDK's body stream reports
+   * leaves the flag set itself.
+   *
    * @param t       what the transport threw
    * @param method  HTTP method, for the message
    * @param url     request URL; only its scheme, host, port and path reach the error, so a
@@ -289,7 +294,6 @@ private[llm4s] object HttpFailures {
     val detail   = Option(t.getMessage).filter(_.nonEmpty).getOrElse(t.getClass.getSimpleName)
     t match {
       case e if CancelledError.isCancellation(e) =>
-        Thread.currentThread().interrupt()
         CancelledError(s"http.$method", Some(e))
       case e: HttpConnectTimeoutException =>
         TimeoutError(s"$method $endpoint: connection timed out after $timeout", timeout, s"http.$method", Some(e))
