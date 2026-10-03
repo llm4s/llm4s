@@ -1,5 +1,6 @@
 package org.llm4s.testkit
 
+import org.llm4s.error.CancelledError
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, EmbeddingProviderConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.{ Conversation, StreamedChunk, UserMessage }
@@ -19,6 +20,7 @@ import org.scalactic.source.Position
 import org.scalatest.exceptions.{ StackDepthException, TestFailedException }
 import org.scalatest.{ Assertion, Assertions }
 
+import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import scala.collection.mutable.ListBuffer
 
 /**
@@ -47,6 +49,9 @@ import scala.collection.mutable.ListBuffer
  *     "bind ACME_API_KEY" in assertCredentialBindings(AcmeProvider)
  *   }
  * }}}
+ *
+ * Chat providers also run [[assertCancelsWhenInterrupted]] and [[assertCancelsStreamWhenInterrupted]]
+ * against [[LocalProviderTestServer.holdOpen]] and [[LocalProviderTestServer.streamThenHold]].
  *
  * Modules are compared by class and descriptors by equality (normally reference equality on an
  * `object`), so pass the same descriptor instances your module lists.
@@ -216,6 +221,62 @@ trait ProviderModuleChecks extends Assertions:
       case Left(error)                => failAt(s"streamComplete failed: ${error.message}")
       case Right(_) if chunks.isEmpty => failAt("streamComplete succeeded without delivering a single chunk")
       case Right(_)                   => succeed
+
+  /**
+   * `client.complete` honours interruption: run on a virtual thread (as the agent runtime runs
+   * calls) against a server that never answers - [[LocalProviderTestServer.holdOpen]] - and then
+   * interrupted, it returns `Left(CancelledError)` promptly with the thread's interrupt flag still
+   * set. Every chat provider must pass; see `docs/guide/writing-a-provider.md`.
+   */
+  def assertCancelsWhenInterrupted(client: LLMClient)(using pos: Position): Assertion =
+    val started = new CountDownLatch(1)
+    interrupted("complete") {
+      started.countDown()
+      client.complete(Conversation(Seq(UserMessage("Hello"))))
+    }(started.await(5, TimeUnit.SECONDS): Unit)
+
+  /**
+   * `client.streamComplete` honours interruption mid-stream: against a server that sends one
+   * event and then stalls - [[LocalProviderTestServer.streamThenHold]] - it delivers that chunk,
+   * and, interrupted, returns `Left(CancelledError)` promptly with the interrupt flag set.
+   */
+  def assertCancelsStreamWhenInterrupted(client: LLMClient)(using pos: Position): Assertion =
+    val firstChunk = new CountDownLatch(1)
+    interrupted("streamComplete") {
+      client.streamComplete(Conversation(Seq(UserMessage("Hello"))), onChunk = _ => firstChunk.countDown())
+    } {
+      if !firstChunk.await(10, TimeUnit.SECONDS) then
+        failAt("streamComplete delivered no chunk before the server stalled")
+    }
+
+  /**
+   * Runs `call` on a virtual thread, waits with `ready`, interrupts it, and checks it returns
+   * `Left(CancelledError)` within 10 seconds with its interrupt flag set.
+   */
+  private def interrupted(what: String)(call: => Result[?])(ready: => Unit)(using pos: Position): Assertion =
+    @volatile var outcome: Option[(Result[?], Boolean)] = None
+    val worker = Thread.ofVirtual().start { () =>
+      val result = call
+      outcome = Some(result -> Thread.currentThread().isInterrupted)
+    }
+    ready
+    Thread.sleep(100) // let the call block on the socket; any earlier interrupt must also cancel
+    worker.interrupt()
+    worker.join(10_000)
+    if worker.isAlive then failAt(s"$what was still running 10 seconds after its thread was interrupted")
+    outcome match
+      case Some((Left(_: CancelledError), true)) => succeed
+      case Some((Left(_: CancelledError), false)) =>
+        failAt(
+          s"$what returned CancelledError but cleared the thread's interrupt flag; restore it with Thread.currentThread().interrupt()"
+        )
+      case Some((Left(other), _)) =>
+        failAt(
+          s"$what returned Left(${other.getClass.getSimpleName}: ${other.message}) when its thread was interrupted; expected Left(CancelledError)"
+        )
+      case Some((Right(value), _)) =>
+        failAt(s"$what returned Right($value) when its thread was interrupted; expected Left(CancelledError)")
+      case None => failAt(s"$what threw instead of returning a Result when its thread was interrupted")
 
   /**
    * Builds an embedding provider the way `EmbeddingClient` does: resolve the descriptor for the

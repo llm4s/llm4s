@@ -4,6 +4,7 @@ import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.{ CountDownLatch, Executors }
 import scala.util.Try
 
 /**
@@ -19,8 +20,14 @@ import scala.util.Try
  *   assertStreams(client)
  * }
  * }}}
+ *
+ * [[holdOpen]] and [[streamThenHold]] are handlers that never finish answering, for checking that
+ * a client's call can be interrupted (see `ProviderModuleChecks.assertCancelsWhenInterrupted`).
+ * Handlers run on virtual threads.
  */
 object LocalProviderTestServer {
+
+  private val ReleaseAttribute = "llm4s.testkit.release"
 
   /**
    * Starts a local HTTP server with `handler` bound to `path`, runs `test` with the server's
@@ -28,13 +35,43 @@ object LocalProviderTestServer {
    * `test` throws, whose exception is then rethrown.
    */
   def withServer(path: String)(handler: HttpExchange => Unit)(test: String => Any): Unit = {
-    val server = HttpServer.create(new InetSocketAddress("localhost", 0), 0)
-    server.createContext(path, exchange => handler(exchange))
+    val server   = HttpServer.create(new InetSocketAddress("localhost", 0), 0)
+    val handlers = Executors.newVirtualThreadPerTaskExecutor()
+    val release  = new CountDownLatch(1)
+    val context  = server.createContext(path, exchange => handler(exchange))
+    context.getAttributes.put(ReleaseAttribute, release)
+    server.setExecutor(handlers)
     server.start()
 
     val outcome = Try(test(s"http://localhost:${server.getAddress.getPort}"))
+    release.countDown() // let held handlers finish, so stop() does not wait on them
     server.stop(0)
+    handlers.shutdownNow(): Unit
     outcome.fold(error => throw error, _ => ())
+  }
+
+  /**
+   * Holds the request open without answering until the enclosing [[withServer]] block ends - a
+   * provider that never replies, for checking that a client's call can be interrupted.
+   */
+  def holdOpen(exchange: HttpExchange): Unit =
+    exchange.getHttpContext.getAttributes.get(ReleaseAttribute) match {
+      case latch: CountDownLatch => latch.await()
+      case _                     => ()
+    }
+
+  /**
+   * Starts a 200 streaming response, sends `firstEvent` (one complete event in the provider's
+   * stream format), then holds the response open like [[holdOpen]].
+   */
+  def streamThenHold(exchange: HttpExchange, firstEvent: String, contentType: String = "text/event-stream"): Unit = {
+    exchange.getResponseHeaders.add("Content-Type", contentType)
+    exchange.sendResponseHeaders(200, 0) // 0: chunked, length unknown
+    val os = exchange.getResponseBody
+    os.write(firstEvent.getBytes(StandardCharsets.UTF_8))
+    os.flush()
+    holdOpen(exchange)
+    Try(os.close()): Unit
   }
 
   /** Sends a JSON response with the given status code and body. */
