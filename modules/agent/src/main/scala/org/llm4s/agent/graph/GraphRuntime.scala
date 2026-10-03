@@ -92,10 +92,11 @@ object GraphRuntime:
 final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.systemUTC()):
 
   private val hub        = EventHub(checkpointer)
-  private val commitLock = new Object
+  private val commitLock = new java.util.concurrent.locks.ReentrantLock()
 
   /** Threads with a run executing in this runtime; guarded by itself. */
-  private val active = mutable.Set.empty[String]
+  private val active     = mutable.Set.empty[String]
+  private val activeLock = new java.util.concurrent.locks.ReentrantLock()
 
   /**
    * Replays events with `seq > afterSeq`, then delivers new events until cancelled or
@@ -211,7 +212,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
   private def exclusively[I, O](threadId: ThreadId)(
     admit: AtomicReference[Option[StopCause]] => Result[Run[I, O]]
   ): Result[RunHandle[O]] = admission(threadId) {
-    if !active.synchronized(active.add(threadId.value)) then
+    if !withLock(activeLock)(active.add(threadId.value)) then
       checkpointer
         .latest(threadId)
         .flatMap(latest => Left(GraphError.ThreadBusy(threadId.value, latest.map(_.checkpoint.id))))
@@ -249,7 +250,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         Thread.currentThread().interrupt()
         Left(CancelledError("graph run admission", Some(interrupted)))
 
-  private def release(threadId: ThreadId): Unit = active.synchronized(active.remove(threadId.value)): Unit
+  private def release(threadId: ThreadId): Unit = withLock(activeLock)(active.remove(threadId.value)): Unit
 
   private def started(config: RunConfig): RunEvent =
     RunEvent.RunStarted(config.tenantId.map(_.value), config.principal.map(_.value))
@@ -317,7 +318,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
    * same way; an `InterruptedException` is not a store failure and propagates.
    */
   private def commitAndDeliver(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
-    commitLock.synchronized {
+    withLock(commitLock) {
       Try(checkpointer.commit(threadId, commit)).toResult.flatten.map { records =>
         hub.durable(threadId, records)
         records
@@ -373,8 +374,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     private var writes: Vector[PendingWrite]          = Vector.empty
     private var events: Vector[EventDraft]            = Vector.empty
     private var failed: Option[LLMError]              = None
+    private val lock                                  = new java.util.concurrent.locks.ReentrantLock()
 
-    def submit(commit: Commit): Unit = synchronized {
+    def submit(commit: Commit): Unit = withLock(lock) {
       commit.checkpoint.foreach { next =>
         if durableParent.isEmpty then durableParent = Some(next.parent)
         checkpoint = Some(next)
@@ -383,8 +385,8 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       writes ++= commit.pendingWrites
       events ++= commit.events
     }
-    def failure: Option[LLMError] = synchronized(failed)
-    def close(): Unit = synchronized {
+    def failure: Option[LLMError] = withLock(lock)(failed)
+    def close(): Unit = withLock(lock) {
       val last = checkpoint.map(c => c.copy(parent = durableParent.flatten))
       if last.isDefined || writes.nonEmpty || events.nonEmpty then
         failed = commitAndDeliver(threadId, Commit(last, writes, events)).left.toOption
@@ -646,8 +648,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     /** Buffers a task's custom events for its commit; forwards its progress live. */
     final private class TaskSink(task: Task, checkpointId: String) extends NodeEventSink:
       private val buffered                 = mutable.ArrayBuffer.empty[EventDraft]
-      def customEvents: Vector[EventDraft] = synchronized(buffered.toVector)
-      def custom(name: String, version: Int, payload: ujson.Value): Unit = synchronized {
+      private val lock                     = new java.util.concurrent.locks.ReentrantLock()
+      def customEvents: Vector[EventDraft] = withLock(lock)(buffered.toVector)
+      def custom(name: String, version: Int, payload: ujson.Value): Unit = withLock(lock) {
         buffered += draft(Some(checkpointId), Some(task), RunEvent.Custom(name, version, payload))
       }
       def progress(payload: ujson.Value): Unit =

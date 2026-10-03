@@ -51,11 +51,12 @@ final class InMemoryCheckpointer extends Checkpointer:
   )
 
   private val threads = mutable.Map.empty[String, ThreadRecord]
+  private val lock    = new java.util.concurrent.locks.ReentrantLock()
 
   private def record(threadId: ThreadId): ThreadRecord =
     threads.getOrElse(threadId.value, ThreadRecord(None, Vector.empty, Vector.empty, 1L, 1L))
 
-  def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = synchronized {
+  def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = withLock(lock) {
     val current  = record(threadId)
     val latestId = current.checkpoint.flatMap(_.obj.get("id")).map(_.str)
     val conflict = commit.checkpoint.filter(_.parent != latestId).map { checkpoint =>
@@ -90,7 +91,7 @@ final class InMemoryCheckpointer extends Checkpointer:
     }
   }
 
-  def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = synchronized {
+  def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = withLock(lock) {
     val current = record(threadId)
     current.checkpoint match
       case None => Right(None)
@@ -101,7 +102,7 @@ final class InMemoryCheckpointer extends Checkpointer:
         yield Some(StoredCheckpoint(checkpoint, writes))
   }
 
-  def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = synchronized {
+  def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = withLock(lock) {
     val current = record(threadId)
     if afterSeq + 1 < current.earliestSeq then Left(GraphError.ReplayUnavailable(threadId.value, current.earliestSeq))
     else
@@ -110,7 +111,7 @@ final class InMemoryCheckpointer extends Checkpointer:
       ).toResult
   }
 
-  def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = synchronized {
+  def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = withLock(lock) {
     val current = record(threadId)
     val floor   = math.max(current.earliestSeq, math.min(beforeSeq, current.nextSeq))
     threads.update(threadId.value, current.copy(events = current.events.filter(_._1 >= floor), earliestSeq = floor))
