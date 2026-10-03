@@ -17,18 +17,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never throws: a non-fatal throwable is `Left(GraphError.RunCrashed)`, an interrupt is
   `Left(CancelledError)` with the flag set, and a checkpointer whose commit throws is
   `CheckpointWriteFailed`. `RunConfig` carries the run id, tenant, principal, metadata and
-  `RunBudgets` (`maxSupersteps`, `timeout`, `maxConcurrency`); a timeout is measured from the claim
-  and ends the run with the recoverable `GraphError.DeadlineExceeded` and a new
-  `RunEvent.RunTimedOut`, and the first of cancel and expiry wins. `RunContext(config, position)`
+  `RunBudgets` (`maxSupersteps`, `timeout`, `maxConcurrency`, each validated by `apply`, `of` and the
+  `with*` setters); a timeout is measured from the claim and ends the run with the recoverable
+  `GraphError.DeadlineExceeded` and a new `RunEvent.RunTimedOut`, and the first of cancel and expiry
+  wins. Once a run has begun committing its completed or suspended checkpoint, a cancel or expiry
+  sends no interrupt into that commit and the run ends with its outcome; a cancel or expiry that
+  interrupts a superstep's commit ends the run `Cancelled` or `DeadlineExceeded`, even if the store
+  reports that commit as failed. `RunContext(config, position)`
   replaces `NodeContext`, with `emit`, `progress` and `isCancelled`; dependencies stay captured by
   node closures. The tenant is recorded on every checkpoint (format 3, with a migration) and a
-  mismatch is refused at admission with `GraphError.TenantMismatch`; `RunStarted`, `RunRecovered`
+  mismatch is refused at admission with `GraphError.TenantMismatch`, before any status error and in
+  place of `ThreadBusy`, so a caller from another tenant learns nothing about the thread; `RunStarted`, `RunRecovered`
   and `RunResumed` record `tenantId` and `principal`. Each subscription has its own ordered
   dispatcher thread and a queue of `capacity` (at least 2) entries: a lagging subscriber is
   disconnected with its last delivered `seq`, dropped live events are reported as `LiveGap(n)`, and
   a throwing listener is disconnected, so a listener never runs on, or holds up, a committing
   thread. `TracingSubscriber.attach` projects durable run events onto core's
-  `TraceEvent.CustomEvent` (`graph.run_started`, ...). Every lock in the runtime is a
+  `TraceEvent.CustomEvent` (`graph.run_started`, ...). A subscription belongs to the thread and holds
+  its dispatcher until cancelled. Every lock in the runtime is a
   `ReentrantLock`, so none pins a virtual thread's carrier. Migration: `NodeContext` ->
   `RunContext`, and `context.taskId`/`nodeId`/`superstep` -> `context.position.*`;
   `compile(entry, maxSupersteps)` -> `compile(entry)` and `ToolLoop.build` drops `maxSupersteps`
@@ -36,7 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GraphRuntime.inMemory().start(threadId, graph, input).flatMap(_.await())`; `step(execution)` ->
   `step(threadId, execution, config)`; `GraphRuntime.start/recover/resume(..., runId, durability)`
   -> `(..., config, durability)`, returning `Result[RunHandle[O]]`, cancelled with
-  `handle.cancel()` rather than by interrupting the caller; `subscribe` gains `capacity`, listeners
+  `handle.cancel()` rather than by interrupting the caller; `recover(graph, threadId, ...)` ->
+  `recover(threadId, graph, ...)` and `resume(graph, threadId, answers, ...)` ->
+  `resume(threadId, graph, answers, ...)`, matching `start`; `subscribe` gains `capacity`, listeners
   run on a dispatcher thread, a throwing listener is disconnected, and `StreamEvent` gains `LiveGap`
   and `Disconnected`; `GraphError` now extends `LLMError` rather than `NonRecoverableError` - every
   case is still a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`;

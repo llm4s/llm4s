@@ -52,7 +52,9 @@ object RunBudgets:
 ```
 
 `apply` throws `IllegalArgumentException` for a non-positive value (`require`, as a programming
-error); `of` returns `Left(ValidationError)`. `copy` is private.
+error); `of` returns `Left(ValidationError)`. The `with*` setters validate exactly as `apply` does,
+with the same messages - `withMaxConcurrency(0)` would otherwise build a `Semaphore(0)` that blocks
+every task. `copy` is private.
 
 ```scala
 final case class RunConfig private (
@@ -135,9 +137,9 @@ superstep limit (callers driving `step` own their loop). Outside a `GraphRuntime
 final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.systemUTC()):
   def start[I, O](threadId: ThreadId, graph: CompiledGraph[I, O], input: I,
                   config: RunConfig = RunConfig(), durability: Durability = Durability.Sync): Result[RunHandle[O]]
-  def recover[I, O](graph: CompiledGraph[I, O], threadId: ThreadId,
+  def recover[I, O](threadId: ThreadId, graph: CompiledGraph[I, O],
                     config: RunConfig = RunConfig(), durability: Durability = Durability.Sync): Result[RunHandle[O]]
-  def resume[I, O](graph: CompiledGraph[I, O], threadId: ThreadId, answers: Map[InterruptId, ujson.Value],
+  def resume[I, O](threadId: ThreadId, graph: CompiledGraph[I, O], answers: Map[InterruptId, ujson.Value],
                    config: RunConfig = RunConfig(), durability: Durability = Durability.Sync): Result[RunHandle[O]]
   def subscribe(threadId: ThreadId, afterSeq: Long = 0L, capacity: Int = 1024)(
     listener: StreamEvent => Unit
@@ -159,18 +161,22 @@ trait RunHandle[O]:
 ```
 
 `Durability` stays a parameter of each call, after `config`: it is a storage choice, not a budget or an
-identity, so `RunConfig` does not carry it. The `runId` parameter goes; it is `config.runId`.
+identity, so `RunConfig` does not carry it. The `runId` parameter goes; it is `config.runId`. All three
+calls take `threadId` first and `graph` second, so `recover` and `resume` read like `start`.
 
 ### Admission (caller's thread)
 
 In order; any `Left` leaves the thread unchanged:
 
-1. In-process exclusivity: a thread with a live run in this runtime fails with `ThreadBusy`.
-2. Read the latest checkpoint and check its status (`IncompleteRun`, `PendingInterrupts`,
-   `NothingToRecover`, `NotSuspended`), exactly as today.
-3. Tenant check (`TenantMismatch`).
+1. In-process exclusivity: a thread with a live run in this runtime fails with `ThreadBusy` - or with
+   `TenantMismatch` if the latest checkpoint belongs to another tenant, so that caller is not told a
+   run is live, nor given its checkpoint id.
+2. Read the latest checkpoint. If there is one, the tenant check comes first (`TenantMismatch`), so a
+   caller from another tenant learns nothing about the thread's state.
+3. Check its status (`IncompleteRun`, `PendingInterrupts`, `NothingToRecover`, `NotSuspended`).
 4. Restore, decode the answers (`resume`), re-check reused pending writes (`recover`).
-5. Commit the claim (`ThreadBusy` on a lost claim, `CheckpointWriteFailed` otherwise).
+5. Commit the claim (`ThreadBusy` on a lost claim - `TenantMismatch` if the thread, re-read, belongs
+   to another tenant - and `CheckpointWriteFailed` otherwise).
 
 The thread stays in the runtime's `active` set from step 1 until the run thread exits - not until
 admission returns - so `recover` cannot mistake a live run's `Running` checkpoint for an abandoned one.
@@ -185,8 +191,20 @@ task records nothing, a cancelled run commits `RunCancelled`, leaves its checkpo
 returns `Failed(Cancelled(threadId, lastCheckpoint))`. The superstep limit is
 `budgets.maxSupersteps`, counted per run.
 
-- `cancel()` interrupts the run thread. It is idempotent and a no-op once the run has ended. A run
-  that has already submitted its completed or suspended checkpoint still finishes with that outcome.
+- `cancel()` interrupts the run thread. It is idempotent and a no-op once the run has ended.
+- **Finishing.** Before the run submits its completed or suspended checkpoint it records the cause
+  `Finishing` (the same compare-and-set as `Cancelled` and `Expired`). A later `cancel()` or expiry
+  then fails its compare-and-set and sends no interrupt, so a store that reacts to interrupts (a
+  database driver on a virtual thread) cannot fail or abandon the outcome's commit; the run ends with
+  its outcome. If a cancel or expiry was recorded first, the run takes the cancellation path instead
+  and does not commit its outcome.
+- **An interrupted superstep commit.** A cancel or expiry can still interrupt a superstep's commit
+  under `Sync`. If the store throws `InterruptedException` the cancellation path runs as for any
+  interrupt; if it returns `Left` instead, the run sees a failed commit with `Cancelled` or `Expired`
+  recorded and also takes the cancellation path - reporting `Cancelled` or `DeadlineExceeded`, not
+  `CheckpointWriteFailed`. It names the last durable checkpoint, forgets the interrupted failure so
+  that `RunCancelled` or `RunTimedOut` is committed (with the interrupt flag cleared), and stays
+  recoverable. If that closing commit fails too, the run reports `CheckpointWriteFailed`.
 - **Deadline.** When `budgets.timeout` is set, the deadline is fixed at admission (claim commit). On
   expiry the runtime records the cause `Expired` and interrupts the run thread. The cancellation path
   then commits `RunEvent.RunTimedOut` instead of `RunCancelled` and returns
@@ -200,7 +218,9 @@ returns `Failed(Cancelled(threadId, lastCheckpoint))`. The superstep limit is
   stops a run.
 - **`status`** is non-blocking: `Running` until the result is set, then the result's case.
 - **`handle.subscribe`** subscribes to the thread from the sequence number just before this run's
-  claim event, so it replays this run from its start whenever it is called.
+  claim event, so it replays this run from its start whenever it is called. Like every
+  subscription it is the thread's, not the run's: it keeps delivering later runs on the same thread
+  until cancelled.
 
 ## Event dispatch
 
@@ -239,7 +259,11 @@ enum DisconnectReason:
 - **A throwing listener** ends its subscription with `Disconnected(lastSeq, ListenerFailed(cause))`
   (today the exception is swallowed). `lastSeq` excludes the event that threw.
 - **`Subscription.cancel()`** stops the dispatcher; nothing further is delivered, not even
-  `Disconnected`.
+  `Disconnected`. Off the dispatcher thread it interrupts a running listener and waits for the call to
+  end, so it blocks while a listener ignores its interrupt, and two listeners that cancel each other's
+  subscriptions can deadlock. From the listener itself it neither interrupts nor waits.
+- **Lifetime.** A subscription is scoped to the thread and holds its dispatcher (a parked virtual
+  thread while idle) until it is cancelled or disconnected.
 - Unchanged guarantees: ascending `seq`, no gaps or duplicates, delivery only after the commit that
   numbered an event, in every durability mode.
 
@@ -256,13 +280,16 @@ Each `Durable` event becomes `TraceEvent.CustomEvent(s"graph.$name", data, recor
 `taskId`, `nodeId` and the event's fields. Failures are `CustomEvent`s too: `ErrorOccurred` needs a
 `Throwable`, which the event log does not keep. `Live`, `LiveGap` are not traced; `Disconnected` is
 logged at WARN. A `Left` from `tracing.traceEvent` is logged at WARN and the subscription continues.
+A `Disconnected(lastSeq, Lagging)` ends tracing; nothing re-attaches by itself, so the caller attaches
+again with `afterSeq = lastSeq`.
 
 ## Carrier pinning
 
 Every lock a task or run thread can take moves from `synchronized` to
 `java.util.concurrent.locks.ReentrantLock`: the commit lock, the `active` set, `EventHub`,
 `OnExitCommitter`, `TaskSink` and `InMemoryCheckpointer` - every `synchronized` in
-`org.llm4s.agent.graph`. A source check in a spec (no `synchronized` under `agent/graph`) keeps it so.
+`org.llm4s.agent.graph`. A source check in `TracingSubscriberSpec` keeps it so: it fails if the sources
+are not found, and matches `synchronized` as a word in code, ignoring comments.
 
 ## Migration
 
@@ -274,6 +301,9 @@ One CHANGELOG entry, and the same list in the design doc section:
 - `step(execution)` → `step(threadId, execution, config)`.
 - `GraphRuntime.start/recover/resume(..., runId, durability)` → `(..., config, durability)`, returning
   `Result[RunHandle[O]]`; cancel with `handle.cancel()` rather than by interrupting the caller.
+- `recover(graph, threadId, ...)` → `recover(threadId, graph, ...)` and
+  `resume(graph, threadId, answers, ...)` → `resume(threadId, graph, answers, ...)`, matching `start`.
+- A wrong-tenant call gets `TenantMismatch` before any status error or `ThreadBusy`.
 - `subscribe` gains `capacity`; listeners run on a dispatcher thread; a throwing listener is
   disconnected; `StreamEvent` gains `LiveGap` and `Disconnected`.
 - `ToolLoop` and every graph spec move to the new signatures.
@@ -301,17 +331,23 @@ One CHANGELOG entry, and the same list in the design doc section:
 - **`RunBudgetsSpec`:** a timeout stops every sibling, reports `DeadlineExceeded` with
   `RunTimedOut`, and `recover` then completes without re-running finished work; `maxConcurrency` is
   honoured (latch-counting nodes); the superstep limit is per run; `cancel` racing a deadline reports
-  exactly one cause; `RunBudgets.of` rejects non-positive values.
-- **`TenantSpec`:** mismatch refused by `start`, `recover` and `resume`; `None` vs `Some` differ;
-  an earlier-format checkpoint loads as `None`; principal recorded, not checked.
+  exactly one cause; `RunBudgets.of`, `apply` and every `with*` setter reject non-positive values
+  (`RunConfigSpec`).
+- **`CancellationSpec`:** a cancel during the terminal commit loses (the run completes); a cancel or
+  deadline during a superstep commit - whether the store throws or returns `Left` - ends `Cancelled`
+  or `DeadlineExceeded` with `RunCancelled` or `RunTimedOut` committed, and `recover` completes.
+- **`TenantSpec`:** mismatch refused by `start`, `recover` and `resume`, before any status error and
+  instead of `ThreadBusy` (live run or lost claim); `None` vs `Some` differ; an earlier-format
+  checkpoint loads as `None`; principal recorded, not checked.
 - **`RebindSpec`:** suspend with a graph built on client A, resume with one built on client B - the
   work reaches B; a resolver keyed by thread id resolves the same resource after `recover`.
 - **`EventDispatchSpec`:** a lagging subscriber is disconnected with the right `lastSeq` and resumes
   with no gap; `LiveGap` counts drops; a throwing listener is disconnected; a commit during the
   replay-to-live switch is delivered exactly once; a commit never waits on a blocked listener;
-  listeners never run on a task thread; no `synchronized` remains under `agent/graph`.
+  listeners never run on a task thread; a listener that cancels its own subscription is not
+  interrupted.
 - **`TracingSubscriberSpec`:** the projection's names and data; a backend returning `Left` does not
-  end the subscription.
+  end the subscription; no `synchronized` remains under `agent/graph`.
 - Existing specs (`GraphRuntimeSpec`, `CancellationSpec`, `SuspendSpec`, `RestoreSpec`,
   `SuperstepSpec`, `JoinSpec`, `CheckpointFormatSpec`, tool-loop specs) are ported; durable
   cancellation goes through `handle.cancel`, in-memory cases through `GraphRuntime.inMemory`.

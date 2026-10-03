@@ -14,7 +14,8 @@ shims. Design: `docs/design/typed-agent-runtime-design.md` §4.6.
 - **Limits are per run.** `compile(entry, maxSupersteps)` becomes `compile(entry)`, and
   `ToolLoop.build` drops `maxSupersteps`. Pass
   `RunConfig(budgets = RunBudgets(maxSupersteps = ..., timeout = ..., maxConcurrency = ...))` to
-  each run; `RunBudgets.of` validates untrusted values as a `Result`.
+  each run; `RunBudgets.of` validates untrusted values as a `Result`, while `apply` and the
+  `with*` setters throw `IllegalArgumentException` for a non-positive value.
 - **`CompiledGraph.run(input)` is removed.** Use
   `GraphRuntime.inMemory().start(threadId, graph, input).flatMap(_.await())`.
 - **`step(execution)` is `step(threadId, execution, config)`.** It runs at most
@@ -23,14 +24,24 @@ shims. Design: `docs/design/typed-agent-runtime-design.md` §4.6.
   `Result[RunHandle[O]]`; the run id is `config.runId`. Call `handle.await()` for the
   `RunResult`. Cancel with `handle.cancel()`: interrupting the caller no longer cancels the run,
   and interrupting a thread blocked in `await` returns `Left(CancelledError)` while the run
-  continues.
+  continues. A cancel that arrives once the run has begun committing its completed or suspended
+  checkpoint is ignored, and the run ends with its outcome.
+- **`recover` and `resume` take the thread first, as `start` does.** `recover(graph, threadId, ...)`
+  becomes `recover(threadId, graph, ...)`, and `resume(graph, threadId, answers, ...)` becomes
+  `resume(threadId, graph, answers, ...)`. Both arguments have different types, so the compiler
+  flags every call to swap.
 - **Subscribers have their own thread.** `subscribe` gains `capacity` (default 1024, at least 2).
   Listeners run on the subscription's dispatcher thread, not a task or committing thread. A
   listener that falls behind by more than `capacity` durable events is disconnected; a listener
   that throws is disconnected rather than ignored. `StreamEvent` gains `LiveGap(dropped)` and
-  `Disconnected(lastSeq, reason)`; resubscribe with `afterSeq = lastSeq` to continue without a gap.
+  `Disconnected(lastSeq, reason)`; resubscribe with `afterSeq = lastSeq` to continue without a gap
+  (`TracingSubscriber.attach` included: a lagging tracer is not re-attached for you). A
+  subscription belongs to the thread, not one run, and keeps a parked dispatcher thread until
+  `cancel()`; cancel subscriptions you no longer need.
 - **Tenants are checked.** A run whose `RunConfig.tenantId` differs from the one on the thread's
-  latest checkpoint is refused with `GraphError.TenantMismatch`; `None` and `Some` differ.
+  latest checkpoint is refused with `GraphError.TenantMismatch`; `None` and `Some` differ. The check
+  comes first: a wrong-tenant call gets `TenantMismatch` rather than `IncompleteRun`,
+  `PendingInterrupts`, `NothingToRecover`, `NotSuspended` or `ThreadBusy`.
   Checkpoints move to format 3, and earlier checkpoints read as having no tenant.
 - **`GraphError` is classified per case.** It extends `LLMError` rather than
   `NonRecoverableError`; every case is still a `NonRecoverableError` except the new
