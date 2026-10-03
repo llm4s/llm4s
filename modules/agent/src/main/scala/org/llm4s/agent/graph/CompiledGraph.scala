@@ -1,5 +1,6 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.error.CancelledError
 import org.llm4s.types.{ Result, TryOps }
 
 import scala.annotation.tailrec
@@ -67,7 +68,17 @@ final class CompiledGraph[I, O] private[graph] (
     else if execution.isQuiescent then Step.Done(complete(execution))
     else if execution.superstep >= maxSupersteps then
       Step.Done(RunResult.Failed(execution.state, GraphError.SuperstepLimitExceeded(maxSupersteps)))
-    else superstep(execution).fold(error => Step.Done(RunResult.Failed(execution.state, error)), Step.Next(_))
+    else
+      CancelledError.catchInterrupt(superstep(execution)) match
+        case Left(_)                        => Step.Done(cancelled(execution))
+        case Right(Left(_: CancelledError)) => Step.Done(cancelled(execution))
+        case Right(Left(error))             => Step.Done(RunResult.Failed(execution.state, error))
+        case Right(Right(next))             => Step.Next(next)
+
+  /** A run cancelled during a superstep: nothing from it commits, and the interrupt flag is set. */
+  private def cancelled(execution: Execution): RunResult[O] =
+    Thread.currentThread().interrupt()
+    RunResult.Failed(execution.state, GraphError.Cancelled(None, None))
 
   /**
    * Answers some of `execution`'s parked continuations. Each answer is decoded with its resume
@@ -256,15 +267,25 @@ final class CompiledGraph[I, O] private[graph] (
     val outcomes = executor.runAll(execution.frontier.map { task => () =>
       executeTask(task, execution, NodeEventSink.none).map(task -> _)
     })
-    sequence(outcomes).flatMap(commitSuperstep(execution, _))
+    // A cancelled task wins over an earlier task's failure: the run was cancelled, not failed.
+    outcomes
+      .collectFirst { case Left(c: CancelledError) => c }
+      .fold(sequence(outcomes).flatMap(commitSuperstep(execution, _)))(Left(_))
 
-  /** Runs one task against the committed snapshot and checks what it returned. */
+  /**
+   * Runs one task against the committed snapshot and checks what it returned. A task whose node
+   * throws `InterruptedException`, or whose thread is interrupted when its node returns, is
+   * cancelled: `Left(CancelledError)` with the flag set, whatever the node returned.
+   */
   private[graph] def executeTask(task: Task, execution: Execution, sink: NodeEventSink): Result[TaskResult] =
     nodes.get(task.node) match
       case None => Left(GraphError.InvalidRoute(task.node, task.id, "node is not part of this graph"))
       case Some(node) =>
-        val context = new NodeContext(task.id, task.node, execution.superstep, sink)
-        Try(node.run(task.input, execution.state, context)).toResult match
+        val context   = new NodeContext(task.id, task.node, execution.superstep, sink)
+        val operation = s"task ${task.id.value}"
+        CancelledError.attempt(operation)(Try(node.run(task.input, execution.state, context)).toResult) match
+          case Left(cancelled: CancelledError)                  => Left(cancelled)
+          case Right(_) if Thread.currentThread().isInterrupted => Left(CancelledError(operation))
           case Left(thrown)                  => Left(GraphError.NodeFailed(task.node, task.id, thrown))
           case Right(NodeResult.Fail(error)) => Left(GraphError.NodeFailed(task.node, task.id, error))
           case Right(NodeResult.Continue(command)) =>

@@ -85,7 +85,9 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     val recorder = Recorder()
     runtime.subscribe(thread)(recorder.listener).value
 
-    runtime.start(thread, f.graph, Vector("a", "b"), RunId("run-1")).value.completed._2 shouldBe Vector("A", "B")
+    // sequential, so the workers' events interleave in one order; concurrency is covered below
+    val graph = f.graph.withExecutor(TaskExecutor.sequential)
+    runtime.start(thread, graph, Vector("a", "b"), RunId("run-1")).value.completed._2 shouldBe Vector("A", "B")
 
     store.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Completed)
     val events = recorder.durable
@@ -158,6 +160,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
   it should "recover without re-running siblings whose results were committed" in {
     Seq[CompiledGraph[Vector[String], Vector[String]] => CompiledGraph[Vector[String], Vector[String]]](
       identity,
+      _.withExecutor(TaskExecutor.sequential),
       _.withExecutor(reversed),
       _.withExecutor(concurrent(7L))
     ).foreach { variant =>
@@ -372,12 +375,14 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
         while store.underlying.latest(thread).value.forall(_.pendingWrites.size < 2) && System.nanoTime() < deadline do
           Thread.sleep(1)
         store.crashed.set(true)
+    // sequential, so "a" and "b" are exactly the results durable when "c" crashes
+    val graph  = f.graph.withExecutor(TaskExecutor.sequential)
     val before = Recorder()
     val first  = GraphRuntime(store)
     first.subscribe(thread)(before.listener).value
 
     val (_, error) =
-      first.start(thread, f.graph, Vector("a", "b", "c", "d"), RunId("run-1"), Durability.Async).value.failed
+      first.start(thread, graph, Vector("a", "b", "c", "d"), RunId("run-1"), Durability.Async).value.failed
     error shouldBe a[GraphError.CheckpointWriteFailed]
     val durable = store.underlying.eventsAfter(thread, 0L, 1000).value
     before.durable shouldBe durable
@@ -385,7 +390,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     // a new process over the same store
     store.crashed.set(false)
     val second = GraphRuntime(store)
-    second.recover(f.graph, thread, RunId("run-2"), Durability.Async).value.completed._2 shouldBe
+    second.recover(graph, thread, RunId("run-2"), Durability.Async).value.completed._2 shouldBe
       Vector("A", "B", "C", "D")
     val after = Recorder()
     second.subscribe(thread)(after.listener).value

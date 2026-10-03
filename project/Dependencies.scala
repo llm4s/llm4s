@@ -15,6 +15,7 @@ object Versions {
   val scalamock               = "7.5.5"
   val scalatestplusScalacheck = "3.2.19.0"
   val fansi                   = "0.5.1"
+  val ox                      = "1.0.9"
   val postgres                = "42.7.11"
   val sqlite                  = "3.53.2.0"
   val config                  = "1.4.9"
@@ -63,6 +64,7 @@ object Deps {
   val scalamock               = "org.scalamock"           %% "scalamock"       % Versions.scalamock
   val scalatestplusScalacheck = "org.scalatestplus"       %% "scalacheck-1-18" % Versions.scalatestplusScalacheck
   val fansi                   = "com.lihaoyi"             %% "fansi"           % Versions.fansi
+  val ox                      = "com.softwaremill.ox"     %% "core"            % Versions.ox
   val postgres                = "org.postgresql"           % "postgresql"      % Versions.postgres
   val sqlite                  = "org.xerial"               % "sqlite-jdbc"     % Versions.sqlite
   val config                  = "com.typesafe"             % "config"          % Versions.config

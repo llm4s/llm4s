@@ -996,6 +996,7 @@ lazy val agent = (project in file("modules/agent"))
     libraryDependencies ++= Seq(
       Deps.ujson,
       Deps.fansi,
+      Deps.ox,
       Deps.scalamock % Test
     )
   )
