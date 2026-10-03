@@ -10,6 +10,8 @@ trait ErrorMapper {
 /** Default mapping that preserves existing behavior. */
 object DefaultErrorMapper extends ErrorMapper {
   def apply(t: Throwable): LLMError = t match {
+    case ex if CancelledError.isCancellation(ex) =>
+      CancelledError.fromThrowable(ex, "unknown").getOrElse(UnknownError("Unknown error", ex))
     case _: java.net.SocketTimeoutException =>
       NetworkError("Request timeout", Some(t), "unknown")
     case _: java.net.ConnectException =>

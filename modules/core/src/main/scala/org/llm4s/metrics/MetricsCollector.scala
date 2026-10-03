@@ -299,6 +299,9 @@ object ErrorKind {
   /** Local execution failure outside the provider API. */
   case object ExecutionError extends ErrorKind
 
+  /** The operation was cancelled by interrupting its thread. */
+  case object Cancelled extends ErrorKind
+
   /** Fallback category when no more specific kind is available. */
   case object Unknown extends ErrorKind
 
@@ -319,6 +322,7 @@ object ErrorKind {
       case _: org.llm4s.error.ServiceError        => ServiceError
       case _: org.llm4s.error.ExecutionError      => ExecutionError
       case _: org.llm4s.error.ConfigurationError  => Validation
+      case _: org.llm4s.error.CancelledError      => Cancelled
       case _                                      => Unknown
     }
 }
