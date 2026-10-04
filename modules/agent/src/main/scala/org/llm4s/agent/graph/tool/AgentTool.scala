@@ -21,17 +21,22 @@ import scala.annotation.unused
  *
  * @param validateDecoded a check on the decoded arguments; `Left` becomes an error the model sees
  * @param question the question this tool may ask; set by [[AgentTool.Asking]]
+ * @param hints what the tool is likely to do, for a middleware to read; see [[ToolHints]]
  */
 final case class AgentToolSpec[A] private (
   name: String,
   description: String,
   schema: SchemaDefinition[A],
   validateDecoded: A => Result[Unit],
-  question: Option[ToolQuestion[?, ?]]
+  question: Option[ToolQuestion[?, ?]],
+  hints: ToolHints
 )(using val codec: ReadWriter[A]):
 
   /** Adds a check on the decoded arguments, replacing any earlier one. */
   def withValidation(check: A => Result[Unit]): AgentToolSpec[A] = copy(validateDecoded = check)(using codec)
+
+  /** Declares what the tool is likely to do, replacing any earlier hints. */
+  def withHints(hints: ToolHints): AgentToolSpec[A] = copy(hints = hints)(using codec)
 
   /** Declares the question this tool asks and the answer it takes; only [[AgentTool.Asking]] calls it. */
   private[tool] def withQuestion[Q: ReadWriter, Ans: ReadWriter]: AgentToolSpec[A] =
@@ -83,7 +88,37 @@ object AgentToolSpec:
     description: String,
     schema: SchemaDefinition[A]
   ): AgentToolSpec[A] =
-    new AgentToolSpec(name, description, schema, _ => Right(()), None)
+    new AgentToolSpec(name, description, schema, _ => Right(()), None, ToolHints.default)
+
+/**
+ * What a tool is likely to do, with the meanings of the MCP tool annotations and their conservative
+ * defaults. These are hints a middleware reads (for example to ask approval for a tool that is not
+ * read-only), not guarantees: nothing checks that a tool behaves as it says.
+ *
+ * @param readOnly MCP `readOnlyHint`: the tool does not modify its environment
+ * @param destructive MCP `destructiveHint`: the tool may perform destructive updates rather than
+ *                    only additive ones; meaningful only when it is not `readOnly`
+ * @param idempotent MCP `idempotentHint`: calling it again with the same arguments has no further
+ *                   effect; meaningful only when it is not `readOnly`
+ * @param openWorld MCP `openWorldHint`: the tool may interact with an open world of external
+ *                  entities, such as the web, rather than a closed domain
+ */
+final case class ToolHints private (readOnly: Boolean, destructive: Boolean, idempotent: Boolean, openWorld: Boolean):
+  def withReadOnly(v: Boolean): ToolHints    = copy(readOnly = v)
+  def withDestructive(v: Boolean): ToolHints = copy(destructive = v)
+  def withIdempotent(v: Boolean): ToolHints  = copy(idempotent = v)
+  def withOpenWorld(v: Boolean): ToolHints   = copy(openWorld = v)
+
+object ToolHints:
+  def apply(
+    readOnly: Boolean = false,
+    destructive: Boolean = true,
+    idempotent: Boolean = false,
+    openWorld: Boolean = true
+  ): ToolHints = new ToolHints(readOnly, destructive, idempotent, openWorld)
+
+  /** Not read-only, destructive, not idempotent, open-world: the MCP defaults. */
+  val default: ToolHints = ToolHints()
 
 /** The codecs of a tool's question and of the answer it takes. */
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])

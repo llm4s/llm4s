@@ -141,6 +141,43 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     AgentTool.fromToolFunction(function).spec.name shouldBe "bad name"
   }
 
+  "ToolHints" should "default to the conservative MCP values" in {
+    val hints = spec("search").hints
+    hints shouldBe ToolHints.default
+    (hints.readOnly, hints.destructive, hints.idempotent, hints.openWorld) shouldBe (false, true, false, true)
+  }
+
+  it should "be stored by withHints and kept by withValidation" in {
+    val hinted = spec("search").withHints(ToolHints(readOnly = true))
+    hinted.hints shouldBe ToolHints(readOnly = true)
+    hinted.hints.readOnly shouldBe true
+    hinted.withValidation(_ => Right(())).hints shouldBe hinted.hints
+  }
+
+  it should "be kept by an Asking tool's spec" in {
+    val hinted = spec("search").withHints(ToolHints(readOnly = true))
+    val tool = new AgentTool.Asking[Search, Confirm, Reply](hinted) {
+      def execute(args: Search, context: ToolContext): ToolOutcome = ToolOutcome.Success(ujson.Null)
+      def resume(args: Search, question: Confirm, answer: Reply, context: ToolContext): ToolOutcome =
+        ToolOutcome.Success(ujson.Null)
+    }
+    tool.spec.hints shouldBe hinted.hints
+    tool.spec.question should not be empty
+  }
+
+  it should "be the default for a tool adapted from a ToolFunction" in {
+    val function = ToolFunction[Map[String, Any], String]("f", "d", Schema.`object`("o"), _ => Right("x"))
+    AgentTool.fromToolFunction(function).spec.hints shouldBe ToolHints.default
+  }
+
+  it should "change only the field a setter names" in {
+    val base = ToolHints.default
+    base.withReadOnly(true) shouldBe ToolHints(readOnly = true)
+    base.withDestructive(false) shouldBe ToolHints(destructive = false)
+    base.withIdempotent(true) shouldBe ToolHints(idempotent = true)
+    base.withOpenWorld(false) shouldBe ToolHints(openWorld = false)
+  }
+
   "GraphError.ToolFailed" should "name the tool, the call and the cause" in {
     val error = GraphError.ToolFailed("search", "call-1", ValidationError("x", "boom"))
     error.message should include("search")
