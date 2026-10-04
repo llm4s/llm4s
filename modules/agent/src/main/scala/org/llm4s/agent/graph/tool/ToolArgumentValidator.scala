@@ -184,7 +184,6 @@ object ToolArgumentValidator {
           val types = fields.get("type").map(typeNames).getOrElse(Vector.empty)
           if (types.nonEmpty && !types.exists(matchesType(_, value)))
             Vector(s"$path: expected ${types.mkString(" or ")}, got ${actualType(value)}")
-          else if (value == ujson.Null && types.contains("null")) Vector.empty
           else
             enumViolations(fields, value, path) ++ (value match {
               case ujson.Str(s) => stringViolations(fields, s, path)

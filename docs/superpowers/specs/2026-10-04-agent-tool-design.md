@@ -150,7 +150,7 @@ supported one with a malformed value, reported at its path: a non-number `minimu
 `additionalProperties`; a `required` that is not an array of strings; a non-array `enum`; a
 non-object `properties`; a `type` that is not a JSON type name or a non-empty array of them. Types: `string`,
 `number` (any JSON number), `integer` (a number with no fractional part), `boolean`, `array`,
-`object`, `null`. Lengths count Unicode code points. Well-formedness is part of `unsupported`: `enum` is a non-empty array of unique entries; `type` a known name or
+`object`, `null`. Lengths count Unicode code points. Standard JSON Schema semantics: `type` and `enum` apply to every value, `null` included (core renders a nullable enum with `null` appended to its `enum`); `minLength`/`maxLength` apply only to strings, numeric keywords to numbers, array keywords to arrays, object keywords to objects. Well-formedness is part of `unsupported`: `enum` is a non-empty array of unique entries; `type` a known name or
 a non-empty array of unique known names; `required` an array of unique strings; `properties` an object whose
 values are schemas; `items` a schema; `multipleOf` a positive finite number; bounds finite numbers; lengths and
 counts non-negative whole numbers. So is satisfiability, reported as `$.path: <what>`: `minLength` above

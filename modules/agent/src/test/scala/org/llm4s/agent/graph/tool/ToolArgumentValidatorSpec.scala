@@ -274,7 +274,7 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
     val schema = NullableSchema(StringSchema("m").withEnum(Seq("a"))).toJsonSchema(true)
     check(schema, ujson.Null) shouldBe Vector.empty
     check(schema, ujson.Str("a")) shouldBe Vector.empty
-    check(schema, ujson.Str("b")) shouldBe Vector("""$: "b" is not one of ["a"]""")
+    check(schema, ujson.Str("b")) shouldBe Vector("""$: "b" is not one of ["a",null]""")
   }
 
   "unsupported" should "flag unknown or malformed type declarations" in {
@@ -410,5 +410,25 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
     ) shouldBe Vector.empty
     v.unsupported(obj("properties" -> obj("a" -> obj("type" -> "string", "minLength" -> 2, "maxLength" -> 1)))) shouldBe
       Vector("$.properties.a: minLength 2 is above maxLength 1")
+  }
+
+  "type and enum" should "apply to null like any value, and keyword families only to their own types" in {
+    val handWritten = obj("type" -> ujson.Arr("string", "null"), "enum" -> ujson.Arr("a"))
+    check(handWritten, ujson.Null) shouldBe Vector("$: null is not one of [\"a\"]")
+    check(handWritten, ujson.Str("a")) shouldBe Vector.empty
+    val nullableEnum = NullableSchema(StringSchema("m").withEnum(Seq("a"))).toJsonSchema(false)
+    check(nullableEnum, ujson.Null) shouldBe Vector.empty
+    val lengths = obj("type" -> ujson.Arr("string", "null"), "minLength" -> 2)
+    check(lengths, ujson.Null) shouldBe Vector.empty
+    check(lengths, ujson.Str("a")) shouldBe Vector("$: length 1 is below minLength 2")
+    check(obj("enum" -> ujson.Arr(1, 2), "minLength" -> 5), ujson.Num(1)) shouldBe Vector.empty
+    check(obj("type" -> ujson.Arr("integer", "null"), "enum" -> ujson.Arr(1)), ujson.Null) shouldBe
+      Vector("$: null is not one of [1]")
+  }
+
+  "unsupported" should "still accept an enum matching a type only through null" in {
+    v.unsupported(obj("type" -> ujson.Arr("string", "null"), "enum" -> ujson.Arr(ujson.Null))) shouldBe Vector.empty
+    v.unsupported(obj("type" -> "string", "enum" -> ujson.Arr(ujson.Null))) shouldBe
+      Vector("$: no enum entry matches the type")
   }
 }

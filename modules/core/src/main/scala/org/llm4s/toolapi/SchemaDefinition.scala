@@ -347,6 +347,13 @@ case class NullableSchema[T](
         schema("type") = ujson.Arr(ujson.Str("null"))
     }
 
+    // a nullable enum is one of its values, or null
+    schema.get("enum") match {
+      case Some(values: ujson.Arr) if !values.value.contains(ujson.Null) =>
+        schema("enum") = ujson.Arr.from(values.value :+ ujson.Null)
+      case _ => ()
+    }
+
     ujson.Obj.from(schema)
   }
 }

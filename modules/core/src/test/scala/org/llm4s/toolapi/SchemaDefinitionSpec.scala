@@ -270,6 +270,15 @@ class SchemaDefinitionSpec extends AnyFlatSpec with Matchers {
     json("type").arr.map(_.str).toSeq shouldBe Seq("string", "null")
   }
 
+  it should "add null to the enum of a nullable enum, once" in {
+    val json = NullableSchema(StringSchema("c").withEnum(Seq("red"))).toJsonSchema(strict = false)
+    json("enum").arr.toSeq shouldBe Seq(ujson.Str("red"), ujson.Null)
+    NullableSchema(NullableSchema(StringSchema("c").withEnum(Seq("red"))))
+      .toJsonSchema(false)("enum")
+      .arr
+      .size shouldBe 2
+  }
+
   it should "preserve description from underlying schema" in {
     val schema = NullableSchema(StringSchema("Important description"))
     val json   = schema.toJsonSchema(strict = false)
