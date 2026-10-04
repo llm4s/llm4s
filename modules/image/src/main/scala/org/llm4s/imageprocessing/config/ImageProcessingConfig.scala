@@ -42,6 +42,28 @@ case class AnthropicVisionConfig(
 ) extends ImageProcessingConfig
 
 /**
+ * Configuration for Google Gemini Vision API.
+ *
+ * @param apiKey Google API key
+ * @param model Gemini model to use
+ * @param baseUrl Base URL for Google Generative Language API
+ * @param connectTimeoutSeconds Connection timeout in seconds (default: 30)
+ * @param requestTimeoutSeconds Request timeout in seconds (default: 60)
+ */
+case class GeminiVisionConfig(
+  apiKey: String,
+  model: String = "gemini-3.6-flash",
+  baseUrl: String = "https://generativelanguage.googleapis.com/v1beta",
+  connectTimeoutSeconds: Int = 30,
+  requestTimeoutSeconds: Int = 60
+) extends ImageProcessingConfig {
+
+  /** Never prints the API key. */
+  override def toString: String =
+    s"GeminiVisionConfig(apiKey=***,model=$model,baseUrl=$baseUrl,connectTimeoutSeconds=$connectTimeoutSeconds,requestTimeoutSeconds=$requestTimeoutSeconds)"
+}
+
+/**
  * Configuration for local image processing.
  * This doesn't require external API calls.
  */

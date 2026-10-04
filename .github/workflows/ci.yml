@@ -199,6 +199,7 @@ jobs:
           agentTools/test agentTools/coverageReport
           agent/test agent/coverageReport
           traceOpentelemetry/test traceOpentelemetry/coverageReport
+          gradleDemo/test gradleDemo/coverageReport
           coverageAggregate
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes
@@ -414,6 +415,16 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload gradle-demo coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/gradle-demo/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: gradle-demo
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload coverage report artifact
         uses: actions/upload-artifact@v7
         with:
@@ -556,11 +567,36 @@ jobs:
             modules/it/target/**/test-reports/
           retention-days: 5
 
+  # Binary compatibility (MiMa). Only the frozen modules have a baseline (see `mimaFrozen` in
+  # build.sbt), and none until 0.5.0 is published (#1281), so this checks nothing yet. The build
+  # is Scala 3 only, with no `crossScalaVersions`, so a bare `mimaReportBinaryIssues` covers every
+  # artifact; use `+mimaReportBinaryIssues` if a second Scala version returns (#1126).
+  mima-check:
+    name: Binary Compatibility (MiMa)
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Check binary compatibility
+        run: sbt mimaReportBinaryIssues
+
   # All tests must pass
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage, config-policy-check, scaladoc, integration-tests]
+    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -588,10 +624,19 @@ jobs:
             echo "Integration tests failed"
             exit 1
           fi
+          if [[ "${{ needs.mima-check.result }}" != "success" ]]; then
+            echo "Binary compatibility check failed"
+            exit 1
+          fi
           echo "All tests passed!"
 
   # Tier 3: Ollama integration tests — verifies full round-trip against a real
   # local LLM. Only runs on pushes to main to avoid slowing down PR builds.
+  #
+  # Carries a pgvector service as well as Ollama, because the RAG pipeline suite needs both:
+  # real embeddings are the whole point of it, and pgvector is where the hybrid-search half
+  # stores them. A suite declares exactly one tier, so the tier its scarcer dependency
+  # belongs to has to supply the rest.
   ollama-integration:
     name: Ollama Integration
     needs: quick-checks
@@ -599,6 +644,20 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
 
     steps:
       - uses: actions/checkout@v7
@@ -626,19 +685,27 @@ jobs:
             sleep 1
           done
 
-      - name: Pull test model
-        run: ollama pull qwen2.5:0.5b
+      # Two models: one to answer with, one to embed with. RAGPipelineOllamaIntegrationSpec
+      # is the only suite in the repo that exercises retrieval against a real embedding
+      # model, so leaving nomic-embed-text out would make it fail rather than skip here.
+      - name: Pull test models
+        run: |
+          ollama pull qwen2.5:0.5b
+          ollama pull nomic-embed-text
 
       - name: Run Ollama integration tests
         env:
-          # This job installs Ollama and pulls the model, so "Ollama not available" here is a
-          # failure, not a reason to skip.
+          # This job installs Ollama, pulls the models and runs pgvector, so "not available"
+          # here is a failure, not a reason to skip.
           LLM4S_IT_STRICT: "true"
+          PGVECTOR_TEST_URL: jdbc:postgresql://localhost:5432/postgres
+          PGVECTOR_USER: postgres
+          PGVECTOR_PASSWORD: postgres
         run: sbt testOllama
 
   # Tier 2: containerised workspace tests. Split from the `integration-tests` job because
-  # this one has to build the workspace-runner image first (apt + sdkman + two Scala
-  # versions), which is far too slow for every PR. The image tag comes from the build
+  # this one has to build the workspace-runner image first (apt + sdkman + the Scala 3
+  # toolchain), which is far too slow for every PR. The image tag comes from the build
   # itself — `it / Test / envVars` passes `workspaceRunner / Docker / version` to the suite.
   workspace-integration:
     name: Workspace Integration
@@ -720,4 +787,19 @@ jobs:
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           LANGFUSE_URL: ${{ secrets.LANGFUSE_URL }}
+          # Keys for the smoke suites added with the new providers. With LLM4S_IT_STRICT=true each
+          # one that is missing from the repository secrets makes its suite FAIL (not skip).
+          # MistralSmokeSpec, ZaiSmokeSpec, JinaEmbeddingsSmokeSpec, StableDiffusionSmokeSpec.
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          STABILITY_API_KEY: ${{ secrets.STABILITY_API_KEY }}
+          # BedrockSmokeSpec: AWS_REGION plus credentials the default chain finds
+          # (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, optionally AWS_SESSION_TOKEN).
+          # BEDROCK_MODEL_ID is optional; unset, the suite uses its built-in default model.
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+          BEDROCK_MODEL_ID: ${{ secrets.BEDROCK_MODEL_ID }}
         run: sbt testSmoke

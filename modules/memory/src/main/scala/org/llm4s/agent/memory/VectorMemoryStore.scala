@@ -589,6 +589,8 @@ final class VectorMemoryStore private (
 
 object VectorMemoryStore {
 
+  private val BusyTimeoutMillis = 30000
+
   /**
    * Create a vector memory store with file-based SQLite storage.
    */
@@ -600,8 +602,17 @@ object VectorMemoryStore {
     Try {
       Class.forName("org.sqlite.JDBC")
       val connection = DriverManager.getConnection(s"jdbc:sqlite:$dbPath")
-      connection.setAutoCommit(true)
-      new VectorMemoryStore(dbPath, embeddingService, config, connection)
+      // If schema setup fails (e.g. the file is not a database) the connection must not leak:
+      // an open handle keeps the file locked, which blocks deletion on Windows.
+      Try {
+        connection.setAutoCommit(true)
+        // Wait for a competing writer on the same file instead of failing immediately with SQLITE_BUSY
+        Using.resource(connection.createStatement())(_.execute(s"PRAGMA busy_timeout = $BusyTimeoutMillis"))
+        new VectorMemoryStore(dbPath, embeddingService, config, connection)
+      }.recoverWith { case e =>
+        Try(connection.close())
+        scala.util.Failure(e)
+      }.get
     }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to create vector store: ${e.getMessage}"))
 
   /**
@@ -636,15 +647,16 @@ object VectorMemoryStore {
 
   private[memory] def serializeMetadata(metadata: Map[String, String]): String =
     if (metadata.isEmpty) "{}"
-    else metadata.map { case (k, v) => s""""$k":"$v"""" }.mkString("{", ",", "}")
+    else ujson.write(ujson.Obj.from(metadata.map { case (k, v) => k -> ujson.Str(v) }))
 
   private[memory] def deserializeMetadata(json: String): Map[String, String] =
     if (json == null || json == "{}" || json.isEmpty) Map.empty
-    else {
-      // Simple JSON parsing for metadata
-      val pattern = """"([^"]+)":"([^"]*)"""".r
-      pattern.findAllMatchIn(json).map(m => m.group(1) -> m.group(2)).toMap
-    }
+    else
+      Try(ujson.read(json).obj.collect { case (k, ujson.Str(v)) => k -> v }.toMap).getOrElse {
+        // Rows written before metadata was JSON-escaped: fall back to the lenient pattern
+        val pattern = """"([^"]+)":"([^"]*)"""".r
+        pattern.findAllMatchIn(json).map(m => m.group(1) -> m.group(2)).toMap
+      }
 
   private[memory] def serializeEmbedding(embedding: Array[Float]): Array[Byte] = {
     val buffer = java.nio.ByteBuffer.allocate(embedding.length * 4)

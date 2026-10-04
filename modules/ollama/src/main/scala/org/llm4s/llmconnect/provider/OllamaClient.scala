@@ -31,6 +31,17 @@ import scala.util.{ Try, Using }
  * are forwarded to the model. Conversations that rely on tool call
  * round-trips should use a different provider.
  *
+ * == Structured output ==
+ *
+ * [[CompletionOptions.responseFormat]] is honoured through the top-level `format`
+ * field of `/api/chat`, on both the streaming and non-streaming paths:
+ *
+ *  - `None` sends no `format` key.
+ *  - [[ResponseFormat.Json]] sends `"format": "json"` (JSON mode).
+ *  - [[ResponseFormat.JsonSchema]] sends `"format": <schema object>` (structured outputs,
+ *    which requires Ollama 0.5 or later; older servers reject or ignore the object).
+ *    The `name` and `strict` parameters have no Ollama equivalent and are ignored.
+ *
  * == Streaming ==
  *
  * Token counts (`prompt_eval_count`, `eval_count`) are only present in the
@@ -202,12 +213,14 @@ class OllamaClient(
     )
     options.maxTokens.foreach(t => opts("num_predict") = t)
 
-    ujson.Obj(
+    val body = ujson.Obj(
       "model"    -> config.model,
       "messages" -> msgs,
       "stream"   -> stream,
       "options"  -> opts
     )
+    options.responseFormat.foreach(rf => body("format") = OllamaClient.encodeFormat(rf))
+    body
   }
 
   private def parseCompletion(json: ujson.Value): Completion = {
@@ -252,6 +265,12 @@ class OllamaClient(
 
 object OllamaClient {
   import org.llm4s.types.TryOps
+
+  /** Value of the `/api/chat` `format` field for a [[ResponseFormat]]; `name` and `strict` are not sent. */
+  private[provider] def encodeFormat(format: ResponseFormat): ujson.Value = format match {
+    case ResponseFormat.Json                     => ujson.Str("json")
+    case ResponseFormat.JsonSchema(schema, _, _) => schema
+  }
 
   /**
    * Constructs an [[OllamaClient]], wrapping any construction-time exception

@@ -258,5 +258,16 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
         FusionStrategy.WeightedScore(vectorWeight = -0.1, keywordWeight = 0.5)
       }
     }
+
+    "reject weights that are both zero, which would divide every score by zero" in {
+      an[IllegalArgumentException] should be thrownBy {
+        FusionStrategy.WeightedScore(vectorWeight = 0.0, keywordWeight = 0.0)
+      }
+    }
+
+    "accept a single zero weight" in {
+      FusionStrategy.WeightedScore(vectorWeight = 1.0, keywordWeight = 0.0).keywordWeight shouldBe 0.0
+      FusionStrategy.WeightedScore(vectorWeight = 0.0, keywordWeight = 1.0).vectorWeight shouldBe 0.0
+    }
   }
 }

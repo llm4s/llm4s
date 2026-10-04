@@ -50,6 +50,11 @@ Comprehensive guides for LLM4S features.
 - **[Image Generation](image-generation)** - Generate images with DALL-E and other providers
 - **[Speech](speech)** - Speech-to-text (STT) and text-to-speech (TTS)
 
+### Effect Systems
+
+- **[cats-effect](cats-effect)** - `LLMClientIO` and `AgentIO` for cats-effect `IO` and fs2 streaming
+- **[ZIO](zio)** - `LLMClientZ` and `AgentZ` for ZIO 2 and ZIO Streams
+
 ### Observability
 
 - **[Monitoring](observability/)** - Production monitoring for LLM4S applications

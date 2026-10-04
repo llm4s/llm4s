@@ -66,6 +66,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Handoff.of(id, agent, reason)` for a `Result`), and `handoffId` is `handoff_to_<id>` rather
   than `handoff_to_agent_<hash>`. Design: `docs/design/typed-agent-runtime-design.md` §4.7, with
   the Stage 0 carry-forward in §4.8.
+- **Ollama honours `responseFormat`** ([#932](https://github.com/llm4s/llm4s/issues/932)):
+  `OllamaClient` now sends the `/api/chat` `format` field for streaming and non-streaming requests,
+  so `completeStructured` is constrained natively. `ResponseFormat.Json` sends `"format": "json"`
+  and `ResponseFormat.JsonSchema` sends the schema object (requires Ollama 0.5 or later); `name` and
+  `strict` have no Ollama equivalent and are ignored. Previously the field was silently dropped.
 - **Run API and event dispatch for graph runs** (Experimental, `org.llm4s.agent.graph`,
   [#1277](https://github.com/llm4s/llm4s/issues/1277)): `GraphRuntime.start`/`recover`/`resume`
   admit a run on the caller's thread and return `Result[RunHandle[O]]` once the thread is claimed;
@@ -256,6 +261,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core` had accumulated - `imagegeneration.ImageFormat`, `imageprocessing.ImageFormat`
   (structurally identical to the first, different package) and `imageprocessing.MediaType` -
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
+- **Gradle integration guide and `gradle-demo`** ([#938](https://github.com/llm4s/llm4s/issues/938)):
+  `docs/getting-started/gradle.md` and `docs/reference/dependency-conflicts.md`, a Gradle section in
+  the installation guide, and `modules/gradle-demo` (not published): reference `build.gradle`,
+  `build.gradle.kts` and `settings.gradle.kts`, plus `GradleSnippets` and `ConversationTemplates`,
+  small helpers that return `Result`. The snippets name `llm4s-core_3:0.4.1`, the latest release, and
+  pin `scala3-library_3` only, because a rule over the whole `org.scala-lang` group makes Gradle look
+  for a `scala-library` 3.x that does not exist. Bump the version in the guide, the reference files
+  and `GradleSnippets.LLM4S_VERSION` when 0.5.0 publishes the split modules. No change to any
+  published module.
 
 ### Changed
 - **Approval resumes through the middleware chain; `ToolLoop` gains a `finish` node**
@@ -263,6 +277,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chain again with `ToolContext.approved = true`, where it skipped the policy; a deny rule that
   depends only on the call refuses the same calls as before. `ToolLoop` has a new `finish` node, so
   checkpoints from an earlier build of the loop do not restore (pre-1.0; no migration is provided).
+- **Binary compatibility is checked by MiMa** ([#924](https://github.com/llm4s/llm4s/issues/924),
+  [#1281](https://github.com/llm4s/llm4s/issues/1281)): a `mima-check` CI job runs
+  `sbt mimaReportBinaryIssues` and gates `all-tests-pass`. The baseline is set per frozen module
+  (`mimaFrozen` in `build.sbt`: `llm4s-core`, `llm4s-agent`, `llm4s-openai`,
+  `llm4s-openai-compatible`, `llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama`) and is not set yet:
+  it is 0.5.0, the first release with the split coordinates, so the job checks nothing until 0.5.0
+  is published. See [API stability](docs/reference/api-stability.md).
+- **`RegexValidator` constructor** (`org.llm4s.agent.guardrails.builtin`): the primary constructor
+  now takes a compiled `Pattern` and a pattern description, so it is not binary compatible with
+  earlier releases. Source is compatible: secondary constructors keep the `Regex`-based
+  `new RegexValidator(regex)`, `(regex, errorMessage)` and `(regex, errorMessage, fallbackError)`
+  forms. Recompile code that calls it. This predates the 0.5.0 MiMa baseline, so no filter is needed.
 - **An interrupted call returns `CancelledError`** ([#1270](https://github.com/llm4s/llm4s/issues/1270)):
   new `org.llm4s.error.CancelledError` (non-recoverable, never retried) with the interrupt flag kept.
   A `SocketTimeoutException` on its own stays a timeout. `Llm4sHttpClient` returns it where it

@@ -357,6 +357,8 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
           case Right(response) =>
             response.result match {
               case Some(result) =>
+                // Per the MCP spec a tool-level failure is a normal result flagged `isError: true`
+                val isToolError = result.objOpt.flatMap(_.get("isError")).flatMap(_.boolOpt).contains(true)
                 Try {
                   // MCP returns content array with text results
                   val content = result("content").arr
@@ -365,13 +367,19 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
                     val text         = firstContent("text").str
 
                     // Try to parse as JSON, fallback to string result
-                    Try(ujsonRead(text)).getOrElse(ujson.Str(text))
+                    if (isToolError) ujson.Str(text) else Try(ujsonRead(text)).getOrElse(ujson.Str(text))
+                  } else if (isToolError) {
+                    ujson.Str("server reported an error")
                   } else {
                     ujson.Obj("result" -> ujson.Str("No content returned"))
                   }
                 } match {
+                  case Success(parsed) if isToolError =>
+                    Left(s"Tool call failed: ${parsed.str}")
                   case Success(parsed) => Right(parsed)
-                  case Failure(e)      => Left(s"Failed to parse tool result: ${e.getMessage}")
+                  case Failure(_) if isToolError =>
+                    Left("Tool call failed: server reported an error")
+                  case Failure(e) => Left(s"Failed to parse tool result: ${e.getMessage}")
                 }
               case None =>
                 Left("Tool call failed: no result")

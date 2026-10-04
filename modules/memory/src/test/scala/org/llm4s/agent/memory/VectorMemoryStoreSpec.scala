@@ -4,8 +4,11 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 
+import java.nio.file.{ Files, Path }
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.Comparator
+import scala.util.Using
 
 class VectorMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
@@ -368,6 +371,336 @@ class VectorMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
 
     results.toOption.get.length shouldBe 1
     results.toOption.get.head.memoryType shouldBe MemoryType.Custom("my_custom_type")
+  }
+}
+
+/**
+ * Persistence across close/reopen on a file-backed [[VectorMemoryStore]].
+ *
+ * The suite above only uses `inMemory()`, and `SQLiteMemoryStoreSpec` checks that a store can be
+ * created on a path, so neither shows that data written by one instance is readable by another.
+ */
+class VectorMemoryStoreFilePersistenceSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+
+  private val embeddings = MockEmbeddingService.default
+
+  private var tempDir: Path = _
+
+  override def beforeEach(): Unit =
+    tempDir = Files.createTempDirectory("llm4s-vector-store-persistence")
+
+  override def afterEach(): Unit =
+    if (tempDir != null) {
+      Using.resource(Files.walk(tempDir))(paths =>
+        paths.sorted(Comparator.reverseOrder[Path]()).forEach(p => Files.delete(p))
+      )
+    }
+
+  private def dbPath: String = tempDir.resolve("memories.db").toString
+
+  /** Open a store on the shared file, run `f`, and always close it again. */
+  private def withStore[A](f: VectorMemoryStore => A): A = withStoreAt(dbPath, embeddings)(f)
+
+  private def withStoreAt[A](path: String, service: EmbeddingService)(f: VectorMemoryStore => A): A = {
+    val opened = VectorMemoryStore(path, service).fold(
+      e => fail(s"Failed to open file-backed store: ${e.message}"),
+      identity
+    )
+    Using.resource(new AutoCloseable { override def close(): Unit = opened.close() })(_ => f(opened))
+  }
+
+  private val base = Instant.ofEpochMilli(1700000000000L)
+
+  private val first = Memory(
+    id = MemoryId("persist-1"),
+    content = "The user prefers Scala over Java",
+    memoryType = MemoryType.UserFact,
+    metadata = Map("user_id" -> "user-a", "note" -> "with spaces"),
+    timestamp = base,
+    importance = Some(0.9)
+  )
+
+  private val second = Memory(
+    id = MemoryId("persist-2"),
+    content = "Distributed databases are the user's specialty",
+    memoryType = MemoryType.Knowledge,
+    metadata = Map("source" -> "docs"),
+    timestamp = base.plusSeconds(60),
+    importance = None
+  )
+
+  "A file-backed VectorMemoryStore" should "return all fields of stored memories from a second instance" in {
+    withStore { s =>
+      s.store(first).isRight shouldBe true
+      s.store(second).isRight shouldBe true
+    }
+
+    withStore { s =>
+      s.count() shouldBe Right(2L)
+
+      val one = s.get(first.id).toOption.flatten.getOrElse(fail("persist-1 missing after reopen"))
+      one.content shouldBe first.content
+      one.memoryType shouldBe MemoryType.UserFact
+      one.importance shouldBe Some(0.9)
+      one.timestamp shouldBe base
+      one.getMetadata("user_id") shouldBe Some("user-a")
+      one.getMetadata("note") shouldBe Some("with spaces")
+
+      val two = s.get(second.id).toOption.flatten.getOrElse(fail("persist-2 missing after reopen"))
+      two.content shouldBe second.content
+      two.memoryType shouldBe MemoryType.Knowledge
+      two.importance shouldBe None
+      two.getMetadata("source") shouldBe Some("docs")
+    }
+  }
+
+  it should "persist the generated embeddings so they survive a reopen" in {
+    withStore(_.store(first))
+
+    withStore { s =>
+      val embedding = s.get(first.id).toOption.flatten.flatMap(_.embedding).getOrElse(fail("embedding not persisted"))
+      val expected  = embeddings.embed(first.content).getOrElse(fail("mock embed failed"))
+      embedding.toSeq shouldBe expected.toSeq
+
+      val stats = s.vectorStats.getOrElse(fail("vectorStats failed"))
+      stats.totalMemories shouldBe 1
+      stats.embeddedMemories shouldBe 1
+      s.embedAll() shouldBe Right(0)
+    }
+  }
+
+  it should "run semantic search and filtered recall over data written by a previous instance" in {
+    withStore { s =>
+      s.store(first)
+      s.store(second)
+    }
+
+    withStore { s =>
+      val hits = s.search(second.content, topK = 2).getOrElse(fail("search failed"))
+      hits.map(_.memory.id) shouldBe Seq(second.id, first.id)
+      hits.head.score should be > hits(1).score
+
+      s.recall(MemoryFilter.ByType(MemoryType.UserFact)).toOption.get.map(_.id) shouldBe Seq(first.id)
+      s.recall(MemoryFilter.MinImportance(0.8)).toOption.get.map(_.id) shouldBe Seq(first.id)
+    }
+  }
+
+  it should "append writes made after a reopen without losing earlier data" in {
+    withStore(_.store(first))
+
+    withStore { s =>
+      s.count() shouldBe Right(1L)
+      s.store(second).isRight shouldBe true
+    }
+
+    withStore { s =>
+      s.count() shouldBe Right(2L)
+      // most recent first
+      s.recent(10).toOption.get.map(_.id) shouldBe Seq(second.id, first.id)
+    }
+  }
+
+  it should "persist updates and deletes made in a later session" in {
+    withStore { s =>
+      s.store(first)
+      s.store(second)
+    }
+
+    withStore { s =>
+      s.update(first.id, _.copy(content = "The user now prefers Kotlin")).isRight shouldBe true
+      s.delete(second.id).isRight shouldBe true
+    }
+
+    withStore { s =>
+      s.count() shouldBe Right(1L)
+      s.get(second.id) shouldBe Right(None)
+      val updated = s.get(first.id).toOption.flatten.getOrElse(fail("persist-1 missing"))
+      updated.content shouldBe "The user now prefers Kotlin"
+      // content changed, so the stored embedding was regenerated and persisted too
+      updated.embedding.map(_.toSeq) shouldBe embeddings.embed("The user now prefers Kotlin").toOption.map(_.toSeq)
+    }
+  }
+
+  it should "empty the file on clear so a later instance sees no memories" in {
+    withStore { s =>
+      s.store(first)
+      s.clear().isRight shouldBe true
+    }
+
+    withStore(_.count() shouldBe Right(0L))
+  }
+
+  it should "round-trip metadata values containing quotes, backslashes, commas and unicode" in {
+    val tricky = first.copy(metadata =
+      Map(
+        "quote"   -> "she said \"hi\"",
+        "slash"   -> "C:\\temp\\dir",
+        "comma"   -> "a,b,c",
+        "unicode" -> "h\u00e9llo \u65e5\u672c\u8a9e",
+        "braces"  -> "{\"nested\":\"json\"}"
+      )
+    )
+    withStore(_.store(tricky))
+
+    withStore { s =>
+      val read = s.get(tricky.id).toOption.flatten.getOrElse(fail("memory missing after reopen"))
+      read.metadata shouldBe tricky.metadata
+    }
+  }
+
+  it should "still read metadata rows written in the legacy unescaped format" in {
+    VectorMemoryStore.deserializeMetadata("""{"k":"v","note":"with spaces"}""") shouldBe
+      Map("k" -> "v", "note" -> "with spaces")
+    (VectorMemoryStore.deserializeMetadata("""{"k":"has "quote" inside"}""") should contain).key("k")
+  }
+
+  it should "round-trip a memory with no metadata and importance bounds 0.0 and 1.0" in {
+    val low  = Memory(MemoryId("low"), "lowest", MemoryType.Task, Map.empty, base, Some(0.0))
+    val high = Memory(MemoryId("high"), "highest", MemoryType.Task, Map.empty, base.plusSeconds(1), Some(1.0))
+    withStore { s =>
+      s.store(low)
+      s.store(high)
+    }
+    withStore { s =>
+      val readLow = s.get(low.id).toOption.flatten.getOrElse(fail("low missing"))
+      readLow.metadata shouldBe empty
+      readLow.importance shouldBe Some(0.0)
+      s.get(high.id).toOption.flatten.flatMap(_.importance) shouldBe Some(1.0)
+    }
+  }
+
+  it should "filter by conversation, entity and metadata over data written by a previous instance" in {
+    val a = first.copy(
+      id = MemoryId("a"),
+      metadata = Map("conversation_id" -> "conv-1", "entity_id" -> "ent-1", "topic" -> "scala")
+    )
+    val b = second.copy(
+      id = MemoryId("b"),
+      metadata = Map("conversation_id" -> "conv-2", "entity_id" -> "ent-2", "topic" -> "java")
+    )
+    withStore { s =>
+      s.store(a)
+      s.store(b)
+    }
+    withStore { s =>
+      s.recall(MemoryFilter.ByConversation("conv-2")).toOption.get.map(_.id) shouldBe Seq(b.id)
+      s.recall(MemoryFilter.ByEntity(EntityId("ent-1"))).toOption.get.map(_.id) shouldBe Seq(a.id)
+      s.recall(MemoryFilter.ByMetadata("topic", "java")).toOption.get.map(_.id) shouldBe Seq(b.id)
+      s.recall(MemoryFilter.HasMetadata("topic")).toOption.get.map(_.id.value).toSet shouldBe Set("a", "b")
+      s.recall(MemoryFilter.ByTimeRange(Some(base.plusSeconds(30)), None)).toOption.get.map(_.id) shouldBe Seq(b.id)
+    }
+  }
+
+  it should "treat importance and time-range thresholds as inclusive after a reopen" in {
+    withStore { s =>
+      s.store(first)  // importance 0.9, timestamp base
+      s.store(second) // importance None, timestamp base + 60s
+    }
+    withStore { s =>
+      s.recall(MemoryFilter.MinImportance(0.9)).toOption.get.map(_.id) shouldBe Seq(first.id)
+      s.recall(MemoryFilter.MinImportance(0.91)).toOption.get shouldBe empty
+      s.recall(MemoryFilter.ByTimeRange(Some(base), Some(base))).toOption.get.map(_.id) shouldBe Seq(first.id)
+      s.recall(MemoryFilter.ByTimeRange(Some(base.plusSeconds(60)), Some(base.plusSeconds(60))))
+        .toOption
+        .get
+        .map(_.id) shouldBe Seq(second.id)
+      s.recall(MemoryFilter.ByTimeRange(Some(base.plusMillis(1)), Some(base.plusSeconds(59))))
+        .toOption
+        .get shouldBe empty
+    }
+  }
+
+  it should "keep a caller-supplied embedding instead of regenerating it" in {
+    val custom = Array.tabulate(embeddings.dimensions)(i => (i % 7).toFloat / 7f)
+    withStore(_.store(first.withEmbedding(custom)))
+    withStore { s =>
+      val read = s.get(first.id).toOption.flatten.flatMap(_.embedding).getOrElse(fail("embedding missing"))
+      read.toSeq shouldBe custom.toSeq
+    }
+  }
+
+  it should "replace, not duplicate, a memory stored twice with the same id across sessions" in {
+    withStore(_.store(first))
+    withStore(_.store(first.copy(content = "replaced content")))
+    withStore { s =>
+      s.count() shouldBe Right(1L)
+      s.get(first.id).toOption.flatten.map(_.content) shouldBe Some("replaced content")
+      s.search("replaced content", topK = 5).toOption.get.map(_.memory.id) shouldBe Seq(first.id)
+    }
+  }
+
+  it should "work on a path containing spaces and non-ASCII characters" in {
+    val dir = Files.createDirectory(tempDir.resolve("dir with spaces \u00fcn\u00efcode"))
+    val db  = dir.resolve("m\u00e9moires.db")
+    withStoreAt(db.toString, embeddings)(_.store(first))
+    withStoreAt(db.toString, embeddings) { s =>
+      s.get(first.id).toOption.flatten.map(_.content) shouldBe Some(first.content)
+    }
+  }
+
+  it should "return a Left instead of throwing when the file is not a database" in {
+    val bad = tempDir.resolve("garbage.db")
+    Files.write(bad, Array.fill[Byte](4096)(0x5a.toByte))
+    VectorMemoryStore(bad.toString, embeddings).isLeft shouldBe true
+  }
+
+  it should "keep a single schema version row across repeated reopens" in {
+    withStore(_.store(first))
+    withStore(_.count())
+    withStore(_.count())
+
+    Using.resource(java.sql.DriverManager.getConnection(s"jdbc:sqlite:$dbPath")) { c =>
+      Using.resource(c.createStatement()) { st =>
+        Using.resource(st.executeQuery("SELECT COUNT(*), MIN(version), MAX(version) FROM schema_version")) { rs =>
+          rs.next() shouldBe true
+          (rs.getInt(1), rs.getInt(2), rs.getInt(3)) shouldBe ((1, 1, 1))
+        }
+      }
+    }
+  }
+
+  it should "still answer search without throwing when reopened with a different embedding dimension" in {
+    withStore(_.store(first))
+
+    withStoreAt(dbPath, MockEmbeddingService(dimensions = 64)) { other =>
+      // The stored 1536-dim vector cannot be compared with a 64-dim query: the store must degrade
+      // (keyword fallback) rather than throw or return a bogus ranking.
+      other.search("Scala", topK = 3).isRight shouldBe true
+      other.get(first.id).toOption.flatten.map(_.content) shouldBe Some(first.content)
+    }
+  }
+
+  it should "lose no writes when two instances write to the same file concurrently" in {
+    import java.util.concurrent.{ CountDownLatch, Executors }
+    import scala.concurrent.{ Await, ExecutionContext, Future }
+    import scala.concurrent.duration._
+
+    val perWriter = 25
+    val pool      = Executors.newFixedThreadPool(2)
+    Using.resource(new AutoCloseable { override def close(): Unit = pool.shutdown() }) { _ =>
+      withStore { a =>
+        withStore { b =>
+          implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(pool)
+          val start                         = new CountDownLatch(1)
+          def writer(store: VectorMemoryStore, prefix: String): Future[Seq[Boolean]] = Future {
+            start.await()
+            (1 to perWriter).map { i =>
+              store
+                .store(Memory(MemoryId(s"$prefix-$i"), s"$prefix content $i", MemoryType.Task, Map.empty, base))
+                .isRight
+            }
+          }
+          val fa = writer(a, "a")
+          val fb = writer(b, "b")
+          start.countDown()
+          val outcomes = Await.result(Future.sequence(Seq(fa, fb)), 120.seconds).flatten
+
+          outcomes.forall(identity) shouldBe true
+          a.count() shouldBe Right((2 * perWriter).toLong)
+          b.count() shouldBe Right((2 * perWriter).toLong)
+        }
+      }
+    }
   }
 }
 

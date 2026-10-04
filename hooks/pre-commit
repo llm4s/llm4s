@@ -101,6 +101,7 @@ map_file_to_project() {
     modules/openai-compatible/*)          echo "openaiCompatible" ;;
     modules/provider-testkit/*)           echo "providerTestkit" ;;
     modules/providers/voyage/*)           echo "voyage" ;;
+    modules/gradle-demo/*)                echo "gradleDemo" ;;
     modules/memory-postgres/*)            echo "memoryPostgres" ;;
     modules/knowledgegraph/*)             echo "knowledgegraph" ;;
     modules/config-policy/*)              echo "configPolicy" ;;
@@ -211,6 +212,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE agent
       set_add DOWNSTREAM_COMPILE agentTools
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
+      set_add DOWNSTREAM_COMPILE gradleDemo
       set_add DOWNSTREAM_COMPILE providerTestkit
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks

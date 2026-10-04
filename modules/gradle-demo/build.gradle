@@ -1,0 +1,44 @@
+// Reference: build.gradle (Groovy DSL) for a project using llm4s
+// ──────────────────────────────────────────────────────────────
+// Copy the relevant sections into your existing build file.
+// See docs/getting-started/gradle.md for the full guide.
+
+plugins {
+    id 'application'
+    // Uncomment if writing Scala code:
+    // id 'scala'
+}
+
+repositories {
+    mavenCentral()
+}
+
+def llm4sVersion = '0.4.1'
+
+dependencies {
+    // Core module — note the _3 suffix for Scala 3
+    implementation "org.llm4s:llm4s-core_3:${llm4sVersion}"
+
+    // Logback exclusion (Spring Boot / Ktor projects, llm4s-core 0.4.x only):
+    // implementation("org.llm4s:llm4s-core_3:${llm4sVersion}") {
+    //     exclude group: 'ch.qos.logback', module: 'logback-classic'
+    // }
+
+    // Azure exclusion (non-Azure projects, llm4s-core 0.4.x only):
+    // implementation("org.llm4s:llm4s-core_3:${llm4sVersion}") {
+    //     exclude group: 'com.azure', module: 'azure-ai-openai'
+    // }
+}
+
+// Pin the Scala 3 library (scala3-library_3 only; scala-library stays at 2.13.x)
+configurations.all {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == 'org.scala-lang' && details.requested.name == 'scala3-library_3') {
+            details.useVersion '3.7.1'
+        }
+    }
+}
+
+application {
+    mainClass = 'org.example.Main'
+}

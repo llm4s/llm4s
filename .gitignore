@@ -33,3 +33,8 @@ data/
 /init_*.json
 /generate_*.json
 /review*.md
+
+# Gradle state if someone runs the gradle-demo reference build in place
+modules/gradle-demo/.gradle/
+modules/gradle-demo/build/
+modules/gradle-demo/.kotlin/
