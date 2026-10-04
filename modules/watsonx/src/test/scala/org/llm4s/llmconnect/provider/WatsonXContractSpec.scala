@@ -108,7 +108,7 @@ class WatsonXContractSpec extends AnyFunSuite with Matchers:
         result.isRight shouldBe ok
         if !ok then
           result.left.toOption.exists(_.isInstanceOf[ServiceError]) shouldBe true
-          result.left.toOption.map(_.message).getOrElse("") should include(stop.getOrElse(""))
+          result.left.toOption.map(_.message).getOrElse("") should include(stop.getOrElse("").toLowerCase)
       }
     }
   }

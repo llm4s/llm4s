@@ -151,10 +151,10 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
   private val normalStops = Seq("eos_token", "stop_sequence", "max_tokens", "token_limit", "something_new", "ERROR_X")
   private val errorStops  = Seq("error", "cancelled", "time_limit", "ERROR", "Cancelled", "TIME_LIMIT", " error ")
 
-  test("a normal stop reason is passed through verbatim and the stream succeeds") {
+  test("a normal stop reason is delivered normalised (trimmed, lower case) and the stream succeeds") {
     normalStops.foreach { reason =>
       val seen = observe(sse(Seq(event("a", "not_finished"), event("", reason))))
-      withClue(reason)(seen.chunks.last shouldBe ((None, Some(reason))))
+      withClue(reason)(seen.chunks.last shouldBe ((None, Some(reason.trim.toLowerCase))))
     }
   }
 
@@ -163,7 +163,7 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
       val result = run(bytes(sse(Seq(event("par", "not_finished"), event("", reason)))))._1
       withClue(s"'$reason': ")(result.left.toOption match
         case Some(e: ServiceError) =>
-          e.message should include(s"stop_reason '$reason'")
+          e.message should include(s"stop_reason '${reason.trim.toLowerCase}'")
           e.provider shouldBe "watsonx"
         case other => fail(s"expected ServiceError, got $other")
       )

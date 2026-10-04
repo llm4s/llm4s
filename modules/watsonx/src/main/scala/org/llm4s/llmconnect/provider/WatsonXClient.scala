@@ -228,6 +228,7 @@ class WatsonXClient(
             val stop = result
               .flatMap(_.obj.get("stop_reason"))
               .flatMap(_.strOpt)
+              .map(normalizeStopReason)
               .filter(reason => reason.nonEmpty && reason != NOT_FINISHED)
             result.foreach { r =>
               r.obj.get("input_token_count").flatMap(_.numOpt).foreach(n => promptTokens = n.toInt)
@@ -265,8 +266,9 @@ class WatsonXClient(
     case Some(reason) => checkStopReason(reason)
   }
 
+  /** `reason` must already be normalised by [[WatsonXClient.normalizeStopReason]]. */
   private def checkStopReason(reason: String): Result[Unit] =
-    if (ErrorStopReasons.contains(reason.trim.toLowerCase(java.util.Locale.ROOT)))
+    if (ErrorStopReasons.contains(reason))
       Left(ServiceError(502, providerName, s"generation ended abnormally with stop_reason '$reason'"))
     else Right(())
 
@@ -312,7 +314,7 @@ class WatsonXClient(
           )
         case Some(first) =>
           val text = first.get("generated_text").flatMap(_.strOpt).getOrElse("")
-          checkStopReason(first.get("stop_reason").flatMap(_.strOpt).getOrElse("")).map { _ =>
+          checkStopReason(first.get("stop_reason").flatMap(_.strOpt).map(normalizeStopReason).getOrElse("")).map { _ =>
             val usage = for {
               prompt <- first.get("input_token_count").flatMap(_.numOpt).map(_.toInt)
               gen    <- first.get("generated_token_count").flatMap(_.numOpt).map(_.toInt)
@@ -369,8 +371,15 @@ object WatsonXClient {
   val StopSequences: Seq[String] = Seq("\n[USER]:", "\n[SYSTEM]:", "\n[TOOL_RESULT:")
 
   /**
+   * The single point where a `stop_reason` is normalised (trimmed, lower-cased). IBM documents the
+   * values in upper case (`NOT_FINISHED`, `EOS_TOKEN`, ...); everything after reading (terminal
+   * detection, [[ErrorStopReasons]], messages, `StreamedChunk.finishReason`) uses this form.
+   */
+  private[provider] def normalizeStopReason(raw: String): String = raw.trim.toLowerCase(java.util.Locale.ROOT)
+
+  /**
    * The `stop_reason` values that mean a generation did not finish: `error`, `cancelled` and
-   * `time_limit`. Compared trimmed and case-insensitively. Anything else is a normal stop:
+   * `time_limit`. Compared after [[normalizeStopReason]], so any case matches. Anything else is a normal stop:
    * `eos_token`, `stop_sequence`, `max_tokens` and `token_limit` (length stops, as for other
    * providers) and any value IBM adds later.
    */
