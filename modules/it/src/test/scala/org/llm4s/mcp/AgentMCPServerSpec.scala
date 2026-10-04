@@ -41,7 +41,15 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
       .buildSafe()
       .fold(e => fail(s"could not build tool: ${e.formatted}"), identity)
 
-    server = new MCPServer(MCPServerOptions(0, "/mcp", "AgentMCPServer", "1.0.0"), Seq(add))
+    val explode = ToolBuilder[Map[String, Any], String](
+      "explode",
+      "Always fails",
+      Schema.`object`[Map[String, Any]]("No parameters")
+    ).withHandler(_ => Left("kaboom-from-handler"))
+      .buildSafe()
+      .fold(e => fail(s"could not build tool: ${e.formatted}"), identity)
+
+    server = new MCPServer(MCPServerOptions(0, "/mcp", "AgentMCPServer", "1.0.0"), Seq(add, explode))
     server.start().fold(e => throw e, _ => ())
     port = server.boundPort
   }
@@ -105,5 +113,18 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
     toolMessages should have size 1
     (toolMessages.head.content should not).include("42")
     toolMessages.head.content.toLowerCase should include("not_a_tool")
+  }
+
+  it should "keep the run alive and record the handler message when the MCP tool itself fails" in {
+    val toolMessages = runAgent("explode", ujson.Obj())
+    toolMessages should have size 1
+    toolMessages.head.toolCallId shouldBe "call-1"
+    toolMessages.head.content should include("kaboom-from-handler")
+  }
+
+  it should "send the tool arguments to the server unchanged" in {
+    val toolMessages = runAgent("add", ujson.Obj("a" -> -5, "b" -> 2))
+    toolMessages should have size 1
+    toolMessages.head.content should include("-3")
   }
 }
