@@ -399,8 +399,10 @@ class VectorMemoryStoreFilePersistenceSpec extends AnyFlatSpec with Matchers wit
   private def dbPath: String = tempDir.resolve("memories.db").toString
 
   /** Open a store on the shared file, run `f`, and always close it again. */
-  private def withStore[A](f: VectorMemoryStore => A): A = {
-    val opened = VectorMemoryStore(dbPath, embeddings).fold(
+  private def withStore[A](f: VectorMemoryStore => A): A = withStoreAt(dbPath, embeddings)(f)
+
+  private def withStoreAt[A](path: String, service: EmbeddingService)(f: VectorMemoryStore => A): A = {
+    val opened = VectorMemoryStore(path, service).fold(
       e => fail(s"Failed to open file-backed store: ${e.message}"),
       identity
     )
@@ -526,6 +528,136 @@ class VectorMemoryStoreFilePersistenceSpec extends AnyFlatSpec with Matchers wit
     }
 
     withStore(_.count() shouldBe Right(0L))
+  }
+
+  it should "round-trip a memory with no metadata and importance bounds 0.0 and 1.0" in {
+    val low  = Memory(MemoryId("low"), "lowest", MemoryType.Task, Map.empty, base, Some(0.0))
+    val high = Memory(MemoryId("high"), "highest", MemoryType.Task, Map.empty, base.plusSeconds(1), Some(1.0))
+    withStore { s =>
+      s.store(low)
+      s.store(high)
+    }
+    withStore { s =>
+      val readLow = s.get(low.id).toOption.flatten.getOrElse(fail("low missing"))
+      readLow.metadata shouldBe empty
+      readLow.importance shouldBe Some(0.0)
+      s.get(high.id).toOption.flatten.flatMap(_.importance) shouldBe Some(1.0)
+    }
+  }
+
+  it should "filter by conversation, entity and metadata over data written by a previous instance" in {
+    val a = first.copy(
+      id = MemoryId("a"),
+      metadata = Map("conversation_id" -> "conv-1", "entity_id" -> "ent-1", "topic" -> "scala")
+    )
+    val b = second.copy(
+      id = MemoryId("b"),
+      metadata = Map("conversation_id" -> "conv-2", "entity_id" -> "ent-2", "topic" -> "java")
+    )
+    withStore { s =>
+      s.store(a)
+      s.store(b)
+    }
+    withStore { s =>
+      s.recall(MemoryFilter.ByConversation("conv-2")).toOption.get.map(_.id) shouldBe Seq(b.id)
+      s.recall(MemoryFilter.ByEntity(EntityId("ent-1"))).toOption.get.map(_.id) shouldBe Seq(a.id)
+      s.recall(MemoryFilter.ByMetadata("topic", "java")).toOption.get.map(_.id) shouldBe Seq(b.id)
+      s.recall(MemoryFilter.HasMetadata("topic")).toOption.get.map(_.id.value).toSet shouldBe Set("a", "b")
+      s.recall(MemoryFilter.ByTimeRange(Some(base.plusSeconds(30)), None)).toOption.get.map(_.id) shouldBe Seq(b.id)
+    }
+  }
+
+  it should "keep a caller-supplied embedding instead of regenerating it" in {
+    val custom = Array.tabulate(embeddings.dimensions)(i => (i % 7).toFloat / 7f)
+    withStore(_.store(first.withEmbedding(custom)))
+    withStore { s =>
+      val read = s.get(first.id).toOption.flatten.flatMap(_.embedding).getOrElse(fail("embedding missing"))
+      read.toSeq shouldBe custom.toSeq
+    }
+  }
+
+  it should "replace, not duplicate, a memory stored twice with the same id across sessions" in {
+    withStore(_.store(first))
+    withStore(_.store(first.copy(content = "replaced content")))
+    withStore { s =>
+      s.count() shouldBe Right(1L)
+      s.get(first.id).toOption.flatten.map(_.content) shouldBe Some("replaced content")
+      s.search("replaced content", topK = 5).toOption.get.map(_.memory.id) shouldBe Seq(first.id)
+    }
+  }
+
+  it should "work on a path containing spaces and non-ASCII characters" in {
+    val dir = Files.createDirectory(tempDir.resolve("dir with spaces \u00fcn\u00efcode"))
+    val db  = dir.resolve("m\u00e9moires.db")
+    withStoreAt(db.toString, embeddings)(_.store(first))
+    withStoreAt(db.toString, embeddings) { s =>
+      s.get(first.id).toOption.flatten.map(_.content) shouldBe Some(first.content)
+    }
+  }
+
+  it should "return a Left instead of throwing when the file is not a database" in {
+    val bad = tempDir.resolve("garbage.db")
+    Files.write(bad, Array.fill[Byte](4096)(0x5a.toByte))
+    VectorMemoryStore(bad.toString, embeddings).isLeft shouldBe true
+  }
+
+  it should "keep a single schema version row across repeated reopens" in {
+    withStore(_.store(first))
+    withStore(_.count())
+    withStore(_.count())
+
+    Using.resource(java.sql.DriverManager.getConnection(s"jdbc:sqlite:$dbPath")) { c =>
+      Using.resource(c.createStatement()) { st =>
+        Using.resource(st.executeQuery("SELECT COUNT(*), MIN(version), MAX(version) FROM schema_version")) { rs =>
+          rs.next() shouldBe true
+          (rs.getInt(1), rs.getInt(2), rs.getInt(3)) shouldBe ((1, 1, 1))
+        }
+      }
+    }
+  }
+
+  it should "still answer search without throwing when reopened with a different embedding dimension" in {
+    withStore(_.store(first))
+
+    withStoreAt(dbPath, MockEmbeddingService(dimensions = 64)) { other =>
+      // The stored 1536-dim vector cannot be compared with a 64-dim query: the store must degrade
+      // (keyword fallback) rather than throw or return a bogus ranking.
+      other.search("Scala", topK = 3).isRight shouldBe true
+      other.get(first.id).toOption.flatten.map(_.content) shouldBe Some(first.content)
+    }
+  }
+
+  it should "lose no writes when two instances write to the same file concurrently" in {
+    import java.util.concurrent.{ CountDownLatch, Executors }
+    import scala.concurrent.{ Await, ExecutionContext, Future }
+    import scala.concurrent.duration._
+
+    val perWriter = 25
+    val pool      = Executors.newFixedThreadPool(2)
+    Using.resource(new AutoCloseable { override def close(): Unit = pool.shutdown() }) { _ =>
+      withStore { a =>
+        withStore { b =>
+          implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(pool)
+          val start                         = new CountDownLatch(1)
+          def writer(store: VectorMemoryStore, prefix: String): Future[Seq[Boolean]] = Future {
+            start.await()
+            (1 to perWriter).map { i =>
+              store
+                .store(Memory(MemoryId(s"$prefix-$i"), s"$prefix content $i", MemoryType.Task, Map.empty, base))
+                .isRight
+            }
+          }
+          val fa = writer(a, "a")
+          val fb = writer(b, "b")
+          start.countDown()
+          val outcomes = Await.result(Future.sequence(Seq(fa, fb)), 120.seconds).flatten
+
+          outcomes.forall(identity) shouldBe true
+          a.count() shouldBe Right((2 * perWriter).toLong)
+          b.count() shouldBe Right((2 * perWriter).toLong)
+        }
+      }
+    }
   }
 }
 
