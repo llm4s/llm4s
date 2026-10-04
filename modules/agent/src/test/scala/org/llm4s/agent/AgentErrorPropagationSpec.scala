@@ -332,7 +332,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
   "An LLM error inside a handoff target" should "come back from Agent.run unchanged" in {
     val targetError = NetworkError("specialist unreachable", None, "mock://specialist")
     val target      = new Agent(new CountingFailingClient(targetError))
-    val handoff     = Handoff.to(target, "Specialist")
+    val handoff     = Handoff.to("specialist", target, "Specialist")
     val client = new NTurnFakeLLMClient(
       CompletionFixture.withToolCall(handoff.handoffId, ujson.Obj("reason" -> "needs expert"), "call-h")
     )
@@ -343,7 +343,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
   it should "come back from Agent.runWithEvents unchanged, with HandoffCompleted(success = false)" in {
     val targetError = RateLimitError("specialist", 5.seconds)
     val target      = new Agent(new CountingFailingClient(targetError))
-    val handoff     = Handoff.to(target, "Specialist")
+    val handoff     = Handoff.to("specialist", target, "Specialist")
     val client = new NTurnFakeLLMClient(
       CompletionFixture.withToolCall(handoff.handoffId, ujson.Obj("reason" -> "needs expert"), "call-h")
     )
