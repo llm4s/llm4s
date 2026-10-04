@@ -30,7 +30,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 2 ✅ | [#1129](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` |
 | 3 ✅ | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` |
 | 4 ✅ | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
-| 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (incl. Mistral, Cohere), `llm4s-voyage`; core holds no client |
+| 5 ✅ | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (incl. Mistral, Cohere), `llm4s-voyage`; core holds no client |
 | 6 ✅ | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `TracingBackend` SPI; `llm4s-observability` (Langfuse, trace collector/model/store, `CostTracker`); `llm4s-observability-prometheus`; pre-baseline API cleanup (passes 1-8) |
 | 7 ✅ | [#1242](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (built-in tools + their config); `llm4s-agent` (`agent`, `assistant`); spine re-audit (core 20.7k lines) |
 | 8 ⏳ | [#1281](https://github.com/llm4s/llm4s/issues/1281) | release, not a carve: publish 0.5.0, MiMa baseline on the frozen modules, `@Stable` / `@Experimental`, compatibility policy, g8 template; then 1.0 |
@@ -130,7 +130,7 @@ third-party resolvers at all**: the "Vosk Repository" at alphacephei.com was the
 it went with the speech carve because Vosk publishes to Maven Central and it had never resolved
 anything. Think hard before adding one back.
 
-Slice 5 has begun: `modules/ollama` carries the Ollama chat client, embedding provider,
+Slice 5 is done. `modules/ollama` carries the Ollama chat client, embedding provider,
 `OllamaConfig`, model lister and its `llm4s.embeddings.ollama` block, so core's tests cannot
 use Ollama as a convenient no-key provider any more - use a fixture descriptor, as
 `EmbeddingProviderSpiSpec` and `ModelDimensionRegistrySpec` do. `modules/gemini` followed,
