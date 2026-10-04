@@ -10,6 +10,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 
 class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
@@ -238,6 +239,26 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
     stack(a).wrapToolCall(request, toolContext)(() => ToolOutcome.NeedsApproval("tool")).raisedBy shouldBe
       Some(MiddlewareId("a"))
+  }
+
+  it should "keep the attribution of an earlier next result a wrapper returns after calling next again" in {
+    // a calls next twice and returns the first outcome, which the inner layer raised
+    val firstOfTwo = new Wrap("a")(next =>
+      val first = next()
+      next()
+      first
+    )
+    val calls = new AtomicInteger(0)
+    val toolAsksOnce: () => ToolOutcome =
+      () => if calls.getAndIncrement() == 0 then ToolOutcome.NeedsApproval("tool asks") else ToolOutcome.Error("later")
+    stack(firstOfTwo).wrapToolCall(request, toolContext)(toolAsksOnce) shouldBe
+      MiddlewareStack.ToolChainResult(ToolOutcome.NeedsApproval("tool asks"), None)
+
+    val bCalls = new AtomicInteger(0)
+    val bAsksOnce =
+      new Wrap("b")(next => if bCalls.getAndIncrement() == 0 then ToolOutcome.NeedsApproval("b asks") else next())
+    stack(firstOfTwo, bAsksOnce).wrapToolCall(request, toolContext)(() => ToolOutcome.Error("x")) shouldBe
+      MiddlewareStack.ToolChainResult(ToolOutcome.NeedsApproval("b asks"), Some(MiddlewareId("b")))
   }
 
   "a throwing tool wrapper" should "become Fatal(MiddlewareFailed), which the outer wrapper sees" in {

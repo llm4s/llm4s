@@ -238,6 +238,9 @@ object ToolLoop:
         history   <- state.get(messages)
         _         <- Message.validateConversation(history.map(_.message).toList)
         assistant <- stack.wrapModelCall(ModelRequest(history.map(_.message), tools), context)(callModel(model))
+        // a blank answer without tool calls is refused before it is stored, so the history stays valid
+        // and recover asks the model again
+        _ <- assistant.validate
       yield
         val stored   = StoredMessage(s"${context.position.taskId.value}/assistant", assistant)
         val appended = Command.empty.update(messages, MessageUpdate.Append(stored))
@@ -256,8 +259,8 @@ object ToolLoop:
         (answerId, assistant) = last
         changed <- stack.afterAgent(assistant.content, context)
         command <-
-          if changed == assistant.content then Right(Command.empty)
-          else if changed.trim.isEmpty then Left(ValidationError("tool loop", "afterAgent returned a blank answer"))
+          if changed.trim.isEmpty then Left(ValidationError("tool loop", "afterAgent returned a blank answer"))
+          else if changed == assistant.content then Right(Command.empty)
           else
             val replaced = StoredMessage(answerId, assistant.copy(contentOpt = Some(changed)))
             Right(Command.empty.update(messages, MessageUpdate.Replace(answerId, replaced)))

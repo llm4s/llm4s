@@ -6,8 +6,9 @@ import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.model.AssistantMessage
 import org.llm4s.types.Result
 
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.ConcurrentLinkedQueue
 import scala.annotation.tailrec
+import scala.jdk.CollectionConverters.*
 import scala.util.{ Failure, Success, Try }
 
 /**
@@ -54,9 +55,9 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
    * Runs the tool call through every `wrapToolCall`, the first outermost, with `innermost` at the
    * centre, and says who raised a resulting `NeedsApproval`.
    *
-   * A layer raised it when its own result is `NeedsApproval` and its `next` was not called, or last
-   * returned something other than that same value (by reference); otherwise the inner layer's
-   * attribution stands, and the innermost function's own `NeedsApproval` is attributed to the tool.
+   * A layer raised it when its own result is `NeedsApproval` and none of the results its `next`
+   * returned - however often it was called - is that same value (by reference); otherwise that inner
+   * result's attribution stands, and the innermost function's own `NeedsApproval` is attributed to the tool.
    */
   private[graph] def wrapToolCall(request: ToolCallRequest, context: ToolContext)(
     innermost: () => ToolOutcome
@@ -64,17 +65,16 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
     def layer(index: Int): ToolChainResult =
       if index == ordered.size then ToolChainResult(innermost(), None)
       else
-        val m     = ordered(index)
-        val inner = new AtomicReference[Option[ToolChainResult]](None)
+        val m = ordered(index)
+        // every result next returned, so an earlier one the wrapper hands back keeps its attribution
+        val inner = new ConcurrentLinkedQueue[ToolChainResult]()
         val next: () => ToolOutcome = () =>
           val result = layer(index + 1)
-          inner.set(Some(result))
+          inner.add(result)
           result.outcome
         guardedTool(m)(m.wrapToolCall(request, context)(next)) match
           case asked: ToolOutcome.NeedsApproval =>
-            inner.get match
-              case Some(result) if result.outcome.eq(asked) => result
-              case _                                        => ToolChainResult(asked, Some(m.id))
+            inner.asScala.find(_.outcome.eq(asked)).getOrElse(ToolChainResult(asked, Some(m.id)))
           case other => ToolChainResult(other, None)
     layer(0)
 

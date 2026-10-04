@@ -1337,6 +1337,19 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     why.message should include("blocked")
   }
 
+  it should "refuse a blank final answer at the model node, storing nothing, even when afterAgent leaves it unchanged" in {
+    val blankAnswer: Vector[Message] => AssistantMessage = _ => AssistantMessage("  ")
+    val passThrough                                      = middleware("pass", after = s => Right(s))
+    Seq(Nil, Seq(passThrough)).foreach { stack =>
+      val l             = ToolLoop.build("assistant", "v1", ScriptedModel(blankAnswer), set(Tools().echo), stack).value
+      val result        = runInMemory(l.graph, "go")
+      val (node, cause) = nodeFailure(result)
+      node shouldBe NodeId("model")
+      cause.message should include("Assistant message must have either content or tool calls")
+      messagesOf(result.failed._1).collect { case a: AssistantMessage => a } shouldBe empty
+    }
+  }
+
   it should "offer and run a middleware's contributed tool, and refuse clashing or loop-owned declarations" in {
     val runs = new AtomicInteger()
     val notes = tool[Echo]("note", "text") { (a, _) =>

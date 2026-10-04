@@ -276,7 +276,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#1279](https://github.com/llm4s/llm4s/issues/1279)): `Approve` now runs the whole middleware
   chain again with `ToolContext.approved = true`, where it skipped the policy; a deny rule that
   depends only on the call refuses the same calls as before. `ToolLoop` has a new `finish` node, so
-  checkpoints from an earlier build of the loop do not restore (pre-1.0; no migration is provided).
+  checkpoints from an earlier build of the loop do not restore (pre-1.0; no migration is provided). A final
+  answer with blank content and no tool calls now fails the run at the `model` node before it is
+  stored, rather than completing with a message the next turn's `Message.validateConversation`
+  refuses; `recover` asks the model again.
 - **Binary compatibility is checked by MiMa** ([#924](https://github.com/llm4s/llm4s/issues/924),
   [#1281](https://github.com/llm4s/llm4s/issues/1281)): a `mima-check` CI job runs
   `sbt mimaReportBinaryIssues` and gates `all-tests-pass`. The baseline is set per frozen module
