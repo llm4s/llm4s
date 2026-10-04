@@ -115,7 +115,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
 
   private def buildInMemoryRag(): RAG = {
     val config = RAGConfig.default
-      .withEmbeddings(EmbeddingProvider.Ollama, embeddingModel, embeddingDims)
+      .withEmbeddings("ollama", embeddingModel, embeddingDims)
       .inMemory
     register(
       RAG
@@ -127,7 +127,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
   private def buildPgHybridRag(): RAG = {
     val url = pgUrl.getOrElse(fail("PGVECTOR_TEST_URL not set"))
     val config = RAGConfig.default
-      .withEmbeddings(EmbeddingProvider.Ollama, embeddingModel, embeddingDims)
+      .withEmbeddings("ollama", embeddingModel, embeddingDims)
       .withPgHybrid(url, pgUser, pgPassword, vectorTable, keywordTable)
     register(
       RAG
@@ -300,7 +300,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
 
       try {
         val config = RAGConfig.default
-          .withEmbeddings(EmbeddingProvider.Ollama, embeddingModel, embeddingDims)
+          .withEmbeddings("ollama", embeddingModel, embeddingDims)
           .withLLM(llmClient)
           .inMemory
         val rag = register(
