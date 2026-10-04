@@ -42,6 +42,15 @@ object GraphError:
       with NonRecoverableError:
     override val message: String = s"Node '${nodeId.value}' (task ${taskId.value}) failed: ${cause.message}"
 
+  /**
+   * A tool call failed the run: the tool returned `Fatal`, or broke its contract (an update to a key
+   * it does not declare, a question it does not declare). `cause` says which.
+   */
+  final case class ToolFailed(tool: String, toolCallId: String, cause: LLMError)
+      extends GraphError
+      with NonRecoverableError:
+    override val message: String = s"Tool '$tool' (call $toolCallId) failed: ${cause.message}"
+
   /** The graph went quiescent while a join still waited for arrivals that nothing can produce. */
   final case class UnsatisfiedJoin(joinId: JoinId, missing: List[String]) extends GraphError with NonRecoverableError:
     override val message: String =
