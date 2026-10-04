@@ -65,12 +65,27 @@ object SpeechConfigLoader {
   def tts(source: ConfigSource): Result[TTSConfig] =
     for {
       root <- load(source)
-      ttsSection = root.getOrElse("tts", Map.empty[String, String])
-      spec          <- required(ttsSection, "tts", "model", "SPEECH_TTS_MODEL")
+      spec <- required(root.getOrElse("tts", Map.empty[String, String]), "tts", "model", "SPEECH_TTS_MODEL")
+      cfg  <- ttsFrom(root, spec)
+    } yield cfg
+
+  /**
+   * The TTS configuration for an explicit `provider/model` (e.g. `openai/tts-1`), with that
+   * provider's credentials and endpoint read from `source`. For callers that choose the model
+   * themselves instead of through `llm4s.speech.tts.model`.
+   */
+  def tts(modelSpec: String, source: ConfigSource): Result[TTSConfig] =
+    load(source).flatMap(ttsFrom(_, modelSpec))
+
+  /** `tts(modelSpec, source)` against the current environment. */
+  def tts(modelSpec: String): Result[TTSConfig] = tts(modelSpec, ConfigSource.default)
+
+  private def ttsFrom(root: Map[String, Section], spec: String): Result[TTSConfig] =
+    for {
       providerModel <- SpeechProviderSelector.parseModelSpec(spec)
       provider = providerModel._1
       id       = providerModel._2
-      voice    = nonBlank(ttsSection, "voice")
+      voice    = nonBlank(root.getOrElse("tts", Map.empty[String, String]), "voice")
       cfg <- provider match {
         case "openai" =>
           val section = root.getOrElse("openai", Map.empty[String, String])
@@ -121,8 +136,19 @@ object SpeechConfigLoader {
   def stt(source: ConfigSource): Result[STTConfig] =
     for {
       root <- load(source)
-      sttSection = root.getOrElse("stt", Map.empty[String, String])
-      spec          <- required(sttSection, "stt", "model", "SPEECH_STT_MODEL")
+      spec <- required(root.getOrElse("stt", Map.empty[String, String]), "stt", "model", "SPEECH_STT_MODEL")
+      cfg  <- sttFrom(root, spec)
+    } yield cfg
+
+  /** As `tts(modelSpec, source)`, for speech-to-text: an explicit `provider/model` such as `openai/whisper-1`. */
+  def stt(modelSpec: String, source: ConfigSource): Result[STTConfig] =
+    load(source).flatMap(sttFrom(_, modelSpec))
+
+  /** `stt(modelSpec, source)` against the current environment. */
+  def stt(modelSpec: String): Result[STTConfig] = stt(modelSpec, ConfigSource.default)
+
+  private def sttFrom(root: Map[String, Section], spec: String): Result[STTConfig] =
+    for {
       providerModel <- SpeechProviderSelector.parseModelSpec(spec)
       provider = providerModel._1
       id       = providerModel._2

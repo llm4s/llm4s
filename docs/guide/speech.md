@@ -187,6 +187,10 @@ for {
 } yield text.text
 ```
 
+To pick the model in code instead of `SPEECH_*_MODEL`, use
+`SpeechConfigLoader.tts("openai/tts-1")` / `.stt("openai/whisper-1")` (credentials still come from
+config) and `SpeechProviderSelector.getTTSClient` / `getSTTClient`.
+
 Behaviour worth knowing:
 
 - **Audio is raw PCM.** The TTS clients request raw 24 kHz, 16-bit, mono PCM from each service, so

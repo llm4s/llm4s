@@ -163,6 +163,29 @@ class SpeechConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValues
     }
   }
 
+  "SpeechConfigLoader with an explicit model spec" should {
+
+    "read only the credentials, not llm4s.speech.tts.model" in {
+      SpeechConfigLoader
+        .tts("openai/tts-1-hd", env("OPENAI_API_KEY" -> "sk-1", "SPEECH_TTS_MODEL" -> "azure/ignored"))
+        .value shouldBe TTSConfig("openai", "tts-1-hd", "alloy", "sk-1", "https://api.openai.com")
+
+      SpeechConfigLoader
+        .stt("azure/fr-FR", env("AZURE_SPEECH_KEY" -> "az", "AZURE_SPEECH_REGION" -> "eastus"))
+        .value
+        .model shouldBe "fr-FR"
+    }
+
+    "fail with the missing key, or an unknown provider" in {
+      SpeechConfigLoader.tts("openai/tts-1", env()).left.value.message should include("OPENAI_API_KEY")
+      SpeechConfigLoader.stt("openai/whisper-1", env()).left.value.message should include("OPENAI_API_KEY")
+      SpeechConfigLoader.tts("acme/x", env()).left.value.message should include("acme")
+      SpeechConfigLoader.stt("elevenlabs/x", env("ELEVENLABS_API_KEY" -> "k")).left.value.message should include(
+        "elevenlabs"
+      )
+    }
+  }
+
   "SpeechProviderSelector.tts / stt" should {
 
     "build the client the configuration selects" in {

@@ -580,7 +580,7 @@ lazy val speech = (project in file("modules/speech"))
     name := "llm4s-speech",
     commonSettings,
     // Measured 80.68% statement coverage (`sbt coverage speech/test speech/coverageReport`) on
-    // the code as carved out of core; 86.43% with the cloud providers (#1010) and their stubbed-HTTP
+    // the code as carved out of core; 86.28% with the cloud providers (#1010) and their stubbed-HTTP
     // specs. Floor is the measured value rounded down to the nearest 5. Never lower it.
     coverageFloor(85),
     Test / fork                     := true,
