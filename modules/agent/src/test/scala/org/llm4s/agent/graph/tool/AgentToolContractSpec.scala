@@ -44,24 +44,29 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     an[IllegalArgumentException] should be thrownBy spec("search web")
   }
 
-  it should "default to strict, no extra validation and no question" in {
+  it should "default to no extra validation and no question" in {
     val s = spec("search")
-    s.strict shouldBe true
     s.question shouldBe None
     s.validateDecoded(Search("x")) shouldBe Right(())
   }
 
-  "providerSchema" should "be the schema rendered with the spec's strictness" in {
+  "providerSchema" should "be the schema rendered strict" in {
     spec("search").providerSchema shouldBe searchSchema.toJsonSchema(true)
-    AgentToolSpec[Search]("search", "Searches", searchSchema, strict = false).providerSchema shouldBe
-      searchSchema.toJsonSchema(false)
   }
 
-  "toolDefinition" should "have the shape of ToolFunction.toOpenAITool" in {
+  "toolDefinition" should "have the shape of ToolFunction.toOpenAITool(true)" in {
     val function = ToolFunction[Search, String]("search", "Searches", searchSchema, _ => Right("ok"))
     spec("search").toolDefinition shouldBe function.toOpenAITool(true)
-    AgentToolSpec[Search]("search", "Searches", searchSchema, strict = false).toolDefinition shouldBe
-      function.toOpenAITool(false)
+  }
+
+  it should "hand out a copy of the schema, so mutating a definition leaves providerSchema intact" in {
+    val s          = spec("search")
+    val definition = s.toolDefinition
+    definition("function")("parameters").obj.remove("additionalProperties")
+    definition("function")("parameters")("properties").obj.remove("query")
+    s.providerSchema shouldBe searchSchema.toJsonSchema(true)
+    s.toolDefinition shouldBe ToolFunction[Search, String]("search", "Searches", searchSchema, _ => Right("ok"))
+      .toOpenAITool(true)
   }
 
   "withValidation" should "store the check" in {
@@ -87,7 +92,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   "AgentTool.Asking" should "carry its question codecs on its spec and resume typed" in {
     val tool = new AgentTool.Asking[Search, Confirm, Reply](spec("search")) {
-      def execute(args: Search, context: ToolContext): ToolOutcome = ToolOutcome.Ask(Confirm(args.query))
+      def execute(args: Search, context: ToolContext): ToolOutcome = ask(Confirm(args.query))
       def resume(args: Search, question: Confirm, answer: Reply, context: ToolContext): ToolOutcome =
         ToolOutcome.Success(ujson.Str(s"${question.prompt}:${answer.ok}"))
     }
@@ -107,7 +112,6 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     val tool = AgentTool.fromToolFunction(function)
     tool.spec.name shouldBe "echo"
     tool.spec.description shouldBe "Echoes"
-    tool.spec.strict shouldBe true
     tool.spec.providerSchema shouldBe schema.toJsonSchema(true)
     tool.spec.toolDefinition shouldBe function.toOpenAITool(true)
     tool.writes shouldBe Set.empty

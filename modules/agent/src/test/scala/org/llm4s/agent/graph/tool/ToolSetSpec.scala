@@ -59,14 +59,34 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
     error.message should include("$.properties.query.format")
   }
 
-  it should "report every problem in one ValidationError, one per line" in {
+  it should "report every problem in one ValidationError, one violation per problem" in {
     val error = ToolSet.of(refusingValidator, badlyNamed("bad name"), tool("a"), tool("a")).left.value
-    error shouldBe a[ValidationError]
-    val lines = error.message.split("\n").toVector
-    lines.count(_.contains("invalid tool name")) shouldBe 1
-    lines.count(_.contains("duplicate tool name")) shouldBe 1
-    lines.count(_.contains("$.properties.query.format")) shouldBe 3
-    lines.size shouldBe 5
+    val violations = error match {
+      case v: ValidationError => v.violations
+      case other              => fail(s"expected a ValidationError, got $other")
+    }
+    violations.count(_.contains("invalid tool name")) shouldBe 1
+    violations.count(_.contains("duplicate tool name")) shouldBe 1
+    violations.count(_.contains("$.properties.query.format")) shouldBe 3
+    violations.size shouldBe 5
+    violations.foreach(v => error.message should include(v))
+  }
+
+  "ToolSet.toolFunctions" should "match the set's definitions, in order" in {
+    val adapted = badlyNamed("echo")
+    val set     = ToolSet.of(tool("a_tool"), adapted).value
+    val fns     = set.toolFunctions
+    fns.map(_.name) shouldBe Vector("a_tool", "echo")
+    fns.map(_.description) shouldBe Vector("Tool a_tool", "d")
+    fns.map(_.toOpenAITool(true)) shouldBe set.definitions
+  }
+
+  it should "return the original function for an adapted tool and a refusing stand-in otherwise" in {
+    val original = ToolFunction[Map[String, Any], String]("echo", "d", Schema.`object`("o"), _ => Right("x"))
+    val set      = ToolSet.of(tool("a_tool"), AgentTool.fromToolFunction(original)).value
+    (set.toolFunctions(1) should be).theSameInstanceAs(original)
+    val standIn = set.toolFunctions.head.execute(ujson.Obj("query" -> "q"))
+    standIn.left.value.getFormattedMessage should include("executed by ToolLoop")
   }
 
   "ToolSet.empty" should "hold no tools" in {

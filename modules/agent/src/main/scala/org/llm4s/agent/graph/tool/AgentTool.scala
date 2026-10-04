@@ -15,7 +15,9 @@ import scala.annotation.unused
  * `name` must match `[a-zA-Z0-9_-]{1,64}`: `apply` throws `IllegalArgumentException` otherwise, and
  * [[ToolSet.of]] refuses one too, so a spec built another way is still checked.
  *
- * @param strict whether the schema is rendered in strict mode (every property required, no others)
+ * The schema is always rendered strict (every property required, no others), as core's clients
+ * send tools.
+ *
  * @param validateDecoded a check on the decoded arguments; `Left` becomes an error the model sees
  * @param question the question this tool may ask; set by [[AgentTool.Asking]]
  */
@@ -23,7 +25,6 @@ final case class AgentToolSpec[A] private (
   name: String,
   description: String,
   schema: SchemaDefinition[A],
-  strict: Boolean,
   validateDecoded: A => Result[Unit],
   question: Option[ToolQuestion[?, ?]]
 )(using val codec: ReadWriter[A]):
@@ -31,22 +32,28 @@ final case class AgentToolSpec[A] private (
   /** Adds a check on the decoded arguments, replacing any earlier one. */
   def withValidation(check: A => Result[Unit]): AgentToolSpec[A] = copy(validateDecoded = check)(using codec)
 
-  /** Declares the question this tool asks and the answer it takes; see [[AgentTool.Asking]]. */
-  def withQuestion[Q: ReadWriter, Ans: ReadWriter]: AgentToolSpec[A] =
+  /** Declares the question this tool asks and the answer it takes; only [[AgentTool.Asking]] calls it. */
+  private[tool] def withQuestion[Q: ReadWriter, Ans: ReadWriter]: AgentToolSpec[A] =
     copy(question = Some(ToolQuestion(summon[ReadWriter[Q]], summon[ReadWriter[Ans]])))(using codec)
 
-  /** The schema sent to the provider, `schema.toJsonSchema(strict)`, rendered once; arguments are validated against it. */
-  lazy val providerSchema: ujson.Value = schema.toJsonSchema(strict)
+  /**
+   * The schema sent to the provider, `schema.toJsonSchema(strict = true)`, rendered once; arguments
+   * are validated against it. Do not mutate it: [[toolDefinition]] hands out copies instead.
+   */
+  lazy val providerSchema: ujson.Value = schema.toJsonSchema(true)
 
-  /** The provider-facing tool definition, in the shape of `ToolFunction.toOpenAITool(strict)`. */
+  /**
+   * The provider-facing tool definition, in the shape of `ToolFunction.toOpenAITool(true)`. Its
+   * parameters are a fresh copy of [[providerSchema]], since clients may rewrite schemas in place.
+   */
   def toolDefinition: ujson.Value =
     ujson.Obj(
       "type" -> ujson.Str("function"),
       "function" -> ujson.Obj(
         "name"        -> ujson.Str(name),
         "description" -> ujson.Str(description),
-        "parameters"  -> providerSchema,
-        "strict"      -> ujson.Bool(strict)
+        "parameters"  -> ujson.copy(providerSchema),
+        "strict"      -> ujson.Bool(true)
       )
     )
 
@@ -59,20 +66,18 @@ object AgentToolSpec:
   def apply[A: ReadWriter](
     name: String,
     description: String,
-    schema: SchemaDefinition[A],
-    strict: Boolean = true
+    schema: SchemaDefinition[A]
   ): AgentToolSpec[A] =
     require(isValidName(name), s"Invalid tool name '$name': must match [a-zA-Z0-9_-]{1,64}")
-    unchecked(name, description, schema, strict)
+    unchecked(name, description, schema)
 
   /** Builds a spec without checking its name; [[ToolSet.of]] reports an invalid one. */
   private[tool] def unchecked[A: ReadWriter](
     name: String,
     description: String,
-    schema: SchemaDefinition[A],
-    strict: Boolean
+    schema: SchemaDefinition[A]
   ): AgentToolSpec[A] =
-    new AgentToolSpec(name, description, schema, strict, _ => Right(()), None)
+    new AgentToolSpec(name, description, schema, _ => Right(()), None)
 
 /** The codecs of a tool's question and of the answer it takes. */
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])
@@ -136,23 +141,24 @@ object AgentTool:
 
   /**
    * Adapts a core `ToolFunction`: the spec takes its name, description and schema (as a
-   * `SchemaDefinition[ujson.Value]` - the type parameter is a phantom) with `strict = true`, and
-   * arguments arrive as raw JSON. `Right(json)` becomes `Success(json)`, `Left(error)` an `Error`
+   * `SchemaDefinition[ujson.Value]` - the type parameter is a phantom), and arguments arrive as raw JSON. `Right(json)` becomes `Success(json)`, `Left(error)` an `Error`
    * with its formatted message. It writes no state and never asks. Its name is not checked here;
    * [[ToolSet.of]] refuses an invalid one.
    */
-  def fromToolFunction(tool: ToolFunction[?, ?]): AgentTool[ujson.Value] =
-    val spec = AgentToolSpec.unchecked[ujson.Value](
-      tool.name,
-      tool.description,
-      tool.schema.asInstanceOf[SchemaDefinition[ujson.Value]],
-      strict = true
+  def fromToolFunction(tool: ToolFunction[?, ?]): AgentTool[ujson.Value] = new FromToolFunction(tool)
+
+  /** Keeps the original function, so [[ToolSet.toolFunctions]] hands it back unchanged. */
+  final private[tool] class FromToolFunction(val function: ToolFunction[?, ?]) extends AgentTool[ujson.Value]:
+    val spec: AgentToolSpec[ujson.Value] = AgentToolSpec.unchecked[ujson.Value](
+      function.name,
+      function.description,
+      function.schema.asInstanceOf[SchemaDefinition[ujson.Value]]
     )
-    AgentTool(spec) { (args, _) =>
-      tool.execute(args) match
+
+    def execute(args: ujson.Value, context: ToolContext): ToolOutcome =
+      function.execute(args) match
         case Right(json) => ToolOutcome.Success(json)
         case Left(error) => ToolOutcome.Error(error.getFormattedMessage)
-    }
 
   /**
    * A tool that asks questions of type `Q` and takes answers of type `Ans`. Its spec is `base`
@@ -164,6 +170,9 @@ object AgentTool:
 
     /** Continues the call `args` after `question` was answered with `answer`. */
     def resume(args: A, question: Q, answer: Ans, context: ToolContext): ToolOutcome
+
+    /** Asks `question`, of the declared type; the answer arrives through `resume`. */
+    final protected def ask(question: Q): ToolOutcome = ToolOutcome.Ask(question)
 
     // The loop decodes question and answer with this spec's codecs, so the casts hold.
     final override private[tool] def resumeErased(

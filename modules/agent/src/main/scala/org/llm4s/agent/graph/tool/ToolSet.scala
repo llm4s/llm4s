@@ -1,6 +1,7 @@
 package org.llm4s.agent.graph.tool
 
 import org.llm4s.error.ValidationError
+import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
 
 /**
@@ -16,7 +17,27 @@ final class ToolSet private (val tools: Vector[AgentTool[?]], val validator: Too
   /** The provider-facing tool definitions, in order. */
   def definitions: Vector[ujson.Value] = tools.map(_.spec.toolDefinition)
 
+  /**
+   * The tools as core `ToolFunction`s, in order, for `CompletionOptions.tools`. A tool made by
+   * [[AgentTool.fromToolFunction]] is its original function; any other is a stand-in with the
+   * spec's name, description and schema whose handler refuses to run, since `ToolLoop` executes
+   * agent tools itself.
+   */
+  def toolFunctions: Seq[ToolFunction[?, ?]] = tools.map(ToolSet.toolFunction)
+
 object ToolSet:
+  private def toolFunction(tool: AgentTool[?]): ToolFunction[?, ?] = tool match
+    case adapted: AgentTool.FromToolFunction => adapted.function
+    case other                               => standIn(other.spec)
+
+  private def standIn[A](spec: AgentToolSpec[A]): ToolFunction[A, ujson.Value] =
+    ToolFunction[A, ujson.Value](
+      spec.name,
+      spec.description,
+      spec.schema,
+      _ => Left(s"Tool '${spec.name}' is executed by ToolLoop, not directly")
+    )
+
   val empty: ToolSet = new ToolSet(Vector.empty, ToolArgumentValidator.default)
 
   /** A set checked with [[ToolArgumentValidator.default]]. */
@@ -42,4 +63,4 @@ object ToolSet:
     }
     invalid ++ duplicates ++ unsupported match
       case Vector() => Right(new ToolSet(all, validator))
-      case problems => Left(ValidationError("tool set", problems.mkString("\n")))
+      case problems => Left(ValidationError("tool set", problems.toList))

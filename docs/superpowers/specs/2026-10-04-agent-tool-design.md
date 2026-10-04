@@ -39,22 +39,25 @@ final case class AgentToolSpec[A] private (
   name: String,
   description: String,
   schema: SchemaDefinition[A],
-  strict: Boolean,
   validateDecoded: A => Result[Unit],
   question: Option[ToolQuestion[?, ?]]
 )(using val codec: ReadWriter[A]):
   def withValidation(check: A => Result[Unit]): AgentToolSpec[A]
-  def withQuestion[Q: ReadWriter, Ans: ReadWriter]: AgentToolSpec[A]   // see "Typed questions"
-  def providerSchema: ujson.Value      // schema.toJsonSchema(strict), rendered once
-  def toolDefinition: ujson.Value      // the provider-facing tool definition, same shape as ToolFunction.toOpenAITool(strict)
+  private[tool] def withQuestion[Q: ReadWriter, Ans: ReadWriter]: AgentToolSpec[A]   // only Asking; see "Typed questions"
+  def providerSchema: ujson.Value      // schema.toJsonSchema(strict = true), rendered once; the validator's input
+  def toolDefinition: ujson.Value      // same shape as ToolFunction.toOpenAITool(true), with a copy of providerSchema
 
 object AgentToolSpec:
-  def apply[A: ReadWriter](name: String, description: String, schema: SchemaDefinition[A], strict: Boolean = true): AgentToolSpec[A]
+  def apply[A: ReadWriter](name: String, description: String, schema: SchemaDefinition[A]): AgentToolSpec[A]
 ```
 
 - `name` must match `[a-zA-Z0-9_-]{1,64}`. `apply` throws `IllegalArgumentException` for an invalid
   name (a programming error); `ToolSet.of` reports it as a `Left` too, so a tool built another way is
   still checked. `copy` is private (repo pattern for growth-prone types).
+- There is no `strict` field: core's clients always send tools strict (`ToolRegistry.getOpenAITools()`
+  defaults to it; the others convert that schema), so the schema is always rendered strict.
+  `toolDefinition` embeds a copy of `providerSchema`, because clients rewrite schemas in place (such
+  as removing `additionalProperties`), which would otherwise loosen validation.
 
 ```scala
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])
@@ -87,6 +90,7 @@ types and supplies the codecs to its spec:
 ```scala
 abstract class Asking[A, Q: ReadWriter, Ans: ReadWriter] extends AgentTool[A]:
   def resume(args: A, question: Q, answer: Ans, context: ToolContext): ToolOutcome
+  protected final def ask(question: Q): ToolOutcome   // ToolOutcome.Ask(question)
   // implements resumeErased by casting through the declared codecs; spec.question is Some(ToolQuestion[Q, Ans])
 ```
 
@@ -100,6 +104,7 @@ authors never see `Any`.
 final class ToolSet private (val tools: Vector[AgentTool[?]], validator: ToolArgumentValidator):
   def get(name: String): Option[AgentTool[?]]
   def definitions: Vector[ujson.Value]          // provider-facing tool definitions, in order
+  def toolFunctions: Seq[ToolFunction[?, ?]]    // the bridge to CompletionOptions.tools, in order
 object ToolSet:
   def of(tools: AgentTool[?]*): Result[ToolSet]
   def of(validator: ToolArgumentValidator, tools: AgentTool[?]*): Result[ToolSet]
@@ -107,7 +112,12 @@ object ToolSet:
 ```
 
 `of` refuses, with one `ValidationError` listing every problem: an invalid tool name; duplicate names;
-any keyword in a tool's `providerSchema` that `validator.supports` rejects.
+any keyword in a tool's `providerSchema` that `validator.unsupported` reports.
+
+`toolFunctions` is what the loop passes as `CompletionOptions.tools`: a tool made by
+`AgentTool.fromToolFunction` is its original `ToolFunction`; any other is a stand-in with the spec's
+name, description and schema whose handler fails ("executed by ToolLoop, not directly"). Their
+`toOpenAITool(true)` equals `definitions`.
 
 ### ToolArgumentValidator
 
@@ -176,7 +186,7 @@ helpers to read pending questions and answer them, alongside the existing approv
 ### `AgentTool.fromToolFunction`
 
 Adapts a core `ToolFunction[T, R]` as `AgentTool[ujson.Value]`: the spec uses the function's name,
-description, schema (erased to `SchemaDefinition[ujson.Value]`) and `strict = true`, so its arguments
+description and schema (erased to `SchemaDefinition[ujson.Value]`), rendered strict, so its arguments
 are validated like any other tool's; `execute` calls `tool.execute(arguments)`. `Right(json)` →
 `Success(json)`; `Left(error)` → `Error(error.getFormattedMessage)`. No state, never asks.
 
