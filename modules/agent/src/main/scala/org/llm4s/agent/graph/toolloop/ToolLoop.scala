@@ -41,11 +41,16 @@ final case class ToolTask(assistantMessageId: String, call: ToolCall) derives Re
 
 /**
  * The question a tool's `Ask` interrupt carries: the call that asked, from one assistant message,
- * and the question encoded with the tool's declared question codec. Read it with
+ * the question encoded with the tool's declared question codec, and whether the call was approved
+ * before it asked - `resume` sees the same `ToolContext.approved`. Read it with
  * [[ToolLoop.questions]] and answer it with [[ToolLoop.answer]].
  */
-final case class ToolQuestionRequest(assistantMessageId: String, call: ToolCall, question: ujson.Value)
-    derives ReadWriter
+final case class ToolQuestionRequest(
+  assistantMessageId: String,
+  call: ToolCall,
+  question: ujson.Value,
+  approved: Boolean = false
+) derives ReadWriter
 
 /** The result the loop wrote for one call, waiting for the batch barrier. */
 final case class ToolResult(assistantMessageId: String, toolCallId: String, content: String, isError: Boolean)
@@ -323,8 +328,8 @@ object ToolLoop:
           decoded match
             case Left(message) => error(task, message)
             case Right((args, question, reply)) =>
-              val toolContext = ToolContext(context, request.call.id, state, approved = false)
-              outcome(tool, task, request.call, approved = false)(
+              val toolContext = ToolContext(context, request.call.id, state, request.approved)
+              outcome(tool, task, request.call, request.approved)(
                 AgentTool.resumeWith(tool, args, question, reply, toolContext)
               )
         case _ => error(task, s"Tool '$name' does not take answers")
@@ -401,7 +406,11 @@ object ToolLoop:
               // a question of another type than the declared one fails to encode: a tool bug, like an undeclared one
               Try(upickle.default.writeJs(question.asInstanceOf[q])(using declared.questionCodec)).toResult match
                 case Right(json) =>
-                  NodeResult.Suspend(StateUpdate.empty, ToolQuestionRequest(task.assistantMessageId, call, json), ref)
+                  NodeResult.Suspend(
+                    StateUpdate.empty,
+                    ToolQuestionRequest(task.assistantMessageId, call, json, approved),
+                    ref
+                  )
                 case Left(e) =>
                   failRun(
                     ValidationError("tool question", s"tool '$name' asked a question of another type: ${e.message}")

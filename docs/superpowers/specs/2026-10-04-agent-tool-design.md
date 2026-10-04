@@ -156,17 +156,26 @@ model sees; none runs a tool or fails the run.
 6. **Execute** and map the outcome:
    - `Success(content, update)`: the call's result is `content.render()` (a `ujson.Str` renders its
      string value, not a quoted JSON string); `update` commits with the superstep. An update touching a
-     key outside the tool's `writes` → `Fatal(GraphError.ToolFailed(tool, callId, InvalidToolUpdate))`.
+     key outside the tool's `writes` → `Fatal(GraphError.ToolFailed(tool, callId, cause))`, where `cause`
+     is a `ValidationError` naming the undeclared keys.
    - `Error(msg)`: an error result, rendered `{"error": msg}` as today.
    - `NeedsApproval(reason)`: suspend at the approval node; if the call was already approved → error
      result "Tool 'x' asked for approval again: ...".
    - `Ask(q)`: encode `q` with the declared question codec and suspend at that tool's resume node
      (`ask/<tool name>`, one per asking tool). The question carried in the interrupt is a
-     `ToolQuestionRequest(assistantMessageId, call, question: ujson.Value)`. The resume node decodes the
-     answer, re-decodes the original arguments from the stored call (no re-validation), and calls
-     `resume`; its outcome is handled by this same step, so a second `Ask` is allowed.
-   - `Fatal(error)`: the task fails with `GraphError.ToolFailed(tool, callId, error)`; the run fails
-     with its checkpoint `Running`; `recover` re-runs only that call task. Tools that return `Fatal`
+     `ToolQuestionRequest(assistantMessageId, call, question: ujson.Value, approved: Boolean = false)`;
+     `approved` records the asking call's `ToolContext.approved`, and `resume` sees the same value, so
+     an approved call that asks is not asked for approval again. The resume node decodes the answer,
+     re-decodes the original arguments from the stored call (no re-validation), and calls `resume`;
+     its outcome is handled by this same step, so a second `Ask` is allowed. An answer that does not
+     decode with the tool's answer codec becomes an error result for that call ("Invalid answer for
+     'x': ..."); the resume itself is not refused, since the graph-level answer type is JSON.
+   - An `Ask` from a tool that declares no question, or whose question does not encode with the
+     declared codec, → `Fatal(GraphError.ToolFailed(tool, callId, cause))`, where `cause` is a
+     `ValidationError` ("tool 'x' asked a question it does not declare").
+   - `Fatal(error)`: the task fails with `GraphError.ToolFailed(tool, callId, error)`, which the run
+     reports as `GraphError.NodeFailed(call-tool, task, ToolFailed(...))` (the graph wraps every node
+     failure); the run fails with its checkpoint `Running`; `recover` re-runs only that call task. Tools that return `Fatal`
      after a side effect must be idempotent; `(run.position.threadId, run.position.checkpointId,
      toolCallId)` is the key.
    - A thrown NonFatal exception → error result `"Tool 'x' failed: <message>"`. Throwing never fails

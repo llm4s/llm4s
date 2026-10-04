@@ -566,6 +566,34 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     answer shouldBe """done: a1={"error":"not confirmed"} | a2=found x"""
   }
 
+  it should "keep a call's approval across its question, so resume does not ask for approval again" in {
+    val seen = new CopyOnWriteArrayList[Boolean]()
+    val gated = new AgentTool.Asking[Deploy, Confirm, Reply](
+      AgentToolSpec[Deploy]("gated", "Approved, then asks", strings[Deploy]("g", "env"))
+    ) {
+      def execute(args: Deploy, context: ToolContext): ToolOutcome =
+        if !context.approved then ToolOutcome.NeedsApproval("deploys are irreversible")
+        else ask(Confirm(s"deploy to ${args.env}?"))
+      def resume(args: Deploy, question: Confirm, answer: Reply, context: ToolContext): ToolOutcome =
+        seen.add(context.approved)
+        if !context.approved then ToolOutcome.NeedsApproval("lost the approval")
+        else text(s"deployed to ${args.env}")
+    }
+    val model    = ScriptedModel(calls(("g1", "gated", ujson.Obj("env" -> "prod"))), summarise)
+    val l        = ToolLoop.build("assistant", "v1", model, set(gated)).value
+    val first    = runInMemory(l.graph, "go").suspended
+    val approval = l.requests(first).value.head._1
+    val asked =
+      drive(l.graph, l.graph.resume(first.execution, l.answers(approval -> ApprovalDecision.Approve)).value).suspended
+    l.requests(asked).value shouldBe empty
+    val Vector((question, request)) = l.questions(asked).value
+    request.approved shouldBe true
+    val (_, answer) =
+      drive(l.graph, l.graph.resume(asked.execution, Map(l.answer(question, Reply(true)))).value).completed
+    answer shouldBe "done: g1=deployed to prod"
+    seen.asScala.toVector shouldBe Vector(true)
+  }
+
   it should "turn a resume that throws into an error result" in {
     val throwing = new AgentTool.Asking[ujson.Value, Confirm, Reply](
       AgentToolSpec[ujson.Value]("throwing", "Throws on resume", strings[ujson.Value]("t"))
@@ -693,5 +721,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
   "ToolQuestionRequest" should "round-trip through JSON" in {
     val request = ToolQuestionRequest("m", ToolCall("c", "confirm", ujson.Obj("env" -> "prod")), ujson.Obj("p" -> 1))
     upickle.default.read[ToolQuestionRequest](upickle.default.write(request)) shouldBe request
+    val approved = request.copy(approved = true)
+    upickle.default.read[ToolQuestionRequest](upickle.default.write(approved)) shouldBe approved
   }
 }
