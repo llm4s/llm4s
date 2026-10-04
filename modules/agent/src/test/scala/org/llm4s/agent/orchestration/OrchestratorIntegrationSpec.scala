@@ -98,7 +98,7 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
 
   it should "resolve a handoff to a specialist and pass the specialist's answer downstream" in {
     val specialist = new Agent(new NTurnFakeLLMClient(CompletionFixture.simple("Specialist answer: 42")))
-    val handoff    = Handoff.to(specialist, "Math specialist")
+    val handoff    = Handoff.to("math-specialist", specialist, "Math specialist")
     val primary = new NTurnFakeLLMClient(
       CompletionFixture.withToolCall(handoff.handoffId, ujson.Obj("reason" -> "Needs specialist"), "call_handoff")
     )
