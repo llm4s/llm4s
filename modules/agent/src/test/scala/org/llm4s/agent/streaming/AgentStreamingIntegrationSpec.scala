@@ -224,7 +224,7 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers with Optio
 
   it should "emit HandoffStarted then HandoffCompleted when the model requests a handoff" in {
     val target  = new Agent(new NTurnFakeLLMClient(CompletionFixture.simple("Specialist response")))
-    val handoff = Handoff.to(target, "Specialist for echoing")
+    val handoff = Handoff.to("echo-specialist", target, "Specialist for echoing")
     val client = new NTurnFakeLLMClient(
       CompletionFixture.withToolCall(handoff.handoffId, ujson.Obj("reason" -> "delegating"), "call-handoff")
     )
@@ -632,7 +632,7 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers with Optio
   "Handoff events" should "name the handoff, carry the model's reason and report success=false when the target fails" in {
     val targetError = NetworkError("target down", None, "mock://target")
     val target      = new Agent(new RecordingStreamClient(Seq.empty, exhausted = Some(targetError)))
-    val handoff     = Handoff.to(target, "Specialist")
+    val handoff     = Handoff.to("specialist", target, "Specialist")
     val client = new NTurnFakeLLMClient(
       CompletionFixture.withToolCall(handoff.handoffId, ujson.Obj("reason" -> "needs expert"), "call-h")
     )
@@ -651,7 +651,7 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers with Optio
 
   it should "run a handoff after a tool round and return the specialist's answer" in {
     val target  = new Agent(new NTurnFakeLLMClient(CompletionFixture.simple("specialist says hi")))
-    val handoff = Handoff.to(target, "Specialist")
+    val handoff = Handoff.to("specialist", target, "Specialist")
     val client = new NTurnFakeLLMClient(
       echoCall("c1", "x"),
       CompletionFixture.withToolCall(handoff.handoffId, ujson.Obj("reason" -> "r"), "call-h")
