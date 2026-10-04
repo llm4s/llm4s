@@ -400,7 +400,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
   it should "propagate tracing across handoff with debug enabled" in {
     val clientB     = new StubLLMClient(Right(createCompletion("Specialist response")))
     val agentB      = new Agent(clientB)
-    val handoff     = Handoff(agentB, Some("delegate"))
+    val handoff     = Handoff("agent-b", agentB, Some("delegate"))
     val toolCall    = createToolCall(handoff.handoffId, """{"reason":"delegate"}""")
     val completionA = createCompletion(content = "", toolCalls = Seq(toolCall))
 
@@ -423,7 +423,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
   it should "emit HandoffStarted and HandoffCompleted events" in {
     val clientB     = new StubLLMClient(Right(createCompletion("Specialist response")))
     val agentB      = new Agent(clientB)
-    val handoff     = Handoff(agentB, Some("delegate"))
+    val handoff     = Handoff("agent-b", agentB, Some("delegate"))
     val toolCall    = createToolCall(handoff.handoffId, """{"reason":"delegate"}""")
     val completionA = createCompletion(content = "", toolCalls = Seq(toolCall))
 

@@ -61,7 +61,7 @@ class HandoffIntegrationSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient()
     val agent1     = new Agent(mockClient)
     val agent2     = new Agent(mockClient)
-    val handoff    = Handoff.to(agent2, "Specialist")
+    val handoff    = Handoff.to("specialist", agent2, "Specialist")
 
     agent1
       .initializeSafe(
@@ -73,7 +73,7 @@ class HandoffIntegrationSpec extends AnyFlatSpec with Matchers {
         e => fail(s"initializeSafe failed: ${e.formatted}"),
         state => {
           // Should have at least one handoff tool
-          state.tools.tools.exists(_.name.startsWith("handoff_to_agent_")) shouldBe true
+          state.tools.tools.exists(_.name.startsWith("handoff_to_")) shouldBe true
 
           // Should preserve handoffs in state
           (state.availableHandoffs should have).length(1)
@@ -86,7 +86,7 @@ class HandoffIntegrationSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient()
     val agent1     = new Agent(mockClient)
     val agent2     = new Agent(mockClient)
-    val handoff    = Handoff.to(agent2, "Math specialist")
+    val handoff    = Handoff.to("specialist", agent2, "Math specialist")
 
     // Set up mock response with handoff tool call
     val handoffId = handoff.handoffId
@@ -143,7 +143,8 @@ class HandoffIntegrationSpec extends AnyFlatSpec with Matchers {
     )
 
     // Handoff config for reference (tested through agent.run in other tests)
-    @unused val handoff = Handoff(agent2, Some("Test"), preserveContext = true, transferSystemMessage = false)
+    @unused val handoff =
+      Handoff("specialist", agent2, Some("Test"), preserveContext = true, transferSystemMessage = false)
 
     // Build handoff state using reflection to access private method
     // In real test, this would be tested through full agent run
@@ -175,7 +176,7 @@ class HandoffIntegrationSpec extends AnyFlatSpec with Matchers {
     )
 
     // Handoff config for reference (tested through agent.run in other tests)
-    @unused val handoff = Handoff(agent2, Some("Test"), preserveContext = false)
+    @unused val handoff = Handoff("specialist", agent2, Some("Test"), preserveContext = false)
 
     // When preserveContext = false, only last user message is transferred
     val lastUserMessage = sourceState.conversation.messages
@@ -196,6 +197,7 @@ class HandoffIntegrationSpec extends AnyFlatSpec with Matchers {
     )
 
     val handoffWithTransfer = Handoff(
+      "with-transfer",
       agent2,
       Some("Test"),
       transferSystemMessage = true
@@ -205,6 +207,7 @@ class HandoffIntegrationSpec extends AnyFlatSpec with Matchers {
     handoffWithTransfer.transferSystemMessage shouldBe true
 
     val handoffWithoutTransfer = Handoff(
+      "without-transfer",
       agent2,
       Some("Test"),
       transferSystemMessage = false

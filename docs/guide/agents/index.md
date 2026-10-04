@@ -226,7 +226,7 @@ agent.run(
   query = "Complex physics question",
   tools = tools,
   handoffs = Seq(
-    Handoff.to(physicsAgent, "Physics expertise required")
+    Handoff.to("physics", physicsAgent, "Physics expertise required")
   )
 )
 ```

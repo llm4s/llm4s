@@ -212,7 +212,7 @@ class AgentSpec extends AnyFlatSpec with Matchers {
   it should "include handoff tools when handoffs are provided" in {
     val targetClient = new MockLLMClient()
     val targetAgent  = new Agent(targetClient)
-    val handoff      = Handoff(targetAgent, Some("For complex math"))
+    val handoff      = Handoff("target", targetAgent, Some("For complex math"))
 
     val mockClient = new MockLLMClient()
     val agent      = new Agent(mockClient)
@@ -223,7 +223,7 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     } yield {
       // Should have original tool + handoff tool
       state.tools.tools.size shouldBe 2
-      state.tools.tools.exists(_.name.startsWith("handoff_to_agent_")) shouldBe true
+      state.tools.tools.exists(_.name.startsWith("handoff_to_")) shouldBe true
     }
     result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
@@ -793,7 +793,7 @@ class AgentSpec extends AnyFlatSpec with Matchers {
   "Agent with handoffs" should "detect handoff tool calls" in {
     val targetClient = new MockLLMClient()
     val targetAgent  = new Agent(targetClient)
-    val handoff      = Handoff(targetAgent, Some("For specialist help"))
+    val handoff      = Handoff("target", targetAgent, Some("For specialist help"))
 
     // Get the actual handoff ID that will be used
     val handoffId = handoff.handoffId
