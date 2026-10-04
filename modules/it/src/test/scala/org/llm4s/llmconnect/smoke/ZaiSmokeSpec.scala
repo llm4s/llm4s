@@ -35,7 +35,9 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
   private def config(key: String): ZaiConfig =
     ZaiConfig
       .fromValues(
-        modelName = "GLM-4-Flash",
+        // api.z.ai's free flash model (listed in the model registry as `zai/glm-4.5-flash`).
+        // `GLM-4-Flash` is a bigmodel.cn name that api.z.ai does not serve.
+        modelName = "glm-4.5-flash",
         apiKey = key,
         baseUrl = ZaiConfig.DEFAULT_BASE_URL
       )
@@ -43,7 +45,9 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 
-  private val options: CompletionOptions = CompletionOptions(maxTokens = Some(16))
+  // GLM-4.5 models reason before answering by default and the reasoning counts against the
+  // budget, so leave room for it: 16 tokens could be spent entirely on thinking.
+  private val options: CompletionOptions = CompletionOptions(maxTokens = Some(512))
 
   "Zai" should "complete a basic request" in {
     Tier.require(apiKey.isDefined, "ZAI_API_KEY not set")
@@ -63,7 +67,9 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
     val result = client.streamComplete(conversation, options, c => chunks += c).value
 
-    chunks.exists(_.content.isDefined) shouldBe true
+    // The first delta carries `content: ""`, so `isDefined` alone passes for a stream with no
+    // payload; require real text or reasoning text, and that the text is what the call returned.
+    chunks.exists(c => c.content.exists(_.nonEmpty) || c.thinkingDelta.exists(_.nonEmpty)) shouldBe true
     chunks.flatMap(_.content).mkString shouldBe result.content
   }
 
