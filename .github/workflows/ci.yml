@@ -715,6 +715,9 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+          # StableDiffusionSmokeSpec (Stability AI image generation). OPENAI_API_KEY above also
+          # serves DALLESmokeSpec, which needs an organisation verified for gpt-image-1.
+          STABILITY_API_KEY: ${{ secrets.STABILITY_API_KEY }}
           # LangfuseSmokeSpec (llm4s-observability). LANGFUSE_URL is optional: unset, it is
           # Langfuse Cloud. The LLM in that suite is a mock, so it costs only a trace.
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
