@@ -61,7 +61,7 @@ val result = for {
     query = "What is the integral of x^2?",
     tools = ToolRegistry.empty,
     handoffs = Seq(
-      Handoff.to(mathAgent, "Math expertise required")
+      Handoff.to("math", mathAgent, "Math expertise required")
     )
   )
 } yield state
@@ -77,8 +77,9 @@ val result = for {
 import org.llm4s.agent.Handoff
 
 val handoff = Handoff.to(
-  targetAgent = specialistAgent,
-  transferReason = "Domain expertise required"
+  "specialist",
+  specialistAgent,
+  "Domain expertise required"
 )
 ```
 
@@ -87,6 +88,7 @@ val handoff = Handoff.to(
 ```scala
 // Preserve full conversation history
 val handoff = Handoff(
+  id = "specialist",
   targetAgent = specialistAgent,
   transferReason = Some("Specialist needed"),
   preserveContext = true,        // Keep conversation history
@@ -99,6 +101,7 @@ val handoff = Handoff(
 ```scala
 // Start fresh with specialist
 val handoff = Handoff(
+  id = "specialist",
   targetAgent = specialistAgent,
   transferReason = Some("Fresh analysis needed"),
   preserveContext = false,        // Don't transfer history
@@ -111,6 +114,7 @@ val handoff = Handoff(
 ```scala
 // Transfer original instructions to specialist
 val handoff = Handoff(
+  id = "specialist",
   targetAgent = specialistAgent,
   transferReason = Some("Continue with same instructions"),
   preserveContext = true,
@@ -140,10 +144,10 @@ val result = mainAgent.run(
   query = userQuery,
   tools = tools,
   handoffs = Seq(
-    Handoff.to(mathAgent, "Mathematical calculations and proofs"),
-    Handoff.to(codeAgent, "Programming and code review"),
-    Handoff.to(legalAgent, "Legal questions and contracts"),
-    Handoff.to(medicalAgent, "Health and medical information")
+    Handoff.to("math", mathAgent, "Mathematical calculations and proofs"),
+    Handoff.to("code", codeAgent, "Programming and code review"),
+    Handoff.to("legal", legalAgent, "Legal questions and contracts"),
+    Handoff.to("medical", medicalAgent, "Health and medical information")
   )
 )
 ```
@@ -210,7 +214,7 @@ mainAgent.run(
   query = "Explain quantum entanglement",
   tools = tools,
   handoffs = Seq(
-    Handoff.to(physicsAgent, "Physics questions requiring expert explanation")
+    Handoff.to("physics", physicsAgent, "Physics questions requiring expert explanation")
   )
 )
 ```
@@ -236,6 +240,7 @@ mainAgent.run(
   tools = basicTools,
   handoffs = Seq(
     Handoff(
+      id = "data",
       targetAgent = dataAgent,
       transferReason = Some("Data analysis with database access")
     )
@@ -274,9 +279,9 @@ triageAgent.run(
   query = "I can't log into my account and my payment failed",
   tools = ToolRegistry.empty,
   handoffs = Seq(
-    Handoff.to(billingAgent, "Billing, payments, and subscription issues"),
-    Handoff.to(technicalAgent, "Technical problems and account access"),
-    Handoff.to(salesAgent, "Purchases, upgrades, and pricing questions")
+    Handoff.to("billing", billingAgent, "Billing, payments, and subscription issues"),
+    Handoff.to("technical", technicalAgent, "Technical problems and account access"),
+    Handoff.to("sales", salesAgent, "Purchases, upgrades, and pricing questions")
   )
 )
 ```
@@ -332,6 +337,7 @@ mainAgent.runWithEvents(query, tools, handoffs) {
 ```scala
 // Specialist sees entire conversation
 val handoff = Handoff(
+  id = "specialist",
   targetAgent = specialist,
   preserveContext = true,
   transferSystemMessage = false
@@ -349,6 +355,7 @@ val handoff = Handoff(
 ```scala
 // Specialist starts fresh
 val handoff = Handoff(
+  id = "specialist",
   targetAgent = specialist,
   preserveContext = false,
   transferSystemMessage = false
@@ -366,6 +373,7 @@ val handoff = Handoff(
 ```scala
 // Specialist inherits original instructions
 val handoff = Handoff(
+  id = "specialist",
   targetAgent = specialist,
   preserveContext = true,
   transferSystemMessage = true
@@ -397,10 +405,10 @@ For complex workflows, see [Orchestration documentation](/design/agent-framework
 
 ```scala
 // Good - specific and actionable
-Handoff.to(agent, "Database queries and SQL optimization")
+Handoff.to("target", agent, "Database queries and SQL optimization")
 
 // Bad - vague
-Handoff.to(agent, "Technical stuff")
+Handoff.to("target", agent, "Technical stuff")
 ```
 
 ### 2. Focused Specialists
@@ -425,10 +433,10 @@ val everythingAgent = new Agent(
 
 ```scala
 // Preserve context when history matters
-Handoff(targetAgent = followUpAgent, preserveContext = true)
+Handoff(id = "follow-up", targetAgent = followUpAgent, preserveContext = true)
 
 // Fresh start for independent analysis
-Handoff(targetAgent = reviewAgent, preserveContext = false)
+Handoff(id = "review", targetAgent = reviewAgent, preserveContext = false)
 ```
 
 ### 4. Don't Overuse Handoffs
@@ -436,15 +444,15 @@ Handoff(targetAgent = reviewAgent, preserveContext = false)
 ```scala
 // Good - meaningful specialization
 handoffs = Seq(
-  Handoff.to(mathAgent, "Complex mathematical calculations"),
-  Handoff.to(legalAgent, "Legal analysis and compliance")
+  Handoff.to("math", mathAgent, "Complex mathematical calculations"),
+  Handoff.to("legal", legalAgent, "Legal analysis and compliance")
 )
 
 // Bad - too granular
 handoffs = Seq(
-  Handoff.to(additionAgent, "Adding numbers"),
-  Handoff.to(subtractionAgent, "Subtracting numbers"),
-  Handoff.to(multiplicationAgent, "Multiplying numbers"),
+  Handoff.to("addition", additionAgent, "Adding numbers"),
+  Handoff.to("subtraction", subtractionAgent, "Subtracting numbers"),
+  Handoff.to("multiplication", multiplicationAgent, "Multiplying numbers"),
   // ...
 )
 ```

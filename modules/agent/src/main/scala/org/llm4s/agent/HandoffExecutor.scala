@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ AssistantMessage, Conversation, MessageRole }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction, ToolRegistry }
 import org.llm4s.types.Result
@@ -45,48 +46,65 @@ private[agent] object HandoffExecutor {
    * invoke to trigger delegation.
    *
    * The generated tool name is [[Handoff.handoffId]] so that
-   * [[detectHandoff]] can identify it by the `handoff_to_agent_` prefix.
+   * [[detectHandoff]] can identify it by that exact id.
    * The tool schema exposes a single required `reason` field that the LLM must
    * populate, giving operators visibility into why the delegation occurred.
    *
    * @param handoffs Handoffs to convert; may be empty.
-   * @return `Right(tools)` — one tool per handoff — or `Left` if tool creation
-   *         fails (e.g. invalid schema definition).
+   * @param registeredToolNames Names of the caller's tools; a handoff whose tool name is one of them is refused.
+   * @return `Right(tools)` — one tool per handoff — or `Left(ValidationError)`
+   *         listing every invalid id and every duplicated id, each quoted, or
+   *         `Left` if tool creation fails.
    */
-  def createHandoffTools(handoffs: Seq[Handoff]): Result[Seq[ToolFunction[_, _]]] = {
+  def createHandoffTools(
+    handoffs: Seq[Handoff],
+    registeredToolNames: Set[String] = Set.empty
+  ): Result[Seq[ToolFunction[_, _]]] = {
     import HandoffResult._
 
-    handoffs.traverse { handoff =>
-      val toolName = handoff.handoffId
-      val toolDescription = handoff.transferReason.fold(
-        "Hand off this query to a specialist agent."
-      )(reason => s"Hand off this query to a specialist agent. $reason")
+    def quoted(ids: Seq[String]): String = ids.map(id => s"'$id'").mkString(", ")
+    val ids                              = handoffs.map(_.id)
+    val invalid                          = ids.filterNot(Handoff.isValidId).distinct
+    val duplicates                       = ids.distinct.filter(id => ids.count(_ == id) > 1)
+    val clashing                         = handoffs.map(_.handoffId).distinct.filter(registeredToolNames.contains)
+    val problems = List(
+      Option.when(invalid.nonEmpty)(s"invalid handoff ids: ${quoted(invalid)}"),
+      Option.when(duplicates.nonEmpty)(s"duplicate handoff ids: ${quoted(duplicates)}"),
+      Option.when(clashing.nonEmpty)(s"handoff tool names already registered as tools: ${quoted(clashing)}")
+    ).flatten
+    if (problems.nonEmpty) Left(ValidationError("handoffs", problems))
+    else
+      handoffs.traverse { handoff =>
+        val toolName = handoff.handoffId
+        val toolDescription = handoff.transferReason.fold(
+          "Hand off this query to a specialist agent."
+        )(reason => s"Hand off this query to a specialist agent. $reason")
 
-      val schema = Schema
-        .`object`[Map[String, Any]]("Handoff parameters")
-        .withRequiredField("reason", Schema.string("Reason for the handoff"))
+        val schema = Schema
+          .`object`[Map[String, Any]]("Handoff parameters")
+          .withRequiredField("reason", Schema.string("Reason for the handoff"))
 
-      ToolBuilder[Map[String, Any], HandoffResult](
-        toolName,
-        toolDescription,
-        schema
-      ).withHandler { extractor =>
-        extractor.getString("reason").map { reason =>
-          HandoffResult(
-            handoff_requested = true,
-            handoff_id = handoff.handoffId,
-            reason = reason
-          )
-        }
-      }.buildSafe()
-    }
+        ToolBuilder[Map[String, Any], HandoffResult](
+          toolName,
+          toolDescription,
+          schema
+        ).withHandler { extractor =>
+          extractor.getString("reason").map { reason =>
+            HandoffResult(
+              handoff_requested = true,
+              handoff_id = handoff.handoffId,
+              reason = reason
+            )
+          }
+        }.buildSafe()
+      }
   }
 
   /**
    * Scans the most recent assistant message in `state` for a handoff tool call.
    *
    * Returns `None` when there is no assistant message with tool calls, or when
-   * none of the tool calls have the `handoff_to_agent_` prefix.  Returns
+   * none of the tool calls have the `handoff_to_` prefix.  Returns
    * `Some((handoff, reason))` on the '''first''' matching tool call — multiple
    * handoffs in a single turn are not supported (only the first is executed).
    *
@@ -99,18 +117,18 @@ private[agent] object HandoffExecutor {
       .collectFirst { case msg: AssistantMessage if msg.toolCalls.nonEmpty => msg }
 
     latestAssistantMessage.flatMap { assistantMessage =>
-      val handoffToolCalls = assistantMessage.toolCalls.filter(tc => tc.name.startsWith("handoff_to_agent_"))
+      val matchedCall = for {
+        toolCall <- assistantMessage.toolCalls.find(tc => state.availableHandoffs.exists(_.handoffId == tc.name))
+        handoff  <- state.availableHandoffs.find(_.handoffId == toolCall.name)
+      } yield (toolCall, handoff)
 
-      handoffToolCalls.headOption.flatMap { toolCall =>
+      matchedCall.flatMap { case (toolCall, handoff) =>
         val reasonOpt = Try {
           val args = ujson.read(toolCall.arguments)
           args.obj.get("reason").map(_.str).getOrElse("No reason provided")
         }.toOption
 
-        val handoffId  = toolCall.name
-        val handoffOpt = state.availableHandoffs.find(_.handoffId == handoffId)
-
-        handoffOpt.flatMap(handoff => reasonOpt.map(reason => (handoff, reason)))
+        reasonOpt.map(reason => (handoff, reason))
       }
     }
   }

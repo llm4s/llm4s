@@ -221,7 +221,7 @@ class Agent(client: LLMClient) {
     )
 
     for {
-      handoffTools <- HandoffExecutor.createHandoffTools(handoffs)
+      handoffTools <- HandoffExecutor.createHandoffTools(handoffs, tools.tools.map(_.name).toSet)
     } yield {
       val allTools = new ToolRegistry(tools.tools ++ handoffTools)
 
