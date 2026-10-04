@@ -76,7 +76,7 @@ class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
     )
 
     val childAgent = new Agent(new DeterministicFakeLLMClient(childCompletion))
-    val handoff    = Handoff.to(childAgent, reason = "delegate")
+    val handoff    = Handoff.to("child", childAgent, reason = "delegate")
 
     val handoffToolCall = ToolCall(
       id = "tc_handoff",
@@ -133,7 +133,7 @@ class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
 
     val agentB = new Agent(new DeterministicFakeLLMClient(bCompletion))
 
-    val aHandoffToB = Handoff.to(agentB, reason = "delegate to B")
+    val aHandoffToB = Handoff.to("agent-b", agentB, reason = "delegate to B")
 
     val aHandoffToolCall = ToolCall(
       id = "tc_handoff_a",

@@ -31,11 +31,13 @@ class HandoffExecutorSpec extends AnyFlatSpec with Matchers {
 
   private def handoff(
     agent: Agent,
+    id: String = "target",
     reason: Option[String] = Some("specialist"),
     preserveContext: Boolean = true,
     transferSystemMessage: Boolean = false
   ): Handoff =
     Handoff(
+      id = id,
       targetAgent = agent,
       transferReason = reason,
       preserveContext = preserveContext,
@@ -123,7 +125,7 @@ class HandoffExecutorSpec extends AnyFlatSpec with Matchers {
 
   it should "return None when handoff prefix matches but no matching handoff in availableHandoffs" in {
     val tc =
-      ToolCall(id = "tc-1", name = "handoff_to_agent_deadbeef", arguments = ujson.Obj("reason" -> ujson.Str("r")))
+      ToolCall(id = "tc-1", name = "handoff_to_deadbeef", arguments = ujson.Obj("reason" -> ujson.Str("r")))
     val state = AgentState(
       conversation = Conversation(
         Seq(
@@ -235,8 +237,8 @@ class HandoffExecutorSpec extends AnyFlatSpec with Matchers {
   it should "create one ToolFunction per handoff" in {
     val agent1 = mkAgent()
     val agent2 = mkAgent()
-    val h1     = handoff(agent1, reason = Some("reason A"))
-    val h2     = handoff(agent2, reason = Some("reason B"))
+    val h1     = handoff(agent1, "a", reason = Some("reason A"))
+    val h2     = handoff(agent2, "b", reason = Some("reason B"))
     val result = HandoffExecutor.createHandoffTools(Seq(h1, h2))
     result shouldBe a[Right[_, _]]
     result.getOrElse(Seq.empty) should have size 2

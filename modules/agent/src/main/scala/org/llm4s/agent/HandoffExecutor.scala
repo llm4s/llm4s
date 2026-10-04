@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ AssistantMessage, Conversation, MessageRole }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction, ToolRegistry }
 import org.llm4s.types.Result
@@ -45,7 +46,7 @@ private[agent] object HandoffExecutor {
    * invoke to trigger delegation.
    *
    * The generated tool name is [[Handoff.handoffId]] so that
-   * [[detectHandoff]] can identify it by the `handoff_to_agent_` prefix.
+   * [[detectHandoff]] can identify it by the `handoff_to_` prefix.
    * The tool schema exposes a single required `reason` field that the LLM must
    * populate, giving operators visibility into why the delegation occurred.
    *
@@ -56,37 +57,41 @@ private[agent] object HandoffExecutor {
   def createHandoffTools(handoffs: Seq[Handoff]): Result[Seq[ToolFunction[_, _]]] = {
     import HandoffResult._
 
-    handoffs.traverse { handoff =>
-      val toolName = handoff.handoffId
-      val toolDescription = handoff.transferReason.fold(
-        "Hand off this query to a specialist agent."
-      )(reason => s"Hand off this query to a specialist agent. $reason")
+    val duplicates = handoffs.groupBy(_.id).collect { case (id, hs) if hs.size > 1 => id }.toList.sorted
+    if (duplicates.nonEmpty)
+      Left(ValidationError("handoffs", s"duplicate handoff ids: ${duplicates.mkString(", ")}"))
+    else
+      handoffs.traverse { handoff =>
+        val toolName = handoff.handoffId
+        val toolDescription = handoff.transferReason.fold(
+          "Hand off this query to a specialist agent."
+        )(reason => s"Hand off this query to a specialist agent. $reason")
 
-      val schema = Schema
-        .`object`[Map[String, Any]]("Handoff parameters")
-        .withRequiredField("reason", Schema.string("Reason for the handoff"))
+        val schema = Schema
+          .`object`[Map[String, Any]]("Handoff parameters")
+          .withRequiredField("reason", Schema.string("Reason for the handoff"))
 
-      ToolBuilder[Map[String, Any], HandoffResult](
-        toolName,
-        toolDescription,
-        schema
-      ).withHandler { extractor =>
-        extractor.getString("reason").map { reason =>
-          HandoffResult(
-            handoff_requested = true,
-            handoff_id = handoff.handoffId,
-            reason = reason
-          )
-        }
-      }.buildSafe()
-    }
+        ToolBuilder[Map[String, Any], HandoffResult](
+          toolName,
+          toolDescription,
+          schema
+        ).withHandler { extractor =>
+          extractor.getString("reason").map { reason =>
+            HandoffResult(
+              handoff_requested = true,
+              handoff_id = handoff.handoffId,
+              reason = reason
+            )
+          }
+        }.buildSafe()
+      }
   }
 
   /**
    * Scans the most recent assistant message in `state` for a handoff tool call.
    *
    * Returns `None` when there is no assistant message with tool calls, or when
-   * none of the tool calls have the `handoff_to_agent_` prefix.  Returns
+   * none of the tool calls have the `handoff_to_` prefix.  Returns
    * `Some((handoff, reason))` on the '''first''' matching tool call — multiple
    * handoffs in a single turn are not supported (only the first is executed).
    *
@@ -99,7 +104,7 @@ private[agent] object HandoffExecutor {
       .collectFirst { case msg: AssistantMessage if msg.toolCalls.nonEmpty => msg }
 
     latestAssistantMessage.flatMap { assistantMessage =>
-      val handoffToolCalls = assistantMessage.toolCalls.filter(tc => tc.name.startsWith("handoff_to_agent_"))
+      val handoffToolCalls = assistantMessage.toolCalls.filter(tc => tc.name.startsWith(Handoff.ToolPrefix))
 
       handoffToolCalls.headOption.flatMap { toolCall =>
         val reasonOpt = Try {

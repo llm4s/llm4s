@@ -41,9 +41,9 @@ object SimpleTriageHandoffExample extends App {
       query = "I want a refund for my order #12345",
       tools = ToolRegistry.empty,
       handoffs = Seq(
-        Handoff.to(supportAgent, "General customer support questions"),
-        Handoff.to(salesAgent, "Sales and product inquiries"),
-        Handoff.to(refundAgent, "Refund and return requests")
+        Handoff.to("support", supportAgent, "General customer support questions"),
+        Handoff.to("sales", salesAgent, "Sales and product inquiries"),
+        Handoff.to("refund", refundAgent, "Refund and return requests")
       ),
       systemPromptAddition = Some(
         """You are a customer service triage agent.
