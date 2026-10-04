@@ -62,8 +62,11 @@ class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
     val result = client.streamComplete(conversation, options, c => chunks += c).value
 
-    chunks.exists(_.content.isDefined) shouldBe true
-    chunks.flatMap(_.content).mkString shouldBe result.content
+    // The first delta carries `content: ""` (the role chunk), so `isDefined` alone would pass for a
+    // stream with no text at all; require real text, and that it is what the call returned.
+    val streamed = chunks.flatMap(_.content).mkString
+    streamed should not be empty
+    streamed shouldBe result.content
   }
 
   it should "return AuthenticationError for an invalid API key" in {
