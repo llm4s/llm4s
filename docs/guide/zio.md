@@ -47,7 +47,11 @@ val wrapped: LLMClientZ = LLMClientZ(existingClient)
 
 ### Streaming
 
-`streamComplete` returns a `ZStream[Any, LLMError, StreamedChunk]`:
+`streamComplete` returns a `ZStream[Any, LLMError, StreamedChunk]` that delivers chunks
+incrementally. The blocking provider call runs on an interruptible blocking thread and feeds a
+bounded queue, so a slow consumer applies backpressure, and stopping early or interrupting the
+fiber interrupts the call. If the call fails mid-stream, chunks already received are emitted
+first and the stream then fails with the `LLMError`:
 
 ```scala
 client
@@ -94,3 +98,9 @@ client.complete(conversation).catchAll { err =>
 
 See [CLAUDE.md](../../CLAUDE.md) for the full list of supported environment
 variables (`LLM_MODEL`, `OPENAI_API_KEY`, etc.).
+
+### Differences from `Agent`
+
+`AgentZ` is a deliberately thin wrapper. `run` does not expose `handoffs`, `tracing` or `debug`,
+and `continueConversation` does not expose `contextWindowConfig`; the `Agent` defaults apply.
+If you need them, call `Agent` directly inside `ZIO.attemptBlocking`.

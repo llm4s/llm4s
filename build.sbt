@@ -288,8 +288,7 @@ lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
     libraryDependencies ++= Seq(
       Deps.catsEffect,
       Deps.fs2,
-      Deps.catsEffectTestingScalatest % Test,
-      Deps.scalatest                  % Test
+      Deps.scalatest % Test
     )
   )
 

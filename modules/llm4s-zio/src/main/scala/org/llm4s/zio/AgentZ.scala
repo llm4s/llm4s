@@ -12,6 +12,10 @@ import zio.ZIO
  *
  * Lifts every `Result[AgentState]` return value into `ZIO[Any, LLMError, AgentState]`.
  * The underlying blocking [[Agent]] methods are shifted to ZIO's blocking thread pool.
+ *
+ * Intentionally a thin wrapper: `run` does not expose `handoffs`, `tracing` or `debug`, and
+ * `continueConversation` does not expose `contextWindowConfig`; the underlying [[Agent]] defaults
+ * apply. Use [[Agent]] directly (inside `ZIO.attemptBlocking`) when you need those.
  */
 trait AgentZ {
 

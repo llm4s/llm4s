@@ -1,8 +1,10 @@
 package org.llm4s.effect.cats
 
 import cats.effect.kernel.{ Async, Resource }
+import cats.effect.std.{ Dispatcher, Queue }
+import cats.syntax.applicativeError.*
 import cats.syntax.flatMap.*
-import fs2.{ Chunk, Stream }
+import fs2.Stream
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
@@ -22,7 +24,16 @@ trait LLMClientIO[F[_]] {
     options: CompletionOptions = CompletionOptions()
   ): F[Completion]
 
-  /** Runs the streaming call on the blocking pool, emits all chunks as an fs2 [[Stream]]. */
+  /**
+   * Streams chunks incrementally as an fs2 [[Stream]].
+   *
+   * The underlying blocking call runs on an interruptible blocking thread and pushes each chunk
+   * into a bounded queue (backpressure: the provider thread blocks while the consumer lags).
+   * Chunks are delivered as they arrive, not after the call completes. If the call fails
+   * mid-stream, chunks already received are emitted first and the stream then fails with
+   * [[LLMException]]. Stopping consumption early (e.g. `take`) or cancelling the fiber
+   * interrupts the blocking call.
+   */
   def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions()
@@ -33,6 +44,9 @@ trait LLMClientIO[F[_]] {
 }
 
 object LLMClientIO {
+
+  /** Capacity of the bounded buffer between the provider thread and the consumer. */
+  private val StreamBufferSize = 64
 
   /** Wraps an already-constructed [[LLMClient]]. Does not manage its lifecycle. */
   def apply[F[_]: Async](underlying: LLMClient): LLMClientIO[F] =
@@ -73,15 +87,37 @@ object LLMClientIO {
       conversation: Conversation,
       options: CompletionOptions = CompletionOptions()
     ): Stream[F, StreamedChunk] =
-      Stream.evalUnChunk {
-        F.blocking {
-          val buf = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-          (underlying.streamComplete(conversation, options, buf += _), buf)
-        }.flatMap { case (result, buf) =>
-          result match {
-            case Right(_)  => F.pure(Chunk.from(buf.toSeq))
-            case Left(err) => F.raiseError(new LLMException(err))
-          }
+      Stream.eval(Queue.bounded[F, Option[Either[Throwable, StreamedChunk]]](StreamBufferSize)).flatMap { queue =>
+        Stream.resource(Dispatcher.sequential[F]).flatMap { dispatcher =>
+          // Runs on a blocking thread. `onChunk` offers each chunk to the bounded queue and blocks
+          // the provider thread while the queue is full (backpressure). The terminal element is
+          // enqueued after every chunk, so chunks received before an error precede it.
+          val producer: F[Unit] =
+            F.interruptible {
+              underlying.streamComplete(
+                conversation,
+                options,
+                chunk => dispatcher.unsafeRunSync(queue.offer(Some(Right(chunk))))
+              )
+            }.attempt
+              .flatMap { outcome =>
+                val terminal: Option[Throwable] = outcome match {
+                  case Right(Right(_))  => None
+                  case Right(Left(err)) => Some(new LLMException(err))
+                  case Left(t)          => Some(t)
+                }
+                terminal.fold(F.unit)(t => queue.offer(Some(Left(t)))) >> queue.offer(None)
+              }
+
+          // `concurrently` cancels the producer (interrupting the blocking thread) when the
+          // consumer stops early, fails, or is cancelled.
+          Stream
+            .fromQueueNoneTerminated(queue)
+            .flatMap {
+              case Right(chunk) => Stream.emit(chunk)
+              case Left(t)      => Stream.raiseError[F](t)
+            }
+            .concurrently(Stream.eval(producer))
         }
       }
 

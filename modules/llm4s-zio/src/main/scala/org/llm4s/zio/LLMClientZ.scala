@@ -5,8 +5,8 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
-import zio.{ ZIO, ZLayer }
-import zio.stream.ZStream
+import zio.{ Queue, Unsafe, ZIO, ZLayer }
+import zio.stream.{ Take, ZStream }
 
 /**
  * ZIO wrapper for [[LLMClient]].
@@ -22,7 +22,16 @@ trait LLMClientZ {
     options: CompletionOptions = CompletionOptions()
   ): ZIO[Any, LLMError, Completion]
 
-  /** Runs the streaming call on the blocking pool, emits all chunks as a [[ZStream]]. */
+  /**
+   * Streams chunks incrementally as a [[ZStream]].
+   *
+   * The underlying blocking call runs on an interruptible blocking thread and pushes each chunk
+   * into a bounded queue (backpressure: the provider thread blocks while the consumer lags).
+   * Chunks are delivered as they arrive, not after the call completes. If the call fails
+   * mid-stream, chunks already received are emitted first and the stream then fails with the
+   * `LLMError`. Stopping consumption early (e.g. `take`) or interrupting the fiber interrupts
+   * the blocking call.
+   */
   def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions()
@@ -37,14 +46,17 @@ object LLMClientZ {
   /** Wraps an already-constructed [[LLMClient]]. Does not manage its lifecycle. */
   def apply(underlying: LLMClient): LLMClientZ = new Impl(underlying)
 
+  /** Capacity of the bounded buffer between the provider thread and the consumer. */
+  private val StreamBufferSize = 64
+
   /**
    * ZLayer that acquires an [[LLMClient]] from the environment (via [[Llm4sConfig]])
    * on the blocking thread pool and finalises it on scope exit.
    */
   val layer: ZLayer[Any, LLMError, LLMClientZ] =
     ZLayer.scoped {
-      ZIO
-        .blocking {
+      val acquireClient: ZIO[Any, LLMError, LLMClient] =
+        ZIO.blocking {
           ZIO.fromEither {
             for {
               registry <- Llm4sConfig.modelRegistryService()
@@ -53,7 +65,10 @@ object LLMClientZ {
             } yield client
           }
         }
-        .flatMap(client => ZIO.acquireRelease(ZIO.succeed(LLMClientZ(client)))(_ => ZIO.succeed(client.close())))
+      // Acquisition sits inside the bracket so an interruption cannot leak the client.
+      ZIO
+        .acquireRelease(acquireClient)(c => ZIO.attemptBlocking(c.close()).orDie)
+        .map(LLMClientZ(_))
     }
 
   final private class Impl(underlying: LLMClient) extends LLMClientZ {
@@ -69,15 +84,36 @@ object LLMClientZ {
     def streamComplete(
       conversation: Conversation,
       options: CompletionOptions = CompletionOptions()
-    ): ZStream[Any, LLMError, StreamedChunk] = {
-      val fetchChunks: ZIO[Any, LLMError, List[StreamedChunk]] = ZIO.blocking {
-        ZIO.fromEither {
-          val buf = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-          underlying.streamComplete(conversation, options, buf.append(_)).map(_ => buf.toList)
-        }
+    ): ZStream[Any, LLMError, StreamedChunk] =
+      ZStream.unwrapScoped {
+        for {
+          queue <- Queue.bounded[Take[LLMError, StreamedChunk]](StreamBufferSize)
+          rt    <- ZIO.runtime[Any]
+          // Runs on a blocking thread. `onChunk` offers each chunk to the bounded queue and blocks
+          // the provider thread while it is full (backpressure). The terminal Take is enqueued
+          // after every chunk, so chunks received before an error precede it.
+          _ <- ZIO
+            .attemptBlockingInterrupt {
+              underlying.streamComplete(
+                conversation,
+                options,
+                chunk =>
+                  Unsafe.unsafe { implicit u =>
+                    rt.unsafe.run(queue.offer(Take.single(chunk))).getOrThrowFiberFailure()
+                  }
+              )
+            }
+            .foldZIO(
+              t => queue.offer(Take.die(t)),
+              {
+                case Right(_)  => queue.offer(Take.end)
+                case Left(err) => queue.offer(Take.fail(err))
+              }
+            )
+            // Scoped: the blocking thread is interrupted if the consumer stops early or fails.
+            .forkScoped
+        } yield ZStream.fromQueue(queue).flattenTake
       }
-      ZStream.fromZIO(fetchChunks).flatMap(ZStream.fromIterable(_))
-    }
 
     def agent(): AgentZ = AgentZ(new Agent(underlying))
   }

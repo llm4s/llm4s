@@ -49,8 +49,11 @@ val wrapped = LLMClientIO[IO](existingClient)
 
 ### Streaming
 
-`streamComplete` returns an `fs2.Stream[F, StreamedChunk]` whose evaluation
-runs on the blocking pool:
+`streamComplete` returns an `fs2.Stream[F, StreamedChunk]` that delivers chunks incrementally.
+The blocking provider call runs on an interruptible blocking thread and feeds a bounded queue,
+so a slow consumer applies backpressure to the provider thread, and stopping early (`take`,
+fiber cancellation) interrupts the call. If the call fails mid-stream, chunks already received
+are emitted first and the stream then fails with `LLMException`:
 
 ```scala
 client
@@ -99,3 +102,9 @@ client.complete(conversation).handleErrorWith {
 
 See [CLAUDE.md](../../CLAUDE.md) for the full list of supported environment
 variables (`LLM_MODEL`, `OPENAI_API_KEY`, etc.).
+
+### Differences from `Agent`
+
+`AgentIO` is a deliberately thin wrapper. `run` does not expose `handoffs`, `tracing` or `debug`,
+and `continueConversation` does not expose `contextWindowConfig`; the `Agent` defaults apply.
+If you need them, call `Agent` directly inside `Async[F].blocking`.

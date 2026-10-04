@@ -83,4 +83,69 @@ class LLMClientIOSpec extends AnyFlatSpec with Matchers {
         .unsafeRunSync()
     }
   }
+
+  it should "deliver the first chunk before the underlying call finishes" in {
+    val released = new java.util.concurrent.CountDownLatch(1)
+    val client = new LLMClient {
+      def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Right(testCompletion)
+      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
+        onChunk(StreamedChunk(id = "c1", content = Some("a")))
+        // Only returns normally if the consumer observed c1 while this call is still running.
+        if (released.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+          onChunk(StreamedChunk(id = "c2", content = Some("b")))
+          Right(testCompletion)
+        } else Left(SimpleError("first chunk was not delivered incrementally"))
+      }
+      def getContextWindow(): Int     = 4096
+      def getReserveCompletion(): Int = 256
+    }
+    val emitted = LLMClientIO[IO](client)
+      .streamComplete(testConversation)
+      .evalTap(c => IO(if (c.id == "c1") released.countDown()))
+      .compile
+      .toList
+      .unsafeRunSync()
+    emitted.map(_.id) shouldBe List("c1", "c2")
+  }
+
+  it should "emit chunks received before a mid-stream error, then fail" in {
+    val client = new LLMClient {
+      def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Right(testCompletion)
+      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
+        onChunk(StreamedChunk(id = "c1", content = Some("a")))
+        onChunk(StreamedChunk(id = "c2", content = Some("b")))
+        Left(SimpleError("mid-stream"))
+      }
+      def getContextWindow(): Int     = 4096
+      def getReserveCompletion(): Int = 256
+    }
+    val out = LLMClientIO[IO](client).streamComplete(testConversation).attempt.compile.toList.unsafeRunSync()
+    out.map(_.map(_.id).left.map(_.getClass)) shouldBe List(
+      Right("c1"),
+      Right("c2"),
+      Left(classOf[LLMException])
+    )
+  }
+
+  it should "interrupt the underlying call when the consumer stops early" in {
+    val interrupted = new java.util.concurrent.CountDownLatch(1)
+    val client = new LLMClient {
+      def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Right(testCompletion)
+      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+        try {
+          onChunk(StreamedChunk(id = "c1", content = Some("a")))
+          Thread.sleep(30000)
+          Right(testCompletion)
+        } catch {
+          case _: InterruptedException =>
+            interrupted.countDown()
+            Left(SimpleError("interrupted"))
+        }
+      def getContextWindow(): Int     = 4096
+      def getReserveCompletion(): Int = 256
+    }
+    val taken = LLMClientIO[IO](client).streamComplete(testConversation).take(1).compile.toList.unsafeRunSync()
+    taken.map(_.id) shouldBe List("c1")
+    interrupted.await(10, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+  }
 }

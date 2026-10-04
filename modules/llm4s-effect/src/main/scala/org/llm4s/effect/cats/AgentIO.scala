@@ -14,6 +14,10 @@ import org.llm4s.toolapi.ToolRegistry
  * raising `LLMError` as [[LLMException]] in the error channel.
  * The underlying [[Agent.run]] and related methods are blocking — each
  * call is dispatched to the blocking thread pool via `Async[F].blocking`.
+ *
+ * Intentionally a thin wrapper: `run` does not expose `handoffs`, `tracing` or `debug`, and
+ * `continueConversation` does not expose `contextWindowConfig`; the underlying [[Agent]] defaults
+ * apply. Use [[Agent]] directly (inside `Async[F].blocking`) when you need those.
  */
 trait AgentIO[F[_]] {
 

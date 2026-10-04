@@ -42,7 +42,6 @@ object Versions {
   // cats-effect + fs2
   val catsEffect = "3.5.7"
   val fs2        = "3.11.0"
-  val catsEffectTestingScalatest = "1.5.0"
 
   // ZIO
   val zio = "2.1.16"
@@ -96,8 +95,6 @@ object Deps {
   // cats-effect + fs2
   val catsEffect = "org.typelevel" %% "cats-effect" % Versions.catsEffect
   val fs2        = "co.fs2"        %% "fs2-core"    % Versions.fs2
-  val catsEffectTestingScalatest =
-    "org.typelevel" %% "cats-effect-testing-scalatest" % Versions.catsEffectTestingScalatest
 
   // ZIO
   val zio        = "dev.zio" %% "zio"         % Versions.zio
