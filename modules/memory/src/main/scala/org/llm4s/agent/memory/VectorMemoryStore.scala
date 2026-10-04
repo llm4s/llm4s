@@ -600,8 +600,15 @@ object VectorMemoryStore {
     Try {
       Class.forName("org.sqlite.JDBC")
       val connection = DriverManager.getConnection(s"jdbc:sqlite:$dbPath")
-      connection.setAutoCommit(true)
-      new VectorMemoryStore(dbPath, embeddingService, config, connection)
+      // If schema setup fails (e.g. the file is not a database) the connection must not leak:
+      // an open handle keeps the file locked, which blocks deletion on Windows.
+      Try {
+        connection.setAutoCommit(true)
+        new VectorMemoryStore(dbPath, embeddingService, config, connection)
+      }.recoverWith { case e =>
+        Try(connection.close())
+        scala.util.Failure(e)
+      }.get
     }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to create vector store: ${e.getMessage}"))
 
   /**
