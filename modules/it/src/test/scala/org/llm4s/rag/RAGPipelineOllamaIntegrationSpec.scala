@@ -221,7 +221,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
         .fold(e => fail(e.message), identity)
 
       hits should not be empty
-      (hits.map(r => docIdOf(r.id)) should contain).oneOf("doc-llm-2", "doc-llm-1", "doc-ollama-1")
+      (hits.map(r => docIdOf(r.id)) should contain).atLeastOneOf("doc-llm-2", "doc-llm-1", "doc-ollama-1")
       hits.map(_.score) shouldBe hits.map(_.score).sorted(Ordering[Double].reverse)
     }
 
@@ -233,7 +233,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
       .fold(e => fail(e.message), identity)
 
     hits should not be empty
-    (hits.map(r => docIdOf(r.id)) should contain).oneOf("doc-database-2", "doc-database-1")
+    (hits.map(r => docIdOf(r.id)) should contain).atLeastOneOf("doc-database-2", "doc-database-1")
     hits.map(_.score) shouldBe hits.map(_.score).sorted(Ordering[Double].reverse)
   }
 
@@ -317,7 +317,7 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
         answer.question shouldBe "What is RAG and how does it enhance language models?"
         answer.contexts should have size 3
         answer.contexts.foreach(_.content should not be empty)
-        (answer.contexts.map(c => docIdOf(c.id)) should contain).oneOf("doc-llm-2", "doc-llm-1", "doc-ollama-1")
+        (answer.contexts.map(c => docIdOf(c.id)) should contain).atLeastOneOf("doc-llm-2", "doc-llm-1", "doc-ollama-1")
       } finally llmClient.close()
     }
 
