@@ -42,8 +42,9 @@ final case class ToolTask(assistantMessageId: String, call: ToolCall) derives Re
 /**
  * The question a tool's `Ask` interrupt carries: the call that asked, from one assistant message,
  * the question encoded with the tool's declared question codec, and whether the call was approved
- * before it asked - `resume` sees the same `ToolContext.approved`. Read it with
- * [[ToolLoop.questions]] and answer it with [[ToolLoop.answer]].
+ * before it asked - `resume` sees the same `ToolContext.approved`. Find it with
+ * [[ToolLoop.questions]], read its question as the tool's type with [[ToolLoop.question]], and
+ * answer it with [[ToolLoop.answer]].
  */
 final case class ToolQuestionRequest(
   assistantMessageId: String,
@@ -62,7 +63,10 @@ trait ModelStep:
 
 object ModelStep:
 
-  /** Calls `client` with `options`, its `tools` replaced by the loop's [[ToolSet.toolFunctions]]. */
+  /**
+   * Calls `client` with `options`, its `tools` replaced by the loop's
+   * [[org.llm4s.agent.graph.tool.ToolSet.toolFunctions]].
+   */
   def fromClient(client: LLMClient, options: CompletionOptions = CompletionOptions()): ModelStep =
     (messages, tools) => client.complete(Conversation(messages), options.withTools(tools.toolFunctions)).map(_.message)
 
@@ -77,7 +81,7 @@ object ModelStep:
  * }}}
  *
  *  - Each call is its own task. Its tool is looked up, its raw arguments validated against the
- *    tool's provider schema, decoded and checked by the tool's `validateDecoded` - any failure is an
+ *    tool's `argumentSchema`, decoded and checked by the tool's `validateDecoded` - any failure is an
  *    error result the model sees, before the policy or the tool runs. Then the policy, then the tool.
  *  - A policy `RequireApproval` and a tool's `NeedsApproval` both suspend the call with an
  *    [[ApprovalRequest]] and resume at the one `approval` node; an edited approval's arguments are
@@ -102,7 +106,7 @@ final class ToolLoop private (
   def requests(suspended: RunResult.Suspended): Result[Vector[(InterruptId, ApprovalRequest)]] =
     pending[ApprovalRequest](suspended, _ == approval.node.id)
 
-  /** The tool questions a suspended run is waiting on; decode each `question` with the asking tool's type. */
+  /** The tool questions a suspended run is waiting on; read each one's question with [[ToolLoop.question]]. */
   def questions(suspended: RunResult.Suspended): Result[Vector[(InterruptId, ToolQuestionRequest)]] =
     pending[ToolQuestionRequest](suspended, askNodes.contains)
 
@@ -128,6 +132,10 @@ final class ToolLoop private (
       }
 
 object ToolLoop:
+
+  /** A pending question, decoded as the asking tool's question type `Q`. */
+  def question[Q: ReadWriter](request: ToolQuestionRequest): Result[Q] =
+    Try(upickle.default.read[Q](request.question)).toResult
 
   /** The results recorded for the current batch, at most one per call; removed when the batch is collected. */
   val results: StateKey[Vector[ToolResult], ToolResult] =
@@ -287,6 +295,11 @@ object ToolLoop:
 
     def error(task: ToolTask, message: String): NodeResult = record(task, message, isError = true)
 
+    /** Restores the interrupt flag, so the runtime cancels the task and it records nothing. */
+    private def cancelled(error: CancelledError): NodeResult =
+      Thread.currentThread().interrupt()
+      NodeResult.Fail(error)
+
     private def record(task: ToolTask, content: String, isError: Boolean): NodeResult =
       NodeResult.Continue(
         Command.empty.update(results, ToolResult(task.assistantMessageId, task.call.id, content, isError))
@@ -297,8 +310,8 @@ object ToolLoop:
 
     /** A new call: steps 2-5, then the tool. */
     def admit[A](tool: AgentTool[A], task: ToolTask, state: ThreadState, context: RunContext): NodeResult =
-      checked(tool, task.call) match
-        case Left(message) => error(task, message)
+      checked(tool, task, task.call) match
+        case Left(refused) => refused
         case Right(args) =>
           policy.decide(task.call) match
             case PolicyDecision.Deny(reason)            => error(task, s"Denied: $reason")
@@ -319,8 +332,8 @@ object ToolLoop:
       tools.get(call.name) match
         case None => error(task, s"Unknown tool '${call.name}'")
         case Some(tool) =>
-          checked(tool, call) match
-            case Left(message) => error(task, message)
+          checked(tool, task, call) match
+            case Left(refused) => refused
             case Right(args) =>
               val denied = if edited then policy.decide(call) else PolicyDecision.Allow
               denied match
@@ -354,18 +367,26 @@ object ToolLoop:
               )
         case _ => error(task, s"Tool '$name' does not take answers")
 
-    /** Steps 2-4: validate the raw arguments, decode them, run the tool's own check. */
-    private def checked[A](tool: AgentTool[A], call: ToolCall): Either[String, A] =
-      val invalid = s"Invalid arguments for '${tool.spec.name}': "
-      // the validator is pluggable: one that throws refuses the call instead of failing the run
-      Try(tools.validator.validate(tool.spec.providerSchema, call.arguments)).toResult match
-        case Left(thrown) => Left(invalid + thrown.message)
-        case Right(Vector()) =>
-          for
-            args <- decode(tool, call).left.map(invalid + _)
-            _    <- Try(tool.spec.validateDecoded(args)).toResult.flatten.left.map(e => invalid + e.message)
-          yield args
-        case Right(violations) => Left(invalid + violations.mkString("; "))
+    /**
+     * Steps 2-4: validate the raw arguments, decode them, run the tool's own check. `Left` is the
+     * task's result instead: an error result, or a cancellation.
+     */
+    private def checked[A](tool: AgentTool[A], task: ToolTask, call: ToolCall): Either[NodeResult, A] =
+      val name                                 = tool.spec.name
+      def refused(message: String): NodeResult = error(task, s"Invalid arguments for '$name': $message")
+      // the validator and the check are caller code: a throw refuses the call rather than failing the
+      // run, unless it is a cancellation, which cancels the task as a throwing tool's does
+      def guarded[T](run: => T): Either[NodeResult, T] =
+        Try(run).toEither.left.map { thrown =>
+          CancelledError.fromThrowable(thrown, s"tool $name").fold(refused(describe(thrown)))(cancelled)
+        }
+      for
+        violations <- guarded(tools.validator.validate(tool.spec.argumentSchema, call.arguments))
+        _          <- Either.cond(violations.isEmpty, (), refused(violations.mkString("; ")))
+        args       <- decode(tool, call).left.map(refused)
+        check      <- guarded(tool.spec.validateDecoded(args))
+        _          <- check.left.map(e => refused(e.message))
+      yield args
 
     private def decode[A](tool: AgentTool[A], call: ToolCall): Either[String, A] =
       read(call.arguments)(using tool.spec.codec)
@@ -408,9 +429,6 @@ object ToolLoop:
     )(run: => ToolOutcome): NodeResult =
       val name                                 = tool.spec.name
       def failRun(error: LLMError): NodeResult = NodeResult.Fail(GraphError.ToolFailed(name, call.id, error))
-      def cancelled(error: CancelledError): NodeResult =
-        Thread.currentThread().interrupt()
-        NodeResult.Fail(error)
       Try(run).toEither match
         case Left(thrown) =>
           CancelledError.fromThrowable(thrown, s"tool $name") match

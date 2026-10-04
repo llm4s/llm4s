@@ -50,8 +50,22 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     s.validateDecoded(Search("x")) shouldBe Right(())
   }
 
-  "providerSchema" should "be the schema rendered strict" in {
-    spec("search").providerSchema shouldBe searchSchema.toJsonSchema(true)
+  "argumentSchema" should "be the schema rendered non-strict, as core's Anthropic and Gemini clients send it" in {
+    spec("search").argumentSchema shouldBe searchSchema.toJsonSchema(false)
+  }
+
+  it should "require only the required fields, so a call may omit an optional one" in {
+    val schema = Schema
+      .`object`[Search]("Search")
+      .withRequiredField("query", Schema.string("The query"))
+      .withOptionalField("limit", Schema.integer("At most this many"))
+    val argumentSchema = AgentToolSpec[Search]("search", "Searches", schema).argumentSchema
+    val validator      = ToolArgumentValidator.default
+    validator.validate(argumentSchema, ujson.Obj("query" -> "x")) shouldBe Vector.empty
+    validator.validate(argumentSchema, ujson.Obj("query" -> "x", "limit" -> 3)) shouldBe Vector.empty
+    validator.validate(argumentSchema, ujson.Obj("limit" -> 3)) shouldBe Vector("$.query: required property missing")
+    validator.validate(argumentSchema, ujson.Obj("query" -> "x", "extra" -> 1)) shouldBe
+      Vector("$.extra: property not allowed")
   }
 
   "toolDefinition" should "have the shape of ToolFunction.toOpenAITool(true)" in {
@@ -59,12 +73,12 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     spec("search").toolDefinition shouldBe function.toOpenAITool(true)
   }
 
-  it should "hand out a copy of the schema, so mutating a definition leaves providerSchema intact" in {
+  it should "hand out a fresh copy each time, so editing one definition changes no other" in {
     val s          = spec("search")
     val definition = s.toolDefinition
     definition("function")("parameters").obj.remove("additionalProperties")
     definition("function")("parameters")("properties").obj.remove("query")
-    s.providerSchema shouldBe searchSchema.toJsonSchema(true)
+    s.argumentSchema shouldBe searchSchema.toJsonSchema(false)
     s.toolDefinition shouldBe ToolFunction[Search, String]("search", "Searches", searchSchema, _ => Right("ok"))
       .toOpenAITool(true)
   }
@@ -103,7 +117,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
       ToolOutcome.Success(ujson.Str("go:true"))
   }
 
-  "AgentTool.fromToolFunction" should "use the function's name, description and schema, strict" in {
+  "AgentTool.fromToolFunction" should "use the function's name, description and schema" in {
     val schema = Schema.`object`[Map[String, Any]]("Echo").withRequiredField("message", Schema.string("Message"))
     val function = ToolBuilder[Map[String, Any], Search]("echo", "Echoes", schema)
       .withHandler(extractor => extractor.getString("message").map(Search(_)))
@@ -112,7 +126,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     val tool = AgentTool.fromToolFunction(function)
     tool.spec.name shouldBe "echo"
     tool.spec.description shouldBe "Echoes"
-    tool.spec.providerSchema shouldBe schema.toJsonSchema(true)
+    tool.spec.argumentSchema shouldBe schema.toJsonSchema(false)
     tool.spec.toolDefinition shouldBe function.toOpenAITool(true)
     tool.writes shouldBe Set.empty
     tool.execute(ujson.Obj("message" -> "hi"), context) shouldBe ToolOutcome.Success(ujson.Obj("query" -> "hi"))

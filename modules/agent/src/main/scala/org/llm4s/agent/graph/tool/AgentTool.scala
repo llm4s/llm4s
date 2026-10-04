@@ -15,8 +15,9 @@ import scala.annotation.unused
  * `name` must match `[a-zA-Z0-9_-]{1,64}`: `apply` throws `IllegalArgumentException` otherwise, and
  * [[ToolSet.of]] refuses one too, so a spec built another way is still checked.
  *
- * The schema is always rendered strict (every property required, no others), as core's clients
- * send tools.
+ * Arguments are validated against [[argumentSchema]], the schema rendered non-strict, which is what
+ * core's Anthropic, Gemini and Vertex AI clients send. A call from a client that sends tools strict
+ * (OpenAI and the OpenAI-compatible ones) carries every property, which that schema also accepts.
  *
  * @param validateDecoded a check on the decoded arguments; `Left` becomes an error the model sees
  * @param question the question this tool may ask; set by [[AgentTool.Asking]]
@@ -37,14 +38,19 @@ final case class AgentToolSpec[A] private (
     copy(question = Some(ToolQuestion(summon[ReadWriter[Q]], summon[ReadWriter[Ans]])))(using codec)
 
   /**
-   * The schema sent to the provider, `schema.toJsonSchema(strict = true)`, rendered once; arguments
-   * are validated against it. Do not mutate it: [[toolDefinition]] hands out copies instead.
+   * The schema arguments are validated against, `schema.toJsonSchema(strict = false)`, rendered
+   * once: only the required properties are required, so a call that omits an optional one is
+   * accepted, as core's non-strict clients allow. [[ToolSet.of]] checks its keywords. Do not mutate it.
    */
-  lazy val providerSchema: ujson.Value = schema.toJsonSchema(true)
+  lazy val argumentSchema: ujson.Value = schema.toJsonSchema(false)
+
+  private lazy val strictSchema: ujson.Value = schema.toJsonSchema(true)
 
   /**
-   * The provider-facing tool definition, in the shape of `ToolFunction.toOpenAITool(true)`. Its
-   * parameters are a fresh copy of [[providerSchema]], since clients may rewrite schemas in place.
+   * The tool definition in OpenAI's strict format, the shape of `ToolFunction.toOpenAITool(true)`,
+   * for callers that send definitions themselves; core's clients receive [[ToolSet.toolFunctions]]
+   * and render their own from `schema`. Its parameters are a fresh copy each time, so a caller that
+   * edits one definition cannot change another.
    */
   def toolDefinition: ujson.Value =
     ujson.Obj(
@@ -52,7 +58,7 @@ final case class AgentToolSpec[A] private (
       "function" -> ujson.Obj(
         "name"        -> ujson.Str(name),
         "description" -> ujson.Str(description),
-        "parameters"  -> ujson.copy(providerSchema),
+        "parameters"  -> ujson.copy(strictSchema),
         "strict"      -> ujson.Bool(true)
       )
     )
@@ -107,7 +113,7 @@ enum ToolOutcome:
   case Fatal(error: LLMError)
 
 /**
- * A tool the agent loop can call: typed arguments, validated against [[AgentToolSpec.providerSchema]]
+ * A tool the agent loop can call: typed arguments, validated against [[AgentToolSpec.argumentSchema]]
  * and decoded with its codec before `execute` runs. A tool writes only the state keys in `writes`.
  */
 trait AgentTool[A]:
@@ -141,9 +147,10 @@ object AgentTool:
 
   /**
    * Adapts a core `ToolFunction`: the spec takes its name, description and schema (as a
-   * `SchemaDefinition[ujson.Value]` - the type parameter is a phantom), and arguments arrive as raw JSON. `Right(json)` becomes `Success(json)`, `Left(error)` an `Error`
-   * with its formatted message. It writes no state and never asks. Its name is not checked here;
-   * [[ToolSet.of]] refuses an invalid one.
+   * `SchemaDefinition[ujson.Value]` - the type parameter is a phantom), and arguments arrive as
+   * raw JSON. `Right(json)` becomes `Success(json)`, `Left(error)` an `Error` with its formatted
+   * message. It writes no state and never asks. Its name is not checked here; [[ToolSet.of]]
+   * refuses an invalid one.
    */
   def fromToolFunction(tool: ToolFunction[?, ?]): AgentTool[ujson.Value] = new FromToolFunction(tool)
 

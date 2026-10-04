@@ -24,6 +24,7 @@ object ToolLoopFixtures {
   final case class Other(x: String) derives ReadWriter
   final case class Confirm(prompt: String) derives ReadWriter
   final case class Reply(ok: Boolean) derives ReadWriter
+  final case class Find(q: String, limit: Int = 10) derives ReadWriter
 }
 
 class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
@@ -539,12 +540,13 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     l.requests(first).value shouldBe empty
     val Vector((q1, request)) = l.questions(first).value
     request.call.id shouldBe "a1"
-    request.question shouldBe upickle.default.writeJs(Confirm("deploy to prod?"))
+    ToolLoop.question[Confirm](request).value shouldBe Confirm("deploy to prod?")
     first.interrupts.map(_.resumeNode) shouldBe Vector(NodeId("ask/confirm"))
 
     val second = drive(l.graph, l.graph.resume(first.execution, Map(l.answer(q1, Reply(true)))).value).suspended
     val Vector((q2, again)) = l.questions(second).value
-    upickle.default.read[Confirm](again.question) shouldBe Confirm("really?")
+    ToolLoop.question[Confirm](again).value shouldBe Confirm("really?")
+    ToolLoop.question[Reply](again).left.value shouldBe a[org.llm4s.error.LLMError]
     model.calls shouldBe 1
 
     val (_, answer) = drive(l.graph, l.graph.resume(second.execution, Map(l.answer(q2, Reply(true)))).value).completed
@@ -668,6 +670,50 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       // the cancelled call recorded nothing: no result, so recover would run it again
       store.latest(thread).value.get.pendingWrites.size should be <= 1
       (store.latest(thread).value.get.pendingWrites.map(_.toString).mkString should not).include("x2")
+    }
+  }
+
+  it should "run a call that omits an optional field, as core's non-strict clients allow" in {
+    val schema = Schema
+      .`object`[Find]("Find")
+      .withRequiredField("q", Schema.string("q"))
+      .withOptionalField("limit", Schema.integer("limit"))
+    val find = AgentTool(AgentToolSpec[Find]("find", "Finds", schema))((a, _) => text(s"${a.q}/${a.limit}"))
+    val model = ScriptedModel(
+      calls(("o1", "find", ujson.Obj("q" -> "x")), ("o2", "find", ujson.Obj("q" -> "y", "limit" -> 5))),
+      summarise
+    )
+    val l = ToolLoop.build("assistant", "v1", model, set(find)).value
+    runInMemory(l.graph, "go").completed._2 shouldBe "done: o1=x/10 | o2=y/5"
+  }
+
+  it should "cancel, not refuse, a call whose validator or validateDecoded throws a cancellation" in {
+    val executed             = new AtomicInteger()
+    def interrupt(): Nothing = throw new RuntimeException("wrapped", new InterruptedException("stop"))
+    val validating = new ToolArgumentValidator {
+      def unsupported(schema: ujson.Value): Vector[String] = Vector.empty
+      def validate(schema: ujson.Value, arguments: ujson.Value): Vector[String] =
+        if arguments.obj.contains("cancel") then interrupt() else Vector.empty
+    }
+    val checking = AgentTool(
+      AgentToolSpec[ujson.Value]("checking", "Checks", strings[ujson.Value]("c")).withValidation(_ => interrupt())
+    ) { (_, _) =>
+      executed.incrementAndGet(); text("ran")
+    }
+    val validated = AgentTool(AgentToolSpec[ujson.Value]("validated", "Validated", strings[ujson.Value]("v"))) {
+      (_, _) =>
+        executed.incrementAndGet(); text("ran")
+    }
+    Seq(("validated", ujson.Obj("cancel" -> true)), ("checking", ujson.Obj())).foreach { (name, args) =>
+      val model = ScriptedModel(calls(("x1", "echo", ujson.Obj("text" -> "hi")), ("x2", name, args)), summarise)
+      val tools = ToolSet.of(validating, validated, checking, Tools().echo).value
+      val l     = ToolLoop.build("assistant", "v1", model, tools).value
+      val store = InMemoryCheckpointer()
+      val ended = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited.value
+      withClue(name)(ended.failed._2 shouldBe a[GraphError.Cancelled])
+      // the cancelled call recorded nothing, and its tool never ran
+      (store.latest(thread).value.get.pendingWrites.map(_.toString).mkString should not).include("x2")
+      executed.get shouldBe 0
     }
   }
 

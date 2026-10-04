@@ -59,6 +59,20 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
     error.message should include("$.properties.query.format")
   }
 
+  it should "refuse a tool whose argument schema is not an object" in {
+    val scalar = AgentTool(AgentToolSpec[String]("scalar", "Takes a string", Schema.string("s"))) { (_, _) =>
+      ToolOutcome.Success(ujson.Null)
+    }
+    val listing = AgentTool.fromToolFunction(
+      ToolFunction[Seq[String], String]("listing", "d", Schema.array("l", Schema.string("s")), _ => Right("x"))
+    )
+    val error = ToolSet.of(scalar, listing, tool("a")).left.value
+    error shouldBe a[ValidationError]
+    error.message should include("tool 'scalar': argument schema must be an object (type: object)")
+    error.message should include("tool 'listing': argument schema must be an object (type: object)")
+    (error.message should not).include("'a'")
+  }
+
   it should "report every problem in one ValidationError, one violation per problem" in {
     val error = ToolSet.of(refusingValidator, badlyNamed("bad name"), tool("a"), tool("a")).left.value
     val violations = error match {

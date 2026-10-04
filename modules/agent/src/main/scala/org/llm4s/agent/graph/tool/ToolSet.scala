@@ -6,15 +6,18 @@ import org.llm4s.types.Result
 
 /**
  * The tools an agent loop offers, in order, with the validator that checks their arguments. Built
- * only through [[ToolSet.of]], so every name is valid and unique and every schema keyword is one
- * the validator checks.
+ * only through [[ToolSet.of]], so every name is valid and unique, every argument schema is an
+ * object, and every schema keyword is one the validator checks.
  */
 final class ToolSet private (val tools: Vector[AgentTool[?]], val validator: ToolArgumentValidator):
   private val byName: Map[String, AgentTool[?]] = tools.map(t => t.spec.name -> t).toMap
 
   def get(name: String): Option[AgentTool[?]] = byName.get(name)
 
-  /** The provider-facing tool definitions, in order. */
+  /**
+   * The tool definitions in OpenAI's strict format, in order, for callers that send definitions
+   * themselves; core's clients receive [[toolFunctions]] instead.
+   */
   def definitions: Vector[ujson.Value] = tools.map(_.spec.toolDefinition)
 
   /**
@@ -45,7 +48,9 @@ object ToolSet:
 
   /**
    * Refuses, with one `ValidationError` listing every problem one per line: an invalid tool name,
-   * a duplicate name, or a keyword in a tool's provider schema that `validator` does not support.
+   * a duplicate name, an argument schema whose root is not `type: object` (core's clients send
+   * every tool's parameters as an object), or a keyword in a tool's
+   * [[AgentToolSpec.argumentSchema]] that `validator` does not support.
    */
   def of(validator: ToolArgumentValidator, tools: AgentTool[?]*): Result[ToolSet] =
     val all   = tools.toVector
@@ -56,11 +61,15 @@ object ToolSet:
     val duplicates = names.distinct.collect {
       case n if names.count(_ == n) > 1 => s"tool '$n': duplicate tool name"
     }
+    val notObject = all.collect {
+      case t if !t.spec.argumentSchema.objOpt.flatMap(_.get("type")).contains(ujson.Str("object")) =>
+        s"tool '${t.spec.name}': argument schema must be an object (type: object)"
+    }
     val unsupported = all.flatMap { t =>
       validator
-        .unsupported(t.spec.providerSchema)
+        .unsupported(t.spec.argumentSchema)
         .map(path => s"tool '${t.spec.name}': unsupported schema keyword at $path")
     }
-    invalid ++ duplicates ++ unsupported match
+    invalid ++ duplicates ++ notObject ++ unsupported match
       case Vector() => Right(new ToolSet(all, validator))
       case problems => Left(ValidationError("tool set", problems.toList))
