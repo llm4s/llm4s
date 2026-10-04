@@ -1,7 +1,13 @@
 package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.agent.graph.*
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, MiddlewareStack, ToolCallRequest }
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  MiddlewareId,
+  MiddlewareStack,
+  ModelRequest,
+  ToolCallRequest
+}
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
@@ -10,7 +16,7 @@ import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.util.Try
+import scala.util.{ Failure, Try }
 
 /** Who asked for an approval: the tool itself, or a middleware's tool wrapper. All resume at the same approval node. */
 enum ApprovalSource derives ReadWriter:
@@ -67,10 +73,16 @@ object ModelStep:
  *
  * {{{
  * input -> model --fan-out, one task per call--> call-tool --(dynamic join "tool-batch")--> collect -> model
- *                                                    \--suspend--> approval  --/
- *                                                    \--suspend--> ask/<tool> --/
+ *            \                                       \--suspend--> approval  --/
+ *             \--final answer--> finish               \--suspend--> ask/<tool> --/
  * }}}
  *
+ *  - The middleware stack (#1279) runs at the run's boundaries and around each call: `input` runs
+ *    every `beforeAgent` on the user's text, `model` runs `ModelStep.next` inside every
+ *    `wrapModelCall`, and `finish` runs every `afterAgent` (in reverse) on the final answer,
+ *    replacing the stored answer's content when it changes; a blank answer or a `Left` fails the
+ *    run. A middleware's `tools` join the loop's [[org.llm4s.agent.graph.tool.ToolSet]], and its
+ *    `writes` are keys its `wrapToolCall` may add to a `Success` update.
  *  - Each call is its own task. Its tool is looked up, its raw arguments validated against the
  *    tool's `argumentSchema`, decoded and checked by the tool's `validateDecoded` - any failure is an
  *    error result the model sees, before any middleware or the tool runs. Then the middleware
@@ -85,7 +97,7 @@ object ModelStep:
  *  - The loop, not the tool, records exactly one [[ToolResult]] per call - for success, failure,
  *    denial, rejection and unknown tools alike, however often a wrapper ran the tool; the results key
  *    refuses a second one. A tool's thrown exception is that call's error result. `Fatal`, an update
- *    to a key the tool does not declare, and a question it does not declare fail the run with
+ *    to a key neither the tool nor any middleware declares, and a question it does not declare fail the run with
  *    `GraphError.ToolFailed`; a throwing wrapper fails it with `GraphError.MiddlewareFailed`. Either
  *    leaves the checkpoint `Running`, so `recover` re-runs only that call.
  *  - `collect` runs only when the barrier releases, checks every call of the batch has exactly one
@@ -148,18 +160,24 @@ object ToolLoop:
     tools: ToolSet,
     middleware: Seq[AgentMiddleware] = Nil
   ): Result[ToolLoop] =
-    val messages = Messages.key
-    // the loop alone writes results and messages: a tool writing either could break one result per call
-    val owned = Set(results.id, messages.id)
-    tools.tools.filter(_.writes.exists(k => owned.contains(k.id))).map(_.spec.name) match
-      case Vector() => MiddlewareStack.of(middleware*).flatMap(assemble(id, version, model, tools, _))
-      case offending =>
-        Left(
-          ValidationError(
-            "tool loop",
-            offending.toList.map(n => s"tool '$n' declares a key the loop owns ('tool-results' or 'messages')")
-          )
-        )
+    for
+      stack <- MiddlewareStack.of(middleware*)
+      // a middleware's tools join the user's, checked as one set: a name clash or invalid schema is refused
+      toolSet <- ToolSet.of(tools.validator, (tools.tools ++ stack.tools)*)
+      _       <- ownedKeysUntouched(toolSet, stack)
+      loop    <- assemble(id, version, model, toolSet, stack)
+    yield loop
+
+  /** The loop alone writes results and messages: a tool or middleware writing either could break one result per call. */
+  private def ownedKeysUntouched(tools: ToolSet, stack: MiddlewareStack): Result[Unit] =
+    val owned                              = Set(results.id, Messages.key.id)
+    def touches(keys: Set[StateKey[?, ?]]) = keys.exists(k => owned.contains(k.id))
+    val clause                             = "declares a key the loop owns ('tool-results' or 'messages')"
+    val byTools      = tools.tools.filter(t => touches(t.writes)).map(t => s"tool '${t.spec.name}' $clause")
+    val byMiddleware = stack.ordered.filter(m => touches(m.writes)).map(m => s"middleware '${m.id.value}' $clause")
+    (byTools ++ byMiddleware).toList match
+      case Nil      => Right(())
+      case problems => Left(ValidationError("tool loop", problems))
 
   private def assemble(
     id: String,
@@ -171,9 +189,10 @@ object ToolLoop:
     val messages = Messages.key
     val b        = GraphBuilder(id, version)
     // the call-tool, approval and ask nodes may write any tool's keys; each call is checked against its own tool's
-    val callWrites: Set[StateKey[?, ?]] = tools.tools.flatMap(_.writes).toSet ++ Set(results, messages)
+    val callWrites: Set[StateKey[?, ?]] = tools.tools.flatMap(_.writes).toSet ++ stack.writes ++ Set(results, messages)
 
     val modelNode = b.declare[Unit]("model")
+    val finish    = b.declare[Unit]("finish")
     val collect   = b.declare[Unit]("collect")
     val callTool  = b.declare[ToolTask]("call-tool")
     val approval  = b.declareResume[ApprovalRequest, ApprovalDecision]("approval")
@@ -218,13 +237,31 @@ object ToolLoop:
       NodeResult.fromResult(for
         history   <- state.get(messages)
         _         <- Message.validateConversation(history.map(_.message).toList)
-        assistant <- model.next(history.map(_.message), tools)
+        assistant <- stack.wrapModelCall(ModelRequest(history.map(_.message), tools), context)(callModel(model))
       yield
         val stored   = StoredMessage(s"${context.position.taskId.value}/assistant", assistant)
         val appended = Command.empty.update(messages, MessageUpdate.Append(stored))
-        if assistant.toolCalls.isEmpty then appended
+        if assistant.toolCalls.isEmpty then appended.goto(finish)
         else appended.fanOut(batch, callTool, assistant.toolCalls.toVector.map(ToolTask(stored.id, _)))
       )
+    }
+
+    // the final answer, through every afterAgent; a changed answer replaces the stored message's content
+    b.implement(finish, writes = Set(messages)) { (_, state, context) =>
+      NodeResult.fromResult(for
+        history <- state.get(messages)
+        last <- history.lastOption
+          .collect { case StoredMessage(id, a: AssistantMessage) if a.toolCalls.isEmpty => id -> a }
+          .toRight(ValidationError("tool-loop", "finish found no final assistant message"))
+        (answerId, assistant) = last
+        changed <- stack.afterAgent(assistant.content, context)
+        command <-
+          if changed == assistant.content then Right(Command.empty)
+          else if changed.trim.isEmpty then Left(ValidationError("tool-loop", "afterAgent returned a blank answer"))
+          else
+            val replaced = StoredMessage(answerId, assistant.copy(contentOpt = Some(changed)))
+            Right(Command.empty.update(messages, MessageUpdate.Replace(answerId, replaced)))
+      yield command)
     }
 
     b.implement(collect, writes = Set(messages, results)) { (_, state, context) =>
@@ -263,14 +300,14 @@ object ToolLoop:
     }
 
     val input = b.node[String]("input", writes = Set(messages)) { (text, _, context) =>
-      NodeResult.Continue(
+      NodeResult.fromResult(stack.beforeAgent(text, context).map { transformed =>
         Command.empty
           .update(
             messages,
-            MessageUpdate.Append(StoredMessage(s"${context.position.taskId.value}/user", UserMessage(text)))
+            MessageUpdate.Append(StoredMessage(s"${context.position.taskId.value}/user", UserMessage(transformed)))
           )
           .goto(modelNode)
-      )
+      })
     }
 
     b.compile(input) { state =>
@@ -280,6 +317,21 @@ object ToolLoop:
           case _ => Left(ValidationError("tool-loop", "the run ended without a final assistant message"))
       }
     }.map(new ToolLoop(_, approval, askRefs.values.map(_.node.id).toSet))
+
+  /**
+   * The model wrappers' innermost function: `model.next`, guarded, since the stack guards only its
+   * hooks. A NonFatal throw is `Left`; a thrown cancellation restores the interrupt flag and is
+   * `Left(CancelledError)`. Either way it is the model's failure, not a wrapper's.
+   */
+  private def callModel(model: ModelStep)(request: ModelRequest): Result[AssistantMessage] =
+    Try(model.next(request.messages, request.tools)).toEither match
+      case Right(result) => result
+      case Left(thrown) =>
+        CancelledError.fromThrowable(thrown, "model") match
+          case Some(cancellation) =>
+            Thread.currentThread().interrupt()
+            Left(cancellation)
+          case None => Failure[AssistantMessage](thrown).toResult
 
   /** The call pipeline (design #1278, "The call pipeline"; #1279): one call's checks, chain, tool and outcome. */
   final private class Pipeline(
@@ -465,8 +517,9 @@ object ToolLoop:
       def failRun(error: LLMError): NodeResult = NodeResult.Fail(GraphError.ToolFailed(name, call.id, error))
       chain.outcome match
         case ToolOutcome.Success(content, update) =>
+          val allowed = tool.writes ++ stack.writes
           val undeclared =
-            update.operations.map(_.key.id).filterNot(k => tool.writes.exists(_.id == k)).map(_.value).distinct
+            update.operations.map(_.key.id).filterNot(k => allowed.exists(_.id == k)).map(_.value).distinct
           if undeclared.isEmpty then
             NodeResult.Continue(
               Command(update, Nil)
@@ -476,7 +529,7 @@ object ToolLoop:
             failRun(
               ValidationError(
                 "tool update",
-                s"tool '$name' updated ${undeclared.map(k => s"'$k'").mkString(", ")}, which it does not declare"
+                s"tool '$name' updated ${undeclared.map(k => s"'$k'").mkString(", ")}, which neither it nor any middleware declares"
               )
             )
         case ToolOutcome.Error(message) => error(task, message)

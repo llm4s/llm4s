@@ -2,7 +2,7 @@ package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.GraphTestSupport.*
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ToolCallRequest }
+import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelRequest, ToolCallRequest }
 import org.llm4s.agent.graph.tool.*
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -1077,6 +1077,241 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     answer shouldBe
       """done: q1={"error":"Middleware 'late' asked for approval after a question: second thoughts"}"""
     confirming.resumes.get shouldBe 0
+  }
+
+  // ---- model wrapper, run-boundary hooks, contributed tools and keys (#1279) ----
+
+  /** A middleware built from optional hooks; each one left out passes through. */
+  private def middleware(
+    name: String,
+    before: String => Result[String] = Right(_),
+    after: String => Result[String] = Right(_),
+    model: (ModelRequest, ModelRequest => Result[AssistantMessage]) => Result[AssistantMessage] = (r, next) => next(r),
+    contributes: Vector[AgentTool[?]] = Vector.empty,
+    declares: Set[StateKey[?, ?]] = Set.empty,
+    wrapTool: (ToolCallRequest, ToolContext, () => ToolOutcome) => ToolOutcome = (_, _, next) => next()
+  ): AgentMiddleware =
+    new AgentMiddleware {
+      val id: MiddlewareId                                                         = MiddlewareId(name)
+      override def writes: Set[StateKey[?, ?]]                                     = declares
+      override def tools: Vector[AgentTool[?]]                                     = contributes
+      override def beforeAgent(input: String, context: RunContext): Result[String] = before(input)
+      override def afterAgent(answer: String, context: RunContext): Result[String] = after(answer)
+      override def wrapModelCall(request: ModelRequest, context: RunContext)(
+        next: ModelRequest => Result[AssistantMessage]
+      ): Result[AssistantMessage] = model(request, next)
+      override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
+        wrapTool(request, context, next)
+    }
+
+  /** The run's failure, unwrapped to the error its node failed with. */
+  private def nodeFailure(result: RunResult[?]): (NodeId, org.llm4s.error.LLMError) =
+    result.failed._2 match {
+      case GraphError.NodeFailed(node, _, cause) => node -> cause
+      case other                                 => fail(s"not a node failure: $other")
+    }
+
+  it should "run beforeAgent on the input the model sees, and fail the run before any model call on Left" in {
+    val model      = ScriptedModel(summarise)
+    val shout      = middleware("shout", before = s => Right(s.toUpperCase))
+    val tag        = middleware("tag", before = s => Right(s"[$s]"))
+    val l          = ToolLoop.build("assistant", "v1", model, set(Tools().echo), Seq(shout, tag)).value
+    val (state, _) = runInMemory(l.graph, "go").completed
+    // stack order: shout first, then tag
+    model.seen.get(0).collect { case u: UserMessage => u.content } shouldBe Vector("[GO]")
+    messagesOf(state).head shouldBe UserMessage("[GO]")
+
+    val blocked       = ScriptedModel(summarise)
+    val refusing      = middleware("refusing", before = _ => Left(ValidationError("input", "not allowed")))
+    val refused       = ToolLoop.build("assistant", "v1", blocked, set(Tools().echo), Seq(refusing)).value
+    val (node, cause) = nodeFailure(runInMemory(refused.graph, "go"))
+    node shouldBe NodeId("input")
+    cause.message should include("not allowed")
+    blocked.calls shouldBe 0
+  }
+
+  it should "let a model wrapper filter the offered tools, and retry the model on a Left" in {
+    val tools = Tools()
+    val model = ScriptedModel(calls(("m1", "echo", ujson.Obj("text" -> "hi"))), summarise)
+    val filtering = middleware(
+      "filtering",
+      model = (request, next) =>
+        ToolSet
+          .of(request.tools.tools.filter(t => Set("echo", "lookup").contains(t.spec.name))*)
+          .flatMap(filtered => next(request.copy(tools = filtered)))
+    )
+    val l = ToolLoop.build("assistant", "v1", model, set(tools.all*), Seq(filtering)).value
+    runInMemory(l.graph, "go").completed._2 shouldBe "done: m1=hi"
+    model.toolNames.asScala.toVector shouldBe Vector(Vector("lookup", "echo"), Vector("lookup", "echo"))
+
+    // a model that fails its first call; the wrapper retries once
+    val attempts = new AtomicInteger()
+    val flaky = new ModelStep {
+      def next(messages: Vector[Message], tools: ToolSet): Result[AssistantMessage] =
+        if attempts.incrementAndGet() == 1 then Left(ValidationError("model", "rate limited"))
+        else Right(AssistantMessage("second time lucky"))
+    }
+    val retrying = middleware("retrying", model = (request, next) => next(request).left.flatMap(_ => next(request)))
+    val retried  = ToolLoop.build("assistant", "v1", flaky, set(tools.echo), Seq(retrying)).value
+    runInMemory(retried.graph, "go").completed._2 shouldBe "second time lucky"
+    attempts.get shouldBe 2
+  }
+
+  it should "run afterAgent in reverse stack order, replacing the stored answer only when it changes" in {
+    val order = new CopyOnWriteArrayList[String]()
+    def appending(name: String) = middleware(
+      name,
+      after = answer => {
+        order.add(name); Right(s"$answer+$name")
+      }
+    )
+    val model = ScriptedModel(_ => AssistantMessage("answer"))
+    val l     = ToolLoop.build("assistant", "v1", model, set(Tools().echo), Seq(appending("a"), appending("b"))).value
+    val (state, answer) = runInMemory(l.graph, "go").completed
+    order.asScala.toVector shouldBe Vector("b", "a")
+    answer shouldBe "answer+b+a"
+    messagesOf(state).last shouldBe AssistantMessage("answer+b+a")
+    state.get(Messages.key).value.size shouldBe 2
+
+    val unchangedModel = ScriptedModel(_ => AssistantMessage("as is"))
+    val observing      = middleware("observing", after = Right(_))
+    val unchanged      = ToolLoop.build("assistant", "v1", unchangedModel, set(Tools().echo), Seq(observing)).value
+    val (kept, same)   = runInMemory(unchanged.graph, "go").completed
+    same shouldBe "as is"
+    val stored = kept.get(Messages.key).value.last
+    stored.message shouldBe AssistantMessage("as is")
+    stored.id should endWith("/assistant")
+  }
+
+  it should "fail the run when afterAgent returns a blank answer, or a Left" in {
+    val blanking = middleware("blanking", after = _ => Right("  "))
+    val l        = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(Tools().echo), Seq(blanking)).value
+    val (node, cause) = nodeFailure(runInMemory(l.graph, "go"))
+    node shouldBe NodeId("finish")
+    cause shouldBe ValidationError("tool-loop", "afterAgent returned a blank answer")
+
+    val refusing  = middleware("refusing", after = _ => Left(ValidationError("output", "blocked")))
+    val refused   = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(Tools().echo), Seq(refusing)).value
+    val (at, why) = nodeFailure(runInMemory(refused.graph, "go"))
+    at shouldBe NodeId("finish")
+    why.message should include("blocked")
+  }
+
+  it should "offer and run a middleware's contributed tool, and refuse clashing or loop-owned declarations" in {
+    val runs = new AtomicInteger()
+    val notes = tool[Echo]("note", "text") { (a, _) =>
+      runs.incrementAndGet(); text(s"noted ${a.text}")
+    }
+    val contributing = middleware("contributing", contributes = Vector(notes))
+    val model        = ScriptedModel(calls(("n1", "note", ujson.Obj("text" -> "x"))), summarise)
+    val tools        = Tools()
+    val l            = ToolLoop.build("assistant", "v1", model, set(tools.echo), Seq(contributing)).value
+    runInMemory(l.graph, "go").completed._2 shouldBe "done: n1=noted x"
+    runs.get shouldBe 1
+    model.toolNames.get(0) shouldBe Vector("echo", "note")
+
+    val clashing = middleware("clashing", contributes = Vector(tool[Echo]("echo", "text")((a, _) => text(a.text))))
+    val clash    = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(tools.echo), Seq(clashing))
+    clash.left.value shouldBe a[ValidationError]
+    clash.left.value.message should include("echo")
+
+    val owning = middleware("owning", declares = Set(Messages.key))
+    val owned  = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(tools.echo), Seq(owning))
+    owned.left.value.message should include(
+      "middleware 'owning' declares a key the loop owns ('tool-results' or 'messages')"
+    )
+  }
+
+  it should "commit a wrapper's update to a key its middleware declares" in {
+    val audits = StateKey[Vector[String], String]("audits", Vector.empty)((seen, s) => Right(seen :+ s))
+    val auditing = middleware(
+      "auditing",
+      declares = Set(audits),
+      wrapTool = (request, _, next) =>
+        next() match {
+          case ToolOutcome.Success(content, update) =>
+            ToolOutcome.Success(content, update.combine(StateUpdate.update(audits, request.call.id)))
+          case other => other
+        }
+    )
+    val model           = ScriptedModel(calls(("a1", "echo", ujson.Obj("text" -> "hi"))), summarise)
+    val l               = ToolLoop.build("assistant", "v1", model, set(Tools().echo), Seq(auditing)).value
+    val (state, answer) = runInMemory(l.graph, "go").completed
+    answer shouldBe "done: a1=hi"
+    state.get(audits).value shouldBe Vector("a1")
+  }
+
+  it should "cancel, not fail, the run when a model wrapper throws a wrapped interrupt" in {
+    val interrupting = middleware(
+      "interrupting",
+      model = (_, _) => throw new RuntimeException("wrapped", new InterruptedException("stop"))
+    )
+    val model = ScriptedModel(summarise)
+    val l     = ToolLoop.build("assistant", "v1", model, set(Tools().echo), Seq(interrupting)).value
+    val ended =
+      GraphRuntime(InMemoryCheckpointer()).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited
+    ended.value.failed._2 shouldBe a[GraphError.Cancelled]
+    model.calls shouldBe 0
+  }
+
+  it should "fail the run as the model's own failure, not a middleware's, when the ModelStep throws" in {
+    val throwing = new ModelStep {
+      def next(messages: Vector[Message], tools: ToolSet): Result[AssistantMessage] =
+        throw new IllegalStateException("model broke")
+    }
+    val l             = ToolLoop.build("assistant", "v1", throwing, set(Tools().echo), Seq(middleware("passing"))).value
+    val (node, cause) = nodeFailure(runInMemory(l.graph, "go"))
+    node shouldBe NodeId("model")
+    cause should not be a[GraphError.MiddlewareFailed]
+    cause.message should include("model broke")
+
+    val interrupted = new ModelStep {
+      def next(messages: Vector[Message], tools: ToolSet): Result[AssistantMessage] =
+        throw new RuntimeException("wrapped", new InterruptedException("stop"))
+    }
+    val c = ToolLoop.build("assistant", "v1", interrupted, set(Tools().echo), Seq(middleware("passing"))).value
+    GraphRuntime(InMemoryCheckpointer())
+      .start(thread, c.graph, "go", RunConfig().withRunId(RunId("run-1")))
+      .awaited
+      .value
+      .failed
+      ._2 shouldBe a[GraphError.Cancelled]
+  }
+
+  it should "resume a middleware approval durably, through a rebuilt loop with a different compatible stack" in {
+    val model = ScriptedModel(calls(("c1", "lookup", ujson.Obj("q" -> "x"))), summarise)
+    val tools = Tools()
+    val store = InMemoryCheckpointer()
+    val first = ToolLoop.build("assistant", "v1", model, set(tools.all*), Seq(policy)).value
+    val suspended =
+      GraphRuntime(store)
+        .start(thread, first.graph, "go", RunConfig().withRunId(RunId("run-1")))
+        .awaited
+        .value
+        .suspended
+    val Vector((id, request)) = first.requests(suspended).value
+    request.source shouldBe ApprovalSource.Middleware(MiddlewareId("policy"))
+    store.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Suspended)
+
+    // a new process: the same policy, now inside a recorder and with a closing afterAgent
+    val log     = new CopyOnWriteArrayList[String]()
+    val signing = middleware("signing", after = a => Right(s"$a (signed)"))
+    val rebuilt =
+      ToolLoop.build("assistant", "v1", model, set(tools.all*), Seq(recorder("rec", log), policy, signing)).value
+    val (state, answer) = GraphRuntime(store)
+      .resume(
+        thread,
+        rebuilt.graph,
+        rebuilt.answers(id -> ApprovalDecision.Approve),
+        RunConfig().withRunId(RunId("run-2"))
+      )
+      .awaited
+      .value
+      .completed
+    answer shouldBe "done: c1=found x (signed)"
+    log.asScala.toVector shouldBe Vector("c1:true")
+    Message.validateConversation(messagesOf(state).toList).value shouldBe (())
+    store.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Completed)
   }
 
   "ModelStep.fromClient" should "offer the loop's tools to the client" in {
