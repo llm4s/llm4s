@@ -117,21 +117,50 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
     ordered.map(r => r("embedding").arr.map(_.num).toVector)
   }
 
+  /**
+   * The `task` to send for `model`, per Jina's published request schemas (api.jina.ai/openapi.json):
+   * `jina-embeddings-v2-*` has no `task` field, so it is omitted; `jina-clip-v2` accepts only
+   * `retrieval.query` ("Leave unset for documents"); `jina-embeddings-v4` accepts retrieval,
+   * text-matching and code tasks but not `classification` or `separation`, which is a local error
+   * rather than a request the API would reject; `jina-embeddings-v3` and unknown models take any.
+   */
+  private[provider] def taskFor(model: String, task: JinaTask): Either[EmbeddingError, Option[JinaTask]] =
+    if (model.startsWith("jina-embeddings-v2")) Right(None)
+    else if (model == "jina-clip-v2") Right(Some(task).filter(_ == JinaTask.RetrievalQuery))
+    else if (model == "jina-embeddings-v4" && (task == JinaTask.Classification || task == JinaTask.Separation))
+      Left(
+        EmbeddingError(
+          code = None,
+          message = s"Jina task '${task.wireName}' is not supported by $model " +
+            "(supported: retrieval.query, retrieval.passage, text-matching)",
+          provider = "jina"
+        )
+      )
+    else Right(Some(task))
+
   private def create(cfg: EmbeddingProviderConfig, task: JinaTask, httpClient: Llm4sHttpClient): EmbeddingProvider =
     new EmbeddingProvider {
       private val logger = LoggerFactory.getLogger(getClass)
 
-      override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] = {
+      override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] =
+        taskFor(request.model.name, task).flatMap(sent => send(request, sent))
+
+      private def send(
+        request: EmbeddingRequest,
+        sentTask: Option[JinaTask]
+      ): Either[EmbeddingError, EmbeddingResponse] = {
         val model = request.model.name
         val input = request.input
         val payload = Obj(
           "input" -> Arr.from(input),
-          "model" -> model,
-          "task"  -> task.wireName
+          "model" -> model
         )
+        sentTask.foreach(t => payload("task") = t.wireName)
 
         val url = s"${cfg.baseUrl.stripSuffix("/")}/embeddings"
-        logger.debug(s"[JinaEmbeddingProvider] POST $url model=$model task=${task.wireName} inputs=${input.size}")
+        logger.debug(
+          s"[JinaEmbeddingProvider] POST $url model=$model task=${sentTask.map(_.wireName).getOrElse("-")} inputs=${input.size}"
+        )
 
         val headers = Map(
           "Authorization" -> s"Bearer ${cfg.apiKey}",
@@ -152,9 +181,8 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
                 val metadata = Map(
                   "provider" -> "jina",
                   "model"    -> model,
-                  "task"     -> task.wireName,
                   "count"    -> input.size.toString
-                )
+                ) ++ sentTask.map(t => "task" -> t.wireName)
                 EmbeddingResponse(embeddings = vectors, metadata = metadata)
               }.toEither.left
                 .map { ex =>

@@ -59,6 +59,40 @@ class JinaEmbeddingProviderBehaviourSpec extends AnyFlatSpec with Matchers {
     read(http.lastBody.get).obj.keySet shouldBe Set("input", "model", "task")
   }
 
+  // Per api.jina.ai/openapi.json: EmbeddingsV2Request has no `task`; ClipV2Request.task is the
+  // constant `retrieval.query`; EmbeddingsV4Request.task excludes classification and separation.
+  private def bodyFor(model: String, task: JinaTask) = {
+    val http = new MockHttpClient(ok(Seq(Seq(1.0))))
+    val res = JinaEmbeddingProvider
+      .forTest(cfg(), http, task)
+      .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig(model, 1024)))
+    (res, http.lastBody.map(read(_)))
+  }
+
+  "the task field" should "be omitted for jina-embeddings-v2 models, whose schema has none" in {
+    val (res, body) = bodyFor("jina-embeddings-v2-base-en", JinaTask.RetrievalPassage)
+    res.isRight shouldBe true
+    body.get.obj.keySet shouldBe Set("input", "model")
+    res.toOption.get.metadata.contains("task") shouldBe false
+  }
+
+  it should "be sent for jina-clip-v2 only as retrieval.query, and omitted for documents" in {
+    bodyFor("jina-clip-v2", JinaTask.RetrievalQuery)._2.get("task").str shouldBe "retrieval.query"
+    bodyFor("jina-clip-v2", JinaTask.RetrievalPassage)._2.get.obj.keySet shouldBe Set("input", "model")
+  }
+
+  it should "be rejected locally for jina-embeddings-v4 when classification or separation" in {
+    Seq(JinaTask.Classification, JinaTask.Separation).foreach { t =>
+      val http = new MockHttpClient(ok(Seq(Seq(1.0))))
+      val res = JinaEmbeddingProvider
+        .forTest(cfg(), http, t)
+        .embed(EmbeddingRequest(Seq("a"), EmbeddingModelConfig("jina-embeddings-v4", 2048)))
+      res.left.toOption.get.message should include(t.wireName)
+      http.lastBody shouldBe None
+    }
+    bodyFor("jina-embeddings-v4", JinaTask.TextMatching)._2.get("task").str shouldBe "text-matching"
+  }
+
   "URL joining" should "yield <base>/embeddings for every base-URL spelling" in {
     val table = Seq(
       "https://api.jina.ai/v1"   -> "https://api.jina.ai/v1/embeddings",
