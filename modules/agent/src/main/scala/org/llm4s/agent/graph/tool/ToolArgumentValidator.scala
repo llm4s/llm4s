@@ -93,7 +93,12 @@ object ToolArgumentValidator {
                     case _: ujson.Bool => Vector.empty
                     case _             => Vector(s"$path.$key")
                   }
-                case "minimum" | "maximum" | "exclusiveMinimum" | "exclusiveMaximum" | "multipleOf" =>
+                case "multipleOf" =>
+                  value match {
+                    case ujson.Num(n) if n > 0 && !n.isInfinity => Vector.empty
+                    case _                                      => Vector(s"$path.$key")
+                  }
+                case "minimum" | "maximum" | "exclusiveMinimum" | "exclusiveMaximum" =>
                   value match {
                     case _: ujson.Num => Vector.empty
                     case _            => Vector(s"$path.$key")
@@ -230,7 +235,7 @@ object ToolArgumentValidator {
           .map(m => s"$path: ${num(n)} is not below exclusiveMaximum ${num(m)}")
           .toVector ++
         intKeyword(fields, "multipleOf")
-          .filter(m => m != 0 && !isMultiple(n, m))
+          .filter(m => m > 0 && !m.isInfinity && !isMultiple(n, m))
           .map(m => s"$path: ${num(n)} is not a multiple of ${num(m)}")
           .toVector
 

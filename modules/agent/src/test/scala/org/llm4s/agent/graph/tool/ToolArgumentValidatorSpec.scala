@@ -318,4 +318,19 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
       noException should be thrownBy v.unsupported(s)
     }
   }
+
+  "unsupported" should "report a multipleOf that is not a positive finite number" in {
+    v.unsupported(obj("type" -> "number", "multipleOf" -> 0)) shouldBe Vector("$.multipleOf")
+    v.unsupported(obj("properties" -> obj("a" -> obj("type" -> "integer", "multipleOf" -> -5)))) shouldBe
+      Vector("$.properties.a.multipleOf")
+    v.unsupported(obj("type" -> "number", "multipleOf" -> Double.NaN)) shouldBe Vector("$.multipleOf")
+    v.unsupported(obj("type" -> "number", "multipleOf" -> Double.PositiveInfinity)) shouldBe Vector("$.multipleOf")
+    v.unsupported(obj("type" -> "number", "multipleOf" -> 0.5)) shouldBe Vector.empty
+  }
+
+  "validate" should "stay safe and ignore a non-positive or non-finite multipleOf" in {
+    Seq(0.0, -5.0, Double.NaN, Double.PositiveInfinity).foreach { m =>
+      noException should be thrownBy check(obj("type" -> "number", "multipleOf" -> m), ujson.Num(7))
+    }
+  }
 }

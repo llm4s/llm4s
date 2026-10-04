@@ -53,6 +53,17 @@ class ToolSetSpec extends AnyFlatSpec with Matchers with EitherValues {
     error.message should include("duplicate tool name")
   }
 
+  it should "refuse a zero multipleOf" in {
+    val schema = org.llm4s.toolapi
+      .ObjectSchema[Unit]("o", Seq.empty)
+      .withRequiredField("n", org.llm4s.toolapi.IntegerSchema("n").withMultipleOf(0))
+    val bad = AgentTool.fromToolFunction(
+      ToolFunction[Unit, String]("zero", "d", schema, _ => Right("x"))
+    )
+    val error = ToolSet.of(bad).left.value
+    error.message should include("multipleOf")
+  }
+
   it should "refuse a schema keyword the validator does not support" in {
     val error = ToolSet.of(refusingValidator, tool("a")).left.value
     error.message should include("'a'")
