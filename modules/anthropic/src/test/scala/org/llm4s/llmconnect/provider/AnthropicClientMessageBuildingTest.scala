@@ -46,7 +46,7 @@ class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
       .builder()
       .model("claude-3-5-sonnet-latest")
       .maxTokens(1024)
-    client.addMessagesToParams(conversation, builder)
+    client.addMessagesToParams(conversation, builder, CompletionOptions())
     val params = builder.build()
     ObjectMappers.jsonMapper().writeValueAsString(params._body())
   }

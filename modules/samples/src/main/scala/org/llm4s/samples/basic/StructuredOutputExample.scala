@@ -11,7 +11,7 @@ import upickle.default.{ macroRW, ReadWriter }
  *
  * The provider is asked to respond with JSON that conforms to the `Invoice` schema.
  * OpenAI and Gemini enforce the schema at generation time; Anthropic falls back to
- * system-message injection (same guarantee at the prompt level).
+ * system-message injection (a best-effort prompt-level instruction; not schema-enforced).
  *
  * Run with:
  * {{{

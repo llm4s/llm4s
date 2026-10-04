@@ -402,10 +402,12 @@ curl https://api.anthropic.com/v1/messages \
   private[provider] def addMessagesToParams(
     conversation: Conversation,
     paramsBuilder: MessageCreateParams.Builder,
-    options: CompletionOptions = CompletionOptions()
+    options: CompletionOptions
   ): Unit = {
+    // Track if we've seen a system message
     var hasSystemMessage = false
 
+    // Process messages in order
     conversation.messages.foreach {
       case SystemMessage(content) =>
         paramsBuilder.system(appendJsonInstruction(content, options))
@@ -415,13 +417,22 @@ curl https://api.anthropic.com/v1/messages \
         paramsBuilder.addUserMessage(content)
 
       case AssistantMessage(contentOpt, toolCalls) =>
-        if (toolCalls.isEmpty)
+        // For AssistantMessages with tool calls, we skip sending them back to Anthropic
+        // The tool results will be sent as ToolMessages, which Anthropic converts to user messages
+        if (toolCalls.isEmpty) {
+          // Only send AssistantMessages without tool calls
           paramsBuilder.addAssistantMessage(contentOpt.getOrElse(""))
+        }
+      // If there are tool calls, we don't send this message - Anthropic will infer it from the tool results
 
       case ToolMessage(content, toolCallId) =>
+        // Anthropic API expects tool results to be sent in user messages
+        // We prefix the content to make it clear this is a tool result
         paramsBuilder.addUserMessage(s"[Tool result for $toolCallId]: $content")
     }
 
+    // Add a default system message if none was provided; the JSON instruction is appended to it as
+    // well so structured-output requests keep the instruction when the caller supplied no system prompt
     if (!hasSystemMessage) {
       val base = "You are Claude, a helpful AI assistant."
       paramsBuilder.system(appendJsonInstruction(base, options))

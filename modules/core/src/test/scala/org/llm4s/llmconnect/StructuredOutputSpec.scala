@@ -51,6 +51,47 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
     result shouldBe Right(Invoice("Acme", 99.99))
   }
 
+  it should "parse JSON wrapped in a ```json code fence" in {
+    val raw    = "```json\n{\"vendor\":\"Acme\",\"amount\":1.5}\n```"
+    val stub   = new StubClient(Right(makeCompletion(raw)))
+    val result = stub.completeStructured[Invoice](conversation, invoiceSchema)
+    result shouldBe Right(Invoice("Acme", 1.5))
+  }
+
+  it should "parse JSON wrapped in a bare code fence with surrounding whitespace" in {
+    val raw    = "  ```\n{\"vendor\":\"Acme\",\"amount\":2.0}\n```  \n"
+    val stub   = new StubClient(Right(makeCompletion(raw)))
+    val result = stub.completeStructured[Invoice](conversation, invoiceSchema)
+    result shouldBe Right(Invoice("Acme", 2.0))
+  }
+
+  it should "parse JSON surrounded by prose" in {
+    val raw    = "Sure! Here is the invoice:\n{\"vendor\":\"Acme\",\"amount\":3.0}\nLet me know if you need more."
+    val stub   = new StubClient(Right(makeCompletion(raw)))
+    val result = stub.completeStructured[Invoice](conversation, invoiceSchema)
+    result shouldBe Right(Invoice("Acme", 3.0))
+  }
+
+  it should "extract a balanced object when strings contain braces and escaped quotes" in {
+    val raw    = "Result: {\"vendor\":\"Ac}me \\\"{Co}\\\"\",\"amount\":4.0} done {"
+    val stub   = new StubClient(Right(makeCompletion(raw)))
+    val result = stub.completeStructured[Invoice](conversation, invoiceSchema)
+    result shouldBe Right(Invoice("Ac}me \"{Co}\"", 4.0))
+  }
+
+  it should "parse fenced JSON preceded by prose" in {
+    val raw    = "Here you go:\n```json\n{\"vendor\":\"Acme\",\"amount\":5.5}\n```"
+    val stub   = new StubClient(Right(makeCompletion(raw)))
+    val result = stub.completeStructured[Invoice](conversation, invoiceSchema)
+    result shouldBe Right(Invoice("Acme", 5.5))
+  }
+
+  it should "return ValidationError for an unbalanced JSON fragment" in {
+    val stub   = new StubClient(Right(makeCompletion("""Here: {"vendor":"Acme""")))
+    val result = stub.completeStructured[Invoice](conversation, invoiceSchema)
+    result.isLeft shouldBe true
+  }
+
   it should "set ResponseFormat.JsonSchema on the options" in {
     val json = """{"vendor":"Acme","amount":1.0}"""
     val stub = new StubClient(Right(makeCompletion(json)))

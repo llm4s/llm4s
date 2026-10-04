@@ -52,8 +52,10 @@ trait LLMClient extends AutoCloseable {
    * Sends the conversation and parses the response into a typed value using the provided schema.
    *
    * Sets `ResponseFormat.JsonSchema` on the options so providers that support native structured
-   * output (OpenAI, Gemini) enforce the schema at generation time. Anthropic falls back to
-   * system-prompt injection. The raw JSON string returned by the model is then deserialised with
+   * output (OpenAI, Gemini) enforce the schema at generation time. Anthropic falls back to a
+   * best-effort system-prompt instruction, which is not schema-enforced. Because models may wrap
+   * JSON in markdown code fences or surround it with prose, the response is normalised
+   * (fence stripped, first balanced `{...}` or `[...]` extracted) before being deserialised with
    * uPickle into the expected type `A`.
    *
    * @param conversation conversation history
@@ -72,7 +74,7 @@ trait LLMClient extends AutoCloseable {
     val opts       = options.withResponseFormat(jsonSchema)
     for {
       completion <- complete(conversation, opts)
-      parsed <- Try(ujson.read(completion.content)).toEither.left.map(e =>
+      parsed <- Try(ujson.read(LLMClient.extractJson(completion.content))).toEither.left.map(e =>
         ValidationError("structured_output", s"Response is not valid JSON: ${e.getMessage}")
       )
       result <- Try(upickle.default.read[A](parsed)).toEither.left.map(e =>
@@ -133,4 +135,52 @@ trait LLMClient extends AutoCloseable {
    * Default implementation is a no-op; override if managing resources like connections or thread pools.
    */
   def close(): Unit = ()
+}
+
+object LLMClient {
+
+  private val FencePattern = """(?s)^```[A-Za-z0-9_-]*[ \t]*\r?\n?(.*?)\r?\n?```\s*$""".r
+
+  /**
+   * Best-effort normalisation of model output that should contain a JSON value.
+   *
+   * Strips a surrounding markdown code fence and, if the remainder still does not start with
+   * `{` or `[`, extracts the first balanced `{...}` or `[...]` block (string and escape aware).
+   * Plain JSON is returned trimmed; if nothing is found the trimmed text is returned unchanged so
+   * the caller reports the parse error.
+   */
+  private[llmconnect] def extractJson(raw: String): String = {
+    val trimmed = raw.trim
+    val unfenced = trimmed match {
+      case FencePattern(inner) => inner.trim
+      case _                   => trimmed
+    }
+    if (unfenced.startsWith("{") || unfenced.startsWith("[")) unfenced
+    else
+      unfenced.indexWhere(c => c == '{' || c == '[') match {
+        case -1    => unfenced
+        case start => balancedFrom(unfenced, start).getOrElse(unfenced)
+      }
+  }
+
+  private def balancedFrom(text: String, start: Int): Option[String] = {
+    @scala.annotation.tailrec
+    def loop(i: Int, depth: Int, inString: Boolean, escaped: Boolean): Option[String] =
+      if (i >= text.length) None
+      else {
+        val c = text.charAt(i)
+        if (inString) {
+          if (escaped) loop(i + 1, depth, inString = true, escaped = false)
+          else if (c == '\\') loop(i + 1, depth, inString = true, escaped = true)
+          else if (c == '"') loop(i + 1, depth, inString = false, escaped = false)
+          else loop(i + 1, depth, inString = true, escaped = false)
+        } else if (c == '"') loop(i + 1, depth, inString = true, escaped = false)
+        else if (c == '{' || c == '[') loop(i + 1, depth + 1, inString = false, escaped = false)
+        else if (c == '}' || c == ']') {
+          if (depth == 1) Some(text.substring(start, i + 1))
+          else loop(i + 1, depth - 1, inString = false, escaped = false)
+        } else loop(i + 1, depth, inString = false, escaped = false)
+      }
+    loop(start, 0, inString = false, escaped = false)
+  }
 }
