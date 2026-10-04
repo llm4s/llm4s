@@ -95,6 +95,28 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
   ): EmbeddingProvider =
     create(cfg, task, httpClient)
 
+  /** An error body for logs and messages: truncated, with anything key-shaped (a reflected `Bearer ...`) redacted. */
+  private def safeBody(body: String): String = Redaction.truncateForLog(Redaction.redact(body))
+
+  /**
+   * The response vectors in input order. Jina tags each item with the `index` of the input it
+   * answers and does not promise the array is sorted, so position in the array is not trusted
+   * when indices are present. A count or index set that does not match the inputs is an error:
+   * a short or duplicated result would otherwise pair vectors with the wrong texts.
+   */
+  private def alignedVectors(items: Seq[ujson.Value], expected: Int): Seq[Vector[Double]] = {
+    if (items.size != expected)
+      throw new IllegalStateException(s"expected $expected embeddings for $expected inputs but received ${items.size}")
+    val indices = items.map(_.obj.get("index").map(_.num.toInt))
+    val ordered =
+      if (indices.forall(_.isEmpty)) items
+      else if (indices.forall(_.isDefined) && indices.flatten.sorted == (0 until expected))
+        items.sortBy(_("index").num)
+      else
+        throw new IllegalStateException(s"response indices are not 0 until $expected: ${indices.flatten.mkString(",")}")
+    ordered.map(r => r("embedding").arr.map(_.num).toVector)
+  }
+
   private def create(cfg: EmbeddingProviderConfig, task: JinaTask, httpClient: Llm4sHttpClient): EmbeddingProvider =
     new EmbeddingProvider {
       private val logger = LoggerFactory.getLogger(getClass)
@@ -126,7 +148,7 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
             case 200 =>
               Try {
                 val json    = ujson.read(response.body)
-                val vectors = json("data").arr.map(r => r("embedding").arr.map(_.num).toVector).toSeq
+                val vectors = alignedVectors(json("data").arr.toSeq, input.size)
                 val metadata = Map(
                   "provider" -> "jina",
                   "model"    -> model,
@@ -140,15 +162,15 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
                   EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "jina")
                 }
             case 401 =>
-              val body = Redaction.truncateForLog(response.body)
+              val body = safeBody(response.body)
               logger.error(s"[JinaEmbeddingProvider] Auth error (401): $body")
               Left(EmbeddingError(code = Some("401"), message = s"Authentication failed: $body", provider = "jina"))
             case 429 =>
-              val body = Redaction.truncateForLog(response.body)
+              val body = safeBody(response.body)
               logger.warn(s"[JinaEmbeddingProvider] Rate limit (429): $body")
               Left(EmbeddingError(code = Some("429"), message = s"Rate limit exceeded: $body", provider = "jina"))
             case status =>
-              val body = Redaction.truncateForLog(response.body)
+              val body = safeBody(response.body)
               logger.error(s"[JinaEmbeddingProvider] HTTP error $status: $body")
               Left(EmbeddingError(code = Some(status.toString), message = body, provider = "jina"))
           }
