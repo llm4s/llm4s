@@ -464,7 +464,7 @@ Testkit decisions:
 - **`LocalProviderTestServer` can hold a request open.** It runs handlers on their own executor, and gives a test a way to release a held handler, so a request held open by a test cannot block the server's shutdown.
 - **`ProviderModuleChecks.assertCancelsWhenInterrupted` and `assertCancelsStreamWhenInterrupted`** run on a virtual thread against two servers: one that never answers, and one that streams a single chunk and then stalls. For `complete` and `streamComplete` it interrupts the call and asserts that the call returns promptly with `Left(CancelledError)` and the interrupt flag set. For the stream it also asserts that the first chunk was delivered. Every chat provider's module spec calls them: OpenAI, Anthropic, Gemini, Vertex AI, Ollama and OpenAI-compatible. Vertex AI's runs against a stalled mock HTTP client, because its base URL derives from `location`.
 
-Limits (owners in §4.8):
+Limits (owners in §4.9):
 
 - Embedding, reranker, MCP, image and speech clients are not yet brought under the cancellation contract. Some of them flatten every error into their own type.
 - On a platform thread, cancelling an SDK client call is not prompt.
@@ -496,7 +496,7 @@ Tool-loop decisions (`ToolLoop`):
 - **Edits are an operation.** `MessageUpdate.EditToolCall` changes one call's arguments in place, so two approvals that edit calls of the same message in one superstep both apply. Under the sketch's whole-message `Replace`, the second edit would overwrite the first.
 - **Message IDs.** Each `StoredMessage` ID is derived from the task that wrote it, so a re-run writes the same IDs. Core `Message` stays ID-free, as §4 requires.
 
-Limits (owners in §4.8):
+Limits (owners in §4.9):
 
 - `LoopTool`, `ToolCallPolicy`, and `ModelStep` are prototype contracts. §4.7 replaced `LoopTool` with `AgentTool` and gave `ModelStep` the tool set.
 - Tool-argument schema validation is not implemented. §4.7 added it.
@@ -537,7 +537,7 @@ Source breaks, with no shims (the CHANGELOG lists the same):
 - `subscribe` gains `capacity` (at least 2); listeners run on a dispatcher thread; a throwing listener is disconnected; `StreamEvent` gains `LiveGap` and `Disconnected`.
 - `GraphError` no longer extends `NonRecoverableError`: it extends `LLMError`, and each case is a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`; `GraphError.RunCrashed`, `TenantMismatch` and `DeadlineExceeded`, and `RunEvent.RunTimedOut`, are new cases, and `RunStarted`, `RunRecovered` and `RunResumed` gain `tenantId` and `principal`.
 
-Limits (owners in §4.8):
+Limits (owners in §4.9):
 
 - Cancelling a run does not reach child runs it started; nested runs and their cancellation are Stage 3.
 - `RunContext` has no dependency accessor, by decision (§9).
@@ -583,7 +583,7 @@ Source breaks, with no shims (the CHANGELOG lists the same):
 - `ModelStep.next(messages)` becomes `next(messages, tools)`, and `ModelStep.fromClient` replaces `options.tools` with `tools.toolFunctions`.
 - `Handoff(agent, ...)` and `Handoff.to(agent, ...)` become `Handoff(id, agent, ...)` and `Handoff.to(id, agent, ...)`; `handoffId` is `handoff_to_<id>`.
 
-Limits (owners in §4.8):
+Limits (owners in §4.9):
 
 - `AgentToolSpec` has no policy metadata (side-effect class, permissions, timeout, idempotency). #1279 adds it with the middleware that reads it; until then `ToolCallPolicy` is the stand-in, and a policy that throws fails the run.
 - Tools reach the provider as core `ToolFunction`s, stand-ins for any tool not adapted from one, because core's clients take no other form.
@@ -591,7 +591,65 @@ Limits (owners in §4.8):
 - The legacy `Agent` does not run `AgentTool`s; Stage 1 moves it onto `ToolLoop`.
 - The `Handoff` case-class constructor does not check its id; `Handoff.to`, `Handoff.of` and `createHandoffTools` do.
 
-### 4.8 Stage 0 carry-forward
+### 4.8 Stage 0 prototype: agent middleware ([#1279](https://github.com/llm4s/llm4s/issues/1279))
+
+`org.llm4s.agent.graph.middleware` adds `AgentMiddleware`: one ordered, composable extension point for model and tool cross-cutting concerns - approval, guardrails, logging, retry, rate limits - that Stage 1's `Agent.run` builds on. It replaces `ToolCallPolicy`, makes approval a middleware that suspends with #1269's semantics, and runs the existing input/output and LLM-as-judge guardrails at the run boundary with their current behaviour. `AgentToolSpec` gains the policy metadata the middleware reads. Nothing in `llm4s-core` changes. The specs are `MiddlewareStackSpec`, `ToolLoopSpec`, `ApprovalMiddlewareSpec` and `GuardrailMiddlewareSpec`.
+
+```scala
+trait AgentMiddleware:
+  def id: MiddlewareId                                  // [a-zA-Z0-9_-]{1,64}
+  def runsBefore: Set[MiddlewareId] = Set.empty
+  def runsAfter: Set[MiddlewareId]  = Set.empty
+  def writes: Set[StateKey[?, ?]]   = Set.empty         // keys its wrapToolCall may add to a Success update
+  def tools: Vector[AgentTool[?]]   = Vector.empty      // merged into the loop's ToolSet
+
+  def beforeAgent(input: String, context: RunContext): Result[String] = Right(input)
+  def afterAgent(answer: String, context: RunContext): Result[String] = Right(answer)
+  def wrapModelCall(request: ModelRequest, context: RunContext)(
+    next: ModelRequest => Result[AssistantMessage]
+  ): Result[AssistantMessage] = next(request)
+  def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome = next()
+```
+
+Contract decisions:
+
+- **Four hooks, all pass-through by default.** `beforeAgent` sees the run's input, `afterAgent` its final answer, `wrapModelCall` each model call and `wrapToolCall` each tool call. §5.6's `beforeModel`, `afterModel` and `afterToolCall` are not separate hooks: each is a wrapper that does its work before or after `next`, so there is one way to write each concern and less API to freeze.
+- **A tool wrapper returns a `ToolOutcome`.** No new result type: a wrapper denies with `Error("Denied: ...")`, asks for approval with `NeedsApproval(reason)`, fails the run with `Fatal`, and short-circuits by not calling `next`. It may call `next` more than once (retry), and may transform the outcome `next` returns. `ToolCallRequest(spec, call)` is read-only: a wrapper cannot change a call's arguments, so none can get round argument validation; only an approval `Edit` changes arguments, and those are validated again.
+- **A model wrapper rewrites the request and cannot suspend.** `ModelRequest(messages, tools: ToolSet)`; a wrapper may change either (inject a system note, filter tools), call `next` again (retry, fallback), or return `Left`, which fails the run. Model wrappers do not suspend: the only middleware suspension is approval of a tool call (below). This narrows §5.6 and the §9 entry "model wrappers can suspend"; typed middleware questions are carried forward (§4.9).
+- **Run-boundary hooks transform or fail.** `beforeAgent` and `afterAgent` return the input or answer, possibly changed, or `Left`, which fails the run with that error.
+- **Middleware contributes tools and keys.** A middleware's `tools` join the loop's `ToolSet` and are validated like any other tool's; a name that clashes with another tool is refused. Its `writes` are the keys its `wrapToolCall` may add to a `Success` update. `ToolLoop.build` still refuses a declaration of `ToolLoop.results` or `Messages.key`, from a tool or a middleware.
+- **Tools carry MCP-style hints.** `AgentToolSpec.withHints(ToolHints(readOnly, destructive, idempotent, openWorld))`, with the meanings of MCP tool annotations and their conservative defaults: not read-only, destructive, not idempotent, open-world. `AgentTool.fromToolFunction` gets the defaults. Permissions and timeout are not added: nothing in this slice reads them (§4.9).
+
+Ordering decisions:
+
+- **A stack is built once and checked whole.** `MiddlewareStack.of(middleware*): Result[MiddlewareStack]` orders registrations topologically by `runsBefore`/`runsAfter`, breaking ties by registration order. One `ValidationError` reports every invalid id, duplicate id, constraint naming an id that is not registered, cycle, and contributed tool whose name clashes. An unknown id fails closed rather than being ignored, so a typo cannot silently reorder approval after a side-effecting wrapper.
+- **Wrappers nest; boundary hooks mirror them.** The first middleware in stack order is the outermost wrapper and the first `beforeAgent`; unwinding runs in reverse, and so does `afterAgent`. A failure propagates out through every enclosing wrapper, each of which sees it as `next`'s result.
+
+Loop decisions (`ToolLoop`):
+
+- **`build(id, version, model, tools, middleware: Seq[AgentMiddleware] = Nil)`.** `policy` is removed. The `input` node runs `beforeAgent`; the `model` node runs `wrapModelCall` around `ModelStep.next`; a final answer routes to a new `finish` node, which runs `afterAgent` and replaces the answer's content when a hook changes it.
+- **Validation first, then the chain, then the tool.** Each `call-tool` task looks its tool up, validates, decodes and runs `validateDecoded` exactly as §4.7, then runs the `wrapToolCall` chain, whose innermost `next` is `execute`. Middleware cannot be placed before validation. A `Success` update may touch the tool's `writes` and the `writes` of the middleware in the stack; any other key fails the run with `ToolFailed`, as an undeclared tool write does.
+- **Approval resumes through the whole chain.** Every `NeedsApproval`, from a tool or a wrapper, suspends with an `ApprovalRequest` at the loop's one `approval` node; `ApprovalSource` becomes `Tool | Middleware(id)`. `Approve` repeats the argument checks and runs the whole chain again from the outermost wrapper with `ToolContext.approved = true`. `Edit(arguments)` amends the assistant message (§4.5), validates the new arguments and runs the whole chain with `approved = true`, so a deny rule still refuses edited arguments. `Reject` records an error result. Nothing about the chain's position is checkpointed, so a graph rebuilt with a different stack resumes cleanly (§4.6 rebinding); the cost is that wrappers outside the approval run again, which is already required of them because `recover` re-runs a task.
+- **Approval is asked once.** A `NeedsApproval` while `approved = true`, from a tool or a wrapper, is an error result (`asked for approval again`), as a tool's is today. `ApprovalMiddleware(requires: ToolCallRequest => Option[String])` asks when `requires` returns a reason and passes when the call is approved; `ApprovalMiddleware.unlessReadOnly` asks for every tool whose hints are not `readOnly`.
+- **A throwing hook fails the run.** A hook that throws a non-fatal exception fails the run with `GraphError.MiddlewareFailed(id, cause)`; the checkpoint stays `Running`, and `recover` re-runs only that task. A thrown cancellation cancels the task (§4.4). A wrapper that wants a tool's failure to be an error result catches it around `next` itself.
+
+Guardrail decisions:
+
+- **Guardrails are a middleware with their current behaviour.** `GuardrailMiddleware(input: Seq[InputGuardrail], output: Seq[OutputGuardrail], mode)` runs the input guardrails in `beforeAgent` and the output guardrails in `afterAgent`, with `GuardrailApplicator`'s semantics: `Block` fails the run with the guardrail's error, before any model call for input; `Fix` transforms; `Warn` logs and passes. The LLM-as-judge guardrails are `OutputGuardrail`s and run unchanged. A guardrail does not suspend; an application that wants human review of an answer, or guardrail outcomes that branch, uses explicit graph nodes.
+
+Source breaks, with no shims (the CHANGELOG lists the same):
+
+- `ToolCallPolicy` and `PolicyDecision` are removed, and `ToolLoop.build` loses `policy`. A policy becomes an `AgentMiddleware` overriding `wrapToolCall`: `Allow` is `next()`, `Deny(reason)` is `ToolOutcome.Error(s"Denied: $reason")`, `RequireApproval(reason)` is `if context.approved then next() else ToolOutcome.NeedsApproval(reason)`, or use `ApprovalMiddleware`.
+- `ApprovalSource.Policy` becomes `ApprovalSource.Middleware(id)`.
+- `Approve` now runs the middleware chain again, where it skipped the policy; a deny rule that depends only on the call refuses the same calls as before.
+
+Limits (owners in §4.9):
+
+- Only tool-call approval suspends; model wrappers and guardrails cannot ask typed questions.
+- `ToolHints` are not yet read from MCP tool annotations by `llm4s-mcp`.
+- The legacy `Agent` still runs guardrails through `GuardrailApplicator`; Stage 1 moves it onto `ToolLoop` and `GuardrailMiddleware`.
+
+### 4.9 Stage 0 carry-forward
 
 Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 
@@ -599,6 +657,9 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 |---|---|---|
 | `AgentMiddleware` (ordered hooks, `wrapModelCall`/`wrapToolCall`) replacing `ToolCallPolicy` (today a policy that throws fails the run); guardrails as middleware | #1269, #1278 | [#1279](https://github.com/llm4s/llm4s/issues/1279) |
 | Policy metadata on `AgentToolSpec` (side-effect class, permissions, timeout, idempotency), added with the middleware that reads it | #1278 | [#1279](https://github.com/llm4s/llm4s/issues/1279) |
+| Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only) | #1279 | Stage 1, if the agent loop needs it |
+| `ToolHints` read from MCP tool annotations in `llm4s-mcp` | #1279 | Stage 1 |
+| Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6 | #1279 | Stage 3 |
 | `ToolContext` and `GraphError.ToolFailed` in the growth-prone type pattern (private constructor, `with*` setters), with typed IDs | #1278 | Stage 1 |
 | `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool`; `ModelStep` streaming through live progress; `PlanRunner` rebuilt or removed; `AgentEvent` replaced | #1269 | Stage 1 |
 | Per-node retry and cache policy (recovery currently retries a failed task once) | #1268 | Stage 1 |
@@ -620,7 +681,7 @@ Closed by [#1277](https://github.com/llm4s/llm4s/issues/1277) (§4.6): public ca
 
 Closed by [#1278](https://github.com/llm4s/llm4s/issues/1278) (§4.7): `AgentTool[A]` and `AgentToolSpec[A]` replacing `LoopTool`, `ToolArgumentValidator` checking arguments before policy or side effects, and the split between tool-level and infrastructure failure (left by #1269); and the stop handshake, so a stop's interrupt cannot land on a run's closing commit (left by #1277).
 
-### 4.9 Durable workflow API
+### 4.10 Durable workflow API
 
 Explore a Scala `Workflow[A]`/`Durable[A]` for-comprehension as a peer frontend to the graph DSL. It should compile to the same runtime/checkpoint kernel, not create a second durable engine. Durable boundaries must be explicit named steps with serializable inputs/outputs; arbitrary Scala closures are not replayable. The workflow API can express sequence, parallel composition, retry, timeout, and typed suspension in direct Scala style. Prototype after the superstep kernel exists, and adopt only if it substantially improves ordinary Scala ergonomics.
 
@@ -759,7 +820,7 @@ The migration note should give direct replacements for existing state/event/Plan
 | Explicit joins and partial resume | **Accepted.** Static joins wait for declared arrivals; dynamic joins record expected fan-out task IDs. The tool-call batch feeds a barrier, so an approved branch cannot advance the model while other calls are unresolved. Quiescence with parked continuations reports `Suspended`; an impossible join fails explicitly. |
 | Tool-result ownership | **Accepted.** `AgentTool` returns content/effects/outcomes. The runtime creates the correlated provider-valid result message for success, failure, rejection, denial, and unknown tools, and the join enforces one result per call. Edited approvals replace the originating assistant message before execution. |
 | Durable event storage | **Accepted.** The thread checkpointer owns an atomic event log alongside snapshots and pending writes. Lifecycle and state/tool events are durable; token deltas are live-only. Replay has configurable retention/compaction and reports the earliest available sequence. |
-| Middleware and schema contract | **Accepted.** Middleware declares IDs, state keys, tools, and ordering constraints with pass-through hook defaults; model wrappers can suspend. Agent tool specs use core `SchemaDefinition[A]` plus a decoder for the same `A`, with no raw schema field. |
+| Middleware and schema contract | **Accepted.** Middleware declares IDs, state keys, tools, and ordering constraints with pass-through hook defaults. Stage 0 has four hooks - `beforeAgent`, `afterAgent`, `wrapModelCall`, `wrapToolCall` - and only tool-call approval suspends; model wrappers rewrite, retry or fail (§4.8). Agent tool specs use core `SchemaDefinition[A]` plus a decoder for the same `A`, with no raw schema field. |
 | Concurrent resume and state removal | **Accepted.** A resume against an actively claimed thread returns retryable `ThreadBusy` without consuming its answer. Removing a typed state key clears its stored entry, so reads return its initial value; collection element deletion remains a typed update operation. |
 | Recovery after task failure or process restart | **Accepted.** Add `recover(threadId, graph, config)` for incomplete execution checkpoints. It continues from durable pending writes without accepting a new turn input, retries only failed/unstarted tasks per policy, and rejects threads with pending interrupts (use `resume`). |
 | Tool argument validation | **Accepted.** Validate raw arguments against the exact provider-facing JSON Schema generated from core `SchemaDefinition` before decoding, policy, or side effects. Use an agent-local validator SPI that fails closed for unsupported constraints, then decode and run optional semantic validation; do not change core for this runtime requirement. |
