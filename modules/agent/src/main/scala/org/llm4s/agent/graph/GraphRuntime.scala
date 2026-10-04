@@ -138,10 +138,10 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     input: I,
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync
-  ): Result[RunHandle[O]] = exclusively(threadId, config) { cause =>
+  ): Result[RunHandle[O]] = exclusively(threadId, config) { signal =>
     checkpointer.latest(threadId).flatMap {
       case None =>
-        newRun(graph, threadId, config, durability, 0, cause).admit(graph.start(input), None, started(config))
+        newRun(graph, threadId, config, durability, 0, signal).admit(graph.start(input), None, started(config))
       case Some(stored) =>
         checkTenant(threadId, stored, config).flatMap { _ =>
           stored.checkpoint.status match
@@ -149,7 +149,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
             case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
             case CheckpointStatus.Completed =>
               graph.restore(stored.checkpoint.snapshot).flatMap { done =>
-                newRun(graph, threadId, config, durability, done.superstep, cause)
+                newRun(graph, threadId, config, durability, done.superstep, signal)
                   .admit(
                     graph.startAt(done.superstep, done.state, input),
                     Some(stored.checkpoint.id),
@@ -166,7 +166,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     graph: CompiledGraph[I, O],
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync
-  ): Result[RunHandle[O]] = exclusively(threadId, config) { cause =>
+  ): Result[RunHandle[O]] = exclusively(threadId, config) { signal =>
     checkpointer.latest(threadId).flatMap {
       case None => Left(GraphError.NothingToRecover(threadId.value))
       case Some(stored) =>
@@ -176,7 +176,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
               for
                 execution <- graph.restore(stored.checkpoint.snapshot)
                 reused    <- reusableWrites(graph, execution, stored)
-                run <- newRun(graph, threadId, config, durability, execution.superstep, cause).admit(
+                run <- newRun(graph, threadId, config, durability, execution.superstep, signal).admit(
                   execution,
                   Some(stored.checkpoint.id),
                   RunEvent
@@ -201,7 +201,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync
-  ): Result[RunHandle[O]] = exclusively(threadId, config) { cause =>
+  ): Result[RunHandle[O]] = exclusively(threadId, config) { signal =>
     checkpointer.latest(threadId).flatMap {
       case None => Left(GraphError.NotSuspended(threadId.value))
       case Some(stored) =>
@@ -211,7 +211,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
             for
               suspended <- graph.restore(stored.checkpoint.snapshot)
               resumed   <- graph.resume(suspended, answers)
-              run <- newRun(graph, threadId, config, durability, resumed.superstep, cause).admit(
+              run <- newRun(graph, threadId, config, durability, resumed.superstep, signal).admit(
                 resumed,
                 Some(stored.checkpoint.id),
                 RunEvent.RunResumed(
@@ -233,7 +233,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
    * exits, before the run's result is set.
    */
   private def exclusively[I, O](threadId: ThreadId, config: RunConfig)(
-    admit: AtomicReference[Option[StopCause]] => Result[Run[I, O]]
+    admit: StopSignal => Result[Run[I, O]]
   ): Result[RunHandle[O]] = admission(threadId) {
     val reserving = config.tenantId.map(_.value)
     val holder = withLock(activeLock) {
@@ -244,18 +244,18 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     holder match
       case Some(holderTenant) => busy(threadId, config, holderTenant)
       case None =>
-        val cause    = AtomicReference[Option[StopCause]](None)
+        val signal   = StopSignal()
         var launched = false
         // released on every exit but a launch, including an InterruptedException, which `Try` would not catch
         Using.resource(new AutoCloseable {
           def close(): Unit = if !launched then release(threadId)
         }) { _ =>
-          admit(cause).map { run =>
+          admit(signal).map { run =>
             val handle = DefaultRunHandle[O](
               threadId,
               run.runId,
               run.claimSeq,
-              cause,
+              signal,
               (afterSeq, capacity, listener) => subscribe(threadId, afterSeq, capacity)(listener)
             )
             handle.launch(() => run.execute(), run.crashed, () => release(threadId), run.deadline)
@@ -322,9 +322,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     config: RunConfig,
     durability: Durability,
     firstSuperstep: Int,
-    cause: AtomicReference[Option[StopCause]]
+    signal: StopSignal
   ): Run[I, O] =
-    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, cause)
+    new Run(graph, threadId, config, committer(threadId, durability), firstSuperstep, signal)
 
   private def reusableWrites(
     graph: CompiledGraph[?, ?],
@@ -457,9 +457,10 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     config: RunConfig,
     committer: Committer,
     firstSuperstep: Int,
-    cause: AtomicReference[Option[StopCause]]
+    signal: StopSignal
   ):
     val runId               = config.runId
+    private val cause       = signal.cause
     private var checkpoints = 0
 
     /** Where the run is: the execution `loop` is at and its checkpoint; set by the claim. */
@@ -698,6 +699,9 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
      */
     private def cancelled(): RunResult[O] =
       val (execution, checkpointId) = position
+      // acknowledged before the flag is cleared: a stop that recorded its cause but has not yet
+      // interrupted now never will, so no interrupt can land on the closing commits below
+      signal.acknowledge()
       Thread.interrupted(): Unit
       // an interrupt with no recorded cause came from inside the run, such as a node; it cancels too.
       // Recording it makes a later cancel or expiry fail its compare-and-set and send no interrupt,
