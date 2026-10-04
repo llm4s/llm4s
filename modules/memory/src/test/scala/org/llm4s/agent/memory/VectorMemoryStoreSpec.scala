@@ -567,6 +567,25 @@ class VectorMemoryStoreFilePersistenceSpec extends AnyFlatSpec with Matchers wit
     }
   }
 
+  it should "treat importance and time-range thresholds as inclusive after a reopen" in {
+    withStore { s =>
+      s.store(first)  // importance 0.9, timestamp base
+      s.store(second) // importance None, timestamp base + 60s
+    }
+    withStore { s =>
+      s.recall(MemoryFilter.MinImportance(0.9)).toOption.get.map(_.id) shouldBe Seq(first.id)
+      s.recall(MemoryFilter.MinImportance(0.91)).toOption.get shouldBe empty
+      s.recall(MemoryFilter.ByTimeRange(Some(base), Some(base))).toOption.get.map(_.id) shouldBe Seq(first.id)
+      s.recall(MemoryFilter.ByTimeRange(Some(base.plusSeconds(60)), Some(base.plusSeconds(60))))
+        .toOption
+        .get
+        .map(_.id) shouldBe Seq(second.id)
+      s.recall(MemoryFilter.ByTimeRange(Some(base.plusMillis(1)), Some(base.plusSeconds(59))))
+        .toOption
+        .get shouldBe empty
+    }
+  }
+
   it should "keep a caller-supplied embedding instead of regenerating it" in {
     val custom = Array.tabulate(embeddings.dimensions)(i => (i % 7).toFloat / 7f)
     withStore(_.store(first.withEmbedding(custom)))
