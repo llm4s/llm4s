@@ -20,7 +20,7 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers:
 
   test("golden: system + user") {
     body(Conversation(Seq(SystemMessage("be brief"), UserMessage("Hi"))), options) shouldBe
-      """{"model_id":"ibm/granite-13b-instruct-v2","input":"[SYSTEM]: be brief\n[USER]: Hi\n[ASSISTANT]: ","parameters":{"temperature":0.5,"max_new_tokens":64},"project_id":"project-1"}"""
+      """{"model_id":"ibm/granite-13b-instruct-v2","input":"[SYSTEM]: be brief\n[USER]: Hi\n[ASSISTANT]: ","parameters":{"temperature":0.5,"stop_sequences":["\n[USER]:","\n[SYSTEM]:","\n[TOOL_RESULT:"],"max_new_tokens":64},"project_id":"project-1"}"""
   }
 
   test("golden: system, user, assistant, tool result, user") {
@@ -34,14 +34,14 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers:
       )
     )
     body(conversation, options) shouldBe
-      """{"model_id":"ibm/granite-13b-instruct-v2","input":"[SYSTEM]: s\n[USER]: u1\n[ASSISTANT]: a1\n[TOOL_RESULT:call-7]: 42\n[USER]: u2\n[ASSISTANT]: ","parameters":{"temperature":0.5,"max_new_tokens":64},"project_id":"project-1"}"""
+      """{"model_id":"ibm/granite-13b-instruct-v2","input":"[SYSTEM]: s\n[USER]: u1\n[ASSISTANT]: a1\n[TOOL_RESULT:call-7]: 42\n[USER]: u2\n[ASSISTANT]: ","parameters":{"temperature":0.5,"stop_sequences":["\n[USER]:","\n[SYSTEM]:","\n[TOOL_RESULT:"],"max_new_tokens":64},"project_id":"project-1"}"""
   }
 
   test("golden: quotes, backslashes, newlines, tabs, control characters and unicode are JSON-escaped") {
     val tricky = "say \"hi\" \\ path\nline2\ttab\u0001ctl é 🌍  "
     val json   = body(Conversation(Seq(UserMessage(tricky))), options)
     json shouldBe
-      "{\"model_id\":\"ibm/granite-13b-instruct-v2\",\"input\":\"[USER]: say \\\"hi\\\" \\\\ path\\nline2\\ttab\\u0001ctl é 🌍 \u2028\\n[ASSISTANT]: \",\"parameters\":{\"temperature\":0.5,\"max_new_tokens\":64},\"project_id\":\"project-1\"}"
+      "{\"model_id\":\"ibm/granite-13b-instruct-v2\",\"input\":\"[USER]: say \\\"hi\\\" \\\\ path\\nline2\\ttab\\u0001ctl é 🌍 \u2028\\n[ASSISTANT]: \",\"parameters\":{\"temperature\":0.5,\"stop_sequences\":[\"\\n[USER]:\",\"\\n[SYSTEM]:\",\"\\n[TOOL_RESULT:\"],\"max_new_tokens\":64},\"project_id\":\"project-1\"}"
     // and it is lossless: parsing the wire JSON returns exactly the flattened prompt
     ujson.read(json)("input").str shouldBe s"[USER]: $tricky\n[ASSISTANT]: "
   }
@@ -76,21 +76,25 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers:
     ujson.read(body(Conversation(Seq.empty)))("input").str shouldBe "[ASSISTANT]: "
   }
 
-  test("temperature is always sent, including zero; max_new_tokens only when set; top_p only when not 1.0") {
+  test(
+    "temperature and stop_sequences are always sent, including zero temperature; max_new_tokens only when set; top_p only when not 1.0"
+  ) {
     val p0 = ujson.read(body(Conversation(Seq(UserMessage("x"))), CompletionOptions().withTemperature(0.0)))
-    p0("parameters").obj.keySet shouldBe Set("temperature")
+    p0("parameters").obj.keySet shouldBe Set("temperature", "stop_sequences")
     p0("parameters")("temperature").num shouldBe 0.0
 
     val p1 = ujson.read(
       body(Conversation(Seq(UserMessage("x"))), CompletionOptions().withMaxTokens(7).withTopP(0.9).withTemperature(1.2))
     )
-    p1("parameters").obj.keySet shouldBe Set("temperature", "max_new_tokens", "top_p")
+    p1("parameters").obj.keySet shouldBe Set("temperature", "stop_sequences", "max_new_tokens", "top_p")
     p1("parameters")("max_new_tokens").num shouldBe 7
     p1("parameters")("top_p").num shouldBe 0.9
     p1("parameters")("temperature").num shouldBe 1.2
   }
 
-  test("options the text-generation API has no equivalent for are dropped silently (documented limitation)") {
+  test(
+    "options the text-generation API has no equivalent for (penalties, response format, reasoning) are ignored (documented)"
+  ) {
     val ignored = CompletionOptions()
       .withPresencePenalty(0.5)
       .withFrequencyPenalty(0.5)
@@ -101,10 +105,16 @@ class WatsonXRequestSpec extends AnyFunSuite with Matchers:
     ujson.read(body(Conversation(Seq(UserMessage("x"))), ignored)) shouldBe plain
   }
 
-  test(
-    "no stop sequences are sent, so a base model may continue past its turn into a forged [USER] line (design gap)"
-  ) {
-    ujson.read(body(Conversation(Seq(UserMessage("x")))))("parameters").obj.keySet should not contain "stop_sequences"
+  test("stop_sequences stop the model from writing the next turn: exactly the three role markers") {
+    val stops = ujson.read(body(Conversation(Seq(UserMessage("x")))))("parameters")("stop_sequences").arr.map(_.str)
+    stops shouldBe Seq("\n[USER]:", "\n[SYSTEM]:", "\n[TOOL_RESULT:")
+    // each stop sequence is a marker the flattener really emits, preceded by the newline joining turns
+    val flattened = ujson
+      .read(body(Conversation(Seq(UserMessage("u"), SystemMessage("s"), ToolMessage("r", "id"), UserMessage("v")))))(
+        "input"
+      )
+      .str
+    stops.foreach(stop => withClue(stop)(flattened should include(stop)))
   }
 
   test("a space id replaces the project id and never both are sent") {

@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.AuthenticationError
+import org.llm4s.error.{ AuthenticationError, ServiceError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.llmconnect.config.WatsonXConfig
@@ -32,8 +32,25 @@ import scala.util.{ Try, Using }
  *
  * The text-generation API is not a chat API: the conversation is flattened into one `input`
  * string with `[SYSTEM]:`, `[USER]:`, `[ASSISTANT]:` and `[TOOL_RESULT:<id>]:` prefixes, ending in
- * an open `[ASSISTANT]:` turn. Tool calling is not supported, so a completion never carries tool
- * calls.
+ * an open `[ASSISTANT]:` turn. Content is not escaped, so user content can forge those markers
+ * (a prompt-injection surface inherent to the flattened format). Requests carry `stop_sequences`
+ * ([[WatsonXClient.StopSequences]]) so a model cannot go on to write the next turn itself.
+ *
+ * == Unsupported options ==
+ *
+ *  - '''Tools are rejected.''' text-generation has no tool calling: `complete` and `streamComplete`
+ *    return a `Left(ValidationError("tools", ...))` when `CompletionOptions.tools` is non-empty, before
+ *    any HTTP call (the IAM exchange included).
+ *  - '''Ignored without error:''' `presencePenalty`, `frequencyPenalty`, `responseFormat`,
+ *    `reasoning` and `budgetTokens`. Only `temperature`, `maxTokens` and `topP` (when not 1.0) are sent.
+ *
+ * == Stream endings ==
+ *
+ * A stream must end with a terminal event (a `stop_reason` other than `not_finished`). One that
+ * ends without it, or whose reason is in [[WatsonXClient.ErrorStopReasons]], is a
+ * `Left(ServiceError)` naming the reason; text received so far is not returned as a success. Every
+ * other reason (`eos_token`, `stop_sequence`, `max_tokens`, `token_limit`, unknown values) is a
+ * normal stop. `complete` applies the same rule to `results[0].stop_reason` (a missing one is fine).
  *
  * @param config          model, credentials, project or space and endpoints.
  * @param metrics         receives per-call latency and token-usage events.
@@ -126,11 +143,21 @@ class WatsonXClient(
   private def apiHeaders(token: String, accept: String): Map[String, String] =
     Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token", "Accept" -> accept)
 
+  private def rejectTools(options: CompletionOptions): Result[Unit] =
+    Either.cond(
+      options.tools.isEmpty,
+      (),
+      ValidationError(
+        "tools",
+        "watsonx text generation does not support tool calling; remove the tools from CompletionOptions"
+      )
+    )
+
   private def endpoint(path: String): String = s"${config.baseUrl}$path?version=${config.apiVersion}"
 
   override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
     completeWithMetrics {
-      bearerToken().flatMap { token =>
+      rejectTools(options).flatMap(_ => bearerToken()).flatMap { token =>
         val requestText = createRequestBody(conversation, options).render()
         val startedAt   = Instant.now()
         httpClient
@@ -157,7 +184,7 @@ class WatsonXClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
-    bearerToken().flatMap { token =>
+    rejectTools(options).flatMap(_ => bearerToken()).flatMap { token =>
       val requestText = createRequestBody(conversation, options).render()
       val url         = endpoint("/ml/v1/text/generation_stream")
       val startedAt   = Instant.now()
@@ -187,6 +214,7 @@ class WatsonXClient(
   ): Result[Completion] = {
     val accumulator                   = StreamingAccumulator.create()
     var promptTokens, generatedTokens = 0
+    var terminal: Option[String]      = None
     val read = Using(new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) { reader =>
       Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
         raw.append(line).append('\n')
@@ -205,6 +233,7 @@ class WatsonXClient(
               r.obj.get("input_token_count").flatMap(_.numOpt).foreach(n => promptTokens = n.toInt)
               r.obj.get("generated_token_count").flatMap(_.numOpt).foreach(n => generatedTokens = n.toInt)
             }
+            stop.foreach(reason => terminal = Some(reason))
             if (text.isDefined || stop.isDefined) {
               val chunk = StreamedChunk(id = "", content = text, toolCall = None, finishReason = stop)
               accumulator.addChunk(chunk)
@@ -216,6 +245,7 @@ class WatsonXClient(
     }.toEither.left.map(HttpFailures.streamReadError(_, url, 10.minutes))
 
     read
+      .flatMap(_ => checkStreamEnding(terminal))
       .flatMap { _ =>
         accumulator.updateTokens(promptTokens, generatedTokens)
         accumulator.toCompletion
@@ -223,10 +253,28 @@ class WatsonXClient(
       .map(c => c.withModel(config.model).withEstimatedCost(c.usage.flatMap(estimateCost)))
   }
 
+  private def checkStreamEnding(terminal: Option[String]): Result[Unit] = terminal match {
+    case None =>
+      Left(
+        ServiceError(
+          502,
+          providerName,
+          "stream ended without a terminal event (no stop_reason); the response is incomplete"
+        )
+      )
+    case Some(reason) => checkStopReason(reason)
+  }
+
+  private def checkStopReason(reason: String): Result[Unit] =
+    if (ErrorStopReasons.contains(reason.trim.toLowerCase(java.util.Locale.ROOT)))
+      Left(ServiceError(502, providerName, s"generation ended abnormally with stop_reason '$reason'"))
+    else Right(())
+
   private def estimateCost(usage: TokenUsage): Option[Double] = CostEstimator.estimate(config.model, usage)
 
   private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val parameters = ujson.Obj("temperature" -> options.temperature)
+    parameters("stop_sequences") = ujson.Arr.from(StopSequences)
     options.maxTokens.foreach(max => parameters("max_new_tokens") = max)
     if (options.topP != 1.0) parameters("top_p") = options.topP
 
@@ -264,11 +312,11 @@ class WatsonXClient(
           )
         case Some(first) =>
           val text = first.get("generated_text").flatMap(_.strOpt).getOrElse("")
-          val usage = for {
-            prompt <- first.get("input_token_count").flatMap(_.numOpt).map(_.toInt)
-            gen    <- first.get("generated_token_count").flatMap(_.numOpt).map(_.toInt)
-          } yield TokenUsage(prompt, gen, prompt + gen)
-          Right(
+          checkStopReason(first.get("stop_reason").flatMap(_.strOpt).getOrElse("")).map { _ =>
+            val usage = for {
+              prompt <- first.get("input_token_count").flatMap(_.numOpt).map(_.toInt)
+              gen    <- first.get("generated_token_count").flatMap(_.numOpt).map(_.toInt)
+            } yield TokenUsage(prompt, gen, prompt + gen)
             Completion(
               id = json.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).getOrElse(java.util.UUID.randomUUID().toString),
               created = nowSeconds(),
@@ -279,7 +327,7 @@ class WatsonXClient(
               message = AssistantMessage(text),
               estimatedCost = usage.flatMap(estimateCost)
             )
-          )
+          }
       }
     }
 
@@ -311,6 +359,22 @@ object WatsonXClient {
   private val TOKEN_REFRESH_BUFFER_SECONDS: Long = 300L
   private val DEFAULT_TOKEN_TTL_SECONDS: Long    = 3600L
   private val NOT_FINISHED                       = "not_finished"
+
+  /**
+   * Strings that stop generation, so a base or instruct model cannot write the next turn of the
+   * flattened prompt itself: the role markers `[USER]:`, `[SYSTEM]:` and `[TOOL_RESULT:` at the start
+   * of a line. Sent as `parameters.stop_sequences` (unverified against IBM's reference; the
+   * API documents an array of at most six strings).
+   */
+  val StopSequences: Seq[String] = Seq("\n[USER]:", "\n[SYSTEM]:", "\n[TOOL_RESULT:")
+
+  /**
+   * The `stop_reason` values that mean a generation did not finish: `error`, `cancelled` and
+   * `time_limit`. Compared trimmed and case-insensitively. Anything else is a normal stop:
+   * `eos_token`, `stop_sequence`, `max_tokens` and `token_limit` (length stops, as for other
+   * providers) and any value IBM adds later.
+   */
+  val ErrorStopReasons: Set[String] = Set("error", "cancelled", "time_limit")
 
   /**
    * Constructs a [[WatsonXClient]], wrapping any construction-time exception in a `Left`.

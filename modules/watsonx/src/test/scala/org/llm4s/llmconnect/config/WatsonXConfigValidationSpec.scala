@@ -42,22 +42,77 @@ class WatsonXConfigValidationSpec extends AnyFunSuite with Matchers:
       .foreach(_.left.toOption.exists(_.isInstanceOf[ConfigurationError]) shouldBe true)
   }
 
-  test("a project and a space together are accepted and the space wins (not an either-or error)") {
-    val config = build(project = Some("p"), space = Some("s")).getOrElse(fail("expected a config"))
-    config.spaceId shouldBe Some("s")
-    config.projectId shouldBe "p"
+  test("a project and a space together are a ConfigurationError naming both fields (the space no longer wins)") {
+    build(project = Some("p"), space = Some("s")).left.toOption match
+      case Some(e: ConfigurationError) =>
+        e.message should include("not both")
+        (e.missingKeys should contain).allOf("projectId", "spaceId")
+      case other => fail(s"expected a ConfigurationError, got $other")
+    // blank ids count as absent, so a blank project next to a space is still fine
+    build(project = Some(" "), space = Some("s")).map(_.spaceId) shouldBe Right(Some("s"))
   }
 
-  test("ids are trimmed; the api key is kept verbatim (a trailing newline is not stripped)") {
+  test("ids and the api key are trimmed (a trailing newline from an env file must not reach IAM)") {
     val config = build(apiKey = "key\n", project = Some(" p "), space = None).getOrElse(fail("expected a config"))
     config.projectId shouldBe "p"
-    config.apiKey shouldBe "key\n"
+    config.apiKey shouldBe "key"
+    build(apiKey = "  k2 \r\n").map(_.apiKey) shouldBe Right("k2")
   }
 
-  test("the URL scheme is not validated: plain http and even a non-http scheme are accepted (design gap)") {
-    build(baseUrl = "http://wx.example.com").isRight shouldBe true
-    build(iamUrl = "http://iam.example.com/identity/token").isRight shouldBe true
-    build(baseUrl = "ftp://wx.example.com").isRight shouldBe true
+  test("baseUrl and iamUrl: https is accepted; http only for localhost, 127.0.0.1 and ::1; the rest is refused") {
+    val accepted = Seq(
+      "https://wx.example.com",
+      "HTTPS://wx.example.com/",
+      "https://wx.example.com:8443/path",
+      "http://localhost",
+      "http://localhost:8080",
+      "http://127.0.0.1:9999",
+      "http://[::1]",
+      "http://[::1]:8080/x"
+    )
+    val refused = Seq(
+      "http://example.com",
+      "http://localhost.evil.com",
+      "http://127.0.0.1.evil.com",
+      "http://evil.com/localhost",
+      "http://user@evil.com:80@localhost",
+      "ftp://wx.example.com",
+      "wx.example.com",
+      "//wx.example.com",
+      "https://",
+      "https:",
+      "file:///etc/passwd",
+      "not a url",
+      "",
+      "   "
+    )
+    accepted.foreach { url =>
+      withClue(s"baseUrl $url: ")(build(baseUrl = url).isRight shouldBe true)
+      withClue(s"iamUrl $url: ")(build(iamUrl = url).isRight shouldBe true)
+    }
+    refused.foreach { url =>
+      withClue(s"baseUrl '$url': ")(build(baseUrl = url).left.toOption match
+        case Some(e: ConfigurationError) => e.message should include("baseUrl")
+        case other                       => fail(s"expected a ConfigurationError, got $other")
+      )
+      withClue(s"iamUrl '$url': ")(build(iamUrl = url).left.toOption match
+        case Some(e: ConfigurationError) => e.message should include("iamUrl")
+        case other                       => fail(s"expected a ConfigurationError, got $other")
+      )
+    }
+  }
+
+  test("config errors never contain the API key") {
+    val key = "SUPERSECRETKEY123"
+    Seq(
+      build(apiKey = key, baseUrl = "http://example.com"),
+      build(apiKey = key, iamUrl = "ftp://x"),
+      build(apiKey = key, project = Some("p"), space = Some("s")),
+      build(apiKey = key, project = None, space = None)
+    ).foreach { r =>
+      r.isLeft shouldBe true
+      (r.left.toOption.map(e => e.message + e.toString).getOrElse("") should not).include(key)
+    }
   }
 
   test("toString redacts the key for a space-based config too, and shows the space") {

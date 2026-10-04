@@ -440,8 +440,30 @@ llm4s.providers.watsonx-main {
 
 `WATSONX_API_KEY` supplies the IBM Cloud API key, which the client exchanges for an IAM bearer token
 and refreshes before it expires. The text-generation API takes one prompt string, so the
-conversation is flattened with `[SYSTEM]:`/`[USER]:`/`[ASSISTANT]:` prefixes and tool calling is not
-supported.
+conversation is flattened with `[SYSTEM]:`/`[USER]:`/`[ASSISTANT]:` prefixes.
+
+Behaviour to know about:
+
+- **Tools are rejected.** text-generation has no tool calling, so `complete` and `streamComplete`
+  return a `Left(ValidationError("tools", ...))` when `CompletionOptions.tools` is non-empty, before
+  any HTTP call.
+- **Ignored options.** `presencePenalty`, `frequencyPenalty`, `responseFormat`, `reasoning` and
+  `budgetTokens` have no equivalent and are dropped without error. Only `temperature`, `maxTokens`
+  and `topP` (when not 1.0) are sent.
+- **Forgeable markers.** Content is not escaped, so user content can contain `[SYSTEM]:` or
+  `[USER]:` lines that look like real turns to the model. Do not rely on the system prompt as a
+  security boundary against untrusted input. Requests send `stop_sequences` for `\n[USER]:`,
+  `\n[SYSTEM]:` and `\n[TOOL_RESULT:`, so a model cannot write the following turn itself.
+- **Abnormal stream endings.** A stream that ends without a terminal event, or whose `stop_reason`
+  is `error`, `cancelled` or `time_limit`, returns `Left(ServiceError)` naming the reason, not the
+  partial text (chunks already passed to `onChunk` were delivered). `eos_token`, `stop_sequence`,
+  `max_tokens`, `token_limit` and unknown reasons are normal stops. `complete` applies the same
+  rule to `results[0].stop_reason`.
+- **URLs and ids.** `baseUrl` and `iamUrl` must be `https` (plain `http` only for `localhost`,
+  `127.0.0.1` and `::1`), because the IAM request carries the API key. The API key is trimmed. Set
+  `projectId` or `spaceId`, not both.
+- **Environment variables.** Only `WATSONX_API_KEY` is bound automatically. `WATSONX_PROJECT_ID` and
+  the other variables in the example are just `${?VAR}` substitutions you write in your own config.
 
 ---
 

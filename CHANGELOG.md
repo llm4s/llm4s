@@ -121,7 +121,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token, cached and refreshed five minutes before it expires. A section sets `projectId` (or
   `spaceId`) and optionally `baseUrl` (default `https://us-south.ml.cloud.ibm.com`), `apiVersion`
   and `iamUrl`; `WATSONX_API_KEY` binds to `llm4s.credentials.watsonx.apiKey`. The conversation is
-  flattened into one prompt string, and tool calling is not supported.
+  flattened into one prompt string; tool calling is not supported, so requests that carry tools are
+  rejected with a `ValidationError` before any HTTP call. Requests send `stop_sequences` for the role
+  markers, a stream that ends without a terminal event or with `error`, `cancelled` or `time_limit`
+  is a `Left(ServiceError)`, `baseUrl` and `iamUrl` must be `https` (except localhost), the API key
+  is trimmed, and setting both `projectId` and `spaceId` is a configuration error.
 - **Run API and event dispatch for graph runs** (Experimental, `org.llm4s.agent.graph`,
   [#1277](https://github.com/llm4s/llm4s/issues/1277)): `GraphRuntime.start`/`recover`/`resume`
   admit a run on the caller's thread and return `Result[RunHandle[O]]` once the thread is claimed;

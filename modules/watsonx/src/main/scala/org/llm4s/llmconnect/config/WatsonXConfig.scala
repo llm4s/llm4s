@@ -10,12 +10,12 @@ import org.llm4s.util.Redaction
  *
  * watsonx.ai hosts IBM Granite, Llama, Mistral and other models behind a governed API. Auth is
  * IBM Cloud IAM: the `apiKey` is exchanged for a short-lived bearer token. Inference runs in a
- * project (`projectId`) or a deployment space (`spaceId`, which takes precedence when set).
+ * project (`projectId`) or a deployment space (`spaceId`); setting both is rejected.
  * Prefer [[WatsonXConfig.fromValues]] over the primary constructor.
  *
  * @param apiKey        IBM Cloud API key exchanged for IAM bearer tokens; redacted in `toString`.
  * @param projectId     watsonx project ID; may be empty only when `spaceId` is set.
- * @param spaceId       Optional watsonx deployment space ID, used in place of the project.
+ * @param spaceId       Optional watsonx deployment space ID, used in place of the project (never together with it).
  * @param model         Model identifier, e.g. `"ibm/granite-13b-instruct-v2"`.
  * @param baseUrl       watsonx.ai ML API base URL, e.g. `"https://us-south.ml.cloud.ibm.com"`.
  * @param apiVersion    watsonx API version date, e.g. `"2024-05-31"`.
@@ -56,10 +56,28 @@ object WatsonXConfig:
       case name if name.contains("llama-2")       => (4096, DefaultReserveCompletion)
       case _                                      => (DefaultContextWindow, DefaultReserveCompletion)
 
+  private val LocalHosts = Set("localhost", "127.0.0.1", "::1", "[::1]")
+
+  /** `https`, or `http` only to a loopback host: both URLs carry the API key or a bearer token. */
+  private def requireHttps(field: String, url: String): Result[Unit] =
+    val parsed = scala.util.Try(java.net.URI.create(url)).toOption
+    val scheme = parsed.flatMap(u => Option(u.getScheme)).map(_.toLowerCase(java.util.Locale.ROOT))
+    val host   = parsed.flatMap(u => Option(u.getHost)).map(_.toLowerCase(java.util.Locale.ROOT))
+    val ok = scheme match
+      case Some("https") => host.exists(_.nonEmpty)
+      case Some("http")  => host.exists(LocalHosts.contains)
+      case _             => false
+    Either.cond(
+      ok,
+      (),
+      ConfigurationError(s"watsonx $field must be an https URL (http is allowed only for localhost)", List(field))
+    )
+
   /**
    * Constructs a [[WatsonXConfig]], resolving `contextWindow` and `reserveCompletion` from the
-   * model name. A blank `apiKey`, `baseUrl`, `apiVersion` or `iamUrl`, or neither a `projectId`
-   * nor a `spaceId`, is a `ConfigurationError`.
+   * model name. The `apiKey` is trimmed. A blank `apiKey`, `baseUrl`, `apiVersion` or `iamUrl`, a
+   * `baseUrl` or `iamUrl` that is not `https` (`http` is allowed for `localhost`, `127.0.0.1` and
+   * `::1`), neither a `projectId` nor a `spaceId`, or both, is a `ConfigurationError`.
    */
   def fromValues(
     modelName: String,
@@ -72,16 +90,24 @@ object WatsonXConfig:
   )(using resolver: ContextWindowResolver): Result[WatsonXConfig] =
     // A trailing slash would put `//` in every endpoint (`$baseUrl/ml/v1/...`); stray whitespace
     // would make the URL unparseable.
+    val key     = apiKey.trim
     val base    = baseUrl.trim.replaceAll("/+$", "")
     val version = apiVersion.trim
     val iam     = iamUrl.trim
     val project = projectId.map(_.trim).filter(_.nonEmpty)
     val space   = spaceId.map(_.trim).filter(_.nonEmpty)
     for
-      _ <- ProviderConfig.nonEmpty("watsonx", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("watsonx", "apiKey", key)
       _ <- ProviderConfig.nonEmpty("watsonx", "baseUrl", base)
       _ <- ProviderConfig.nonEmpty("watsonx", "apiVersion", version)
       _ <- ProviderConfig.nonEmpty("watsonx", "iamUrl", iam)
+      _ <- requireHttps("baseUrl", base)
+      _ <- requireHttps("iamUrl", iam)
+      _ <- Either.cond(
+        !(project.isDefined && space.isDefined),
+        (),
+        ConfigurationError("watsonx takes a projectId or a spaceId, not both", List("projectId", "spaceId"))
+      )
       _ <- Either.cond(
         project.isDefined || space.isDefined,
         (),
@@ -96,7 +122,7 @@ object WatsonXConfig:
         fallbackResolver = watsonxFallback
       )
       WatsonXConfig(
-        apiKey = apiKey,
+        apiKey = key,
         projectId = project.getOrElse(""),
         spaceId = space,
         model = modelName,

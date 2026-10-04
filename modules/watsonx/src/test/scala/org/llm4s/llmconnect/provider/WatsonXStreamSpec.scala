@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ CancelledError, NetworkError }
+import org.llm4s.error.{ CancelledError, NetworkError, ServiceError }
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.funsuite.AnyFunSuite
@@ -148,22 +148,51 @@ class WatsonXStreamSpec extends AnyFunSuite with Matchers:
     seen.chunks shouldBe List((Some("x"), Some("eos_token")))
   }
 
-  test("a stop reason other than not_finished is passed through verbatim (no normalisation)") {
-    Seq("max_tokens", "stop_sequence", "eos_token", "time_limit", "cancelled", "error").foreach { reason =>
+  private val normalStops = Seq("eos_token", "stop_sequence", "max_tokens", "token_limit", "something_new", "ERROR_X")
+  private val errorStops  = Seq("error", "cancelled", "time_limit", "ERROR", "Cancelled", "TIME_LIMIT", " error ")
+
+  test("a normal stop reason is passed through verbatim and the stream succeeds") {
+    normalStops.foreach { reason =>
       val seen = observe(sse(Seq(event("a", "not_finished"), event("", reason))))
       withClue(reason)(seen.chunks.last shouldBe ((None, Some(reason))))
     }
   }
 
-  test("a stream that ends without a terminal event completes with the text so far (documented gap)") {
-    val seen = observe(sse(Seq(event("par", "not_finished"))))
-    seen.content shouldBe "par"
-    seen.chunks.flatMap(_._2) shouldBe empty
+  test("stop_reason table: error-type values (any case) are a ServiceError naming the reason; the rest are Right") {
+    errorStops.foreach { reason =>
+      val result = run(bytes(sse(Seq(event("par", "not_finished"), event("", reason)))))._1
+      withClue(s"'$reason': ")(result.left.toOption match
+        case Some(e: ServiceError) =>
+          e.message should include(s"stop_reason '$reason'")
+          e.provider shouldBe "watsonx"
+        case other => fail(s"expected ServiceError, got $other")
+      )
+    }
+    normalStops.foreach { reason =>
+      withClue(s"'$reason': ")(run(bytes(sse(Seq(event("par", reason)))))._1.isRight shouldBe true)
+    }
   }
 
-  test("an empty stream and a stream with only [DONE] complete with empty text and no usage") {
-    observe("") shouldBe Observed(Nil, "", None)
-    observe("data: [DONE]\n\n") shouldBe Observed(Nil, "", None)
+  test("an error-type ending never returns the partial text as a success (chunks were still delivered)") {
+    val chunks = ListBuffer.empty[StreamedChunk]
+    val result = new WatsonXClient(config, httpClient = streaming(streamOf(bytes(sse(Seq(event("partial", "error")))))))
+      .streamComplete(hi, CompletionOptions(), chunks += _)
+    result.isLeft shouldBe true
+    result.toOption shouldBe None
+    chunks.flatMap(_.content).mkString shouldBe "partial"
+  }
+
+  test("a stream that ends without a terminal event is a ServiceError, not a success with the text so far") {
+    val result = run(bytes(sse(Seq(event("par", "not_finished")))))._1
+    result.left.toOption match
+      case Some(e: ServiceError) => e.message should include("without a terminal event")
+      case other                 => fail(s"expected ServiceError, got $other")
+  }
+
+  test("an empty stream and a stream with only [DONE] have no terminal event: ServiceError") {
+    Seq("", "data: [DONE]\n\n", ": keep-alive\n\n", """{"results":[]}""").foreach { text =>
+      withClue(text)(run(bytes(text))._1.left.toOption.exists(_.isInstanceOf[ServiceError]) shouldBe true)
+    }
   }
 
   test("a very long event (2 MB of text) streams through intact") {
