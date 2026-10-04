@@ -2,12 +2,16 @@
 layout: page
 title: API Stability
 parent: Reference
-nav_order: 6
+nav_order: 12
 ---
 
 # API Stability
 
-This document defines which packages are part of the **stable public API** and which are **internal**. Binary compatibility is enforced between releases using [MiMa](https://github.com/lightbend/mima) for all public API packages.
+This page says how binary compatibility is checked and which modules are covered. Which packages are
+stable, beta or experimental is defined in [1.0 Scope](v1-scope), the source of truth for tiers; this
+page does not repeat that list, so the two cannot drift.
+
+Binary compatibility is enforced between releases with [MiMa](https://github.com/lightbend/mima).
 
 ---
 
@@ -15,70 +19,71 @@ This document defines which packages are part of the **stable public API** and w
 
 | Release type | Guarantee |
 |---|---|
-| **Patch** (0.x.y → 0.x.z) | No binary-breaking changes in public API |
-| **Minor** (0.x → 0.y) | Binary-breaking changes allowed with `@deprecated` migration path |
-| **v1.0.0+** | Full SemVer — MAJOR version only for breaking changes |
-
-MiMa runs on every PR and blocks merges that introduce binary-incompatible changes to the public API without an explicit exclusion filter.
+| **Patch** (0.x.y to 0.x.z) | No binary-breaking changes in frozen modules |
+| **Minor** (0.x to 0.y) | Binary-breaking changes allowed, with a `@deprecated` migration path where one exists |
+| **1.0.0 and later** | Full SemVer: a MAJOR version for breaking changes |
 
 ---
 
-## Public API (Stable)
+## What MiMa Covers
 
-These packages are covered by the compatibility guarantee. Changes that break binary compatibility here will fail CI.
+MiMa runs only on the modules [1.0 Scope](v1-scope) freezes. Each calls `mimaFrozen("<artifact>")` in
+`build.sbt`:
 
-| Package | Contents |
+| Module | Artifact |
 |---|---|
-| `org.llm4s.llmconnect` | `LLMClient`, `LLMConnect`, `Completion`, `Conversation`, `CompletionOptions`, `StreamedChunk` |
-| `org.llm4s.agent` | `Agent`, `AgentState`, `Handoff`, streaming events |
-| `org.llm4s.agent.guardrails` | `Guardrail` trait, `CompositeGuardrail` |
-| `org.llm4s.agent.guardrails.builtin` | All built-in guardrails |
-| `org.llm4s.agent.memory` | `MemoryManager`, `MemoryStore` traits and built-in stores |
-| `org.llm4s.toolapi` | `ToolRegistry`, `ToolFunction`, `Schema`, `SchemaDefinition` |
-| `org.llm4s.toolapi.builtin` | All built-in tools |
-| `org.llm4s.types` | All newtypes (`ModelName`, `ApiKey`, `ConversationId`, etc.) |
-| `org.llm4s.error` | Full error hierarchy (`LLMError` and all subtypes) |
-| `org.llm4s.config` | `Llm4sConfig` public methods only |
-| `org.llm4s.reliability` | `ReliableClient`, `ReliabilityConfig` |
-| `org.llm4s.metrics` | `MetricsCollector`, `PrometheusMetrics`, `PrometheusEndpoint` |
-| `org.llm4s.trace` | `Tracing` trait, `TraceEvent` |
+| `modules/core` | `llm4s-core` |
+| `modules/agent` | `llm4s-agent` |
+| `modules/openai` | `llm4s-openai` |
+| `modules/openai-compatible` | `llm4s-openai-compatible` |
+| `modules/anthropic` | `llm4s-anthropic` |
+| `modules/gemini` | `llm4s-gemini` |
+| `modules/ollama` | `llm4s-ollama` |
+
+Every other module is Beta or Experimental, or is not published (`llm4s-samples`,
+`llm4s-workspace-*`, `llm4s-it`, `llm4s-docs`, `llm4s-benchmarks`), and is not checked. That includes
+`org.llm4s.speech.*` (`llm4s-speech`), `org.llm4s.runner.*` (`llm4s-workspace-runner`) and
+`org.llm4s.samples.*` (`llm4s-samples`, `llm4s-workspace-samples`): none ships in a frozen module, so
+no filter is needed for them. Anything a frozen module marks Beta or Experimental in 1.0 Scope is
+excluded by a `ProblemFilters.exclude` entry that says why.
+
+If you find yourself importing from a Beta or Experimental package, please open an issue: it likely
+means the stable API is missing something.
 
 ---
 
-## Internal API (Unstable)
+## The Baseline
 
-These packages are **not covered** by the compatibility guarantee. They may change in any release without notice.
+`mimaBaselineVersion` in `build.sbt` names the release each frozen module is compared with. It is
+`None` for now, so `sbt mimaReportBinaryIssues` checks nothing and CI passes.
 
-| Package | Reason |
-|---|---|
-| `org.llm4s.llmconnect.provider.*` | Provider implementations — internal HTTP/SDK wiring |
-| `org.llm4s.llmconnect.caching.*` | Internal caching layer |
-| `org.llm4s.llmconnect.encoding.*` | Internal token encoding |
-| `org.llm4s.config.RawProviders*` | Raw config parsing internals |
-| `org.llm4s.config.NamedProvider*` | Named provider loading internals |
-| `org.llm4s.config.ProvidersConfig*` | Config model internals |
-| `org.llm4s.rag.loader.internal.*` | RAG loader internals |
+The last release, 0.4.1, is a single `llm4s-core` of the pre-modularisation code, so it is not a usable
+baseline for the split modules. The baseline is 0.5.0, the first release with the split coordinates
+([#1281](https://github.com/llm4s/llm4s/issues/1281)); set `mimaBaselineVersion := Some("0.5.0")` once it
+is published. The `mima-check` CI job gates `all-tests-pass`.
 
-If you find yourself importing from an internal package, please open an issue — it likely means the public API is missing something.
+The build is Scala 3 only, so one `sbt mimaReportBinaryIssues` covers every artifact. If a second Scala
+version returns, run `sbt +mimaReportBinaryIssues` in CI.
 
 ---
 
 ## Adding a Binary-Incompatible Change
 
-If you need to make a breaking change to the public API (rename, remove, or change a method signature):
+Once a baseline is set, a change to a frozen module that breaks binary compatibility needs:
 
-1. Add a `@deprecated` version of the old API pointing to the new one
-2. Add a `ProblemFilters.exclude` entry in `build.sbt` under `mimaBinaryIssueFilters`
-3. Document the change in `CHANGELOG.md` under the next release version
+1. A `@deprecated` version of the old API pointing to the new one, where that is possible
+2. A `ProblemFilters.exclude` entry in the module's `mimaBinaryIssueFilters`, with a comment saying why the break is intentional
+3. An entry in `CHANGELOG.md` under `[Unreleased]`
 
 ```scala
-// build.sbt — example exclusion for an intentional breaking change
+// build.sbt, in the module's settings
 mimaBinaryIssueFilters ++= Seq(
+  // Agent.run gained a parameter; the old overload is deprecated, not removed.
   ProblemFilters.exclude[DirectMissingMethodProblem]("org.llm4s.agent.Agent.run")
 )
 ```
 
-4. The exclusion **must** include a comment explaining why the break is intentional.
+Use the narrowest problem type and the narrowest name that matches, not `[Problem]` with a wildcard.
 
 ---
 
@@ -88,4 +93,5 @@ mimaBinaryIssueFilters ++= Seq(
 sbt mimaReportBinaryIssues
 ```
 
-This reports all binary incompatibilities between the current code and the previous release (`0.3.2`). Zero output means the public API is compatible.
+This reports binary incompatibilities between the current code and the baseline release. With no
+baseline set it reports nothing. Zero output otherwise means the frozen API is compatible.

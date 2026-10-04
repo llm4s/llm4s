@@ -113,8 +113,26 @@ addCommandAlias("testWorkspace", ItTiers.alias(ItTiers.Workspace))
 addCommandAlias("testOllama", ItTiers.alias(ItTiers.Ollama))
 addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 
+// ---- binary compatibility (MiMa) ----
+// MiMa compares a module with the artifact of the same name in a previous release. It can only
+// run once split artifacts exist: the last release (0.4.1) is a single `llm4s-core`, and the
+// modularisation (#1126) moved every package this check would cover. #1281 sets the baseline at
+// 0.5.0, the first release with the split coordinates, for the frozen modules only. Until then
+// `mimaBaselineVersion` is `None`, `mimaPreviousArtifacts` is empty and
+// `sbt mimaReportBinaryIssues` checks nothing. Set it to `Some("0.5.0")` when 0.5.0 is
+// published; see docs/reference/api-stability.md.
+val mimaBaselineVersion: Option[String] = None
+
+// `module` is the artifact name (the project's `name`). Apply this to frozen modules only.
+def mimaFrozen(module: String) = Seq(
+  mimaPreviousArtifacts := mimaBaselineVersion.map(v => "org.llm4s" %% module % v).toSet,
+  mimaFailOnNoPrevious  := false
+)
+
 // ---- shared settings ----
 lazy val commonSettings = Seq(
+  // Modules outside the frozen set have no baseline; keep MiMa quiet for them.
+  mimaFailOnNoPrevious    := false,
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
   Test / scalacOptions    := scalacOptionsForVersion(scalaVersion.value),
   // Suppress ScalaDoc warnings from third-party libraries (e.g., ScalaTest)
@@ -220,7 +238,8 @@ lazy val llm4s = (project in file("."))
     relocationKnowledgegraphNeo4j
   )
   .settings(
-    publish / skip := true,
+    publish / skip       := true,
+    mimaFailOnNoPrevious := false,
     // Root is an aggregator with no sources of its own. `coverageAggregate` runs here, and
     // the per-module floors are enforced by each module's own `coverageReport`, so the
     // aggregate number is reported but not gated (a build-wide average is exactly the kind
@@ -282,6 +301,7 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
+    mimaFrozen("llm4s-core"),
     // Measured 73.67% statement coverage after the `agent` carve took the agent runtime (80.80%
     // covered) out (#1242); 75.90% after the `agent-tools` carve took the built-in tools
     // (66.18% covered) out; 74.09% after the `observability-prometheus` carve took
@@ -578,6 +598,7 @@ lazy val ollama = (project in file("modules/ollama"))
   .settings(
     name := "llm4s-ollama",
     commonSettings,
+    mimaFrozen("llm4s-ollama"),
     // Measured 77.44% statement coverage (`sbt coverage ollama/test ollama/coverageReport`) on
     // the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The `@Ollama` suite in `modules/it` is not counted here.
@@ -605,6 +626,7 @@ lazy val gemini = (project in file("modules/gemini"))
   .settings(
     name := "llm4s-gemini",
     commonSettings,
+    mimaFrozen("llm4s-gemini"),
     // Measured 87.53% statement coverage (`sbt coverage gemini/test gemini/coverageReport`) on
     // the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The `@Cloud` Gemini smoke suite in `modules/it` is not counted here.
@@ -629,6 +651,7 @@ lazy val anthropic = (project in file("modules/anthropic"))
   .settings(
     name := "llm4s-anthropic",
     commonSettings,
+    mimaFrozen("llm4s-anthropic"),
     // Measured 81.32% statement coverage (`sbt coverage anthropic/test anthropic/coverageReport`)
     // on the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The `@Cloud` Anthropic smoke suite in `modules/it` is not counted here.
@@ -655,6 +678,7 @@ lazy val openaiCompatible = (project in file("modules/openai-compatible"))
   .settings(
     name := "llm4s-openai-compatible",
     commonSettings,
+    mimaFrozen("llm4s-openai-compatible"),
     // Measured 92.92% statement coverage (`sbt coverage openaiCompatible/test
     // openaiCompatible/coverageReport`) with Mistral and Cohere added as dialects; it was 92.68%
     // with the first three clients consolidated onto `OpenAICompatibleClient`, their suites moved
@@ -739,6 +763,7 @@ lazy val openai = (project in file("modules/openai"))
   .settings(
     name := "llm4s-openai",
     commonSettings,
+    mimaFrozen("llm4s-openai"),
     // Measured 80.42% statement coverage (`sbt coverage openai/test openai/coverageReport`)
     // after the move to `openai-java` (#1132), up from 62.34% at the carve and 73.72% at the
     // switch: `OpenAIClient` is at 85% with the streamed tool-call specs and
@@ -986,6 +1011,7 @@ lazy val agent = (project in file("modules/agent"))
   .settings(
     name := "llm4s-agent",
     commonSettings,
+    mimaFrozen("llm4s-agent"),
     // Measured 80.80% statement coverage (`sbt coverage agent/test agent/coverageReport`) on the
     // code as carved out of core. Floor is the measured value rounded down to the nearest 5.
     // Never lower it.
@@ -1218,7 +1244,7 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
 // ---- relocation stubs for the 0.4.0 artifact rename ----
 // Each project below publishes ONLY a POM at the retired coordinate, carrying a Maven
 // `<relocation>` that points at its replacement. They deliberately carry no sources, no
-// `commonSettings` and no Scala library, so they compile nothing; see project/Relocation.scala
+// `commonSettings` and no Scala library, so they compile nothing (and have no MiMa baseline); see project/Relocation.scala
 // for what a relocation POM does and does not achieve.
 //
 // Only coordinates with real published history on Maven Central get a stub - publishing a
@@ -1230,16 +1256,16 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
 // no Central history, so they need no stub.
 
 lazy val relocationCore = (project in file("modules/relocations/core"))
-  .settings(Relocation.settings("core", "llm4s-core_3"))
+  .settings(Relocation.settings("core", "llm4s-core_3"), mimaFailOnNoPrevious := false)
 
 lazy val relocationWorkspaceClient = (project in file("modules/relocations/workspaceclient"))
-  .settings(Relocation.settings("workspaceclient", "llm4s-workspace-client_3"))
+  .settings(Relocation.settings("workspaceclient", "llm4s-workspace-client_3"), mimaFailOnNoPrevious := false)
 
 lazy val relocationWorkspaceShared = (project in file("modules/relocations/workspaceshared"))
-  .settings(Relocation.settings("workspaceshared", "llm4s-workspace-shared_3"))
+  .settings(Relocation.settings("workspaceshared", "llm4s-workspace-shared_3"), mimaFailOnNoPrevious := false)
 
 lazy val relocationTraceOpentelemetry = (project in file("modules/relocations/trace-opentelemetry"))
-  .settings(Relocation.settings("trace-opentelemetry", "llm4s-observability-otel_3"))
+  .settings(Relocation.settings("trace-opentelemetry", "llm4s-observability-otel_3"), mimaFailOnNoPrevious := false)
 
 lazy val relocationKnowledgegraphNeo4j = (project in file("modules/relocations/knowledgegraph-neo4j"))
-  .settings(Relocation.settings("knowledgegraph-neo4j", "llm4s-knowledgegraph-neo4j_3"))
+  .settings(Relocation.settings("knowledgegraph-neo4j", "llm4s-knowledgegraph-neo4j_3"), mimaFailOnNoPrevious := false)

@@ -556,11 +556,36 @@ jobs:
             modules/it/target/**/test-reports/
           retention-days: 5
 
+  # Binary compatibility (MiMa). Only the frozen modules have a baseline (see `mimaFrozen` in
+  # build.sbt), and none until 0.5.0 is published (#1281), so this checks nothing yet. The build
+  # is Scala 3 only, with no `crossScalaVersions`, so a bare `mimaReportBinaryIssues` covers every
+  # artifact; use `+mimaReportBinaryIssues` if a second Scala version returns (#1126).
+  mima-check:
+    name: Binary Compatibility (MiMa)
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Check binary compatibility
+        run: sbt mimaReportBinaryIssues
+
   # All tests must pass
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage, config-policy-check, scaladoc, integration-tests]
+    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -586,6 +611,10 @@ jobs:
           fi
           if [[ "${{ needs.integration-tests.result }}" != "success" ]]; then
             echo "Integration tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.mima-check.result }}" != "success" ]]; then
+            echo "Binary compatibility check failed"
             exit 1
           fi
           echo "All tests passed!"

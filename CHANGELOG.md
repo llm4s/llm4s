@@ -200,6 +200,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **Binary compatibility is checked by MiMa** ([#924](https://github.com/llm4s/llm4s/issues/924),
+  [#1281](https://github.com/llm4s/llm4s/issues/1281)): a `mima-check` CI job runs
+  `sbt mimaReportBinaryIssues` and gates `all-tests-pass`. The baseline is set per frozen module
+  (`mimaFrozen` in `build.sbt`: `llm4s-core`, `llm4s-agent`, `llm4s-openai`,
+  `llm4s-openai-compatible`, `llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama`) and is not set yet:
+  it is 0.5.0, the first release with the split coordinates, so the job checks nothing until 0.5.0
+  is published. See [API stability](docs/reference/api-stability.md).
+- **`RegexValidator` constructor** (`org.llm4s.agent.guardrails.builtin`): the primary constructor
+  now takes a compiled `Pattern` and a pattern description, so it is not binary compatible with
+  earlier releases. Source is compatible: secondary constructors keep the `Regex`-based
+  `new RegexValidator(regex)`, `(regex, errorMessage)` and `(regex, errorMessage, fallbackError)`
+  forms. Recompile code that calls it. This predates the 0.5.0 MiMa baseline, so no filter is needed.
 - **An interrupted call returns `CancelledError`** ([#1270](https://github.com/llm4s/llm4s/issues/1270)):
   new `org.llm4s.error.CancelledError` (non-recoverable, never retried) with the interrupt flag kept.
   A `SocketTimeoutException` on its own stays a timeout. `Llm4sHttpClient` returns it where it
