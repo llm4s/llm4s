@@ -282,7 +282,13 @@ units and keys: convert at the boundary (`.toMillis` into a JSON field; `Duratio
 `WireDurations` for a `macroRW`, with `@upickle.implicits.key` pinning a renamed field), and round
 up with `DurationRounding` when a whole-unit API reads `0` as "no timeout" or "now". A
 `FiniteDuration` interpolated as `s"${d}ms"` compiles and prints `150 millisecondsms` - use
-`d.toMillis`.
+`d.toMillis`. Pass 8 kept third-party types out of `llm4s-agent`'s API: the console UI
+(`ConsoleInterface`, `ConsoleConfig`, `StyleConfig`, `MessageType`), whose fansi `Attrs` and cats
+`Show` would have frozen both libraries into it, and `SessionState.localDateTimeRW`, a public
+implicit codec any `import SessionState._` picked up, are `private[assistant]`, and
+`AssistantAgent` lost its `consoleConfig` parameter; `SimilarityUtils` is `private[llm4s]`. **A
+frozen module's public signatures expose no third-party type** (fansi, cats type classes) and no
+implicit a wildcard import would pull in.
 
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must
