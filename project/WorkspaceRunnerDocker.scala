@@ -32,7 +32,20 @@ object WorkspaceRunnerDocker {
       "RUN",
       // Install both Scala versions used by the repo so `scala` tooling exists in the container
       // when needed. Consider a slimmer image in future.
-      "bash -c 'source /root/.sdkman/bin/sdkman-init.sh && sdk install scala 3.3.3 && sdk install scala 2.13.14'"
+      //
+      // sdkman downloads each archive and deletes it when its integrity check fails ("The
+      // archive was corrupt and has been removed"), so each version is retried a few times with
+      // a growing pause. Success is judged by the candidate directory existing, not by
+      // `sdk install`'s exit status, so a failure that survives every retry still fails the
+      // build instead of producing an image without Scala.
+      "bash -c 'source /root/.sdkman/bin/sdkman-init.sh && " +
+        "for v in 3.3.3 2.13.14; do " +
+        "for i in 1 2 3 4 5; do " +
+        "[ -d /root/.sdkman/candidates/scala/$v ] && break; " +
+        "sdk install scala $v || sleep $((i * 5)); " +
+        "done; " +
+        "[ -d /root/.sdkman/candidates/scala/$v ] || { echo \"scala $v was not installed after 5 attempts\" >&2; exit 1; }; " +
+        "done'"
     ),
     Cmd("ENV", "PATH=/root/.sdkman/candidates/scala/current/bin:$PATH")
   )
