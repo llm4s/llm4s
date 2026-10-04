@@ -8,15 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Gradle integration guide and `gradle-demo`** ([#938](https://github.com/llm4s/llm4s/issues/938)):
-  `docs/getting-started/gradle.md` and `docs/reference/dependency-conflicts.md`, a Gradle section in
-  the installation guide, and `modules/gradle-demo` (not published): reference `build.gradle`,
-  `build.gradle.kts` and `settings.gradle.kts`, plus `GradleSnippets` and `ConversationTemplates`,
-  small helpers that return `Result`. The snippets name `llm4s-core_3:0.4.1`, the latest release, and
-  pin `scala3-library_3` only, because a rule over the whole `org.scala-lang` group makes Gradle look
-  for a `scala-library` 3.x that does not exist. Bump the version in the guide, the reference files
-  and `GradleSnippets.LLM4S_VERSION` when 0.5.0 publishes the split modules. No change to any
-  published module.
 - **Run API and event dispatch for graph runs** (Experimental, `org.llm4s.agent.graph`,
   [#1277](https://github.com/llm4s/llm4s/issues/1277)): `GraphRuntime.start`/`recover`/`resume`
   admit a run on the caller's thread and return `Result[RunHandle[O]]` once the thread is claimed;
@@ -207,6 +198,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core` had accumulated - `imagegeneration.ImageFormat`, `imageprocessing.ImageFormat`
   (structurally identical to the first, different package) and `imageprocessing.MediaType` -
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
+- **Gradle integration guide and `gradle-demo`** ([#938](https://github.com/llm4s/llm4s/issues/938)):
+  `docs/getting-started/gradle.md` and `docs/reference/dependency-conflicts.md`, a Gradle section in
+  the installation guide, and `modules/gradle-demo` (not published): reference `build.gradle`,
+  `build.gradle.kts` and `settings.gradle.kts`, plus `GradleSnippets` and `ConversationTemplates`,
+  small helpers that return `Result`. The snippets name `llm4s-core_3:0.4.1`, the latest release, and
+  pin `scala3-library_3` only, because a rule over the whole `org.scala-lang` group makes Gradle look
+  for a `scala-library` 3.x that does not exist. Bump the version in the guide, the reference files
+  and `GradleSnippets.LLM4S_VERSION` when 0.5.0 publishes the split modules. No change to any
+  published module.
 
 ### Changed
 - **An interrupted call returns `CancelledError`** ([#1270](https://github.com/llm4s/llm4s/issues/1270)):
