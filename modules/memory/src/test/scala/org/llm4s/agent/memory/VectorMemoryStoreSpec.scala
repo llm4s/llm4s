@@ -4,8 +4,11 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 
+import java.nio.file.{ Files, Path }
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.Comparator
+import scala.util.Using
 
 class VectorMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
@@ -368,6 +371,161 @@ class VectorMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
 
     results.toOption.get.length shouldBe 1
     results.toOption.get.head.memoryType shouldBe MemoryType.Custom("my_custom_type")
+  }
+}
+
+/**
+ * Persistence across close/reopen on a file-backed [[VectorMemoryStore]].
+ *
+ * The suite above only uses `inMemory()`, and `SQLiteMemoryStoreSpec` checks that a store can be
+ * created on a path, so neither shows that data written by one instance is readable by another.
+ */
+class VectorMemoryStoreFilePersistenceSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+
+  private val embeddings = MockEmbeddingService.default
+
+  private var tempDir: Path = _
+
+  override def beforeEach(): Unit =
+    tempDir = Files.createTempDirectory("llm4s-vector-store-persistence")
+
+  override def afterEach(): Unit =
+    if (tempDir != null) {
+      Using.resource(Files.walk(tempDir))(paths =>
+        paths.sorted(Comparator.reverseOrder[Path]()).forEach(p => Files.delete(p))
+      )
+    }
+
+  private def dbPath: String = tempDir.resolve("memories.db").toString
+
+  /** Open a store on the shared file, run `f`, and always close it again. */
+  private def withStore[A](f: VectorMemoryStore => A): A = {
+    val opened = VectorMemoryStore(dbPath, embeddings).fold(
+      e => fail(s"Failed to open file-backed store: ${e.message}"),
+      identity
+    )
+    Using.resource(new AutoCloseable { override def close(): Unit = opened.close() })(_ => f(opened))
+  }
+
+  private val base = Instant.ofEpochMilli(1700000000000L)
+
+  private val first = Memory(
+    id = MemoryId("persist-1"),
+    content = "The user prefers Scala over Java",
+    memoryType = MemoryType.UserFact,
+    metadata = Map("user_id" -> "user-a", "note" -> "with spaces"),
+    timestamp = base,
+    importance = Some(0.9)
+  )
+
+  private val second = Memory(
+    id = MemoryId("persist-2"),
+    content = "Distributed databases are the user's specialty",
+    memoryType = MemoryType.Knowledge,
+    metadata = Map("source" -> "docs"),
+    timestamp = base.plusSeconds(60),
+    importance = None
+  )
+
+  "A file-backed VectorMemoryStore" should "return all fields of stored memories from a second instance" in {
+    withStore { s =>
+      s.store(first).isRight shouldBe true
+      s.store(second).isRight shouldBe true
+    }
+
+    withStore { s =>
+      s.count() shouldBe Right(2L)
+
+      val one = s.get(first.id).toOption.flatten.getOrElse(fail("persist-1 missing after reopen"))
+      one.content shouldBe first.content
+      one.memoryType shouldBe MemoryType.UserFact
+      one.importance shouldBe Some(0.9)
+      one.timestamp shouldBe base
+      one.getMetadata("user_id") shouldBe Some("user-a")
+      one.getMetadata("note") shouldBe Some("with spaces")
+
+      val two = s.get(second.id).toOption.flatten.getOrElse(fail("persist-2 missing after reopen"))
+      two.content shouldBe second.content
+      two.memoryType shouldBe MemoryType.Knowledge
+      two.importance shouldBe None
+      two.getMetadata("source") shouldBe Some("docs")
+    }
+  }
+
+  it should "persist the generated embeddings so they survive a reopen" in {
+    withStore(_.store(first))
+
+    withStore { s =>
+      val embedding = s.get(first.id).toOption.flatten.flatMap(_.embedding).getOrElse(fail("embedding not persisted"))
+      val expected  = embeddings.embed(first.content).getOrElse(fail("mock embed failed"))
+      embedding.toSeq shouldBe expected.toSeq
+
+      val stats = s.vectorStats.getOrElse(fail("vectorStats failed"))
+      stats.totalMemories shouldBe 1
+      stats.embeddedMemories shouldBe 1
+      s.embedAll() shouldBe Right(0)
+    }
+  }
+
+  it should "run semantic search and filtered recall over data written by a previous instance" in {
+    withStore { s =>
+      s.store(first)
+      s.store(second)
+    }
+
+    withStore { s =>
+      val hits = s.search(second.content, topK = 2).getOrElse(fail("search failed"))
+      hits.map(_.memory.id) shouldBe Seq(second.id, first.id)
+      hits.head.score should be > hits(1).score
+
+      s.recall(MemoryFilter.ByType(MemoryType.UserFact)).toOption.get.map(_.id) shouldBe Seq(first.id)
+      s.recall(MemoryFilter.MinImportance(0.8)).toOption.get.map(_.id) shouldBe Seq(first.id)
+    }
+  }
+
+  it should "append writes made after a reopen without losing earlier data" in {
+    withStore(_.store(first))
+
+    withStore { s =>
+      s.count() shouldBe Right(1L)
+      s.store(second).isRight shouldBe true
+    }
+
+    withStore { s =>
+      s.count() shouldBe Right(2L)
+      // most recent first
+      s.recent(10).toOption.get.map(_.id) shouldBe Seq(second.id, first.id)
+    }
+  }
+
+  it should "persist updates and deletes made in a later session" in {
+    withStore { s =>
+      s.store(first)
+      s.store(second)
+    }
+
+    withStore { s =>
+      s.update(first.id, _.copy(content = "The user now prefers Kotlin")).isRight shouldBe true
+      s.delete(second.id).isRight shouldBe true
+    }
+
+    withStore { s =>
+      s.count() shouldBe Right(1L)
+      s.get(second.id) shouldBe Right(None)
+      val updated = s.get(first.id).toOption.flatten.getOrElse(fail("persist-1 missing"))
+      updated.content shouldBe "The user now prefers Kotlin"
+      // content changed, so the stored embedding was regenerated and persisted too
+      updated.embedding.map(_.toSeq) shouldBe embeddings.embed("The user now prefers Kotlin").toOption.map(_.toSeq)
+    }
+  }
+
+  it should "empty the file on clear so a later instance sees no memories" in {
+    withStore { s =>
+      s.store(first)
+      s.clear().isRight shouldBe true
+    }
+
+    withStore(_.count() shouldBe Right(0L))
   }
 }
 
