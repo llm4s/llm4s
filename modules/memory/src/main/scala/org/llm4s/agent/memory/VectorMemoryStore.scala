@@ -589,6 +589,8 @@ final class VectorMemoryStore private (
 
 object VectorMemoryStore {
 
+  private val BusyTimeoutMillis = 30000
+
   /**
    * Create a vector memory store with file-based SQLite storage.
    */
@@ -604,6 +606,8 @@ object VectorMemoryStore {
       // an open handle keeps the file locked, which blocks deletion on Windows.
       Try {
         connection.setAutoCommit(true)
+        // Wait for a competing writer on the same file instead of failing immediately with SQLITE_BUSY
+        Using.resource(connection.createStatement())(_.execute(s"PRAGMA busy_timeout = $BusyTimeoutMillis"))
         new VectorMemoryStore(dbPath, embeddingService, config, connection)
       }.recoverWith { case e =>
         Try(connection.close())
