@@ -526,7 +526,7 @@ import org.llm4s.agent.Handoff
 agent.run(
   query = "Complex physics question",
   tools = ToolRegistry.empty,
-  handoffs = Seq(Handoff.to(specialistAgent, "Physics expertise required"))
+  handoffs = Seq(Handoff.to("physics", specialistAgent, "Physics expertise required"))
 )
 ```
 

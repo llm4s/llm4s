@@ -1,6 +1,11 @@
 package org.llm4s.agent
 
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model._
+import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.types.Result
+import java.util.concurrent.atomic.AtomicInteger
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -12,86 +17,93 @@ class HandoffSpec extends AnyFlatSpec with Matchers {
   // Mock client for testing
   private val mockClient: LLMClient = null // Will be mocked in actual tests
 
+  private def countingClient(calls: AtomicInteger): LLMClient = new LLMClient {
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+      calls.incrementAndGet()
+      Right(Completion("t", 0L, "ok", "test", AssistantMessage("ok")))
+    }
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = complete(conversation, options)
+    override def getContextWindow(): Int     = 4096
+    override def getReserveCompletion(): Int = 1024
+  }
+
   "Handoff" should "create with target agent" in {
     val targetAgent = new Agent(mockClient)
-    val handoff     = Handoff(targetAgent)
+    val handoff     = Handoff("physics", targetAgent)
 
+    handoff.id shouldBe "physics"
     handoff.targetAgent shouldBe targetAgent
     handoff.preserveContext shouldBe true
     handoff.transferSystemMessage shouldBe false
     handoff.transferReason shouldBe None
   }
 
-  it should "create with reason" in {
-    val targetAgent = new Agent(mockClient)
-    val reason      = "Specialist knowledge required"
-    val handoff     = Handoff(targetAgent, Some(reason))
-
-    handoff.transferReason shouldBe Some(reason)
-    handoff.preserveContext shouldBe true
+  it should "derive a stable handoffId from the explicit id" in {
+    Handoff.to("physics", new Agent(mockClient)).handoffId shouldBe "handoff_to_physics"
   }
 
-  it should "generate unique handoff ID" in {
-    val agent1 = new Agent(mockClient)
-    val agent2 = new Agent(mockClient)
-
-    val handoff1 = Handoff(agent1)
-    val handoff2 = Handoff(agent2)
-
-    // IDs should be different for different agents
-    (handoff1.handoffId should not).equal(handoff2.handoffId)
-
-    // IDs should be consistent for same agent
-    val handoff1b = Handoff(agent1)
-    handoff1.handoffId shouldBe handoff1b.handoffId
-  }
-
-  it should "generate handoff ID with correct format" in {
-    val targetAgent = new Agent(mockClient)
-    val handoff     = Handoff(targetAgent)
-
-    handoff.handoffId should startWith("handoff_to_agent_")
-    (handoff.handoffId should have).length(handoff.handoffId.length) // Should be consistent
+  it should "give equal handoffIds to the same id on different agent instances" in {
+    val h1 = Handoff.to("math", new Agent(mockClient))
+    val h2 = Handoff.to("math", new Agent(mockClient))
+    h1.handoffId shouldBe h2.handoffId
   }
 
   it should "generate human-readable name with reason" in {
-    val targetAgent = new Agent(mockClient)
-    val reason      = "Math expertise"
-    val handoff     = Handoff(targetAgent, Some(reason))
-
-    handoff.handoffName should include(reason)
-    handoff.handoffName should startWith("Handoff:")
+    val handoff = Handoff.to("math", new Agent(mockClient), "Math expertise")
+    handoff.handoffName shouldBe "Handoff: Math expertise"
   }
 
   it should "generate human-readable name without reason" in {
-    val targetAgent = new Agent(mockClient)
-    val handoff     = Handoff(targetAgent)
-
-    handoff.handoffName should startWith("Handoff to agent")
+    Handoff.to("math", new Agent(mockClient)).handoffName shouldBe "Handoff to math"
   }
 
-  "Handoff companion object" should "create simple handoff with to()" in {
+  "Handoff.of" should "refuse invalid ids and accept valid ones" in {
+    val agent = new Agent(mockClient)
+    Handoff.of("", agent).left.map(_.getClass.getSimpleName) shouldBe Left("ValidationError")
+    Handoff.of("has space", agent) shouldBe a[Left[_, _]]
+    Handoff.of("x" * 53, agent) shouldBe a[Left[_, _]]
+    Handoff.of("x" * 52, agent) shouldBe a[Right[_, _]]
+    Handoff.of("a_b-C9", agent, Some("why")).map(_.transferReason) shouldBe Right(Some("why"))
+  }
+
+  "Handoff companion object" should "create with to(id, agent)" in {
     val targetAgent = new Agent(mockClient)
-    val handoff     = Handoff.to(targetAgent)
+    val handoff     = Handoff.to("math", targetAgent)
 
     handoff.targetAgent shouldBe targetAgent
     handoff.transferReason shouldBe None
-    handoff.preserveContext shouldBe true
-    handoff.transferSystemMessage shouldBe false
   }
 
-  it should "create handoff with reason using to(agent, reason)" in {
-    val targetAgent = new Agent(mockClient)
-    val reason      = "Specialist needed"
-    val handoff     = Handoff.to(targetAgent, reason)
+  it should "create with a reason using to(id, agent, reason)" in {
+    val handoff = Handoff.to("math", new Agent(mockClient), "Specialist needed")
+    handoff.transferReason shouldBe Some("Specialist needed")
+  }
 
-    handoff.transferReason shouldBe Some(reason)
-    handoff.preserveContext shouldBe true
+  it should "throw IllegalArgumentException for an invalid id" in {
+    an[IllegalArgumentException] should be thrownBy Handoff.to("has space", new Agent(mockClient))
+    an[IllegalArgumentException] should be thrownBy Handoff.to("", new Agent(mockClient), "r")
+  }
+
+  "Agent" should "fail with ValidationError, before any model call, when two handoffs share an id" in {
+    val calls = new AtomicInteger(0)
+    val agent = new Agent(countingClient(calls))
+    val other = new Agent(countingClient(calls))
+    val result = agent.run(
+      "hi",
+      ToolRegistry.empty,
+      handoffs = Seq(Handoff.to("dup", other), Handoff.to("dup", other))
+    )
+    result.left.map(_.isInstanceOf[ValidationError]) shouldBe Left(true)
+    calls.get() shouldBe 0
   }
 
   "HandoffRequested status" should "contain handoff and reason" in {
     val targetAgent   = new Agent(mockClient)
-    val handoff       = Handoff(targetAgent, Some("Test reason"))
+    val handoff       = Handoff.to("test", targetAgent, "Test reason")
     val handoffReason = "Complex query requires specialist"
     val status        = AgentStatus.HandoffRequested(handoff, Some(handoffReason))
 
@@ -104,7 +116,7 @@ class HandoffSpec extends AnyFlatSpec with Matchers {
 
   it should "serialize without target agent reference" in {
     val targetAgent         = new Agent(mockClient)
-    val handoff             = Handoff(targetAgent, Some("Test handoff"))
+    val handoff             = Handoff.to("test", targetAgent, "Test handoff")
     val status: AgentStatus = AgentStatus.HandoffRequested(handoff, Some("Complex query"))
 
     import upickle.default._

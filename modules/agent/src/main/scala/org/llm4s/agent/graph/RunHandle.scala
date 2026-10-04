@@ -5,6 +5,7 @@ import org.llm4s.types.Result
 
 import java.util.concurrent.{ CompletableFuture, TimeUnit, TimeoutException }
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.ReentrantLock
 import scala.util.Using
 import scala.util.control.Exception.allCatch
 
@@ -61,6 +62,25 @@ private[graph] enum StopCause:
   case Cancelled, Expired, Finishing
 
 /**
+ * How a run and its [[DefaultRunHandle]] agree that it stops. `cause` records why (see
+ * [[StopCause]]). A stop records its cause and only then interrupts, so the run can see the cause
+ * and begin closing between the two; `acknowledged` closes that gap. The run [[acknowledge]]s
+ * before it clears its interrupt flag to commit its closing events, and [[interruptUnlessAcknowledged]]
+ * interrupts only before that, both holding `lock` - so no stop's interrupt arrives after it.
+ */
+final private[graph] class StopSignal:
+  val cause: AtomicReference[Option[StopCause]] = AtomicReference(None)
+  private val lock                              = new ReentrantLock()
+  private var acknowledged                      = false
+
+  /** Called by the run before it clears its interrupt flag to close; no interrupt follows it. */
+  def acknowledge(): Unit = withLock(lock) { acknowledged = true }
+
+  /** Runs `interrupt` unless the run has acknowledged its stop. */
+  def interruptUnlessAcknowledged(interrupt: () => Unit): Unit =
+    withLock(lock)(if !acknowledged then interrupt())
+
+/**
  * The runtime's [[RunHandle]]. [[launch]] starts the run thread, which completes `result` on every
  * exit - normal, interrupted, or by an unexpected throwable - after releasing the thread claim, so
  * a caller that has seen the result can start the next run at once.
@@ -69,7 +89,7 @@ final private[graph] class DefaultRunHandle[O](
   val threadId: ThreadId,
   val runId: RunId,
   claimSeq: Long,
-  private[graph] val cause: AtomicReference[Option[StopCause]],
+  signal: StopSignal,
   subscribeFrom: (Long, Int, StreamEvent => Unit) => Result[Subscription]
 ) extends RunHandle[O]:
 
@@ -95,12 +115,19 @@ final private[graph] class DefaultRunHandle[O](
 
   /**
    * Records `stopCause` unless a cause is already recorded - including the run's own
-   * [[StopCause.Finishing]] - and only then interrupts a live run.
+   * [[StopCause.Finishing]] - and only then interrupts a live run that has not acknowledged its
+   * stop (see [[StopSignal]]). A stop whose cause was not the first sends no interrupt at all: the
+   * first cause's stop interrupts, or the run is finishing, or it is closing a stop it detected.
    */
   private[graph] def stop(stopCause: StopCause): Unit =
     // the thread is started before the handle is returned, and an interrupt on a started thread
     // that has not yet run sets its flag, which the loop checks before every superstep
-    if cause.compareAndSet(None, Some(stopCause)) && !result.isDone then runThread.interrupt()
+    if signal.cause.compareAndSet(None, Some(stopCause)) then
+      beforeInterrupt()
+      signal.interruptUnlessAcknowledged(() => if !result.isDone then runThread.interrupt())
+
+  /** A test hook run by [[stop]] between recording its cause and interrupting; a no-op by default. */
+  @volatile private[graph] var beforeInterrupt: () => Unit = () => ()
 
   def subscribe(capacity: Int = 1024)(listener: StreamEvent => Unit): Result[Subscription] =
     subscribeFrom(claimSeq - 1, capacity, listener)

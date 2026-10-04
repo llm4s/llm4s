@@ -40,6 +40,7 @@ object MathSpecialistHandoffExample extends App {
       tools = ToolRegistry.empty,
       handoffs = Seq(
         Handoff.to(
+          "math",
           mathAgent,
           "Mathematical questions requiring calculus or advanced math"
         )

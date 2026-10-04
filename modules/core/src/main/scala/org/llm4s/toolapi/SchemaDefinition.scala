@@ -50,7 +50,7 @@ case class StringSchema(
    *
    * @param values Allowed string values
    */
-  def withEnum(values: Seq[String]): StringSchema = copy(enumValues = Some(values))
+  def withEnum(values: Seq[String]): StringSchema = copy(enumValues = Some(values.distinct))
 
   /**
    * Add minimum and/or maximum length constraints.
@@ -280,7 +280,7 @@ case class ObjectSchema[T](
     val props = ujson.Obj()
 
     // in strict mode all properties are required
-    val required = (if (strict) properties else properties.filter(_.required)).map(_.name)
+    val required = (if (strict) properties else properties.filter(_.required)).map(_.name).distinct
 
     properties.foreach(prop => props(prop.name) = prop.schema.toJsonSchema(strict))
 
@@ -339,11 +339,19 @@ case class NullableSchema[T](
         // Replace type field with array of types
         schema("type") = ujson.Arr(ujson.Str(typeValue), ujson.Str("null"))
       case Some(arr: ujson.Arr) =>
-        // Add null to existing type array
-        schema("type") = ujson.Arr.from(arr.value :+ ujson.Str("null"))
+        // Add null to the existing type array, unless it is already there
+        val nullType = ujson.Str("null")
+        schema("type") = if (arr.value.contains(nullType)) arr else ujson.Arr.from(arr.value :+ nullType)
       case _ =>
         // Create new type array if none exists
         schema("type") = ujson.Arr(ujson.Str("null"))
+    }
+
+    // a nullable enum is one of its values, or null
+    schema.get("enum") match {
+      case Some(values: ujson.Arr) if !values.value.contains(ujson.Null) =>
+        schema("enum") = ujson.Arr.from(values.value :+ ujson.Null)
+      case _ => ()
     }
 
     ujson.Obj.from(schema)
