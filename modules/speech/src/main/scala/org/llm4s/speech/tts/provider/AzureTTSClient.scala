@@ -1,5 +1,6 @@
 package org.llm4s.speech.tts.provider
 
+import org.llm4s.error.ValidationError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.speech.{ AudioMeta, CloudSpeechSupport, GeneratedAudio }
 import org.llm4s.speech.config.TTSConfig
@@ -30,6 +31,7 @@ final class AzureTTSClient(config: TTSConfig, httpClient: Llm4sHttpClient = Llm4
   override def synthesize(text: String, options: TTSOptions): Result[GeneratedAudio] =
     for {
       input <- CloudSpeechSupport.requireText(text)
+      _     <- AzureTTSClient.requireRate(options.speakingRate)
       voice = options.voice.getOrElse(config.voice)
       response <- httpClient.postRaw(
         s"${config.baseUrl}/cognitiveservices/v1",
@@ -53,6 +55,17 @@ object AzureTTSClient {
   val PcmMeta: AudioMeta = AudioMeta(sampleRate = 24000, numChannels = 1, bitDepth = 16)
 
   private[tts] val OutputFormat = "raw-24khz-16bit-mono-pcm"
+
+  /** Azure documents prosody `rate` as a multiplier that "should be within 0.5 to 2 times the original audio". */
+  private[tts] val MinRate: Double = 0.5
+  private[tts] val MaxRate: Double = 2.0
+
+  private def requireRate(rate: Option[Double]): Result[Unit] =
+    rate match {
+      case Some(r) if !(r >= MinRate && r <= MaxRate) =>
+        Left(ValidationError("speakingRate", s"must be between $MinRate and $MaxRate for Azure TTS, got $r"))
+      case _ => Right(())
+    }
 
   private[tts] def ssml(text: String, voice: String, options: TTSOptions): String = {
     val lang = options.language.getOrElse(localeOf(voice))

@@ -1,5 +1,6 @@
 package org.llm4s.speech.stt.provider
 
+import org.llm4s.error.ValidationError
 import org.llm4s.http.{ Llm4sHttpClient, MultipartPart }
 import org.llm4s.speech.{ AudioInput, CloudSpeechSupport }
 import org.llm4s.speech.config.STTConfig
@@ -33,6 +34,9 @@ final class OpenAISTTClient(config: STTConfig, httpClient: Llm4sHttpClient = Llm
     List("audio/wav", "audio/mpeg", "audio/mp4", "audio/m4a", "audio/ogg", "audio/webm", "audio/flac")
 
   override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] =
+    OpenAISTTClient.requireTimestampModel(config.model, options).flatMap(_ => transcribeChecked(input, options))
+
+  private def transcribeChecked(input: AudioInput, options: STTOptions): Result[Transcription] =
     input match {
       case AudioInput.FileAudio(path) => upload(path, options)
       case other =>
@@ -72,6 +76,19 @@ final class OpenAISTTClient(config: STTConfig, httpClient: Llm4sHttpClient = Llm
 }
 
 object OpenAISTTClient {
+
+  /** OpenAI: "the `timestamp_granularities[]` parameter is only supported for `whisper-1`". */
+  private[provider] val TimestampModel = "whisper-1"
+
+  private[provider] def requireTimestampModel(model: String, options: STTOptions): Result[Unit] =
+    if (options.enableTimestamps && model != TimestampModel)
+      Left(
+        ValidationError(
+          "enableTimestamps",
+          s"word timestamps are only supported by OpenAI's $TimestampModel model, not '$model'"
+        )
+      )
+    else Right(())
 
   private[provider] def parse(body: String, options: STTOptions): Result[Transcription] =
     Try {

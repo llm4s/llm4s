@@ -53,6 +53,21 @@ class AzureTTSClientSpec extends AnyFlatSpec with Matchers {
     http.only.text should include("a &lt; b &amp; &quot;c&quot; &gt; &apos;d&apos;")
   }
 
+  it should "reject a speaking rate outside Azure's documented 0.5 to 2 range without calling the service" in {
+    Seq(0.4, 2.5, Double.NaN).foreach { rate =>
+      val http   = new StubHttpClient(body = Array[Byte](1))
+      val result = new AzureTTSClient(cfg, http).synthesize("Hello", TTSOptions(speakingRate = Some(rate)))
+
+      result.left.toOption.get shouldBe a[ValidationError]
+      http.requests shouldBe empty
+    }
+    Seq(0.5, 2.0).foreach { rate =>
+      new AzureTTSClient(cfg, new StubHttpClient(body = Array[Byte](1)))
+        .synthesize("Hello", TTSOptions(speakingRate = Some(rate)))
+        .isRight shouldBe true
+    }
+  }
+
   it should "use the voice, language and speaking rate from TTSOptions" in {
     val http = new StubHttpClient(body = Array[Byte](1))
 

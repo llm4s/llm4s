@@ -95,6 +95,19 @@ class OpenAISTTClientSpec extends AnyFlatSpec with Matchers {
     result.language shouldBe Some("english")
   }
 
+  it should "refuse word timestamps for a model other than whisper-1 (OpenAI supports them only there)" in {
+    val http = StubHttpClient.json(200, """{"text":"hi"}""")
+
+    val result = new OpenAISTTClient(cfg.copy(model = "gpt-4o-transcribe"), http)
+      .transcribe(AudioInput.BytesAudio(wav, 16000), STTOptions(enableTimestamps = true))
+
+    result.left.toOption.get.message should include("whisper-1")
+    http.requests shouldBe empty
+    new OpenAISTTClient(cfg.copy(model = "gpt-4o-transcribe"), http)
+      .transcribe(AudioInput.BytesAudio(wav, 16000))
+      .isRight shouldBe true
+  }
+
   it should "fail on an empty transcription" in {
     val result = new OpenAISTTClient(cfg, StubHttpClient.json(200, """{"text":"  "}"""))
       .transcribe(AudioInput.BytesAudio(wav, 16000))
