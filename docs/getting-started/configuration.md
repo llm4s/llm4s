@@ -70,6 +70,7 @@ libraryDependencies ++= Seq(
 | `anthropic` | `llm4s-anthropic` |
 | `gemini`, `vertexai` | `llm4s-gemini` |
 | `ollama` | `llm4s-ollama` |
+| `bedrock` | `llm4s-bedrock` |
 | `deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `openai-compatible` | `llm4s-openai-compatible` |
 
 The provider modules are on `main` but not yet published: `0.4.1` ships every provider inside
@@ -162,9 +163,10 @@ the value.
 | `cohere` | `COHERE_API_KEY` (chat and reranker) | `llm4s-openai-compatible`, `llm4s-rag` |
 | `voyage` | `VOYAGE_API_KEY` | `llm4s-voyage` |
 
-`ollama` takes no key, the generic `openai-compatible` provider has no vendor, and `vertexai`
+`ollama` takes no key, the generic `openai-compatible` provider has no vendor, `vertexai`
 authenticates with OAuth2 (Application Default Credentials, or a service-account file named by
-its `apiKey`), so none of them has a shared key.
+its `apiKey`), and `bedrock` authenticates with AWS credentials (the AWS default credential chain,
+a `profile`, or explicit keys), so none of them has a shared key.
 
 A section for a **second account** sets its own key, which wins over the shared one:
 
@@ -201,6 +203,7 @@ config-policy `prod` preset flags any section that does not (see
 | `organization` | OpenAI, Requesty and OpenRouter: the OpenAI organisation id, sent as `OpenAI-Organization` |
 | `endpoint`, `apiVersion` | Azure OpenAI: the resource endpoint (required) and API version |
 | `project`, `location` | Vertex AI: the GCP project id (required) and region (default `us-central1`) |
+| `region`, `profile`, `accessKeyId`, `secretAccessKey`, `sessionToken` | AWS Bedrock: the AWS region (required, never defaulted); a shared-config profile; or explicit credentials, with a session token for temporary ones. With none of the credential keys the AWS default credential chain is used. `baseUrl` overrides the endpoint |
 | `contextWindow`, `reserveCompletion`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
 
 The first five keys are shared by every provider. The rest belong to the providers named, which

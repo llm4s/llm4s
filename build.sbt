@@ -211,6 +211,7 @@ lazy val llm4s = (project in file("."))
     openai,
     openaiCompatible,
     voyage,
+    bedrock,
     providerTestkit,
     llm4sEffect,
     llm4sZio,
@@ -758,6 +759,30 @@ lazy val voyage = (project in file("modules/providers/voyage"))
     )
   )
 
+// AWS Bedrock chat (#1008): rebuilt from #1029 as a `ProviderDescriptor` over the Bedrock Converse
+// and ConverseStream APIs. It takes the AWS SDK v2 `bedrockruntime` artifact (Apache-2.0, the same
+// SDK release train as `llm4s-rag`'s S3 client) and nothing else; core gains no dependency.
+
+lazy val bedrock = (project in file("modules/providers/bedrock"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-bedrock",
+    commonSettings,
+    // Measured 96.39% statement coverage (`sbt coverage bedrock/test bedrock/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. The `@Cloud`
+    // Bedrock smoke suite in `modules/it` is not counted here.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.awsBedrockRuntime,
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // `llm4s-provider-testkit` (#1133) is what a provider module's `Llm4s<Name>ModuleSpec` is written
 // with: discovery, sole ownership, explicit registration, the config-to-client round trip and
 // the `reference.conf` credential binding, as assertions, plus config loading from a HOCON
@@ -900,6 +925,7 @@ lazy val samples = (project in file("modules//samples"))
     openai,
     openaiCompatible,
     voyage,
+    bedrock,
     knowledgegraphNeo4j,
     observability,
     observabilityPrometheus,
@@ -1142,6 +1168,7 @@ lazy val it = (project in file("modules/it"))
     openai,
     openaiCompatible,
     voyage,
+    bedrock,
     knowledgegraphNeo4j,
     workspaceClient,
     observability,
@@ -1216,6 +1243,7 @@ lazy val docs = (project in file("modules/docs"))
     openai,
     openaiCompatible,
     voyage,
+    bedrock,
     providerTestkit,
     workspaceShared,
     workspaceClient,
@@ -1250,6 +1278,7 @@ lazy val docs = (project in file("modules/docs"))
         (openai / Compile / sources).value ++
         (openaiCompatible / Compile / sources).value ++
         (voyage / Compile / sources).value ++
+        (bedrock / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++

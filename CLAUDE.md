@@ -98,7 +98,8 @@ llm4s/
 │   ├── openai/                # OpenAI, Azure, Requesty chat + OpenAI embeddings + openai-java SDK (published)
 │   ├── openai-compatible/     # One SDK-free chat-completions client: DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, generic (published)
 │   ├── providers/             # Community provider modules, one `llm4s-<name>` each (published)
-│   │   └── voyage/            # Voyage AI embedding provider
+│   │   ├── voyage/            # Voyage AI embedding provider
+│   │   └── bedrock/           # AWS Bedrock chat provider + AWS SDK bedrockruntime (Converse, ConverseStream)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)

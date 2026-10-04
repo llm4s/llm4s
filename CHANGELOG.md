@@ -50,6 +50,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so `completeStructured` is constrained natively. `ResponseFormat.Json` sends `"format": "json"`
   and `ResponseFormat.JsonSchema` sends the schema object (requires Ollama 0.5 or later); `name` and
   `strict` have no Ollama equivalent and are ignored. Previously the field was silently dropped.
+- **`llm4s-bedrock`: AWS Bedrock chat provider** (`modules/providers/bedrock`,
+  [#1008](https://github.com/llm4s/llm4s/issues/1008), rebuilt from #1029 as a `ProviderDescriptor`,
+  so `llm4s-core` is untouched and gains no dependency). `provider = "bedrock"` over the Converse API
+  and, for `streamComplete`, ConverseStream (true streaming: text, tool-call and reasoning deltas,
+  usage). A section needs a `region` (a provider-specific key, never defaulted) and a `model`;
+  credentials come from the AWS default credential chain, a `profile`, or explicit
+  `accessKeyId` / `secretAccessKey` with a `sessionToken` for temporary credentials; `baseUrl`
+  overrides the endpoint. Context windows come from the model registry, including the `us.` / `eu.` /
+  `apac.` / `global.` inference-profile ids. `ThrottlingException` and `ServiceQuotaExceededException`
+  map to `RateLimitError`, `ValidationException` to `ValidationError`, `AccessDeniedException` (and any
+  401/403) to `AuthenticationError`, other service errors to `ServiceError`, a failure to reach
+  Bedrock to `NetworkError`; an interrupted call or stream is `CancelledError`. A conversation with only
+  a system message is a `ValidationError`, which Converse cannot accept. Add the dependency
+  `"org.llm4s" %% "llm4s-bedrock"`, which brings the AWS SDK v2 `bedrockruntime` artifact
+  (Apache-2.0, the SDK release train `llm4s-rag` already uses for S3); nothing else changes.
 - **Run API and event dispatch for graph runs** (Experimental, `org.llm4s.agent.graph`,
   [#1277](https://github.com/llm4s/llm4s/issues/1277)): `GraphRuntime.start`/`recover`/`resume`
   admit a run on the caller's thread and return `Result[RunHandle[O]]` once the thread is claimed;

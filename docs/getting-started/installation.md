@@ -372,6 +372,34 @@ are unchanged; see the
 [migration note](../reference/migration.md#slice-5-llm4s-openai-compatible), and for Mistral and
 Cohere [this one](../reference/migration.md#slice-5-mistral-cohere-and-voyage-leave-core-core-ships-no-provider).
 
+### For AWS Bedrock
+
+{: .note }
+> Not yet published. `llm4s-bedrock` exists in the build as of
+> [#1008](https://github.com/llm4s/llm4s/issues/1008) but ships in the next release.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-bedrock" % llm4sVersion
+```
+
+The AWS Bedrock chat provider (`provider = "bedrock"`), over the Converse and ConverseStream APIs,
+so one client reaches Claude, Llama, Mistral, Nova and Titan models. It brings the AWS SDK for
+Java v2 `bedrockruntime` artifact (Apache-2.0, the same SDK release train `llm4s-rag` uses for S3);
+`llm4s-core` gains no dependency. A section needs a `region` and a `model`:
+
+```hocon
+llm4s.providers.claude-bedrock {
+  provider = "bedrock"
+  model    = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  region   = ${?AWS_REGION}
+}
+```
+
+Credentials come from the AWS default credential chain (environment variables, `~/.aws`, an
+instance or task role), or from a `profile`, or from explicit `accessKeyId` / `secretAccessKey`
+(plus `sessionToken` for temporary credentials).
+
 ### For Voyage AI embeddings
 
 {: .note }
