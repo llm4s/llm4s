@@ -1,19 +1,17 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.imageprocessing.provider.geminiclient
 
 import org.llm4s.imageprocessing._
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
 import org.llm4s.imageprocessing.provider.LocalImageProcessor
-import org.llm4s.error.LLMError
+import org.llm4s.error.{ ConfigurationError, LLMError }
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.media.{ ImageMediaType, MediaType }
 import ujson.read
 
-import java.net.URI
-import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
-import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Paths }
-import java.time.{ Duration, Instant }
+import java.time.Instant
 import java.util.Base64
+import scala.concurrent.duration._
 import scala.util.Try
 
 /**
@@ -22,22 +20,28 @@ import scala.util.Try
  * Sends multimodal requests (image + text prompt) to the Gemini
  * generateContent REST endpoint and returns structured analysis results.
  *
- * Authentication is done via an `?key=` query parameter as required by the
- * Google Generative Language API.  The full URL (which contains the key) is
- * never logged.
+ * The API key is sent in the `x-goog-api-key` request header, never in the URL, so it cannot
+ * reach a log line or an error message through the URL.
+ *
+ * Failures are returned, not thrown: an HTTP error status is an [[org.llm4s.error.APIError]]
+ * carrying the status code; a timeout, connection failure or interruption is the typed
+ * [[org.llm4s.error.TimeoutError]], [[org.llm4s.error.NetworkError]] or
+ * [[org.llm4s.error.CancelledError]]; a reply that carries no text (a blocked prompt, a
+ * candidate stopped for safety or recitation, a body that is not Gemini JSON) is an
+ * [[org.llm4s.error.APIError]] too, never a made-up description.
  *
  * @param config [[GeminiVisionConfig]] containing the API key, model, and base URL.
+ * @param httpClient the HTTP transport; defaults to the JDK client honouring `config.connectTimeoutSeconds`.
  */
-class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageprocessing.ImageProcessingClient {
+class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient)
+    extends org.llm4s.imageprocessing.ImageProcessingClient {
+
+  def this(config: GeminiVisionConfig) =
+    this(config, Llm4sHttpClient.create(connectTimeout = config.connectTimeoutSeconds.seconds))
 
   private val localProcessor = new LocalImageProcessor()
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
-
-  private val httpClient = HttpClient
-    .newBuilder()
-    .connectTimeout(Duration.ofSeconds(config.connectTimeoutSeconds))
-    .build()
 
   /**
    * Analyses an image using the Google Gemini Vision API.
@@ -51,6 +55,7 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
     prompt: Option[String] = None
   ): Either[LLMError, ImageAnalysisResult] =
     for {
+      _     <- validateConfig()
       basic <- localProcessor.analyzeImage(imagePath, None)
       metadata = basic.metadata
       base64Image <- encodeImageToBase64(imagePath).toEither.left
@@ -60,8 +65,7 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
           "Provide tags that categorize the image content."
       )
       mediaType = detectMediaType(imagePath)
-      visionResponse <- callGeminiVisionAPI(base64Image, analysisPrompt, mediaType).toEither.left
-        .map(e => LLMError.apiCallFailed("Gemini", s"Gemini Vision API call failed: ${e.getMessage}"))
+      visionResponse <- callGeminiVisionAPI(base64Image, analysisPrompt, mediaType)
     } yield parseVisionResponse(visionResponse, metadata)
 
   override def preprocessImage(
@@ -109,84 +113,98 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
 
   // ---- private helpers ----
 
-  /**
-   * Executes an HTTP POST request. Protected so tests can override without real network.
-   *
-   * @param url             The full URL to POST to.
-   * @param requestBodyJson The JSON request body string.
-   * @param timeoutSeconds  Request timeout in seconds.
-   * @return A [[scala.util.Try]] of (statusCode, responseBody).
-   */
-  protected def sendHttpRequest(url: String, requestBodyJson: String, timeoutSeconds: Int): Try[(Int, String)] =
-    Try {
-      val httpRequest = HttpRequest
-        .newBuilder()
-        .uri(URI.create(url))
-        .header("Content-Type", "application/json")
-        .timeout(Duration.ofSeconds(timeoutSeconds))
-        .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
-        .build()
-      val response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-      (response.statusCode(), response.body())
-    }
+  private def validateConfig(): Either[LLMError, Unit] =
+    if (config.apiKey.trim.isEmpty)
+      Left(ConfigurationError("Gemini vision API key is blank", List("apiKey")))
+    else if (config.model.trim.isEmpty)
+      Left(ConfigurationError("Gemini vision model name is blank", List("model")))
+    else Right(())
 
   private def callGeminiVisionAPI(
     base64Image: String,
     prompt: String,
     mediaType: ImageMediaType
-  ): Try[String] = {
+  ): Either[LLMError, String] = {
     val requestBody = GeminiRequestBody.serialize(prompt, base64Image, mediaType)
-    val url         = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
+    // The key goes in a header: a query-string key is echoed by URI parse errors and could be
+    // captured by proxies and access logs.
+    val url     = s"${config.baseUrl}/models/${config.model}:generateContent"
+    val headers = Map("Content-Type" -> "application/json", "x-goog-api-key" -> config.apiKey)
 
-    // Do NOT log the URL — it contains the API key as a query parameter
-    logger.debug(s"[GeminiVisionClient] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
+    logger.debug(s"[GeminiVisionClient] Sending request to $url")
 
-    sendHttpRequest(url, requestBody, config.requestTimeoutSeconds)
-      .flatMap { case (statusCode, responseBody) =>
-        statusCode match {
-          case 200 =>
-            scala.util.Success(extractContentFromResponse(responseBody))
-          case _ =>
-            val errorMessage =
-              Try(read(responseBody)).toOption
-                .flatMap(_.obj.get("error"))
-                .map { err =>
-                  val message = err.obj.get("message").flatMap(_.strOpt)
-                  val status  = err.obj.get("status").flatMap(_.strOpt)
-                  (message, status) match {
-                    case (Some(msg), Some(st)) => s"$st: $msg"
-                    case (Some(msg), None)     => msg
-                    case _                     => org.llm4s.util.Redaction.truncateForLog(responseBody)
-                  }
-                }
-                .map(d => s"Status $statusCode: $d")
-                .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.truncateForLog(responseBody)}")
-
-            logger.error(
-              "[GeminiVisionClient] HTTP error {}: {}",
-              statusCode.asInstanceOf[AnyRef],
-              org.llm4s.util.Redaction.truncateForLog(responseBody)
-            )
-            scala.util.Failure(new RuntimeException(s"Gemini API call failed - $errorMessage"))
-        }
+    httpClient.post(url, headers, requestBody, config.requestTimeoutSeconds.seconds).flatMap { response =>
+      if (response.statusCode == 200) extractContentFromResponse(response.body)
+      else {
+        val errorMessage = describeError(response.statusCode, response.body)
+        logger.error(
+          "[GeminiVisionClient] HTTP error {}: {}",
+          response.statusCode.asInstanceOf[AnyRef],
+          org.llm4s.util.Redaction.truncateForLog(response.body)
+        )
+        Left(
+          LLMError.apiCallFailed(
+            "Gemini",
+            s"Gemini Vision API call failed - $errorMessage",
+            Some(response.statusCode)
+          )
+        )
       }
-      .recoverWith { case e: InterruptedException =>
-        Thread.currentThread().interrupt()
-        scala.util.Failure(e)
-      }
+    }
   }
 
-  private def extractContentFromResponse(jsonResponse: String): String =
-    Try(read(jsonResponse)).toOption
-      .flatMap { json =>
-        json("candidates").arr.headOption
-          .flatMap(_.obj.get("content"))
-          .flatMap(_.obj.get("parts"))
-          .flatMap(_.arr.headOption)
-          .flatMap(_.obj.get("text"))
-          .map(_.str)
+  private def describeError(statusCode: Int, responseBody: String): String = {
+    val detail = Try(read(responseBody)).toOption
+      .flatMap(_.objOpt)
+      .flatMap(_.get("error"))
+      .flatMap(_.objOpt)
+      .flatMap { err =>
+        val message = err.get("message").flatMap(_.strOpt)
+        val status  = err.get("status").flatMap(_.strOpt)
+        (message, status) match {
+          case (Some(msg), Some(st)) => Some(s"$st: $msg")
+          case (Some(msg), None)     => Some(msg)
+          case _                     => None
+        }
       }
-      .getOrElse("Could not parse response from Gemini Vision API")
+      .getOrElse(org.llm4s.util.Redaction.truncateForLog(responseBody, 512))
+    s"Status $statusCode: $detail"
+  }
+
+  /**
+   * The text of the first candidate: every text part, in order. A reply with no text is an
+   * error that names why (prompt blocked, candidate stopped for safety, malformed body).
+   */
+  private def extractContentFromResponse(jsonResponse: String): Either[LLMError, String] = {
+    def fail(why: String): Either[LLMError, String] =
+      Left(LLMError.apiCallFailed("Gemini", s"Gemini Vision API returned no text: $why", Some(200)))
+
+    Try(read(jsonResponse)).toOption.flatMap(_.objOpt) match {
+      case None => fail("response body is not a JSON object")
+      case Some(root) =>
+        val candidate = root.get("candidates").flatMap(_.arrOpt).flatMap(_.headOption).flatMap(_.objOpt)
+        val text = candidate
+          .flatMap(_.get("content"))
+          .flatMap(_.objOpt)
+          .flatMap(_.get("parts"))
+          .flatMap(_.arrOpt)
+          .map(_.toSeq.flatMap(_.objOpt).filterNot(_.get("thought").exists(_.boolOpt.contains(true))))
+          .map(_.flatMap(_.get("text").flatMap(_.strOpt)).mkString)
+          .filter(_.nonEmpty)
+        text match {
+          case Some(t) => Right(t)
+          case None =>
+            val blockReason =
+              root.get("promptFeedback").flatMap(_.objOpt).flatMap(_.get("blockReason")).flatMap(_.strOpt)
+            val finishReason = candidate.flatMap(_.get("finishReason")).flatMap(_.strOpt)
+            (blockReason, finishReason) match {
+              case (Some(b), _) => fail(s"prompt blocked (blockReason=$b)")
+              case (_, Some(f)) => fail(s"candidate finished with finishReason=$f and no text")
+              case _            => fail("no candidates with text in the response")
+            }
+        }
+    }
+  }
 
   private def parseVisionResponse(response: String, metadata: ImageMetadata): ImageAnalysisResult =
     ImageAnalysisResult(

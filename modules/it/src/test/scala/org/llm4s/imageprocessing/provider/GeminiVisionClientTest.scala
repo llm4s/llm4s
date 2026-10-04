@@ -35,9 +35,6 @@ class GeminiVisionClientTest extends AnyFlatSpec with Matchers with EitherValues
   /** The 64x64 PNG fixture in `modules/it/src/test/resources`. */
   private def testImage: Path = Paths.get(getClass.getResource("/test-image.png").toURI)
 
-  /** What the client returns as the description when the reply body cannot be parsed. */
-  private val UnparsedReply = "Could not parse response from Gemini Vision API"
-
   "GeminiVisionClient" should "analyze an image with the real Gemini API" in {
     Tier.require(apiKey.isDefined, "GOOGLE_API_KEY (or GEMINI_API_KEY) not set")
 
@@ -46,8 +43,8 @@ class GeminiVisionClientTest extends AnyFlatSpec with Matchers with EitherValues
     val analysis =
       client.analyzeImage(testImage.toString, Some("Describe this image in one sentence")).value
 
-    // A reply the client could not parse becomes a fixed fallback description.
-    analysis.description should not be UnparsedReply
+    // A reply with no text is a Left, so a Right always carries the model's words.
+    analysis.description.trim should not be empty
   }
 
   it should "return Left for an invalid API key" in {
@@ -55,6 +52,11 @@ class GeminiVisionClientTest extends AnyFlatSpec with Matchers with EitherValues
 
     val result = client.analyzeImage(testImage.toString, None)
 
-    result.isLeft shouldBe true
+    // Google answers a bad key with 400 (INVALID_ARGUMENT) or 401/403; anything else (a 404
+    // for a retired model, a 5xx) is not the failure this test is about.
+    val error = result.left.value
+    error shouldBe a[org.llm4s.error.APIError]
+    error.asInstanceOf[org.llm4s.error.APIError].statusCode.exists(Set(400, 401, 403).contains) shouldBe true
+    (error.message should not).include("invalid-key-for-testing")
   }
 }

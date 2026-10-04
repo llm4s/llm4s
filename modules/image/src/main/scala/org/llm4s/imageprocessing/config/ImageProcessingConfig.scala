@@ -56,7 +56,12 @@ case class GeminiVisionConfig(
   baseUrl: String = "https://generativelanguage.googleapis.com/v1beta",
   connectTimeoutSeconds: Int = 30,
   requestTimeoutSeconds: Int = 60
-) extends ImageProcessingConfig
+) extends ImageProcessingConfig {
+
+  /** Never prints the API key. */
+  override def toString: String =
+    s"GeminiVisionConfig(apiKey=***,model=$model,baseUrl=$baseUrl,connectTimeoutSeconds=$connectTimeoutSeconds,requestTimeoutSeconds=$requestTimeoutSeconds)"
+}
 
 /**
  * Configuration for local image processing.

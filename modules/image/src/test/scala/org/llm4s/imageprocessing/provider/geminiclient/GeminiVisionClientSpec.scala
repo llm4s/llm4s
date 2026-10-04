@@ -1,6 +1,9 @@
 package org.llm4s.imageprocessing.provider.geminiclient
 
+import org.llm4s.error.NetworkError
+import org.llm4s.http.{ HttpRawResponse, HttpResponse, Llm4sHttpClient, MultipartPart, StreamingHttpResponse }
 import org.llm4s.imageprocessing._
+import org.llm4s.types.Result
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
 import org.llm4s.media.MediaType
 import org.scalatest.flatspec.AnyFlatSpec
@@ -11,19 +14,33 @@ import java.awt.image.BufferedImage
 import java.awt.Color
 import java.nio.file.Files
 import javax.imageio.ImageIO
+import scala.concurrent.duration.FiniteDuration
 import scala.util.{ Failure, Success, Try }
 
-/** Test double that overrides the HTTP layer. */
-class MockGeminiVisionClient(
-  config: GeminiVisionConfig,
-  mockResponse: Try[(Int, String)]
-) extends GeminiVisionClient(config) {
-  override protected def sendHttpRequest(
-    url: String,
-    requestBodyJson: String,
-    timeoutSeconds: Int
-  ): Try[(Int, String)] = mockResponse
+/** Test double for the HTTP layer: every request gets the same canned outcome. */
+class FixedHttpClient(outcome: Result[HttpResponse]) extends Llm4sHttpClient {
+  override def get(u: String, h: Map[String, String], p: Map[String, String], t: FiniteDuration)          = outcome
+  override def post(u: String, h: Map[String, String], b: String, t: FiniteDuration)                      = outcome
+  override def postBytes(u: String, h: Map[String, String], d: Array[Byte], t: FiniteDuration)            = outcome
+  override def postMultipart(u: String, h: Map[String, String], p: Seq[MultipartPart], t: FiniteDuration) = outcome
+  override def put(u: String, h: Map[String, String], b: String, t: FiniteDuration)                       = outcome
+  override def delete(u: String, h: Map[String, String], t: FiniteDuration)                               = outcome
+  override def postRaw(u: String, h: Map[String, String], b: String, t: FiniteDuration) =
+    outcome.map(r => HttpRawResponse(r.statusCode, r.body.getBytes, r.headers))
+  override def postStream(u: String, h: Map[String, String], b: String, t: FiniteDuration) =
+    outcome.map(r => StreamingHttpResponse(r.statusCode, new java.io.ByteArrayInputStream(r.body.getBytes), r.headers))
 }
+
+/** A [[GeminiVisionClient]] whose HTTP layer answers with a canned outcome. */
+class MockGeminiVisionClient(config: GeminiVisionConfig, mockResponse: Try[(Int, String)])
+    extends GeminiVisionClient(
+      config,
+      new FixedHttpClient(
+        mockResponse.toEither.left.map(e => NetworkError(e.getMessage, Some(e), "test")).map { case (c, b) =>
+          HttpResponse(c, b)
+        }
+      )
+    )
 
 class GeminiVisionClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
@@ -181,18 +198,14 @@ class GeminiVisionClientSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     client.analyzeImage(tempImageFile.toString, Some("What is in this image?")).isRight shouldBe true
   }
 
-  it should "handle malformed JSON response gracefully (fallback description)" in {
+  it should "return Left, not a made-up description, for a malformed 200 body" in {
     val client = new MockGeminiVisionClient(testConfig, Success((200, malformedJson)))
-    val result = client.analyzeImage(tempImageFile.toString, None)
-    result.isRight shouldBe true
-    result.foreach(_.description should not be empty)
+    client.analyzeImage(tempImageFile.toString, None).isLeft shouldBe true
   }
 
-  it should "handle empty parts array in response (fallback description)" in {
+  it should "return Left for an empty parts array" in {
     val client = new MockGeminiVisionClient(testConfig, Success((200, emptyResponseJson)))
-    val result = client.analyzeImage(tempImageFile.toString, None)
-    result.isRight shouldBe true
-    result.foreach(_.description should not be empty)
+    client.analyzeImage(tempImageFile.toString, None).isLeft shouldBe true
   }
 
   // ---- analyzeImage — error paths ----
