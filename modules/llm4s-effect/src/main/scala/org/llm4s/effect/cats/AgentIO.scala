@@ -20,6 +20,11 @@ import org.llm4s.toolapi.ToolRegistry
  * not expose `contextWindowConfig`; the underlying [[Agent]] defaults apply. Tracing, debug logging
  * and the trace log path are still available through the `context` parameter. Use [[Agent]]
  * directly (inside `Async[F].interruptible`) when you need handoffs or context-window pruning.
+ *
+ * Tool calls are not a failure of the effect: `Agent` hands a call with invalid arguments back to the
+ * model as a structured error tool result and the run continues. The experimental
+ * schema-validated `AgentTool` contract and the graph runtime (`org.llm4s.agent.graph`) are not
+ * wrapped here.
  */
 trait AgentIO[F[_]] {
 

@@ -123,3 +123,12 @@ variables (`LLM_MODEL`, `OPENAI_API_KEY`, etc.).
 Tracing, debug logging and the trace log path are still available through the `context`
 parameter (`AgentContext`). If you need handoffs or context-window pruning, call `Agent` directly
 inside `Async[F].blocking`.
+
+Tool calls are not a failure of the effect. When the model calls a tool with arguments that do not
+fit the tool's schema, `Agent` hands a structured error result back to the model so it
+can correct itself; the run continues and only the step limit or a provider error ends it, which
+then arrives in the error channel as usual. If you need to see those results, read the
+`ToolMessage`s in the returned `AgentState`. The schema-validated `AgentTool` contract and the
+graph runtime (`org.llm4s.agent.graph`) are experimental and are not wrapped here; if you pass
+handoffs by calling `Agent` directly, each `Handoff` needs a stable id, as in
+`Handoff.to("physics", agent)`.
