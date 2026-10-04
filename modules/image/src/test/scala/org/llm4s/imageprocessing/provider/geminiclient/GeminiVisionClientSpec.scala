@@ -2,6 +2,7 @@ package org.llm4s.imageprocessing.provider.geminiclient
 
 import org.llm4s.imageprocessing._
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
+import org.llm4s.media.MediaType
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
@@ -89,39 +90,39 @@ class GeminiVisionClientSpec extends AnyFlatSpec with Matchers with BeforeAndAft
   // ---- detectMediaType ----
 
   "GeminiVisionClient.detectMediaType" should "detect PNG" in {
-    new GeminiVisionClient(testConfig).detectMediaType("a.png").value shouldBe "image/png"
+    new GeminiVisionClient(testConfig).detectMediaType("a.png").mimeType shouldBe "image/png"
   }
 
   it should "detect JPEG for .jpg" in {
-    new GeminiVisionClient(testConfig).detectMediaType("a.jpg").value shouldBe "image/jpeg"
+    new GeminiVisionClient(testConfig).detectMediaType("a.jpg").mimeType shouldBe "image/jpeg"
   }
 
   it should "detect JPEG for .jpeg" in {
-    new GeminiVisionClient(testConfig).detectMediaType("a.jpeg").value shouldBe "image/jpeg"
+    new GeminiVisionClient(testConfig).detectMediaType("a.jpeg").mimeType shouldBe "image/jpeg"
   }
 
   it should "detect GIF" in {
-    new GeminiVisionClient(testConfig).detectMediaType("a.gif").value shouldBe "image/gif"
+    new GeminiVisionClient(testConfig).detectMediaType("a.gif").mimeType shouldBe "image/gif"
   }
 
   it should "detect WEBP" in {
-    new GeminiVisionClient(testConfig).detectMediaType("a.webp").value shouldBe "image/webp"
+    new GeminiVisionClient(testConfig).detectMediaType("a.webp").mimeType shouldBe "image/webp"
   }
 
   it should "detect BMP" in {
-    new GeminiVisionClient(testConfig).detectMediaType("a.bmp").value shouldBe "image/bmp"
+    new GeminiVisionClient(testConfig).detectMediaType("a.bmp").mimeType shouldBe "image/bmp"
   }
 
   it should "detect TIFF for .tiff" in {
-    new GeminiVisionClient(testConfig).detectMediaType("a.tiff").value shouldBe "image/tiff"
+    new GeminiVisionClient(testConfig).detectMediaType("a.tiff").mimeType shouldBe "image/tiff"
   }
 
   it should "detect TIFF for .tif" in {
-    new GeminiVisionClient(testConfig).detectMediaType("a.tif").value shouldBe "image/tiff"
+    new GeminiVisionClient(testConfig).detectMediaType("a.tif").mimeType shouldBe "image/tiff"
   }
 
   it should "default to JPEG for unknown extension" in {
-    new GeminiVisionClient(testConfig).detectMediaType("a.xyz").value shouldBe "image/jpeg"
+    new GeminiVisionClient(testConfig).detectMediaType("a.xyz").mimeType shouldBe "image/jpeg"
   }
 
   // ---- analyzeImage — happy path ----
@@ -245,9 +246,9 @@ class GeminiVisionClientSpec extends AnyFlatSpec with Matchers with BeforeAndAft
 
   "GeminiVisionClient.convertFormat" should "delegate to the local processor" in {
     val client = new GeminiVisionClient(testConfig)
-    val result = client.convertFormat(tempImageFile.toString, ImageFormat.JPEG)
+    val result = client.convertFormat(tempImageFile.toString, MediaType.Jpeg)
     result.isRight shouldBe true
-    result.foreach(_.format shouldBe ImageFormat.JPEG)
+    result.foreach(_.format shouldBe MediaType.Jpeg)
   }
 
   "GeminiVisionClient.resizeImage" should "delegate to the local processor" in {

@@ -5,6 +5,7 @@ import org.llm4s.imageprocessing._
 import org.llm4s.imageprocessing.config.GeminiVisionConfig
 import org.llm4s.imageprocessing.provider.LocalImageProcessor
 import org.llm4s.error.LLMError
+import org.llm4s.media.{ ImageMediaType, MediaType }
 import ujson.read
 
 import java.net.URI
@@ -58,7 +59,7 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
         "Analyze this image in detail. Describe what you see, identify any objects, text, or people present. " +
           "Provide tags that categorize the image content."
       )
-      mediaType = MediaType.fromPath(imagePath)
+      mediaType = detectMediaType(imagePath)
       visionResponse <- callGeminiVisionAPI(base64Image, analysisPrompt, mediaType).toEither.left
         .map(e => LLMError.apiCallFailed("Gemini", s"Gemini Vision API call failed: ${e.getMessage}"))
     } yield parseVisionResponse(visionResponse, metadata)
@@ -71,7 +72,7 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
 
   override def convertFormat(
     imagePath: String,
-    targetFormat: ImageFormat
+    targetFormat: ImageMediaType
   ): Either[LLMError, ProcessedImage] =
     localProcessor.convertFormat(imagePath, targetFormat)
 
@@ -103,8 +104,8 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
    * @param imagePath Path to the image file.
    * @return [[MediaType]] inferred from the file extension (defaults to JPEG).
    */
-  def detectMediaType(imagePath: String): MediaType =
-    MediaType.fromPath(imagePath)
+  def detectMediaType(imagePath: String): ImageMediaType =
+    MediaType.imageFromPath(imagePath).getOrElse(MediaType.Jpeg)
 
   // ---- private helpers ----
 
@@ -132,7 +133,7 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
   private def callGeminiVisionAPI(
     base64Image: String,
     prompt: String,
-    mediaType: MediaType
+    mediaType: ImageMediaType
   ): Try[String] = {
     val requestBody = GeminiRequestBody.serialize(prompt, base64Image, mediaType)
     val url         = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"

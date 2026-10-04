@@ -1,6 +1,6 @@
 package org.llm4s.imageprocessing.provider.geminiclient
 
-import org.llm4s.imageprocessing.MediaType
+import org.llm4s.media.ImageMediaType
 
 /**
  * Serialises the Gemini generateContent request body for vision calls.
@@ -27,11 +27,11 @@ private[geminiclient] object GeminiRequestBody {
    * @param mediaType    MIME type of the image.
    * @return             A JSON string ready to POST to the Gemini generateContent endpoint.
    */
-  def serialize(prompt: String, base64Image: String, mediaType: MediaType): String = {
+  def serialize(prompt: String, base64Image: String, mediaType: ImageMediaType): String = {
     val textPart = ujson.Obj("text" -> prompt)
     val imagePart = ujson.Obj(
       "inlineData" -> ujson.Obj(
-        "mimeType" -> mediaType.value,
+        "mimeType" -> mediaType.mimeType,
         "data"     -> base64Image
       )
     )
