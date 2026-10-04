@@ -637,10 +637,10 @@ lazy val ollama = (project in file("modules/ollama"))
     name := "llm4s-ollama",
     commonSettings,
     mimaFrozen("llm4s-ollama"),
-    // Measured 77.44% statement coverage (`sbt coverage ollama/test ollama/coverageReport`) on
-    // the code as carved out of core. Floor is the measured value rounded down to the nearest
+    // Measured 97.22% statement coverage (`sbt coverage ollama/test ollama/coverageReport`) after
+    // the `format` (structured output) wiring; 77.44% when carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The `@Ollama` suite in `modules/it` is not counted here.
-    coverageFloor(75),
+    coverageFloor(95),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,

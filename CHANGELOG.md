@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Handoff.of(id, agent, reason)` for a `Result`), and `handoffId` is `handoff_to_<id>` rather
   than `handoff_to_agent_<hash>`. Design: `docs/design/typed-agent-runtime-design.md` §4.7, with
   the Stage 0 carry-forward in §4.8.
+- **Ollama honours `responseFormat`** ([#932](https://github.com/llm4s/llm4s/issues/932)):
+  `OllamaClient` now sends the `/api/chat` `format` field for streaming and non-streaming requests,
+  so `completeStructured` is constrained natively. `ResponseFormat.Json` sends `"format": "json"`
+  and `ResponseFormat.JsonSchema` sends the schema object (requires Ollama 0.5 or later); `name` and
+  `strict` have no Ollama equivalent and are ignored. Previously the field was silently dropped.
 - **Run API and event dispatch for graph runs** (Experimental, `org.llm4s.agent.graph`,
   [#1277](https://github.com/llm4s/llm4s/issues/1277)): `GraphRuntime.start`/`recover`/`resume`
   admit a run on the caller's thread and return `Result[RunHandle[O]]` once the thread is claimed;

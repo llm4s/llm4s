@@ -1319,6 +1319,14 @@ llm4s {
 }
 ```
 
+### Structured output
+
+`llm4s-ollama` honours `CompletionOptions.responseFormat` (and so `completeStructured`) through
+the `format` field of `/api/chat`, for streaming and non-streaming calls alike:
+`ResponseFormat.Json` sends `"format": "json"`, and `ResponseFormat.JsonSchema` sends the schema
+object, which needs Ollama 0.5 or later. `JsonSchema.name` and `strict` have no Ollama equivalent
+and are ignored. With no `responseFormat`, no `format` field is sent.
+
 ### Available Models
 
 100+ models available:
