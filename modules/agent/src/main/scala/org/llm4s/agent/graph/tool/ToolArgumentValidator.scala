@@ -7,12 +7,18 @@ package org.llm4s.agent.graph.tool
  * `type` (a string or an array of strings), `description` (ignored), `properties`, `required`,
  * `additionalProperties` (boolean), `enum`, `minLength`, `maxLength`, `minimum`, `maximum`,
  * `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `items`, `minItems`, `maxItems` and
- * `uniqueItems`. Any other keyword is reported by [[unsupported]] so a tool set can refuse it when
- * it is built, rather than silently skip the constraint on every call.
+ * `uniqueItems`. Any other keyword, and a supported one with a malformed value (a bound that is not
+ * a number, a length or count that is not a non-negative whole number, a non-boolean `uniqueItems`,
+ * a `required` that is not an array of strings, an `enum` that is not an array, `properties` that
+ * is not an object), is reported by [[unsupported]] so a tool set can refuse it when it is built,
+ * rather than silently skip the constraint on every call.
  */
 trait ToolArgumentValidator {
 
-  /** Keywords this validator cannot check, as JSON paths into `schema` (empty when fully supported). */
+  /**
+   * Keywords this validator cannot check, unknown or with a malformed value, as JSON paths into
+   * `schema` (empty when fully supported).
+   */
   def unsupported(schema: ujson.Value): Vector[String]
 
   /**
@@ -82,10 +88,30 @@ object ToolArgumentValidator {
                     case _: ujson.Obj => unsupportedAt(value, s"$path.items")
                     case _            => Vector(s"$path.items")
                   }
-                case "additionalProperties" =>
+                case "additionalProperties" | "uniqueItems" =>
                   value match {
                     case _: ujson.Bool => Vector.empty
-                    case _             => Vector(s"$path.additionalProperties")
+                    case _             => Vector(s"$path.$key")
+                  }
+                case "minimum" | "maximum" | "exclusiveMinimum" | "exclusiveMaximum" | "multipleOf" =>
+                  value match {
+                    case _: ujson.Num => Vector.empty
+                    case _            => Vector(s"$path.$key")
+                  }
+                case "minLength" | "maxLength" | "minItems" | "maxItems" =>
+                  value match {
+                    case ujson.Num(n) if n >= 0 && isWhole(n) => Vector.empty
+                    case _                                    => Vector(s"$path.$key")
+                  }
+                case "required" =>
+                  value match {
+                    case ujson.Arr(names) if names.forall(_.strOpt.isDefined) => Vector.empty
+                    case _                                                    => Vector(s"$path.required")
+                  }
+                case "enum" =>
+                  value match {
+                    case _: ujson.Arr => Vector.empty
+                    case _            => Vector(s"$path.enum")
                   }
                 case _ => Vector.empty
               }

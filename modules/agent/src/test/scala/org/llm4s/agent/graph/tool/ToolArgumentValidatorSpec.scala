@@ -189,6 +189,55 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
     v.unsupported(schema) shouldBe Vector("$.additionalProperties")
   }
 
+  it should "refuse malformed keyword values, by path" in {
+    val schema = obj(
+      "type"     -> "object",
+      "required" -> ujson.Arr("a", 1),
+      "properties" -> obj(
+        "a" -> obj(
+          "type"             -> "number",
+          "minimum"          -> "1",
+          "maximum"          -> true,
+          "exclusiveMinimum" -> ujson.Null,
+          "exclusiveMaximum" -> obj(),
+          "multipleOf"       -> "2"
+        ),
+        "s" -> obj("type" -> "string", "minLength" -> "1", "maxLength" -> ujson.Arr()),
+        "l" -> obj(
+          "type"        -> "array",
+          "items"       -> obj("type" -> "string", "enum" -> "x"),
+          "minItems"    -> "0",
+          "maxItems"    -> false,
+          "uniqueItems" -> "yes"
+        ),
+        "o" -> obj("type" -> "object", "properties" -> ujson.Arr())
+      )
+    )
+    v.unsupported(schema) shouldBe Vector(
+      "$.required",
+      "$.properties.a.minimum",
+      "$.properties.a.maximum",
+      "$.properties.a.exclusiveMinimum",
+      "$.properties.a.exclusiveMaximum",
+      "$.properties.a.multipleOf",
+      "$.properties.s.minLength",
+      "$.properties.s.maxLength",
+      "$.properties.l.items.enum",
+      "$.properties.l.minItems",
+      "$.properties.l.maxItems",
+      "$.properties.l.uniqueItems",
+      "$.properties.o.properties"
+    )
+  }
+
+  it should "refuse a non-array required, and a count that is negative or fractional" in {
+    v.unsupported(obj("type" -> "object", "required" -> "a")) shouldBe Vector("$.required")
+    v.unsupported(obj("type" -> "string", "minLength" -> -1, "maxLength" -> 1.5)) shouldBe
+      Vector("$.minLength", "$.maxLength")
+    v.unsupported(obj("type" -> "array", "minItems" -> 0, "maxItems" -> 3, "uniqueItems" -> false)) shouldBe
+      Vector.empty
+  }
+
   it should "return empty for every SchemaDefinition constructor in core, strict and non-strict" in {
     val inner = ObjectSchema[Unit]("i", Seq.empty)
       .withRequiredField("s", StringSchema("s").withEnum(Seq("a")).withLengthConstraints(Some(1), Some(5)))
