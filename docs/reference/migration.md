@@ -3,8 +3,8 @@
 ## Agent tool contract and handoff ids
 
 Not in a release yet ([#1278](https://github.com/llm4s/llm4s/issues/1278)). The graph tool loop
-runs `AgentTool`s, whose arguments are validated against the schema sent to the provider before
-the policy or the tool runs, and legacy handoffs take an explicit id. The graph runtime is
+runs `AgentTool`s, whose arguments are validated against their schema (rendered non-strict, so
+optional fields may be omitted) before the policy or the tool runs, and legacy handoffs take an explicit id. The graph runtime is
 Experimental, so these are source breaks with no shims. Design:
 `docs/design/typed-agent-runtime-design.md` §4.7.
 
@@ -36,8 +36,8 @@ Experimental, so these are source breaks with no shims. Design:
   `writes`; anything else fails the run. `ToolLoop.build` refuses a tool that declares
   `ToolLoop.results` or `Messages.key`.
 - **`ToolLoop.build` takes a `ToolSet`.** Build it with `ToolSet.of(tools*)`, which returns
-  `Left(ValidationError)` for an invalid name (`[a-zA-Z0-9_-]{1,64}`), a duplicate name, or a
-  schema keyword the validator cannot check. `AgentToolSpec.apply` throws
+  `Left(ValidationError)` for an invalid name (`[a-zA-Z0-9_-]{1,64}`), a duplicate name, an
+  argument schema that is not an object, or a schema keyword the validator cannot check. `AgentToolSpec.apply` throws
   `IllegalArgumentException` for an invalid name.
 - **`ModelStep.next` takes the tool set.** `next(messages)` becomes `next(messages, tools)`, and
   `ModelStep.fromClient(client, options)` replaces `options.tools` with `tools.toolFunctions`, so

@@ -12,9 +12,9 @@ middleware build on:
 
 - `AgentTool[A]` and `AgentToolSpec[A]`: typed, validated arguments; `RunContext` and thread state
   in; content, state updates, approval requests, typed questions and failures out, as data.
-- An agent-local `ToolArgumentValidator` that checks raw arguments against the exact schema sent to
-  the provider, before policy or any side effect, and refuses unsupported constraints when a tool set
-  is built.
+- An agent-local `ToolArgumentValidator` that checks raw arguments against the tool's argument
+  schema - the non-strict rendering core's Anthropic, Gemini and Vertex AI clients send - before
+  policy or any side effect, and refuses unsupported constraints when a tool set is built.
 - A tool-level failure (the model sees it) distinct from an infrastructure failure (the run fails).
 - A `ToolFunction` adapter, so core's stateless tools run in the loop.
 - Stable, explicit handoff IDs.
@@ -27,6 +27,7 @@ Nothing in `llm4s-core` changes. Nothing is frozen: replaced API is deleted, wit
 | Question | Decision |
 |---|---|
 | What a tool may do | Return content and a state update to keys it declares, ask for approval, ask a typed question, report a tool-level error, or fail the run. No routing. |
+| Argument schema | `schema.toJsonSchema(strict = false)`: only required fields are required. Core's clients do not agree on strictness - Anthropic, Gemini and Vertex AI send the non-strict schema, OpenAI and the OpenAI-compatible clients the strict one - and a strict call carries every field, which the non-strict schema also accepts. Validating strict would refuse every call on the first group that omits an optional field. |
 | Validation | An in-house validator for exactly the JSON Schema subset core's `SchemaDefinition` emits, behind a `ToolArgumentValidator` trait. Unsupported keywords are refused by `ToolSet.of`, never at call time. Violations become one tool-level error listing every violation by JSON path. |
 | Questions | Approval stays built in (`NeedsApproval`, `ToolContext.approved`, the loop's approval node). Other questions are declared on the spec (`withQuestion[Q, A]`), returned as `Ask(q)`, and answered through `resume`. A tool cannot hold a builder-issued `ResumeRef`, so the §4 sketch's `Suspend(question, resumeAt)` is replaced. |
 | Handoff IDs | Explicit and required: `Handoff.to(id, agent, ...)`, tool name `handoff_to_<id>`. |
@@ -44,8 +45,8 @@ final case class AgentToolSpec[A] private (
 )(using val codec: ReadWriter[A]):
   def withValidation(check: A => Result[Unit]): AgentToolSpec[A]
   private[tool] def withQuestion[Q: ReadWriter, Ans: ReadWriter]: AgentToolSpec[A]   // only Asking; see "Typed questions"
-  def providerSchema: ujson.Value      // schema.toJsonSchema(strict = true), rendered once; the validator's input
-  def toolDefinition: ujson.Value      // same shape as ToolFunction.toOpenAITool(true), with a copy of providerSchema
+  def argumentSchema: ujson.Value      // schema.toJsonSchema(strict = false), rendered once; the validator's input
+  def toolDefinition: ujson.Value      // ToolFunction.toOpenAITool(true)'s shape, strict; a fresh copy each call
 
 object AgentToolSpec:
   def apply[A: ReadWriter](name: String, description: String, schema: SchemaDefinition[A]): AgentToolSpec[A]
@@ -54,10 +55,13 @@ object AgentToolSpec:
 - `name` must match `[a-zA-Z0-9_-]{1,64}`. `apply` throws `IllegalArgumentException` for an invalid
   name (a programming error); `ToolSet.of` reports it as a `Left` too, so a tool built another way is
   still checked. `copy` is private (repo pattern for growth-prone types).
-- There is no `strict` field: core's clients always send tools strict (`ToolRegistry.getOpenAITools()`
-  defaults to it; the others convert that schema), so the schema is always rendered strict.
-  `toolDefinition` embeds a copy of `providerSchema`, because clients rewrite schemas in place (such
-  as removing `additionalProperties`), which would otherwise loosen validation.
+- There is no `strict` field. Core's clients render each tool's schema themselves from
+  `ToolFunction.schema` (`ToolSet.toolFunctions`): Anthropic, Gemini and Vertex AI non-strict,
+  OpenAI and the OpenAI-compatible clients strict. Arguments are therefore validated against
+  `argumentSchema`, the non-strict rendering, which accepts calls from both. `toolDefinition` is the
+  strict OpenAI-format definition, for callers that send definitions themselves; core's clients never
+  see it. Its parameters are a fresh copy on each call, a cheap defence so that a caller editing one
+  definition cannot change another.
 
 ```scala
 final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec: ReadWriter[Ans])
@@ -104,7 +108,7 @@ authors never see `Any`.
 ```scala
 final class ToolSet private (val tools: Vector[AgentTool[?]], val validator: ToolArgumentValidator):
   def get(name: String): Option[AgentTool[?]]
-  def definitions: Vector[ujson.Value]          // provider-facing tool definitions, in order
+  def definitions: Vector[ujson.Value]          // strict OpenAI-format definitions, in order, for callers that send them
   def toolFunctions: Seq[ToolFunction[?, ?]]    // the bridge to CompletionOptions.tools, in order
 object ToolSet:
   def of(tools: AgentTool[?]*): Result[ToolSet]
@@ -113,7 +117,9 @@ object ToolSet:
 ```
 
 `of` refuses, with one `ValidationError` listing every problem: an invalid tool name; duplicate names;
-any keyword in a tool's `providerSchema` that `validator.unsupported` reports.
+an `argumentSchema` whose root is not `type: object` (core's clients assume an object, and Anthropic's
+casts to `ObjectSchema`); any keyword in a tool's `argumentSchema` that `validator.unsupported`
+reports.
 
 `toolFunctions` is what the loop passes as `CompletionOptions.tools`: a tool made by
 `AgentTool.fromToolFunction` is its original `ToolFunction`; any other is a stand-in with the spec's
@@ -137,7 +143,12 @@ object ToolArgumentValidator:
 The default supports exactly: `type` (a string, or an array such as `["string","null"]`),
 `description` (ignored), `properties`, `required`, `additionalProperties` (boolean), `enum`,
 `minLength`, `maxLength`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`,
-`items`, `minItems`, `maxItems`, `uniqueItems`. Any other keyword is unsupported. Types: `string`,
+`items`, `minItems`, `maxItems`, `uniqueItems`. Any other keyword is unsupported, and so is a
+supported one with a malformed value, reported at its path: a non-number `minimum`, `maximum`,
+`exclusiveMinimum`, `exclusiveMaximum` or `multipleOf`; a `minLength`, `maxLength`, `minItems` or
+`maxItems` that is not a non-negative whole number; a non-boolean `uniqueItems` or
+`additionalProperties`; a `required` that is not an array of strings; a non-array `enum`; a
+non-object `properties`; a `type` that is not a JSON type name or a non-empty array of them. Types: `string`,
 `number` (any JSON number), `integer` (a number with no fractional part), `boolean`, `array`,
 `object`, `null`. Lengths count Unicode code points. `multipleOf` on non-integers uses a relative
 tolerance of 1e-9. Messages: `$.path: <what is wrong>`, e.g. `$.limit: 500 is above maximum 100`,
@@ -149,11 +160,13 @@ Each tool-call task (the `call-tool` node), in order. Steps 1-4 produce only an 
 model sees; none runs a tool or fails the run.
 
 1. **Look up** the tool by name: unknown → `Error("Unknown tool 'x'")`.
-2. **Validate** the raw arguments against `spec.providerSchema` with the set's validator: violations →
+2. **Validate** the raw arguments against `spec.argumentSchema` with the set's validator: violations →
    `Error("Invalid arguments for 'x': <violation>; <violation>")`. The validator is pluggable, so a
-   validator that throws → `Error("Invalid arguments for 'x': <exception message>")`.
+   validator that throws → `Error("Invalid arguments for 'x': <exception message>")`, unless the
+   throw is a cancellation (see step 6), which cancels the task instead.
 3. **Decode** with `spec.codec`: failure → `Error("Invalid arguments for 'x': <decode message>")`.
-4. **`validateDecoded`**: `Left(e)` → `Error("Invalid arguments for 'x': <e.message>")`.
+4. **`validateDecoded`**: `Left(e)` → `Error("Invalid arguments for 'x': <e.message>")`; a throw is
+   handled as a throwing validator's is.
 5. **Policy** (`ToolCallPolicy` until #1279): `Deny` → `Error("Denied: ...")`; `RequireApproval` →
    suspend at the approval node.
 6. **Execute** and map the outcome:
@@ -201,7 +214,9 @@ Exactly one result per call, written by the loop, is unchanged from #1269.
 `ToolLoop.build(id, version, model, tools: ToolSet, policy = ToolCallPolicy.allowAll)`. The
 `call-tool`, approval and `ask/<name>` nodes declare `writes = results ∪ messages ∪` the union of the
 tools' `writes`; the per-tool check in step 6 enforces each tool's own set. `ToolLoop` exposes typed
-helpers to read pending questions and answer them, alongside the existing approval helpers. `build`
+helpers alongside the existing approval helpers: `questions(suspended)` lists the pending
+`ToolQuestionRequest`s, `ToolLoop.question[Q](request): Result[Q]` decodes one's question as the
+asking tool's type, and `answer[Ans](id, answer)` encodes an answer to merge with `answers`. `build`
 refuses, with a `ValidationError` naming each offending tool, a tool whose `writes` contains
 `ToolLoop.results` or `Messages.key`: the loop alone writes those, so that every call gets exactly
 one result.
@@ -209,8 +224,8 @@ one result.
 ### `AgentTool.fromToolFunction`
 
 Adapts a core `ToolFunction[T, R]` as `AgentTool[ujson.Value]`: the spec uses the function's name,
-description and schema (erased to `SchemaDefinition[ujson.Value]`), rendered strict, so its arguments
-are validated like any other tool's; `execute` calls `tool.execute(arguments)`. `Right(json)` →
+description and schema (erased to `SchemaDefinition[ujson.Value]`), so its arguments are validated
+like any other tool's; `execute` calls `tool.execute(arguments)`. `Right(json)` →
 `Success(json)`; `Left(error)` → `Error(error.getFormattedMessage)`. No state, never asks.
 
 ## Handoffs (legacy `org.llm4s.agent`)
@@ -222,8 +237,8 @@ are validated like any other tool's; `execute` calls `tool.execute(arguments)`. 
   Valid: `[a-zA-Z0-9_-]{1,52}`, so `handoff_to_<id>` fits the 64-character tool-name limit.
 - `handoffId` is `s"handoff_to_$id"`. `handoffName` uses the reason, else `s"Handoff to $id"`.
 - `HandoffExecutor.createHandoffTools` refuses an invalid id (a `Handoff` built with `new` or `copy`
-  is not checked) or two handoffs with the same id with `ValidationError`, so an agent run given
-  either fails before any model call.
+  is not checked) or two handoffs with the same id with one `ValidationError` listing every invalid
+  and every duplicated id, quoted, so an agent run given either fails before any model call.
 - `AgentState` and `HandoffExecutor` keep matching on `handoffId`, now stable across processes;
   `detectHandoff` matches a tool call only by the exact `handoffId` of an available handoff.
 
@@ -261,14 +276,19 @@ acknowledgement. The design doc's carry-forward row (now §4.8) closes.
 - `ToolArgumentValidatorSpec`: each supported keyword accepted and refused; nested objects, arrays,
   nullable type arrays; `strict` and non-strict `required`; several violations reported together with
   paths; code-point lengths; integer vs number; `multipleOf` with decimals; `unsupported` reports
-  unknown keywords by path; a generated case per `SchemaDefinition` constructor proving every keyword
-  core emits is supported.
-- `ToolSetSpec`: invalid names, duplicates, unsupported keywords - all reported in one error.
+  unknown keywords and malformed keyword values by path; a generated case per `SchemaDefinition`
+  constructor proving every keyword core emits is supported.
+- `AgentToolContractSpec`: `argumentSchema` is the non-strict rendering and accepts an omitted
+  optional field.
+- `ToolSetSpec`: invalid names, duplicates, a non-object argument schema, unsupported keywords - all
+  reported in one error.
 - `ToolLoopSpec` (ported and extended): invalid arguments never reach policy or the tool (counting
   fakes); decode and `validateDecoded` failures; `Success` with an update; an undeclared key → run
   fails `ToolFailed`; `Fatal` → run fails, `recover` re-runs only that call; a thrown exception → error
   result; `Ask` answered and resumed, then a second `Ask`; an undeclared `Ask` → `ToolFailed`; edited
-  approval arguments re-validated; `fromToolFunction` round trip.
+  approval arguments re-validated; `fromToolFunction` round trip; a call omitting an optional field
+  runs; a validator or `validateDecoded` throwing a cancellation cancels the call.
 - `HandoffSpec`: id validation; duplicates refused; `handoffId` equal for two instances with the same id.
+  `HandoffExecutorSpec`: invalid and duplicate ids reported together, quoted, in one error.
 - `RunHandleSpec`: the stop handshake - a gate forces stop's interrupt after `cancelled()`
   acknowledges; the closing commit is not interrupted and the run reports `Cancelled`.

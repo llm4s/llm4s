@@ -11,17 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Agent tool contract for graph runs** (Experimental, `org.llm4s.agent.graph.tool`,
   [#1278](https://github.com/llm4s/llm4s/issues/1278)): `AgentTool[A]` and `AgentToolSpec[A]`
   replace the prototype `LoopTool`. A tool's arguments are typed by a core `SchemaDefinition[A]`
-  and a `ReadWriter[A]`; `ToolLoop` validates the raw arguments against the exact strict schema
-  sent to the provider, decodes them and runs the spec's optional `withValidation` check, and any
-  failure is an error result the model sees, before the policy or the tool runs. A tool receives a
+  and a `ReadWriter[A]`; `ToolLoop` validates the raw arguments against the spec's
+  `argumentSchema` (the non-strict rendering, so a call may omit an optional field), decodes them
+  and runs the spec's optional `withValidation` check, and any failure is an error result the
+  model sees, before the policy or the tool runs. A tool receives a
   `ToolContext` (run, call id, thread state, `approved`) and returns `ToolOutcome.Success(content,
   update)` - the update limited to the keys it declares in `writes` - `Error`, `NeedsApproval`,
   `Ask` or `Fatal`; it does not route. `ToolArgumentValidator.default` checks exactly the JSON
-  Schema subset core emits, and `ToolSet.of` refuses invalid or duplicate names and any schema
-  keyword the validator cannot check, in one `ValidationError`, when the set is built. A tool that
-  extends `AgentTool.Asking[A, Q, Ans]` asks typed questions: `Ask(q)` suspends the call at an
-  `ask/<tool>` resume node, `ToolLoop.questions` and `ToolLoop.answer` read and answer them, and
-  the tool continues in `resume`. `Fatal`, an update to an undeclared key and an undeclared or
+  Schema subset core emits, and `ToolSet.of` refuses invalid or duplicate names, a non-object
+  argument schema and any schema keyword the validator cannot check (unknown, or with a malformed
+  value), in one `ValidationError`, when the set is built. A tool that extends
+  `AgentTool.Asking[A, Q, Ans]` asks typed questions: `Ask(q)` suspends the call at an
+  `ask/<tool>` resume node, `ToolLoop.questions`, `ToolLoop.question[Q]` and `ToolLoop.answer`
+  find, read and answer them, and the tool continues in `resume`. `Fatal`, an update to an undeclared key and an undeclared or
   mistyped question fail the run with `GraphError.ToolFailed` (inside `NodeFailed`), leaving it
   recoverable; a thrown exception is an error result; a cancellation cancels the run. Edited
   approval arguments are validated again, and only a policy `Deny` refuses them.
