@@ -546,10 +546,11 @@ lazy val image = (project in file("modules/image"))
   .settings(
     name := "llm4s-image",
     commonSettings,
-    // Measured 66.82% statement coverage (`sbt coverage image/test image/coverageReport`) on
-    // the code as carved out of core. Floor is the measured value rounded down to the nearest
-    // 5. Never lower it. The two `@Local` vision suites in `modules/it` are not counted here.
-    coverageFloor(65),
+    // Measured 75.60% statement coverage (`sbt coverage image/test image/coverageReport`) with
+    // the Gemini vision client and its stub-server spec (66.82% as carved out of core). Floor is
+    // the measured value rounded down to the nearest 5. Never lower it. The two `@Local`
+    // vision suites in `modules/it` are not counted here.
+    coverageFloor(75),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
