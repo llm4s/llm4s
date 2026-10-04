@@ -637,8 +637,8 @@ jobs:
         run: sbt testOllama
 
   # Tier 2: containerised workspace tests. Split from the `integration-tests` job because
-  # this one has to build the workspace-runner image first (apt + sdkman + two Scala
-  # versions), which is far too slow for every PR. The image tag comes from the build
+  # this one has to build the workspace-runner image first (apt + sdkman + the Scala 3
+  # toolchain), which is far too slow for every PR. The image tag comes from the build
   # itself — `it / Test / envVars` passes `workspaceRunner / Docker / version` to the suite.
   workspace-integration:
     name: Workspace Integration
