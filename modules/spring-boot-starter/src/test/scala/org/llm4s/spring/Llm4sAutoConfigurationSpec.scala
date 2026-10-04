@@ -105,6 +105,37 @@ class Llm4sAutoConfigurationSpec extends AnyFlatSpec with Matchers {
       .run { ctx =>
         ctx.getBeansOfType(classOf[JLlmClient]).size() shouldBe 0
         ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 0
+        ctx.getBeansOfType(classOf[java.util.concurrent.ExecutorService]).size() shouldBe 0
+      }
+  }
+
+  it should "register the llm4sTaskExecutor bean that backs completeAsync" in {
+    runner
+      .withPropertyValues("llm4s.provider=ollama", "llm4s.model=llama3")
+      .run { ctx =>
+        ctx.getStartupFailure shouldBe null
+        ctx.getBeansOfType(classOf[java.util.concurrent.ExecutorService]).keySet().toArray.toSeq shouldBe
+          Seq("llm4sTaskExecutor")
+      }
+  }
+
+  it should "bind the llm4s.async.* and llm4s.health.* properties" in {
+    runner
+      .withUserConfiguration(classOf[MockClientConfig])
+      .withPropertyValues(
+        "llm4s.async.max-threads=3",
+        "llm4s.async.queue-capacity=9",
+        "llm4s.health.probe=true",
+        "llm4s.health.probe-ttl=2m",
+        "llm4s.health.probe-timeout=1500ms"
+      )
+      .run { ctx =>
+        val props = ctx.getBean(classOf[Llm4sProperties])
+        props.async.maxThreads shouldBe 3
+        props.async.queueCapacity shouldBe 9
+        props.health.probe shouldBe true
+        props.health.probeTtl shouldBe java.time.Duration.ofMinutes(2)
+        props.health.probeTimeout shouldBe java.time.Duration.ofMillis(1500)
       }
   }
 
