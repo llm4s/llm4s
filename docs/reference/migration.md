@@ -1,10 +1,62 @@
 # Migration Guide
 
+## Agent middleware
+
+Not in a release yet ([#1279](https://github.com/llm4s/llm4s/issues/1279)). The graph tool loop
+takes a stack of `AgentMiddleware` in place of a `ToolCallPolicy`: one ordered extension point with
+`beforeAgent`, `afterAgent`, `wrapModelCall` and `wrapToolCall` hooks, for approval, guardrails,
+logging, retry and rate limits. The graph runtime is Experimental, so these are source breaks with
+no shims. Design: `docs/design/typed-agent-runtime-design.md` §4.8.
+
+- **`ToolCallPolicy` and `PolicyDecision` are removed, and `ToolLoop.build` loses `policy`.** It
+  takes `middleware: Seq[AgentMiddleware] = Nil` instead. A policy becomes an `AgentMiddleware`
+  overriding `wrapToolCall`: `Allow` is `next()`, `Deny(reason)` is
+  `ToolOutcome.Error(s"Denied: $reason")`, and `RequireApproval(reason)` is
+  `if context.approved then next() else ToolOutcome.NeedsApproval(reason)` - or use
+  `ApprovalMiddleware`:
+
+  ```scala
+  // before
+  val policy: ToolCallPolicy = call =>
+    call.name match
+      case "drop_table" => PolicyDecision.Deny("never allowed")
+      case "deploy"     => PolicyDecision.RequireApproval("deploys are irreversible")
+      case _            => PolicyDecision.Allow
+  ToolLoop.build("assistant", "v1", model, tools, policy)
+
+  // after
+  val guard = new AgentMiddleware:
+    val id = MiddlewareId("guard")
+    override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
+      request.call.name match
+        case "drop_table"                  => ToolOutcome.Error("Denied: never allowed")
+        case "deploy" if !context.approved => ToolOutcome.NeedsApproval("deploys are irreversible")
+        case _                             => next()
+  ToolLoop.build("assistant", "v1", model, tools, Seq(guard))
+
+  // or, for approval alone
+  ToolLoop.build("assistant", "v1", model, tools, Seq(ApprovalMiddleware.unlessReadOnly))
+  ```
+
+- **`ApprovalSource.Policy` becomes `ApprovalSource.Middleware(id)`**, naming the middleware that
+  asked; a tool's own request is still `ApprovalSource.Tool`.
+- **`Approve` now re-runs the chain.** It used to skip the policy and run the tool; it now runs the
+  whole middleware chain again, from the outermost wrapper, with `ToolContext.approved = true`, as
+  `Edit` does with the new arguments. A deny rule that depends only on the call refuses the same
+  calls as before; a wrapper that asks for approval must pass when `context.approved` is set, or
+  the call becomes an error result (`asked for approval again`).
+- **Guardrails in the graph loop apply their transformations.** `GuardrailMiddleware(input, output)`
+  runs input guardrails in `beforeAgent` and output guardrails in `afterAgent`, each on the value the
+  previous one returned, so a guardrail that rewrites its input (`PIIMasker`, say) changes what the
+  model sees and what the run answers. The legacy `Agent` validates every guardrail against the
+  original value and keeps it, so it never applied a transformation; it is unchanged. A `Block`
+  fails the run with the error `CompositeGuardrail.all` reports.
+
 ## Agent tool contract and handoff ids
 
 Not in a release yet ([#1278](https://github.com/llm4s/llm4s/issues/1278)). The graph tool loop
 runs `AgentTool`s, whose arguments are validated against their schema (rendered non-strict, so
-optional fields may be omitted) before the policy or the tool runs, and legacy handoffs take an explicit id. The graph runtime is
+optional fields may be omitted) before any middleware or the tool runs, and legacy handoffs take an explicit id. The graph runtime is
 Experimental, so these are source breaks with no shims. Design:
 `docs/design/typed-agent-runtime-design.md` §4.7.
 
@@ -44,7 +96,7 @@ Experimental, so these are source breaks with no shims. Design:
   pass the tools to `ToolLoop.build`, not in `CompletionOptions`.
 - **Invalid arguments never reach the tool.** Arguments that break the schema, fail to decode or
   fail `withValidation` become the error result `Invalid arguments for '<tool>': ...`. Edited
-  approval arguments are checked again, and the policy can still deny them.
+  approval arguments are checked again, and a middleware's tool wrapper can still deny them.
 - **Handoffs take an id.** `Handoff(agent, ...)` becomes `Handoff(id, agent, ...)`, and
   `Handoff.to(agent)` / `Handoff.to(agent, reason)` become `Handoff.to(id, agent)` /
   `Handoff.to(id, agent, reason)`, which throw `IllegalArgumentException` for an invalid id;
