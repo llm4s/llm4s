@@ -213,6 +213,7 @@ lazy val llm4s = (project in file("."))
     voyage,
     bedrock,
     jina,
+    watsonx,
     providerTestkit,
     llm4sEffect,
     llm4sZio,
@@ -805,6 +806,30 @@ lazy val jina = (project in file("modules/providers/jina"))
     )
   )
 
+// `llm4s-watsonx` (#1019): IBM watsonx.ai. Not OpenAI-compatible - its text-generation API takes
+// a flattened `input` string and authenticates by exchanging an IBM Cloud API key for an IAM
+// bearer token - so it is a provider module of its own rather than a dialect in
+// `openai-compatible`. No dependency beyond core.
+
+lazy val watsonx = (project in file("modules/watsonx"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-watsonx",
+    commonSettings,
+    // Measured 96.15% statement coverage (`sbt coverage watsonx/test watsonx/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. There is no
+    // live suite in `modules/it`: watsonx.ai needs an IBM Cloud account (#1020).
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // `llm4s-provider-testkit` (#1133) is what a provider module's `Llm4s<Name>ModuleSpec` is written
 // with: discovery, sole ownership, explicit registration, the config-to-client round trip and
 // the `reference.conf` credential binding, as assertions, plus config loading from a HOCON
@@ -949,6 +974,7 @@ lazy val samples = (project in file("modules//samples"))
     voyage,
     bedrock,
     jina,
+    watsonx,
     knowledgegraphNeo4j,
     observability,
     observabilityPrometheus,
@@ -974,7 +1000,7 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   // registered" before any policy runs. It must accept whatever a user's config names, not
   // just what CI's smoke config (ollama) happens to exercise. A provider carve adds itself
   // here; `CheckPoliciesProvidersSpec` checks each one resolves.
-  .dependsOn(core, ollama, gemini, anthropic, openai, openaiCompatible, bedrock)
+  .dependsOn(core, ollama, gemini, anthropic, openai, openaiCompatible, bedrock, watsonx)
   .settings(
     name := "llm4s-config-policy",
     commonSettings,
@@ -1193,6 +1219,7 @@ lazy val it = (project in file("modules/it"))
     voyage,
     bedrock,
     jina,
+    watsonx,
     knowledgegraphNeo4j,
     workspaceClient,
     observability,
@@ -1269,6 +1296,7 @@ lazy val docs = (project in file("modules/docs"))
     voyage,
     bedrock,
     jina,
+    watsonx,
     providerTestkit,
     workspaceShared,
     workspaceClient,
@@ -1305,6 +1333,7 @@ lazy val docs = (project in file("modules/docs"))
         (voyage / Compile / sources).value ++
         (bedrock / Compile / sources).value ++
         (jina / Compile / sources).value ++
+        (watsonx / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++

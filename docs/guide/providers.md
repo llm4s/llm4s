@@ -37,6 +37,7 @@ LLM4S supports these LLM providers, plus any endpoint that speaks the OpenAI cha
 | **Mistral** | Cloud | Mistral and Magistral models | Easy |
 | **Cohere** | Cloud | Command models, RAG | Easy |
 | **Ollama** | Local | Private, no API key, offline | Easy |
+| **IBM watsonx.ai** | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
 
 Missing a vendor? See [Writing a Provider](writing-a-provider.md) to publish your own provider module.
 
@@ -416,6 +417,31 @@ rather than silently doing nothing. `organization`, `endpoint`, `apiVersion`, `c
 `reserveCompletion` were built-in fields that every section carried until
 [#1133](https://github.com/llm4s/llm4s/issues/1133); the HOCON for the providers that use them is
 unchanged.
+
+---
+
+## IBM watsonx.ai
+
+IBM's enterprise AI platform, serving Granite, Llama and Mistral models. It lives in its own module,
+`llm4s-watsonx`; adding the dependency registers the `watsonx` provider.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-watsonx" % llm4sVersion
+```
+
+```hocon
+llm4s.providers.watsonx-main {
+  provider  = "watsonx"
+  model     = "ibm/granite-13b-instruct-v2"   # or meta-llama/llama-3-8b-instruct, mistralai/mistral-large
+  projectId = ${?WATSONX_PROJECT_ID}          # or spaceId for a deployment space
+  # baseUrl = "https://eu-de.ml.cloud.ibm.com" # default https://us-south.ml.cloud.ibm.com
+}
+```
+
+`WATSONX_API_KEY` supplies the IBM Cloud API key, which the client exchanges for an IAM bearer token
+and refreshes before it expires. The text-generation API takes one prompt string, so the
+conversation is flattened with `[SYSTEM]:`/`[USER]:`/`[ASSISTANT]:` prefixes and tool calling is not
+supported.
 
 ---
 

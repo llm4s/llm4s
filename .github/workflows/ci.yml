@@ -195,6 +195,7 @@ jobs:
           voyage/test voyage/coverageReport
           bedrock/test bedrock/coverageReport
           jina/test jina/coverageReport
+          watsonx/test watsonx/coverageReport
           providerTestkit/test providerTestkit/coverageReport
           observability/test observability/coverageReport
           observabilityPrometheus/test observabilityPrometheus/coverageReport
@@ -369,6 +370,12 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/jina/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: jina
+      - name: Upload watsonx coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/watsonx/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: watsonx
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

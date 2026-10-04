@@ -431,6 +431,15 @@ The Jina AI embedding provider (`EMBEDDING_MODEL=jina/<model>`), with its
 `llm4s.embeddings.jina` config block and a typed `JinaTask` (`retrieval.query`,
 `retrieval.passage`, ...). A community provider module under `modules/providers/`; it brings no
 dependency beyond `llm4s-core`.
+### For IBM watsonx.ai
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-watsonx" % llm4sVersion
+```
+
+The IBM watsonx.ai chat provider (`provider = "watsonx"`), brings no dependency beyond
+`llm4s-core`. See [IBM watsonx.ai](../guide/providers.md#ibm-watsonxai).
 
 ### For image generation and vision
 
