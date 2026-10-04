@@ -31,11 +31,13 @@ class HandoffExecutorSpec extends AnyFlatSpec with Matchers {
 
   private def handoff(
     agent: Agent,
+    id: String = "target",
     reason: Option[String] = Some("specialist"),
     preserveContext: Boolean = true,
     transferSystemMessage: Boolean = false
   ): Handoff =
     Handoff(
+      id = id,
       targetAgent = agent,
       transferReason = reason,
       preserveContext = preserveContext,
@@ -109,6 +111,18 @@ class HandoffExecutorSpec extends AnyFlatSpec with Matchers {
     HandoffExecutor.detectHandoff(state) shouldBe None
   }
 
+  it should "find a real handoff call even after a user tool whose name has the handoff prefix" in {
+    val h    = handoff(mkAgent(), id = "x")
+    val user = ToolCall(id = "tc-0", name = "handoff_to_other", arguments = ujson.Obj())
+    val real = ToolCall(id = "tc-1", name = h.handoffId, arguments = ujson.Obj("reason" -> ujson.Str("r")))
+    val state = AgentState(
+      conversation = Conversation(Seq(UserMessage("q"), AssistantMessage("", Seq(user, real)))),
+      tools = ToolRegistry.empty,
+      availableHandoffs = Seq(h)
+    )
+    HandoffExecutor.detectHandoff(state).map(_._1.id) shouldBe Some("x")
+  }
+
   it should "return Some((handoff, reason)) when a matching handoff tool call is found" in {
     val agent = mkAgent()
     val h     = handoff(agent)
@@ -123,7 +137,7 @@ class HandoffExecutorSpec extends AnyFlatSpec with Matchers {
 
   it should "return None when handoff prefix matches but no matching handoff in availableHandoffs" in {
     val tc =
-      ToolCall(id = "tc-1", name = "handoff_to_agent_deadbeef", arguments = ujson.Obj("reason" -> ujson.Str("r")))
+      ToolCall(id = "tc-1", name = "handoff_to_deadbeef", arguments = ujson.Obj("reason" -> ujson.Str("r")))
     val state = AgentState(
       conversation = Conversation(
         Seq(
@@ -235,11 +249,28 @@ class HandoffExecutorSpec extends AnyFlatSpec with Matchers {
   it should "create one ToolFunction per handoff" in {
     val agent1 = mkAgent()
     val agent2 = mkAgent()
-    val h1     = handoff(agent1, reason = Some("reason A"))
-    val h2     = handoff(agent2, reason = Some("reason B"))
+    val h1     = handoff(agent1, "a", reason = Some("reason A"))
+    val h2     = handoff(agent2, "b", reason = Some("reason B"))
     val result = HandoffExecutor.createHandoffTools(Seq(h1, h2))
     result shouldBe a[Right[_, _]]
     result.getOrElse(Seq.empty) should have size 2
+  }
+
+  it should "return ValidationError for a directly constructed handoff with an invalid id" in {
+    val result = HandoffExecutor.createHandoffTools(Seq(handoff(mkAgent(), id = "bad id")))
+    result.left.map(_.isInstanceOf[org.llm4s.error.ValidationError]) shouldBe Left(true)
+    result.left.map(_.message) shouldBe Left("Invalid handoffs: invalid handoff ids: 'bad id'")
+  }
+
+  it should "report invalid and duplicate ids together, each quoted, in one error" in {
+    val agent = mkAgent()
+    val result = HandoffExecutor.createHandoffTools(
+      Seq(handoff(agent, id = "b"), handoff(agent, id = "bad id"), handoff(agent, id = "a"), handoff(agent, id = "b"))
+    )
+    result.left.map {
+      case v: org.llm4s.error.ValidationError => v.violations
+      case other                              => fail(s"expected a ValidationError, got $other")
+    } shouldBe Left(List("invalid handoff ids: 'bad id'", "duplicate handoff ids: 'b'"))
   }
 
   it should "use the handoffId as the tool name" in {
@@ -251,5 +282,60 @@ class HandoffExecutorSpec extends AnyFlatSpec with Matchers {
         tools.head.name shouldBe h.handoffId
       case Left(err) => fail(s"Expected Right but got Left: $err")
     }
+  }
+
+  it should "refuse a handoff whose tool name is already a registered tool, quoted, in the same error" in {
+    val agent = mkAgent()
+    val result = HandoffExecutor.createHandoffTools(
+      Seq(handoff(agent, id = "support"), handoff(agent, id = "bad id")),
+      Set("handoff_to_support", "other")
+    )
+    result.left.map {
+      case v: org.llm4s.error.ValidationError => v.violations
+      case other                              => fail(s"expected a ValidationError, got $other")
+    } shouldBe Left(
+      List("invalid handoff ids: 'bad id'", "handoff tool names already registered as tools: 'handoff_to_support'")
+    )
+  }
+
+  "Agent.run" should "refuse a handoff clashing with a registered tool before any model call" in {
+    val calls = new java.util.concurrent.atomic.AtomicInteger(0)
+    val inner = new DeterministicFakeLLMClient(
+      org.llm4s.llmconnect.model.Completion(
+        id = "t",
+        created = 0L,
+        content = "done",
+        model = "m",
+        message = AssistantMessage("done", Seq.empty),
+        toolCalls = Nil,
+        usage = None
+      )
+    )
+    val client = new org.llm4s.llmconnect.LLMClient {
+      def complete(c: Conversation, o: org.llm4s.llmconnect.model.CompletionOptions) = {
+        calls.incrementAndGet(); inner.complete(c, o)
+      }
+      def streamComplete(
+        c: Conversation,
+        o: org.llm4s.llmconnect.model.CompletionOptions,
+        f: org.llm4s.llmconnect.model.StreamedChunk => Unit
+      ) = { calls.incrementAndGet(); inner.complete(c, o) }
+      def getContextWindow(): Int     = 1000
+      def getReserveCompletion(): Int = 100
+    }
+    val clash = org.llm4s.toolapi
+      .ToolBuilder[Map[String, Any], String](
+        "handoff_to_support",
+        "d",
+        org.llm4s.toolapi.Schema.`object`[Map[String, Any]]("p")
+      )
+      .withHandler(_ => Right("x"))
+      .buildSafe()
+      .toOption
+      .get
+    val result =
+      new Agent(client).run("hi", new ToolRegistry(Seq(clash)), handoffs = Seq(handoff(mkAgent(), "support")))
+    result.left.map(_.message).left.getOrElse("") should include("'handoff_to_support'")
+    calls.get shouldBe 0
   }
 }

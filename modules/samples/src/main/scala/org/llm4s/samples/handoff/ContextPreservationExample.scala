@@ -50,6 +50,7 @@ object ContextPreservationExample extends App {
     _ = logger.info("Manually handing off to specialist with full context...")
 
     handoff = Handoff(
+      id = "physics",
       targetAgent = specialistAgent,
       transferReason = Some("Quantum physics expertise required"),
       preserveContext = true, // Transfer full conversation history

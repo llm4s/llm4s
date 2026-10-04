@@ -46,7 +46,7 @@ class AgentStatusSpec extends AnyFlatSpec with Matchers {
 
   "AgentStatus.HandoffRequested" should "store handoff and reason" in {
     val targetAgent = new Agent(mockClient)
-    val handoff     = Handoff(targetAgent, Some("Specialist needed"))
+    val handoff     = Handoff("target", targetAgent, Some("Specialist needed"))
     val status      = AgentStatus.HandoffRequested(handoff, Some("Complex query"))
 
     status.handoff shouldBe handoff
@@ -55,7 +55,7 @@ class AgentStatusSpec extends AnyFlatSpec with Matchers {
 
   it should "allow None for handoff reason" in {
     val targetAgent = new Agent(mockClient)
-    val handoff     = Handoff(targetAgent)
+    val handoff     = Handoff("target", targetAgent)
     val status      = AgentStatus.HandoffRequested(handoff, None)
 
     status.handoffReason shouldBe None
@@ -135,20 +135,20 @@ class AgentStatusSpec extends AnyFlatSpec with Matchers {
 
   "AgentStatus.HandoffRequested serialization" should "serialize with handoff ID" in {
     val targetAgent         = new Agent(mockClient)
-    val handoff             = Handoff(targetAgent, Some("Physics expertise"))
+    val handoff             = Handoff("target", targetAgent, Some("Physics expertise"))
     val status: AgentStatus = AgentStatus.HandoffRequested(handoff, Some("Complex physics question"))
 
     val json   = write[AgentStatus](status)
     val parsed = ujson.read(json)
 
     parsed("type").str shouldBe "HandoffRequested"
-    parsed("handoffId").str should startWith("handoff_to_agent_")
+    parsed("handoffId").str should startWith("handoff_to_")
     parsed("reason").str shouldBe "Complex physics question"
   }
 
   it should "serialize with null reason when None" in {
     val targetAgent         = new Agent(mockClient)
-    val handoff             = Handoff(targetAgent)
+    val handoff             = Handoff("target", targetAgent)
     val status: AgentStatus = AgentStatus.HandoffRequested(handoff, None)
 
     val json   = write[AgentStatus](status)
@@ -160,7 +160,7 @@ class AgentStatusSpec extends AnyFlatSpec with Matchers {
 
   // Note: HandoffRequested cannot be fully deserialized because it contains Agent reference
   it should "return Failed status when attempting to deserialize HandoffRequested" in {
-    val json   = """{"type":"HandoffRequested","handoffId":"handoff_to_agent_abc","reason":"test"}"""
+    val json   = """{"type":"HandoffRequested","handoffId":"handoff_to_abc","reason":"test"}"""
     val status = read[AgentStatus](json)
 
     // HandoffRequested cannot be deserialized - it contains Agent reference
@@ -241,7 +241,7 @@ class AgentStatusSpec extends AnyFlatSpec with Matchers {
     describe(AgentStatus.Failed("test")) shouldBe "failed: test"
 
     val targetAgent = new Agent(mockClient)
-    val handoff     = Handoff(targetAgent)
-    describe(AgentStatus.HandoffRequested(handoff, None)) should startWith("handoff: handoff_to_agent_")
+    val handoff     = Handoff("target", targetAgent)
+    describe(AgentStatus.HandoffRequested(handoff, None)) should startWith("handoff: handoff_to_")
   }
 }
