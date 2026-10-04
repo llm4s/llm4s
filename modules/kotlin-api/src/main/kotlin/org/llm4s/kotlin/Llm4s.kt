@@ -36,10 +36,8 @@ object Llm4s {
      * Throws [LLMException] if the provider cannot be configured.
      */
     fun createDefaultClient(): LLMClientKt {
-        val result = factory.createDefault()
-        if (result.isSuccess) return LLMClientKt(result.get())
-        val err = result.getError()
-        throw LLMException(err.message ?: "Failed to create client", err)
+        val jClient = factory.createDefault().unwrap("Failed to create client", cancellation = false)
+        return LLMClientKt(jClient)
     }
 
     /**

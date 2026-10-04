@@ -3,13 +3,14 @@ package org.llm4s.kotlin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runInterruptible
 import org.llm4s.javaapi.JLlmClient
 
 /**
  * Kotlin coroutine wrapper around [JLlmClient].
  *
- * All blocking calls are dispatched on [Dispatchers.IO] automatically. Errors
+ * All blocking calls are dispatched on [Dispatchers.IO] automatically, and cancelling the calling
+ * coroutine (or the collector of a [Flow]) interrupts the blocked call. Errors
  * surface as [LLMException] rather than Scala [Either], so callers never need
  * to import any Scala types.
  *
@@ -27,14 +28,8 @@ class LLMClientKt internal constructor(internal val underlying: JLlmClient) : Au
      *
      * Throws [LLMException] if the underlying call fails.
      */
-    suspend fun complete(query: String): String = withContext(Dispatchers.IO) {
-        val result = underlying.complete(query)
-        if (result.isSuccess) {
-            result.get()
-        } else {
-            val err = result.getError()
-            throw LLMException(err.message ?: "LLM call failed", err)
-        }
+    suspend fun complete(query: String): String = runInterruptible(Dispatchers.IO) {
+        underlying.complete(query).unwrap("LLM call failed")
     }
 
     /**
