@@ -264,6 +264,8 @@ class BedrockClient(
       onChunk(chunk)
     }
 
+    var stopped = false
+
     def drain(): Result[Completion] =
       CancelledError.catchInterrupt(queue.take()) match {
         case Left(interrupted) =>
@@ -289,12 +291,17 @@ class BedrockClient(
               }
               drain()
             case StreamSignal.Stop(reason) =>
+              stopped = true
               emit(StreamedChunk(messageId, None, None, Some(reason)))
               drain()
             case StreamSignal.Usage(input, output) =>
               accumulator.updateTokens(input, output)
               drain()
-            case StreamSignal.Finished(Some(error)) => Left(mapException(error))
+            case StreamSignal.Finished(Some(error))      => Left(mapException(error))
+            case StreamSignal.Finished(None) if !stopped =>
+              // The connection ended cleanly but the model never said it was done: what was
+              // delivered is a truncated answer, and a truncated tool call is worse.
+              Left(NetworkError("ConverseStream ended before messageStop", None, endpointLabel))
             case StreamSignal.Finished(None) =>
               accumulator.toCompletion.map { c =>
                 c.withModel(config.model)
@@ -311,7 +318,7 @@ class BedrockClient(
 
   private def partitionMessages(conversation: Conversation): Result[(Seq[String], Seq[BedrockMessage])] = {
     val systemTexts = conversation.messages.collect { case SystemMessage(content) => content }
-    val messages    = convertMessages(conversation.messages.filterNot(_.isInstanceOf[SystemMessage]))
+    val messages = mergeAdjacentRoles(convertMessages(conversation.messages.filterNot(_.isInstanceOf[SystemMessage])))
     if (messages.isEmpty)
       Left(
         ValidationError(
@@ -325,6 +332,9 @@ class BedrockClient(
   private def inferenceConfig(options: CompletionOptions): InferenceConfiguration = {
     val cfg = InferenceConfiguration.builder().temperature(options.temperature.floatValue())
     options.maxTokens.foreach(m => cfg.maxTokens(m))
+    // Only an explicit top-p is sent: 1.0 is the CompletionOptions default, and some models reject
+    // temperature and top-p together.
+    if (options.topP != 1.0) cfg.topP(options.topP.floatValue())
     cfg.build()
   }
 
@@ -352,6 +362,22 @@ class BedrockClient(
       builder.inferenceConfig(inferenceConfig(options))
       toolConfig(options).foreach(builder.toolConfig)
       builder.build()
+    }
+
+  /**
+   * Converse needs user and assistant turns to alternate. llm4s keeps one message per tool result,
+   * so an assistant turn with parallel tool calls is followed by several user messages (and an
+   * empty assistant message is dropped between two user ones); each run of same-role messages
+   * becomes one turn carrying all their content blocks, in order.
+   */
+  private def mergeAdjacentRoles(messages: Seq[BedrockMessage]): Seq[BedrockMessage] =
+    messages.foldLeft(Vector.empty[BedrockMessage]) { (acc, next) =>
+      acc.lastOption match {
+        case Some(prev) if prev.role() == next.role() =>
+          val blocks = prev.content().asScala ++ next.content().asScala
+          acc.init :+ BedrockMessage.builder().role(prev.role()).content(blocks.asJava).build()
+        case _ => acc :+ next
+      }
     }
 
   private def convertMessages(messages: Seq[Message]): Seq[BedrockMessage] =
@@ -445,6 +471,9 @@ class BedrockClient(
 
   // ---- errors ----
 
+  private def endpointLabel: String =
+    config.endpointUrl.getOrElse(s"bedrock-runtime.${config.region}.amazonaws.com")
+
   private def mapException(throwable: Throwable): LLMError =
     unwrap(throwable) match {
       case _: ThrottlingException           => RateLimitError("bedrock")
@@ -454,12 +483,11 @@ class BedrockClient(
       case e: BedrockRuntimeException if e.statusCode() == 401 || e.statusCode() == 403 =>
         AuthenticationError("bedrock", e.getMessage)
       case e: BedrockRuntimeException => ServiceError(e.statusCode(), "bedrock", e.getMessage)
+      // The SDK reports "no credentials" as a client exception; retrying cannot fix it.
+      case e: SdkClientException if Option(e.getMessage).exists(_.toLowerCase.contains("credentials")) =>
+        AuthenticationError("bedrock", e.getMessage)
       case e: SdkClientException =>
-        NetworkError(
-          e.getMessage,
-          Some(e),
-          config.endpointUrl.getOrElse(s"bedrock-runtime.${config.region}.amazonaws.com")
-        )
+        NetworkError(e.getMessage, Some(e), endpointLabel)
       case e => e.toLLMError
     }
 
@@ -542,7 +570,8 @@ object BedrockClient {
   private def credentialsFor(config: BedrockConfig): AwsCredentialsProvider =
     config.credentials match {
       case Some(c) =>
-        val credentials: AwsCredentials = c.sessionToken match {
+        // An empty AWS_SESSION_TOKEN is "no token", not a token of "".
+        val credentials: AwsCredentials = c.sessionToken.filter(_.trim.nonEmpty) match {
           case Some(token) => AwsSessionCredentials.create(c.accessKeyId, c.secretAccessKey, token)
           case None        => AwsBasicCredentials.create(c.accessKeyId, c.secretAccessKey)
         }
