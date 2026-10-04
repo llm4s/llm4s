@@ -416,6 +416,22 @@ The Voyage AI embedding provider (`EMBEDDING_MODEL=voyage/<model>`), with its
 `llm4s.embeddings.voyage` config block. It is the first community provider module under
 `modules/providers/`, and brings no dependency beyond `llm4s-core`.
 
+### For Jina AI embeddings
+
+{: .note }
+> Not yet published. `llm4s-jina` exists in the build as of
+> [#1028](https://github.com/llm4s/llm4s/issues/1028) but ships in the next release.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-jina" % llm4sVersion
+```
+
+The Jina AI embedding provider (`EMBEDDING_MODEL=jina/<model>`), with its
+`llm4s.embeddings.jina` config block and a typed `JinaTask` (`retrieval.query`,
+`retrieval.passage`, ...). A community provider module under `modules/providers/`; it brings no
+dependency beyond `llm4s-core`.
+
 ### For image generation and vision
 
 {: .note }

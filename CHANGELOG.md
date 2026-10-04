@@ -86,6 +86,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a system message is a `ValidationError`, which Converse cannot accept. Add the dependency
   `"org.llm4s" %% "llm4s-bedrock"`, which brings the AWS SDK v2 `bedrockruntime` artifact
   (Apache-2.0, the SDK release train `llm4s-rag` already uses for S3); nothing else changes.
+- **`llm4s-jina`: Jina AI embedding provider** (`modules/providers/jina`,
+  [#1028](https://github.com/llm4s/llm4s/issues/1028), rebuilt from #1060 as an
+  `EmbeddingProviderDescriptor`, so `llm4s-core` is untouched). `EMBEDDING_MODEL=jina/jina-embeddings-v3`
+  with `JINA_API_KEY` (bound to `llm4s.credentials.jina.apiKey`), `JINA_EMBEDDING_BASE_URL` (default
+  `https://api.jina.ai/v1`) and `JINA_EMBEDDING_MODEL`. The Jina `task` is a typed setting,
+  `JinaTask` (`RetrievalQuery`, `RetrievalPassage`, `TextMatching`, `Classification`,
+  `Separation`), passed as `JinaEmbeddingProvider.fromConfig(config, task)`; the provider the
+  registry builds uses `RetrievalPassage` until an input-purpose parameter lands on the embedding
+  request ([#1218](https://github.com/llm4s/llm4s/issues/1218)). Add the dependency
+  `"org.llm4s" %% "llm4s-jina"`; nothing else changes. HTTP 401 and 429 map to `EmbeddingError`
+  with codes `"401"` and `"429"`.
 - **Run API and event dispatch for graph runs** (Experimental, `org.llm4s.agent.graph`,
   [#1277](https://github.com/llm4s/llm4s/issues/1277)): `GraphRuntime.start`/`recover`/`resume`
   admit a run on the caller's thread and return `Result[RunHandle[O]]` once the thread is claimed;

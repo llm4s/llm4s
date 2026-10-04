@@ -212,6 +212,7 @@ lazy val llm4s = (project in file("."))
     openaiCompatible,
     voyage,
     bedrock,
+    jina,
     providerTestkit,
     llm4sEffect,
     llm4sZio,
@@ -783,6 +784,27 @@ lazy val bedrock = (project in file("modules/providers/bedrock"))
     )
   )
 
+// Jina AI embeddings (#1028): an embedding provider only, rebuilt from #1060 as an
+// `EmbeddingProviderDescriptor` with a typed `JinaTask` setting. No dependency beyond core.
+
+lazy val jina = (project in file("modules/providers/jina"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-jina",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage jina/test jina/coverageReport`). Floor is
+    // the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(100),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // `llm4s-provider-testkit` (#1133) is what a provider module's `Llm4s<Name>ModuleSpec` is written
 // with: discovery, sole ownership, explicit registration, the config-to-client round trip and
 // the `reference.conf` credential binding, as assertions, plus config loading from a HOCON
@@ -926,6 +948,7 @@ lazy val samples = (project in file("modules//samples"))
     openaiCompatible,
     voyage,
     bedrock,
+    jina,
     knowledgegraphNeo4j,
     observability,
     observabilityPrometheus,
@@ -1169,6 +1192,7 @@ lazy val it = (project in file("modules/it"))
     openaiCompatible,
     voyage,
     bedrock,
+    jina,
     knowledgegraphNeo4j,
     workspaceClient,
     observability,
@@ -1244,6 +1268,7 @@ lazy val docs = (project in file("modules/docs"))
     openaiCompatible,
     voyage,
     bedrock,
+    jina,
     providerTestkit,
     workspaceShared,
     workspaceClient,
@@ -1279,6 +1304,7 @@ lazy val docs = (project in file("modules/docs"))
         (openaiCompatible / Compile / sources).value ++
         (voyage / Compile / sources).value ++
         (bedrock / Compile / sources).value ++
+        (jina / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++

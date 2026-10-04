@@ -162,6 +162,7 @@ the value.
 | `mistral` | `MISTRAL_API_KEY` | `llm4s-openai-compatible` |
 | `cohere` | `COHERE_API_KEY` (chat and reranker) | `llm4s-openai-compatible`, `llm4s-rag` |
 | `voyage` | `VOYAGE_API_KEY` | `llm4s-voyage` |
+| `jina` | `JINA_API_KEY` | `llm4s-jina` |
 
 `ollama` takes no key, the generic `openai-compatible` provider has no vendor, `vertexai`
 authenticates with OAuth2 (Application Default Credentials, or a service-account file named by
@@ -349,6 +350,10 @@ OPENAI_API_KEY=sk-...
 EMBEDDING_MODEL=voyage/voyage-3
 VOYAGE_API_KEY=pa-...
 
+# Jina AI embeddings
+EMBEDDING_MODEL=jina/jina-embeddings-v3
+JINA_API_KEY=jina_...
+
 # Ollama embeddings (local, no API key needed)
 EMBEDDING_MODEL=ollama/nomic-embed-text
 ```
@@ -363,19 +368,21 @@ llm4s.embeddings.openai.apiKey = ${?OPENAI_EMBEDDINGS_API_KEY}
 ```
 
 Each embedding provider comes from its module: `openai` from `llm4s-openai`, `voyage` from
-`llm4s-voyage` and `ollama` from `llm4s-ollama` (in `0.4.1` and earlier, `openai` and `voyage` are
+`llm4s-voyage`, `jina` from `llm4s-jina` and `ollama` from `llm4s-ollama` (in `0.4.1` and earlier, `openai` and `voyage` are
 inside `llm4s-core`). Without the module, the provider id fails with an error naming the
 registered embedding providers.
 
 Default base URLs are used automatically:
 - OpenAI: `https://api.openai.com/v1`
 - Voyage: `https://api.voyageai.com/v1`
+- Jina: `https://api.jina.ai/v1`
 - Ollama: `http://localhost:11434`
 
 Override base URLs if needed - each module's `reference.conf` binds a variable for it:
 ```bash
 OPENAI_EMBEDDING_BASE_URL=https://custom.openai.com/v1   # llm4s-openai
 VOYAGE_EMBEDDING_BASE_URL=https://custom.voyage.ai/v1    # llm4s-voyage
+JINA_EMBEDDING_BASE_URL=https://custom.jina.ai/v1        # llm4s-jina
 OLLAMA_EMBEDDING_BASE_URL=http://embeddings-host:11434   # llm4s-ollama
 ```
 
@@ -390,6 +397,14 @@ OLLAMA_EMBEDDING_BASE_URL=http://embeddings-host:11434   # llm4s-ollama
 - `voyage-3` - General purpose
 - `voyage-3-large` - Higher quality
 - `voyage-code-2` - Code-optimized
+
+**Jina AI:**
+- `jina-embeddings-v3` - Multilingual, 8192-token context (1024 dimensions)
+- `jina-embeddings-v4` - (2048 dimensions)
+
+Jina embeds queries and documents differently. The provider built from `EMBEDDING_MODEL` sends
+the `retrieval.passage` task; to embed queries, build it with the typed `JinaTask` setting:
+`JinaEmbeddingProvider.fromConfig(config, JinaTask.RetrievalQuery)`.
 
 **Ollama (local):**
 - `nomic-embed-text` - General purpose (768 dimensions)
@@ -692,8 +707,10 @@ also set in `application.conf` or with `-D`.
 | `DEEPSEEK_API_KEY`, `ZAI_API_KEY`, `OPENROUTER_API_KEY`, `MISTRAL_API_KEY` | `llm4s.credentials.<provider>.apiKey` | `llm4s-openai-compatible` |
 | `COHERE_API_KEY` | `llm4s.credentials.cohere.apiKey` (Cohere chat and the Cohere reranker) | `llm4s-openai-compatible`, `llm4s-rag` |
 | `VOYAGE_API_KEY` | `llm4s.credentials.voyage.apiKey` | `llm4s-voyage` |
+| `JINA_API_KEY` | `llm4s.credentials.jina.apiKey` | `llm4s-jina` |
 | `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` | `llm4s.embeddings.openai.*` | `llm4s-openai` |
 | `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL` | `llm4s.embeddings.voyage.*` | `llm4s-voyage` |
+| `JINA_EMBEDDING_BASE_URL`, `JINA_EMBEDDING_MODEL` | `llm4s.embeddings.jina.*` | `llm4s-jina` |
 | `OLLAMA_EMBEDDING_BASE_URL`, `OLLAMA_EMBEDDING_MODEL` | `llm4s.embeddings.ollama.*` | `llm4s-ollama` |
 | `RERANK_PROVIDER`, `COHERE_RERANK_BASE_URL`, `COHERE_RERANK_MODEL` | `llm4s.rerank.*`, read by `RerankerConfigLoader` | `llm4s-rag` |
 | `PGVECTOR_HOST`, `PGVECTOR_PORT`, `PGVECTOR_DATABASE`, `PGVECTOR_USER`, `PGVECTOR_PASSWORD`, `PGVECTOR_TABLE`, ... | `llm4s.rag.permissions.pg.*` | `llm4s-rag` |

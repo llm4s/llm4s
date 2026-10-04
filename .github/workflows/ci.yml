@@ -194,6 +194,7 @@ jobs:
           openaiCompatible/test openaiCompatible/coverageReport
           voyage/test voyage/coverageReport
           bedrock/test bedrock/coverageReport
+          jina/test jina/coverageReport
           providerTestkit/test providerTestkit/coverageReport
           observability/test observability/coverageReport
           observabilityPrometheus/test observabilityPrometheus/coverageReport
@@ -362,6 +363,12 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/bedrock/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: bedrock
+      - name: Upload jina coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/jina/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: jina
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
