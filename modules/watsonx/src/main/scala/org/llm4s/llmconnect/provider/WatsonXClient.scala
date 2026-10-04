@@ -15,6 +15,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.ReentrantLock
 import scala.concurrent.duration.*
 import scala.util.{ Try, Using }
 
@@ -58,12 +59,39 @@ class WatsonXClient(
 
   private val tokenCache = new AtomicReference[Option[IamToken]](None)
 
+  // Single-flight: concurrent first calls (or calls racing a refresh) wait for one IAM exchange
+  // instead of each making their own. A ReentrantLock, not `synchronized`, so a virtual thread
+  // blocked here does not pin its carrier and an interrupted waiter wakes with the interrupt.
+  private val tokenLock = new ReentrantLock()
+
+  private def freshCached(): Option[String] =
+    tokenCache.get().filter(token => nowSeconds() < token.expiresAt - TOKEN_REFRESH_BUFFER_SECONDS).map(_.value)
+
   /** The cached IAM token, or a fresh one when none is cached or it expires within the buffer. */
   private[provider] def bearerToken(): Result[String] =
-    tokenCache.get() match {
-      case Some(token) if nowSeconds() < token.expiresAt - TOKEN_REFRESH_BUFFER_SECONDS => Right(token.value)
-      case _                                                                            => fetchToken()
+    freshCached() match {
+      case Some(token) => Right(token)
+      case None =>
+        tokenLock.lockInterruptibly()
+        Using.resource(new AutoCloseable { def close(): Unit = tokenLock.unlock() }) { _ =>
+          freshCached() match {
+            case Some(token) => Right(token)
+            case None        => fetchToken()
+          }
+        }
     }
+
+  /** Forgets `token` if it is still the cached one (a newer token fetched meanwhile is kept). */
+  private def invalidate(token: String): Unit =
+    tokenCache.updateAndGet(cached => cached.filterNot(_.value == token)): Unit
+
+  /** A 401 means the token we sent is no good (revoked, or expired early): never reuse it. */
+  private def noteStatus(status: Int, token: String): Unit =
+    if (status == 401) invalidate(token)
+
+  /** `text` with the API key and `token` blanked, for a body that goes into an error message. */
+  private def scrub(text: String, token: String): String =
+    Seq(config.apiKey, token).filter(_.nonEmpty).foldLeft(text)(_.replace(_, "[REDACTED]"))
 
   private def fetchToken(): Result[String] = {
     val body =
@@ -75,7 +103,7 @@ class WatsonXClient(
         Left(
           AuthenticationError(
             providerName,
-            s"IAM token exchange failed (HTTP ${response.statusCode}): ${response.body.take(256)}"
+            s"IAM token exchange failed (HTTP ${response.statusCode}): ${scrub(response.body, "").take(256)}"
           )
         )
     }
@@ -83,9 +111,11 @@ class WatsonXClient(
 
   private def parseToken(body: String): Result[String] =
     Try(ujson.read(body)).toResult.flatMap { json =>
-      json.obj.get("access_token").flatMap(_.strOpt).filter(_.nonEmpty) match {
+      val fields = json.objOpt
+      fields.flatMap(_.get("access_token")).flatMap(_.strOpt).filter(_.nonEmpty) match {
         case Some(token) =>
-          val ttl = json.obj.get("expires_in").flatMap(_.numOpt).map(_.toLong).getOrElse(DEFAULT_TOKEN_TTL_SECONDS)
+          val ttl =
+            fields.flatMap(_.get("expires_in")).flatMap(_.numOpt).map(_.toLong).getOrElse(DEFAULT_TOKEN_TTL_SECONDS)
           tokenCache.set(Some(IamToken(token, nowSeconds() + ttl)))
           Right(token)
         case None =>
@@ -106,9 +136,16 @@ class WatsonXClient(
         httpClient
           .post(endpoint("/ml/v1/text/generation"), apiHeaders(token, "application/json"), requestText, 120.seconds)
           .flatMap { response =>
+            noteStatus(response.statusCode, token)
             val result =
               if (response.statusCode >= 200 && response.statusCode < 300) parseCompletion(response.body)
-              else HttpErrorMapper.mapHttpError(response.statusCode, response.body, providerName, response.headers)
+              else
+                HttpErrorMapper.mapHttpError(
+                  response.statusCode,
+                  scrub(response.body, token),
+                  providerName,
+                  response.headers
+                )
             recordExchange(startedAt, requestText, response.body, result)
             result
           }
@@ -133,7 +170,8 @@ class WatsonXClient(
           else {
             val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
             raw.append(err)
-            HttpErrorMapper.mapHttpError(response.statusCode, err, providerName, response.headers)
+            noteStatus(response.statusCode, token)
+            HttpErrorMapper.mapHttpError(response.statusCode, scrub(err, token), providerName, response.headers)
           }
       }
       recordExchange(startedAt, requestText, raw.result(), result)
@@ -216,7 +254,7 @@ class WatsonXClient(
 
   private def parseCompletion(body: String): Result[Completion] =
     Try(ujson.read(body)).toResult.flatMap { json =>
-      json.obj.get("results").flatMap(_.arrOpt).flatMap(_.headOption) match {
+      json.objOpt.flatMap(_.get("results")).flatMap(_.arrOpt).flatMap(_.headOption).flatMap(_.objOpt) match {
         case None =>
           Left(
             org.llm4s.error.ValidationError(
@@ -225,14 +263,14 @@ class WatsonXClient(
             )
           )
         case Some(first) =>
-          val text = first.obj.get("generated_text").flatMap(_.strOpt).getOrElse("")
+          val text = first.get("generated_text").flatMap(_.strOpt).getOrElse("")
           val usage = for {
-            prompt <- first.obj.get("input_token_count").flatMap(_.numOpt).map(_.toInt)
-            gen    <- first.obj.get("generated_token_count").flatMap(_.numOpt).map(_.toInt)
+            prompt <- first.get("input_token_count").flatMap(_.numOpt).map(_.toInt)
+            gen    <- first.get("generated_token_count").flatMap(_.numOpt).map(_.toInt)
           } yield TokenUsage(prompt, gen, prompt + gen)
           Right(
             Completion(
-              id = json.obj.get("id").flatMap(_.strOpt).getOrElse(java.util.UUID.randomUUID().toString),
+              id = json.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).getOrElse(java.util.UUID.randomUUID().toString),
               created = nowSeconds(),
               content = text,
               toolCalls = List.empty,

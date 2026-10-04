@@ -70,13 +70,18 @@ object WatsonXConfig:
     apiVersion: String = DEFAULT_API_VERSION,
     iamUrl: String = DEFAULT_IAM_URL
   )(using resolver: ContextWindowResolver): Result[WatsonXConfig] =
+    // A trailing slash would put `//` in every endpoint (`$baseUrl/ml/v1/...`); stray whitespace
+    // would make the URL unparseable.
+    val base    = baseUrl.trim.replaceAll("/+$", "")
+    val version = apiVersion.trim
+    val iam     = iamUrl.trim
     val project = projectId.map(_.trim).filter(_.nonEmpty)
     val space   = spaceId.map(_.trim).filter(_.nonEmpty)
     for
       _ <- ProviderConfig.nonEmpty("watsonx", "apiKey", apiKey)
-      _ <- ProviderConfig.nonEmpty("watsonx", "baseUrl", baseUrl)
-      _ <- ProviderConfig.nonEmpty("watsonx", "apiVersion", apiVersion)
-      _ <- ProviderConfig.nonEmpty("watsonx", "iamUrl", iamUrl)
+      _ <- ProviderConfig.nonEmpty("watsonx", "baseUrl", base)
+      _ <- ProviderConfig.nonEmpty("watsonx", "apiVersion", version)
+      _ <- ProviderConfig.nonEmpty("watsonx", "iamUrl", iam)
       _ <- Either.cond(
         project.isDefined || space.isDefined,
         (),
@@ -95,9 +100,9 @@ object WatsonXConfig:
         projectId = project.getOrElse(""),
         spaceId = space,
         model = modelName,
-        baseUrl = baseUrl,
-        apiVersion = apiVersion,
-        iamUrl = iamUrl,
+        baseUrl = base,
+        apiVersion = version,
+        iamUrl = iam,
         contextWindow = cw,
         reserveCompletion = rc
       )
