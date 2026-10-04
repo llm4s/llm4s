@@ -160,7 +160,8 @@ Each tool-call task (the `call-tool` node), in order. Steps 1-4 produce only an 
 model sees; none runs a tool or fails the run.
 
 1. **Look up** the tool by name: unknown → `Error("Unknown tool 'x'")`.
-2. **Validate** the raw arguments against `spec.argumentSchema` with the set's validator: violations →
+2. **Validate** the raw arguments (`null` first becomes `{}` for a tool whose object schema requires nothing, as in
+   core's `ToolFunction.execute`; it stays `null`, and fails, for a tool with required fields) against `spec.argumentSchema` with the set's validator: violations →
    `Error("Invalid arguments for 'x': <violation>; <violation>")`. The validator is pluggable, so a
    validator that throws → `Error("Invalid arguments for 'x': <exception message>")`, unless the
    throw is a cancellation (see step 6), which cancels the task instead.

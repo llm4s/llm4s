@@ -381,7 +381,7 @@ object ToolLoop:
           CancelledError.fromThrowable(thrown, s"tool $name").fold(refused(describe(thrown)))(cancelled)
         }
       for
-        violations <- guarded(tools.validator.validate(tool.spec.argumentSchema, call.arguments))
+        violations <- guarded(tools.validator.validate(tool.spec.argumentSchema, argumentsOf(tool, call)))
         _          <- Either.cond(violations.isEmpty, (), refused(violations.mkString("; ")))
         args       <- decode(tool, call).left.map(refused)
         check      <- guarded(tool.spec.validateDecoded(args))
@@ -389,7 +389,23 @@ object ToolLoop:
       yield args
 
     private def decode[A](tool: AgentTool[A], call: ToolCall): Either[String, A] =
-      read(call.arguments)(using tool.spec.codec)
+      read(argumentsOf(tool, call))(using tool.spec.codec)
+
+    /**
+     * The call's arguments as the tool sees them. As core's `ToolFunction.execute` does, `null` for a
+     * tool that requires nothing is the empty object; for a tool with required fields it stays `null`
+     * and fails validation.
+     */
+    private def argumentsOf(tool: AgentTool[?], call: ToolCall): ujson.Value =
+      call.arguments match
+        case ujson.Null =>
+          tool.spec.argumentSchema match
+            case schema: ujson.Obj
+                if schema.value.get("type").contains(ujson.Str("object")) &&
+                  schema.value.get("required").forall { case ujson.Arr(names) => names.isEmpty; case _ => false } =>
+              ujson.Obj()
+            case _ => ujson.Null
+        case other => other
 
     /** Decodes `json`, describing a failure by the JSON path it happened at and its cause. */
     private def read[T: ReadWriter](json: ujson.Value): Either[String, T] =

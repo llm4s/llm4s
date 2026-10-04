@@ -797,6 +797,35 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       """done: t1={"message":"hi"} | t2={"error":"Invalid arguments for 'say': $.message: expected string, got integer"}"""
   }
 
+  it should "treat null arguments as {} for a tool that requires nothing, and refuse them otherwise" in {
+    val seenByCore   = new CopyOnWriteArrayList[String]()
+    val optionalOnly = Schema.`object`[Map[String, Any]]("Opt").withOptionalField("note", Schema.string("Note"))
+    val core = ToolBuilder[Map[String, Any], String]("core_opt", "Optional", optionalOnly)
+      .withHandler { extractor =>
+        seenByCore.add(extractor.params.render()); Right("ok")
+      }
+      .buildSafe()
+      .value
+    val seenByTyped = new CopyOnWriteArrayList[String]()
+    val typed = tool[ujson.Value]("typed_none") { (args, _) =>
+      seenByTyped.add(args.render()); text("ok")
+    }
+    val strict = tool[Echo]("needs_text", "text")((a, _) => text(a.text))
+    val model = ScriptedModel(
+      calls(
+        ("c1", "core_opt", ujson.Null),
+        ("c2", "typed_none", ujson.Null),
+        ("c3", "needs_text", ujson.Null)
+      ),
+      summarise
+    )
+    val l = ToolLoop.build("assistant", "v1", model, set(AgentTool.fromToolFunction(core), typed, strict)).value
+    runInMemory(l.graph, "go").completed._2 shouldBe
+      """done: c1=ok | c2=ok | c3={"error":"Invalid arguments for 'needs_text': $: expected object, got null"}"""
+    seenByCore.toArray.toSeq shouldBe Seq("{}")
+    seenByTyped.toArray.toSeq shouldBe Seq("{}")
+  }
+
   "ModelStep.fromClient" should "offer the loop's tools to the client" in {
     val offered = new CopyOnWriteArrayList[Seq[String]]()
     val client = new LLMClient {
