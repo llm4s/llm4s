@@ -123,6 +123,10 @@ flags:
     paths:
       - modules/config-policy/src/main/scala
     carryforward: true
+  gradle-demo:
+    paths:
+      - modules/gradle-demo/src/main/scala
+    carryforward: true
   samples:
     paths:
       - modules/samples/src/main/scala

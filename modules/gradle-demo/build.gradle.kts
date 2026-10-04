@@ -15,33 +15,30 @@ repositories {
     mavenCentral()
 }
 
-val llm4sVersion = "0.1.16"
+val llm4sVersion = "0.4.1"
 
 dependencies {
     // ── Core module ──────────────────────────────────────────────────────────
     // The _3 suffix selects the Scala 3 artifact. Gradle does not resolve Scala
     // cross-version suffixes automatically — you must specify it explicitly.
-    implementation("org.llm4s:core_3:$llm4sVersion")
-
-    // ── Java-friendly API (optional) ─────────────────────────────────────────
-    // Use this if you prefer a Java/Kotlin idiomatic API (no Scala Either/Option).
-    // implementation("org.llm4s:java-api_3:$llm4sVersion")
+    implementation("org.llm4s:llm4s-core_3:$llm4sVersion")
 
     // ── Logback exclusion (Spring Boot / Ktor projects) ──────────────────────
-    // llm4s bundles logback-classic 1.5.x as a runtime dependency.
+    // llm4s-core 0.4.x declares logback-classic 1.5.x as a compile dependency (the split
+    // modules on main depend on slf4j-api only, so this is not needed there).
     // Spring Boot 3.2.x ships 1.4.x; having both on the classpath causes
     // "multiple SLF4J bindings" warnings or log-format changes.
     // Uncomment the block below if your project manages logging separately:
     //
-    // implementation("org.llm4s:core_3:$llm4sVersion") {
+    // implementation("org.llm4s:llm4s-core_3:$llm4sVersion") {
     //     exclude(group = "ch.qos.logback", module = "logback-classic")
     // }
 
     // ── Azure exclusion (non-Azure projects) ─────────────────────────────────
-    // If you only use OpenAI or Anthropic providers you can shed the Azure SDK
-    // transitive dependency tree (~30 MB) with:
+    // llm4s-core 0.4.x depends on azure-ai-openai. If you do not use the Azure
+    // provider you can shed that transitive dependency tree with:
     //
-    // implementation("org.llm4s:core_3:$llm4sVersion") {
+    // implementation("org.llm4s:llm4s-core_3:$llm4sVersion") {
     //     exclude(group = "com.azure", module = "azure-ai-openai")
     // }
 }

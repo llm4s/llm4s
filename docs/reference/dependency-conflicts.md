@@ -2,7 +2,7 @@
 layout: page
 title: Dependency Conflicts
 parent: Reference
-nav_order: 10
+nav_order: 12
 ---
 
 # Dependency Conflict Resolution
@@ -19,40 +19,53 @@ LLM4S transitively pulls several large dependencies. This page documents known c
 
 ---
 
+## Which version does this apply to?
+
+LLM4S is being split from one `llm4s-core` jar into focused modules (see the [migration guide](/reference/migration)). The conflicts differ between the two shapes:
+
+- **`0.4.x`** (latest release): `llm4s-core` contains everything, and declares `logback-classic` and `com.azure:azure-ai-openai` as compile dependencies.
+- **`main` / the split modules**: `llm4s-core` and the provider modules depend on `slf4j-api` only (logback is test-scoped) and have no Azure dependency. Provider modules bring the vendor SDKs (`openai-java`, `anthropic-java`) and with them OkHttp and the Kotlin standard library.
+
+These were checked against the `0.4.1` build definition and the dependency trees of the `openai`, `anthropic` and `gemini` modules on `main`.
+
+---
+
 ## Conflict Matrix
 
 | Conflict | Affected scenario | Symptom | Resolution |
 |---|---|---|---|
-| `logback-classic` 1.4 vs 1.5 | Spring Boot 3.2.x + llm4s | `Multiple SLF4J bindings` warning or changed log format | Exclude `ch.qos.logback:logback-classic` from llm4s; let Spring Boot manage it |
+| `logback-classic` 1.4 vs 1.5 | Spring Boot 3.2.x + `llm4s-core` 0.4.x | `Multiple SLF4J bindings` warning or changed log format | Exclude `ch.qos.logback:logback-classic` from llm4s; let Spring Boot manage it |
 | Multiple SLF4J bindings | Any project with 2+ logging frameworks | `SLF4J: Class path contains multiple SLF4J bindings` | Keep exactly one SLF4J implementation on the classpath |
-| `azure-ai-openai` transitive tree | Non-Azure projects | ~30 MB extra jars; possible Netty version conflict | Exclude `com.azure:azure-ai-openai` from llm4s |
-| Apache HTTP client 5 vs OkHttp / Reactor Netty | Ktor or Spring WebFlux + Anthropic provider | Both HTTP clients on classpath; port conflicts possible | Exclude `org.apache.httpcomponents.client5:httpclient5` |
+| `azure-ai-openai` transitive tree | Non-Azure projects on 0.4.x | Extra Azure SDK jars on the classpath | Exclude `com.azure:azure-ai-openai` from llm4s |
+| OkHttp / Kotlin stdlib versions | Ktor, Kotlin projects + the OpenAI or Anthropic modules | Gradle upgrades OkHttp or `kotlin-stdlib` to the highest requested version | Check with `dependencyInsight`; pin with a constraint if needed |
 | Scala 3 micro-version mismatch | Any multi-lib Gradle project | `IncompatibleClassChangeError` at runtime | Pin `org.scala-lang` to `3.7.1` via `resolutionStrategy` |
-| Scala `_3` artifact suffix | Gradle (does not auto-resolve) | `Could not resolve org.llm4s:core` | Use explicit artifact names: `core_3`, `java-api_3` |
+| Scala `_3` artifact suffix | Gradle (does not auto-resolve) | `Could not resolve org.llm4s:llm4s-core` | Use explicit artifact names, e.g. `llm4s-core_3` |
 
 ---
 
-## Logback conflict
+## Logback conflict (0.4.x)
 
 ### Root cause
 
-LLM4S declares `ch.qos.logback:logback-classic:1.5.18` as a `runtime` dependency. Spring Boot 3.2.x uses `1.4.x` via its BOM. Gradle's default resolution strategy (highest wins) picks `1.5.x`, which may change log format output or trigger duplicate-binding errors if another binding is already present.
+`llm4s-core` `0.4.x` declares `ch.qos.logback:logback-classic` as a compile dependency. Spring Boot 3.2.x uses `1.4.x` via its BOM. Gradle's default resolution strategy (highest wins) can pick the llm4s version, which may change log format output or trigger duplicate-binding errors if another binding is already present.
 
-### Fix — Gradle (Kotlin DSL)
+On `main` this no longer applies: the library modules depend on `slf4j-api` only.
+
+### Fix - Gradle (Kotlin DSL)
 
 ```kotlin
-implementation("org.llm4s:core_3:0.1.16") {
+implementation("org.llm4s:llm4s-core_3:0.4.1") {
     exclude(group = "ch.qos.logback", module = "logback-classic")
 }
 ```
 
-### Fix — Maven
+### Fix - Maven
 
 ```xml
 <dependency>
     <groupId>org.llm4s</groupId>
-    <artifactId>core_3</artifactId>
-    <version>0.1.16</version>
+    <artifactId>llm4s-core_3</artifactId>
+    <version>0.4.1</version>
     <exclusions>
         <exclusion>
             <groupId>ch.qos.logback</groupId>
@@ -62,29 +75,29 @@ implementation("org.llm4s:core_3:0.1.16") {
 </dependency>
 ```
 
-### Fix — sbt
+### Fix - sbt
 
 ```scala
-libraryDependencies += "org.llm4s" %% "core" % "0.1.16" exclude("ch.qos.logback", "logback-classic")
+libraryDependencies += ("org.llm4s" %% "llm4s-core" % "0.4.1").exclude("ch.qos.logback", "logback-classic")
 ```
 
 ---
 
-## Azure SDK transitive tree
+## Azure SDK transitive tree (0.4.x)
 
 ### Root cause
 
-The Azure OpenAI provider depends on `com.azure:azure-ai-openai` which transitively pulls the full Azure Identity SDK, Azure Core HTTP Netty client, and reactor-netty. If you only use OpenAI or Anthropic providers, this adds ~30 MB and can conflict with a project's own Netty version.
+`llm4s-core` `0.4.x` includes the Azure OpenAI provider, which depends on `com.azure:azure-ai-openai` and, through it, the Azure core HTTP client stack. If you use neither Azure, this is dead weight and can conflict with a project's own Netty version.
 
-### Fix — Gradle (Kotlin DSL)
+### Fix - Gradle (Kotlin DSL)
 
 ```kotlin
-implementation("org.llm4s:core_3:0.1.16") {
+implementation("org.llm4s:llm4s-core_3:0.4.1") {
     exclude(group = "com.azure", module = "azure-ai-openai")
 }
 ```
 
-### Fix — Maven
+### Fix - Maven
 
 ```xml
 <exclusions>
@@ -97,17 +110,21 @@ implementation("org.llm4s:core_3:0.1.16") {
 
 ---
 
-## Apache HTTP client conflict (Ktor / Spring WebFlux)
+## OkHttp and Kotlin standard library
 
 ### Root cause
 
-`anthropic-java:2.x` pulls `org.apache.httpcomponents.client5:httpclient5`. Ktor uses OkHttp; Spring WebFlux uses Reactor Netty. Having Apache HTTP client 5 on the classpath alongside OkHttp is harmless but wastes classpath space and can trigger dependency-resolution version conflicts in multi-project builds.
+`openai-java` and `anthropic-java` (pulled in by `llm4s-openai` and `llm4s-anthropic`) use OkHttp 4.12 and Kotlin standard library 1.9.x. Ktor and other Kotlin projects often bring their own versions of both. Gradle resolves to the highest version requested, which is normally harmless.
 
-### Fix — Gradle (Kotlin DSL)
+Do not exclude OkHttp from the SDKs: they need it at runtime.
+
+### Fix - pin a version (Gradle, Kotlin DSL)
 
 ```kotlin
-implementation("org.llm4s:core_3:0.1.16") {
-    exclude(group = "org.apache.httpcomponents.client5", module = "httpclient5")
+dependencies {
+    constraints {
+        implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    }
 }
 ```
 
@@ -117,18 +134,12 @@ implementation("org.llm4s:core_3:0.1.16") {
 
 ### Root cause
 
-In sbt, `%%` automatically appends the Scala binary version suffix (`_3` or `_2.13`). Gradle has no equivalent. If you write `org.llm4s:core:0.1.16` without a suffix, Gradle cannot resolve the artifact.
+In sbt, `%%` automatically appends the Scala binary version suffix (`_3`). Gradle has no equivalent. If you write `org.llm4s:llm4s-core:0.4.1` without a suffix, Gradle cannot resolve the artifact. LLM4S is Scala 3 only, so the suffix is always `_3`.
 
 ### Fix
 
-Always use the explicit suffix:
-
 ```kotlin
-// Scala 3 (recommended)
-implementation("org.llm4s:core_3:0.1.16")
-
-// Scala 2.13 (if needed)
-implementation("org.llm4s:core_2.13:0.1.16")
+implementation("org.llm4s:llm4s-core_3:0.4.1")
 ```
 
 ---
@@ -137,7 +148,7 @@ implementation("org.llm4s:core_2.13:0.1.16")
 
 Multiple llm4s transitive dependencies may request different `org.scala-lang:scala3-library_3` micro-versions. Gradle resolves to the highest, which is usually fine, but an explicit pin avoids unexpected upgrades.
 
-### Fix — Gradle (Kotlin DSL)
+### Fix - Gradle (Kotlin DSL)
 
 ```kotlin
 configurations.all {

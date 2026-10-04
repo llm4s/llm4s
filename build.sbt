@@ -1219,14 +1219,15 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
 lazy val gradleDemo = (project in file("modules/gradle-demo"))
   .dependsOn(core)
   .settings(
-    name           := "gradle-demo",
+    name := "gradle-demo",
     commonSettings,
     publish / skip := true,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     ),
-    coverageMinimumStmtTotal := 100,
-    coverageFailOnMinimum    := true
+    // Measured 100.00% statement coverage (`sbt coverage gradleDemo/test
+    // gradleDemo/coverageReport`); floor is the measured value rounded down to the nearest 5.
+    coverageFloor(100)
   )
 
 // ---- relocation stubs for the 0.4.0 artifact rename ----

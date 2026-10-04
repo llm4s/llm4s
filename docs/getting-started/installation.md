@@ -76,14 +76,14 @@ ThisBuild / scalaVersion := "3.7.1"
 
 ### Gradle (Kotlin DSL)
 
-Gradle does **not** resolve Scala cross-version suffixes automatically — you must append `_3` (Scala 3) or `_2.13` explicitly:
+Gradle does **not** resolve Scala cross-version suffixes automatically — you must append the `_3` suffix explicitly (LLM4S is Scala 3 only):
 
 ```kotlin
 // build.gradle.kts
 repositories { mavenCentral() }
 
 dependencies {
-    implementation("org.llm4s:core_3:0.1.16")
+    implementation("org.llm4s:llm4s-core_3:0.4.1")
 }
 
 // Pin Scala library to avoid binary-incompatibility from transitive deps
@@ -103,7 +103,7 @@ configurations.all {
 repositories { mavenCentral() }
 
 dependencies {
-    implementation 'org.llm4s:core_3:0.1.16'
+    implementation 'org.llm4s:llm4s-core_3:0.4.1'
 }
 
 configurations.all {
