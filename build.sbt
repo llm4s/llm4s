@@ -951,7 +951,7 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   // registered" before any policy runs. It must accept whatever a user's config names, not
   // just what CI's smoke config (ollama) happens to exercise. A provider carve adds itself
   // here; `CheckPoliciesProvidersSpec` checks each one resolves.
-  .dependsOn(core, ollama, gemini, anthropic, openai, openaiCompatible)
+  .dependsOn(core, ollama, gemini, anthropic, openai, openaiCompatible, bedrock)
   .settings(
     name := "llm4s-config-policy",
     commonSettings,

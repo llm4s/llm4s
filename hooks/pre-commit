@@ -100,6 +100,7 @@ map_file_to_project() {
     modules/trace-opentelemetry/*)        echo "traceOpentelemetry" ;;
     modules/openai-compatible/*)          echo "openaiCompatible" ;;
     modules/provider-testkit/*)           echo "providerTestkit" ;;
+    modules/providers/bedrock/*)          echo "bedrock" ;;
     modules/providers/voyage/*)           echo "voyage" ;;
     modules/gradle-demo/*)                echo "gradleDemo" ;;
     modules/memory-postgres/*)            echo "memoryPostgres" ;;
@@ -201,6 +202,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE anthropic
       set_add DOWNSTREAM_COMPILE openaiCompatible
       set_add DOWNSTREAM_COMPILE voyage
+      set_add DOWNSTREAM_COMPILE bedrock
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE workspaceClient
       set_add DOWNSTREAM_COMPILE samples
@@ -284,6 +286,12 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
       ;;
+    bedrock)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
     voyage)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -355,6 +363,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE openaiCompatible
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE voyage
+      set_add DOWNSTREAM_COMPILE bedrock
       ;;
     knowledgegraphNeo4j)
       set_add DOWNSTREAM_COMPILE samples
