@@ -14,6 +14,7 @@ import java.io.ByteArrayInputStream
 import java.nio.{ ByteBuffer, ByteOrder }
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import scala.util.{ Try, Using }
 import javax.sound.sampled.AudioSystem
 
 /**
@@ -67,9 +68,13 @@ class CloudSpeechPipelineWireSpec extends AnyFlatSpec with Matchers with EitherV
           val file = Files.createTempFile("llm4s-pipeline-wire-", ".wav")
           try {
             WavFileGenerator.saveAsWav(audio, file).value
-            val saved = AudioSystem.getAudioInputStream(file.toFile).getFormat
+            // getAudioInputStream(File) holds the file open until closed; Windows cannot delete an open file.
+            val saved = Using.resource(AudioSystem.getAudioInputStream(file.toFile))(_.getFormat)
             (saved.getSampleRate.toInt, saved.getChannels, saved.getSampleSizeInBits) shouldBe ((Rate, 1, 16))
-          } finally Files.deleteIfExists(file)
+          } finally {
+            // Cleanup must not mask the real assertion failure.
+            val _ = Try(Files.deleteIfExists(file))
+          }
 
           val (pcm16k, meta) = AudioPreprocessing.resamplePcm16(audio.data, audio.meta, 16000).value
           val wav            = WavFileGenerator.createWavHeader(pcm16k.length, meta).value ++ pcm16k
@@ -80,10 +85,11 @@ class CloudSpeechPipelineWireSpec extends AnyFlatSpec with Matchers with EitherV
 
           val sent = uploadedFile(stt.only)
           sent shouldBe wav
-          val decoded = AudioSystem.getAudioInputStream(new ByteArrayInputStream(sent))
-          val fmt     = decoded.getFormat
-          (fmt.getSampleRate.toInt, fmt.getChannels, fmt.getSampleSizeInBits) shouldBe ((16000, 1, 16))
-          math.abs(decoded.getFrameLength - 16000L) should be <= 2L
+          Using.resource(AudioSystem.getAudioInputStream(new ByteArrayInputStream(sent))) { decoded =>
+            val fmt = decoded.getFormat
+            (fmt.getSampleRate.toInt, fmt.getChannels, fmt.getSampleSizeInBits) shouldBe ((16000, 1, 16))
+            math.abs(decoded.getFrameLength - 16000L) should be <= 2L
+          }
           val samples = ByteBuffer.wrap(sent.drop(44)).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
           val arr     = new Array[Short](samples.remaining())
           samples.get(arr)
