@@ -2,10 +2,12 @@ package org.llm4s.rag
 
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Ollama
-import org.llm4s.llmconnect.EmbeddingClient
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, OllamaConfig }
+import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
 import org.llm4s.llmconnect.provider.{ OllamaClient, OllamaEmbeddingProvider }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.Result
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -113,6 +115,40 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
 
   private def register(rag: RAG): RAG = { openRags = rag :: openRags; rag }
 
+  /**
+   * Passes every call through to the real model while keeping the prompts it was sent.
+   *
+   * What the model says back is not something to assert on, but what it was *given* is
+   * deterministic: this is how the suite checks the answer is grounded in the retrieved
+   * context without depending on a 0.5b model's wording.
+   */
+  private class RecordingLLMClient(delegate: LLMClient) extends LLMClient {
+    @volatile private var recorded: List[String] = Nil
+
+    /** One entry per `complete` call, oldest first; each is the whole conversation as text. */
+    def prompts: List[String] = recorded.reverse
+
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+      recorded = conversation.messages.map(_.content).mkString("\n") :: recorded
+      delegate.complete(conversation, options)
+    }
+
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = delegate.streamComplete(conversation, options, onChunk)
+
+    override def getContextWindow(): Int     = delegate.getContextWindow()
+    override def getReserveCompletion(): Int = delegate.getReserveCompletion()
+    override def close(): Unit               = delegate.close()
+  }
+
+  private def newOllamaClient(): OllamaClient =
+    new OllamaClient(
+      OllamaConfig(model = llmModel, baseUrl = ollamaBaseUrl, contextWindow = 8192, reserveCompletion = 4096)
+    )
+
   private def buildInMemoryRag(): RAG = {
     val config = RAGConfig.default
       .withEmbeddings("ollama", embeddingModel, embeddingDims)
@@ -143,6 +179,9 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
 
   override def beforeAll(): Unit = {
     super.beforeAll()
+    // A previous crashed run (or one against a different embedding dimension) may have left
+    // the tables behind; start from a schema this run creates.
+    dropOwnTables()
     if (embeddingsAvailable) {
       val rag = buildInMemoryRag()
       ingestCorpus(rag)
@@ -153,8 +192,26 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
   override def afterAll(): Unit = {
     openRags.foreach(rag => Try(rag.close()))
     dropOwnTables()
+    // "Cleans up after itself" is an acceptance criterion, so verify it rather than trust the DROPs.
+    val leftovers = ownTablesPresent()
     super.afterAll()
+    if (leftovers.nonEmpty) fail(s"test tables were not dropped: ${leftovers.mkString(", ")}")
   }
+
+  /** The suite's own tables that still exist in the database (empty when pgvector is not in use). */
+  private def ownTablesPresent(): List[String] =
+    pgUrl.toList.flatMap { url =>
+      Try {
+        Using.resource(java.sql.DriverManager.getConnection(url, pgUser, pgPassword)) { conn =>
+          List(vectorTable, keywordTable).filter { table =>
+            Using.resource(conn.prepareStatement("SELECT to_regclass(?) IS NOT NULL")) { stmt =>
+              stmt.setString(1, table)
+              Using.resource(stmt.executeQuery())(rs => rs.next() && rs.getBoolean(1))
+            }
+          }
+        }
+      }.getOrElse(Nil)
+    }
 
   /**
    * Drop exactly the two tables this suite created, whether or not a test got that far.
@@ -272,7 +329,36 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
       hits.exists(_.vectorScore.isDefined) shouldBe true
       hits.exists(_.keywordScore.isDefined) shouldBe true
       hits.map(r => docIdOf(r.id)) should contain("doc-database-2")
+
+      // The two exists() above could be satisfied by two different chunks. The pgvector
+      // document contains every query term (so the AND-ed full-text query matches it) and the
+      // whole ten-chunk corpus fits inside the vector channel's candidate window, so that one
+      // chunk must have been reached - and fused - through both channels.
+      val fused = hits.find(r => docIdOf(r.id) == "doc-database-2").getOrElse(fail("doc-database-2 not returned"))
+      fused.vectorScore should be(defined)
+      fused.keywordScore should be(defined)
     }
+
+  it should "upsert on re-ingestion and remove a deleted document from both channels" in {
+    requirePg()
+
+    val rag = buildPgHybridRag()
+    rag.clear().fold(e => fail(e.message), identity)
+    ingestCorpus(rag)
+    val indexed = rag.stats.fold(e => fail(e.message), _.vectorCount)
+    indexed should be >= corpus.size.toLong
+
+    // Same ids again: the store must replace rows, not accumulate them.
+    ingestCorpus(rag)
+    rag.stats.fold(e => fail(e.message), _.vectorCount) shouldBe indexed
+
+    rag.deleteDocument("doc-database-2").fold(e => fail(e.message), identity)
+    rag.stats.fold(e => fail(e.message), _.vectorCount) shouldBe indexed - 1
+
+    val hits = rag.query("pgvector semantic search", topK = Some(10)).fold(e => fail(e.message), identity)
+    hits.map(r => docIdOf(r.id)) should not contain "doc-database-2"
+    hits.map(r => docIdOf(r.id)) should contain("doc-database-1")
+  }
 
   it should "clear the pgvector store on request" in {
     requirePg()
@@ -294,14 +380,13 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
       Tier.require(embeddingsAvailable, s"Ollama at $ollamaBaseUrl is not serving $embeddingModel")
       Tier.require(llmAvailable, s"Ollama at $ollamaBaseUrl is not serving $llmModel")
 
-      val llmClient = new OllamaClient(
-        OllamaConfig(model = llmModel, baseUrl = ollamaBaseUrl, contextWindow = 8192, reserveCompletion = 4096)
-      )
+      val llmClient = newOllamaClient()
+      val recording = new RecordingLLMClient(llmClient)
 
       try {
         val config = RAGConfig.default
           .withEmbeddings("ollama", embeddingModel, embeddingDims)
-          .withLLM(llmClient)
+          .withLLM(recording)
           .inMemory
         val rag = register(
           RAG.buildWithClient(config, embeddingClient).fold(e => fail(s"Failed to build: ${e.message}"), identity)
@@ -318,8 +403,49 @@ class RAGPipelineOllamaIntegrationSpec extends AnyFlatSpec with Matchers with Be
         answer.contexts should have size 3
         answer.contexts.foreach(_.content should not be empty)
         (answer.contexts.map(c => docIdOf(c.id)) should contain).atLeastOneOf("doc-llm-2", "doc-llm-1", "doc-ollama-1")
+
+        // Grounding, without judging the model's wording: the one prompt it received carried
+        // the question and the text of every retrieved chunk.
+        recording.prompts should have size 1
+        recording.prompts.foreach { prompt =>
+          prompt should include("What is RAG and how does it enhance language models?")
+          answer.contexts.foreach(ctx => prompt should include(ctx.content))
+        }
       } finally llmClient.close()
     }
+
+  it should "answer from chunks retrieved through pgvector hybrid search, all in one pipeline" in {
+    requirePg()
+    Tier.require(llmAvailable, s"Ollama at $ollamaBaseUrl is not serving $llmModel")
+
+    val llmClient = newOllamaClient()
+    val recording = new RecordingLLMClient(llmClient)
+
+    try {
+      val url = pgUrl.getOrElse(fail("PGVECTOR_TEST_URL not set"))
+      val config = RAGConfig.default
+        .withEmbeddings("ollama", embeddingModel, embeddingDims)
+        .withPgHybrid(url, pgUser, pgPassword, vectorTable, keywordTable)
+        .withLLM(recording)
+      val rag = register(
+        RAG.buildWithClient(config, embeddingClient).fold(e => fail(s"Failed to build: ${e.message}"), identity)
+      )
+      rag.clear().fold(e => fail(e.message), identity)
+      ingestCorpus(rag)
+
+      val question = "Which PostgreSQL extension adds vector similarity search?"
+      val answer   = rag.queryWithAnswer(question, topK = Some(3)).fold(e => fail(e.message), identity)
+
+      answer.answer.trim should not be empty
+      answer.contexts should have size 3
+      (answer.contexts.map(c => docIdOf(c.id)) should contain).atLeastOneOf("doc-database-2", "doc-database-1")
+      recording.prompts should have size 1
+      recording.prompts.foreach { prompt =>
+        prompt should include(question)
+        answer.contexts.foreach(ctx => prompt should include(ctx.content))
+      }
+    } finally llmClient.close()
+  }
 
   // ---------------------------------------------------------------------------
   // 5. Lifecycle
