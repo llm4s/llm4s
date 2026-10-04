@@ -126,7 +126,7 @@ object ToolArgumentValidator {
       t match {
         case ujson.Str(s) => JsonTypes.contains(s)
         case ujson.Arr(a) =>
-          a.nonEmpty && a.forall {
+          a.nonEmpty && a.distinct.size == a.size && a.forall {
             case ujson.Str(s) => JsonTypes.contains(s)
             case _            => false
           }

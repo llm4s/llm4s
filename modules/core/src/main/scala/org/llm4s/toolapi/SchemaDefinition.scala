@@ -339,8 +339,9 @@ case class NullableSchema[T](
         // Replace type field with array of types
         schema("type") = ujson.Arr(ujson.Str(typeValue), ujson.Str("null"))
       case Some(arr: ujson.Arr) =>
-        // Add null to existing type array
-        schema("type") = ujson.Arr.from(arr.value :+ ujson.Str("null"))
+        // Add null to the existing type array, unless it is already there
+        val nullType = ujson.Str("null")
+        schema("type") = if (arr.value.contains(nullType)) arr else ujson.Arr.from(arr.value :+ nullType)
       case _ =>
         // Create new type array if none exists
         schema("type") = ujson.Arr(ujson.Str("null"))

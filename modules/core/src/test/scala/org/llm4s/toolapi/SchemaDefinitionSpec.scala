@@ -252,6 +252,11 @@ class SchemaDefinitionSpec extends AnyFlatSpec with Matchers {
     types should contain("string")
   }
 
+  it should "not repeat null when the schema is nullable twice" in {
+    val json = NullableSchema(NullableSchema(StringSchema("twice"))).toJsonSchema(strict = false)
+    json("type").arr.map(_.str).toSeq shouldBe Seq("string", "null")
+  }
+
   it should "preserve description from underlying schema" in {
     val schema = NullableSchema(StringSchema("Important description"))
     val json   = schema.toJsonSchema(strict = false)

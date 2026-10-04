@@ -357,4 +357,10 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
     }
       v.unsupported(obj(k -> bad)) shouldBe Vector(s"$$.$k")
   }
+
+  "unsupported" should "report a type array with duplicate entries" in {
+    v.unsupported(obj("type" -> ujson.Arr("string", "null", "null"))) shouldBe Vector("$.type")
+    v.unsupported(obj("properties" -> obj("a" -> obj("type" -> ujson.Arr("string", "string"))))) shouldBe
+      Vector("$.properties.a.type")
+  }
 }
