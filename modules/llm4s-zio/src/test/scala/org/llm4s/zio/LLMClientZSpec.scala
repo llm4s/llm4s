@@ -1,6 +1,6 @@
 package org.llm4s.zio
 
-import org.llm4s.error.SimpleError
+import org.llm4s.error.{ CancelledError, SimpleError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
@@ -136,9 +136,11 @@ object LLMClientZSpec extends ZIOSpecDefault {
             o: CompletionOptions,
             onChunk: StreamedChunk => Unit
           ): Result[Completion] = {
-            onChunk(StreamedChunk(id = "c1", content = Some("a")))
-            // Park (not sleep) so an interrupt ends the wait without an exception.
-            while (!Thread.currentThread().isInterrupted) java.util.concurrent.locks.LockSupport.parkNanos(10000000L)
+            // A cancellation that lands while `onChunk` waits for the chunk to be taken is thrown from
+            // it as InterruptedException; one that lands later sets the flag, ending the park.
+            val delivered = CancelledError.catchInterrupt(onChunk(StreamedChunk(id = "c1", content = Some("a"))))
+            if (delivered.isRight)
+              while (!Thread.currentThread().isInterrupted) java.util.concurrent.locks.LockSupport.parkNanos(10000000L)
             interrupted.countDown()
             Left(SimpleError("interrupted"))
           }
