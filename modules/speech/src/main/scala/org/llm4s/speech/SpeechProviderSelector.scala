@@ -1,25 +1,37 @@
+// scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.speech
 
 import org.llm4s.error.ConfigurationError
-import org.llm4s.speech.config.{ STTConfig, TTSConfig }
+import org.llm4s.speech.config.{ STTConfig, SpeechConfigLoader, TTSConfig }
 import org.llm4s.speech.stt.SpeechToText
 import org.llm4s.speech.stt.provider.{ AzureSTTClient, OpenAISTTClient }
 import org.llm4s.speech.tts.TextToSpeech
 import org.llm4s.speech.tts.provider.{ AzureTTSClient, ElevenLabsTTSClient, OpenAITTSClient }
 import org.llm4s.types.Result
+import pureconfig.ConfigSource
 
 /**
  * Routes speech provider configuration to the appropriate TTS or STT client.
  *
  * Provider selection follows the same `provider/model` prefix pattern used for LLM providers.
- * The model env-var format is:
- *   SPEECH_TTS_MODEL=openai/tts-1
- *   SPEECH_TTS_MODEL=elevenlabs/<voice-id>
- *   SPEECH_TTS_MODEL=azure/<voice-name>
- *   SPEECH_STT_MODEL=openai/whisper-1
- *   SPEECH_STT_MODEL=azure/en-US
+ * The model format, set through `SPEECH_TTS_MODEL` / `SPEECH_STT_MODEL` (see
+ * [[org.llm4s.speech.config.SpeechConfigLoader]]), is:
+ *   openai/tts-1, elevenlabs/<voice-id>, azure/<voice-name>   (TTS)
+ *   openai/whisper-1, azure/en-US                             (STT)
  */
 object SpeechProviderSelector {
+
+  /** The TTS client selected by `llm4s.speech.tts.model`, with credentials read from configuration. */
+  def tts(): Result[TextToSpeech] = tts(ConfigSource.default)
+
+  /** As [[tts()*]], reading `source`. */
+  def tts(source: ConfigSource): Result[TextToSpeech] = SpeechConfigLoader.tts(source).flatMap(getTTSClient)
+
+  /** The STT client selected by `llm4s.speech.stt.model`, with credentials read from configuration. */
+  def stt(): Result[SpeechToText] = stt(ConfigSource.default)
+
+  /** As [[stt()*]], reading `source`. */
+  def stt(source: ConfigSource): Result[SpeechToText] = SpeechConfigLoader.stt(source).flatMap(getSTTClient)
 
   /**
    * Returns a [[TextToSpeech]] implementation for the given configuration.
@@ -33,9 +45,9 @@ object SpeechProviderSelector {
    */
   def getTTSClient(cfg: TTSConfig): Result[TextToSpeech] =
     cfg.provider.toLowerCase match {
-      case "openai"     => Right(OpenAITTSClient.fromConfig(cfg))
-      case "elevenlabs" => Right(ElevenLabsTTSClient.fromConfig(cfg))
-      case "azure"      => Right(AzureTTSClient.fromConfig(cfg))
+      case "openai"     => Right(new OpenAITTSClient(cfg))
+      case "elevenlabs" => Right(new ElevenLabsTTSClient(cfg))
+      case "azure"      => Right(new AzureTTSClient(cfg))
       case unknown =>
         Left(
           ConfigurationError(
@@ -55,8 +67,8 @@ object SpeechProviderSelector {
    */
   def getSTTClient(cfg: STTConfig): Result[SpeechToText] =
     cfg.provider.toLowerCase match {
-      case "openai" => Right(OpenAISTTClient.fromConfig(cfg))
-      case "azure"  => Right(AzureSTTClient.fromConfig(cfg))
+      case "openai" => Right(new OpenAISTTClient(cfg))
+      case "azure"  => Right(new AzureSTTClient(cfg))
       case unknown =>
         Left(
           ConfigurationError(

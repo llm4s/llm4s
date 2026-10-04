@@ -1,132 +1,88 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.speech.stt.provider
 
 import org.llm4s.http.Llm4sHttpClient
-import org.llm4s.speech.AudioInput
+import org.llm4s.speech.{ AudioInput, CloudSpeechSupport }
 import org.llm4s.speech.config.STTConfig
 import org.llm4s.speech.stt.{ STTError, STTOptions, SpeechToText, Transcription }
-import org.llm4s.types.Result
-import org.slf4j.LoggerFactory
+import org.llm4s.types.{ Result, TryOps }
 
-import java.nio.file.Files
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import scala.concurrent.duration._
 import scala.util.Try
-import scala.util.control.NonFatal
 
 /**
- * Azure Speech-to-Text REST API client.
+ * Azure AI Speech speech-to-text (short-audio REST API, `POST /speech/recognition/conversation/cognitiveservices/v1`).
  *
- * Calls the Azure Speech-to-Text REST API with audio bytes.
- * Returns transcription result.
+ * The REST endpoint recognises at most about 60 seconds of audio and takes WAV (PCM) input:
+ * `FileAudio`, `BytesAudio` and `StreamAudio` are all read as WAV data, and the sample rate is
+ * read from the WAV header, falling back to the input's `sampleRate`, then 16 kHz.
  *
- * Auth: AZURE_SPEECH_KEY, AZURE_SPEECH_REGION
+ * The recognition language is `options.language`, else the configured default (`model` of the
+ * config, e.g. `azure/en-US`).
+ *
+ * @param config     configuration from [[org.llm4s.speech.config.SpeechConfigLoader.stt]]; `baseUrl` is the
+ *                   regional `https://<region>.stt.speech.microsoft.com` endpoint
+ * @param httpClient HTTP transport, replaceable in tests
  */
+final class AzureSTTClient(config: STTConfig, httpClient: Llm4sHttpClient = Llm4sHttpClient.create())
+    extends SpeechToText {
+
+  override val name: String = "azure-stt"
+
+  override val supportedFormats: List[String] = List("audio/wav")
+
+  override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] =
+    for {
+      audio <- CloudSpeechSupport.readAudio(input)
+      sampleRate = CloudSpeechSupport
+        .wavSampleRate(audio)
+        .orElse(AzureSTTClient.declaredSampleRate(input))
+        .getOrElse(AzureSTTClient.DefaultSampleRate)
+      language = options.language.getOrElse(config.model)
+      response <- httpClient.postBytes(
+        s"${config.baseUrl}/speech/recognition/conversation/cognitiveservices/v1" +
+          s"?language=${URLEncoder.encode(language, StandardCharsets.UTF_8)}&format=simple",
+        Map(
+          "Ocp-Apim-Subscription-Key" -> config.apiKey,
+          "Content-Type"              -> s"audio/wav; codecs=audio/pcm; samplerate=$sampleRate",
+          "Accept"                    -> "application/json"
+        ),
+        audio,
+        120.seconds
+      )
+      body          <- CloudSpeechSupport.textBody(name, response)
+      transcription <- AzureSTTClient.parse(body, language)
+    } yield transcription
+}
+
 object AzureSTTClient {
 
-  /**
-   * Creates an AzureSTTClient backed by the real JDK HTTP client.
-   */
-  def fromConfig(cfg: STTConfig): SpeechToText =
-    create(cfg, Llm4sHttpClient.create())
+  private[provider] val DefaultSampleRate = 16000
 
-  private[provider] def forTest(cfg: STTConfig, httpClient: Llm4sHttpClient): SpeechToText =
-    create(cfg, httpClient)
-
-  private def create(cfg: STTConfig, httpClient: Llm4sHttpClient): SpeechToText =
-    new SpeechToText {
-      private val logger = LoggerFactory.getLogger(getClass)
-
-      override val name: String = "azure-stt"
-
-      override val supportedFormats: List[String] =
-        List("audio/wav", "audio/ogg; codecs=opus", "audio/mp3")
-
-      override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] = {
-        val region = cfg.region.getOrElse("eastus")
-        val url = cfg.baseUrl match {
-          case u if u.nonEmpty && u != "default" => s"$u/speech/recognition/conversation/cognitiveservices/v1"
-          case _ =>
-            s"https://$region.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1"
-        }
-
-        val language = options.language.getOrElse("en-US")
-        val fullUrl  = s"$url?language=$language"
-
-        logger.debug(s"[AzureSTTClient] POST $fullUrl region=$region language=$language")
-
-        val headers = Map(
-          "Ocp-Apim-Subscription-Key" -> cfg.apiKey,
-          "Content-Type"              -> "audio/wav; codecs=audio/pcm; samplerate=16000",
-          "Accept"                    -> "application/json"
-        )
-
-        readAudioBytes(input).flatMap { audioBytes =>
-          try {
-            val response = httpClient.postBytes(fullUrl, headers, audioBytes, timeout = 120000)
-            response.statusCode match {
-              case 200 =>
-                parseAzureResponse(response.body, options)
-              case 401 =>
-                Left(STTError.EngineNotAvailable(s"Azure STT authentication failed: ${response.body}"))
-              case 400 =>
-                Left(STTError.InvalidInput(s"Azure STT invalid request: ${response.body}"))
-              case status =>
-                Left(STTError.ProcessingFailed(s"Azure STT API returned HTTP $status: ${response.body}"))
-            }
-          } catch {
-            case NonFatal(e) =>
-              logger.error(s"[AzureSTTClient] Request failed: ${e.getMessage}")
-              Left(STTError.ProcessingFailed(s"Azure STT request failed: ${e.getMessage}", Some(e)))
-          }
-        }
-      }
-
-      private def readAudioBytes(input: AudioInput): Result[Array[Byte]] =
-        input match {
-          case AudioInput.FileAudio(path) =>
-            Try(Files.readAllBytes(path)).fold(
-              err => Left(STTError.ProcessingFailed(s"Failed to read audio file: ${err.getMessage}", Some(err))),
-              bytes => Right(bytes)
-            )
-          case AudioInput.BytesAudio(bytes, _, _) =>
-            Right(bytes)
-          case AudioInput.StreamAudio(stream, _, _) =>
-            Try(stream.readAllBytes()).fold(
-              err => Left(STTError.ProcessingFailed(s"Failed to read audio stream: ${err.getMessage}", Some(err))),
-              bytes => Right(bytes)
-            )
-        }
-
-      private def parseAzureResponse(body: String, options: STTOptions): Result[Transcription] =
-        Try {
-          val json              = ujson.read(body)
-          val recognitionStatus = json.obj.get("RecognitionStatus").flatMap(_.strOpt).getOrElse("Unknown")
-
-          recognitionStatus match {
-            case "Success" =>
-              val text = json.obj.get("DisplayText").flatMap(_.strOpt).getOrElse("").trim
-              if (text.isEmpty) {
-                Left(STTError.ProcessingFailed("Azure STT returned empty transcription"))
-              } else {
-                Right(
-                  Transcription(
-                    text = text,
-                    language = options.language,
-                    confidence = None,
-                    timestamps = Nil,
-                    meta = None
-                  )
-                )
-              }
-            case "NoMatch" =>
-              Left(STTError.ProcessingFailed("Azure STT: No speech could be recognized in the audio"))
-            case "InitialSilenceTimeout" =>
-              Left(STTError.ProcessingFailed("Azure STT: Input audio starts with silence, exceeding timeout"))
-            case other =>
-              Left(STTError.ProcessingFailed(s"Azure STT recognition failed with status: $other"))
-          }
-        }.fold(
-          err => Left(STTError.ProcessingFailed(s"Failed to parse Azure STT response: ${err.getMessage}", Some(err))),
-          result => result
-        )
+  private[provider] def declaredSampleRate(input: AudioInput): Option[Int] =
+    input match {
+      case AudioInput.BytesAudio(_, rate, _)  => Some(rate)
+      case AudioInput.StreamAudio(_, rate, _) => Some(rate)
+      case _                                  => None
     }
+
+  private[provider] def parse(body: String, language: String): Result[Transcription] =
+    Try {
+      val json = ujson.read(body)
+      (
+        json.obj.get("RecognitionStatus").flatMap(_.strOpt).getOrElse("Unknown"),
+        json.obj.get("DisplayText").flatMap(_.strOpt).map(_.trim).getOrElse("")
+      )
+    }.toResult.left
+      .map(e => STTError.ProcessingFailed(s"Failed to parse Azure STT response: ${e.message}"))
+      .flatMap {
+        case ("Success", text) if text.nonEmpty => Right(Transcription(text, Some(language)))
+        case ("Success", _) => Left(STTError.ProcessingFailed("Azure STT returned an empty transcription"))
+        case ("NoMatch", _) =>
+          Left(STTError.ProcessingFailed("Azure STT: no speech could be recognized in the audio"))
+        case ("InitialSilenceTimeout", _) =>
+          Left(STTError.ProcessingFailed("Azure STT: the audio starts with silence that exceeded the timeout"))
+        case (other, _) => Left(STTError.ProcessingFailed(s"Azure STT recognition failed with status: $other"))
+      }
 }

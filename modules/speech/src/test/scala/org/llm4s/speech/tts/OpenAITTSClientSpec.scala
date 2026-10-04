@@ -1,7 +1,7 @@
 package org.llm4s.speech.tts
 
-import org.llm4s.http.{ HttpResponse, MockHttpClient, FailingHttpClient }
-import org.llm4s.speech.AudioFormat
+import org.llm4s.error.ValidationError
+import org.llm4s.speech.{ AudioFormat, StubHttpClient }
 import org.llm4s.speech.config.TTSConfig
 import org.llm4s.speech.tts.provider.OpenAITTSClient
 import org.scalatest.flatspec.AnyFlatSpec
@@ -9,126 +9,64 @@ import org.scalatest.matchers.should.Matchers
 
 class OpenAITTSClientSpec extends AnyFlatSpec with Matchers {
 
-  private val cfg = TTSConfig(
-    provider = "openai",
-    model = "tts-1",
-    voice = "alloy",
-    apiKey = "sk-test-key",
-    baseUrl = "https://api.openai.com"
-  )
+  private val cfg = TTSConfig("openai", "tts-1", "alloy", "sk-test-key", "https://api.openai.com")
 
-  private val defaultOptions = TTSOptions(outputFormat = AudioFormat.WavPcm16)
+  "OpenAITTSClient" should "return the response bytes untouched, described as 24 kHz 16-bit mono PCM" in {
+    val http   = new StubHttpClient(body = StubHttpClient.binaryAudio)
+    val client = new OpenAITTSClient(cfg, http)
 
-  "OpenAITTSClient" should "return GeneratedAudio on 200 OK response" in {
-    val audioData = "fake-mp3-audio-bytes"
-    val mock      = new MockHttpClient(HttpResponse(200, audioData))
-    val client    = OpenAITTSClient.forTest(cfg, mock)
+    val audio = client.synthesize("Hello world", TTSOptions(outputFormat = AudioFormat.RawPcm16)).toOption.get
 
-    val result = client.synthesize("Hello world", defaultOptions)
-
-    result.isRight shouldBe true
-    val audio = result.toOption.get
-    audio.data.length should be > 0
+    audio.data shouldBe StubHttpClient.binaryAudio
     audio.meta.sampleRate shouldBe 24000
     audio.meta.numChannels shouldBe 1
-    audio.format shouldBe AudioFormat.WavPcm16
+    audio.meta.bitDepth shouldBe 16
+    audio.format shouldBe AudioFormat.RawPcm16
   }
 
-  it should "use correct URL and headers in request" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "audio-bytes"))
-    val client = OpenAITTSClient.forTest(cfg, mock)
+  it should "POST model, voice, input and the pcm response format with a bearer token" in {
+    val http   = new StubHttpClient(body = Array[Byte](1, 2, 3))
+    val client = new OpenAITTSClient(cfg, http)
 
-    client.synthesize("Hello", defaultOptions)
+    client.synthesize("Say this text")
 
-    mock.lastUrl shouldBe Some("https://api.openai.com/v1/audio/speech")
-    mock.lastHeaders.get should contain("Authorization" -> "Bearer sk-test-key")
-    mock.lastHeaders.get should contain("Content-Type" -> "application/json")
+    val request = http.only
+    request.url shouldBe "https://api.openai.com/v1/audio/speech"
+    request.headers("Authorization") shouldBe "Bearer sk-test-key"
+    val json = ujson.read(request.text)
+    json("model").str shouldBe "tts-1"
+    json("voice").str shouldBe "alloy"
+    json("input").str shouldBe "Say this text"
+    json("response_format").str shouldBe "pcm"
+    json.obj.contains("speed") shouldBe false
   }
 
-  it should "include model, voice and input in the request body" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "audio-bytes"))
-    val client = OpenAITTSClient.forTest(cfg, mock)
+  it should "prefer the voice and speaking rate in TTSOptions" in {
+    val http   = new StubHttpClient(body = Array[Byte](1))
+    val client = new OpenAITTSClient(cfg, http)
 
-    client.synthesize("Say this text", defaultOptions)
+    client.synthesize("Hi", TTSOptions(voice = Some("nova"), speakingRate = Some(1.5)))
 
-    val body = mock.lastBody.get
-    body should include("tts-1")
-    body should include("alloy")
-    body should include("Say this text")
+    val json = ujson.read(http.only.text)
+    json("voice").str shouldBe "nova"
+    json("speed").num shouldBe 1.5
   }
 
-  it should "use voice from TTSOptions when provided" in {
-    val mock    = new MockHttpClient(HttpResponse(200, "audio-bytes"))
-    val client  = OpenAITTSClient.forTest(cfg, mock)
-    val options = defaultOptions.copy(voice = Some("fable"))
+  it should "reject blank text without sending a request" in {
+    val http   = new StubHttpClient(body = Array[Byte](1))
+    val result = new OpenAITTSClient(cfg, http).synthesize("   ")
 
-    client.synthesize("Test", options)
-
-    val body = mock.lastBody.get
-    body should include("fable")
+    result.left.toOption.get shouldBe a[ValidationError]
+    http.requests shouldBe empty
   }
 
-  it should "return EngineNotAvailable error on 401 response" in {
-    val mock   = new MockHttpClient(HttpResponse(401, """{"error":{"message":"Incorrect API key"}}"""))
-    val client = OpenAITTSClient.forTest(cfg, mock)
+  it should "fail on an empty audio body" in {
+    val result = new OpenAITTSClient(cfg, new StubHttpClient()).synthesize("Hi")
 
-    val result = client.synthesize("Hello", defaultOptions)
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[TTSError.EngineNotAvailable]
-  }
-
-  it should "return SynthesisFailed error on 500 response" in {
-    val mock   = new MockHttpClient(HttpResponse(500, """{"error":{"message":"Internal server error"}}"""))
-    val client = OpenAITTSClient.forTest(cfg, mock)
-
-    val result = client.synthesize("Hello", defaultOptions)
-
-    result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[TTSError.SynthesisFailed]
   }
 
-  it should "return SynthesisFailed on network failure" in {
-    val failing = new FailingHttpClient(new java.io.IOException("connection refused"))
-    val client  = OpenAITTSClient.forTest(cfg, failing)
-
-    val result = client.synthesize("Hello", defaultOptions)
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[TTSError.SynthesisFailed]
-  }
-
-  it should "have name 'openai-tts'" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "audio"))
-    val client = OpenAITTSClient.forTest(cfg, mock)
-    client.name shouldBe "openai-tts"
-  }
-
-  it should "send a POST request (not GET)" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "audio"))
-    val client = OpenAITTSClient.forTest(cfg, mock)
-
-    client.synthesize("Hello", defaultOptions)
-
-    mock.postCallCount shouldBe 1
-  }
-
-  it should "handle empty text synthesis" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "audio-bytes"))
-    val client = OpenAITTSClient.forTest(cfg, mock)
-
-    val result = client.synthesize("", defaultOptions)
-    // The client should still call the API and return a result
-    result.isRight shouldBe true
-  }
-
-  it should "use custom baseUrl from config" in {
-    val customCfg = cfg.copy(baseUrl = "https://custom.openai.proxy.com")
-    val mock      = new MockHttpClient(HttpResponse(200, "audio"))
-    val client    = OpenAITTSClient.forTest(customCfg, mock)
-
-    client.synthesize("Test", defaultOptions)
-
-    mock.lastUrl shouldBe Some("https://custom.openai.proxy.com/v1/audio/speech")
+  it should "report its name" in {
+    new OpenAITTSClient(cfg, new StubHttpClient()).name shouldBe "openai-tts"
   }
 }

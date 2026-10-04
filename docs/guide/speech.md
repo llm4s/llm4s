@@ -18,9 +18,11 @@ A comprehensive speech recognition and text-to-speech synthesis module for the L
 - **Whisper**: High-accuracy transcription via CLI integration
 - **Audio Preprocessing**: Resampling, channel conversion, silence trimming
 - **Multiple Input Formats**: File, bytes, and stream audio support
+- **Cloud**: `OpenAISTTClient` (Whisper API) and `AzureSTTClient` (Azure AI Speech), see [Cloud providers](#cloud-providers)
 
 ### Text-to-Speech (TTS)
 - **Tacotron2**: Neural speech synthesis via CLI integration
+- **Cloud**: `OpenAITTSClient`, `ElevenLabsTTSClient` and `AzureTTSClient`, see [Cloud providers](#cloud-providers)
 - **Voice Customization**: Language, speaking rate, pitch, volume control
 - **Output Formats**: WAV and raw PCM16 audio support
 - **Cross-platform**: Works on Windows, Linux, and macOS
@@ -148,6 +150,54 @@ The `PlatformCommands` utility automatically provides the right commands:
 - **Installation**: Requires Tacotron2 CLI tool
 - **Usage**: The module integrates with Tacotron2 CLI for synthesis
 - **Features**: Voice customization, language support, audio output
+
+---
+
+## Cloud providers
+
+Three cloud TTS clients and two cloud STT clients live in `org.llm4s.speech.tts.provider` and
+`org.llm4s.speech.stt.provider`. They are selected like chat models, with a `provider/model`
+string, and built through `SpeechProviderSelector`:
+
+| Setting | Values |
+|---|---|
+| `SPEECH_TTS_MODEL` | `openai/tts-1`, `openai/tts-1-hd`, `elevenlabs/<voice-id>`, `azure/<voice-name>` (e.g. `azure/en-US-JennyNeural`) |
+| `SPEECH_TTS_VOICE` | optional voice override (OpenAI default `alloy`) |
+| `SPEECH_STT_MODEL` | `openai/whisper-1`, `azure/<default-language>` (e.g. `azure/en-US`) |
+| `OPENAI_API_KEY` | OpenAI TTS and STT |
+| `ELEVENLABS_API_KEY` | ElevenLabs TTS (optional `ELEVENLABS_MODEL_ID`, default `eleven_multilingual_v2`) |
+| `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` | Azure TTS and STT |
+
+Only the selected provider's credentials are needed. The same keys exist as HOCON under
+`llm4s.speech.*` (see this module's `reference.conf`); `OPENAI_SPEECH_BASE_URL`,
+`ELEVENLABS_BASE_URL`, `AZURE_SPEECH_TTS_BASE_URL` and `AZURE_SPEECH_STT_BASE_URL` override the
+endpoints.
+
+```scala
+import org.llm4s.speech.SpeechProviderSelector
+import org.llm4s.speech.tts.TTSOptions
+import org.llm4s.speech.stt.STTOptions
+import org.llm4s.speech.AudioInput
+
+for {
+  tts   <- SpeechProviderSelector.tts()   // reads llm4s.speech.tts / SPEECH_TTS_MODEL
+  audio <- tts.synthesize("Hello from LLM4S")
+  stt   <- SpeechProviderSelector.stt()   // reads llm4s.speech.stt / SPEECH_STT_MODEL
+  text  <- stt.transcribe(AudioInput.FileAudio(java.nio.file.Paths.get("hello.wav")), STTOptions())
+} yield text.text
+```
+
+Behaviour worth knowing:
+
+- **Audio is raw PCM.** The TTS clients request raw 24 kHz, 16-bit, mono PCM from each service, so
+  `GeneratedAudio.data` is headerless PCM with an accurate `AudioMeta`, the same shape Tacotron2
+  produces. Write a playable file with `WavFileGenerator.saveAsWav(audio, path)`. MP3 is not offered.
+- **STT input is WAV.** `BytesAudio` and `StreamAudio` are treated as WAV data, as for Whisper and Vosk.
+  Azure's REST endpoint recognises about 60 seconds of audio per request.
+- **Errors map like the chat providers**: HTTP 401/403 is `AuthenticationError`, 429 is
+  `RateLimitError` (with `Retry-After`), 400 is `ValidationError`, other statuses are `ServiceError`,
+  and a timeout or refused connection is `TimeoutError` / `NetworkError`.
+- The clients take an `Llm4sHttpClient`, so tests inject a stub and never touch the network.
 
 ---
 

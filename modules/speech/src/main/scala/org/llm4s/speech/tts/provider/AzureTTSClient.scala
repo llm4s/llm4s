@@ -1,97 +1,75 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.speech.tts.provider
 
 import org.llm4s.http.Llm4sHttpClient
-import org.llm4s.speech.{ AudioMeta, GeneratedAudio }
+import org.llm4s.speech.{ AudioMeta, CloudSpeechSupport, GeneratedAudio }
 import org.llm4s.speech.config.TTSConfig
 import org.llm4s.speech.tts.{ TTSError, TTSOptions, TextToSpeech }
 import org.llm4s.types.Result
-import org.slf4j.LoggerFactory
 
-import scala.util.control.NonFatal
+import scala.concurrent.duration._
 
 /**
- * Azure Cognitive Services Text-to-Speech client.
+ * Azure AI Speech text-to-speech (REST `POST /cognitiveservices/v1`, SSML body).
  *
- * Calls the Azure Speech synthesis REST API.
- * Returns WAV/MP3 audio bytes.
+ * Requests the `raw-24khz-16bit-mono-pcm` output format, so [[GeneratedAudio.data]] is headerless
+ * 24 kHz, 16-bit, mono PCM described by an honest [[AudioMeta]]. Write it out with
+ * [[org.llm4s.speech.io.WavFileGenerator.saveAsWav]].
  *
- * Auth: AZURE_SPEECH_KEY, AZURE_SPEECH_REGION
+ * `options.voice` overrides the configured voice name; `options.language` sets `xml:lang` (default:
+ * the locale prefix of the voice name, else `en-US`); `options.speakingRate` becomes a `prosody` rate.
+ *
+ * @param config     configuration from [[org.llm4s.speech.config.SpeechConfigLoader.tts]]; `baseUrl` is the
+ *                   regional `https://<region>.tts.speech.microsoft.com` endpoint
+ * @param httpClient HTTP transport, replaceable in tests
  */
+final class AzureTTSClient(config: TTSConfig, httpClient: Llm4sHttpClient = Llm4sHttpClient.create())
+    extends TextToSpeech {
+
+  override val name: String = "azure-tts"
+
+  override def synthesize(text: String, options: TTSOptions): Result[GeneratedAudio] =
+    for {
+      input <- CloudSpeechSupport.requireText(text)
+      voice = options.voice.getOrElse(config.voice)
+      response <- httpClient.postRaw(
+        s"${config.baseUrl}/cognitiveservices/v1",
+        Map(
+          "Ocp-Apim-Subscription-Key" -> config.apiKey,
+          "Content-Type"              -> "application/ssml+xml",
+          "X-Microsoft-OutputFormat"  -> AzureTTSClient.OutputFormat,
+          "User-Agent"                -> "llm4s"
+        ),
+        AzureTTSClient.ssml(input, voice, options),
+        60.seconds
+      )
+      audio <- CloudSpeechSupport.rawBody(name, response)
+      _     <- Either.cond(audio.nonEmpty, (), TTSError.SynthesisFailed("Azure TTS returned an empty audio body"))
+    } yield GeneratedAudio(audio, AzureTTSClient.PcmMeta, options.outputFormat)
+}
+
 object AzureTTSClient {
 
-  /**
-   * Creates an AzureTTSClient backed by the real JDK HTTP client.
-   *
-   * @param cfg speech TTS configuration; must have region set for Azure
-   */
-  def fromConfig(cfg: TTSConfig): TextToSpeech =
-    create(cfg, Llm4sHttpClient.create())
+  /** Azure's `raw-24khz-16bit-mono-pcm` output: 24 kHz, 16-bit, mono. */
+  val PcmMeta: AudioMeta = AudioMeta(sampleRate = 24000, numChannels = 1, bitDepth = 16)
 
-  private[tts] def forTest(cfg: TTSConfig, httpClient: Llm4sHttpClient): TextToSpeech =
-    create(cfg, httpClient)
+  private[tts] val OutputFormat = "raw-24khz-16bit-mono-pcm"
 
-  private def create(cfg: TTSConfig, httpClient: Llm4sHttpClient): TextToSpeech =
-    new TextToSpeech {
-      private val logger = LoggerFactory.getLogger(getClass)
-
-      override val name: String = "azure-tts"
-
-      override def synthesize(text: String, options: TTSOptions): Result[GeneratedAudio] = {
-        val region = cfg.region.getOrElse("eastus")
-        val voice  = options.voice.getOrElse(cfg.voice)
-        val url = cfg.baseUrl match {
-          case u if u.nonEmpty && u != "default" => s"$u/cognitiveservices/v1"
-          case _                                 => s"https://$region.tts.speech.microsoft.com/cognitiveservices/v1"
-        }
-
-        val ssml =
-          s"""<speak version='1.0' xml:lang='en-US'>
-             |  <voice xml:lang='en-US' name='$voice'>
-             |    ${escapeXml(text)}
-             |  </voice>
-             |</speak>""".stripMargin
-
-        logger.debug(s"[AzureTTSClient] POST $url region=$region voice=$voice")
-
-        val headers = Map(
-          "Ocp-Apim-Subscription-Key" -> cfg.apiKey,
-          "Content-Type"              -> "application/ssml+xml",
-          "X-Microsoft-OutputFormat"  -> "audio-16khz-128kbitrate-mono-mp3"
-        )
-
-        try {
-          val response = httpClient.post(url, headers, ssml, timeout = 60000)
-          response.statusCode match {
-            case 200 =>
-              val audioBytes = response.body.getBytes("ISO-8859-1")
-              Right(
-                GeneratedAudio(
-                  data = audioBytes,
-                  meta = AudioMeta(sampleRate = 16000, numChannels = 1, bitDepth = 16),
-                  format = options.outputFormat
-                )
-              )
-            case 401 =>
-              Left(TTSError.EngineNotAvailable(s"Azure TTS authentication failed: ${response.body}"))
-            case 400 =>
-              Left(TTSError.SynthesisFailed(s"Azure TTS invalid request (SSML): ${response.body}"))
-            case status =>
-              Left(TTSError.SynthesisFailed(s"Azure TTS API returned HTTP $status: ${response.body}"))
-          }
-        } catch {
-          case NonFatal(e) =>
-            logger.error(s"[AzureTTSClient] Request failed: ${e.getMessage}")
-            Left(TTSError.SynthesisFailed(s"Azure TTS request failed: ${e.getMessage}"))
-        }
-      }
-
-      private def escapeXml(text: String): String =
-        text
-          .replace("&", "&amp;")
-          .replace("<", "&lt;")
-          .replace(">", "&gt;")
-          .replace("\"", "&quot;")
-          .replace("'", "&apos;")
+  private[tts] def ssml(text: String, voice: String, options: TTSOptions): String = {
+    val lang = options.language.getOrElse(localeOf(voice))
+    val body = options.speakingRate match {
+      case Some(rate) => s"<prosody rate='$rate'>${escapeXml(text)}</prosody>"
+      case None       => escapeXml(text)
     }
+    s"<speak version='1.0' xml:lang='${escapeXml(lang)}'><voice name='${escapeXml(voice)}'>$body</voice></speak>"
+  }
+
+  /** `en-US-JennyNeural` is `en-US`; anything without a locale prefix defaults to `en-US`. */
+  private def localeOf(voice: String): String =
+    voice.split("-").toList match {
+      case language :: region :: _ if language.length == 2 && region.length == 2 => s"$language-$region"
+      case _                                                                     => "en-US"
+    }
+
+  private def escapeXml(s: String): String =
+    s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;")
 }

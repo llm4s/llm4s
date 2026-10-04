@@ -1,7 +1,7 @@
 package org.llm4s.speech.tts
 
-import org.llm4s.http.{ HttpResponse, MockHttpClient, FailingHttpClient }
-import org.llm4s.speech.AudioFormat
+import org.llm4s.error.ValidationError
+import org.llm4s.speech.{ AudioFormat, StubHttpClient }
 import org.llm4s.speech.config.TTSConfig
 import org.llm4s.speech.tts.provider.AzureTTSClient
 import org.scalatest.flatspec.AnyFlatSpec
@@ -10,167 +10,84 @@ import org.scalatest.matchers.should.Matchers
 class AzureTTSClientSpec extends AnyFlatSpec with Matchers {
 
   private val cfg = TTSConfig(
-    provider = "azure",
-    model = "neural",
-    voice = "en-US-JennyNeural",
-    apiKey = "azure-speech-key",
-    baseUrl = "default",
-    region = Some("eastus")
+    "azure",
+    "en-US-JennyNeural",
+    "en-US-JennyNeural",
+    "azure-key",
+    "https://westus.tts.speech.microsoft.com",
+    Some("westus")
   )
 
-  private val defaultOptions = TTSOptions(outputFormat = AudioFormat.WavPcm16)
+  "AzureTTSClient" should "return the response bytes untouched, described as 24 kHz 16-bit mono PCM" in {
+    val http   = new StubHttpClient(body = StubHttpClient.binaryAudio)
+    val client = new AzureTTSClient(cfg, http)
 
-  "AzureTTSClient" should "return GeneratedAudio on 200 OK response" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "fake-azure-audio"))
-    val client = AzureTTSClient.forTest(cfg, mock)
+    val audio = client.synthesize("Hello", TTSOptions(outputFormat = AudioFormat.RawPcm16)).toOption.get
 
-    val result = client.synthesize("Hello Azure", defaultOptions)
-
-    result.isRight shouldBe true
-    val audio = result.toOption.get
-    audio.data.length should be > 0
-    audio.meta.sampleRate shouldBe 16000
+    audio.data shouldBe StubHttpClient.binaryAudio
+    audio.meta.sampleRate shouldBe 24000
     audio.meta.numChannels shouldBe 1
-    audio.format shouldBe AudioFormat.WavPcm16
+    audio.meta.bitDepth shouldBe 16
+    audio.format shouldBe AudioFormat.RawPcm16
   }
 
-  it should "use the correct Azure TTS URL with region" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "audio"))
-    val client = AzureTTSClient.forTest(cfg, mock)
+  it should "POST SSML with the subscription key and raw PCM output format" in {
+    val http = new StubHttpClient(body = Array[Byte](1))
 
-    client.synthesize("Hello", defaultOptions)
+    new AzureTTSClient(cfg, http).synthesize("Hello")
 
-    mock.lastUrl shouldBe Some("https://eastus.tts.speech.microsoft.com/cognitiveservices/v1")
+    val request = http.only
+    request.url shouldBe "https://westus.tts.speech.microsoft.com/cognitiveservices/v1"
+    request.headers("Ocp-Apim-Subscription-Key") shouldBe "azure-key"
+    request.headers("Content-Type") shouldBe "application/ssml+xml"
+    request.headers("X-Microsoft-OutputFormat") shouldBe "raw-24khz-16bit-mono-pcm"
+    request.text shouldBe
+      "<speak version='1.0' xml:lang='en-US'><voice name='en-US-JennyNeural'>Hello</voice></speak>"
   }
 
-  it should "default to eastus region when no region is provided" in {
-    val cfgNoRegion = cfg.copy(region = None)
-    val mock        = new MockHttpClient(HttpResponse(200, "audio"))
-    val client      = AzureTTSClient.forTest(cfgNoRegion, mock)
+  it should "XML-escape the text" in {
+    val http = new StubHttpClient(body = Array[Byte](1))
 
-    client.synthesize("Hello", defaultOptions)
+    new AzureTTSClient(cfg, http).synthesize("""a < b & "c" > 'd'""")
 
-    mock.lastUrl shouldBe Some("https://eastus.tts.speech.microsoft.com/cognitiveservices/v1")
+    http.only.text should include("a &lt; b &amp; &quot;c&quot; &gt; &apos;d&apos;")
   }
 
-  it should "use custom baseUrl when provided" in {
-    val customCfg = cfg.copy(baseUrl = "https://custom-azure-endpoint.com")
-    val mock      = new MockHttpClient(HttpResponse(200, "audio"))
-    val client    = AzureTTSClient.forTest(customCfg, mock)
+  it should "use the voice, language and speaking rate from TTSOptions" in {
+    val http = new StubHttpClient(body = Array[Byte](1))
 
-    client.synthesize("Hello", defaultOptions)
+    new AzureTTSClient(cfg, http)
+      .synthesize("Bonjour", TTSOptions(voice = Some("fr-FR-DeniseNeural"), speakingRate = Some(1.25)))
+    new AzureTTSClient(cfg, http)
+      .synthesize("Hola", TTSOptions(voice = Some("custom"), language = Some("es-ES")))
 
-    mock.lastUrl shouldBe Some("https://custom-azure-endpoint.com/cognitiveservices/v1")
+    http.requests(0).text shouldBe
+      "<speak version='1.0' xml:lang='fr-FR'><voice name='fr-FR-DeniseNeural'><prosody rate='1.25'>Bonjour</prosody></voice></speak>"
+    http.requests(1).text shouldBe
+      "<speak version='1.0' xml:lang='es-ES'><voice name='custom'>Hola</voice></speak>"
   }
 
-  it should "use Ocp-Apim-Subscription-Key header for authentication" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "audio"))
-    val client = AzureTTSClient.forTest(cfg, mock)
+  it should "default the language to en-US for a voice without a locale" in {
+    val http = new StubHttpClient(body = Array[Byte](1))
 
-    client.synthesize("Test", defaultOptions)
+    new AzureTTSClient(cfg, http).synthesize("Hi", TTSOptions(voice = Some("custom")))
 
-    mock.lastHeaders.get should contain("Ocp-Apim-Subscription-Key" -> "azure-speech-key")
+    http.only.text should include("xml:lang='en-US'")
   }
 
-  it should "use SSML content type header" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "audio"))
-    val client = AzureTTSClient.forTest(cfg, mock)
+  it should "reject blank text without sending a request" in {
+    val http = new StubHttpClient(body = Array[Byte](1))
 
-    client.synthesize("Test", defaultOptions)
-
-    mock.lastHeaders.get should contain("Content-Type" -> "application/ssml+xml")
+    new AzureTTSClient(cfg, http).synthesize(" ").left.toOption.get shouldBe a[ValidationError]
+    http.requests shouldBe empty
   }
 
-  it should "set MP3 output format header" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "audio"))
-    val client = AzureTTSClient.forTest(cfg, mock)
-
-    client.synthesize("Test", defaultOptions)
-
-    mock.lastHeaders.get should contain("X-Microsoft-OutputFormat" -> "audio-16khz-128kbitrate-mono-mp3")
+  it should "fail on an empty audio body" in {
+    new AzureTTSClient(cfg, new StubHttpClient()).synthesize("Hi").left.toOption.get shouldBe
+      a[TTSError.SynthesisFailed]
   }
 
-  it should "include SSML with voice name in request body" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "audio"))
-    val client = AzureTTSClient.forTest(cfg, mock)
-
-    client.synthesize("Hello world", defaultOptions)
-
-    val body = mock.lastBody.get
-    body should include("en-US-JennyNeural")
-    body should include("Hello world")
-    body should include("<speak")
-    body should include("<voice")
-  }
-
-  it should "use voice from TTSOptions when provided" in {
-    val mock    = new MockHttpClient(HttpResponse(200, "audio"))
-    val client  = AzureTTSClient.forTest(cfg, mock)
-    val options = defaultOptions.copy(voice = Some("en-US-AriaNeural"))
-
-    client.synthesize("Test", options)
-
-    val body = mock.lastBody.get
-    body should include("en-US-AriaNeural")
-  }
-
-  it should "escape XML special characters in text" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "audio"))
-    val client = AzureTTSClient.forTest(cfg, mock)
-
-    client.synthesize("Hello & <World> \"test\" 'quote'", defaultOptions)
-
-    val body = mock.lastBody.get
-    body should include("&amp;")
-    body should include("&lt;")
-    body should include("&gt;")
-    body should include("&quot;")
-    body should include("&apos;")
-  }
-
-  it should "return EngineNotAvailable error on 401 response" in {
-    val mock   = new MockHttpClient(HttpResponse(401, "Unauthorized"))
-    val client = AzureTTSClient.forTest(cfg, mock)
-
-    val result = client.synthesize("Hello", defaultOptions)
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[TTSError.EngineNotAvailable]
-  }
-
-  it should "return SynthesisFailed error on 400 bad SSML response" in {
-    val mock   = new MockHttpClient(HttpResponse(400, "Bad Request: Invalid SSML"))
-    val client = AzureTTSClient.forTest(cfg, mock)
-
-    val result = client.synthesize("Hello", defaultOptions)
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[TTSError.SynthesisFailed]
-  }
-
-  it should "return SynthesisFailed error on 500 response" in {
-    val mock   = new MockHttpClient(HttpResponse(500, "Internal server error"))
-    val client = AzureTTSClient.forTest(cfg, mock)
-
-    val result = client.synthesize("Hello", defaultOptions)
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[TTSError.SynthesisFailed]
-  }
-
-  it should "return SynthesisFailed on network failure" in {
-    val failing = new FailingHttpClient(new java.io.IOException("connection refused"))
-    val client  = AzureTTSClient.forTest(cfg, failing)
-
-    val result = client.synthesize("Hello", defaultOptions)
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[TTSError.SynthesisFailed]
-  }
-
-  it should "have name 'azure-tts'" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "audio"))
-    val client = AzureTTSClient.forTest(cfg, mock)
-    client.name shouldBe "azure-tts"
+  it should "report its name" in {
+    new AzureTTSClient(cfg, new StubHttpClient()).name shouldBe "azure-tts"
   }
 }

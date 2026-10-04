@@ -1,152 +1,98 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.speech.stt.provider
 
 import org.llm4s.http.{ Llm4sHttpClient, MultipartPart }
-import org.llm4s.speech.AudioInput
+import org.llm4s.speech.{ AudioInput, CloudSpeechSupport }
 import org.llm4s.speech.config.STTConfig
-import org.llm4s.speech.stt.{ STTError, STTOptions, SpeechToText, Transcription }
-import org.llm4s.types.Result
-import org.slf4j.LoggerFactory
+import org.llm4s.speech.io.WavFileGenerator
+import org.llm4s.speech.stt.{ STTError, STTOptions, SpeechToText, Transcription, WordTimestamp }
+import org.llm4s.types.{ Result, TryOps }
 
-import java.nio.file.Files
+import java.nio.file.{ Files, Path }
+import scala.concurrent.duration._
 import scala.util.Try
-import scala.util.control.NonFatal
 
 /**
- * OpenAI Speech-to-Text client (Whisper API).
+ * OpenAI speech-to-text (`POST /v1/audio/transcriptions`, the Whisper API).
  *
- * Calls POST /v1/audio/transcriptions with audio file bytes + model.
- * Returns transcribed text.
+ * `FileAudio` is uploaded as it is; `BytesAudio` and `StreamAudio` are WAV data, as for the other
+ * STT engines, and are staged in a temporary file that is deleted afterwards.
  *
- * Auth: reuses OPENAI_API_KEY
- * Config: SPEECH_STT_MODEL=openai/whisper-1
+ * `options.language` is sent as the ISO 639-1 prefix of the tag (`en-US` becomes `en`),
+ * `options.prompt` as `prompt`, and `options.enableTimestamps` switches the request to
+ * `verbose_json` with word granularity.
+ *
+ * @param config     configuration from [[org.llm4s.speech.config.SpeechConfigLoader.stt]]
+ * @param httpClient HTTP transport, replaceable in tests
  */
+final class OpenAISTTClient(config: STTConfig, httpClient: Llm4sHttpClient = Llm4sHttpClient.create())
+    extends SpeechToText {
+
+  override val name: String = "openai-stt"
+
+  override val supportedFormats: List[String] =
+    List("audio/wav", "audio/mpeg", "audio/mp4", "audio/m4a", "audio/ogg", "audio/webm", "audio/flac")
+
+  override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] =
+    input match {
+      case AudioInput.FileAudio(path) => upload(path, options)
+      case other =>
+        CloudSpeechSupport.readAudio(other).flatMap { bytes =>
+          WavFileGenerator.managedTempWavFile("llm4s-openai-stt-").use { tmp =>
+            Try(Files.write(tmp, bytes)).toResult.flatMap(_ => upload(tmp, options))
+          }
+        }
+    }
+
+  private def upload(path: Path, options: STTOptions): Result[Transcription] = {
+    val fields: Seq[MultipartPart] =
+      Seq(
+        MultipartPart.FilePart("file", path, path.getFileName.toString),
+        MultipartPart.TextField("model", config.model)
+      ) ++
+        options.language.map(l => MultipartPart.TextField("language", CloudSpeechSupport.primaryLanguage(l))) ++
+        options.prompt.map(p => MultipartPart.TextField("prompt", p)) ++
+        (if (options.enableTimestamps)
+           Seq(
+             MultipartPart.TextField("response_format", "verbose_json"),
+             MultipartPart.TextField("timestamp_granularities[]", "word")
+           )
+         else Seq.empty)
+
+    for {
+      response <- httpClient.postMultipart(
+        s"${config.baseUrl}/v1/audio/transcriptions",
+        Map("Authorization" -> s"Bearer ${config.apiKey}"),
+        fields,
+        120.seconds
+      )
+      body          <- CloudSpeechSupport.textBody(name, response)
+      transcription <- OpenAISTTClient.parse(body, options)
+    } yield transcription
+  }
+}
+
 object OpenAISTTClient {
 
-  /**
-   * Creates an OpenAISTTClient backed by the real JDK HTTP client.
-   */
-  def fromConfig(cfg: STTConfig): SpeechToText =
-    create(cfg, Llm4sHttpClient.create())
-
-  private[provider] def forTest(cfg: STTConfig, httpClient: Llm4sHttpClient): SpeechToText =
-    create(cfg, httpClient)
-
-  private def create(cfg: STTConfig, httpClient: Llm4sHttpClient): SpeechToText =
-    new SpeechToText {
-      private val logger = LoggerFactory.getLogger(getClass)
-
-      override val name: String = "openai-stt"
-
-      override val supportedFormats: List[String] =
-        List("audio/wav", "audio/mp3", "audio/mp4", "audio/mpeg", "audio/mpga", "audio/m4a", "audio/ogg", "audio/webm")
-
-      override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] = {
-        val model = cfg.model
-        val url   = s"${cfg.baseUrl}/v1/audio/transcriptions"
-
-        logger.debug(s"[OpenAISTTClient] POST $url model=$model")
-
-        val headers = Map(
-          "Authorization" -> s"Bearer ${cfg.apiKey}"
-        )
-
-        val parts = buildMultipartParts(input, model, options)
-
-        parts.flatMap { multipartParts =>
-          try {
-            val response = httpClient.postMultipart(url, headers, multipartParts, timeout = 120000)
-            response.statusCode match {
-              case 200 =>
-                parseTranscriptionResponse(response.body, options)
-              case 401 =>
-                Left(STTError.EngineNotAvailable(s"OpenAI STT authentication failed: ${response.body}"))
-              case 400 =>
-                Left(STTError.InvalidInput(s"OpenAI STT invalid request: ${response.body}"))
-              case status =>
-                Left(STTError.ProcessingFailed(s"OpenAI STT API returned HTTP $status: ${response.body}"))
-            }
-          } catch {
-            case NonFatal(e) =>
-              logger.error(s"[OpenAISTTClient] Request failed: ${e.getMessage}")
-              Left(STTError.ProcessingFailed(s"OpenAI STT request failed: ${e.getMessage}", Some(e)))
-          }
-        }
+  private[provider] def parse(body: String, options: STTOptions): Result[Transcription] =
+    Try {
+      val json = ujson.read(body)
+      val text = json("text").str.trim
+      val words = json.obj
+        .get("words")
+        .map(_.arr.toList.flatMap { w =>
+          for {
+            word  <- w.obj.get("word").flatMap(_.strOpt).map(_.trim).filter(_.nonEmpty)
+            start <- w.obj.get("start").flatMap(_.numOpt)
+            end   <- w.obj.get("end").flatMap(_.numOpt)
+            if start >= 0 && end >= start
+          } yield WordTimestamp(word, start, end)
+        })
+        .getOrElse(Nil)
+      (text, words, json.obj.get("language").flatMap(_.strOpt))
+    }.toResult.left
+      .map(e => STTError.ProcessingFailed(s"Failed to parse OpenAI STT response: ${e.message}"))
+      .flatMap { case (text, words, detected) =>
+        if (text.isEmpty) Left(STTError.ProcessingFailed("OpenAI STT returned an empty transcription"))
+        else Right(Transcription(text, options.language.orElse(detected), timestamps = words))
       }
-
-      private def buildMultipartParts(
-        input: AudioInput,
-        model: String,
-        options: STTOptions
-      ): Result[Seq[MultipartPart]] = {
-        val modelPart = MultipartPart.TextField("model", model)
-
-        val languageParts = options.language
-          .map(lang => MultipartPart.TextField("language", lang))
-          .toSeq
-
-        val promptParts = options.prompt
-          .map(p => MultipartPart.TextField("prompt", p))
-          .toSeq
-
-        input match {
-          case AudioInput.FileAudio(path) =>
-            val filename = path.getFileName.toString
-            val filePart = MultipartPart.FilePart("file", path, filename)
-            Right(Seq(filePart, modelPart) ++ languageParts ++ promptParts)
-
-          case AudioInput.BytesAudio(bytes, _, _) =>
-            Try {
-              val tmpPath = Files.createTempFile("llm4s-openai-stt-", ".wav")
-              Files.write(tmpPath, bytes)
-              tmpPath
-            }.fold(
-              err =>
-                Left(
-                  STTError.ProcessingFailed(s"Failed to write audio bytes to temp file: ${err.getMessage}", Some(err))
-                ),
-              tmpPath => {
-                val filePart = MultipartPart.FilePart("file", tmpPath, "audio.wav")
-                Right(Seq(filePart, modelPart) ++ languageParts ++ promptParts)
-              }
-            )
-
-          case AudioInput.StreamAudio(stream, _, _) =>
-            Try {
-              val tmpPath = Files.createTempFile("llm4s-openai-stt-", ".wav")
-              Files.write(tmpPath, stream.readAllBytes())
-              tmpPath
-            }.fold(
-              err =>
-                Left(STTError.ProcessingFailed(s"Failed to write stream to temp file: ${err.getMessage}", Some(err))),
-              tmpPath => {
-                val filePart = MultipartPart.FilePart("file", tmpPath, "audio.wav")
-                Right(Seq(filePart, modelPart) ++ languageParts ++ promptParts)
-              }
-            )
-        }
-      }
-
-      private def parseTranscriptionResponse(body: String, options: STTOptions): Result[Transcription] =
-        Try {
-          val json = ujson.read(body)
-          val text = json("text").str.trim
-          if (text.isEmpty) {
-            Left(STTError.ProcessingFailed("OpenAI STT returned empty transcription"))
-          } else {
-            Right(
-              Transcription(
-                text = text,
-                language = options.language,
-                confidence = None,
-                timestamps = Nil,
-                meta = None
-              )
-            )
-          }
-        }.fold(
-          err => Left(STTError.ProcessingFailed(s"Failed to parse OpenAI STT response: ${err.getMessage}", Some(err))),
-          result => result
-        )
-    }
 }

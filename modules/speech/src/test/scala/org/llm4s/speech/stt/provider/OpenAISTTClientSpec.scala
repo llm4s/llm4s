@@ -1,8 +1,8 @@
 package org.llm4s.speech.stt.provider
 
-import org.llm4s.http.{ HttpResponse, MockHttpClient, FailingHttpClient }
-import org.llm4s.speech.AudioInput
+import org.llm4s.speech.{ AudioInput, AudioMeta, StubHttpClient }
 import org.llm4s.speech.config.STTConfig
+import org.llm4s.speech.io.WavFileGenerator
 import org.llm4s.speech.stt.{ STTError, STTOptions }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -11,170 +11,115 @@ import java.nio.file.Files
 
 class OpenAISTTClientSpec extends AnyFlatSpec with Matchers {
 
-  private val cfg = STTConfig(
-    provider = "openai",
-    model = "whisper-1",
-    apiKey = "sk-test-key",
-    baseUrl = "https://api.openai.com"
-  )
+  private val cfg = STTConfig("openai", "whisper-1", "sk-test-key", "https://api.openai.com")
 
-  private val defaultOptions = STTOptions()
+  private val pcm = Array.fill[Byte](3200)(7)
+  private val wav =
+    WavFileGenerator.createWavHeader(pcm.length, AudioMeta(16000, 1, 16)).toOption.get ++ pcm
 
-  private val validResponse = """{"text":"Hello world, this is a transcription."}"""
+  "OpenAISTTClient" should "upload the WAV bytes as a file and return the transcription" in {
+    val http   = StubHttpClient.json(200, """{"text":"  hello world "}""")
+    val client = new OpenAISTTClient(cfg, http)
 
-  "OpenAISTTClient" should "return Transcription on 200 OK for BytesAudio input" in {
-    val mock   = new MockHttpClient(HttpResponse(200, validResponse))
-    val client = OpenAISTTClient.forTest(cfg, mock)
+    val result = client.transcribe(AudioInput.BytesAudio(wav, 16000)).toOption.get
 
-    val audioBytes = "fake-audio-bytes".getBytes
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000)
-
-    val result = client.transcribe(input, defaultOptions)
-
-    result.isRight shouldBe true
-    val transcription = result.toOption.get
-    transcription.text shouldBe "Hello world, this is a transcription."
+    result.text shouldBe "hello world"
+    result.timestamps shouldBe empty
+    val request = http.only
+    request.url shouldBe "https://api.openai.com/v1/audio/transcriptions"
+    request.headers("Authorization") shouldBe "Bearer sk-test-key"
+    request.field("model") shouldBe Some("whisper-1")
+    request.fileContents("file") shouldBe wav
   }
 
-  it should "include Authorization header with API key" in {
-    val mock   = new MockHttpClient(HttpResponse(200, validResponse))
-    val client = OpenAISTTClient.forTest(cfg, mock)
+  it should "delete the temporary file it staged for byte input" in {
+    val http = StubHttpClient.json(200, """{"text":"hi"}""")
 
-    val input = AudioInput.BytesAudio("audio".getBytes, sampleRate = 16000)
-    client.transcribe(input, defaultOptions)
+    new OpenAISTTClient(cfg, http).transcribe(AudioInput.BytesAudio(wav, 16000))
 
-    mock.lastHeaders.get should contain("Authorization" -> "Bearer sk-test-key")
+    Files.exists(http.only.filePaths("file")) shouldBe false
   }
 
-  it should "post to the correct URL" in {
-    val mock   = new MockHttpClient(HttpResponse(200, validResponse))
-    val client = OpenAISTTClient.forTest(cfg, mock)
-
-    val input = AudioInput.BytesAudio("audio".getBytes, sampleRate = 16000)
-    client.transcribe(input, defaultOptions)
-
-    mock.lastUrl shouldBe Some("https://api.openai.com/v1/audio/transcriptions")
-  }
-
-  it should "include language in request when specified in options" in {
-    val mock    = new MockHttpClient(HttpResponse(200, validResponse))
-    val client  = OpenAISTTClient.forTest(cfg, mock)
-    val options = defaultOptions.copy(language = Some("en"))
-
-    val input = AudioInput.BytesAudio("audio".getBytes, sampleRate = 16000)
-    client.transcribe(input, options)
-
-    // Multipart is sent; we just verify a call was made
-    mock.postCallCount shouldBe 1
-  }
-
-  it should "return EngineNotAvailable error on 401 response" in {
-    val mock   = new MockHttpClient(HttpResponse(401, """{"error":{"message":"Incorrect API key"}}"""))
-    val client = OpenAISTTClient.forTest(cfg, mock)
-
-    val input  = AudioInput.BytesAudio("audio".getBytes, sampleRate = 16000)
-    val result = client.transcribe(input, defaultOptions)
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[STTError.EngineNotAvailable]
-  }
-
-  it should "return InvalidInput error on 400 response" in {
-    val mock   = new MockHttpClient(HttpResponse(400, """{"error":{"message":"Bad request"}}"""))
-    val client = OpenAISTTClient.forTest(cfg, mock)
-
-    val input  = AudioInput.BytesAudio("audio".getBytes, sampleRate = 16000)
-    val result = client.transcribe(input, defaultOptions)
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[STTError.InvalidInput]
-  }
-
-  it should "return ProcessingFailed error on 500 response" in {
-    val mock   = new MockHttpClient(HttpResponse(500, """{"error":{"message":"Server error"}}"""))
-    val client = OpenAISTTClient.forTest(cfg, mock)
-
-    val input  = AudioInput.BytesAudio("audio".getBytes, sampleRate = 16000)
-    val result = client.transcribe(input, defaultOptions)
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[STTError.ProcessingFailed]
-  }
-
-  it should "return ProcessingFailed on network failure" in {
-    val failing = new FailingHttpClient(new java.io.IOException("connection refused"))
-    val client  = OpenAISTTClient.forTest(cfg, failing)
-
-    val input  = AudioInput.BytesAudio("audio".getBytes, sampleRate = 16000)
-    val result = client.transcribe(input, defaultOptions)
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[STTError.ProcessingFailed]
-  }
-
-  it should "handle StreamAudio input" in {
-    val mock   = new MockHttpClient(HttpResponse(200, validResponse))
-    val client = OpenAISTTClient.forTest(cfg, mock)
-
-    val stream = new java.io.ByteArrayInputStream("audio-stream-data".getBytes)
-    val input  = AudioInput.StreamAudio(stream, sampleRate = 16000)
-
-    val result = client.transcribe(input, defaultOptions)
-
-    result.isRight shouldBe true
-    result.toOption.get.text shouldBe "Hello world, this is a transcription."
-  }
-
-  it should "handle FileAudio input" in {
-    val mock   = new MockHttpClient(HttpResponse(200, validResponse))
-    val client = OpenAISTTClient.forTest(cfg, mock)
-
-    val tempFile = Files.createTempFile("test-audio-", ".wav")
-    Files.write(tempFile, "fake-wav-data".getBytes)
-
+  it should "upload a file input in place and leave it alone" in {
+    val file = Files.createTempFile("llm4s-stt-spec-", ".wav")
     try {
-      val input  = AudioInput.FileAudio(tempFile)
-      val result = client.transcribe(input, defaultOptions)
+      Files.write(file, wav)
+      val http = StubHttpClient.json(200, """{"text":"hi"}""")
 
-      result.isRight shouldBe true
-    } finally Files.deleteIfExists(tempFile)
+      new OpenAISTTClient(cfg, http).transcribe(AudioInput.FileAudio(file))
+
+      http.only.filePaths("file") shouldBe file
+      http.only.fileContents("file") shouldBe wav
+      Files.exists(file) shouldBe true
+    } finally Files.deleteIfExists(file)
   }
 
-  it should "return ProcessingFailed for invalid JSON response" in {
-    val mock   = new MockHttpClient(HttpResponse(200, "this is not json"))
-    val client = OpenAISTTClient.forTest(cfg, mock)
+  it should "read stream input" in {
+    val http = StubHttpClient.json(200, """{"text":"hi"}""")
 
-    val input  = AudioInput.BytesAudio("audio".getBytes, sampleRate = 16000)
-    val result = client.transcribe(input, defaultOptions)
+    new OpenAISTTClient(cfg, http).transcribe(AudioInput.StreamAudio(new java.io.ByteArrayInputStream(wav), 16000))
 
-    result.isLeft shouldBe true
+    http.only.fileContents("file") shouldBe wav
+  }
+
+  it should "send the ISO 639-1 language and the prompt" in {
+    val http = StubHttpClient.json(200, """{"text":"bonjour"}""")
+
+    val result = new OpenAISTTClient(cfg, http)
+      .transcribe(AudioInput.BytesAudio(wav, 16000), STTOptions(language = Some("fr-FR"), prompt = Some("greetings")))
+
+    result.toOption.get.language shouldBe Some("fr-FR")
+    http.only.field("language") shouldBe Some("fr")
+    http.only.field("prompt") shouldBe Some("greetings")
+    http.only.field("response_format") shouldBe None
+  }
+
+  it should "request word timestamps and parse them" in {
+    val http = StubHttpClient.json(
+      200,
+      """{"text":"hello world","language":"english","words":[
+        |  {"word":"hello","start":0.0,"end":0.4},
+        |  {"word":"world","start":0.5,"end":0.9},
+        |  {"word":"bad","start":2.0,"end":1.0}]}""".stripMargin
+    )
+
+    val result = new OpenAISTTClient(cfg, http)
+      .transcribe(AudioInput.BytesAudio(wav, 16000), STTOptions(enableTimestamps = true))
+      .toOption
+      .get
+
+    http.only.field("response_format") shouldBe Some("verbose_json")
+    http.only.field("timestamp_granularities[]") shouldBe Some("word")
+    result.timestamps.map(w => (w.word, w.startSec, w.endSec)) shouldBe
+      List(("hello", 0.0, 0.4), ("world", 0.5, 0.9))
+    result.language shouldBe Some("english")
+  }
+
+  it should "fail on an empty transcription" in {
+    val result = new OpenAISTTClient(cfg, StubHttpClient.json(200, """{"text":"  "}"""))
+      .transcribe(AudioInput.BytesAudio(wav, 16000))
+
     result.left.toOption.get shouldBe a[STTError.ProcessingFailed]
   }
 
-  it should "have correct name" in {
-    val mock   = new MockHttpClient(HttpResponse(200, validResponse))
-    val client = OpenAISTTClient.forTest(cfg, mock)
+  it should "fail on a body that is not the expected JSON" in {
+    val result = new OpenAISTTClient(cfg, StubHttpClient.json(200, "not json"))
+      .transcribe(AudioInput.BytesAudio(wav, 16000))
+
+    result.left.toOption.get.message should include("Failed to parse OpenAI STT response")
+  }
+
+  it should "report a missing input file as an error" in {
+    val missing = java.nio.file.Paths.get("/nonexistent/llm4s/audio.wav")
+    val result =
+      new OpenAISTTClient(cfg, StubHttpClient.json(200, """{"text":"hi"}""")).transcribe(AudioInput.FileAudio(missing))
+
+    result.left.toOption.get shouldBe a[org.llm4s.error.ValidationError]
+  }
+
+  it should "report its name and formats" in {
+    val client = new OpenAISTTClient(cfg, new StubHttpClient())
     client.name shouldBe "openai-stt"
-  }
-
-  it should "list supported audio formats" in {
-    val mock   = new MockHttpClient(HttpResponse(200, validResponse))
-    val client = OpenAISTTClient.forTest(cfg, mock)
-
     client.supportedFormats should contain("audio/wav")
-    client.supportedFormats should contain("audio/mp3")
-    client.supportedFormats.nonEmpty shouldBe true
-  }
-
-  it should "return language from options in transcription" in {
-    val mock    = new MockHttpClient(HttpResponse(200, validResponse))
-    val client  = OpenAISTTClient.forTest(cfg, mock)
-    val options = defaultOptions.copy(language = Some("fr"))
-
-    val input  = AudioInput.BytesAudio("audio".getBytes, sampleRate = 16000)
-    val result = client.transcribe(input, options)
-
-    result.isRight shouldBe true
-    result.toOption.get.language shouldBe Some("fr")
   }
 }

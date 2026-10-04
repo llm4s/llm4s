@@ -97,6 +97,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request ([#1218](https://github.com/llm4s/llm4s/issues/1218)). Add the dependency
   `"org.llm4s" %% "llm4s-jina"`; nothing else changes. HTTP 401 and 429 map to `EmbeddingError`
   with codes `"401"` and `"429"`.
+- **Cloud speech providers** (`llm4s-speech`, [#1010](https://github.com/llm4s/llm4s/issues/1010)):
+  `OpenAITTSClient`, `ElevenLabsTTSClient`, `AzureTTSClient` (text-to-speech) and `OpenAISTTClient`,
+  `AzureSTTClient` (speech-to-text), selected through `SpeechProviderSelector.tts()` / `.stt()` by a
+  `provider/model` string (`SPEECH_TTS_MODEL=openai/tts-1`, `SPEECH_STT_MODEL=azure/en-US`).
+  Credentials and endpoints come from the new `llm4s.speech` block of this module's `reference.conf`
+  (`OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`) through
+  `SpeechConfigLoader`. TTS output is raw 24 kHz 16-bit mono PCM in `GeneratedAudio`, not MP3. HTTP
+  failures map as the chat providers' do (`AuthenticationError`, `RateLimitError`, `ValidationError`,
+  `ServiceError`). See [docs/guide/speech.md](docs/guide/speech.md#cloud-providers).
 - **Run API and event dispatch for graph runs** (Experimental, `org.llm4s.agent.graph`,
   [#1277](https://github.com/llm4s/llm4s/issues/1277)): `GraphRuntime.start`/`recover`/`resume`
   admit a run on the caller's thread and return `Result[RunHandle[O]]` once the thread is claimed;

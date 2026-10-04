@@ -418,6 +418,13 @@ VOYAGE_API_KEY=pa-...                # llm4s-voyage
 # Embeddings (llm4s-core selects; each provider module binds its own block)
 EMBEDDING_MODEL=openai/text-embedding-3-small  # provider/model
 # OPENAI_EMBEDDING_BASE_URL / VOYAGE_EMBEDDING_BASE_URL / OLLAMA_EMBEDDING_BASE_URL override base URLs
+
+# Speech (llm4s-speech): cloud TTS/STT, "provider/model" like LLM_MODEL
+SPEECH_TTS_MODEL=openai/tts-1                  # or openai/tts-1-hd, elevenlabs/<voice-id>, azure/<voice-name>
+SPEECH_STT_MODEL=openai/whisper-1              # or azure/en-US
+# SPEECH_TTS_VOICE=alloy                       # optional voice override
+# Credentials, only for the selected provider: OPENAI_API_KEY, ELEVENLABS_API_KEY,
+# AZURE_SPEECH_KEY + AZURE_SPEECH_REGION (see modules/speech reference.conf, docs/guide/speech.md)
 ```
 
 The full list is in `docs/getting-started/configuration.md#environment-variables-llm4s-reads`.

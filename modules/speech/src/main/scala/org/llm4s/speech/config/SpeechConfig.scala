@@ -3,14 +3,14 @@ package org.llm4s.speech.config
 import org.llm4s.util.Redaction
 
 /**
- * Configuration for cloud TTS providers.
+ * Configuration for a cloud TTS provider, as produced by [[SpeechConfigLoader.tts]].
  *
  * @param provider  Provider name: "openai", "elevenlabs", or "azure"
- * @param model     Model/voice identifier (e.g. "tts-1", "tts-1-hd")
- * @param voice     Voice name (e.g. "alloy", "echo" for OpenAI)
+ * @param model     Model identifier (OpenAI: `tts-1`; ElevenLabs: the `model_id`; Azure: unused)
+ * @param voice     Voice (OpenAI: `alloy`; ElevenLabs: voice id; Azure: voice name)
  * @param apiKey    API key for the provider
- * @param baseUrl   API base URL (defaults to the official API endpoint)
- * @param region    Azure Speech region (only for Azure provider)
+ * @param baseUrl   API base URL, without a trailing path (the endpoint path is added by the client)
+ * @param region    Azure Speech region, when the provider is Azure
  */
 final case class TTSConfig(
   provider: String,
@@ -30,16 +30,17 @@ object TTSConfig {
   val DEFAULT_ELEVENLABS_BASE_URL: String = "https://api.elevenlabs.io"
   val DEFAULT_OPENAI_MODEL: String        = "tts-1"
   val DEFAULT_OPENAI_VOICE: String        = "alloy"
+  val DEFAULT_ELEVENLABS_MODEL_ID: String = "eleven_multilingual_v2"
 }
 
 /**
- * Configuration for cloud STT providers.
+ * Configuration for a cloud STT provider, as produced by [[SpeechConfigLoader.stt]].
  *
  * @param provider  Provider name: "openai" or "azure"
- * @param model     Model identifier (e.g. "whisper-1")
+ * @param model     Model identifier (OpenAI: `whisper-1`; Azure: the default recognition language, e.g. `en-US`)
  * @param apiKey    API key for the provider
- * @param baseUrl   API base URL (defaults to the official API endpoint)
- * @param region    Azure Speech region (only for Azure provider)
+ * @param baseUrl   API base URL, without a trailing path (the endpoint path is added by the client)
+ * @param region    Azure Speech region, when the provider is Azure
  */
 final case class STTConfig(
   provider: String,
@@ -56,4 +57,5 @@ final case class STTConfig(
 object STTConfig {
   val DEFAULT_OPENAI_BASE_URL: String = "https://api.openai.com"
   val DEFAULT_OPENAI_MODEL: String    = "whisper-1"
+  val DEFAULT_AZURE_LANGUAGE: String  = "en-US"
 }
