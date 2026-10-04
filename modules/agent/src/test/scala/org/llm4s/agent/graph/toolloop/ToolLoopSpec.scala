@@ -594,6 +594,83 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     seen.asScala.toVector shouldBe Vector(true)
   }
 
+  it should "turn an answer of the wrong type into an error result, without resuming the tool" in {
+    val confirming = Confirming()
+    val model      = ScriptedModel(calls(("a1", "confirm", ujson.Obj("env" -> "prod"))), summarise)
+    val l          = ToolLoop.build("assistant", "v1", model, set(confirming)).value
+    val first      = runInMemory(l.graph, "go").suspended
+    val (id, _)    = l.questions(first).value.head
+    val (_, answer) =
+      drive(l.graph, l.graph.resume(first.execution, Map(id -> ujson.Num(42))).value).completed
+    answer shouldBe """done: a1={"error":"Invalid answer for 'confirm': $: expected dictionary got float64"}"""
+    confirming.resumes.get shouldBe 0
+  }
+
+  it should "refuse an approval asked for after a question, which would lose the answer" in {
+    val asksTwice = new AgentTool.Asking[ujson.Value, Confirm, Reply](
+      AgentToolSpec[ujson.Value]("asks_twice", "Asks, then wants approval", strings[ujson.Value]("t"))
+    ) {
+      def execute(args: ujson.Value, context: ToolContext): ToolOutcome = ask(Confirm("sure?"))
+      def resume(args: ujson.Value, question: Confirm, answer: Reply, context: ToolContext): ToolOutcome =
+        ToolOutcome.NeedsApproval("one more check")
+    }
+    val model   = ScriptedModel(calls(("n1", "asks_twice", ujson.Obj())), summarise)
+    val l       = ToolLoop.build("assistant", "v1", model, set(asksTwice)).value
+    val first   = runInMemory(l.graph, "go").suspended
+    val (id, _) = l.questions(first).value.head
+    val (_, answer) =
+      drive(l.graph, l.graph.resume(first.execution, Map(l.answer(id, Reply(true)))).value).completed
+    answer shouldBe
+      """done: n1={"error":"Tool 'asks_twice' asked for approval after a question: one more check"}"""
+  }
+
+  it should "refuse a tool that declares a key the loop owns" in {
+    val results = AgentTool(
+      AgentToolSpec[ujson.Value]("results_writer", "Writes results", strings[ujson.Value]("r")),
+      Set(ToolLoop.results)
+    )((_, _) => text("x"))
+    val history = AgentTool(
+      AgentToolSpec[ujson.Value]("history_writer", "Writes messages", strings[ujson.Value]("h")),
+      Set(Messages.key)
+    )((_, _) => text("x"))
+    val refused = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(results, history, Tools().echo))
+    refused.left.value shouldBe a[ValidationError]
+    refused.left.value.message should (include("results_writer").and(include("history_writer")))
+    (refused.left.value.message should not).include("echo")
+  }
+
+  it should "refuse a call whose validator throws, without running the tool" in {
+    val executed = new AtomicInteger()
+    val counted = tool[Lookup]("lookup", "q") { (a, _) =>
+      executed.incrementAndGet(); text(a.q)
+    }
+    val throwing = new ToolArgumentValidator {
+      def unsupported(schema: ujson.Value): Vector[String] = Vector.empty
+      def validate(schema: ujson.Value, arguments: ujson.Value): Vector[String] =
+        throw new IllegalStateException("validator broke")
+    }
+    val model = ScriptedModel(calls(("v1", "lookup", ujson.Obj("q" -> "x"))), summarise)
+    val l     = ToolLoop.build("assistant", "v1", model, ToolSet.of(throwing, counted).value).value
+    runInMemory(l.graph, "go").completed
+    errors(model) shouldBe Vector("v1" -> "Invalid arguments for 'lookup': validator broke")
+    executed.get shouldBe 0
+  }
+
+  it should "cancel, not fail, a call that throws a wrapped interrupt or returns Fatal(CancelledError)" in {
+    val wrapped = bare("wrapped")(_ => throw new RuntimeException("wrapped", new InterruptedException("stop")))
+    val fatal   = bare("fatal")(_ => ToolOutcome.Fatal(org.llm4s.error.CancelledError("upstream call")))
+    Seq("wrapped", "fatal").foreach { name =>
+      val model = ScriptedModel(calls(("x1", "echo", ujson.Obj("text" -> "hi")), ("x2", name, ujson.Obj())), summarise)
+      val l     = ToolLoop.build("assistant", "v1", model, set(wrapped, fatal, Tools().echo)).value
+      val store = InMemoryCheckpointer()
+      val ended = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited.value
+      withClue(name)(ended.failed._2 shouldBe a[GraphError.Cancelled])
+      // the cancelled call recorded nothing: no result, so recover would run it again
+      store.latest(thread).value.get.pendingWrites.size should be <= 1
+      (store.latest(thread).value.get.pendingWrites.map(_.toString).mkString should not).include("x2")
+    }
+  }
+
   it should "turn a resume that throws into an error result" in {
     val throwing = new AgentTool.Asking[ujson.Value, Confirm, Reply](
       AgentToolSpec[ujson.Value]("throwing", "Throws on resume", strings[ujson.Value]("t"))

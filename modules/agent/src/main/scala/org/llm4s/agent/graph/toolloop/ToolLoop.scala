@@ -2,7 +2,7 @@ package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
-import org.llm4s.error.{ LLMError, ValidationError }
+import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.types.{ Result, TryOps }
@@ -143,6 +143,26 @@ object ToolLoop:
     model: ModelStep,
     tools: ToolSet,
     policy: ToolCallPolicy = ToolCallPolicy.allowAll
+  ): Result[ToolLoop] =
+    val messages = Messages.key
+    // the loop alone writes results and messages: a tool writing either could break one result per call
+    val owned = Set(results.id, messages.id)
+    tools.tools.filter(_.writes.exists(k => owned.contains(k.id))).map(_.spec.name) match
+      case Vector() => assemble(id, version, model, tools, policy)
+      case offending =>
+        Left(
+          ValidationError(
+            "tool loop",
+            offending.toList.map(n => s"tool '$n' declares a key the loop owns ('tool-results' or 'messages')")
+          )
+        )
+
+  private def assemble(
+    id: String,
+    version: String,
+    model: ModelStep,
+    tools: ToolSet,
+    policy: ToolCallPolicy
   ): Result[ToolLoop] =
     val messages = Messages.key
     val b        = GraphBuilder(id, version)
@@ -329,7 +349,7 @@ object ToolLoop:
             case Left(message) => error(task, message)
             case Right((args, question, reply)) =>
               val toolContext = ToolContext(context, request.call.id, state, request.approved)
-              outcome(tool, task, request.call, request.approved)(
+              outcome(tool, task, request.call, request.approved, resumed = true)(
                 AgentTool.resumeWith(tool, args, question, reply, toolContext)
               )
         case _ => error(task, s"Tool '$name' does not take answers")
@@ -337,13 +357,15 @@ object ToolLoop:
     /** Steps 2-4: validate the raw arguments, decode them, run the tool's own check. */
     private def checked[A](tool: AgentTool[A], call: ToolCall): Either[String, A] =
       val invalid = s"Invalid arguments for '${tool.spec.name}': "
-      tools.validator.validate(tool.spec.providerSchema, call.arguments) match
-        case Vector() =>
+      // the validator is pluggable: one that throws refuses the call instead of failing the run
+      Try(tools.validator.validate(tool.spec.providerSchema, call.arguments)).toResult match
+        case Left(thrown) => Left(invalid + thrown.message)
+        case Right(Vector()) =>
           for
             args <- decode(tool, call).left.map(invalid + _)
             _    <- Try(tool.spec.validateDecoded(args)).toResult.flatten.left.map(e => invalid + e.message)
           yield args
-        case violations => Left(invalid + violations.mkString("; "))
+        case Right(violations) => Left(invalid + violations.mkString("; "))
 
     private def decode[A](tool: AgentTool[A], call: ToolCall): Either[String, A] =
       read(call.arguments)(using tool.spec.codec)
@@ -371,16 +393,29 @@ object ToolLoop:
       outcome(tool, task, call, approved)(tool.execute(args, toolContext))
 
     /**
-     * Step 6: maps what the tool did. A thrown NonFatal exception is an error result; an
-     * `InterruptedException` is not caught, so the task is cancelled and records nothing.
+     * Step 6: maps what the tool did. A thrown NonFatal exception is an error result. An
+     * `InterruptedException` is not caught; a thrown cancellation (an interrupt wrapped in another
+     * exception, or one thrown with the flag set) and `Fatal(CancelledError)` restore the interrupt
+     * flag, so the runtime cancels the task and it records nothing. `resumed` is true when the tool
+     * is continuing after a question.
      */
-    private def outcome[A](tool: AgentTool[A], task: ToolTask, call: ToolCall, approved: Boolean)(
-      run: => ToolOutcome
-    ): NodeResult =
+    private def outcome[A](
+      tool: AgentTool[A],
+      task: ToolTask,
+      call: ToolCall,
+      approved: Boolean,
+      resumed: Boolean = false
+    )(run: => ToolOutcome): NodeResult =
       val name                                 = tool.spec.name
       def failRun(error: LLMError): NodeResult = NodeResult.Fail(GraphError.ToolFailed(name, call.id, error))
-      Try(run).toResult match
-        case Left(thrown) => error(task, s"Tool '$name' failed: ${thrown.message}")
+      def cancelled(error: CancelledError): NodeResult =
+        Thread.currentThread().interrupt()
+        NodeResult.Fail(error)
+      Try(run).toEither match
+        case Left(thrown) =>
+          CancelledError.fromThrowable(thrown, s"tool $name") match
+            case Some(cancellation) => cancelled(cancellation)
+            case None               => error(task, s"Tool '$name' failed: ${describe(thrown)}")
         case Right(ToolOutcome.Success(content, update)) =>
           val undeclared =
             update.operations.map(_.key.id).filterNot(k => tool.writes.exists(_.id == k)).map(_.value).distinct
@@ -396,9 +431,11 @@ object ToolLoop:
                 s"tool '$name' updated ${undeclared.map(k => s"'$k'").mkString(", ")}, which it does not declare"
               )
             )
-        case Right(ToolOutcome.Error(message)) => error(task, message)
+        case Right(ToolOutcome.Error(message))        => error(task, message)
         case Right(ToolOutcome.NeedsApproval(reason)) =>
-          if approved then error(task, s"Tool '$name' asked for approval again: $reason")
+          // approving would run `execute` again and lose the answer
+          if resumed then error(task, s"Tool '$name' asked for approval after a question: $reason")
+          else if approved then error(task, s"Tool '$name' asked for approval again: $reason")
           else suspend(task, call, reason, ApprovalSource.Tool)
         case Right(ToolOutcome.Ask(question)) =>
           (tool.spec.question, askRefs.get(name)) match
@@ -416,7 +453,8 @@ object ToolLoop:
                     ValidationError("tool question", s"tool '$name' asked a question of another type: ${e.message}")
                   )
             case _ => failRun(ValidationError("tool question", s"tool '$name' asked a question it does not declare"))
-        case Right(ToolOutcome.Fatal(error)) => failRun(error)
+        case Right(ToolOutcome.Fatal(cancellation: CancelledError)) => cancelled(cancellation)
+        case Right(ToolOutcome.Fatal(error))                        => failRun(error)
 
     /** A string result is the string itself, not a quoted JSON string. */
     private def rendered(content: ujson.Value): String = content match

@@ -148,7 +148,8 @@ model sees; none runs a tool or fails the run.
 
 1. **Look up** the tool by name: unknown → `Error("Unknown tool 'x'")`.
 2. **Validate** the raw arguments against `spec.providerSchema` with the set's validator: violations →
-   `Error("Invalid arguments for 'x': <violation>; <violation>")`.
+   `Error("Invalid arguments for 'x': <violation>; <violation>")`. The validator is pluggable, so a
+   validator that throws → `Error("Invalid arguments for 'x': <exception message>")`.
 3. **Decode** with `spec.codec`: failure → `Error("Invalid arguments for 'x': <decode message>")`.
 4. **`validateDecoded`**: `Left(e)` → `Error("Invalid arguments for 'x': <e.message>")`.
 5. **Policy** (`ToolCallPolicy` until #1279): `Deny` → `Error("Denied: ...")`; `RequireApproval` →
@@ -160,7 +161,9 @@ model sees; none runs a tool or fails the run.
      is a `ValidationError` naming the undeclared keys.
    - `Error(msg)`: an error result, rendered `{"error": msg}` as today.
    - `NeedsApproval(reason)`: suspend at the approval node; if the call was already approved → error
-     result "Tool 'x' asked for approval again: ...".
+     result "Tool 'x' asked for approval again: ...". If `resume` returns it after a question → error
+     result "Tool 'x' asked for approval after a question: ...", because an approval would run
+     `execute` again and lose the answer.
    - `Ask(q)`: encode `q` with the declared question codec and suspend at that tool's resume node
      (`ask/<tool name>`, one per asking tool). The question carried in the interrupt is a
      `ToolQuestionRequest(assistantMessageId, call, question: ujson.Value, approved: Boolean = false)`;
@@ -181,16 +184,24 @@ model sees; none runs a tool or fails the run.
    - A thrown NonFatal exception → error result `"Tool 'x' failed: <message>"`. Throwing never fails
      the run; `Fatal` does.
    - An interrupt (`CancelledError` or `InterruptedException`) follows #1270: the task records nothing
-     and the run is cancelled.
+     and the run is cancelled. This includes a thrown exception that `CancelledError.fromThrowable`
+     classifies as a cancellation (an interrupt wrapped in another exception, or any throw while the
+     flag is set) and `Fatal(e: CancelledError)`: the loop restores the interrupt flag and the task is
+     cancelled, not given an error result and not failed with `ToolFailed`.
 7. **Edited approval** (`ApprovalDecision.Edit(arguments)`): the assistant message is amended first, as
-   today, then the edited arguments go through steps 2-5 again before execution.
+   today, then the edited arguments go through steps 2-5 again before execution. In step 5 only `Deny`
+   refuses an edit; `RequireApproval` counts as satisfied, because the reviewer has just approved
+   these arguments. A plain `Approve` re-runs steps 2-4 but does not consult the policy again.
 
 Exactly one result per call, written by the loop, is unchanged from #1269.
 
 `ToolLoop.build(id, version, model, tools: ToolSet, policy = ToolCallPolicy.allowAll)`. The
 `call-tool`, approval and `ask/<name>` nodes declare `writes = results ∪ messages ∪` the union of the
 tools' `writes`; the per-tool check in step 6 enforces each tool's own set. `ToolLoop` exposes typed
-helpers to read pending questions and answer them, alongside the existing approval helpers.
+helpers to read pending questions and answer them, alongside the existing approval helpers. `build`
+refuses, with a `ValidationError` naming each offending tool, a tool whose `writes` contains
+`ToolLoop.results` or `Messages.key`: the loop alone writes those, so that every call gets exactly
+one result.
 
 ### `AgentTool.fromToolFunction`
 
