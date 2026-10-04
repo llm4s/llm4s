@@ -422,6 +422,14 @@ unchanged.
 
 ## IBM watsonx.ai
 
+> **Beta, built on deprecated endpoints.** `llm4s-watsonx` uses the watsonx.ai "Infer text" and
+> "Infer text event stream" endpoints (`/ml/v1/text/generation` and `/generation_stream`), which IBM
+> deprecated in its [February 2026 release notes](https://www.ibm.com/docs/en/software-hub/5.3.x?topic=new-watsonxai)
+> and will remove in the future; IBM points to the chat API. The module has never been run against
+> the live service (there is no watsonx account to test with), it is Beta and its API is not frozen,
+> and tools are unsupported because of this API. Migration to the chat API is tracked in
+> [#1314](https://github.com/llm4s/llm4s/issues/1314).
+
 IBM's enterprise AI platform, serving Granite, Llama and Mistral models. It lives in its own module,
 `llm4s-watsonx`; adding the dependency registers the `watsonx` provider.
 

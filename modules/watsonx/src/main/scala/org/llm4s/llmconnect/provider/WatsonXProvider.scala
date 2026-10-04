@@ -11,6 +11,13 @@ import org.llm4s.types.Result
 /**
  * Registration for IBM watsonx.ai.
  *
+ * '''Beta - built on deprecated endpoints.''' IBM's February 2026 release notes
+ * (https://www.ibm.com/docs/en/software-hub/5.3.x?topic=new-watsonxai) deprecate the watsonx.ai
+ * "Infer text" and "Infer text event stream" endpoints (`/ml/v1/text/generation` and
+ * `/generation_stream`) this module uses; IBM points to the chat API. This module has never been run
+ * against the live service (no watsonx account), its API is not frozen, and tools are unsupported
+ * because of the endpoint. Migration to the chat API: https://github.com/llm4s/llm4s/issues/1314.
+ *
  * A section names the model and the `projectId` (or `spaceId`) inference runs in, and takes the
  * IBM Cloud API key as `apiKey` - or from `llm4s.credentials.watsonx.apiKey`, which
  * `WATSONX_API_KEY` binds. `baseUrl` selects the region and defaults to Dallas (`us-south`).

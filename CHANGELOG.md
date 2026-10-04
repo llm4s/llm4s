@@ -112,8 +112,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SpeechConfigLoader`. TTS output is raw 24 kHz 16-bit mono PCM in `GeneratedAudio`, not MP3. HTTP
   failures map as the chat providers' do (`AuthenticationError`, `RateLimitError`, `ValidationError`,
   `ServiceError`). See [docs/guide/speech.md](docs/guide/speech.md#cloud-providers).
-- **`llm4s-watsonx`: IBM watsonx.ai chat provider** ([#1019](https://github.com/llm4s/llm4s/issues/1019)):
-  a new provider module under the id `watsonx` (`WatsonXClient`, `WatsonXConfig`, `WatsonXProvider`,
+- **`llm4s-watsonx`: IBM watsonx.ai provider (Beta, built on deprecated endpoints)** ([#1019](https://github.com/llm4s/llm4s/issues/1019)):
+  IBM's [February 2026 release notes](https://www.ibm.com/docs/en/software-hub/5.3.x?topic=new-watsonxai)
+  deprecate the "Infer text" and "Infer text event stream" endpoints this module uses; it has never
+  been run against the live service, its API is not frozen, and tools are unsupported because of the
+  endpoint. Migration to the chat API is tracked in [#1314](https://github.com/llm4s/llm4s/issues/1314).
+  A new provider module under the id `watsonx` (`WatsonXClient`, `WatsonXConfig`, `WatsonXProvider`,
   `Llm4sWatsonXModule`, declared in `META-INF/services`), so adding the dependency is all it takes
   to use `provider = "watsonx"`; `llm4s-core` is unchanged. It speaks the text-generation API
   (`/ml/v1/text/generation` and `/generation_stream`), which is not OpenAI-compatible, so it is not
