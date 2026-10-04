@@ -16,7 +16,7 @@ import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.util.{ Failure, Try }
+import scala.util.{ Failure, Success, Try }
 
 /** Who asked for an approval: the tool itself, or a middleware's tool wrapper. All resume at the same approval node. */
 enum ApprovalSource derives ReadWriter:
@@ -252,12 +252,12 @@ object ToolLoop:
         history <- state.get(messages)
         last <- history.lastOption
           .collect { case StoredMessage(id, a: AssistantMessage) if a.toolCalls.isEmpty => id -> a }
-          .toRight(ValidationError("tool-loop", "finish found no final assistant message"))
+          .toRight(ValidationError("tool loop", "finish found no final assistant message"))
         (answerId, assistant) = last
         changed <- stack.afterAgent(assistant.content, context)
         command <-
           if changed == assistant.content then Right(Command.empty)
-          else if changed.trim.isEmpty then Left(ValidationError("tool-loop", "afterAgent returned a blank answer"))
+          else if changed.trim.isEmpty then Left(ValidationError("tool loop", "afterAgent returned a blank answer"))
           else
             val replaced = StoredMessage(answerId, assistant.copy(contentOpt = Some(changed)))
             Right(Command.empty.update(messages, MessageUpdate.Replace(answerId, replaced)))
@@ -314,24 +314,39 @@ object ToolLoop:
       state.get(messages).flatMap { history =>
         history.lastOption.map(_.message) match
           case Some(answer: AssistantMessage) if answer.toolCalls.isEmpty => Right(answer.content)
-          case _ => Left(ValidationError("tool-loop", "the run ended without a final assistant message"))
+          case _ => Left(ValidationError("tool loop", "the run ended without a final assistant message"))
       }
     }.map(new ToolLoop(_, approval, askRefs.values.map(_.node.id).toSet))
 
   /**
    * The model wrappers' innermost function: `model.next`, guarded, since the stack guards only its
-   * hooks. A NonFatal throw is `Left`; a thrown cancellation restores the interrupt flag and is
-   * `Left(CancelledError)`. Either way it is the model's failure, not a wrapper's.
+   * hooks. It refuses to call the model while the thread is interrupted, returning
+   * `Left(CancelledError)`, so a wrapper that retries never calls a cancelled model again. A
+   * NonFatal throw is `Left`; a thrown cancellation - a bare `InterruptedException` too - restores
+   * the interrupt flag and is `Left(CancelledError)`. Either way it is the model's failure, not a
+   * wrapper's.
    */
   private def callModel(model: ModelStep)(request: ModelRequest): Result[AssistantMessage] =
-    Try(model.next(request.messages, request.tools)).toEither match
-      case Right(result) => result
-      case Left(thrown) =>
-        CancelledError.fromThrowable(thrown, "model") match
-          case Some(cancellation) =>
-            Thread.currentThread().interrupt()
-            Left(cancellation)
-          case None => Failure[AssistantMessage](thrown).toResult
+    if Thread.currentThread().isInterrupted then Left(CancelledError("model"))
+    else
+      attempt(model.next(request.messages, request.tools)) match
+        case Right(result) => result
+        case Left(thrown) =>
+          CancelledError.fromThrowable(thrown, "model") match
+            case Some(cancellation) =>
+              Thread.currentThread().interrupt()
+              Left(cancellation)
+            case None => Failure[AssistantMessage](thrown).toResult
+
+  /**
+   * Runs `body`, returning what it throws as `Left`: a NonFatal exception, or a bare
+   * `InterruptedException`, which `Try` alone rethrows (its flag is clear, so the caller restores it).
+   */
+  private def attempt[A](body: => A): Either[Throwable, A] =
+    CancelledError.catchInterrupt(Try(body)) match
+      case Right(Success(value))  => Right(value)
+      case Right(Failure(thrown)) => Left(thrown)
+      case Left(interrupted)      => Left(interrupted)
 
   /** The call pipeline (design #1278, "The call pipeline"; #1279): one call's checks, chain, tool and outcome. */
   final private class Pipeline(
@@ -469,14 +484,18 @@ object ToolLoop:
 
     /**
      * The chain's innermost function, for one chain invocation: the tool's `execute` or `resume`,
-     * [[guarded]]. Once it has produced `Fatal(CancelledError)`, every later call - a wrapper
-     * retrying - returns that same outcome without running the tool again.
+     * [[guarded]]. It refuses to start the tool while the thread is interrupted, returning
+     * `Fatal(CancelledError)` - so a tool that reported its cancellation as an `Error` is not run
+     * again by a wrapper that retries. Once it has produced `Fatal(CancelledError)`, every later
+     * call - a wrapper retrying - returns that same outcome without running the tool again.
      */
     private def innermost(name: String)(run: => ToolOutcome): () => ToolOutcome =
       val cancelledWith = new AtomicReference[Option[ToolOutcome]](None)
       () =>
         cancelledWith.get.getOrElse {
-          val result = guarded(name)(run)
+          val result =
+            if Thread.currentThread().isInterrupted then ToolOutcome.Fatal(CancelledError(s"tool $name"))
+            else guarded(name)(run)
           result match
             case ToolOutcome.Fatal(_: CancelledError) => cancelledWith.set(Some(result))
             case _                                    => ()
@@ -485,12 +504,12 @@ object ToolLoop:
 
     /**
      * Guards the tool so that wrappers see a throwing tool as an outcome. A thrown NonFatal exception
-     * is an error result; a thrown cancellation (an interrupt wrapped in another exception, or one
-     * thrown with the flag set) restores the interrupt flag at once and is `Fatal(CancelledError)`.
-     * An `InterruptedException` is not caught.
+     * is an error result; a thrown cancellation (a bare `InterruptedException`, an interrupt wrapped
+     * in another exception, or one thrown with the flag set) restores the interrupt flag at once and
+     * is `Fatal(CancelledError)`.
      */
     private def guarded(name: String)(run: => ToolOutcome): ToolOutcome =
-      Try(run).toEither match
+      attempt(run) match
         case Right(result) => result
         case Left(thrown) =>
           CancelledError.fromThrowable(thrown, s"tool $name") match

@@ -1061,6 +1061,125 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     (store.latest(thread).value.get.pendingWrites.map(_.toString).mkString should not).include("k1")
   }
 
+  /** Retries any outcome other than `Success`, and any throw from `next`, up to three attempts in all. */
+  private def catchAllRetry(attempts: AtomicInteger): AgentMiddleware =
+    wrapper("catch-all") { (_, _, next) =>
+      def attempt(n: Int): ToolOutcome =
+        attempts.incrementAndGet()
+        // test sources are outside scalafix; this is the catch-all a careless wrapper would write
+        val outcome =
+          try next()
+          catch { case _: Throwable => ToolOutcome.Error("next threw") }
+        outcome match {
+          case ok: ToolOutcome.Success => ok
+          case other                   => if n < 3 then attempt(n + 1) else other
+        }
+      attempt(1)
+    }
+
+  it should "never run a tool again that threw a bare InterruptedException, under a catch-all retrying wrapper" in {
+    val runs     = new AtomicInteger()
+    val attempts = new AtomicInteger()
+    val interrupted = bare("interrupted") { _ =>
+      runs.incrementAndGet()
+      throw new InterruptedException("stop")
+    }
+    val model = ScriptedModel(calls(("b1", "interrupted", ujson.Obj())), summarise)
+    val l     = ToolLoop.build("assistant", "v1", model, set(interrupted), Seq(catchAllRetry(attempts))).value
+    val store = InMemoryCheckpointer()
+    val ended = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited.value
+    ended.failed._2 shouldBe a[GraphError.Cancelled]
+    attempts.get shouldBe 3
+    runs.get shouldBe 1
+    (store.latest(thread).value.get.pendingWrites.map(_.toString).mkString should not).include("b1")
+  }
+
+  it should "never run a tool again that reported its cancellation as an Error, under a wrapper that retries Errors" in {
+    val runs     = new AtomicInteger()
+    val attempts = new AtomicInteger()
+    // a core ToolFunction cancelled mid-call: it sets the flag and returns Left, which fromToolFunction maps to Error
+    val function = ToolBuilder[Map[String, Any], String]("halting", "Halts", Schema.`object`[Map[String, Any]]("Halt"))
+      .withHandler { _ =>
+        runs.incrementAndGet()
+        Thread.currentThread().interrupt()
+        Left("cancelled")
+      }
+      .buildSafe()
+      .value
+    val model = ScriptedModel(calls(("h1", "halting", ujson.Obj())), summarise)
+    val l =
+      ToolLoop
+        .build("assistant", "v1", model, set(AgentTool.fromToolFunction(function)), Seq(catchAllRetry(attempts)))
+        .value
+    val store = InMemoryCheckpointer()
+    val ended = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited.value
+    ended.failed._2 shouldBe a[GraphError.Cancelled]
+    attempts.get shouldBe 3
+    runs.get shouldBe 1
+    (store.latest(thread).value.get.pendingWrites.map(_.toString).mkString should not).include("h1")
+  }
+
+  it should "never run a tool again after an inner wrapper throws a bare InterruptedException, under a retrying outer one" in {
+    val runs     = new AtomicInteger()
+    val attempts = new AtomicInteger()
+    val counted = tool[Echo]("counted", "text") { (a, _) =>
+      runs.incrementAndGet(); text(a.text)
+    }
+    // runs the tool, then is interrupted while it waits (a rate limiter, say)
+    val waiting = wrapper("waiting") { (_, _, next) =>
+      next()
+      throw new InterruptedException("stop")
+    }
+    val model = ScriptedModel(calls(("w1", "counted", ujson.Obj("text" -> "hi"))), summarise)
+    val l     = ToolLoop.build("assistant", "v1", model, set(counted), Seq(catchAllRetry(attempts), waiting)).value
+    val ended = GraphRuntime(InMemoryCheckpointer())
+      .start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1")))
+      .awaited
+      .value
+    ended.failed._2 shouldBe a[GraphError.Cancelled]
+    attempts.get shouldBe 3
+    runs.get shouldBe 1
+  }
+
+  it should "never call a cancelled model again, under a retrying model wrapper" in {
+    val retrying = middleware(
+      "retrying",
+      // retries a Left, and a throw from next, up to three calls in all
+      model = (request, next) => {
+        def attempt(n: Int): Result[AssistantMessage] = {
+          val result =
+            try next(request)
+            catch { case _: Throwable => Left(ValidationError("model", "next threw")) }
+          if result.isLeft && n < 3 then attempt(n + 1) else result
+        }
+        attempt(1)
+      }
+    )
+    final class Cancelling(cancel: () => Result[AssistantMessage]) extends ModelStep {
+      val calls = new AtomicInteger()
+      def next(messages: Vector[Message], tools: ToolSet): Result[AssistantMessage] =
+        calls.incrementAndGet()
+        cancel()
+    }
+    val throwing = Cancelling(() => throw new InterruptedException("stop"))
+    val reporting = Cancelling { () =>
+      Thread.currentThread().interrupt()
+      Left(org.llm4s.error.CancelledError("model"))
+    }
+    Seq("throws a bare InterruptedException" -> throwing, "returns a cancelled Left" -> reporting).foreach {
+      (name, model) =>
+        val l = ToolLoop.build("assistant", "v1", model, set(Tools().echo), Seq(retrying)).value
+        val ended = GraphRuntime(InMemoryCheckpointer())
+          .start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1")))
+          .awaited
+          .value
+        withClue(name) {
+          ended.failed._2 shouldBe a[GraphError.Cancelled]
+          model.calls.get shouldBe 1
+        }
+    }
+  }
+
   it should "refuse an approval a wrapper asks for when the tool resumes after a question" in {
     val invocations = new AtomicInteger()
     // passes the call's first run, then wants approval once the tool resumes
@@ -1183,12 +1302,33 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     stored.id should endWith("/assistant")
   }
 
+  it should "carry each turn's replaced answer into the next turn on the same thread" in {
+    val model   = ScriptedModel(_ => AssistantMessage("first"), _ => AssistantMessage("second"))
+    val ticking = middleware("ticking", after = answer => Right(s"$answer ✓"))
+    val l       = ToolLoop.build("assistant", "v1", model, set(Tools().echo), Seq(ticking)).value
+    val runtime = GraphRuntime(InMemoryCheckpointer())
+    val (_, first) =
+      runtime.start(thread, l.graph, "one", RunConfig().withRunId(RunId("run-1"))).awaited.value.completed
+    first shouldBe "first ✓"
+
+    val (state, second) =
+      runtime.start(thread, l.graph, "two", RunConfig().withRunId(RunId("run-2"))).awaited.value.completed
+    second shouldBe "second ✓"
+    // the second model call saw turn 1's answer as afterAgent replaced it
+    model.seen.get(1) shouldBe Vector(UserMessage("one"), AssistantMessage("first ✓"), UserMessage("two"))
+    val history = messagesOf(state)
+    history shouldBe
+      Vector(UserMessage("one"), AssistantMessage("first ✓"), UserMessage("two"), AssistantMessage("second ✓"))
+    history.size shouldBe 4
+    Message.validateConversation(history.toList).value shouldBe (())
+  }
+
   it should "fail the run when afterAgent returns a blank answer, or a Left" in {
     val blanking = middleware("blanking", after = _ => Right("  "))
     val l        = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(Tools().echo), Seq(blanking)).value
     val (node, cause) = nodeFailure(runInMemory(l.graph, "go"))
     node shouldBe NodeId("finish")
-    cause shouldBe ValidationError("tool-loop", "afterAgent returned a blank answer")
+    cause shouldBe ValidationError("tool loop", "afterAgent returned a blank answer")
 
     val refusing  = middleware("refusing", after = _ => Left(ValidationError("output", "blocked")))
     val refused   = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(Tools().echo), Seq(refusing)).value

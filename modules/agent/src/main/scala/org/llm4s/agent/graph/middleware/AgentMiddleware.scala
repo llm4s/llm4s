@@ -42,6 +42,12 @@ final case class ToolCallRequest(spec: AgentToolSpec[?], call: ToolCall)
  * [[runsAfter]]: the first in stack order is the outermost wrapper and runs `beforeAgent` first;
  * unwinding, and `afterAgent`, run in reverse. A hook that throws fails the run with
  * `GraphError.MiddlewareFailed`; a thrown cancellation cancels it.
+ *
+ * `wrapToolCall` runs concurrently for the calls of one batch (up to `RunBudgets.maxConcurrency`),
+ * on task threads, so a middleware's own state must be thread-safe.
+ *
+ * A wrapper should pass `ToolOutcome.Fatal(CancelledError)` through and not retry it: the call
+ * was cancelled, and a retry gets the same outcome without running the tool again.
  */
 trait AgentMiddleware:
 
@@ -70,6 +76,9 @@ trait AgentMiddleware:
    * Wraps one model call. A wrapper may rewrite the request (inject a note, filter tools), call
    * `next` more than once (retry, fallback), transform its result, or return `Left`, which fails
    * the run. A model wrapper cannot suspend.
+   *
+   * Filtering `ModelRequest.tools` shapes what the model is offered and is not a permission
+   * control: a tool the model calls anyway still runs through `wrapToolCall`, where denial belongs.
    */
   def wrapModelCall(request: ModelRequest, @unused context: RunContext)(
     next: ModelRequest => Result[AssistantMessage]

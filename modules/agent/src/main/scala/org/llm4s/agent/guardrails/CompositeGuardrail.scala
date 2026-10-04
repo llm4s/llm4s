@@ -1,6 +1,6 @@
 package org.llm4s.agent.guardrails
 
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ LLMError, ValidationError }
 import org.llm4s.types.Result
 
 /**
@@ -39,17 +39,7 @@ class CompositeGuardrail[A](
     val results = guardrails.map(_.validate(value))
     val errors  = results.collect { case Left(err) => err }
 
-    if (errors.isEmpty) {
-      Right(value)
-    } else {
-      // Aggregate all errors
-      Left(
-        ValidationError.invalid(
-          "composite",
-          s"Multiple validation failures: ${errors.map(_.formatted).mkString("; ")}"
-        )
-      )
-    }
+    if (errors.isEmpty) Right(value) else Left(CompositeGuardrail.multipleFailures(errors))
   }
 
   /**
@@ -91,6 +81,13 @@ class CompositeGuardrail[A](
 }
 
 object CompositeGuardrail {
+
+  /**
+   * The error `All` mode reports for `errors`, one or more: every failure, formatted, in one
+   * `ValidationError`. Shared with `GuardrailMiddleware`, so the two report failures alike.
+   */
+  private[agent] def multipleFailures(errors: Seq[LLMError]): ValidationError =
+    ValidationError.invalid("composite", s"Multiple validation failures: ${errors.map(_.formatted).mkString("; ")}")
 
   /**
    * Create a composite guardrail that validates all guardrails.

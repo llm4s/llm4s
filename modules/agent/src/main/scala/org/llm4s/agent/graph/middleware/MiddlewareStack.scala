@@ -8,7 +8,7 @@ import org.llm4s.types.Result
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
-import scala.util.Try
+import scala.util.{ Failure, Success, Try }
 
 /**
  * Middleware in the order they run, built and checked whole by [[MiddlewareStack.of]].
@@ -30,19 +30,19 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
   val writes: Set[StateKey[?, ?]] = ordered.flatMap(_.writes).toSet
 
   /** Runs each `beforeAgent` in stack order, threading the input; the first `Left` stops. */
-  def beforeAgent(input: String, context: RunContext): Result[String] =
+  private[graph] def beforeAgent(input: String, context: RunContext): Result[String] =
     ordered.foldLeft[Result[String]](Right(input))((acc, m) =>
       acc.flatMap(value => guarded(m)(m.beforeAgent(value, context)))
     )
 
   /** Runs each `afterAgent` in reverse stack order, threading the answer; the first `Left` stops. */
-  def afterAgent(answer: String, context: RunContext): Result[String] =
+  private[graph] def afterAgent(answer: String, context: RunContext): Result[String] =
     ordered.reverse.foldLeft[Result[String]](Right(answer))((acc, m) =>
       acc.flatMap(value => guarded(m)(m.afterAgent(value, context)))
     )
 
   /** Runs the model call through every `wrapModelCall`, the first outermost, with `innermost` at the centre. */
-  def wrapModelCall(request: ModelRequest, context: RunContext)(
+  private[graph] def wrapModelCall(request: ModelRequest, context: RunContext)(
     innermost: ModelRequest => Result[AssistantMessage]
   ): Result[AssistantMessage] =
     val chain = ordered.foldRight(innermost) { (m, next) => (req: ModelRequest) =>
@@ -58,7 +58,9 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
    * returned something other than that same value (by reference); otherwise the inner layer's
    * attribution stands, and the innermost function's own `NeedsApproval` is attributed to the tool.
    */
-  def wrapToolCall(request: ToolCallRequest, context: ToolContext)(innermost: () => ToolOutcome): ToolChainResult =
+  private[graph] def wrapToolCall(request: ToolCallRequest, context: ToolContext)(
+    innermost: () => ToolOutcome
+  ): ToolChainResult =
     def layer(index: Int): ToolChainResult =
       if index == ordered.size then ToolChainResult(innermost(), None)
       else
@@ -78,7 +80,7 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
 
   /** Runs one boundary or model hook; a throw is `Left`, and a cancellation also restores the interrupt flag. */
   private def guarded[A](m: AgentMiddleware)(run: => Result[A]): Result[A] =
-    Try(run).toEither match
+    MiddlewareStack.attempt(run) match
       case Right(result) => result
       case Left(thrown) =>
         CancelledError.fromThrowable(thrown, MiddlewareStack.operation(m)) match
@@ -93,7 +95,7 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
    * runs with it clear.
    */
   private def guardedTool(m: AgentMiddleware)(run: => ToolOutcome): ToolOutcome =
-    Try(run).toEither match
+    MiddlewareStack.attempt(run) match
       case Right(outcome) => outcome
       case Left(thrown) =>
         val error: LLMError = CancelledError.fromThrowable(thrown, MiddlewareStack.operation(m)) match
@@ -106,7 +108,7 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
 object MiddlewareStack:
 
   /** What a tool call's chain returned; `raisedBy` is set when `outcome` is `NeedsApproval`: `None` = the tool, `Some(id)` = that middleware. */
-  final case class ToolChainResult(outcome: ToolOutcome, raisedBy: Option[MiddlewareId])
+  final private[graph] case class ToolChainResult(outcome: ToolOutcome, raisedBy: Option[MiddlewareId])
 
   /** No middleware: every chain is its innermost function. */
   val empty: MiddlewareStack = new MiddlewareStack(Vector.empty)
@@ -116,10 +118,20 @@ object MiddlewareStack:
   private def operation(m: AgentMiddleware): String = s"middleware ${m.id.value}"
 
   /**
+   * Runs one hook, returning what it throws as `Left`: a NonFatal exception, or a bare
+   * `InterruptedException`, which `Try` alone rethrows past every enclosing wrapper with the flag clear.
+   */
+  private def attempt[A](run: => A): Either[Throwable, A] =
+    CancelledError.catchInterrupt(Try(run)) match
+      case Right(Success(value))  => Right(value)
+      case Right(Failure(thrown)) => Left(thrown)
+      case Left(interrupted)      => Left(interrupted)
+
+  /**
    * Orders `middleware` topologically by `runsBefore` / `runsAfter` (`a.runsBefore(b)` and
    * `b.runsAfter(a)` are the same edge, `a` outside `b`), breaking ties by registration order.
    * One `ValidationError` lists every invalid id, duplicate id, constraint naming an id that is not
-   * registered, cycle, and tool name contributed by more than one middleware.
+   * registered, cycle, and tool name contributed twice by one middleware or by more than one.
    */
   def of(middleware: AgentMiddleware*): Result[MiddlewareStack] =
     val all   = middleware.toVector
@@ -165,8 +177,14 @@ object MiddlewareStack:
 
     val contributed = all.flatMap(m => m.tools.map(t => t.spec.name -> m.id.value))
     val clashes = contributed.map(_._1).distinct.flatMap { name =>
-      val owners = contributed.collect { case (`name`, owner) => owner }
-      Option.when(owners.size > 1)(s"tool '$name' is contributed by more than one middleware: ${owners.mkString(", ")}")
+      val owners   = contributed.collect { case (`name`, owner) => owner }
+      val distinct = owners.distinct
+      val twice = distinct
+        .filter(owner => owners.count(_ == owner) > 1)
+        .map(owner => s"tool '$name' is contributed twice by middleware '$owner'")
+      twice ++ Option.when(distinct.size > 1)(
+        s"tool '$name' is contributed by more than one middleware: ${distinct.mkString(", ")}"
+      )
     }
 
     val problems = (invalid ++ duplicates ++ unknown ++ cycles ++ clashes).toList

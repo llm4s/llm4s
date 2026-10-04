@@ -141,6 +141,21 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     )
   }
 
+  it should "report a tool one middleware contributes twice, listing each clashing owner once" in {
+    val log = newLog
+    problems(
+      MiddlewareStack.of(
+        Rec("a", log, contributes = Vector(tool("twin"), tool("twin"))),
+        Rec("b", log, contributes = Vector(tool("shared"), tool("shared"))),
+        Rec("c", log, contributes = Vector(tool("shared")))
+      )
+    ) shouldBe List(
+      "tool 'twin' is contributed twice by middleware 'a'",
+      "tool 'shared' is contributed twice by middleware 'b'",
+      "tool 'shared' is contributed by more than one middleware: b, c"
+    )
+  }
+
   it should "collect contributed tools in stack order and union the writes" in {
     val log = newLog
     val k1  = StateKey.replace[Int]("k1", 0)
@@ -237,12 +252,14 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "become Fatal(CancelledError) when it throws a cancellation, restoring the interrupt flag" in {
-    val result = stack(new Throwing("b", () => new RuntimeException(new InterruptedException())))
-      .wrapToolCall(request, toolContext)(() => ToolOutcome.Error("x"))
-    Thread.interrupted() shouldBe true
-    result.outcome match
-      case ToolOutcome.Fatal(c: CancelledError) => c.message should include("middleware b")
-      case other                                => fail(s"not a cancellation: $other")
+    Seq[() => Throwable](() => new RuntimeException(new InterruptedException()), () => new InterruptedException())
+      .foreach { thrown =>
+        val result = stack(new Throwing("b", thrown)).wrapToolCall(request, toolContext)(() => ToolOutcome.Error("x"))
+        Thread.interrupted() shouldBe true
+        result.outcome match
+          case ToolOutcome.Fatal(c: CancelledError) => c.message should include("middleware b")
+          case other                                => fail(s"not a cancellation: $other")
+      }
   }
 
   "wrapModelCall" should "nest the first middleware outermost and pass each rewritten request inward" in {
@@ -277,11 +294,14 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     log.asScala.toList shouldBe Nil
   }
 
-  it should "turn a thrown cancellation into Left(CancelledError) and set the interrupt flag" in {
-    val result = stack(new Throwing("b", () => new RuntimeException(new InterruptedException())))
-      .wrapModelCall(modelRequest, runContext)(_ => Right(AssistantMessage("hi")))
-    Thread.interrupted() shouldBe true
-    result.left.value shouldBe a[CancelledError]
+  it should "turn a thrown cancellation, a bare InterruptedException too, into Left(CancelledError) and set the interrupt flag" in {
+    Seq[() => Throwable](() => new RuntimeException(new InterruptedException()), () => new InterruptedException())
+      .foreach { thrown =>
+        val result =
+          stack(new Throwing("b", thrown)).wrapModelCall(modelRequest, runContext)(_ => Right(AssistantMessage("hi")))
+        Thread.interrupted() shouldBe true
+        result.left.value shouldBe a[CancelledError]
+      }
   }
 
   "beforeAgent" should "run in stack order, threading the transformed input" in {

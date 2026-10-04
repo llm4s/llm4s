@@ -1,8 +1,8 @@
 package org.llm4s.agent.graph.middleware
 
 import org.llm4s.agent.graph.RunContext
-import org.llm4s.agent.guardrails.{ Guardrail, InputGuardrail, OutputGuardrail }
-import org.llm4s.error.ValidationError
+import org.llm4s.agent.guardrails.{ CompositeGuardrail, Guardrail, InputGuardrail, OutputGuardrail }
+import org.llm4s.error.LLMError
 import org.llm4s.types.Result
 
 /**
@@ -25,20 +25,12 @@ object GuardrailMiddleware:
 
   /**
    * Threads `value` through `guardrails`; a failing guardrail leaves it unchanged for the next.
-   * The aggregate error is built as `CompositeGuardrail`'s `All` mode builds it, which is private.
+   * The aggregate error is `CompositeGuardrail`'s, built by the same helper its `All` mode uses.
    */
   private def run(guardrails: Seq[Guardrail[String]], value: String): Result[String] =
-    val (last, errors) = guardrails.foldLeft((value, Vector.empty[org.llm4s.error.LLMError])) {
-      case ((current, errs), guardrail) =>
-        guardrail.validate(current) match
-          case Right(next) => (next, errs)
-          case Left(err)   => (current, errs :+ err)
+    val (last, errors) = guardrails.foldLeft((value, Vector.empty[LLMError])) { case ((current, errs), guardrail) =>
+      guardrail.validate(current) match
+        case Right(next) => (next, errs)
+        case Left(err)   => (current, errs :+ err)
     }
-    if errors.isEmpty then Right(last)
-    else
-      Left(
-        ValidationError.invalid(
-          "composite",
-          s"Multiple validation failures: ${errors.map(_.formatted).mkString("; ")}"
-        )
-      )
+    if errors.isEmpty then Right(last) else Left(CompositeGuardrail.multipleFailures(errors))
