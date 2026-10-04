@@ -147,6 +147,19 @@ object AgentTool:
    */
   def fromToolFunction(tool: ToolFunction[?, ?]): AgentTool[ujson.Value] = new FromToolFunction(tool)
 
+  /**
+   * Continues `tool`'s call `args` with `question` answered by `answer`, both decoded with the codecs
+   * of `tool.spec.question`; the loop's entry point to [[AgentTool.resumeErased]].
+   */
+  private[graph] def resumeWith[A](
+    tool: AgentTool[A],
+    args: A,
+    question: Any,
+    answer: Any,
+    context: ToolContext
+  ): ToolOutcome =
+    tool.resumeErased(args, question, answer, context)
+
   /** Keeps the original function, so [[ToolSet.toolFunctions]] hands it back unchanged. */
   final private[tool] class FromToolFunction(val function: ToolFunction[?, ?]) extends AgentTool[ujson.Value]:
     val spec: AgentToolSpec[ujson.Value] = AgentToolSpec.unchecked[ujson.Value](
