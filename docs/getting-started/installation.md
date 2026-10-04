@@ -86,10 +86,10 @@ dependencies {
     implementation("org.llm4s:llm4s-core_3:0.4.1")
 }
 
-// Pin Scala library to avoid binary-incompatibility from transitive deps
+// Pin the Scala 3 library (scala3-library_3 only; scala-library stays at 2.13.x)
 configurations.all {
     resolutionStrategy.eachDependency {
-        if (requested.group == "org.scala-lang") {
+        if (requested.group == "org.scala-lang" && requested.name == "scala3-library_3") {
             useVersion("3.7.1")
         }
     }
@@ -108,7 +108,7 @@ dependencies {
 
 configurations.all {
     resolutionStrategy.eachDependency { details ->
-        if (details.requested.group == 'org.scala-lang') {
+        if (details.requested.group == 'org.scala-lang' && details.requested.name == 'scala3-library_3') {
             details.useVersion '3.7.1'
         }
     }

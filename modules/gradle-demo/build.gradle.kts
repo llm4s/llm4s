@@ -45,10 +45,11 @@ dependencies {
 
 // ── Scala library version pinning ───────────────────────────────────────────
 // Gradle may resolve multiple Scala 3 micro-versions from transitive deps.
-// Pin to a single known-good version to avoid binary incompatibility.
+// Pin scala3-library_3 to a single known-good version to avoid binary incompatibility.
+// Do not match the whole org.scala-lang group: scala-library stays at 2.13.x and has no 3.x release.
 configurations.all {
     resolutionStrategy.eachDependency {
-        if (requested.group == "org.scala-lang") {
+        if (requested.group == "org.scala-lang" && requested.name == "scala3-library_3") {
             useVersion("3.7.1")
         }
     }

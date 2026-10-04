@@ -38,7 +38,7 @@ These were checked against the `0.4.1` build definition and the dependency trees
 | Multiple SLF4J bindings | Any project with 2+ logging frameworks | `SLF4J: Class path contains multiple SLF4J bindings` | Keep exactly one SLF4J implementation on the classpath |
 | `azure-ai-openai` transitive tree | Non-Azure projects on 0.4.x | Extra Azure SDK jars on the classpath | Exclude `com.azure:azure-ai-openai` from llm4s |
 | OkHttp / Kotlin stdlib versions | Ktor, Kotlin projects + the OpenAI or Anthropic modules | Gradle upgrades OkHttp or `kotlin-stdlib` to the highest requested version | Check with `dependencyInsight`; pin with a constraint if needed |
-| Scala 3 micro-version mismatch | Any multi-lib Gradle project | `IncompatibleClassChangeError` at runtime | Pin `org.scala-lang` to `3.7.1` via `resolutionStrategy` |
+| Scala 3 micro-version mismatch | Any multi-lib Gradle project | `IncompatibleClassChangeError` at runtime | Pin `org.scala-lang:scala3-library_3` to `3.7.1` via `resolutionStrategy` |
 | Scala `_3` artifact suffix | Gradle (does not auto-resolve) | `Could not resolve org.llm4s:llm4s-core` | Use explicit artifact names, e.g. `llm4s-core_3` |
 
 ---
@@ -148,12 +148,14 @@ implementation("org.llm4s:llm4s-core_3:0.4.1")
 
 Multiple llm4s transitive dependencies may request different `org.scala-lang:scala3-library_3` micro-versions. Gradle resolves to the highest, which is usually fine, but an explicit pin avoids unexpected upgrades.
 
+Pin `scala3-library_3` by name, not the whole `org.scala-lang` group. Scala 3 runs on the Scala 2.13 `scala-library`, which has no `3.x` release, so a group-wide `useVersion("3.7.1")` fails to resolve with `Could not find org.scala-lang:scala-library:3.7.1`.
+
 ### Fix - Gradle (Kotlin DSL)
 
 ```kotlin
 configurations.all {
     resolutionStrategy.eachDependency {
-        if (requested.group == "org.scala-lang") {
+        if (requested.group == "org.scala-lang" && requested.name == "scala3-library_3") {
             useVersion("3.7.1")
         }
     }

@@ -45,10 +45,11 @@ dependencies {
     implementation("org.llm4s:llm4s-core_3:$llm4sVersion")
 }
 
-// Pin the Scala library version to avoid binary incompatibility from transitive deps
+// Pin the Scala 3 library to avoid binary incompatibility from transitive deps.
+// Match scala3-library_3 only: scala-library stays at 2.13.x and has no 3.x version.
 configurations.all {
     resolutionStrategy.eachDependency {
-        if (requested.group == "org.scala-lang") {
+        if (requested.group == "org.scala-lang" && requested.name == "scala3-library_3") {
             useVersion("3.7.1")
         }
     }
@@ -72,7 +73,7 @@ dependencies {
 
 configurations.all {
     resolutionStrategy.eachDependency { details ->
-        if (details.requested.group == 'org.scala-lang') {
+        if (details.requested.group == 'org.scala-lang' && details.requested.name == 'scala3-library_3') {
             details.useVersion '3.7.1'
         }
     }
@@ -207,7 +208,7 @@ Gradle could not find the artifact. Use the prefixed name and the explicit Scala
 Two SLF4J implementations are on the classpath. With `llm4s-core` `0.4.x`, exclude `logback-classic` (see [Logback conflict](#logback-conflict-spring-boot-3x-04x-only)) and ensure only one binding is declared.
 
 ### `Binary incompatible Scala library versions`
-Add the `resolutionStrategy` block shown above to pin `org.scala-lang` to `3.7.1`.
+Add the `resolutionStrategy` block shown above to pin `org.scala-lang:scala3-library_3` to `3.7.1`. Pin that artifact only: Scala 3 runs on the Scala 2.13 `scala-library` (`2.13.x`), which has no `3.x` release, so a rule that matches the whole `org.scala-lang` group fails with `Could not find org.scala-lang:scala-library:3.7.1`.
 
 ---
 
