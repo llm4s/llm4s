@@ -1,3 +1,10 @@
+---
+layout: page
+title: cats-effect Integration
+parent: User Guide
+nav_order: 14
+---
+
 # cats-effect Integration
 
 The `llm4s-effect` module wraps the synchronous `LLMClient` and `Agent` APIs in
@@ -85,6 +92,12 @@ for {
 } yield s2
 ```
 
+## Cancellation
+
+Cancellation is by thread interrupt, matching the llm4s core contract. `LLMClientIO.complete`, `AgentIO` and the streaming
+methods all run the provider call on an interruptible blocking thread, so cancelling the fiber (or
+a timeout) interrupts the call instead of waiting for it to finish.
+
 ## Error handling
 
 All `LLMError` values are raised as `LLMException` in the `F` error channel:
@@ -105,6 +118,8 @@ variables (`LLM_MODEL`, `OPENAI_API_KEY`, etc.).
 
 ### Differences from `Agent`
 
-`AgentIO` is a deliberately thin wrapper. `run` does not expose `handoffs`, `tracing` or `debug`,
-and `continueConversation` does not expose `contextWindowConfig`; the `Agent` defaults apply.
-If you need them, call `Agent` directly inside `Async[F].blocking`.
+`AgentIO` is a deliberately thin wrapper. `run` does not expose `handoffs`, and
+`continueConversation` does not expose `contextWindowConfig`; the `Agent` defaults apply.
+Tracing, debug logging and the trace log path are still available through the `context`
+parameter (`AgentContext`). If you need handoffs or context-window pruning, call `Agent` directly
+inside `Async[F].blocking`.
