@@ -333,4 +333,28 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
       noException should be thrownBy check(obj("type" -> "number", "multipleOf" -> m), ujson.Num(7))
     }
   }
+
+  "multipleOf" should "be exact in decimal, not relative" in {
+    def mult(n: Double, m: Double) = check(obj("type" -> "number", "multipleOf" -> m), ujson.Num(n)).isEmpty
+    mult(0.3, 0.1) shouldBe true
+    mult(7, 5) shouldBe false
+    mult(1000000000.5, 1) shouldBe false
+    mult(1e20, 1) shouldBe true
+    mult(2.5, 0.5) shouldBe true
+    // the decimal text of the double is used, so a value that prints as 0.30000000000000004 is refused
+    mult(0.30000000000000004, 0.1) shouldBe false
+  }
+
+  "unsupported" should "report a non-finite bound or count" in {
+    for {
+      k   <- Seq("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum")
+      bad <- Seq(Double.NaN, Double.PositiveInfinity, Double.NegativeInfinity)
+    }
+      v.unsupported(obj("type" -> "number", k -> bad)) shouldBe Vector(s"$$.$k")
+    for {
+      k   <- Seq("minLength", "maxLength", "minItems", "maxItems")
+      bad <- Seq(Double.NaN, Double.PositiveInfinity)
+    }
+      v.unsupported(obj(k -> bad)) shouldBe Vector(s"$$.$k")
+  }
 }

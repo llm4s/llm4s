@@ -57,8 +57,6 @@ object ToolArgumentValidator {
   private val JsonTypes: Set[String] =
     Set("string", "number", "integer", "boolean", "array", "object", "null")
 
-  private val MultipleOfTolerance = 1e-9
-
   private object SubsetValidator extends ToolArgumentValidator {
 
     override def unsupported(schema: ujson.Value): Vector[String] = unsupportedAt(schema, "$")
@@ -100,8 +98,8 @@ object ToolArgumentValidator {
                   }
                 case "minimum" | "maximum" | "exclusiveMinimum" | "exclusiveMaximum" =>
                   value match {
-                    case _: ujson.Num => Vector.empty
-                    case _            => Vector(s"$path.$key")
+                    case ujson.Num(n) if !n.isNaN && !n.isInfinity => Vector.empty
+                    case _                                         => Vector(s"$path.$key")
                   }
                 case "minLength" | "maxLength" | "minItems" | "maxItems" =>
                   value match {
@@ -239,10 +237,9 @@ object ToolArgumentValidator {
           .map(m => s"$path: ${num(n)} is not a multiple of ${num(m)}")
           .toVector
 
-    private def isMultiple(n: Double, m: Double): Boolean = {
-      val q = n / m
-      Math.abs(q - Math.rint(q)) <= MultipleOfTolerance * Math.max(1.0, Math.abs(q))
-    }
+    // Exact in decimal: the shortest decimal text of each double, so 0.3 is a multiple of 0.1.
+    private def isMultiple(n: Double, m: Double): Boolean =
+      BigDecimal(n.toString).remainder(BigDecimal(m.toString)).signum == 0
 
     private def objectViolations(
       fields: scala.collection.Map[String, ujson.Value],

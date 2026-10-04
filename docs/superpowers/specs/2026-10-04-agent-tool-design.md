@@ -150,8 +150,8 @@ supported one with a malformed value, reported at its path: a non-number `minimu
 `additionalProperties`; a `required` that is not an array of strings; a non-array `enum`; a
 non-object `properties`; a `type` that is not a JSON type name or a non-empty array of them. Types: `string`,
 `number` (any JSON number), `integer` (a number with no fractional part), `boolean`, `array`,
-`object`, `null`. Lengths count Unicode code points. `multipleOf` on non-integers uses a relative
-tolerance of 1e-9. Messages: `$.path: <what is wrong>`, e.g. `$.limit: 500 is above maximum 100`,
+`object`, `null`. Lengths count Unicode code points. `multipleOf` is checked exactly in decimal (the
+shortest decimal text of each double), with no tolerance; a bound or count that is NaN or infinite is unsupported. Messages: `$.path: <what is wrong>`, e.g. `$.limit: 500 is above maximum 100`,
 `$.query: required property missing`, `$.extra: property not allowed`.
 
 ## The call pipeline
