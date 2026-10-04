@@ -55,9 +55,63 @@ class MCPToolErrorResultSpec extends AnyFlatSpec with Matchers {
     execute(ujson.Obj("content" -> content("fine"))) shouldBe Right(ujson.Str("fine"))
   }
 
-  it should "be reported as a failure carrying the server's text when isError is true" in {
-    val result = execute(ujson.Obj("content" -> content("disk on fire"), "isError" -> true))
+  private def failure(callResult: ujson.Value): String = {
+    val result = execute(callResult)
     result.isLeft shouldBe true
-    result.left.toOption.map(_.toString).getOrElse("") should include("disk on fire")
+    result.left.toOption.map(_.toString).getOrElse("")
+  }
+
+  it should "be reported as a failure carrying the server's text when isError is true" in {
+    failure(ujson.Obj("content" -> content("disk on fire"), "isError" -> true)) should include(
+      "Tool call failed: disk on fire"
+    )
+  }
+
+  it should "keep non-JSON-looking and JSON-looking error text verbatim" in {
+    failure(ujson.Obj("content" -> content("""{"code":7}"""), "isError" -> true)) should include(
+      """Tool call failed: {"code":7}"""
+    )
+  }
+
+  it should "use only the first text part when an error carries several parts" in {
+    val parts = ujson.Arr(
+      ujson.Obj("type" -> "text", "text" -> "first"),
+      ujson.Obj("type" -> "text", "text" -> "second")
+    )
+    val msg = failure(ujson.Obj("content" -> parts, "isError" -> true))
+    msg should include("Tool call failed: first")
+    (msg should not).include("second")
+  }
+
+  it should "report a generic failure when an error has empty content" in {
+    failure(ujson.Obj("content" -> ujson.Arr(), "isError" -> true)) should include(
+      "Tool call failed: server reported an error"
+    )
+  }
+
+  it should "report a generic failure when an error has no content field" in {
+    failure(ujson.Obj("isError" -> true)) should include("Tool call failed: server reported an error")
+  }
+
+  it should "report a generic failure when an error has only a non-text part" in {
+    val image = ujson.Arr(ujson.Obj("type" -> "image", "data" -> "AAAA", "mimeType" -> "image/png"))
+    failure(ujson.Obj("content" -> image, "isError" -> true)) should include(
+      "Tool call failed: server reported an error"
+    )
+  }
+
+  it should "not treat a non-boolean isError as a failure" in {
+    execute(ujson.Obj("content" -> content("fine"), "isError" -> "true")) shouldBe Right(ujson.Str("fine"))
+    execute(ujson.Obj("content" -> content("fine"), "isError" -> 1)) shouldBe Right(ujson.Str("fine"))
+  }
+
+  it should "still parse JSON text and report empty content as a result when isError is false" in {
+    execute(ujson.Obj("content" -> content("""{"a":1}"""), "isError" -> false)) shouldBe Right(ujson.Obj("a" -> 1))
+    execute(ujson.Obj("content" -> ujson.Arr(), "isError" -> false)) shouldBe
+      Right(ujson.Obj("result" -> "No content returned"))
+  }
+
+  it should "fail with a parse error, not a tool error, for malformed non-error results" in {
+    failure(ujson.Obj("isError" -> false)) should include("Failed to parse tool result")
   }
 }

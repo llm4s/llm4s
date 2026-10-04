@@ -368,12 +368,14 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 
                     // Try to parse as JSON, fallback to string result
                     if (isToolError) ujson.Str(text) else Try(ujsonRead(text)).getOrElse(ujson.Str(text))
+                  } else if (isToolError) {
+                    ujson.Str("server reported an error")
                   } else {
                     ujson.Obj("result" -> ujson.Str("No content returned"))
                   }
                 } match {
                   case Success(parsed) if isToolError =>
-                    Left(s"Tool call failed: ${parsed.strOpt.getOrElse(parsed.render())}")
+                    Left(s"Tool call failed: ${parsed.str}")
                   case Success(parsed) => Right(parsed)
                   case Failure(_) if isToolError =>
                     Left("Tool call failed: server reported an error")
