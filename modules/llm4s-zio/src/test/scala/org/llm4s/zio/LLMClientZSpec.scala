@@ -135,16 +135,13 @@ object LLMClientZSpec extends ZIOSpecDefault {
             c: Conversation,
             o: CompletionOptions,
             onChunk: StreamedChunk => Unit
-          ): Result[Completion] =
-            try {
-              onChunk(StreamedChunk(id = "c1", content = Some("a")))
-              Thread.sleep(30000)
-              Right(testCompletion)
-            } catch {
-              case _: InterruptedException =>
-                interrupted.countDown()
-                Left(SimpleError("interrupted"))
-            }
+          ): Result[Completion] = {
+            onChunk(StreamedChunk(id = "c1", content = Some("a")))
+            // Park (not sleep) so an interrupt ends the wait without an exception.
+            while (!Thread.currentThread().isInterrupted) java.util.concurrent.locks.LockSupport.parkNanos(10000000L)
+            interrupted.countDown()
+            Left(SimpleError("interrupted"))
+          }
           def getContextWindow(): Int     = 4096
           def getReserveCompletion(): Int = 256
         }

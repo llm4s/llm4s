@@ -64,6 +64,14 @@ flags:
     paths:
       - modules/speech/src/main/scala
     carryforward: true
+  llm4s-effect:
+    paths:
+      - modules/llm4s-effect/src/main/scala
+    carryforward: true
+  llm4s-zio:
+    paths:
+      - modules/llm4s-zio/src/main/scala
+    carryforward: true
   ollama:
     paths:
       - modules/ollama/src/main/scala

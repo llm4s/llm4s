@@ -285,6 +285,9 @@ lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
   .settings(
     name := "llm4s-effect",
     commonSettings,
+    // Measured 63.04% statement coverage (`sbt coverage llm4sEffect/test llm4sEffect/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(60),
     libraryDependencies ++= Seq(
       Deps.catsEffect,
       Deps.fs2,
@@ -297,6 +300,9 @@ lazy val llm4sZio = (project in file("modules/llm4s-zio"))
   .settings(
     name := "llm4s-zio",
     commonSettings,
+    // Measured 58.86% statement coverage (`sbt coverage llm4sZio/test llm4sZio/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(55),
     libraryDependencies ++= Seq(
       Deps.zio,
       Deps.zioStreams,
