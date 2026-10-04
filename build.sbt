@@ -1354,7 +1354,7 @@ lazy val docs = (project in file("modules/docs"))
   )
 
 lazy val javaApi = (project in file("modules/java-api"))
-  .dependsOn(core, agent, openai, anthropic, ollama, gemini, openaiCompatible)
+  .dependsOn(core % "compile->compile;test->test", agent, openai, anthropic, ollama, gemini, openaiCompatible)
   .settings(
     name := "llm4s-java-api",
     commonSettings,

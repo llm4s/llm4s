@@ -1,10 +1,11 @@
 package org.llm4s.javaapi
 
 import org.llm4s.agent.AgentStatus
-import org.llm4s.error.{ APIError, NetworkError }
+import org.llm4s.error.APIError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
+import org.llm4s.testutil.MockLLMClients
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -12,47 +13,13 @@ import upickle.default._
 
 class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
 
-  // ── Shared mock helpers ──
+  // ── Shared mock helpers (core test mocks) ──
 
-  private def successClient(answer: String): LLMClient = new LLMClient {
-    override def complete(conv: Conversation, opts: CompletionOptions): Result[Completion] =
-      Right(Completion("id", 0L, answer, "test-model", AssistantMessage(answer)))
-    override def streamComplete(
-      conv: Conversation,
-      opts: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): Result[Completion] = complete(conv, opts)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
-  }
+  private def successClient(answer: String): LLMClient = new MockLLMClients.SimpleMock(answer)
 
-  private def failingClient(message: String): LLMClient = new LLMClient {
-    override def complete(conv: Conversation, opts: CompletionOptions): Result[Completion] =
-      Left(NetworkError(message, None, "mock://test"))
-    override def streamComplete(
-      conv: Conversation,
-      opts: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): Result[Completion] = Left(NetworkError(message, None, "mock://test"))
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
-  }
+  private def failingClient(message: String): LLMClient = new MockLLMClients.FailingMock(message)
 
-  private def multiResponseClient(responses: Seq[String]): LLMClient = new LLMClient {
-    private var idx = 0
-    override def complete(conv: Conversation, opts: CompletionOptions): Result[Completion] = {
-      val answer = responses(idx % responses.size)
-      idx += 1
-      Right(Completion("id", 0L, answer, "test-model", AssistantMessage(answer)))
-    }
-    override def streamComplete(
-      conv: Conversation,
-      opts: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): Result[Completion] = complete(conv, opts)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
-  }
+  private def multiResponseClient(responses: Seq[String]): LLMClient = new MockLLMClients.MultiResponseMock(responses)
 
   private def toolCallingClient(toolName: String, toolArgs: ujson.Value, finalResponse: String): LLMClient =
     new LLMClient {
@@ -140,7 +107,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val client = new JLlmClient(failingClient("oops"))
     val agent  = Llm4s.createAgent(client)
     val result = agent.run("hello")
-    val ex     = intercept[LlmException] { result.get() }
+    val ex     = intercept[LlmException](result.get())
     ex.getMessage should include("oops")
   }
 
@@ -160,8 +127,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val agent  = Llm4s.createAgent(client)
     val result = agent.run("hello")
     result.isFailure shouldBe true
-    val ex = intercept[LlmException] { result.get() }
-    ex shouldBe a[LlmException]
+    val ex = intercept[LlmException](result.get())
     ex.error shouldBe a[APIError]
   }
 
