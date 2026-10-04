@@ -2,6 +2,7 @@ package org.llm4s.kotlin
 
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.llm4s.java.JAgent
 import org.llm4s.java.JLlmClient
 import org.llm4s.java.LlmException
@@ -10,7 +11,7 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
-import kotlin.test.assertNotNull
+import kotlin.test.assertSame
 
 class Llm4sTest {
 
@@ -37,7 +38,7 @@ class Llm4sTest {
         every { mockFactory.createDefault() } returns result
 
         val client = Llm4s.createDefaultClient()
-        assertNotNull(client)
+        assertSame(jClient, client.underlying)
     }
 
     @Test
@@ -59,14 +60,14 @@ class Llm4sTest {
         val client = LLMClientKt(jClient)
         every { mockFactory.createAgent(jClient) } returns jAgent
 
-        val agent = Llm4s.createAgent(client)
-        assertNotNull(agent)
+        Llm4s.createAgent(client)
+        verify(exactly = 1) { mockFactory.createAgent(jClient) }
     }
 
     @Test
     fun `DefaultClientFactory is the initial factory`() {
         // Restore original and verify it is DefaultClientFactory
         Llm4s.factory = originalFactory
-        assertNotNull(Llm4s.factory)
+        assertSame(DefaultClientFactory, Llm4s.factory)
     }
 }
