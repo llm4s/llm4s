@@ -530,6 +530,30 @@ class VectorMemoryStoreFilePersistenceSpec extends AnyFlatSpec with Matchers wit
     withStore(_.count() shouldBe Right(0L))
   }
 
+  it should "round-trip metadata values containing quotes, backslashes, commas and unicode" in {
+    val tricky = first.copy(metadata =
+      Map(
+        "quote"   -> "she said \"hi\"",
+        "slash"   -> "C:\\temp\\dir",
+        "comma"   -> "a,b,c",
+        "unicode" -> "h\u00e9llo \u65e5\u672c\u8a9e",
+        "braces"  -> "{\"nested\":\"json\"}"
+      )
+    )
+    withStore(_.store(tricky))
+
+    withStore { s =>
+      val read = s.get(tricky.id).toOption.flatten.getOrElse(fail("memory missing after reopen"))
+      read.metadata shouldBe tricky.metadata
+    }
+  }
+
+  it should "still read metadata rows written in the legacy unescaped format" in {
+    VectorMemoryStore.deserializeMetadata("""{"k":"v","note":"with spaces"}""") shouldBe
+      Map("k" -> "v", "note" -> "with spaces")
+    (VectorMemoryStore.deserializeMetadata("""{"k":"has "quote" inside"}""") should contain).key("k")
+  }
+
   it should "round-trip a memory with no metadata and importance bounds 0.0 and 1.0" in {
     val low  = Memory(MemoryId("low"), "lowest", MemoryType.Task, Map.empty, base, Some(0.0))
     val high = Memory(MemoryId("high"), "highest", MemoryType.Task, Map.empty, base.plusSeconds(1), Some(1.0))

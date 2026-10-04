@@ -636,15 +636,16 @@ object VectorMemoryStore {
 
   private[memory] def serializeMetadata(metadata: Map[String, String]): String =
     if (metadata.isEmpty) "{}"
-    else metadata.map { case (k, v) => s""""$k":"$v"""" }.mkString("{", ",", "}")
+    else ujson.write(ujson.Obj.from(metadata.map { case (k, v) => k -> ujson.Str(v) }))
 
   private[memory] def deserializeMetadata(json: String): Map[String, String] =
     if (json == null || json == "{}" || json.isEmpty) Map.empty
-    else {
-      // Simple JSON parsing for metadata
-      val pattern = """"([^"]+)":"([^"]*)"""".r
-      pattern.findAllMatchIn(json).map(m => m.group(1) -> m.group(2)).toMap
-    }
+    else
+      Try(ujson.read(json).obj.collect { case (k, ujson.Str(v)) => k -> v }.toMap).getOrElse {
+        // Rows written before metadata was JSON-escaped: fall back to the lenient pattern
+        val pattern = """"([^"]+)":"([^"]*)"""".r
+        pattern.findAllMatchIn(json).map(m => m.group(1) -> m.group(2)).toMap
+      }
 
   private[memory] def serializeEmbedding(embedding: Array[Float]): Array[Byte] = {
     val buffer = java.nio.ByteBuffer.allocate(embedding.length * 4)
