@@ -50,7 +50,7 @@ case class StringSchema(
    *
    * @param values Allowed string values
    */
-  def withEnum(values: Seq[String]): StringSchema = copy(enumValues = Some(values))
+  def withEnum(values: Seq[String]): StringSchema = copy(enumValues = Some(values.distinct))
 
   /**
    * Add minimum and/or maximum length constraints.

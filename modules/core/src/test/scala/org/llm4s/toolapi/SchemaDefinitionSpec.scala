@@ -238,6 +238,11 @@ class SchemaDefinitionSpec extends AnyFlatSpec with Matchers {
     schema.toJsonSchema(strict = false)("required").arr.map(_.str).toSeq shouldBe Seq("x", "y")
   }
 
+  "StringSchema.withEnum" should "render duplicate values once, in first-occurrence order" in {
+    val json = StringSchema("s").withEnum(Seq("a", "b", "a")).toJsonSchema(strict = false)
+    json("enum").arr.map(_.str).toSeq shouldBe Seq("a", "b")
+  }
+
   // ============ NullableSchema ============
 
   "NullableSchema" should "add null to type for simple schema" in {

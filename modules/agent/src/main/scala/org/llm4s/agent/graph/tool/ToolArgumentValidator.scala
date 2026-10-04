@@ -69,7 +69,7 @@ object ToolArgumentValidator {
     private def unsupportedAt(schema: ujson.Value, path: String): Vector[String] =
       schema match {
         case ujson.Obj(fields) =>
-          fields.toVector.flatMap { case (key, value) =>
+          satisfiability(fields, path) ++ fields.toVector.flatMap { case (key, value) =>
             if (!Supported.contains(key)) Vector(s"$path.$key")
             else
               key match {
@@ -114,14 +114,56 @@ object ToolArgumentValidator {
                   }
                 case "enum" =>
                   value match {
-                    case _: ujson.Arr => Vector.empty
-                    case _            => Vector(s"$path.enum")
+                    case ujson.Arr(entries) if entries.nonEmpty && entries.distinct.size == entries.size =>
+                      Vector.empty
+                    case _ => Vector(s"$path.enum")
                   }
                 case _ => Vector.empty
               }
           }
         case _ => Vector(path)
       }
+
+    /** Well-formed keywords that together admit no value: a tool with such an argument can never be called. */
+    private def satisfiability(fields: scala.collection.Map[String, ujson.Value], path: String): Vector[String] = {
+      def num(key: String): Option[Double] = fields.get(key).collect { case ujson.Num(n) if !n.isNaN => n }
+      def order(lo: String, hi: String): Vector[String] =
+        (num(lo), num(hi)) match {
+          case (Some(l), Some(h)) if l > h => Vector(s"$path: $lo ${this.num(l)} is above $hi ${this.num(h)}")
+          case _                           => Vector.empty
+        }
+      val range = {
+        val lows  = num("minimum").map(_ -> false).toVector ++ num("exclusiveMinimum").map(_ -> true)
+        val highs = num("maximum").map(_ -> false).toVector ++ num("exclusiveMaximum").map(_ -> true)
+        val empty = lows.exists { case (l, lx) =>
+          highs.exists { case (h, hx) => l > h || (l == h && (lx || hx)) }
+        }
+        if (empty) Vector(s"$path: the bounds leave no number") else Vector.empty
+      }
+      val enumVsType = (fields.get("enum"), fields.get("type")) match {
+        case (Some(ujson.Arr(entries)), Some(t)) if entries.nonEmpty && validType(t) =>
+          val names = t match {
+            case ujson.Str(s) => Seq(s)
+            case ujson.Arr(a) => a.toSeq.collect { case ujson.Str(s) => s }
+            case _            => Seq.empty
+          }
+          if (entries.exists(e => names.exists(matchesType(_, e)))) Vector.empty
+          else Vector(s"$path: no enum entry matches the type")
+        case _ => Vector.empty
+      }
+      val undeclared =
+        if (fields.get("additionalProperties").contains(ujson.Bool(false))) {
+          val declared =
+            fields.get("properties").collect { case ujson.Obj(p) => p.keySet.toSet }.getOrElse(Set.empty[String])
+          fields
+            .get("required")
+            .collect { case ujson.Arr(r) => r.toVector.flatMap(_.strOpt) }
+            .getOrElse(Vector.empty)
+            .filterNot(declared.contains)
+            .map(name => s"$path: required property '$name' is not in properties")
+        } else Vector.empty
+      order("minLength", "maxLength") ++ order("minItems", "maxItems") ++ range ++ enumVsType ++ undeclared
+    }
 
     private def validType(t: ujson.Value): Boolean =
       t match {

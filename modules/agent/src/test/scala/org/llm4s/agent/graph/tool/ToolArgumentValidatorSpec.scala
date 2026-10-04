@@ -369,4 +369,46 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
     v.unsupported(obj("properties" -> obj("a" -> obj("required" -> ujson.Arr("x", "y", "x"))))) shouldBe
       Vector("$.properties.a.required")
   }
+
+  "unsupported" should "refuse a malformed enum, items and properties" in {
+    v.unsupported(obj("enum" -> ujson.Arr())) shouldBe Vector("$.enum")
+    v.unsupported(obj("enum" -> ujson.Arr("a", "a"))) shouldBe Vector("$.enum")
+    v.unsupported(obj("enum" -> ujson.Arr(1, 1.0))) shouldBe Vector("$.enum")
+    v.unsupported(obj("enum" -> ujson.Arr(obj("a" -> 1), obj("a" -> 1)))) shouldBe Vector("$.enum")
+    v.unsupported(obj("enum" -> ujson.Arr("a", "b"))) shouldBe Vector.empty
+    v.unsupported(obj("items" -> ujson.Arr())) shouldBe Vector("$.items")
+    v.unsupported(obj("properties" -> obj("a" -> ujson.Str("string")))) shouldBe Vector("$.properties.a")
+  }
+
+  it should "refuse a schema nothing can satisfy" in {
+    v.unsupported(obj("type" -> "string", "minLength" -> 5, "maxLength" -> 3)) shouldBe
+      Vector("$: minLength 5 is above maxLength 3")
+    v.unsupported(obj("type" -> "array", "minItems" -> 2, "maxItems" -> 1)) shouldBe
+      Vector("$: minItems 2 is above maxItems 1")
+    v.unsupported(obj("minimum" -> 5, "maximum" -> 1)) shouldBe Vector("$: the bounds leave no number")
+    v.unsupported(obj("exclusiveMinimum" -> 5, "maximum" -> 5)) shouldBe Vector("$: the bounds leave no number")
+    v.unsupported(obj("minimum" -> 5, "exclusiveMaximum" -> 5)) shouldBe Vector("$: the bounds leave no number")
+    v.unsupported(obj("exclusiveMinimum" -> 5, "exclusiveMaximum" -> 5)) shouldBe Vector(
+      "$: the bounds leave no number"
+    )
+    v.unsupported(obj("minimum" -> 5, "maximum" -> 5)) shouldBe Vector.empty
+    v.unsupported(obj("type" -> "string", "enum" -> ujson.Arr(1, 2))) shouldBe
+      Vector("$: no enum entry matches the type")
+    v.unsupported(obj("type" -> "integer", "enum" -> ujson.Arr(1.5))) shouldBe
+      Vector("$: no enum entry matches the type")
+    v.unsupported(obj("type" -> ujson.Arr("string", "null"), "enum" -> ujson.Arr(ujson.Null))) shouldBe Vector.empty
+    v.unsupported(
+      obj(
+        "type"                 -> "object",
+        "additionalProperties" -> false,
+        "required"             -> ujson.Arr("a", "b"),
+        "properties"           -> obj("a" -> obj("type" -> "string"))
+      )
+    ) shouldBe Vector("$: required property 'b' is not in properties")
+    v.unsupported(
+      obj("type" -> "object", "additionalProperties" -> true, "required" -> ujson.Arr("b"))
+    ) shouldBe Vector.empty
+    v.unsupported(obj("properties" -> obj("a" -> obj("type" -> "string", "minLength" -> 2, "maxLength" -> 1)))) shouldBe
+      Vector("$.properties.a: minLength 2 is above maxLength 1")
+  }
 }

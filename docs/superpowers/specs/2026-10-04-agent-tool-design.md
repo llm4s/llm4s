@@ -150,7 +150,12 @@ supported one with a malformed value, reported at its path: a non-number `minimu
 `additionalProperties`; a `required` that is not an array of strings; a non-array `enum`; a
 non-object `properties`; a `type` that is not a JSON type name or a non-empty array of them. Types: `string`,
 `number` (any JSON number), `integer` (a number with no fractional part), `boolean`, `array`,
-`object`, `null`. Lengths count Unicode code points. `multipleOf` is checked exactly in decimal (the
+`object`, `null`. Lengths count Unicode code points. Well-formedness is part of `unsupported`: `enum` is a non-empty array of unique entries; `type` a known name or
+a non-empty array of unique known names; `required` an array of unique strings; `properties` an object whose
+values are schemas; `items` a schema; `multipleOf` a positive finite number; bounds finite numbers; lengths and
+counts non-negative whole numbers. So is satisfiability, reported as `$.path: <what>`: `minLength` above
+`maxLength`, `minItems` above `maxItems`, bounds that leave no number, an `enum` none of whose entries matches the
+node's `type`, and (with `additionalProperties: false`) a `required` name missing from `properties`. `multipleOf` is checked exactly in decimal (the
 shortest decimal text of each double), with no tolerance; a bound or count that is NaN or infinite is unsupported. Messages: `$.path: <what is wrong>`, e.g. `$.limit: 500 is above maximum 100`,
 `$.query: required property missing`, `$.extra: property not allowed`.
 
