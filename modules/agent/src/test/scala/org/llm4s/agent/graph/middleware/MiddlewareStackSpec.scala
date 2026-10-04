@@ -236,10 +236,10 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     result.raisedBy shouldBe None
   }
 
-  it should "become Fatal(CancelledError) when it throws a cancellation" in {
+  it should "become Fatal(CancelledError) when it throws a cancellation, restoring the interrupt flag" in {
     val result = stack(new Throwing("b", () => new RuntimeException(new InterruptedException())))
       .wrapToolCall(request, toolContext)(() => ToolOutcome.Error("x"))
-    Thread.interrupted()
+    Thread.interrupted() shouldBe true
     result.outcome match
       case ToolOutcome.Fatal(c: CancelledError) => c.message should include("middleware b")
       case other                                => fail(s"not a cancellation: $other")

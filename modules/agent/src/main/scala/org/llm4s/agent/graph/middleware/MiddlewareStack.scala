@@ -17,8 +17,8 @@ import scala.util.Try
  * `next` calls the innermost function. `beforeAgent` runs in stack order and `afterAgent` in
  * reverse; each stops at the first `Left`. Every hook invocation is guarded on its own: a throw
  * becomes `GraphError.MiddlewareFailed` naming that middleware, and a thrown cancellation a
- * `CancelledError`, which each enclosing wrapper sees as its `next`'s result. The innermost
- * function is not guarded; its caller guards it.
+ * `CancelledError`, restoring the interrupt flag at once, which each enclosing wrapper sees as its
+ * `next`'s result. The innermost function is not guarded; its caller guards it.
  */
 final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
   import MiddlewareStack.ToolChainResult
@@ -87,14 +87,20 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
             Left(cancellation)
           case None => Left(GraphError.MiddlewareFailed(m.id.value, thrown))
 
-  /** Runs one tool hook; a throw is `Fatal`, which the loop turns into a failed or cancelled task. */
+  /**
+   * Runs one tool hook; a throw is `Fatal`, which the loop turns into a failed or cancelled task. A
+   * thrown cancellation restores the interrupt flag at once, so no enclosing wrapper that retries
+   * runs with it clear.
+   */
   private def guardedTool(m: AgentMiddleware)(run: => ToolOutcome): ToolOutcome =
     Try(run).toEither match
       case Right(outcome) => outcome
       case Left(thrown) =>
-        val error: LLMError = CancelledError
-          .fromThrowable(thrown, MiddlewareStack.operation(m))
-          .getOrElse(GraphError.MiddlewareFailed(m.id.value, thrown))
+        val error: LLMError = CancelledError.fromThrowable(thrown, MiddlewareStack.operation(m)) match
+          case Some(cancellation) =>
+            Thread.currentThread().interrupt()
+            cancellation
+          case None => GraphError.MiddlewareFailed(m.id.value, thrown)
         ToolOutcome.Fatal(error)
 
 object MiddlewareStack:

@@ -1030,7 +1030,53 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val store = InMemoryCheckpointer()
     val ended = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited.value
     ended.failed._2 shouldBe a[GraphError.Cancelled]
+    store.latest(thread).value.get.pendingWrites.size should be <= 1
     (store.latest(thread).value.get.pendingWrites.map(_.toString).mkString should not).include("x2")
+  }
+
+  it should "never run a cancelled tool again, however often a wrapper retries" in {
+    val runs    = new AtomicInteger()
+    val retries = new AtomicInteger()
+    val cancelling = bare("cancelling") { _ =>
+      runs.incrementAndGet()
+      throw new RuntimeException(new InterruptedException())
+    }
+    // retries any outcome other than Success, up to three attempts in all
+    val retry = wrapper("retry") { (_, _, next) =>
+      def attempt(n: Int): ToolOutcome =
+        retries.incrementAndGet()
+        next() match {
+          case ok: ToolOutcome.Success => ok
+          case other                   => if n < 3 then attempt(n + 1) else other
+        }
+      attempt(1)
+    }
+    val model = ScriptedModel(calls(("k1", "cancelling", ujson.Obj())), summarise)
+    val l     = ToolLoop.build("assistant", "v1", model, set(cancelling), Seq(retry)).value
+    val store = InMemoryCheckpointer()
+    val ended = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited.value
+    ended.failed._2 shouldBe a[GraphError.Cancelled]
+    retries.get shouldBe 3
+    runs.get shouldBe 1
+    (store.latest(thread).value.get.pendingWrites.map(_.toString).mkString should not).include("k1")
+  }
+
+  it should "refuse an approval a wrapper asks for when the tool resumes after a question" in {
+    val invocations = new AtomicInteger()
+    // passes the call's first run, then wants approval once the tool resumes
+    val late = wrapper("late") { (_, _, next) =>
+      if invocations.incrementAndGet() == 1 then next() else ToolOutcome.NeedsApproval("second thoughts")
+    }
+    val confirming = Confirming()
+    val model      = ScriptedModel(calls(("q1", "confirm", ujson.Obj("env" -> "prod"))), summarise)
+    val l          = ToolLoop.build("assistant", "v1", model, set(confirming), Seq(late)).value
+    val first      = runInMemory(l.graph, "go").suspended
+    val (id, _)    = l.questions(first).value.head
+    val (_, answer) =
+      drive(l.graph, l.graph.resume(first.execution, Map(l.answer(id, Reply(true)))).value).completed
+    answer shouldBe
+      """done: q1={"error":"Middleware 'late' asked for approval after a question: second thoughts"}"""
+    confirming.resumes.get shouldBe 0
   }
 
   "ModelStep.fromClient" should "offer the loop's tools to the client" in {

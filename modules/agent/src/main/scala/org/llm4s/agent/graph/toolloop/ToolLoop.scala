@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.util.Try
 
 /** Who asked for an approval: the tool itself, or a middleware's tool wrapper. All resume at the same approval node. */
@@ -343,9 +344,9 @@ object ToolLoop:
             case Left(message) => error(task, message)
             case Right((args, question, reply)) =>
               val toolContext = ToolContext(context, request.call.id, state, request.approved)
-              val chain = stack.wrapToolCall(ToolCallRequest(tool.spec, request.call), toolContext) { () =>
-                guarded(name)(AgentTool.resumeWith(tool, args, question, reply, toolContext))
-              }
+              val chain = stack.wrapToolCall(ToolCallRequest(tool.spec, request.call), toolContext)(
+                innermost(name)(AgentTool.resumeWith(tool, args, question, reply, toolContext))
+              )
               outcome(tool, task, request.call, request.approved, chain, resumed = true)
         case _ => error(task, s"Tool '$name' does not take answers")
 
@@ -409,24 +410,42 @@ object ToolLoop:
       approved: Boolean = false
     ): NodeResult =
       val toolContext = ToolContext(context, call.id, state, approved)
-      val chain = stack.wrapToolCall(ToolCallRequest(tool.spec, call), toolContext) { () =>
-        guarded(tool.spec.name)(tool.execute(args, toolContext))
-      }
+      val chain = stack.wrapToolCall(ToolCallRequest(tool.spec, call), toolContext)(
+        innermost(tool.spec.name)(tool.execute(args, toolContext))
+      )
       outcome(tool, task, call, approved, chain)
 
     /**
-     * The chain's innermost function: the tool's `execute` or `resume`, guarded so that wrappers see
-     * a throwing tool as an outcome. A thrown NonFatal exception is an error result; a thrown
-     * cancellation (an interrupt wrapped in another exception, or one thrown with the flag set) is
-     * `Fatal(CancelledError)`. An `InterruptedException` is not caught.
+     * The chain's innermost function, for one chain invocation: the tool's `execute` or `resume`,
+     * [[guarded]]. Once it has produced `Fatal(CancelledError)`, every later call - a wrapper
+     * retrying - returns that same outcome without running the tool again.
+     */
+    private def innermost(name: String)(run: => ToolOutcome): () => ToolOutcome =
+      val cancelledWith = new AtomicReference[Option[ToolOutcome]](None)
+      () =>
+        cancelledWith.get.getOrElse {
+          val result = guarded(name)(run)
+          result match
+            case ToolOutcome.Fatal(_: CancelledError) => cancelledWith.set(Some(result))
+            case _                                    => ()
+          result
+        }
+
+    /**
+     * Guards the tool so that wrappers see a throwing tool as an outcome. A thrown NonFatal exception
+     * is an error result; a thrown cancellation (an interrupt wrapped in another exception, or one
+     * thrown with the flag set) restores the interrupt flag at once and is `Fatal(CancelledError)`.
+     * An `InterruptedException` is not caught.
      */
     private def guarded(name: String)(run: => ToolOutcome): ToolOutcome =
       Try(run).toEither match
         case Right(result) => result
         case Left(thrown) =>
           CancelledError.fromThrowable(thrown, s"tool $name") match
-            case Some(cancellation) => ToolOutcome.Fatal(cancellation)
-            case None               => ToolOutcome.Error(s"Tool '$name' failed: ${describe(thrown)}")
+            case Some(cancellation) =>
+              Thread.currentThread().interrupt()
+              ToolOutcome.Fatal(cancellation)
+            case None => ToolOutcome.Error(s"Tool '$name' failed: ${describe(thrown)}")
 
     /**
      * Step 6: maps what the chain returned. `Fatal(CancelledError)` restores the interrupt flag, so
