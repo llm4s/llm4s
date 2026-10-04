@@ -715,8 +715,6 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
-          # MistralSmokeSpec (llm4s-openai-compatible).
-          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           # LangfuseSmokeSpec (llm4s-observability). LANGFUSE_URL is optional: unset, it is
           # Langfuse Cloud. The LLM in that suite is a mock, so it costs only a trace.
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
