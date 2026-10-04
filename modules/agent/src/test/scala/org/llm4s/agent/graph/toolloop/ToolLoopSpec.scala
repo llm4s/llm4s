@@ -118,7 +118,19 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       case other                                                     => fail(s"not a tool failure: $other")
     }
 
-  "The tool loop" should "suspend policy- and tool-raised approvals independently, behind the batch barrier" in {
+  "The tool loop" should "record a blank string result in its quoted JSON form, keeping the conversation valid" in {
+    val blank = tool[Echo]("blank", "text")((a, _) => text(a.text))
+    val model = ScriptedModel(
+      calls(("c1", "blank", ujson.Obj("text" -> "")), ("c2", "blank", ujson.Obj("text" -> "  "))),
+      summarise
+    )
+    val l = ToolLoop.build("assistant", "v1", model, set(blank), policy).value
+    runInMemory(l.graph, "go")
+    model.calls shouldBe 2
+    model.seen.get(1).collect { case t: ToolMessage => t.content } shouldBe Vector("\"\"", "\"  \"")
+  }
+
+  it should "suspend policy- and tool-raised approvals independently, behind the batch barrier" in {
     val model = threeCalls
     val tools = Tools()
     val l     = loop(model, tools)

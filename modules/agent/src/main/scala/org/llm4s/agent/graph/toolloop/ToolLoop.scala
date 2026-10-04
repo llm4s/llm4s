@@ -474,7 +474,10 @@ object ToolLoop:
         case Right(ToolOutcome.Fatal(cancellation: CancelledError)) => cancelled(cancellation)
         case Right(ToolOutcome.Fatal(error))                        => failRun(error)
 
-    /** A string result is the string itself, not a quoted JSON string. */
+    /**
+     * A string result is the string itself, not a quoted JSON string - except a blank one, which a
+     * `ToolMessage` refuses, so it is recorded in its quoted JSON form.
+     */
     private def rendered(content: ujson.Value): String = content match
-      case ujson.Str(s) => s
-      case other        => other.render()
+      case ujson.Str(s) if s.trim.nonEmpty => s
+      case other                           => other.render()

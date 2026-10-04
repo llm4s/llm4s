@@ -283,4 +283,59 @@ class HandoffExecutorSpec extends AnyFlatSpec with Matchers {
       case Left(err) => fail(s"Expected Right but got Left: $err")
     }
   }
+
+  it should "refuse a handoff whose tool name is already a registered tool, quoted, in the same error" in {
+    val agent = mkAgent()
+    val result = HandoffExecutor.createHandoffTools(
+      Seq(handoff(agent, id = "support"), handoff(agent, id = "bad id")),
+      Set("handoff_to_support", "other")
+    )
+    result.left.map {
+      case v: org.llm4s.error.ValidationError => v.violations
+      case other                              => fail(s"expected a ValidationError, got $other")
+    } shouldBe Left(
+      List("invalid handoff ids: 'bad id'", "handoff tool names already registered as tools: 'handoff_to_support'")
+    )
+  }
+
+  "Agent.run" should "refuse a handoff clashing with a registered tool before any model call" in {
+    val calls = new java.util.concurrent.atomic.AtomicInteger(0)
+    val inner = new DeterministicFakeLLMClient(
+      org.llm4s.llmconnect.model.Completion(
+        id = "t",
+        created = 0L,
+        content = "done",
+        model = "m",
+        message = AssistantMessage("done", Seq.empty),
+        toolCalls = Nil,
+        usage = None
+      )
+    )
+    val client = new org.llm4s.llmconnect.LLMClient {
+      def complete(c: Conversation, o: org.llm4s.llmconnect.model.CompletionOptions) = {
+        calls.incrementAndGet(); inner.complete(c, o)
+      }
+      def streamComplete(
+        c: Conversation,
+        o: org.llm4s.llmconnect.model.CompletionOptions,
+        f: org.llm4s.llmconnect.model.StreamedChunk => Unit
+      ) = { calls.incrementAndGet(); inner.complete(c, o) }
+      def getContextWindow(): Int     = 1000
+      def getReserveCompletion(): Int = 100
+    }
+    val clash = org.llm4s.toolapi
+      .ToolBuilder[Map[String, Any], String](
+        "handoff_to_support",
+        "d",
+        org.llm4s.toolapi.Schema.`object`[Map[String, Any]]("p")
+      )
+      .withHandler(_ => Right("x"))
+      .buildSafe()
+      .toOption
+      .get
+    val result =
+      new Agent(client).run("hi", new ToolRegistry(Seq(clash)), handoffs = Seq(handoff(mkAgent(), "support")))
+    result.left.map(_.message).left.getOrElse("") should include("'handoff_to_support'")
+    calls.get shouldBe 0
+  }
 }

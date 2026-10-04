@@ -51,20 +51,26 @@ private[agent] object HandoffExecutor {
    * populate, giving operators visibility into why the delegation occurred.
    *
    * @param handoffs Handoffs to convert; may be empty.
+   * @param registeredToolNames Names of the caller's tools; a handoff whose tool name is one of them is refused.
    * @return `Right(tools)` — one tool per handoff — or `Left(ValidationError)`
    *         listing every invalid id and every duplicated id, each quoted, or
    *         `Left` if tool creation fails.
    */
-  def createHandoffTools(handoffs: Seq[Handoff]): Result[Seq[ToolFunction[_, _]]] = {
+  def createHandoffTools(
+    handoffs: Seq[Handoff],
+    registeredToolNames: Set[String] = Set.empty
+  ): Result[Seq[ToolFunction[_, _]]] = {
     import HandoffResult._
 
     def quoted(ids: Seq[String]): String = ids.map(id => s"'$id'").mkString(", ")
     val ids                              = handoffs.map(_.id)
     val invalid                          = ids.filterNot(Handoff.isValidId).distinct
     val duplicates                       = ids.distinct.filter(id => ids.count(_ == id) > 1)
+    val clashing                         = handoffs.map(_.handoffId).distinct.filter(registeredToolNames.contains)
     val problems = List(
       Option.when(invalid.nonEmpty)(s"invalid handoff ids: ${quoted(invalid)}"),
-      Option.when(duplicates.nonEmpty)(s"duplicate handoff ids: ${quoted(duplicates)}")
+      Option.when(duplicates.nonEmpty)(s"duplicate handoff ids: ${quoted(duplicates)}"),
+      Option.when(clashing.nonEmpty)(s"handoff tool names already registered as tools: ${quoted(clashing)}")
     ).flatten
     if (problems.nonEmpty) Left(ValidationError("handoffs", problems))
     else

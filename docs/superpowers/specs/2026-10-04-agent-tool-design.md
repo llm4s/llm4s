@@ -171,7 +171,8 @@ model sees; none runs a tool or fails the run.
    suspend at the approval node.
 6. **Execute** and map the outcome:
    - `Success(content, update)`: the call's result is `content.render()` (a `ujson.Str` renders its
-     string value, not a quoted JSON string); `update` commits with the superstep. An update touching a
+     string value, not a quoted JSON string, except a blank string, which `ToolMessage` refuses and which
+     is therefore recorded quoted, `""`); `update` commits with the superstep. An update touching a
      key outside the tool's `writes` → `Fatal(GraphError.ToolFailed(tool, callId, cause))`, where `cause`
      is a `ValidationError` naming the undeclared keys.
    - `Error(msg)`: an error result, rendered `{"error": msg}` as today.
