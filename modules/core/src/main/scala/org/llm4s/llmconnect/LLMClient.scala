@@ -77,6 +77,13 @@ trait LLMClient extends AutoCloseable {
       parsed <- Try(ujson.read(LLMClient.extractJson(completion.content))).toEither.left.map(e =>
         ValidationError("structured_output", s"Response is not valid JSON: ${e.getMessage}")
       )
+      // uPickle reads a JSON null into a null reference for case classes; the schema is an object
+      // schema so a null document is never a valid answer and must not reach callers as Right(null)
+      _ <- Either.cond(
+        parsed != ujson.Null,
+        (),
+        ValidationError("structured_output", "Response does not match expected schema: got JSON null")
+      )
       result <- Try(upickle.default.read[A](parsed)).toEither.left.map(e =>
         ValidationError("structured_output", s"Response does not match expected schema: ${e.getMessage}")
       )
@@ -141,13 +148,18 @@ object LLMClient {
 
   private val FencePattern = """(?s)^```[A-Za-z0-9_-]*[ \t]*\r?\n?(.*?)\r?\n?```\s*$""".r
 
+  /** Upper bound on how many `{`/`[` start positions are tried, keeping extraction linear in practice. */
+  private val MaxCandidateStarts = 16
+
   /**
    * Best-effort normalisation of model output that should contain a JSON value.
    *
-   * Strips a surrounding markdown code fence and, if the remainder still does not start with
-   * `{` or `[`, extracts the first balanced `{...}` or `[...]` block (string and escape aware).
-   * Plain JSON is returned trimmed; if nothing is found the trimmed text is returned unchanged so
-   * the caller reports the parse error.
+   * Strips a surrounding markdown code fence and, if the remainder is not itself valid JSON,
+   * extracts the first balanced `{...}` or `[...]` block that parses as JSON (string and escape
+   * aware). Trailing prose after the JSON, and earlier non-JSON brace pairs in the prose, are
+   * skipped; at most `MaxCandidateStarts` candidate start positions are tried. Plain JSON is
+   * returned trimmed; if nothing is found the trimmed text is returned unchanged so the caller
+   * reports the parse error.
    */
   private[llmconnect] def extractJson(raw: String): String = {
     val trimmed = raw.trim
@@ -155,12 +167,26 @@ object LLMClient {
       case FencePattern(inner) => inner.trim
       case _                   => trimmed
     }
-    if (unfenced.startsWith("{") || unfenced.startsWith("[")) unfenced
-    else
-      unfenced.indexWhere(c => c == '{' || c == '[') match {
-        case -1    => unfenced
-        case start => balancedFrom(unfenced, start).getOrElse(unfenced)
+    if (isJson(unfenced)) unfenced
+    else firstJsonBlock(unfenced).getOrElse(unfenced)
+  }
+
+  private def isJson(text: String): Boolean = Try(ujson.read(text)).isSuccess
+
+  private def firstJsonBlock(text: String): Option[String] = {
+    @scala.annotation.tailrec
+    def tryFrom(from: Int, attempts: Int): Option[String] =
+      if (attempts >= MaxCandidateStarts) None
+      else {
+        val start = text.indexWhere(c => c == '{' || c == '[', from)
+        if (start < 0) None
+        else
+          balancedFrom(text, start).filter(isJson) match {
+            case found @ Some(_) => found
+            case None            => tryFrom(start + 1, attempts + 1)
+          }
       }
+    tryFrom(0, 0)
   }
 
   private def balancedFrom(text: String, start: Int): Option[String] = {
