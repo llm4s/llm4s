@@ -2,6 +2,7 @@ package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.GraphTestSupport.*
+import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ToolCallRequest }
 import org.llm4s.agent.graph.tool.*
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -84,17 +85,36 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val all       = Seq(lookup, echo, deploy, pesky, broken, failing, forbidden)
   }
 
-  private val policy: ToolCallPolicy = call =>
-    call.name match {
-      case "lookup"    => PolicyDecision.RequireApproval("lookups cost money")
-      case "forbidden" => PolicyDecision.Deny("never allowed")
-      case _           => PolicyDecision.Allow
+  /** A middleware whose tool wrapper is `wrap`. */
+  private def wrapper(name: String)(
+    wrap: (ToolCallRequest, ToolContext, () => ToolOutcome) => ToolOutcome
+  ): AgentMiddleware =
+    new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId(name)
+      override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
+        wrap(request, context, next)
+    }
+
+  /** A policy middleware: lookups need approval, `forbidden` is denied, everything else passes. */
+  private val policy: AgentMiddleware = wrapper("policy") { (request, context, next) =>
+    request.call.name match {
+      case "lookup"    => if context.approved then next() else ToolOutcome.NeedsApproval("lookups cost money")
+      case "forbidden" => ToolOutcome.Error("Denied: never allowed")
+      case _           => next()
+    }
+  }
+
+  /** Logs each invocation of the chain as `<call id>:<approved>`, then passes through. */
+  private def recorder(name: String, log: CopyOnWriteArrayList[String]): AgentMiddleware =
+    wrapper(name) { (request, context, next) =>
+      log.add(s"${request.call.id}:${context.approved}")
+      next()
     }
 
   private def set(tools: AgentTool[?]*): ToolSet = ToolSet.of(tools*).value
 
   private def loop(model: ModelStep, tools: Tools = Tools()) =
-    ToolLoop.build("assistant", "v1", model, set(tools.all*), policy).value
+    ToolLoop.build("assistant", "v1", model, set(tools.all*), Seq(policy)).value
 
   private def threeCalls = ScriptedModel(
     calls(
@@ -124,21 +144,22 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       calls(("c1", "blank", ujson.Obj("text" -> "")), ("c2", "blank", ujson.Obj("text" -> "  "))),
       summarise
     )
-    val l = ToolLoop.build("assistant", "v1", model, set(blank), policy).value
+    val l = ToolLoop.build("assistant", "v1", model, set(blank), Seq(policy)).value
     runInMemory(l.graph, "go")
     model.calls shouldBe 2
     model.seen.get(1).collect { case t: ToolMessage => t.content } shouldBe Vector("\"\"", "\"  \"")
   }
 
-  it should "suspend policy- and tool-raised approvals independently, behind the batch barrier" in {
+  it should "suspend middleware- and tool-raised approvals independently, behind the batch barrier" in {
     val model = threeCalls
     val tools = Tools()
-    val l     = loop(model, tools)
+    val log   = new CopyOnWriteArrayList[String]()
+    val l     = ToolLoop.build("assistant", "v1", model, set(tools.all*), Seq(recorder("outer", log), policy)).value
 
     val first    = runInMemory(l.graph, "go").suspended
     val requests = l.requests(first).value
     requests.map((_, r) => (r.call.id, r.source)) shouldBe Vector(
-      "c1" -> ApprovalSource.Policy,
+      "c1" -> ApprovalSource.Middleware(MiddlewareId("policy")),
       "c2" -> ApprovalSource.Tool
     )
     l.questions(first).value shouldBe empty
@@ -146,10 +167,13 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     messagesOf(first.state).map(_.role) shouldBe Vector(MessageRole.User, MessageRole.Assistant)
     model.calls shouldBe 1
 
-    // answer only the policy approval: the model stays behind the barrier
+    // answer only the middleware approval: the model stays behind the barrier
     val (policyId, _) = requests.head
+    log.clear()
     val second =
       drive(l.graph, l.graph.resume(first.execution, l.answers(policyId -> ApprovalDecision.Approve)).value).suspended
+    // Approve ran the whole chain again, from the outermost wrapper, as approved; the policy passed it
+    log.asScala.toVector shouldBe Vector("c1:true")
     l.requests(second).value.map(_._2.call.id) shouldBe Vector("c2")
     second.state.get(ToolLoop.results).value.map(_.toolCallId) shouldBe Vector("c3", "c1")
     messagesOf(second.state).size shouldBe 2
@@ -207,14 +231,21 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     Message.validateConversation(messagesOf(state).toList).value shouldBe (())
   }
 
-  it should "refuse a policy-denied edit without running it" in {
-    val model = ScriptedModel(calls(("e1", "lookup", ujson.Obj("q" -> "x"))), summarise)
-    val strict: ToolCallPolicy = call =>
-      if call.arguments.obj.contains("q") && call.arguments("q").str == "secret" then PolicyDecision.Deny("secret")
-      else PolicyDecision.RequireApproval("check")
-    val l     = ToolLoop.build("assistant", "v1", model, set(Tools().all*), strict).value
-    val first = runInMemory(l.graph, "go").suspended
-    val id    = l.requests(first).value.head._1
+  it should "refuse an edit the middleware denies, without running the tool" in {
+    val model    = ScriptedModel(calls(("e1", "lookup", ujson.Obj("q" -> "x"))), summarise)
+    val executed = new AtomicInteger()
+    val counted = tool[Lookup]("lookup", "q") { (a, _) =>
+      executed.incrementAndGet(); text(a.q)
+    }
+    val strict = wrapper("strict") { (request, context, next) =>
+      if request.call.arguments("q").str == "secret" then ToolOutcome.Error("Denied: secret")
+      else if context.approved then next()
+      else ToolOutcome.NeedsApproval("check")
+    }
+    val l                 = ToolLoop.build("assistant", "v1", model, set(counted), Seq(strict)).value
+    val first             = runInMemory(l.graph, "go").suspended
+    val Vector((id, req)) = l.requests(first).value
+    req.source shouldBe ApprovalSource.Middleware(MiddlewareId("strict"))
     val (state, answer) =
       drive(
         l.graph,
@@ -226,6 +257,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       case a: AssistantMessage if a.toolCalls.nonEmpty => a.toolCalls.head.arguments
     }.head shouldBe
       ujson.Obj("q" -> "secret")
+    executed.get shouldBe 0
   }
 
   it should "resume approvals in separate runs and processes, persisting each suspension before returning" in {
@@ -365,7 +397,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       if context.approved then throw new java.io.IOException("connection reset")
       text(s"found ${a.q}")
     }
-    val l     = ToolLoop.build("assistant", "v1", model, set(flaky, counting, tools.deploy), policy).value
+    val l     = ToolLoop.build("assistant", "v1", model, set(flaky, counting, tools.deploy), Seq(policy)).value
     val store = InMemoryCheckpointer()
     val first =
       GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited.value.suspended
@@ -400,7 +432,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       text("slow done")
     }
     val model = ScriptedModel(calls(("c1", "echo", ujson.Obj("text" -> "hi")), ("c2", "slow", ujson.Obj())), summarise)
-    val l     = ToolLoop.build("assistant", "v1", model, set(echo, slow), policy).value
+    val l     = ToolLoop.build("assistant", "v1", model, set(echo, slow), Seq(policy)).value
     val store = InMemoryCheckpointer()
 
     val handle = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).value
@@ -421,13 +453,15 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   // ---- the call pipeline (#1278) ----
 
-  it should "check arguments before policy or the tool, reporting every violation" in {
+  it should "check arguments before any middleware or the tool, reporting every violation" in {
     val decided  = new AtomicInteger()
     val executed = new AtomicInteger()
     val counted = tool[Lookup]("lookup", "q") { (a, _) =>
       executed.incrementAndGet(); text(a.q)
     }
-    val counting: ToolCallPolicy = _ => { decided.incrementAndGet(); PolicyDecision.Allow }
+    val counting = wrapper("counting") { (_, _, next) =>
+      decided.incrementAndGet(); next()
+    }
     val model = ScriptedModel(
       calls(
         ("v1", "lookup", ujson.Obj("q" -> 5)),
@@ -436,7 +470,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       ),
       summarise
     )
-    val l = ToolLoop.build("assistant", "v1", model, set(counted), counting).value
+    val l = ToolLoop.build("assistant", "v1", model, set(counted), Seq(counting)).value
     runInMemory(l.graph, "go").completed
     errors(model) shouldBe Vector(
       "v1" -> "Invalid arguments for 'lookup': $.q: expected string, got integer",
@@ -546,7 +580,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       calls(("a1", "confirm", ujson.Obj("env" -> "prod")), ("a2", "echo", ujson.Obj("text" -> "hi"))),
       summarise
     )
-    val l = ToolLoop.build("assistant", "v1", model, set(confirming, tools.echo), policy).value
+    val l = ToolLoop.build("assistant", "v1", model, set(confirming, tools.echo), Seq(policy)).value
 
     val first = runInMemory(l.graph, "go").suspended
     l.requests(first).value shouldBe empty
@@ -571,7 +605,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       calls(("a1", "confirm", ujson.Obj("env" -> "prod")), ("a2", "lookup", ujson.Obj("q" -> "x"))),
       summarise
     )
-    val l           = ToolLoop.build("assistant", "v1", model, set(Confirming(), Tools().lookup), policy).value
+    val l           = ToolLoop.build("assistant", "v1", model, set(Confirming(), Tools().lookup), Seq(policy)).value
     val first       = runInMemory(l.graph, "go").suspended
     val approval    = l.requests(first).value.head._1
     val question    = l.questions(first).value.head._1
@@ -768,7 +802,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "re-validate edited arguments, refusing invalid ones without running the tool" in {
     val tools           = Tools()
     val model           = ScriptedModel(calls(("e1", "deploy", ujson.Obj("env" -> "prod"))), summarise)
-    val l               = ToolLoop.build("assistant", "v1", model, set(tools.all*), policy).value
+    val l               = ToolLoop.build("assistant", "v1", model, set(tools.all*), Seq(policy)).value
     val first           = runInMemory(l.graph, "go").suspended
     val id              = l.requests(first).value.head._1
     val edit            = ApprovalDecision.Edit(ujson.Obj("env" -> 7))
@@ -824,6 +858,179 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       """done: c1=ok | c2=ok | c3={"error":"Invalid arguments for 'needs_text': $: expected object, got null"}"""
     seenByCore.toArray.toSeq shouldBe Seq("{}")
     seenByTyped.toArray.toSeq shouldBe Seq("{}")
+  }
+
+  // ---- tool-call middleware (#1279) ----
+
+  it should "refuse a middleware stack that does not build" in {
+    val pass = wrapper("bad id")((_, _, next) => next())
+    ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(Tools().echo), Seq(pass)).left.value shouldBe
+      a[ValidationError]
+  }
+
+  it should "run tool wrappers in stack order around the tool, and only after argument validation" in {
+    val log = new CopyOnWriteArrayList[String]()
+    def nested(name: String) = wrapper(name) { (request, _, next) =>
+      log.add(s"$name:before:${request.call.id}")
+      val result = next()
+      log.add(s"$name:after:${request.call.id}")
+      result
+    }
+    val echo = tool[Echo]("echo", "text") { (a, _) =>
+      log.add(s"tool:${a.text}"); text(a.text)
+    }
+    val model = ScriptedModel(
+      calls(("w1", "echo", ujson.Obj("text" -> "hi"))),
+      calls(("w2", "echo", ujson.Obj("text" -> 5))),
+      summarise
+    )
+    val l = ToolLoop.build("assistant", "v1", model, set(echo), Seq(nested("a"), nested("b"))).value
+    runInMemory(l.graph, "go").completed
+    log.asScala.toVector shouldBe Vector("a:before:w1", "b:before:w1", "tool:hi", "b:after:w1", "a:after:w1")
+    model.seen.get(2).collect {
+      case t: ToolMessage if t.toolCallId == "w2" => "w2" -> ujson.read(t.content)("error").str
+    } shouldBe
+      Vector("w2" -> "Invalid arguments for 'echo': $.text: expected string, got integer")
+  }
+
+  it should "record one result, and only the returned attempt's update, when a wrapper retries a tool" in {
+    val attempts = StateKey[Vector[Int], Int]("attempts", Vector.empty)((seen, n) => Right(seen :+ n))
+    val runs     = new AtomicInteger()
+    val writer = AgentTool(AgentToolSpec[ujson.Value]("writer", "Writes", strings[ujson.Value]("w")), Set(attempts)) {
+      (_, _) =>
+        val n = runs.incrementAndGet()
+        ToolOutcome.Success(ujson.Str(s"attempt $n"), StateUpdate.update(attempts, n))
+    }
+    val retry = wrapper("retry") { (_, _, next) =>
+      next() match {
+        case ToolOutcome.Success(ujson.Str("attempt 1"), _) => next()
+        case other                                          => other
+      }
+    }
+    val model           = ScriptedModel(calls(("r1", "writer", ujson.Obj())), summarise)
+    val l               = ToolLoop.build("assistant", "v1", model, set(writer), Seq(retry)).value
+    val (state, answer) = runInMemory(l.graph, "go").completed
+    runs.get shouldBe 2
+    answer shouldBe "done: r1=attempt 2"
+    model.seen.get(1).collect { case t: ToolMessage => t.toolCallId } shouldBe Vector("r1")
+    state.get(attempts).value shouldBe Vector(2)
+  }
+
+  it should "fail the run when a wrapper adds an update to a key the tool does not declare" in {
+    val hits = StateKey.replace[Int]("hits", 0)
+    val honest =
+      AgentTool(AgentToolSpec[ujson.Value]("honest", "Honest", strings[ujson.Value]("h")), Set(hits))((_, _) =>
+        text("ok")
+      )
+    val adding = wrapper("adding") { (_, _, next) =>
+      next() match {
+        case ToolOutcome.Success(content, update) =>
+          ToolOutcome.Success(content, update.combine(StateUpdate.update(hits, 1)))
+        case other => other
+      }
+    }
+    val model   = ScriptedModel(calls(("s1", "echo", ujson.Obj("text" -> "hi"))), summarise)
+    val l       = ToolLoop.build("assistant", "v1", model, set(Tools().echo, honest), Seq(adding)).value
+    val failure = toolFailure(runInMemory(l.graph, "go"))
+    (failure.tool, failure.toolCallId) shouldBe ("echo" -> "s1")
+    failure.message should include("hits")
+  }
+
+  it should "refuse a second approval from a wrapper inside the one that asked first" in {
+    val tools = Tools()
+    // x is a well-behaved approval middleware; y asks whether or not the call is approved
+    val x = wrapper("x") { (request, context, next) =>
+      if request.call.name == "deploy" && !context.approved then ToolOutcome.NeedsApproval("x checks deploys")
+      else next()
+    }
+    val y = wrapper("y") { (request, _, next) =>
+      if request.call.name == "deploy" then ToolOutcome.NeedsApproval("y checks deploys") else next()
+    }
+    val model             = ScriptedModel(calls(("d1", "deploy", ujson.Obj("env" -> "prod"))), summarise)
+    val l                 = ToolLoop.build("assistant", "v1", model, set(tools.all*), Seq(x, y)).value
+    val first             = runInMemory(l.graph, "go").suspended
+    val Vector((id, req)) = l.requests(first).value
+    (req.source, req.reason) shouldBe (ApprovalSource.Middleware(MiddlewareId("x")) -> "x checks deploys")
+    val (_, answer) =
+      drive(l.graph, l.graph.resume(first.execution, l.answers(id -> ApprovalDecision.Approve)).value).completed
+    answer shouldBe """done: d1={"error":"Middleware 'y' asked for approval again: y checks deploys"}"""
+    tools.deploys.asScala shouldBe empty
+  }
+
+  it should "run a tool's resume after a question inside the chain, with the approval it asked with" in {
+    val log = new CopyOnWriteArrayList[String]()
+    val gated = new AgentTool.Asking[Deploy, Confirm, Reply](
+      AgentToolSpec[Deploy]("gated", "Approved, then asks", strings[Deploy]("g", "env"))
+    ) {
+      def execute(args: Deploy, context: ToolContext): ToolOutcome =
+        if !context.approved then ToolOutcome.NeedsApproval("deploys are irreversible")
+        else ask(Confirm(s"deploy to ${args.env}?"))
+      def resume(args: Deploy, question: Confirm, answer: Reply, context: ToolContext): ToolOutcome =
+        text(s"deployed to ${args.env}")
+    }
+    val model    = ScriptedModel(calls(("g1", "gated", ujson.Obj("env" -> "prod"))), summarise)
+    val l        = ToolLoop.build("assistant", "v1", model, set(gated), Seq(recorder("rec", log))).value
+    val first    = runInMemory(l.graph, "go").suspended
+    val approval = l.requests(first).value.head._1
+    val asked =
+      drive(l.graph, l.graph.resume(first.execution, l.answers(approval -> ApprovalDecision.Approve)).value).suspended
+    val question = l.questions(asked).value.head._1
+    val (_, answer) =
+      drive(l.graph, l.graph.resume(asked.execution, Map(l.answer(question, Reply(true)))).value).completed
+    answer shouldBe "done: g1=deployed to prod"
+    // execute, the approved execute, then the resume - each through the wrapper
+    log.asScala.toVector shouldBe Vector("g1:false", "g1:true", "g1:true")
+  }
+
+  it should "fail the run when a wrapper throws, and recover re-runs only that call" in {
+    val echoes = new AtomicInteger()
+    val echo = tool[Echo]("echo", "text") { (a, _) =>
+      echoes.incrementAndGet(); text(a.text)
+    }
+    val tools = Tools()
+    val model = ScriptedModel(
+      calls(("c1", "echo", ujson.Obj("text" -> "hi")), ("c2", "lookup", ujson.Obj("q" -> "x"))),
+      summarise
+    )
+    val throwing = wrapper("boom-mw") { (request, _, next) =>
+      if request.call.name == "lookup" then throw new IllegalStateException("boom") else next()
+    }
+    val store  = InMemoryCheckpointer()
+    val broken = ToolLoop.build("assistant", "v1", model, set(echo, tools.lookup), Seq(throwing)).value
+    val failed =
+      GraphRuntime(store).start(thread, broken.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited.value
+    failed.failed._2 match {
+      case GraphError.NodeFailed(node, _, GraphError.MiddlewareFailed("boom-mw", cause)) =>
+        node shouldBe NodeId("call-tool")
+        cause.getMessage shouldBe "boom"
+      case other => fail(s"not a middleware failure: $other")
+    }
+    store.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Running)
+
+    val fixed = ToolLoop
+      .build("assistant", "v1", model, set(echo, tools.lookup), Seq(wrapper("boom-mw")((_, _, next) => next())))
+      .value
+    val (_, answer) =
+      GraphRuntime(store).recover(thread, fixed.graph, RunConfig().withRunId(RunId("run-2"))).awaited.value.completed
+    answer shouldBe "done: c1=hi | c2=found x"
+    echoes.get shouldBe 1
+  }
+
+  it should "cancel, not fail, the run when a wrapper throws a wrapped interrupt" in {
+    val interrupting = wrapper("interrupting") { (request, _, next) =>
+      if request.call.name == "lookup" then throw new RuntimeException("wrapped", new InterruptedException("stop"))
+      else next()
+    }
+    val model = ScriptedModel(
+      calls(("x1", "echo", ujson.Obj("text" -> "hi")), ("x2", "lookup", ujson.Obj("q" -> "x"))),
+      summarise
+    )
+    val tools = Tools()
+    val l     = ToolLoop.build("assistant", "v1", model, set(tools.echo, tools.lookup), Seq(interrupting)).value
+    val store = InMemoryCheckpointer()
+    val ended = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited.value
+    ended.failed._2 shouldBe a[GraphError.Cancelled]
+    (store.latest(thread).value.get.pendingWrites.map(_.toString).mkString should not).include("x2")
   }
 
   "ModelStep.fromClient" should "offer the loop's tools to the client" in {

@@ -1,6 +1,7 @@
 package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.agent.graph.*
+import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, MiddlewareStack, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
@@ -10,21 +11,10 @@ import upickle.default.ReadWriter
 
 import scala.util.Try
 
-/** Decides each call before it runs - the policy-middleware stand-in until (#1271)'s `AgentMiddleware`. */
-trait ToolCallPolicy:
-  def decide(call: ToolCall): PolicyDecision
-
-object ToolCallPolicy:
-  val allowAll: ToolCallPolicy = _ => PolicyDecision.Allow
-
-enum PolicyDecision:
-  case Allow
-  case Deny(reason: String)
-  case RequireApproval(reason: String)
-
-/** Who asked for an approval. Both kinds resume at the same approval node. */
+/** Who asked for an approval: the tool itself, or a middleware's tool wrapper. All resume at the same approval node. */
 enum ApprovalSource derives ReadWriter:
-  case Policy, Tool
+  case Tool
+  case Middleware(id: MiddlewareId)
 
 /** The question an approval interrupt asks: one tool call, from one assistant message. */
 final case class ApprovalRequest(assistantMessageId: String, call: ToolCall, reason: String, source: ApprovalSource)
@@ -82,16 +72,21 @@ object ModelStep:
  *
  *  - Each call is its own task. Its tool is looked up, its raw arguments validated against the
  *    tool's `argumentSchema`, decoded and checked by the tool's `validateDecoded` - any failure is an
- *    error result the model sees, before the policy or the tool runs. Then the policy, then the tool.
- *  - A policy `RequireApproval` and a tool's `NeedsApproval` both suspend the call with an
- *    [[ApprovalRequest]] and resume at the one `approval` node; an edited approval's arguments are
- *    checked again. A tool's `Ask` suspends with a [[ToolQuestionRequest]] at that tool's
- *    `ask/<name>` node, which calls the tool's `resume` with the decoded answer.
+ *    error result the model sees, before any middleware or the tool runs. Then the middleware
+ *    stack's `wrapToolCall` chain, the first middleware outermost, with the tool at its centre.
+ *  - A `NeedsApproval`, from a wrapper or the tool, suspends the call with an [[ApprovalRequest]]
+ *    naming its [[ApprovalSource]], and resumes at the one `approval` node. `Approve` and `Edit`
+ *    check the arguments again (an edit's are new) and run the whole chain again with
+ *    `ToolContext.approved`, so a deny rule still refuses an edit; a second `NeedsApproval` from an
+ *    approved call is an error result. A tool's `Ask` suspends with a [[ToolQuestionRequest]] at
+ *    that tool's `ask/<name>` node, which runs the tool's `resume` with the decoded answer inside the
+ *    same chain, with the approval the call asked with.
  *  - The loop, not the tool, records exactly one [[ToolResult]] per call - for success, failure,
- *    denial, rejection and unknown tools alike; the results key refuses a second one. A thrown
- *    exception is that call's error result. `Fatal`, an update to a key the tool does not declare,
- *    and a question it does not declare fail the run with `GraphError.ToolFailed`, leaving the
- *    checkpoint `Running` so `recover` re-runs only that call.
+ *    denial, rejection and unknown tools alike, however often a wrapper ran the tool; the results key
+ *    refuses a second one. A tool's thrown exception is that call's error result. `Fatal`, an update
+ *    to a key the tool does not declare, and a question it does not declare fail the run with
+ *    `GraphError.ToolFailed`; a throwing wrapper fails it with `GraphError.MiddlewareFailed`. Either
+ *    leaves the checkpoint `Running`, so `recover` re-runs only that call.
  *  - `collect` runs only when the barrier releases, checks every call of the batch has exactly one
  *    result, and appends the `ToolMessage`s in call order. The model never sees a partial batch.
  *  - The model node re-checks the history with `Message.validateConversation` before every call.
@@ -150,13 +145,13 @@ object ToolLoop:
     version: String,
     model: ModelStep,
     tools: ToolSet,
-    policy: ToolCallPolicy = ToolCallPolicy.allowAll
+    middleware: Seq[AgentMiddleware] = Nil
   ): Result[ToolLoop] =
     val messages = Messages.key
     // the loop alone writes results and messages: a tool writing either could break one result per call
     val owned = Set(results.id, messages.id)
     tools.tools.filter(_.writes.exists(k => owned.contains(k.id))).map(_.spec.name) match
-      case Vector() => assemble(id, version, model, tools, policy)
+      case Vector() => MiddlewareStack.of(middleware*).flatMap(assemble(id, version, model, tools, _))
       case offending =>
         Left(
           ValidationError(
@@ -170,7 +165,7 @@ object ToolLoop:
     version: String,
     model: ModelStep,
     tools: ToolSet,
-    policy: ToolCallPolicy
+    stack: MiddlewareStack
   ): Result[ToolLoop] =
     val messages = Messages.key
     val b        = GraphBuilder(id, version)
@@ -186,7 +181,7 @@ object ToolLoop:
     val askRefs: Map[String, ResumeRef[ToolQuestionRequest, ujson.Value]] =
       asking.map(t => t.spec.name -> b.declareResume[ToolQuestionRequest, ujson.Value](s"ask/${t.spec.name}")).toMap
 
-    val pipeline = Pipeline(tools, policy, approval, askRefs)
+    val pipeline = Pipeline(tools, stack, approval, askRefs)
 
     b.implement(callTool, writes = callWrites) { (task, state, context) =>
       tools.get(task.call.name) match
@@ -205,7 +200,7 @@ object ToolLoop:
             messages,
             MessageUpdate.EditToolCall(request.assistantMessageId, request.call.id, arguments)
           )
-          pipeline.approved(task, request.call.copy(arguments = arguments), state, context, edited = true) match
+          pipeline.approved(task, request.call.copy(arguments = arguments), state, context) match
             case NodeResult.Continue(command) =>
               NodeResult.Continue(command.copy(update = edit.combine(command.update)))
             case NodeResult.Suspend(update, q, resume) => NodeResult.Suspend(edit.combine(update), q, resume)
@@ -285,10 +280,10 @@ object ToolLoop:
       }
     }.map(new ToolLoop(_, approval, askRefs.values.map(_.node.id).toSet))
 
-  /** The call pipeline (design #1278, "The call pipeline"): one call's checks, policy, tool and outcome. */
+  /** The call pipeline (design #1278, "The call pipeline"; #1279): one call's checks, chain, tool and outcome. */
   final private class Pipeline(
     tools: ToolSet,
-    policy: ToolCallPolicy,
+    stack: MiddlewareStack,
     approval: ResumeRef[ApprovalRequest, ApprovalDecision],
     askRefs: Map[String, ResumeRef[ToolQuestionRequest, ujson.Value]]
   ):
@@ -308,37 +303,23 @@ object ToolLoop:
     private def suspend(task: ToolTask, call: ToolCall, reason: String, source: ApprovalSource): NodeResult =
       NodeResult.Suspend(StateUpdate.empty, ApprovalRequest(task.assistantMessageId, call, reason, source), approval)
 
-    /** A new call: steps 2-5, then the tool. */
+    /** A new call: steps 2-4, then the middleware chain around the tool. */
     def admit[A](tool: AgentTool[A], task: ToolTask, state: ThreadState, context: RunContext): NodeResult =
       checked(tool, task, task.call) match
         case Left(refused) => refused
-        case Right(args) =>
-          policy.decide(task.call) match
-            case PolicyDecision.Deny(reason)            => error(task, s"Denied: $reason")
-            case PolicyDecision.RequireApproval(reason) => suspend(task, task.call, reason, ApprovalSource.Policy)
-            case PolicyDecision.Allow                   => execute(tool, task, task.call, args, state, context)
+        case Right(args)   => execute(tool, task, task.call, args, state, context)
 
     /**
-     * An approved call, as approved or with edited arguments: checked again, and an edit offered to
-     * the policy, which can still deny it outright; the reviewer's approval stands for the rest.
+     * An approved call, as approved or with edited arguments: checked again, then run through the
+     * whole chain with `approved = true`, so every wrapper - a deny rule too - sees it again.
      */
-    def approved(
-      task: ToolTask,
-      call: ToolCall,
-      state: ThreadState,
-      context: RunContext,
-      edited: Boolean = false
-    ): NodeResult =
+    def approved(task: ToolTask, call: ToolCall, state: ThreadState, context: RunContext): NodeResult =
       tools.get(call.name) match
         case None => error(task, s"Unknown tool '${call.name}'")
         case Some(tool) =>
           checked(tool, task, call) match
             case Left(refused) => refused
-            case Right(args) =>
-              val denied = if edited then policy.decide(call) else PolicyDecision.Allow
-              denied match
-                case PolicyDecision.Deny(reason) => error(task, s"Denied: $reason")
-                case _                           => execute(tool, task, call, args, state, context, approved = true)
+            case Right(args)   => execute(tool, task, call, args, state, context, approved = true)
 
     /** An answered question: decodes the stored call, question and answer, and resumes the tool. */
     def answered[A](
@@ -362,9 +343,10 @@ object ToolLoop:
             case Left(message) => error(task, message)
             case Right((args, question, reply)) =>
               val toolContext = ToolContext(context, request.call.id, state, request.approved)
-              outcome(tool, task, request.call, request.approved, resumed = true)(
-                AgentTool.resumeWith(tool, args, question, reply, toolContext)
-              )
+              val chain = stack.wrapToolCall(ToolCallRequest(tool.spec, request.call), toolContext) { () =>
+                guarded(name)(AgentTool.resumeWith(tool, args, question, reply, toolContext))
+              }
+              outcome(tool, task, request.call, request.approved, chain, resumed = true)
         case _ => error(task, s"Tool '$name' does not take answers")
 
     /**
@@ -427,30 +409,43 @@ object ToolLoop:
       approved: Boolean = false
     ): NodeResult =
       val toolContext = ToolContext(context, call.id, state, approved)
-      outcome(tool, task, call, approved)(tool.execute(args, toolContext))
+      val chain = stack.wrapToolCall(ToolCallRequest(tool.spec, call), toolContext) { () =>
+        guarded(tool.spec.name)(tool.execute(args, toolContext))
+      }
+      outcome(tool, task, call, approved, chain)
 
     /**
-     * Step 6: maps what the tool did. A thrown NonFatal exception is an error result. An
-     * `InterruptedException` is not caught; a thrown cancellation (an interrupt wrapped in another
-     * exception, or one thrown with the flag set) and `Fatal(CancelledError)` restore the interrupt
-     * flag, so the runtime cancels the task and it records nothing. `resumed` is true when the tool
-     * is continuing after a question.
+     * The chain's innermost function: the tool's `execute` or `resume`, guarded so that wrappers see
+     * a throwing tool as an outcome. A thrown NonFatal exception is an error result; a thrown
+     * cancellation (an interrupt wrapped in another exception, or one thrown with the flag set) is
+     * `Fatal(CancelledError)`. An `InterruptedException` is not caught.
+     */
+    private def guarded(name: String)(run: => ToolOutcome): ToolOutcome =
+      Try(run).toEither match
+        case Right(result) => result
+        case Left(thrown) =>
+          CancelledError.fromThrowable(thrown, s"tool $name") match
+            case Some(cancellation) => ToolOutcome.Fatal(cancellation)
+            case None               => ToolOutcome.Error(s"Tool '$name' failed: ${describe(thrown)}")
+
+    /**
+     * Step 6: maps what the chain returned. `Fatal(CancelledError)` restores the interrupt flag, so
+     * the runtime cancels the task and it records nothing; a wrapper's `MiddlewareFailed` fails the
+     * run as itself, any other `Fatal` as `ToolFailed`. A `NeedsApproval` is attributed to the tool
+     * or to the wrapper that raised it. `resumed` is true when the tool is continuing after a question.
      */
     private def outcome[A](
       tool: AgentTool[A],
       task: ToolTask,
       call: ToolCall,
       approved: Boolean,
+      chain: MiddlewareStack.ToolChainResult,
       resumed: Boolean = false
-    )(run: => ToolOutcome): NodeResult =
+    ): NodeResult =
       val name                                 = tool.spec.name
       def failRun(error: LLMError): NodeResult = NodeResult.Fail(GraphError.ToolFailed(name, call.id, error))
-      Try(run).toEither match
-        case Left(thrown) =>
-          CancelledError.fromThrowable(thrown, s"tool $name") match
-            case Some(cancellation) => cancelled(cancellation)
-            case None               => error(task, s"Tool '$name' failed: ${describe(thrown)}")
-        case Right(ToolOutcome.Success(content, update)) =>
+      chain.outcome match
+        case ToolOutcome.Success(content, update) =>
           val undeclared =
             update.operations.map(_.key.id).filterNot(k => tool.writes.exists(_.id == k)).map(_.value).distinct
           if undeclared.isEmpty then
@@ -465,13 +460,16 @@ object ToolLoop:
                 s"tool '$name' updated ${undeclared.map(k => s"'$k'").mkString(", ")}, which it does not declare"
               )
             )
-        case Right(ToolOutcome.Error(message))        => error(task, message)
-        case Right(ToolOutcome.NeedsApproval(reason)) =>
+        case ToolOutcome.Error(message) => error(task, message)
+        case ToolOutcome.NeedsApproval(reason) =>
+          val (asker, source) = chain.raisedBy match
+            case None     => (s"Tool '$name'", ApprovalSource.Tool)
+            case Some(id) => (s"Middleware '${id.value}'", ApprovalSource.Middleware(id))
           // approving would run `execute` again and lose the answer
-          if resumed then error(task, s"Tool '$name' asked for approval after a question: $reason")
-          else if approved then error(task, s"Tool '$name' asked for approval again: $reason")
-          else suspend(task, call, reason, ApprovalSource.Tool)
-        case Right(ToolOutcome.Ask(question)) =>
+          if resumed then error(task, s"$asker asked for approval after a question: $reason")
+          else if approved then error(task, s"$asker asked for approval again: $reason")
+          else suspend(task, call, reason, source)
+        case ToolOutcome.Ask(question) =>
           (tool.spec.question, askRefs.get(name)) match
             case (Some(declared: ToolQuestion[q, ?]), Some(ref)) =>
               // a question of another type than the declared one fails to encode: a tool bug, like an undeclared one
@@ -487,8 +485,9 @@ object ToolLoop:
                     ValidationError("tool question", s"tool '$name' asked a question of another type: ${e.message}")
                   )
             case _ => failRun(ValidationError("tool question", s"tool '$name' asked a question it does not declare"))
-        case Right(ToolOutcome.Fatal(cancellation: CancelledError)) => cancelled(cancellation)
-        case Right(ToolOutcome.Fatal(error))                        => failRun(error)
+        case ToolOutcome.Fatal(cancellation: CancelledError)        => cancelled(cancellation)
+        case ToolOutcome.Fatal(failed: GraphError.MiddlewareFailed) => NodeResult.Fail(failed)
+        case ToolOutcome.Fatal(error)                               => failRun(error)
 
     /**
      * A string result is the string itself, not a quoted JSON string - except a blank one, which a
