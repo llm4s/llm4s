@@ -230,6 +230,14 @@ class SchemaDefinitionSpec extends AnyFlatSpec with Matchers {
     schemaTrue.toJsonSchema(strict = false)("additionalProperties").bool shouldBe true
   }
 
+  "ObjectSchema" should "render a field added twice once in required, in first-occurrence order" in {
+    val schema = ObjectSchema[Map[String, Any]]("o", Seq.empty)
+      .withRequiredField("x", StringSchema("x"))
+      .withRequiredField("y", StringSchema("y"))
+      .withRequiredField("x", StringSchema("x"))
+    schema.toJsonSchema(strict = false)("required").arr.map(_.str).toSeq shouldBe Seq("x", "y")
+  }
+
   // ============ NullableSchema ============
 
   "NullableSchema" should "add null to type for simple schema" in {

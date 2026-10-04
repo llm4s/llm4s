@@ -280,7 +280,7 @@ case class ObjectSchema[T](
     val props = ujson.Obj()
 
     // in strict mode all properties are required
-    val required = (if (strict) properties else properties.filter(_.required)).map(_.name)
+    val required = (if (strict) properties else properties.filter(_.required)).map(_.name).distinct
 
     properties.foreach(prop => props(prop.name) = prop.schema.toJsonSchema(strict))
 

@@ -108,8 +108,9 @@ object ToolArgumentValidator {
                   }
                 case "required" =>
                   value match {
-                    case ujson.Arr(names) if names.forall(_.strOpt.isDefined) => Vector.empty
-                    case _                                                    => Vector(s"$path.required")
+                    case ujson.Arr(names) if names.forall(_.strOpt.isDefined) && names.distinct.size == names.size =>
+                      Vector.empty
+                    case _ => Vector(s"$path.required")
                   }
                 case "enum" =>
                   value match {
