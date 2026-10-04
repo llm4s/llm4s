@@ -1,8 +1,10 @@
 package org.llm4s.zio
 
+import java.util.concurrent.CountDownLatch
+
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.error.LLMError
+import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
 import zio.{ Queue, Unsafe, ZIO, ZLayer }
@@ -102,7 +104,15 @@ object LLMClientZ {
                 options,
                 chunk =>
                   Unsafe.unsafe { implicit u =>
-                    rt.unsafe.run(queue.offer(Take.single(chunk))).getOrThrowFiberFailure()
+                    // Not `rt.unsafe.run`: if this thread is interrupted while the offer is parked
+                    // on a full queue, `run` throws and leaves the offer fiber suspended forever.
+                    val offer = rt.unsafe.fork(queue.offer(Take.single(chunk)).unit)
+                    val done  = new CountDownLatch(1)
+                    offer.unsafe.addObserver(_ => done.countDown())
+                    CancelledError.catchInterrupt(done.await()).left.foreach { e =>
+                      rt.unsafe.fork(offer.interrupt)
+                      throw e
+                    }
                   }
               )
             }
