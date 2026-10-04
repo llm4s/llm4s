@@ -14,7 +14,9 @@ import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation,
  * cats-effect wrapper for [[LLMClient]].
  *
  * All blocking LLM calls are shifted to the blocking thread pool via
- * `Async[F].blocking`, keeping the compute pool free for fibers.
+ * `Async[F].interruptible`, keeping the compute pool free for fibers. Cancelling the fiber (or a
+ * `timeout`) interrupts the provider thread, which is how llm4s providers are cancelled: they keep
+ * the interrupt and return `Left(CancelledError)`.
  * `LLMError` values are surfaced as [[LLMException]] in the `F` error channel.
  */
 trait LLMClientIO[F[_]] {
@@ -78,7 +80,7 @@ object LLMClientIO {
       conversation: Conversation,
       options: CompletionOptions = CompletionOptions()
     ): F[Completion] =
-      F.blocking(underlying.complete(conversation, options)).flatMap {
+      F.interruptible(underlying.complete(conversation, options)).flatMap {
         case Right(c) => F.pure(c)
         case Left(e)  => F.raiseError(new LLMException(e))
       }

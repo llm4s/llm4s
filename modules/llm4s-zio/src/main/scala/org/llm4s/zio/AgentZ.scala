@@ -11,11 +11,13 @@ import zio.ZIO
  * ZIO wrapper for [[Agent]].
  *
  * Lifts every `Result[AgentState]` return value into `ZIO[Any, LLMError, AgentState]`.
- * The underlying blocking [[Agent]] methods are shifted to ZIO's blocking thread pool.
+ * The underlying blocking [[Agent]] methods are shifted to ZIO's blocking thread pool and run
+ * interruptibly: interrupting the fiber interrupts the running agent loop.
  *
- * Intentionally a thin wrapper: `run` does not expose `handoffs`, `tracing` or `debug`, and
- * `continueConversation` does not expose `contextWindowConfig`; the underlying [[Agent]] defaults
- * apply. Use [[Agent]] directly (inside `ZIO.attemptBlocking`) when you need those.
+ * Intentionally a thin wrapper: `run` does not expose `handoffs`, and `continueConversation` does
+ * not expose `contextWindowConfig`; the underlying [[Agent]] defaults apply. Tracing, debug logging
+ * and the trace log path are still available through the `context` parameter. Use [[Agent]]
+ * directly (inside `ZIO.attemptBlockingInterrupt`) when you need handoffs or context-window pruning.
  */
 trait AgentZ {
 
@@ -57,8 +59,8 @@ object AgentZ {
       completionOptions: CompletionOptions = CompletionOptions(),
       context: AgentContext = AgentContext.Default
     ): ZIO[Any, LLMError, AgentState] =
-      ZIO.blocking {
-        ZIO.fromEither(
+      ZIO
+        .attemptBlockingInterrupt(
           agent.run(
             query,
             tools,
@@ -70,7 +72,8 @@ object AgentZ {
             context = context
           )
         )
-      }
+        .orDie
+        .flatMap(ZIO.fromEither(_))
 
     def continueConversation(
       previousState: AgentState,
@@ -80,8 +83,8 @@ object AgentZ {
       maxSteps: Option[Int] = None,
       context: AgentContext = AgentContext.Default
     ): ZIO[Any, LLMError, AgentState] =
-      ZIO.blocking {
-        ZIO.fromEither(
+      ZIO
+        .attemptBlockingInterrupt(
           agent.continueConversation(
             previousState,
             newUserMessage,
@@ -91,6 +94,7 @@ object AgentZ {
             context = context
           )
         )
-      }
+        .orDie
+        .flatMap(ZIO.fromEither(_))
   }
 }

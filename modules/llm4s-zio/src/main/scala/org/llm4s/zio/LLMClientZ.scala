@@ -12,7 +12,9 @@ import zio.stream.{ Take, ZStream }
  * ZIO wrapper for [[LLMClient]].
  *
  * Blocking LLM calls are shifted to ZIO's blocking thread pool via
- * `ZIO.blocking`, keeping the fiber executor free.
+ * `ZIO.attemptBlockingInterrupt`, keeping the fiber executor free. Interrupting the fiber (or a
+ * `timeout`) interrupts the provider thread, which is how llm4s providers are cancelled: they keep
+ * the interrupt and return `Left(CancelledError)`. An exception thrown by a provider is a defect.
  * `LLMError` is used directly as the error channel type — no wrapping needed.
  */
 trait LLMClientZ {
@@ -77,9 +79,10 @@ object LLMClientZ {
       conversation: Conversation,
       options: CompletionOptions = CompletionOptions()
     ): ZIO[Any, LLMError, Completion] =
-      ZIO.blocking {
-        ZIO.fromEither(underlying.complete(conversation, options))
-      }
+      ZIO
+        .attemptBlockingInterrupt(underlying.complete(conversation, options))
+        .orDie
+        .flatMap(ZIO.fromEither(_))
 
     def streamComplete(
       conversation: Conversation,

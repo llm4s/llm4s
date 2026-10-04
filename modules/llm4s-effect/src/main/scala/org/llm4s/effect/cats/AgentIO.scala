@@ -13,11 +13,13 @@ import org.llm4s.toolapi.ToolRegistry
  * Lifts every `Result[AgentState]` return value into `F[AgentState]`,
  * raising `LLMError` as [[LLMException]] in the error channel.
  * The underlying [[Agent.run]] and related methods are blocking — each
- * call is dispatched to the blocking thread pool via `Async[F].blocking`.
+ * call is dispatched to the blocking thread pool via `Async[F].interruptible`, so cancelling the
+ * fiber interrupts the running agent loop.
  *
- * Intentionally a thin wrapper: `run` does not expose `handoffs`, `tracing` or `debug`, and
- * `continueConversation` does not expose `contextWindowConfig`; the underlying [[Agent]] defaults
- * apply. Use [[Agent]] directly (inside `Async[F].blocking`) when you need those.
+ * Intentionally a thin wrapper: `run` does not expose `handoffs`, and `continueConversation` does
+ * not expose `contextWindowConfig`; the underlying [[Agent]] defaults apply. Tracing, debug logging
+ * and the trace log path are still available through the `context` parameter. Use [[Agent]]
+ * directly (inside `Async[F].interruptible`) when you need handoffs or context-window pruning.
  */
 trait AgentIO[F[_]] {
 
@@ -59,7 +61,7 @@ object AgentIO {
       completionOptions: CompletionOptions = CompletionOptions(),
       context: AgentContext = AgentContext.Default
     ): F[AgentState] =
-      F.blocking(
+      F.interruptible(
         agent.run(
           query,
           tools,
@@ -83,7 +85,7 @@ object AgentIO {
       maxSteps: Option[Int] = None,
       context: AgentContext = AgentContext.Default
     ): F[AgentState] =
-      F.blocking(
+      F.interruptible(
         agent.continueConversation(
           previousState,
           newUserMessage,
