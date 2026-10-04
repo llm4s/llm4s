@@ -52,7 +52,7 @@ case class AnthropicVisionConfig(
  */
 case class GeminiVisionConfig(
   apiKey: String,
-  model: String = "gemini-1.5-flash",
+  model: String = "gemini-3.6-flash",
   baseUrl: String = "https://generativelanguage.googleapis.com/v1beta",
   connectTimeoutSeconds: Int = 30,
   requestTimeoutSeconds: Int = 60

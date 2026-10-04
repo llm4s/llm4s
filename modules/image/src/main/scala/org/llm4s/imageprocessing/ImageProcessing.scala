@@ -53,12 +53,12 @@ object ImageProcessing {
    * Creates a Google Gemini Vision client for image analysis.
    *
    * @param apiKey Google API key
-   * @param model  Gemini model to use (default: gemini-1.5-flash)
+   * @param model  Gemini model to use (default: gemini-3.6-flash)
    * @return ImageProcessingClient instance
    */
   def geminiVisionClient(
     apiKey: String,
-    model: String = "gemini-1.5-flash"
+    model: String = "gemini-3.6-flash"
   ): ImageProcessingClient = {
     val config = GeminiVisionConfig(apiKey, model)
     new GeminiVisionClient(config)

@@ -30,7 +30,7 @@ class GeminiVisionClientTest extends AnyFlatSpec with Matchers with EitherValues
       .filter(_.nonEmpty)
       .orElse(Option(System.getenv("GEMINI_API_KEY")).filter(_.nonEmpty))
 
-  private val Model = "gemini-2.0-flash"
+  private val Model = "gemini-3.6-flash"
 
   /** The 64x64 PNG fixture in `modules/it/src/test/resources`. */
   private def testImage: Path = Paths.get(getClass.getResource("/test-image.png").toURI)

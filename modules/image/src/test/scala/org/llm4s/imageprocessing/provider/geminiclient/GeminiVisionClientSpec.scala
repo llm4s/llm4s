@@ -46,7 +46,7 @@ class GeminiVisionClientSpec extends AnyFlatSpec with Matchers with BeforeAndAft
 
   private val testConfig = GeminiVisionConfig(
     apiKey = "test-key",
-    model = "gemini-1.5-flash",
+    model = "gemini-3.6-flash",
     connectTimeoutSeconds = 5,
     requestTimeoutSeconds = 10
   )
