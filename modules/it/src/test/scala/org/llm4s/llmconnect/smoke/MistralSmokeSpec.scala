@@ -1,10 +1,13 @@
 package org.llm4s.llmconnect.smoke
 
-import org.llm4s.error.{ AuthenticationError, ConfigurationError }
+import org.llm4s.error.AuthenticationError
+import org.llm4s.it.Tier
+import org.llm4s.it.tags.Cloud
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, MistralConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.MistralClient
 import org.llm4s.model.ModelRegistryService
+import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -12,65 +15,61 @@ import org.scalatest.matchers.should.Matchers
  * Cloud smoke tests for Mistral.
  *
  * These tests live in the dedicated integration-test module so default `sbt test`
- * stays fast. Run them with `sbt "it/testOnly org.llm4s.llmconnect.smoke.*"`
- * or the `sbt testSmoke` alias.
+ * stays fast. Run them with `sbt testSmoke`.
  *
  * Requires: `MISTRAL_API_KEY` environment variable.
+ * Tier: `@Cloud` - `sbt testSmoke`.
+ *
+ * `MistralClient` is the Mistral dialect of `llm4s-openai-compatible` (#1210), so streaming
+ * goes through the shared client. Assertions are structural; generated text is never compared.
  */
-class MistralSmokeSpec extends AnyFlatSpec with Matchers {
+@Cloud
+class MistralSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
-  private given ContextWindowResolver = ContextWindowResolver(mrs)
+  private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
   private val apiKey: Option[String] = Option(System.getenv("MISTRAL_API_KEY")).filter(_.nonEmpty)
 
   private def config(key: String): MistralConfig =
-    MistralConfig.fromValues(
-      modelName = "mistral-small-latest",
-      apiKey = key,
-      baseUrl = "https://api.mistral.ai"
-    )
+    MistralConfig
+      .fromValues(
+        modelName = "mistral-small-latest",
+        apiKey = key,
+        baseUrl = MistralConfig.DEFAULT_BASE_URL
+      )
+      .value
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 
+  private val options: CompletionOptions = CompletionOptions(maxTokens = Some(16))
+
   "Mistral" should "complete a basic request" in {
-    assume(apiKey.isDefined, "MISTRAL_API_KEY not set")
+    Tier.require(apiKey.isDefined, "MISTRAL_API_KEY not set")
 
-    val clientResult = MistralClient(config(apiKey.get))
-    withClue(s"Client creation failed: ${clientResult.swap.toOption}") {
-      clientResult.isRight shouldBe true
-    }
+    val client     = MistralClient(config(apiKey.get)).value
+    val completion = client.complete(conversation, options).value
 
-    val client     = clientResult.toOption.get
-    val completion = client.complete(conversation, CompletionOptions())
-
-    withClue(s"Completion failed: ${completion.swap.toOption}") {
-      completion.isRight shouldBe true
-    }
-    completion.toOption.get.content should not be empty
-    completion.toOption.get.usage shouldBe defined
-    completion.toOption.get.usage.get.promptTokens should be > 0
-    completion.toOption.get.usage.get.completionTokens should be > 0
+    completion.usage shouldBe defined
+    completion.usage.get.promptTokens should be > 0
+    completion.usage.get.completionTokens should be > 0
   }
 
-  it should "indicate that streaming is not yet supported" in {
-    assume(apiKey.isDefined, "MISTRAL_API_KEY not set")
+  it should "stream a basic request" in {
+    Tier.require(apiKey.isDefined, "MISTRAL_API_KEY not set")
 
-    val client = MistralClient(config(apiKey.get)).toOption.get
+    val client = MistralClient(config(apiKey.get)).value
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+    val result = client.streamComplete(conversation, options, c => chunks += c).value
 
-    // Mistral v1 does not support streaming; verify it returns Left(ConfigurationError)
-    // rather than throwing an exception — the contract is graceful degradation.
-    result.isLeft shouldBe true
-    result.swap.toOption.get shouldBe a[ConfigurationError]
+    chunks.exists(_.content.isDefined) shouldBe true
+    chunks.flatMap(_.content).mkString shouldBe result.content
   }
 
   it should "return AuthenticationError for an invalid API key" in {
-    val client = MistralClient(config("invalid-key-for-testing")).toOption.get
-    val result = client.complete(conversation, CompletionOptions())
+    val client = MistralClient(config("invalid-key-for-testing")).value
+    val result = client.complete(conversation, options)
 
-    result.isLeft shouldBe true
-    result.swap.toOption.get shouldBe an[AuthenticationError]
+    result.swap.value shouldBe an[AuthenticationError]
   }
 }
