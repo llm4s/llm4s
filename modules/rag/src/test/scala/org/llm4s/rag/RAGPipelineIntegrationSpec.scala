@@ -1,11 +1,13 @@
 package org.llm4s.rag
 
 import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
+import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.EmbeddingClient
+import org.llm4s.llmconnect.model.EmbeddingError
 import org.llm4s.model.{ ModelRegistryService, ModelRegistryTestSupport }
 import org.llm4s.rag.loader.TextLoader
 import org.llm4s.testutil.{ MockEmbeddingProviders, MockLLMClients }
-import org.scalatest.OptionValues
+import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -22,7 +24,7 @@ import org.scalatest.matchers.should.Matchers
  * did: a query about functional programming genuinely ranks the Scala and Haskell documents
  * above the Java one, so a retrieval regression has somewhere to show up.
  */
-class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionValues {
+class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionValues with EitherValues {
 
   private given ModelRegistryService = ModelRegistryTestSupport.defaultService()
 
@@ -140,6 +142,32 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
     // unrelated to the channel scores; weighted fusion normalises into [0, 1].
     rrfResults.map(_.score).max should be < 0.1
     weightedResults.map(_.score).max shouldBe 1.0 +- 1e-9
+  }
+
+  it should "fuse by reciprocal rank: 1/(60+vectorRank) + 1/(60+keywordRank) per chunk" in {
+    val query = "functional programming language"
+
+    def ranks(config: RAGConfig): Map[String, Int] = {
+      val rag = buildRAG(config)
+      ingestAll(rag)
+      rag.query(query, topK = Some(10)).fold(err => fail(err.message), identity).map(_.id).zipWithIndex.toMap.map {
+        case (id, zeroBased) => id -> (zeroBased + 1)
+      }
+    }
+    val vectorRanks  = ranks(RAGConfig.default.vectorOnly)
+    val keywordRanks = ranks(RAGConfig.default.keywordOnly)
+
+    val fused = buildRAG()
+    ingestAll(fused)
+    val results = fused.query(query, topK = Some(5)).fold(err => fail(err.message), identity)
+
+    results should not be empty
+    results.foreach { r =>
+      val expected =
+        vectorRanks.get(r.id).fold(0.0)(rank => 1.0 / (60 + rank)) +
+          keywordRanks.get(r.id).fold(0.0)(rank => 1.0 / (60 + rank))
+      r.score shouldBe expected +- 1e-12
+    }
   }
 
   it should "consult only the vector channel under vectorOnly" in {
@@ -311,7 +339,8 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
       // Retrieve every chunk and check the sizes actually indexed, rather than only the count.
       val indexed = rag.query("quick brown fox", topK = Some(100)).fold(err => fail(err.message), identity)
       indexed should have size rag.chunkCount.toLong
-      every(indexed.map(_.content.length)) should be <= chunking.maxSize
+      // SimpleChunker windows by targetSize; maxSize is only a ceiling for the other strategies.
+      every(indexed.map(_.content.length)) should be <= chunking.targetSize
       indexed.map(_.content.length).max should be > chunking.minChunkSize
     }
 
@@ -365,4 +394,284 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
       val prompt = llm.lastConversation.value.messages.map(_.content).mkString("\n")
       answer.contexts.foreach(ctx => prompt should include(ctx.content))
     }
+
+  // -----------------------------------------------------------------------
+  // 9. Retrieval limits
+  // -----------------------------------------------------------------------
+
+  "RAGPipelineIntegration topK" should "return the whole corpus when topK exceeds it" in {
+    val rag = buildRAG()
+    ingestAll(rag)
+    rag.query("programming language", topK = Some(50)).fold(err => fail(err.message), identity) should have size 5
+  }
+
+  it should "honour a per-query topK and fall back to the configured one" in {
+    val rag = buildRAG(RAGConfig.default.withTopK(2))
+    ingestAll(rag)
+
+    rag.query("programming language").fold(err => fail(err.message), identity) should have size 2
+    rag.query("programming language", topK = Some(1)).fold(err => fail(err.message), identity) should have size 1
+    rag.query("programming language", topK = Some(4)).fold(err => fail(err.message), identity) should have size 4
+  }
+
+  it should "return the top-ranked chunk first and in descending score order" in {
+    val rag = buildRAG()
+    ingestAll(rag)
+    val results =
+      rag.query("purely functional lazy evaluation", topK = Some(5)).fold(err => fail(err.message), identity)
+    docIdOf(results.head.id) shouldBe "doc-haskell"
+    results.map(_.score) shouldBe results.map(_.score).sorted.reverse
+  }
+
+  it should "find one specific document in a larger corpus" in {
+    val embeddings = new EmbeddingClient(new MockEmbeddingProviders.BagOfWordsMock(1024))
+    val big        = RAG.buildWithClient(RAGConfig.default, embeddings).fold(err => fail(err.message), identity)
+    val docs       = (0 until 200).map(i => f"doc-$i%03d" -> f"filler text number zq$i%04d about topic ${i % 7}%d")
+    ingestAll(big, docs)
+
+    big.stats.fold(err => fail(err.message), _.vectorCount) shouldBe 200L
+    val results = big.query("zq0137", topK = Some(3)).fold(err => fail(err.message), identity)
+    docIdOf(results.head.id) shouldBe "doc-137"
+    results.head.keywordScore should be(defined)
+  }
+
+  // -----------------------------------------------------------------------
+  // 10. Fusion extremes
+  // -----------------------------------------------------------------------
+
+  "RAGPipelineIntegration weighted fusion extremes" should
+    "rank like the vector channel when the keyword weight is zero" in {
+      val query      = "functional programming language"
+      val vectorOnly = buildRAG(RAGConfig.default.vectorOnly)
+      ingestAll(vectorOnly)
+      val expected =
+        vectorOnly.query(query, topK = Some(5)).fold(err => fail(err.message), _.map(r => docIdOf(r.id)))
+
+      val weighted = buildRAG(RAGConfig.default.withWeightedScore(vectorWeight = 1.0, keywordWeight = 0.0))
+      ingestAll(weighted)
+      val got = weighted.query(query, topK = Some(5)).fold(err => fail(err.message), identity)
+      got.map(r => docIdOf(r.id)) shouldBe expected
+    }
+
+  it should "rank like the keyword channel when the vector weight is zero" in {
+    val query       = "functional programming language"
+    val keywordOnly = buildRAG(RAGConfig.default.keywordOnly)
+    ingestAll(keywordOnly)
+    val keywordHits =
+      keywordOnly.query(query, topK = Some(5)).fold(err => fail(err.message), identity)
+
+    val weighted = buildRAG(RAGConfig.default.withWeightedScore(vectorWeight = 0.0, keywordWeight = 1.0))
+    ingestAll(weighted)
+    val got = weighted.query(query, topK = Some(5)).fold(err => fail(err.message), identity)
+
+    // Min-max normalisation: the best keyword hit scores 1.0, and a chunk only the vector
+    // channel found contributes nothing, so it scores 0.0. (Which of several tied chunks comes
+    // next is not specified, so only the top and the zero floor are pinned.)
+    docIdOf(got.head.id) shouldBe docIdOf(keywordHits.head.id)
+    got.head.score shouldBe 1.0 +- 1e-9
+    val keywordIds = keywordHits.map(_.id).toSet
+    got.filterNot(r => keywordIds.contains(r.id)).foreach(_.score shouldBe 0.0)
+  }
+
+  // -----------------------------------------------------------------------
+  // 11. Reranker degradation
+  // -----------------------------------------------------------------------
+
+  private def rerankDocs = Seq(
+    "doc-scala"   -> "Scala is a functional programming language.",
+    "doc-java"    -> "Java is an object oriented programming language.",
+    "doc-haskell" -> "Haskell is a purely functional language."
+  )
+
+  "RAGPipelineIntegration reranking degradation" should
+    "keep the retrieval order with neutral scores when the judge answers with garbage" in {
+      val rag = buildRAG(RAGConfig.default.withLLMReranking, llm = Some(new MockLLMClients.SimpleMock("I cannot help")))
+      ingestAll(rag, rerankDocs)
+
+      val results = rag.query("functional programming", topK = Some(3)).fold(err => fail(err.message), identity)
+      results.map(r => docIdOf(r.id)) shouldBe Seq("doc-scala", "doc-haskell", "doc-java")
+      results.map(_.score) shouldBe Seq(0.5, 0.5, 0.5)
+    }
+
+  it should "pad missing scores with the neutral score when the judge returns too few" in {
+    val rag = buildRAG(RAGConfig.default.withLLMReranking, llm = Some(new MockLLMClients.SimpleMock("[0.9]")))
+    ingestAll(rag, rerankDocs)
+
+    val results = rag.query("functional programming", topK = Some(3)).fold(err => fail(err.message), identity)
+    results.map(_.score) shouldBe Seq(0.9, 0.5, 0.5)
+    docIdOf(results.head.id) shouldBe "doc-scala"
+  }
+
+  it should "truncate to topK after reranking, keeping the best-scored chunks" in {
+    val rag = buildRAG(
+      RAGConfig.default.withLLMReranking,
+      llm = Some(new MockLLMClients.SimpleMock("[0.1, 0.2, 0.9]"))
+    )
+    ingestAll(rag, rerankDocs)
+
+    val results = rag.query("functional programming", topK = Some(1)).fold(err => fail(err.message), identity)
+    results should have size 1
+    // Retrieval order is scala, haskell, java; the judge scores the third candidate (java) highest.
+    docIdOf(results.head.id) shouldBe "doc-java"
+    results.head.score shouldBe 0.9
+  }
+
+  // -----------------------------------------------------------------------
+  // 12. Ingestion edge cases
+  // -----------------------------------------------------------------------
+
+  "RAGPipelineIntegration ingestion edge cases" should "index nothing for an empty document" in {
+    val rag = buildRAG()
+    rag.ingestText("", "doc-empty") shouldBe Right(0)
+    rag.documentCount shouldBe 0
+    rag.stats.fold(err => fail(err.message), _.vectorCount) shouldBe 0L
+  }
+
+  it should "not fail on a whitespace-only document" in {
+    val rag = buildRAG()
+    rag.ingestText("   \n\t  ", "doc-blank").isRight shouldBe true
+    rag.query("anything here").isRight shouldBe true
+  }
+
+  it should "skip empty documents in a loader batch without failing the batch" in {
+    val rag = buildRAG()
+    val stats = rag
+      .ingest(TextLoader.fromPairs("doc-empty" -> "", "doc-real" -> "Real content about Scala."))
+      .fold(err => fail(err.message), identity)
+    stats.failed shouldBe 0
+    rag.stats.fold(err => fail(err.message), _.vectorCount) shouldBe 1L
+  }
+
+  it should "carry user metadata and the docId/chunkIndex bookkeeping onto results" in {
+    val rag = buildRAG()
+    rag
+      .ingestText("Scala has case classes.", "doc-meta", Map("author" -> "ada"))
+      .fold(err => fail(err.message), identity)
+
+    val hit = rag.query("case classes").fold(err => fail(err.message), _.head)
+    (hit.metadata should contain).allOf("author" -> "ada", "docId" -> "doc-meta", "chunkIndex" -> "0")
+  }
+
+  it should "chunk contiguously: reassembling the chunks, minus the overlap, gives back the document" in {
+    val chunking = ChunkingConfig(targetSize = 100, maxSize = 150, overlap = 25, minChunkSize = 10)
+    val rag      = buildRAG(RAGConfig.default.withChunking(ChunkerFactory.Strategy.Simple, chunking))
+
+    val text = (1 to 80).map(i => f"w$i%03d").mkString(" ")
+    rag.ingestText(text, "doc-seq").fold(err => fail(err.message), identity)
+
+    val chunks = rag
+      .query("w001", topK = Some(100))
+      .fold(err => fail(err.message), identity)
+      .sortBy(_.metadata("chunkIndex").toInt)
+    chunks.map(_.metadata("chunkIndex").toInt) shouldBe chunks.indices
+
+    chunks.head.content shouldBe text.take(100)
+    val rebuilt = chunks.tail.foldLeft(chunks.head.content) { (acc, c) =>
+      // Each chunk begins `overlap` characters before the end of the previous one. (The final
+      // window can be shorter than the overlap, in which case it lies wholly inside the
+      // previous chunk - ChunkingUtilsSpec pins that behaviour - and adds nothing.)
+      if (c.content.length >= chunking.overlap)
+        c.content.take(chunking.overlap) shouldBe acc.takeRight(chunking.overlap)
+      else acc should endWith(c.content)
+      acc + c.content.drop(chunking.overlap)
+    }
+    rebuilt shouldBe text
+  }
+
+  it should "produce exactly one chunk for a document of exactly targetSize and two for one more" in {
+    val chunking = ChunkingConfig(targetSize = 50, maxSize = 80, overlap = 0, minChunkSize = 5)
+    val cfg      = RAGConfig.default.withChunking(ChunkerFactory.Strategy.Simple, chunking)
+
+    buildRAG(cfg).ingestText("a" * 50, "doc-exact") shouldBe Right(1)
+    buildRAG(cfg).ingestText("a" * 51, "doc-over") shouldBe Right(2)
+    buildRAG(cfg).ingestText("a" * 100, "doc-double") shouldBe Right(2)
+  }
+
+  // -----------------------------------------------------------------------
+  // 13. Deletion and lifecycle
+  // -----------------------------------------------------------------------
+
+  "RAGPipelineIntegration lifecycle" should "remove a document from both channels when it is deleted" in {
+    val rag = buildRAG()
+    ingestAll(rag)
+
+    rag.deleteDocument("doc-haskell").isRight shouldBe true
+
+    rag.stats.fold(err => fail(err.message), _.vectorCount) shouldBe 4L
+    val hybrid =
+      rag.query("purely functional lazy evaluation", topK = Some(10)).fold(err => fail(err.message), identity)
+    hybrid.map(r => docIdOf(r.id)) should not contain "doc-haskell"
+    hybrid should have size 4
+
+    val keywordOnly = buildRAG(RAGConfig.default.keywordOnly)
+    ingestAll(keywordOnly)
+    keywordOnly.deleteDocument("doc-haskell").isRight shouldBe true
+    val kw = keywordOnly.query("purely functional lazy evaluation").fold(err => fail(err.message), identity)
+    kw.map(r => docIdOf(r.id)) should not contain "doc-haskell"
+  }
+
+  it should "empty both channels on clear and reset the counters" in {
+    val rag = buildRAG()
+    ingestAll(rag)
+    rag.clear().isRight shouldBe true
+
+    rag.documentCount shouldBe 0
+    rag.chunkCount shouldBe 0
+    rag.stats.fold(err => fail(err.message), _.vectorCount) shouldBe 0L
+    rag.query("functional programming language", topK = Some(5)).fold(err => fail(err.message), identity) shouldBe empty
+
+    val keywordOnly = buildRAG(RAGConfig.default.keywordOnly)
+    ingestAll(keywordOnly)
+    keywordOnly.clear().isRight shouldBe true
+    keywordOnly.query("functional programming language").fold(err => fail(err.message), identity) shouldBe empty
+  }
+
+  // -----------------------------------------------------------------------
+  // 14. Failure propagation
+  // -----------------------------------------------------------------------
+
+  "RAGPipelineIntegration failures" should "surface an embedding failure on ingest and index nothing" in {
+    val client = new EmbeddingClient(new MockEmbeddingProviders.FailingMock("provider down"))
+    val rag    = RAG.buildWithClient(RAGConfig.default, client).fold(err => fail(err.message), identity)
+
+    val result = rag.ingestText("Some content about Scala.", "doc-x")
+    result.left.value shouldBe a[EmbeddingError]
+    result.left.value.message should include("provider down")
+    rag.documentCount shouldBe 0
+    rag.stats.fold(err => fail(err.message), _.vectorCount) shouldBe 0L
+  }
+
+  it should "surface an embedding failure on query" in {
+    val client = new EmbeddingClient(new MockEmbeddingProviders.FailingMock("provider down"))
+    val rag    = RAG.buildWithClient(RAGConfig.default, client).fold(err => fail(err.message), identity)
+    rag.query("anything").left.value shouldBe a[EmbeddingError]
+  }
+
+  it should "reject queryWithAnswer when no LLM is configured" in {
+    val rag = buildRAG()
+    ingestAll(rag)
+    rag.queryWithAnswer("What is Scala?").left.value shouldBe a[ConfigurationError]
+  }
+
+  it should "reject an LLM-reranking config when no LLM is configured" in {
+    val client = new EmbeddingClient(new MockEmbeddingProviders.BagOfWordsMock())
+    RAG.buildWithClient(RAGConfig.default.withLLMReranking, client).left.value shouldBe a[ConfigurationError]
+  }
+
+  it should "still answer, with no contexts, when nothing is indexed" in {
+    val llm    = new MockLLMClients.SimpleMock("I do not know.")
+    val rag    = buildRAG(llm = Some(llm))
+    val answer = rag.queryWithAnswer("Who created Scala?").fold(err => fail(err.message), identity)
+    answer.contexts shouldBe empty
+    answer.answer shouldBe "I do not know."
+    llm.lastConversation.value.messages.map(_.content).mkString should include("Who created Scala?")
+  }
+
+  it should "not fail on a query whose terms the embedder cannot represent" in {
+    val rag = buildRAG()
+    ingestAll(rag)
+    // Every token is shorter than three characters, so BagOfWordsMock yields the zero vector.
+    val results = rag.query("a to be", topK = Some(3)).fold(err => fail(err.message), identity)
+    results.foreach(_.score.isNaN shouldBe false)
+  }
 }
