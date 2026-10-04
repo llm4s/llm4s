@@ -1,7 +1,7 @@
 package org.llm4s.kotlin
 
 import io.mockk.mockk
-import org.llm4s.java.LlmException
+import org.llm4s.javaapi.LlmException
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull

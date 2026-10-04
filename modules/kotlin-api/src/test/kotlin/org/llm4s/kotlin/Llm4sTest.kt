@@ -3,10 +3,10 @@ package org.llm4s.kotlin
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import org.llm4s.java.JAgent
-import org.llm4s.java.JLlmClient
-import org.llm4s.java.LlmException
-import org.llm4s.java.LlmResult
+import org.llm4s.javaapi.JAgent
+import org.llm4s.javaapi.JLlmClient
+import org.llm4s.javaapi.LlmException
+import org.llm4s.javaapi.LlmResult
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test

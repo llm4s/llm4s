@@ -4,9 +4,9 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.llm4s.agent.AgentState
-import org.llm4s.java.JAgent
-import org.llm4s.java.LlmException
-import org.llm4s.java.LlmResult
+import org.llm4s.javaapi.JAgent
+import org.llm4s.javaapi.LlmException
+import org.llm4s.javaapi.LlmResult
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

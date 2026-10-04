@@ -8,9 +8,9 @@ import io.mockk.verify
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
-import org.llm4s.java.JLlmClient
-import org.llm4s.java.LlmException
-import org.llm4s.java.LlmResult
+import org.llm4s.javaapi.JLlmClient
+import org.llm4s.javaapi.LlmException
+import org.llm4s.javaapi.LlmResult
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

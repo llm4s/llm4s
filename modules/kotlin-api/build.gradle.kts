@@ -23,7 +23,7 @@ tasks.withType<JavaCompile>().configureEach {
 }
 
 dependencies {
-    implementation("org.llm4s:java-api_3:0.1.0-SNAPSHOT")
+    implementation("org.llm4s:llm4s-java-api_3:0.1.0-SNAPSHOT")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
 
     testImplementation(kotlin("test"))

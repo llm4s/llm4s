@@ -3,13 +3,13 @@ package org.llm4s.kotlin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.llm4s.agent.AgentState
-import org.llm4s.java.JAgent
+import org.llm4s.javaapi.JAgent
 
 /**
  * Kotlin coroutine wrapper around [JAgent].
  *
  * Dispatches the blocking agent run on [Dispatchers.IO] and converts
- * Scala [org.llm4s.java.LlmResult] errors into [LLMException].
+ * Scala [org.llm4s.javaapi.LlmResult] errors into [LLMException].
  *
  * Obtain instances via [Llm4s.createAgent].
  *

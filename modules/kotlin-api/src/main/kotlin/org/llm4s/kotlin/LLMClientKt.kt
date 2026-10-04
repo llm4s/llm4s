@@ -4,7 +4,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import org.llm4s.java.JLlmClient
+import org.llm4s.javaapi.JLlmClient
 
 /**
  * Kotlin coroutine wrapper around [JLlmClient].

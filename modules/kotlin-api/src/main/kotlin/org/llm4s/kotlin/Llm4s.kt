@@ -1,9 +1,9 @@
 package org.llm4s.kotlin
 
-import org.llm4s.java.JAgent
-import org.llm4s.java.JLlmClient
-import org.llm4s.java.LlmResult
-import org.llm4s.java.Llm4s as JLlm4s
+import org.llm4s.javaapi.JAgent
+import org.llm4s.javaapi.JLlmClient
+import org.llm4s.javaapi.LlmResult
+import org.llm4s.javaapi.Llm4s as JLlm4s
 
 /**
  * Internal seam that allows tests to replace the calls to [JLlm4s] static

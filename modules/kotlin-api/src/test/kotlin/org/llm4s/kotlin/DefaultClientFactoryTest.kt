@@ -4,10 +4,10 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
-import org.llm4s.java.JAgent
-import org.llm4s.java.JLlmClient
-import org.llm4s.java.LlmResult
-import org.llm4s.java.Llm4s as JLlm4s
+import org.llm4s.javaapi.JAgent
+import org.llm4s.javaapi.JLlmClient
+import org.llm4s.javaapi.LlmResult
+import org.llm4s.javaapi.Llm4s as JLlm4s
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
@@ -15,7 +15,7 @@ import kotlin.test.assertEquals
 
 /**
  * Tests [DefaultClientFactory] by mocking the Scala static forwarders on
- * [org.llm4s.java.Llm4s] so no real LLM credentials are needed.
+ * [org.llm4s.javaapi.Llm4s] so no real LLM credentials are needed.
  */
 class DefaultClientFactoryTest {
 
