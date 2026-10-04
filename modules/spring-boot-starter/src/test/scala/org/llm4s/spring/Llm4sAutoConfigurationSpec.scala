@@ -43,7 +43,7 @@ class Llm4sAutoConfigurationSpec extends AnyFlatSpec with Matchers {
   "Llm4sAutoConfiguration" should "register LLM4STemplate when a JLlmClient bean is present" in {
     runner
       .withUserConfiguration(classOf[MockClientConfig])
-      .run(ctx => ctx.getBean(classOf[LLM4STemplate]) should not be null)
+      .run(ctx => ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 1)
   }
 
   it should "use the user-provided JLlmClient bean (ConditionalOnMissingBean)" in {
@@ -111,7 +111,7 @@ class Llm4sAutoConfigurationSpec extends AnyFlatSpec with Matchers {
   it should "register beans when llm4s.enabled is absent (matchIfMissing=true)" in {
     runner
       .withUserConfiguration(classOf[MockClientConfig])
-      .run(ctx => ctx.getBean(classOf[LLM4STemplate]) should not be null)
+      .run(ctx => ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 1)
   }
 
   it should "register JLlmClient from properties for ollama (no api-key required)" in {
@@ -123,7 +123,8 @@ class Llm4sAutoConfigurationSpec extends AnyFlatSpec with Matchers {
       )
       .run { ctx =>
         ctx.getStartupFailure shouldBe null
-        ctx.getBean(classOf[LLM4STemplate]) should not be null
+        ctx.getBeansOfType(classOf[JLlmClient]).size() shouldBe 1
+        ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 1
       }
   }
 
