@@ -155,6 +155,30 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     client.complete(conv).isFailure shouldBe true
   }
 
+  "The conversation sent to the provider" should "carry the built roles, contents and order unchanged" in {
+    val seen = new java.util.concurrent.atomic.AtomicReference[Conversation]()
+    val capturing = new LLMClient {
+      override def complete(conv: Conversation, opts: CompletionOptions): Result[Completion] = {
+        seen.set(conv)
+        Right(Completion("id", 0L, "ok", "m", AssistantMessage("ok")))
+      }
+      override def streamComplete(
+        conv: Conversation,
+        opts: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conv, opts)
+      override def getContextWindow(): Int     = 4096
+      override def getReserveCompletion(): Int = 512
+    }
+    val client = new JLlmClient(capturing)
+    client.complete(ConversationBuilder.create().system("S").user("U").assistant("A").user("U2").build()).get()
+    seen.get().messages.map(m => m.role.name -> m.content) shouldBe
+      Seq("system" -> "S", "user" -> "U", "assistant" -> "A", "user" -> "U2")
+
+    client.complete("plain").get()
+    seen.get().messages.map(m => m.role.name -> m.content) shouldBe Seq("user" -> "plain")
+  }
+
   // ── 5. Tool-calling: mock returns a tool call then a final response ──
 
   "JAgent.run with tool-calling mock" should "invoke the registered tool and reach Complete status" in {
@@ -165,6 +189,23 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val result = agent.run("Echo 'world'", tools)
     result.isSuccess shouldBe true
     result.get().status shouldBe AgentStatus.Complete
+  }
+
+  it should "actually execute the tool and feed its output back into the conversation" in {
+    val mock        = toolCallingClient("echo_tool", ujson.Obj("input" -> ujson.Str("world")), "Done!")
+    val agent       = Llm4s.createAgent(new JLlmClient(mock))
+    val result      = agent.run("Echo 'world'", echoToolRegistry())
+    val toolOutputs = result.get().conversation.messages.collect { case t: ToolMessage => t.content }
+    toolOutputs should have size 1
+    toolOutputs.head should include("echoed: world")
+  }
+
+  it should "not execute any tool when the single-argument run (empty registry) is used" in {
+    val mock        = toolCallingClient("echo_tool", ujson.Obj("input" -> ujson.Str("world")), "Done!")
+    val agent       = Llm4s.createAgent(new JLlmClient(mock))
+    val result      = agent.run("Echo 'world'")
+    val toolOutputs = result.get().conversation.messages.collect { case t: ToolMessage => t.content }
+    toolOutputs.exists(_.contains("echoed: world")) shouldBe false
   }
 
   it should "include the final assistant response in the conversation after tool use" in {
