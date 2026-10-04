@@ -50,6 +50,8 @@ class ExtractJsonSpec extends AnyFlatSpec with Matchers {
     ("opening brace inside string", """x {"a":"{{{"} y""", """{"a":"{{{"}"""),
     ("bracket inside string", """x {"a":"]["} y""", """{"a":"]["}"""),
     ("escaped quote inside string", """x {"a":"say \"hi\" }"} y""", """{"a":"say \"hi\" }"}"""),
+    ("escaped quote directly followed by closing brace in string", """x {"a":"\"}"} y""", """{"a":"\"}"}"""),
+    ("escaped quote then bracket in string", """x ["\"]", 1] y""", """["\"]", 1]"""),
     ("string ending in escaped backslash", """x {"a":"c:\\"} y""", """{"a":"c:\\"}"""),
     ("double escaped backslash before quote", """x {"a":"\\\\"} y""", """{"a":"\\\\"}"""),
     ("unicode escape", """x {"a":"\u007d\u0022"} y""", """{"a":"\u007d\u0022"}"""),
