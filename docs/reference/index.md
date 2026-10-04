@@ -27,6 +27,7 @@ Start here if you want to contribute to the project.
 - **[Release Process](release)** - How releases are created
 - **[Postgres Memory Store](postgres-memory-store)** - PostgreSQL-backed agent memory persistence
 - **[Troubleshooting / FAQ](troubleshooting)** - Common errors and solutions
+- **[Dependency Conflicts](dependency-conflicts)** - Gradle and sbt dependency conflicts and how to resolve them
 
 ## Roadmap & Planning
 

@@ -199,6 +199,7 @@ jobs:
           agentTools/test agentTools/coverageReport
           agent/test agent/coverageReport
           traceOpentelemetry/test traceOpentelemetry/coverageReport
+          gradleDemo/test gradleDemo/coverageReport
           coverageAggregate
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes
@@ -410,6 +411,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/trace-opentelemetry/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: trace-opentelemetry
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload gradle-demo coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/gradle-demo/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: gradle-demo
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

@@ -16,6 +16,7 @@ This section will guide you through:
 3. **[Configuration](configuration)** - Configure providers and API keys
 4. **[Next Steps](next-steps)** - Choose your learning path
 5. **[Ollama Quick Start](ollama-quickstart)** - Local LLM development (no API keys needed)
+6. **[Gradle Integration](gradle)** - Use LLM4S from a Gradle (Java or Kotlin) build
 
 ## Quick Start
 
