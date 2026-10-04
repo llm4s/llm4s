@@ -36,7 +36,7 @@ final class ElevenLabsTTSClient(config: TTSConfig, httpClient: Llm4sHttpClient =
         ujson.write(ujson.Obj("text" -> input, "model_id" -> config.model)),
         60.seconds
       )
-      audio <- CloudSpeechSupport.rawBody(name, response)
+      audio <- CloudSpeechSupport.rawBody(name, response, config.apiKey)
       _     <- Either.cond(audio.nonEmpty, (), TTSError.SynthesisFailed("ElevenLabs returned an empty audio body"))
     } yield GeneratedAudio(audio, ElevenLabsTTSClient.PcmMeta, options.outputFormat)
 }

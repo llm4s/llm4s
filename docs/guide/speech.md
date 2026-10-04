@@ -196,6 +196,9 @@ Behaviour worth knowing:
 - **Audio is raw PCM.** The TTS clients request raw 24 kHz, 16-bit, mono PCM from each service, so
   `GeneratedAudio.data` is headerless PCM with an accurate `AudioMeta`, the same shape Tacotron2
   produces. Write a playable file with `WavFileGenerator.saveAsWav(audio, path)`. MP3 is not offered.
+- **OpenAI TTS limits are checked locally**: text over 4096 characters and a `speakingRate` outside
+  0.25 to 4.0 are a `ValidationError` before any request is sent. Split long text yourself; the clients
+  do not chunk it.
 - **STT input is WAV.** `BytesAudio` and `StreamAudio` are treated as WAV data, as for Whisper and Vosk.
   Azure's REST endpoint recognises about 60 seconds of audio per request.
 - **Errors map like the chat providers**: HTTP 401/403 is `AuthenticationError`, 429 is

@@ -22,18 +22,26 @@ private[speech] object CloudSpeechSupport {
 
   private def success(status: Int): Boolean = status >= 200 && status < 300
 
-  /** The body of a 2xx response, or the mapped error. */
-  def textBody(provider: String, response: HttpResponse): Result[String] =
-    if (success(response.statusCode)) Right(response.body)
-    else HttpErrorMapper.mapHttpError(response.statusCode, response.body, provider, response.headers)
+  /**
+   * An error body with `secret` removed. `HttpErrorMapper` redacts well-known key shapes, but not
+   * every provider's (an Azure subscription key is 32 hex digits), so the configured key itself is
+   * scrubbed before the body can reach an error message.
+   */
+  private def scrub(body: String, secret: String): String =
+    if (secret.isEmpty) body else body.replace(secret, "[REDACTED]")
 
-  /** The bytes of a 2xx response, or the mapped error. */
-  def rawBody(provider: String, response: HttpRawResponse): Result[Array[Byte]] =
+  /** The body of a 2xx response, or the mapped error (with `secret`, the API key, scrubbed from it). */
+  def textBody(provider: String, response: HttpResponse, secret: String): Result[String] =
+    if (success(response.statusCode)) Right(response.body)
+    else HttpErrorMapper.mapHttpError(response.statusCode, scrub(response.body, secret), provider, response.headers)
+
+  /** The bytes of a 2xx response, or the mapped error (with `secret`, the API key, scrubbed from it). */
+  def rawBody(provider: String, response: HttpRawResponse, secret: String): Result[Array[Byte]] =
     if (success(response.statusCode)) Right(response.body)
     else
       HttpErrorMapper.mapHttpError(
         response.statusCode,
-        new String(response.body, StandardCharsets.UTF_8),
+        scrub(new String(response.body, StandardCharsets.UTF_8), secret),
         provider,
         response.headers
       )
@@ -49,14 +57,40 @@ private[speech] object CloudSpeechSupport {
       case AudioInput.StreamAudio(stream, _, _) => Try(stream.readAllBytes()).toResult
     }
 
-  /** The sample rate in a WAV header, when `bytes` starts with one. */
-  def wavSampleRate(bytes: Array[Byte]): Option[Int] =
-    if (bytes.length >= 28 && new String(bytes, 0, 4, StandardCharsets.US_ASCII) == "RIFF") {
-      Some(
-        (bytes(24) & 0xff) | ((bytes(25) & 0xff) << 8) | ((bytes(26) & 0xff) << 16) | ((bytes(27) & 0xff) << 24)
-      )
-    } else None
+  private def ascii(bytes: Array[Byte], offset: Int, length: Int): String =
+    new String(bytes, offset, length, StandardCharsets.US_ASCII)
 
-  /** The ISO 639-1 language of a BCP 47 tag: `en-US` is `en`. */
-  def primaryLanguage(tag: String): String = tag.takeWhile(_ != '-').toLowerCase(java.util.Locale.ROOT)
+  private def le32(bytes: Array[Byte], at: Int): Long =
+    (bytes(at) & 0xffL) | ((bytes(at + 1) & 0xffL) << 8) | ((bytes(at + 2) & 0xffL) << 16) | ((bytes(
+      at + 3
+    ) & 0xffL) << 24)
+
+  /**
+   * The sample rate in the `fmt ` chunk of a RIFF/WAVE file, when `bytes` is one.
+   *
+   * The chunks are walked, so a `LIST` or `fact` chunk before `fmt ` (and the pad byte after an odd-sized
+   * chunk) does not move the field being read. `None` for anything that is not a WAVE file with a
+   * complete `fmt ` chunk and a positive rate.
+   */
+  def wavSampleRate(bytes: Array[Byte]): Option[Int] = {
+    val FmtMinSize = 16
+    @scala.annotation.tailrec
+    def fromChunk(offset: Long): Option[Int] =
+      if (offset + 8 > bytes.length) None
+      else {
+        val at   = offset.toInt
+        val size = le32(bytes, at + 4)
+        if (ascii(bytes, at, 4) == "fmt ") {
+          if (size >= FmtMinSize && offset + 8 + FmtMinSize <= bytes.length)
+            Some(le32(bytes, at + 12)).filter(r => r > 0 && r <= Int.MaxValue).map(_.toInt)
+          else None
+        } else fromChunk(offset + 8 + size + (size & 1L))
+      }
+    if (bytes.length >= 12 && ascii(bytes, 0, 4) == "RIFF" && ascii(bytes, 8, 4) == "WAVE") fromChunk(12L)
+    else None
+  }
+
+  /** The ISO 639-1 language of a BCP 47 (`en-US`) or POSIX (`en_US`) tag: both are `en`. */
+  def primaryLanguage(tag: String): String =
+    tag.takeWhile(c => c != '-' && c != '_').toLowerCase(java.util.Locale.ROOT)
 }

@@ -1,5 +1,6 @@
 package org.llm4s.speech.tts.provider
 
+import org.llm4s.error.ValidationError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.speech.{ AudioMeta, CloudSpeechSupport, GeneratedAudio }
 import org.llm4s.speech.config.TTSConfig
@@ -29,7 +30,8 @@ final class OpenAITTSClient(config: TTSConfig, httpClient: Llm4sHttpClient = Llm
 
   override def synthesize(text: String, options: TTSOptions): Result[GeneratedAudio] =
     for {
-      input <- CloudSpeechSupport.requireText(text)
+      input <- CloudSpeechSupport.requireText(text).flatMap(OpenAITTSClient.requireWithinLimit)
+      _     <- OpenAITTSClient.requireSpeed(options.speakingRate)
       payload = ujson.Obj(
         "model"           -> config.model,
         "input"           -> input,
@@ -43,7 +45,7 @@ final class OpenAITTSClient(config: TTSConfig, httpClient: Llm4sHttpClient = Llm
         ujson.write(payload),
         60.seconds
       )
-      audio <- CloudSpeechSupport.rawBody(name, response)
+      audio <- CloudSpeechSupport.rawBody(name, response, config.apiKey)
       _     <- Either.cond(audio.nonEmpty, (), TTSError.SynthesisFailed("OpenAI TTS returned an empty audio body"))
     } yield GeneratedAudio(audio, OpenAITTSClient.PcmMeta, options.outputFormat)
 }
@@ -54,4 +56,23 @@ object OpenAITTSClient {
   val PcmMeta: AudioMeta = AudioMeta(sampleRate = 24000, numChannels = 1, bitDepth = 16)
 
   private[tts] val ResponseFormat = "pcm"
+
+  /** OpenAI's documented limit on `input`, in characters. */
+  private[tts] val MaxInputChars: Int = 4096
+
+  /** OpenAI's documented range for `speed`. */
+  private[tts] val MinSpeed: Double = 0.25
+  private[tts] val MaxSpeed: Double = 4.0
+
+  private def requireWithinLimit(text: String): Result[String] =
+    if (text.length > MaxInputChars)
+      Left(ValidationError("text", s"must be at most $MaxInputChars characters for OpenAI TTS, got ${text.length}"))
+    else Right(text)
+
+  private def requireSpeed(rate: Option[Double]): Result[Unit] =
+    rate match {
+      case Some(r) if !(r >= MinSpeed && r <= MaxSpeed) =>
+        Left(ValidationError("speakingRate", s"must be between $MinSpeed and $MaxSpeed for OpenAI TTS, got $r"))
+      case _ => Right(())
+    }
 }

@@ -42,7 +42,7 @@ final class AzureTTSClient(config: TTSConfig, httpClient: Llm4sHttpClient = Llm4
         AzureTTSClient.ssml(input, voice, options),
         60.seconds
       )
-      audio <- CloudSpeechSupport.rawBody(name, response)
+      audio <- CloudSpeechSupport.rawBody(name, response, config.apiKey)
       _     <- Either.cond(audio.nonEmpty, (), TTSError.SynthesisFailed("Azure TTS returned an empty audio body"))
     } yield GeneratedAudio(audio, AzureTTSClient.PcmMeta, options.outputFormat)
 }

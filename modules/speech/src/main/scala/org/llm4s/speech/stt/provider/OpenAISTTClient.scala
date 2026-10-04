@@ -65,7 +65,7 @@ final class OpenAISTTClient(config: STTConfig, httpClient: Llm4sHttpClient = Llm
         fields,
         120.seconds
       )
-      body          <- CloudSpeechSupport.textBody(name, response)
+      body          <- CloudSpeechSupport.textBody(name, response, config.apiKey)
       transcription <- OpenAISTTClient.parse(body, options)
     } yield transcription
   }

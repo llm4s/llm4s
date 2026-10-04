@@ -51,7 +51,7 @@ final class AzureSTTClient(config: STTConfig, httpClient: Llm4sHttpClient = Llm4
         audio,
         120.seconds
       )
-      body          <- CloudSpeechSupport.textBody(name, response)
+      body          <- CloudSpeechSupport.textBody(name, response, config.apiKey)
       transcription <- AzureSTTClient.parse(body, language)
     } yield transcription
 }
