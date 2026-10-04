@@ -62,6 +62,7 @@ object FusionStrategy {
     keywordWeight: Double = 0.5
   ) extends FusionStrategy {
     require(vectorWeight >= 0 && keywordWeight >= 0, "Weights must be non-negative")
+    require(vectorWeight + keywordWeight > 0, "At least one weight must be positive")
   }
 
   /**
