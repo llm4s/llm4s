@@ -220,4 +220,53 @@ class ToolArgumentValidatorSpec extends AnyFlatSpec with Matchers {
     }
       v.unsupported(s.toJsonSchema(strict)) shouldBe Vector.empty
   }
+
+  "a nullable enum" should "accept null, accept its values and refuse others" in {
+    val schema = NullableSchema(StringSchema("m").withEnum(Seq("a"))).toJsonSchema(true)
+    check(schema, ujson.Null) shouldBe Vector.empty
+    check(schema, ujson.Str("a")) shouldBe Vector.empty
+    check(schema, ujson.Str("b")) shouldBe Vector("""$: "b" is not one of ["a"]""")
+  }
+
+  "unsupported" should "flag unknown or malformed type declarations" in {
+    v.unsupported(obj("type" -> "date")) shouldBe Vector("$.type")
+    v.unsupported(obj("type" -> ujson.Arr())) shouldBe Vector("$.type")
+    v.unsupported(obj("type" -> ujson.Arr("string", 1))) shouldBe Vector("$.type")
+    v.unsupported(obj("type" -> ujson.Arr("string", "foo"))) shouldBe Vector("$.type")
+    v.unsupported(obj("type" -> 3)) shouldBe Vector("$.type")
+    v.unsupported(obj("properties" -> obj("a" -> obj("type" -> "wat")))) shouldBe Vector("$.properties.a.type")
+    v.unsupported(obj("type" -> ujson.Arr("string", "null"))) shouldBe Vector.empty
+  }
+
+  "numbers" should "render large whole values without exponent or fraction" in {
+    val schema = NumberSchema("n", maximum = Some(1e15)).toJsonSchema(true)
+    check(schema, ujson.Num(1e16)) shouldBe Vector("$: 10000000000000000 is above maximum 1000000000000000")
+  }
+
+  "the validator" should "never throw on malformed schemas or arguments" in {
+    val args: Seq[ujson.Value] =
+      Seq(ujson.Null, ujson.Bool(true), ujson.Num(1.5), ujson.Str("x"), ujson.Arr(1, "a"), obj("a" -> 1))
+    val schemas: Seq[ujson.Value] = Seq(
+      ujson.Null,
+      ujson.Str("x"),
+      obj(),
+      obj("type"      -> "object", "properties"  -> ujson.Arr()),
+      obj("type"      -> "object", "properties"  -> obj("a" -> 3)),
+      obj("required"  -> ujson.Arr(1, ujson.Null, "a")),
+      obj("required"  -> "a"),
+      obj("type"      -> ujson.Arr()),
+      obj("type"      -> ujson.Arr(1)),
+      obj("type"      -> 5),
+      obj("items"     -> 1, "minItems"           -> "x", "uniqueItems" -> 1),
+      obj("enum"      -> 1, "minimum"            -> "a", "multipleOf"  -> 0, "additionalProperties" -> obj()),
+      obj("minLength" -> ujson.Null, "maxLength" -> ujson.Arr())
+    )
+    for {
+      s <- schemas
+      a <- args
+    } {
+      noException should be thrownBy v.validate(s, a)
+      noException should be thrownBy v.unsupported(s)
+    }
+  }
 }

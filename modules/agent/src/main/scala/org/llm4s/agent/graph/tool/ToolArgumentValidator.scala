@@ -48,6 +48,9 @@ object ToolArgumentValidator {
     "uniqueItems"
   )
 
+  private val JsonTypes: Set[String] =
+    Set("string", "number", "integer", "boolean", "array", "object", "null")
+
   private val MultipleOfTolerance = 1e-9
 
   private object SubsetValidator extends ToolArgumentValidator {
@@ -66,6 +69,8 @@ object ToolArgumentValidator {
             if (!Supported.contains(key)) Vector(s"$path.$key")
             else
               key match {
+                case "type" =>
+                  if (validType(value)) Vector.empty else Vector(s"$path.type")
                 case "properties" =>
                   value match {
                     case ujson.Obj(props) =>
@@ -88,6 +93,17 @@ object ToolArgumentValidator {
         case _ => Vector(path)
       }
 
+    private def validType(t: ujson.Value): Boolean =
+      t match {
+        case ujson.Str(s) => JsonTypes.contains(s)
+        case ujson.Arr(a) =>
+          a.nonEmpty && a.forall {
+            case ujson.Str(s) => JsonTypes.contains(s)
+            case _            => false
+          }
+        case _ => false
+      }
+
     // ---- validation ----
 
     private def validateAt(schema: ujson.Value, value: ujson.Value, path: String): Vector[String] =
@@ -96,6 +112,7 @@ object ToolArgumentValidator {
           val types = fields.get("type").map(typeNames).getOrElse(Vector.empty)
           if (types.nonEmpty && !types.exists(matchesType(_, value)))
             Vector(s"$path: expected ${types.mkString(" or ")}, got ${actualType(value)}")
+          else if (value == ujson.Null && types.contains("null")) Vector.empty
           else
             enumViolations(fields, value, path) ++ (value match {
               case ujson.Str(s) => stringViolations(fields, s, path)
@@ -139,7 +156,7 @@ object ToolArgumentValidator {
     private def isWhole(n: Double): Boolean = !n.isNaN && !n.isInfinity && n == Math.rint(n)
 
     private def num(n: Double): String =
-      if (isWhole(n) && Math.abs(n) < 1e15) n.toLong.toString else n.toString
+      if (isWhole(n)) BigDecimal(n).toBigInt.toString else n.toString
 
     private def enumViolations(
       fields: scala.collection.Map[String, ujson.Value],
@@ -201,7 +218,8 @@ object ToolArgumentValidator {
       obj: scala.collection.Map[String, ujson.Value],
       path: String
     ): Vector[String] = {
-      val props = fields.get("properties").collect { case ujson.Obj(p) => p.toVector }.getOrElse(Vector.empty)
+      val props    = fields.get("properties").collect { case ujson.Obj(p) => p.toVector }.getOrElse(Vector.empty)
+      val declared = props.map(_._1).toSet
       val missing = fields
         .get("required")
         .collect { case ujson.Arr(r) => r.toVector.collect { case ujson.Str(name) => name } }
@@ -210,7 +228,7 @@ object ToolArgumentValidator {
         .map(name => s"$path.$name: required property missing")
       val extra =
         if (fields.get("additionalProperties").contains(ujson.Bool(false)))
-          obj.keys.toVector.filterNot(k => props.exists(_._1 == k)).map(k => s"$path.$k: property not allowed")
+          obj.keys.toVector.filterNot(declared.contains).map(k => s"$path.$k: property not allowed")
         else Vector.empty
       val nested = props.flatMap { case (name, sub) =>
         obj.get(name).toVector.flatMap(validateAt(sub, _, s"$path.$name"))
