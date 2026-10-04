@@ -585,7 +585,7 @@ Source breaks, with no shims (the CHANGELOG lists the same):
 
 Limits (owners in §4.9):
 
-- `AgentToolSpec` has no policy metadata (side-effect class, permissions, timeout, idempotency). #1279 adds it with the middleware that reads it; until then `ToolCallPolicy` is the stand-in, and a policy that throws fails the run.
+- `AgentToolSpec` has no policy metadata (side-effect class, permissions, timeout, idempotency). #1279 adds it with the middleware that reads it; until then `ToolCallPolicy` is the stand-in, and a policy that throws fails the run. #1279 added `ToolHints` (§4.8).
 - Tools reach the provider as core `ToolFunction`s, stand-ins for any tool not adapted from one, because core's clients take no other form.
 - `ToolContext` and `GraphError.ToolFailed` are plain case classes with `String` IDs, not yet in the pattern for growth-prone types (private constructor, `with*` setters).
 - The legacy `Agent` does not run `AgentTool`s; Stage 1 moves it onto `ToolLoop`.
@@ -655,8 +655,6 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 
 | Item | Left by | Owner |
 |---|---|---|
-| `AgentMiddleware` (ordered hooks, `wrapModelCall`/`wrapToolCall`) replacing `ToolCallPolicy` (today a policy that throws fails the run); guardrails as middleware | #1269, #1278 | [#1279](https://github.com/llm4s/llm4s/issues/1279) |
-| Policy metadata on `AgentToolSpec` (side-effect class, permissions, timeout, idempotency), added with the middleware that reads it | #1278 | [#1279](https://github.com/llm4s/llm4s/issues/1279) |
 | Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only) | #1279 | Stage 1, if the agent loop needs it |
 | `ToolHints` read from MCP tool annotations in `llm4s-mcp` | #1279 | Stage 1 |
 | Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6 | #1279 | Stage 3 |
@@ -680,6 +678,8 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 Closed by [#1277](https://github.com/llm4s/llm4s/issues/1277) (§4.6): public cancellation (`RunHandle.cancel`), a configurable superstep concurrency limit and deadlines in `RunBudgets` (left by #1270); `RunContext`/`RunConfig`/`RunBudgets` replacing `NodeContext` and `compile(maxSupersteps)`, and `RunHandle` with `await`/`status`/`cancel` (left by #1267 and #1268); the ordered per-subscriber dispatcher with bounded queues and lagging-subscriber disconnect (left by #1268); and the `synchronized` locks that pinned a virtual thread's carrier on JDK 21 (left by #1270).
 
 Closed by [#1278](https://github.com/llm4s/llm4s/issues/1278) (§4.7): `AgentTool[A]` and `AgentToolSpec[A]` replacing `LoopTool`, `ToolArgumentValidator` checking arguments before policy or side effects, and the split between tool-level and infrastructure failure (left by #1269); and the stop handshake, so a stop's interrupt cannot land on a run's closing commit (left by #1277).
+
+Closed by [#1279](https://github.com/llm4s/llm4s/issues/1279) (§4.8): `AgentMiddleware` with ordered wrap hooks replacing `ToolCallPolicy`, approval as middleware, guardrails as middleware (left by #1269 and #1278); and policy metadata on `AgentToolSpec` as MCP-style `ToolHints` (left by #1278).
 
 ### 4.10 Durable workflow API
 

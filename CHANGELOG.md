@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Agent middleware for graph runs** (Experimental, `org.llm4s.agent.graph.middleware`,
+  [#1279](https://github.com/llm4s/llm4s/issues/1279)): `AgentMiddleware` is one ordered extension
+  point with four pass-through hooks - `beforeAgent`, `afterAgent`, `wrapModelCall` and
+  `wrapToolCall` - plus the `tools` it contributes and the state keys (`writes`) its tool wrapper
+  may add. `MiddlewareStack.of` orders middleware by `runsBefore`/`runsAfter` (ties by
+  registration) and reports every invalid or duplicate id, unknown constraint, cycle and clashing
+  contributed tool in one `ValidationError`. `ToolLoop.build(..., middleware)` runs `beforeAgent` in
+  the `input` node, `wrapModelCall` around each model call, the `wrapToolCall` chain around each
+  tool after argument validation, and `afterAgent` in a new `finish` node. `ApprovalMiddleware`
+  asks for approval when a function of the call returns a reason (`unlessReadOnly` asks for every
+  tool not hinted read-only). `GuardrailMiddleware` runs input and output guardrails at the run
+  boundary, each in order on the previous one's returned value, with failures collected and
+  reported exactly as `CompositeGuardrail.all` reports them. Unlike the legacy `Agent`, which never
+  applied any guardrail's transformation on input or output (so `PIIMasker` masked nothing), the
+  middleware applies them; the legacy `Agent` and `GuardrailApplicator` are unchanged.
+  `AgentToolSpec.withHints(ToolHints(readOnly, destructive, idempotent, openWorld))` carries
+  MCP-style hints with conservative defaults. A cancellation thrown by a tool or a wrapper restores
+  the interrupt flag at once, and a wrapper that retries never runs a cancelled tool again. A hook
+  that throws fails the run with `GraphError.MiddlewareFailed(middleware, cause)`; a throwing
+  `ModelStep` is not reported as a middleware failure. Design:
+  `docs/design/typed-agent-runtime-design.md` §4.8.
 - **Agent tool contract for graph runs** (Experimental, `org.llm4s.agent.graph.tool`,
   [#1278](https://github.com/llm4s/llm4s/issues/1278)): `AgentTool[A]` and `AgentToolSpec[A]`
   replace the prototype `LoopTool`. A tool's arguments are typed by a core `SchemaDefinition[A]`
@@ -237,6 +258,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **Approval resumes through the middleware chain; `ToolLoop` gains a `finish` node**
+  ([#1279](https://github.com/llm4s/llm4s/issues/1279)): `Approve` now runs the whole middleware
+  chain again with `ToolContext.approved = true`, where it skipped the policy; a deny rule that
+  depends only on the call refuses the same calls as before. `ToolLoop` has a new `finish` node, so
+  checkpoints from an earlier build of the loop do not restore (pre-1.0; no migration is provided).
 - **An interrupted call returns `CancelledError`** ([#1270](https://github.com/llm4s/llm4s/issues/1270)):
   new `org.llm4s.error.CancelledError` (non-recoverable, never retried) with the interrupt flag kept.
   A `SocketTimeoutException` on its own stays a timeout. `Llm4sHttpClient` returns it where it
@@ -962,6 +988,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules inseparable; moving that one file broke the cycle.
 
 ### Removed
+- **`ToolCallPolicy` and `PolicyDecision`** ([#1279](https://github.com/llm4s/llm4s/issues/1279)),
+  with `ApprovalSource.Policy` and `ToolLoop.build`'s `policy` parameter, replaced by
+  `AgentMiddleware`. Migration: a policy becomes an `AgentMiddleware` overriding `wrapToolCall`:
+  `Allow` is `next()`, `Deny(reason)` is `ToolOutcome.Error(s"Denied: $reason")`,
+  `RequireApproval(reason)` is `if context.approved then next() else
+  ToolOutcome.NeedsApproval(reason)`, or use `ApprovalMiddleware`; `ApprovalSource.Policy` becomes
+  `ApprovalSource.Middleware(id)`.
 - **Pre-baseline API cleanup, pass 8** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
   `llm4s-agent`'s console UI (`ConsoleInterface`, `ConsoleConfig`, `MessageType`) is internal, so
   fansi and cats stay out of its public API; `AssistantAgent` loses its `consoleConfig` parameter
