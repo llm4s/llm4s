@@ -789,11 +789,12 @@ final class RAG private (
   }
 
   private def deleteDocumentChunks(docId: String): Result[Unit] =
-    // Delete from vector store - find all chunks with this docId
-    // For now, use pattern-based deletion (chunks are named "docId-chunk-N")
+    // Chunks are named "docId-chunk-N". The prefix must include the "-chunk-" separator: a bare
+    // docId prefix would also match every other document whose id merely starts with it
+    // ("doc-1" would take "doc-10" and "doc-1-appendix" with it).
     for {
-      _ <- hybridSearcher.vectorStore.deleteByPrefix(docId)
-      _ <- hybridSearcher.keywordIndex.deleteByPrefix(docId)
+      _ <- hybridSearcher.vectorStore.deleteByPrefix(s"$docId-chunk-")
+      _ <- hybridSearcher.keywordIndex.deleteByPrefix(s"$docId-chunk-")
     } yield ()
 
   // ========== Query API ==========

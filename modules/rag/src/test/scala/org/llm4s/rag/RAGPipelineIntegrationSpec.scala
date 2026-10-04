@@ -5,7 +5,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.model.EmbeddingError
 import org.llm4s.model.{ ModelRegistryService, ModelRegistryTestSupport }
-import org.llm4s.rag.loader.TextLoader
+import org.llm4s.rag.loader.{ Document, TextLoader }
 import org.llm4s.testutil.{ MockEmbeddingProviders, MockLLMClients }
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -608,6 +608,37 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
     keywordOnly.deleteDocument("doc-haskell").isRight shouldBe true
     val kw = keywordOnly.query("purely functional lazy evaluation").fold(err => fail(err.message), identity)
     kw.map(r => docIdOf(r.id)) should not contain "doc-haskell"
+  }
+
+  it should "leave other documents alone when deleting one whose id is a prefix of theirs" in {
+    val rag = buildRAG()
+    ingestAll(rag, Seq("doc-1" -> "Alpha content about aardvarks.", "doc-10" -> "Beta content about badgers."))
+
+    rag.deleteDocument("doc-1").isRight shouldBe true
+
+    val remaining = rag.query("content", topK = Some(10)).fold(err => fail(err.message), identity)
+    remaining.map(r => docIdOf(r.id)) shouldBe Seq("doc-10")
+    val keywordOnly = buildRAG(RAGConfig.default.keywordOnly)
+    ingestAll(keywordOnly, Seq("doc-1" -> "Alpha content about aardvarks.", "doc-10" -> "Beta content about badgers."))
+    keywordOnly.deleteDocument("doc-1").isRight shouldBe true
+    keywordOnly.query("content").fold(err => fail(err.message), _.map(r => docIdOf(r.id))) shouldBe Seq("doc-10")
+  }
+
+  it should "keep a prefix-sharing document when sync re-ingests a changed one" in {
+    val rag = buildRAG()
+    val v1 = TextLoader(
+      Seq(Document("doc-1", "Alpha content about aardvarks."), Document("doc-10", "Beta content about badgers."))
+    )
+    val v2 = TextLoader(
+      Seq(Document("doc-1", "Alpha updated about armadillos."), Document("doc-10", "Beta content about badgers."))
+    )
+    rag.sync(v1).fold(err => fail(err.message), identity)
+
+    val stats = rag.sync(v2).fold(err => fail(err.message), identity)
+    stats.updated shouldBe 1
+
+    val docs = rag.query("content updated", topK = Some(10)).fold(err => fail(err.message), _.map(r => docIdOf(r.id)))
+    docs should contain theSameElementsAs Seq("doc-1", "doc-10")
   }
 
   it should "empty both channels on clear and reset the counters" in {
