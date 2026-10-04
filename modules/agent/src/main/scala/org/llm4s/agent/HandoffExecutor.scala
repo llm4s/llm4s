@@ -58,7 +58,10 @@ private[agent] object HandoffExecutor {
     import HandoffResult._
 
     val duplicates = handoffs.groupBy(_.id).collect { case (id, hs) if hs.size > 1 => id }.toList.sorted
-    if (duplicates.nonEmpty)
+    val invalid    = handoffs.map(_.id).filterNot(Handoff.isValidId).distinct
+    if (invalid.nonEmpty)
+      Left(ValidationError("handoffs", s"invalid handoff ids: ${invalid.map(i => s"'$i'").mkString(", ")}"))
+    else if (duplicates.nonEmpty)
       Left(ValidationError("handoffs", s"duplicate handoff ids: ${duplicates.mkString(", ")}"))
     else
       handoffs.traverse { handoff =>
@@ -104,18 +107,18 @@ private[agent] object HandoffExecutor {
       .collectFirst { case msg: AssistantMessage if msg.toolCalls.nonEmpty => msg }
 
     latestAssistantMessage.flatMap { assistantMessage =>
-      val handoffToolCalls = assistantMessage.toolCalls.filter(tc => tc.name.startsWith(Handoff.ToolPrefix))
+      val matchedCall = for {
+        toolCall <- assistantMessage.toolCalls.find(tc => state.availableHandoffs.exists(_.handoffId == tc.name))
+        handoff  <- state.availableHandoffs.find(_.handoffId == toolCall.name)
+      } yield (toolCall, handoff)
 
-      handoffToolCalls.headOption.flatMap { toolCall =>
+      matchedCall.flatMap { case (toolCall, handoff) =>
         val reasonOpt = Try {
           val args = ujson.read(toolCall.arguments)
           args.obj.get("reason").map(_.str).getOrElse("No reason provided")
         }.toOption
 
-        val handoffId  = toolCall.name
-        val handoffOpt = state.availableHandoffs.find(_.handoffId == handoffId)
-
-        handoffOpt.flatMap(handoff => reasonOpt.map(reason => (handoff, reason)))
+        reasonOpt.map(reason => (handoff, reason))
       }
     }
   }

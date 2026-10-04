@@ -60,9 +60,11 @@ object Handoff {
 
   private val IdPattern = "[a-zA-Z0-9_-]{1,52}".r
 
+  private[agent] def isValidId(id: String): Boolean = IdPattern.matches(id)
+
   /** Validated construction: `Left(ValidationError)` unless `id` matches `[a-zA-Z0-9_-]{1,52}`. */
   def of(id: String, targetAgent: Agent, reason: Option[String] = None): Result[Handoff] =
-    if (IdPattern.matches(id)) Right(Handoff(id, targetAgent, reason))
+    if (isValidId(id)) Right(Handoff(id, targetAgent, reason))
     else Left(ValidationError("handoff.id", s"'$id' must match [a-zA-Z0-9_-]{1,52}"))
 
   /** Create a handoff with default settings; throws `IllegalArgumentException` for an invalid id. */

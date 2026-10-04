@@ -111,6 +111,18 @@ class HandoffExecutorSpec extends AnyFlatSpec with Matchers {
     HandoffExecutor.detectHandoff(state) shouldBe None
   }
 
+  it should "find a real handoff call even after a user tool whose name has the handoff prefix" in {
+    val h    = handoff(mkAgent(), id = "x")
+    val user = ToolCall(id = "tc-0", name = "handoff_to_other", arguments = ujson.Obj())
+    val real = ToolCall(id = "tc-1", name = h.handoffId, arguments = ujson.Obj("reason" -> ujson.Str("r")))
+    val state = AgentState(
+      conversation = Conversation(Seq(UserMessage("q"), AssistantMessage("", Seq(user, real)))),
+      tools = ToolRegistry.empty,
+      availableHandoffs = Seq(h)
+    )
+    HandoffExecutor.detectHandoff(state).map(_._1.id) shouldBe Some("x")
+  }
+
   it should "return Some((handoff, reason)) when a matching handoff tool call is found" in {
     val agent = mkAgent()
     val h     = handoff(agent)
@@ -242,6 +254,11 @@ class HandoffExecutorSpec extends AnyFlatSpec with Matchers {
     val result = HandoffExecutor.createHandoffTools(Seq(h1, h2))
     result shouldBe a[Right[_, _]]
     result.getOrElse(Seq.empty) should have size 2
+  }
+
+  it should "return ValidationError for a directly constructed handoff with an invalid id" in {
+    val result = HandoffExecutor.createHandoffTools(Seq(handoff(mkAgent(), id = "bad id")))
+    result.left.map(_.isInstanceOf[org.llm4s.error.ValidationError]) shouldBe Left(true)
   }
 
   it should "use the handoffId as the tool name" in {
