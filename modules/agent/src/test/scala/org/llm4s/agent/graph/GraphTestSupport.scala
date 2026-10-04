@@ -72,6 +72,14 @@ object GraphTestSupport {
     }
   }
 
+  /** A `RunContext` outside any runtime, for calling hooks and tools directly: events go nowhere. */
+  def testRunContext(config: RunConfig = RunConfig()): RunContext =
+    new RunContext(
+      config,
+      RunPosition(ThreadId("t"), config.runId, "", TaskId("task"), NodeId("node"), 0),
+      NodeEventSink.none
+    )
+
   def continue(command: Command): NodeResult = NodeResult.Continue(command)
 
   extension [O](admitted: org.llm4s.types.Result[RunHandle[O]])

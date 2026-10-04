@@ -51,6 +51,15 @@ object GraphError:
       with NonRecoverableError:
     override val message: String = s"Tool '$tool' (call $toolCallId) failed: ${cause.message}"
 
+  /**
+   * A middleware hook threw: the run fails, the checkpoint stays `Running`, and `recover` re-runs
+   * only that task. `middleware` is the middleware's id.
+   */
+  final case class MiddlewareFailed(middleware: String, cause: Throwable) extends GraphError with NonRecoverableError:
+    override val message: String = s"Middleware '$middleware' failed: ${describe(cause)}"
+
+  private def describe(thrown: Throwable): String = Option(thrown.getMessage).getOrElse(thrown.toString)
+
   /** The graph went quiescent while a join still waited for arrivals that nothing can produce. */
   final case class UnsatisfiedJoin(joinId: JoinId, missing: List[String]) extends GraphError with NonRecoverableError:
     override val message: String =
