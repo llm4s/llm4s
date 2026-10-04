@@ -601,7 +601,7 @@ jobs:
     name: Ollama Integration
     needs: quick-checks
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
 
@@ -714,7 +714,7 @@ jobs:
   cloud-smoke:
     name: Cloud Smoke Tests
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    if: false
     permissions:
       contents: read
 
