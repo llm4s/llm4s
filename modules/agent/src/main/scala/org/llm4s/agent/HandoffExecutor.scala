@@ -46,23 +46,27 @@ private[agent] object HandoffExecutor {
    * invoke to trigger delegation.
    *
    * The generated tool name is [[Handoff.handoffId]] so that
-   * [[detectHandoff]] can identify it by the `handoff_to_` prefix.
+   * [[detectHandoff]] can identify it by that exact id.
    * The tool schema exposes a single required `reason` field that the LLM must
    * populate, giving operators visibility into why the delegation occurred.
    *
    * @param handoffs Handoffs to convert; may be empty.
-   * @return `Right(tools)` — one tool per handoff — or `Left` if tool creation
-   *         fails (e.g. invalid schema definition).
+   * @return `Right(tools)` — one tool per handoff — or `Left(ValidationError)`
+   *         listing every invalid id and every duplicated id, each quoted, or
+   *         `Left` if tool creation fails.
    */
   def createHandoffTools(handoffs: Seq[Handoff]): Result[Seq[ToolFunction[_, _]]] = {
     import HandoffResult._
 
-    val duplicates = handoffs.groupBy(_.id).collect { case (id, hs) if hs.size > 1 => id }.toList.sorted
-    val invalid    = handoffs.map(_.id).filterNot(Handoff.isValidId).distinct
-    if (invalid.nonEmpty)
-      Left(ValidationError("handoffs", s"invalid handoff ids: ${invalid.map(i => s"'$i'").mkString(", ")}"))
-    else if (duplicates.nonEmpty)
-      Left(ValidationError("handoffs", s"duplicate handoff ids: ${duplicates.mkString(", ")}"))
+    def quoted(ids: Seq[String]): String = ids.map(id => s"'$id'").mkString(", ")
+    val ids                              = handoffs.map(_.id)
+    val invalid                          = ids.filterNot(Handoff.isValidId).distinct
+    val duplicates                       = ids.distinct.filter(id => ids.count(_ == id) > 1)
+    val problems = List(
+      Option.when(invalid.nonEmpty)(s"invalid handoff ids: ${quoted(invalid)}"),
+      Option.when(duplicates.nonEmpty)(s"duplicate handoff ids: ${quoted(duplicates)}")
+    ).flatten
+    if (problems.nonEmpty) Left(ValidationError("handoffs", problems))
     else
       handoffs.traverse { handoff =>
         val toolName = handoff.handoffId

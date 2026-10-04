@@ -259,6 +259,18 @@ class HandoffExecutorSpec extends AnyFlatSpec with Matchers {
   it should "return ValidationError for a directly constructed handoff with an invalid id" in {
     val result = HandoffExecutor.createHandoffTools(Seq(handoff(mkAgent(), id = "bad id")))
     result.left.map(_.isInstanceOf[org.llm4s.error.ValidationError]) shouldBe Left(true)
+    result.left.map(_.message) shouldBe Left("Invalid handoffs: invalid handoff ids: 'bad id'")
+  }
+
+  it should "report invalid and duplicate ids together, each quoted, in one error" in {
+    val agent = mkAgent()
+    val result = HandoffExecutor.createHandoffTools(
+      Seq(handoff(agent, id = "b"), handoff(agent, id = "bad id"), handoff(agent, id = "a"), handoff(agent, id = "b"))
+    )
+    result.left.map {
+      case v: org.llm4s.error.ValidationError => v.violations
+      case other                              => fail(s"expected a ValidationError, got $other")
+    } shouldBe Left(List("invalid handoff ids: 'bad id'", "duplicate handoff ids: 'b'"))
   }
 
   it should "use the handoffId as the tool name" in {
