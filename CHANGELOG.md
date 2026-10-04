@@ -97,6 +97,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request ([#1218](https://github.com/llm4s/llm4s/issues/1218)). Add the dependency
   `"org.llm4s" %% "llm4s-jina"`; nothing else changes. HTTP 401 and 429 map to `EmbeddingError`
   with codes `"401"` and `"429"`.
+- **Cloud speech smoke and integration tests** ([#1011](https://github.com/llm4s/llm4s/issues/1011)):
+  `@Cloud` suites in `modules/it` (`org.llm4s.speech`: OpenAI TTS, OpenAI STT, ElevenLabs, Azure
+  TTS/STT with a synthesise-then-transcribe round trip), run by `sbt testSmoke` and gated by
+  `Tier.require`. TTS output is asserted on structure (24 kHz 16-bit mono PCM, plausible duration,
+  audible samples, a WAV header that matches the data), STT on a known spoken phrase. The no-network
+  counterpart is `CloudSpeechProviderIntegrationSpec` in `llm4s-speech`.
 - **Cloud speech providers** (`llm4s-speech`, [#1010](https://github.com/llm4s/llm4s/issues/1010)):
   `OpenAITTSClient`, `ElevenLabsTTSClient`, `AzureTTSClient` (text-to-speech) and `OpenAISTTClient`,
   `AzureSTTClient` (speech-to-text), selected through `SpeechProviderSelector.tts()` / `.stt()` by a

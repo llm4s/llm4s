@@ -240,6 +240,12 @@ sbt "testOnly org.llm4s.speech.*"
 sbt test
 ```
 
+The cloud clients are covered without a network by `speech/test` (stubbed HTTP layer, including
+`CloudSpeechProviderIntegrationSpec`). Live-API smoke suites, one per provider, are in
+`modules/it` (`org.llm4s.speech.*`, tier `@Cloud`): run them with `sbt testSmoke` and
+`OPENAI_API_KEY`, `ELEVENLABS_API_KEY`, `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION` set. They make
+billed calls; a suite whose key is missing is skipped, or fails under `LLM4S_IT_STRICT=true`.
+
 ---
 
 ## See Also
