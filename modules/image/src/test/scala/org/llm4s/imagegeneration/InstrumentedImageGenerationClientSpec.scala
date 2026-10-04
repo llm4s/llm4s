@@ -220,6 +220,24 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
     metrics.imageGenerationCalls.head._4 shouldBe Outcome.Error(ErrorKind.ServiceError)
   }
 
+  test("maps each provider config to its metrics provider name") {
+    val cases: Seq[(ImageGenerationConfig, String)] = Seq(
+      StableDiffusionConfig()                  -> "stable-diffusion",
+      StabilityAIConfig(apiKey = "test-key")   -> "stability-ai",
+      HuggingFaceConfig(apiKey = "test-token") -> "huggingface",
+      testConfig                               -> "openai"
+    )
+
+    cases.foreach { case (config, expected) =>
+      val metrics = new RecordingMetricsCollector()
+      val client  = new InstrumentedImageGenerationClient(new StubDelegate(), config, metrics, new RecordingTracing())
+
+      client.generateImage("a red square", ImageGenerationOptions())
+
+      metrics.imageGenerationCalls.map(_._1) shouldBe Seq(expected)
+    }
+  }
+
   test("health delegates directly without recording metrics or trace events") {
     val metrics = new RecordingMetricsCollector()
     val tracing = new RecordingTracing()
