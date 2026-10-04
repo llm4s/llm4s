@@ -42,7 +42,7 @@ Session JSON is valuable for saving a conversation. Durable runtime checkpoints 
 
 ### 2.5 Make tool side effects governable
 
-Every tool call passes through runtime policy before execution. A new agent-level `AgentTool` contract receives validated arguments and `RunContext`, and returns typed state updates and routing, failure, or suspension. Completion occurs when no further graph work is scheduled. `AgentToolSpec` holds model-facing schema and runtime policy metadata (side-effect class, permissions, timeout, retry/idempotency behavior, and sensitivity). Existing core `ToolFunction` remains the simple stateless synchronous tool contract; an adapter makes it available to the agent runtime. Agent-specific state, suspension, and cancellation stay out of `llm4s-core`.
+Every tool call passes through runtime policy before execution. A new agent-level `AgentTool` contract receives validated arguments, `RunContext` and the thread state, and returns content with typed updates to the state keys it declares, an approval request, a typed question, or a tool-level or fatal failure; it does not route (§4.7). Completion occurs when no further graph work is scheduled. `AgentToolSpec` holds the model-facing schema; runtime policy metadata (side-effect class, permissions, timeout, retry/idempotency behavior, and sensitivity) is added with the middleware that reads it ([#1279](https://github.com/llm4s/llm4s/issues/1279)). Existing core `ToolFunction` remains the simple stateless synchronous tool contract; an adapter makes it available to the agent runtime. Agent-specific state, suspension, and cancellation stay out of `llm4s-core`.
 
 Approval is represented as an interrupt that persists the proposed action for review and resumes with an explicit approve, edit, or reject decision.
 
@@ -235,34 +235,43 @@ enum HookResult[+A]:
   ) extends HookResult[Nothing]
   case Fail(error: AgentError) extends HookResult[Nothing]
 
-final case class AgentToolSpec[A](
+/** Settled in §4.7. Policy metadata (side-effect class, permissions, timeout, idempotency) arrives with `AgentMiddleware` (#1279). */
+final case class AgentToolSpec[A] private (
   name: String,
   description: String,
   schema: SchemaDefinition[A],
-  argumentCodec: ReadWriter[A],
-  sideEffect: SideEffectClass,
-  policy: ToolPolicy,
-  validateDecoded: A => Result[Unit] = (_: A) => Right(())
-)
-
-trait ToolArgumentValidator {
-  def validate(schema: ujson.Value, arguments: ujson.Value): Result[Unit]
+  validateDecoded: A => Result[Unit],
+  question: Option[ToolQuestion[?, ?]]
+)(using val codec: ReadWriter[A]) {
+  def withValidation(check: A => Result[Unit]): AgentToolSpec[A]
+  def providerSchema: ujson.Value // schema.toJsonSchema(strict = true): sent to the provider and validated against
+  def toolDefinition: ujson.Value
 }
 
-final case class ToolContext(run: RunContext, toolCallId: ToolCallId)
+trait ToolArgumentValidator {
+  def unsupported(schema: ujson.Value): Vector[String]
+  def validate(schema: ujson.Value, arguments: ujson.Value): Vector[String]
+}
 
+final case class ToolContext(run: RunContext, toolCallId: String, state: ThreadState, approved: Boolean)
+
+/** No routes: routing belongs to the loop. A question is `Ask`, answered through `resume`. */
 enum ToolOutcome:
-  case Result(content: ToolContent, update: StateUpdate, routes: List[Route])
-  case Suspend[Q, Ans](
-    update: StateUpdate,
-    interrupt: TypedInterrupt[Q, Ans],
-    resumeAt: NodeRef[Resumed[Q, Ans]]
-  )
-  case Fail(error: AgentError)
+  case Success(content: ujson.Value, update: StateUpdate = StateUpdate.empty)
+  case Error(message: String)
+  case NeedsApproval(reason: String)
+  case Ask[Q](question: Q)
+  case Fatal(error: LLMError)
 
 trait AgentTool[A] {
   def spec: AgentToolSpec[A]
+  def writes: Set[StateKey[?, ?]] = Set.empty
   def execute(arguments: A, context: ToolContext): ToolOutcome
+}
+
+/** A tool that asks typed questions; only it can declare one. */
+abstract class Asking[A, Q: ReadWriter, Ans: ReadWriter](base: AgentToolSpec[A]) extends AgentTool[A] {
+  def resume(arguments: A, question: Q, answer: Ans, context: ToolContext): ToolOutcome
 }
 
 trait SandboxBackend {
@@ -455,7 +464,7 @@ Testkit decisions:
 - **`LocalProviderTestServer` can hold a request open.** It runs handlers on their own executor, and gives a test a way to release a held handler, so a request held open by a test cannot block the server's shutdown.
 - **`ProviderModuleChecks.assertCancelsWhenInterrupted` and `assertCancelsStreamWhenInterrupted`** run on a virtual thread against two servers: one that never answers, and one that streams a single chunk and then stalls. For `complete` and `streamComplete` it interrupts the call and asserts that the call returns promptly with `Left(CancelledError)` and the interrupt flag set. For the stream it also asserts that the first chunk was delivered. Every chat provider's module spec calls them: OpenAI, Anthropic, Gemini, Vertex AI, Ollama and OpenAI-compatible. Vertex AI's runs against a stalled mock HTTP client, because its base URL derives from `location`.
 
-Limits (owners in §4.7):
+Limits (owners in §4.8):
 
 - Embedding, reranker, MCP, image and speech clients are not yet brought under the cancellation contract. Some of them flatten every error into their own type.
 - On a platform thread, cancelling an SDK client call is not prompt.
@@ -487,11 +496,11 @@ Tool-loop decisions (`ToolLoop`):
 - **Edits are an operation.** `MessageUpdate.EditToolCall` changes one call's arguments in place, so two approvals that edit calls of the same message in one superstep both apply. Under the sketch's whole-message `Replace`, the second edit would overwrite the first.
 - **Message IDs.** Each `StoredMessage` ID is derived from the task that wrote it, so a re-run writes the same IDs. Core `Message` stays ID-free, as §4 requires.
 
-Limits (owners in §4.7):
+Limits (owners in §4.8):
 
-- `LoopTool`, `ToolCallPolicy`, and `ModelStep` are prototype contracts.
-- Tool-argument schema validation is not implemented.
-- A thrown tool is always a tool-level failure.
+- `LoopTool`, `ToolCallPolicy`, and `ModelStep` are prototype contracts. §4.7 replaced `LoopTool` with `AgentTool` and gave `ModelStep` the tool set.
+- Tool-argument schema validation is not implemented. §4.7 added it.
+- A thrown tool is always a tool-level failure. It still is; §4.7 added `ToolOutcome.Fatal` for a failure that must fail the run.
 
 ### 4.6 Stage 0 prototype: run API and event dispatch ([#1277](https://github.com/llm4s/llm4s/issues/1277))
 
@@ -528,7 +537,7 @@ Source breaks, with no shims (the CHANGELOG lists the same):
 - `subscribe` gains `capacity` (at least 2); listeners run on a dispatcher thread; a throwing listener is disconnected; `StreamEvent` gains `LiveGap` and `Disconnected`.
 - `GraphError` no longer extends `NonRecoverableError`: it extends `LLMError`, and each case is a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`; `GraphError.RunCrashed`, `TenantMismatch` and `DeadlineExceeded`, and `RunEvent.RunTimedOut`, are new cases, and `RunStarted`, `RunRecovered` and `RunResumed` gain `tenantId` and `principal`.
 
-Limits (owners in §4.7):
+Limits (owners in §4.8):
 
 - Cancelling a run does not reach child runs it started; nested runs and their cancellation are Stage 3.
 - `RunContext` has no dependency accessor, by decision (§9).
@@ -539,15 +548,59 @@ Limits (owners in §4.7):
 - The hub lock is runtime-wide, so a long catch-up during a replay-to-live switch briefly delays commits on other threads.
 - If the caller is interrupted after a slow store has saved the claim, admission returns `Left(CancelledError)` and the thread is left with a `Running` claim, which `recover` continues.
 
-### 4.7 Stage 0 carry-forward
+### 4.7 Stage 0 prototype: agent tool contract ([#1278](https://github.com/llm4s/llm4s/issues/1278))
+
+`org.llm4s.agent.graph.tool` replaces the prototype `LoopTool` with the tool contract that Stage 1's `Agent` and [#1279](https://github.com/llm4s/llm4s/issues/1279)'s middleware build on: `AgentTool[A]` and `AgentToolSpec[A]` with typed, schema-validated arguments, `ToolSet`, a pluggable `ToolArgumentValidator`, and an adapter for core's `ToolFunction`. `ToolLoop` runs them. The same issue gives legacy handoffs explicit, stable IDs and adds the stop handshake left by #1277. Nothing in `llm4s-core` changes. The specs are `ToolArgumentValidatorSpec`, `ToolSetSpec`, `AgentToolContractSpec`, `ToolLoopSpec`, `HandoffSpec`, `HandoffExecutorSpec` and `RunHandleSpec`.
+
+Contract decisions:
+
+- **A tool returns data and does not route.** `AgentTool[A]` has `spec`, `writes: Set[StateKey[?, ?]]` and `execute(args: A, context: ToolContext): ToolOutcome`. `ToolContext(run, toolCallId, state, approved)` gives it the run, its call, the thread state to read and whether the call was approved. `ToolOutcome` is `Success(content: ujson.Value, update)`, `Error(message)`, `NeedsApproval(reason)`, `Ask(question)` or `Fatal(error: LLMError)`. A `Success` update may touch only the keys in `writes`. The sketch's `routes` are gone: routing belongs to the loop. So is its `Suspend(update, interrupt, resumeAt)`, because a tool cannot hold a builder-issued `ResumeRef`. `AgentTool(spec, writes)((args, context) => ...)` builds a tool from a function.
+- **The schema sent is the schema checked.** `AgentToolSpec(name, description, schema: SchemaDefinition[A])` takes a `ReadWriter[A]`; `withValidation(A => Result[Unit])` adds a check on the decoded value. `providerSchema` is `schema.toJsonSchema(strict = true)`, rendered once. There is no non-strict option, because core's clients always send tools strict. `toolDefinition` embeds a copy of `providerSchema`, because clients rewrite schemas in place (removing `additionalProperties`, for example), which would otherwise loosen validation. A name must match `[a-zA-Z0-9_-]{1,64}`: `apply` throws `IllegalArgumentException` for an invalid one, as a programming error, and `ToolSet.of` checks again. The spec's constructor and `copy` are private.
+- **Unsupported constraints are refused when the tool set is built.** `ToolArgumentValidator` has `unsupported(schema)`, the JSON paths of keywords it cannot check, and `validate(schema, arguments)`, every violation prefixed with its JSON path (`$.limit: 500 is above maximum 100`). The default is in-house and supports exactly the subset core's `SchemaDefinition` emits: `type` (a string, or an array such as `["string", "null"]`), `description` (ignored), `properties`, `required`, `additionalProperties` (boolean), `enum`, `minLength`/`maxLength` (in code points), `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf` (relative tolerance 1e-9 for non-integers), `items`, `minItems`, `maxItems` and `uniqueItems`. `ToolSet.of(tools*)` and `ToolSet.of(validator, tools*)` report invalid names, duplicate names and every unsupported keyword in one `ValidationError`, so no call is checked against a schema whose constraints the validator would skip. `ToolArgumentValidatorSpec` generates a case for each `SchemaDefinition` constructor to prove that every keyword core emits is supported.
+- **Tools reach the provider through core.** Core's clients take tools only as `ToolFunction`s in `CompletionOptions.tools`. `ToolSet.toolFunctions` supplies them in order: a tool made by `AgentTool.fromToolFunction` is its original function; any other is a stand-in with the spec's name, description and schema whose handler refuses to run. `ModelStep.next(messages, tools: ToolSet)` receives the set, and `ModelStep.fromClient` sends `options.withTools(tools.toolFunctions)`.
+- **Questions are typed and declared.** Approval stays built in (`NeedsApproval`, `ToolContext.approved`, the loop's approval node). Any other question needs a tool that extends `AgentTool.Asking[A, Q, Ans](spec)`: it declares the question and answer codecs on its spec, asks with `ask(question: Q)`, and continues in `resume(args, question: Q, answer: Ans, context)`. Only `Asking` can declare a question, so tool authors never see `Any`.
+- **Two failure channels.** `Error` is a tool-level failure: the model sees it and the run continues. `Fatal` is an infrastructure failure: the run fails with `GraphError.ToolFailed(tool, toolCallId, cause)`, reported as `NodeFailed(call-tool, task, ToolFailed(...))` because the graph wraps every node failure. The checkpoint stays `Running`, and `recover` re-runs only that call. A tool that returns `Fatal` after a side effect must be idempotent; `(position.threadId, position.checkpointId, toolCallId)` is the key. A thrown non-fatal exception is an error result (`Tool 'x' failed: ...`), never a run failure.
+- **Core tools adapt.** `AgentTool.fromToolFunction(tool)` takes the function's name, description and schema, so its arguments are validated like any other tool's, and maps `Right(json)` to `Success(json)` and `Left(error)` to `Error(error.getFormattedMessage)`. It writes no state and never asks.
+
+Loop decisions (`ToolLoop`):
+
+- **Checks before policy, policy before side effects.** Each `call-tool` task looks its tool up, validates the raw arguments against `providerSchema`, decodes them, and runs `validateDecoded`. Any failure is one error result (`Invalid arguments for 'x': <violation>; <violation>`), and neither the policy nor the tool runs; so is a validator that throws. Then `ToolCallPolicy` decides, then the tool runs. A `Success` whose content is a JSON string records the string itself, not a quoted string.
+- **A question suspends at a node of the asking tool's own.** `Ask(q)` encodes `q` with the declared codec and suspends with `ToolQuestionRequest(assistantMessageId, call, question, approved)` at `ask/<tool name>`, one resume node per asking tool. `ToolLoop.questions` reads the pending questions, and `ToolLoop.answer(id, answer)` encodes an answer of the tool's type, to merge with `answers` into one resume map. The resume node decodes the answer, decodes the stored arguments again without re-validating them, and calls `resume` with the `approved` the call asked with, so an approved call is not asked for approval again. Its outcome is handled as `execute`'s is, so a tool may ask again. An answer that does not decode is that call's error result rather than a refused resume, because the graph-level answer type is JSON. `NeedsApproval` from `resume` is an error result too: approving runs `execute` again and would lose the answer.
+- **A tool bug fails the run, not the call.** An update to a key outside the tool's `writes`, an `Ask` from a tool that declares no question, and an `Ask` whose question does not encode with the declared codec each fail the run with `ToolFailed`, whose cause is a `ValidationError` naming the problem. The `call-tool`, approval and `ask/<name>` nodes declare the union of the tools' `writes`, and each call is checked against its own tool's. `ToolLoop.build` refuses a tool that declares `ToolLoop.results` or `Messages.key`: the loop alone writes those, which is how every call gets exactly one result.
+- **Edited arguments are checked again.** `ApprovalDecision.Edit(arguments)` amends the assistant message as in §4.5, then the edited arguments are validated, decoded and checked by `validateDecoded` again, and the policy decides once more. Only `Deny` refuses an edit: `RequireApproval` counts as satisfied, because the reviewer has just approved these arguments. `Approve` repeats the argument checks but not the policy.
+- **Cancellation follows §4.4.** An `InterruptedException` is not caught. A thrown exception that `CancelledError.fromThrowable` classifies as a cancellation (an interrupt wrapped in another exception, or any throw while the flag is set) and `Fatal(CancelledError)` restore the interrupt flag, so the task is cancelled: it records nothing, and the run ends `Cancelled` rather than failing with `ToolFailed`.
+
+Handoffs and the stop handshake:
+
+- **Handoff IDs are explicit and stable.** `Handoff(id, targetAgent, transferReason, preserveContext, transferSystemMessage)`; `Handoff.to(id, agent)` and `Handoff.to(id, agent, reason)` throw `IllegalArgumentException` for an invalid id, and `Handoff.of(id, agent, reason): Result[Handoff]` returns `Left(ValidationError)`. An id matches `[a-zA-Z0-9_-]{1,52}`, so the tool name `handoff_to_<id>` fits the 64-character limit. It replaces `handoff_to_agent_<hash code>`, which differed between processes, so a stored conversation could not be matched to its handoff after a restart. `HandoffExecutor.createHandoffTools` refuses invalid and duplicate ids, so an agent run given either fails before any model call, and `detectHandoff` matches a tool call only by the exact `handoffId` of an available handoff.
+- **No stop's interrupt lands on a closing commit.** #1277's `DefaultRunHandle.stop` recorded its cause and then interrupted, in two steps. A run that saw the cause in between could clear its interrupt flag to close and then take the interrupt on its `RunCancelled` or exit commit, misreporting the outcome. The handle and the run now share a `StopSignal`: the cause, a lock and an `acknowledged` flag. `stop` records the cause by compare-and-set, then interrupts, holding the lock, only if the run has not acknowledged. The run acknowledges, holding the lock, before it clears its flag. `RunHandleSpec` forces the interleaving with a hook between the two steps of `stop`.
+
+Source breaks, with no shims (the CHANGELOG lists the same):
+
+- `toolloop.LoopTool` is removed: use `tool.AgentTool[A]` (`AgentTool(spec)((args, context) => ...)`), and `AgentTool.fromToolFunction` for `LoopTool.fromToolFunction`.
+- `toolloop.ToolOutcome` (`Completed`, `Failed`, `NeedsApproval`) is replaced by `tool.ToolOutcome` (`Success`, `Error`, `NeedsApproval`, `Ask`, `Fatal`).
+- `ToolLoop.build(..., tools: Seq[LoopTool], ...)` becomes `ToolLoop.build(..., tools: ToolSet, ...)`.
+- `ModelStep.next(messages)` becomes `next(messages, tools)`, and `ModelStep.fromClient` replaces `options.tools` with `tools.toolFunctions`.
+- `Handoff(agent, ...)` and `Handoff.to(agent, ...)` become `Handoff(id, agent, ...)` and `Handoff.to(id, agent, ...)`; `handoffId` is `handoff_to_<id>`.
+
+Limits (owners in §4.8):
+
+- `AgentToolSpec` has no policy metadata (side-effect class, permissions, timeout, idempotency). #1279 adds it with the middleware that reads it; until then `ToolCallPolicy` is the stand-in, and a policy that throws fails the run.
+- Tools reach the provider as core `ToolFunction`s, stand-ins for any tool not adapted from one, because core's clients take no other form.
+- `ToolContext` and `GraphError.ToolFailed` are plain case classes with `String` IDs, not yet in the pattern for growth-prone types (private constructor, `with*` setters).
+- The legacy `Agent` does not run `AgentTool`s; Stage 1 moves it onto `ToolLoop`.
+- The `Handoff` case-class constructor does not check its id; `Handoff.to`, `Handoff.of` and `createHandoffTools` do.
+
+### 4.8 Stage 0 carry-forward
 
 Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 
 | Item | Left by | Owner |
 |---|---|---|
-| `AgentTool[A]` + `AgentToolSpec[A]` replacing `LoopTool`; `ToolArgumentValidator` (schema validation before policy or side effects); infrastructure-fatal versus tool-level failure | #1269 | [#1278](https://github.com/llm4s/llm4s/issues/1278) |
-| `AgentMiddleware` (ordered hooks, `wrapModelCall`/`wrapToolCall`) replacing `ToolCallPolicy`; guardrails as middleware | #1269 | [#1279](https://github.com/llm4s/llm4s/issues/1279) |
-| `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop`; `ModelStep` streaming through live progress; `PlanRunner` rebuilt or removed; `AgentEvent` replaced | #1269 | Stage 1 |
+| `AgentMiddleware` (ordered hooks, `wrapModelCall`/`wrapToolCall`) replacing `ToolCallPolicy` (today a policy that throws fails the run); guardrails as middleware | #1269, #1278 | [#1279](https://github.com/llm4s/llm4s/issues/1279) |
+| Policy metadata on `AgentToolSpec` (side-effect class, permissions, timeout, idempotency), added with the middleware that reads it | #1278 | [#1279](https://github.com/llm4s/llm4s/issues/1279) |
+| `ToolContext` and `GraphError.ToolFailed` in the growth-prone type pattern (private constructor, `with*` setters), with typed IDs | #1278 | Stage 1 |
+| `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool`; `ModelStep` streaming through live progress; `PlanRunner` rebuilt or removed; `AgentEvent` replaced | #1269 | Stage 1 |
 | Per-node retry and cache policy (recovery currently retries a failed task once) | #1268 | Stage 1 |
 | Delete `CancellationToken` with the `PlanRunner` rebuild | #1270 | Stage 1 |
 | Embedding, reranker, MCP, image and speech clients under the `CancelledError` contract (today: chat clients and core only) | #1270 | Stage 1 |
@@ -559,13 +612,15 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 | Store-level change notification (or polling), so a subscription sees live commits made by another `GraphRuntime` or process sharing the checkpointer (today: live delivery only for commits through the subscribing runtime; others by resubscribing and replaying) | #1277 | Stage 2 |
 | Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction) | #1268 | Stage 2 |
 | Static `interruptBefore`/`interruptAfter` breakpoints | #1269 | Stage 2 |
-| `DefaultRunHandle.stop` does its CAS and `interrupt()` in two steps; `cancelled()` can clear the flag between them, so the interrupt may land on the closing `RunCancelled`/OnExit commit and misreport the outcome (`CheckpointWriteFailed`/`RunCrashed`; the result still completes and the checkpoint stays recoverable). Needs a stop handshake. | #1277 | [#1278](https://github.com/llm4s/llm4s/issues/1278) |
 | Known limits, not planned: a `Subscription` dropped without `cancel()` keeps a parked virtual thread; `cancel()` blocks while a listener ignores its interrupt; the hub lock is runtime-wide; `RunContext` has no dependency accessor (by decision) | #1277 | - |
+| Known limit, not planned: tools reach the provider as core `ToolFunction`s (`ToolSet.toolFunctions`), stand-ins for agent tools, because core's clients take no other form | #1278 | - |
 | Known limit, not planned: the structural fingerprint does not cover node input types; a changed input type is caught when a pending input fails to decode | #1267 | - |
 
 Closed by [#1277](https://github.com/llm4s/llm4s/issues/1277) (§4.6): public cancellation (`RunHandle.cancel`), a configurable superstep concurrency limit and deadlines in `RunBudgets` (left by #1270); `RunContext`/`RunConfig`/`RunBudgets` replacing `NodeContext` and `compile(maxSupersteps)`, and `RunHandle` with `await`/`status`/`cancel` (left by #1267 and #1268); the ordered per-subscriber dispatcher with bounded queues and lagging-subscriber disconnect (left by #1268); and the `synchronized` locks that pinned a virtual thread's carrier on JDK 21 (left by #1270).
 
-### 4.8 Durable workflow API
+Closed by [#1278](https://github.com/llm4s/llm4s/issues/1278) (§4.7): `AgentTool[A]` and `AgentToolSpec[A]` replacing `LoopTool`, `ToolArgumentValidator` checking arguments before policy or side effects, and the split between tool-level and infrastructure failure (left by #1269); and the stop handshake, so a stop's interrupt cannot land on a run's closing commit (left by #1277).
+
+### 4.9 Durable workflow API
 
 Explore a Scala `Workflow[A]`/`Durable[A]` for-comprehension as a peer frontend to the graph DSL. It should compile to the same runtime/checkpoint kernel, not create a second durable engine. Durable boundaries must be explicit named steps with serializable inputs/outputs; arbitrary Scala closures are not replayable. The workflow API can express sequence, parallel composition, retry, timeout, and typed suspension in direct Scala style. Prototype after the superstep kernel exists, and adopt only if it substantially improves ordinary Scala ergonomics.
 
@@ -584,11 +639,11 @@ Explore a Scala `Workflow[A]`/`Durable[A]` for-comprehension as a peer frontend 
 
 ### 5.2 Agent tool contract
 
-The current core `ToolFunction` is stateless and synchronous. Keep that simple tool contract in core because agent state, routing, suspension, and run context should not become core concepts. The agent runtime introduces `AgentTool[A]` plus `AgentToolSpec[A]`: a core `SchemaDefinition[A]` supplies the advertised JSON schema and a `ReadWriter[A]` decodes the same typed argument, with no independent raw `ujson` schema field; effect and permission metadata; and an execution function that receives `RunContext` and returns typed updates/routing or suspension. Before decoding, policy, or execution, the runtime validates the raw JSON arguments against the exact schema sent to the provider using an agent-local `ToolArgumentValidator`; it then decodes with the typed `ReadWriter` and applies optional decoded-value validation. Unsupported schema constraints fail closed. This catches constraints such as numeric bounds, enum membership, required properties, and string length even when decoding to `A` would succeed. Built-in runtime tools such as `write_todos`, virtual filesystem operations, and `task` are agent tools; reusable no-state tools in `llm4s-agent-tools` continue implementing `ToolFunction` and are adapted into the agent registry. Keep the existing core tool/schema/tracing contracts as the planned stable 1.0 spine; this runtime design does not require agent-specific additions to core.
+The current core `ToolFunction` is stateless and synchronous. Keep that simple tool contract in core because agent state, routing, suspension, and run context should not become core concepts. The agent runtime introduces `AgentTool[A]` plus `AgentToolSpec[A]`: a core `SchemaDefinition[A]` supplies the advertised JSON schema and a `ReadWriter[A]` decodes the same typed argument, with no independent raw `ujson` schema field; and an execution function that receives `RunContext`, the thread state and whether the call is approved, and returns content with updates to the keys the tool declares, an approval request, a typed question, or a failure - never a route (§4.7). Effect and permission metadata come with `AgentMiddleware` ([#1279](https://github.com/llm4s/llm4s/issues/1279)). Before decoding, policy, or execution, the runtime validates the raw JSON arguments against the exact schema sent to the provider using an agent-local `ToolArgumentValidator`; it then decodes with the typed `ReadWriter` and applies optional decoded-value validation. Unsupported schema constraints fail closed: `ToolSet.of` refuses a keyword the validator cannot check, when the set is built rather than at call time. This catches constraints such as numeric bounds, enum membership, required properties, and string length even when decoding to `A` would succeed. Built-in runtime tools such as `write_todos`, virtual filesystem operations, and `task` are agent tools; reusable no-state tools in `llm4s-agent-tools` continue implementing `ToolFunction` and are adapted into the agent registry. Keep the existing core tool/schema/tracing contracts as the planned stable 1.0 spine; this runtime design does not require agent-specific additions to core.
 
 This keeps the stable tool API small while allowing a tool to access caller identity, scoped backends, cancellation, idempotency keys, and the graph's typed key registry. Do not put `AgentState`, graph commands, interrupt concepts, or the agent-local argument validator into `llm4s-core`.
 
-Tool implementations return content and state/routing effects, never `ToolMessage`s. For each model-issued call, the runtime writes exactly one provider-valid result message linked to its `ToolCallId`, then contributes that result to the batch barrier before the next model node can run. A successful outcome writes the returned content; a tool-level failure writes a structured error result, while an infrastructure-fatal failure may fail the run. A suspended call contributes no result until its continuation resolves. Approval executes the call, rejection/denial and unknown tools produce runtime-generated error results, and an edited approval first replaces the source assistant message containing the call (including its arguments) before execution. The runtime enforces uniqueness by source assistant message and call ID, so this invariant is not delegated to tool authors.
+Tool implementations return content and state effects, never `ToolMessage`s. For each model-issued call, the runtime writes exactly one provider-valid result message linked to its `ToolCallId`, then contributes that result to the batch barrier before the next model node can run. A successful outcome writes the returned content; a tool-level failure (`Error`, or a thrown exception) writes a structured error result, while an infrastructure failure (`Fatal`) fails the run with `GraphError.ToolFailed`, leaving it recoverable. A suspended call contributes no result until its continuation resolves. Approval executes the call, rejection/denial and unknown tools produce runtime-generated error results, and an edited approval first replaces the source assistant message containing the call (including its arguments) before execution. The runtime enforces uniqueness by source assistant message and call ID, so this invariant is not delegated to tool authors.
 
 ### 5.3 Durability and human review
 
@@ -712,6 +767,8 @@ The migration note should give direct replacements for existing state/event/Plan
 | Objective parity measure | **Accepted.** Port a Deep Agents-style research workflow and coding/workspace workflow as acceptance suites, and score the same capabilities across both. |
 | Run dependencies | **Accepted.** Node closures capture dependencies when the graph is built; per-tenant or per-thread resources come from captured resolvers keyed by `RunContext` identity (`position`, `config.tenantId`). No `RunDependencies` bag: it is a service locator, and a missing key is found only at run time. No context type parameter: it would spread through every graph, node and tool type. Rebinding after restore follows from data-only checkpoints and a freshly built graph (§4.6). |
 | Tenant identity | **Accepted.** The tenant is part of a thread's identity: recorded on every checkpoint, and a mismatch is refused at admission (`TenantMismatch`). The principal is recorded on run events, not checked (§4.6). |
+| Tool questions and routing | **Accepted.** A tool does not route. Approval stays built in (`NeedsApproval`, `ToolContext.approved`); any other question is declared by extending `AgentTool.Asking[A, Q, Ans]`, returned as `Ask(q)` and answered through `resume`, because a tool cannot hold a builder-issued `ResumeRef`. Tool-level failure (`Error`) and infrastructure failure (`Fatal`) are separate outcomes (§4.7). |
+| Handoff identity | **Accepted.** Handoff IDs are explicit, caller-chosen and validated (`Handoff.to(id, agent)`, tool `handoff_to_<id>`), so a stored conversation matches its handoff in another process (§4.7). |
 
 ## 10. Main risks and remaining prototypes
 

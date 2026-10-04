@@ -8,6 +8,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Agent tool contract for graph runs** (Experimental, `org.llm4s.agent.graph.tool`,
+  [#1278](https://github.com/llm4s/llm4s/issues/1278)): `AgentTool[A]` and `AgentToolSpec[A]`
+  replace the prototype `LoopTool`. A tool's arguments are typed by a core `SchemaDefinition[A]`
+  and a `ReadWriter[A]`; `ToolLoop` validates the raw arguments against the exact strict schema
+  sent to the provider, decodes them and runs the spec's optional `withValidation` check, and any
+  failure is an error result the model sees, before the policy or the tool runs. A tool receives a
+  `ToolContext` (run, call id, thread state, `approved`) and returns `ToolOutcome.Success(content,
+  update)` - the update limited to the keys it declares in `writes` - `Error`, `NeedsApproval`,
+  `Ask` or `Fatal`; it does not route. `ToolArgumentValidator.default` checks exactly the JSON
+  Schema subset core emits, and `ToolSet.of` refuses invalid or duplicate names and any schema
+  keyword the validator cannot check, in one `ValidationError`, when the set is built. A tool that
+  extends `AgentTool.Asking[A, Q, Ans]` asks typed questions: `Ask(q)` suspends the call at an
+  `ask/<tool>` resume node, `ToolLoop.questions` and `ToolLoop.answer` read and answer them, and
+  the tool continues in `resume`. `Fatal`, an update to an undeclared key and an undeclared or
+  mistyped question fail the run with `GraphError.ToolFailed` (inside `NodeFailed`), leaving it
+  recoverable; a thrown exception is an error result; a cancellation cancels the run. Edited
+  approval arguments are validated again, and only a policy `Deny` refuses them.
+  `AgentTool.fromToolFunction` adapts a core `ToolFunction`, and `ToolSet.toolFunctions` is what
+  `ModelStep.fromClient` sends as `CompletionOptions.tools`. Legacy handoffs (`org.llm4s.agent`)
+  have explicit, stable ids:
+  the tool for `Handoff.to("physics", agent)` is `handoff_to_physics`, invalid
+  (`[a-zA-Z0-9_-]{1,52}`) or duplicate ids fail a run before any model call, and `detectHandoff`
+  matches the exact id. A stop's interrupt can no longer land on a run's closing commit: the run
+  acknowledges its stop before clearing its interrupt flag, and `stop` interrupts only before
+  that. Migration: `LoopTool` -> `AgentTool[A]` (`AgentTool(spec)((args, context) => ...)`) and
+  `LoopTool.fromToolFunction` -> `AgentTool.fromToolFunction`; `toolloop.ToolOutcome`
+  (`Completed`, `Failed`, `NeedsApproval`) -> `tool.ToolOutcome` (`Success`, `Error`,
+  `NeedsApproval`, `Ask`, `Fatal`); `ToolLoop.build(..., tools: Seq[LoopTool], ...)` ->
+  `ToolLoop.build(..., tools: ToolSet, ...)`, which refuses a tool that declares the loop's results
+  or messages key; `ModelStep.next(messages)` -> `next(messages, tools)`, and
+  `ModelStep.fromClient` replaces `options.tools` with the tool set's; `Handoff(agent, ...)` /
+  `Handoff.to(agent, ...)` -> `Handoff(id, agent, ...)` / `Handoff.to(id, agent, ...)` (or
+  `Handoff.of(id, agent, reason)` for a `Result`), and `handoffId` is `handoff_to_<id>` rather
+  than `handoff_to_agent_<hash>`. Design: `docs/design/typed-agent-runtime-design.md` §4.7, with
+  the Stage 0 carry-forward in §4.8.
 - **Run API and event dispatch for graph runs** (Experimental, `org.llm4s.agent.graph`,
   [#1277](https://github.com/llm4s/llm4s/issues/1277)): `GraphRuntime.start`/`recover`/`resume`
   admit a run on the caller's thread and return `Result[RunHandle[O]]` once the thread is claimed;
@@ -50,7 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `Disconnected`; `GraphError` now extends `LLMError` rather than `NonRecoverableError` - every
   case is still a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`;
   new `GraphError` and `RunEvent` cases break exhaustive matches. Design:
-  `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.7.
+  `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
 - **Cancellation by interrupt for graph runs and providers** (Experimental, `org.llm4s.agent.graph`,
   [#1270](https://github.com/llm4s/llm4s/issues/1270)): each superstep runs in a bounded Ox scope on
   virtual threads (Ox is a new implementation dependency of `llm4s-agent`). Interrupting the thread
@@ -75,7 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime: one task per call; exactly one runtime-written result per call, including denial,
   rejection, unknown tools and failures; policy- and tool-raised approvals both resuming at one
   approval node; and edited approvals amending the source assistant message. Design:
-  `docs/design/typed-agent-runtime-design.md` §4.5, with the Stage 0 carry-forward in §4.7.
+  `docs/design/typed-agent-runtime-design.md` §4.5, with the Stage 0 carry-forward in §4.8.
 - **Durable graph runs: checkpoints and commit-gated event replay** (Experimental,
   `org.llm4s.agent.graph`, [#1268](https://github.com/llm4s/llm4s/issues/1268)):
   `GraphRuntime.start`/`recover`/`subscribe` over a `Checkpointer` SPI that owns each thread's latest

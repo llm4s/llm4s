@@ -88,20 +88,21 @@ A tool that asks questions extends `AgentTool.Asking[A, Q, Ans]`, which fixes th
 types and supplies the codecs to its spec:
 
 ```scala
-abstract class Asking[A, Q: ReadWriter, Ans: ReadWriter] extends AgentTool[A]:
+abstract class Asking[A, Q: ReadWriter, Ans: ReadWriter](base: AgentToolSpec[A]) extends AgentTool[A]:
+  final val spec: AgentToolSpec[A]   // base.withQuestion[Q, Ans]
   def resume(args: A, question: Q, answer: Ans, context: ToolContext): ToolOutcome
   protected final def ask(question: Q): ToolOutcome   // ToolOutcome.Ask(question)
   // implements resumeErased by casting through the declared codecs; spec.question is Some(ToolQuestion[Q, Ans])
 ```
 
-A plain `AgentTool` that returns `Ask` without declaring a question is a tool bug: the loop turns it
-into `Fatal(GraphError.ToolFailed(...))` ("tool 'x' asked a question it does not declare"). Tool
+A plain `AgentTool` that returns `Ask` without declaring a question is a tool bug: the loop fails the
+run with `GraphError.ToolFailed(...)` ("tool 'x' asked a question it does not declare"). Tool
 authors never see `Any`.
 
 ### ToolSet
 
 ```scala
-final class ToolSet private (val tools: Vector[AgentTool[?]], validator: ToolArgumentValidator):
+final class ToolSet private (val tools: Vector[AgentTool[?]], val validator: ToolArgumentValidator):
   def get(name: String): Option[AgentTool[?]]
   def definitions: Vector[ujson.Value]          // provider-facing tool definitions, in order
   def toolFunctions: Seq[ToolFunction[?, ?]]    // the bridge to CompletionOptions.tools, in order
@@ -117,7 +118,8 @@ any keyword in a tool's `providerSchema` that `validator.unsupported` reports.
 `toolFunctions` is what the loop passes as `CompletionOptions.tools`: a tool made by
 `AgentTool.fromToolFunction` is its original `ToolFunction`; any other is a stand-in with the spec's
 name, description and schema whose handler fails ("executed by ToolLoop, not directly"). Their
-`toOpenAITool(true)` equals `definitions`.
+`toOpenAITool(true)` equals `definitions`. `ModelStep.next(messages, tools: ToolSet)` receives the
+set, and `ModelStep.fromClient(client, options)` sends `options.withTools(tools.toolFunctions)`.
 
 ### ToolArgumentValidator
 
@@ -175,7 +177,8 @@ model sees; none runs a tool or fails the run.
      'x': ..."); the resume itself is not refused, since the graph-level answer type is JSON.
    - An `Ask` from a tool that declares no question, or whose question does not encode with the
      declared codec, → `Fatal(GraphError.ToolFailed(tool, callId, cause))`, where `cause` is a
-     `ValidationError` ("tool 'x' asked a question it does not declare").
+     `ValidationError` ("tool 'x' asked a question it does not declare", or "tool 'x' asked a question
+     of another type: ...").
    - `Fatal(error)`: the task fails with `GraphError.ToolFailed(tool, callId, error)`, which the run
      reports as `GraphError.NodeFailed(call-tool, task, ToolFailed(...))` (the graph wraps every node
      failure); the run fails with its checkpoint `Running`; `recover` re-runs only that call task. Tools that return `Fatal`
@@ -218,18 +221,20 @@ are validated like any other tool's; `execute` calls `tool.execute(arguments)`. 
   invalid id; `Handoff.of(id, agent, reason = None): Result[Handoff]` returns `Left(ValidationError)`.
   Valid: `[a-zA-Z0-9_-]{1,52}`, so `handoff_to_<id>` fits the 64-character tool-name limit.
 - `handoffId` is `s"handoff_to_$id"`. `handoffName` uses the reason, else `s"Handoff to $id"`.
-- An agent run given two handoffs with the same id fails with `ValidationError` before any model
-  call.
-- `AgentState` and `HandoffExecutor` keep matching on `handoffId`, now stable across processes.
+- `HandoffExecutor.createHandoffTools` refuses an invalid id (a `Handoff` built with `new` or `copy`
+  is not checked) or two handoffs with the same id with `ValidationError`, so an agent run given
+  either fails before any model call.
+- `AgentState` and `HandoffExecutor` keep matching on `handoffId`, now stable across processes;
+  `detectHandoff` matches a tool call only by the exact `handoffId` of an available handoff.
 
 ## Stop handshake (carried forward from #1277)
 
 `DefaultRunHandle.stop` records the cause and interrupts in two steps; `Run.cancelled()` can clear
-the flag between them, so the interrupt lands on the closing commit. Fix: a lock-guarded
-`acknowledged` flag on the handle. `stop` records the cause (CAS), then, holding the lock, interrupts
-only if `!acknowledged`. `cancelled()` takes the lock and sets `acknowledged` before it clears the
-interrupt flag. No interrupt can arrive after acknowledgement. The design doc §4.8 row (currently
-§4.7) closes.
+the flag between them, so the interrupt lands on the closing commit. Fix: the handle and
+the run share a `StopSignal` holding the stop cause, a lock and an `acknowledged` flag. `stop` records
+the cause (CAS), then, holding the lock, interrupts only if `!acknowledged`. `cancelled()` takes the
+lock and sets `acknowledged` before it clears the interrupt flag. No interrupt can arrive after
+acknowledgement. The design doc's carry-forward row (now §4.8) closes.
 
 ## Migration
 
@@ -238,8 +243,10 @@ interrupt flag. No interrupt can arrive after acknowledgement. The design doc §
 - `toolloop.ToolOutcome` (`Completed`, `Failed`, `NeedsApproval`) → `tool.ToolOutcome` (`Success`,
   `Error`, `NeedsApproval`, `Ask`, `Fatal`).
 - `ToolLoop.build(..., tools: Seq[LoopTool], ...)` → `ToolLoop.build(..., tools: ToolSet, ...)`.
+- `ModelStep.next(messages)` → `ModelStep.next(messages, tools)`; `ModelStep.fromClient` replaces
+  `options.tools` with `tools.toolFunctions`.
 - `Handoff(agent, ...)` / `Handoff.to(agent, ...)` → `Handoff(id, agent, ...)` /
-  `Handoff.to(id, agent, ...)`; `handoffId` is `handoff_to_<id>`.
+  `Handoff.to(id, agent, ...)`; `handoffId` is `handoff_to_<id>` (was `handoff_to_agent_<hash>`).
 
 ## Design doc changes (`docs/design/typed-agent-runtime-design.md`)
 

@@ -1,5 +1,66 @@
 # Migration Guide
 
+## Agent tool contract and handoff ids
+
+Not in a release yet ([#1278](https://github.com/llm4s/llm4s/issues/1278)). The graph tool loop
+runs `AgentTool`s, whose arguments are validated against the schema sent to the provider before
+the policy or the tool runs, and legacy handoffs take an explicit id. The graph runtime is
+Experimental, so these are source breaks with no shims. Design:
+`docs/design/typed-agent-runtime-design.md` §4.7.
+
+- **`LoopTool` is `AgentTool[A]`.** A tool now has an `AgentToolSpec[A]` - name, description and
+  a core `SchemaDefinition[A]`, with a `ReadWriter[A]` for the arguments - and receives them
+  decoded, with a `ToolContext` (run, call id, thread state, `approved`):
+
+  ```scala
+  // before
+  val search = LoopTool("search")((call, approved) => ToolOutcome.Completed(run(call.arguments)))
+
+  // after
+  final case class SearchArgs(query: String) derives ReadWriter
+  val schema = Schema.`object`[SearchArgs]("Search arguments").withRequiredField("query", Schema.string("Query"))
+  val spec   = AgentToolSpec[SearchArgs]("search", "Search the index", schema)
+  val search = AgentTool(spec)((args, context) => ToolOutcome.Success(ujson.Str(run(args.query))))
+  ```
+
+  `LoopTool.fromToolFunction(f)` becomes `AgentTool.fromToolFunction(f)`; its arguments are now
+  validated against the function's schema too.
+- **`toolloop.ToolOutcome` is `tool.ToolOutcome`.** `Completed(content: String)` becomes
+  `Success(content: ujson.Value, update)` (a `ujson.Str` is recorded as the string itself);
+  `Failed(message)` becomes `Error(message)`; `NeedsApproval` is unchanged. `Ask` and `Fatal` are
+  new: `Fatal(error)` fails the run with `GraphError.ToolFailed`, reported inside
+  `GraphError.NodeFailed`, and the run is recoverable. A thrown exception is still an error result.
+- **Approval now arrives in the context.** `LoopTool`'s `approved` parameter is
+  `context.approved`.
+- **State updates are declared.** A tool's `Success` update may touch only the keys in its
+  `writes`; anything else fails the run. `ToolLoop.build` refuses a tool that declares
+  `ToolLoop.results` or `Messages.key`.
+- **`ToolLoop.build` takes a `ToolSet`.** Build it with `ToolSet.of(tools*)`, which returns
+  `Left(ValidationError)` for an invalid name (`[a-zA-Z0-9_-]{1,64}`), a duplicate name, or a
+  schema keyword the validator cannot check. `AgentToolSpec.apply` throws
+  `IllegalArgumentException` for an invalid name.
+- **`ModelStep.next` takes the tool set.** `next(messages)` becomes `next(messages, tools)`, and
+  `ModelStep.fromClient(client, options)` replaces `options.tools` with `tools.toolFunctions`, so
+  pass the tools to `ToolLoop.build`, not in `CompletionOptions`.
+- **Invalid arguments never reach the tool.** Arguments that break the schema, fail to decode or
+  fail `withValidation` become the error result `Invalid arguments for '<tool>': ...`. Edited
+  approval arguments are checked again, and the policy can still deny them.
+- **Handoffs take an id.** `Handoff(agent, ...)` becomes `Handoff(id, agent, ...)`, and
+  `Handoff.to(agent)` / `Handoff.to(agent, reason)` become `Handoff.to(id, agent)` /
+  `Handoff.to(id, agent, reason)`, which throw `IllegalArgumentException` for an invalid id;
+  `Handoff.of(id, agent, reason)` returns a `Result`. An id matches `[a-zA-Z0-9_-]{1,52}` and is
+  unique within one run's handoffs; an agent run given an invalid or duplicate id fails with
+  `ValidationError` before any model call. The handoff tool is `handoff_to_<id>` rather than
+  `handoff_to_agent_<hash>`, so a conversation stored with the old name does not match a handoff.
+
+  ```scala
+  // before
+  agent.run(query, tools, handoffs = Seq(Handoff.to(physicsAgent, "Physics expertise required")))
+
+  // after
+  agent.run(query, tools, handoffs = Seq(Handoff.to("physics", physicsAgent, "Physics expertise required")))
+  ```
+
 ## Run API for graph runs
 
 Not in a release yet ([#1277](https://github.com/llm4s/llm4s/issues/1277)). `GraphRuntime.start`,
