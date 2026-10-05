@@ -1265,6 +1265,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and `GraphError.ToolFailed.tool` / `.toolCallId` are the new opaque `ToolCallId` and `ToolName` (`.value`
     for the string; `ToolCallId(call.id)` to make one), and `ToolCallRequest` gains `toolCallId` and `toolName`.
 
+- **Embedding, reranker, MCP, image and speech clients return `CancelledError` when interrupted**
+  ([#1331](https://github.com/llm4s/llm4s/issues/1331), slice 5 of [#1326](https://github.com/llm4s/llm4s/issues/1326);
+  design §4.12): until now only core and the chat clients did, and the rest flattened an interrupt into an error of
+  their own - an `EmbeddingError`, a `RerankError`, `UnknownError`, `Transport error: ...` - or, worse, reported a
+  cancelled call as a success. Now an interrupted call returns `Left(CancelledError)` with the thread's interrupt flag
+  still set, promptly, and never retried. Voyage, Jina, Ollama and OpenAI embeddings, `CohereReranker`, every image
+  generation and vision client, the MCP transports, client and registry, and Whisper and Tacotron2 follow the rule; the
+  five cloud speech clients already did (now pinned by a spec). Behaviour changes: `LLMReranker` no longer carries
+  on through the remaining batches, and returns `Right`, after a cancelled one (an ordinary batch failure still gets
+  neutral scores); `MCPClientImpl.getTools` still swallows other failures into an empty list but returns a
+  cancellation; `MCPToolRegistry` reports an interrupted MCP call as cancelled (never "no such tool" or a failed
+  tool) and a cancelled stdio startup stops the half-started server; Ollama embeddings stop at the first failed text;
+  Whisper and Tacotron2 stop the program they started when interrupted, where it used to be left running.
+  **Breaking, no shims:** `ImageGenerationError` is an `LLMError`, `ServiceError`'s second field is `statusCode`
+  (`code` is the derived `Option[String]`), and the image generation clients return `Either[LLMError, _]`, so a match
+  on their result needs a case for other errors; `MCPTransportImpl.sendRequest`, `sendNotification`,
+  `MCPClient.initialize` and `getTools` return `Result` instead of `Either[String, _]` (read the old string as
+  `error.message`; the messages are unchanged); the concrete embedding providers' `embed` returns
+  `Result[EmbeddingResponse]`. `llm4s-provider-testkit` gains `assertCallCancelsWhenInterrupted` and
+  `assertEmbeddingCancelsWhenInterrupted`.
+- **`ToolHints` are read from MCP tool annotations** ([#1331](https://github.com/llm4s/llm4s/issues/1331); design
+  §4.12): `llm4s-mcp` reads `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` and `title` from the
+  annotations a server attaches to a tool (`MCPToolAnnotations`, leniently: an unknown key or a hint of the wrong type
+  is ignored) and fills in the specification's defaults for the rest; `MCPClient.getToolHints` and
+  `MCPToolRegistry.toolHints(name)` return them, and `AgentTool.fromToolFunction(tool, hints)` attaches them.
+  **Breaking, no shim:** `ToolHints` moves from `org.llm4s.agent.graph.tool` in `llm4s-agent` to
+  `org.llm4s.toolapi.ToolHints` in `llm4s-core` (`@Experimental`), because `llm4s-mcp` cannot depend on the agent runtime.
+
 ### Removed
 - **`ToolCallPolicy` and `PolicyDecision`** ([#1279](https://github.com/llm4s/llm4s/issues/1279)),
   with `ApprovalSource.Policy` and `ToolLoop.build`'s `policy` parameter, replaced by
