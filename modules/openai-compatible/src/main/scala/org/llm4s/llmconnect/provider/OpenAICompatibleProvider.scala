@@ -5,6 +5,7 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAICompatibleConfigKeys, OpenAICompatibleModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.auth.TokenExchangeConfig
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
@@ -30,6 +31,17 @@ import java.util.Locale
  *
  * {{{
  * llm4s.providers {
+ *   databricks {
+ *     provider = "openai-compatible"
+ *     baseUrl  = "https://ws.cloud.databricks.com/serving-endpoints"
+ *     model    = "databricks-meta-llama-3-3-70b-instruct"
+ *     auth {   // workload identity: no apiKey
+ *       identityTokenFile = "/var/run/secrets/spiffe/svid.jwt"
+ *       tokenUrl          = "https://ws.cloud.databricks.com/oidc/v1/token"
+ *       clientId          = "<service principal UUID>"
+ *       scope             = "all-apis"
+ *     }
+ *   }
  *   groq-main {
  *     provider = "openai-compatible"
  *     baseUrl  = "https://api.groq.com/openai/v1"
@@ -65,6 +77,12 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
   /** The key giving the tokens held back for the reply; a field of `NamedProviderConfig` until #1133. */
   val ReserveCompletionKey: String = "reserveCompletion"
 
+  /** `auth` keys: the RFC 8693 token endpoint (required), and the optional exchange parameters. */
+  val TokenUrlKey: String = "tokenUrl"
+  val ClientIdKey: String = "clientId"
+  val ScopeKey: String    = "scope"
+  val AudienceKey: String = "audience"
+
   // `baseUrlEnv` makes a missing-baseUrl error show `baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}`,
   // the binding that reads the conventional variable. The generic provider has no vendor, so no
   // `llm4s.credentials` block binds its key either: a section sets its own `apiKey`, if any.
@@ -90,6 +108,19 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
           default = Some("true")
         )
       )
+    ).withAuthExtras(
+      Seq(
+        ProviderConfigKey.required(
+          TokenUrlKey,
+          "the RFC 8693 token endpoint, e.g. https://<workspace>/oidc/v1/token for Databricks"
+        ),
+        ProviderConfigKey.optional(
+          ClientIdKey,
+          "the client id sent with the exchange, e.g. a Databricks service principal's UUID"
+        ),
+        ProviderConfigKey.optional(ScopeKey, "the scope requested, e.g. all-apis for Databricks"),
+        ProviderConfigKey.optional(AudienceKey, "the RFC 8693 audience parameter, if the token endpoint needs one")
+      )
     )
 
   override val modelLister: Option[ProviderModelLister] = Some(OpenAICompatibleModelLister)
@@ -102,6 +133,7 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
       streamUsage       <- parseStreamUsage(providerName, section.extra(StreamUsageKey))
       contextWindow     <- parseCount(providerName, section, ContextWindowKey, min = 1, "a positive whole number")
       reserveCompletion <- parseCount(providerName, section, ReserveCompletionKey, min = 0, "a whole number, 0 or more")
+      tokenExchange     <- tokenExchangeOf(providerName, section)
       config <- OpenAICompatibleConfig.fromValues(
         model = section.model.asString,
         baseUrl = baseUrl,
@@ -109,9 +141,30 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
         contextWindow = contextWindow,
         reserveCompletion = reserveCompletion,
         headers = section.headers,
-        streamUsage = streamUsage
+        streamUsage = streamUsage,
+        tokenExchange = tokenExchange
       )
     yield config
+
+  /** The exchange a section's `auth` block describes, if it has one. */
+  private[llm4s] def tokenExchangeOf(
+    providerName: String,
+    section: NamedProviderConfig
+  ): Result[Option[TokenExchangeConfig]] =
+    section.auth match
+      case None => Right(None)
+      case Some(auth) =>
+        ProviderDescriptor.requireAuthExtra(providerName, auth, TokenUrlKey).map { tokenUrl =>
+          Some(
+            TokenExchangeConfig(
+              auth.identityToken,
+              tokenUrl,
+              auth.extra(ClientIdKey),
+              auth.extra(ScopeKey),
+              auth.extra(AudienceKey)
+            )
+          )
+        }
 
   // Extras arrive as strings, so a number written in HOCON arrives as its text. Range checks
   // between the two counts (the reserve must be less than the window) are `fromValues`'s.

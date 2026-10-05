@@ -247,11 +247,13 @@ private[llm4s] object NamedProviderSectionValidator:
     val claimed = spec.extras.flatMap(key => key.name +: key.deprecatedAliases).toSet
     val unknown = normalized.extras.keys.filterNot(claimed.contains).toSeq.sorted
     val unknownWarning = Option.when(unknown.nonEmpty) {
+      // `auth` is a built-in only for a provider that can use it.
+      val builtins = ProviderConfigSpec.BuiltinKeys.toSeq.filter(k => k != "auth" || spec.supportsAuth).sorted
       val accepted =
         if spec.extras.isEmpty then s"provider = $id declares no provider-specific keys"
         else s"provider = $id also accepts ${spec.extras.map(_.name).mkString(", ")}"
       s"$section has unknown key(s) ${unknown.mkString(", ")}, which are ignored. Besides the built-in fields " +
-        s"(${ProviderConfigSpec.BuiltinKeys.toSeq.sorted.mkString(", ")}), $accepted."
+        s"(${builtins.mkString(", ")}), $accepted."
     }
 
     ResolvedExtras(

@@ -64,7 +64,7 @@ class OpenRouterClient(
         displayName = "OpenRouter",
         model = config.model,
         baseUrl = config.baseUrl,
-        apiKey = Some(config.apiKey),
+        credential = OpenAICompatibleClient.Credential.Static(config.apiKey),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion
       ),

@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.auth.TokenExchangeConfig
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -34,6 +35,8 @@ import org.llm4s.util.Redaction
  *                          OpenAI (vLLM, Ollama's `/v1`) stream no usage without it; turn it
  *                          off for an endpoint that rejects the field. A named section sets it
  *                          with the `streamUsage` key.
+ * @param tokenExchange     workload-identity auth: the identity token is exchanged here for the bearer
+ *                          token, which replaces `apiKey`; never set together with `apiKey`.
  */
 @Stable
 final case class OpenAICompatibleConfig(
@@ -43,7 +46,8 @@ final case class OpenAICompatibleConfig(
   contextWindow: Int = OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW,
   reserveCompletion: Int = OpenAICompatibleConfig.DEFAULT_RESERVE_COMPLETION,
   headers: Map[String, String] = Map.empty,
-  streamUsage: Boolean = true
+  streamUsage: Boolean = true,
+  tokenExchange: Option[TokenExchangeConfig] = None
 ) extends ProviderConfig:
   override def providerId: ProviderId                           = ProviderId(OpenAICompatibleConfig.ProviderIdName)
   override def endpointUrl: Option[String]                      = Some(baseUrl)
@@ -51,7 +55,8 @@ final case class OpenAICompatibleConfig(
   override def toString: String =
     s"OpenAICompatibleConfig(model=$model, baseUrl=$baseUrl, apiKey=${Redaction.secretOpt(apiKey)}, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, " +
-      s"headers=${headers.keys.map(k => s"$k -> ***").mkString("{", ", ", "}")}, streamUsage=$streamUsage)"
+      s"headers=${headers.keys.map(k => s"$k -> ***").mkString("{", ", ", "}")}, streamUsage=$streamUsage, " +
+      s"tokenExchange=$tokenExchange)"
 
 object OpenAICompatibleConfig {
 
@@ -81,13 +86,22 @@ object OpenAICompatibleConfig {
     contextWindow: Option[Int] = None,
     reserveCompletion: Option[Int] = None,
     headers: Map[String, String] = Map.empty,
-    streamUsage: Boolean = true
+    streamUsage: Boolean = true,
+    tokenExchange: Option[TokenExchangeConfig] = None
   ): Result[OpenAICompatibleConfig] =
     val window  = contextWindow.getOrElse(DEFAULT_CONTEXT_WINDOW)
     val reserve = reserveCompletion.getOrElse(math.min(DEFAULT_RESERVE_COMPLETION, window / 4))
     for
       _ <- ProviderConfig.nonEmpty("OpenAI-compatible", "model", model)
       _ <- ProviderConfig.nonEmpty("OpenAI-compatible", "baseUrl", baseUrl)
+      _ <- Either.cond(
+        apiKey.forall(_.trim.isEmpty) || tokenExchange.isEmpty,
+        (),
+        ConfigurationError(
+          "OpenAI-compatible config sets both apiKey and tokenExchange; use one",
+          List("apiKey", "auth")
+        )
+      )
       _ <- Either.cond(
         window > 0,
         (),
@@ -108,6 +122,7 @@ object OpenAICompatibleConfig {
       contextWindow = window,
       reserveCompletion = reserve,
       headers = headers,
-      streamUsage = streamUsage
+      streamUsage = streamUsage,
+      tokenExchange = tokenExchange
     )
 }

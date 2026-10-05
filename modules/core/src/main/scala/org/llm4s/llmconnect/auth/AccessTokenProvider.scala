@@ -4,7 +4,9 @@ import org.llm4s.annotation.Experimental
 import org.llm4s.types.Result
 
 import java.time.{ Clock, Duration as JDuration, Instant }
+import java.util.concurrent.locks.ReentrantLock
 import scala.concurrent.duration.*
+import scala.util.Using
 
 /** A bearer token and when it stops being valid. The value is redacted in `toString`. */
 @Experimental
@@ -39,13 +41,19 @@ final class CachingAccessTokenProvider(
   final private case class Cached(token: AccessToken, refreshAt: Instant)
 
   @volatile private var cached: Option[Cached] = None
-  private val lock                             = new Object
+  // Not `synchronized`: the fetch is blocking I/O, and a monitor pins a virtual thread's carrier
+  // for its whole duration, which can starve the very I/O the holder waits on.
+  private val lock = new ReentrantLock()
+
+  private def locked[A](body: => A): A =
+    lock.lock()
+    Using.resource((() => lock.unlock()): AutoCloseable)(_ => body)
 
   def token(): Result[String] =
     fresh() match
       case Some(value) => Right(value)
       case None =>
-        lock.synchronized {
+        locked {
           fresh() match
             case Some(value) => Right(value)
             case None =>
@@ -56,7 +64,7 @@ final class CachingAccessTokenProvider(
         }
 
   def invalidate(rejected: String): Unit =
-    lock.synchronized { cached = cached.filterNot(_.token.value == rejected) }
+    locked { cached = cached.filterNot(_.token.value == rejected) }
 
   private def fresh(): Option[String] =
     cached.collect { case Cached(token, at) if clock.instant().isBefore(at) => token.value }

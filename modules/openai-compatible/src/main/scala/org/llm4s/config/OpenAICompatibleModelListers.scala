@@ -1,10 +1,11 @@
 package org.llm4s.config
 
 import org.llm4s.annotation.Stable
-import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, ProviderId }
+import org.llm4s.config.ProvidersConfigModel.{ ApiKey, BaseUrl, NamedProviderConfig, ProviderId }
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.auth.TokenExchange
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, MistralConfig, OpenAICompatibleConfig }
-import org.llm4s.llmconnect.provider.{ OpenRouterDialect, OpenRouterProvider }
+import org.llm4s.llmconnect.provider.{ OpenAICompatibleProvider, OpenRouterDialect, OpenRouterProvider }
 import org.llm4s.types.Result
 
 /**
@@ -83,7 +84,19 @@ object OpenAICompatibleModelLister extends ProviderModelLister:
     )
 
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
-    config.requireBaseUrl.flatMap { baseUrl =>
+    for
+      baseUrl <- config.requireBaseUrl
+      // A section with `auth` is exchanged once, and lists with the access token as its key.
+      withToken <- exchanged(config, httpClient)
       // Strip a trailing slash as `OpenAICompatibleConfig.fromValues` does for chat.
-      delegate.listModels(config.withBaseUrl(Some(BaseUrl(baseUrl.asUrl.stripSuffix("/")))), httpClient)
+      models <- delegate.listModels(withToken.withBaseUrl(Some(BaseUrl(baseUrl.asUrl.stripSuffix("/")))), httpClient)
+    yield models
+
+  private def exchanged(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[NamedProviderConfig] =
+    OpenAICompatibleProvider.tokenExchangeOf("model-lister", config).flatMap {
+      case None => Right(config)
+      case Some(exchange) =>
+        TokenExchange
+          .rfc8693(exchange, httpClient)()
+          .map(token => config.withAuth(None).withApiKey(Some(ApiKey(token.value))))
     }
