@@ -8,16 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **`@Stable` and `@Experimental`: the tier of a public type, in the code** ([#1281](https://github.com/llm4s/llm4s/issues/1281),
-  `org.llm4s.annotation` in `llm4s-core`): Java annotations with runtime retention, so an IDE, a tool or a
-  Java caller can read them. Every top-level public type of `llm4s-core`, `llm4s-openai`,
-  `llm4s-openai-compatible`, `llm4s-anthropic`, `llm4s-gemini` and `llm4s-ollama` is now `@Stable`
-  (268 types), except the Mistral and Cohere dialects of `llm4s-openai-compatible`, which 1.0 Scope does
-  not freeze and which are `@Experimental` (6). `sbt stabilityTierCheck`, a CI quick check, fails the build
-  for a new top-level public type of those modules with neither annotation or both. Adding the
-  annotations changes no behaviour and no binary signature. **`llm4s-agent` is not covered yet**: its tier
-  waits on the typed graph runtime ([#1266](https://github.com/llm4s/llm4s/issues/1266)). See
-  [docs/reference/api-stability.md](docs/reference/api-stability.md#tiers-in-the-code).
 - **Agent middleware for graph runs** (Experimental, `org.llm4s.agent.graph.middleware`,
   [#1279](https://github.com/llm4s/llm4s/issues/1279)): `AgentMiddleware` is one ordered extension
   point with four pass-through hooks - `beforeAgent`, `afterAgent`, `wrapModelCall` and
@@ -39,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that throws fails the run with `GraphError.MiddlewareFailed(middleware, cause)`; a throwing
   `ModelStep` is not reported as a middleware failure. Design:
   `docs/design/typed-agent-runtime-design.md` §4.8.
+- **`@Stable` and `@Experimental`: the tier of a public type, in the code** ([#1281](https://github.com/llm4s/llm4s/issues/1281),
+  `org.llm4s.annotation` in `llm4s-core`): Java annotations with runtime retention, so an IDE, a tool or a
+  Java caller can read them. Every top-level public type of `llm4s-core`, `llm4s-openai`,
+  `llm4s-openai-compatible`, `llm4s-anthropic`, `llm4s-gemini` and `llm4s-ollama` is now `@Stable`
+  (268 types), except the Mistral and Cohere dialects of `llm4s-openai-compatible`, which 1.0 Scope does
+  not freeze and which are `@Experimental` (6). `sbt stabilityTierCheck`, a CI quick check, fails the build
+  for a new top-level public type of those modules with neither annotation or both. Adding the
+  annotations changes no behaviour and no binary signature. **`llm4s-agent` is not covered yet**: its tier
+  waits on the typed graph runtime ([#1266](https://github.com/llm4s/llm4s/issues/1266)). See
+  [docs/reference/api-stability.md](docs/reference/api-stability.md#tiers-in-the-code).
 - **Agent tool contract for graph runs** (Experimental, `org.llm4s.agent.graph.tool`,
   [#1278](https://github.com/llm4s/llm4s/issues/1278)): `AgentTool[A]` and `AgentToolSpec[A]`
   replace the prototype `LoopTool`. A tool's arguments are typed by a core `SchemaDefinition[A]`
