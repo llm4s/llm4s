@@ -813,7 +813,7 @@ lazy val jina = (project in file("modules/providers/jina"))
 // bearer token - so it is a provider module of its own rather than a dialect in
 // `openai-compatible`. No dependency beyond core.
 
-lazy val watsonx = (project in file("modules/watsonx"))
+lazy val watsonx = (project in file("modules/providers/watsonx"))
   .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
   .settings(
     name := "llm4s-watsonx",

@@ -104,7 +104,7 @@ flags:
       - modules/providers/jina/src/main/scala
   watsonx:
     paths:
-      - modules/watsonx/src/main/scala
+      - modules/providers/watsonx/src/main/scala
     carryforward: true
   provider-testkit:
     paths:

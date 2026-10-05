@@ -378,7 +378,7 @@ jobs:
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: modules/watsonx/target/scala-3.7.1/scoverage-report/scoverage.xml
+          files: modules/providers/watsonx/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: watsonx
           slug: llm4s/llm4s
           fail_ci_if_error: false

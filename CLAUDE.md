@@ -100,7 +100,8 @@ llm4s/
 │   ├── providers/             # Community provider modules, one `llm4s-<name>` each (published)
 │   │   ├── voyage/            # Voyage AI embedding provider
 │   │   ├── bedrock/           # AWS Bedrock chat provider + AWS SDK bedrockruntime (Converse, ConverseStream)
-│   │   └── jina/              # Jina AI embedding provider (typed JinaTask)
+│   │   ├── jina/              # Jina AI embedding provider (typed JinaTask)
+│   │   └── watsonx/           # IBM watsonx.ai chat provider (Beta; IBM has deprecated the endpoints it uses)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)

@@ -105,7 +105,7 @@ map_file_to_project() {
     modules/openai-compatible/*)          echo "openaiCompatible" ;;
     modules/provider-testkit/*)           echo "providerTestkit" ;;
     modules/providers/bedrock/*)          echo "bedrock" ;;
-    modules/watsonx/*)                    echo "watsonx" ;;
+    modules/providers/watsonx/*)          echo "watsonx" ;;
     modules/providers/jina/*)             echo "jina" ;;
     modules/providers/voyage/*)           echo "voyage" ;;
     modules/gradle-demo/*)                echo "gradleDemo" ;;
