@@ -442,6 +442,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for a `scala-library` 3.x that does not exist. Bump the version in the guide, the reference files
   and `GradleSnippets.LLM4S_VERSION` when 0.5.0 publishes the split modules. No change to any
   published module.
+- **`JSONValidator` checks property types** ([#922](https://github.com/llm4s/llm4s/issues/922)).
+  A schema's `properties.<field>.type` is now enforced on the top-level fields the output
+  contains - `string`, `number`, `integer` (a number with no fractional part), `boolean`,
+  `object`, `array` and `null`, or a list such as `["string", "null"]` - and every mismatch is
+  reported, in the order the schema lists the properties: `Field 'name' has type 'number',
+  expected 'string'`. A field the output does not contain is not checked (list it under
+  `required`). Everything the validator cannot judge is still ignored - nested `properties`,
+  `items`, `enum`, and a `type` that is not one of those names - so no schema rejects output
+  for something it does not understand. **Behaviour change:** a schema that already declared
+  `properties` with a `type` was ignored on those fields until now, so output that passed may
+  now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
 - **Approval resumes through the middleware chain; `ToolLoop` gains a `finish` node**
