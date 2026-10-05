@@ -228,6 +228,7 @@ jobs:
           voyage/test voyage/coverageReport
           bedrock/test bedrock/coverageReport
           jina/test jina/coverageReport
+          cohere/test cohere/coverageReport
           watsonx/test watsonx/coverageReport
           providerTestkit/test providerTestkit/coverageReport
           observability/test observability/coverageReport
@@ -408,6 +409,12 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/jina/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: jina
+      - name: Upload cohere coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/cohere/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: cohere
       - name: Upload watsonx coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -960,6 +967,7 @@ jobs:
           # Keys for the smoke suites added with the new providers. With LLM4S_IT_STRICT=true each
           # one that is missing from the repository secrets makes its suite FAIL (not skip).
           # MistralSmokeSpec, ZaiSmokeSpec, JinaEmbeddingsSmokeSpec, StableDiffusionSmokeSpec.
+          # (CohereEmbeddingsSmokeSpec reads COHERE_API_KEY, set above for CohereSmokeSpec.)
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}

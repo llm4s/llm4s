@@ -102,6 +102,9 @@ flags:
   jina:
     paths:
       - modules/providers/jina/src/main/scala
+  cohere:
+    paths:
+      - modules/providers/cohere/src/main/scala
   watsonx:
     paths:
       - modules/providers/watsonx/src/main/scala

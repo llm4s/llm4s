@@ -101,6 +101,7 @@ llm4s/
 │   │   ├── voyage/            # Voyage AI embedding provider
 │   │   ├── bedrock/           # AWS Bedrock chat provider + AWS SDK bedrockruntime (Converse, ConverseStream)
 │   │   ├── jina/              # Jina AI embedding provider (typed JinaTask)
+│   │   ├── cohere/            # Cohere embedding provider, native /v2/embed (typed CohereInputType)
 │   │   └── watsonx/           # IBM watsonx.ai chat provider (Beta; IBM has deprecated the endpoints it uses)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
@@ -423,7 +424,7 @@ OPENAI_API_KEY=sk-...                # llm4s-openai (openai); also REQUESTY_API_
 ANTHROPIC_API_KEY=sk-ant-...         # llm4s-anthropic
 GOOGLE_API_KEY=...                   # llm4s-gemini (gemini); GEMINI_API_KEY when GOOGLE_API_KEY is unset
 DEEPSEEK_API_KEY=...                 # llm4s-openai-compatible; also ZAI_API_KEY, OPENROUTER_API_KEY, MISTRAL_API_KEY
-COHERE_API_KEY=...                   # llm4s-openai-compatible and llm4s-rag (Cohere chat + reranker)
+COHERE_API_KEY=...                   # llm4s-openai-compatible, llm4s-rag and llm4s-cohere (Cohere chat, reranker, embeddings)
 VOYAGE_API_KEY=pa-...                # llm4s-voyage
 
 # Embeddings (llm4s-core selects; each provider module binds its own block)

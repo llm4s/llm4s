@@ -438,6 +438,21 @@ The Jina AI embedding provider (`EMBEDDING_MODEL=jina/<model>`), with its
 `llm4s.embeddings.jina` config block and a typed `JinaTask` (`retrieval.query`,
 `retrieval.passage`, ...). A community provider module under `modules/providers/`; it brings no
 dependency beyond `llm4s-core`.
+
+### For Cohere embeddings
+
+{: .note }
+> Not yet published. `llm4s-cohere` exists in the build but ships in the next release.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-cohere" % llm4sVersion
+```
+
+The Cohere embedding provider (`EMBEDDING_MODEL=cohere/<model>`), on Cohere's native `/v2/embed`,
+with its `llm4s.embeddings.cohere` config block and a typed `CohereInputType` (`search_document`,
+`search_query`, ...). Cohere chat is a different module: `llm4s-openai-compatible`. A community
+provider module under `modules/providers/`; it brings no dependency beyond `llm4s-core`.
 ### For IBM watsonx.ai
 
 ```scala

@@ -172,6 +172,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request ([#1218](https://github.com/llm4s/llm4s/issues/1218)). Add the dependency
   `"org.llm4s" %% "llm4s-jina"`; nothing else changes. HTTP 401 and 429 map to `EmbeddingError`
   with codes `"401"` and `"429"`.
+- **`llm4s-cohere`: Cohere embedding provider** (`modules/providers/cohere`, rebuilt from #1068 as an
+  `EmbeddingProviderDescriptor`, so `llm4s-core` is untouched). `EMBEDDING_MODEL=cohere/embed-english-v3.0`
+  with `COHERE_API_KEY` (bound to `llm4s.credentials.cohere.apiKey`, the key `llm4s-openai-compatible`
+  and `llm4s-rag` already share), `COHERE_EMBEDDING_BASE_URL` (default `https://api.cohere.com`) and
+  `COHERE_EMBEDDING_MODEL`. It is a module of its own because Cohere's native `/v2/embed` (`texts`,
+  `input_type`, `embedding_types`, vectors keyed by type) is not OpenAI-compatible; Cohere chat stays a
+  dialect in `llm4s-openai-compatible`. The `input_type` is a typed setting, `CohereInputType`
+  (`SearchDocument`, `SearchQuery`, `Classification`, `Clustering`), passed as
+  `CohereEmbeddingProvider.fromConfig(config, inputType)`; the provider the registry builds uses
+  `SearchDocument` until an input-purpose parameter lands on the embedding request
+  ([#1218](https://github.com/llm4s/llm4s/issues/1218)). Texts go in requests of at most 96, Cohere's
+  limit, and the billed tokens are reported as usage. Add the dependency
+  `"org.llm4s" %% "llm4s-cohere"`; nothing else changes. HTTP 429 is a `RateLimitError` carrying
+  `Retry-After` when Cohere sends it in seconds; other failures are `EmbeddingError` with the status as
+  its code.
 - **Cloud speech smoke and integration tests** ([#1011](https://github.com/llm4s/llm4s/issues/1011)):
   `@Cloud` suites in `modules/it` (`org.llm4s.speech`: OpenAI TTS, OpenAI STT, ElevenLabs, Azure
   TTS/STT with a synthesise-then-transcribe round trip), run by `sbt testSmoke` and gated by

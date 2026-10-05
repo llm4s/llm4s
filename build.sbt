@@ -249,6 +249,7 @@ lazy val llm4s = (project in file("."))
     voyage,
     bedrock,
     jina,
+    cohere,
     watsonx,
     providerTestkit,
     llm4sEffect,
@@ -888,6 +889,30 @@ lazy val jina = (project in file("modules/providers/jina"))
     )
   )
 
+// Cohere embeddings: an embedding provider only, as an `EmbeddingProviderDescriptor` with a typed
+// `CohereInputType` setting. Cohere's native `/v2/embed` is not OpenAI-compatible (`texts`,
+// `input_type`, `embedding_types`, vectors keyed by type), so it is a module of its own and not a
+// dialect in `llm4s-openai-compatible`, where Cohere chat lives. No dependency beyond core.
+
+lazy val cohere = (project in file("modules/providers/cohere"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-cohere",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage cohere/test cohere/coverageReport`). Floor is
+    // the measured value rounded down to the nearest 5. Never lower it. The `@Cloud`
+    // `CohereEmbeddingsSmokeSpec` in `modules/it` is not counted here.
+    coverageFloor(100),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // `llm4s-watsonx` (#1019): IBM watsonx.ai. Not OpenAI-compatible - its text-generation API takes
 // a flattened `input` string and authenticates by exchanging an IBM Cloud API key for an IAM
 // bearer token - so it is a provider module of its own rather than a dialect in
@@ -1094,6 +1119,7 @@ lazy val samples = (project in file("modules//samples"))
     voyage,
     bedrock,
     jina,
+    cohere,
     watsonx,
     knowledgegraphNeo4j,
     observability,
@@ -1339,6 +1365,7 @@ lazy val it = (project in file("modules/it"))
     voyage,
     bedrock,
     jina,
+    cohere,
     watsonx,
     knowledgegraphNeo4j,
     workspaceClient,
@@ -1416,6 +1443,7 @@ lazy val docs = (project in file("modules/docs"))
     voyage,
     bedrock,
     jina,
+    cohere,
     watsonx,
     providerTestkit,
     workspaceShared,
@@ -1457,6 +1485,7 @@ lazy val docs = (project in file("modules/docs"))
         (voyage / Compile / sources).value ++
         (bedrock / Compile / sources).value ++
         (jina / Compile / sources).value ++
+        (cohere / Compile / sources).value ++
         (watsonx / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
