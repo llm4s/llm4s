@@ -3,6 +3,7 @@ package org.llm4s.agent.guardrails.builtin
 import org.llm4s.agent.guardrails.{ GuardrailAction, InputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 import scala.util.matching.Regex
 
@@ -47,6 +48,8 @@ class PromptInjectionDetector(
   val onFail: GuardrailAction = GuardrailAction.Block
 ) extends InputGuardrail {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def validate(value: String): Result[String] = {
     val normalizedInput = value.toLowerCase
 
@@ -87,7 +90,12 @@ class PromptInjectionDetector(
           )
 
         case GuardrailAction.Warn =>
-          // Allow processing but the warning should be logged
+          // Allow processing, but say what fired: the categories and how many patterns, never the input
+          val categories = matches.map(_.category.name).distinct.mkString(", ")
+          logger.warn(
+            s"$name matched ${matches.size} injection pattern(s) in categories [$categories] " +
+              s"(sensitivity: ${sensitivity.name}) - passing through in warn mode"
+          )
           Right(value)
       }
     }

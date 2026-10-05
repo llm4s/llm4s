@@ -5,6 +5,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 import scala.util.Try
 
@@ -69,6 +70,8 @@ class GroundingGuardrail(
   val strictMode: Boolean = false
 ) extends RAGGuardrail {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   val name: String = "GroundingGuardrail"
 
   override val description: Option[String] = Some(
@@ -82,8 +85,10 @@ class GroundingGuardrail(
     if (context.retrievedChunks.isEmpty) {
       // No context to ground against - pass through with warning
       onFail match {
-        case GuardrailAction.Warn => Right(output)
-        case GuardrailAction.Fix  => Right(output) // Can't fix without context
+        case GuardrailAction.Warn =>
+          logger.warn(s"$name: no retrieved chunks to ground against - passing through in warn mode")
+          Right(output)
+        case GuardrailAction.Fix => Right(output) // Can't fix without context
         case GuardrailAction.Block =>
           Left(
             ValidationError.invalid(
@@ -128,7 +133,12 @@ class GroundingGuardrail(
         )
 
       case GuardrailAction.Warn =>
-        // Log would happen here in production
+        // The score, the threshold and how many claims - not the claims, which quote the response
+        logger.warn(
+          s"$name: response not sufficiently grounded (score ${"%.2f".format(result.score)}, " +
+            s"threshold ${"%.2f".format(threshold)}, strict mode: $strictMode, " +
+            s"${result.ungroundedClaims.size} ungrounded claim(s)) - passing through in warn mode"
+        )
         Right(output)
 
       case GuardrailAction.Fix =>

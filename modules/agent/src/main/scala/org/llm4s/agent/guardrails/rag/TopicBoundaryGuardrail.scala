@@ -5,6 +5,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 import scala.util.Try
 
@@ -72,6 +73,8 @@ class TopicBoundaryGuardrail(
   val onFail: GuardrailAction = GuardrailAction.Block
 ) extends InputGuardrail {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   val name: String = "TopicBoundaryGuardrail"
 
   override val description: Option[String] = Some(
@@ -114,6 +117,12 @@ class TopicBoundaryGuardrail(
         )
 
       case GuardrailAction.Warn =>
+        // The score only: neither the query nor the topic the model read into it is logged
+        logger.warn(
+          s"$name: query is outside the allowed topic boundaries (relevance score " +
+            s"${"%.2f".format(result.relevanceScore)}, ${allowedTopics.size} allowed topic(s)) - " +
+            "passing through in warn mode"
+        )
         Right(query)
 
       case GuardrailAction.Fix =>

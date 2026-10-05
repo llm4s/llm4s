@@ -1344,6 +1344,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by a bare prefix, so deleting or re-syncing `doc-1` also deleted every chunk of `doc-10` and
   `doc-1-appendix`. It now matches the `<docId>-chunk-` prefix. Also, `FusionStrategy.WeightedScore(0, 0)`
   now throws `IllegalArgumentException` instead of producing `NaN` scores (https://github.com/llm4s/llm4s/pull/1036).
+- **`GuardrailAction.Warn` now logs in five more guardrails**: `Warn` is documented as "log a warning and let
+  processing continue", but `PromptInjectionDetector`, `GroundingGuardrail`, `ContextRelevanceGuardrail`,
+  `TopicBoundaryGuardrail` and `SourceAttributionGuardrail` passed the text through without a word, so a
+  monitoring deployment (`PromptInjectionDetector.monitoring`, `GroundingGuardrail.monitoring`, ...) detected
+  violations and told nobody. Each now logs one `WARN` through its own class logger, as `SecretLeakGuardrail`
+  does: the categories and how many patterns matched, or the score, the threshold and how many claims - never the
+  input, the response, the retrieved chunks, the topic the model read into a query, or the judge's explanation.
+  The value returned is unchanged. `ContextRelevanceGuardrail` and `SourceAttributionGuardrail` also log when
+  `Fix` is chosen, because for them `Fix` falls back to `Warn`. `PIIDetector` is a separate change; the four
+  `LLM*Guardrail` judges have no `Warn` mode, so nothing changes for them.
 - **MCP: a tool result flagged `isError` is a failure** (https://github.com/llm4s/llm4s/issues/1006): `MCPClientImpl` returned a
   server-reported failure to the agent as a successful tool result. It now returns
   `Left("Tool call failed: <text>")`, or `Left("Tool call failed: server reported an error")` when the
