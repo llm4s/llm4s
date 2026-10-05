@@ -618,7 +618,8 @@ lazy val memoryPostgres = (project in file("modules/memory-postgres"))
 // the rest of core and no edge to each other, so they carve independently.
 
 lazy val mcp = (project in file("modules/mcp"))
-  .dependsOn(core)
+  // `providerTestkit % Test` is for the interruption checks, run against a server that never answers.
+  .dependsOn(core, providerTestkit % Test)
   .settings(
     name := "llm4s-mcp",
     commonSettings,
@@ -659,7 +660,9 @@ lazy val mcp = (project in file("modules/mcp"))
 // It was the build's only third-party resolver and it resolved nothing.
 
 lazy val speech = (project in file("modules/speech"))
-  .dependsOn(core)
+  // `providerTestkit % Test` is for `CloudSpeechCancellationSpec`: the testkit's interruption check, run
+  // against a server that never answers. Test scope only.
+  .dependsOn(core, providerTestkit % Test)
   .settings(
     name := "llm4s-speech",
     commonSettings,
@@ -685,7 +688,7 @@ lazy val image = (project in file("modules/image"))
   // `observabilityPrometheus % Test` is for `ImageGenerationCostTrackingSpec`, which reads the
   // image metrics back out of a real `PrometheusMetrics` registry. Test scope only: the
   // published `llm4s-image` depends on the `MetricsCollector` contract, not on Prometheus.
-  .dependsOn(media, core, observabilityPrometheus % Test)
+  .dependsOn(media, core, observabilityPrometheus % Test, providerTestkit % Test)
   .settings(
     name := "llm4s-image",
     commonSettings,

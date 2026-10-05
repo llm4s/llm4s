@@ -3,7 +3,8 @@ package org.llm4s.speech.stt
 import org.llm4s.types.Result
 import org.llm4s.speech.AudioInput
 import org.llm4s.speech.io.WavFileGenerator
-import org.llm4s.error.ProcessingError
+import org.llm4s.error.{ CancelledError, ProcessingError }
+import org.llm4s.speech.util.CommandRuns
 import cats.implicits._
 
 import java.nio.file.{ Files, Path }
@@ -40,11 +41,13 @@ final class WhisperSpeechToText(
     val result = for {
       wavAndTemp <- wavResult
       args = buildWhisperArgs(wavAndTemp._1, options)
-      stdout <- Safety
-        .fromTry(Try(args.!!))
+      stdout <- CommandRuns
+        .stdout(args)
         .left
         .map {
-          case _: IOException => ProcessingError.audioValidation("Whisper CLI not found or IO error")
+          // An interrupt stops the program and is a cancellation, not a failed run (design section 4.4).
+          case interrupted: InterruptedException => CancelledError("whisper.transcribe", Some(interrupted))
+          case _: IOException                    => ProcessingError.audioValidation("Whisper CLI not found or IO error")
           case _: RuntimeException =>
             ProcessingError.audioValidation("Whisper CLI execution failed with non-zero exit code")
           case _ => ProcessingError.audioValidation("Whisper CLI execution failed")
