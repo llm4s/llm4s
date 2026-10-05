@@ -1,6 +1,7 @@
 package org.llm4s.mcp
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 
 /**
  * MCP clients handle the communication with MCP servers to:
@@ -15,17 +16,19 @@ trait MCPClient {
    * Retrieves all available tools from the MCP server.
    * Returns tools converted to the llm4s ToolFunction format.
    *
-   * @return Sequence of tool functions available from this server
+   * @return Sequence of tool functions available from this server;
+   *         `Left(CancelledError)`, with the thread's interrupt flag still set, if the call was interrupted
    */
-  def getTools(): Either[String, Seq[ToolFunction[_, _]]]
+  def getTools(): Result[Seq[ToolFunction[_, _]]]
 
   /**
    * Initializes the MCP connection with handshake protocol.
    * Must be called before other operations.
    *
-   * @return Either error message or successful initialization
+   * @return the error that stopped the handshake, or successful initialization;
+   *         `Left(CancelledError)`, with the thread's interrupt flag still set, if the call was interrupted
    */
-  def initialize(): Either[String, Unit]
+  def initialize(): Result[Unit]
 
   /**
    * Closes the MCP client connection and releases resources.

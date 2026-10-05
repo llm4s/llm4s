@@ -2,13 +2,14 @@ package org.llm4s.mcp
 
 import cats.data.ValidatedNel
 import cats.implicits._
+import org.llm4s.error.{ CancelledError, LLMError, SimpleError }
 import org.llm4s.toolapi._
 import org.slf4j.LoggerFactory
 
 import java.util.concurrent.ConcurrentHashMap
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
-import scala.util.Try
+import scala.util.{ Failure, Success, Try }
 
 import scala.util.chaining.scalaUtilChainingOps
 
@@ -83,10 +84,25 @@ class MCPToolRegistry(
         findMCPTool(request.functionName) match {
           case Some(tool) =>
             logger.debug(s"Executing MCP tool: ${request.functionName}")
-            Try(tool.execute(request.arguments)).toEither.left.map { e =>
-              logger.error(s"MCP tool ${request.functionName} execution failed", e)
-              ToolCallError.ExecutionError(request.functionName, e)
-            }.flatten
+            // The same rule as ToolRegistry.execute applies to local tools (design section 4.4): a call
+            // that ends while its thread is interrupted is cancelled, whatever it returned, and is
+            // never reported as a failed tool.
+            CancelledError.catchInterrupt(Try(tool.execute(request.arguments))) match {
+              case Left(_) =>
+                Thread.currentThread().interrupt()
+                Left(ToolCallError.Cancelled(request.functionName))
+              case Right(_) if Thread.currentThread().isInterrupted =>
+                Left(ToolCallError.Cancelled(request.functionName))
+              case Right(Failure(e)) if CancelledError.isCancellation(e) =>
+                Left(ToolCallError.Cancelled(request.functionName))
+              case Right(Failure(e)) =>
+                logger.error(s"MCP tool ${request.functionName} execution failed", e)
+                Left(ToolCallError.ExecutionError(request.functionName, e))
+              case Right(Success(outcome)) => outcome
+            }
+          case None if Thread.currentThread().isInterrupted =>
+            // Finding the tool meant asking a server, and that was interrupted: not "no such tool".
+            Left(ToolCallError.Cancelled(request.functionName))
           case None =>
             logger.warn(s"Tool ${request.functionName} not found in any registry (local or MCP)")
             Left(ToolCallError.UnknownFunction(request.functionName, getAllTools.map(_.name)))
@@ -141,7 +157,7 @@ class MCPToolRegistry(
     val result = for {
       client <- Try(getOrCreateClient(server)).toEither.leftMap { ex =>
         logger.trace("{}", ex.getStackTrace)
-        ex.getMessage
+        SimpleError(ex.getMessage): LLMError
       }
       tools <- client.getTools()
     } yield {
@@ -149,9 +165,12 @@ class MCPToolRegistry(
       toolCache.put(server.name, CachedTools(tools, timestamp))
       tools
     }
-    result.left.foreach { errMsg =>
-      logger.error("Failed to refresh tools from ${}: {}", server.name, errMsg)
-      removeServerFromCache(server) // Clean up failed client
+    result.left.foreach {
+      // An interrupted refresh is not a failed server: keep the client, cache nothing, report nothing.
+      case _: CancelledError => logger.debug("Refreshing tools from {} was cancelled", server.name)
+      case error =>
+        logger.error("Failed to refresh tools from ${}: {}", server.name, error.message)
+        removeServerFromCache(server) // Clean up failed client
     }
     result.getOrElse(Seq.empty)
   }
@@ -215,7 +234,7 @@ class MCPToolRegistry(
   private[mcp] def createAndInitializeClient(server: MCPServerConfig): ValidatedNel[String, MCPServerConfig] = {
     val status: Either[String, MCPServerConfig] = for {
       mcpClient <- Try(getOrCreateClient(server)).toEither.leftMap(_.getMessage)
-      _         <- mcpClient.initialize()
+      _         <- mcpClient.initialize().left.map(_.message)
     } yield server
     status.tap { x =>
       x.fold(
