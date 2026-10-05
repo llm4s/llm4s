@@ -1532,6 +1532,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an up-to-date table is not locked, and the column is added with `ADD COLUMN IF NOT EXISTS`, so
   replicas initialising at once do not fail on a duplicate column. `PgSchemaManager.extendVectorsTable` now also rejects a table
   name that is not a valid SQL identifier, as `PgSearchIndex` and `PgVectorStore` already did.
+- **`llm4s-rag`: re-ingesting a document replaces it, and several inputs return `Left` instead of throwing**
+  ([#1318](https://github.com/llm4s/llm4s/issues/1318)): `RAG.ingestText` / `ingestChunks` / `ingest` upserted by
+  chunk id, so a document that came back with fewer chunks (or none) kept its old tail and went on matching
+  queries. Indexing now embeds first, then deletes the document's old chunks from both stores, then writes the new
+  ones - a document that cannot be embedded keeps its previous version. `deleteByPrefix` on the SQLite and
+  pgvector stores and keyword indexes used the prefix as a `LIKE` pattern, so ids containing `_` or `%` deleted
+  other documents' chunks; they are matched literally now. A reranker returning an out-of-range index made
+  `HybridSearcher` throw `IndexOutOfBoundsException`; that result is now dropped with a WARN, as
+  `AsyncHybridSearcher` always did. `WeightedScore` fusion no longer scores a channel's weakest genuine hit `0`, the
+  score of a miss: it maps to `0.1`, the best to `1`, so weighted scores shift. New `Result`-returning
+  `ChunkingConfig.validated`, `ChunkingUtils.chunkTextValidated` and `FusionStrategy.weightedScore` for values
+  that come from input; the constructors keep throwing on an invalid literal. `documentCount` / `chunkCount` no
+  longer count an ingest that produced no chunks.
 - **The docs taught a configuration route that no longer exists.** Since
   [#903](https://github.com/llm4s/llm4s/pull/903) (0.3.2) nothing in llm4s reads `LLM_MODEL` or a
   provider's API-key variable, yet the README, CLAUDE.md, every getting-started page and most

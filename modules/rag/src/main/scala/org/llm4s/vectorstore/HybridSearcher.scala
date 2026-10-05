@@ -66,6 +66,17 @@ object FusionStrategy {
   }
 
   /**
+   * A [[WeightedScore]] from weights that did not come from source code. The constructor throws
+   * `IllegalArgumentException` on a negative or all-zero pair; this returns it as a `Left`.
+   */
+  def weightedScore(vectorWeight: Double, keywordWeight: Double): Result[WeightedScore] =
+    if (vectorWeight.isNaN || keywordWeight.isNaN || vectorWeight < 0 || keywordWeight < 0)
+      Left(org.llm4s.error.ValidationError("weights", "Weights must be non-negative"))
+    else if (vectorWeight + keywordWeight <= 0)
+      Left(org.llm4s.error.ValidationError("weights", "At least one weight must be positive"))
+    else Right(WeightedScore(vectorWeight, keywordWeight))
+
+  /**
    * Vector-only search (no keyword fusion).
    */
   case object VectorOnly extends FusionStrategy
@@ -185,12 +196,7 @@ final class HybridSearcher private (
             documents = candidates.map(_.content),
             topK = Some(topK)
           )
-          r.rerank(request).map { response =>
-            response.results.map { rr =>
-              // Preserve original metadata but update score from reranker
-              candidates(rr.index).copy(score = rr.score)
-            }
-          }
+          r.rerank(request).flatMap(response => RerankMapping.applyRerank(candidates, response.results))
         case None =>
           Right(candidates.take(topK))
       }
@@ -303,24 +309,9 @@ final class HybridSearcher private (
       vectorResults  <- vectorStore.search(queryEmbedding, topK * 2, filter)
       keywordResults <- keywordIndex.searchWithHighlights(queryText, topK * 2, filter = filter)
     } yield {
-      // Normalize scores to [0, 1]
-      val vectorScores = vectorResults.map(_.score)
-      val (vectorMin, vectorMax) =
-        if (vectorScores.isEmpty) (0.0, 1.0)
-        else (vectorScores.min, vectorScores.max)
-
-      val keywordScores = keywordResults.map(_.score)
-      val (keywordMin, keywordMax) =
-        if (keywordScores.isEmpty) (0.0, 1.0)
-        else (keywordScores.min, keywordScores.max)
-
-      def normalizeVector(score: Double): Double =
-        if (vectorMax == vectorMin) 1.0
-        else (score - vectorMin) / (vectorMax - vectorMin)
-
-      def normalizeKeyword(score: Double): Double =
-        if (keywordMax == keywordMin) 1.0
-        else (score - keywordMin) / (keywordMax - keywordMin)
+      // Normalize each channel's scores to (0, 1]; a chunk a channel did not find scores 0 there.
+      val normalizeVector  = ScoreNormalisation.over(vectorResults.map(_.score))
+      val normalizeKeyword = ScoreNormalisation.over(keywordResults.map(_.score))
 
       // Build maps
       val vectorMap: Map[String, ScoredRecord] =
@@ -522,4 +513,28 @@ object HybridSearcher {
       vectorStore  <- VectorStoreFactory.create(config.vectorStoreConfig)
       keywordIndex <- SQLiteKeywordIndex(config.keywordIndexConfig)
     } yield new HybridSearcher(vectorStore, keywordIndex, config.defaultStrategy)
+}
+
+private[vectorstore] object RerankMapping {
+
+  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+
+  /**
+   * Map a reranker's results back onto the candidates it was given. A result naming no candidate is
+   * dropped and logged at WARN: one bad index from the reranker must not cost the caller every other
+   * result, or an exception. (`AsyncHybridSearcher` always behaved this way; the synchronous searcher
+   * used to throw `IndexOutOfBoundsException`, #1318.)
+   */
+  def applyRerank(
+    candidates: Seq[HybridSearchResult],
+    results: Seq[org.llm4s.reranker.RerankResult]
+  ): Result[Seq[HybridSearchResult]] = {
+    val (valid, invalid) = results.partition(rr => candidates.indices.contains(rr.index))
+    if (invalid.nonEmpty)
+      logger.warn(
+        s"Reranker returned ${invalid.size} result(s) with an index outside 0 until ${candidates.size}: " +
+          invalid.map(_.index).mkString(", ")
+      )
+    Right(valid.map(rr => candidates(rr.index).copy(score = rr.score)))
+  }
 }

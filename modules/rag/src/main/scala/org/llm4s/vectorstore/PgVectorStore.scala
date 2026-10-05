@@ -303,8 +303,10 @@ final class PgVectorStore private (
   override def deleteByPrefix(prefix: String): Result[Long] =
     Try {
       withConnection { conn =>
-        Using.resource(conn.prepareStatement(s"DELETE FROM $tableName WHERE id LIKE ?")) { stmt =>
-          stmt.setString(1, prefix + "%")
+        Using.resource(
+          conn.prepareStatement(s"DELETE FROM $tableName WHERE id LIKE ? ${SqlLikePattern.EscapeClause}")
+        ) { stmt =>
+          stmt.setString(1, SqlLikePattern.prefix(prefix))
           stmt.executeUpdate().toLong
         }
       }

@@ -278,8 +278,10 @@ final class SQLiteVectorStore private (
   override def deleteByPrefix(prefix: String): Result[Long] =
     Try {
       // First get IDs to delete
-      val ids = Using.resource(connection.prepareStatement("SELECT id FROM vectors WHERE id LIKE ?")) { stmt =>
-        stmt.setString(1, prefix + "%")
+      val ids = Using.resource(
+        connection.prepareStatement(s"SELECT id FROM vectors WHERE id LIKE ? ${SqlLikePattern.EscapeClause}")
+      ) { stmt =>
+        stmt.setString(1, SqlLikePattern.prefix(prefix))
         Using.resource(stmt.executeQuery()) { rs =>
           val buffer = ArrayBuffer.empty[String]
           while (rs.next())

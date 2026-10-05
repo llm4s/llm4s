@@ -1154,12 +1154,15 @@ final class RAG private (
     chunks: Seq[DocumentChunk],
     metadata: Map[String, String]
   ): Result[Int] = {
-    if (chunks.isEmpty) return Right(0)
-
+    // Embed first: a document that cannot be embedded keeps its previous version. An empty chunk list
+    // still replaces - a document that became empty must not leave its old chunks behind.
     val contents = chunks.map(_.content)
 
     for {
-      embeddings <- embedBatch(contents)
+      embeddings <- if (chunks.isEmpty) Right(Seq.empty[Array[Float]]) else embedBatch(contents)
+      // Replace, don't merge: the stores upsert by chunk id, so a document that now has fewer chunks
+      // would otherwise keep its old tail and keep matching queries (#1318).
+      _ <- deleteDocumentChunks(docId)
       _ <- {
         val vectorRecords = chunks.zip(embeddings).map { case (chunk, embedding) =>
           VectorRecord(
@@ -1169,7 +1172,7 @@ final class RAG private (
             metadata = metadata + ("docId" -> docId) + ("chunkIndex" -> chunk.index.toString)
           )
         }
-        hybridSearcher.vectorStore.upsertBatch(vectorRecords)
+        if (vectorRecords.isEmpty) Right(()) else hybridSearcher.vectorStore.upsertBatch(vectorRecords)
       }
       _ <- {
         val keywordDocs = chunks.map { chunk =>
@@ -1179,11 +1182,13 @@ final class RAG private (
             metadata = metadata + ("docId" -> docId) + ("chunkIndex" -> chunk.index.toString)
           )
         }
-        hybridSearcher.keywordIndex.indexBatch(keywordDocs)
+        if (keywordDocs.isEmpty) Right(()) else hybridSearcher.keywordIndex.indexBatch(keywordDocs)
       }
     } yield {
-      _chunkCount += chunks.size
-      _documentCount += 1
+      if (chunks.nonEmpty) {
+        _chunkCount += chunks.size
+        _documentCount += 1
+      }
       chunks.size
     }
   }
