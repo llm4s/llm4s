@@ -392,6 +392,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and their defaults, a worked example (Cohere), the config, descriptor and
   `Llm4sOpenAICompatibleModule` registration, the tests and `@Cloud` smoke spec to write, and the
   docs to update ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
+- **A standalone Java sample with Gradle** ([#968](https://github.com/llm4s/llm4s/issues/968), reworked from #981
+  by @krrish175-byte): `modules/samples/gradle-java` is a Gradle project with a Java `main` that calls llm4s through
+  `llm4s-java-api`: a client, a question, a conversation built with `ConversationBuilder`, and `LlmResult` error
+  handling, with no Scala `Either`, `Option` or `Nil$.MODULE$` in the code and an exit status of 1 when a call
+  fails. It depends only on `llm4s-java-api`, whose POM brings the provider modules and the Scala 3 library, and
+  it is built in CI by the existing `Kotlin API` job against the library it just published. No Gradle wrapper
+  jar is committed. Until 0.5.0 ships `llm4s-java-api`, it resolves it from local Maven (see its README).
 - **`llm4s-media`, a shared vocabulary for multimodal code** - landed as part of
   [#1130](https://github.com/llm4s/llm4s/issues/1130), ahead of `llm4s-image` and
   `llm4s-speech` so those carves are pure file moves. `org.llm4s.media.MediaType` (MIME string,

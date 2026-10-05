@@ -187,6 +187,13 @@ dependencies {
 
 ---
 
+## Java sample
+
+[`modules/samples/gradle-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java) is a
+standalone Gradle project that calls llm4s from Java through `llm4s-java-api`: a client, a question, a
+conversation, and `LlmResult` error handling, with no Scala types in the code. Its README says how to build and
+run it. CI builds it on every pull request, so it stays current.
+
 ## Reference files
 
 The `modules/gradle-demo/` directory in the llm4s repository contains:

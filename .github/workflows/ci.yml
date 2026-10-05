@@ -682,7 +682,8 @@ jobs:
       - name: Check binary compatibility
         run: sbt mimaReportBinaryIssues
 
-  # Kotlin coroutine API - a separate Gradle build that consumes llm4s-java-api from local Maven.
+  # Kotlin coroutine API and the Java sample (modules/samples/gradle-java): separate Gradle builds that consume
+  # llm4s-java-api from local Maven, so they share one publish of the library.
   kotlin-api:
     name: Kotlin API
     needs: quick-checks
@@ -715,6 +716,11 @@ jobs:
       - name: Build and test Kotlin API with coverage check
         working-directory: modules/kotlin-api
         run: gradle check
+
+      # Compiles the Java sample against the library just published, so it cannot drift from the API it shows.
+      - name: Build the Java sample
+        working-directory: modules/samples/gradle-java
+        run: gradle build installDist
 
       - name: Upload Kotlin coverage report
         if: always()

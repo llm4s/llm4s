@@ -463,7 +463,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-effect"               % llm4sVersio
 libraryDependencies += "org.llm4s" %% "llm4s-zio"                  % llm4sVersion  // ZIO 2 / ZIO Streams
 ```
 
-`llm4s-java-api` is the Java-friendly facade and the base of the Spring starter, which adds the
+`llm4s-java-api` is the Java-friendly facade (a runnable Gradle sample is in
+[`modules/samples/gradle-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java)) and the base of the Spring starter, which adds the
 `llm4s.*` properties, an `LLM4STemplate` and an Actuator health indicator. `llm4s-effect` and
 `llm4s-zio` wrap `LLMClient` and `Agent` for their effect systems. There is also a Kotlin coroutine
 API, `modules/kotlin-api`, a separate Gradle build that is not published yet.
