@@ -123,6 +123,10 @@ object AudioPreprocessing {
       normalized <- trimSilence(resampled._1, resampled._2)
     } yield normalized
 
+  /** [[standardizeForSTT]] for generated audio; MP3 is a `ValidationError`, as it is not PCM. */
+  def standardizeForSTT(audio: GeneratedAudio, targetRate: Int): Result[(Array[Byte], AudioMeta)] =
+    audio.requirePcm("Preparing audio for STT").flatMap(a => standardizeForSTT(a.data, a.meta, targetRate))
+
   def wrap(bytes: Array[Byte], meta: AudioMeta, format: AudioFormat = AudioFormat.WavPcm16): GeneratedAudio =
     GeneratedAudio(bytes, meta, format)
 }

@@ -33,6 +33,12 @@ class OpenAITTSSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
     CloudSpeechSmoke.requireSpeechPcm(audio)
   }
 
+  it should "return real MP3 on request (ID3 tag or MPEG frame sync)" in {
+    val audio = client.synthesize(CloudSpeechSmoke.Phrase, TTSOptions(outputFormat = AudioFormat.Mp3)).value
+
+    CloudSpeechSmoke.requireMp3(audio)
+  }
+
   it should "honour the voice option: different voices give different audio" in {
     val alloy = client.synthesize(CloudSpeechSmoke.Phrase, TTSOptions(voice = Some("alloy"))).value
     val onyx  = client.synthesize(CloudSpeechSmoke.Phrase, TTSOptions(voice = Some("onyx"))).value

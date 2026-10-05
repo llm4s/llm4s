@@ -1,9 +1,9 @@
 package org.llm4s.speech.tts
 
-import org.llm4s.error.{ CancelledError, ProcessingError }
+import org.llm4s.error.{ CancelledError, ProcessingError, ValidationError }
 import org.llm4s.speech.util.CommandRuns
 import org.llm4s.types.Result
-import org.llm4s.speech.GeneratedAudio
+import org.llm4s.speech.{ AudioFormat, GeneratedAudio }
 import org.llm4s.speech.io.WavFileGenerator
 import cats.implicits._
 
@@ -20,6 +20,11 @@ final class Tacotron2TextToSpeech(
 
   override def synthesize(text: String, options: TTSOptions): Result[GeneratedAudio] =
     for {
+      _ <- Either.cond(
+        options.outputFormat != AudioFormat.Mp3,
+        (),
+        ValidationError("outputFormat", "Tacotron2 produces PCM; MP3 output is only offered by the cloud TTS clients")
+      )
       tmpOut <- WavFileGenerator.createTempWavFile("llm4s-tts-")
       baseCommand = command ++ Seq("--text", text, "--out", tmpOut.toString)
 

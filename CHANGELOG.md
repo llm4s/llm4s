@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
+  `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
+  service's MP3 and return its bytes untouched. PCM stays the default. `AudioFormat.Mp3` is a new case
+  (`llm4s-speech` is Experimental), `GeneratedAudio.isPcm` / `requirePcm`, and `AudioIO.saveMp3`. WAV
+  writing, `AudioIO.saveWav` / `saveRawPcm16` and the new `AudioPreprocessing.standardizeForSTT(audio, rate)`
+  reject MP3 with a `ValidationError`; Tacotron2 refuses it. A caller with an exhaustive `match` on
+  `AudioFormat` needs a case for `Mp3`. The `@Cloud` smoke suites check MP3 magic bytes.
 - **`llm4s-java-api`: Java interop module** (Beta, `modules/java-api`, package `org.llm4s.javaapi`,
   [#934](https://github.com/llm4s/llm4s/issues/934)): a facade for Java callers over the client and agent API. `Llm4s.createDefaultClient()`
   and `createClient(config)` return an `LlmResult<JLlmClient>`; `JLlmClient` (`AutoCloseable`) offers

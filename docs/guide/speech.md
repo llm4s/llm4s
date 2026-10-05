@@ -195,7 +195,14 @@ Behaviour worth knowing:
 
 - **Audio is raw PCM.** The TTS clients request raw 24 kHz, 16-bit, mono PCM from each service, so
   `GeneratedAudio.data` is headerless PCM with an accurate `AudioMeta`, the same shape Tacotron2
-  produces. Write a playable file with `WavFileGenerator.saveAsWav(audio, path)`. MP3 is not offered.
+  produces. Write a playable file with `WavFileGenerator.saveAsWav(audio, path)`.
+- **MP3 is opt-in.** `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure
+  clients request the service's MP3 (`response_format=mp3`, `output_format=mp3_44100_128`,
+  `audio-24khz-48kbitrate-mono-mp3`) and return its bytes untouched: no decoding, no resampling.
+  `GeneratedAudio.format` is `AudioFormat.Mp3`, so the PCM helpers (`WavFileGenerator.saveAsWav`,
+  `AudioIO.saveWav` / `saveRawPcm16`, `AudioPreprocessing.standardizeForSTT(audio, rate)`) refuse it with a
+  `ValidationError`; save it with `AudioIO.saveMp3(audio, path)`. `AudioMeta` gives the requested
+  sample rate. Tacotron2 produces PCM only and refuses MP3. The default stays PCM.
 - **OpenAI TTS limits are checked locally**: text over 4096 characters and a `speakingRate` outside
   0.25 to 4.0 are a `ValidationError` before any request is sent. Split long text yourself; the clients
   do not chunk it.
