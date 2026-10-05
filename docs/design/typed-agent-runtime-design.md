@@ -687,6 +687,38 @@ Closed by [#1279](https://github.com/llm4s/llm4s/issues/1279) (§4.8): `AgentMid
 
 Explore a Scala `Workflow[A]`/`Durable[A]` for-comprehension as a peer frontend to the graph DSL. It should compile to the same runtime/checkpoint kernel, not create a second durable engine. Durable boundaries must be explicit named steps with serializable inputs/outputs; arbitrary Scala closures are not replayable. The workflow API can express sequence, parallel composition, retry, timeout, and typed suspension in direct Scala style. Prototype after the superstep kernel exists, and adopt only if it substantially improves ordinary Scala ergonomics.
 
+### 4.13 Stage 1 slice 2: the agent loop on the graph runtime ([#1328](https://github.com/llm4s/llm4s/issues/1328))
+
+Slice 2 of [#1326](https://github.com/llm4s/llm4s/issues/1326): the graph runtime becomes the only agent loop. It is large, so it lands in the order below, each step compiling and passing on its own. **Steps 1 and 2 are implemented by the PR that adds this section; steps 3 to 6 are proposals that need review before the destructive part (deleting `AgentState` and migrating every caller) is written.**
+
+**Step 1. The terminal outcome of a guardrail Block (implements the decision of [#1322](https://github.com/llm4s/llm4s/pull/1322)).**
+
+- A run-boundary guardrail `Left` (any `beforeAgent` or `afterAgent` failure other than a cancellation) fails the run with the guardrail's error, so callers still get the error the legacy `Agent` returned. What changes is that the failure is a *finished* outcome, not an interrupted run.
+- `NodeResult.Block(error, update)` is the node's way to say so. The superstep commits `update` together with every sibling's result, and the run's closing checkpoint gets the new status `CheckpointStatus.Failed`, with a `RunFailed` event; the caller receives `RunResult.Failed(state, error)`. The status is terminal: `start` accepts a `Failed` thread exactly like a `Completed` one (it restores the committed state and applies the new input), `recover` refuses it (`NothingToRecover`), and `resume` refuses it (`NotSuspended`).
+- `MessageUpdate.RemoveTurn(id)` removes the stored message `id` and every message after it. `RemoveThrough` drops history *up to* a message; a turn's writes are the user input, the assistant messages, the tool calls and results, and the answer, all of which come after the turn's user message. An *input* Block happens before the loop stores anything, so it commits no update. An *output* Block commits `RemoveTurn` of the turn's user message: no blocked content is stored, and the next `start` continues from the history before the turn.
+- Not changed: a cancellation or deadline, a tool or model-wrapper failure (`ToolFailed`, `MiddlewareFailed`) and a checkpoint-store failure still leave the checkpoint `Running`, so `recover` continues them. Only the run boundaries block.
+- A blocked task records no pending write, because its error cannot be replayed from data; if the process dies between the guardrail's decision and the closing commit, `recover` runs the guardrail again, which is the behaviour of any other task that had not completed.
+- `Checkpoint.CurrentFormat` becomes 4, with an identity migration from 3: a build that predates the status refuses format 4 rather than misreading `Failed`.
+- Rejected: a refusal answer that completes the run (callers would inspect a typed result instead of an error, a behaviour change for guardrail users); guarding output before it is stored (alone it leaves the thread stuck, and `recover` would ask the model again).
+
+**Step 2. Token usage through the model step.** `ModelStep.next` returns only an `AssistantMessage`, so the usage a completion reports is dropped, and `AgentState.usageSummary` has no source on the runtime. The step returns the message with its `TokenUsage`, and the loop accumulates a `UsageSummary` in a state key that the thread snapshot reads.
+
+**Step 3. Data-only thread state (proposal).** A thread's state is its checkpoint, so the replacement for `AgentState` is a snapshot read from it, never a live object:
+
+| `AgentState` field | Replacement |
+|---|---|
+| `conversation` | `messages`, the loop's `Messages` key |
+| `tools`, `completionOptions`, `systemMessage`, `availableHandoffs` | not state: run configuration of the `Agent`, supplied again on every call, never serialized |
+| `status` | the checkpoint's status plus, when finished, the outcome: completed with an answer, or failed with the error |
+| `usageSummary` | the usage state key (step 2) |
+| `logs`, `initialQuery` | dropped: events and tracing carry what the logs did (slice #1329) |
+
+**Step 4. The `Agent` front end (proposal).** `Agent.run(query, tools, ...)` stays the simple entry point; it takes a `ThreadId` (a fresh one by default), builds a `ToolLoop` from the tools, the guardrails as `GuardrailMiddleware` and the model step over the client, starts it on the runtime and awaits the result. `continueConversation` is `run` on the same thread, `runMultiTurn` is a sequence of those, and `recover` and `resume` are the runtime's, with the thread snapshot as the return value. Context-window pruning moves to a message update applied before the turn.
+
+**Step 5. Handoffs by stable ID (proposal, needs a decision).** `Handoff` already carries a stable `id`, but it holds the target `Agent`, a live reference that cannot be stored. The thread records only the *id* of the agent that is active; the `Agent` that runs it is resolved from the handoffs supplied on each call. Two shapes are possible: (a) the handoff tool switches the active agent on the same thread, so the target continues with the history (the legacy behaviour, `preserveContext`), or (b) the handoff tool runs the target as a child run and returns its answer as the tool result, which is the Stage 4 delegation of §5.5. This section proposes (a), so existing handoff users keep their behaviour, and leaves (b) to Stage 4.
+
+**Step 6. What is deleted, what stays.** Deleted with the cutover: `ToolProcessor`, `GuardrailApplicator`, `HandoffExecutor`, `AgentState`, `AgentStatus`, and `AgentStreamingExecutor` as superseded. Not deleted here, because other slices own them: `AgentEvent` and `runWithEvents`, `runCollectingEvents` and `continueConversationWithEvents` (#1329), the `TraceEvent.AgentStateUpdated` consumers (#1329), and `PlanRunner`, `DAG`, `TypedAgent` and `CancellationToken` (#1330). `AgentStreamingExecutor` is the one overlap: the issue lists it as superseded here, but the streaming entry points that use it are replaced by the run events of #1329. Until that slice lands, either a minimal bridge keeps them or they are absent; this section proposes **absent**, so no second engine remains, and the streaming samples and guide move with #1329.
+
 ## 5. Harness capabilities
 
 ### 5.1 Core runtime
