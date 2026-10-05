@@ -17,22 +17,43 @@ import scala.util.Try
 import scala.concurrent.{ Future, ExecutionContext }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.trace.Tracing
+import org.llm4s.error.{ CancelledError, LLMError }
 
 // ===== ERROR HANDLING =====
 
-sealed trait ImageGenerationError {
+/**
+ * Why an image generation call failed.
+ *
+ * An [[org.llm4s.error.LLMError]], so the client methods can return
+ * [[org.llm4s.error.CancelledError]] when their thread is interrupted - the contract of every llm4s
+ * client - next to these cases: they return `Either[LLMError, _]`.
+ */
+sealed trait ImageGenerationError extends LLMError {
   def message: String
 }
 
-case class AuthenticationError(message: String)        extends ImageGenerationError
-case class RateLimitError(message: String)             extends ImageGenerationError
-case class ServiceError(message: String, code: Int)    extends ImageGenerationError
+case class AuthenticationError(message: String) extends ImageGenerationError
+case class RateLimitError(message: String)      extends ImageGenerationError
+case class ServiceError(message: String, statusCode: Int) extends ImageGenerationError {
+  override def code: Option[String] = Some(statusCode.toString)
+}
 case class ValidationError(message: String)            extends ImageGenerationError
 case class InvalidPromptError(message: String)         extends ImageGenerationError
 case class InsufficientResourcesError(message: String) extends ImageGenerationError
 case class UnsupportedOperation(message: String)       extends ImageGenerationError
 case class UnknownError(throwable: Throwable) extends ImageGenerationError {
   def message: String = throwable.getMessage
+}
+
+private[imagegeneration] object ImageErrors {
+
+  /**
+   * What a failed call is: a [[org.llm4s.error.CancelledError]] if `t` is a cancellation - the thread is
+   * interrupted, or `t` has an interruption among its causes (design section 4.4) - otherwise
+   * `otherwise(t)`.
+   */
+  def fromThrowable(t: Throwable, operation: String)(otherwise: Throwable => LLMError): LLMError =
+    CancelledError.fromThrowable(t, operation).getOrElse(otherwise(t))
 }
 
 // ===== MODELS =====
@@ -274,14 +295,14 @@ trait ImageGenerationClient {
   def generateImage(
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, GeneratedImage]
+  ): Either[LLMError, GeneratedImage]
 
   /** Generate multiple images from a text prompt */
   def generateImages(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]]
+  ): Either[LLMError, Seq[GeneratedImage]]
 
   /** Edit an existing image based on a prompt and optional mask */
   def editImage(
@@ -289,14 +310,14 @@ trait ImageGenerationClient {
     @unused prompt: String,
     @unused maskPath: Option[Path] = None,
     @unused options: ImageEditOptions = ImageEditOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+  ): Either[LLMError, Seq[GeneratedImage]] =
     Left(UnsupportedOperation("Image editing is not supported by this provider"))
 
   /** Generate an image asynchronously */
   def generateImageAsync(
     @unused prompt: String,
     @unused options: ImageGenerationOptions = ImageGenerationOptions()
-  )(implicit @unused ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+  )(implicit @unused ec: ExecutionContext): Future[Either[LLMError, GeneratedImage]] =
     Future.successful(Left(UnsupportedOperation("Async generation is not supported by this provider")))
 
   /** Generate multiple images asynchronously */
@@ -304,7 +325,7 @@ trait ImageGenerationClient {
     @unused prompt: String,
     @unused count: Int,
     @unused options: ImageGenerationOptions = ImageGenerationOptions()
-  )(implicit @unused ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+  )(implicit @unused ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
     Future.successful(Left(UnsupportedOperation("Async generation is not supported by this provider")))
 
   /** Edit an existing image asynchronously */
@@ -313,11 +334,11 @@ trait ImageGenerationClient {
     @unused prompt: String,
     @unused maskPath: Option[Path] = None,
     @unused options: ImageEditOptions = ImageEditOptions()
-  )(implicit @unused ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+  )(implicit @unused ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
     Future.successful(Left(UnsupportedOperation("Async editing is not supported by this provider")))
 
   /** Check the health/status of the image generation service */
-  def health(): Either[ImageGenerationError, ServiceStatus] =
+  def health(): Either[LLMError, ServiceStatus] =
     Right(ServiceStatus(HealthStatus.Unknown, "Health check not implemented"))
 }
 
@@ -328,7 +349,7 @@ object ImageGeneration {
   /** Factory method for getting a client with the right configuration */
   def client(
     config: ImageGenerationConfig
-  ): Either[ImageGenerationError, ImageGenerationClient] =
+  ): Either[LLMError, ImageGenerationClient] =
     createBaseClient(config)
 
   /** Factory method for getting an instrumented client with metrics and tracing */
@@ -336,12 +357,12 @@ object ImageGeneration {
     config: ImageGenerationConfig,
     metrics: MetricsCollector,
     tracing: Tracing
-  ): Either[ImageGenerationError, ImageGenerationClient] =
+  ): Either[LLMError, ImageGenerationClient] =
     createBaseClient(config).map(c => new InstrumentedImageGenerationClient(c, config, metrics, tracing))
 
   private def createBaseClient(
     config: ImageGenerationConfig
-  ): Either[ImageGenerationError, ImageGenerationClient] = config match {
+  ): Either[LLMError, ImageGenerationClient] = config match {
     case sdConfig: StableDiffusionConfig =>
       val httpClient = HttpClient.create()
       Right(new StableDiffusionClient(sdConfig, httpClient))
@@ -363,7 +384,7 @@ object ImageGeneration {
     prompt: String,
     config: ImageGenerationConfig,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, GeneratedImage] =
+  ): Either[LLMError, GeneratedImage] =
     client(config).flatMap(_.generateImage(prompt, options))
 
   /** Convenience method for generating multiple images */
@@ -372,7 +393,7 @@ object ImageGeneration {
     count: Int,
     config: ImageGenerationConfig,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+  ): Either[LLMError, Seq[GeneratedImage]] =
     client(config).flatMap(_.generateImages(prompt, count, options))
 
   /** Convenience method for edit image */
@@ -382,7 +403,7 @@ object ImageGeneration {
     maskPath: Option[Path] = None,
     config: ImageGenerationConfig,
     options: ImageEditOptions = ImageEditOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+  ): Either[LLMError, Seq[GeneratedImage]] =
     client(config).flatMap(_.editImage(imagePath, prompt, maskPath, options))
 
   /** Convenience method for generating an image asynchronously */
@@ -390,7 +411,7 @@ object ImageGeneration {
     prompt: String,
     config: ImageGenerationConfig,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, GeneratedImage]] =
     client(config) match {
       case Right(c) => c.generateImageAsync(prompt, options)
       case Left(e)  => Future.successful(Left(e))
@@ -402,7 +423,7 @@ object ImageGeneration {
     count: Int,
     config: ImageGenerationConfig,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
     client(config) match {
       case Right(c) => c.generateImagesAsync(prompt, count, options)
       case Left(e)  => Future.successful(Left(e))
@@ -415,7 +436,7 @@ object ImageGeneration {
     maskPath: Option[Path] = None,
     config: ImageGenerationConfig,
     options: ImageEditOptions = ImageEditOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
     client(config) match {
       case Right(c) => c.editImageAsync(imagePath, prompt, maskPath, options)
       case Left(e)  => Future.successful(Left(e))
@@ -425,7 +446,7 @@ object ImageGeneration {
   def stableDiffusionClient(
     baseUrl: String = "http://localhost:7860",
     apiKey: Option[String] = None
-  ): Either[ImageGenerationError, ImageGenerationClient] = {
+  ): Either[LLMError, ImageGenerationClient] = {
     val config = StableDiffusionConfig(baseUrl = baseUrl, apiKey = apiKey)
     client(config)
   }
@@ -443,7 +464,7 @@ object ImageGeneration {
   def huggingFaceClient(
     apiKey: String,
     model: String = "stabilityai/stable-diffusion-xl-base-1.0"
-  ): Either[ImageGenerationError, ImageGenerationClient] = {
+  ): Either[LLMError, ImageGenerationClient] = {
     val config = HuggingFaceConfig(apiKey = apiKey, model = model)
     client(config)
   }
@@ -461,7 +482,7 @@ object ImageGeneration {
   def openAIClient(
     apiKey: String,
     model: String = "dall-e-2"
-  ): Either[ImageGenerationError, ImageGenerationClient] = {
+  ): Either[LLMError, ImageGenerationClient] = {
     val config = OpenAIConfig(apiKey = apiKey, model = model)
     client(config)
   }
@@ -471,7 +492,7 @@ object ImageGeneration {
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions(),
     baseUrl: String = "http://localhost:7860"
-  ): Either[ImageGenerationError, GeneratedImage] = {
+  ): Either[LLMError, GeneratedImage] = {
     val config = StableDiffusionConfig(baseUrl = baseUrl)
     generateImage(prompt, config, options)
   }
@@ -482,7 +503,7 @@ object ImageGeneration {
     apiKey: String,
     options: ImageGenerationOptions = ImageGenerationOptions(),
     model: String = "dall-e-2"
-  ): Either[ImageGenerationError, GeneratedImage] = {
+  ): Either[LLMError, GeneratedImage] = {
     val config = OpenAIConfig(apiKey = apiKey, model = model)
     generateImage(prompt, config, options)
   }
@@ -500,7 +521,7 @@ object ImageGeneration {
   def stabilityAIClient(
     apiKey: String,
     model: String = "stable-diffusion-xl-1024-v1-0"
-  ): Either[ImageGenerationError, ImageGenerationClient] = {
+  ): Either[LLMError, ImageGenerationClient] = {
     val config = StabilityAIConfig(apiKey = apiKey, model = model)
     client(config)
   }
@@ -511,12 +532,12 @@ object ImageGeneration {
     apiKey: String,
     options: ImageGenerationOptions = ImageGenerationOptions(),
     model: String = "stable-diffusion-xl-1024-v1-0"
-  ): Either[ImageGenerationError, GeneratedImage] = {
+  ): Either[LLMError, GeneratedImage] = {
     val config = StabilityAIConfig(apiKey = apiKey, model = model)
     generateImage(prompt, config, options)
   }
 
   /** Check service health */
-  def healthCheck(config: ImageGenerationConfig): Either[ImageGenerationError, ServiceStatus] =
+  def healthCheck(config: ImageGenerationConfig): Either[LLMError, ServiceStatus] =
     client(config).flatMap(_.health())
 }
