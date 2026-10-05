@@ -33,7 +33,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 5 ✅ | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (incl. Mistral, Cohere), `llm4s-voyage`; core holds no client |
 | 6 ✅ | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `TracingBackend` SPI; `llm4s-observability` (Langfuse, trace collector/model/store, `CostTracker`); `llm4s-observability-prometheus`; pre-baseline API cleanup (passes 1-8) |
 | 7 ✅ | [#1242](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (built-in tools + their config); `llm4s-agent` (`agent`, `assistant`); spine re-audit (core 20.7k lines) |
-| 8 ⏳ | [#1281](https://github.com/llm4s/llm4s/issues/1281) | release, not a carve: publish 0.5.0, MiMa baseline on the frozen modules, `@Stable` / `@Experimental`, compatibility policy, g8 template; then 1.0 |
+| 8 ⏳ | [#1281](https://github.com/llm4s/llm4s/issues/1281) | release, not a carve: publish 0.5.0, MiMa baseline on the Frozen-at-1.0 modules, `@Stable` / `@Experimental`, compatibility policy, g8 template; then 1.0 |
 
 **Invariants for every carve:**
 
@@ -247,7 +247,14 @@ With slice 7, `llm4s-core` is the spine: 20.7k lines at the re-audit, 19.1k afte
 `toolapi`, `context`, `llmconnect`, the `trace`/`metrics` contracts, `util`, `http`, `reliability`,
 `core/safety`, `security`, `resource`, `syntax`, `identity`), on cats, upickle, slf4j-api, Typesafe
 Config, pureconfig and jtokkit only ([re-audit](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540)).
-Before slice 8 ([#1281](https://github.com/llm4s/llm4s/issues/1281)) publishes 0.5.0 and sets the
+**Nothing is frozen until 0.5.0 is published and the MiMa baseline is set** (slice 8,
+[#1281](https://github.com/llm4s/llm4s/issues/1281)). Until then "frozen module" below means a module in
+1.0 Scope's *Frozen at 1.0* tier - the ones calling `mimaFrozen` in `build.sbt` - and is a target, not a
+constraint: never argue for or against a design from "frozen", "the baseline" or "can be added later
+without breaking". Fix a bad API outright, record the break in the CHANGELOG and migration guide, and
+add no shim or `@deprecated` overload. The rules below shape what those modules will freeze, which is
+why they apply now.
+Before slice 8 publishes 0.5.0 and sets the
 MiMa baseline, **pre-baseline cleanup passes** (slice 6, done) removed what should not be frozen. Pass 1 removed the unused `org.llm4s.types` vocabulary (it keeps `Result`, its syntax and
 the newtypes the library takes), every `@deprecated` member of core and `Agent`, `ContextConfig`'s
 legacy field, `ClientStatus`, `StreamingOptions`, `RuntimeId`/`ModelId`, and cats `Show`/`Validated`
@@ -267,7 +274,7 @@ and it applies `rateLimit` itself through a private `TokenBucket`); moved OpenAI
 `max_completion_tokens` rules out of core's `RequestTransformer` into `llm4s-openai`'s
 `OpenAIModelRules` - **vendor model rules live in the vendor's module**, layered on with
 `RequestTransformer.adjusted`, as Anthropic's temperature rule already did; and settled the
-provider plumbing as a **public, frozen provider-author SPI** (`docs/guide/writing-a-provider.md`),
+provider plumbing as a **public provider-author SPI, Frozen at 1.0** (`docs/guide/writing-a-provider.md`),
 with `ResponseFormatMapper` and `ToolCallDeserializer` moved to `llm4s-openai-compatible` and
 `ProviderResultOps` made `private[llm4s]`. Pass 4 moved `NamedProviderConfig`'s vendor fields
 into descriptor-declared extras with unchanged HOCON names - `endpoint` (required) and

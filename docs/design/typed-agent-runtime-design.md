@@ -747,21 +747,24 @@ Contract decisions:
   their own that is not an `LLMError`, so a `CancelledError` could not be returned at all. `ImageGenerationError` now
   extends `LLMError`, the client methods return `Either[LLMError, _]`, and every place a provider turns a `Throwable`
   into an error goes through one classifier, `ImageErrors.fromThrowable`. `ServiceError(message, code: Int)` clashed
-  with `LLMError.code: Option[String]`: the field is `statusCode`, and `code` is derived from it. The instrumented
+  with `LLMError.code: Option[String]`: the field is `statusCode`, and `code` is derived from it. Five cases shared a
+  name with an `org.llm4s.error` type, and as `LLMError`s both of each pair can reach the same `match`, where the
+  wrong import compiles and never fires; they carry an `Image` prefix (`ImageAuthenticationError`,
+  `ImageRateLimitError`, `ImageServiceError`, `ImageValidationError`, `ImageUnknownError`). The instrumented
   client records a cancelled call as `ErrorKind.Cancelled`. *Rejected:* an `ImageGenerationError.Cancelled` case -
   callers would have to special-case a second cancellation type, and no retry layer would recognise it; and retiring
   the hierarchy for core's errors, a larger break that this slice does not need.
   **Every case also says whether a retry can help**, because an `LLMError` must: `LLMError.isRecoverable` (and
   `recoverableErrors`, `nonRecoverableErrors`, `RetryPolicy.recoverableOnly`) match only `RecoverableError` and
   `NonRecoverableError` and threw a `MatchError` on an image error, which before this slice could not reach them.
-  `RateLimitError` is recoverable, and so is a `ServiceError` whose status is transient (`0` - no answer at all, as in
+  `ImageRateLimitError` is recoverable, and so is an `ImageServiceError` whose status is transient (`0` - no answer at all, as in
   a failed health check - `408`, `429`, any `5xx`); a rejected credential, request or prompt, `InsufficientResources`,
-  an unsupported operation and an `UnknownError` are not (an unknown failure is not retried blindly). A status is a
-  value and a marker trait is a type, so `ServiceError` is a sealed type with two cases behind the same
-  `ServiceError(message, status)` and `case ServiceError(message, status)`, picked by `ServiceError.isTransientStatus`.
-  *Rejected:* marking every `ServiceError` recoverable, as core's own `ServiceError` is - a `400` or `403` would be
-  retried to the same answer; and a default case in `LLMError.isRecoverable` - it is frozen core API, and a silent
-  default would hide the next error type that forgets to say.
+  an unsupported operation and an `ImageUnknownError` are not (an unknown failure is not retried blindly). A status is
+  a value and a marker trait is a type, so `ImageServiceError` is a sealed type with two cases behind
+  `ImageServiceError(message, status)` and `case ImageServiceError(message, status)`, picked by
+  `ImageServiceError.isTransientStatus`. *Rejected:* marking every `ImageServiceError` recoverable, as core's own
+  `ServiceError` is - a `400` or `403` would be retried to the same answer; and a default case in
+  `LLMError.isRecoverable` - a silent default would hide the next error type that forgets to say.
 - **MCP.** The error channel was a `String` (`Either[String, _]` on the transports, `MCPClient.initialize` and
   `getTools`), which cannot carry a cancellation. These return `Result`, and every existing message is kept byte for
   byte as `SimpleError(message)`. The HTTP transports pass the HTTP client's `CancelledError` through; the stdio
@@ -769,11 +772,12 @@ Contract decisions:
   half-started server (the process was recorded but no reader thread had started, so the next request would have found
   a live process that never answers). `MCPClientImpl.getTools` still swallows failures into an empty list, as
   documented, but not a cancellation. `MCPToolRegistry` applies to MCP tools the rule `ToolRegistry` applies to local
-  ones - a call that ends while its thread is interrupted is cancelled, whatever it returned - and a cancelled
-  discovery is not "no such tool", drops no client and caches nothing. A tool handler keeps core's frozen
+  ones - a call that ends while its thread is interrupted is cancelled, whatever it returned, and a tool that throws
+  an interruption wrapped in another exception is cancelled with the flag restored, in both registries - and a
+  cancelled discovery is not "no such tool", drops no client and caches nothing. A tool handler keeps core's
   `Either[String, _]` shape: the interrupt flag the transport leaves set is how the registry knows. *Rejected:* a
   dedicated `MCPError` type (`SimpleError` carries the message and nothing more is needed); changing
-  `ToolFunction.handler`'s error type (frozen core API).
+  `ToolFunction.handler`'s error type, which would change every tool, local ones included, for MCP's sake alone.
 
 `ToolHints` from MCP annotations *(a call for Rory)*:
 
@@ -802,8 +806,9 @@ Contract decisions:
   a server the application itself runs.
 - **`ToolHints` moves from `llm4s-agent` to `llm4s-core`** (`org.llm4s.toolapi.ToolHints`, `@Experimental` like the tool
   contract it belongs to). `llm4s-mcp` cannot depend on `llm4s-agent` without pulling the agent runtime, Ox and fansi
-  into every MCP client, and a frozen module cannot depend on `llm4s-mcp`, so core is the one module both see.
-  *Rejected:* hints on `ToolFunction` (growing a frozen type); and keeping `ToolHints` in the agent and exposing only
+  into every MCP client, and `llm4s-agent` depending on `llm4s-mcp` would put the MCP client on every agent user's
+  classpath, so core is the one module both see. *Rejected:* hints on `ToolFunction` (every tool would carry a field
+  only the agent's middleware reads); and keeping `ToolHints` in the agent and exposing only
   the raw annotations from `llm4s-mcp`, which leaves the conversion to every application. `AgentTool.fromToolFunction(
   tool, hints)` attaches hints to the adapted tool.
 

@@ -1278,13 +1278,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cancellation; `MCPToolRegistry` reports an interrupted MCP call as cancelled (never "no such tool" or a failed
   tool) and a cancelled stdio startup stops the half-started server; Ollama embeddings stop at the first failed text;
   Whisper and Tacotron2 stop the program they started when interrupted, where it used to be left running.
-  **Breaking, no shims:** `ImageGenerationError` is an `LLMError`, `ServiceError`'s second field is `statusCode`
-  (`code` is the derived `Option[String]`), and the image generation clients return `Either[LLMError, _]`, so a match
-  on their result needs a case for other errors. Being an `LLMError`, each case says whether trying again can help,
-  which `LLMError.isRecoverable` needs (it threw a `MatchError` on an image error otherwise): `RateLimitError` and a
-  `ServiceError` with a transient status (`0`, `408`, `429` or any `5xx`) are `RecoverableError`; the other
-  `ServiceError`s and every other case are `NonRecoverableError`. `ServiceError` is now a sealed type with two cases
-  behind the same `ServiceError(message, status)` and `case ServiceError(message, status)`; `MCPTransportImpl.sendRequest`, `sendNotification`,
+  **Breaking, no shims:** `ImageGenerationError` is an `LLMError`, and the cases whose names `org.llm4s.error`
+  also uses carry an `Image` prefix - `ImageAuthenticationError`, `ImageRateLimitError`, `ImageServiceError`,
+  `ImageValidationError`, `ImageUnknownError` - since a match on the wrong one of two same-named `LLMError`s compiles
+  and never fires. `ImageServiceError`'s second field is `statusCode` (`code` is the derived `Option[String]`), and
+  the image generation clients return `Either[LLMError, _]`, so a match on their result needs a case for other
+  errors. Being an `LLMError`, each case says whether trying again can help, which `LLMError.isRecoverable` needs (it
+  threw a `MatchError` on an image error otherwise): `ImageRateLimitError` and an `ImageServiceError` with a transient
+  status (`0`, `408`, `429` or any `5xx`) are `RecoverableError`; the other `ImageServiceError`s and every other case
+  are `NonRecoverableError`. `ImageServiceError` is a sealed type with two cases (`TransientImageServiceError`,
+  `RejectedImageServiceError`) behind `ImageServiceError(message, status)` and `case ImageServiceError(message, status)`;
+  `ToolRegistry` restores the interrupt flag when a tool throws an interruption wrapped in another exception (it
+  already did for a bare `InterruptedException`), as `MCPToolRegistry` does; `MCPTransportImpl.sendRequest`, `sendNotification`,
   `MCPClient.initialize` and `getTools` return `Result` instead of `Either[String, _]` (read the old string as
   `error.message`; the messages are unchanged); the concrete embedding providers' `embed` returns
   `Result[EmbeddingResponse]`. `llm4s-provider-testkit` gains `assertCallCancelsWhenInterrupted` and
