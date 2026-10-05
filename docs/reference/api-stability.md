@@ -7,7 +7,8 @@ nav_order: 12
 
 # API Stability
 
-This page says how binary compatibility is checked and which modules are covered. Which packages are
+This page says how binary compatibility is checked and which modules are covered; the promise it serves, and
+how an API is deprecated and removed, are in the [Compatibility and Deprecation Policy](compatibility-policy). Which packages are
 stable, beta or experimental is defined in [1.0 Scope](v1-scope), the source of truth for tiers; this
 page does not repeat that list, so the two cannot drift.
 

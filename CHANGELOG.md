@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Compatibility and Deprecation Policy** ([docs/reference/compatibility-policy.md](docs/reference/compatibility-policy.md),
+  [#1281](https://github.com/llm4s/llm4s/issues/1281)): one page for what you can rely on when you upgrade, by
+  tier; how versions are read (`early-semver`, 0.5.0 as the MiMa baseline); what the promise covers (public
+  types, the provider-author SPI, the error model, documented configuration keys) and what it does not; the
+  rules for changing a Frozen API without breaking it; and how an API is deprecated (`@deprecated` with the
+  replacement and the release, a CHANGELOG entry) and removed (never within a major version). It collects
+  what `1.0 Scope`, `API Stability`, the provider guide and `CLAUDE.md` already said, and links to each.
 - **Agent middleware for graph runs** (Experimental, `org.llm4s.agent.graph.middleware`,
   [#1279](https://github.com/llm4s/llm4s/issues/1279)): `AgentMiddleware` is one ordered extension
   point with four pass-through hooks - `beforeAgent`, `afterAgent`, `wrapModelCall` and

@@ -104,7 +104,7 @@ Notes:
 ## What Frozen means
 
 - **Source and binary compatible within 1.x.** Once `0.5.0` publishes the split modules, `mimaPreviousArtifacts` enforces binary compatibility on every Frozen module for all subsequent 1.x releases.
-- **Deprecate before removing.** A Frozen API is only removed after a deprecation cycle, never dropped outright in a minor release.
+- **Deprecate before removing.** A Frozen API is only removed after a deprecation cycle, never dropped outright in a minor release. See the [Compatibility and Deprecation Policy](compatibility-policy).
 - **Beta and Experimental can move faster.** They may change in a minor release, but a migration note ships with the change in the same release's CHANGELOG.
 
 ## Scala and JDK support
