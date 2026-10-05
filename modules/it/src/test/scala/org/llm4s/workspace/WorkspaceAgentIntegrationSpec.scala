@@ -1,6 +1,6 @@
 package org.llm4s.workspace
 
-import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.{ Agent, ThreadStatus }
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Workspace
 import org.llm4s.llmconnect.LLMClient
@@ -96,13 +96,13 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
   }
 
   /** Runs the agent over the real workspace tools and returns the final state's tool messages. */
-  private def runScript(script: (String, ujson.Value)*): (AgentStatus, Seq[ToolMessage]) = {
+  private def runScript(script: (String, ujson.Value)*): (ThreadStatus, Seq[ToolMessage]) = {
     Tier.require(isDockerAvailable, s"Docker not available or $EnableDockerEnvVar!=true")
     val state = (for {
       toolSeq <- WorkspaceTools.createDefaultWorkspaceTools(workspace)
       state   <- new Agent(new ScriptedToolCallLLM(script)).run("go", new ToolRegistry(toolSeq), maxSteps = Some(10))
     } yield state).fold(e => fail(s"agent run failed: ${e.formatted}"), identity)
-    (state.status, state.conversation.messages.collect { case m: ToolMessage => m })
+    (state.status, state.messages.collect { case m: ToolMessage => m })
   }
 
   private def resultOf(m: ToolMessage): ujson.Value = ujson.read(m.content)
@@ -110,7 +110,7 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
   "An Agent with the workspace tools" should "run a command in the container and receive its stdout and exit code" in {
     val (status, tms) = runScript("execute_command" -> ujson.Obj("command" -> "echo hello_from_workspace"))
 
-    status shouldBe AgentStatus.Complete
+    status shouldBe ThreadStatus.Completed
     tms should have size 1
     val r = resultOf(tms.head)
     r("exit_code").num.toInt shouldBe 0
@@ -139,7 +139,7 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
       "read_file"  -> ujson.Obj("path" -> "agent_roundtrip.txt")
     )
 
-    status shouldBe AgentStatus.Complete
+    status shouldBe ThreadStatus.Completed
     tms should have size 2
     resultOf(tms(1))("content").str shouldBe "round-trip payload"
     // The write really landed on the mounted host directory, not just in a fake.
@@ -159,7 +159,7 @@ class WorkspaceAgentIntegrationSpec extends AnyFlatSpec with Matchers with Befor
   it should "surface a tool error for a file that does not exist" in {
     val (status, tms) = runScript("read_file" -> ujson.Obj("path" -> "no_such_file.txt"))
 
-    status shouldBe AgentStatus.Complete
+    status shouldBe ThreadStatus.Completed
     tms should have size 1
     // A failed read must not look like a successful one: there is no "content" field.
     Try(resultOf(tms.head)).toOption.flatMap(_.objOpt).forall(o => !o.value.contains("content")) shouldBe true

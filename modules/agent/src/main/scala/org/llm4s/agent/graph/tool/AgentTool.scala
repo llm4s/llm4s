@@ -2,7 +2,7 @@ package org.llm4s.agent.graph.tool
 
 import org.llm4s.agent.graph.{ RunContext, StateKey, StateUpdate, ThreadState }
 import org.llm4s.error.{ CancelledError, LLMError }
-import org.llm4s.toolapi.{ SchemaDefinition, ToolCallError, ToolFunction }
+import org.llm4s.toolapi.{ SchemaDefinition, ToolCallError, ToolCallErrorJson, ToolFunction }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -135,8 +135,11 @@ enum ToolOutcome:
   /** The call's result for the model, and an update to keys the tool declares in `writes`. */
   case Success(content: ujson.Value, update: StateUpdate = StateUpdate.empty)
 
-  /** A tool-level failure: the model sees `message`; the run continues. */
-  case Error(message: String)
+  /**
+   * A tool-level failure; the run continues. The model sees `message` as `{"error": message}`, or `details` as given
+   * when the tool has a structured form of the failure (a tool function's [[ToolCallError]] as its JSON).
+   */
+  case Error(message: String, details: Option[ujson.Value] = None)
 
   /** The call needs approval before it runs; the loop suspends at its approval node. */
   case NeedsApproval(reason: String)
@@ -158,6 +161,13 @@ trait AgentTool[A]:
   def writes: Set[StateKey[?, ?]] = Set.empty
 
   def execute(args: A, context: ToolContext): ToolOutcome
+
+  /**
+   * Whether `execute` checks its own arguments, so the loop passes them on as the model gave them instead of validating
+   * them against the schema first: true for an adapted core `ToolFunction`, whose own validation reports a problem as a
+   * structured `ToolCallError` the model has always seen.
+   */
+  private[graph] def selfValidating: Boolean = false
 
   /** Continues a call after its question was answered; only [[AgentTool.Asking]] takes answers. */
   private[tool] def resumeErased(
@@ -224,12 +234,14 @@ object AgentTool:
       function.schema.asInstanceOf[SchemaDefinition[ujson.Value]]
     )
 
+    override private[graph] def selfValidating: Boolean = true
+
     def execute(args: ujson.Value, context: ToolContext): ToolOutcome =
       run(args) match
         case Right(json) => ToolOutcome.Success(json)
         // a cancelled call is the run's cancellation, not a result the model should see
         case Left(_: ToolCallError.Cancelled) => ToolOutcome.Fatal(CancelledError(s"tool ${function.name}"))
-        case Left(error)                      => ToolOutcome.Error(error.getFormattedMessage)
+        case Left(error) => ToolOutcome.Error(error.getFormattedMessage, Some(ToolCallErrorJson.toJson(error)))
 
   /**
    * A tool that asks questions of type `Q` and takes answers of type `Ans`. Its spec is `base`

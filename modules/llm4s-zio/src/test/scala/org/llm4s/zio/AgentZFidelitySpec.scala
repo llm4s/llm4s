@@ -4,7 +4,7 @@ import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentContext, AgentThread, ThreadStatus }
 import org.llm4s.agent.guardrails.builtin.LengthCheck
 import org.llm4s.error.{ SimpleError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
@@ -12,7 +12,6 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 import upickle.default.*
-import zio.ZIO
 import zio.test.*
 
 /** Proves that arguments given to `AgentZ` reach the underlying `Agent` unchanged. */
@@ -66,7 +65,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
 
   private def z(client: LLMClient) = AgentZ(new Agent(client))
 
-  private val failed = AgentStatus.Failed("Maximum step limit reached")
+  private val failed = ThreadStatus.Failed("Maximum step limit reached")
 
   val spec =
     suite("AgentZ fidelity")(
@@ -77,7 +76,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
           .run("q", tools, systemPromptAddition = Some("EXTRA-INSTRUCTIONS"), completionOptions = opts)
           .map { state =>
             val sent = client.conversations.get(0).messages
-            assertTrue(state.status == AgentStatus.Complete) &&
+            assertTrue(state.status == ThreadStatus.Completed) &&
             assertTrue(client.calls.get() == 1) &&
             assertTrue(sent.collect { case m: SystemMessage => m.content }.exists(_.contains("EXTRA-INSTRUCTIONS"))) &&
             assertTrue(sent.collect { case m: UserMessage => m.content } == Seq("q")) &&
@@ -87,17 +86,17 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
           }
       },
       test(
-        "run honours maxSteps = Some(2) (a tool round trip costs two steps): one model call, then the step-limit failure"
+        "run honours maxSteps = Some(1) (the number of model calls): one model call, then the step-limit failure"
       ) {
         val client = new Recording(toolCall)
-        z(client).run("q", tools, maxSteps = Some(2)).map { state =>
+        z(client).run("q", tools, maxSteps = Some(1)).map { state =>
           assertTrue(client.calls.get() == 1) && assertTrue(state.status == failed)
         }
       },
       test("run honours maxSteps = None as unlimited rather than the default cap") {
         val client = new Recording(i => if (i < 60) toolCall(i) else text("finally"))
         z(client).run("q", tools, maxSteps = None).map { state =>
-          assertTrue(client.calls.get() == 61) && assertTrue(state.status == AgentStatus.Complete)
+          assertTrue(client.calls.get() == 61) && assertTrue(state.status == ThreadStatus.Completed)
         }
       },
       test("run applies the Agent default step cap when maxSteps is not given") {
@@ -106,7 +105,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
         new Agent(direct).run("q", tools)
         z(client).run("q", tools).map { state =>
           assertTrue(client.calls.get() == direct.calls.get()) &&
-          assertTrue(client.calls.get() == Agent.DefaultMaxSteps / 2) &&
+          assertTrue(client.calls.get() == Agent.DefaultMaxSteps) &&
           assertTrue(state.status == failed)
         }
       },
@@ -135,7 +134,7 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
             assertTrue(exists)
           }
       },
-      test("run turns a thrown non-LLM exception into a defect, unchanged") {
+      test("run reports an exception thrown by the client as a failure: an UnknownError holding the throwable") {
         val failure = new IllegalStateException("provider exploded")
         val client = new LLMClient {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] = throw failure
@@ -148,16 +147,17 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
           def getContextWindow(): Int     = 1
           def getReserveCompletion(): Int = 1
         }
-        z(client).run("q", ToolRegistry.empty).exit.map { exit =>
-          assertTrue(exit.causeOption.flatMap(_.dieOption).contains(failure))
+        z(client).run("q", ToolRegistry.empty).flip.map {
+          case unknown: org.llm4s.error.UnknownError => assertTrue(unknown.cause eq failure)
+          case other                                 => assertTrue(other == null)
         }
       },
       test("continueConversation forwards the previous state, the message and maxSteps") {
         val loop = new Recording(toolCall)
         for {
           first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
-          next  <- z(loop).continueConversation(first.copy(tools = tools), "q2", maxSteps = Some(3))
-        } yield assertTrue(loop.calls.get() == 2) && // maxSteps = 3: two steps per tool round trip
+          next  <- z(loop).continueConversation(first, "q2", tools, maxSteps = Some(3))
+        } yield assertTrue(loop.calls.get() == 3) && // maxSteps = 3: three model calls
           assertTrue(next.status == failed) &&
           assertTrue(loop.conversations.get(0).messages.collect { case m: UserMessage => m.content } == Seq("q1", "q2"))
       },
@@ -165,15 +165,20 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
         val loop = new Recording(i => if (i < 60) toolCall(i) else text("end"))
         for {
           first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
-          next  <- z(loop).continueConversation(first.copy(tools = tools), "q2")
-        } yield assertTrue(loop.calls.get() == 61) && assertTrue(next.status == AgentStatus.Complete)
+          next  <- z(loop).continueConversation(first, "q2", tools)
+        } yield assertTrue(loop.calls.get() == 61) && assertTrue(next.status == ThreadStatus.Completed)
       },
       test("continueConversation applies input guardrails to the new message and does not call the model") {
         val client = new Recording(_ => text("x"))
         for {
           first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
           err <- z(client)
-            .continueConversation(first, "far too long a follow up", inputGuardrails = Seq(new LengthCheck(1, 5)))
+            .continueConversation(
+              first,
+              "far too long a follow up",
+              ToolRegistry.empty,
+              inputGuardrails = Seq(new LengthCheck(1, 5))
+            )
             .flip
         } yield assertTrue(err.isInstanceOf[ValidationError]) && assertTrue(client.calls.get() == 0)
       },
@@ -181,15 +186,14 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
         for {
           first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
           err <- z(new Recording(_ => text("ok")))
-            .continueConversation(first, "q2", outputGuardrails = Seq(new LengthCheck(10, 100)))
+            .continueConversation(first, "q2", ToolRegistry.empty, outputGuardrails = Seq(new LengthCheck(10, 100)))
             .flip
         } yield assertTrue(err.isInstanceOf[ValidationError])
       },
-      test("continueConversation refuses an incomplete state with a ValidationError") {
-        val inProgress = new Agent(new Recording(_ => text("x"))).initializeSafe("q", ToolRegistry.empty)
-        ZIO
-          .fromEither(inProgress)
-          .flatMap(s => z(new Recording(_ => text("x"))).continueConversation(s, "more"))
+      test("continueConversation refuses a suspended thread with a ValidationError") {
+        val suspended = AgentThread("t", status = ThreadStatus.Suspended(Vector.empty))
+        z(new Recording(_ => text("x")))
+          .continueConversation(suspended, "more", ToolRegistry.empty)
           .flip
           .map(err => assertTrue(err.isInstanceOf[ValidationError]))
       },
@@ -207,13 +211,13 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
         }
         for {
           first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
-          err   <- z(client).continueConversation(first, "q2").flip
+          err   <- z(client).continueConversation(first, "q2", ToolRegistry.empty).flip
         } yield assertTrue(err == SimpleError("nope"))
       },
       test("agent() builds an AgentZ over the same underlying client") {
         val client = new Recording(_ => text("via-client"))
         LLMClientZ(client).agent().run("q", ToolRegistry.empty).map { state =>
-          assertTrue(state.status == AgentStatus.Complete) && assertTrue(client.calls.get() == 1)
+          assertTrue(state.status == ThreadStatus.Completed) && assertTrue(client.calls.get() == 1)
         }
       }
     ) @@ TestAspect.sequential

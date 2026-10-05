@@ -1,6 +1,6 @@
 package org.llm4s.javaapi
 
-import org.llm4s.agent.AgentStatus
+import org.llm4s.agent.ThreadStatus
 import org.llm4s.error.{ APIError, LLMError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -47,12 +47,12 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
     override def getReserveCompletion(): Int = 512
   }
 
-  "run(String)" should "return a successful AgentState when the LLM completes normally" in {
+  "run(String)" should "return a successful AgentThread when the LLM completes normally" in {
     val agent  = Llm4s.createAgent(new JLlmClient(completingClient("42")))
     val result = agent.run("What is 6*7?")
     result.isSuccess shouldBe true
     val state = result.get()
-    state.status shouldBe AgentStatus.Complete
+    state.status shouldBe ThreadStatus.Completed
   }
 
   it should "return the LLM answer in the final conversation" in {

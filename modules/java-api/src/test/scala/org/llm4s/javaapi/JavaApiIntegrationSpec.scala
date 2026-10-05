@@ -1,6 +1,6 @@
 package org.llm4s.javaapi
 
-import org.llm4s.agent.AgentStatus
+import org.llm4s.agent.ThreadStatus
 import org.llm4s.error.APIError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -67,7 +67,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val agent  = Llm4s.createAgent(client)
     val result = agent.run("What is 6*7?")
     result.isSuccess shouldBe true
-    result.get().status shouldBe AgentStatus.Complete
+    result.get().status shouldBe ThreadStatus.Completed
   }
 
   it should "surface the LLM response in the final conversation" in {
@@ -188,7 +188,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val agent  = Llm4s.createAgent(client)
     val result = agent.run("Echo 'world'", tools)
     result.isSuccess shouldBe true
-    result.get().status shouldBe AgentStatus.Complete
+    result.get().status shouldBe ThreadStatus.Completed
   }
 
   it should "actually execute the tool and feed its output back into the conversation" in {

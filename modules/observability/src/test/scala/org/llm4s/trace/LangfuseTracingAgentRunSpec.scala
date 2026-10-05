@@ -1,6 +1,6 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentContext, ThreadStatus }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -112,7 +112,7 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
         .run("Echo hello", new ToolRegistry(Seq(tool)), context = AgentContext(tracing = Some(tracing)))
     }
 
-    result.map(_.status) shouldBe Right(AgentStatus.Complete)
+    result.map(_.status) shouldBe Right(ThreadStatus.Completed)
     (tracing, http, tracing.batches.toSeq.flatten)
   }
 
@@ -162,7 +162,7 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
     trace("body")("name").str shouldBe "LLM4S Agent Run"
     trace("body")("input").str shouldBe "Echo hello"
     trace("body")("output").str shouldBe "Echoed."
-    trace("body")("metadata")("status").str shouldBe AgentStatus.Complete.toString
+    trace("body")("metadata")("status").str shouldBe ThreadStatus.Completed.toString
 
     val spans = last.tail
     spans.map(_("type").str).distinct shouldBe Seq("span-create")

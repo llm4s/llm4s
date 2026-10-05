@@ -113,17 +113,13 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
   test("should trace agent state updates") {
     val tracer = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
 
-    val agentState = org.llm4s.agent.AgentState(
-      conversation = org.llm4s.llmconnect.model.Conversation(
-        Vector(
-          org.llm4s.llmconnect.model.SystemMessage("You are a helpful assistant"),
-          org.llm4s.llmconnect.model.UserMessage("Hello")
-        )
+    val agentState = org.llm4s.agent.AgentThread(
+      threadId = "t",
+      messages = Vector(
+        org.llm4s.llmconnect.model.SystemMessage("You are a helpful assistant"),
+        org.llm4s.llmconnect.model.UserMessage("Hello")
       ),
-      tools = new org.llm4s.toolapi.ToolRegistry(Vector.empty),
-      initialQuery = Some("Test query"),
-      status = org.llm4s.agent.AgentStatus.InProgress,
-      logs = Vector("Log entry 1", "Log entry 2")
+      status = org.llm4s.agent.ThreadStatus.Suspended(Vector.empty)
     )
 
     val result = tracer.traceEvent(agentState.toTraceEvent)

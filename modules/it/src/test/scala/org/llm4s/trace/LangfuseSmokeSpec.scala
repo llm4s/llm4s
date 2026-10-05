@@ -1,6 +1,6 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentContext, ThreadStatus }
 import org.llm4s.config.LangfuseConfigLoader
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.it.Tier
@@ -120,7 +120,7 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
       new Agent(client).run(query, new ToolRegistry(Seq(tool)), context = AgentContext(tracing = Some(tracing)))
     }
 
-    state.map(_.status) shouldBe Right(AgentStatus.Complete)
+    state.map(_.status) shouldBe Right(ThreadStatus.Completed)
     tracing.results should not be empty
     all(tracing.results) shouldBe Right(())
 

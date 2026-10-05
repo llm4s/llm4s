@@ -2,7 +2,7 @@ package org.llm4s.effect.cats
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.{ Agent, ThreadStatus }
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
@@ -39,18 +39,18 @@ class AgentIOSpec extends AnyFlatSpec with Matchers {
     def getReserveCompletion(): Int = 256
   }
 
-  "AgentIO.run" should "return AgentState with Complete status when the agent finishes" in {
+  "AgentIO.run" should "return AgentThread with Completed status when the agent finishes" in {
     val state = AgentIO[IO](new Agent(successClient("4")))
       .run("What is 2+2?", ToolRegistry.empty)
       .unsafeRunSync()
-    state.status shouldBe AgentStatus.Complete
+    state.status shouldBe ThreadStatus.Completed
   }
 
   it should "include the query in the conversation" in {
     val state = AgentIO[IO](new Agent(successClient("answer")))
       .run("my query", ToolRegistry.empty)
       .unsafeRunSync()
-    val messages = state.conversation.messages.map(_.content)
+    val messages = state.messages.map(_.content)
     messages should contain("my query")
   }
 
@@ -73,22 +73,22 @@ class AgentIOSpec extends AnyFlatSpec with Matchers {
     ex.asInstanceOf[LLMException].error shouldBe SimpleError("agent-fail")
   }
 
-  "AgentIO.continueConversation" should "return AgentState with Complete status on a follow-up turn" in {
+  "AgentIO.continueConversation" should "return AgentThread with Completed status on a follow-up turn" in {
     val agentIO = AgentIO[IO](new Agent(successClient("6")))
     val state = for {
       s1 <- agentIO.run("What is 2+2?", ToolRegistry.empty)
-      s2 <- agentIO.continueConversation(s1, "And 3+3?")
+      s2 <- agentIO.continueConversation(s1, "And 3+3?", ToolRegistry.empty)
     } yield s2
-    state.unsafeRunSync().status shouldBe AgentStatus.Complete
+    state.unsafeRunSync().status shouldBe ThreadStatus.Completed
   }
 
   it should "append the follow-up question to the conversation history" in {
     val agentIO = AgentIO[IO](new Agent(successClient("6")))
     val state = for {
       s1 <- agentIO.run("First question", ToolRegistry.empty)
-      s2 <- agentIO.continueConversation(s1, "Second question")
+      s2 <- agentIO.continueConversation(s1, "Second question", ToolRegistry.empty)
     } yield s2
-    val messages = state.unsafeRunSync().conversation.messages.map(_.content)
+    val messages = state.unsafeRunSync().messages.map(_.content)
     messages should contain("Second question")
   }
 
@@ -98,7 +98,7 @@ class AgentIOSpec extends AnyFlatSpec with Matchers {
       .unsafeRunSync()
     a[LLMException] should be thrownBy {
       AgentIO[IO](new Agent(failingClient))
-        .continueConversation(s1, "Follow-up")
+        .continueConversation(s1, "Follow-up", ToolRegistry.empty)
         .unsafeRunSync()
     }
   }

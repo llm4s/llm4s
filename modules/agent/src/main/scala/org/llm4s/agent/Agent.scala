@@ -174,7 +174,7 @@ class Agent(client: LLMClient, runtime: GraphRuntime = GraphRuntime.inMemory()) 
       val result = outcome match {
         case ToolOutcome.Success(ujson.Str(text), _) => text
         case ToolOutcome.Success(content, _)         => content.render()
-        case ToolOutcome.Error(message)              => message
+        case ToolOutcome.Error(message, _)           => message
         case ToolOutcome.NeedsApproval(reason)       => s"needs approval: $reason"
         case ToolOutcome.Ask(_)                      => "asked a question"
         case ToolOutcome.Fatal(error)                => error.message
@@ -256,9 +256,25 @@ class Agent(client: LLMClient, runtime: GraphRuntime = GraphRuntime.inMemory()) 
         if (history.isEmpty && usage == UsageSummary()) Right(())
         else runtime.seed(threadId, loop.graph, seedUpdate(history, usage))
       handle <- runtime.start(threadId, loop.graph, text, runConfig(setup))
-      result <- handle.await()
+      result <- awaitRun(handle)
       thread <- settle(setup, threadId, result)
     } yield thread
+
+  /**
+   * Waits for the run. A caller interrupted while it waits - a cancelled fiber, a timed-out future - cancels the run too,
+   * which interrupts the model call in flight, and returns once the run has stopped, with its interrupt flag set again:
+   * the run does not outlive its caller.
+   */
+  private def awaitRun[O](handle: RunHandle[O]): Result[RunResult[O]] = {
+    val result = handle.await()
+    if (Thread.currentThread().isInterrupted) {
+      handle.cancel()
+      Thread.interrupted()
+      handle.await()
+      Thread.currentThread().interrupt()
+    }
+    result
+  }
 
   /** What a run's result means for the conversation: a thread, a handoff run, or the run's error. */
   private def settle(setup: Setup, threadId: ThreadId, result: RunResult[String]): Result[AgentThread] = {
@@ -577,7 +593,7 @@ class Agent(client: LLMClient, runtime: GraphRuntime = GraphRuntime.inMemory()) 
     for {
       loop   <- loopFor(setup)
       handle <- runtime.recover(ThreadId(thread.threadId), loop.graph, runConfig(setup, withInput = false))
-      result <- handle.await()
+      result <- awaitRun(handle)
       done   <- settle(setup, ThreadId(thread.threadId), result)
     } yield done
   }
@@ -623,7 +639,7 @@ class Agent(client: LLMClient, runtime: GraphRuntime = GraphRuntime.inMemory()) 
         answers.map((id, answer) => InterruptId(id) -> answer),
         runConfig(setup, withInput = false)
       )
-      result <- handle.await()
+      result <- awaitRun(handle)
       done   <- settle(setup, ThreadId(thread.threadId), result)
     } yield done
   }

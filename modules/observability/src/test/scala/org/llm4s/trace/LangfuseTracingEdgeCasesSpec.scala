@@ -1,10 +1,9 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.{ AgentState, AgentStatus }
+import org.llm4s.agent.{ AgentThread, ThreadStatus }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.LangfuseConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.ToolRegistry
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import scala.concurrent.duration.*
@@ -261,17 +260,14 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val state = AgentState(
-      conversation = Conversation(
-        Seq(
-          SystemMessage("You are helpful"),
-          UserMessage("Hello"),
-          AssistantMessage(Some("Hi there!"), Seq.empty)
-        )
+    val state = AgentThread(
+      threadId = "t",
+      messages = Seq(
+        SystemMessage("You are helpful"),
+        UserMessage("Hello"),
+        AssistantMessage(Some("Hi there!"), Seq.empty)
       ),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.Complete,
-      logs = Vector("log1")
+      status = ThreadStatus.Completed
     )
 
     val result = tracing.traceEvent(state.toTraceEvent)
@@ -288,9 +284,9 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     batch(0)("type").str shouldBe "trace-create"
     batch(0)("body")("input").str shouldBe "Hello"
     batch(0)("body")("output").str shouldBe "Hi there!"
-    batch(0)("body")("metadata")("status").str shouldBe AgentStatus.Complete.toString
+    batch(0)("body")("metadata")("status").str shouldBe ThreadStatus.Completed.toString
     batch(0)("body")("metadata")("message_count").num shouldBe 3
-    batch(0)("body")("metadata")("log_count").num shouldBe 1
+    batch(0)("body")("metadata")("log_count").num shouldBe 0
 
     // Child spans
     batch(1)("type").str shouldBe "span-create"
@@ -309,12 +305,15 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracing = makeTracing(mock)
     val call    = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
 
-    val state = AgentState(
-      conversation = Conversation(
-        Seq(UserMessage("1 + 2?"), AssistantMessage(None, Seq(call)), ToolMessage("3", "call-1"), AssistantMessage("3"))
+    val state = AgentThread(
+      threadId = "t",
+      messages = Seq(
+        UserMessage("1 + 2?"),
+        AssistantMessage(None, Seq(call)),
+        ToolMessage("3", "call-1"),
+        AssistantMessage("3")
       ),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.Complete
+      status = ThreadStatus.Completed
     )
 
     tracing.traceEvent(state.toTraceEvent) shouldBe Right(())
@@ -337,11 +336,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val state = AgentState(
-      conversation = Conversation(Seq.empty),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.InProgress
-    )
+    val state = AgentThread("t", status = ThreadStatus.Suspended(Vector.empty))
 
     val result = tracing.traceEvent(state.toTraceEvent)
 

@@ -125,10 +125,10 @@ object TraceEvent {
    *
    * This replaced `Tracing.traceAgentState(AgentState)` (D5, #1133), which tied
    * the tracing contract to the agent runtime. The agent builds it with
-   * `AgentState#toTraceEvent`; it carries plain values and conversation
-   * [[org.llm4s.llmconnect.model.Message]]s, never `AgentState` itself.
+   * `AgentThread#toTraceEvent`; it carries plain values and conversation
+   * [[org.llm4s.llmconnect.model.Message]]s, never `AgentThread` itself.
    *
-   * @param status       the agent status, as `AgentStatus#toString`
+   * @param status       the agent status, as `ThreadStatus#toString`
    * @param messageCount the number of messages in the conversation
    * @param logCount     the number of agent log entries
    * @param messages     the conversation at this point, for backends that record it

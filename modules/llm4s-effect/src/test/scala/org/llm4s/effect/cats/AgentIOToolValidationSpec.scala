@@ -5,7 +5,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentThread, ThreadStatus }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
@@ -86,7 +86,7 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with Matchers {
     val client = new Recording(invalidThenText(ujson.Obj()))
     val state  = io(client).run("q", tools).unsafeRunSync()
     client.calls.get() shouldBe 2
-    state.status shouldBe AgentStatus.Complete
+    state.status shouldBe ThreadStatus.Completed
     executed.get() shouldBe 0
     val seen = toolResults(client.conversations.get(1))
     seen.map(_.toolCallId) shouldBe Seq("call-0")
@@ -101,7 +101,7 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with Matchers {
     executed.set(0)
     val client = new Recording(invalidThenText(ujson.Obj("v" -> 42)))
     val state  = io(client).run("q", tools).unsafeRunSync()
-    state.status shouldBe AgentStatus.Complete
+    state.status shouldBe ThreadStatus.Completed
     executed.get() shouldBe 0
     ujson.read(toolResults(client.conversations.get(1)).head.content)("errorType").str shouldBe "handler_error"
   }
@@ -110,7 +110,7 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with Matchers {
     executed.set(0)
     val client = new Recording(invalidThenText(ujson.Obj("v" -> "ok")))
     val state  = io(client).run("q", tools).unsafeRunSync()
-    state.status shouldBe AgentStatus.Complete
+    state.status shouldBe ThreadStatus.Completed
     executed.get() shouldBe 1
     ujson.read(toolResults(client.conversations.get(1)).head.content).obj.contains("isError") shouldBe false
   }
@@ -118,18 +118,18 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with Matchers {
   it should "end at the step limit, not hang, when the model never fixes its arguments" in {
     executed.set(0)
     val client = new Recording(i => if (i < 40) callWith(i, ujson.Obj()) else text("late"))
-    val state  = io(client).run("q", tools, maxSteps = Some(4)).unsafeRunSync()
+    val state  = io(client).run("q", tools, maxSteps = Some(2)).unsafeRunSync()
     client.calls.get() shouldBe 2
-    state.status shouldBe AgentStatus.Failed("Maximum step limit reached")
+    state.status shouldBe ThreadStatus.Failed("Maximum step limit reached")
     executed.get() shouldBe 0
   }
 
   "AgentIO.continueConversation" should "hand an invalid tool call back to the model too" in {
     executed.set(0)
-    val first: AgentState = io(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty).unsafeRunSync()
-    val client            = new Recording(invalidThenText(ujson.Obj()))
-    val next              = io(client).continueConversation(first.copy(tools = tools), "q2").unsafeRunSync()
-    next.status shouldBe AgentStatus.Complete
+    val first: AgentThread = io(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty).unsafeRunSync()
+    val client             = new Recording(invalidThenText(ujson.Obj()))
+    val next               = io(client).continueConversation(first, "q2", tools).unsafeRunSync()
+    next.status shouldBe ThreadStatus.Completed
     client.calls.get() shouldBe 2
     executed.get() shouldBe 0
     ujson.read(toolResults(client.conversations.get(1)).head.content)("errorType").str shouldBe "handler_error"
@@ -148,7 +148,7 @@ class AgentIOToolValidationSpec extends AnyFlatSpec with Matchers {
       def getReserveCompletion(): Int = 1
     }
     val err =
-      io(client).continueConversation(first.copy(tools = tools), "q2").attempt.unsafeRunSync().left.toOption.get
+      io(client).continueConversation(first, "q2", tools).attempt.unsafeRunSync().left.toOption.get
     err.asInstanceOf[LLMException].error shouldBe org.llm4s.error.SimpleError("provider down")
   }
 }

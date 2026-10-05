@@ -3,7 +3,7 @@ package org.llm4s.zio
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
-import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.{ Agent, ThreadStatus }
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -88,7 +88,7 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
           val seen = toolResults(client.conversations.get(1))
           val json = ujson.read(seen.head.content)
           assertTrue(client.calls.get() == 2) &&
-          assertTrue(state.status == AgentStatus.Complete) &&
+          assertTrue(state.status == ThreadStatus.Completed) &&
           assertTrue(executed.get() == 0) &&
           assertTrue(seen.map(_.toolCallId) == Seq("call-0")) &&
           assertTrue(json("isError").bool) &&
@@ -101,7 +101,7 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
         executed.set(0)
         val client = new Recording(invalidThenText(ujson.Obj("v" -> 42)))
         z(client).run("q", tools).map { state =>
-          assertTrue(state.status == AgentStatus.Complete) &&
+          assertTrue(state.status == ThreadStatus.Completed) &&
           assertTrue(executed.get() == 0) &&
           assertTrue(
             ujson.read(toolResults(client.conversations.get(1)).head.content)("errorType").str == "handler_error"
@@ -112,7 +112,7 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
         executed.set(0)
         val client = new Recording(invalidThenText(ujson.Obj("v" -> "ok")))
         z(client).run("q", tools).map { state =>
-          assertTrue(state.status == AgentStatus.Complete) &&
+          assertTrue(state.status == ThreadStatus.Completed) &&
           assertTrue(executed.get() == 1) &&
           assertTrue(!ujson.read(toolResults(client.conversations.get(1)).head.content).obj.contains("isError"))
         }
@@ -120,9 +120,9 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
       test("run ends at the step limit, not hang, when the model never fixes its arguments") {
         executed.set(0)
         val client = new Recording(i => if (i < 40) callWith(i, ujson.Obj()) else text("late"))
-        z(client).run("q", tools, maxSteps = Some(4)).map { state =>
+        z(client).run("q", tools, maxSteps = Some(2)).map { state =>
           assertTrue(client.calls.get() == 2) &&
-          assertTrue(state.status == AgentStatus.Failed("Maximum step limit reached")) &&
+          assertTrue(state.status == ThreadStatus.Failed("Maximum step limit reached")) &&
           assertTrue(executed.get() == 0)
         }
       },
@@ -131,8 +131,8 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
         val client = new Recording(invalidThenText(ujson.Obj()))
         for {
           first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
-          next  <- z(client).continueConversation(first.copy(tools = tools), "q2")
-        } yield assertTrue(next.status == AgentStatus.Complete) &&
+          next  <- z(client).continueConversation(first, "q2", tools)
+        } yield assertTrue(next.status == ThreadStatus.Completed) &&
           assertTrue(client.calls.get() == 2) &&
           assertTrue(executed.get() == 0) &&
           assertTrue(
@@ -154,7 +154,7 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
         }
         for {
           first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
-          err   <- z(client).continueConversation(first.copy(tools = tools), "q2").flip
+          err   <- z(client).continueConversation(first, "q2", tools).flip
         } yield assertTrue(err == SimpleError("provider down"))
       }
     ) @@ TestAspect.sequential

@@ -131,8 +131,8 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
     tool.writes shouldBe Set.empty
     tool.execute(ujson.Obj("message" -> "hi"), context) shouldBe ToolOutcome.Success(ujson.Obj("query" -> "hi"))
     tool.execute(ujson.Obj(), context) match {
-      case ToolOutcome.Error(message) => message should include("echo")
-      case other                      => fail(s"expected an error, got $other")
+      case ToolOutcome.Error(message, _) => message should include("echo")
+      case other                         => fail(s"expected an error, got $other")
     }
   }
 

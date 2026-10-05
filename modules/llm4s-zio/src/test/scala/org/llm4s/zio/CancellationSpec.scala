@@ -3,7 +3,7 @@ package org.llm4s.zio
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 
-import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.{ Agent, ThreadStatus }
 import org.llm4s.error.CancelledError
 import org.llm4s.toolapi.ToolRegistry
 import zio.{ ZIO, durationInt }
@@ -72,10 +72,10 @@ object CancellationSpec extends ZIOSpecDefault {
         val parked = new Parked
         for {
           first    <- AgentZ(new Agent(new Scripted())).run("q1", ToolRegistry.empty)
-          fiber    <- AgentZ(new Agent(parked.client)).continueConversation(first, "q2").fork
+          fiber    <- AgentZ(new Agent(parked.client)).continueConversation(first, "q2", ToolRegistry.empty).fork
           _        <- awaitStarted(parked)
           promptly <- interruptPromptly(fiber)
-        } yield assertTrue(first.status == AgentStatus.Complete) &&
+        } yield assertTrue(first.status == ThreadStatus.Completed) &&
           assertTrue(promptly) &&
           assertTrue(parked.sawInterrupt.get())
       }

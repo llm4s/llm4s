@@ -1,6 +1,6 @@
 package org.llm4s.zio
 
-import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.{ Agent, ThreadStatus }
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
@@ -37,16 +37,16 @@ object AgentZSpec extends ZIOSpecDefault {
   }
 
   val spec = suite("AgentZ")(
-    test("run returns AgentState with Complete status when the agent finishes") {
+    test("run returns AgentThread with Completed status when the agent finishes") {
       for {
         state <- AgentZ(new Agent(successClient("4"))).run("What is 2+2?", ToolRegistry.empty)
-      } yield assertTrue(state.status == AgentStatus.Complete)
+      } yield assertTrue(state.status == ThreadStatus.Completed)
     },
     test("run includes the query in the conversation history") {
       for {
         state <- AgentZ(new Agent(successClient("answer"))).run("my query", ToolRegistry.empty)
       } yield {
-        val messages = state.conversation.messages.map(_.content)
+        val messages = state.messages.map(_.content)
         assertTrue(messages.contains("my query"))
       }
     },
@@ -56,25 +56,25 @@ object AgentZSpec extends ZIOSpecDefault {
         .flip
         .map(err => assertTrue(err == SimpleError("agent-fail")))
     },
-    test("continueConversation returns AgentState with Complete status") {
+    test("continueConversation returns AgentThread with Completed status") {
       for {
         s1 <- AgentZ(new Agent(successClient("4"))).run("What is 2+2?", ToolRegistry.empty)
-        s2 <- AgentZ(new Agent(successClient("6"))).continueConversation(s1, "And 3+3?")
-      } yield assertTrue(s2.status == AgentStatus.Complete)
+        s2 <- AgentZ(new Agent(successClient("6"))).continueConversation(s1, "And 3+3?", ToolRegistry.empty)
+      } yield assertTrue(s2.status == ThreadStatus.Completed)
     },
     test("continueConversation appends follow-up to conversation history") {
       for {
         s1 <- AgentZ(new Agent(successClient("4"))).run("First question", ToolRegistry.empty)
-        s2 <- AgentZ(new Agent(successClient("6"))).continueConversation(s1, "Second question")
+        s2 <- AgentZ(new Agent(successClient("6"))).continueConversation(s1, "Second question", ToolRegistry.empty)
       } yield {
-        val messages = s2.conversation.messages.map(_.content)
+        val messages = s2.messages.map(_.content)
         assertTrue(messages.contains("Second question"))
       }
     },
     test("continueConversation propagates LLMError on failure") {
       for {
         s1  <- AgentZ(new Agent(successClient("4"))).run("First", ToolRegistry.empty)
-        err <- AgentZ(new Agent(failingClient)).continueConversation(s1, "Follow-up").flip
+        err <- AgentZ(new Agent(failingClient)).continueConversation(s1, "Follow-up", ToolRegistry.empty).flip
       } yield assertTrue(err == SimpleError("agent-fail"))
     }
   )

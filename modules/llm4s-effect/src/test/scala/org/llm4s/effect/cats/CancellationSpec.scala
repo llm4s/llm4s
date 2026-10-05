@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
 import cats.effect.IO
 import cats.effect.kernel.Outcome
 import cats.effect.unsafe.implicits.global
-import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.{ Agent, ThreadStatus }
 import org.llm4s.error.CancelledError
 import org.llm4s.toolapi.ToolRegistry
 import org.scalatest.flatspec.AnyFlatSpec
@@ -67,9 +67,10 @@ class CancellationSpec extends AnyFlatSpec with Matchers {
     val first = AgentIO[IO](new Agent(new Scripted()))
       .run("q1", ToolRegistry.empty)
       .unsafeRunSync()
-    first.status shouldBe AgentStatus.Complete
+    first.status shouldBe ThreadStatus.Completed
     val parked = new Parked
-    val fiber  = AgentIO[IO](new Agent(parked.client)).continueConversation(first, "q2").start.unsafeRunSync()
+    val fiber =
+      AgentIO[IO](new Agent(parked.client)).continueConversation(first, "q2", ToolRegistry.empty).start.unsafeRunSync()
     parked.started.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
     fiber.cancel.timeout(PromptSeconds.seconds).attempt.unsafeRunSync().isRight shouldBe true
     withClue("provider thread was never interrupted: ")(parked.sawInterrupt.get() shouldBe true)

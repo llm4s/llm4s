@@ -53,8 +53,13 @@ final case class ToolQuestionRequest(
 ) derives ReadWriter
 
 /** The result the loop wrote for one call, waiting for the batch barrier. */
-final case class ToolResult(assistantMessageId: String, toolCallId: String, content: String, isError: Boolean)
-    derives ReadWriter
+final case class ToolResult(
+  assistantMessageId: String,
+  toolCallId: String,
+  content: String,
+  isError: Boolean,
+  details: Option[ujson.Value] = None
+) derives ReadWriter
 
 /**
  * What one model call returned: the assistant message, and what the provider reported about the call -
@@ -361,7 +366,8 @@ object ToolLoop:
         asked <- state.get(handoff)
       yield
         val toolMessages = ordered.map { r =>
-          val content = if r.isError then ujson.Obj("error" -> r.content).render() else r.content
+          val content =
+            if r.isError then r.details.getOrElse(ujson.Obj("error" -> r.content)).render() else r.content
           StoredMessage(s"${context.position.taskId.value}/tool/${r.toolCallId}", ToolMessage(content, r.toolCallId))
         }
         val done = toolMessages
@@ -460,16 +466,17 @@ object ToolLoop:
     askRefs: Map[String, ResumeRef[ToolQuestionRequest, ujson.Value]]
   ):
 
-    def error(task: ToolTask, message: String): NodeResult = record(task, message, isError = true)
+    def error(task: ToolTask, message: String, details: Option[ujson.Value] = None): NodeResult =
+      record(task, message, isError = true, details)
 
     /** Restores the interrupt flag, so the runtime cancels the task and it records nothing. */
     private def cancelled(error: CancelledError): NodeResult =
       Thread.currentThread().interrupt()
       NodeResult.Fail(error)
 
-    private def record(task: ToolTask, content: String, isError: Boolean): NodeResult =
+    private def record(task: ToolTask, content: String, isError: Boolean, details: Option[ujson.Value]): NodeResult =
       NodeResult.Continue(
-        Command.empty.update(results, ToolResult(task.assistantMessageId, task.call.id, content, isError))
+        Command.empty.update(results, ToolResult(task.assistantMessageId, task.call.id, content, isError, details))
       )
 
     private def suspend(task: ToolTask, call: ToolCall, reason: String, source: ApprovalSource): NodeResult =
@@ -534,13 +541,15 @@ object ToolLoop:
         Try(run).toEither.left.map { thrown =>
           CancelledError.fromThrowable(thrown, s"tool $name").fold(refused(describe(thrown)))(cancelled)
         }
-      for
-        violations <- guarded(tools.validator.validate(tool.spec.argumentSchema, argumentsOf(tool, call)))
-        _          <- Either.cond(violations.isEmpty, (), refused(violations.mkString("; ")))
-        args       <- decode(tool, call).left.map(refused)
-        check      <- guarded(tool.spec.validateDecoded(args))
-        _          <- check.left.map(e => refused(e.message))
-      yield args
+      if tool.selfValidating then Right(argumentsOf(tool, call).asInstanceOf[A])
+      else
+        for
+          violations <- guarded(tools.validator.validate(tool.spec.argumentSchema, argumentsOf(tool, call)))
+          _          <- Either.cond(violations.isEmpty, (), refused(violations.mkString("; ")))
+          args       <- decode(tool, call).left.map(refused)
+          check      <- guarded(tool.spec.validateDecoded(args))
+          _          <- check.left.map(e => refused(e.message))
+        yield args
 
     private def decode[A](tool: AgentTool[A], call: ToolCall): Either[String, A] =
       read(argumentsOf(tool, call))(using tool.spec.codec)
@@ -655,7 +664,7 @@ object ToolLoop:
                 s"tool '$name' updated ${undeclared.map(k => s"'$k'").mkString(", ")}, which neither it nor any middleware declares"
               )
             )
-        case ToolOutcome.Error(message) => error(task, message)
+        case ToolOutcome.Error(message, details) => error(task, message, details)
         case ToolOutcome.NeedsApproval(reason) =>
           val (asker, source) = chain.raisedBy match
             case None     => (s"Tool '$name'", ApprovalSource.Tool)
