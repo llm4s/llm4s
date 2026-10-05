@@ -185,6 +185,11 @@ Global / excludeLintKeys += coveragePolicy
 lazy val publishedArtifactsCheck = taskKey[Unit](
   "Fail the build if a published llm4s-* artifact is not named in v1-scope.md and installation.md"
 )
+// What a release must put on Maven Central, one `artifact <id>` or `stub <id>` per line, for
+// scripts/verify-release.sh. Run it with `sbt -error listPublishedArtifacts`.
+lazy val listPublishedArtifacts = taskKey[Unit](
+  "Print the Maven coordinates a release must publish: artifact lines, then relocation stub lines"
+)
 
 // ---- coverage policy check ----
 // Fails the build when a module has neither a coverage floor nor an explicit opt-out.
@@ -280,6 +285,13 @@ lazy val llm4s = (project in file("."))
     publishedArtifactsCheck := {
       val projects = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
       PublishedArtifacts.check(projects, (ThisBuild / baseDirectory).value, streams.value.log)
+    },
+    listPublishedArtifacts / aggregate := false,
+    listPublishedArtifacts := {
+      val projects      = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
+      val (real, stubs) = PublishedArtifacts.coordinates(projects, (ThisBuild / scalaBinaryVersion).value)
+      real.foreach(a => println(s"artifact $a"))
+      stubs.foreach(a => println(s"stub $a"))
     },
     // Root is an aggregator with no sources of its own. `coverageAggregate` runs here, and
     // the per-module floors are enforced by each module's own `coverageReport`, so the

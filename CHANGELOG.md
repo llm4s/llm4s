@@ -196,6 +196,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SpeechConfigLoader`. TTS output is raw 24 kHz 16-bit mono PCM in `GeneratedAudio`, not MP3. HTTP
   failures map as the chat providers' do (`AuthenticationError`, `RateLimitError`, `ValidationError`,
   `ServiceError`). See [docs/guide/speech.md](docs/guide/speech.md#cloud-providers).
+- **`scripts/verify-release.sh`: check that a release is on Maven Central** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
+  `scripts/verify-release.sh 0.5.0` asks the build which artifacts it publishes (the new
+  `sbt -error listPublishedArtifacts`: 31 artifacts and 5 relocation stubs today) and checks that each
+  resolves at that version, the POM and jar for an artifact and a POM carrying a `<relocation>` for a stub,
+  exiting non-zero with each miss. The release guide's "Verify Release" step was three links. Against 0.4.0
+  it reports all five stubs missing, the known 0.4.0 failure ([#1150](https://github.com/llm4s/llm4s/issues/1150));
+  against 0.4.1 it passes.
 - **`llm4s-watsonx`: IBM watsonx.ai provider (Beta, built on deprecated endpoints)** ([#1019](https://github.com/llm4s/llm4s/issues/1019)):
   IBM's [February 2026 release notes](https://www.ibm.com/docs/en/software-hub/5.3.x?topic=new-watsonxai)
   deprecate the "Infer text" and "Infer text event stream" endpoints this module uses; it has never

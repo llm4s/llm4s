@@ -30,6 +30,19 @@ object PublishedArtifacts {
     published.sorted.map(a => (a, mentions(scope, a), mentions(installation, a))).filterNot { case (_, s, i) => s && i }
 
   /**
+   * The coordinates a release must put on Maven Central, as (real artifacts, relocation stubs).
+   *
+   * A relocation stub redirects a pre-0.4.0 coordinate (`core`, `workspaceclient`, ...) to its `llm4s-*`
+   * successor; it is a published project whose name does not start with `llm4s-`. Both get the Scala
+   * binary suffix, since every module here is a Scala 3 artifact.
+   */
+  def coordinates(projects: Seq[(String, Boolean)], scalaBinaryVersion: String): (Seq[String], Seq[String]) = {
+    val published     = projects.collect { case (name, false) => name }.distinct.sorted
+    val (real, stubs) = published.partition(_.startsWith("llm4s-"))
+    (real.map(n => s"${n}_$scalaBinaryVersion"), stubs.map(n => s"${n}_$scalaBinaryVersion"))
+  }
+
+  /**
    * @param projects (artifact name, whether `publish / skip` is set) for every project in the build
    */
   def check(projects: Seq[(String, Boolean)], root: File, log: Logger): Unit = {

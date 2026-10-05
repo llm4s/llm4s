@@ -56,6 +56,15 @@ A new published module needs the same check twice over: it must be on the tagged
 aggregated by the root project in `build.sbt`. A module outside the aggregate publishes nothing
 and does so silently.
 
+To see exactly what the tagged commit will publish, ask the build:
+
+```bash
+sbt -error listPublishedArtifacts   # one `artifact <id>` or `stub <id>` per line
+```
+
+`sbt publishedArtifactsCheck` (a CI quick check) fails when a published `llm4s-*` artifact has no tier in
+[1.0 Scope](v1-scope) or no install line in the installation guide.
+
 ### 4. Do NOT create the GitHub Release by hand
 
 The `github-release` job creates it for you, and it runs **after** `publish` succeeds. That
@@ -74,8 +83,22 @@ it never overwrites. Write whatever the release deserves once it exists.
 ### 5. Verify Release
 
 - Check GitHub Actions: https://github.com/llm4s/llm4s/actions/workflows/release.yml
-- Verify Maven Central: https://central.sonatype.com/namespace/org.llm4s
 - Check Docker images: https://github.com/llm4s/llm4s/pkgs/container/workspace-runner
+- Verify Maven Central, with the script rather than by eye:
+
+  ```bash
+  scripts/verify-release.sh 0.5.0     # a leading v is accepted
+  ```
+
+  It asks the build which artifacts it publishes (the list above) and checks that each resolves at that
+  version: the POM and the jar for a real artifact, and for each relocation stub (the pre-0.4.0
+  coordinates) a POM that carries a `<relocation>`. It exits non-zero and names each miss. Run against
+  `0.4.0` with the stub list it reports all five stubs as missing, which is how 0.4.0 shipped
+  ([#1150](https://github.com/llm4s/llm4s/issues/1150)); against `0.4.1` it passes.
+
+  Maven Central's index can lag a successful publish, so a 404 straight after the job finishes is not
+  proof of a miss: re-run before concluding one. A miss that persists cannot be fixed in that version
+  ([Re-triggering a failed release](#re-triggering-a-failed-release)); it waits for the next one.
 
 ## Troubleshooting
 
