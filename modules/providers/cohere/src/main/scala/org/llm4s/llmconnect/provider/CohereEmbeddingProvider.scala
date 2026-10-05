@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.CohereEmbeddingConfigKeys
-import org.llm4s.error.RateLimitError
+import org.llm4s.error.{ CancelledError, RateLimitError }
 import org.llm4s.http.{ HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
@@ -162,7 +162,10 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
       private val logger = LoggerFactory.getLogger(getClass)
       private val url    = endpoint(cfg.baseUrl)
 
-      override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
+      override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
+        CancelledError.attempt("cohere.embed")(embedBatches(request))
+
+      private def embedBatches(request: EmbeddingRequest): Result[EmbeddingResponse] = {
         val model = request.model.name
         val input = request.input
         val metadata = Map(
@@ -208,9 +211,12 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
           "Content-Type"  -> "application/json"
         )
 
-        val respEither: Either[EmbeddingError, Llm4sHttpResponse] =
-          httpClient.post(url, headers, payload.render(), timeout = 120.seconds).left.map { err =>
-            EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "cohere")
+        // A cancellation is not a failed request: it passes through (design section 4.4).
+        val respEither: Result[Llm4sHttpResponse] =
+          httpClient.post(url, headers, payload.render(), timeout = 120.seconds).left.map {
+            case cancelled: CancelledError => cancelled
+            case err =>
+              EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "cohere")
           }
 
         respEither.flatMap { response =>

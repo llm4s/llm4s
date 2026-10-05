@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ NetworkError, RateLimitError }
+import org.llm4s.error.{ CancelledError, NetworkError, RateLimitError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient, MultipartPart }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingUsage }
@@ -54,6 +54,22 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
       bodies += b
       Right(respond(bodies.size - 1, textsOf(bodies.size - 1)))
     }
+    def get(u: String, h: Map[String, String], p: Map[String, String], t: FiniteDuration)          = fail
+    def postBytes(u: String, h: Map[String, String], d: Array[Byte], t: FiniteDuration)            = fail
+    def postMultipart(u: String, h: Map[String, String], p: Seq[MultipartPart], t: FiniteDuration) = fail
+    def put(u: String, h: Map[String, String], b: String, t: FiniteDuration)                       = fail
+    def delete(u: String, h: Map[String, String], t: FiniteDuration)                               = fail
+    def postRaw(u: String, h: Map[String, String], b: String, t: FiniteDuration)                   = fail
+    def postStream(u: String, h: Map[String, String], b: String, t: FiniteDuration)                = fail
+  }
+
+  /** Answers the nth POST with `script(n)`, which may also throw. Everything else fails. */
+  private class ScriptedPost(script: Int => Result[HttpResponse]) extends Llm4sHttpClient {
+    val calls = new java.util.concurrent.atomic.AtomicInteger(0)
+
+    private def fail[A]: Result[A] = Left(NetworkError("not a post", None, "http://cohere-test"))
+    def post(u: String, h: Map[String, String], b: String, t: FiniteDuration): Result[HttpResponse] =
+      script(calls.getAndIncrement())
     def get(u: String, h: Map[String, String], p: Map[String, String], t: FiniteDuration)          = fail
     def postBytes(u: String, h: Map[String, String], d: Array[Byte], t: FiniteDuration)            = fail
     def postMultipart(u: String, h: Map[String, String], p: Seq[MultipartPart], t: FiniteDuration) = fail
@@ -390,6 +406,51 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
     err.code shouldBe None
     err.message should startWith("HTTP request failed")
     (err.message should not).include(secretKey)
+  }
+
+  "cancellation" should "pass a CancelledError from the HTTP layer through, not turn it into an EmbeddingError" in {
+    Thread.interrupted(): Unit // the flag is clear: only the error says it was cancelled
+    val http = new ScriptedPost(_ => Left(CancelledError("http.POST")))
+
+    val result = embed(http, Seq("t1"))
+
+    result should matchPattern { case Left(_: CancelledError) => }
+    http.calls.get shouldBe 1
+  }
+
+  it should "return CancelledError, with the interrupt flag set, when the HTTP layer throws an InterruptedException" in {
+    Thread.interrupted(): Unit
+    val http = new ScriptedPost(_ => throw new InterruptedException("cancelled"))
+
+    val result = embed(http, Seq("t1"))
+    val flag   = Thread.interrupted() // reads and clears, so it cannot leak into another test
+
+    result should matchPattern { case Left(_: CancelledError) => }
+    flag shouldBe true
+  }
+
+  it should "stop at the cancelled batch and send no more" in {
+    Thread.interrupted(): Unit
+    val texts = (1 to (CohereEmbeddingProvider.MaxTextsPerRequest * 3)).map(i => s"t$i")
+    val http = new ScriptedPost({
+      case 0 => Right(ok(vectorsFor(texts.take(CohereEmbeddingProvider.MaxTextsPerRequest))))
+      case _ => Left(CancelledError("http.POST"))
+    })
+
+    val result = embed(http, texts)
+
+    result should matchPattern { case Left(_: CancelledError) => }
+    http.calls.get shouldBe 2 // the first batch answered, the second was cancelled, the third was never sent
+  }
+
+  it should "still report a failed request that was not a cancellation as one" in {
+    Thread.interrupted(): Unit
+    val http = new ScriptedPost(_ => Left(NetworkError("connection reset", None, "http://cohere-test")))
+
+    val err = embed(http, Seq("t1")).left.toOption.get
+
+    err shouldBe a[EmbeddingError]
+    err.message should startWith("HTTP request failed")
   }
 
   "the descriptor" should "name the provider, its defaults and the dimensions of the models it knows" in {

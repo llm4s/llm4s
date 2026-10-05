@@ -1,9 +1,9 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.CohereEmbeddingConfigKeys
-import org.llm4s.llmconnect.config.ModelDimensionRegistry
+import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ModelDimensionRegistry }
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.testkit.{ ProviderModuleChecks, ProviderTestConfig }
+import org.llm4s.testkit.{ LocalProviderTestServer, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -24,6 +24,16 @@ class Llm4sCohereModuleSpec extends AnyWordSpec with Matchers with ProviderModul
     "contribute no chat provider: Cohere chat is a dialect in llm4s-openai-compatible" in {
       new Llm4sCohereModule().chatProviders shouldBe empty
       ProviderRegistry.default.find(ProviderId("cohere")) shouldBe None
+    }
+  }
+
+  "the cohere embedding provider" should {
+
+    "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
+      LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
+        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "embed-english-v3.0", apiKey = "test-key")
+        assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(CohereEmbeddingProvider, config))
+      }
     }
   }
 
