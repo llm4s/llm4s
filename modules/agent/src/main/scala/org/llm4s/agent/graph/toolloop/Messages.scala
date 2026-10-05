@@ -20,6 +20,14 @@ enum MessageUpdate derives ReadWriter:
   case RemoveThrough(id: String)
 
   /**
+   * Removes the message `id` and every message after it: a turn's writes - the user input, the assistant messages, the
+   * tool calls and results, and the answer all come after the turn's user message. An output guardrail's
+   * Block commits it for the blocked turn, so no blocked content is kept and the next turn continues from the
+   * history before it. `RemoveThrough` is the opposite cut, dropping history *up to* a message.
+   */
+  case RemoveTurn(id: String)
+
+  /**
    * Replaces one tool call's arguments in an assistant message - an edited approval. An operation
    * rather than a whole-message `Replace`, so two edits to calls of one message in the same
    * superstep both apply instead of the later overwriting the earlier.
@@ -44,6 +52,8 @@ object Messages:
         indexOf(id).map(i => history.updated(i, message))
       case MessageUpdate.RemoveThrough(id) =>
         indexOf(id).map(i => history.drop(i + 1))
+      case MessageUpdate.RemoveTurn(id) =>
+        indexOf(id).map(i => history.take(i))
       case MessageUpdate.EditToolCall(messageId, toolCallId, arguments) =>
         indexOf(messageId).flatMap { i =>
           history(i).message match

@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.error.CancelledError
+import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.types.{ Result, TryOps }
 
 import scala.util.Try
@@ -65,7 +65,9 @@ final class CompiledGraph[I, O] private[graph] (
         case Left(_)                        => Step.Done(cancelled(execution))
         case Right(Left(_: CancelledError)) => Step.Done(cancelled(execution))
         case Right(Left(error))             => Step.Done(RunResult.Failed(execution.state, error))
-        case Right(Right(next))             => Step.Next(next)
+        case Right(Right((next, None)))     => Step.Next(next)
+        // a blocked task ends the run once the superstep is committed: the state keeps its update
+        case Right(Right((next, Some(error)))) => Step.Done(RunResult.Failed(next.state, error))
 
   /** A run cancelled during a superstep: nothing from it commits, and the interrupt flag is set. */
   private def cancelled(execution: Execution): RunResult[O] =
@@ -256,7 +258,11 @@ final class CompiledGraph[I, O] private[graph] (
       paused = false
     )
 
-  private def superstep(threadId: ThreadId, execution: Execution, config: RunConfig): Result[Execution] =
+  private def superstep(
+    threadId: ThreadId,
+    execution: Execution,
+    config: RunConfig
+  ): Result[(Execution, Option[LLMError])] =
     val outcomes = executorFor(config.budgets).runAll(execution.frontier.map { task => () =>
       val position = RunPosition(threadId, config.runId, "", task.id, task.node, execution.superstep)
       executeTask(task, execution, new RunContext(config, position, NodeEventSink.none)).map(task -> _)
@@ -264,7 +270,16 @@ final class CompiledGraph[I, O] private[graph] (
     // A cancelled task wins over an earlier task's failure: the run was cancelled, not failed.
     outcomes
       .collectFirst { case Left(c: CancelledError) => c }
-      .fold(sequence(outcomes).flatMap(commitSuperstep(execution, _)))(Left(_))
+      .fold(
+        sequence(outcomes).flatMap(done => commitSuperstep(execution, done).map(next => next -> blockedBy(done)))
+      )(Left(_))
+
+  /**
+   * The error of the first blocked task in `completed`, in frontier order: the run ends once the superstep is
+   * committed, and the caller receives this error.
+   */
+  private[graph] def blockedBy(completed: Vector[(Task, TaskResult)]): Option[LLMError] =
+    completed.collectFirst { case (_, TaskResult.Blocked(_, error)) => error }
 
   /**
    * Runs one task against the committed snapshot and checks what it returned. A task whose node
@@ -281,6 +296,8 @@ final class CompiledGraph[I, O] private[graph] (
           case Right(_) if Thread.currentThread().isInterrupted => Left(CancelledError(operation))
           case Left(thrown)                  => Left(GraphError.NodeFailed(task.node, task.id, thrown))
           case Right(NodeResult.Fail(error)) => Left(GraphError.NodeFailed(task.node, task.id, error))
+          case Right(NodeResult.Block(update, error)) =>
+            undeclaredWrite(task, update).toLeft(TaskResult.Blocked(update, error))
           case Right(NodeResult.Continue(command)) =>
             validate(task, command).map(_ => TaskResult.Done(command))
           case Right(NodeResult.Suspend(update, question, resumeAt)) =>
@@ -291,6 +308,7 @@ final class CompiledGraph[I, O] private[graph] (
     result match
       case TaskResult.Done(command)               => validate(task, command)
       case TaskResult.Parked(update, _, resumeAt) => validateSuspension(task, update, resumeAt)
+      case TaskResult.Blocked(update, _)          => undeclaredWrite(task, update).toLeft(())
 
   /**
    * Applies every task's checked result in frontier order and schedules the next frontier.
@@ -337,6 +355,9 @@ final class CompiledGraph[I, O] private[graph] (
             Vector.empty,
             Some(EncodedSuspension(resume.node.id.value, resume.encodeQuestion(question)))
           )
+        // a blocked task is never written: the runtime ends the run, and recovery runs the task again
+        case TaskResult.Blocked(_, _) =>
+          throw new IllegalStateException(s"task ${task.id.value} is blocked and has no pending write")
     }.toResult
 
   /** Rebinds a pending write to this graph's keys, nodes and joins, migrating encoded values. */
@@ -616,11 +637,13 @@ final class CompiledGraph[I, O] private[graph] (
         )
       else Right(activation)
 
-/** What a task produced, once checked: a command, or a suspension with its update. */
+/** What a task produced, once checked: a command, a suspension with its update, or a block that ends the run. */
 private[graph] enum TaskResult:
   case Done(command: Command)
   case Parked(suspendedUpdate: StateUpdate, question: Any, resume: ResumeRef[?, ?])
+  case Blocked(blockedUpdate: StateUpdate, error: LLMError)
 
   def update: StateUpdate = this match
     case Done(command)        => command.update
     case Parked(update, _, _) => update
+    case Blocked(update, _)   => update

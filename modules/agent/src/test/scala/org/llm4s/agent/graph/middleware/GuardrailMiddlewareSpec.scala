@@ -30,11 +30,8 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
   private def build(model: ModelStep, mw: GuardrailMiddleware) =
     ToolLoop.build("assistant", "v1", model, ToolSet.of().value, Seq(mw)).value
 
-  private def nodeFailure(result: RunResult[?]): (NodeId, org.llm4s.error.LLMError) =
-    result.failed._2 match {
-      case GraphError.NodeFailed(node, _, cause) => node -> cause
-      case other                                 => fail(s"not a node failure: $other")
-    }
+  /** What the blocked run kept of the conversation: nothing, whichever boundary blocked. */
+  private def keptMessages(state: ThreadState) = state.get(Messages.key).value
 
   private class Upper extends InputGuardrail {
     def validate(value: String): Result[String] = Right(value.toUpperCase)
@@ -60,12 +57,12 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
 
   private val none = Seq.empty[InputGuardrail]
 
-  "GuardrailMiddleware" should "fail the run before any model call when an input guardrail blocks" in {
+  "GuardrailMiddleware" should "block the run before any model call when an input guardrail blocks" in {
     val model         = ScriptedModel("ok")
     val l             = build(model, new GuardrailMiddleware(Seq(LengthCheck(1, 5)), Nil))
-    val (node, cause) = nodeFailure(runInMemory(l.graph, "much too long"))
-    node shouldBe NodeId("input")
+    val (kept, cause) = runInMemory(l.graph, "much too long").failed
     cause.message should include("Input too long")
+    keptMessages(kept) shouldBe empty
     model.seen.size shouldBe 0
   }
 
@@ -85,8 +82,8 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
 
   it should "collect every failure into one aggregated error" in {
     val l             = build(ScriptedModel("ok"), new GuardrailMiddleware(Seq(new Reject("A"), new Reject("B")), Nil))
-    val (node, cause) = nodeFailure(runInMemory(l.graph, "hi"))
-    node shouldBe NodeId("input")
+    val (kept, cause) = runInMemory(l.graph, "hi").failed
+    keptMessages(kept) shouldBe empty
     cause.message should include("Multiple validation failures")
     cause.message should include("A rejected")
     cause.message should include("B rejected")
@@ -94,11 +91,12 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
 
   it should "block an answer an output guardrail rejects" in {
     val l             = build(ScriptedModel("this is badword"), new GuardrailMiddleware(none, Seq(ProfanityFilter())))
-    val (node, cause) = nodeFailure(runInMemory(l.graph, "hi"))
-    node shouldBe NodeId("finish")
+    val (kept, cause) = runInMemory(l.graph, "hi").failed
     cause.message should include("inappropriate")
+    // the blocked turn is not kept: neither the input nor the blocked answer
+    keptMessages(kept) shouldBe empty
     val l2 = build(ScriptedModel("fine"), new GuardrailMiddleware(none, Seq(new Reject("Z"))))
-    nodeFailure(runInMemory(l2.graph, "hi"))._2.message should include("Z rejected")
+    runInMemory(l2.graph, "hi").failed._2.message should include("Z rejected")
   }
 
   it should "change the run's output when an output guardrail fixes it" in {
@@ -135,7 +133,8 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
     val judge = LLMSafetyGuardrail(new Judge("0.95", "0.1"))
     val mw    = new GuardrailMiddleware(none, Seq(judge))
     runInMemory(build(ScriptedModel("safe"), mw).graph, "hi", thread = "a").completed._2 shouldBe "safe"
-    val (node, _) = nodeFailure(runInMemory(build(ScriptedModel("unsafe"), mw).graph, "hi", thread = "b"))
-    node shouldBe NodeId("finish")
+    val (kept, error) = runInMemory(build(ScriptedModel("unsafe"), mw).graph, "hi", thread = "b").failed
+    error.message should not be empty
+    keptMessages(kept) shouldBe empty
   }
 }

@@ -4,12 +4,12 @@ import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId, ModelRequest, ToolCallRequest }
 import org.llm4s.agent.graph.tool.*
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.toolapi.{ Schema, SchemaDefinition, ToolBuilder }
 import org.llm4s.types.Result
-import org.scalatest.EitherValues
+import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.ReadWriter
@@ -28,7 +28,7 @@ object ToolLoopFixtures {
   final case class Find(q: String, limit: Int = 10) derives ReadWriter
 }
 
-class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
+class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
   import ToolLoopFixtures.*
 
   private val thread = ThreadId("conversation-1")
@@ -1230,7 +1230,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       case other                                 => fail(s"not a node failure: $other")
     }
 
-  it should "run beforeAgent on the input the model sees, and fail the run before any model call on Left" in {
+  it should "run beforeAgent on the input the model sees, and block the run before any model call on Left" in {
     val model      = ScriptedModel(summarise)
     val shout      = middleware("shout", before = s => Right(s.toUpperCase))
     val tag        = middleware("tag", before = s => Right(s"[$s]"))
@@ -1243,9 +1243,10 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val blocked       = ScriptedModel(summarise)
     val refusing      = middleware("refusing", before = _ => Left(ValidationError("input", "not allowed")))
     val refused       = ToolLoop.build("assistant", "v1", blocked, set(Tools().echo), Seq(refusing)).value
-    val (node, cause) = nodeFailure(runInMemory(refused.graph, "go"))
-    node shouldBe NodeId("input")
-    cause.message should include("not allowed")
+    val (kept, cause) = runInMemory(refused.graph, "go").failed
+    // the guardrail's own error, with nothing stored
+    cause shouldBe ValidationError("input", "not allowed")
+    messagesOf(kept) shouldBe empty
     blocked.calls shouldBe 0
   }
 
@@ -1323,18 +1324,105 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     Message.validateConversation(history.toList).value shouldBe (())
   }
 
-  it should "fail the run when afterAgent returns a blank answer, or a Left" in {
+  it should "block the run when afterAgent returns a blank answer, or a Left, keeping none of the turn" in {
     val blanking = middleware("blanking", after = _ => Right("  "))
     val l        = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(Tools().echo), Seq(blanking)).value
-    val (node, cause) = nodeFailure(runInMemory(l.graph, "go"))
-    node shouldBe NodeId("finish")
+    val (blankedState, cause) = runInMemory(l.graph, "go").failed
     cause shouldBe ValidationError("tool loop", "afterAgent returned a blank answer")
+    messagesOf(blankedState) shouldBe empty
 
-    val refusing  = middleware("refusing", after = _ => Left(ValidationError("output", "blocked")))
-    val refused   = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(Tools().echo), Seq(refusing)).value
-    val (at, why) = nodeFailure(runInMemory(refused.graph, "go"))
-    at shouldBe NodeId("finish")
-    why.message should include("blocked")
+    val refusing = middleware("refusing", after = _ => Left(ValidationError("output", "blocked")))
+    val refused  = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(Tools().echo), Seq(refusing)).value
+    val (refusedState, why) = runInMemory(refused.graph, "go").failed
+    why shouldBe ValidationError("output", "blocked")
+    messagesOf(refusedState) shouldBe empty
+  }
+
+  // ---- a guardrail Block is a finished failure that leaves the thread usable (#1328, design 4.13) ----
+
+  /** Blocks any input equal to "forbidden" and any answer containing "SECRET". */
+  private def gate: AgentMiddleware = middleware(
+    "gate",
+    before = in => if in == "forbidden" then Left(ValidationError("input", "not allowed")) else Right(in),
+    after = out => if out.contains("SECRET") then Left(ValidationError("output", "blocked")) else Right(out)
+  )
+
+  it should "finish an input Block as Failed with the history unchanged, so the next turn runs from it" in {
+    val model   = ScriptedModel(_ => AssistantMessage("hello"))
+    val l       = ToolLoop.build("assistant", "v1", model, set(Tools().echo), Seq(gate)).value
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+
+    val (kept, error) = runtime.start(thread, l.graph, "forbidden").awaited.value.failed
+    error shouldBe ValidationError("input", "not allowed")
+    messagesOf(kept) shouldBe empty
+    model.calls shouldBe 0
+    store.latest(thread).value.value.checkpoint.status shouldBe CheckpointStatus.Failed
+
+    val (state, answer) = runtime.start(thread, l.graph, "hi").awaited.value.completed
+    answer shouldBe "hello"
+    model.seen.get(0) shouldBe Vector(UserMessage("hi"))
+    messagesOf(state) shouldBe Vector(UserMessage("hi"), AssistantMessage("hello"))
+  }
+
+  it should "remove the whole blocked turn on an output Block: input, tool calls and results, and the answer" in {
+    val model = ScriptedModel(
+      _ => AssistantMessage("fine"),
+      calls(("c1", "echo", ujson.Obj("text" -> "hi"))),
+      _ => AssistantMessage("SECRET answer"),
+      _ => AssistantMessage("after")
+    )
+    val l       = ToolLoop.build("assistant", "v1", model, set(Tools().echo), Seq(gate)).value
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    runtime.start(thread, l.graph, "one").awaited.value.completed
+
+    // turn two calls a tool, then answers with what the gate refuses
+    val (kept, error) = runtime.start(thread, l.graph, "two").awaited.value.failed
+    error shouldBe ValidationError("output", "blocked")
+    model.calls shouldBe 3
+    messagesOf(kept) shouldBe Vector(UserMessage("one"), AssistantMessage("fine"))
+
+    // no blocked content is stored: not in the checkpoint, nor in any pending write
+    val stored = store.latest(thread).value.value
+    stored.checkpoint.status shouldBe CheckpointStatus.Failed
+    val persisted = Checkpoint.toJson(stored.checkpoint).render()
+    (persisted should not).include("SECRET")
+    (persisted should not).include("\"c1\"")
+    stored.pendingWrites shouldBe empty
+
+    // the thread continues from the history before the turn
+    val (state, answer) = runtime.start(thread, l.graph, "three").awaited.value.completed
+    answer shouldBe "after"
+    model.seen.get(3) shouldBe Vector(UserMessage("one"), AssistantMessage("fine"), UserMessage("three"))
+    val history = messagesOf(state)
+    history shouldBe Vector(
+      UserMessage("one"),
+      AssistantMessage("fine"),
+      UserMessage("three"),
+      AssistantMessage("after")
+    )
+    Message.validateConversation(history.toList).value shouldBe (())
+  }
+
+  it should "refuse recover on a blocked thread: it is finished, not interrupted" in {
+    val model   = ScriptedModel(_ => AssistantMessage("SECRET"))
+    val l       = ToolLoop.build("assistant", "v1", model, set(Tools().echo), Seq(gate)).value
+    val runtime = GraphRuntime(InMemoryCheckpointer())
+    runtime.start(thread, l.graph, "go").awaited.value.failed
+
+    runtime.recover(thread, l.graph).left.value shouldBe GraphError.NothingToRecover(thread.value)
+    model.calls shouldBe 1
+  }
+
+  it should "not treat a cancellation from a boundary hook as a Block: the run fails and stays Running" in {
+    val cancelling = middleware("cancelling", after = _ => Left(CancelledError("hook")))
+    val l     = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(Tools().echo), Seq(cancelling)).value
+    val store = InMemoryCheckpointer()
+
+    GraphRuntime(store).start(thread, l.graph, "go").awaited.value.failed
+
+    store.latest(thread).value.value.checkpoint.status shouldBe CheckpointStatus.Running
   }
 
   it should "refuse a blank final answer at the model node, storing nothing, even when afterAgent leaves it unchanged" in {

@@ -689,7 +689,7 @@ Explore a Scala `Workflow[A]`/`Durable[A]` for-comprehension as a peer frontend 
 
 ### 4.13 Stage 1 slice 2: the agent loop on the graph runtime ([#1328](https://github.com/llm4s/llm4s/issues/1328))
 
-Slice 2 of [#1326](https://github.com/llm4s/llm4s/issues/1326): the graph runtime becomes the only agent loop. It is large, so it lands in the order below, each step compiling and passing on its own. **Steps 1 and 2 are implemented by the PR that adds this section; steps 3 to 6 are proposals that need review before the destructive part (deleting `AgentState` and migrating every caller) is written.**
+Slice 2 of [#1326](https://github.com/llm4s/llm4s/issues/1326): the graph runtime becomes the only agent loop. It is large, so it lands in the order below, each step compiling and passing on its own. **Step 1 is implemented by the PR that adds this section. Steps 2 to 6 are proposals that need review before the destructive part (deleting `AgentState` and migrating every caller) is written.**
 
 **Step 1. The terminal outcome of a guardrail Block (implements the decision of [#1322](https://github.com/llm4s/llm4s/pull/1322)).**
 
@@ -701,7 +701,7 @@ Slice 2 of [#1326](https://github.com/llm4s/llm4s/issues/1326): the graph runtim
 - `Checkpoint.CurrentFormat` becomes 4, with an identity migration from 3: a build that predates the status refuses format 4 rather than misreading `Failed`.
 - Rejected: a refusal answer that completes the run (callers would inspect a typed result instead of an error, a behaviour change for guardrail users); guarding output before it is stored (alone it leaves the thread stuck, and `recover` would ask the model again).
 
-**Step 2. Token usage through the model step.** `ModelStep.next` returns only an `AssistantMessage`, so the usage a completion reports is dropped, and `AgentState.usageSummary` has no source on the runtime. The step returns the message with its `TokenUsage`, and the loop accumulates a `UsageSummary` in a state key that the thread snapshot reads.
+**Step 2. Token usage through the model step (proposal).** `ModelStep.next` returns only an `AssistantMessage`, so the usage a completion reports is dropped, and `AgentState.usageSummary` has no source on the runtime. The step returns the message with its `TokenUsage`, and the loop accumulates a `UsageSummary` in a state key that the thread snapshot reads.
 
 **Step 3. Data-only thread state (proposal).** A thread's state is its checkpoint, so the replacement for `AgentState` is a snapshot read from it, never a live object:
 

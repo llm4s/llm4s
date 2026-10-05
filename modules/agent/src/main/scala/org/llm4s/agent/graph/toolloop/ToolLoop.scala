@@ -80,8 +80,10 @@ object ModelStep:
  *  - The middleware stack (#1279) runs at the run's boundaries and around each call: `input` runs
  *    every `beforeAgent` on the user's text, `model` runs `ModelStep.next` inside every
  *    `wrapModelCall`, and `finish` runs every `afterAgent` (in reverse) on the final answer,
- *    replacing the stored answer's content when it changes; a blank answer or a `Left` fails the
- *    run. A middleware's `tools` join the loop's [[org.llm4s.agent.graph.tool.ToolSet]], and its
+ *    replacing the stored answer's content when it changes. A `Left` from `beforeAgent`, and a blank
+ *    answer or a `Left` from `afterAgent`, *blocks* the run (design 4.13): it ends as a finished failure
+ *    carrying that error, the thread stays usable, and an output Block removes the blocked turn from the
+ *    history; a cancellation is not a Block. A middleware's `tools` join the loop's [[org.llm4s.agent.graph.tool.ToolSet]], and its
  *    `writes` are keys its `wrapToolCall` may add to a `Success` update.
  *  - Each call is its own task. Its tool is looked up, its raw arguments validated against the
  *    tool's `argumentSchema`, decoded and checked by the tool's `validateDecoded` - any failure is an
@@ -250,21 +252,29 @@ object ToolLoop:
     }
 
     // the final answer, through every afterAgent; a changed answer replaces the stored message's content
+    // An output Block (an afterAgent `Left`, or a blank answer) ends the run as a finished failure and removes the
+    // blocked turn from the history, so no blocked content is stored and the thread continues from before it.
     b.implement(finish, writes = Set(messages)) { (_, state, context) =>
-      NodeResult.fromResult(for
-        history <- state.get(messages)
-        last <- history.lastOption
-          .collect { case StoredMessage(id, a: AssistantMessage) if a.toolCalls.isEmpty => id -> a }
-          .toRight(ValidationError("tool loop", "finish found no final assistant message"))
-        (answerId, assistant) = last
-        changed <- stack.afterAgent(assistant.content, context)
-        command <-
-          if changed.trim.isEmpty then Left(ValidationError("tool loop", "afterAgent returned a blank answer"))
-          else if changed == assistant.content then Right(Command.empty)
-          else
-            val replaced = StoredMessage(answerId, assistant.copy(contentOpt = Some(changed)))
-            Right(Command.empty.update(messages, MessageUpdate.Replace(answerId, replaced)))
-      yield command)
+      state.get(messages) match
+        case Left(error) => NodeResult.Fail(error)
+        case Right(history) =>
+          val removeTurn = history.reverseIterator
+            .collectFirst { case StoredMessage(id, _: UserMessage) => id }
+            .fold(StateUpdate.empty)(id => StateUpdate.update(messages, MessageUpdate.RemoveTurn(id)))
+          history.lastOption
+            .collect { case StoredMessage(id, a: AssistantMessage) if a.toolCalls.isEmpty => id -> a }
+            .fold[NodeResult](
+              NodeResult.Fail(ValidationError("tool loop", "finish found no final assistant message"))
+            ) { (answerId, assistant) =>
+              stack.afterAgent(assistant.content, context) match
+                case Left(error) => boundary(error, removeTurn)
+                case Right(changed) if changed.trim.isEmpty =>
+                  boundary(ValidationError("tool loop", "afterAgent returned a blank answer"), removeTurn)
+                case Right(changed) if changed == assistant.content => NodeResult.Continue(Command.empty)
+                case Right(changed) =>
+                  val replaced = StoredMessage(answerId, assistant.copy(contentOpt = Some(changed)))
+                  NodeResult.Continue(Command.empty.update(messages, MessageUpdate.Replace(answerId, replaced)))
+            }
     }
 
     b.implement(collect, writes = Set(messages, results)) { (_, state, context) =>
@@ -302,15 +312,20 @@ object ToolLoop:
       )
     }
 
+    // An input Block (a beforeAgent `Left`) happens before anything is stored: the run ends as a finished failure
+    // and the history is unchanged.
     val input = b.node[String]("input", writes = Set(messages)) { (text, _, context) =>
-      NodeResult.fromResult(stack.beforeAgent(text, context).map { transformed =>
-        Command.empty
-          .update(
-            messages,
-            MessageUpdate.Append(StoredMessage(s"${context.position.taskId.value}/user", UserMessage(transformed)))
+      stack.beforeAgent(text, context) match
+        case Left(error) => boundary(error)
+        case Right(transformed) =>
+          NodeResult.Continue(
+            Command.empty
+              .update(
+                messages,
+                MessageUpdate.Append(StoredMessage(s"${context.position.taskId.value}/user", UserMessage(transformed)))
+              )
+              .goto(modelNode)
           )
-          .goto(modelNode)
-      })
     }
 
     b.compile(input) { state =>
@@ -320,6 +335,15 @@ object ToolLoop:
           case _ => Left(ValidationError("tool loop", "the run ended without a final assistant message"))
       }
     }.map(new ToolLoop(_, approval, askRefs.values.map(_.node.id).toSet))
+
+  /**
+   * A run-boundary failure (a `beforeAgent` or `afterAgent` `Left`): a guardrail's Block, which ends the run as a
+   * finished failure and commits `update` first (design 4.13). A cancellation is not a Block: it fails the run
+   * as before, leaving the checkpoint `Running` for `recover`.
+   */
+  private def boundary(error: LLMError, update: StateUpdate = StateUpdate.empty): NodeResult = error match
+    case cancelled: CancelledError => NodeResult.Fail(cancelled)
+    case other                     => NodeResult.Block(update, other)
 
   /**
    * The model wrappers' innermost function: `model.next`, guarded, since the stack guards only its

@@ -1194,6 +1194,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `org.llm4s.knowledgegraph.graphrag` keeps its package name but ships in `llm4s-rag`.
   `GraphRAG` imported `vectorstore` while `rag` imported `graphrag`, which made the two
   modules inseparable; moving that one file broke the cycle.
+- **A guardrail Block finishes the run and leaves the thread usable** ([#1328](https://github.com/llm4s/llm4s/issues/1328),
+  slice 2 of [#1326](https://github.com/llm4s/llm4s/issues/1326); design §4.13, decision of
+  [#1322](https://github.com/llm4s/llm4s/pull/1322)): a `beforeAgent` or `afterAgent` failure, and a blank answer from
+  `afterAgent`, used to leave the thread `Running` with no way forward and, for an output Block, the blocked answer in
+  state. It now ends the run as a *finished* failure. The run returns the guardrail's own error, no longer wrapped in
+  `GraphError.NodeFailed`; the thread's closing checkpoint is the new `CheckpointStatus.Failed`; `start` accepts such a
+  thread like a `Completed` one and `recover` refuses it with `NothingToRecover`. An output Block removes the blocked
+  turn from the history - the input, the tool calls and results, and the answer - through the new
+  `MessageUpdate.RemoveTurn`, so no blocked content is stored; an input Block stores nothing. A cancellation from a
+  boundary hook is not a Block, and a tool or model-wrapper failure still leaves the run `Running` for `recover`. The
+  node-level form is `NodeResult.Block(update, error)`: the superstep commits `update` and every sibling's result, then
+  the run ends. **Breaking:** `CheckpointStatus` and `NodeResult` gain a case, so an exhaustive `match` over either needs
+  one more branch; `Checkpoint.CurrentFormat` is 4 (a checkpoint written by this build is refused by an older one, and
+  older checkpoints migrate unchanged); code that read a guardrail failure out of `NodeFailed` reads the error itself.
 
 ### Removed
 - **`ToolCallPolicy` and `PolicyDecision`** ([#1279](https://github.com/llm4s/llm4s/issues/1279)),

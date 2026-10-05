@@ -44,8 +44,10 @@ object GraphRuntime:
  *
  * A thread's latest checkpoint says what may happen next:
  *
- *  - none, or `Completed`: `start` runs the graph with a new input (on a completed thread, over its
- *    committed state);
+ *  - none, `Completed` or `Failed`: `start` runs the graph with a new input (on a finished thread, over its
+ *    committed state). `Failed` is a run that ended in a failure that is its outcome, not an interruption:
+ *    a node returned [[NodeResult.Block]], as a guardrail does. The thread is usable and `recover` has
+ *    nothing to continue;
  *  - `Running` - work was scheduled when the last run stopped: `recover` continues it with no new
  *    input, reusing every pending write so completed tasks are not run again, and running failed
  *    or unstarted tasks once more (per-node retry policy is Stage 1);
@@ -147,7 +149,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           stored.checkpoint.status match
             case CheckpointStatus.Running   => Left(GraphError.IncompleteRun(threadId.value, stored.checkpoint.id))
             case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
-            case CheckpointStatus.Completed =>
+            case CheckpointStatus.Completed | CheckpointStatus.Failed =>
               graph.restore(stored.checkpoint.snapshot).flatMap { done =>
                 newRun(graph, threadId, config, durability, done.superstep, signal)
                   .admit(
@@ -186,7 +188,8 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
                 )
               yield run
             case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
-            case CheckpointStatus.Completed => Left(GraphError.NothingToRecover(threadId.value))
+            case CheckpointStatus.Completed | CheckpointStatus.Failed =>
+              Left(GraphError.NothingToRecover(threadId.value))
         }
     }
   }
@@ -571,18 +574,23 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
                 outcomes.foldLeft[Result[Vector[(Task, TaskResult)]]](Right(Vector.empty))((done, outcome) =>
                   done.flatMap(cs => outcome.map(cs :+ _))
                 )
+              // the first blocked task, in frontier order, ends the run once the superstep is committed
+              val blockedBy = completed.toOption.flatMap(graph.blockedBy)
               completed.flatMap(graph.commitSuperstep(execution, _)) match
-                case Left(error)                => fail(execution, error)
-                case Right(next) if next.paused => end(next, checkpointId)
+                case Left(error) => fail(execution, error)
                 case Right(next) =>
-                  checkpoint(
-                    next,
-                    Some(checkpointId),
-                    CheckpointStatus.Running,
-                    RunEvent.CheckpointCommitted(next.superstep)
-                  ) match
-                    case Left(error) => fail(execution, error)
-                    case Right(id)   => loop(next, id, Map.empty)
+                  blockedBy match
+                    case Some(error)         => block(next, checkpointId, error)
+                    case None if next.paused => end(next, checkpointId)
+                    case None =>
+                      checkpoint(
+                        next,
+                        Some(checkpointId),
+                        CheckpointStatus.Running,
+                        RunEvent.CheckpointCommitted(next.superstep)
+                      ) match
+                        case Left(error) => fail(execution, error)
+                        case Right(id)   => loop(next, id, Map.empty)
 
     /** Whether a cancel or expiry has been recorded, and so may have interrupted a commit. */
     private def stopRecorded: Boolean =
@@ -622,6 +630,24 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
                 RunResult.Failed(execution.state, GraphError.CheckpointWriteFailed(threadId.value, e))
               )
 
+    /**
+     * Ends a run a task blocked: the superstep's updates are committed, so `execution` is the state the
+     * thread keeps, and the closing checkpoint is [[CheckpointStatus.Failed]] with a
+     * [[RunEvent.RunFailed]]. Like [[end]], it records [[StopCause.Finishing]] before submitting, so no
+     * later cancel or expiry interrupts that commit; if one was recorded first, the run is stopped instead.
+     * The caller gets `error` itself.
+     */
+    private def block(execution: Execution, parent: String, error: LLMError): RunResult[O] =
+      newCheckpoint(execution, Some(parent), CheckpointStatus.Failed) match
+        case Left(storeError)                                                  => fail(execution, storeError)
+        case Right(_) if !cause.compareAndSet(None, Some(StopCause.Finishing)) => cancelled()
+        case Right(saved) =>
+          submit(saved, RunEvent.RunFailed(error.message))
+          committer.close()
+          committer.failure.fold[RunResult[O]](RunResult.Failed(execution.state, error))(e =>
+            RunResult.Failed(execution.state, GraphError.CheckpointWriteFailed(threadId.value, e, Some(error)))
+          )
+
     private def runTask(task: Task, execution: Execution, checkpointId: String): Result[TaskResult] =
       val sink = TaskSink(task, checkpointId)
       val context = new RunContext(
@@ -629,29 +655,44 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         RunPosition(threadId, runId, checkpointId, task.id, task.node, execution.superstep),
         sink
       )
-      graph
-        .executeTask(task, execution, context)
-        .flatMap(result => graph.encodeWrite(checkpointId, task, result).map(result -> _)) match
-        // no write and no event: `recover` runs the task again
-        case Left(cancelled: CancelledError)                  => Left(cancelled)
-        case Right(_) if Thread.currentThread().isInterrupted => Left(CancelledError(s"task ${task.id.value}"))
-        case Right((result, write)) =>
-          val event = result match
-            case TaskResult.Done(_)         => RunEvent.TaskCompleted
-            case TaskResult.Parked(_, _, _) => RunEvent.TaskSuspended(task.id.value)
-          committer.submit(
-            Commit(None, Vector(write), draft(Some(checkpointId), Some(task), event) +: sink.customEvents)
-          )
-          Right(result)
-        case Left(error) =>
+      def settled(executed: Result[TaskResult]): Result[TaskResult] =
+        executed.flatMap(result => graph.encodeWrite(checkpointId, task, result).map(result -> _)) match
+          // no write and no event: `recover` runs the task again
+          case Left(cancelled: CancelledError)                  => Left(cancelled)
+          case Right(_) if Thread.currentThread().isInterrupted => Left(CancelledError(s"task ${task.id.value}"))
+          case Right((result, write)) =>
+            val event = result match
+              case TaskResult.Done(_)         => RunEvent.TaskCompleted
+              case TaskResult.Parked(_, _, _) => RunEvent.TaskSuspended(task.id.value)
+              case TaskResult.Blocked(_, e)   => RunEvent.TaskFailed(e.message)
+            committer.submit(
+              Commit(None, Vector(write), draft(Some(checkpointId), Some(task), event) +: sink.customEvents)
+            )
+            Right(result)
+          case Left(error) =>
+            committer.submit(
+              Commit(
+                None,
+                Vector.empty,
+                Vector(draft(Some(checkpointId), Some(task), RunEvent.TaskFailed(error.message)))
+              )
+            )
+            Left(error)
+      graph.executeTask(task, execution, context) match
+        case Right(_: TaskResult.Blocked) if Thread.currentThread().isInterrupted =>
+          Left(CancelledError(s"task ${task.id.value}"))
+        // a blocked task has no pending write, since its error is not data: its event records the failure,
+        // and the run ends with the superstep
+        case Right(blocked @ TaskResult.Blocked(_, error)) =>
           committer.submit(
             Commit(
               None,
               Vector.empty,
-              Vector(draft(Some(checkpointId), Some(task), RunEvent.TaskFailed(error.message)))
+              draft(Some(checkpointId), Some(task), RunEvent.TaskFailed(error.message)) +: sink.customEvents
             )
           )
-          Left(error)
+          Right(blocked)
+        case executed => settled(executed)
 
     private def newCheckpoint(
       execution: Execution,
