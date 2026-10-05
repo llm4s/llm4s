@@ -1131,6 +1131,23 @@ sbt "samples/runMain org.llm4s.samples.metrics.CostTrackingExample"
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/metrics/CostTrackingExample.scala)
 
+### MultiProviderComparisonExample
+
+**File:** [`MultiProviderComparisonExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/basic/MultiProviderComparisonExample.scala)
+
+The same prompt against several providers, side by side: each one's answer, the tokens it reported and the
+latency of the call. Providers are *named sections* under `llm4s.providers` in your configuration
+(`openai-main`, `anthropic-main`, `gemini-main` by default; pass other names as arguments), not
+`provider/model` strings. A provider that is not configured, or has no key, is reported with the reason and
+the others still run.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.basic.MultiProviderComparisonExample"
+sbt "samples/runMain org.llm4s.samples.basic.MultiProviderComparisonExample openai-main ollama-local"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/basic/MultiProviderComparisonExample.scala)
+
 ---
 
 ## Other Examples

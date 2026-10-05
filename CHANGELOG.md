@@ -339,6 +339,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trackers from one client. A model with no price is reported as *unknown*, not as a guessed number, and the
   output says when a total of `0` means "no price". The sample's logic is tested against a fake provider with
   fixed token counts and prices (`CostTrackingExampleSpec`).
+- **`MultiProviderComparisonExample`: one prompt, several providers, side by side**
+  ([#957](https://github.com/llm4s/llm4s/issues/957), reworked from #1081 by @vansh7nvc):
+  `sbt "samples/runMain org.llm4s.samples.basic.MultiProviderComparisonExample"` asks each named provider
+  (`openai-main`, `anthropic-main` and `gemini-main` by default, or the section names you pass) the same prompt
+  and prints each answer with its reported tokens and the latency of the `complete` call alone. Providers are
+  named sections under `llm4s.providers`; a section that is missing or has no key is reported with the reason
+  and the others still run, and every client is closed. Tested against fake providers
+  (`MultiProviderComparisonExampleSpec`).
 - **Vendor credentials: `llm4s.credentials.<provider>.apiKey`**
   ([#1132](https://github.com/llm4s/llm4s/issues/1132), [#1126](https://github.com/llm4s/llm4s/issues/1126)).
   Credentials belong to a vendor, keyed by provider id; clients belong to a use. Each provider
