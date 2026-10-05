@@ -288,8 +288,9 @@ class StreamableHTTPTransportImpl(
             Some(response)
           case Failure(e) =>
             // Skip non-JSON-RPC data (might be other SSE messages)
-            logger.debug(
-              s"StreamableHTTPTransport($name) skipping non-JSON-RPC SSE data: $dataContent (${e.getMessage})"
+            logger.debugPayload(
+              s"StreamableHTTPTransport($name) skipping non-JSON-RPC SSE data (${e.getMessage}): ",
+              dataContent
             )
             None
         }
@@ -865,7 +866,7 @@ class StdioTransportImpl(
     }
   }
 
-  // Read any available stderr output for diagnostics
+  // Read any available stderr output for diagnostics, bounded: the result goes into error logs and returned errors
   private def readAvailableStderr(): String =
     stderrReader match {
       case Some(reader) =>
@@ -881,7 +882,7 @@ class StdioTransportImpl(
             }
           }
           .fold(e => logger.debug(s"Error reading stderr: ${e.getMessage}"), _ => ())
-        output.toString
+        PayloadLog.preview(output.toString)
       case None => ""
     }
 
