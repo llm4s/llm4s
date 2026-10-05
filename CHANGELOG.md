@@ -513,8 +513,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `(threadId, query, config, history)`. `agent.start(...)`, `startRecover` and `startResume`
     return an `AgentRun` (`threadId`, `runId`, `status`, `await()`, `cancel()`).
   - Per-run guardrails -> `.withMiddleware(new GuardrailMiddleware(input, output))`. A block is
-    `AgentStatus.Blocked(guardrail, reason)`, not an error; the thread completes. A transforming
-    guardrail (`PIIMasker`) now applies. The root agent's guardrails and other run-boundary
+    the runtime's Block (see "A guardrail Block finishes the run"), which `Agent` reports as `Right` with
+    `AgentStatus.Blocked(guardrail, reason)`: the thread stays usable, an input block stores nothing
+    of the turn and an output block removes it (any handoff made in it too), and `usage` keeps its
+    model calls. Another middleware's `beforeAgent`/`afterAgent` `Left` blocks too, returned as that
+    `Left`. A transforming guardrail (`PIIMasker`) now applies. The root agent's guardrails and other run-boundary
     middleware guard the whole handoff family, whichever agent is active.
   - `continueConversation(state, q)` -> `continueConversation(result, q)`, which reads only
     `result.threadId`.
@@ -551,6 +554,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `ModelStep.next` returns the `Completion`.
   - Samples `StreamingAgentExample`, `StreamingWithToolsExample`, `EventCollectionExample` and
     `AsyncToolAgentExample` are deleted.
+  - `GuardrailMiddleware`'s Block error is `GuardrailBlocked(guardrail, reason)` (the first failing
+    guardrail's name, every failure's error joined), no longer `CompositeGuardrail`'s aggregate.
   - `llm4s-java-api`: `JAgent.run(query)` returns `LlmResult<AgentResult>`; tools are given to
     `Llm4s.createAgent(client, tools)` (`run(query, tools)` is removed); `continueConversation` and
     `forget` are new. The Kotlin `AgentKt` follows (`run`, `continueConversation`, `forget`).

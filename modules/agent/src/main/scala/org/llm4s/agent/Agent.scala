@@ -21,11 +21,14 @@ import org.llm4s.types.Result
  * }}}
  *
  * Every run is a turn on a thread. A run that reaches the graph's end is `Right` with status
- * `Completed`, `Blocked` or `StepLimitReached`; one that parks on approvals or questions is `Right`
- * with `Suspended`, and continues with [[resume]]. Anything else is `Left`: the runtime's refusals
+ * `Completed` or `StepLimitReached`; one a guardrail blocks is `Right` with `Blocked`, the blocked
+ * turn absent from the thread; one that parks on approvals or questions is `Right` with
+ * `Suspended`, and continues with [[resume]]. Anything else is `Left`: the runtime's refusals
  * (`ThreadBusy`, `TenantMismatch`, `IncompleteRun`, `PendingInterrupts`, ...) leave the thread
- * unchanged, and a failed run - a provider error, a tool's `Fatal`, a middleware's failure,
- * cancellation, a deadline - leaves it for [[recover]].
+ * unchanged, as does another middleware's `beforeAgent` or `afterAgent` failure (a Block without a
+ * guardrail; a blank answer from a hook is one), which also ends the run; a failed run - a provider
+ * error, a tool's `Fatal`, a model or tool wrapper's failure, cancellation, a deadline - leaves the
+ * thread for [[recover]].
  */
 final class Agent private[agent] (
   val id: AgentId,
@@ -43,7 +46,7 @@ final class Agent private[agent] (
     run(ThreadId(java.util.UUID.randomUUID().toString), query, config, Nil)
 
   /**
-   * One turn on `threadId`: a new thread is created, seeded with `history`; on a completed thread
+   * One turn on `threadId`: a new thread is created, seeded with `history`; on a completed or blocked thread
    * it is the next turn, and `history` must be empty. `history` holds no system message and must be
    * a valid conversation. A `history` refused for its content, or given for a thread that exists, is
    * a `ValidationError`; the runtime's refusals - `GraphError.TenantMismatch` for another tenant's
@@ -53,11 +56,11 @@ final class Agent private[agent] (
   def run(threadId: ThreadId, query: String, config: RunConfig, history: Seq[Message]): Result[AgentResult] =
     start(threadId, query, config, history).flatMap(_.await())
 
-  /** One turn on `threadId`, new or completed. */
+  /** One turn on `threadId`, new, completed or blocked. */
   def run(threadId: ThreadId, query: String, config: RunConfig): Result[AgentResult] =
     run(threadId, query, config, Nil)
 
-  /** One turn on `threadId`, new or completed, with the default config. */
+  /** One turn on `threadId`, new, completed or blocked, with the default config. */
   def run(threadId: ThreadId, query: String): Result[AgentResult] = run(threadId, query, RunConfig(), Nil)
 
   /** The next turn on `previous`'s thread: only its `threadId` is read. */

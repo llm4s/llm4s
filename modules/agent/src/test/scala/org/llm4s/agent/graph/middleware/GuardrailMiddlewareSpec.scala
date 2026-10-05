@@ -8,7 +8,7 @@ import org.llm4s.agent.graph.tool.*
 import org.llm4s.agent.graph.toolloop.*
 import org.llm4s.agent.guardrails.{ GuardrailAction, InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.guardrails.builtin.*
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.types.Result
@@ -39,6 +39,14 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
       )
       .value
 
+  /** What the blocked run kept of the conversation: nothing, whichever boundary blocked. */
+  private def keptMessages(state: ThreadState) = state.get(Messages.key).value
+
+  private def blocked(cause: LLMError): GuardrailBlocked = cause match {
+    case b: GuardrailBlocked => b
+    case other               => fail(s"not a guardrail block: $other")
+  }
+
   private class Upper extends InputGuardrail {
     def validate(value: String): Result[String] = Right(value.toUpperCase)
     val name                                    = "Upper"
@@ -63,18 +71,13 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
 
   private val none = Seq.empty[InputGuardrail]
 
-  private def blockedOutput(result: RunResult[TurnOutput]): TurnOutcome.Blocked =
-    result.completed._2.outcome match {
-      case b: TurnOutcome.Blocked => b
-      case other                  => fail(s"not blocked: $other")
-    }
-
-  "GuardrailMiddleware" should "end the turn Blocked before any model call when an input guardrail blocks" in {
-    val model = ScriptedModel("ok")
-    val l     = build(model, new GuardrailMiddleware(Seq(LengthCheck(1, 5)), Nil))
-    val b     = blockedOutput(runInMemory(l.graph, AgentInput("much too long")))
-    b.guardrail shouldBe "LengthCheck"
-    b.reason should include("Input too long")
+  "GuardrailMiddleware" should "block the run before any model call when an input guardrail blocks" in {
+    val model         = ScriptedModel("ok")
+    val l             = build(model, new GuardrailMiddleware(Seq(LengthCheck(1, 5)), Nil))
+    val (kept, cause) = runInMemory(l.graph, AgentInput("much too long")).failed
+    blocked(cause).guardrail shouldBe "LengthCheck"
+    cause.message should include("Input too long")
+    keptMessages(kept) shouldBe empty
     model.seen.size shouldBe 0
   }
 
@@ -113,19 +116,22 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
   }
 
   it should "collect every failure into one block" in {
-    val l = build(ScriptedModel("ok"), new GuardrailMiddleware(Seq(new Reject("A"), new Reject("B")), Nil))
-    val b = blockedOutput(runInMemory(l.graph, AgentInput("hi")))
-    b.guardrail shouldBe "A"
-    b.reason should include("A rejected")
-    b.reason should include("B rejected")
+    val l             = build(ScriptedModel("ok"), new GuardrailMiddleware(Seq(new Reject("A"), new Reject("B")), Nil))
+    val (kept, cause) = runInMemory(l.graph, AgentInput("hi")).failed
+    keptMessages(kept) shouldBe empty
+    blocked(cause).guardrail shouldBe "A"
+    cause.message should include("A rejected")
+    cause.message should include("B rejected")
   }
 
   it should "block an answer an output guardrail rejects" in {
-    val l = build(ScriptedModel("this is badword"), new GuardrailMiddleware(none, Seq(ProfanityFilter())))
-    val r = runInMemory(l.graph, AgentInput("hi"))
-    blockedOutput(r).reason should include("inappropriate")
+    val l             = build(ScriptedModel("this is badword"), new GuardrailMiddleware(none, Seq(ProfanityFilter())))
+    val (kept, cause) = runInMemory(l.graph, AgentInput("hi")).failed
+    cause.message should include("inappropriate")
+    // the blocked turn is not kept: neither the input nor the blocked answer
+    keptMessages(kept) shouldBe empty
     val l2 = build(ScriptedModel("fine"), new GuardrailMiddleware(none, Seq(new Reject("Z"))))
-    blockedOutput(runInMemory(l2.graph, AgentInput("hi"), thread = "z")).reason should include("Z rejected")
+    runInMemory(l2.graph, AgentInput("hi"), thread = "z").failed._2.message should include("Z rejected")
   }
 
   it should "change the run's output when an output guardrail fixes it" in {
@@ -162,6 +168,8 @@ class GuardrailMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValue
     val judge = LLMSafetyGuardrail(new Judge("0.95", "0.1"))
     val mw    = new GuardrailMiddleware(none, Seq(judge))
     runInMemory(build(ScriptedModel("safe"), mw).graph, AgentInput("hi"), thread = "a").answered._2 shouldBe "safe"
-    blockedOutput(runInMemory(build(ScriptedModel("unsafe"), mw).graph, AgentInput("hi"), thread = "b"))
+    val (kept, error) = runInMemory(build(ScriptedModel("unsafe"), mw).graph, AgentInput("hi"), thread = "b").failed
+    blocked(error).reason should not be empty
+    keptMessages(kept) shouldBe empty
   }
 }

@@ -53,14 +53,20 @@ enum TurnOutcome derives ReadWriter:
   /** The active agent gave a final answer. */
   case Completed
 
-  /** A guardrail refused the turn. */
-  case Blocked(guardrail: String, reason: String)
-
   /** The active agent used its `maxSteps` model calls without a final answer. */
   case StepLimitReached
 
-/** The current turn: the model calls it has made, and its outcome once it has one. Reset by each turn's input. */
-final case class TurnState(steps: Int, outcome: Option[TurnOutcome]) derives ReadWriter
+/**
+ * The current turn: the model calls it has made, its outcome once it has one, and the agent and
+ * transfer it started with - which an output Block restores when it removes the turn. Reset by each
+ * turn's input.
+ */
+final case class TurnState(
+  steps: Int,
+  outcome: Option[TurnOutcome],
+  startAgent: Option[AgentId] = None,
+  startTransfer: Option[Transfer] = None
+) derives ReadWriter
 
 /** A turn's result: how it ended, and the agent active at its end - the one the next turn starts with. */
 final case class TurnOutput(outcome: TurnOutcome, activeAgent: AgentId) derives ReadWriter

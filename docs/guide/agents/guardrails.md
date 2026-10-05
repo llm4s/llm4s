@@ -46,12 +46,19 @@ val agent = Agent.builder("assistant", client)
   .build()
 ```
 
-A guardrail that refuses does not make the run fail: the turn ends with
-`AgentStatus.Blocked(guardrail, reason)` and the thread stays usable. An input block stores nothing
-for that turn; an output block stores a refusal in place of the answer
-(``Response withheld by guardrail `<name>`: <reason>`` by default, or
-`GuardrailMiddleware(..., refusal = (guardrail, reason) => ...)`). A guardrail that transforms
-(`PIIMasker`) changes the stored query or answer instead.
+A guardrail that refuses does not make `run` return a `Left`: the turn ends with
+`AgentStatus.Blocked(guardrail, reason)` - the first failing guardrail's name, and every failure's
+error - and the thread stays usable, so the next `run` or `continueConversation` on it works. The
+blocked turn is never kept: an input block stores nothing for that turn, and an output block removes
+the whole turn - the query, any tool calls and results, and the answer - so `result.messages` is the
+conversation as it was before the turn and the model never sees the blocked answer again. `usage`
+still counts the blocked turn's model calls. A guardrail that transforms (`PIIMasker`) changes the
+stored query or answer instead.
+
+Underneath, a block is the graph runtime's *Block*: the run ends as a finished failure
+(`RunResult.Failed` with a `GuardrailBlocked` error, the thread's checkpoint `Failed`), which
+`recover` has nothing to continue and `start` accepts like a completed thread. A `Left` from another
+middleware's `beforeAgent` or `afterAgent` blocks the same way, but is returned as that `Left`.
 
 Guardrails on the root agent guard its whole handoff family: they apply to every turn's query and
 every final answer, whichever agent is active after a handoff. See
@@ -479,8 +486,8 @@ agent.flatMap(_.run(userInput))
 
 ### Blocked Turns
 
-A block is an outcome, not an error: `run` returns `Right` with `AgentStatus.Blocked`, and the
-thread can take another turn.
+A block is an outcome, not an error: `run` returns `Right` with `AgentStatus.Blocked`, the blocked
+turn absent from `result.messages`, and the thread can take another turn.
 
 ```scala
 agent.run(query) match {
@@ -496,7 +503,7 @@ agent.run(query) match {
     }
 
   case Left(error) =>
-    // a provider error, a tool's failure, or a middleware that failed rather than blocked
+    // a provider error, a tool's failure, or another middleware's beforeAgent/afterAgent Left
     println(s"Run failed: ${error.message}")
 }
 ```

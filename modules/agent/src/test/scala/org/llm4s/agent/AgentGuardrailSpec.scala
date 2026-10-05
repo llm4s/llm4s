@@ -14,9 +14,11 @@ import org.scalatest.matchers.should.Matchers
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Guardrails on the agent: a block is the turn's `Blocked` outcome on a completed thread, not a
- * `Left`, and the next turn runs normally; any other middleware failure fails the run, and
- * `recover` completes it. Ports the behaviour of the former `AgentGuardrailsIntegrationSpec`.
+ * Guardrails on the agent: a block is the kernel's Block (design 4.13), which `Agent` reports as the
+ * turn's `Blocked` outcome, not a `Left`. An input block stores nothing of the turn, an output block
+ * removes it, and the next turn runs normally. Another middleware's boundary failure is also a
+ * Block, returned as `Left`, the thread usable. Ports the behaviour of the former
+ * `AgentGuardrailsIntegrationSpec`.
  */
 class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
 
@@ -50,7 +52,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
     client.callCount shouldBe 0
   }
 
-  it should "leave the thread completed, so the next turn works and the blocked query is not in its history" in {
+  it should "leave the thread usable, so the next turn works and the blocked query is not in its history" in {
     val client = answers("first answer", "second answer")
     val agent  = guarded(client, input = Seq(new LengthCheck(min = 10, max = 100)))
 
@@ -104,7 +106,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
     client.callCount shouldBe 1
   }
 
-  "An output block" should "replace the stored answer with the refusal and end the turn Blocked" in {
+  "An output block" should "remove the blocked turn and end it Blocked, keeping the turn's usage" in {
     val client = answers("not json")
     val result = guarded(client, output = Seq(new JSONValidator())).run("Generate JSON").value
 
@@ -112,26 +114,23 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
     blocked.guardrail shouldBe "JSONValidator"
     blocked.reason should include("not valid JSON")
     result.answer shouldBe None
-    result.messages.last shouldBe AssistantMessage(
-      GuardrailMiddleware.defaultRefusal(blocked.guardrail, blocked.reason)
-    )
-    result.messages.map(_.content) should not contain "not json"
+    result.messages shouldBe empty
     result.usage.requestCount shouldBe 1
   }
 
-  it should "keep the history valid: a follow-up turn succeeds, and the model sees its refusal" in {
-    val client = answers("leaks the secret", "a safe answer")
+  it should "keep the history valid: a follow-up turn succeeds, and the model sees nothing of the blocked turn" in {
+    val client = answers("first", "leaks the secret", "a safe answer")
     val agent  = guarded(client, output = Seq(secretFree))
 
-    val blocked  = agent.run("Tell me").value
+    val first    = agent.run("Hello").value
+    val blocked  = agent.continueConversation(first, "Tell me").value
     val followUp = agent.continueConversation(blocked, "Try again").value
 
     blocked.status shouldBe a[AgentStatus.Blocked]
+    blocked.messages shouldBe first.messages
     followUp.answer shouldBe Some("a safe answer")
     followUp.threadId shouldBe blocked.threadId
-    val refusal = client.sent(1).collect { case a: AssistantMessage => a.content }
-    refusal should have size 1
-    refusal.head should include("response must not contain secrets")
+    client.sent(2) shouldBe Vector(UserMessage("Hello"), AssistantMessage("first"), UserMessage("Try again"))
     Message.validateConversation(followUp.messages.toList) shouldBe Right(())
   }
 
@@ -184,20 +183,20 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
       else Right(answer)
   }
 
-  "A non-guardrail middleware failure" should "fail the run, and recover completes it without asking the model again" in {
-    val client = answers("the answer")
+  "A non-guardrail boundary failure" should "end the run as Left with its error, the turn removed and the thread usable" in {
+    val client = answers("the answer", "the next answer")
     val flaky  = new FlakyAfterAgent(failures = 1)
     val agent  = built(Agent.builder("assistant", client).withMiddleware(flaky))
-    val thread = org.llm4s.agent.graph.ThreadId("guardrail-recover")
+    val thread = org.llm4s.agent.graph.ThreadId("boundary-failure")
 
-    val error = agent.run(thread, "q").error
-    error shouldBe a[GraphError.NodeFailed]
-    cause(error).message should include("audit store unavailable")
+    agent.run(thread, "q").error shouldBe ValidationError("audit", "audit store unavailable")
+    // a Block is finished, not interrupted: there is nothing to recover
+    agent.recover(thread).error shouldBe GraphError.NothingToRecover(thread.value)
 
-    val recovered = agent.recover(thread).value
-    recovered.answer shouldBe Some("the answer")
-    recovered.threadId shouldBe thread
-    client.callCount shouldBe 1
+    val next = agent.run(thread, "q again").value
+    next.answer shouldBe Some("the next answer")
+    next.messages shouldBe Vector(UserMessage("q again"), AssistantMessage("the next answer"))
+    client.callCount shouldBe 2
     flaky.calls.get() shouldBe 2
   }
 
@@ -246,13 +245,13 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
     specialist.callCount shouldBe 1
   }
 
-  "A root output guardrail" should "block a handoff target's answer, with the root's refusal text" in {
+  "A root output guardrail" should "block a handoff target's answer, removing the turn and its handoff" in {
     val root       = ScriptedLLMClient.of(handoffTo("specialist"))
     val specialist = answers("here is the secret")
     val agent = built(
       Agent
         .builder("triage", root)
-        .withMiddleware(new GuardrailMiddleware(Nil, Seq(secretFree), refusal = (g, _) => s"root refused ($g)"))
+        .withMiddleware(new GuardrailMiddleware(Nil, Seq(secretFree)))
         .withHandoffs(Handoff.to("specialist", Agent.builder("specialist", specialist)))
     )
 
@@ -260,23 +259,24 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
 
     result.status shouldBe a[AgentStatus.Blocked]
     result.status.asInstanceOf[AgentStatus.Blocked].guardrail shouldBe "NoSecrets"
-    result.messages.last shouldBe AssistantMessage("root refused (NoSecrets)")
-    result.messages.map(_.content).exists(_.contains("secret")) shouldBe false
+    result.messages shouldBe empty
+    // the handoff was part of the removed turn: the thread is with the root again
+    result.activeAgent.value shouldBe "triage"
   }
 
-  "A handoff target's own guardrail" should "still apply, with its own refusal text, under a root guardrail" in {
+  "A handoff target's own guardrail" should "still apply under a root guardrail" in {
     val root       = ScriptedLLMClient.of(handoffTo("specialist"))
     val specialist = answers("here is the secret")
     val agent = built(
       Agent
         .builder("triage", root)
-        .withMiddleware(new GuardrailMiddleware(Seq(rejectNo), Nil, refusal = (_, _) => "root refused"))
+        .withMiddleware(new GuardrailMiddleware(Seq(rejectNo), Nil))
         .withHandoffs(
           Handoff.to(
             "specialist",
             Agent
               .builder("specialist", specialist)
-              .withMiddleware(new GuardrailMiddleware(Nil, Seq(secretFree), refusal = (_, _) => "specialist refused"))
+              .withMiddleware(new GuardrailMiddleware(Nil, Seq(secretFree)))
           )
         )
     )
@@ -284,7 +284,7 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
     val result = agent.run("tell me").value
 
     result.status.asInstanceOf[AgentStatus.Blocked].guardrail shouldBe "NoSecrets"
-    result.messages.last shouldBe AssistantMessage("specialist refused")
+    result.messages shouldBe empty
   }
 
   "Boundary middleware across a handoff" should "run the root's then the target's beforeAgent, and the target's then the root's afterAgent" in {
@@ -344,22 +344,5 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
     next.answer shouldBe Some("next answer")
     next.messages shouldBe (history.toVector ++ Vector(UserMessage("yes"), AssistantMessage("next answer")))
     client.sent.head.collect { case u: UserMessage => u.content } shouldBe Vector("earlier question", "yes")
-  }
-
-  // --- a blank refusal ---
-
-  "A refusal function returning blank text" should "fall back to the default refusal, keeping later turns valid" in {
-    val client = answers("leaks the secret", "a safe answer")
-    val agent = built(
-      Agent
-        .builder("assistant", client)
-        .withMiddleware(new GuardrailMiddleware(Nil, Seq(secretFree), refusal = (_, _) => "  "))
-    )
-
-    val blocked = agent.run("Tell me").value
-    val reason  = blocked.status.asInstanceOf[AgentStatus.Blocked].reason
-    blocked.messages.last shouldBe AssistantMessage(GuardrailMiddleware.defaultRefusal("NoSecrets", reason))
-
-    agent.continueConversation(blocked, "Try again").value.answer shouldBe Some("a safe answer")
   }
 }

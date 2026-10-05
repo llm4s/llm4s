@@ -12,8 +12,10 @@ enum AgentStatus:
   case Completed(answer: String)
 
   /**
-   * A guardrail refused the turn. An input block stores nothing; an output block stores a refusal
-   * in place of the answer. The thread is complete either way, and the next turn runs normally.
+   * A guardrail refused the turn: `guardrail` is the first failing guardrail's name, `reason` every
+   * failure's error. An input block stores nothing of the turn; an output block removes it - the
+   * query, any tool calls and the answer - so `messages` is the history from before the turn. Usage
+   * keeps the turn's model calls. The thread is usable, and the next turn runs normally.
    */
   case Blocked(guardrail: String, reason: String)
 

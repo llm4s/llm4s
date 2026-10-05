@@ -38,12 +38,8 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
 
   /** Runs each `afterAgent` in reverse stack order, threading the answer; the first `Left` stops. */
   private[graph] def afterAgent(answer: String, context: RunContext): Result[String] =
-    afterAgentRaised(answer, context).left.map(_._2)
-
-  /** As [[afterAgent]], but a `Left` also says which middleware returned it. */
-  private[graph] def afterAgentRaised(answer: String, context: RunContext): Either[(MiddlewareId, LLMError), String] =
-    ordered.reverse.foldLeft[Either[(MiddlewareId, LLMError), String]](Right(answer))((acc, m) =>
-      acc.flatMap(value => guarded(m)(m.afterAgent(value, context)).left.map(m.id -> _))
+    ordered.reverse.foldLeft[Result[String]](Right(answer))((acc, m) =>
+      acc.flatMap(value => guarded(m)(m.afterAgent(value, context)))
     )
 
   /** Runs the model call through every `wrapModelCall`, the first outermost, with `innermost` at the centre. */

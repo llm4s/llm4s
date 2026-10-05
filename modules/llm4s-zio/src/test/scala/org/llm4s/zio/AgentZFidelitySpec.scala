@@ -163,7 +163,9 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
           first <- agent.run("q1")
           next  <- agent.continueConversation(first, "q2")
         } yield assertTrue(first.status == AgentStatus.Completed("a long enough first answer")) &&
-          assertTrue(next.status.isInstanceOf[AgentStatus.Blocked])
+          assertTrue(next.status.isInstanceOf[AgentStatus.Blocked]) &&
+          // the blocked turn is removed: the thread is as the first turn left it
+          assertTrue(next.messages == first.messages)
       },
       test("continueConversation surfaces provider errors with the original LLMError attached") {
         val calls = new AtomicInteger(0)

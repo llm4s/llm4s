@@ -9,9 +9,9 @@ import org.llm4s.types.Result
  * Runs input guardrails on the run's input (`beforeAgent`) and output guardrails on its final
  * answer (`afterAgent`). Each list runs in order, each guardrail on the value the previous one
  * returned, so a `Fix` transforms; a `Warn` passes. Failures are collected into one
- * [[GuardrailBlocked]], which the tool loop ends the turn with as `TurnOutcome.Blocked`. When an
- * answer is blocked, the stored message's content becomes `refusal(guardrail, reason)`, or
- * [[GuardrailMiddleware.defaultRefusal]] when that is blank. A guardrail does not suspend.
+ * [[GuardrailBlocked]], which blocks the run (design 4.13): it ends as a finished failure, an input
+ * block storing nothing of the turn and an output block removing it, and the thread stays usable.
+ * `Agent` reports it as `AgentStatus.Blocked`. A guardrail does not suspend.
  *
  * On a root agent it guards the whole agent family: its input guardrails run on every turn's query
  * and its output guardrails on every final answer, whichever agent is active after a handoff. On a
@@ -20,21 +20,14 @@ import org.llm4s.types.Result
 final class GuardrailMiddleware(
   input: Seq[InputGuardrail],
   output: Seq[OutputGuardrail],
-  val id: MiddlewareId = MiddlewareId("guardrails"),
-  refusal: (String, String) => String = GuardrailMiddleware.defaultRefusal
+  val id: MiddlewareId = MiddlewareId("guardrails")
 ) extends AgentMiddleware:
-
-  /** The text that replaces an answer this middleware blocked. */
-  def refusalFor(blocked: GuardrailBlocked): String = refusal(blocked.guardrail, blocked.reason)
 
   override def beforeAgent(text: String, context: RunContext): Result[String] = GuardrailMiddleware.run(input, text)
 
   override def afterAgent(answer: String, context: RunContext): Result[String] = GuardrailMiddleware.run(output, answer)
 
 object GuardrailMiddleware:
-
-  /** The refusal that replaces a blocked answer: names the guardrail and the reason. */
-  val defaultRefusal: (String, String) => String = (g, r) => s"Response withheld by guardrail `$g`: $r"
 
   /**
    * Threads `value` through `guardrails`; a failing guardrail leaves it unchanged for the next.

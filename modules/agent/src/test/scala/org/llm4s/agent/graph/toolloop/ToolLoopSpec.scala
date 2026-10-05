@@ -14,13 +14,13 @@ import org.llm4s.agent.graph.middleware.{
 import org.llm4s.agent.guardrails.builtin.{ LengthCheck, PIIMasker }
 import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.agent.graph.tool.*
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.toolapi.{ Schema, SchemaDefinition, ToolBuilder }
 import org.llm4s.types.Result
 import org.scalatest.Assertions.fail
-import org.scalatest.EitherValues
+import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.ReadWriter
@@ -62,7 +62,7 @@ object ToolLoopFixtures {
     }
 }
 
-class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
+class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
   import ToolLoopFixtures.*
 
   private val thread = ThreadId("conversation-1")
@@ -1339,9 +1339,10 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val blocked       = ScriptedModel(summarise)
     val refusing      = middleware("refusing", before = _ => Left(ValidationError("input", "not allowed")))
     val refused       = buildSingle(blocked, set(Tools().echo), Seq(refusing)).value
-    val (node, cause) = nodeFailure(runInMemory(refused.graph, AgentInput("go")))
-    node shouldBe NodeId("input")
-    cause.message should include("not allowed")
+    val (kept, cause) = runInMemory(refused.graph, AgentInput("go")).failed
+    // the guardrail's own error, with nothing stored
+    cause shouldBe ValidationError("input", "not allowed")
+    messagesOf(kept) shouldBe empty
     blocked.calls shouldBe 0
   }
 
@@ -1419,24 +1420,111 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     Message.validateConversation(history.toList).value shouldBe (())
   }
 
-  it should "fail the run when afterAgent returns a blank answer, or a Left" in {
-    val blanking      = middleware("blanking", after = _ => Right("  "))
-    val l             = buildSingle(ScriptedModel(summarise), set(Tools().echo), Seq(blanking)).value
-    val (node, cause) = nodeFailure(runInMemory(l.graph, AgentInput("go")))
-    node shouldBe NodeId("a/finish")
+  it should "block the run when afterAgent returns a blank answer, or a Left, keeping none of the turn" in {
+    val blanking              = middleware("blanking", after = _ => Right("  "))
+    val l                     = buildSingle(ScriptedModel(summarise), set(Tools().echo), Seq(blanking)).value
+    val (blankedState, cause) = runInMemory(l.graph, AgentInput("go")).failed
     cause shouldBe ValidationError("tool loop", "afterAgent returned a blank answer")
+    messagesOf(blankedState) shouldBe empty
 
-    val refusing  = middleware("refusing", after = _ => Left(ValidationError("output", "blocked")))
-    val refused   = buildSingle(ScriptedModel(summarise), set(Tools().echo), Seq(refusing)).value
-    val (at, why) = nodeFailure(runInMemory(refused.graph, AgentInput("go")))
-    at shouldBe NodeId("a/finish")
-    why.message should include("blocked")
+    val refusing            = middleware("refusing", after = _ => Left(ValidationError("output", "blocked")))
+    val refused             = buildSingle(ScriptedModel(summarise), set(Tools().echo), Seq(refusing)).value
+    val (refusedState, why) = runInMemory(refused.graph, AgentInput("go")).failed
+    why shouldBe ValidationError("output", "blocked")
+    messagesOf(refusedState) shouldBe empty
+  }
+
+  // ---- a guardrail Block is a finished failure that leaves the thread usable (#1328, design 4.13) ----
+
+  /** Blocks any input equal to "forbidden" and any answer containing "SECRET". */
+  private def gate: AgentMiddleware = middleware(
+    "gate",
+    before = in => if in == "forbidden" then Left(ValidationError("input", "not allowed")) else Right(in),
+    after = out => if out.contains("SECRET") then Left(ValidationError("output", "blocked")) else Right(out)
+  )
+
+  it should "finish an input Block as Failed with the history unchanged, so the next turn runs from it" in {
+    val model   = ScriptedModel(_ => AssistantMessage("hello"))
+    val l       = buildSingle(model, set(Tools().echo), Seq(gate)).value
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+
+    val (kept, error) = runtime.start(thread, l.graph, AgentInput("forbidden")).awaited.value.failed
+    error shouldBe ValidationError("input", "not allowed")
+    messagesOf(kept) shouldBe empty
+    model.calls shouldBe 0
+    store.latest(thread).value.value.checkpoint.status shouldBe CheckpointStatus.Failed
+
+    val (state, answer) = runtime.start(thread, l.graph, AgentInput("hi")).awaited.value.answered
+    answer shouldBe "hello"
+    model.seen.get(0) shouldBe Vector(UserMessage("hi"))
+    messagesOf(state) shouldBe Vector(UserMessage("hi"), AssistantMessage("hello"))
+  }
+
+  it should "remove the whole blocked turn on an output Block: input, tool calls and results, and the answer" in {
+    val model = ScriptedModel(
+      _ => AssistantMessage("fine"),
+      calls(("c1", "echo", ujson.Obj("text" -> "hi"))),
+      _ => AssistantMessage("SECRET answer"),
+      _ => AssistantMessage("after")
+    )
+    val l       = buildSingle(model, set(Tools().echo), Seq(gate)).value
+    val store   = InMemoryCheckpointer()
+    val runtime = GraphRuntime(store)
+    runtime.start(thread, l.graph, AgentInput("one")).awaited.value.answered
+
+    // turn two calls a tool, then answers with what the gate refuses
+    val (kept, error) = runtime.start(thread, l.graph, AgentInput("two")).awaited.value.failed
+    error shouldBe ValidationError("output", "blocked")
+    model.calls shouldBe 3
+    messagesOf(kept) shouldBe Vector(UserMessage("one"), AssistantMessage("fine"))
+
+    // no blocked content is stored: not in the checkpoint, nor in any pending write
+    val stored = store.latest(thread).value.value
+    stored.checkpoint.status shouldBe CheckpointStatus.Failed
+    val persisted = Checkpoint.toJson(stored.checkpoint).render()
+    (persisted should not).include("SECRET")
+    (persisted should not).include("\"c1\"")
+    stored.pendingWrites shouldBe empty
+
+    // the thread continues from the history before the turn
+    val (state, answer) = runtime.start(thread, l.graph, AgentInput("three")).awaited.value.answered
+    answer shouldBe "after"
+    model.seen.get(3) shouldBe Vector(UserMessage("one"), AssistantMessage("fine"), UserMessage("three"))
+    val history = messagesOf(state)
+    history shouldBe Vector(
+      UserMessage("one"),
+      AssistantMessage("fine"),
+      UserMessage("three"),
+      AssistantMessage("after")
+    )
+    Message.validateConversation(history.toList).value shouldBe (())
+  }
+
+  it should "refuse recover on a blocked thread: it is finished, not interrupted" in {
+    val model   = ScriptedModel(_ => AssistantMessage("SECRET"))
+    val l       = buildSingle(model, set(Tools().echo), Seq(gate)).value
+    val runtime = GraphRuntime(InMemoryCheckpointer())
+    runtime.start(thread, l.graph, AgentInput("go")).awaited.value.failed
+
+    runtime.recover(thread, l.graph).left.value shouldBe GraphError.NothingToRecover(thread.value)
+    model.calls shouldBe 1
+  }
+
+  it should "not treat a cancellation from a boundary hook as a Block: the run fails and stays Running" in {
+    val cancelling = middleware("cancelling", after = _ => Left(CancelledError("hook")))
+    val l          = buildSingle(ScriptedModel(summarise), set(Tools().echo), Seq(cancelling)).value
+    val store      = InMemoryCheckpointer()
+
+    GraphRuntime(store).start(thread, l.graph, AgentInput("go")).awaited.value.failed
+
+    store.latest(thread).value.value.checkpoint.status shouldBe CheckpointStatus.Running
   }
 
   private def turn(runtime: GraphRuntime, l: ToolLoop, q: String, i: Int): RunResult[TurnOutput] =
     runtime.start(thread, l.graph, AgentInput(q), RunConfig().withRunId(RunId(s"run-$i"))).awaited.value
 
-  it should "end a turn Blocked on an input guardrail block, leaving the thread as it was" in {
+  it should "block on an input guardrail, leaving the thread as it was" in {
     val model   = ScriptedModel(_ => AssistantMessage("one"), _ => AssistantMessage("three"))
     val l       = buildSingle(model, set(Tools().echo), Seq(new GuardrailMiddleware(Seq(LengthCheck(1, 6)), Nil))).value
     val runtime = GraphRuntime(InMemoryCheckpointer())
@@ -1444,10 +1532,9 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val firstMessages = messagesOf(first)
     val firstUsage    = first.get(LoopKeys.usage).value
 
-    val blocked         = turn(runtime, l, "much too long", 2)
-    val (state, output) = blocked.completed
-    output.outcome shouldBe a[TurnOutcome.Blocked]
-    output.activeAgent shouldBe agentA
+    val (state, error) = turn(runtime, l, "much too long", 2).failed
+    error shouldBe a[GuardrailBlocked]
+    state.get(LoopKeys.activeAgent).value shouldBe Some(agentA)
     messagesOf(state) shouldBe firstMessages
     state.get(LoopKeys.usage).value shouldBe firstUsage
     model.calls shouldBe 1
@@ -1457,22 +1544,21 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     messagesOf(third) shouldBe firstMessages ++ Vector(UserMessage("again"), AssistantMessage("three"))
   }
 
-  it should "store no message on a brand-new thread whose first input is blocked, making the root active" in {
-    val model = ScriptedModel(_ => AssistantMessage("never"))
-    val l     = buildSingle(model, set(Tools().echo), Seq(new GuardrailMiddleware(Seq(LengthCheck(1, 3)), Nil))).value
-    val (state, output) = runInMemory(l.graph, AgentInput("too long")).completed
-    output shouldBe TurnOutput(
-      TurnOutcome.Blocked(
-        "LengthCheck",
-        output.outcome match {
-          case TurnOutcome.Blocked(_, r) => r
-          case _                         => ""
-        }
-      ),
-      agentA
-    )
-    state.get(Messages.key).value shouldBe empty
+  it should "keep a new thread's imported history and make the root active when its first input is blocked" in {
+    val model   = ScriptedModel(_ => AssistantMessage("never"), _ => AssistantMessage("ok"))
+    val l       = buildSingle(model, set(Tools().echo), Seq(new GuardrailMiddleware(Seq(LengthCheck(1, 3)), Nil))).value
+    val runtime = GraphRuntime(InMemoryCheckpointer())
+    val history = Vector(UserMessage("hi"), AssistantMessage("hello"))
+    val (state, error) = runtime.start(thread, l.graph, AgentInput("too long", history)).awaited.value.failed
+    error shouldBe GuardrailBlocked("LengthCheck", error.asInstanceOf[GuardrailBlocked].reason)
+    messagesOf(state) shouldBe history
     state.get(LoopKeys.activeAgent).value shouldBe Some(agentA)
+    model.calls shouldBe 0
+
+    // the seeded thread continues, with no history to import again
+    val (next, answer) = runtime.start(thread, l.graph, AgentInput("ok")).awaited.value.answered
+    answer shouldBe "never"
+    messagesOf(next) shouldBe history ++ Vector(UserMessage("ok"), AssistantMessage("never"))
   }
 
   private class Banned(word: String) extends OutputGuardrail {
@@ -1481,35 +1567,44 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
       if value.contains(word) then Left(ValidationError("output", s"contains $word")) else Right(value)
   }
 
-  it should "replace a blocked answer with the refusal, keeping the original in no state" in {
+  it should "remove an answer a guardrail blocks, keeping it in no state, with the guardrail's name in the error" in {
     val model = ScriptedModel(_ => AssistantMessage("the secret-word is here"))
     val l =
       buildSingle(model, set(Tools().echo), Seq(new GuardrailMiddleware(Nil, Seq(new Banned("secret-word"))))).value
-    val (state, output) = runInMemory(l.graph, AgentInput("go")).completed
-    output.outcome shouldBe a[TurnOutcome.Blocked]
-    val refusal = messagesOf(state).last.asInstanceOf[AssistantMessage].content
-    refusal should startWith("Response withheld by guardrail `Banned`: ")
-    (messagesOf(state).map(_.toString).mkString should not).include("secret-word is here")
-    (state.toString should not).include("the secret-word is here")
-    Message.validateConversation(messagesOf(state).toList).value shouldBe (())
+    val (state, error) = runInMemory(l.graph, AgentInput("go")).failed
+    error shouldBe GuardrailBlocked("Banned", ValidationError("output", "contains secret-word").formatted)
+    messagesOf(state) shouldBe empty
+    (state.toString should not).include("secret-word is here")
   }
 
-  it should "use a custom refusal function when given" in {
-    val model           = ScriptedModel(_ => AssistantMessage("a secret-word"))
-    val mw              = new GuardrailMiddleware(Nil, Seq(new Banned("secret-word")), refusal = (g, _) => s"no ($g)")
-    val l               = buildSingle(model, set(Tools().echo), Seq(mw)).value
-    val (state, output) = runInMemory(l.graph, AgentInput("go")).completed
-    output.outcome shouldBe a[TurnOutcome.Blocked]
-    messagesOf(state).last shouldBe AssistantMessage("no (Banned)")
-  }
+  it should "restore the agent the turn started with when an output Block removes a turn that handed off" in {
+    val agentB = AgentId.unsafe("b")
+    val modelA = ScriptedModel(
+      _ => AssistantMessage("hello"),
+      _ => AssistantMessage(None, Seq(ToolCall("h1", HandoffTools.toolName(agentB), ujson.Obj("reason" -> "x"))))
+    )
+    val modelB = ScriptedModel(_ => AssistantMessage("SECRET from b"))
+    val l = ToolLoop
+      .build(
+        "loop",
+        "1",
+        agentA,
+        Vector(
+          LoopAgent(agentA, modelA, set(Tools().echo))
+            .withMiddleware(Seq(gate))
+            .withHandoffs(Vector(LoopHandoff(agentB, None, preserveContext = false))),
+          LoopAgent(agentB, modelB, set(Tools().echo))
+        )
+      )
+      .value
+    val runtime = GraphRuntime(InMemoryCheckpointer())
+    turn(runtime, l, "one", 1).answered
 
-  it should "use the default refusal when another middleware raises GuardrailBlocked" in {
-    val model           = ScriptedModel(_ => AssistantMessage("whatever"))
-    val other           = middleware("other", after = _ => Left(GuardrailBlocked("Custom", "nope")))
-    val l               = buildSingle(model, set(Tools().echo), Seq(other)).value
-    val (state, output) = runInMemory(l.graph, AgentInput("go")).completed
-    output.outcome shouldBe TurnOutcome.Blocked("Custom", "nope")
-    messagesOf(state).last shouldBe AssistantMessage("Response withheld by guardrail `Custom`: nope")
+    val (state, error) = turn(runtime, l, "two", 2).failed
+    error shouldBe ValidationError("output", "blocked")
+    messagesOf(state) shouldBe Vector(UserMessage("one"), AssistantMessage("hello"))
+    state.get(LoopKeys.activeAgent).value shouldBe Some(agentA)
+    state.get(LoopKeys.transfer).value shouldBe None
   }
 
   it should "store the transformed input when an input guardrail transforms rather than blocks" in {
@@ -1518,12 +1613,6 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues {
     val (state, _) = runInMemory(l.graph, AgentInput("mail me at jane.doe@example.com")).answered
     val user       = messagesOf(state).head.asInstanceOf[UserMessage].content
     (user should not).include("jane.doe@example.com")
-  }
-
-  it should "still fail the run on a non-guardrail Left from beforeAgent" in {
-    val refusing = middleware("refusing", before = _ => Left(ValidationError("input", "not allowed")))
-    val l        = buildSingle(ScriptedModel(summarise), set(Tools().echo), Seq(refusing)).value
-    nodeFailure(runInMemory(l.graph, AgentInput("go")))._1 shouldBe NodeId("input")
   }
 
   it should "refuse a blank final answer at the model node, storing nothing, even when afterAgent leaves it unchanged" in {

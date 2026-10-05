@@ -2,14 +2,7 @@ package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
-import org.llm4s.agent.graph.middleware.{
-  GuardrailBlocked,
-  GuardrailMiddleware,
-  MiddlewareId,
-  MiddlewareStack,
-  ModelRequest,
-  ToolCallRequest
-}
+import org.llm4s.agent.graph.middleware.{ MiddlewareId, MiddlewareStack, ModelRequest, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
@@ -85,22 +78,26 @@ object ModelStep:
  *    message, and a valid conversation - and makes the root the active agent; on an existing thread
  *    a `history` is refused. It then runs the root's `beforeAgent` stack on the query and, when
  *    another agent is active, that agent's stack on the result, appends the user message, resets
- *    [[LoopKeys.turn]] and routes to the active agent's model. A [[org.llm4s.agent.graph.middleware.GuardrailBlocked]] from either
- *    stack ends the turn [[TurnOutcome.Blocked]] without the query or a model call; a new thread
- *    still keeps its imported history and the root as its active agent. The turn's [[TurnOutput]]
- *    is its outcome and the active agent.
+ *    [[LoopKeys.turn]] and routes to the active agent's model. A `Left` from either stack blocks
+ *    the run without the query or a model call; a new thread still keeps its
+ *    imported history and the root as its active agent. The turn's [[TurnOutput]] is its outcome
+ *    and the active agent.
  *  - `<id>/model` counts the turn's steps: at the agent's `maxSteps` it ends the turn with
  *    [[TurnOutcome.StepLimitReached]] without calling the model. Otherwise it sends the agent's
  *    system prompt, then the history; the prompt is never stored.
  *  - The middleware stack (#1279) runs at the run's boundaries and around each call: `input` runs
  *    every `beforeAgent` on the user's text, `model` runs `ModelStep.next` inside every
  *    `wrapModelCall`, and `finish` runs every `afterAgent` (in reverse) on the final answer,
- *    replacing the stored answer's content when it changes; a blank answer or a `Left` fails the
- *    run. The root's boundary hooks guard the whole family: `<id>/finish` of a handoff target runs
- *    its own `afterAgent` stack, then the root's. A `GuardrailBlocked` from either replaces the
- *    stored answer with the raising middleware's refusal - the default refusal when that text is
- *    blank - and ends the turn `Blocked`. `wrapModelCall` and `wrapToolCall` stay per agent. A
- *    middleware's `tools` join the loop's [[org.llm4s.agent.graph.tool.ToolSet]], and its
+ *    replacing the stored answer's content when it changes. The root's boundary hooks guard the
+ *    whole family: `input` runs the root's `beforeAgent` stack, then the active agent's, and
+ *    `<id>/finish` of a handoff target runs its own `afterAgent` stack, then the root's. A `Left`
+ *    from either hook and a blank answer from `afterAgent`
+ *    *block* the run (design 4.13): it ends as a finished failure, `RunResult.Failed`, carrying
+ *    that error, and the thread stays usable; a cancellation is not a Block. An input Block
+ *    commits only a new thread's seed - its imported history and the root as active agent - and an
+ *    output Block removes the blocked turn from the history, restoring the agent and transfer the
+ *    turn started with. `wrapModelCall` and `wrapToolCall` stay per agent. A middleware's `tools`
+ *    join the loop's [[org.llm4s.agent.graph.tool.ToolSet]], and its
  *    `writes` are keys its `wrapToolCall` may add to a `Success` update.
  *  - Each call is its own task. Its tool is looked up, its raw arguments validated against the
  *    tool's `argumentSchema`, decoded and checked by the tool's `validateDecoded` - any failure is an
@@ -324,43 +321,38 @@ object ToolLoop:
     val preserves = prepared.flatMap(p => p.agent.handoffs.map(h => (p.agent.id, h.target) -> h.preserveContext)).toMap
     prepared.foreach(p => implement(b, agents(p.agent.id), agents, root, preserves))
 
+    // An input Block (a beforeAgent `Left`) stores nothing of the turn: the run ends as a
+    // finished failure, committing only a new thread's seed - its imported history and the root as active agent.
     val input = b.node[AgentInput]("input", writes = Set(messages, LoopKeys.activeAgent, LoopKeys.turn)) {
       (in, state, context) =>
         val taskId = context.position.taskId.value
-        NodeResult.fromResult(
-          for
-            active  <- state.get(LoopKeys.activeAgent)
-            history <- state.get(messages)
-            start <- active match
-              case None =>
-                imported(in.history, history, taskId).map(seed => root -> seed.update(LoopKeys.activeAgent, root))
-              case Some(current) =>
-                if in.history.nonEmpty then
-                  Left(ValidationError("history", "history is imported only into a new thread"))
-                else Right(current -> Command.empty)
-            (agentId, seeded) = start
-            nodes <- agents
-              .get(agentId)
-              .toRight(ValidationError("tool loop", s"the thread's agent '${agentId.value}' is not in this loop"))
-            // the root's boundary hooks guard the whole family; the active agent's own run inside them
-            stacks = if agentId == root then Vector(nodes.stack) else Vector(agents(root).stack, nodes.stack)
-            checked <- stacks.foldLeft[Result[String]](Right(in.query))((acc, s) =>
-              acc.flatMap(s.beforeAgent(_, context))
-            ) match
-              case Left(b: GuardrailBlocked) => Right(Left(b))
-              case Left(other)               => Left(other)
-              case Right(text)               => Right(Right(text))
-          yield checked match
-            // a block ends the turn without the query or a model call; a new thread still gets its
-            // imported history and the root as its active agent
-            case Left(b) =>
-              seeded.update(LoopKeys.turn, TurnState(0, Some(TurnOutcome.Blocked(b.guardrail, b.reason))))
+        val outcome = for
+          active   <- state.get(LoopKeys.activeAgent)
+          history  <- state.get(messages)
+          transfer <- state.get(LoopKeys.transfer)
+          start <- active match
+            case None =>
+              imported(in.history, history, taskId).map(seed => root -> seed.update(LoopKeys.activeAgent, root))
+            case Some(current) =>
+              if in.history.nonEmpty then Left(ValidationError("history", "history is imported only into a new thread"))
+              else Right(current -> Command.empty)
+          (agentId, seeded) = start
+          nodes <- agents
+            .get(agentId)
+            .toRight(ValidationError("tool loop", s"the thread's agent '${agentId.value}' is not in this loop"))
+        yield
+          // the root's boundary hooks guard the whole family; the active agent's own run inside them
+          val stacks = if agentId == root then Vector(nodes.stack) else Vector(agents(root).stack, nodes.stack)
+          stacks.foldLeft[Result[String]](Right(in.query))((acc, s) => acc.flatMap(s.beforeAgent(_, context))) match
+            case Left(error) => boundary(error, seeded.update)
             case Right(transformed) =>
-              seeded
-                .update(messages, MessageUpdate.Append(StoredMessage(s"$taskId/user", UserMessage(transformed))))
-                .update(LoopKeys.turn, TurnState(0, None))
-                .goto(nodes.model)
-        )
+              NodeResult.Continue(
+                seeded
+                  .update(messages, MessageUpdate.Append(StoredMessage(s"$taskId/user", UserMessage(transformed))))
+                  .update(LoopKeys.turn, TurnState(0, None, Some(agentId), transfer))
+                  .goto(nodes.model)
+              )
+        outcome.fold(NodeResult.Fail(_), identity)
     }
 
     b.compile(input) { state =>
@@ -487,7 +479,7 @@ object ToolLoop:
                 appended
                   .update(messages, toolMessage(transfer, HandoffTools.transferred(target.agent.id)))
                   .update(LoopKeys.activeAgent, target.agent.id)
-                  .update(LoopKeys.transfer, Transfer(agent.id, target.agent.id, stored.id))
+                  .update(LoopKeys.transfer, Some(Transfer(agent.id, target.agent.id, stored.id)))
                   .goto(target.model)
               case _ =>
                 // a handoff with other calls, or several: nothing runs, every call gets the rule as its error
@@ -502,41 +494,40 @@ object ToolLoop:
     val boundaryStacks =
       if agent.id == root then Vector(stack) else Vector(stack, family(root).stack)
 
-    // the final answer, through every afterAgent; a changed answer replaces the stored message's content
-    b.implement(nodes.finish, writes = Set(messages, LoopKeys.turn)) { (_, state, context) =>
-      NodeResult.fromResult(for
-        history <- state.get(messages)
-        turn    <- state.get(LoopKeys.turn)
-        last <- history.lastOption
-          .collect { case StoredMessage(id, a: AssistantMessage) if a.toolCalls.isEmpty => id -> a }
-          .toRight(ValidationError("tool loop", "finish found no final assistant message"))
-        (answerId, assistant) = last
-        checked <- boundaryStacks
-          .foldLeft[Either[(MiddlewareStack, MiddlewareId, LLMError), String]](Right(assistant.content)) { (acc, s) =>
-            acc.flatMap(text => s.afterAgentRaised(text, context).left.map((raiser, error) => (s, raiser, error)))
-          } match
-          case Left((s, raiser, b: GuardrailBlocked)) => Right(Left((s, raiser, b)))
-          case Left((_, _, other))                    => Left(other)
-          case Right(text)                            => Right(Right(text))
-        replace = (text: String) =>
-          Command.empty.update(
-            messages,
-            MessageUpdate.Replace(answerId, StoredMessage(answerId, assistant.copy(contentOpt = Some(text))))
+    // the final answer, through every afterAgent; a changed answer replaces the stored message's content.
+    // An output Block (an afterAgent `Left`, or a blank answer) ends the run as a finished failure and removes the
+    // blocked turn from the history, so no blocked content is stored and the thread continues from before it, with
+    // the agent and transfer the turn started with.
+    b.implement(nodes.finish, writes = Set(messages, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)) {
+      (_, state, context) =>
+        val outcome = for
+          history <- state.get(messages)
+          turn    <- state.get(LoopKeys.turn)
+          last <- history.lastOption
+            .collect { case StoredMessage(id, a: AssistantMessage) if a.toolCalls.isEmpty => id -> a }
+            .toRight(ValidationError("tool loop", "finish found no final assistant message"))
+        yield
+          val (answerId, assistant) = last
+          val removeTurn = history.reverseIterator
+            .collectFirst { case StoredMessage(id, _: UserMessage) => id }
+            .fold(StateUpdate.empty)(id => StateUpdate.update(messages, MessageUpdate.RemoveTurn(id)))
+          val rollback = turn.startAgent.fold(removeTurn)(agentId =>
+            removeTurn
+              .combine(StateUpdate.update(LoopKeys.activeAgent, agentId))
+              .combine(StateUpdate.update(LoopKeys.transfer, turn.startTransfer))
           )
-        result <- checked match
-          case Left((raisingStack, raiser, b)) =>
-            // the original answer is replaced, so it stays in no state; the raiser's refusal text stands
-            // in, or the default when it is blank, which no assistant message may be
-            val refusal = raisingStack.ordered
-              .collectFirst { case g: GuardrailMiddleware if g.id == raiser => g.refusalFor(b) }
-              .filter(_.trim.nonEmpty)
-              .getOrElse(GuardrailMiddleware.defaultRefusal(b.guardrail, b.reason))
-            Right(replace(refusal) -> TurnOutcome.Blocked(b.guardrail, b.reason))
-          case Right(changed) =>
-            if changed.trim.isEmpty then Left(ValidationError("tool loop", "afterAgent returned a blank answer"))
-            else if changed == assistant.content then Right(Command.empty -> TurnOutcome.Completed)
-            else Right(replace(changed)                                   -> TurnOutcome.Completed)
-      yield result._1.update(LoopKeys.turn, turn.copy(outcome = Some(result._2))))
+          val completed = Command.empty.update(LoopKeys.turn, turn.copy(outcome = Some(TurnOutcome.Completed)))
+          boundaryStacks.foldLeft[Result[String]](Right(assistant.content))((acc, s) =>
+            acc.flatMap(s.afterAgent(_, context))
+          ) match
+            case Left(error) => boundary(error, rollback)
+            case Right(changed) if changed.trim.isEmpty =>
+              boundary(ValidationError("tool loop", "afterAgent returned a blank answer"), rollback)
+            case Right(changed) if changed == assistant.content => NodeResult.Continue(completed)
+            case Right(changed) =>
+              val replaced = StoredMessage(answerId, assistant.copy(contentOpt = Some(changed)))
+              NodeResult.Continue(completed.update(messages, MessageUpdate.Replace(answerId, replaced)))
+        outcome.fold(NodeResult.Fail(_), identity)
     }
 
     b.implement(nodes.collect, writes = Set(messages, results)) { (_, state, context) =>
@@ -603,6 +594,15 @@ object ToolLoop:
               case at =>
                 val question = all.take(at).reverseIterator.collectFirst { case u: UserMessage => u }
                 Right(question.toVector ++ all.drop(at))
+
+  /**
+   * A run-boundary failure (a `beforeAgent` or `afterAgent` `Left`): a guardrail's Block, which ends the run as a
+   * finished failure and commits `update` first (design 4.13). A cancellation is not a Block: it fails the run
+   * as before, leaving the checkpoint `Running` for `recover`.
+   */
+  private def boundary(error: LLMError, update: StateUpdate): NodeResult = error match
+    case cancelled: CancelledError => NodeResult.Fail(cancelled)
+    case other                     => NodeResult.Block(update, other)
 
   /**
    * The model wrappers' innermost function: `model.next`, guarded, since the stack guards only its

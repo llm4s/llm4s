@@ -18,6 +18,5 @@ object LoopKeys:
   /** The current turn's step count and outcome; `input` resets it. */
   val turn: StateKey[TurnState, TurnState] = StateKey.replace[TurnState]("turn", TurnState(0, None))
 
-  /** The thread's last handoff, if any; each transfer replaces it. */
-  val transfer: StateKey[Option[Transfer], Transfer] =
-    StateKey[Option[Transfer], Transfer]("transfer", None)((_, next) => Right(Some(next)))
+  /** The thread's last handoff, if any; each transfer replaces it, and an output Block restores the turn's start. */
+  val transfer: StateKey[Option[Transfer], Option[Transfer]] = StateKey.replace[Option[Transfer]]("transfer", None)

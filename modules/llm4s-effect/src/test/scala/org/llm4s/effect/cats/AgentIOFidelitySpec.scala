@@ -164,6 +164,8 @@ class AgentIOFidelitySpec extends AnyFlatSpec with Matchers {
     first.status shouldBe AgentStatus.Completed("a long enough first answer")
     val next = agent.continueConversation(first, "q2").unsafeRunSync()
     next.status shouldBe a[AgentStatus.Blocked]
+    // the blocked turn is removed: the thread is as the first turn left it
+    next.messages shouldBe first.messages
   }
 
   it should "surface provider errors with the original LLMError attached" in {

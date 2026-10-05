@@ -176,7 +176,7 @@ which belong to the `Agent`. `AgentResult` is a value to read, not something to 
 Query
   |
   v
-input node (input guardrails) ---> Blocked
+input node (input guardrails) ---> Blocked (nothing stored)
   |
   v
 model <---------- tool results
@@ -185,7 +185,7 @@ model <---------- tool results
   +-- handoff -----> the target agent's model
   |
   v
-finish node (output guardrails) ---> Completed | Blocked
+finish node (output guardrails) ---> Completed | Blocked (turn removed)
 ```
 
 ### Parallel Tool Calls
@@ -217,7 +217,7 @@ val agent = Agent.builder("assistant", client)
   .build()
 ```
 
-A blocked run ends `AgentStatus.Blocked(guardrail, reason)`, with the thread `Completed`.
+A blocked run ends `AgentStatus.Blocked(guardrail, reason)`, the blocked turn removed from the thread, which stays usable.
 
 [Learn more about guardrails →](guardrails)
 

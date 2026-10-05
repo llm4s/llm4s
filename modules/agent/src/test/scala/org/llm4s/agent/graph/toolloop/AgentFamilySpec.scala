@@ -83,7 +83,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
       GraphRuntime(store).start(thread, loop.graph, AgentInput("go"), RunConfig()).awaited.value.completed
     output shouldBe TurnOutput(TurnOutcome.StepLimitReached, idA)
     model.seen.size shouldBe 2
-    state.get(LoopKeys.turn).value shouldBe TurnState(2, Some(TurnOutcome.StepLimitReached))
+    state.get(LoopKeys.turn).value shouldBe TurnState(2, Some(TurnOutcome.StepLimitReached), Some(idA))
     // both batches were collected: the history ends with the second call's result
     messagesOf(state).last shouldBe ToolMessage("step 2", "c2")
     Message.validateConversation(messagesOf(state).toList).value shouldBe (())
@@ -99,7 +99,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
       TurnOutput(TurnOutcome.Completed, idA)
     val (state, output) = runtime.start(thread, loop.graph, AgentInput("two"), RunConfig()).awaited.value.completed
     output shouldBe TurnOutput(TurnOutcome.Completed, idA)
-    state.get(LoopKeys.turn).value shouldBe TurnState(2, Some(TurnOutcome.Completed))
+    state.get(LoopKeys.turn).value shouldBe TurnState(2, Some(TurnOutcome.Completed), Some(idA))
     model.calls shouldBe 4
     model.seen.get(2).takeRight(2) shouldBe Vector(AssistantMessage("first"), UserMessage("two"))
     messagesOf(state).map(_.role) shouldBe Vector(
@@ -265,9 +265,11 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
   "TurnOutput" should "round-trip through JSON" in {
     Seq(
       TurnOutput(TurnOutcome.Completed, idA),
-      TurnOutput(TurnOutcome.Blocked("pii", "found an SSN"), idB),
+      TurnOutput(TurnOutcome.Completed, idB),
       TurnOutput(TurnOutcome.StepLimitReached, idA)
     ).foreach(o => upickle.default.read[TurnOutput](upickle.default.write(o)) shouldBe o)
+    val turn = TurnState(2, Some(TurnOutcome.Completed), Some(idB), Some(Transfer(idA, idB, "m1")))
+    upickle.default.read[TurnState](upickle.default.write(turn)) shouldBe turn
     val input = AgentInput("q", Vector(UserMessage("u"), AssistantMessage("a")))
     upickle.default.read[AgentInput](upickle.default.write(input)) shouldBe input
   }

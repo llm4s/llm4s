@@ -86,7 +86,7 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
     physicsModel.seen.get(0).tail shouldBe messagesOf(state).init
     messagesOf(state) should contain(ToolMessage("Transferred to physics", "h1"))
     Message.validateConversation(messagesOf(state).toList).value shouldBe (())
-    state.get(LoopKeys.turn).value shouldBe TurnState(2, Some(TurnOutcome.Completed))
+    state.get(LoopKeys.turn).value shouldBe TurnState(2, Some(TurnOutcome.Completed), Some(triage))
   }
 
   it should "start the next turn with the target, without calling the source" in {
@@ -257,7 +257,7 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
     val (state, output) = runInMemory(graph.graph, AgentInput("go")).completed
     output shouldBe TurnOutput(TurnOutcome.StepLimitReached, physics)
     physicsModel.calls shouldBe 1
-    state.get(LoopKeys.turn).value shouldBe TurnState(2, Some(TurnOutcome.StepLimitReached))
+    state.get(LoopKeys.turn).value shouldBe TurnState(2, Some(TurnOutcome.StepLimitReached), Some(triage))
   }
 
   it should "apply the current agent's limit to the turn's shared step count" in {
@@ -271,7 +271,7 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
     val (state, output) = runInMemory(graph.graph, AgentInput("go")).completed
     output shouldBe TurnOutput(TurnOutcome.StepLimitReached, physics)
     physicsModel.calls shouldBe 0
-    state.get(LoopKeys.turn).value shouldBe TurnState(2, Some(TurnOutcome.StepLimitReached))
+    state.get(LoopKeys.turn).value shouldBe TurnState(2, Some(TurnOutcome.StepLimitReached), Some(triage))
   }
 
   it should "refuse two handoffs to different targets in one message" in {

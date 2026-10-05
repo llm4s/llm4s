@@ -1,6 +1,7 @@
 package org.llm4s.agent
 
 import org.llm4s.agent.graph.*
+import org.llm4s.agent.graph.middleware.GuardrailBlocked
 import org.llm4s.agent.graph.toolloop.{ LoopKeys, Messages, ToolLoop, TurnOutcome, TurnOutput }
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.model.AssistantMessage
@@ -47,7 +48,9 @@ final class AgentRun private[agent] (
     ended.flatMap {
       case RunResult.Completed(state, output, _) => completed(state, output)
       case suspended: RunResult.Suspended        => this.suspended(suspended)
-      case RunResult.Failed(_, error)            => Left(error)
+      case RunResult.Failed(state, blocked: GuardrailBlocked) =>
+        snapshot(state, AgentStatus.Blocked(blocked.guardrail, blocked.reason))
+      case RunResult.Failed(_, error) => Left(error)
     }
 
   private def completed(state: ThreadState, output: TurnOutput): Result[AgentResult] =
@@ -59,9 +62,19 @@ final class AgentRun private[agent] (
           messages.reverseIterator
             .collectFirst { case a: AssistantMessage => AgentStatus.Completed(a.content) }
             .toRight(ValidationError("agent", "the turn completed without an assistant message"))
-        case TurnOutcome.Blocked(guardrail, reason) => Right(AgentStatus.Blocked(guardrail, reason))
-        case TurnOutcome.StepLimitReached           => Right(AgentStatus.StepLimitReached)
+        case TurnOutcome.StepLimitReached => Right(AgentStatus.StepLimitReached)
     yield AgentResult(threadId, runId, output.activeAgent, status, messages, usage)
+
+  /**
+   * A blocked turn: the thread as the Block committed it - an input block stores nothing of the turn,
+   * an output block removes it - with the usage the turn's model calls added.
+   */
+  private def snapshot(state: ThreadState, status: AgentStatus): Result[AgentResult] =
+    for
+      messages <- state.get(Messages.key).map(_.map(_.message))
+      usage    <- state.get(LoopKeys.usage)
+      active   <- state.get(LoopKeys.activeAgent)
+    yield AgentResult(threadId, runId, active.getOrElse(root), status, messages, usage)
 
   private def suspended(result: RunResult.Suspended): Result[AgentResult] =
     for

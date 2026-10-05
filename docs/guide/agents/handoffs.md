@@ -252,8 +252,8 @@ val triage = Agent.builder("triage", client)
 ```
 
 A specialist's own boundary middleware applies only while it is active, inside the root's. A block
-from either ends the turn `Blocked`, an output block storing the refusal of the middleware that
-raised it. Model and tool wrappers (`wrapModelCall`, `wrapToolCall`, such as
+from either ends the turn `Blocked`; an output block removes the whole turn, a handoff made in it
+included, so the next turn starts with the agent that was active before it. Model and tool wrappers (`wrapModelCall`, `wrapToolCall`, such as
 `ContextWindowMiddleware` and `ApprovalMiddleware`) are per agent: give them to each agent that
 needs them. Do not give the root's guardrails to its specialists too: they would run twice.
 
