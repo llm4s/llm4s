@@ -1,4 +1,4 @@
-# SPIFFE Workload Identity Implementation Plan
+# SPIFFE Workload Identity Implementation Plan (#1354)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -9,6 +9,8 @@
 **Tech Stack:** Scala 3.7.1, JDK 21, sbt, ScalaTest, upickle/ujson, pureconfig, openai-java 4.69.3, anthropic-java 2.65.0, SPIRE 1.15.3, spiffe-helper 0.12.1, nimbus-jose-jwt (test-only, `it`).
 
 **Spec:** `docs/superpowers/specs/2026-10-04-spiffe-workload-identity-design.md`
+
+**Issue:** [#1354](https://github.com/llm4s/llm4s/issues/1354)
 
 ## Global Constraints
 

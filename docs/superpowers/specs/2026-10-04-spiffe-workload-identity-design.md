@@ -1,7 +1,8 @@
-# SPIFFE workload identity for providers - design
+# SPIFFE workload identity for providers - design (#1354)
 
 Date: 2026-10-04
-Status: approved in brainstorming, awaiting written-spec review
+Status: approved; implementation tracked in [#1354](https://github.com/llm4s/llm4s/issues/1354)
+Plan: [`docs/superpowers/plans/2026-10-04-spiffe-workload-identity.md`](../plans/2026-10-04-spiffe-workload-identity.md)
 
 ## Intent
 
