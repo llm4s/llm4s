@@ -1,0 +1,120 @@
+package org.llm4s.llmconnect.auth
+
+import org.llm4s.error.{ AuthenticationError, ServiceError }
+import org.llm4s.http.{ HttpResponse, MockHttpClient }
+import org.scalatest.{ EitherValues, OptionValues }
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
+
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
+import java.time.Instant
+
+class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with OptionValues:
+
+  private val now   = Instant.parse("2026-10-04T12:00:00Z")
+  private val clock = MutableClock(now)
+  private val jwt   = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJzcGlmZmUifQ.sig"
+  private val ok    = HttpResponse(200, """{"access_token":"dbx-1","token_type":"Bearer","expires_in":3600}""")
+
+  private def config(
+    clientId: Option[String] = None,
+    scope: Option[String] = None,
+    audience: Option[String] = None
+  ) = TokenExchangeConfig(IdentitySource.Literal(jwt), "https://ws.example/oidc/v1/token", clientId, scope, audience)
+
+  private def form(body: String): Map[String, String] =
+    body
+      .split('&')
+      .toSeq
+      .map { pair =>
+        val Array(k, v) = pair.split("=", 2)
+        URLDecoder.decode(k, StandardCharsets.UTF_8) -> URLDecoder.decode(v, StandardCharsets.UTF_8)
+      }
+      .toMap
+
+  "TokenExchange.rfc8693" should {
+    "post the RFC 8693 form and return the access token with its expiry" in {
+      val http  = MockHttpClient(Seq(ok))
+      val token = TokenExchange.rfc8693(config(Some("sp-uuid"), Some("all-apis")), http, clock)().value
+      token shouldBe AccessToken("dbx-1", now.plusSeconds(3600))
+      http.lastUrl shouldBe Some("https://ws.example/oidc/v1/token")
+      http.lastHeaders.value("Content-Type") shouldBe "application/x-www-form-urlencoded"
+      form(http.lastBody.value) shouldBe Map(
+        "grant_type"         -> TokenExchange.GrantType,
+        "subject_token"      -> jwt,
+        "subject_token_type" -> TokenExchange.JwtTokenType,
+        "client_id"          -> "sp-uuid",
+        "scope"              -> "all-apis"
+      )
+    }
+
+    "omit optional fields that are not set" in {
+      val http = MockHttpClient(Seq(ok))
+      TokenExchange.rfc8693(config(), http, clock)().value
+      form(http.lastBody.value).keySet shouldBe Set("grant_type", "subject_token", "subject_token_type")
+    }
+
+    "send audience when set" in {
+      val http = MockHttpClient(Seq(ok))
+      TokenExchange.rfc8693(config(audience = Some("aud-x")), http, clock)().value
+      form(http.lastBody.value)("audience") shouldBe "aud-x"
+    }
+
+    "accept expires_in given as a string" in {
+      val http = MockHttpClient(Seq(HttpResponse(200, """{"access_token":"a","expires_in":"60"}""")))
+      TokenExchange.rfc8693(config(), http, clock)().value.expiresAt shouldBe now.plusSeconds(60)
+    }
+
+    "map 400, 401 and 403 from the token endpoint to AuthenticationError" in {
+      for status <- Seq(400, 401, 403) do
+        val http = MockHttpClient(Seq(HttpResponse(status, """{"error":"invalid_grant"}""")))
+        TokenExchange.rfc8693(config(), http, clock)().left.value shouldBe an[AuthenticationError]
+    }
+
+    "map a 5xx to a retryable ServiceError" in {
+      val http  = MockHttpClient(Seq(HttpResponse(503, "busy")))
+      val error = TokenExchange.rfc8693(config(), http, clock)().left.value
+      error shouldBe a[ServiceError]
+      error.asInstanceOf[ServiceError].httpStatus shouldBe 503
+    }
+
+    "fail on a malformed body or missing fields" in {
+      for body <- Seq(
+          "not json",
+          """{"expires_in":60}""",
+          """{"access_token":"a"}""",
+          """{"access_token":"","expires_in":1}"""
+        )
+      do
+        val http = MockHttpClient(Seq(HttpResponse(200, body)))
+        TokenExchange.rfc8693(config(), http, clock)().left.value shouldBe an[AuthenticationError]
+    }
+
+    "never echoes the subject token in an error" in {
+      val http  = MockHttpClient(Seq(HttpResponse(400, s"""{"error":"invalid_grant","assertion":"$jwt"}""")))
+      val error = TokenExchange.rfc8693(config(), http, clock)().left.value
+      (error.message should not).include(jwt)
+    }
+
+    "fail without calling the endpoint when the identity token is missing" in {
+      val http = MockHttpClient(Seq(ok))
+      val cfg  = config().copy(identityToken = IdentitySource.File(java.nio.file.Path.of("/no/such/svid")))
+      TokenExchange.rfc8693(cfg, http, clock)().left.value shouldBe an[AuthenticationError]
+      http.postCallCount shouldBe 0
+    }
+
+    "keep a literal identity token out of TokenExchangeConfig.toString" in {
+      (config().toString should not).include(jwt)
+    }
+  }
+
+  "TokenExchange.provider" should {
+    "cache the exchanged token between calls" in {
+      val http     = MockHttpClient(Seq(ok))
+      val provider = TokenExchange.provider(config(), http)
+      provider.token() shouldBe Right("dbx-1")
+      provider.token() shouldBe Right("dbx-1")
+      http.postCallCount shouldBe 1
+    }
+  }
