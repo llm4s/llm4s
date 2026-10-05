@@ -118,6 +118,18 @@ jobs:
       - name: Check every frozen type declares a stability tier
         run: sbt stabilityTierCheck
 
+      # The staged-deployment template (deploy/, .github/workflows/deploy-staged.yml) is never run by CI, so
+      # these keep it from rotting: every overlay must render with the image, namespace, replica count and
+      # pod hardening it promises (kubectl is on the GitHub-hosted runners), and the image definition must
+      # still stage without a Docker daemon and run as a numeric non-root user.
+      - name: Check the deployment manifests render
+        run: deploy/scripts/deploy.sh check
+
+      - name: Check the deploy-service image definition
+        run: |
+          sbt deployService/Docker/stage
+          grep -qx 'USER 1001:0' modules/deploy-service/target/docker/stage/Dockerfile
+
   scaladoc:
     name: ScalaDoc
     needs: quick-checks

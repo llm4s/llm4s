@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# The namespace and the replica count are the defaults for this environment; the pipeline can override both
+# (see deploy/README.md). The image is set by the pipeline, not here.
+namespace: llm4s-staging
+resources:
+  - ../../base
+replicas:
+  - name: llm4s-deploy-service
+    count: 1

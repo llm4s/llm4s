@@ -38,3 +38,6 @@ data/
 modules/gradle-demo/.gradle/
 modules/gradle-demo/build/
 modules/gradle-demo/.kotlin/
+
+# Scratch directory of deploy/scripts/deploy.sh
+deploy/rendered/

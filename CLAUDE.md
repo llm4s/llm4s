@@ -113,6 +113,7 @@ llm4s/
 │   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
 │   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, not published yet
 │   ├── samples/               # Usage examples
+│   ├── deploy-service/        # /health and /llm-check service + image for the staged-deployment template (unpublished)
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
 │   ├── knowledgegraph-neo4j/  # Neo4j graph store

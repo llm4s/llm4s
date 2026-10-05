@@ -273,6 +273,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejection, unknown tools and failures; policy- and tool-raised approvals both resuming at one
   approval node; and edited approvals amending the source assistant message. Design:
   `docs/design/typed-agent-runtime-design.md` §4.5, with the Stage 0 carry-forward in §4.8.
+- **A staged-deployment template: dev, staging, prod** ([#846](https://github.com/llm4s/llm4s/issues/846),
+  reworked from #857 by @Shivampal157): `modules/deploy-service` (unpublished) serves `GET /health` and
+  `GET /llm-check` (a configuration check, not a connectivity check: `200` when a default provider is
+  configured and a client can be built, `503` otherwise), with its image built by the sbt Docker plugin like
+  the workspace-runner image, a numeric non-root user, and its port from `PORT` through
+  `llm4s.deploy-service.port`. `deploy/` has Kustomize manifests (a hardened pod, rolling updates that never
+  drop capacity, `dev` / `staging` / `prod` overlays) and `deploy/scripts/deploy.sh`, which applies them, waits
+  for the rollout, rolls back with `kubectl rollout undo` if it fails, and smoke-checks the result.
+  `.github/workflows/deploy-staged.yml` is opt-in (`workflow_dispatch` or `workflow_call`, never a push or a
+  pull request): it builds and smoke-tests the image, and with `deploy` pushes it tagged with the commit SHA
+  and rolls it out dev, then staging, then prod, with GitHub Environments' required reviewers as the promotion
+  gate. See [deploy/README.md](deploy/README.md). **Not run against a real cluster or registry**; the script's
+  rollout, rollback and smoke logic was tested against a fake `kubectl`.
 - **Durable graph runs: checkpoints and commit-gated event replay** (Experimental,
   `org.llm4s.agent.graph`, [#1268](https://github.com/llm4s/llm4s/issues/1268)):
   `GraphRuntime.start`/`recover`/`subscribe` over a `Checkpointer` SPI that owns each thread's latest
