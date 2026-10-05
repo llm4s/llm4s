@@ -3,16 +3,17 @@ package org.llm4s.mcp
 
 import org.llm4s.error.{ CancelledError, LLMError, SimpleError }
 import org.llm4s.types.Result
-import org.llm4s.util.DurationRounding
+import org.llm4s.util.{ DurationRounding, Redaction }
 import scala.util.{ Try, Success, Failure }
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.{ CompletableFuture, ConcurrentHashMap, TimeUnit }
 import java.util.concurrent.locks.ReentrantLock
 import upickle.default._
-import org.slf4j.LoggerFactory
+import org.slf4j.{ Logger, LoggerFactory }
 import org.llm4s.http.Llm4sHttpClient
 import scala.concurrent.duration._
 import HttpExchanges.flattened
+import PayloadLog.debugPayload
 
 // Transport type definitions
 
@@ -105,7 +106,7 @@ class StreamableHTTPTransportImpl(
 
     Try {
       val requestJson = write(request)
-      logger.debug(s"StreamableHTTPTransport($name) request JSON: $requestJson")
+      logger.debugPayload(s"StreamableHTTPTransport($name) request JSON: ", requestJson)
 
       // Build headers according to 2025-06-18 spec
       val headers = buildHeaders(request)
@@ -314,7 +315,7 @@ class StreamableHTTPTransportImpl(
 
     Try {
       val notificationJson = write(notification)
-      logger.debug(s"StreamableHTTPTransport($name) notification JSON: $notificationJson")
+      logger.debugPayload(s"StreamableHTTPTransport($name) notification JSON: ", notificationJson)
 
       // Build headers for notification (same as requests)
       val headers = buildNotificationHeaders()
@@ -418,7 +419,7 @@ class SSETransportImpl(
 
     Try {
       val requestJson = write(request)
-      logger.debug(s"SSETransport($name) request JSON: $requestJson")
+      logger.debugPayload(s"SSETransport($name) request JSON: ", requestJson)
 
       // Build headers according to MCP 2024-11-05 specification
       val headers = buildHeaders(request)
@@ -542,7 +543,7 @@ class SSETransportImpl(
           case Success(response) => Some(response)
           case Failure(_)        =>
             // Skip non-JSON-RPC data (might be other SSE messages)
-            logger.debug(s"SSETransport($name) skipping non-JSON-RPC SSE data: $data")
+            logger.debugPayload(s"SSETransport($name) skipping non-JSON-RPC SSE data: ", data)
             None
         }
       }
@@ -559,7 +560,7 @@ class SSETransportImpl(
 
     Try {
       val notificationJson = write(notification)
-      logger.debug(s"SSETransport($name) notification JSON: $notificationJson")
+      logger.debugPayload(s"SSETransport($name) notification JSON: ", notificationJson)
 
       // Build headers for notification
       val headers = buildNotificationHeaders()
@@ -800,7 +801,7 @@ class StdioTransportImpl(
 
   // Routes a response line to the appropriate pending request future
   private def routeResponse(line: String): Unit = {
-    logger.debug(s"StdioTransport($name) routing response: $line")
+    logger.debugPayload(s"StdioTransport($name) routing response: ", line)
     Try {
       // Parse the response to extract the ID
       val json       = ujson.read(line)
@@ -816,10 +817,10 @@ class StdioTransportImpl(
         }
       } else {
         // This might be a notification from the server (no ID field)
-        logger.debug(s"StdioTransport($name) received message without ID (possibly notification): $line")
+        logger.debugPayload(s"StdioTransport($name) received message without ID (possibly notification): ", line)
       }
     }.recover { case e =>
-      logger.warn(s"StdioTransport($name) failed to parse response: ${e.getMessage}, line: $line")
+      logger.warn(s"StdioTransport($name) failed to parse response: ${e.getMessage}, line: ${PayloadLog.preview(line)}")
     }
   }
 
@@ -875,7 +876,7 @@ class StdioTransportImpl(
               val line = reader.readLine()
               if (line != null) {
                 output.append(line).append("\n")
-                logger.info(s"StdioTransport($name) stderr: $line")
+                logger.info(s"StdioTransport($name) stderr: ${PayloadLog.preview(line)}")
               }
             }
           }
@@ -906,7 +907,7 @@ class StdioTransportImpl(
                   readAvailableStderr()
 
                   val requestJson = write(request)
-                  logger.debug(s"StdioTransport($name) writing to stdin: $requestJson")
+                  logger.debugPayload(s"StdioTransport($name) writing to stdin: ", requestJson)
 
                   // Write request as line-delimited JSON (one complete JSON object per line)
                   writer.println(requestJson)
@@ -929,7 +930,7 @@ class StdioTransportImpl(
                     if (responseLine.isEmpty) {
                       Left(SimpleError(s"No response from MCP server for request ${request.id}"))
                     } else {
-                      logger.debug(s"StdioTransport($name) received from stdout: $responseLine")
+                      logger.debugPayload(s"StdioTransport($name) received from stdout: ", responseLine)
 
                       // Parse JSON response
                       Try(read[JsonRpcResponse](responseLine)) match {
@@ -1068,7 +1069,7 @@ class StdioTransportImpl(
               readAvailableStderr()
 
               val notificationJson = write(notification)
-              logger.debug(s"StdioTransport($name) writing notification to stdin: $notificationJson")
+              logger.debugPayload(s"StdioTransport($name) writing notification to stdin: ", notificationJson)
 
               // Write notification as line-delimited JSON (one complete JSON object per line)
               writer.println(notificationJson)
@@ -1143,4 +1144,21 @@ private[mcp] object HttpExchanges {
       attempt.toEither.left
         .map(e => CancelledError.fromThrowable(e, "mcp.http").getOrElse(SimpleError(e.getMessage)): LLMError)
         .flatMap(identity)
+}
+
+/**
+ * How the transports log a JSON-RPC payload or a line from the server: secrets redacted and cut to [[MaxChars]].
+ * A tool argument or result can be megabytes, and logging it whole floods the log - a single 1 MB line stalled CI's
+ * log processing for half an hour.
+ */
+private[mcp] object PayloadLog {
+
+  val MaxChars: Int = 2048
+
+  def preview(payload: String): String = Redaction.redactForLogging(payload, MaxChars)
+
+  extension (logger: Logger)
+    /** Logs `message` followed by a preview of `payload`, building the preview only when DEBUG is enabled. */
+    def debugPayload(message: String, payload: String): Unit =
+      if (logger.isDebugEnabled) logger.debug(message + preview(payload))
 }
