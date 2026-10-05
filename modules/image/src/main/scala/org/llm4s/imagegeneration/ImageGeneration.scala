@@ -17,7 +17,7 @@ import scala.util.Try
 import scala.concurrent.{ Future, ExecutionContext }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.trace.Tracing
-import org.llm4s.error.{ CancelledError, LLMError }
+import org.llm4s.error.{ CancelledError, LLMError, NonRecoverableError, RecoverableError }
 
 // ===== ERROR HANDLING =====
 
@@ -27,21 +27,58 @@ import org.llm4s.error.{ CancelledError, LLMError }
  * An [[org.llm4s.error.LLMError]], so the client methods can return
  * [[org.llm4s.error.CancelledError]] when their thread is interrupted - the contract of every llm4s
  * client - next to these cases: they return `Either[LLMError, _]`.
+ *
+ * Every case says whether trying again can help, as an `LLMError` must: `LLMError.isRecoverable` (and the
+ * retry policies built on it) matches only [[org.llm4s.error.RecoverableError]] and
+ * [[org.llm4s.error.NonRecoverableError]]. Recoverable: [[RateLimitError]], and a [[ServiceError]] whose status
+ * is transient (see [[ServiceError.isTransientStatus]]). Everything else is not: a rejected credential, request
+ * or prompt gets the same answer on the next call, and an [[UnknownError]] is not retried blindly.
  */
 sealed trait ImageGenerationError extends LLMError {
   def message: String
 }
 
-case class AuthenticationError(message: String) extends ImageGenerationError
-case class RateLimitError(message: String)      extends ImageGenerationError
-case class ServiceError(message: String, statusCode: Int) extends ImageGenerationError {
+case class AuthenticationError(message: String) extends ImageGenerationError with NonRecoverableError
+case class RateLimitError(message: String)      extends ImageGenerationError with RecoverableError
+
+/**
+ * The provider's service failed or refused the call, with the HTTP status it answered (`0` when it did not
+ * answer at all, as in a failed health check).
+ *
+ * Whether trying again can help follows from the status, which a class cannot express by itself, so there
+ * are two cases behind this type and [[ServiceError.apply]] picks one: a transient status gives a
+ * [[org.llm4s.error.RecoverableError]], any other a [[org.llm4s.error.NonRecoverableError]]. Build and match
+ * it as before, `ServiceError(message, status)` and `case ServiceError(message, status)`.
+ */
+sealed trait ServiceError extends ImageGenerationError {
+  def statusCode: Int
   override def code: Option[String] = Some(statusCode.toString)
 }
-case class ValidationError(message: String)            extends ImageGenerationError
-case class InvalidPromptError(message: String)         extends ImageGenerationError
-case class InsufficientResourcesError(message: String) extends ImageGenerationError
-case class UnsupportedOperation(message: String)       extends ImageGenerationError
-case class UnknownError(throwable: Throwable) extends ImageGenerationError {
+
+object ServiceError {
+
+  /** Statuses worth retrying: no answer (0), request timeout (408), rate limited (429) and every 5xx. */
+  def isTransientStatus(statusCode: Int): Boolean =
+    statusCode == 0 || statusCode == 408 || statusCode == 429 || statusCode >= 500
+
+  def apply(message: String, statusCode: Int): ServiceError =
+    if (isTransientStatus(statusCode)) TransientServiceError(message, statusCode)
+    else RejectedServiceError(message, statusCode)
+
+  def unapply(error: ServiceError): Some[(String, Int)] = Some((error.message, error.statusCode))
+}
+
+/** A [[ServiceError]] with a transient status: trying again can help. */
+final case class TransientServiceError(message: String, statusCode: Int) extends ServiceError with RecoverableError
+
+/** A [[ServiceError]] the provider refused for good: the same call gets the same answer. */
+final case class RejectedServiceError(message: String, statusCode: Int) extends ServiceError with NonRecoverableError
+
+case class ValidationError(message: String)            extends ImageGenerationError with NonRecoverableError
+case class InvalidPromptError(message: String)         extends ImageGenerationError with NonRecoverableError
+case class InsufficientResourcesError(message: String) extends ImageGenerationError with NonRecoverableError
+case class UnsupportedOperation(message: String)       extends ImageGenerationError with NonRecoverableError
+case class UnknownError(throwable: Throwable) extends ImageGenerationError with NonRecoverableError {
   def message: String = throwable.getMessage
 }
 
