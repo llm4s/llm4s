@@ -2,6 +2,13 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
+import com.anthropic.config.{
+  AuthenticationConfig,
+  AuthenticationType,
+  IdentityTokenConfig,
+  InMemoryProfileConfigProvider,
+  ProfileConfig
+}
 import com.anthropic.core.{ JsonObject, ObjectMappers }
 import com.anthropic.models.messages.{
   Message,
@@ -85,11 +92,27 @@ class AnthropicClient(
   private val providerConfig: ProviderConfig = config
 
   // Initialize Anthropic client
-  private val client = AnthropicOkHttpClient
-    .builder()
-    .apiKey(config.apiKey)
-    .baseUrl(config.baseUrl)
-    .build()
+  private val client = {
+    val builder = AnthropicOkHttpClient.builder().baseUrl(config.baseUrl)
+    config.workloadIdentity match {
+      case None => builder.apiKey(config.apiKey)
+      case Some(wi) =>
+        val auth = AuthenticationConfig
+          .builder()
+          .`type`(AuthenticationType.OIDC_FEDERATION)
+          .federationRuleId(wi.federationRuleId)
+          .identityToken(IdentityTokenConfig.builder().source("file").path(wi.identityTokenFile.toString).build())
+        wi.serviceAccountId.foreach(auth.serviceAccountId)
+        val profile = ProfileConfig
+          .builder()
+          .authentication(auth.build())
+          .baseUrl(config.baseUrl)
+          .organizationId(wi.organizationId)
+        wi.workspaceId.foreach(profile.workspaceId)
+        builder.configurationProvider(InMemoryProfileConfigProvider.of(profile.build()))
+    }
+    builder.build()
+  }
 
   protected def clientDescription: String = s"Anthropic client for model ${config.model}"
   protected def providerName: String      = "anthropic"

@@ -24,14 +24,15 @@ case class AnthropicConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  workloadIdentity: Option[AnthropicWorkloadIdentity] = None
 ) extends ProviderConfig:
   override val providerId: ProviderId                    = ProviderId("anthropic")
   override def endpointUrl: Option[String]               = Some(baseUrl)
   override def withModel(model: String): AnthropicConfig = copy(model = model)
   override def toString: String =
     s"AnthropicConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion)"
+      s"reserveCompletion=$reserveCompletion, workloadIdentity=${workloadIdentity.map(_ => "set").getOrElse("none")})"
 
 object AnthropicConfig {
 
@@ -64,10 +65,11 @@ object AnthropicConfig {
   def fromValues(
     modelName: String,
     apiKey: String,
-    baseUrl: String
+    baseUrl: String,
+    workloadIdentity: Option[AnthropicWorkloadIdentity] = None
   )(using resolver: ContextWindowResolver): Result[AnthropicConfig] =
     for {
-      _ <- ProviderConfig.nonEmpty("Anthropic", "apiKey", apiKey)
+      _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("Anthropic", "apiKey", apiKey)
       _ <- ProviderConfig.nonEmpty("Anthropic", "baseUrl", baseUrl)
     } yield {
       val (cw, rc) = resolver.resolve(
@@ -82,7 +84,8 @@ object AnthropicConfig {
         model = modelName,
         baseUrl = baseUrl,
         contextWindow = cw,
-        reserveCompletion = rc
+        reserveCompletion = rc,
+        workloadIdentity = workloadIdentity
       )
     }
 }
