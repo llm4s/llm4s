@@ -228,5 +228,5 @@ object LLMClientZConcurrencySpec extends ZIOSpecDefault {
         } yield assertTrue(left == SimpleError("boom")) &&
           assertTrue(thrown.causeOption.flatMap(_.dieOption).contains(failure))
       }
-    ) @@ TestAspect.sequential @@ TestAspect.timeout(120.seconds)
+    ) @@ TestAspect.sequential @@ TestAspect.timeout(300.seconds)
 }

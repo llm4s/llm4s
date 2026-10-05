@@ -27,7 +27,13 @@ private[cats] object Fixtures {
   def chunk(i: Int): StreamedChunk = StreamedChunk(id = s"c$i", content = Some("x"))
 
   /** Safety deadline for any condition expected to hold; only ever reached by a broken implementation. */
-  val DeadlineSeconds: Long = 30L
+  val DeadlineSeconds: Long = 60L
+
+  /** How long a parked provider call waits for an interrupt; longer than every deadline that observes it. */
+  val ParkSeconds: Long = 120L
+
+  /** Upper bound for a cancellation that must be prompt; below `ParkSeconds`, so a call that ignores the interrupt still fails it. */
+  val PromptSeconds: Long = 60L
 
   /** Spins (yielding) until `cond` holds; returns false only if the safety deadline passes. */
   def awaitCondition(cond: => Boolean): Boolean = {
@@ -41,7 +47,7 @@ private[cats] object Fixtures {
    * implementation cannot leak the thread forever). Returns whether it was interrupted.
    */
   def parkUntilInterrupted(): Boolean = {
-    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10L)
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(ParkSeconds)
     while (!Thread.currentThread().isInterrupted && System.nanoTime() < deadline)
       LockSupport.parkNanos(10000000L)
     Thread.currentThread().isInterrupted

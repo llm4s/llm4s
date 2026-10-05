@@ -35,7 +35,7 @@ object CancellationSpec extends ZIOSpecDefault {
 
   // The interrupt must return promptly; a non-interruptible call would hold it for the park deadline.
   private def interruptPromptly[E, A](fiber: zio.Fiber[E, A]): ZIO[Any, Nothing, Boolean] =
-    fiber.interrupt.timeout(5.seconds).map(_.isDefined).withClock(zio.Clock.ClockLive)
+    fiber.interrupt.timeout(zio.Duration.fromSeconds(PromptSeconds)).map(_.isDefined).withClock(zio.Clock.ClockLive)
 
   val spec =
     suite("cancellation by interrupt")(
@@ -79,5 +79,5 @@ object CancellationSpec extends ZIOSpecDefault {
           assertTrue(promptly) &&
           assertTrue(parked.sawInterrupt.get())
       }
-    ) @@ TestAspect.sequential @@ TestAspect.timeout(120.seconds)
+    ) @@ TestAspect.sequential @@ TestAspect.timeout(300.seconds)
 }

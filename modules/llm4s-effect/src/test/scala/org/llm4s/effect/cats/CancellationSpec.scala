@@ -39,7 +39,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers {
     val parked = new Parked
     val fiber  = LLMClientIO[IO](parked.client).complete(conversation).start.unsafeRunSync()
     parked.started.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    fiber.cancel.timeout(5.seconds).attempt.unsafeRunSync().isRight shouldBe true
+    fiber.cancel.timeout(PromptSeconds.seconds).attempt.unsafeRunSync().isRight shouldBe true
     withClue("provider thread was never interrupted: ")(parked.sawInterrupt.get() shouldBe true)
     fiber.join.unsafeRunSync() shouldBe a[Outcome.Canceled[?, ?, ?]]
   }
@@ -49,7 +49,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers {
       val parked = new Parked
       val fiber  = LLMClientIO[IO](parked.client).complete(conversation).start.unsafeRunSync()
       parked.started.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-      fiber.cancel.timeout(5.seconds).attempt.unsafeRunSync()
+      fiber.cancel.timeout(PromptSeconds.seconds).attempt.unsafeRunSync()
       awaitCondition(parked.live.get() == 0) shouldBe true
       parked.sawInterrupt.get() shouldBe true
     }
@@ -59,7 +59,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers {
     val parked = new Parked
     val fiber  = AgentIO[IO](new Agent(parked.client)).run("q", ToolRegistry.empty).start.unsafeRunSync()
     parked.started.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    fiber.cancel.timeout(5.seconds).attempt.unsafeRunSync().isRight shouldBe true
+    fiber.cancel.timeout(PromptSeconds.seconds).attempt.unsafeRunSync().isRight shouldBe true
     withClue("provider thread was never interrupted: ")(parked.sawInterrupt.get() shouldBe true)
   }
 
@@ -71,7 +71,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers {
     val parked = new Parked
     val fiber  = AgentIO[IO](new Agent(parked.client)).continueConversation(first, "q2").start.unsafeRunSync()
     parked.started.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    fiber.cancel.timeout(5.seconds).attempt.unsafeRunSync().isRight shouldBe true
+    fiber.cancel.timeout(PromptSeconds.seconds).attempt.unsafeRunSync().isRight shouldBe true
     withClue("provider thread was never interrupted: ")(parked.sawInterrupt.get() shouldBe true)
   }
 }

@@ -91,7 +91,7 @@ class LLMClientIOSpec extends AnyFlatSpec with Matchers {
       def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
         onChunk(StreamedChunk(id = "c1", content = Some("a")))
         // Only returns normally if the consumer observed c1 while this call is still running.
-        if (released.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+        if (released.await(Fixtures.DeadlineSeconds, java.util.concurrent.TimeUnit.SECONDS)) {
           onChunk(StreamedChunk(id = "c2", content = Some("b")))
           Right(testCompletion)
         } else Left(SimpleError("first chunk was not delivered incrementally"))
@@ -128,15 +128,16 @@ class LLMClientIOSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "interrupt the underlying call when the consumer stops early" in {
-    val interrupted = new java.util.concurrent.CountDownLatch(1)
+    val interrupted  = new java.util.concurrent.CountDownLatch(1)
+    val sawInterrupt = new java.util.concurrent.atomic.AtomicBoolean(false)
     val client = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Right(testCompletion)
       def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = {
         // A cancellation that lands while `onChunk` waits for the chunk to be taken is thrown from
         // it as InterruptedException; one that lands later sets the flag, ending the park.
         val delivered = CancelledError.catchInterrupt(onChunk(StreamedChunk(id = "c1", content = Some("a"))))
-        if (delivered.isRight)
-          while (!Thread.currentThread().isInterrupted) java.util.concurrent.locks.LockSupport.parkNanos(10000000L)
+        // The call may only end because it was interrupted, never because the park ran out.
+        sawInterrupt.set(delivered.isLeft || Fixtures.parkUntilInterrupted())
         interrupted.countDown()
         Left(SimpleError("interrupted"))
       }
@@ -145,6 +146,7 @@ class LLMClientIOSpec extends AnyFlatSpec with Matchers {
     }
     val taken = LLMClientIO[IO](client).streamComplete(testConversation).take(1).compile.toList.unsafeRunSync()
     taken.map(_.id) shouldBe List("c1")
-    interrupted.await(10, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+    interrupted.await(Fixtures.DeadlineSeconds, java.util.concurrent.TimeUnit.SECONDS) shouldBe true
+    withClue("provider thread was never interrupted: ")(sawInterrupt.get() shouldBe true)
   }
 }

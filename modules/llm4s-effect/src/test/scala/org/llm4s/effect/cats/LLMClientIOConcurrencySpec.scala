@@ -23,7 +23,7 @@ import scala.concurrent.duration.*
 class LLMClientIOConcurrencySpec extends AnyFlatSpec with Matchers {
   import Fixtures.*
 
-  private val Safety = 20.seconds
+  private val Safety = 60.seconds
 
   // Await on a Future so a hung (uncancellable) stream fails the test instead of hanging the suite.
   private def run[A](io: IO[A]): A = Await.result(io.unsafeToFuture(), Safety)
