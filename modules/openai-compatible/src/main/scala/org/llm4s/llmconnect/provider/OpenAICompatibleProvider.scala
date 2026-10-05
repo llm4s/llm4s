@@ -10,8 +10,11 @@ import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
+import java.net.URI
 import java.util.Locale
+import scala.util.Try
 
 /**
  * Registration for the generic `openai-compatible` provider: any endpoint
@@ -19,14 +22,25 @@ import java.util.Locale
  *
  * A named provider section with `provider = "openai-compatible"` needs a
  * `baseUrl` and a `model`; `apiKey` and `headers` are optional (local servers need
- * no key). It also accepts three provider-specific keys: `contextWindow` and
+ * no key). It also accepts four provider-specific keys: `contextWindow` and
  * `reserveCompletion` (whole numbers; the model's window cannot be known from an
  * arbitrary endpoint, so these default to [[org.llm4s.llmconnect.config.OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW]]
  * and a quarter of the window up to [[org.llm4s.llmconnect.config.OpenAICompatibleConfig.DEFAULT_RESERVE_COMPLETION]]),
- * and `streamUsage` (default `true`), which controls whether a streaming
+ * `registryProvider`, and `streamUsage` (default `true`), which controls whether a streaming
  * request asks for token usage with `stream_options.include_usage`; set it to
- * `false` for a server that rejects that field. Several sections can use it side
- * by side:
+ * `false` for a server that rejects that field.
+ *
+ * '''Where the context window comes from.''' In this order: the section's `contextWindow`; else the
+ * model registry's entry for `model` under the `registryProvider` the section names (`groq`,
+ * `together_ai`, `fireworks_ai`, `xai`, `perplexity`, ...); else, when the section names none, the entry
+ * under the provider inferred from the `baseUrl` host; else the default. An explicit `registryProvider` is
+ * an instruction, so it switches the inference off. The host is inferred only by an exact match on the
+ * URL's host (`api.groq.com`, `api.together.xyz`, `api.together.ai`, `api.fireworks.ai`, `api.x.ai`,
+ * `api.perplexity.ai`), never by a substring, so a look-alike host such as `api.groq.com.evil.example` gets
+ * no registry window. Only the window is taken from the registry: `reserveCompletion` keeps its own rule
+ * (a quarter of the window, up to 2048) because a registry entry's output limit can be as large as the whole
+ * window. The lookup is strict - only the named provider's own entry for exactly that model id counts, never a substring match or another provider's entry for the same name - and a model the registry does not know, or lists with no input limit, gets the default.
+ * Several sections can use it side by side:
  *
  * {{{
  * llm4s.providers {
@@ -65,6 +79,41 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
   /** The key giving the tokens held back for the reply; a field of `NamedProviderConfig` until #1133. */
   val ReserveCompletionKey: String = "reserveCompletion"
 
+  /**
+   * The key naming the model registry provider (`groq`, `together_ai`, `fireworks_ai`, `xai`, `perplexity`,
+   * ...) whose entry for `model` supplies the context window when `contextWindow` is not set. Without it the
+   * provider is inferred from the `baseUrl` host for the hosts in [[RegistryHosts]]; with it, no inference
+   * happens.
+   */
+  val RegistryProviderKey: String = "registryProvider"
+
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  /**
+   * The registry provider for each hosted API whose models the registry knows, by the exact host of the
+   * `baseUrl`. NVIDIA NIM is left out on purpose: the registry holds three `nvidia_nim` entries, none a chat
+   * model with an input limit, so inferring it would find nothing; `registryProvider = "nvidia_nim"` still works.
+   */
+  private val RegistryHosts: Map[String, String] = Map(
+    "api.groq.com"      -> "groq",
+    "api.together.xyz"  -> "together_ai",
+    "api.together.ai"   -> "together_ai",
+    "api.fireworks.ai"  -> "fireworks_ai",
+    "api.x.ai"          -> "xai",
+    "api.perplexity.ai" -> "perplexity"
+  )
+
+  /**
+   * The registry provider for a `baseUrl`, from the URL's host alone and only on an exact match with one of
+   * [[RegistryHosts]]: `https://api.groq.com.evil.example/v1`, `https://api.groq.com@evil.example/v1` (whose host
+   * is `evil.example`) and `https://evil.example/api.groq.com` all give `None`.
+   */
+  private[llm4s] def inferRegistryProvider(baseUrl: String): Option[String] =
+    Try(URI.create(baseUrl.trim)).toOption
+      .flatMap(uri => Option(uri.getHost))
+      .map(_.toLowerCase(Locale.ROOT))
+      .flatMap(RegistryHosts.get)
+
   // `baseUrlEnv` makes a missing-baseUrl error show `baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}`,
   // the binding that reads the conventional variable. The generic provider has no vendor, so no
   // `llm4s.credentials` block binds its key either: a section sets its own `apiKey`, if any.
@@ -76,12 +125,18 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
       extras = Seq(
         ProviderConfigKey.optional(
           ContextWindowKey,
-          s"the model's context window in tokens, a positive whole number " +
-            s"(default ${OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW})"
+          s"the model's context window in tokens, a positive whole number; overrides the model registry " +
+            s"(default: the registry's, else ${OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW})"
         ),
         ProviderConfigKey.optional(
           ReserveCompletionKey,
           "the tokens held back from the prompt for the reply, a whole number less than contextWindow"
+        ),
+        ProviderConfigKey.optional(
+          RegistryProviderKey,
+          "the model registry provider (e.g. groq, together_ai, fireworks_ai, xai, perplexity) whose entry for " +
+            "model gives the context window when contextWindow is not set; inferred from the baseUrl host for " +
+            "Groq, Together, Fireworks, xAI and Perplexity"
         ),
         ProviderConfigKey.optional(
           StreamUsageKey,
@@ -106,12 +161,41 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
         model = section.model.asString,
         baseUrl = baseUrl,
         apiKey = section.apiKey.map(_.asKey),
-        contextWindow = contextWindow,
+        contextWindow = contextWindow.orElse(
+          registryWindow(providerName, section.model.asString, baseUrl, section.extra(RegistryProviderKey))
+        ),
         reserveCompletion = reserveCompletion,
         headers = section.headers,
         streamUsage = streamUsage
       )
     yield config
+
+  // The context window the model registry gives `model`, under the explicit `registryProvider` or, when the
+  // section names none, the provider inferred from the `baseUrl` host. `None` when there is no provider to ask,
+  // the registry has no entry, or its entry has no input limit; the caller then uses the default. A miss under
+  // an explicit provider is a warning, since the section asked for it; under an inferred one it is not.
+  private def registryWindow(
+    providerName: String,
+    model: String,
+    baseUrl: String,
+    explicit: Option[String]
+  )(using resolver: ContextWindowResolver): Option[Int] =
+    explicit.orElse(inferRegistryProvider(baseUrl)).flatMap { registryProvider =>
+      resolver.strictContextWindow(registryProvider, model) match
+        case Some(window) =>
+          logger.info(
+            s"Configured provider '$providerName': contextWindow $window taken from the model registry " +
+              s"entry $registryProvider/$model; set contextWindow to override"
+          )
+          Some(window)
+        case None =>
+          val message =
+            s"Configured provider '$providerName': the model registry has no context window for " +
+              s"$registryProvider/$model; using the default ${OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW}. " +
+              s"Set contextWindow to the model's real limit"
+          if explicit.isDefined then logger.warn(message) else logger.info(message)
+          None
+    }
 
   // Extras arrive as strings, so a number written in HOCON arrives as its text. Range checks
   // between the two counts (the reserve must be less than the window) are `fromValues`'s.

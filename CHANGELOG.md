@@ -404,6 +404,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OpenAIConfigKeys.AZURE_API_KEY` is now `AZURE_OPENAI_API_KEY`; the chat and embeddings
   missing-key messages changed. See the
   [migration note](docs/reference/migration.md#vendor-credentials-a-shared-api-key-per-provider).
+- **`openai-compatible` takes its context window from the model registry** ([#1217](https://github.com/llm4s/llm4s/issues/1217)):
+  without a `contextWindow`, the generic provider used 8192 and never asked the registry, though the registry
+  holds the window of most of the popular compatible hosts' models (`groq/`, `together_ai/`, `fireworks_ai/`,
+  `xai/`, `perplexity/`). A section now takes it from, in order: its own `contextWindow`; the registry's entry for
+  `model` under a new optional `registryProvider` key; the entry under the provider inferred from the `baseUrl`
+  host (an exact match on `api.groq.com`, `api.together.xyz`, `api.together.ai`, `api.fireworks.ai`, `api.x.ai` or
+  `api.perplexity.ai`, never a substring); then 8192. An explicit `registryProvider` switches the inference off.
+  The lookup is strict: only the named provider's own entry for exactly that model id counts, never a partial
+  name or another provider's entry for the same name (new `ContextWindowResolver.strictContextWindow`; the
+  forgiving `resolve` would have picked up a neighbour's window). Only the window is taken: `reserveCompletion`
+  keeps its rule. The Groq, Fireworks and Perplexity recipes in the providers guide no longer set `contextWindow`;
+  the Together, xAI and NVIDIA NIM recipes keep it, as the registry has no input limit for those models.
+  **Behaviour change:** a section for one of those hosts that set no `contextWindow` now gets the registry's
+  window instead of 8192; set `contextWindow` to keep the old value.
 - **Provider-specific config keys for named providers** - a descriptor declares keys of its own
   in `ProviderConfigSpec.extras` (`ProviderConfigKey`: name, description, `required`, `default`,
   `env`, `deprecatedAliases`), and reads them from the new `NamedProviderConfig.extras` (or
