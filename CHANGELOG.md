@@ -1370,6 +1370,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `0.4.0-SNAPSHOT`, which nothing publishes (releases are cut from tags only, and the build names a snapshot
   `0.4.1+165-abc1234-SNAPSHOT`); it now says how to build and publish `main` locally. A new check,
   `scripts/check-doc-versions.sh`, runs in CI quick checks and fails on a literal pin.
+- **`ToneValidator` classified every multi-line text as Neutral**: it looked for its keywords with
+  `lower.matches(".*\\b(...)\\b.*")`, and `.` does not match a line break, so a newline anywhere in the text
+  made all four keyword checks fail, whatever the text said. `"Thank you for your inquiry.\nWe will respond
+  shortly."` was refused by `ToneValidator.professionalOnly`, and LLM output is often several lines or
+  paragraphs. The keywords are now found with `find`, over `\n`, `\r\n`, `\r` and the Unicode line and paragraph
+  separators alike. Single-line text is classified as before, and so is the order of the checks (exclamation
+  first, then Professional, Casual, Friendly, Formal). **Behaviour change:** a validator that allowed only
+  `Neutral` used to accept multi-line text of any tone, and now refuses it when it carries a keyword.
 - **Vertex AI token refresh is serialised** (https://github.com/llm4s/llm4s/pull/1191): concurrent callers with an expired token each fetched
   a new one; the first now refreshes under a lock and the rest reuse it.
 - **`ToolRegistry` no longer loses a timeout that fires before the tool starts** (https://github.com/llm4s/llm4s/issues/1139, https://github.com/llm4s/llm4s/pull/1194): when

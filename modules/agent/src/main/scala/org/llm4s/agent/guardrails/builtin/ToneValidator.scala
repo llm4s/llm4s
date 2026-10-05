@@ -4,6 +4,8 @@ import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
+import scala.util.matching.Regex
+
 /**
  * Tone categories for content validation.
  *
@@ -79,19 +81,19 @@ class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
       Tone.Excited
     }
     // Check for professional language
-    else if (lower.matches(".*\\b(please|thank you|kindly|regards|sincerely)\\b.*")) {
+    else if (mentions(ToneValidator.ProfessionalWords, lower)) {
       Tone.Professional
     }
     // Check for casual language
-    else if (lower.matches(".*\\b(hey|cool|awesome|yeah|nah)\\b.*")) {
+    else if (mentions(ToneValidator.CasualWords, lower)) {
       Tone.Casual
     }
     // Check for friendly language
-    else if (lower.matches(".*\\b(hi|hello|thanks|appreciate)\\b.*")) {
+    else if (mentions(ToneValidator.FriendlyWords, lower)) {
       Tone.Friendly
     }
     // Check for formal language
-    else if (lower.matches(".*\\b(furthermore|moreover|consequently|therefore)\\b.*")) {
+    else if (mentions(ToneValidator.FormalWords, lower)) {
       Tone.Formal
     }
     // Default to neutral
@@ -99,6 +101,11 @@ class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
       Tone.Neutral
     }
   }
+
+  // `find`, not `matches(".*kw.*")`: `.` stops at a line break, so a newline anywhere made every keyword check
+  // fail and multi-line text always came out Neutral.
+  private def mentions(words: Regex, text: String): Boolean =
+    words.findFirstIn(text).isDefined
 
   val name: String = "ToneValidator"
 
@@ -108,6 +115,13 @@ class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
 }
 
 object ToneValidator {
+
+  private def wholeWords(words: String*): Regex = s"\\b(${words.mkString("|")})\\b".r
+
+  private val ProfessionalWords: Regex = wholeWords("please", "thank you", "kindly", "regards", "sincerely")
+  private val CasualWords: Regex       = wholeWords("hey", "cool", "awesome", "yeah", "nah")
+  private val FriendlyWords: Regex     = wholeWords("hi", "hello", "thanks", "appreciate")
+  private val FormalWords: Regex       = wholeWords("furthermore", "moreover", "consequently", "therefore")
 
   /**
    * Create a tone validator with specified allowed tones.
