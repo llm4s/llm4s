@@ -245,7 +245,9 @@ the newtypes the library takes), every `@deprecated` member of core and `Agent`,
 legacy field, `ClientStatus`, `StreamingOptions`, `RuntimeId`/`ModelId`, and cats `Show`/`Validated`
 on the API. Do not add them back: **a frozen module gains no speculative public types and no
 `@deprecated` members before the baseline** - delete instead, with a migration note - and a
-helper only llm4s modules use is `private[llm4s]`. Pass 2 removed `ToolRegistry`'s provider switch
+helper only llm4s modules use is `private[llm4s]`. **A new top-level public type in a frozen module
+needs `@Stable` (or `@Experimental` for a Beta one)** from `org.llm4s.annotation`; `sbt
+stabilityTierCheck` fails the build otherwise, and a companion object is covered by its class. Pass 2 removed `ToolRegistry`'s provider switch
 (`getToolDefinitionsSafe`; tool definitions are `getOpenAITools()`, the format every client
 takes), replaced `CancellationToken`'s exception-throwing members with `whenCancelled:
 Future[Unit]`, and moved single-consumer utilities to their consumer, keeping packages:
@@ -328,6 +330,7 @@ sbt testWorkspace      # modules/it @Workspace tier (needs a built workspace-run
 sbt testOllama         # modules/it @Ollama tier
 sbt testSmoke          # modules/it @Cloud tier (live API keys)
 sbt it/itTierCheck     # every suite in modules/it must declare exactly one tier
+sbt stabilityTierCheck # every top-level public type of a frozen module is @Stable or @Experimental
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 

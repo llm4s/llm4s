@@ -107,6 +107,11 @@ jobs:
       - name: Check every integration suite declares a test tier
         run: sbt it/itTierCheck
 
+      # Fails when a top-level public type of a frozen module is not marked @Stable or @Experimental,
+      # so the tier lives in the code and cannot drift from docs/reference/v1-scope.md.
+      - name: Check every frozen type declares a stability tier
+        run: sbt stabilityTierCheck
+
   scaladoc:
     name: ScalaDoc
     needs: quick-checks

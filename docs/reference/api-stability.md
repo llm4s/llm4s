@@ -25,6 +25,39 @@ Binary compatibility is enforced between releases with [MiMa](https://github.com
 
 ---
 
+## Tiers in the Code
+
+[1.0 Scope](v1-scope) says which packages are frozen, but a table drifts from the code it describes. So
+every top-level public type of a frozen module also carries its tier, from `org.llm4s.annotation` in
+`llm4s-core`:
+
+| Annotation | Meaning |
+|---|---|
+| `@Stable` | Covered by the 1.x compatibility promise: removed only after a deprecation cycle, and checked by MiMa. |
+| `@Experimental` | Not covered. It can change or disappear in a minor release, with a migration note in that release's CHANGELOG. |
+
+Both are Java annotations with runtime retention, so an IDE, a tool or a Java caller can read them; a
+Scala-only annotation would be invisible to all three. A companion `object` needs no annotation of its
+own: the one on its class, trait or enum covers the pair. A type that is `private` or `private[x]` needs
+none. A type in a module 1.0 does not freeze (anything Beta or Experimental in the
+[Package Map](v1-scope#package-map)) carries neither.
+
+`sbt stabilityTierCheck` (a CI quick check) fails the build for a top-level public type of a frozen
+module that has neither annotation or both, and for a Beta dialect that lives inside a frozen module
+and is not `@Experimental`: today the Mistral and Cohere dialects of `llm4s-openai-compatible`, listed in
+`build.sbt`. It reads sources, not classes, because Scala compiles `private[llm4s]` to a public
+bytecode member. It covers `llm4s-core`, `llm4s-openai`, `llm4s-openai-compatible`,
+`llm4s-anthropic`, `llm4s-gemini` and `llm4s-ollama`. **`llm4s-agent` is frozen by 1.0 Scope but is not
+covered yet**: the typed graph runtime ([#1266](https://github.com/llm4s/llm4s/issues/1266)) is
+replacing its execution model and its tier is an open question in
+[#1281](https://github.com/llm4s/llm4s/issues/1281). Add it to `stabilityTierModules` in `build.sbt`
+when that is settled.
+
+A type annotated `@Experimental` inside a frozen module needs a `ProblemFilters.exclude` entry that says
+why when the baseline is set (see [The Baseline](#the-baseline)); the annotation is what tells you which.
+
+---
+
 ## What MiMa Covers
 
 MiMa runs only on the modules [1.0 Scope](v1-scope) freezes. Each calls `mimaFrozen("<artifact>")` in
