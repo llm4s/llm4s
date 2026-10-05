@@ -1082,7 +1082,7 @@ sbt "samples/runMain org.llm4s.samples.model.ModelMetadataExample"
 **File:** [`CostTrackingExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/metrics/CostTrackingExample.scala)
 
 What a call costs, at three levels: per request (`Completion.estimatedCost`), per agent run
-(`AgentState.usageSummary` after a real `Agent.run` that calls a tool), and per session (a `CostTracker`
+(`AgentResult.usage` after a real `Agent.run` that calls a tool), and per session (a `CostTracker`
 the client reports to). It also shows how to price a model the registry does not know, with a
 `ModelRegistryService` built from your own `ModelMetadata` (an immutable snapshot, so nothing global
 changes), and how `MetricsCollector.compose` feeds several collectors from one client. A model with no price

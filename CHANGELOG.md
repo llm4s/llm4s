@@ -551,6 +551,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `ModelStep.next` returns the `Completion`.
   - Samples `StreamingAgentExample`, `StreamingWithToolsExample`, `EventCollectionExample` and
     `AsyncToolAgentExample` are deleted.
+  - `llm4s-java-api`: `JAgent.run(query)` returns `LlmResult<AgentResult>`; tools are given to
+    `Llm4s.createAgent(client, tools)` (`run(query, tools)` is removed); `continueConversation` and
+    `forget` are new. The Kotlin `AgentKt` follows (`run`, `continueConversation`, `forget`).
 - **Approval resumes through the middleware chain; `ToolLoop` gains a `finish` node**
   ([#1279](https://github.com/llm4s/llm4s/issues/1279)): `Approve` now runs the whole middleware
   chain again with `ToolContext.approved = true`, where it skipped the policy; a deny rule that

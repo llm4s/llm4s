@@ -37,7 +37,7 @@ object AgentZSpec extends ZIOSpecDefault {
   }
 
   val spec = suite("AgentZ")(
-    test("run returns AgentState with Complete status when the agent finishes") {
+    test("run returns an AgentResult with Completed status when the agent finishes") {
       for {
         state <- AgentZ(Fixtures.agentOf(successClient("4"))()).run("What is 2+2?")
       } yield assertTrue(state.status == AgentStatus.Completed("4"))
@@ -56,7 +56,7 @@ object AgentZSpec extends ZIOSpecDefault {
         .flip
         .map(err => assertTrue(Fixtures.causeOf(err) == SimpleError("agent-fail")))
     },
-    test("continueConversation returns AgentState with Complete status") {
+    test("continueConversation returns an AgentResult with Completed status") {
       for {
         s1 <- AgentZ(Fixtures.agentOf(successClient("4"))()).run("What is 2+2?")
         s2 <- AgentZ(Fixtures.agentOf(successClient("6"))()).continueConversation(s1, "And 3+3?")

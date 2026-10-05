@@ -38,7 +38,7 @@ class AgentIOSpec extends AnyFlatSpec with Matchers {
     def getReserveCompletion(): Int = 256
   }
 
-  "AgentIO.run" should "return AgentState with Complete status when the agent finishes" in {
+  "AgentIO.run" should "return an AgentResult with Completed status when the agent finishes" in {
     val state = AgentIO[IO](Fixtures.agentOf(successClient("4"))())
       .run("What is 2+2?")
       .unsafeRunSync()
@@ -72,7 +72,7 @@ class AgentIOSpec extends AnyFlatSpec with Matchers {
     Fixtures.causeOf(ex.asInstanceOf[LLMException].error) shouldBe SimpleError("agent-fail")
   }
 
-  "AgentIO.continueConversation" should "return AgentState with Complete status on a follow-up turn" in {
+  "AgentIO.continueConversation" should "return an AgentResult with Completed status on a follow-up turn" in {
     val agentIO = AgentIO[IO](Fixtures.agentOf(successClient("6"))())
     val state = for {
       s1 <- agentIO.run("What is 2+2?")
