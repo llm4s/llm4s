@@ -238,10 +238,12 @@ class MCPServer(
               isError = Some(false)
             )
             val body = upickle.default.writeJs(response)
-            // A result that is not text travels as structuredContent too, so a client gets the value, not its rendering.
+            // An object result travels as structuredContent too, so a client gets the value, not its rendering. Only an
+            // object: the specification types structuredContent as one, and a schema-validating client rejects a
+            // number, array or null there. Any other result is its JSON text alone.
             resultJson match {
-              case _: ujson.Str => ()
-              case other        => body.obj("structuredContent") = other
+              case obj: ujson.Obj => body.obj("structuredContent") = obj
+              case _              => ()
             }
             JsonRpcResponse(id = request.id, result = Some(body))
           case Left(error) =>

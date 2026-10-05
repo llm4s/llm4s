@@ -1472,8 +1472,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failing with `SQLITE_BUSY`. Remaining store issues are tracked in [#1320](https://github.com/llm4s/llm4s/issues/1320).
 - **MCP: text stays text, tool failures are `isError` results, `getTools` returns a `Left`** ([#1319](https://github.com/llm4s/llm4s/issues/1319)):
   the client no longer turns a text result that parses as JSON into a JSON value (a tool that returned
-  `"24"` is not handed back as the number 24); a structured result travels as the `structuredContent` the
-  server now sends for any non-text result, and the client returns it as that value. `MCPServer` reports a
+  `"24"` is not handed back as the number 24); an object result also travels as the `structuredContent` the
+  server now sends, and the client returns it as that value (the specification types `structuredContent` as a
+  JSON object, so a number, array or `null` result is sent as its JSON text only). `MCPServer` reports a
   tool that fails as a normal `tools/call` result with `isError: true` and the message as text, as the MCP
   specification models it; an unknown tool stays a JSON-RPC error. `MCPClientImpl.getTools` returns a `Left`
   for a failed listing instead of an empty `Seq`, so "no tools" and "unreachable" differ; `MCPToolRegistry`
