@@ -3,8 +3,6 @@ package org.llm4s.agent.graph
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import scala.collection.mutable
 import scala.util.Try
 
@@ -53,20 +51,32 @@ final class GraphBuilder private (val id: String, val version: String):
     declared.update(ref.id, ref)
     ref
 
-  /** Gives a declared node its behaviour and the state keys it may update or remove. */
-  def implement[I](ref: NodeRef[I], writes: Set[StateKey[?, ?]] = Set.empty)(node: GraphNode[I]): Unit =
+  /**
+   * Gives a declared node its behaviour and the state keys it may update or remove. `retry` runs
+   * the node again after its own failure ([[RetryPolicy]]); `cache` answers a repeated input from
+   * memory for a node that depends only on its input ([[CachePolicy]]). Neither changes the graph's
+   * structural fingerprint.
+   */
+  def implement[I](
+    ref: NodeRef[I],
+    writes: Set[StateKey[?, ?]] = Set.empty,
+    retry: RetryPolicy = RetryPolicy.none,
+    cache: Option[CachePolicy] = None
+  )(node: GraphNode[I]): Unit =
     if !owns(ref) then problems += s"node '${ref.id.value}' was issued by another builder"
     else if implemented.contains(ref.id) then problems += s"node '${ref.id.value}' is implemented twice"
-    else implemented.update(ref.id, NodeDef(ref, writes, node))
+    else implemented.update(ref.id, NodeDef(ref, writes, node, retry, cache))
 
   /** Declares and implements a node in one step. */
   def node[I](
     nodeId: String,
     writes: Set[StateKey[?, ?]] = Set.empty,
-    inputVersion: SchemaVersion = SchemaVersion.initial
+    inputVersion: SchemaVersion = SchemaVersion.initial,
+    retry: RetryPolicy = RetryPolicy.none,
+    cache: Option[CachePolicy] = None
   )(node: GraphNode[I])(using codec: ReadWriter[I]): NodeRef[I] =
     val ref = declare[I](nodeId, inputVersion)
-    implement(ref, writes)(node)
+    implement(ref, writes, retry, cache)(node)
     ref
 
   /**
@@ -85,12 +95,17 @@ final class GraphBuilder private (val id: String, val version: String):
     ref
 
   /** Declares and implements a resume node in one step. */
-  def resumeNode[Q, A](nodeId: String, writes: Set[StateKey[?, ?]] = Set.empty)(node: GraphNode[Resumed[Q, A]])(using
+  def resumeNode[Q, A](
+    nodeId: String,
+    writes: Set[StateKey[?, ?]] = Set.empty,
+    retry: RetryPolicy = RetryPolicy.none,
+    cache: Option[CachePolicy] = None
+  )(node: GraphNode[Resumed[Q, A]])(using
     question: ReadWriter[Q],
     answer: ReadWriter[A]
   ): ResumeRef[Q, A] =
     val ref = declareResume[Q, A](nodeId)
-    implement(ref.node, writes)(node)
+    implement(ref.node, writes, retry, cache)(node)
     ref
 
   /** Registers a key that nodes read but none writes, such as one seeded by a restored snapshot. */
@@ -183,18 +198,23 @@ final class GraphBuilder private (val id: String, val version: String):
       dynamicJoins.map(j => s"dynamic:${j.id.value}->${j.target.id.value}") ++
       resumes.keys.map(n => s"resume:${n.value}").toVector.sorted ++
       keys.map(k => s"key:${k.id.value}").sorted
-    MessageDigest
-      .getInstance("SHA-256")
-      .digest(structure.mkString("\n").getBytes(StandardCharsets.UTF_8))
-      .map(b => f"$b%02x")
-      .mkString
+    Sha256.hex(structure.mkString("\n"))
 
 object GraphBuilder:
   /** `version` names the graph's behaviour; bump it when node logic changes incompatibly. */
   def apply(id: String, version: String): GraphBuilder = new GraphBuilder(id, version)
 
-/** A node's handle, write set and behaviour, with its input erased at the scheduler boundary. */
-final private[graph] case class NodeDef[I](ref: NodeRef[I], writes: Set[StateKey[?, ?]], behaviour: GraphNode[I]):
+/**
+ * A node's handle, write set, behaviour and run policies, with its input erased at the scheduler
+ * boundary.
+ */
+final private[graph] case class NodeDef[I](
+  ref: NodeRef[I],
+  writes: Set[StateKey[?, ?]],
+  behaviour: GraphNode[I],
+  retry: RetryPolicy = RetryPolicy.none,
+  cache: Option[CachePolicy] = None
+):
   def run(input: Any, state: ThreadState, context: RunContext): NodeResult =
     behaviour.run(input.asInstanceOf[I], state, context)
   def encode(input: Any): VersionedJson =

@@ -46,10 +46,17 @@ object GraphError:
    * A tool call failed the run: the tool returned `Fatal`, or broke its contract (an update to a key
    * it does not declare, a question it does not declare). `cause` says which.
    */
-  final case class ToolFailed(tool: String, toolCallId: String, cause: LLMError)
+  final case class ToolFailed private (tool: ToolName, toolCallId: ToolCallId, cause: LLMError)
       extends GraphError
       with NonRecoverableError:
-    override val message: String = s"Tool '$tool' (call $toolCallId) failed: ${cause.message}"
+    override val message: String          = s"Tool '${tool.value}' (call ${toolCallId.value}) failed: ${cause.message}"
+    def withTool(t: ToolName): ToolFailed = copy(tool = t)
+    def withToolCallId(id: ToolCallId): ToolFailed = copy(toolCallId = id)
+    def withCause(c: LLMError): ToolFailed         = copy(cause = c)
+
+  object ToolFailed:
+    def apply(tool: ToolName, toolCallId: ToolCallId, cause: LLMError): ToolFailed =
+      new ToolFailed(tool, toolCallId, cause)
 
   /**
    * A middleware hook threw: the run fails, the checkpoint stays `Running`, and `recover` re-runs

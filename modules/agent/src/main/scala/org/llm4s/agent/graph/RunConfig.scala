@@ -104,3 +104,6 @@ final class RunContext private[graph] (
 
   /** The task thread's interrupt flag, read without clearing it. */
   def isCancelled: Boolean = Thread.currentThread().isInterrupted
+
+  /** Forgets the durable events a failed attempt emitted, before the node is run again. */
+  private[graph] def discardAttempt(): Unit = sink.discardCustom()

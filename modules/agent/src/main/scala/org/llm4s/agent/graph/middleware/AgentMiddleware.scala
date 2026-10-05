@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.agent.graph.{ RunContext, StateKey }
+import org.llm4s.agent.graph.{ RunContext, StateKey, ToolCallId, ToolName }
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Message, ToolCall }
 import org.llm4s.types.Result
@@ -24,14 +24,35 @@ object MiddlewareId:
    */
   given ReadWriter[MiddlewareId] = ReadWriter.join(upickle.default.StringReader, upickle.default.StringWriter)
 
-/** One model call as a model wrapper sees it: the conversation so far and the tools offered. */
-final case class ModelRequest(messages: Vector[Message], tools: ToolSet)
+/**
+ * One model call as a model wrapper sees it: the conversation so far and the tools offered. A
+ * wrapper that rewrites the request builds the next one with `withMessages` or `withTools`.
+ */
+final case class ModelRequest private (messages: Vector[Message], tools: ToolSet):
+  def withMessages(m: Vector[Message]): ModelRequest = copy(messages = m)
+  def withTools(t: ToolSet): ModelRequest            = copy(tools = t)
+
+object ModelRequest:
+  def apply(messages: Vector[Message], tools: ToolSet = ToolSet.empty): ModelRequest =
+    new ModelRequest(messages, tools)
 
 /**
  * One tool call as a tool wrapper sees it, after its arguments were validated and decoded. It is
  * read-only: a wrapper cannot change a call's arguments.
  */
-final case class ToolCallRequest(spec: AgentToolSpec[?], call: ToolCall)
+final case class ToolCallRequest private (spec: AgentToolSpec[?], call: ToolCall):
+
+  /** The call's id, typed; core's `ToolCall` keeps a string. */
+  def toolCallId: ToolCallId = ToolCallId(call.id)
+
+  /** The called tool's name, typed. */
+  def toolName: ToolName = ToolName(call.name)
+
+  def withSpec(s: AgentToolSpec[?]): ToolCallRequest = copy(spec = s)
+  def withCall(c: ToolCall): ToolCallRequest         = copy(call = c)
+
+object ToolCallRequest:
+  def apply(spec: AgentToolSpec[?], call: ToolCall): ToolCallRequest = new ToolCallRequest(spec, call)
 
 /**
  * A cross-cutting concern - approval, guardrails, logging, retry, rate limits - around an agent

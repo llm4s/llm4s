@@ -1227,6 +1227,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the run ends. **Breaking:** `CheckpointStatus` and `NodeResult` gain a case, so an exhaustive `match` over either needs
   one more branch; `Checkpoint.CurrentFormat` is 4 (a checkpoint written by this build is refused by an older one, and
   older checkpoints migrate unchanged); code that read a guardrail failure out of `NodeFailed` reads the error itself.
+- **Graph kernel completion: per-node retry and cache policy, Mermaid export, growth-prone run types**
+  ([#1327](https://github.com/llm4s/llm4s/issues/1327), `llm4s-agent`, Experimental; design §4.11).
+  `GraphBuilder.implement`, `node` and `resumeNode` take `retry: RetryPolicy` and
+  `cache: Option[CachePolicy]`, both defaulted, so a graph that sets neither runs as before.
+  - **Retry.** A node that throws or returns `NodeResult.Fail` runs again, inside the run, while its error
+    passes `retryOn` (default: recoverable errors) and attempts remain, waiting an exponential, capped
+    backoff (`FiniteDuration`s, no jitter). The wait is interruptible, so cancelling the run or its deadline
+    ends the retries. A cancellation, a result the kernel rejects and a suspension are never retried. A failed
+    attempt's `RunContext.emit` events are discarded, so a retry commits one attempt's events. `recover` still
+    re-runs a failed task, now with the node's full policy; it used to give it one more try.
+  - **Cache.** A node declared a function of its input is answered from memory for an input it has seen: the key
+    is the node, its input schema version and the encoded input, the entry's life is an optional `ttl` and
+    `maxEntries` (least recently used out). The cache is process-local and is not checkpointed; only `Continue`
+    results are stored; a hit does not run the node (so no `emit` or `progress`) but leaves an ordinary pending
+    write and `TaskCompleted` event. Neither policy is part of the structural fingerprint.
+  - **`CompiledGraph.toMermaid`** draws the declared structure as a flowchart, deterministically (nodes and
+    joins by id, a node's edges by declaration); routes returned at run time are not drawn.
+  - **Breaking (pre-1.0, no shims).** `ToolContext`, `GraphError.ToolFailed`, `ModelRequest` and
+    `ToolCallRequest` have a private constructor and no public `copy`: build them with `X(...)` and change
+    them with `withY(...)` (`ToolContext.approved`, `ModelRequest.tools` default). `ToolContext.toolCallId`
+    and `GraphError.ToolFailed.tool` / `.toolCallId` are the new opaque `ToolCallId` and `ToolName` (`.value`
+    for the string; `ToolCallId(call.id)` to make one), and `ToolCallRequest` gains `toolCallId` and `toolName`.
 
 ### Removed
 - **`ToolCallPolicy` and `PolicyDecision`** ([#1279](https://github.com/llm4s/llm4s/issues/1279)),

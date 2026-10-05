@@ -28,7 +28,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
       RunPosition(ThreadId("t"), RunId("r"), "", TaskId("task"), NodeId("node"), 0),
       NodeEventSink.none
     ),
-    "call-1",
+    ToolCallId("call-1"),
     ThreadState.empty(Map.empty),
     approved = false
   )
@@ -179,7 +179,7 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
   }
 
   "GraphError.ToolFailed" should "name the tool, the call and the cause" in {
-    val error = GraphError.ToolFailed("search", "call-1", ValidationError("x", "boom"))
+    val error = GraphError.ToolFailed(ToolName("search"), ToolCallId("call-1"), ValidationError("x", "boom"))
     error.message should include("search")
     error.message should include("call-1")
     error.message should include("boom")

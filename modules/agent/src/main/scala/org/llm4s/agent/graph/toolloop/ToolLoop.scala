@@ -437,7 +437,7 @@ object ToolLoop:
           decoded match
             case Left(message) => error(task, message)
             case Right((args, question, reply)) =>
-              val toolContext = ToolContext(context, request.call.id, state, request.approved)
+              val toolContext = ToolContext(context, ToolCallId(request.call.id), state, request.approved)
               val chain = stack.wrapToolCall(ToolCallRequest(tool.spec, request.call), toolContext)(
                 innermost(name)(AgentTool.resumeWith(tool, args, question, reply, toolContext))
               )
@@ -503,7 +503,7 @@ object ToolLoop:
       context: RunContext,
       approved: Boolean = false
     ): NodeResult =
-      val toolContext = ToolContext(context, call.id, state, approved)
+      val toolContext = ToolContext(context, ToolCallId(call.id), state, approved)
       val chain = stack.wrapToolCall(ToolCallRequest(tool.spec, call), toolContext)(
         innermost(tool.spec.name)(tool.execute(args, toolContext))
       )
@@ -559,8 +559,9 @@ object ToolLoop:
       chain: MiddlewareStack.ToolChainResult,
       resumed: Boolean = false
     ): NodeResult =
-      val name                                 = tool.spec.name
-      def failRun(error: LLMError): NodeResult = NodeResult.Fail(GraphError.ToolFailed(name, call.id, error))
+      val name = tool.spec.name
+      def failRun(error: LLMError): NodeResult =
+        NodeResult.Fail(GraphError.ToolFailed(ToolName(name), ToolCallId(call.id), error))
       chain.outcome match
         case ToolOutcome.Success(content, update) =>
           val allowed = tool.writes ++ stack.writes

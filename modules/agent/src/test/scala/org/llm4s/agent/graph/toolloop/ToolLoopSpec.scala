@@ -529,14 +529,14 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val model   = ScriptedModel(calls(("s1", "sneaky", ujson.Obj())), summarise)
     val l       = ToolLoop.build("assistant", "v1", model, set(sneaky, honest)).value
     val failure = toolFailure(runInMemory(l.graph, "go"))
-    (failure.tool, failure.toolCallId) shouldBe ("sneaky" -> "s1")
+    (failure.tool, failure.toolCallId) shouldBe (ToolName("sneaky") -> ToolCallId("s1"))
     failure.message should include("hits")
   }
 
   it should "fail the run on Fatal, and recover re-runs only that call" in {
     val runs = new ConcurrentHashMap[String, AtomicInteger]()
     def count(context: ToolContext): Int =
-      runs.computeIfAbsent(context.toolCallId, _ => new AtomicInteger()).incrementAndGet()
+      runs.computeIfAbsent(context.toolCallId.value, _ => new AtomicInteger()).incrementAndGet()
     val flaky = bare("flaky") { context =>
       if count(context) == 1 then ToolOutcome.Fatal(ValidationError("upstream", "down")) else text("ok")
     }
@@ -549,7 +549,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
 
     val failed  = GraphRuntime(store).start(thread, l.graph, "go", RunConfig().withRunId(RunId("run-1"))).awaited.value
     val failure = toolFailure(failed)
-    (failure.tool, failure.toolCallId) shouldBe ("flaky" -> "f1")
+    (failure.tool, failure.toolCallId) shouldBe (ToolName("flaky") -> ToolCallId("f1"))
     failure.cause.message should include("down")
     store.latest(thread).value.map(_.checkpoint.status) shouldBe Some(CheckpointStatus.Running)
 
@@ -790,13 +790,13 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val first = ScriptedModel(calls(("u1", "undeclared", ujson.Obj())), summarise)
     val undeclaredFailure =
       toolFailure(runInMemory(ToolLoop.build("assistant", "v1", first, set(undeclared)).value.graph, "go"))
-    (undeclaredFailure.tool, undeclaredFailure.toolCallId) shouldBe ("undeclared" -> "u1")
+    (undeclaredFailure.tool, undeclaredFailure.toolCallId) shouldBe (ToolName("undeclared") -> ToolCallId("u1"))
     undeclaredFailure.message should include("asked a question it does not declare")
 
     val second = ScriptedModel(calls(("w1", "mistyped", ujson.Obj())), summarise)
     val mistypedFailure =
       toolFailure(runInMemory(ToolLoop.build("assistant", "v1", second, set(mistyped)).value.graph, "go"))
-    (mistypedFailure.tool, mistypedFailure.toolCallId) shouldBe ("mistyped" -> "w1")
+    (mistypedFailure.tool, mistypedFailure.toolCallId) shouldBe (ToolName("mistyped") -> ToolCallId("w1"))
   }
 
   it should "re-validate edited arguments, refusing invalid ones without running the tool" in {
@@ -932,7 +932,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val model   = ScriptedModel(calls(("s1", "echo", ujson.Obj("text" -> "hi"))), summarise)
     val l       = ToolLoop.build("assistant", "v1", model, set(Tools().echo, honest), Seq(adding)).value
     val failure = toolFailure(runInMemory(l.graph, "go"))
-    (failure.tool, failure.toolCallId) shouldBe ("echo" -> "s1")
+    (failure.tool, failure.toolCallId) shouldBe (ToolName("echo") -> ToolCallId("s1"))
     failure.message should include("hits")
   }
 
@@ -1258,7 +1258,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
       model = (request, next) =>
         ToolSet
           .of(request.tools.tools.filter(t => Set("echo", "lookup").contains(t.spec.name))*)
-          .flatMap(filtered => next(request.copy(tools = filtered)))
+          .flatMap(filtered => next(request.withTools(filtered)))
     )
     val l = ToolLoop.build("assistant", "v1", model, set(tools.all*), Seq(filtering)).value
     runInMemory(l.graph, "go").completed._2 shouldBe "done: m1=hi"

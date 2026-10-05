@@ -38,7 +38,7 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
       next: ModelRequest => Result[AssistantMessage]
     ): Result[AssistantMessage] =
       log.add(s"$name:before")
-      val result = next(request.copy(messages = request.messages :+ UserMessage(name)))
+      val result = next(request.withMessages(request.messages :+ UserMessage(name)))
       log.add(s"$name:after")
       result
     override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
@@ -65,7 +65,7 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private val runContext: RunContext = GraphTestSupport.testRunContext()
   private val toolContext: ToolContext =
-    ToolContext(runContext, "call-1", ThreadState.empty(Map.empty), approved = false)
+    ToolContext(runContext, ToolCallId("call-1"), ThreadState.empty(Map.empty), approved = false)
 
   private val request = ToolCallRequest(
     AgentToolSpec[Search]("search", "Searches", searchSchema),

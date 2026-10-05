@@ -50,7 +50,7 @@ object GraphRuntime:
  *    nothing to continue;
  *  - `Running` - work was scheduled when the last run stopped: `recover` continues it with no new
  *    input, reusing every pending write so completed tasks are not run again, and running failed
- *    or unstarted tasks once more (per-node retry policy is Stage 1);
+ *    or unstarted tasks again, each with its node's full [[RetryPolicy]];
  *  - `Suspended`: `resume` answers any non-empty subset of the parked interrupts; unanswered ones
  *    stay parked, and the run suspends again if nothing else can proceed.
  *
@@ -799,6 +799,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         withLock(lock) {
           buffered += draft(Some(checkpointId), Some(task), RunEvent.Custom(name, version, snapshot))
         }
+      def discardCustom(): Unit = withLock(lock)(buffered.clear())
       def progress(payload: ujson.Value): Unit =
         hub.live(
           threadId,

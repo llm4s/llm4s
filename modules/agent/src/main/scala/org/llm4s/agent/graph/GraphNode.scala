@@ -105,10 +105,14 @@ private[graph] trait NodeEventSink:
   def custom(name: String, version: Int, payload: ujson.Value): Unit
   def progress(payload: ujson.Value): Unit
 
+  /** Drops the custom events buffered so far: the attempt that emitted them failed and is retried. */
+  def discardCustom(): Unit
+
 private[graph] object NodeEventSink:
   val none: NodeEventSink = new NodeEventSink:
     def custom(name: String, version: Int, payload: ujson.Value): Unit = ()
     def progress(payload: ujson.Value): Unit                           = ()
+    def discardCustom(): Unit                                          = ()
 
 /**
  * A node's behaviour. It reads the superstep's committed snapshot - never another task's

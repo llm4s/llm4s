@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.tool
 
-import org.llm4s.agent.graph.{ RunContext, StateKey, StateUpdate, ThreadState }
+import org.llm4s.agent.graph.{ RunContext, StateKey, StateUpdate, ThreadState, ToolCallId }
 import org.llm4s.error.LLMError
 import org.llm4s.toolapi.{ SchemaDefinition, ToolFunction }
 import org.llm4s.types.Result
@@ -125,9 +125,18 @@ final case class ToolQuestion[Q, Ans](questionCodec: ReadWriter[Q], answerCodec:
 
 /**
  * What a tool call knows: the run, the call's id, the thread state it may read, and whether the
- * call has been approved.
+ * call has been approved. Built with `ToolContext(...)`; a field added later gets a default there
+ * and a `with*` setter, so existing callers keep compiling.
  */
-final case class ToolContext(run: RunContext, toolCallId: String, state: ThreadState, approved: Boolean)
+final case class ToolContext private (run: RunContext, toolCallId: ToolCallId, state: ThreadState, approved: Boolean):
+  def withRun(r: RunContext): ToolContext         = copy(run = r)
+  def withToolCallId(id: ToolCallId): ToolContext = copy(toolCallId = id)
+  def withState(s: ThreadState): ToolContext      = copy(state = s)
+  def withApproved(a: Boolean): ToolContext       = copy(approved = a)
+
+object ToolContext:
+  def apply(run: RunContext, toolCallId: ToolCallId, state: ThreadState, approved: Boolean = false): ToolContext =
+    new ToolContext(run, toolCallId, state, approved)
 
 /** What a tool call produced, as data. */
 enum ToolOutcome:
