@@ -514,7 +514,7 @@ Changes:
 ### Task 11: Docs, migration note, design doc
 
 **Files:**
-- Modify: `docs/design/typed-agent-runtime-design.md`. Add a new §4.10, "Stage 1: agent loop on the runtime ([#1328](https://github.com/llm4s/llm4s/issues/1328))", in §4.8's style: what changed, bulleted decisions, specs list. Renumber the old §4.10 to §4.11 and fix references to it (`grep -n "4\.10" docs/`). In §4.9's table, mark the rows this slice closes (the `Agent.run` row, the guardrail Block row) as closed by #1328, and add the "Closed by #1328" paragraph in the style of the others.
+- Modify: `docs/design/typed-agent-runtime-design.md`. Rewrite §4.13, "Stage 1 slice 2: the agent loop on the graph runtime ([#1328](https://github.com/llm4s/llm4s/issues/1328))", as the implemented record in §4.8's style: what changed, bulleted decisions, specs list (landed as §4.13 after main added §4.10-§4.12; originally planned as a new §4.10). In §4.9's table, mark the rows this slice closes (the `Agent.run` row, the guardrail Block row) as closed by #1328, and add the "Closed by #1328" paragraph in the style of the others.
 - Modify: `CLAUDE.md` "Agent Framework" section. Basic usage, multi-turn, guardrails, handoffs and memory examples use `Agent.builder(...)`, `AgentResult` and `continueConversation(result, ...)`. Remove the "Streaming Events" subsection, and put a one-line pointer to #1329 in its place.
 - Modify: the `docs/guide` agent pages and any other docs page that `grep -rln "new Agent(\|AgentState\|runWithEvents\|continueConversation(state" docs/ README.md` lists.
 - Modify: `CHANGELOG.md`, under the unreleased section. Add one "Stage 1 migration: agent runtime" note with direct replacements for:

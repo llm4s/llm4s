@@ -1,5 +1,11 @@
 # Agent loop cutover - design (#1328)
 
+> **Superseded in part.** Guardrail blocks did not land as designed here: rebased onto main's guardrail Block
+> (#1350), a block is the kernel's Block of design §4.13 - the run ends as a finished failure, the thread usable -
+> which `Agent` reports as `AgentStatus.Blocked(guardrail, reason)`. An input block stores nothing of the turn, an
+> output block removes the whole turn, and no refusal message is stored. The design section landed as §4.13 of
+> `docs/design/typed-agent-runtime-design.md`, not §4.10. The rest describes what was built.
+
 Slice 2 of [#1326](https://github.com/llm4s/llm4s/issues/1326), Stage 1 of the typed agent runtime
 ([#1266](https://github.com/llm4s/llm4s/issues/1266)), and the first Stage 1 slice to land. Module
 `llm4s-agent`, with callers in `llm4s-effect`, `llm4s-zio`, `workspaceClient`, `observability`, `it`
@@ -27,7 +33,7 @@ for Stage 1, and no shim runs the old loop beside the new one.
 | Question | Decision |
 |---|---|
 | How a conversation is carried between turns | By `ThreadId` on a `GraphRuntime` (in-memory by default). A turn on a completed thread is the runtime's "start on an existing thread". `AgentResult` is a readable value, not something passed back in; `continueConversation(previous, ...)` reads only its `threadId`. Stage 2 durability is a different checkpointer, not a new API. |
-| A guardrail block | A normal terminal outcome, `AgentStatus.Blocked`, with the thread `Completed`. An input block commits nothing else; an output block replaces the stored answer with a refusal message. Not a `Left`: callers handle it as an outcome and still get the thread and usage. |
+| A guardrail block | *(Superseded: see the note at the top and "Guardrail blocks".)* A normal terminal outcome, `AgentStatus.Blocked`, with the thread `Completed`. An input block commits nothing else; an output block replaces the stored answer with a refusal message. Not a `Left`: callers handle it as an outcome and still get the thread and usage. |
 | Handoffs | Routes inside one graph: the root agent and every agent reachable through handoffs are compiled together, keyed by `AgentId`; thread state records the active agent. Not removed (delegation in Stage 4 is a different pattern), and not a run ending in `HandedOff` that callers must glue. |
 | Context-window pruning | A model-call middleware that trims what is sent. The thread keeps its full history, for recovery, resume and Stage 3 summarisation. |
 | Event streaming between slices 2 and 3 | Slice 2 deletes `runWithEvents`, `runCollectingEvents`, `continueConversationWithEvents`, `AgentStreamingExecutor` and `AgentEvent`; slice 3 adds their replacement. 0.5.0 (#1281) is not cut between the two. |
@@ -221,6 +227,13 @@ Each handoff target is offered to the model as a tool `handoff_to_<id>` with the
 
 ### Guardrail blocks
 
+> **Superseded.** As landed, a block is the kernel's Block (design §4.13): the run ends `RunResult.Failed` with
+> `GuardrailBlocked`, the thread's checkpoint `Failed` but usable, and `Agent` reports it as
+> `AgentStatus.Blocked(guardrail, reason)`. An input block commits only a new thread's history seed and root active
+> agent; an output block removes the turn (`MessageUpdate.RemoveTurn`) and restores the agent and transfer it started
+> with. There is no `TurnOutcome.Blocked` and no refusal message. Any other boundary `Left` also blocks, returned as
+> `Left`. The text below is the earlier design.
+
 `GuardrailMiddleware` returns a dedicated `GuardrailBlocked(guardrail: String, reason: String)`
 (`NonRecoverableError`, in `org.llm4s.agent.graph.middleware`) when a guardrail refuses. Any other
 `Left` from a hook keeps failing the run, as today.
@@ -298,9 +311,9 @@ in core until slice 3 rewrites its consumers.
 
 ## Documentation
 
-- The design doc gains a §4.10, "Stage 1: agent loop on the runtime" (#1328), in the style of
-  §4.5-4.8; the current §4.10 (durable workflow API) is renumbered §4.11, and §4.9's carry-forward
-  rows owned by this slice are marked closed.
+- The design doc's §4.13, "Stage 1 slice 2: the agent loop on the graph runtime" (#1328), becomes the
+  implemented record (it landed as §4.13, after main's §4.10-§4.12, not as a new §4.10), and §4.9's
+  carry-forward rows owned by this slice are marked closed.
 - `CLAUDE.md`'s Agent Framework section and `docs/guide` agent pages show the builder and
   `AgentResult`.
 - One Stage 1 migration note in `CHANGELOG` and the docs, covering `AgentState`, `AgentContext`,
