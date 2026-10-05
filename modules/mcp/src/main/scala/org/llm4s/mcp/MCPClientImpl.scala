@@ -34,11 +34,12 @@ import scala.util.{ Failure, Success, Try }
  * @param config Server configuration including transport type, URL/command, and timeout.
  */
 class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
-  private val logger                                   = LoggerFactory.getLogger(getClass)
-  private[mcp] var transport: Option[MCPTransportImpl] = None
-  private val requestId                                = new AtomicLong(0)
-  private var initialized                              = false
-  private var protocolVersion                          = "2025-06-18" // Updated to latest version
+  private val logger                                      = LoggerFactory.getLogger(getClass)
+  private[mcp] var transport: Option[MCPTransportImpl]    = None
+  private val requestId                                   = new AtomicLong(0)
+  private var initialized                                 = false
+  @volatile private var toolHints: Map[String, ToolHints] = Map.empty
+  private var protocolVersion                             = "2025-06-18" // Updated to latest version
 
   logger.info(s"MCPClientImpl created for server: ${config.name}")
 
@@ -263,14 +264,19 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
   private def parseTools(value: Value): Result[Seq[ToolFunction[_, _]]] = {
     val result = Try {
       val toolsData = value("tools").arr
-      toolsData.map(convertMCPToolToToolFunction).toSeq
+      (toolsData.map(convertMCPToolToToolFunction).toSeq, toolsData.map(MCPClientImpl.hintsOf).toMap)
     }
     result.fold(
       ex => logger.error("Failed to parse tools from {}: {}", config.name, ex.getMessage),
-      tools => logger.info("Successfully retrieved from {} {} tools", config.name, tools.size)
+      { case (tools, hints) =>
+        toolHints = hints
+        logger.info("Successfully retrieved from {} {} tools", config.name, tools.size)
+      }
     )
-    result.getOrElse(Seq.empty).asRight[LLMError]
+    result.map(_._1).getOrElse(Seq.empty).asRight[LLMError]
   }
+
+  override def getToolHints(): Map[String, ToolHints] = toolHints
 
   // Closes the transport connection and resets initialization state
   override def close(): Unit = {
@@ -416,6 +422,13 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 }
 
 object MCPClientImpl {
+
+  /** A tool's name and the hints its MCP annotations declare (the specification's defaults when it has none). */
+  private[mcp] def hintsOf(toolJson: Value): (String, ToolHints) =
+    toolJson("name").str -> MCPToolAnnotations
+      .fromJson(toolJson.objOpt.flatMap(_.get("annotations")).getOrElse(ujson.Null))
+      .toToolHints
+
   val listRequest: JsonRpcRequest = JsonRpcRequest(
     jsonrpc = "2.0",
     id = "",

@@ -110,6 +110,18 @@ class MCPToolRegistry(
     }
   }
 
+  /**
+   * The hints the MCP server declares for the tool `name` through its tool annotations, as of the last
+   * discovery of that server's tools (`tools`, `getAllTools` or `execute` trigger it); `None` for a tool no
+   * MCP server advertises, and for one a local tool shadows. See [[MCPClient.getToolHints]].
+   */
+  def toolHints(name: String): Option[ToolHints] =
+    if (localTools.exists(_.name == name)) None
+    else
+      mcpServers.view
+        .flatMap(server => Option(mcpClients.get(server.name)).flatMap(_.getToolHints().get(name)))
+        .headOption
+
   // Get tools in OpenAI format
   override def getOpenAITools(strict: Boolean = true): ujson.Arr =
     ujson.Arr.from(tools.map(_.toOpenAITool(strict)))
