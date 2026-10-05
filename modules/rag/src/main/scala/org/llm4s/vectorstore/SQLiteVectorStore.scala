@@ -279,9 +279,9 @@ final class SQLiteVectorStore private (
     Try {
       // First get IDs to delete
       val ids = Using.resource(
-        connection.prepareStatement(s"SELECT id FROM vectors WHERE id LIKE ? ${SqlLikePattern.EscapeClause}")
+        connection.prepareStatement("SELECT id FROM vectors WHERE id GLOB ?")
       ) { stmt =>
-        stmt.setString(1, SqlLikePattern.prefix(prefix))
+        stmt.setString(1, SqlLikePattern.globPrefix(prefix))
         Using.resource(stmt.executeQuery()) { rs =>
           val buffer = ArrayBuffer.empty[String]
           while (rs.next())

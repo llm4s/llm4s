@@ -9,6 +9,7 @@ import org.llm4s.model.{ ModelRegistryService, ModelRegistryTestSupport }
 import org.llm4s.rag.loader.TextLoader
 import org.llm4s.testutil.MockEmbeddingProviders
 import org.llm4s.types.Result
+import org.llm4s.vectorstore.*
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -37,11 +38,37 @@ class RAGReingestSpec extends AnyFlatSpec with Matchers {
       if (failing) Left(ProcessingError("embedding", "the provider is down")) else delegate.embed(request)
   }
 
+  /** A vector store whose batch writes can be told to fail, to check a failed write leaves the index alone. */
+  final private class FlakyVectorStore(underlying: VectorStore) extends VectorStore {
+    @volatile var failingWrites: Boolean = false
+
+    override def upsert(record: VectorRecord): Result[Unit] = upsertBatch(Seq(record))
+    override def upsertBatch(records: Seq[VectorRecord]): Result[Unit] =
+      if (failingWrites) Left(ProcessingError("vector-store", "the store is down"))
+      else underlying.upsertBatch(records)
+    override def search(queryVector: Array[Float], topK: Int, filter: Option[MetadataFilter]) =
+      underlying.search(queryVector, topK, filter)
+    override def get(id: String)                                               = underlying.get(id)
+    override def getBatch(ids: Seq[String])                                    = underlying.getBatch(ids)
+    override def delete(id: String)                                            = underlying.delete(id)
+    override def deleteBatch(ids: Seq[String])                                 = underlying.deleteBatch(ids)
+    override def deleteByPrefix(prefix: String)                                = underlying.deleteByPrefix(prefix)
+    override def deleteByFilter(filter: MetadataFilter)                        = underlying.deleteByFilter(filter)
+    override def count(filter: Option[MetadataFilter])                         = underlying.count(filter)
+    override def list(limit: Int, offset: Int, filter: Option[MetadataFilter]) = underlying.list(limit, offset, filter)
+    override def clear()                                                       = underlying.clear()
+    override def stats()                                                       = underlying.stats()
+    override def close(): Unit                                                 = underlying.close()
+  }
+
   private def build(
     cfg: RAGConfig = config,
-    provider: EmbeddingProvider = new MockEmbeddingProviders.BagOfWordsMock()
+    provider: EmbeddingProvider = new MockEmbeddingProviders.BagOfWordsMock(),
+    searcher: Option[HybridSearcher] = None
   ) =
-    RAG.buildWithClient(cfg, new EmbeddingClient(provider)).fold(e => fail(e.message), identity)
+    RAG
+      .buildWithClient(cfg, new EmbeddingClient(provider), hybridSearcher = searcher)
+      .fold(e => fail(e.message), identity)
 
   private def storedChunks(rag: RAG): Long = rag.stats.fold(e => fail(e.message), _.vectorCount)
 
@@ -148,5 +175,81 @@ class RAGReingestSpec extends AnyFlatSpec with Matchers {
 
     storedChunks(rag) shouldBe 5L
     indexedIds(rag) should have size 5
+  }
+
+  it should "keep the previous version when the new one cannot be stored" in {
+    val store    = new FlakyVectorStore(VectorStoreFactory.inMemory().fold(e => fail(e.message), identity))
+    val keywords = KeywordIndex.inMemory().fold(e => fail(e.message), identity)
+    val rag      = build(searcher = Some(HybridSearcher(store, keywords)))
+    rag.ingestText(fiveChunks, "doc-a").fold(e => fail(e.message), identity)
+
+    store.failingWrites = true
+    rag.ingestText(oneChunk, "doc-a").isLeft shouldBe true
+    store.failingWrites = false
+
+    storedChunks(rag) shouldBe 5L
+    indexedIds(rag) should have size 5
+    rag.chunkCount shouldBe 5
+  }
+
+  it should "keep the previous version when sync cannot embed a changed document" in {
+    val provider = new FlakyEmbeddings
+    val rag      = build(provider = provider)
+    rag.sync(TextLoader.fromPairs("doc-a" -> fiveChunks)).fold(e => fail(e.message), _.added) shouldBe 1
+
+    provider.failing = true
+    rag.sync(TextLoader.fromPairs("doc-a" -> oneChunk)).fold(e => fail(e.message), _.updated) shouldBe 0
+    provider.failing = false
+
+    storedChunks(rag) shouldBe 5L
+  }
+
+  it should "replace a changed document through sync" in {
+    val rag = build()
+    rag.sync(TextLoader.fromPairs("doc-a" -> fiveChunks)).fold(e => fail(e.message), identity)
+
+    rag.sync(TextLoader.fromPairs("doc-a" -> oneChunk)).fold(e => fail(e.message), _.updated) shouldBe 1
+
+    indexedIds(rag) shouldBe Set("doc-a-chunk-0")
+  }
+
+  it should "count a re-ingested document once, with its new chunks" in {
+    val rag = build()
+    rag.ingestText(fiveChunks, "doc-a").fold(e => fail(e.message), identity)
+    rag.ingestText(fiveChunks, "doc-b").fold(e => fail(e.message), identity)
+
+    rag.ingestText(oneChunk, "doc-a").fold(e => fail(e.message), identity)
+    (rag.documentCount, rag.chunkCount) shouldBe (2, 6)
+
+    rag.ingestText("", "doc-a").fold(e => fail(e.message), identity)
+    (rag.documentCount, rag.chunkCount) shouldBe (1, 5)
+
+    rag.deleteDocument("doc-b").fold(e => fail(e.message), identity)
+    (rag.documentCount, rag.chunkCount) shouldBe (0, 0)
+    rag.stats.fold(e => fail(e.message), s => (s.documentCount, s.chunkCount, s.vectorCount)) shouldBe (0, 0, 0L)
+  }
+
+  it should "leave a document whose id differs only in case alone" in {
+    // SQLite's LIKE folds ASCII case, so a LIKE prefix delete of "Doc-A" took "doc-a" with it.
+    val rag = build()
+    rag.ingestText(fiveChunks, "doc-a").fold(e => fail(e.message), identity)
+    rag.ingestText(fiveChunks, "Doc-A").fold(e => fail(e.message), identity)
+
+    rag.ingestText(oneChunk, "Doc-A").fold(e => fail(e.message), identity)
+    rag.deleteDocument("Doc-A").fold(e => fail(e.message), identity)
+
+    indexedIds(rag) should have size 5
+    indexedIds(rag).forall(_.startsWith("doc-a-chunk-")) shouldBe true
+  }
+
+  it should "treat GLOB wildcards in a document id literally when deleting it" in {
+    val rag = build()
+    Seq("a*", "a?", "a[b]", "abc", "ab]").foreach(id =>
+      rag.ingestText(fiveChunks, id).fold(e => fail(e.message), identity)
+    )
+
+    Seq("a*", "a?", "a[b]").foreach(id => rag.deleteDocument(id).fold(e => fail(e.message), identity))
+
+    indexedIds(rag).map(_.takeWhile(_ != '-')) shouldBe Set("abc", "ab]")
   }
 }

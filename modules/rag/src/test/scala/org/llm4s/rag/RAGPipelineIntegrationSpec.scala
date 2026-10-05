@@ -311,10 +311,9 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
       // The store upserts on chunk id, so re-ingesting replaces rather than duplicates.
       rag.stats.fold(err => fail(err.message), _.vectorCount) shouldBe 1L
 
-      // documentCount and chunkCount are ingestion counters, not store cardinality: they
-      // count calls. Pinned rather than corrected here so the discrepancy is visible.
-      rag.documentCount shouldBe 2
-      rag.chunkCount shouldBe 2
+      // The counters follow the store: a re-ingested document counts once, with its new chunks.
+      rag.documentCount shouldBe 1
+      rag.chunkCount shouldBe 1
 
       val results = rag.query("aardvarks zebras", topK = Some(5)).fold(err => fail(err.message), identity)
       results should have size 1

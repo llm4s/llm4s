@@ -82,6 +82,9 @@ class RerankAndFusionRobustnessSpec extends AnyFlatSpec with Matchers with Eithe
     FusionStrategy.weightedScore(-1, 1).left.value shouldBe a[ValidationError]
     FusionStrategy.weightedScore(0, 0).isLeft shouldBe true
     FusionStrategy.weightedScore(Double.NaN, 1).isLeft shouldBe true
+    FusionStrategy.weightedScore(Double.PositiveInfinity, 1).isLeft shouldBe true
+    FusionStrategy.weightedScore(1, Double.NegativeInfinity).isLeft shouldBe true
+    an[IllegalArgumentException] should be thrownBy FusionStrategy.WeightedScore(Double.PositiveInfinity, 1)
     FusionStrategy.weightedScore(0.7, 0.3).value shouldBe FusionStrategy.WeightedScore(0.7, 0.3)
   }
 

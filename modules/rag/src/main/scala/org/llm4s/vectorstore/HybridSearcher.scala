@@ -61,17 +61,21 @@ object FusionStrategy {
     vectorWeight: Double = 0.5,
     keywordWeight: Double = 0.5
   ) extends FusionStrategy {
-    require(vectorWeight >= 0 && keywordWeight >= 0, "Weights must be non-negative")
+    require(
+      vectorWeight.isFinite && keywordWeight.isFinite && vectorWeight >= 0 && keywordWeight >= 0,
+      "Weights must be finite and non-negative"
+    )
     require(vectorWeight + keywordWeight > 0, "At least one weight must be positive")
   }
 
   /**
    * A [[WeightedScore]] from weights that did not come from source code. The constructor throws
-   * `IllegalArgumentException` on a negative or all-zero pair; this returns it as a `Left`.
+   * `IllegalArgumentException` on a NaN, infinite, negative or all-zero pair; this returns it as a `Left`.
+   * An infinite weight would score `Inf`, or `NaN` where a channel scored 0, and break the ranking.
    */
   def weightedScore(vectorWeight: Double, keywordWeight: Double): Result[WeightedScore] =
-    if (vectorWeight.isNaN || keywordWeight.isNaN || vectorWeight < 0 || keywordWeight < 0)
-      Left(org.llm4s.error.ValidationError("weights", "Weights must be non-negative"))
+    if (!vectorWeight.isFinite || !keywordWeight.isFinite || vectorWeight < 0 || keywordWeight < 0)
+      Left(org.llm4s.error.ValidationError("weights", "Weights must be finite and non-negative"))
     else if (vectorWeight + keywordWeight <= 0)
       Left(org.llm4s.error.ValidationError("weights", "At least one weight must be positive"))
     else Right(WeightedScore(vectorWeight, keywordWeight))

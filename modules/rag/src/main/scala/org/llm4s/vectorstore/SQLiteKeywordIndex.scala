@@ -212,8 +212,8 @@ final class SQLiteKeywordIndex private (
 
   override def deleteByPrefix(prefix: String): Result[Long] =
     Try {
-      val stmt = connection.prepareStatement(s"DELETE FROM $tableName WHERE id LIKE ? ${SqlLikePattern.EscapeClause}")
-      stmt.setString(1, SqlLikePattern.prefix(prefix))
+      val stmt = connection.prepareStatement(s"DELETE FROM $tableName WHERE id GLOB ?")
+      stmt.setString(1, SqlLikePattern.globPrefix(prefix))
       val deleted = stmt.executeUpdate().toLong
       stmt.close()
       deleted
