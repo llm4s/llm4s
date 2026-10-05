@@ -723,10 +723,12 @@ Contract decisions:
   is, and the public call is wrapped in `CancelledError.attempt`, which also turns any failure that ends with the
   thread interrupted into a cancellation. *Rejected:* a `cancelled` flag on each client's error type - a caller would
   need one check per client, and the retry layers recognise only `CancelledError`.
-- **Embeddings** (Voyage, Jina, Ollama, OpenAI): `embed` is declared `Result[EmbeddingResponse]`, which is what
+- **Embeddings** (Voyage, Jina, Ollama, OpenAI, Cohere): `embed` is declared `Result[EmbeddingResponse]`, which is what
   `EmbeddingProvider` already promised; the concrete providers had narrowed it to `Either[EmbeddingError, _]`, which
   could not carry the cancellation. Ollama sends one request per text and now stops at the first failure, so a
-  cancelled batch does not go on to send the rest.
+  cancelled batch does not go on to send the rest. `llm4s-cohere` (#1348) landed after this slice was cut and
+  follows the same rule: its module spec runs `assertEmbeddingCancelsWhenInterrupted`, so the rule holds for every
+  embedding provider on `main`.
 - **Rerankers.** `CohereReranker` as above. `LLMReranker` gives a batch the model fails on neutral scores so that one
   bad answer does not lose the ranking; a cancellation is not a bad answer, and used to be swallowed the same way, so
   a cancelled rerank went on through the remaining batches and returned `Right`. It now ends the call at once with
@@ -749,6 +751,17 @@ Contract decisions:
   client records a cancelled call as `ErrorKind.Cancelled`. *Rejected:* an `ImageGenerationError.Cancelled` case -
   callers would have to special-case a second cancellation type, and no retry layer would recognise it; and retiring
   the hierarchy for core's errors, a larger break that this slice does not need.
+  **Every case also says whether a retry can help**, because an `LLMError` must: `LLMError.isRecoverable` (and
+  `recoverableErrors`, `nonRecoverableErrors`, `RetryPolicy.recoverableOnly`) match only `RecoverableError` and
+  `NonRecoverableError` and threw a `MatchError` on an image error, which before this slice could not reach them.
+  `RateLimitError` is recoverable, and so is a `ServiceError` whose status is transient (`0` - no answer at all, as in
+  a failed health check - `408`, `429`, any `5xx`); a rejected credential, request or prompt, `InsufficientResources`,
+  an unsupported operation and an `UnknownError` are not (an unknown failure is not retried blindly). A status is a
+  value and a marker trait is a type, so `ServiceError` is a sealed type with two cases behind the same
+  `ServiceError(message, status)` and `case ServiceError(message, status)`, picked by `ServiceError.isTransientStatus`.
+  *Rejected:* marking every `ServiceError` recoverable, as core's own `ServiceError` is - a `400` or `403` would be
+  retried to the same answer; and a default case in `LLMError.isRecoverable` - it is frozen core API, and a silent
+  default would hide the next error type that forgets to say.
 - **MCP.** The error channel was a `String` (`Either[String, _]` on the transports, `MCPClient.initialize` and
   `getTools`), which cannot carry a cancellation. These return `Result`, and every existing message is kept byte for
   byte as `SimpleError(message)`. The HTTP transports pass the HTTP client's `CancelledError` through; the stdio
@@ -769,7 +782,24 @@ Contract decisions:
   type is ignored, since annotations are advisory and must not fail a tool list. `toToolHints` fills a missing hint
   with the specification's conservative default, which are `ToolHints.default`'s. `MCPClientImpl` records the hints
   of every tool it lists (`MCPClient.getToolHints`, empty by default so implementors are unaffected) and
-  `MCPToolRegistry.toolHints(name)` answers by name, with none for a tool a local tool shadows.
+  `MCPToolRegistry.toolHints(name)` answers by name, with none for a tool a local tool shadows. A listing that
+  fails, whatever the reason short of a cancellation, and `close()` clear the recorded hints: `getTools` turns a
+  failure into `Right(Seq.empty)`, which the registry takes for a refresh that worked, so a tool the server no longer
+  advertises would otherwise keep answering with its old hints.
+- **A server's annotations are untrusted unless the caller says otherwise** *(a call for Rory)*. The MCP
+  specification requires a client to treat annotations from an untrusted server as untrusted, and
+  `ApprovalMiddleware.unlessReadOnly` skips approval for a tool whose hints say read-only. Hints that came straight
+  from the server would let a server mark `delete_everything` read-only and have it run unapproved by an application
+  that followed the documented path, `AgentTool.fromToolFunction(tool, registry.toolHints(name).getOrElse(ToolHints.default))`.
+  `MCPServerConfig` therefore has `trustAnnotations: Boolean = false` (a new field with a default, and a parameter of
+  the `stdio`, `streamableHTTP` and `sse` factories). For a server that is not trusted `MCPClient.getToolHints` is
+  empty and `MCPToolRegistry.toolHints` is `None`, so `ToolHints.default` - approval required - applies; only a server
+  the caller has chosen to trust, because they operate or have reviewed it, can relax approval. The check is made once,
+  in the client, so every way to read the hints is safe by default. *Rejected:* enforcing it only in the registry - a
+  caller of `MCPClient.getToolHints` directly would still see untrusted hints; trusting by default and documenting the
+  risk - the first malicious server wins; a per-tool or per-hint trust setting - configuration the specification does
+  not ask for and nobody would keep up to date; and not mapping `readOnlyHint` at all - it loses the legitimate case,
+  a server the application itself runs.
 - **`ToolHints` moves from `llm4s-agent` to `llm4s-core`** (`org.llm4s.toolapi.ToolHints`, `@Experimental` like the tool
   contract it belongs to). `llm4s-mcp` cannot depend on `llm4s-agent` without pulling the agent runtime, Ox and fansi
   into every MCP client, and a frozen module cannot depend on `llm4s-mcp`, so core is the one module both see.
@@ -783,7 +813,8 @@ Source breaks, with no shims (the CHANGELOG lists the same):
 - `llm4s-image`: `ImageGenerationError` is an `LLMError`; `ServiceError`'s second field is `statusCode`; the generation
   clients return `Either[LLMError, _]`, so a match on their result needs a case for other errors.
 - `llm4s-mcp`: `MCPTransportImpl.sendRequest`, `sendNotification`, `MCPClient.initialize` and `getTools` return
-  `Result`; read the old string as `error.message`.
+  `Result`; read the old string as `error.message`. `MCPServerConfig` gains `trustAnnotations` (default `false`);
+  source-compatible for construction, but a pattern match on the case class needs the fourth field.
 - The concrete embedding providers' `embed` returns `Result[EmbeddingResponse]`.
 
 Limits:

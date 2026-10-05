@@ -1270,7 +1270,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   design §4.12): until now only core and the chat clients did, and the rest flattened an interrupt into an error of
   their own - an `EmbeddingError`, a `RerankError`, `UnknownError`, `Transport error: ...` - or, worse, reported a
   cancelled call as a success. Now an interrupted call returns `Left(CancelledError)` with the thread's interrupt flag
-  still set, promptly, and never retried. Voyage, Jina, Ollama and OpenAI embeddings, `CohereReranker`, every image
+  still set, promptly, and never retried. Voyage, Jina, Ollama, OpenAI and Cohere embeddings, `CohereReranker`, every image
   generation and vision client, the MCP transports, client and registry, and Whisper and Tacotron2 follow the rule; the
   five cloud speech clients already did (now pinned by a spec). Behaviour changes: `LLMReranker` no longer carries
   on through the remaining batches, and returns `Right`, after a cancelled one (an ordinary batch failure still gets
@@ -1280,7 +1280,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Whisper and Tacotron2 stop the program they started when interrupted, where it used to be left running.
   **Breaking, no shims:** `ImageGenerationError` is an `LLMError`, `ServiceError`'s second field is `statusCode`
   (`code` is the derived `Option[String]`), and the image generation clients return `Either[LLMError, _]`, so a match
-  on their result needs a case for other errors; `MCPTransportImpl.sendRequest`, `sendNotification`,
+  on their result needs a case for other errors. Being an `LLMError`, each case says whether trying again can help,
+  which `LLMError.isRecoverable` needs (it threw a `MatchError` on an image error otherwise): `RateLimitError` and a
+  `ServiceError` with a transient status (`0`, `408`, `429` or any `5xx`) are `RecoverableError`; the other
+  `ServiceError`s and every other case are `NonRecoverableError`. `ServiceError` is now a sealed type with two cases
+  behind the same `ServiceError(message, status)` and `case ServiceError(message, status)`; `MCPTransportImpl.sendRequest`, `sendNotification`,
   `MCPClient.initialize` and `getTools` return `Result` instead of `Either[String, _]` (read the old string as
   `error.message`; the messages are unchanged); the concrete embedding providers' `embed` returns
   `Result[EmbeddingResponse]`. `llm4s-provider-testkit` gains `assertCallCancelsWhenInterrupted` and
@@ -1290,7 +1294,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   annotations a server attaches to a tool (`MCPToolAnnotations`, leniently: an unknown key or a hint of the wrong type
   is ignored) and fills in the specification's defaults for the rest; `MCPClient.getToolHints` and
   `MCPToolRegistry.toolHints(name)` return them, and `AgentTool.fromToolFunction(tool, hints)` attaches them.
-  **Breaking, no shim:** `ToolHints` moves from `org.llm4s.agent.graph.tool` in `llm4s-agent` to
+  **A server's annotations are untrusted by default**, as the MCP specification requires: `ApprovalMiddleware.unlessReadOnly`
+  skips approval for a read-only tool, so a server that marked `delete_everything` read-only could have run it
+  unapproved. Hints are reported only for a server configured with `MCPServerConfig(..., trustAnnotations = true)`
+  (also a parameter of `stdio`, `streamableHTTP` and `sse`; new field, default `false`); for any other the registry and
+  the client report none, so `ToolHints.default` (approval required) applies. A listing that fails, or `close()`,
+  clears the hints, so a tool a server no longer advertises keeps none. **Breaking, no shim:** `ToolHints` moves from `org.llm4s.agent.graph.tool` in `llm4s-agent` to
   `org.llm4s.toolapi.ToolHints` in `llm4s-core` (`@Experimental`), because `llm4s-mcp` cannot depend on the agent runtime.
 
 ### Removed
