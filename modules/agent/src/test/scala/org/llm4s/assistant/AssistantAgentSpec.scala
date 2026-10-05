@@ -2,7 +2,7 @@ package org.llm4s.assistant
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.agent.{ AgentContext, AgentState, AgentStatus }
+import org.llm4s.agent.{ AgentContext, AgentThread, ThreadStatus }
 import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -17,7 +17,7 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
   private val emptyTools = ToolRegistry.empty
 
   /** Mock LLM client that always returns a fixed assistant response. */
-  private def mockClient(response: String = "Hello!"): LLMClient = new LLMClient {
+  private def mockClient(response: String): LLMClient = new LLMClient {
     override def complete(
       conversation: Conversation,
       options: CompletionOptions = CompletionOptions()
@@ -56,73 +56,105 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
     override def getReserveCompletion(): Int = 512
   }
 
+  /** A client that answers `response` and records the contents of every conversation it was given. */
+  private def recordingClient(response: String, seen: scala.collection.mutable.ArrayBuffer[Seq[String]]): LLMClient =
+    new LLMClient {
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+        seen += conversation.messages.map(_.content)
+        Right(Completion("id", 0L, response, "m", AssistantMessage(response, toolCalls = List.empty)))
+      }
+      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit) = complete(c, o)
+      override def getContextWindow(): Int                                                         = 4096
+      override def getReserveCompletion(): Int                                                     = 512
+    }
+
   private def emptySessionState(dir: String = "./sessions"): SessionState =
     SessionState(
-      agentState = None,
+      thread = None,
       sessionId = SessionId(UUID.randomUUID().toString),
       sessionDir = DirectoryPath(dir)
     )
 
   private def sessionStateWithAgent(
     messages: Seq[Message],
-    status: AgentStatus = AgentStatus.Complete
-  ): SessionState = {
-    val agentState = AgentState(
-      conversation = Conversation(messages),
-      tools = emptyTools,
-      initialQuery = Some("test"),
-      status = status
-    )
-    emptySessionState().withAgentState(agentState)
-  }
+    status: ThreadStatus = ThreadStatus.Completed
+  ): SessionState =
+    emptySessionState().withThread(AgentThread(threadId = "test", messages = messages, status = status))
 
   private def assistantAgent(client: LLMClient = null.asInstanceOf[LLMClient]): AssistantAgent =
     new AssistantAgent(client, emptyTools, "./sessions")
 
-  // --- addUserMessage ---
+  // --- runTurn ---
 
-  "AssistantAgent.addUserMessage" should "add message to existing conversation (Some branch)" in {
-    val state = sessionStateWithAgent(Seq(UserMessage("hi"), AssistantMessage("hello")))
-    val agent = assistantAgent()
+  "AssistantAgent.runTurn" should "continue an existing conversation, with the model seeing the earlier turns" in {
+    val seen   = scala.collection.mutable.ArrayBuffer.empty[Seq[String]]
+    val client = recordingClient("follow-up answer", seen)
+    val state  = sessionStateWithAgent(Seq(UserMessage("hi"), AssistantMessage("hello")))
 
-    val result = agent.addUserMessage("follow-up", state)
+    val result = assistantAgent(client).runTurn("follow-up", state)
 
     result match {
       case Right(newState) =>
-        newState.agentState match {
-          case Some(as) =>
-            as.conversation.messages.last shouldBe UserMessage("follow-up")
-            as.status shouldBe AgentStatus.InProgress
-          case None => fail("Expected agentState to be defined")
-        }
+        val thread = newState.thread.getOrElse(fail("Expected thread to be defined"))
+        thread.messages.map(_.content) shouldBe Seq("hi", "hello", "follow-up", "follow-up answer")
+        thread.status shouldBe ThreadStatus.Completed
+        (seen.head should contain).allOf("hi", "hello", "follow-up")
       case Left(err) => fail(s"Expected Right but got: ${err.message}")
     }
   }
 
-  it should "initialize agent state on first message (None branch)" in {
+  it should "start the conversation on the first message" in {
     val state = emptySessionState()
-    val agent = assistantAgent(mockClient())
+    val agent = assistantAgent(mockClient("first answer"))
 
-    val result = agent.addUserMessage("first query", state)
+    val result = agent.runTurn("first query", state)
 
     result match {
       case Right(newState) =>
-        newState.agentState match {
-          case Some(as) => as.initialQuery shouldBe Some("first query")
-          case None     => fail("Expected agentState to be defined")
-        }
+        val thread = newState.thread.getOrElse(fail("Expected thread to be defined"))
+        thread.messages.map(_.content) shouldBe Seq("first query", "first answer")
       case Left(err) => fail(s"Expected Right but got: ${err.message}")
     }
   }
 
-  it should "succeed on initialization with a broken LLM client (no LLM call during init)" in {
-    val state        = emptySessionState()
-    val brokenClient = failingClient("init failed")
-    // initializeSafe does not call the LLM — it only builds the initial AgentState
-    // from the query and tool registry. A broken client therefore does not cause init to fail.
-    val agent  = assistantAgent(brokenClient)
-    val result = agent.addUserMessage("query", state)
+  it should "report a failing model as a SessionError carrying the model's error, and keep the session unchanged" in {
+    val state  = emptySessionState()
+    val result = assistantAgent(failingClient("network error")).runTurn("query", state)
+
+    result match {
+      case Left(err: org.llm4s.error.AssistantError.SessionError) =>
+        err.message should include("network error")
+        err.llmCause.map(_.message) shouldBe Some("network error")
+      case other => fail(s"Expected a SessionError, got $other")
+    }
+    state.thread shouldBe None
+  }
+
+  it should "support an explicit AgentContext" in {
+    val agent  = assistantAgent(mockClient("done with context"))
+    val result = agent.runTurn("finish this", emptySessionState(), AgentContext(debug = true))
+
     result.isRight shouldBe true
+  }
+
+  it should "cap a turn at the default step limit" in {
+    val toolCall = ToolCall("c1", "missing_tool", ujson.Obj())
+    val looping = new LLMClient {
+      override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+        Right(
+          Completion("id", 0L, "", "m", AssistantMessage("", toolCalls = List(toolCall)), toolCalls = List(toolCall))
+        )
+      override def streamComplete(c: Conversation, o: CompletionOptions, f: StreamedChunk => Unit) = complete(c, o)
+      override def getContextWindow(): Int                                                         = 4096
+      override def getReserveCompletion(): Int                                                     = 512
+    }
+
+    val result = assistantAgent(looping).runTurn("loop forever", emptySessionState())
+
+    result.map(_.thread.map(_.status)) match {
+      case Right(Some(ThreadStatus.Failed(message))) => message should include("step limit")
+      case other                                     => fail(s"Expected a Failed thread, got $other")
+    }
   }
 
   // --- extractFinalResponse ---
@@ -150,7 +182,7 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
     agent.extractFinalResponse(state) shouldBe Right("final answer")
   }
 
-  it should "return Left when there is no agent state" in {
+  it should "return Left when there is no thread" in {
     val state = emptySessionState()
     val agent = assistantAgent()
 
@@ -167,59 +199,18 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
     agent.extractFinalResponse(state).isLeft shouldBe true
   }
 
-  // --- runAgentToCompletion ---
-
-  "AssistantAgent.runAgentToCompletion" should "return Left when there is no agent state" in {
-    val state = emptySessionState()
-    val agent = assistantAgent()
-
-    agent.runAgentToCompletion(state).isLeft shouldBe true
-  }
-
-  it should "return immediately when agent status is already Complete" in {
+  it should "return Left for a thread that did not complete, even if it holds an assistant message" in {
     val state = sessionStateWithAgent(
-      Seq(UserMessage("q"), AssistantMessage("done")),
-      status = AgentStatus.Complete
+      Seq(UserMessage("q"), AssistantMessage("partial")),
+      status = ThreadStatus.Failed("Maximum step limit reached")
     )
-    val agent = assistantAgent() // null client — must not be called
 
-    agent.runAgentToCompletion(state).isRight shouldBe true
+    assistantAgent().extractFinalResponse(state).isLeft shouldBe true
   }
 
-  it should "run steps and complete when LLM returns a plain response" in {
-    val agent       = assistantAgent(mockClient("I am done"))
-    val emptyState  = emptySessionState()
-    val initialized = agent.addUserMessage("what is 2+2?", emptyState)
+  // --- processInput with a constructor-provided context ---
 
-    initialized match {
-      case Right(stateAfterInit) =>
-        val result = agent.runAgentToCompletion(stateAfterInit)
-        result match {
-          case Right(finalState) =>
-            finalState.agentState match {
-              case Some(as) => as.status shouldBe AgentStatus.Complete
-              case None     => fail("Expected agentState to be defined")
-            }
-          case Left(err) => fail(s"Expected Right but got: ${err.message}")
-        }
-      case Left(err) => fail(s"Init failed: ${err.message}")
-    }
-  }
-
-  it should "support explicit AgentContext when running to completion" in {
-    val agent       = assistantAgent(mockClient("done with context"))
-    val emptyState  = emptySessionState()
-    val initialized = agent.addUserMessage("finish this", emptyState)
-
-    initialized match {
-      case Right(stateAfterInit) =>
-        val result = agent.runAgentToCompletion(stateAfterInit, AgentContext(debug = true))
-        result.isRight shouldBe true
-      case Left(err) => fail(s"Init failed: ${err.message}")
-    }
-  }
-
-  it should "propagate constructor-provided AgentContext through processInput" in {
+  "AssistantAgent" should "propagate a constructor-provided AgentContext through processInput" in {
     val client = mockClient("done with constructor context")
     val agent =
       new AssistantAgent(client, emptyTools, "./sessions", agentContext = AgentContext(debug = true))
@@ -227,19 +218,6 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
 
     val result = agent.processInput("hello", emptyState)
     result.isRight shouldBe true
-  }
-
-  it should "return Left when the LLM call fails during step execution" in {
-    val agent      = assistantAgent(failingClient("network error"))
-    val emptyState = emptySessionState()
-
-    // Initialize (doesn't call LLM)
-    agent.addUserMessage("query", emptyState) match {
-      case Right(stateAfterInit) =>
-        val result = agent.runAgentToCompletion(stateAfterInit)
-        result.isLeft shouldBe true
-      case Left(err) => fail(s"Init failed: ${err.message}")
-    }
   }
 
   // --- processInput ---

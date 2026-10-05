@@ -3,7 +3,7 @@ package org.llm4s.assistant
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
-import org.llm4s.agent.{ AgentState, AgentStatus }
+import org.llm4s.agent.{ AgentThread, ThreadStatus }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
@@ -47,23 +47,16 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
 
   private def emptySessionState(): SessionState =
     SessionState(
-      agentState = None,
+      thread = None,
       sessionId = SessionId(UUID.randomUUID().toString),
       sessionDir = DirectoryPath(tempDir.toString)
     )
 
   private def sessionStateWithMessages(
     messages: Seq[Message],
-    status: AgentStatus = AgentStatus.Complete
-  ): SessionState = {
-    val agentState = AgentState(
-      conversation = Conversation(messages),
-      tools = emptyTools,
-      initialQuery = Some("test"),
-      status = status
-    )
-    emptySessionState().withAgentState(agentState)
-  }
+    status: ThreadStatus = ThreadStatus.Completed
+  ): SessionState =
+    emptySessionState().withThread(AgentThread(threadId = "test", messages = messages, status = status))
 
   private def assistantAgent(client: LLMClient = mockClient()): AssistantAgent =
     new AssistantAgent(client, emptyTools, tempDir.toString)
@@ -121,7 +114,7 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
 
     result.isRight shouldBe true
     result.toOption.get._2 should include("42")
-    result.toOption.get._1.agentState shouldBe defined
+    result.toOption.get._1.thread shouldBe defined
   }
 
   it should "handle multiple sequential queries maintaining state" in {
@@ -137,7 +130,7 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
     val state2 = result2.toOption.get._1
 
     // Should have accumulated messages
-    state2.agentState.get.conversation.messages.size should be > state1.agentState.get.conversation.messages.size
+    state2.thread.get.messages.size should be > state1.thread.get.messages.size
   }
 
   // ========== extractFinalResponse edge cases ==========
@@ -163,30 +156,27 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
     agent.extractFinalResponse(state).isLeft shouldBe true
   }
 
-  // ========== addUserMessage edge cases ==========
+  // ========== runTurn edge cases ==========
 
-  "AssistantAgent.addUserMessage" should "set status to InProgress when adding to existing conversation" in {
-    val agent = assistantAgent()
+  "AssistantAgent.runTurn" should "continue a Failed thread: the conversation can go on after a step limit" in {
+    val agent = assistantAgent(mockClient("recovered"))
     val state = sessionStateWithMessages(
       Seq(UserMessage("hi"), AssistantMessage("hello")),
-      status = AgentStatus.Complete
+      status = ThreadStatus.Failed("Maximum step limit reached")
     )
 
-    val result = agent.addUserMessage("follow-up", state)
+    val result = agent.runTurn("follow-up", state)
+
     result.isRight shouldBe true
-    result.toOption.get.agentState.get.status shouldBe AgentStatus.InProgress
+    val thread = result.toOption.get.thread.get
+    thread.status shouldBe ThreadStatus.Completed
+    thread.messages.last.content shouldBe "recovered"
   }
 
-  // ========== runAgentToCompletion with error status ==========
+  it should "give a Completed status to the thread of a follow-up" in {
+    val result =
+      assistantAgent().runTurn("follow-up", sessionStateWithMessages(Seq(UserMessage("hi"), AssistantMessage("hello"))))
 
-  "AssistantAgent.runAgentToCompletion" should "return immediately for Error status" in {
-    val agent = assistantAgent()
-    val state = sessionStateWithMessages(
-      Seq(UserMessage("q")),
-      status = AgentStatus.Failed("some error")
-    )
-
-    val result = agent.runAgentToCompletion(state)
-    result.isRight shouldBe true
+    result.toOption.get.thread.get.status shouldBe ThreadStatus.Completed
   }
 }

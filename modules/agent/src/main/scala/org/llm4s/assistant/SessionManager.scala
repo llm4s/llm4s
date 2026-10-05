@@ -1,7 +1,6 @@
 package org.llm4s.assistant
 
-import org.llm4s.agent.{ Agent, AgentThread, ThreadStatus }
-import org.llm4s.llmconnect.model._
+import org.llm4s.agent.{ Agent, AgentThread }
 import org.llm4s.error.AssistantError
 import org.llm4s.types.{ SessionId, DirectoryPath, FilePath }
 import cats.implicits._
@@ -11,7 +10,6 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import scala.util.Try
 import org.slf4j.LoggerFactory
-import upickle.default._
 
 /**
  * Manages session persistence for the interactive assistant.
@@ -132,6 +130,9 @@ class SessionManager(
   private def createJsonContent(state: SessionState): Either[AssistantError, String] =
     sessionStateToJson(state)
 
+  private def readThread(json: ujson.Value): AgentThread =
+    AgentThread.fromJson(json).fold(error => throw new IllegalArgumentException(error.message), identity)
+
   /**
    * Converts JSON back to SessionState for loading. A session saved before [[AgentThread]] existed holds an
    * `agentState` object (conversation, status, logs): its conversation and status carry over, the rest is dropped.
@@ -151,30 +152,11 @@ class SessionManager(
       case None =>
         obj.get("agentState") match {
           case None | Some(ujson.Null) => None
-          case Some(legacy)            => Some(legacyThread(legacy))
+          case Some(legacy)            => Some(readThread(legacy))
         }
     }
 
     SessionState(thread, sessionId, sessionDir, created)
-  }
-
-  /**
-   * The thread for a session saved as `agentState`. A turn that was still running when it was saved (`InProgress`,
-   * `WaitingForTools`, `HandoffRequested`) has no finished conversation to continue, so it loads as `Failed`.
-   */
-  private def legacyThread(state: ujson.Value): AgentThread = {
-    val conversation = read[Conversation](state("conversation"))
-    val status = state("status") match {
-      case ujson.Str("Complete") => ThreadStatus.Completed
-      case obj: ujson.Obj if obj.value.get("type").contains(ujson.Str("Failed")) =>
-        ThreadStatus.Failed(obj.value.get("error").flatMap(_.strOpt).getOrElse("Unknown failure"))
-      case other => ThreadStatus.Failed(s"Session was saved mid-turn (status: ${other.render()})")
-    }
-    AgentThread(
-      threadId = java.util.UUID.randomUUID().toString,
-      messages = conversation.messages,
-      status = status
-    )
   }
 
   /**

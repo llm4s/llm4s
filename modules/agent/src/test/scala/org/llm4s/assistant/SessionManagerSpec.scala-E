@@ -5,6 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 import org.llm4s.agent.{ Agent, AgentThread, ThreadStatus }
 import org.llm4s.llmconnect.model._
+import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ DirectoryPath, SessionId }
 
 import java.nio.file.{ Files, Path }
@@ -21,6 +22,7 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
 
   private var tempDir: Path = _
   private val mockClient    = null.asInstanceOf[org.llm4s.llmconnect.LLMClient]
+  private val emptyTools    = new ToolRegistry(Seq.empty)
 
   override def beforeEach(): Unit =
     tempDir = Files.createTempDirectory("session-manager-test")
@@ -79,7 +81,7 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     markdownExists shouldBe true
   }
 
-  it should "return error when no thread to save" in {
+  it should "return error when no agent state to save" in {
     val agent   = createTestAgent()
     val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
     val state = SessionState(
@@ -141,7 +143,7 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
 
     manager.saveSession(state, Some("LoadTest"))
 
-    val loadResult = manager.loadSession("LoadTest")
+    val loadResult = manager.loadSession("LoadTest", emptyTools)
 
     loadResult.isRight shouldBe true
     val loaded = loadResult.toOption.get
@@ -156,7 +158,7 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     val state   = createTestState()
 
     manager.saveSession(state, Some("ContentTest"))
-    val loadResult = manager.loadSession("ContentTest")
+    val loadResult = manager.loadSession("ContentTest", emptyTools)
 
     val loaded   = loadResult.toOption.get
     val messages = loaded.thread.get.messages
@@ -169,7 +171,7 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     val agent   = createTestAgent()
     val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
 
-    val result = manager.loadSession("NonExistent")
+    val result = manager.loadSession("NonExistent", emptyTools)
 
     result.isLeft shouldBe true
   }
@@ -243,14 +245,13 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
 
   "SessionManager" should "round-trip the thread id and the usage" in {
     val manager = new SessionManager(DirectoryPath(tempDir.toString), createTestAgent())
-    val usage =
-      org.llm4s.llmconnect.model.UsageSummary().add("m", org.llm4s.llmconnect.model.TokenUsage(1, 2, 3), Some(0.5))
+    val usage   = org.llm4s.llmconnect.model.UsageSummary().add("m", org.llm4s.llmconnect.model.TokenUsage(1, 2, 3), Some(0.5))
     val state = createTestState("usage-test").withThread(
       AgentThread(threadId = "thread-usage", messages = Seq(UserMessage("Test")), usage = usage)
     )
 
     manager.saveSession(state, Some("UsageTest"))
-    val loaded = manager.loadSession("UsageTest").toOption.get
+    val loaded = manager.loadSession("UsageTest", emptyTools).toOption.get
 
     loaded.thread.get.threadId shouldBe "thread-usage"
     loaded.thread.get.usage shouldBe usage
@@ -271,7 +272,7 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
       )
 
       manager.saveSession(state, Some(s"StatusTest$idx"))
-      val loaded = manager.loadSession(s"StatusTest$idx").toOption.get
+      val loaded = manager.loadSession(s"StatusTest$idx", emptyTools).toOption.get
 
       loaded.thread.get.status shouldBe status
     }
@@ -280,29 +281,23 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   it should "still load a session saved by the AgentState version, as a thread" in {
     val manager = new SessionManager(DirectoryPath(tempDir.toString), createTestAgent())
     val legacy = ujson.Obj(
-      "sessionId"  -> "legacy",
-      "sessionDir" -> tempDir.toString,
-      "created"    -> LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME),
+      "sessionId" -> "legacy",
+      "created"   -> LocalDateTime.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME),
       "agentState" -> ujson.Obj(
-        "conversation" -> upickle.default.writeJs(
-          Conversation(Seq(UserMessage("old question"), AssistantMessage("old answer")))
-        ),
-        "initialQuery"  -> "old question",
-        "status"        -> "Complete",
-        "logs"          -> ujson.Arr("x"),
+        "conversation" -> upickle.default.writeJs(Conversation(Seq(UserMessage("old question"), AssistantMessage("old answer")))),
+        "initialQuery" -> "old question",
+        "status"       -> "Complete",
+        "logs"         -> ujson.Arr("x"),
         "systemMessage" -> ujson.Null,
         "completionOptions" -> ujson.Obj(
-          "temperature"      -> 0.7,
-          "topP"             -> 1.0,
-          "maxTokens"        -> ujson.Null,
-          "presencePenalty"  -> 0.0,
-          "frequencyPenalty" -> 0.0
+          "temperature" -> 0.7, "topP" -> 1.0, "maxTokens" -> ujson.Null,
+          "presencePenalty" -> 0.0, "frequencyPenalty" -> 0.0
         )
       )
     )
     java.nio.file.Files.write(tempDir.resolve("Legacy.json"), upickle.default.write(legacy).getBytes("UTF-8"))
 
-    val loaded = manager.loadSession("Legacy")
+    val loaded = manager.loadSession("Legacy", emptyTools)
 
     loaded.map(_.thread.map(_.messages.map(_.content))) shouldBe Right(Some(Seq("old question", "old answer")))
     loaded.map(_.thread.map(_.status)) shouldBe Right(Some(ThreadStatus.Completed))

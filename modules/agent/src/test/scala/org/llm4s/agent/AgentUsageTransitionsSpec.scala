@@ -7,7 +7,7 @@ import org.scalatest.matchers.should.Matchers
 
 class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
 
-  "Agent.continueConversation" should "carry usageSummary forward across turns" in {
+  "Agent.continueConversation" should "carry usage forward across turns" in {
     val model = "fake/model"
 
     val completion1 = Completion(
@@ -43,24 +43,25 @@ class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
     state1.isRight shouldBe true
 
     val state2 = agent.continueConversation(
-      previousState = state1.toOption.get,
-      newUserMessage = "follow up"
+      previous = state1.toOption.get,
+      newUserMessage = "follow up",
+      tools = ToolRegistry.empty
     )
 
     state2.isRight shouldBe true
 
     val finalState = state2.toOption.get
 
-    finalState.usageSummary.requestCount shouldBe 2L
-    finalState.usageSummary.inputTokens shouldBe 14L
-    finalState.usageSummary.outputTokens shouldBe 5L
-    finalState.usageSummary.totalCost shouldBe BigDecimal("0.03")
+    finalState.usage.requestCount shouldBe 2L
+    finalState.usage.inputTokens shouldBe 14L
+    finalState.usage.outputTokens shouldBe 5L
+    finalState.usage.totalCost shouldBe BigDecimal("0.03")
 
-    finalState.usageSummary.byModel.keySet shouldBe Set(model)
-    finalState.usageSummary.byModel(model).requestCount shouldBe 2L
+    finalState.usage.byModel.keySet shouldBe Set(model)
+    finalState.usage.byModel(model).requestCount shouldBe 2L
   }
 
-  "Agent handoff" should "merge sub-agent usageSummary into the parent state" in {
+  "Agent handoff" should "merge sub-agent usage into the parent state" in {
     val parentModel = "fake/parent"
     val childModel  = "fake/child"
 
@@ -107,15 +108,15 @@ class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
 
     val state = result.toOption.get
 
-    state.usageSummary.requestCount shouldBe 2L
-    state.usageSummary.totalCost shouldBe BigDecimal("0.03")
-    state.usageSummary.byModel.keySet shouldBe Set(parentModel, childModel)
+    state.usage.requestCount shouldBe 2L
+    state.usage.totalCost shouldBe BigDecimal("0.03")
+    state.usage.byModel.keySet shouldBe Set(parentModel, childModel)
 
-    state.usageSummary.byModel(parentModel).requestCount shouldBe 1L
-    state.usageSummary.byModel(childModel).requestCount shouldBe 1L
+    state.usage.byModel(parentModel).requestCount shouldBe 1L
+    state.usage.byModel(childModel).requestCount shouldBe 1L
   }
 
-  it should "accumulate usageSummary correctly across a nested handoff chain" in {
+  it should "accumulate usage correctly across a nested handoff chain" in {
     val parentModel = "fake/parent"
     val aModel      = "fake/a"
     val bModel      = "fake/b"
@@ -184,17 +185,15 @@ class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
     val parentState = parentResult.toOption.get
     val aState      = aResult.toOption.get
 
-    val state = parentState.copy(
-      usageSummary = parentState.usageSummary.merge(aState.usageSummary)
-    )
+    val state = parentState.withUsage(parentState.usage.merge(aState.usage))
 
-    state.usageSummary.requestCount shouldBe 3L
-    state.usageSummary.totalCost shouldBe BigDecimal("0.06")
-    state.usageSummary.byModel.keySet shouldBe Set(parentModel, aModel, bModel)
+    state.usage.requestCount shouldBe 3L
+    state.usage.totalCost shouldBe BigDecimal("0.06")
+    state.usage.byModel.keySet shouldBe Set(parentModel, aModel, bModel)
 
-    state.usageSummary.byModel(parentModel).requestCount shouldBe 1L
-    state.usageSummary.byModel(aModel).requestCount shouldBe 1L
-    state.usageSummary.byModel(bModel).requestCount shouldBe 1L
+    state.usage.byModel(parentModel).requestCount shouldBe 1L
+    state.usage.byModel(aModel).requestCount shouldBe 1L
+    state.usage.byModel(bModel).requestCount shouldBe 1L
   }
 
   it should "not double count usage for a single completion" in {
@@ -226,8 +225,8 @@ class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
     )
 
     finalState.isRight shouldBe true
-    finalState.toOption.get.usageSummary.requestCount shouldBe 1L
-    finalState.toOption.get.usageSummary.totalCost shouldBe BigDecimal("0.01")
+    finalState.toOption.get.usage.requestCount shouldBe 1L
+    finalState.toOption.get.usage.totalCost shouldBe BigDecimal("0.01")
   }
 
 }

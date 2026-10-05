@@ -1,6 +1,6 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentState, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentContext, AgentThread, ThreadStatus }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
@@ -12,10 +12,10 @@ import upickle.default.{ macroRW, ReadWriter }
 import java.io.ByteArrayOutputStream
 
 /**
- * How the agent runtime reaches the tracing contract: `AgentState#toTraceEvent`, and what a whole
+ * How the agent runtime reaches the tracing contract: `AgentThread#toTraceEvent`, and what a whole
  * agent run prints through `ConsoleTracing`.
  *
- * These cases were in core's `ConsoleTracingSpec` and `NoOpTracingSpec`. They need `AgentState`
+ * These cases were in core's `ConsoleTracingSpec` and `NoOpTracingSpec`. They need `AgentThread`
  * and `Agent`, which moved to `llm4s-agent` (#1242); the core specs now build
  * `TraceEvent.AgentStateUpdated` directly, as the contract sees it.
  */
@@ -23,38 +23,34 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers {
 
   private val toolCall = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
 
-  /** An agent state with every kind of message in it, as an agent run leaves it. */
-  private val agentState = AgentState(
-    conversation = Conversation(
-      Seq(
-        SystemMessage("You are a calculator."),
-        UserMessage("What is 1 + 2?"),
-        AssistantMessage(None, Seq(toolCall)),
-        ToolMessage("""{"result":3}""", "call-1"),
-        AssistantMessage("3")
-      )
+  /** A thread with every kind of message in it, as an agent run leaves it. */
+  private val thread = AgentThread(
+    threadId = "t",
+    messages = Seq(
+      UserMessage("What is 1 + 2?"),
+      AssistantMessage(None, Seq(toolCall)),
+      ToolMessage("""{"result":3}""", "call-1"),
+      AssistantMessage("3")
     ),
-    tools = ToolRegistry.empty,
-    initialQuery = Some("What is 1 + 2?"),
-    status = AgentStatus.Complete,
-    logs = Vector("[tool] calculator", "[assistant] 3")
+    systemMessage = Some(SystemMessage("You are a calculator.")),
+    status = ThreadStatus.Completed
   )
 
-  "AgentState#toTraceEvent" should "carry the status, the message and log counts, and the messages" in {
-    val event = agentState.toTraceEvent
+  "AgentThread#toTraceEvent" should "carry the status, the message count, no log, and the messages" in {
+    val event = thread.toTraceEvent
 
-    event.status shouldBe "Complete"
-    event.messageCount shouldBe 5
-    event.logCount shouldBe 2
-    event.messages shouldBe agentState.conversation.messages
+    event.status shouldBe "Completed"
+    event.messageCount shouldBe 4
+    event.logCount shouldBe 0
+    event.messages shouldBe thread.messages
   }
 
-  "NoOpTracing" should "trace agent state as an ordinary event, whatever the state holds" in {
+  "NoOpTracing" should "trace a thread as an ordinary event, whatever it holds" in {
     val tracing = new NoOpTracing()
-    val empty   = AgentState(Conversation(Seq.empty), ToolRegistry.empty)
-    val failed  = agentState.copy(status = AgentStatus.Failed("tool crashed"))
+    val empty   = AgentThread("t")
+    val failed  = thread.withStatus(ThreadStatus.Failed("tool crashed"))
 
-    tracing.traceEvent(agentState.toTraceEvent) shouldBe Right(())
+    tracing.traceEvent(thread.toTraceEvent) shouldBe Right(())
     tracing.traceEvent(empty.toTraceEvent) shouldBe Right(())
     tracing.traceEvent(failed.toTraceEvent) shouldBe Right(())
   }
@@ -66,12 +62,11 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers {
     out.toString.replaceAll("\u001b\\[[0-9;]*m", "")
   }
 
-  "ConsoleTracing" should "show the status and counts of the AgentStateUpdated built by AgentState#toTraceEvent" in {
-    val state = AgentState(
-      conversation = Conversation(Seq(UserMessage("hi"), AssistantMessage("hello"), UserMessage("bye"))),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.Failed("tool crashed"),
-      logs = Vector("one", "two")
+  "ConsoleTracing" should "show the status and counts of the AgentStateUpdated built by AgentThread#toTraceEvent" in {
+    val state = AgentThread(
+      threadId = "t",
+      messages = Seq(UserMessage("hi"), AssistantMessage("hello"), UserMessage("bye")),
+      status = ThreadStatus.Failed("tool crashed")
     )
 
     val output = printed(new ConsoleTracing().traceEvent(state.toTraceEvent))
@@ -79,7 +74,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers {
     output should include("--- AGENT STATE UPDATED ---")
     output should include("Status: Failed(tool crashed)")
     output should include("Messages: 3")
-    output should include("Logs: 2")
+    output should include("Logs: 0")
   }
 
   it should "print an agent run with a tool call in the order it happened" in {
@@ -91,7 +86,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers {
       )
     )
 
-    var result: Result[AgentState] = Right(AgentState(Conversation(Seq.empty), ToolRegistry.empty))
+    var result: Result[AgentThread] = Right(AgentThread("t"))
     val output = printed {
       result = echoTool.flatMap { tool =>
         new Agent(client)
@@ -99,7 +94,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers {
       }
     }
 
-    result.map(_.status) shouldBe Right(AgentStatus.Complete)
+    result.map(_.status) shouldBe Right(ThreadStatus.Completed)
 
     val firstCompletion  = output.indexOf("ID: turn-1")
     val tool             = output.indexOf("Tool: echo")
@@ -112,7 +107,7 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers {
     secondCompletion should be < lastState // ...and the run ends with its final state.
     output should include("""Input: {"message":"hello"}""")
     output should include("Prompt Tokens: 20")
-    output.substring(lastState) should include("Status: Complete")
+    output.substring(lastState) should include("Status: Completed")
   }
 
   private def usage1 = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))

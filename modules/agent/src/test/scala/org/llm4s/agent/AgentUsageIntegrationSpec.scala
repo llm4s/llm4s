@@ -9,7 +9,7 @@ import upickle.default._
 
 class AgentUsageIntegrationSpec extends AnyFlatSpec with Matchers {
 
-  "Agent" should "accumulate usage and cost into AgentState.usageSummary across multiple completions" in {
+  "Agent" should "accumulate usage and cost into AgentThread.usage across multiple completions" in {
     val model = "fake/model"
 
     val tool = ToolFunction[ujson.Value, String](
@@ -61,14 +61,14 @@ class AgentUsageIntegrationSpec extends AnyFlatSpec with Matchers {
 
     val state = finalState.toOption.get
 
-    state.usageSummary.requestCount shouldBe 2L
-    state.usageSummary.inputTokens shouldBe 14L
-    state.usageSummary.outputTokens shouldBe 5L
-    state.usageSummary.totalCost shouldBe BigDecimal("0.03")
+    state.usage.requestCount shouldBe 2L
+    state.usage.inputTokens shouldBe 14L
+    state.usage.outputTokens shouldBe 5L
+    state.usage.totalCost shouldBe BigDecimal("0.03")
 
-    state.usageSummary.byModel.keySet shouldBe Set(model)
+    state.usage.byModel.keySet shouldBe Set(model)
 
-    val perModel = state.usageSummary.byModel(model)
+    val perModel = state.usage.byModel(model)
     perModel.requestCount shouldBe 2L
     perModel.inputTokens shouldBe 14L
     perModel.outputTokens shouldBe 5L

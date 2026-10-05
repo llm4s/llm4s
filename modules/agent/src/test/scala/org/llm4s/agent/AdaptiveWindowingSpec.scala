@@ -364,7 +364,7 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
   // Integration with Pruning
   // ==========================================================================
 
-  "AgentState.pruneConversation with AdaptiveWindowing" should "prune using calculated window" in {
+  "AgentThread.pruned with AdaptiveWindowing" should "prune using calculated window" in {
     val messages = Seq(
       SystemMessage("You are helpful"),
       UserMessage("Hello"),
@@ -379,10 +379,7 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
       AssistantMessage("There was a kingdom...")
     )
 
-    val state = AgentState(
-      conversation = org.llm4s.llmconnect.model.Conversation(messages),
-      tools = new org.llm4s.toolapi.ToolRegistry(Seq.empty)
-    )
+    val state = AgentThread(threadId = "t", messages = messages)
 
     val strategy = PruningStrategy.AdaptiveWindowing(
       contextWindowSize = 8_000 // Small model
@@ -393,15 +390,15 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
       preserveSystemMessage = true
     )
 
-    val pruned = AgentState.pruneConversation(state, config)
+    val pruned = state.pruned(config)
 
     // Should have fewer messages after pruning
-    pruned.conversation.messages.length should be <= messages.length
+    pruned.messages.length should be <= messages.length
     // System message should be preserved
-    pruned.conversation.messages.head shouldBe messages.head
+    pruned.messages.head shouldBe messages.head
   }
 
-  it should "use adaptive windowing path in pruneConversation" in {
+  it should "use adaptive windowing path in pruned" in {
     val messages = Seq(
       SystemMessage("System prompt"),
       UserMessage("Q1"),
@@ -412,10 +409,7 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
       AssistantMessage("A3")
     )
 
-    val state = AgentState(
-      conversation = org.llm4s.llmconnect.model.Conversation(messages),
-      tools = new org.llm4s.toolapi.ToolRegistry(Seq.empty)
-    )
+    val state = AgentThread(threadId = "t", messages = messages)
 
     val strategy = PruningStrategy.AdaptiveWindowing(
       contextWindowSize = 50_000
@@ -426,10 +420,10 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
       maxMessages = None // Let adaptive windowing control via maxTokens
     )
 
-    val pruned = AgentState.pruneConversation(state, config)
+    val pruned = state.pruned(config)
 
     // Should execute without error (case statement matched correctly)
-    pruned.conversation.messages should not be empty
+    pruned.messages should not be empty
   }
 
   it should "respect preserve system message setting with adaptive windowing" in {
@@ -439,10 +433,7 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
       AssistantMessage("A1")
     )
 
-    val state = AgentState(
-      conversation = org.llm4s.llmconnect.model.Conversation(messages),
-      tools = new org.llm4s.toolapi.ToolRegistry(Seq.empty)
-    )
+    val state = AgentThread(threadId = "t", messages = messages)
 
     val strategy = PruningStrategy.AdaptiveWindowing(
       contextWindowSize = 4_000
@@ -453,24 +444,24 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
       preserveSystemMessage = true
     )
 
-    val prunedPreserve = AgentState.pruneConversation(state, configPreserve)
+    val prunedPreserve = state.pruned(configPreserve)
 
     // Should preserve system message
-    prunedPreserve.conversation.messages.head shouldBe messages.head
+    prunedPreserve.messages.head shouldBe messages.head
 
     val configNoPreserve = ContextWindowConfig(
       pruningStrategy = strategy,
       preserveSystemMessage = false
     )
 
-    val prunedNoPreserve = AgentState.pruneConversation(state, configNoPreserve)
+    val prunedNoPreserve = state.pruned(configNoPreserve)
 
     // When pruning to very small size, might not have system message
-    if (prunedNoPreserve.conversation.messages.nonEmpty) {
+    if (prunedNoPreserve.messages.nonEmpty) {
       // If anything remains, it should follow the preserve setting
-      if (prunedNoPreserve.conversation.messages.head == messages.head) {
+      if (prunedNoPreserve.messages.head == messages.head) {
         // System message is present
-        prunedNoPreserve.conversation.messages.head shouldBe messages.head
+        prunedNoPreserve.messages.head shouldBe messages.head
       }
     }
   }
@@ -483,10 +474,7 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
       )
     }
 
-    val state = AgentState(
-      conversation = org.llm4s.llmconnect.model.Conversation(messages),
-      tools = new org.llm4s.toolapi.ToolRegistry(Seq.empty)
-    )
+    val state = AgentThread(threadId = "t", messages = messages)
 
     val strategy = PruningStrategy.AdaptiveWindowing(
       contextWindowSize = 4_000,
@@ -498,10 +486,10 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
       minRecentTurns = 5 // Keep at least 5 turns
     )
 
-    val pruned = AgentState.pruneConversation(state, config)
+    val pruned = state.pruned(config)
 
     // Should preserve roughly last 5 turns (10 messages)
-    pruned.conversation.messages.length should be >= 10
+    pruned.messages.length should be >= 10
   }
 
   it should "apply adaptive windowing with cost-sensitive configuration" in {
@@ -510,10 +498,7 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
       else UserMessage(s"Query $i" * 10)
     }
 
-    val state = AgentState(
-      conversation = org.llm4s.llmconnect.model.Conversation(messages),
-      tools = new org.llm4s.toolapi.ToolRegistry(Seq.empty)
-    )
+    val state = AgentThread(threadId = "t", messages = messages)
 
     val expensiveInputStrategy = PruningStrategy.AdaptiveWindowing(
       contextWindowSize = 128_000,
@@ -527,10 +512,10 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
       preserveSystemMessage = false
     )
 
-    val pruned = AgentState.pruneConversation(state, config)
+    val pruned = state.pruned(config)
 
     // Should have pruned messages according to cost-sensitive window
-    pruned.conversation.messages.length should be <= messages.length
+    pruned.messages.length should be <= messages.length
   }
 
   it should "reduce window more aggressively with cost-sensitive adaptive windowing" in {
@@ -539,10 +524,7 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
       else UserMessage(s"Query $i with lots of content")
     }
 
-    val state = AgentState(
-      conversation = org.llm4s.llmconnect.model.Conversation(largeMessages),
-      tools = new org.llm4s.toolapi.ToolRegistry(Seq.empty)
-    )
+    val state = AgentThread(threadId = "t", messages = largeMessages)
 
     val expensiveInputStrategy = PruningStrategy.AdaptiveWindowing(
       contextWindowSize = 100_000,
@@ -561,11 +543,11 @@ class AdaptiveWindowingSpec extends AnyFlatSpec with Matchers {
     val configExpensive = ContextWindowConfig(pruningStrategy = expensiveInputStrategy)
     val configCheap     = ContextWindowConfig(pruningStrategy = cheapInputStrategy)
 
-    val prunedExpensive = AgentState.pruneConversation(state, configExpensive)
-    val prunedCheap     = AgentState.pruneConversation(state, configCheap)
+    val prunedExpensive = state.pruned(configExpensive)
+    val prunedCheap     = state.pruned(configCheap)
 
     // Expensive input should result in more aggressive pruning (fewer messages)
-    prunedExpensive.conversation.messages.length should be <= prunedCheap.conversation.messages.length
+    prunedExpensive.messages.length should be <= prunedCheap.messages.length
   }
 
   // ==========================================================================

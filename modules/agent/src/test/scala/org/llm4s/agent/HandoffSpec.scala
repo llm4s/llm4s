@@ -100,31 +100,4 @@ class HandoffSpec extends AnyFlatSpec with Matchers {
     result.left.map(_.isInstanceOf[ValidationError]) shouldBe Left(true)
     calls.get() shouldBe 0
   }
-
-  "HandoffRequested status" should "contain handoff and reason" in {
-    val targetAgent   = new Agent(mockClient)
-    val handoff       = Handoff.to("test", targetAgent, "Test reason")
-    val handoffReason = "Complex query requires specialist"
-    val status        = AgentStatus.HandoffRequested(handoff, Some(handoffReason))
-
-    // Verify status type and contents
-    status shouldBe a[AgentStatus.HandoffRequested]
-    val requested = status.asInstanceOf[AgentStatus.HandoffRequested]
-    requested.handoff shouldBe handoff
-    requested.handoffReason shouldBe Some(handoffReason)
-  }
-
-  it should "serialize without target agent reference" in {
-    val targetAgent         = new Agent(mockClient)
-    val handoff             = Handoff.to("test", targetAgent, "Test handoff")
-    val status: AgentStatus = AgentStatus.HandoffRequested(handoff, Some("Complex query"))
-
-    import upickle.default._
-    // Explicitly use AgentStatus type to find the implicit serializer
-    val json = write[AgentStatus](status)
-
-    json should include("HandoffRequested")
-    json should include("Complex query")
-    json should include(handoff.handoffId)
-  }
 }

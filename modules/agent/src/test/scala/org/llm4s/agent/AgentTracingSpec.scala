@@ -1,6 +1,5 @@
 package org.llm4s.agent
 
-import org.llm4s.agent.streaming.AgentEvent
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -11,7 +10,6 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._
-import scala.concurrent.ExecutionContext.Implicits.global
 
 /**
  * Focused tests that verify Agent integrates with the Tracing API
@@ -199,9 +197,9 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     tracing.tokenUsages should have size 1
     tracing.states.nonEmpty shouldBe true
 
-    // The event carries what a backend needs to rebuild the run, without AgentState itself.
+    // The event carries what a backend needs to rebuild the run, without the thread itself.
     val last = tracing.states.last
-    last.status shouldBe AgentStatus.Complete.toString
+    last.status shouldBe ThreadStatus.Completed.toString
     (last.messages.map(_.content) should contain).allOf("test query", "Hello, world!")
     last.messageCount shouldBe last.messages.size
   }
@@ -274,42 +272,6 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
   }
 
-  it should "trace completion, token usage and state on streaming path" in {
-    val completion = createCompletion("Streamed response")
-    val client     = new StubLLMClient(Right(completion))
-    val agent      = new Agent(client)
-    val tracing    = new RecordingTracing()
-
-    val result = agent.runWithEvents(
-      query = "test",
-      tools = ToolRegistry.empty,
-      onEvent = _ => (),
-      context = AgentContext(tracing = Some(tracing))
-    )
-
-    result.isRight shouldBe true
-    tracing.completions should have size 1
-    tracing.tokenUsages should have size 1
-    tracing.states.nonEmpty shouldBe true
-  }
-
-  it should "trace streaming error path when LLM streaming fails" in {
-    val client  = new StubLLMClient(Left(ValidationError.invalid("api", "stream failure")))
-    val agent   = new Agent(client)
-    val tracing = new RecordingTracing()
-
-    val result = agent.runWithEvents(
-      query = "test",
-      tools = ToolRegistry.empty,
-      onEvent = _ => (),
-      context = AgentContext(tracing = Some(tracing))
-    )
-
-    result.isLeft shouldBe true
-    tracing.errors.nonEmpty shouldBe true
-    tracing.errors.head._2 shouldBe "agent_stream_completion"
-  }
-
   it should "trace tool call when tool returns error" in {
     val failingToolResult = ToolBuilder[Map[String, Any], Unit](
       "failing_tool",
@@ -367,10 +329,15 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  it should "trace unexpected tool processing failures when processToolCalls throws" in {
-    // Tool registry that throws from execute, causing processToolCalls to throw inside runStep.
-    // Override the two-arg execute used by ToolProcessor (not the single-arg one).
-    val throwingRegistry = new ToolRegistry(Seq.empty) {
+  it should "survive a registry that throws, tracing the call and handing the failure to the model" in {
+    val echo = ToolBuilder[Map[String, Any], Unit](
+      "echo",
+      "Echoes",
+      Schema.`object`[Map[String, Any]]("args")
+    ).withHandler(_ => Right(())).buildSafe().fold(e => fail(s"tool failed to build: $e"), identity)
+
+    // a registry whose execute throws, which the loop turns into a failed call rather than a failed run
+    val throwingRegistry = new ToolRegistry(Seq(echo)) {
       override def execute(
         request: ToolCallRequest,
         config: ToolExecutionConfig
@@ -378,23 +345,19 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
         throw new RuntimeException("registry failure")
     }
 
-    val toolCall         = createToolCall("throwing_tool", "{}")
-    val assistantMessage = AssistantMessage("", Seq(toolCall))
-    val state = AgentState(
-      conversation = Conversation(Seq(UserMessage("user"), assistantMessage)),
-      tools = throwingRegistry,
-      status = AgentStatus.WaitingForTools
-    )
-
-    val client  = new StubLLMClient(Right(createCompletion("ignored")))
-    val agent   = new Agent(client)
+    val completionWithTool = createCompletion("", Seq(createToolCall("echo", "{}")))
+    val client  = new MultiResponseStubLLMClient(Seq(Right(completionWithTool), Right(createCompletion("Done"))))
     val tracing = new RecordingTracing()
 
-    val result = agent.runStep(state, context = AgentContext(tracing = Some(tracing), debug = true))
+    val result = new Agent(client).run(
+      "use the registry",
+      throwingRegistry,
+      context = AgentContext(tracing = Some(tracing), debug = true)
+    )
 
-    result.isRight shouldBe true
-    tracing.errors.nonEmpty shouldBe true
-    tracing.errors.head._2 shouldBe "agent_tool_execution"
+    result.map(_.status) shouldBe Right(ThreadStatus.Completed)
+    tracing.toolCalls should have size 1
+    tracing.toolCalls.head._3 should include("registry failure")
   }
 
   it should "propagate tracing across handoff with debug enabled" in {
@@ -420,60 +383,39 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     tracing.states.nonEmpty shouldBe true
   }
 
-  it should "emit HandoffStarted and HandoffCompleted events" in {
-    val clientB     = new StubLLMClient(Right(createCompletion("Specialist response")))
-    val agentB      = new Agent(clientB)
-    val handoff     = Handoff("agent-b", agentB, Some("delegate"))
-    val toolCall    = createToolCall(handoff.handoffId, """{"reason":"delegate"}""")
-    val completionA = createCompletion(content = "", toolCalls = Seq(toolCall))
-
-    val clientA = new StubLLMClient(Right(completionA))
-    val agentA  = new Agent(clientA)
-    val tracing = new RecordingTracing()
-    var events  = List.empty[AgentEvent]
-
-    val result = agentA.runWithEvents(
-      query = "hand off",
-      tools = ToolRegistry.empty,
-      onEvent = e => events = events :+ e,
-      handoffs = Seq(handoff),
-      context = AgentContext(tracing = Some(tracing), debug = true)
-    )
-
-    result.isRight shouldBe true
-    events.exists(_.isInstanceOf[AgentEvent.HandoffStarted]) shouldBe true
-    events.exists(_.isInstanceOf[AgentEvent.HandoffCompleted]) shouldBe true
-  }
-
-  "Agent.runWithStrategy" should "execute runWithStrategyInternal recursion path" in {
+  "Agent tool execution strategy" should "trace a run under the sequential strategy" in {
     val completion = createCompletion("strategy response")
     val client     = new StubLLMClient(Right(completion))
     val agent      = new Agent(client)
-    val tools      = ToolRegistry.empty
     val tracing    = new RecordingTracing()
 
-    val result = agent.runWithStrategy(
+    val result = agent.run(
       query = "test strategy",
-      tools = tools,
-      toolExecutionStrategy = ToolExecutionStrategy.Sequential,
-      context = AgentContext(tracing = Some(tracing), debug = true)
+      tools = ToolRegistry.empty,
+      context = AgentContext(
+        tracing = Some(tracing),
+        debug = true,
+        toolExecutionStrategy = ToolExecutionStrategy.Sequential
+      )
     )
 
     result.isRight shouldBe true
     tracing.states.nonEmpty shouldBe true
   }
 
-  it should "handle LLM failure in runWithStrategyInternal" in {
+  it should "trace the model's failure under the parallel strategy" in {
     val client  = new StubLLMClient(Left(ValidationError.invalid("api", "boom")))
     val agent   = new Agent(client)
-    val tools   = ToolRegistry.empty
     val tracing = new RecordingTracing()
 
-    val result = agent.runWithStrategy(
+    val result = agent.run(
       query = "test strategy",
-      tools = tools,
-      toolExecutionStrategy = ToolExecutionStrategy.Sequential,
-      context = AgentContext(tracing = Some(tracing), debug = true)
+      tools = ToolRegistry.empty,
+      context = AgentContext(
+        tracing = Some(tracing),
+        debug = true,
+        toolExecutionStrategy = ToolExecutionStrategy.Parallel
+      )
     )
 
     result.isLeft shouldBe true

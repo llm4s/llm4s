@@ -405,13 +405,12 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  it should "apply the change an output guardrail makes to the answer" in {
+  it should "apply the value an output guardrail returns as the answer" in {
     val mockClient = new MockLLMClient(Seq(Right(createCompletion("hello"))))
     val agent      = new Agent(mockClient)
     val shouting = new OutputGuardrail {
       def name: String                             = "shout"
-      def validate(output: String): Result[String] = Right(output)
-      override def transform(output: String): String = output.toUpperCase
+      def validate(output: String): Result[String] = Right(output.toUpperCase)
     }
 
     val result = for {
@@ -443,7 +442,7 @@ class AgentSpec extends AnyFlatSpec with Matchers {
       val messages = thread2.messages
       messages.count(_.isInstanceOf[UserMessage]) shouldBe 2
       // the model saw the first exchange when it answered the second
-      mockClient.calls(1)._1.messages.map(_.content) should contain allOf ("First query", "First response")
+      (mockClient.calls(1)._1.messages.map(_.content) should contain).allOf("First query", "First response")
     }
     result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
@@ -470,7 +469,7 @@ class AgentSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "continue a thread loaded from its JSON, in another Agent" in {
-    val first  = new Agent(new MockLLMClient(Seq(Right(createCompletion("First response")))))
+    val first        = new Agent(new MockLLMClient(Seq(Right(createCompletion("First response")))))
     val secondClient = new MockLLMClient(Seq(Right(createCompletion("Second response"))))
 
     val result = for {
@@ -480,7 +479,7 @@ class AgentSpec extends AnyFlatSpec with Matchers {
       thread2 <- new Agent(secondClient).continueConversation(loaded, "Follow-up", tools)
     } yield {
       thread2.answer shouldBe Some("Second response")
-      secondClient.calls.head._1.messages.map(_.content) should contain allOf ("First query", "First response")
+      (secondClient.calls.head._1.messages.map(_.content) should contain).allOf("First query", "First response")
     }
     result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
@@ -780,6 +779,15 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     } yield thread
 
     result.map(_.status) shouldBe Right(ThreadStatus.Completed)
+  }
+
+  it should "fail before calling the model at all when maxSteps is zero" in {
+    val mockClient = new MockLLMClient(Seq(Right(createCompletion("never asked"))))
+
+    val result = new Agent(mockClient).run("test", ToolRegistry.empty, maxSteps = Some(0))
+
+    result.map(_.status) shouldBe Right(ThreadStatus.Failed(Agent.StepLimitMessage))
+    mockClient.callCount shouldBe 0
   }
 
   it should "complete a handoff made in the last allowed model call" in {

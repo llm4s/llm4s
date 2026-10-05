@@ -7,6 +7,7 @@ import upickle.default.*
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Paths }
+import java.util.UUID
 import scala.util.Try
 
 /**
@@ -217,24 +218,37 @@ object AgentThread {
       }
     )
 
-  /** The thread from its JSON; the inverse of [[toJson]]. */
+  /**
+   * The thread from its JSON; the inverse of [[toJson]].
+   *
+   * It also reads what `AgentState.toJson` wrote before `AgentThread` existed - the conversation, system message,
+   * completion options and usage carry over; the tools, log and initial query are dropped; a missing `threadId` is
+   * generated; and a status of `Complete` is `Completed`, a `Failed` status is kept, and one that was still running
+   * (`InProgress`, `WaitingForTools`, `HandoffRequested`) loads as `Failed`, since it has no finished conversation to
+   * continue.
+   */
   def fromJson(json: ujson.Value): Result[AgentThread] =
     Try {
+      val obj                                       = json.obj
+      def present(key: String): Option[ujson.Value] = obj.get(key).filter(_ != ujson.Null)
       new AgentThread(
-        threadId = json("threadId").str,
-        messages = read[Conversation](json("conversation")).messages.toVector,
-        systemMessage = json("systemMessage") match {
-          case ujson.Str(content) => Some(SystemMessage(content))
-          case _                  => None
-        },
-        completionOptions = deserializeCompletionOptions(json("completionOptions")),
-        usage = json.obj.get("usageSummary") match {
-          case Some(v) => read[UsageSummary](v)
-          case None    => UsageSummary()
-        },
-        status = read[ThreadStatus](json("status"))
+        threadId = present("threadId").flatMap(_.strOpt).getOrElse(UUID.randomUUID().toString),
+        messages = read[Conversation](obj("conversation")).messages.toVector,
+        systemMessage = present("systemMessage").flatMap(_.strOpt).map(SystemMessage(_)),
+        completionOptions = present("completionOptions").fold(CompletionOptions())(deserializeCompletionOptions),
+        usage = present("usageSummary").fold(UsageSummary())(read[UsageSummary](_)),
+        status = present("status").fold[ThreadStatus](ThreadStatus.Completed)(readStatus)
       )
     }.toResult
+
+  /** A status in this version's format, or in `AgentStatus`'s, which an `AgentState` file holds. */
+  private def readStatus(json: ujson.Value): ThreadStatus =
+    Try(read[ThreadStatus](json)).toOption.getOrElse(json match {
+      case ujson.Str("Complete") => ThreadStatus.Completed
+      case obj: ujson.Obj if obj.value.get("type").contains(ujson.Str("Failed")) =>
+        ThreadStatus.Failed(obj.value.get("error").flatMap(_.strOpt).getOrElse("Unknown failure"))
+      case other => ThreadStatus.Failed(s"Saved while a turn was running (status: ${other.render()})")
+    })
 
   /** Writes the thread as indented JSON to `path`; a filesystem error is a `Left`. */
   def saveToFile(thread: AgentThread, path: String): Result[Unit] =

@@ -236,6 +236,7 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
     val result = agent.continueConversation(
       state1,
       "Short", // Too short
+      tools,
       inputGuardrails = inputGuardrails
     )
 
@@ -258,6 +259,7 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
     val result = agent.continueConversation(
       state1,
       "Generate JSON please",
+      tools,
       outputGuardrails = outputGuardrails
     )
 
@@ -282,12 +284,14 @@ class AgentGuardrailsIntegrationSpec extends AnyFlatSpec with Matchers {
       state2 <- agent.continueConversation(
         state1,
         "Second query",
+        tools,
         inputGuardrails = inputGuardrails,
         outputGuardrails = outputGuardrails
       )
       state3 <- agent.continueConversation(
         state2,
         "Third query",
+        tools,
         inputGuardrails = inputGuardrails,
         outputGuardrails = outputGuardrails
       )

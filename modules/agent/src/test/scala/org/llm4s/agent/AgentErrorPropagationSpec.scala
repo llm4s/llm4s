@@ -3,7 +3,6 @@ package org.llm4s.agent
 import java.util.concurrent.atomic.AtomicInteger
 
 import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
-import org.llm4s.agent.streaming.AgentEvent
 import org.llm4s.error._
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -14,7 +13,6 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration._
 
 /**
@@ -115,17 +113,6 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
     client.calls.get() shouldBe 0
   }
 
-  "Agent.runWithEvents" should "emit AgentFailed carrying the original error" in {
-    val original = NetworkError("down", None, "mock://llm")
-    val events   = ListBuffer[AgentEvent]()
-    val result =
-      new Agent(new FailingLLMClient(original))
-        .runWithEvents("hello", org.llm4s.toolapi.ToolRegistry.empty, onEvent = events += _)
-
-    result shouldBe Left(original)
-    events.collect { case f: AgentEvent.AgentFailed => f.error } shouldBe Seq(original)
-  }
-
   "Agent over ReliableClient" should "retry a recoverable RateLimitError maxAttempts times, then return it unchanged" in {
     val original = RateLimitError("retry-provider", 5.seconds)
     val inner    = new CountingFailingClient(original)
@@ -173,7 +160,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
     ("ValidationError", ValidationError("field", "reason"), false)
   )
 
-  private def completeState: AgentState = AgentStateFixture.complete("earlier question", "earlier answer")
+  private def completeState: AgentThread = AgentThreadFixture.complete("earlier question", "earlier answer")
 
   /** Fails its first `failures` calls with `error`, then answers with `reply`. */
   private class FlakyClient(failures: Int, error: LLMError, reply: String = "recovered") extends LLMClient {
@@ -206,33 +193,29 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "reach the caller of Agent.runWithEvents unchanged and be the payload of AgentFailed" in {
-    allErrors.foreach { case (label, error, _) =>
-      withClue(label) {
-        val events = ListBuffer[AgentEvent]()
-        val result = new Agent(new FailingLLMClient(error))
-          .runWithEvents("hello", org.llm4s.toolapi.ToolRegistry.empty, onEvent = events += _)
-
-        result shouldBe Left(error)
-        events.collect { case f: AgentEvent.AgentFailed => f.error }.toList shouldBe List(error)
-      }
-    }
-  }
-
   it should "reach the caller of Agent.continueConversation unchanged" in {
     allErrors.foreach { case (label, error, _) =>
       withClue(label) {
-        new Agent(new FailingLLMClient(error)).continueConversation(completeState, "follow-up") shouldBe Left(error)
+        new Agent(new FailingLLMClient(error))
+          .continueConversation(completeState, "follow-up", ToolRegistry.empty) shouldBe Left(error)
       }
     }
   }
 
-  it should "reach the caller of Agent.runWithStrategy unchanged" in {
-    implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
-    allErrors.foreach { case (label, error, _) =>
-      withClue(label) {
-        new Agent(new FailingLLMClient(error))
-          .runWithStrategy("hello", org.llm4s.toolapi.ToolRegistry.empty) shouldBe Left(error)
+  it should "reach the caller of Agent.run unchanged under every tool execution strategy" in {
+    import org.llm4s.toolapi.ToolExecutionStrategy
+    Seq(
+      ToolExecutionStrategy.Sequential,
+      ToolExecutionStrategy.Parallel,
+      ToolExecutionStrategy.ParallelWithLimit(2)
+    ).foreach { strategy =>
+      allErrors.foreach { case (label, error, _) =>
+        withClue(s"$strategy $label") {
+          new Agent(new FailingLLMClient(error))
+            .run("hello", ToolRegistry.empty, context = AgentContext(toolExecutionStrategy = strategy)) shouldBe Left(
+            error
+          )
+        }
       }
     }
   }
@@ -254,8 +237,8 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
       .run("hello", org.llm4s.toolapi.ToolRegistry.empty)
       .fold(e => fail(s"expected success: $e"), identity)
 
-    state.status shouldBe AgentStatus.Complete
-    state.conversation.messages.last.content shouldBe "recovered"
+    state.status shouldBe ThreadStatus.Completed
+    state.messages.last.content shouldBe "recovered"
     inner.calls.get() shouldBe 3
   }
 
@@ -265,19 +248,6 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
 
     runError(reliable(inner, "p")) shouldBe error
     inner.calls.get() shouldBe 3
-  }
-
-  it should "retry the streaming path the same way" in {
-    val inner  = new FlakyClient(failures = 2, RateLimitError("p", 1.second))
-    val events = ListBuffer[AgentEvent]()
-
-    val result = new Agent(reliable(inner, "p"))
-      .runWithEvents("hello", org.llm4s.toolapi.ToolRegistry.empty, onEvent = events += _)
-
-    result.isRight shouldBe true
-    inner.calls.get() shouldBe 3
-    events.exists(_.isInstanceOf[AgentEvent.AgentFailed]) shouldBe false
-    events.exists(_.isInstanceOf[AgentEvent.AgentCompleted]) shouldBe true
   }
 
   it should "fail fast with the circuit-breaker's ServiceError, without calling the model, once the circuit is open" in {
@@ -308,8 +278,8 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
       .run("go", new ToolRegistry(Seq(failingTool("flaky", Left("backend unavailable")))))
       .fold(e => fail(s"a tool failure must not become a Left: $e"), identity)
 
-    state.status shouldBe AgentStatus.Complete
-    val toolMessages = state.conversation.messages.collect { case m: ToolMessage => m }
+    state.status shouldBe ThreadStatus.Completed
+    val toolMessages = state.messages.collect { case m: ToolMessage => m }
     toolMessages should have size 1
     toolMessages.head.toolCallId shouldBe "call-1"
     toolMessages.head.content should include("backend unavailable")
@@ -325,8 +295,8 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
       .run("go", new ToolRegistry(Seq(failingTool("explosive", throw new IllegalStateException("kaboom")))))
       .fold(e => fail(s"a throwing tool must not become a Left: $e"), identity)
 
-    state.status shouldBe AgentStatus.Complete
-    state.conversation.messages.collect { case m: ToolMessage => m.content }.head should include("kaboom")
+    state.status shouldBe ThreadStatus.Completed
+    state.messages.collect { case m: ToolMessage => m.content }.head should include("kaboom")
   }
 
   "An LLM error inside a handoff target" should "come back from Agent.run unchanged" in {
@@ -340,22 +310,6 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
     new Agent(client).run("q", org.llm4s.toolapi.ToolRegistry.empty, handoffs = Seq(handoff)) shouldBe Left(targetError)
   }
 
-  it should "come back from Agent.runWithEvents unchanged, with HandoffCompleted(success = false)" in {
-    val targetError = RateLimitError("specialist", 5.seconds)
-    val target      = new Agent(new CountingFailingClient(targetError))
-    val handoff     = Handoff.to("specialist", target, "Specialist")
-    val client = new NTurnFakeLLMClient(
-      CompletionFixture.withToolCall(handoff.handoffId, ujson.Obj("reason" -> "needs expert"), "call-h")
-    )
-    val events = ListBuffer[AgentEvent]()
-
-    val result = new Agent(client)
-      .runWithEvents("q", org.llm4s.toolapi.ToolRegistry.empty, onEvent = events += _, handoffs = Seq(handoff))
-
-    result shouldBe Left(targetError)
-    events.collect { case e: AgentEvent.HandoffCompleted => e.success }.toList shouldBe List(false)
-  }
-
   "Running out of steps" should "be a Failed state inside Right, not an error" in {
     val client = new NTurnFakeLLMClient(CompletionFixture.withToolCall("missing_tool", ujson.Obj()))
 
@@ -363,7 +317,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
       .run("loop", org.llm4s.toolapi.ToolRegistry.empty, maxSteps = Some(2))
       .fold(e => fail(s"step limit must not be a Left: $e"), identity)
 
-    state.status shouldBe AgentStatus.Failed("Maximum step limit reached")
+    state.status shouldBe ThreadStatus.Failed("Maximum step limit reached")
   }
 
   "A rejecting output guardrail" should "return its reason even after a successful tool round, having called the model twice" in {
@@ -397,7 +351,6 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
   }
 
   "A rejecting input guardrail" should "stop every entry point before the model is called" in {
-    implicit val ec: scala.concurrent.ExecutionContext = scala.concurrent.ExecutionContext.global
     val client = new CountingFailingClient(UnknownError("must not be called", new RuntimeException("x")))
     val agent  = new Agent(client)
     val reject = new InputGuardrail {
@@ -408,10 +361,13 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
 
     val results = Seq(
       agent.run("q", org.llm4s.toolapi.ToolRegistry.empty, inputGuardrails = Seq(reject)),
-      agent.runWithEvents("q", org.llm4s.toolapi.ToolRegistry.empty, _ => (), inputGuardrails = Seq(reject)),
-      agent.runWithStrategy("q", org.llm4s.toolapi.ToolRegistry.empty, inputGuardrails = Seq(reject)),
-      agent.continueConversation(completeState, "q", inputGuardrails = Seq(reject)),
-      agent.continueConversationWithEvents(completeState, "q", _ => (), inputGuardrails = Seq(reject))
+      agent.run(
+        "q",
+        org.llm4s.toolapi.ToolRegistry.empty,
+        inputGuardrails = Seq(reject),
+        context = AgentContext(toolExecutionStrategy = org.llm4s.toolapi.ToolExecutionStrategy.Parallel)
+      ),
+      agent.continueConversation(completeState, "q", ToolRegistry.empty, inputGuardrails = Seq(reject))
     )
 
     results.foreach { r =>
@@ -422,16 +378,16 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
     client.calls.get() shouldBe 0
   }
 
-  "Agent.continueConversation" should "refuse an unfinished state with a ValidationError and never call the model" in {
+  "Agent.continueConversation" should "refuse an unfinished thread with a ValidationError and never call the model" in {
     val client = new CountingFailingClient(UnknownError("must not be called", new RuntimeException("x")))
-    val unfinished = AgentState(
-      conversation = Conversation(Seq(UserMessage("q"))),
-      tools = org.llm4s.toolapi.ToolRegistry.empty,
-      status = AgentStatus.InProgress
+    val unfinished = AgentThread(
+      "t-1",
+      messages = Seq(UserMessage("q")),
+      status = ThreadStatus.Suspended(Vector(SuspendedOn("1.0", "approval", ujson.Null)))
     )
 
     val error = new Agent(client)
-      .continueConversation(unfinished, "more")
+      .continueConversation(unfinished, "more", ToolRegistry.empty)
       .fold(identity, s => fail(s"expected Left: $s"))
 
     error shouldBe a[ValidationError]
