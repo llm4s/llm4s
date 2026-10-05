@@ -192,6 +192,69 @@ and bills the default account. In production, give every section its own `apiKey
 config-policy `prod` preset flags any section that does not (see
 [Production deployment](../PRODUCTION_DEPLOYMENT)).
 
+### Workload identity (SPIFFE)
+
+A section can authenticate with a workload identity token - typically a SPIFFE JWT-SVID that
+[`spiffe-helper`](https://github.com/spiffe/spiffe-helper) keeps fresh in a file - instead of an
+API key. Put an `auth` block in the section, with `identityTokenFile` (re-read on every exchange,
+so rotation is picked up) and the keys the provider needs. A section sets `apiKey` or `auth`,
+never both; with `auth`, the shared `llm4s.credentials.<id>.apiKey` is not used.
+
+**Databricks model serving** (the generic `openai-compatible` provider; the SVID is exchanged at
+the workspace's RFC 8693 endpoint, the token cached until shortly before it expires, and refreshed
+once if a request is rejected with 401):
+
+```hocon
+databricks-main {
+  provider = "openai-compatible"
+  baseUrl  = "https://<workspace>.cloud.databricks.com/serving-endpoints"
+  model    = "<serving endpoint name>"
+  auth {
+    identityTokenFile = "/var/run/secrets/spiffe/databricks"
+    tokenUrl = "https://<workspace>.cloud.databricks.com/oidc/v1/token"
+    clientId = ${?DATABRICKS_CLIENT_ID}   # the service principal, for a service-principal federation policy
+    scope    = "all-apis"
+  }
+}
+```
+
+The optional `audience` key sets the RFC 8693 `audience` parameter, for a token endpoint that needs one.
+
+**OpenAI** (the OpenAI SDK's workload identity federation):
+
+```hocon
+openai-wif {
+  provider = "openai"
+  model    = "gpt-4o-mini"
+  auth {
+    identityTokenFile  = "/var/run/secrets/spiffe/openai"
+    identityProviderId = ${OPENAI_IDENTITY_PROVIDER_ID}
+    serviceAccountId   = ${OPENAI_SERVICE_ACCOUNT_ID}
+  }
+}
+```
+
+**Anthropic** (the Anthropic SDK's workload identity federation; `identityTokenFile` only, not a
+literal `identityToken`):
+
+```hocon
+anthropic-wif {
+  provider = "anthropic"
+  model    = "claude-sonnet-4-5"
+  auth {
+    identityTokenFile = "/var/run/secrets/spiffe/anthropic"
+    federationRuleId  = ${ANTHROPIC_FEDERATION_RULE_ID}
+    organizationId    = ${ANTHROPIC_ORGANIZATION_ID}
+    serviceAccountId  = ${?ANTHROPIC_SERVICE_ACCOUNT_ID}
+    workspaceId       = ${?ANTHROPIC_WORKSPACE_ID}
+  }
+}
+```
+
+Request each SVID for the audience its relying party expects (`jwt_audience` in `spiffe-helper`).
+Other providers reject an `auth` block. The `prod` config-policy preset's `ownApiKey` rule accepts
+a section that authenticates this way.
+
 ### Section keys
 
 | Key | Meaning |

@@ -76,6 +76,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that throws fails the run with `GraphError.MiddlewareFailed(middleware, cause)`; a throwing
   `ModelStep` is not reported as a middleware failure. Design:
   `docs/design/typed-agent-runtime-design.md` §4.8.
+- **Workload identity (SPIFFE) for providers**: a named provider section may carry an `auth`
+  block instead of `apiKey` - an `identityTokenFile` (e.g. a JWT-SVID kept by `spiffe-helper`) plus
+  provider keys. `openai-compatible` exchanges it at an RFC 8693 endpoint (`tokenUrl`, `clientId`,
+  `scope`, `audience` - Databricks' `/oidc/v1/token`), caches the token until shortly before
+  expiry and refreshes and retries once on 401; `openai` (`identityProviderId`,
+  `serviceAccountId`, `clientId`) and `anthropic` (`federationRuleId`, `organizationId`,
+  `serviceAccountId`, `workspaceId`) use their SDKs' workload identity federation. New core types
+  in `org.llm4s.llmconnect.auth`; `ProviderConfigSpec.authExtras` declares a provider's auth keys;
+  `NamedProviderConfig.auth`, `OpenAIConfig.workloadIdentity` and `AnthropicConfig.workloadIdentity`
+  are new defaulted fields; `ApiKeySource` gained `WorkloadIdentity`.
+  **Migration:** `OpenAICompatibleClient.Settings.apiKey: Option[String]` became
+  `credential: OpenAICompatibleClient.Credential` (`Anonymous`, `Static(key)`, `Dynamic(provider)`);
+  `OpenAICompatibleClient.settings` gained an optional second parameter. `llm4s-provider-testkit`
+  gains `FakeTokenExchangeServer` and `TestJwt`. (#1354)
 - **`@Stable` and `@Experimental`: the tier of a public type, in the code** ([#1281](https://github.com/llm4s/llm4s/issues/1281),
   `org.llm4s.annotation` in `llm4s-core`): Java annotations with runtime retention, so an IDE, a tool or a
   Java caller can read them. Every top-level public type of `llm4s-core`, `llm4s-openai`,
