@@ -8,6 +8,13 @@ import scala.util.{ Failure, Success, Try }
 import scala.util.matching.Regex
 
 /**
+ * Patterns (`allowedModelPatterns`, `requiredBaseUrlPattern*`) must match the '''whole''' value: `openai/gpt-4o`
+ * allows `openai/gpt-4o` and not `openai/gpt-4o-mini`, and a base-URL pin cannot be satisfied by a
+ * lookalike such as `https://api.openai.com.evil.example`. Use `.*` where a prefix is meant.
+ *
+ * @param maxContextWindowByProvider per-provider caps, which take precedence over the environment-wide cap
+ * @param requiredBaseUrlPatternByProvider per-provider base-URL pins, which take precedence over the
+ *                            environment-wide pin: one endpoint list per provider rather than one for all
  * @param ownApiKeyRequiredIn environments in which every named chat section whose provider needs
  *                            a key must set its own `apiKey`, rather than inherit its vendor's
  *                            shared `llm4s.credentials.<providerId>.apiKey`. A section meant for
@@ -19,7 +26,9 @@ final case class ConfigPolicy(
   allowedModelPatterns: List[String] = Nil,
   maxContextWindowByEnv: Map[CatalogEnvironment, Int] = Map.empty,
   requiredBaseUrlPatternByEnv: Map[CatalogEnvironment, String] = Map.empty,
-  ownApiKeyRequiredIn: Set[CatalogEnvironment] = Set.empty
+  ownApiKeyRequiredIn: Set[CatalogEnvironment] = Set.empty,
+  maxContextWindowByProvider: Map[(CatalogEnvironment, String), Int] = Map.empty,
+  requiredBaseUrlPatternByProvider: Map[(CatalogEnvironment, String), String] = Map.empty
 ) {
   def withAllowedProviders(values: String*): ConfigPolicy =
     copy(allowedProviders = values.map(_.toLowerCase).toSet)
@@ -29,6 +38,14 @@ final case class ConfigPolicy(
 
   def withMaxContextWindow(environment: CatalogEnvironment, max: Int): ConfigPolicy =
     copy(maxContextWindowByEnv = maxContextWindowByEnv + (environment -> max))
+
+  def withMaxContextWindow(environment: CatalogEnvironment, provider: String, max: Int): ConfigPolicy =
+    copy(maxContextWindowByProvider = maxContextWindowByProvider + ((environment, provider.toLowerCase) -> max))
+
+  def withRequiredBaseUrlPattern(environment: CatalogEnvironment, provider: String, pattern: String): ConfigPolicy =
+    copy(requiredBaseUrlPatternByProvider =
+      requiredBaseUrlPatternByProvider + ((environment, provider.toLowerCase) -> pattern)
+    )
 
   def withRequiredBaseUrlPattern(environment: CatalogEnvironment, pattern: String): ConfigPolicy =
     copy(requiredBaseUrlPatternByEnv = requiredBaseUrlPatternByEnv + (environment -> pattern))
@@ -48,7 +65,7 @@ object ConfigPolicy {
   val devSandbox: ConfigPolicy =
     ConfigPolicy()
       .withAllowedProviders("openai", "anthropic", "ollama", "gemini", "deepseek", "openai-compatible")
-      .withMaxContextWindow(CatalogEnvironment.Dev, 128000)
+      .withMaxContextWindow(CatalogEnvironment.Dev, 1048576)
 
   /**
    * Prod: named providers with pinned model patterns. The generic `openai-compatible` provider is
@@ -69,7 +86,13 @@ object ConfigPolicy {
         "gemini/gemini-2\\..*",
         "deepseek/deepseek-chat"
       )
-      .withMaxContextWindow(CatalogEnvironment.Prod, 128000)
+      // Caps follow each provider's current models (Gemini 1M, Claude 200k, DeepSeek 131k, GPT-4o 128k),
+      // so an allowed model is not rejected for its own native window.
+      .withMaxContextWindow(CatalogEnvironment.Prod, "openai", 128000)
+      .withMaxContextWindow(CatalogEnvironment.Prod, "azure", 128000)
+      .withMaxContextWindow(CatalogEnvironment.Prod, "anthropic", 200000)
+      .withMaxContextWindow(CatalogEnvironment.Prod, "gemini", 1048576)
+      .withMaxContextWindow(CatalogEnvironment.Prod, "deepseek", 131072)
       .withOwnApiKeyRequired(CatalogEnvironment.Prod)
 
   def preset(name: String): Option[ConfigPolicy] =
@@ -128,7 +151,7 @@ object ConfigPolicyEngine {
         compileRegexList(policy.allowedModelPatterns, "allowedModelPatterns") match {
           case Left(violations) => violations
           case Right(compiled) =>
-            if (compiled.exists(_.findFirstIn(fullSpec).isDefined)) Nil
+            if (compiled.exists(_.pattern.matcher(fullSpec).matches())) Nil
             else
               List(
                 PolicyViolation(
@@ -139,15 +162,17 @@ object ConfigPolicyEngine {
         }
 
     val maxContextViolations =
-      policy.maxContextWindowByEnv
-        .get(environment)
+      policy.maxContextWindowByProvider
+        .get((environment, provider))
+        .orElse(policy.maxContextWindowByEnv.get(environment))
         .filter(max => config.contextWindow > max)
         .map(max => PolicyViolation("maxContextWindow", s"contextWindow ${config.contextWindow} exceeds $max"))
         .toList
 
     val baseUrlViolations =
-      policy.requiredBaseUrlPatternByEnv
-        .get(environment)
+      policy.requiredBaseUrlPatternByProvider
+        .get((environment, provider))
+        .orElse(policy.requiredBaseUrlPatternByEnv.get(environment))
         .toList
         .flatMap { rawPattern =>
           compileRegexList(List(rawPattern), "requiredBaseUrl") match {
@@ -155,7 +180,7 @@ object ConfigPolicyEngine {
             case Right(compiled) =>
               val pattern = compiled.head
               baseUrlOrEndpoint(config) match {
-                case Some(url) if pattern.findFirstIn(url).isDefined => Nil
+                case Some(url) if pattern.pattern.matcher(url).matches() => Nil
                 case Some(_) =>
                   List(PolicyViolation("requiredBaseUrl", s"Endpoint must match $rawPattern"))
                 case None =>

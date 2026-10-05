@@ -46,11 +46,14 @@ val policy = ConfigPolicy.prodSafeDefaults
 ```
 
 Note that `withAllowedProviders` and `withAllowedModelPatterns` replace the preset's lists rather
-than adding to them, so repeat the entries you want to keep. Patterns are unanchored regular
-expressions matched against `<provider>/<model>`, so anchor them. The base-URL pattern is one
-per environment and is checked against every provider's config in that environment, not only
-`openai-compatible`'s, so it must name every endpoint you use. Both presets cap `contextWindow` at
-128000. Per-provider recipes are in the
+than adding to them, so repeat the entries you want to keep. Patterns are regular
+expressions that must match the **whole** `<provider>/<model>` (or URL): `openai/gpt-4o` no longer
+allows `openai/gpt-4o-mini`; write `.*` where a prefix is meant. A base-URL pattern can be pinned
+per provider with `withRequiredBaseUrlPattern(env, "openai-compatible", pattern)`, which replaces
+the environment-wide pin for that provider; without one, the environment-wide pin is checked
+against every provider. Context caps work the same way (`withMaxContextWindow(env, provider, max)`).
+The `prod` preset caps each provider at its current models' window (openai/azure 128000, anthropic
+200000, gemini 1048576, deepseek 131072); `dev` caps at 1048576. Per-provider recipes are in the
 [providers guide](../../docs/guide/providers.md#openai-compatible-endpoints).
 
 ## Run locally

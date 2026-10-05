@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ifSuccess` / `ifFailure` and `toCompletableFuture()` (an adapter over an already finished result, not
   an asynchronous call). It depends on core, `llm4s-agent` and the OpenAI, Anthropic, Ollama, Gemini
   and OpenAI-compatible provider modules.
+- **config-policy: per-provider pins, anchored patterns, caps that fit current models**
+  ([#1220](https://github.com/llm4s/llm4s/issues/1220)): `ConfigPolicy.withRequiredBaseUrlPattern(env, provider, pattern)` and
+  `withMaxContextWindow(env, provider, max)` take precedence over the environment-wide value. Model and base-URL patterns now
+  must match the **whole** value (previously a substring match, so `openai/gpt-4o` also allowed `gpt-4o-mini` and a lookalike
+  host passed a URL pin); a pattern that relied on a prefix needs a trailing `.*`. The `prod` preset caps each provider at its
+  current models' window (anthropic 200000, gemini 1048576, deepseek 131072, openai/azure 128000), so allowed models are no
+  longer rejected for their native window; `dev` caps at 1048576.
 - **`llm4s-spring-boot-starter`: Spring Boot auto-configuration** (Beta, `modules/spring-boot-starter`,
   [#936](https://github.com/llm4s/llm4s/issues/936)): built on `llm4s-java-api`. Properties under `llm4s.*` (`provider`, `model`, `apiKey`,
   `baseUrl`, `organization`, `contextWindow`, `reserveCompletion`) produce a `JLlmClient` and an
