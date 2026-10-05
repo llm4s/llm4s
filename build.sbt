@@ -63,6 +63,9 @@ inThisBuild(
     ThisBuild / coverageHighlighting := true,
     ThisBuild / coverageExcludedPackages := Seq(
       "org\\.llm4s\\.runner\\..*",
+      // The deploy service's entry point starts a server and exits; the routes, the check and the
+      // configuration behind it are measured, and the image smoke test in deploy-staged.yml runs it.
+      "org\\.llm4s\\.deploy\\.DeployServiceMain",
       "org\\.llm4s\\.samples\\..*",
       "org\\.llm4s\\.workspace\\..*"
     ).mkString(";"),
@@ -254,6 +257,7 @@ lazy val llm4s = (project in file("."))
     knowledgegraphNeo4j,
     gradleDemo,
     benchmarks,
+    deployService,
     // Aggregated so `it` is compiled, formatted and linted with everything else - it was
     // outside the aggregate entirely, so its suites could stop compiling unnoticed. Only the
     // `@Local` tier actually runs under `sbt test`; see `it / Test / testOptions` below.
@@ -1009,6 +1013,44 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
     coverageDisabled
   )
   .settings(WorkspaceRunnerDocker.settings)
+
+// A small HTTP service - GET /health and GET /llm-check - for the staged-deployment workflow template
+// (.github/workflows/deploy-staged.yml) and the Kustomize manifests in deploy/ (#846). It is its own
+// module, not part of `samples`, so cask and a pinned main class do not land on the examples' classpath.
+// Unpublished: it is what a downstream project copies, so it depends on the library as a user's service
+// would, and builds its image with the Docker plugin like `workspaceRunner` does.
+lazy val deployService = (project in file("modules/deploy-service"))
+  .dependsOn(
+    core % "compile->compile;test->test",
+    ollama,
+    gemini,
+    anthropic,
+    openai,
+    openaiCompatible
+  )
+  .enablePlugins(JavaAppPackaging, DockerPlugin)
+  .settings(
+    name := "llm4s-deploy-service",
+    commonSettings,
+    Compile / mainClass := Some("org.llm4s.deploy.DeployServiceMain"),
+    // `cask.Main.main` starts the server on a background thread and returns, so an unforked `run`
+    // finishes at once and sbt exits (in batch mode) with the server still starting. Forked, sbt waits
+    // for the service's own JVM, which the server threads keep alive.
+    run / fork := true,
+    libraryDependencies ++= Seq(
+      Deps.cask,
+      Deps.ujson,
+      Deps.scalatest % Test
+    ),
+    appLogging,
+    publish / skip := true,
+    // Measured 92.91% statement coverage (`sbt coverage deployService/test deployService/coverageReport`),
+    // by unit tests plus the real routes on a real server on an ephemeral port. The entry point
+    // (`DeployServiceMain`) is excluded via ThisBuild / coverageExcludedPackages. Floor is the measured
+    // value rounded down to the nearest 5. Never lower it.
+    coverageFloor(90)
+  )
+  .settings(DeployServiceDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
   .dependsOn(

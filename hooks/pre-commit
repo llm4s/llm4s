@@ -96,6 +96,7 @@ map_file_to_project() {
     modules/workspace/workspaceClient/*)  echo "workspaceClient" ;;
     modules/workspace/workspaceRunner/*)  echo "workspaceRunner" ;;
     modules/spring-boot-starter/*)        echo "springBootStarter" ;;
+    modules/deploy-service/*)             echo "deployService" ;;
     modules/llm4s-effect/*)               echo "llm4sEffect" ;;
     modules/llm4s-zio/*)                  echo "llm4sZio" ;;
     modules/java-api/*)                   echo "javaApi" ;;
@@ -241,6 +242,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE llm4sEffect
       set_add DOWNSTREAM_COMPILE llm4sZio
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     knowledgegraph)
       set_add DOWNSTREAM_COMPILE rag
@@ -289,6 +291,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     gemini)
       set_add DOWNSTREAM_COMPILE samples
@@ -297,6 +300,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     anthropic)
       set_add DOWNSTREAM_COMPILE samples
@@ -305,6 +309,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     openaiCompatible)
       set_add DOWNSTREAM_COMPILE rag
@@ -316,6 +321,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE benchmarks
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     bedrock)
       set_add DOWNSTREAM_COMPILE samples
@@ -348,6 +354,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE benchmarks
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     workspaceShared)
       set_add DOWNSTREAM_COMPILE workspaceClient
@@ -416,6 +423,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE jina
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     knowledgegraphNeo4j)
       set_add DOWNSTREAM_COMPILE samples

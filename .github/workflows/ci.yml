@@ -216,6 +216,7 @@ jobs:
           gradleDemo/test gradleDemo/coverageReport
           javaApi/test javaApi/coverageReport
           springBootStarter/test springBootStarter/coverageReport
+          deployService/test deployService/coverageReport
           llm4sEffect/test llm4sEffect/coverageReport
           llm4sZio/test llm4sZio/coverageReport
           coverageAggregate
@@ -481,6 +482,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/spring-boot-starter/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: spring-boot-starter
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload deploy-service coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/deploy-service/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: deploy-service
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
