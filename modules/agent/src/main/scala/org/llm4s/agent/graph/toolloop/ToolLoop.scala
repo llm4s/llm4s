@@ -15,7 +15,9 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicReference
+import scala.jdk.CollectionConverters.*
 import scala.util.{ Failure, Success, Try }
 
 /** Who asked for an approval: the tool itself, or a middleware's tool wrapper. All resume at the same approval node. */
@@ -54,18 +56,48 @@ final case class ToolQuestionRequest(
 final case class ToolResult(assistantMessageId: String, toolCallId: String, content: String, isError: Boolean)
     derives ReadWriter
 
-/** The model call: the conversation so far, and the tools on offer, to the next assistant message. */
+/**
+ * What one model call returned: the assistant message, and what the provider reported about the call -
+ * the model that answered, its token usage and its estimated cost, each absent when not reported.
+ */
+final case class ModelReply(
+  message: AssistantMessage,
+  model: String = "",
+  usage: Option[TokenUsage] = None,
+  cost: Option[Double] = None
+)
+
+/**
+ * A handoff a tool asked for: the stable id of the [[org.llm4s.agent.Handoff]] and the model's reason. A tool that
+ * declares [[ToolLoop.handoff]] and writes one ends the loop after its batch, instead of calling the model again.
+ */
+final case class HandoffRequest(handoffId: String, reason: String) derives ReadWriter
+
+/**
+ * The model call: the conversation so far, and the tools on offer, to the next assistant message.
+ * Implement `next`; override `complete` to report usage, which the loop adds to [[ToolLoop.usage]].
+ */
 trait ModelStep:
   def next(messages: Vector[Message], tools: ToolSet): Result[AssistantMessage]
+
+  /** The call with what the provider reported about it; by default `next`'s message with nothing reported. */
+  def complete(messages: Vector[Message], tools: ToolSet): Result[ModelReply] =
+    next(messages, tools).map(ModelReply(_))
 
 object ModelStep:
 
   /**
    * Calls `client` with `options`, its `tools` replaced by the loop's
-   * [[org.llm4s.agent.graph.tool.ToolSet.toolFunctions]].
+   * [[org.llm4s.agent.graph.tool.ToolSet.toolFunctions]]. Reports the completion's model, usage and cost.
    */
   def fromClient(client: LLMClient, options: CompletionOptions = CompletionOptions()): ModelStep =
-    (messages, tools) => client.complete(Conversation(messages), options.withTools(tools.toolFunctions)).map(_.message)
+    new ModelStep:
+      def next(messages: Vector[Message], tools: ToolSet): Result[AssistantMessage] =
+        complete(messages, tools).map(_.message)
+      override def complete(messages: Vector[Message], tools: ToolSet): Result[ModelReply] =
+        client.complete(Conversation(messages), options.withTools(tools.toolFunctions)).map { c =>
+          ModelReply(c.message, c.model, c.usage, c.estimatedCost)
+        }
 
 /**
  * The model/tool loop as a graph - the Stage 0 proof of runtime-owned tool results and resumable
@@ -147,6 +179,23 @@ object ToolLoop:
   def question[Q: ReadWriter](request: ToolQuestionRequest): Result[Q] =
     Try(upickle.default.read[Q](request.question)).toResult
 
+  /**
+   * The token usage and cost of every model call of the thread, summed. A model node adds each call's
+   * reported usage, including the calls a model wrapper repeated: each was billed.
+   */
+  val usage: StateKey[UsageSummary, UsageSummary] =
+    StateKey[UsageSummary, UsageSummary]("usage", UsageSummary())((total, spent) => Right(total.merge(spent)))
+
+  /**
+   * The handoff a tool asked for, if any; the first request of a batch wins. A tool that requests one declares this key
+   * in its `writes`. Once set, `collect` ends the loop instead of calling the model, and the output is empty: the
+   * caller reads the key from the final state and runs the target.
+   */
+  val handoff: StateKey[Option[HandoffRequest], HandoffRequest] =
+    StateKey[Option[HandoffRequest], HandoffRequest]("handoff", None)((current, next) =>
+      Right(current.orElse(Some(next)))
+    )
+
   /** The results recorded for the current batch, at most one per call; removed when the batch is collected. */
   val results: StateKey[Vector[ToolResult], ToolResult] =
     StateKey[Vector[ToolResult], ToolResult]("tool-results", Vector.empty) { (recorded, result) =>
@@ -172,9 +221,9 @@ object ToolLoop:
 
   /** The loop alone writes results and messages: a tool or middleware writing either could break one result per call. */
   private def ownedKeysUntouched(tools: ToolSet, stack: MiddlewareStack): Result[Unit] =
-    val owned                              = Set(results.id, Messages.key.id)
+    val owned                              = Set(results.id, Messages.key.id, usage.id)
     def touches(keys: Set[StateKey[?, ?]]) = keys.exists(k => owned.contains(k.id))
-    val clause                             = "declares a key the loop owns ('tool-results' or 'messages')"
+    val clause                             = "declares a key the loop owns ('tool-results', 'messages' or 'usage')"
     val byTools      = tools.tools.filter(t => touches(t.writes)).map(t => s"tool '${t.spec.name}' $clause")
     val byMiddleware = stack.ordered.filter(m => touches(m.writes)).map(m => s"middleware '${m.id.value}' $clause")
     (byTools ++ byMiddleware).toList match
@@ -196,6 +245,7 @@ object ToolLoop:
     val modelNode = b.declare[Unit]("model")
     val finish    = b.declare[Unit]("finish")
     val collect   = b.declare[Unit]("collect")
+    val handedOff = b.declare[Unit]("handed-off")
     val callTool  = b.declare[ToolTask]("call-tool")
     val approval  = b.declareResume[ApprovalRequest, ApprovalDecision]("approval")
     val batch     = b.dynamicJoin("tool-batch", collect)
@@ -235,19 +285,27 @@ object ToolLoop:
       }
     }
 
-    b.implement(modelNode, writes = Set(messages)) { (_, state, context) =>
+    b.implement(modelNode, writes = Set(messages, usage)) { (_, state, context) =>
+      // every call the model wrappers made, retries included: each was billed
+      val replies = new ConcurrentLinkedQueue[ModelReply]()
       NodeResult.fromResult(for
-        history   <- state.get(messages)
-        _         <- Message.validateConversation(history.map(_.message).toList)
-        assistant <- stack.wrapModelCall(ModelRequest(history.map(_.message), tools), context)(callModel(model))
+        history <- state.get(messages)
+        _       <- Message.validateConversation(history.map(_.message).toList)
+        assistant <- stack.wrapModelCall(ModelRequest(history.map(_.message), tools), context)(
+          callModel(model, replies)
+        )
         // a blank answer without tool calls is refused before it is stored, so the history stays valid
         // and recover asks the model again
         _ <- assistant.validate
       yield
-        val stored   = StoredMessage(s"${context.position.taskId.value}/assistant", assistant)
+        val stored = StoredMessage(s"${context.position.taskId.value}/assistant", assistant)
+        val spent = replies.asScala.foldLeft(UsageSummary())((total, reply) =>
+          reply.usage.fold(total)(u => total.add(reply.model, u, reply.cost))
+        )
         val appended = Command.empty.update(messages, MessageUpdate.Append(stored))
-        if assistant.toolCalls.isEmpty then appended.goto(finish)
-        else appended.fanOut(batch, callTool, assistant.toolCalls.toVector.map(ToolTask(stored.id, _)))
+        val billed   = if replies.asScala.exists(_.usage.isDefined) then appended.update(usage, spent) else appended
+        if assistant.toolCalls.isEmpty then billed.goto(finish)
+        else billed.fanOut(batch, callTool, assistant.toolCalls.toVector.map(ToolTask(stored.id, _)))
       )
     }
 
@@ -300,6 +358,7 @@ object ToolLoop:
           (),
           ValidationError("tool-batch", "results recorded for calls outside the batch")
         )
+        asked <- state.get(handoff)
       yield
         val toolMessages = ordered.map { r =>
           val content = if r.isError then ujson.Obj("error" -> r.content).render() else r.content
@@ -308,31 +367,46 @@ object ToolLoop:
         toolMessages
           .foldLeft(Command.empty)((command, m) => command.update(messages, MessageUpdate.Append(m)))
           .remove(results)
-          .goto(modelNode)
+          // a tool asked for a handoff: the loop ends here and the model is not called again
+          .goto(if asked.isDefined then handedOff else modelNode)
       )
     }
 
+    // declared here so the key is registered with every loop, whether or not a tool writes it: `collect` reads it
+    b.implement(handedOff, writes = Set(handoff))((_, _, _) => NodeResult.Continue(Command.empty))
+
     // An input Block (a beforeAgent `Left`) happens before anything is stored: the run ends as a finished failure
     // and the history is unchanged.
+    // An empty text continues the thread from its history: no user message is appended and no beforeAgent runs. It is how a
+    // handoff target, seeded with the transferred conversation, answers it.
     val input = b.node[String]("input", writes = Set(messages)) { (text, _, context) =>
-      stack.beforeAgent(text, context) match
-        case Left(error) => boundary(error)
-        case Right(transformed) =>
-          NodeResult.Continue(
-            Command.empty
-              .update(
-                messages,
-                MessageUpdate.Append(StoredMessage(s"${context.position.taskId.value}/user", UserMessage(transformed)))
-              )
-              .goto(modelNode)
-          )
+      if text.isEmpty then NodeResult.Continue(Command.empty.goto(modelNode))
+      else
+        stack.beforeAgent(text, context) match
+          case Left(error) => boundary(error)
+          case Right(transformed) =>
+            NodeResult.Continue(
+              Command.empty
+                .update(
+                  messages,
+                  MessageUpdate.Append(
+                    StoredMessage(s"${context.position.taskId.value}/user", UserMessage(transformed))
+                  )
+                )
+                .goto(modelNode)
+            )
     }
 
     b.compile(input) { state =>
-      state.get(messages).flatMap { history =>
-        history.lastOption.map(_.message) match
-          case Some(answer: AssistantMessage) if answer.toolCalls.isEmpty => Right(answer.content)
-          case _ => Left(ValidationError("tool loop", "the run ended without a final assistant message"))
+      state.get(handoff).flatMap {
+        // the run ended on a handoff: there is no answer, and the caller reads the request from the state
+        case Some(_) => Right("")
+        case None =>
+          state.get(messages).flatMap { history =>
+            history.lastOption.map(_.message) match
+              case Some(answer: AssistantMessage) if answer.toolCalls.isEmpty => Right(answer.content)
+              case _ => Left(ValidationError("tool loop", "the run ended without a final assistant message"))
+          }
       }
     }.map(new ToolLoop(_, approval, askRefs.values.map(_.node.id).toSet))
 
@@ -353,11 +427,17 @@ object ToolLoop:
    * the interrupt flag and is `Left(CancelledError)`. Either way it is the model's failure, not a
    * wrapper's.
    */
-  private def callModel(model: ModelStep)(request: ModelRequest): Result[AssistantMessage] =
+  private def callModel(model: ModelStep, replies: ConcurrentLinkedQueue[ModelReply])(
+    request: ModelRequest
+  ): Result[AssistantMessage] =
     if Thread.currentThread().isInterrupted then Left(CancelledError("model"))
     else
-      attempt(model.next(request.messages, request.tools)) match
-        case Right(result) => result
+      attempt(model.complete(request.messages, request.tools)) match
+        case Right(result) =>
+          result.map { reply =>
+            replies.add(reply): Unit
+            reply.message
+          }
         case Left(thrown) =>
           CancelledError.fromThrowable(thrown, "model") match
             case Some(cancellation) =>

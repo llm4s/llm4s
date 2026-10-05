@@ -15,6 +15,10 @@ object GraphError:
   final case class InvalidGraph(graphId: String, problems: List[String]) extends GraphError with NonRecoverableError:
     override val message: String = s"Graph '$graphId' is invalid: ${problems.mkString("; ")}"
 
+  /** [[GraphRuntime.seed]] found a checkpoint already on the thread: a seed creates a thread, it never changes one. */
+  final case class ThreadExists(threadId: String) extends GraphError with NonRecoverableError:
+    override val message: String = s"Thread '$threadId' already exists and cannot be seeded"
+
   /** A key was read or written that the graph did not register, or another key shares its id. */
   final case class UnknownStateKey(keyId: StateKeyId) extends GraphError with NonRecoverableError:
     override val message: String = s"State key '${keyId.value}' is not registered with this graph"

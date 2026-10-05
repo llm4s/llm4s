@@ -22,6 +22,9 @@ enum RunEvent derives ReadWriter:
   case CheckpointCommitted(superstep: Int)
   case RunCompleted
 
+  /** The thread was created over given state by [[GraphRuntime.seed]], with no run: `start` applies a new input to it. */
+  case ThreadSeeded
+
   /** The run paused; these interrupts await answers. */
   case RunSuspended(interrupts: Vector[String])
 

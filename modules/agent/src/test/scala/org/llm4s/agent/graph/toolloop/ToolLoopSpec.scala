@@ -1459,7 +1459,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val owning = middleware("owning", declares = Set(Messages.key))
     val owned  = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(tools.echo), Seq(owning))
     owned.left.value.message should include(
-      "middleware 'owning' declares a key the loop owns ('tool-results' or 'messages')"
+      "middleware 'owning' declares a key the loop owns ('tool-results', 'messages' or 'usage')"
     )
   }
 
@@ -1609,6 +1609,117 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val result = ToolResult("a", "t1", "ok", isError = false)
     ToolLoop.results.applyUpdate(Vector(result), result.copy(content = "again")).left.value.message should
       include("already has a result")
+  }
+
+  // ---- usage through the model step, a tool-requested handoff, and an empty input (#1328, design 4.13) ----
+
+  /** A model that plays `turns`, reporting `usage` and a cost for each call through `complete`. */
+  final private class BilledModel(turns: (Vector[Message] => AssistantMessage)*)(usages: TokenUsage*)
+      extends ModelStep {
+    private val calls = new AtomicInteger()
+    def next(messages: Vector[Message], tools: ToolSet): Result[AssistantMessage] =
+      complete(messages, tools).map(_.message)
+    override def complete(messages: Vector[Message], tools: ToolSet): Result[ModelReply] = {
+      val turn = calls.getAndIncrement()
+      Right(
+        ModelReply(turns(turn)(messages), "stub-model", usages.lift(turn), usages.lift(turn).map(_.totalTokens * 0.001))
+      )
+    }
+  }
+
+  it should "sum the usage and cost of every model call into the usage key" in {
+    val model = new BilledModel(calls(("c1", "echo", ujson.Obj("text" -> "hi"))), summarise)(
+      TokenUsage(10, 5, 15),
+      TokenUsage(20, 8, 28)
+    )
+    val l          = ToolLoop.build("assistant", "v1", model, set(Tools().echo)).value
+    val (state, _) = runInMemory(l.graph, "go").completed
+    val usage      = state.get(ToolLoop.usage).value
+
+    usage.requestCount shouldBe 2
+    usage.inputTokens shouldBe 30L
+    usage.outputTokens shouldBe 13L
+    usage.totalCost.toDouble shouldBe (0.043 +- 1e-9)
+    usage.byModel.keySet shouldBe Set("stub-model")
+  }
+
+  it should "count a model wrapper's repeated calls: each was billed" in {
+    val model = new ModelStep {
+      def next(messages: Vector[Message], tools: ToolSet): Result[AssistantMessage] =
+        complete(messages, tools).map(_.message)
+      override def complete(messages: Vector[Message], tools: ToolSet): Result[ModelReply] =
+        Right(ModelReply(AssistantMessage("ok"), "stub-model", Some(TokenUsage(10, 5, 15)), None))
+    }
+    // the wrapper asks twice, as a validating retry would, and keeps the second answer
+    val twice = middleware("twice", model = (request, next) => next(request).flatMap(_ => next(request)))
+    val l     = ToolLoop.build("assistant", "v1", model, set(Tools().echo), Seq(twice)).value
+
+    runInMemory(l.graph, "go").completed._1.get(ToolLoop.usage).value.requestCount shouldBe 2
+  }
+
+  it should "report no usage when the model reports none, leaving the key at its initial value" in {
+    val l          = ToolLoop.build("assistant", "v1", ScriptedModel(summarise), set(Tools().echo)).value
+    val (state, _) = runInMemory(l.graph, "go").completed
+    state.isSet(ToolLoop.usage) shouldBe false
+    state.get(ToolLoop.usage).value shouldBe UsageSummary()
+  }
+
+  /** A tool that asks for the handoff `id` with the call's `reason`. */
+  private def handoffTool(id: String): AgentTool[Echo] =
+    AgentTool(
+      AgentToolSpec[Echo](s"handoff_to_$id", s"Hand off to $id", strings[Echo]("handoff", "text")),
+      Set(ToolLoop.handoff)
+    ) { (a, _) =>
+      ToolOutcome.Success(ujson.Str("handing off"), StateUpdate.update(ToolLoop.handoff, HandoffRequest(id, a.text)))
+    }
+
+  it should "end the loop after the batch in which a tool asked for a handoff, without calling the model again" in {
+    val model = ScriptedModel(calls(("h1", "handoff_to_physics", ujson.Obj("text" -> "needs physics"))), summarise)
+    val l     = ToolLoop.build("assistant", "v1", model, set(handoffTool("physics"))).value
+
+    val (state, answer) = runInMemory(l.graph, "why is the sky blue").completed
+
+    answer shouldBe ""
+    state.get(ToolLoop.handoff).value shouldBe Some(HandoffRequest("physics", "needs physics"))
+    model.calls shouldBe 1
+    // the batch's result was recorded before the loop ended
+    messagesOf(state).last shouldBe a[ToolMessage]
+  }
+
+  it should "take the first handoff of a batch" in {
+    val model = ScriptedModel(
+      calls(
+        ("h1", "handoff_to_physics", ujson.Obj("text" -> "first")),
+        ("h2", "handoff_to_poetry", ujson.Obj("text" -> "second"))
+      )
+    )
+    val l = ToolLoop.build("assistant", "v1", model, set(handoffTool("physics"), handoffTool("poetry"))).value
+
+    runInMemory(l.graph, "go").completed._1.get(ToolLoop.handoff).value shouldBe Some(
+      HandoffRequest("physics", "first")
+    )
+  }
+
+  it should "continue a thread from its history on an empty input: no user message, no beforeAgent" in {
+    val seen    = new CopyOnWriteArrayList[String]()
+    val spy     = middleware("spy", before = text => { seen.add(text); Right(text) })
+    val model   = ScriptedModel(_ => AssistantMessage("answered from history"))
+    val l       = ToolLoop.build("assistant", "v1", model, set(Tools().echo), Seq(spy)).value
+    val runtime = GraphRuntime(InMemoryCheckpointer())
+    runtime
+      .seed(
+        thread,
+        l.graph,
+        StateUpdate.update(Messages.key, MessageUpdate.Append(StoredMessage("seed/user", UserMessage("question"))))
+      )
+      .value
+
+    val (state, answer) = runtime.start(thread, l.graph, "").awaited.value.completed
+
+    answer shouldBe "answered from history"
+    model.seen.get(0) shouldBe Vector(UserMessage("question"))
+    messagesOf(state) shouldBe Vector(UserMessage("question"), AssistantMessage("answered from history"))
+    seen.size shouldBe 0
   }
 
   "ToolQuestionRequest" should "round-trip through JSON" in {

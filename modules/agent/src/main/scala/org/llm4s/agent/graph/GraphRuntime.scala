@@ -133,6 +133,67 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
       Left(ValidationError("capacity", s"must be at least 2 (one slot is reserved for a LiveGap), was $capacity"))
     else hub.subscribe(threadId, afterSeq, capacity, listener)
 
+  /**
+   * Creates `threadId` as a finished thread whose committed state is `update` applied to the graph's initial state,
+   * with no run: its checkpoint is [[CheckpointStatus.Completed]], so `start` then applies a new input over that
+   * state exactly as it does over any completed thread. It is how a conversation held as data - loaded from a file,
+   * or a snapshot from another process - becomes a thread to continue. Refused with [[GraphError.ThreadExists]] when
+   * the thread has a checkpoint (or a run in this runtime), so a seed never changes an existing thread, and with
+   * [[GraphError.TenantMismatch]] under another tenant's name.
+   */
+  def seed[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    update: StateUpdate,
+    config: RunConfig = RunConfig()
+  ): Result[Unit] = admission(threadId) {
+    val held = withLock(activeLock) {
+      if active.contains(threadId.value) then true
+      else
+        active.update(threadId.value, config.tenantId.map(_.value))
+        false
+    }
+    if held then Left(GraphError.ThreadExists(threadId.value))
+    else
+      // the thread is held while it is seeded, and released on every exit, an InterruptedException included
+      Using.resource(new AutoCloseable { def close(): Unit = release(threadId) }) { _ =>
+        checkpointer.latest(threadId).flatMap {
+          case Some(_) => Left(GraphError.ThreadExists(threadId.value))
+          case None =>
+            for
+              state    <- graph.initialState.applyUpdate(update)
+              snapshot <- graph.snapshot(graph.seeded(state))
+              _ <- {
+                val checkpoint = Checkpoint(
+                  Checkpoint.CurrentFormat,
+                  s"${config.runId.value}/1",
+                  None,
+                  threadId.value,
+                  config.runId.value,
+                  CheckpointStatus.Completed,
+                  clock.instant(),
+                  snapshot,
+                  config.tenantId.map(_.value)
+                )
+                val event =
+                  EventDraft(
+                    config.runId.value,
+                    Some(checkpoint.id),
+                    None,
+                    None,
+                    clock.instant(),
+                    RunEvent.ThreadSeeded
+                  )
+                commitAndDeliver(threadId, Commit(Some(checkpoint), Vector.empty, Vector(event))).left.map {
+                  case GraphError.CheckpointConflict(_, _, _) => GraphError.ThreadExists(threadId.value)
+                  case other                                  => GraphError.CheckpointWriteFailed(threadId.value, other)
+                }
+              }
+            yield ()
+        }
+      }
+  }
+
   /** Starts a run on `threadId` with `input`; see the class description. */
   def start[I, O](
     threadId: ThreadId,

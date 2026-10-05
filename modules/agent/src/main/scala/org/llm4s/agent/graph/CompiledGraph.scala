@@ -245,6 +245,13 @@ final class CompiledGraph[I, O] private[graph] (
   private[graph] def executorFor(budgets: RunBudgets): TaskExecutor =
     executorOverride.getOrElse(TaskExecutor.bounded(budgets.maxConcurrency))
 
+  /** An execution over `state` with nothing ready: a finished thread, for [[GraphRuntime.seed]]. */
+  private[graph] def seeded(state: ThreadState): Execution =
+    new Execution(owner, 0, state, Vector.empty, Map.empty, Vector.empty, Vector.empty, paused = false)
+
+  /** The graph's initial state: every registered key at its initial value, for [[GraphRuntime.seed]]. */
+  private[graph] def initialState: ThreadState = ThreadState.empty(keys)
+
   /** An execution at `superstep` over `state` with only the entry task ready. */
   private[graph] def startAt(superstep: Int, state: ThreadState, input: I): Execution =
     new Execution(
