@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
+import org.llm4s.error.CancelledError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
@@ -68,32 +69,28 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
     private val httpClient = Llm4sHttpClient.create()
     private val logger     = LoggerFactory.getLogger(getClass)
 
-    override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] = {
-      val model = request.model.name
-      val input = request.input
+    override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
+      CancelledError.attempt("ollama.embed") {
+        val model = request.model.name
+        val input = request.input
 
-      val results = input.map(text => embedSingle(cfg, model, text))
-
-      val (errors, vectors) = results.partition(_.isLeft)
-      if (errors.nonEmpty) {
-        errors.head
-          .asInstanceOf[Left[EmbeddingError, Vector[Double]]]
-          .swap
-          .toOption
-          .map(Left(_))
-          .getOrElse(Left(EmbeddingError(code = Some("500"), message = "Unknown error", provider = "ollama")))
-      } else {
-        val embeddings = vectors.collect { case Right(v) => v }
-        val metadata   = Map("provider" -> "ollama", "model" -> model, "count" -> input.size.toString)
-        Right(EmbeddingResponse(embeddings = embeddings, metadata = metadata))
+        // One request per text, stopping at the first failure: a cancelled call must not go on to
+        // send the rest of the batch.
+        input
+          .foldLeft[Result[Vector[Vector[Double]]]](Right(Vector.empty)) { (done, text) =>
+            done.flatMap(vectors => embedSingle(cfg, model, text).map(vectors :+ _))
+          }
+          .map { embeddings =>
+            val metadata = Map("provider" -> "ollama", "model" -> model, "count" -> input.size.toString)
+            EmbeddingResponse(embeddings = embeddings, metadata = metadata)
+          }
       }
-    }
 
     private def embedSingle(
       cfg: EmbeddingProviderConfig,
       model: String,
       text: String
-    ): Either[EmbeddingError, Vector[Double]] = {
+    ): Result[Vector[Double]] = {
       val payload = Obj(
         "model"  -> model,
         "prompt" -> text
@@ -108,12 +105,17 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
         else Map.empty
       val headers = Map("Content-Type" -> "application/json") ++ auth
 
-      // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left
-      val respEither: Either[EmbeddingError, org.llm4s.http.HttpResponse] =
+      // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.
+      // A cancellation passes through as it is (design section 4.4); any other failure is an EmbeddingError.
+      val respEither: Result[org.llm4s.http.HttpResponse] =
         httpClient
           .post(url, headers, payload.render(), timeout = 2.minutes)
           .left
-          .map(e => EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "ollama"))
+          .map {
+            case cancelled: CancelledError => cancelled
+            case e =>
+              EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "ollama")
+          }
 
       respEither.flatMap { response =>
         response.statusCode match {
