@@ -3,11 +3,8 @@ package org.llm4s.assistant
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
-import org.llm4s.agent.Agent
-import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.types.{ DirectoryPath, Result }
+import org.llm4s.types.DirectoryPath
 
 import java.nio.file.Files
 
@@ -23,31 +20,10 @@ class ConsoleInterfaceMethodsSpec extends AnyFlatSpec with Matchers with BeforeA
     Files.deleteIfExists(tempDir)
   }
 
-  private val dummyClient: LLMClient = new LLMClient {
-    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      Right(
-        Completion(
-          id = "test",
-          created = 0L,
-          content = "ok",
-          model = "test",
-          message = AssistantMessage("ok")
-        )
-      )
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): Result[Completion] = complete(conversation, options)
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 512
-  }
-
   private val emptyTools = ToolRegistry.empty
 
   private def makeConsole(tools: ToolRegistry = emptyTools): ConsoleInterface = {
-    val agent          = new Agent(dummyClient)
-    val sessionManager = new SessionManager(DirectoryPath(tempDir.toString), agent)
+    val sessionManager = new SessionManager(DirectoryPath(tempDir.toString))
     new ConsoleInterface(tools, sessionManager)
   }
 

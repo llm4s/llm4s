@@ -500,6 +500,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Stage 1 migration: agent runtime** ([#1328](https://github.com/llm4s/llm4s/issues/1328), BREAKING,
+  `llm4s-agent`, `llm4s-effect`, `llm4s-zio`, `workspaceClient`): `Agent` runs on `GraphRuntime`
+  through a generalised `ToolLoop`; the graph is the only agent loop, and `AgentState` and the
+  legacy loop are deleted, with no shim. Tools, guardrails, handoffs and context pruning belong to
+  the agent, set at build time, and a conversation is carried by `ThreadId`. Do not cut 0.5.0
+  between #1328 and #1329, which adds the event stream #1328 removes. Slices 3 (#1329) and 4
+  (#1330) extend this note; the full guide with examples is in `docs/reference/migration.md`.
+  Design: `docs/design/typed-agent-runtime-design.md` §4.13. Replacements:
+  - `new Agent(client).run(q, tools, ...)` -> `Agent.builder(id, client).withTools(tools)...build()`
+    then `run(q)`; `run` also takes `(threadId, query)`, `(threadId, query, config)` and
+    `(threadId, query, config, history)`. `agent.start(...)`, `startRecover` and `startResume`
+    return an `AgentRun` (`threadId`, `runId`, `status`, `await()`, `cancel()`).
+  - Per-run guardrails -> `.withMiddleware(new GuardrailMiddleware(input, output))`. A block is
+    `AgentStatus.Blocked(guardrail, reason)`, not an error; the thread completes. A transforming
+    guardrail (`PIIMasker`) now applies. The root agent's guardrails and other run-boundary
+    middleware guard the whole handoff family, whichever agent is active.
+  - `continueConversation(state, q)` -> `continueConversation(result, q)`, which reads only
+    `result.threadId`.
+  - Threads stay in the agent's runtime until `agent.forget(threadId)` (`GraphRuntime.deleteThread`)
+    removes them - one-shot `run` threads too; `Checkpointer` gains `deleteThread`.
+  - `runMultiTurn` with `contextWindowConfig` -> an agent built with
+    `new ContextWindowMiddleware(config)`. It prunes only what is sent; the current turn is never
+    pruned (the strategy, `Custom` included, sees only the history before it), the request always
+    starts with a user message, and the system prompt is outside the budget.
+  - `AgentState` fields -> `AgentResult`: `conversation` is `messages`, `status` is `status`,
+    `usageSummary` is `usage`, `logs` is removed (use `withTracing`).
+  - `AgentStatus` -> `Completed(answer)`, `Blocked`, `StepLimitReached`, `Suspended`; `Failed` is
+    `Left(GraphError...)` (provider errors as `GraphError.NodeFailed(cause)`); `InProgress`,
+    `WaitingForTools` and `HandoffRequested` are gone.
+  - `AgentContext` is removed: `tracing` is `withTracing`, which emits the `graph.*` events;
+    `debug` and `traceLogPath` are gone. `TraceEvent.AgentStateUpdated` is no longer emitted.
+  - `Handoff(agent)` -> `Handoff.to(id, builder, reason)` (the id must equal the target builder's
+    id, `preserveContext` optional) or `Handoff.toId(id, reason?, preserveContext?)` for a cycle; `transferSystemMessage` is
+    removed; a self-handoff, and a handoff mixed with other tool calls, are refused.
+  - `runStep`, `initializeSafe`, `runWithStrategy`, `continueConversationWithStrategy`: removed;
+    `RunBudgets.maxConcurrency` bounds parallel tool calls. `ToolExecutionStrategy` stays in core as
+    a `ToolRegistry` feature.
+  - `runWithEvents`, `continueConversationWithEvents`, `runCollectingEvents`, `AgentEvent`,
+    `AgentStreamingExecutor`: removed, pending #1329.
+  - Session files: `AgentState.saveToFile`/`loadFromFile` -> save `result.messages` and import them
+    as `history` of a new thread; `history` is refused on an existing thread and may hold no system
+    message.
+  - `AgentIO`/`AgentZ` wrap the new `Agent`: `LLMClientIO.agent(id)(configure)` and
+    `LLMClientZ.agent(id)(configure)`; `run`, `continueConversation`, `recover`, `resume`; fiber
+    cancellation cancels the run; a thrown exception arrives as `NodeFailed` carrying the original.
+  - `CodeWorker.executeTask` returns `Result[AgentResult]` and loses `traceLogPath`;
+    `WorkspaceSettings.traceLogPath` and `WORKSPACE_TRACE_LOG` are removed.
+  - `ToolLoop.build(id, version, root, agents: Vector[LoopAgent])` builds an agent family;
+    `ModelStep.next` returns the `Completion`.
+  - Samples `StreamingAgentExample`, `StreamingWithToolsExample`, `EventCollectionExample` and
+    `AsyncToolAgentExample` are deleted.
 - **Approval resumes through the middleware chain; `ToolLoop` gains a `finish` node**
   ([#1279](https://github.com/llm4s/llm4s/issues/1279)): `Approve` now runs the whole middleware
   chain again with `ToolContext.approved = true`, where it skipped the policy; a deny rule that

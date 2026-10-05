@@ -201,6 +201,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
     }
     GraphRuntime(racing).start(thread, f.graph, "y", tenant("b")).awaited.left.value shouldBe
       GraphError.TenantMismatch("t", Some("b"))
@@ -223,6 +224,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
     }
     GraphRuntime(failing).start(thread, f.graph, "y", tenant("a")).awaited.left.value shouldBe
       GraphError.ThreadBusy("t", winner)
@@ -247,6 +249,7 @@ class TenantSpec extends AnyFlatSpec with Matchers with EitherValues with Option
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
     }
     val runtime = GraphRuntime(slow)
     val first   = new java.util.concurrent.LinkedBlockingQueue[org.llm4s.types.Result[RunResult[Vector[String]]]]()

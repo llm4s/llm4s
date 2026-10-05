@@ -1,6 +1,7 @@
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.{ Agent, ContextWindowConfig, PruningStrategy }
+import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole
@@ -47,8 +48,6 @@ object AdaptiveWindowingExample {
       given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
-      tools = new ToolRegistry(Seq(weatherTool))
-      agent = new Agent(client)
 
       // Create adaptive windowing strategy for GPT-4o
       strategy = PruningStrategy.AdaptiveWindowing(
@@ -67,10 +66,16 @@ object AdaptiveWindowingExample {
         preserveSystemMessage = true
       )
 
+      agent <- Agent
+        .builder("adaptive-windowing", client)
+        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withMiddleware(ContextWindowMiddleware(config))
+        .build()
+
       // Run multi-turn conversation with automatic pruning
       finalState <- agent.runMultiTurn(
-        initialQuery = "What's the weather in Paris?",
-        followUpQueries = Seq(
+        first = "What's the weather in Paris?",
+        followUps = Seq(
           "And in London?",
           "How about Tokyo?",
           "Which is warmest?",
@@ -79,15 +84,13 @@ object AdaptiveWindowingExample {
           "When's the best time to visit?",
           "What are the rainy months?",
           "Tell me more about December weather"
-        ),
-        tools = tools,
-        contextWindowConfig = Some(config)
+        )
       )
 
       _ = logger.info("=== Results ===")
-      _ = logger.info("Final messages: {}", finalState.conversation.messageCount)
-      _ = logger.info("User messages: {}", finalState.conversation.filterByRole(MessageRole.User).length)
-      _ = logger.info("Assistant messages: {}", finalState.conversation.filterByRole(MessageRole.Assistant).length)
+      _ = logger.info("Final messages: {}", finalState.messages.length)
+      _ = logger.info("User messages: {}", finalState.messages.count(_.role == MessageRole.User))
+      _ = logger.info("Assistant messages: {}", finalState.messages.count(_.role == MessageRole.Assistant))
     } yield finalState
 
     result.fold(
@@ -105,8 +108,6 @@ object AdaptiveWindowingExample {
       given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
-      tools = new ToolRegistry(Seq(weatherTool))
-      agent = new Agent(client)
 
       // Very aggressive cost optimization
       strategy = PruningStrategy.AdaptiveWindowing(
@@ -125,9 +126,15 @@ object AdaptiveWindowingExample {
         minRecentTurns = 2 // Minimum 2 turns (cost savings)
       )
 
+      agent <- Agent
+        .builder("adaptive-windowing", client)
+        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withMiddleware(ContextWindowMiddleware(config))
+        .build()
+
       finalState <- agent.runMultiTurn(
-        initialQuery = "Tell me about machine learning",
-        followUpQueries = Seq(
+        first = "Tell me about machine learning",
+        followUps = Seq(
           "What about deep learning?",
           "Difference between them?",
           "Best frameworks?",
@@ -135,12 +142,10 @@ object AdaptiveWindowingExample {
           "How to get started?",
           "Recommended courses?",
           "Any books?"
-        ),
-        tools = tools,
-        contextWindowConfig = Some(config)
+        )
       )
 
-      _ = logger.info("Cost-optimized: {} messages", finalState.conversation.messageCount)
+      _ = logger.info("Cost-optimized: {} messages", finalState.messages.length)
     } yield finalState
 
     result.fold(
@@ -158,8 +163,6 @@ object AdaptiveWindowingExample {
       given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
-      tools = new ToolRegistry(Seq(weatherTool))
-      agent = new Agent(client)
 
       // Maximize context for better quality
       strategy = PruningStrategy.AdaptiveWindowing(
@@ -178,9 +181,15 @@ object AdaptiveWindowingExample {
         minRecentTurns = 5 // Keep more context
       )
 
+      agent <- Agent
+        .builder("adaptive-windowing", client)
+        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withMiddleware(ContextWindowMiddleware(config))
+        .build()
+
       finalState <- agent.runMultiTurn(
-        initialQuery = "Explain quantum computing",
-        followUpQueries = Seq(
+        first = "Explain quantum computing",
+        followUps = Seq(
           "How does superposition work?",
           "What about entanglement?",
           "Practical applications?",
@@ -189,12 +198,10 @@ object AdaptiveWindowingExample {
           "Leading companies?",
           "Learning path?",
           "Math requirements?"
-        ),
-        tools = tools,
-        contextWindowConfig = Some(config)
+        )
       )
 
-      _ = logger.info("Quality-optimized: {} messages", finalState.conversation.messageCount)
+      _ = logger.info("Quality-optimized: {} messages", finalState.messages.length)
     } yield finalState
 
     result.fold(

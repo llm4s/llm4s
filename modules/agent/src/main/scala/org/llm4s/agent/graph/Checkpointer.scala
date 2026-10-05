@@ -36,6 +36,14 @@ trait Checkpointer:
   /** Drops events with `seq < beforeSeq`; replay can then start no earlier than `beforeSeq`. */
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit]
 
+  /**
+   * Removes everything stored for the thread - its latest checkpoint, its pending writes and its
+   * event log - so that its id names a new thread again, whose events are numbered from 1. An
+   * unknown thread is `Right(())`. Use [[GraphRuntime.deleteThread]], which refuses a thread with a
+   * live run and checks the tenant; the store itself checks neither.
+   */
+  def deleteThread(threadId: ThreadId): Result[Unit]
+
 /**
  * A [[Checkpointer]] in memory. Checkpoints and pending writes are stored as JSON and decoded on
  * read, exactly as a database-backed store would, so nothing executable survives a round trip.
@@ -115,5 +123,10 @@ final class InMemoryCheckpointer extends Checkpointer:
     val current = record(threadId)
     val floor   = math.max(current.earliestSeq, math.min(beforeSeq, current.nextSeq))
     threads.update(threadId.value, current.copy(events = current.events.filter(_._1 >= floor), earliestSeq = floor))
+    Right(())
+  }
+
+  def deleteThread(threadId: ThreadId): Result[Unit] = withLock(lock) {
+    threads.remove(threadId.value)
     Right(())
   }

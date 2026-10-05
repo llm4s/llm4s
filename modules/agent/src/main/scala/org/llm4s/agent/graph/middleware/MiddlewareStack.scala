@@ -3,7 +3,7 @@ package org.llm4s.agent.graph.middleware
 import org.llm4s.agent.graph.{ GraphError, RunContext, StateKey }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
-import org.llm4s.llmconnect.model.AssistantMessage
+import org.llm4s.llmconnect.model.Completion
 import org.llm4s.types.Result
 
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -38,14 +38,18 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
 
   /** Runs each `afterAgent` in reverse stack order, threading the answer; the first `Left` stops. */
   private[graph] def afterAgent(answer: String, context: RunContext): Result[String] =
-    ordered.reverse.foldLeft[Result[String]](Right(answer))((acc, m) =>
-      acc.flatMap(value => guarded(m)(m.afterAgent(value, context)))
+    afterAgentRaised(answer, context).left.map(_._2)
+
+  /** As [[afterAgent]], but a `Left` also says which middleware returned it. */
+  private[graph] def afterAgentRaised(answer: String, context: RunContext): Either[(MiddlewareId, LLMError), String] =
+    ordered.reverse.foldLeft[Either[(MiddlewareId, LLMError), String]](Right(answer))((acc, m) =>
+      acc.flatMap(value => guarded(m)(m.afterAgent(value, context)).left.map(m.id -> _))
     )
 
   /** Runs the model call through every `wrapModelCall`, the first outermost, with `innermost` at the centre. */
   private[graph] def wrapModelCall(request: ModelRequest, context: RunContext)(
-    innermost: ModelRequest => Result[AssistantMessage]
-  ): Result[AssistantMessage] =
+    innermost: ModelRequest => Result[Completion]
+  ): Result[Completion] =
     val chain = ordered.foldRight(innermost) { (m, next) => (req: ModelRequest) =>
       guarded(m)(m.wrapModelCall(req, context)(next))
     }

@@ -1,14 +1,15 @@
 package org.llm4s.effect.cats
 
-import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 import cats.effect.IO
 import cats.effect.unsafe.implicits.global
-import org.llm4s.agent.{ Agent, AgentContext, AgentState, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentBuilder, AgentStatus }
+import org.llm4s.agent.graph.GraphError
+import org.llm4s.agent.graph.middleware.{ ApprovalMiddleware, GuardrailMiddleware }
 import org.llm4s.agent.guardrails.builtin.LengthCheck
-import org.llm4s.error.{ SimpleError, ValidationError }
+import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
@@ -17,7 +18,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.*
 
-/** Proves that arguments given to `AgentIO` reach the underlying `Agent` unchanged. */
+/** Proves that what `AgentIO` is given reaches the underlying `Agent` unchanged, and what the agent reports comes back. */
 class AgentIOFidelitySpec extends AnyFlatSpec with Matchers {
 
   final case class EchoResult(value: String)
@@ -64,20 +65,18 @@ class AgentIOFidelitySpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  private def io(client: LLMClient) = AgentIO[IO](new Agent(client))
+  private def tools: ToolRegistry = new ToolRegistry(Seq(echoTool))
 
-  "AgentIO.run" should "forward systemPromptAddition, completionOptions and tools to the model call" in {
+  private def io(client: LLMClient)(configure: AgentBuilder => AgentBuilder = identity) =
+    AgentIO[IO](Fixtures.agentOf(client)(configure))
+
+  "AgentIO.run" should "forward the system prompt, completion options and tools to the model call" in {
     val client = new Recording(_ => text("done"))
     val opts   = CompletionOptions().withTemperature(0.123).withMaxTokens(77)
-    val state = io(client)
-      .run(
-        "q",
-        new ToolRegistry(Seq(echoTool)),
-        systemPromptAddition = Some("EXTRA-INSTRUCTIONS"),
-        completionOptions = opts
-      )
+    val result = io(client)(_.withTools(tools).withSystemPrompt("EXTRA-INSTRUCTIONS").withCompletionOptions(opts))
+      .run("q")
       .unsafeRunSync()
-    state.status shouldBe AgentStatus.Complete
+    result.status shouldBe AgentStatus.Completed("done")
     client.calls.get() shouldBe 1
     val sent = client.conversations.get(0).messages
     sent.collect { case m: SystemMessage => m.content }.exists(_.contains("EXTRA-INSTRUCTIONS")) shouldBe true
@@ -87,61 +86,42 @@ class AgentIOFidelitySpec extends AnyFlatSpec with Matchers {
     client.options.get(0).tools.map(_.name) shouldBe Seq("echo")
   }
 
-  it should "honour maxSteps (a tool round trip costs two steps, so Some(2) allows one model call) and report the step limit" in {
+  it should "honour withMaxSteps (model calls per turn) and report the step limit" in {
     val client = new Recording(toolCall)
-    val state  = io(client).run("q", new ToolRegistry(Seq(echoTool)), maxSteps = Some(2)).unsafeRunSync()
+    val result = io(client)(_.withTools(tools).withMaxSteps(1)).run("q").unsafeRunSync()
     client.calls.get() shouldBe 1
-    state.status shouldBe AgentStatus.Failed("Maximum step limit reached")
+    result.status shouldBe AgentStatus.StepLimitReached
   }
 
-  it should "honour maxSteps = None as unlimited rather than the default cap" in {
-    val client = new Recording(i => if (i < 60) toolCall(i) else text("finally"))
-    val state  = io(client).run("q", new ToolRegistry(Seq(echoTool)), maxSteps = None).unsafeRunSync()
-    client.calls.get() shouldBe 61
-    state.status shouldBe AgentStatus.Complete
-  }
-
-  it should "apply the Agent default step cap when maxSteps is not given" in {
+  it should "apply the Agent default step cap when withMaxSteps is not given" in {
     val client = new Recording(toolCall)
-    val state  = io(client).run("q", new ToolRegistry(Seq(echoTool))).unsafeRunSync()
+    val result = io(client)(_.withTools(tools)).run("q").unsafeRunSync()
     val direct = new Recording(toolCall)
-    new Agent(direct).run("q", new ToolRegistry(Seq(echoTool)))
+    Fixtures.agentOf(direct)(_.withTools(tools)).run("q")
     client.calls.get() shouldBe direct.calls.get()
-    client.calls.get() shouldBe Agent.DefaultMaxSteps / 2
-    state.status shouldBe AgentStatus.Failed("Maximum step limit reached")
+    client.calls.get() shouldBe Agent.DefaultMaxSteps
+    result.status shouldBe AgentStatus.StepLimitReached
   }
 
-  it should "apply input guardrails before any model call and map the failure to LLMException" in {
+  it should "apply input guardrails before any model call and report the turn Blocked" in {
     val client = new Recording(_ => text("done"))
-    val result = io(client)
-      .run("this query is far too long", ToolRegistry.empty, inputGuardrails = Seq(new LengthCheck(1, 5)))
-      .attempt
+    val result = io(client)(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 5)), Nil)))
+      .run("this query is far too long")
       .unsafeRunSync()
-    result.left.toOption.get shouldBe a[LLMException]
-    result.left.toOption.get.asInstanceOf[LLMException].error shouldBe a[ValidationError]
+    result.status shouldBe a[AgentStatus.Blocked]
     client.calls.get() shouldBe 0
   }
 
-  it should "apply output guardrails to the final state" in {
+  it should "apply output guardrails to the answer" in {
     val client = new Recording(_ => text("ok"))
-    val result = io(client)
-      .run("q", ToolRegistry.empty, outputGuardrails = Seq(new LengthCheck(10, 100)))
-      .attempt
+    val result = io(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(10, 100)))))
+      .run("q")
       .unsafeRunSync()
-    result.left.toOption.get shouldBe a[LLMException]
+    result.status shouldBe a[AgentStatus.Blocked]
     client.calls.get() shouldBe 1
   }
 
-  it should "forward the AgentContext (trace log path)" in {
-    val path = Files.createTempFile("agentio-trace", ".md")
-    Files.delete(path)
-    val client = new Recording(_ => text("done"))
-    io(client).run("q", ToolRegistry.empty, context = AgentContext(traceLogPath = Some(path.toString))).unsafeRunSync()
-    Files.exists(path) shouldBe true
-    Files.delete(path)
-  }
-
-  it should "map a thrown non-LLM exception to the raw throwable in the error channel" in {
+  it should "raise a thrown non-LLM exception as an LLMException whose NodeFailed cause carries that instance" in {
     val failure = new IllegalStateException("provider exploded")
     val client = new LLMClient {
       def complete(c: Conversation, o: CompletionOptions): Result[Completion] = throw failure
@@ -150,78 +130,119 @@ class AgentIOFidelitySpec extends AnyFlatSpec with Matchers {
       def getContextWindow(): Int     = 1
       def getReserveCompletion(): Int = 1
     }
-    val outcome = io(client).run("q", ToolRegistry.empty).attempt.unsafeRunSync()
-    (outcome.left.toOption.get should be).theSameInstanceAs(failure)
+    val raised = io(client)().run("q").attempt.unsafeRunSync().left.toOption.get
+    raised shouldBe a[LLMException]
+    raised.asInstanceOf[LLMException].error shouldBe a[GraphError.NodeFailed]
+    (Fixtures.thrownOf(raised.asInstanceOf[LLMException].error).get should be).theSameInstanceAs(failure)
   }
 
-  "AgentIO.continueConversation" should "forward the previous state, message, and maxSteps" in {
-    val first = io(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty).unsafeRunSync()
-
-    val loop  = new Recording(toolCall)
-    val state = first.copy(tools = new ToolRegistry(Seq(echoTool)))
-    val next  = io(loop).continueConversation(state, "q2", maxSteps = Some(3)).unsafeRunSync()
-    loop.calls.get() shouldBe 2 // maxSteps = 3: two steps per tool round trip
-    next.status shouldBe AgentStatus.Failed("Maximum step limit reached")
-    val firstRequest = loop.conversations.get(0).messages.collect { case m: UserMessage => m.content }
-    firstRequest shouldBe Seq("q1", "q2")
-  }
-
-  it should "default to unlimited steps like Agent.continueConversation" in {
-    val first = io(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty).unsafeRunSync()
-    val loop  = new Recording(i => if (i < 60) toolCall(i) else text("end"))
-    val next = io(loop)
-      .continueConversation(first.copy(tools = new ToolRegistry(Seq(echoTool))), "q2")
-      .unsafeRunSync()
-    loop.calls.get() shouldBe 61
-    next.status shouldBe AgentStatus.Complete
+  "AgentIO.continueConversation" should "continue the previous result's thread and honour withMaxSteps" in {
+    val client = new Recording(i => if (i == 0) text("first") else toolCall(i))
+    val agent  = io(client)(_.withTools(tools).withMaxSteps(2))
+    val first  = agent.run("q1").unsafeRunSync()
+    val next   = agent.continueConversation(first, "q2").unsafeRunSync()
+    next.threadId shouldBe first.threadId
+    client.calls.get() shouldBe 3 // one for q1, then two (the step limit) for q2
+    next.status shouldBe AgentStatus.StepLimitReached
+    val lastRequest = client.conversations.get(2).messages.collect { case m: UserMessage => m.content }
+    lastRequest shouldBe Seq("q1", "q2")
   }
 
   it should "apply input guardrails to the new message and not call the model" in {
-    val first  = io(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty).unsafeRunSync()
-    val client = new Recording(_ => text("x"))
-    val result = io(client)
-      .continueConversation(first, "far too long a follow up", inputGuardrails = Seq(new LengthCheck(1, 5)))
-      .attempt
-      .unsafeRunSync()
-    result.left.toOption.get shouldBe a[LLMException]
-    client.calls.get() shouldBe 0
+    val client = new Recording(_ => text("first"))
+    val agent  = io(client)(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 20)), Nil)))
+    val first  = agent.run("q1").unsafeRunSync()
+    val result = agent.continueConversation(first, "far too long a follow up for the guardrail").unsafeRunSync()
+    result.status shouldBe a[AgentStatus.Blocked]
+    client.calls.get() shouldBe 1
   }
 
-  it should "apply output guardrails" in {
-    val first  = io(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty).unsafeRunSync()
-    val client = new Recording(_ => text("ok"))
-    val result = io(client)
-      .continueConversation(first, "q2", outputGuardrails = Seq(new LengthCheck(10, 100)))
-      .attempt
-      .unsafeRunSync()
-    result.left.toOption.get shouldBe a[LLMException]
-  }
-
-  it should "refuse to continue an incomplete state with a ValidationError" in {
-    val inProgress: AgentState = new Agent(new Recording(_ => text("x")))
-      .initializeSafe("q", ToolRegistry.empty)
-      .getOrElse(fail("init failed"))
-    val result = io(new Recording(_ => text("x"))).continueConversation(inProgress, "more").attempt.unsafeRunSync()
-    result.left.toOption.get.asInstanceOf[LLMException].error shouldBe a[ValidationError]
+  it should "apply output guardrails to the new answer" in {
+    val client = new Recording(i => if (i == 0) text("a long enough first answer") else text("ok"))
+    val agent  = io(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(10, 100)))))
+    val first  = agent.run("q1").unsafeRunSync()
+    first.status shouldBe AgentStatus.Completed("a long enough first answer")
+    val next = agent.continueConversation(first, "q2").unsafeRunSync()
+    next.status shouldBe a[AgentStatus.Blocked]
   }
 
   it should "surface provider errors with the original LLMError attached" in {
-    val first = io(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty).unsafeRunSync()
+    val calls = new AtomicInteger(0)
     val client = new LLMClient {
-      def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Left(SimpleError("nope"))
+      def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+        if (calls.getAndIncrement() == 0) Right(text("first")) else Left(SimpleError("nope"))
       def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
-        Left(SimpleError("nope"))
+        complete(c, o)
       def getContextWindow(): Int     = 1
       def getReserveCompletion(): Int = 1
     }
-    val err = io(client).continueConversation(first, "q2").attempt.unsafeRunSync().left.toOption.get
-    err.asInstanceOf[LLMException].error shouldBe SimpleError("nope")
+    val agent = io(client)()
+    val first = agent.run("q1").unsafeRunSync()
+    val err   = agent.continueConversation(first, "q2").attempt.unsafeRunSync().left.toOption.get
+    Fixtures.causeOf(err.asInstanceOf[LLMException].error) shouldBe SimpleError("nope")
   }
 
-  "agent()" should "build an AgentIO over the same underlying client" in {
+  "agent(id)" should "build an AgentIO over the same underlying client" in {
     val client = new Recording(_ => text("via-client"))
-    val state  = LLMClientIO[IO](client).agent().run("q", ToolRegistry.empty).unsafeRunSync()
-    state.status shouldBe AgentStatus.Complete
+    val result = LLMClientIO[IO](client)
+      .agent("assistant")()
+      .flatMap(_.run("q"))
+      .unsafeRunSync()
+    result.status shouldBe AgentStatus.Completed("via-client")
     client.calls.get() shouldBe 1
+  }
+
+  it should "apply the configuration to the agent" in {
+    val client = new Recording(_ => text("x"))
+    val result = LLMClientIO[IO](client)
+      .agent("assistant")(_.withSystemPrompt("CONFIGURED"))
+      .flatMap(_.run("q"))
+      .unsafeRunSync()
+    result.status shouldBe AgentStatus.Completed("x")
+    client.conversations.get(0).messages.collect { case m: SystemMessage => m.content }.head should include(
+      "CONFIGURED"
+    )
+  }
+
+  it should "raise a builder that does not build as LLMException" in {
+    val err = LLMClientIO[IO](new Recording(_ => text("x")))
+      .agent("not a valid id!")()
+      .attempt
+      .unsafeRunSync()
+    err.left.toOption.get shouldBe a[LLMException]
+  }
+
+  "AgentIO.resume" should "complete a turn parked on an approval once it is approved" in {
+    val client = new Recording(i => if (i == 0) toolCall(0) else text("shipped"))
+    val agent = io(client)(_.withTools(tools).withMiddleware(new ApprovalMiddleware(r => Some(s"review ${r.call.id}"))))
+    val parked = agent.run("go").unsafeRunSync()
+    val ids = parked.status match {
+      case AgentStatus.Suspended(approvals, _) => approvals.map(_._1)
+      case other                               => fail(s"expected Suspended, got $other")
+    }
+    ids should have size 1
+    val done = agent.resume(parked.threadId, Map(parked.approve(ids.head))).unsafeRunSync()
+    done.status shouldBe AgentStatus.Completed("shipped")
+  }
+
+  "AgentIO.recover" should "complete a run that failed with a provider error, without any cancellation" in {
+    val calls = new AtomicInteger(0)
+    val client = new LLMClient {
+      def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+        calls.getAndIncrement() match {
+          case 0 => Right(toolCall(0))
+          case 1 => Left(SimpleError("provider down"))
+          case _ => Right(text("recovered"))
+        }
+      def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] =
+        complete(c, o)
+      def getContextWindow(): Int     = 8192
+      def getReserveCompletion(): Int = 512
+    }
+    val (capture, thread) = Fixtures.threadCapture()
+    val agent             = io(client)(_.withTools(tools).withMiddleware(capture))
+    val failed            = agent.run("go").attempt.unsafeRunSync()
+    Fixtures.causeOf(failed.left.toOption.get.asInstanceOf[LLMException].error) shouldBe SimpleError("provider down")
+    agent.recover(thread.get().get).unsafeRunSync().status shouldBe AgentStatus.Completed("recovered")
   }
 }

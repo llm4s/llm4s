@@ -140,24 +140,50 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     input: I,
     config: RunConfig = RunConfig(),
     durability: Durability = Durability.Sync
+  ): Result[RunHandle[O]] = startOn(threadId, graph, input, config, durability, None)
+
+  /**
+   * Starts a run on `threadId` only if the thread is new: an existing thread of the caller's tenant
+   * is refused with `existing`, no run started. Checked during admission, under the thread's
+   * exclusivity and against the claim's parent checkpoint, so no other run can create the thread
+   * between the check and the claim. Another tenant's thread is still `TenantMismatch` first.
+   */
+  private[agent] def startNew[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    input: I,
+    config: RunConfig,
+    existing: => LLMError
+  ): Result[RunHandle[O]] = startOn(threadId, graph, input, config, Durability.Sync, Some(() => existing))
+
+  private def startOn[I, O](
+    threadId: ThreadId,
+    graph: CompiledGraph[I, O],
+    input: I,
+    config: RunConfig,
+    durability: Durability,
+    newOnly: Option[() => LLMError]
   ): Result[RunHandle[O]] = exclusively(threadId, config) { signal =>
     checkpointer.latest(threadId).flatMap {
       case None =>
         newRun(graph, threadId, config, durability, 0, signal).admit(graph.start(input), None, started(config))
       case Some(stored) =>
         checkTenant(threadId, stored, config).flatMap { _ =>
-          stored.checkpoint.status match
-            case CheckpointStatus.Running   => Left(GraphError.IncompleteRun(threadId.value, stored.checkpoint.id))
-            case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
-            case CheckpointStatus.Completed | CheckpointStatus.Failed =>
-              graph.restore(stored.checkpoint.snapshot).flatMap { done =>
-                newRun(graph, threadId, config, durability, done.superstep, signal)
-                  .admit(
-                    graph.startAt(done.superstep, done.state, input),
-                    Some(stored.checkpoint.id),
-                    started(config)
-                  )
-              }
+          newOnly match
+            case Some(refusal) => Left(refusal())
+            case None =>
+              stored.checkpoint.status match
+                case CheckpointStatus.Running   => Left(GraphError.IncompleteRun(threadId.value, stored.checkpoint.id))
+                case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
+                case CheckpointStatus.Completed | CheckpointStatus.Failed =>
+                  graph.restore(stored.checkpoint.snapshot).flatMap { done =>
+                    newRun(graph, threadId, config, durability, done.superstep, signal)
+                      .admit(
+                        graph.startAt(done.superstep, done.state, input),
+                        Some(stored.checkpoint.id),
+                        started(config)
+                      )
+                  }
         }
     }
   }
@@ -226,6 +252,32 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
             yield run
         }
     }
+  }
+
+  /**
+   * Deletes `threadId` from the runtime's store - its checkpoint, pending writes and event log - so
+   * its id names a new thread again. Refused, with nothing deleted, as admission refuses a run: a
+   * thread of another tenant is [[GraphError.TenantMismatch]], and one whose run is admitting or
+   * executing in this runtime is [[GraphError.ThreadBusy]]. The thread is held exclusively while
+   * it is deleted, so no run starts on it meanwhile. An unknown thread is `Right(())`. Cancel any
+   * [[subscribe]] to the thread first: a new thread of the same id numbers its events from 1 again.
+   */
+  def deleteThread(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Unit] = admission(threadId) {
+    val holder = withLock(activeLock) {
+      val existing = active.get(threadId.value)
+      if existing.isEmpty then active.update(threadId.value, config.tenantId.map(_.value))
+      existing
+    }
+    holder match
+      case Some(holderTenant) => busy(threadId, config, holderTenant)
+      case None               =>
+        // released on every exit, including an InterruptedException, which `Try` would not catch
+        Using.resource(new AutoCloseable { def close(): Unit = release(threadId) }) { _ =>
+          checkpointer.latest(threadId).flatMap {
+            case None         => checkpointer.deleteThread(threadId)
+            case Some(stored) => checkTenant(threadId, stored, config).flatMap(_ => checkpointer.deleteThread(threadId))
+          }
+        }
   }
 
   /**

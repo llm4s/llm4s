@@ -1,21 +1,21 @@
 package org.llm4s.zio
 
-import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentBuilder, AgentStatus }
+import org.llm4s.agent.graph.GraphError
+import org.llm4s.agent.graph.middleware.{ ApprovalMiddleware, GuardrailMiddleware }
 import org.llm4s.agent.guardrails.builtin.LengthCheck
-import org.llm4s.error.{ SimpleError, ValidationError }
+import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
 import upickle.default.*
-import zio.ZIO
 import zio.test.*
 
-/** Proves that arguments given to `AgentZ` reach the underlying `Agent` unchanged. */
+/** Proves that what `AgentZ` is given reaches the underlying `Agent` unchanged, and what the agent reports comes back. */
 object AgentZFidelitySpec extends ZIOSpecDefault {
 
   final case class EchoResult(value: String)
@@ -64,20 +64,19 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
     )
   }
 
-  private def z(client: LLMClient) = AgentZ(new Agent(client))
-
-  private val failed = AgentStatus.Failed("Maximum step limit reached")
+  private def z(client: LLMClient)(configure: AgentBuilder => AgentBuilder = identity) =
+    AgentZ(Fixtures.agentOf(client)(configure))
 
   val spec =
     suite("AgentZ fidelity")(
-      test("run forwards systemPromptAddition, completionOptions and tools to the model call") {
+      test("run forwards the system prompt, completion options and tools to the model call") {
         val client = new Recording(_ => text("done"))
         val opts   = CompletionOptions().withTemperature(0.123).withMaxTokens(77)
-        z(client)
-          .run("q", tools, systemPromptAddition = Some("EXTRA-INSTRUCTIONS"), completionOptions = opts)
-          .map { state =>
+        z(client)(_.withTools(tools).withSystemPrompt("EXTRA-INSTRUCTIONS").withCompletionOptions(opts))
+          .run("q")
+          .map { result =>
             val sent = client.conversations.get(0).messages
-            assertTrue(state.status == AgentStatus.Complete) &&
+            assertTrue(result.status == AgentStatus.Completed("done")) &&
             assertTrue(client.calls.get() == 1) &&
             assertTrue(sent.collect { case m: SystemMessage => m.content }.exists(_.contains("EXTRA-INSTRUCTIONS"))) &&
             assertTrue(sent.collect { case m: UserMessage => m.content } == Seq("q")) &&
@@ -86,56 +85,39 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
             assertTrue(client.options.get(0).tools.map(_.name) == Seq("echo"))
           }
       },
-      test(
-        "run honours maxSteps = Some(2) (a tool round trip costs two steps): one model call, then the step-limit failure"
-      ) {
+      test("run honours withMaxSteps (model calls per turn) and reports the step limit") {
         val client = new Recording(toolCall)
-        z(client).run("q", tools, maxSteps = Some(2)).map { state =>
-          assertTrue(client.calls.get() == 1) && assertTrue(state.status == failed)
+        z(client)(_.withTools(tools).withMaxSteps(1)).run("q").map { result =>
+          assertTrue(client.calls.get() == 1) && assertTrue(result.status == AgentStatus.StepLimitReached)
         }
       },
-      test("run honours maxSteps = None as unlimited rather than the default cap") {
-        val client = new Recording(i => if (i < 60) toolCall(i) else text("finally"))
-        z(client).run("q", tools, maxSteps = None).map { state =>
-          assertTrue(client.calls.get() == 61) && assertTrue(state.status == AgentStatus.Complete)
-        }
-      },
-      test("run applies the Agent default step cap when maxSteps is not given") {
+      test("run applies the Agent default step cap when withMaxSteps is not given") {
         val client = new Recording(toolCall)
         val direct = new Recording(toolCall)
-        new Agent(direct).run("q", tools)
-        z(client).run("q", tools).map { state =>
+        Fixtures.agentOf(direct)(_.withTools(tools)).run("q")
+        z(client)(_.withTools(tools)).run("q").map { result =>
           assertTrue(client.calls.get() == direct.calls.get()) &&
-          assertTrue(client.calls.get() == Agent.DefaultMaxSteps / 2) &&
-          assertTrue(state.status == failed)
+          assertTrue(client.calls.get() == Agent.DefaultMaxSteps) &&
+          assertTrue(result.status == AgentStatus.StepLimitReached)
         }
       },
-      test("run applies input guardrails before any model call and fails with the ValidationError") {
+      test("run applies input guardrails before any model call and reports the turn Blocked") {
         val client = new Recording(_ => text("done"))
-        z(client)
-          .run("this query is far too long", ToolRegistry.empty, inputGuardrails = Seq(new LengthCheck(1, 5)))
-          .flip
-          .map(err => assertTrue(err.isInstanceOf[ValidationError]) && assertTrue(client.calls.get() == 0))
+        z(client)(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 5)), Nil)))
+          .run("this query is far too long")
+          .map(result =>
+            assertTrue(result.status.isInstanceOf[AgentStatus.Blocked]) && assertTrue(client.calls.get() == 0)
+          )
       },
-      test("run applies output guardrails to the final state") {
+      test("run applies output guardrails to the answer") {
         val client = new Recording(_ => text("ok"))
-        z(client)
-          .run("q", ToolRegistry.empty, outputGuardrails = Seq(new LengthCheck(10, 100)))
-          .flip
-          .map(err => assertTrue(err.isInstanceOf[ValidationError]) && assertTrue(client.calls.get() == 1))
+        z(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(10, 100)))))
+          .run("q")
+          .map(result =>
+            assertTrue(result.status.isInstanceOf[AgentStatus.Blocked]) && assertTrue(client.calls.get() == 1)
+          )
       },
-      test("run forwards the AgentContext (trace log path)") {
-        val path = Files.createTempFile("agentz-trace", ".md")
-        Files.delete(path)
-        z(new Recording(_ => text("done")))
-          .run("q", ToolRegistry.empty, context = AgentContext(traceLogPath = Some(path.toString)))
-          .map { _ =>
-            val exists = Files.exists(path)
-            Files.deleteIfExists(path)
-            assertTrue(exists)
-          }
-      },
-      test("run turns a thrown non-LLM exception into a defect, unchanged") {
+      test("run fails with a NodeFailed whose cause carries the thrown exception instance") {
         val failure = new IllegalStateException("provider exploded")
         val client = new LLMClient {
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] = throw failure
@@ -148,73 +130,119 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
           def getContextWindow(): Int     = 1
           def getReserveCompletion(): Int = 1
         }
-        z(client).run("q", ToolRegistry.empty).exit.map { exit =>
-          assertTrue(exit.causeOption.flatMap(_.dieOption).contains(failure))
+        z(client)().run("q").flip.map { err =>
+          assertTrue(err.isInstanceOf[GraphError.NodeFailed]) &&
+          assertTrue(Fixtures.thrownOf(err).exists(_ eq failure))
         }
       },
-      test("continueConversation forwards the previous state, the message and maxSteps") {
-        val loop = new Recording(toolCall)
+      test("continueConversation continues the previous result's thread and honours withMaxSteps") {
+        val client = new Recording(i => if (i == 0) text("first") else toolCall(i))
+        val agent  = z(client)(_.withTools(tools).withMaxSteps(2))
         for {
-          first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
-          next  <- z(loop).continueConversation(first.copy(tools = tools), "q2", maxSteps = Some(3))
-        } yield assertTrue(loop.calls.get() == 2) && // maxSteps = 3: two steps per tool round trip
-          assertTrue(next.status == failed) &&
-          assertTrue(loop.conversations.get(0).messages.collect { case m: UserMessage => m.content } == Seq("q1", "q2"))
-      },
-      test("continueConversation defaults to unlimited steps like Agent.continueConversation") {
-        val loop = new Recording(i => if (i < 60) toolCall(i) else text("end"))
-        for {
-          first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
-          next  <- z(loop).continueConversation(first.copy(tools = tools), "q2")
-        } yield assertTrue(loop.calls.get() == 61) && assertTrue(next.status == AgentStatus.Complete)
+          first <- agent.run("q1")
+          next  <- agent.continueConversation(first, "q2")
+        } yield assertTrue(next.threadId == first.threadId) &&
+          assertTrue(client.calls.get() == 3) && // one for q1, then two (the step limit) for q2
+          assertTrue(next.status == AgentStatus.StepLimitReached) &&
+          assertTrue(client.conversations.get(2).messages.collect { case m: UserMessage =>
+            m.content
+          } == Seq("q1", "q2"))
       },
       test("continueConversation applies input guardrails to the new message and does not call the model") {
-        val client = new Recording(_ => text("x"))
+        val client = new Recording(_ => text("first"))
+        val agent  = z(client)(_.withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(1, 20)), Nil)))
         for {
-          first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
-          err <- z(client)
-            .continueConversation(first, "far too long a follow up", inputGuardrails = Seq(new LengthCheck(1, 5)))
-            .flip
-        } yield assertTrue(err.isInstanceOf[ValidationError]) && assertTrue(client.calls.get() == 0)
+          first  <- agent.run("q1")
+          result <- agent.continueConversation(first, "far too long a follow up for the guardrail")
+        } yield assertTrue(result.status.isInstanceOf[AgentStatus.Blocked]) && assertTrue(client.calls.get() == 1)
       },
-      test("continueConversation applies output guardrails") {
+      test("continueConversation applies output guardrails to the new answer") {
+        val client = new Recording(i => if (i == 0) text("a long enough first answer") else text("ok"))
+        val agent  = z(client)(_.withMiddleware(new GuardrailMiddleware(Nil, Seq(new LengthCheck(10, 100)))))
         for {
-          first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
-          err <- z(new Recording(_ => text("ok")))
-            .continueConversation(first, "q2", outputGuardrails = Seq(new LengthCheck(10, 100)))
-            .flip
-        } yield assertTrue(err.isInstanceOf[ValidationError])
+          first <- agent.run("q1")
+          next  <- agent.continueConversation(first, "q2")
+        } yield assertTrue(first.status == AgentStatus.Completed("a long enough first answer")) &&
+          assertTrue(next.status.isInstanceOf[AgentStatus.Blocked])
       },
-      test("continueConversation refuses an incomplete state with a ValidationError") {
-        val inProgress = new Agent(new Recording(_ => text("x"))).initializeSafe("q", ToolRegistry.empty)
-        ZIO
-          .fromEither(inProgress)
-          .flatMap(s => z(new Recording(_ => text("x"))).continueConversation(s, "more"))
-          .flip
-          .map(err => assertTrue(err.isInstanceOf[ValidationError]))
-      },
-      test("continueConversation surfaces provider errors unchanged") {
+      test("continueConversation surfaces provider errors with the original LLMError attached") {
+        val calls = new AtomicInteger(0)
         val client = new LLMClient {
-          def complete(c: Conversation, o: CompletionOptions): Result[Completion] = Left(SimpleError("nope"))
+          def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+            if (calls.getAndIncrement() == 0) Right(text("first")) else Left(SimpleError("nope"))
           def streamComplete(
             c: Conversation,
             o: CompletionOptions,
             onChunk: StreamedChunk => Unit
-          ): Result[Completion] =
-            Left(SimpleError("nope"))
+          ): Result[Completion] = complete(c, o)
           def getContextWindow(): Int     = 1
           def getReserveCompletion(): Int = 1
         }
+        val agent = z(client)()
         for {
-          first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
-          err   <- z(client).continueConversation(first, "q2").flip
-        } yield assertTrue(err == SimpleError("nope"))
+          first <- agent.run("q1")
+          err   <- agent.continueConversation(first, "q2").flip
+        } yield assertTrue(Fixtures.causeOf(err) == SimpleError("nope"))
       },
-      test("agent() builds an AgentZ over the same underlying client") {
-        val client = new Recording(_ => text("via-client"))
-        LLMClientZ(client).agent().run("q", ToolRegistry.empty).map { state =>
-          assertTrue(state.status == AgentStatus.Complete) && assertTrue(client.calls.get() == 1)
+      test("resume completes a turn parked on an approval once it is approved") {
+        val client = new Recording(i => if (i == 0) toolCall(0) else text("shipped"))
+        val agent =
+          z(client)(_.withTools(tools).withMiddleware(new ApprovalMiddleware(r => Some(s"review ${r.call.id}"))))
+        for {
+          parked <- agent.run("go")
+          ids = parked.status match {
+            case AgentStatus.Suspended(approvals, _) => approvals.map(_._1)
+            case _                                   => Vector.empty
+          }
+          done <- agent.resume(parked.threadId, Map(parked.approve(ids.head)))
+        } yield assertTrue(ids.size == 1) && assertTrue(done.status == AgentStatus.Completed("shipped"))
+      },
+      test("recover completes a run that failed with a provider error, without any cancellation") {
+        val calls = new AtomicInteger(0)
+        val client = new LLMClient {
+          def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+            calls.getAndIncrement() match {
+              case 0 => Right(toolCall(0))
+              case 1 => Left(SimpleError("provider down"))
+              case _ => Right(text("recovered"))
+            }
+          def streamComplete(
+            c: Conversation,
+            o: CompletionOptions,
+            onChunk: StreamedChunk => Unit
+          ): Result[Completion] = complete(c, o)
+          def getContextWindow(): Int     = 8192
+          def getReserveCompletion(): Int = 512
         }
+        val (capture, thread) = Fixtures.threadCapture()
+        val agent             = z(client)(_.withTools(tools).withMiddleware(capture))
+        for {
+          err       <- agent.run("go").flip
+          recovered <- agent.recover(thread.get().get)
+        } yield assertTrue(Fixtures.causeOf(err) == SimpleError("provider down")) &&
+          assertTrue(recovered.status == AgentStatus.Completed("recovered"))
+      },
+      test("agent(id) builds an AgentZ over the same underlying client") {
+        val client = new Recording(_ => text("via-client"))
+        LLMClientZ(client).agent("assistant")().flatMap(_.run("q")).map { result =>
+          assertTrue(result.status == AgentStatus.Completed("via-client")) && assertTrue(client.calls.get() == 1)
+        }
+      },
+      test("agent(id) applies the configuration to the agent") {
+        val client = new Recording(_ => text("x"))
+        LLMClientZ(client).agent("assistant")(_.withSystemPrompt("CONFIGURED")).flatMap(_.run("q")).map { _ =>
+          assertTrue(
+            client.conversations
+              .get(0)
+              .messages
+              .collect { case m: SystemMessage => m.content }
+              .head
+              .contains("CONFIGURED")
+          )
+        }
+      },
+      test("agent(id) fails with the LLMError of a builder that does not build") {
+        LLMClientZ(new Recording(_ => text("x"))).agent("not a valid id!")().either.map(r => assertTrue(r.isLeft))
       }
     ) @@ TestAspect.sequential
 }

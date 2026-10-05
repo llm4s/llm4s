@@ -1,6 +1,6 @@
 package org.llm4s.codegen
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentState, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
@@ -36,44 +36,33 @@ class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int, clie
   /**
    * Execute a code task and return the result
    * @param task The description of the code task to perform
-   * @param maxSteps Maximum number of agent steps to run (None for unlimited)
-   * @param traceLogPath Optional path to write a markdown trace file
-   * @return Either an error or the agent's final state
+   * @param maxSteps Maximum number of model calls to run (None for the agent's default)
+   * @return Either an error or the agent's result
    */
   def executeTask(
     task: String,
-    maxSteps: Option[Int] = None,
-    traceLogPath: Option[String] = None
-  ): Result[AgentState] = {
+    maxSteps: Option[Int] = None
+  ): Result[AgentResult] = {
     val infoResponse = workspace.getWorkspaceInfo()
     if (infoResponse.root.isEmpty) {
       return Left(ValidationError("workspace", "Workspace is not initialized"))
     }
 
     logger.info(s"Executing code task: $task")
-    if (traceLogPath.isDefined) {
-      logger.info(s"Trace log will be written to: ${traceLogPath.get}")
-    }
 
-    // Run the agent to completion or until step limit is reached
-    val agent = new Agent(client)
     val result = for {
       toolRegistry <- toolRegistryResult
-      state <- agent.run(
-        query = task,
-        tools = toolRegistry,
-        maxSteps = maxSteps,
-        context = AgentContext(traceLogPath = traceLogPath)
-      )
-    } yield state
+      builder = Agent.builder("codegen", client).withTools(toolRegistry)
+      agent   <- maxSteps.fold(builder)(builder.withMaxSteps).build()
+      outcome <- agent.run(task)
+    } yield outcome
 
     result match {
-      case Right(finalState) =>
-        logger.info(s"Task completed with status: ${finalState.status}")
-        if (finalState.status == AgentStatus.Complete) {
-          logger.info("Task completed successfully")
-        } else {
-          logger.warn(s"Task did not complete successfully: ${finalState.status}")
+      case Right(outcome) =>
+        logger.info(s"Task finished with status: ${outcome.status}")
+        outcome.status match {
+          case AgentStatus.Completed(_) => logger.info("Task completed successfully")
+          case other                    => logger.warn(s"Task did not complete successfully: $other")
         }
       case Left(error) =>
         logger.error(s"Task execution failed: ${error.message}")

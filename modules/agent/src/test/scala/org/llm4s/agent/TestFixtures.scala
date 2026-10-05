@@ -3,7 +3,6 @@ package org.llm4s.agent
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 
 /**
@@ -121,19 +120,15 @@ final private[agent] class FailingLLMClient(error: LLMError) extends LLMClient {
  */
 final private[agent] class NTurnFakeLLMClient(responses: Completion*) extends LLMClient {
 
-  private var callIndex = 0
+  private val callIndex = new java.util.concurrent.atomic.AtomicInteger(0)
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = {
-    val result =
-      if (responses.isEmpty)
-        Right(CompletionFixture.simple(s"turn-$callIndex"))
-      else
-        Right(responses(callIndex % responses.size))
-    callIndex += 1
-    result
+    val index = callIndex.getAndIncrement()
+    if (responses.isEmpty) Right(CompletionFixture.simple(s"turn-$index"))
+    else Right(responses(index % responses.size))
   }
 
   override def streamComplete(
@@ -195,6 +190,18 @@ private[agent] object CompletionFixture {
     )
   }
 
+  /** A completion of `message`, its tool calls included, with the same usage as [[simple]]. */
+  def withMessage(message: AssistantMessage): Completion =
+    Completion(
+      id = s"fixture-msg-${System.nanoTime()}",
+      created = System.currentTimeMillis(),
+      content = message.content,
+      model = "test-model",
+      message = message,
+      toolCalls = message.toolCalls.toList,
+      usage = Some(TokenUsage(promptTokens = 10, completionTokens = 20, totalTokens = 30))
+    )
+
   /**
    * A plain text completion with explicit token usage.
    *
@@ -219,56 +226,115 @@ private[agent] object CompletionFixture {
 }
 
 /**
- * Factory methods for building [[AgentState]] instances in tests.
- *
- * These builders create the minimum viable state for each scenario and leave
- * all other fields at their defaults, keeping test setup concise.
+ * LLM client that answers call N with `responses(N)`, and records every conversation and options
+ * it was called with. Past the end of `responses` it answers `Left(ValidationError)`, so a test
+ * that makes more calls than it scripted fails rather than looping. Thread-safe: the agent calls it
+ * from its run thread.
  */
-private[agent] object AgentStateFixture {
+final private[agent] class ScriptedLLMClient(responses: Result[Completion]*) extends LLMClient {
 
-  /**
-   * An [[AgentState]] ready for its first [[Agent.runStep]] call.
-   *
-   * @param query The user's initial question.
-   * @param tools Tool registry; defaults to an empty registry.
-   */
-  def initial(query: String, tools: ToolRegistry = ToolRegistry.empty): AgentState =
-    AgentState(
-      conversation = Conversation(Seq(UserMessage(query))),
-      tools = tools,
-      initialQuery = Some(query),
-      status = AgentStatus.InProgress
+  private val recorded = new java.util.concurrent.CopyOnWriteArrayList[(Conversation, CompletionOptions)]()
+
+  /** Every call so far: the conversation sent and the options. */
+  def calls: Vector[(Conversation, CompletionOptions)] = {
+    import scala.jdk.CollectionConverters._
+    recorded.asScala.toVector
+  }
+
+  /** The messages each call was sent. */
+  def sent: Vector[Vector[Message]] = calls.map(_._1.messages.toVector)
+
+  def callCount: Int = recorded.size
+
+  override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+    val index = recorded.size
+    recorded.add(conversation -> options)
+    responses
+      .lift(index)
+      .getOrElse(Left(org.llm4s.error.ValidationError("scripted", s"no response scripted for call $index")))
+  }
+
+  override def streamComplete(
+    conversation: Conversation,
+    options: CompletionOptions,
+    onChunk: StreamedChunk => Unit
+  ): Result[Completion] = complete(conversation, options)
+
+  override def getContextWindow(): Int = 128000
+
+  override def getReserveCompletion(): Int = 4096
+}
+
+private[agent] object ScriptedLLMClient {
+
+  /** Answers each call in turn with one of `completions`. */
+  def of(completions: Completion*): ScriptedLLMClient = new ScriptedLLMClient(completions.map(Right(_))*)
+}
+
+/** Builders for agents in tests: building must succeed. */
+private[agent] object AgentFixture {
+  import org.scalatest.Assertions.fail
+
+  /** `builder` built, failing the test if it is refused. */
+  def built(builder: AgentBuilder): Agent = builder.build().fold(e => fail(s"build failed: ${e.message}"), identity)
+
+  /** An agent with id `assistant` over `client` and no tools. */
+  def plain(client: LLMClient): Agent = built(Agent.builder("assistant", client))
+
+  extension (result: Result[AgentResult]) {
+
+    /** The result, failing the test on `Left`. */
+    def value: AgentResult = result.fold(e => fail(s"expected Right, got ${e.message}"), identity)
+
+    /** The error, failing the test on `Right`. */
+    def error: org.llm4s.error.LLMError = result.fold(identity, r => fail(s"expected Left, got ${r.status}"))
+  }
+
+  /** `error`'s cause when it is a failed node's, else `error` itself. */
+  def cause(error: org.llm4s.error.LLMError): org.llm4s.error.LLMError = error match {
+    case org.llm4s.agent.graph.GraphError.NodeFailed(_, _, cause) => cause
+    case other                                                    => other
+  }
+}
+
+/** Builds an [[AgentResult]] directly, for tests outside `org.llm4s.agent` that need one of a given status. */
+object AgentResultFixture {
+  def apply(
+    status: AgentStatus,
+    messages: Vector[Message] = Vector.empty,
+    threadId: org.llm4s.agent.graph.ThreadId = org.llm4s.agent.graph.ThreadId("fixture-thread")
+  ): AgentResult =
+    AgentResult(
+      threadId,
+      org.llm4s.agent.graph.RunId("fixture-run"),
+      AgentId.unsafe("assistant"),
+      status,
+      messages,
+      UsageSummary()
+    )
+}
+
+/** Agent tools for specs: a one-argument tool whose body is a function of the call. */
+private[agent] object SpecTools {
+  import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContext, ToolOutcome }
+  import org.llm4s.toolapi.Schema
+  import upickle.default.ReadWriter
+
+  final case class Text(text: String) derives ReadWriter
+
+  def spec(name: String): AgentToolSpec[Text] =
+    AgentToolSpec[Text](
+      name,
+      s"The $name tool",
+      Schema.`object`[Text](name).withRequiredField("text", Schema.string("Text"))
     )
 
-  /**
-   * An [[AgentState]] in terminal `Complete` status with both a user message
-   * and a final assistant response.
-   *
-   * Use to construct the `previousState` argument for
-   * [[Agent.continueConversation]] tests.
-   *
-   * @param query    The user's question.
-   * @param response The assistant's final response.
-   */
-  def complete(query: String, response: String): AgentState =
-    AgentState(
-      conversation = Conversation(Seq(UserMessage(query), AssistantMessage(response, Seq.empty))),
-      tools = ToolRegistry.empty,
-      initialQuery = Some(query),
-      status = AgentStatus.Complete
-    )
+  def set(tools: AgentTool[?]*): org.llm4s.agent.graph.tool.ToolSet =
+    org.llm4s.agent.graph.tool.ToolSet.of(tools*).fold(e => org.scalatest.Assertions.fail(e.message), identity)
 
-  /**
-   * An [[AgentState]] with exactly the supplied messages in its conversation.
-   *
-   * The state is `InProgress`; override with `.withStatus(...)` if needed.
-   *
-   * @param msgs Ordered sequence of messages forming the conversation.
-   */
-  def withMessages(msgs: Message*): AgentState =
-    AgentState(
-      conversation = Conversation(msgs.toSeq),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.InProgress
-    )
+  def tool(name: String)(run: (Text, ToolContext) => ToolOutcome): AgentTool[Text] = AgentTool(spec(name))(run)
+
+  def call(id: String, name: String, text: String = "x"): ToolCall = ToolCall(id, name, ujson.Obj("text" -> text))
+
+  def calling(calls: ToolCall*): Completion = CompletionFixture.withMessage(AssistantMessage(None, calls))
 }

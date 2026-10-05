@@ -14,14 +14,12 @@ class CodegenTypesSpec extends AnyFlatSpec with Matchers {
     val settings = WorkspaceSettings(
       workspaceDir = "/home/user/code",
       imageName = "my-image:latest",
-      hostPort = 9090,
-      traceLogPath = "/var/log/trace.md"
+      hostPort = 9090
     )
 
     settings.workspaceDir shouldBe "/home/user/code"
     settings.imageName shouldBe "my-image:latest"
     settings.hostPort shouldBe 9090
-    settings.traceLogPath shouldBe "/var/log/trace.md"
   }
 
   it should "have default image name" in {
@@ -33,16 +31,16 @@ class CodegenTypesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "support equality" in {
-    val s1 = WorkspaceSettings("/dir", "image", 8080, "/log")
-    val s2 = WorkspaceSettings("/dir", "image", 8080, "/log")
-    val s3 = WorkspaceSettings("/other", "image", 8080, "/log")
+    val s1 = WorkspaceSettings("/dir", "image", 8080)
+    val s2 = WorkspaceSettings("/dir", "image", 8080)
+    val s3 = WorkspaceSettings("/other", "image", 8080)
 
     s1 shouldBe s2
     s1 should not be s3
   }
 
   it should "support copy with modifications" in {
-    val original = WorkspaceSettings("/dir", "image", 8080, "/log")
+    val original = WorkspaceSettings("/dir", "image", 8080)
     val modified = original.copy(hostPort = 9000)
 
     modified.workspaceDir shouldBe "/dir"

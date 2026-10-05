@@ -1,10 +1,9 @@
 package org.llm4s.samples.catseffect
 
 import cats.effect.{ IO, IOApp }
-import org.llm4s.agent.AgentContext
 import org.llm4s.effect.cats.LLMClientIO
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.samples.util.AgentResults
 
 /**
  * Demonstrates cats-effect / fs2 integration with llm4s.
@@ -39,13 +38,9 @@ object CatsEffectAgentExample extends IOApp.Simple {
         _ <- IO.println("")
 
         // Agent with tool support
-        agentIO = client.agent()
-        state <- agentIO.run(
-          query = "What day is it today?",
-          tools = ToolRegistry.empty,
-          context = AgentContext.Default
-        )
-        _ <- IO.println(s"Agent: ${state.conversation.messages.last}")
+        agentIO <- client.agent("cats-effect-agent-example")()
+        result  <- agentIO.run("What day is it today?")
+        _       <- IO.println(s"Agent: ${AgentResults.answerOrStatus(result)}")
       } yield ()
     }
 }

@@ -1,8 +1,10 @@
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.{ Agent, ContextWindowConfig, PruningStrategy }
+import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.samples.util.AgentResults
 import org.llm4s.llmconnect.model.MessageRole
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.tools.WeatherTool
@@ -35,13 +37,16 @@ object LongConversationExample {
       given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
-      tools = new ToolRegistry(Seq(weatherTool))
-      agent = new Agent(client)
+      agent <- Agent
+        .builder("long-conversation", client)
+        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withMiddleware(ContextWindowMiddleware(contextConfig)) // Enable automatic pruning
+        .build()
 
       // Use runMultiTurn for convenience - automatically chains all turns
       finalState <- agent.runMultiTurn(
-        initialQuery = "What's the weather in Paris?",
-        followUpQueries = Seq(
+        first = "What's the weather in Paris?",
+        followUps = Seq(
           "And in London?",
           "How about Tokyo?",
           "What about New York?",
@@ -51,21 +56,16 @@ object LongConversationExample {
           "Should I pack an umbrella for Paris?",
           "What about sunscreen for Sydney?"
         ),
-        tools = tools,
-        contextWindowConfig = Some(contextConfig) // Enable automatic pruning
       )
 
       _ = logger.info("=== Conversation Statistics ===")
-      _ = logger.info("Total messages: {}", finalState.conversation.messageCount)
-      _ = logger.info("User messages: {}", finalState.conversation.filterByRole(MessageRole.User).length)
-      _ = logger.info("Assistant messages: {}", finalState.conversation.filterByRole(MessageRole.Assistant).length)
-      _ = logger.info("Tool messages: {}", finalState.conversation.filterByRole(MessageRole.Tool).length)
+      _ = logger.info("Total messages: {}", finalState.messages.length)
+      _ = logger.info("User messages: {}", finalState.messages.count(_.role == MessageRole.User))
+      _ = logger.info("Assistant messages: {}", finalState.messages.count(_.role == MessageRole.Assistant))
+      _ = logger.info("Tool messages: {}", finalState.messages.count(_.role == MessageRole.Tool))
 
       _ = logger.info("=== Final Assistant Response ===")
-      _ = finalState.conversation.messages
-        .filter(_.role == MessageRole.Assistant)
-        .lastOption
-        .foreach(msg => logger.info("{}", msg.content))
+      _ = logger.info("{}", AgentResults.answerOrStatus(finalState))
 
     } yield finalState
 

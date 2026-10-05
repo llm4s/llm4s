@@ -156,6 +156,7 @@ class RunBudgetsSpec extends AnyFlatSpec with Matchers with EitherValues {
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
     }
     val b = GraphBuilder("self-interrupt", "v1")
     val node = b.node[Unit]("n") { (_, _, _) =>

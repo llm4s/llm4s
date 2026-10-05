@@ -1,5 +1,7 @@
 # Phase 4.1: Reasoning Modes
 
+> **Superseded in part:** this document describes the pre-#1328 agent API (`new Agent(client)`, `AgentState`, per-run tools and guardrails). `Agent` now runs on the graph runtime and is built with `Agent.builder(...)`; see [typed-agent-runtime-design.md §4.13](typed-agent-runtime-design.md) and the [Stage 1 migration note](../reference/migration.md#stage-1-migration-agent-runtime). Kept as history.
+
 > **Status:** Complete
 > **Last Updated:** 2025-11-26
 > **Related:** Agent Framework Roadmap

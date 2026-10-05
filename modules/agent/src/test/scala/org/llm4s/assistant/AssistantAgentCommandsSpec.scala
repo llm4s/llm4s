@@ -3,7 +3,7 @@ package org.llm4s.assistant
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
-import org.llm4s.agent.{ AgentState, AgentStatus }
+import org.llm4s.agent.{ AgentResultFixture, AgentStatus }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
@@ -47,23 +47,18 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
 
   private def emptySessionState(): SessionState =
     SessionState(
-      agentState = None,
+      threadId = None,
+      last = None,
       sessionId = SessionId(UUID.randomUUID().toString),
       sessionDir = DirectoryPath(tempDir.toString)
     )
 
+  /** A session whose latest turn ended with `status`, leaving `messages`. */
   private def sessionStateWithMessages(
     messages: Seq[Message],
-    status: AgentStatus = AgentStatus.Complete
-  ): SessionState = {
-    val agentState = AgentState(
-      conversation = Conversation(messages),
-      tools = emptyTools,
-      initialQuery = Some("test"),
-      status = status
-    )
-    emptySessionState().withAgentState(agentState)
-  }
+    status: AgentStatus = AgentStatus.Completed("done")
+  ): SessionState =
+    emptySessionState().withResult(AgentResultFixture(status, messages.toVector))
 
   private def assistantAgent(client: LLMClient = mockClient()): AssistantAgent =
     new AssistantAgent(client, emptyTools, tempDir.toString)
@@ -121,7 +116,8 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
 
     result.isRight shouldBe true
     result.toOption.get._2 should include("42")
-    result.toOption.get._1.agentState shouldBe defined
+    result.toOption.get._1.last shouldBe defined
+    result.toOption.get._1.threadId shouldBe defined
   }
 
   it should "handle multiple sequential queries maintaining state" in {
@@ -137,56 +133,23 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
     val state2 = result2.toOption.get._1
 
     // Should have accumulated messages
-    state2.agentState.get.conversation.messages.size should be > state1.agentState.get.conversation.messages.size
+    state2.messages.size should be > state1.messages.size
+    state2.threadId shouldBe state1.threadId
   }
 
   // ========== extractFinalResponse edge cases ==========
 
-  "AssistantAgent.extractFinalResponse" should "return the most recent assistant message" in {
+  "AssistantAgent.extractFinalResponse" should "return the latest turn's answer" in {
     val agent = assistantAgent()
     val state = sessionStateWithMessages(
-      Seq(
-        UserMessage("q1"),
-        AssistantMessage("answer 1"),
-        UserMessage("q2"),
-        AssistantMessage("answer 2")
-      )
+      Seq(UserMessage("q1"), AssistantMessage("answer 1"), UserMessage("q2"), AssistantMessage("answer 2")),
+      AgentStatus.Completed("answer 2")
     )
 
     agent.extractFinalResponse(state) shouldBe Right("answer 2")
   }
 
-  it should "return Left for conversation with only user messages" in {
-    val agent = assistantAgent()
-    val state = sessionStateWithMessages(Seq(UserMessage("unanswered")))
-
-    agent.extractFinalResponse(state).isLeft shouldBe true
-  }
-
-  // ========== addUserMessage edge cases ==========
-
-  "AssistantAgent.addUserMessage" should "set status to InProgress when adding to existing conversation" in {
-    val agent = assistantAgent()
-    val state = sessionStateWithMessages(
-      Seq(UserMessage("hi"), AssistantMessage("hello")),
-      status = AgentStatus.Complete
-    )
-
-    val result = agent.addUserMessage("follow-up", state)
-    result.isRight shouldBe true
-    result.toOption.get.agentState.get.status shouldBe AgentStatus.InProgress
-  }
-
-  // ========== runAgentToCompletion with error status ==========
-
-  "AssistantAgent.runAgentToCompletion" should "return immediately for Error status" in {
-    val agent = assistantAgent()
-    val state = sessionStateWithMessages(
-      Seq(UserMessage("q")),
-      status = AgentStatus.Failed("some error")
-    )
-
-    val result = agent.runAgentToCompletion(state)
-    result.isRight shouldBe true
+  it should "return Left for a session with no turn yet" in {
+    assistantAgent().extractFinalResponse(emptySessionState()).isLeft shouldBe true
   }
 }
