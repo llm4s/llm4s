@@ -78,8 +78,8 @@ object ModelStep:
  *    message, and a valid conversation - and makes the root the active agent; on an existing thread
  *    a `history` is refused. It then runs the root's `beforeAgent` stack on the query and, when
  *    another agent is active, that agent's stack on the result, appends the user message, resets
- *    [[LoopKeys.turn]] and routes to the active agent's model. A `Left` from either stack blocks
- *    the run without the query or a model call; a new thread still keeps its
+ *    [[LoopKeys.turn]] and routes to the active agent's model. A `Left` from either stack, or a
+ *    blank query, blocks the run without the query or a model call; a new thread still keeps its
  *    imported history and the root as its active agent. The turn's [[TurnOutput]] is its outcome
  *    and the active agent.
  *  - `<id>/model` counts the turn's steps: at the agent's `maxSteps` it ends the turn with
@@ -91,7 +91,7 @@ object ModelStep:
  *    replacing the stored answer's content when it changes. The root's boundary hooks guard the
  *    whole family: `input` runs the root's `beforeAgent` stack, then the active agent's, and
  *    `<id>/finish` of a handoff target runs its own `afterAgent` stack, then the root's. A `Left`
- *    from either hook and a blank answer from `afterAgent`
+ *    from either hook, a blank query from `beforeAgent` and a blank answer from `afterAgent`
  *    *block* the run (design 4.13): it ends as a finished failure, `RunResult.Failed`, carrying
  *    that error, and the thread stays usable; a cancellation is not a Block. An input Block
  *    commits only a new thread's seed - its imported history and the root as active agent - and an
@@ -321,7 +321,7 @@ object ToolLoop:
     val preserves = prepared.flatMap(p => p.agent.handoffs.map(h => (p.agent.id, h.target) -> h.preserveContext)).toMap
     prepared.foreach(p => implement(b, agents(p.agent.id), agents, root, preserves))
 
-    // An input Block (a beforeAgent `Left`) stores nothing of the turn: the run ends as a
+    // An input Block (a beforeAgent `Left`, or a blank query) stores nothing of the turn: the run ends as a
     // finished failure, committing only a new thread's seed - its imported history and the root as active agent.
     val input = b.node[AgentInput]("input", writes = Set(messages, LoopKeys.activeAgent, LoopKeys.turn)) {
       (in, state, context) =>
@@ -344,7 +344,10 @@ object ToolLoop:
           // the root's boundary hooks guard the whole family; the active agent's own run inside them
           val stacks = if agentId == root then Vector(nodes.stack) else Vector(agents(root).stack, nodes.stack)
           stacks.foldLeft[Result[String]](Right(in.query))((acc, s) => acc.flatMap(s.beforeAgent(_, context))) match
-            case Left(error) => boundary(error, seeded.update)
+            case Left(error)                                    => boundary(error, seeded.update)
+            case Right(transformed) if transformed.trim.isEmpty =>
+              // stored, a blank query would fail every model call and every recover after it
+              boundary(ValidationError("query", "beforeAgent returned a blank query"), seeded.update)
             case Right(transformed) =>
               NodeResult.Continue(
                 seeded

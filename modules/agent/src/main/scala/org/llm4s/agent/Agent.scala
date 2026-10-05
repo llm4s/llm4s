@@ -23,12 +23,12 @@ import org.llm4s.types.Result
  * Every run is a turn on a thread. A run that reaches the graph's end is `Right` with status
  * `Completed` or `StepLimitReached`; one a guardrail blocks is `Right` with `Blocked`, the blocked
  * turn absent from the thread; one that parks on approvals or questions is `Right` with
- * `Suspended`, and continues with [[resume]]. Anything else is `Left`: the runtime's refusals
- * (`ThreadBusy`, `TenantMismatch`, `IncompleteRun`, `PendingInterrupts`, ...) leave the thread
- * unchanged, as does another middleware's `beforeAgent` or `afterAgent` failure (a Block without a
- * guardrail; a blank answer from a hook is one), which also ends the run; a failed run - a provider
- * error, a tool's `Fatal`, a model or tool wrapper's failure, cancellation, a deadline - leaves the
- * thread for [[recover]].
+ * `Suspended`, and continues with [[resume]]. Anything else is `Left`: a blank query and the
+ * runtime's refusals (`ThreadBusy`, `TenantMismatch`, `IncompleteRun`, `PendingInterrupts`, ...)
+ * leave the thread unchanged, as does another middleware's `beforeAgent` or `afterAgent` failure
+ * (a Block without a guardrail; a blank query or answer from a hook is one), which also ends the
+ * run; a failed run - a provider error, a tool's `Fatal`, a model or tool wrapper's failure,
+ * cancellation, a deadline - leaves the thread for [[recover]].
  */
 final class Agent private[agent] (
   val id: AgentId,
@@ -46,12 +46,13 @@ final class Agent private[agent] (
     run(ThreadId(java.util.UUID.randomUUID().toString), query, config, Nil)
 
   /**
-   * One turn on `threadId`: a new thread is created, seeded with `history`; on a completed or blocked thread
-   * it is the next turn, and `history` must be empty. `history` holds no system message and must be
-   * a valid conversation. A `history` refused for its content, or given for a thread that exists, is
-   * a `ValidationError`; the runtime's refusals - `GraphError.TenantMismatch` for another tenant's
-   * thread, `ThreadBusy`, `IncompleteRun`, `PendingInterrupts` - come back unchanged. Either way no
-   * thread is created and an existing one is unchanged.
+   * One turn on `threadId`: a new thread is created, seeded with `history`; on a completed or
+   * blocked thread it is the next turn, and `history` must be empty. `history` holds no system
+   * message and must be a valid conversation. A blank `query`, a `history` refused for its content,
+   * or one given for a thread that exists, is a `ValidationError`; the runtime's refusals -
+   * `GraphError.TenantMismatch` for another tenant's thread, `ThreadBusy`, `IncompleteRun`,
+   * `PendingInterrupts` - come back unchanged. Either way no thread is created and an existing one
+   * is unchanged.
    */
   def run(threadId: ThreadId, query: String, config: RunConfig, history: Seq[Message]): Result[AgentResult] =
     start(threadId, query, config, history).flatMap(_.await())
@@ -130,7 +131,9 @@ final class Agent private[agent] (
   ): Result[AgentRun] =
     val input = AgentInput(query, history.toVector)
     val started =
-      if history.isEmpty then runtime.start(threadId, loop.graph, input, config)
+      // refused before any thread is claimed: stored, a blank query would fail every model call after it
+      if query.trim.isEmpty then Left(ValidationError("query", "the query is blank"))
+      else if history.isEmpty then runtime.start(threadId, loop.graph, input, config)
       else
         importable(history).flatMap(_ =>
           runtime.startNew(

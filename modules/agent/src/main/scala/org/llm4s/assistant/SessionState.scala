@@ -38,6 +38,7 @@ case class SessionState(
   def withResult(result: AgentResult): SessionState =
     copy(threadId = Some(result.threadId), last = Some(result), history = Vector.empty)
 
+  /** A fresh session with no thread. The caller forgets this session's thread, which nothing continues. */
   def withNewSession(): SessionState =
     copy(
       threadId = None,

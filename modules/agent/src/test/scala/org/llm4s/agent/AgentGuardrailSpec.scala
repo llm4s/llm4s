@@ -345,4 +345,45 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
     next.messages shouldBe (history.toVector ++ Vector(UserMessage("yes"), AssistantMessage("next answer")))
     client.sent.head.collect { case u: UserMessage => u.content } shouldBe Vector("earlier question", "yes")
   }
+
+  // --- a blank query (review of #1369) ---
+
+  "A blank query" should "be refused before any thread is claimed, and the thread stays usable" in {
+    val client = answers("fine")
+    val agent  = built(Agent.builder("assistant", client))
+    val thread = org.llm4s.agent.graph.ThreadId("blank-query")
+
+    agent.run(thread, "   ").error shouldBe ValidationError("query", "the query is blank")
+    agent.run("").error shouldBe ValidationError("query", "the query is blank")
+    client.callCount shouldBe 0
+
+    // nothing was created, so history can still be imported into the thread
+    val history = Seq(UserMessage("earlier"), AssistantMessage("before"))
+    val next    = agent.run(thread, "hello", org.llm4s.agent.graph.RunConfig(), history).value
+    next.answer shouldBe Some("fine")
+    next.messages shouldBe history.toVector ++ Vector(UserMessage("hello"), AssistantMessage("fine"))
+  }
+
+  /** Turns the query `blank me` blank; passes any other. */
+  final private class Blanking extends AgentMiddleware {
+    val id: MiddlewareId = MiddlewareId("blanking")
+    override def beforeAgent(text: String, context: RunContext): Result[String] =
+      Right(if (text == "blank me") "  " else text)
+  }
+
+  "A query a beforeAgent hook turns blank" should "be Left, store nothing, and leave the thread usable" in {
+    val client = answers("first", "second")
+    val agent  = built(Agent.builder("assistant", client).withMiddleware(new Blanking))
+    val thread = org.llm4s.agent.graph.ThreadId("hook-blank")
+
+    val first = agent.run(thread, "hi").value
+    agent.run(thread, "blank me").error shouldBe ValidationError("query", "beforeAgent returned a blank query")
+    client.callCount shouldBe 1
+    // the thread is finished, not left Running with an invalid user message
+    agent.recover(thread).error shouldBe GraphError.NothingToRecover(thread.value)
+
+    val next = agent.run(thread, "again").value
+    next.answer shouldBe Some("second")
+    next.messages shouldBe first.messages ++ Vector(UserMessage("again"), AssistantMessage("second"))
+  }
 }

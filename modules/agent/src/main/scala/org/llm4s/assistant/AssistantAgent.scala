@@ -56,9 +56,9 @@ class AssistantAgent(
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** Built once; a build failure is reported by every query. */
-  private val agent: Result[Agent] = Agent.builder("assistant", client).withTools(tools).build()
-  private val sessionManager       = new SessionManager(DirectoryPath(sessionDir))
-  private val console              = new ConsoleInterface(tools, sessionManager)
+  private[assistant] val agent: Result[Agent] = Agent.builder("assistant", client).withTools(tools).build()
+  private val sessionManager                  = new SessionManager(DirectoryPath(sessionDir))
+  private val console                         = new ConsoleInterface(tools, sessionManager)
 
   /**
    * Starts the interactive session loop
@@ -204,7 +204,22 @@ class AssistantAgent(
    * Creates new session state
    */
   private def createNewSessionState(state: SessionState): SessionState =
-    state.withNewSession()
+    replacing(state, state.withNewSession())
+
+  /**
+   * `next`, having forgotten `previous`'s thread when `next` does not continue it, so an abandoned
+   * conversation does not stay in the agent's runtime.
+   */
+  private def replacing(previous: SessionState, next: SessionState): SessionState = {
+    previous.threadId.filterNot(next.threadId.contains).foreach(forgetThread)
+    next
+  }
+
+  /** Removes `threadId` from the agent's runtime; a failure is logged, since the session moves on either way. */
+  private def forgetThread(threadId: ThreadId): Unit =
+    agent.flatMap(_.forget(threadId)).left.foreach { error =>
+      logger.warn("Could not forget thread {}: {}", threadId.value, error.message)
+    }
 
   /**
    * Formats success message for saved session
@@ -287,7 +302,7 @@ class AssistantAgent(
       loadedState <- loadSession(title)
       messageCount = countMessagesInSession(loadedState)
       message      = formatLoadSuccessMessage(title, messageCount)
-    } yield (loadedState, message)
+    } yield (replacing(state, loadedState), message)
 
   /**
    * Handles quit command by composing atomic operations (reusing existing methods)
@@ -309,7 +324,8 @@ class AssistantAgent(
   /**
    * Runs `query` as one turn: on the session's thread, or on a new thread seeded with the session's
    * messages when it has none yet - a loaded session - or when its thread cannot take a new turn
-   * (an earlier turn failed, or is waiting for an approval the assistant cannot give).
+   * (an earlier turn failed, or is waiting for an approval the assistant cannot give), which is
+   * then forgotten.
    */
   private[assistant] def runTurn(query: String, state: SessionState): Result[AgentResult] =
     agent.flatMap { agent =>
@@ -317,8 +333,12 @@ class AssistantAgent(
       state.threadId match {
         case Some(threadId) =>
           agent.run(threadId, query) match {
-            case Left(_: GraphError.IncompleteRun | _: GraphError.PendingInterrupts) => fresh()
-            case other                                                               => other
+            case Left(_: GraphError.IncompleteRun | _: GraphError.PendingInterrupts) =>
+              fresh().map { result =>
+                forgetThread(threadId)
+                result
+              }
+            case other => other
           }
         case None => fresh()
       }

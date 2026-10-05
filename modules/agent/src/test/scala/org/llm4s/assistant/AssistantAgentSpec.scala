@@ -3,7 +3,7 @@ package org.llm4s.assistant
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.agent.{ AgentResultFixture, AgentStatus }
-import org.llm4s.agent.graph.GraphError
+import org.llm4s.agent.graph.{ GraphError, RunConfig }
 import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -98,6 +98,10 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
     val third = ran(agent, "third", first)
     third.threadId should not be first.threadId
     third.messages.collect { case u: UserMessage => u.content } shouldBe Vector("first", "third")
+    // the abandoned thread is forgotten: a history import, allowed only into a new thread, succeeds
+    agent.agent.flatMap(
+      _.run(first.threadId.get, "probe", RunConfig(), Seq(UserMessage("a"), AssistantMessage("b")))
+    ) shouldBe a[Right[?, ?]]
   }
 
   it should "return Left when the model call fails" in {

@@ -1561,6 +1561,23 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     messagesOf(next) shouldBe history ++ Vector(UserMessage("ok"), AssistantMessage("never"))
   }
 
+  it should "block a blank query from beforeAgent, storing nothing, and leave the thread usable" in {
+    val blanking = middleware("blanking", before = q => if q == "blank me" then Right("  ") else Right(q))
+    val model    = ScriptedModel(_ => AssistantMessage("fine"))
+    val l        = buildSingle(model, set(Tools().echo), Seq(blanking)).value
+    val store    = InMemoryCheckpointer()
+    val runtime  = GraphRuntime(store)
+
+    val (kept, error) = runtime.start(thread, l.graph, AgentInput("blank me")).awaited.value.failed
+    error shouldBe ValidationError("query", "beforeAgent returned a blank query")
+    messagesOf(kept) shouldBe empty
+    model.calls shouldBe 0
+    store.latest(thread).value.value.checkpoint.status shouldBe CheckpointStatus.Failed
+    runtime.recover(thread, l.graph).left.value shouldBe GraphError.NothingToRecover(thread.value)
+
+    runtime.start(thread, l.graph, AgentInput("hi")).awaited.value.answered._2 shouldBe "fine"
+  }
+
   private class Banned(word: String) extends OutputGuardrail {
     val name = "Banned"
     def validate(value: String): Result[String] =

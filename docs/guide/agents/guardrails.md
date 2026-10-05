@@ -503,7 +503,7 @@ agent.run(query) match {
     }
 
   case Left(error) =>
-    // a provider error, a tool's failure, or another middleware's beforeAgent/afterAgent Left
+    // a provider error, a tool's failure, a blank query, or another middleware's beforeAgent/afterAgent Left
     println(s"Run failed: ${error.message}")
 }
 ```

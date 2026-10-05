@@ -517,7 +517,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `AgentStatus.Blocked(guardrail, reason)`: the thread stays usable, an input block stores nothing
     of the turn and an output block removes it (any handoff made in it too), and `usage` keeps its
     model calls. Another middleware's `beforeAgent`/`afterAgent` `Left` blocks too, returned as that
-    `Left`. A transforming guardrail (`PIIMasker`) now applies. The root agent's guardrails and other run-boundary
+    `Left`. A blank query, given or produced by `beforeAgent`, is a `ValidationError` and stores
+    nothing. A transforming guardrail (`PIIMasker`) now applies. The root agent's guardrails and other run-boundary
     middleware guard the whole handoff family, whichever agent is active.
   - `continueConversation(state, q)` -> `continueConversation(result, q)`, which reads only
     `result.threadId`.

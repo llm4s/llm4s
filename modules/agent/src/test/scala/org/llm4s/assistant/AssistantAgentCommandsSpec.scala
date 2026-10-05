@@ -4,6 +4,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 import org.llm4s.agent.{ AgentResultFixture, AgentStatus }
+import org.llm4s.agent.graph.{ RunConfig, ThreadId }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
@@ -135,6 +136,45 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
     // Should have accumulated messages
     state2.messages.size should be > state1.messages.size
     state2.threadId shouldBe state1.threadId
+  }
+
+  // ========== replacing a session forgets its thread (review of #1369) ==========
+
+  /**
+   * Whether `threadId` is still in the agent's runtime: history is imported only into a new thread.
+   * A thread that is gone is created again by the probe.
+   */
+  private def threadKept(agent: AssistantAgent, threadId: ThreadId): Boolean =
+    agent.agent
+      .flatMap(_.run(threadId, "probe", RunConfig(), Seq(UserMessage("a"), AssistantMessage("b"))))
+      .isLeft
+
+  private def afterTurn(agent: AssistantAgent): SessionState =
+    agent.processInput("a question", emptySessionState()).toOption.get._1
+
+  "/new" should "forget the replaced session's thread" in {
+    val agent  = assistantAgent(mockClient("an answer"))
+    val active = afterTurn(agent)
+    threadKept(agent, active.threadId.get) shouldBe true
+
+    // the session has content, so /new asks for a name to save it under
+    val result = Console.withIn(new java.io.StringReader("replaced chat\n"))(agent.processInput("/new", active))
+    result.isRight shouldBe true
+    result.toOption.get._1.threadId shouldBe None
+    threadKept(agent, active.threadId.get) shouldBe false
+  }
+
+  "/load" should "forget the replaced session's thread" in {
+    val agent = assistantAgent(mockClient("an answer"))
+    val saved = sessionStateWithMessages(Seq(UserMessage("hi"), AssistantMessage("hello")))
+    agent.processInput("/save load-target", saved).isRight shouldBe true
+
+    val active = afterTurn(agent)
+    threadKept(agent, active.threadId.get) shouldBe true
+    val result = agent.processInput("/load load-target", active)
+    result.isRight shouldBe true
+    result.toOption.get._1.threadId shouldBe None
+    threadKept(agent, active.threadId.get) shouldBe false
   }
 
   // ========== extractFinalResponse edge cases ==========
