@@ -19,9 +19,12 @@ import scala.util.Try
  * The Cohere `input_type`: which side of retrieval a text is on.
  *
  * Cohere's v3 and v4 models embed a query and a document differently, so a mismatch between how
- * texts were indexed and how a query is embedded quietly degrades retrieval. It is a typed
- * setting of the provider, not guessed from the number of inputs or encoded in the model name:
- * pass it to [[CohereEmbeddingProvider.fromConfig]].
+ * texts were indexed and how a query is embedded quietly degrades retrieval. A request says which
+ * it is with its [[InputPurpose]], and the provider maps it onto [[SearchQuery]] or
+ * [[SearchDocument]] by itself, not guessed from the number of inputs or encoded in the model
+ * name. An input type the purpose cannot express ([[Classification]], [[Clustering]]) is a typed
+ * setting of the provider: pass it to [[CohereEmbeddingProvider.fromConfig]], where it takes
+ * precedence over the purpose of every request.
  *
  * @param wireName the value sent as `input_type` in the request body
  */
@@ -39,11 +42,13 @@ enum CohereInputType(val wireName: String):
   case Clustering extends CohereInputType("clustering")
 
 object CohereInputType:
-  /**
-   * What the registry-built provider uses: a document, because indexing is the common batch
-   * case. A caller embedding queries builds the provider with [[SearchQuery]].
-   */
+  /** The input type for a document, [[InputPurpose.Document]]: what a provider built without an explicit one sends. */
   val default: CohereInputType = SearchDocument
+
+  /** The input type a request's [[InputPurpose]] stands for: [[SearchDocument]] for a document, [[SearchQuery]] for a query. */
+  def forPurpose(purpose: InputPurpose): CohereInputType = purpose match
+    case InputPurpose.Document => SearchDocument
+    case InputPurpose.Query    => SearchQuery
 
 /**
  * Embedding provider implementation for Cohere's native embed API (`POST <baseUrl>/v2/embed`).
@@ -89,22 +94,30 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
     "embed-multilingual-light-v3.0" -> 384
   )
 
-  /** Builds the provider for the SPI, with [[CohereInputType.default]]; see [[fromConfig]] to choose the input type. */
+  /** Builds the provider for the SPI: the input type follows each request's purpose; see [[fromConfig]] to fix it. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
 
-  /** Creates an [[EmbeddingProvider]] backed by Cohere, sending `inputType` with every request. */
-  def fromConfig(
-    cfg: EmbeddingProviderConfig,
-    inputType: CohereInputType = CohereInputType.default
-  ): EmbeddingProvider =
-    create(cfg, inputType, Llm4sHttpClient.create())
+  /** Creates an [[EmbeddingProvider]] backed by Cohere whose `input_type` follows each request's [[InputPurpose]]. */
+  def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
+    create(cfg, None, Llm4sHttpClient.create())
+
+  /**
+   * Creates an [[EmbeddingProvider]] backed by Cohere that sends `inputType` with every request, whatever the
+   * request's [[InputPurpose]]. An explicit input type wins over the purpose: it is a deliberate choice, and it can
+   * be one the purpose cannot express, such as [[CohereInputType.Classification]].
+   */
+  def fromConfig(cfg: EmbeddingProviderConfig, inputType: CohereInputType): EmbeddingProvider =
+    create(cfg, Some(inputType), Llm4sHttpClient.create())
+
+  private[provider] def forTest(cfg: EmbeddingProviderConfig, httpClient: Llm4sHttpClient): EmbeddingProvider =
+    create(cfg, None, httpClient)
 
   private[provider] def forTest(
     cfg: EmbeddingProviderConfig,
     httpClient: Llm4sHttpClient,
-    inputType: CohereInputType = CohereInputType.default
+    inputType: CohereInputType
   ): EmbeddingProvider =
-    create(cfg, inputType, httpClient)
+    create(cfg, Some(inputType), httpClient)
 
   /**
    * The embed endpoint for a configured base URL. The API root is what is configured
@@ -155,7 +168,7 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   private def create(
     cfg: EmbeddingProviderConfig,
-    inputType: CohereInputType,
+    explicitInputType: Option[CohereInputType],
     httpClient: Llm4sHttpClient
   ): EmbeddingProvider =
     new EmbeddingProvider {
@@ -168,6 +181,7 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
       private def embedBatches(request: EmbeddingRequest): Result[EmbeddingResponse] = {
         val model = request.model.name
         val input = request.input
+        val inputType = explicitInputType.getOrElse(CohereInputType.forPurpose(request.purpose))
         val metadata = Map(
           "provider"   -> "cohere",
           "model"      -> model,
@@ -181,7 +195,7 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
           val batches = input.grouped(MaxTextsPerRequest).toVector
           batches
             .foldLeft[Result[Vector[Batch]]](Right(Vector.empty))((done, texts) =>
-              done.flatMap(d => send(model, texts).map(d :+ _))
+              done.flatMap(d => send(model, texts, inputType).map(d :+ _))
             )
             .map { done =>
               val billed = done.map(_.billedTokens)
@@ -195,7 +209,7 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
         }
       }
 
-      private def send(model: String, texts: Seq[String]): Result[Batch] = {
+      private def send(model: String, texts: Seq[String], inputType: CohereInputType): Result[Batch] = {
         val payload = Obj(
           "model"           -> model,
           "texts"           -> Arr.from(texts),

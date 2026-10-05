@@ -19,8 +19,11 @@ import scala.util.Try
  * The Jina AI embedding task: which LoRA adapter `jina-embeddings-v3` applies to the input.
  *
  * Jina embeds queries and documents differently, so the right task depends on what the caller
- * is embedding. It is a typed setting of the provider, not part of the model name: pass it to
- * [[JinaEmbeddingProvider.fromConfig]].
+ * is embedding. A request says so with its [[InputPurpose]], and the provider maps it onto
+ * [[RetrievalQuery]] or [[RetrievalPassage]] by itself. A task the purpose cannot express
+ * ([[TextMatching]], [[Classification]], [[Separation]]) is a typed setting of the provider, not
+ * part of the model name: pass it to [[JinaEmbeddingProvider.fromConfig]], where it takes
+ * precedence over the purpose of every request.
  *
  * @param wireName the value sent as `task` in the request body
  */
@@ -41,18 +44,21 @@ enum JinaTask(val wireName: String):
   case Separation extends JinaTask("separation")
 
 object JinaTask:
-  /**
-   * What the registry-built provider uses: a document, because indexing is the common
-   * batch case. A caller embedding queries builds the provider with [[RetrievalQuery]].
-   */
+  /** The task for a document, [[InputPurpose.Document]]: what a provider built without an explicit task sends. */
   val default: JinaTask = RetrievalPassage
+
+  /** The task a request's [[InputPurpose]] stands for: [[RetrievalPassage]] for a document, [[RetrievalQuery]] for a query. */
+  def forPurpose(purpose: InputPurpose): JinaTask = purpose match
+    case InputPurpose.Document => RetrievalPassage
+    case InputPurpose.Query    => RetrievalQuery
 
 /**
  * Embedding provider implementation for the Jina AI embedding API.
  *
  * Generates text embeddings by posting batched input to Jina's `<baseUrl>/embeddings`
- * endpoint (the default base URL is `https://api.jina.ai/v1`), with the configured
- * [[JinaTask]] as the `task` field. All texts go in one HTTP call.
+ * endpoint (the default base URL is `https://api.jina.ai/v1`), with a [[JinaTask]] as the `task`
+ * field: the one the provider was built with if there is one, otherwise the one the request's
+ * [[InputPurpose]] stands for ([[JinaTask.forPurpose]]). All texts go in one HTTP call.
  *
  * Requires a valid Jina AI API key (`JINA_API_KEY`) in the provider configuration.
  *
@@ -82,19 +88,30 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
     "jina-embeddings-v2-base-code" -> 768
   )
 
-  /** Builds the provider for the SPI, with [[JinaTask.default]]; see [[fromConfig]] to choose the task. */
+  /** Builds the provider for the SPI: the task follows each request's purpose; see [[fromConfig]] to fix the task. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
 
-  /** Creates an [[EmbeddingProvider]] backed by Jina AI, sending `task` with every request. */
-  def fromConfig(cfg: EmbeddingProviderConfig, task: JinaTask = JinaTask.default): EmbeddingProvider =
-    create(cfg, task, Llm4sHttpClient.create())
+  /** Creates an [[EmbeddingProvider]] backed by Jina AI whose `task` follows each request's [[InputPurpose]]. */
+  def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
+    create(cfg, None, Llm4sHttpClient.create())
+
+  /**
+   * Creates an [[EmbeddingProvider]] backed by Jina AI that sends `task` with every request, whatever the
+   * request's [[InputPurpose]]. An explicit task wins over the purpose: it is a deliberate choice, and it can be
+   * one the purpose cannot express, such as [[JinaTask.TextMatching]].
+   */
+  def fromConfig(cfg: EmbeddingProviderConfig, task: JinaTask): EmbeddingProvider =
+    create(cfg, Some(task), Llm4sHttpClient.create())
+
+  private[provider] def forTest(cfg: EmbeddingProviderConfig, httpClient: Llm4sHttpClient): EmbeddingProvider =
+    create(cfg, None, httpClient)
 
   private[provider] def forTest(
     cfg: EmbeddingProviderConfig,
     httpClient: Llm4sHttpClient,
-    task: JinaTask = JinaTask.default
+    task: JinaTask
   ): EmbeddingProvider =
-    create(cfg, task, httpClient)
+    create(cfg, Some(task), httpClient)
 
   /** An error body for logs and messages: truncated, with anything key-shaped (a reflected `Bearer ...`) redacted. */
   private def safeBody(body: String): String = Redaction.truncateForLog(Redaction.redact(body))
@@ -139,12 +156,16 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
       )
     else Right(Some(task))
 
-  private def create(cfg: EmbeddingProviderConfig, task: JinaTask, httpClient: Llm4sHttpClient): EmbeddingProvider =
+  private def create(
+    cfg: EmbeddingProviderConfig,
+    explicitTask: Option[JinaTask],
+    httpClient: Llm4sHttpClient
+  ): EmbeddingProvider =
     new EmbeddingProvider {
       private val logger = LoggerFactory.getLogger(getClass)
 
       override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
-        CancelledError.attempt("jina.embed")(taskFor(request.model.name, task).flatMap(sent => send(request, sent)))
+        CancelledError.attempt("jina.embed")(taskFor(request.model.name, explicitTask.getOrElse(JinaTask.forPurpose(request.purpose))).flatMap(sent => send(request, sent)))
 
       private def send(
         request: EmbeddingRequest,
