@@ -122,8 +122,13 @@ The [migration guide](migration) records each such removal.
 ## Supported platforms
 
 1.0 targets **Scala 3 only (3.7.1)**; Scala 2.13 support is deferred to after 1.0 and, if it happens,
-will target the frozen spine rather than the full tree. CI runs JDK 21. A change to either is announced in
-the CHANGELOG under *Changed*. See [1.0 Scope](v1-scope#scala-and-jdk-support) and the
+will target the frozen spine rather than the full tree. CI runs JDK 21.
+
+Both are part of what you build against: an older Scala 3 compiler cannot read the TASTy of a library
+built with a newer one, and a newer JDK's class files do not load on an older JVM. So the Scala 3 minor
+series and the minimum JDK are raised only in a **minor** release, never a patch release, and each raise
+is announced in the CHANGELOG under *Changed* with a migration note. See
+[1.0 Scope](v1-scope#scala-and-jdk-support) and the
 [programme issue](https://github.com/llm4s/llm4s/issues/1126) for the reasoning.
 
 ---

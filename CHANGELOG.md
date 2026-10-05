@@ -8,13 +8,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Compatibility and Deprecation Policy** ([docs/reference/compatibility-policy.md](docs/reference/compatibility-policy.md),
-  [#1281](https://github.com/llm4s/llm4s/issues/1281)): one page for what you can rely on when you upgrade, by
-  tier; how versions are read (`early-semver`, 0.5.0 as the MiMa baseline); what the promise covers (public
-  types, the provider-author SPI, the error model, documented configuration keys) and what it does not; the
-  rules for changing a Frozen API without breaking it; and how an API is deprecated (`@deprecated` with the
-  replacement and the release, a CHANGELOG entry) and removed (never within a major version). It collects
-  what `1.0 Scope`, `API Stability`, the provider guide and `CLAUDE.md` already said, and links to each.
 - **Agent middleware for graph runs** (Experimental, `org.llm4s.agent.graph.middleware`,
   [#1279](https://github.com/llm4s/llm4s/issues/1279)): `AgentMiddleware` is one ordered extension
   point with four pass-through hooks - `beforeAgent`, `afterAgent`, `wrapModelCall` and
@@ -73,6 +66,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Handoff.of(id, agent, reason)` for a `Result`), and `handoffId` is `handoff_to_<id>` rather
   than `handoff_to_agent_<hash>`. Design: `docs/design/typed-agent-runtime-design.md` §4.7, with
   the Stage 0 carry-forward in §4.8.
+- **Compatibility and Deprecation Policy** ([docs/reference/compatibility-policy.md](docs/reference/compatibility-policy.md),
+  [#1281](https://github.com/llm4s/llm4s/issues/1281)): one page for what you can rely on when you upgrade, by
+  tier; how versions are read (`early-semver`, 0.5.0 as the MiMa baseline); what the promise covers (public
+  types, the provider-author SPI, the error model, documented configuration keys) and what it does not; the
+  rules for changing a Frozen API without breaking it; and how an API is deprecated (`@deprecated` with the
+  replacement and the release, a CHANGELOG entry) and removed (never within a major version). It collects
+  what `1.0 Scope`, `API Stability`, the provider guide and `CLAUDE.md` already said, and links to each.
 - **Ollama honours `responseFormat`** ([#932](https://github.com/llm4s/llm4s/issues/932)):
   `OllamaClient` now sends the `/api/chat` `format` field for streaming and non-streaming requests,
   so `completeStructured` is constrained natively. `ResponseFormat.Json` sends `"format": "json"`
