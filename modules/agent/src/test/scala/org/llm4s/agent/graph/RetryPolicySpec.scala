@@ -1,6 +1,18 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.error.{ CancelledError, LLMError, NetworkError, ValidationError }
+import org.llm4s.error.{
+  APIError,
+  CancelledError,
+  ExecutionError,
+  LLMError,
+  NetworkError,
+  OptimisticLockFailure,
+  RateLimitError,
+  ServiceError,
+  SystemError,
+  ValidationError
+}
+import org.llm4s.reliability.RetryPolicy as LlmRetryPolicy
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -85,6 +97,38 @@ class RetryPolicySpec extends AnyFlatSpec with Matchers with EitherValues {
 
   it should "not retry a non-recoverable error by default" in {
     RetryPolicy(maxAttempts = 3).retries(nonRecoverable, failedAttempts = 1) shouldBe false
+  }
+
+  it should "retry exactly what the LLM retry policy retries, so a node and an LLM call agree" in {
+    val errors: Seq[LLMError] = Seq(
+      APIError("p", "failed"),
+      APIError("p", "bad request", Some(400)),
+      APIError("p", "unavailable", Some(503)),
+      ExecutionError("failed", "run"),
+      NetworkError("down", None, "https://example.test"),
+      OptimisticLockFailure("conflict", "m", 1L),
+      RateLimitError("p", 5.seconds),
+      ServiceError(400, "p", "bad request"),
+      ServiceError(503, "p", "unavailable"),
+      SystemError("system"),
+      ValidationError("field", "bad"),
+      CancelledError("op", None)
+    )
+
+    errors.foreach { error =>
+      withClue(error.getClass.getSimpleName + " " + error.message) {
+        RetryPolicy.transientOnly(error) shouldBe LlmRetryPolicy.exponentialBackoff().isRetryable(error)
+      }
+    }
+  }
+
+  it should "not retry a recoverable client-error response or an optimistic-lock failure" in {
+    val policy = RetryPolicy(maxAttempts = 3)
+
+    policy.retries(ServiceError(400, "p", "bad request"), failedAttempts = 1) shouldBe false
+    policy.retries(APIError("p", "no such model", Some(404)), failedAttempts = 1) shouldBe false
+    policy.retries(OptimisticLockFailure("conflict", "m", 1L), failedAttempts = 1) shouldBe false
+    policy.retries(ServiceError(503, "p", "unavailable"), failedAttempts = 1) shouldBe true
   }
 
   it should "follow a custom predicate" in {

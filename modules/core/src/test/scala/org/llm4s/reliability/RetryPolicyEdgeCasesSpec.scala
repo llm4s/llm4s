@@ -114,7 +114,7 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   // ==========================================================================
-  // isRetryable: ProcessingError and ExecutionError
+  // isRetryable: ProcessingError (never) and ExecutionError (transient, so retried)
   // ==========================================================================
 
   "isRetryable" should "return false for ProcessingError" in {
@@ -122,8 +122,8 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
     policy.isRetryable(ProcessingError("test", "bad data")) shouldBe false
   }
 
-  it should "return false for ExecutionError" in {
+  it should "return true for ExecutionError, which is documented as transient" in {
     val policy = RetryPolicy.exponentialBackoff()
-    policy.isRetryable(ExecutionError("test", "op")) shouldBe false
+    policy.isRetryable(ExecutionError("test", "op")) shouldBe true
   }
 }

@@ -149,12 +149,14 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
 
   /** Every concrete `LLMError` the library defines, with whether the default `RetryPolicy` retries it. */
   private def allErrors: Seq[(String, LLMError, Boolean)] = Seq(
-    ("APIError", APIError("openai", "bad request", Some(400), Some("{}")), false),
+    ("APIError 400", APIError("openai", "bad request", Some(400), Some("{}")), false),
+    ("APIError 503", APIError("openai", "unavailable", Some(503), Some("{}")), true),
+    ("APIError, no status", APIError("openai", "failed"), true),
     ("AuthenticationError", AuthenticationError("openai", "invalid key", "401"), false),
     ("CancelledError", CancelledError("op", None), false),
     ("ConfigurationError", ConfigurationError("missing key", List("OPENAI_API_KEY")), false),
     ("ContextError", ContextError.tokenBudgetExceeded(200, 100), false),
-    ("ExecutionError", ExecutionError("failed", "run", Some(2)), false),
+    ("ExecutionError", ExecutionError("failed", "run", Some(2)), true),
     ("InvalidInputError", InvalidInputError("field", "value", "reason"), false),
     ("NetworkError", NetworkError("refused", None, "https://llm.example/v1"), true),
     ("NotFoundError", NotFoundError("missing", "key-1"), false),
@@ -166,7 +168,7 @@ class AgentErrorPropagationSpec extends AnyFlatSpec with Matchers {
     ("ServiceError 408", ServiceError(408, "p", "request timeout"), true),
     ("ServiceError 400", ServiceError(400, "p", "bad request"), false),
     ("SimpleError", SimpleError("plain"), false),
-    ("SystemError", SystemError("system"), false),
+    ("SystemError", SystemError("system"), true),
     ("TimeoutError", TimeoutError("slow", 5.seconds, "complete"), true),
     ("TokenizerError", TokenizerError.notFound("tok"), false),
     ("UnknownError", UnknownError("weird", new RuntimeException("x")), false),

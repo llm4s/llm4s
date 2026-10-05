@@ -334,14 +334,24 @@ The reliability layer automatically retries these errors:
 
 - ✅ `RateLimitError` - Respects `Retry-After` header
 - ✅ `TimeoutError` - Network timeouts
-- ✅ `ServiceError` - 5xx server errors; respects a 503's `Retry-After` header
+- ✅ `ServiceError` and `APIError` with a retryable status - any 5xx, 429 or 408; respects a 503's `Retry-After` header. An `APIError` with no status is retried too
 - ✅ `NetworkError` - Connection failures
+- ✅ `ExecutionError` and `SystemError` - transient execution and system failures
 
 Non-retryable errors (fail immediately):
 
 - ❌ `AuthenticationError` - Bad API key
 - ❌ `ValidationError` - Invalid input
 - ❌ `ConfigurationError` - Client misconfiguration
+- ❌ `ServiceError` and `APIError` with any other 4xx status - the request itself is wrong, so repeating it cannot succeed
+- ❌ `OptimisticLockFailure` - recoverable, but the caller must re-read the record first
+- ❌ `CancelledError` - the caller stopped the call
+
+**One rule.** Automatic retry is `LLMError.isRecoverable` minus the two exceptions above (a client-error response
+and an `OptimisticLockFailure`). `RetryPolicy.isRetryable`, `LLMClientRetry` and an agent graph node's default
+retry all use it, so they cannot disagree about an error. `isRecoverable` means the error may succeed if tried
+again, perhaps after the caller does something; automatic retry is the part where repeating the identical request is
+enough.
 
 ## Best Practices
 
@@ -881,7 +891,7 @@ final case class ReliabilityConfig(
 sealed trait RetryPolicy {
   def maxAttempts: Int
   def delayFor(attemptNumber: Int, error: LLMError): FiniteDuration
-  def isRetryable(error: LLMError): Boolean // default: rate limit, timeout, 5xx/408/429, network
+  def isRetryable(error: LLMError): Boolean // default: the recoverable errors, except a client-error response (4xx other than 408/429) and an OptimisticLockFailure
 }
 ```
 

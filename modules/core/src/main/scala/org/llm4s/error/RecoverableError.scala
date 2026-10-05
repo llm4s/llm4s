@@ -11,6 +11,13 @@ import scala.concurrent.duration.FiniteDuration
  * with appropriate backoff strategies may succeed. Examples include rate limiting,
  * network timeouts, and temporary service unavailability.
  *
+ * '''What it promises.''' That the operation may succeed if it is attempted again, perhaps after the caller does
+ * something first (waits, re-reads a record, corrects a request). It does not promise that repeating the identical
+ * request is enough: the library's automatic retry, [[org.llm4s.reliability.RetryPolicy.isRetryable]], retries the
+ * recoverable errors for which it is, and is never wider than this trait. Two recoverable errors are deliberately
+ * not retried automatically: a response with a client-error HTTP status (`ServiceError`, `APIError`), because the
+ * request itself is wrong, and an [[OptimisticLockFailure]], because the caller must re-read first.
+ *
  * Use pattern matching or [[LLMError.isRecoverable]] to check recoverability:
  * {{{
  * error match {
