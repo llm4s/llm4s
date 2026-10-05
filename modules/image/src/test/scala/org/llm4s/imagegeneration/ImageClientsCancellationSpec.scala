@@ -25,7 +25,7 @@ import scala.util.Try
 /**
  * Every image client honours interruption (design section 4.4): called on a virtual thread against a
  * server that never answers, then interrupted, it returns `Left(CancelledError)` promptly with the
- * thread's interrupt flag still set - not an `UnknownError`, not a `ServiceError`.
+ * thread's interrupt flag still set - not an `ImageUnknownError`, not an `ImageServiceError`.
  */
 class ImageClientsCancellationSpec extends AnyFlatSpec {
 

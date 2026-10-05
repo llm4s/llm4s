@@ -166,6 +166,29 @@ shims. Design: `docs/design/typed-agent-runtime-design.md` §4.6.
   `RunStarted` is now a case class, and it, `RunRecovered` and `RunResumed` gain `tenantId` and
   `principal`; events in the old encoding still read.
 
+## Image generation errors are `LLMError`s
+
+Not in a release yet ([#1331](https://github.com/llm4s/llm4s/issues/1331)). `llm4s-image`'s
+generation clients return `Either[LLMError, _]`, so an interrupted call can return
+`CancelledError`, and `ImageGenerationError` extends `LLMError`. Source breaks, with no shims:
+
+- **Five cases are renamed** so they no longer share a name with an `org.llm4s.error` type. Both are
+  `LLMError`s, so a `match` that imported the wrong one would compile and never fire:
+
+  | Before (`org.llm4s.imagegeneration`) | After |
+  |---|---|
+  | `AuthenticationError` | `ImageAuthenticationError` |
+  | `RateLimitError` | `ImageRateLimitError` |
+  | `ServiceError` | `ImageServiceError` |
+  | `ValidationError` | `ImageValidationError` |
+  | `UnknownError` | `ImageUnknownError` |
+
+- **`ImageServiceError(message, statusCode)`**: the second field was `code: Int`, which clashed with
+  `LLMError.code: Option[String]`. It is a sealed type now (`TransientImageServiceError` for `0`, `408`,
+  `429` and `5xx`, `RejectedImageServiceError` otherwise); build and match it through
+  `ImageServiceError(message, status)` as before.
+- **A match on a client's result** needs a case for other `LLMError`s, `CancelledError` among them.
+
 ## Cancellation by interrupt
 
 Not in a release yet ([#1270](https://github.com/llm4s/llm4s/issues/1270)). An interrupted call

@@ -31,7 +31,7 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
     prompt = "a cat"
   )
 
-  private val failure = ServiceError("provider is down", 503)
+  private val failure = ImageServiceError("provider is down", 503)
 
   private val healthy = ServiceStatus(HealthStatus.Healthy, "ok")
 

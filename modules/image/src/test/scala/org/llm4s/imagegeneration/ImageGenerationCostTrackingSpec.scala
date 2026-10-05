@@ -54,14 +54,14 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
       prompt: String,
       options: ImageGenerationOptions
     ): Either[ImageGenerationError, GeneratedImage] =
-      Left(ServiceError("Service unavailable", 503))
+      Left(ImageServiceError("Service unavailable", 503))
 
     override def generateImages(
       prompt: String,
       count: Int,
       options: ImageGenerationOptions
     ): Either[ImageGenerationError, Seq[GeneratedImage]] =
-      Left(ServiceError("Service unavailable", 503))
+      Left(ImageServiceError("Service unavailable", 503))
   }
 
   class TracingCollector extends Tracing {

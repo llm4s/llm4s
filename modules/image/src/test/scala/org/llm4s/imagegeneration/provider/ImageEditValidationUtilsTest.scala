@@ -1,6 +1,6 @@
 package org.llm4s.imagegeneration.provider
 
-import org.llm4s.imagegeneration.{ ImageSize, ValidationError }
+import org.llm4s.imagegeneration.{ ImageSize, ImageValidationError }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -25,7 +25,7 @@ class ImageEditValidationUtilsTest extends AnyFlatSpec with Matchers {
 
   it should "return validation error for missing files" in {
     val result = ImageEditValidationUtils.readImageFile(java.nio.file.Path.of("missing.bin"), "source")
-    result should matchPattern { case Left(_: ValidationError) => }
+    result should matchPattern { case Left(_: ImageValidationError) => }
   }
 
   "readImageSize" should "return validation error for non-image files" in {
@@ -33,7 +33,7 @@ class ImageEditValidationUtilsTest extends AnyFlatSpec with Matchers {
     try {
       Files.write(path, "not-an-image".getBytes("UTF-8"))
       val result = ImageEditValidationUtils.readImageSize(path, "source")
-      result should matchPattern { case Left(_: ValidationError) => }
+      result should matchPattern { case Left(_: ImageValidationError) => }
     } finally Files.deleteIfExists(path)
   }
 
@@ -42,7 +42,7 @@ class ImageEditValidationUtilsTest extends AnyFlatSpec with Matchers {
       withTempImage(32, 32) { mask =>
         val sourceSize = ImageEditValidationUtils.readImageSize(source, "source").toOption.get
         val result     = ImageEditValidationUtils.validateMaskDimensions(sourceSize, Some(mask))
-        result should matchPattern { case Left(_: ValidationError) => }
+        result should matchPattern { case Left(_: ImageValidationError) => }
       }
     }
   }

@@ -161,9 +161,9 @@ class ImageClientsErrorPathsSpec extends AnyFlatSpec with Matchers {
 
   "an image client with no health probe of its own" should "report its health as unknown, not as healthy" in {
     val bare = new ImageGenerationClient {
-      def generateImage(prompt: String, options: ImageGenerationOptions) = Left(ServiceError("unused", 500))
+      def generateImage(prompt: String, options: ImageGenerationOptions) = Left(ImageServiceError("unused", 500))
       def generateImages(prompt: String, count: Int, options: ImageGenerationOptions) =
-        Left(ServiceError("unused", 500))
+        Left(ImageServiceError("unused", 500))
     }
 
     bare.health().map(_.status) shouldBe Right(HealthStatus.Unknown)

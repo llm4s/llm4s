@@ -1,6 +1,11 @@
 package org.llm4s.imagegeneration.provider
 
-import org.llm4s.imagegeneration.{ ImageEditOptions, ProviderImageEditOptions, StableDiffusionConfig, ValidationError }
+import org.llm4s.imagegeneration.{
+  ImageEditOptions,
+  ProviderImageEditOptions,
+  StableDiffusionConfig,
+  ImageValidationError
+}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -20,7 +25,7 @@ class StableDiffusionClientEditTest extends AnyFlatSpec with Matchers {
       prompt = "add clouds"
     )
 
-    result should matchPattern { case Left(_: ValidationError) => }
+    result should matchPattern { case Left(_: ImageValidationError) => }
   }
 
   it should "fail when mask dimensions do not match source image dimensions" in {
@@ -38,7 +43,7 @@ class StableDiffusionClientEditTest extends AnyFlatSpec with Matchers {
         options = ImageEditOptions(n = 1)
       )
 
-      result should matchPattern { case Left(_: ValidationError) => }
+      result should matchPattern { case Left(_: ImageValidationError) => }
     }
   }
 
@@ -58,7 +63,7 @@ class StableDiffusionClientEditTest extends AnyFlatSpec with Matchers {
         )
       )
 
-      result shouldBe Left(ValidationError("denoisingStrength must be between 0.0 and 1.0, got: 1.5"))
+      result shouldBe Left(ImageValidationError("denoisingStrength must be between 0.0 and 1.0, got: 1.5"))
     }
   }
 
@@ -75,7 +80,7 @@ class StableDiffusionClientEditTest extends AnyFlatSpec with Matchers {
     )
 
     result shouldBe Left(
-      ValidationError("Unsupported provider-specific edit options for Stable Diffusion image client")
+      ImageValidationError("Unsupported provider-specific edit options for Stable Diffusion image client")
     )
   }
 

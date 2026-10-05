@@ -107,7 +107,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[ValidationError]
+    result.left.value shouldBe a[ImageValidationError]
   }
 
   test("OpenAIImageClient should handle 401 Unauthorized") {
@@ -119,7 +119,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[AuthenticationError]
+    result.left.value shouldBe a[ImageAuthenticationError]
   }
 
   test("OpenAIImageClient should handle 429 Rate Limit") {
@@ -131,7 +131,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[RateLimitError]
+    result.left.value shouldBe a[ImageRateLimitError]
   }
 
   test("OpenAIImageClient should validate prompt") {
@@ -141,7 +141,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage("")
     result.isLeft shouldBe true
-    result.left.value shouldBe a[ValidationError]
+    result.left.value shouldBe a[ImageValidationError]
   }
 
   test("OpenAIImageClient should validate count") {
@@ -151,7 +151,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImages(prompt, 11) // Max is 10 for dall-e-2
     result.isLeft shouldBe true
-    result.left.value shouldBe a[ValidationError]
+    result.left.value shouldBe a[ImageValidationError]
   }
 
   test("OpenAIImageClient health check should return healthy") {
@@ -194,7 +194,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[UnknownError]
+    result.left.value shouldBe a[ImageUnknownError]
   }
 
   test("OpenAIImageClient should handle empty response body") {
@@ -206,7 +206,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[UnknownError]
+    result.left.value shouldBe a[ImageUnknownError]
   }
 
   test("OpenAIImageClient should support async methods") {
@@ -292,7 +292,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[AuthenticationError]
+    result.left.value shouldBe a[ImageAuthenticationError]
   }
 
   test("HuggingFaceClient should handle 429 Rate Limit") {
@@ -306,7 +306,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[RateLimitError]
+    result.left.value shouldBe a[ImageRateLimitError]
   }
 
   test("HuggingFaceClient health check should return healthy") {
@@ -398,7 +398,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[AuthenticationError]
+    result.left.value shouldBe a[ImageAuthenticationError]
   }
 
   test("StableDiffusionClient should handle 429 Rate Limit") {
@@ -410,7 +410,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[RateLimitError]
+    result.left.value shouldBe a[ImageRateLimitError]
   }
 
   test("StableDiffusionClient should handle malformed JSON response") {
@@ -422,7 +422,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[UnknownError]
+    result.left.value shouldBe a[ImageUnknownError]
   }
 
   test("StableDiffusionClient health check should return healthy") {
@@ -486,7 +486,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[ValidationError]
+    result.left.value shouldBe a[ImageValidationError]
   }
 
   test("StabilityAIClient should handle 401 Unauthorized") {
@@ -498,7 +498,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[AuthenticationError]
+    result.left.value shouldBe a[ImageAuthenticationError]
   }
 
   test("StabilityAIClient should handle 429 Rate Limit") {
@@ -510,7 +510,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[RateLimitError]
+    result.left.value shouldBe a[ImageRateLimitError]
   }
 
   test("StabilityAIClient should handle 402 Payment Required") {
@@ -533,7 +533,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage("")
     result.isLeft shouldBe true
-    result.left.value shouldBe a[ValidationError]
+    result.left.value shouldBe a[ImageValidationError]
   }
 
   test("StabilityAIClient should validate count") {
@@ -543,7 +543,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImages(prompt, 11) // Max is 10
     result.isLeft shouldBe true
-    result.left.value shouldBe a[ValidationError]
+    result.left.value shouldBe a[ImageValidationError]
   }
 
   test("StabilityAIClient health check should return healthy") {
@@ -567,7 +567,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
-    result.left.value shouldBe a[UnknownError]
+    result.left.value shouldBe a[ImageUnknownError]
   }
 
   test("StabilityAIClient should support async methods") {
