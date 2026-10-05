@@ -96,15 +96,21 @@ final class SQLiteMemoryStore private (
     limit: Int = 100
   ): Result[Seq[Memory]] =
     Try {
-      val (whereClause, params) = filterToSql(filter)
-      val sql                   = s"SELECT * FROM memories $whereClause ORDER BY timestamp DESC LIMIT ?"
+      // A Custom predicate is code, not SQL: read the rows newest first and let `matches` decide, so the limit
+      // applies to the memories that match and not to the newest rows overall.
+      val custom                = FilterSupport.containsCustom(filter)
+      val (whereClause, params) = if (custom) ("", Seq.empty) else filterToSql(filter)
+      val sql =
+        if (custom) "SELECT * FROM memories ORDER BY timestamp DESC"
+        else s"SELECT * FROM memories $whereClause ORDER BY timestamp DESC LIMIT ?"
       Using.resource(connection.prepareStatement(sql)) { stmt =>
         params.zipWithIndex.foreach { case (param, idx) =>
           setParameter(stmt, idx + 1, param)
         }
-        stmt.setInt(params.length + 1, limit)
+        if (!custom) stmt.setInt(params.length + 1, limit)
         Using.resource(stmt.executeQuery()) { rs =>
-          Iterator.continually(rs).takeWhile(_.next()).map(rowToMemory).toSeq
+          val memories = Iterator.continually(rs).takeWhile(_.next()).map(rowToMemory)
+          (if (custom) memories.filter(filter.matches).take(limit) else memories).toSeq
         }
       }
     }.toEither.left.map(e => ProcessingError("sqlite-recall", s"Failed to recall memories: ${e.getMessage}"))
@@ -115,8 +121,10 @@ final class SQLiteMemoryStore private (
     filter: MemoryFilter = MemoryFilter.All
   ): Result[Seq[ScoredMemory]] =
     Try {
-      // Use FTS5 for full-text search
-      val (whereClause, params) = filterToSql(filter)
+      // Use FTS5 for full-text search. A Custom predicate is evaluated in memory, after the full-text match and
+      // before topK, so the limit is applied to the memories the filter accepts.
+      val custom                = FilterSupport.containsCustom(filter)
+      val (whereClause, params) = if (custom) ("", Seq.empty) else filterToSql(filter)
 
       // Build query to join with FTS table
       val sql = if (whereClause.isEmpty) {
@@ -127,11 +135,12 @@ final class SQLiteMemoryStore private (
           |ORDER BY score
           |LIMIT ?""".stripMargin
       } else {
-        val innerWhere = whereClause.replace("WHERE ", "")
+        // Filter in a subquery: a bare `content` in the filter would be ambiguous with the FTS table's column
+        val innerWhere = whereClause.stripPrefix("WHERE ")
         s"""SELECT m.*, bm25(memories_fts) as score
-           |FROM memories m
+           |FROM (SELECT * FROM memories WHERE $innerWhere) m
            |JOIN memories_fts fts ON m.id = fts.id
-           |WHERE ($innerWhere) AND fts.content MATCH ?
+           |WHERE fts.content MATCH ?
            |ORDER BY score
            |LIMIT ?""".stripMargin
       }
@@ -141,9 +150,9 @@ final class SQLiteMemoryStore private (
           setParameter(stmt, idx + 1, param)
         }
         stmt.setString(params.length + 1, escapeFtsQuery(query))
-        stmt.setInt(params.length + 2, topK)
+        stmt.setInt(params.length + 2, if (custom) -1 else topK) // SQLite: a negative LIMIT means no limit
         Using.resource(stmt.executeQuery()) { rs =>
-          Iterator
+          val scored = Iterator
             .continually(rs)
             .takeWhile(_.next())
             .map { row =>
@@ -153,7 +162,7 @@ final class SQLiteMemoryStore private (
               val normScore = Math.max(0.0, Math.min(1.0, 1.0 / (1.0 + Math.abs(bm25))))
               ScoredMemory(memory, normScore)
             }
-            .toSeq
+          (if (custom) scored.filter(sm => filter.matches(sm.memory)).take(topK) else scored).toSeq
         }
       }
     }.toEither.left.map(e => ProcessingError("sqlite-search", s"Failed to search memories: ${e.getMessage}"))
@@ -174,7 +183,7 @@ final class SQLiteMemoryStore private (
     }.toEither.left.map(e => ProcessingError("sqlite-delete", s"Failed to delete memory: ${e.getMessage}"))
 
   override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
-    if (containsCustom(filter)) {
+    if (FilterSupport.containsCustom(filter)) {
       // Custom predicates anywhere in tree cannot be translated to SQL; fallback to row-by-row
       deleteMatchingRowByRow(filter)
     } else {
@@ -186,15 +195,6 @@ final class SQLiteMemoryStore private (
         deleteMatchingBulk(whereClause, params)
       }
     }
-
-  /** Check if filter tree contains any Custom predicates (which cannot be translated to SQL). */
-  private def containsCustom(filter: MemoryFilter): Boolean = filter match {
-    case _: MemoryFilter.Custom  => true
-    case MemoryFilter.And(l, r)  => containsCustom(l) || containsCustom(r)
-    case MemoryFilter.Or(l, r)   => containsCustom(l) || containsCustom(r)
-    case MemoryFilter.Not(inner) => containsCustom(inner)
-    case _                       => false
-  }
 
   /** Fallback: recall matching memories via SQL (where possible), apply in-memory filter, delete one-by-one. */
   private def deleteMatchingRowByRow(filter: MemoryFilter): Result[MemoryStore] =
@@ -259,15 +259,24 @@ final class SQLiteMemoryStore private (
 
   override def count(filter: MemoryFilter = MemoryFilter.All): Result[Long] =
     Try {
-      val (whereClause, params) = filterToSql(filter)
-      val sql                   = s"SELECT COUNT(*) FROM memories $whereClause"
-      Using.resource(connection.prepareStatement(sql)) { stmt =>
-        params.zipWithIndex.foreach { case (param, idx) =>
-          setParameter(stmt, idx + 1, param)
+      if (FilterSupport.containsCustom(filter)) {
+        // A Custom predicate is code, not SQL: count the rows `matches` accepts.
+        Using.resource(connection.prepareStatement("SELECT * FROM memories")) { stmt =>
+          Using.resource(stmt.executeQuery()) { rs =>
+            Iterator.continually(rs).takeWhile(_.next()).map(rowToMemory).count(filter.matches).toLong
+          }
         }
-        Using.resource(stmt.executeQuery()) { rs =>
-          if (rs.next()) rs.getLong(1)
-          else 0L
+      } else {
+        val (whereClause, params) = filterToSql(filter)
+        val sql                   = s"SELECT COUNT(*) FROM memories $whereClause"
+        Using.resource(connection.prepareStatement(sql)) { stmt =>
+          params.zipWithIndex.foreach { case (param, idx) =>
+            setParameter(stmt, idx + 1, param)
+          }
+          Using.resource(stmt.executeQuery()) { rs =>
+            if (rs.next()) rs.getLong(1)
+            else 0L
+          }
         }
       }
     }.toEither.left.map(e => ProcessingError("sqlite-count", s"Failed to count memories: ${e.getMessage}"))
@@ -351,11 +360,14 @@ final class SQLiteMemoryStore private (
       ("WHERE json_extract(metadata_json, ?) IS NOT NULL", Seq(s"$$.$key"))
 
     case MemoryFilter.MetadataContains(key, substring) =>
-      ("WHERE json_extract(metadata_json, ?) LIKE ?", Seq(s"$$.$key", s"%$substring%"))
+      // instr is a literal, case-sensitive substring test, like String.contains: LIKE would read % and _ as wildcards
+      ("WHERE instr(json_extract(metadata_json, ?), ?) > 0", Seq(s"$$.$key", substring))
 
-    case MemoryFilter.ContentContains(substring, _) =>
-      // Note: caseSensitive not easily supported in SQLite, using LIKE
-      ("WHERE content LIKE ?", Seq(s"%$substring%"))
+    case MemoryFilter.ContentContains(substring, caseSensitive) =>
+      // instr is a literal substring test: LIKE would read % and _ as wildcards and is never case sensitive.
+      // lower() folds ASCII only, which is also all LIKE ever folded.
+      if (caseSensitive) ("WHERE instr(content, ?) > 0", Seq(substring))
+      else ("WHERE instr(lower(content), lower(?)) > 0", Seq(substring))
 
     case MemoryFilter.And(left, right) =>
       val (leftSql, leftParams)   = filterToSql(left)
@@ -427,12 +439,30 @@ object SQLiteMemoryStore {
     dbPath: String,
     config: MemoryStoreConfig = MemoryStoreConfig.default
   ): Result[SQLiteMemoryStore] =
+    open(dbPath, config, path => DriverManager.getConnection(s"jdbc:sqlite:$path"))
+
+  /**
+   * Open the store on a connection from `connect`. The seam exists so a test can prove that a failed open
+   * closes the connection it made.
+   */
+  private[memory] def open(
+    dbPath: String,
+    config: MemoryStoreConfig,
+    connect: String => Connection
+  ): Result[SQLiteMemoryStore] =
     Try {
       Class.forName("org.sqlite.JDBC")
-      val connection = DriverManager.getConnection(s"jdbc:sqlite:$dbPath")
-      connection.setAutoCommit(true)
-      initializeSchema(connection)
-      new SQLiteMemoryStore(dbPath, config, connection)
+      val connection = connect(dbPath)
+      // If setting up the schema fails (e.g. the file is not a database) the connection must not leak: an open
+      // handle keeps the file locked, which blocks deleting it on Windows.
+      Try {
+        connection.setAutoCommit(true)
+        initializeSchema(connection)
+        new SQLiteMemoryStore(dbPath, config, connection)
+      }.recoverWith { case e =>
+        Try(connection.close())
+        scala.util.Failure(e)
+      }.get
     }.toEither.left.map {
       case e: ClassNotFoundException =>
         ConfigurationError(s"SQLite JDBC driver not found: ${e.getMessage}")
