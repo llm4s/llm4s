@@ -3,7 +3,6 @@ package org.llm4s.agent
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 
 /**
@@ -219,56 +218,34 @@ private[agent] object CompletionFixture {
 }
 
 /**
- * Factory methods for building [[AgentState]] instances in tests.
+ * Factory methods for building [[AgentThread]] instances in tests.
  *
- * These builders create the minimum viable state for each scenario and leave
+ * These builders create the minimum viable thread for each scenario and leave
  * all other fields at their defaults, keeping test setup concise.
  */
-private[agent] object AgentStateFixture {
+private[agent] object AgentThreadFixture {
 
   /**
-   * An [[AgentState]] ready for its first [[Agent.runStep]] call.
+   * A finished thread with a user message and a final assistant response.
    *
-   * @param query The user's initial question.
-   * @param tools Tool registry; defaults to an empty registry.
-   */
-  def initial(query: String, tools: ToolRegistry = ToolRegistry.empty): AgentState =
-    AgentState(
-      conversation = Conversation(Seq(UserMessage(query))),
-      tools = tools,
-      initialQuery = Some(query),
-      status = AgentStatus.InProgress
-    )
-
-  /**
-   * An [[AgentState]] in terminal `Complete` status with both a user message
-   * and a final assistant response.
-   *
-   * Use to construct the `previousState` argument for
-   * [[Agent.continueConversation]] tests.
+   * Use to construct the `previous` argument for [[Agent.continueConversation]] tests.
    *
    * @param query    The user's question.
    * @param response The assistant's final response.
    */
-  def complete(query: String, response: String): AgentState =
-    AgentState(
-      conversation = Conversation(Seq(UserMessage(query), AssistantMessage(response, Seq.empty))),
-      tools = ToolRegistry.empty,
-      initialQuery = Some(query),
-      status = AgentStatus.Complete
+  def complete(query: String, response: String): AgentThread =
+    AgentThread(
+      threadId = "fixture-thread",
+      messages = Seq(UserMessage(query), AssistantMessage(response, Seq.empty)),
+      status = ThreadStatus.Completed
     )
 
   /**
-   * An [[AgentState]] with exactly the supplied messages in its conversation.
-   *
-   * The state is `InProgress`; override with `.withStatus(...)` if needed.
+   * A thread with exactly the supplied messages in its conversation, `Completed`; override with `.withStatus(...)`
+   * if needed.
    *
    * @param msgs Ordered sequence of messages forming the conversation.
    */
-  def withMessages(msgs: Message*): AgentState =
-    AgentState(
-      conversation = Conversation(msgs.toSeq),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.InProgress
-    )
+  def withMessages(msgs: Message*): AgentThread =
+    AgentThread(threadId = "fixture-thread", messages = msgs)
 }
