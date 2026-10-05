@@ -94,6 +94,9 @@ class MCPToolRegistry(
               case Right(_) if Thread.currentThread().isInterrupted =>
                 Left(ToolCallError.Cancelled(request.functionName))
               case Right(Failure(e)) if CancelledError.isCancellation(e) =>
+                // A tool that wrapped the InterruptedException has cleared the flag; restore it so the
+                // caller still sees the cancellation (design section 4.4).
+                Thread.currentThread().interrupt()
                 Left(ToolCallError.Cancelled(request.functionName))
               case Right(Failure(e)) =>
                 logger.error(s"MCP tool ${request.functionName} execution failed", e)
@@ -113,7 +116,16 @@ class MCPToolRegistry(
   /**
    * The hints the MCP server declares for the tool `name` through its tool annotations, as of the last
    * discovery of that server's tools (`tools`, `getAllTools` or `execute` trigger it); `None` for a tool no
-   * MCP server advertises, and for one a local tool shadows. See [[MCPClient.getToolHints]].
+   * MCP server advertises, for one a local tool shadows, and for any tool of a server whose last discovery
+   * failed.
+   *
+   * '''Only a trusted server has hints.''' The MCP specification requires annotations from an untrusted
+   * server to be treated as untrusted, and `ApprovalMiddleware.unlessReadOnly` skips approval for a tool
+   * whose hints say read-only, so a server's own claim must not relax approval by default. A server
+   * configured with `trustAnnotations = false` (the default, see [[MCPServerConfig]]) yields `None` for
+   * every one of its tools; pass `registry.toolHints(name).getOrElse(ToolHints.default)` to
+   * `AgentTool.fromToolFunction` and an untrusted tool keeps the conservative defaults, which require
+   * approval. See [[MCPClient.getToolHints]].
    */
   def toolHints(name: String): Option[ToolHints] =
     if (localTools.exists(_.name == name)) None
@@ -194,7 +206,8 @@ class MCPToolRegistry(
       }
     }
 
-  private def createMCPClient(server: MCPServerConfig): MCPClient = {
+  // `private[mcp]` so a spec in this package can hand the registry a stub client.
+  private[mcp] def createMCPClient(server: MCPServerConfig): MCPClient = {
     logger.info(s"Creating new MCP client for server: ${server.name}")
     val client = new MCPClientImpl(server)
     logger.debug(s"MCP client created successfully for server: ${server.name}")

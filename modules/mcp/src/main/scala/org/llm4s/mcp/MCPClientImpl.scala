@@ -224,10 +224,17 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
    *
    * Calls `initialize()` automatically if not already connected.  Any error
    * during transport initialisation, tool listing, or JSON parsing is logged
-   * and swallowed: this method always returns `Right(tools)` where `tools` is
-   * the (possibly empty) sequence of successfully parsed tool definitions.
+   * and swallowed: the result is `Right(tools)` where `tools` is the (possibly
+   * empty) sequence of successfully parsed tool definitions. The one failure
+   * that is not swallowed is a cancellation: if the call is interrupted it
+   * returns `Left(CancelledError)`, with the thread's interrupt flag still set.
    *
-   * @return always `Right`; `Right(Seq.empty)` on any communication or parse failure
+   * A listing that fails clears the hints recorded by the last one (see
+   * [[getToolHints]]), so a server that is down or sends a list that cannot be
+   * read leaves no stale hints behind.
+   *
+   * @return `Right`, with `Right(Seq.empty)` on any communication or parse failure;
+   *         `Left(CancelledError)` if the call was interrupted
    */
   override def getTools(): Result[Seq[ToolFunction[_, _]]] = {
     val result = for {
@@ -239,6 +246,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
       case Left(cancelled: CancelledError) => Left(cancelled)
       case Left(error) =>
         logger.error(error.message)
+        toolHints = Map.empty
         Right(Seq.empty)
       case ok => ok
     }
@@ -256,6 +264,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
       case Left(cancelled: CancelledError) => Left(cancelled)
       case Left(error) =>
         logger.warn(error.message)
+        toolHints = Map.empty
         Right(Seq.empty)
       case ok => ok
     }
@@ -267,9 +276,14 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
       (toolsData.map(convertMCPToolToToolFunction).toSeq, toolsData.map(MCPClientImpl.hintsOf).toMap)
     }
     result.fold(
-      ex => logger.error("Failed to parse tools from {}: {}", config.name, ex.getMessage),
+      ex => {
+        logger.error("Failed to parse tools from {}: {}", config.name, ex.getMessage)
+        toolHints = Map.empty
+      },
       { case (tools, hints) =>
-        toolHints = hints
+        // Annotations are the server's own claim about its tools: only a server the caller has chosen to
+        // trust may relax how they are treated (see MCPServerConfig.trustAnnotations).
+        toolHints = if (config.trustAnnotations) hints else Map.empty
         logger.info("Successfully retrieved from {} {} tools", config.name, tools.size)
       }
     )
@@ -283,6 +297,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
     transport.foreach(_.close())
     transport = None
     initialized = false
+    toolHints = Map.empty
   }
 
   // Generates unique request IDs for JSON-RPC protocol

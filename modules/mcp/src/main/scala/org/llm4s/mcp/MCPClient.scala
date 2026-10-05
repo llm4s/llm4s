@@ -24,10 +24,19 @@ trait MCPClient {
   /**
    * The hints each tool declares through its MCP annotations (`readOnlyHint`, `destructiveHint`,
    * `idempotentHint`, `openWorldHint`), by tool name, as of the last successful [[getTools]]; empty
-   * before that. A tool that carries no annotations has the specification's conservative defaults.
+   * before that, and empty again as soon as a listing fails or the client is closed, so a tool the server
+   * no longer advertises never keeps its old hints. A tool that carries no annotations has the
+   * specification's conservative defaults.
    *
-   * Hints are advisory: they say what a server claims, not what its tool does. Attach them to the
-   * tool a middleware will see with `AgentTool.fromToolFunction(tool, hints)` in `llm4s-agent`.
+   * '''Trust.''' Hints are advisory: they say what a server claims, not what its tool does, and the MCP
+   * specification requires a client to treat annotations from an untrusted server as untrusted. They are
+   * therefore reported only for a server configured with `MCPServerConfig.trustAnnotations = true`; for any
+   * other the map is empty, which leaves `ToolHints.default` in force (approval required). Otherwise a server
+   * could mark a destructive tool `readOnlyHint = true` and have `ApprovalMiddleware.unlessReadOnly` run it
+   * unapproved.
+   *
+   * Attach hints to the tool a middleware will see with `AgentTool.fromToolFunction(tool, hints)` in
+   * `llm4s-agent`.
    */
   def getToolHints(): Map[String, ToolHints] = Map.empty
 
