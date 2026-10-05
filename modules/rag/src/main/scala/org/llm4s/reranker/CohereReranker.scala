@@ -1,5 +1,6 @@
 package org.llm4s.reranker
 
+import org.llm4s.error.CancelledError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -26,7 +27,7 @@ class CohereReranker(config: RerankProviderConfig) extends Reranker {
   private val httpClient = Llm4sHttpClient.create()
   private val logger     = LoggerFactory.getLogger(getClass)
 
-  override def rerank(request: RerankRequest): Result[RerankResponse] = {
+  override def rerank(request: RerankRequest): Result[RerankResponse] = CancelledError.attempt("cohere.rerank") {
     val topN = request.topK.getOrElse(request.documents.size)
 
     val payload = Obj(
@@ -43,12 +44,16 @@ class CohereReranker(config: RerankProviderConfig) extends Reranker {
 
     val headers = Map("Authorization" -> s"Bearer ${config.apiKey}", "Content-Type" -> "application/json")
 
-    // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left
-    val respEither: Either[RerankError, org.llm4s.http.HttpResponse] =
+    // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.
+    // A cancellation passes through as it is (design section 4.4); any other failure is a RerankError.
+    val respEither: Result[org.llm4s.http.HttpResponse] =
       httpClient
         .post(url, headers, payload.render(), timeout = 2.minutes)
         .left
-        .map(e => RerankError(code = None, message = s"HTTP request failed: ${e.message}", provider = "cohere"))
+        .map {
+          case cancelled: CancelledError => cancelled
+          case e => RerankError(code = None, message = s"HTTP request failed: ${e.message}", provider = "cohere")
+        }
 
     respEither.flatMap { response =>
       response.statusCode match {
