@@ -22,6 +22,12 @@ Real-time visibility into agent execution for responsive UIs.
 
 ## Overview
 
+{: .warning }
+> `Agent.runWithEvents`, `runCollectingEvents` and `continueConversationWithEvents` are not available while the agent
+> loop moves onto the graph runtime ([#1328](https://github.com/llm4s/llm4s/issues/1328)). The event types below are
+> unchanged; the stream returns on the runtime's run events in [#1329](https://github.com/llm4s/llm4s/issues/1329).
+> Until then, observe a run through `AgentContext(tracing = ...)` or the graph runtime's `RunEvent`s.
+
 The streaming events system provides real-time feedback during agent execution:
 
 - **Text streaming** - Token-by-token output as the LLM generates
@@ -487,8 +493,6 @@ agent.runWithEvents(query, tools) { event =>
 
 | Example | Description |
 |---------|-------------|
-| [StreamingAgentExample](/examples/#streaming-examples) | Basic streaming with events |
-| [EventCollectionExample](/examples/#streaming-examples) | Collecting and analyzing events |
 | [StreamingWithProgressExample](/examples/#streaming-examples) | Progress indicators and metrics |
 
 [Browse all examples →](/examples/)

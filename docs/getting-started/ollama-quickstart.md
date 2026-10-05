@@ -478,7 +478,7 @@ object OllamaTools extends App {
   result match {
     case Right(state) =>
       println("Final response:")
-      println(state.conversation.messages.last.content)
+      println(state.messages.last.content)
     case Left(error) =>
       Console.err.println(s"Error: ${error.formatted}")
   }

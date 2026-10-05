@@ -495,14 +495,12 @@ println(s"Conversation: $conversationTokens tokens = \$$totalCost")
 ### Inspect pruning results
 
 Pruning happens automatically inside `runMultiTurn`. To observe it explicitly, apply
-`AgentState.pruneConversation` before running and compare message counts:
+`AgentThread#pruned` before running and compare message counts:
 
 ```scala
-import org.llm4s.agent.AgentState
-
-val before = state.conversation.messages.length
-val pruned = AgentState.pruneConversation(state, config)
-val after  = pruned.conversation.messages.length
+val before = thread.messages.length
+val pruned = thread.pruned(config)
+val after  = pruned.messages.length
 
 if (after < before)
   logger.info(s"Pruned ${before - after} messages (${before} → ${after})")
@@ -511,9 +509,10 @@ if (after < before)
 ### Log pruning performance
 
 ```scala
-val pruned = AgentState.pruneConversation(state, config, tokenCounter)
-val tokenBefore = tokenCounter.countConversation(state.conversation)
-val tokenAfter = tokenCounter.countConversation(pruned.conversation)
+// tokenCounter: Message => Int
+val pruned = thread.pruned(config, tokenCounter)
+val tokenBefore = thread.messages.map(tokenCounter).sum
+val tokenAfter = pruned.messages.map(tokenCounter).sum
 
 logger.info(s"Pruning efficiency: saved ${tokenBefore - tokenAfter} tokens")
 logger.info(s"Cost savings: $${(tokenBefore - tokenAfter) * costPerToken}")

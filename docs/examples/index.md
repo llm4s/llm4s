@@ -400,8 +400,8 @@ sbt "samples/runMain org.llm4s.samples.agent.ConversationPersistenceExample"
 
 **Key code:**
 ```scala
-AgentState.saveToFile(state, "/tmp/conversation.json")
-val loadedState = AgentState.loadFromFile("/tmp/conversation.json", tools)
+AgentThread.saveToFile(thread, "/tmp/conversation.json")
+val loaded = AgentThread.loadFromFile("/tmp/conversation.json")
 ```
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/ConversationPersistenceExample.scala)
@@ -1054,29 +1054,8 @@ Streaming with real-time progress feedback.
 sbt "samples/runMain org.llm4s.samples.streaming.StreamingWithProgressExample"
 ```
 
-### StreamingAgentExample
-
-**File:** [`StreamingAgentExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/streaming/StreamingAgentExample.scala)
-
-Agent with real-time event streaming using `runWithEvents()`.
-
-```bash
-sbt "samples/runMain org.llm4s.samples.streaming.StreamingAgentExample"
-```
-
-[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/streaming/StreamingAgentExample.scala)
-
-### EventCollectionExample
-
-**File:** [`EventCollectionExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/streaming/EventCollectionExample.scala)
-
-Collecting and processing agent execution events.
-
-```bash
-sbt "samples/runMain org.llm4s.samples.streaming.EventCollectionExample"
-```
-
-[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/streaming/EventCollectionExample.scala)
+The agent event-stream samples (`StreamingAgentExample`, `EventCollectionExample`, `StreamingWithToolsExample`) are
+removed until the event stream returns on the graph runtime's run events (#1329).
 
 ---
 
@@ -1119,7 +1098,7 @@ sbt "samples/runMain org.llm4s.samples.model.ModelMetadataExample"
 **File:** [`CostTrackingExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/metrics/CostTrackingExample.scala)
 
 What a call costs, at three levels: per request (`Completion.estimatedCost`), per agent run
-(`AgentState.usageSummary` after a real `Agent.run` that calls a tool), and per session (a `CostTracker`
+(`AgentThread.usage` after a real `Agent.run` that calls a tool), and per session (a `CostTracker`
 the client reports to). It also shows how to price a model the registry does not know, with a
 `ModelRegistryService` built from your own `ModelMetadata` (an immutable snapshot, so nothing global
 changes), and how `MetricsCollector.compose` feeds several collectors from one client. A model with no price

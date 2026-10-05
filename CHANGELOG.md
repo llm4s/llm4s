@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `Flow` collector interrupts the blocking provider call. It is a separate Gradle build (`gradle check`,
   JaCoCo coverage check, the `Kotlin API` CI job) that consumes `llm4s-java-api` from local Maven, **not
   part of the sbt build or the MiMa baseline and not yet published to Maven Central**.
+- **`AgentThread`, `ThreadStatus`, `SuspendedOn`, `GraphRuntime.seed`** ([#1328](https://github.com/llm4s/llm4s/issues/1328)):
+  the data-only conversation, where a turn ended, the interrupts a suspended turn waits on, and a runtime call that
+  starts a thread from existing history. `AgentThread.fromJson` also reads files `AgentState.toJson` wrote.
 - **`llm4s-effect` and `llm4s-zio`: cats-effect and ZIO integration** (Beta, `modules/llm4s-effect`,
   `modules/llm4s-zio`, [#935](https://github.com/llm4s/llm4s/issues/935)): `LLMClientIO[F]` and `AgentIO[F]` (package
   `org.llm4s.effect.cats`, cats-effect 3 and fs2) and `LLMClientZ` and `AgentZ` (package `org.llm4s.zio`,
@@ -493,6 +496,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answer with blank content and no tool calls now fails the run at the `model` node before it is
   stored, rather than completing with a message the next turn's `Message.validateConversation`
   refuses; `recover` asks the model again.
+- **The agent loop runs on the graph runtime; `AgentThread` replaces `AgentState`**
+  ([#1328](https://github.com/llm4s/llm4s/issues/1328), slice 2 of [#1326](https://github.com/llm4s/llm4s/issues/1326)):
+  `Agent.run`, `continueConversation` and `runMultiTurn` return `Result[AgentThread]` - data only (`threadId`,
+  `messages`, `systemMessage`, `completionOptions`, `usage`, `ThreadStatus`) - and run every turn through `ToolLoop` on
+  `GraphRuntime`; `Agent` takes an optional `GraphRuntime`. New `Agent.recover` (continues a turn cut off by a
+  recoverable error, the step limit or a cancellation, without re-running completed tool calls) and `Agent.resume`
+  (answers approvals and tool questions of a `Suspended` thread, partially if need be). Handoffs are offered by stable
+  `id` (`handoff_to_<id>`) and recorded as data. `maxSteps` now counts model calls. An interrupted caller cancels the
+  run and waits for it to stop. A tool function's structured `ToolCallError` JSON still reaches the model
+  (`ToolOutcome.Error` carries optional `details`; adapted `ToolFunction`s validate their own arguments).
+  `llm4s-effect`, `llm4s-zio`, the Java and Kotlin APIs, the assistant and `workspaceClient` follow. See the
+  [migration guide](docs/reference/migration.md#the-agent-loop-runs-on-the-graph-runtime-agentthread-replaces-agentstate).
 - **Binary compatibility is checked by MiMa** ([#924](https://github.com/llm4s/llm4s/issues/924),
   [#1281](https://github.com/llm4s/llm4s/issues/1281)): a `mima-check` CI job runs
   `sbt mimaReportBinaryIssues` and gates `all-tests-pass`. The baseline is set per frozen module
@@ -1251,6 +1266,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RequireApproval(reason)` is `if context.approved then next() else
   ToolOutcome.NeedsApproval(reason)`, or use `ApprovalMiddleware`; `ApprovalSource.Policy` becomes
   `ApprovalSource.Middleware(id)`.
+- **`AgentState`, `AgentStatus`, `AgentStreamingExecutor`, `ToolProcessor`, `GuardrailApplicator`, `HandoffExecutor`**
+  ([#1328](https://github.com/llm4s/llm4s/issues/1328)), with `Agent.initializeSafe`, `runStep`, `run(state, ...)`,
+  `runWithStrategy`, `runWithEvents`, `runCollectingEvents` and `continueConversationWithEvents`. Migration: see the
+  table in the [migration guide](docs/reference/migration.md); the event entry points return on the runtime's run events
+  in [#1329](https://github.com/llm4s/llm4s/issues/1329), and the samples `StreamingAgentExample`,
+  `EventCollectionExample` and `StreamingWithToolsExample` are removed until then.
 - **Pre-baseline API cleanup, pass 8** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
   `llm4s-agent`'s console UI (`ConsoleInterface`, `ConsoleConfig`, `MessageType`) is internal, so
   fansi and cats stay out of its public API; `AssistantAgent` loses its `consoleConfig` parameter

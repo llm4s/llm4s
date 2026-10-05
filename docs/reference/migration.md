@@ -1,5 +1,52 @@
 # Migration Guide
 
+## The agent loop runs on the graph runtime: `AgentThread` replaces `AgentState`
+
+`Agent.run`, `continueConversation`, `runMultiTurn` and the new `recover` and `resume` run every turn on
+`GraphRuntime` through the `ToolLoop` (#1328, slice 2 of #1326). The conversation is no longer an `AgentState` holding
+tools and handoffs; it is an `AgentThread`, data only: `threadId`, `messages`, `systemMessage`, `completionOptions`,
+`usage` and a `ThreadStatus` (`Completed`, `Failed(error)`, `Suspended(on)`).
+
+| Before | After |
+|---|---|
+| `Agent.run(...): Result[AgentState]` | `Result[AgentThread]` |
+| `state.conversation.messages` | `thread.messages` |
+| `state.status == AgentStatus.Complete` | `thread.status == ThreadStatus.Completed` |
+| `AgentStatus.Failed(e)` | `ThreadStatus.Failed(e)` |
+| `AgentStatus.InProgress`, `WaitingForTools` | gone: a turn is awaited to its end |
+| `AgentStatus.HandoffRequested` | gone: the handoff runs, the target's thread is returned |
+| `state.tools`, `state.copy(tools = ...)` | gone: pass `tools` to each call |
+| `agent.continueConversation(state, msg)` | `agent.continueConversation(thread, msg, tools)` |
+| `state.logs`, `state.initialQuery` | gone: the run events and `messages.head` carry them |
+| `state.usageSummary` | `thread.usage` |
+| `state.lastAssistantMessage` | `thread.answer` |
+| `AgentState.pruneConversation(state, config)` | `thread.pruned(config)` |
+| `AgentState.saveToFile/loadFromFile(path, tools)` | `AgentThread.saveToFile/loadFromFile(path)` |
+| `agent.initializeSafe`, `runStep`, `run(state, ...)` | gone: use `run(maxSteps = Some(1))` and `agent.recover` |
+| `agent.runWithStrategy(q, tools, strategy)` | `agent.run(q, tools, context = AgentContext(toolExecutionStrategy = strategy))` |
+| `Handoff(targetAgent = ...)` offered by reference | offered by stable `id`; `handoff_to_<id>` |
+| `AgentEvent.AgentCompleted(finalState: AgentState)` | `AgentCompleted(finalState: AgentThread)` |
+
+Things that behave differently:
+
+- **`maxSteps` counts model calls**, not steps of a hand-driven loop: `Some(1)` allows one model call. A turn that runs
+  out ends as `ThreadStatus.Failed("Maximum step limit reached")` with its checkpoint intact; `agent.recover(thread,
+  tools)` continues it without repeating completed work. The default is still `Some(Agent.DefaultMaxSteps)`.
+- **Failures are `Left`**: a model, guardrail or handoff-target error is the `Left` of the call, unwrapped from the
+  runtime's `NodeFailed`. An exception thrown by a client is `Left(UnknownError)` holding the throwable, not a raw
+  exception out of `run`.
+- **Cancellation**: an interrupted caller cancels the run and waits for it to stop, as the effect and ZIO bridges rely on.
+- **Output guardrails** now apply to the final answer the model gives, and may change it (a `Fix`).
+- **Suspension**: a turn that needs an approval or a tool question ends `Suspended`; `agent.resume(thread, answers,
+  tools)` answers some or all of the interrupts and continues; unanswered ones stay parked.
+- **Concurrency**: `AgentContext.toolExecutionStrategy` sets how many tool calls of one reply run at once.
+- **Event streaming**: `Agent.runWithEvents`, `runCollectingEvents` and `continueConversationWithEvents` are removed
+  for now and come back on the runtime's run events in #1329. The three samples built on them
+  (`StreamingAgentExample`, `EventCollectionExample`, `StreamingWithToolsExample`) are removed with them.
+- **Sessions**: `AssistantAgent` sessions hold an `AgentThread`; `SessionManager` still loads a session file saved with
+  an `agentState` (conversation and status carry over; a status that was still running loads as `Failed`).
+- `AgentThread.fromJson` reads `AgentState.toJson` files by the same rule.
+
 ## Agent middleware
 
 Not in a release yet ([#1279](https://github.com/llm4s/llm4s/issues/1279)). The graph tool loop

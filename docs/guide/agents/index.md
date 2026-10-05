@@ -59,7 +59,7 @@ val result = for {
 } yield state
 
 result match {
-  case Right(state) => println(state.lastAssistantMessage)
+  case Right(thread) => println(thread.answer.getOrElse("(no answer)"))
   case Left(error) => println(s"Error: $error")
 }
 ```
@@ -104,10 +104,10 @@ val result = for {
   state1 <- agent.run("Tell me about Scala", tools)
 
   // Follow-up (preserves context)
-  state2 <- agent.continueConversation(state1, "How does it compare to Java?")
+  state2 <- agent.continueConversation(state1, "How does it compare to Java?", tools)
 
   // Another follow-up
-  state3 <- agent.continueConversation(state2, "What about performance?")
+  state3 <- agent.continueConversation(state2, "What about performance?", tools)
 } yield state3
 ```
 
@@ -115,62 +115,67 @@ val result = for {
 
 ## Safety Defaults
 
-- **Agent step limit**: `Agent.run(...)` defaults to `maxSteps = Some(50)` to prevent infinite loops. Pass `maxSteps = None` to allow unlimited steps.
+- **Agent step limit**: `Agent.run(...)` defaults to `maxSteps = Some(50)` - at most 50 model calls - to prevent infinite loops. Pass `maxSteps = None` to allow unlimited steps. A turn that hits the limit ends as `ThreadStatus.Failed("Maximum step limit reached")`, and `agent.recover(thread, tools)` takes it further.
 - **HTTPTool methods**: `HttpConfig()` defaults to `GET` and `HEAD` only. Use `HttpConfig.withWriteMethods()` or `HttpConfig().withAllMethods` to allow write methods.
 
 ---
 
 ## Core Concepts
 
-### Agent State
+### Agent Thread
 
-The `AgentState` is an immutable container that tracks:
+The `AgentThread` is an immutable, data-only record of a conversation. It replaces `AgentState` and holds:
 
-- **Conversation history** - All messages exchanged
-- **Available tools** - Tools the agent can call
-- **Status** - `InProgress`, `WaitingForTools`, `Complete`, `Failed`, or `HandoffRequested`
+- **Conversation history** - All messages exchanged (`messages`)
+- **Status** - `ThreadStatus.Completed`, `Failed(error)` or `Suspended(on)`
 - **System message** - Instructions for the LLM
 - **Completion options** - Temperature, max tokens, etc.
+- **Usage** - Tokens and cost of every model call so far
+
+It holds no tools, handoffs, guardrails or clients - those are live objects, supplied again on every call - so a thread serializes with `AgentThread.toJson` and continues in any `Agent`.
 
 ```scala
-// Agent state is immutable - operations return new states
-val newState = state.addMessage(UserMessage("Follow-up question"))
+// A thread is immutable - setters return new threads
+val edited = thread.withMessages(thread.messages :+ UserMessage("Follow-up question"))
 ```
 
 ### Agent Lifecycle
 
+An `Agent` turn runs on the graph runtime: the model is called, the tool calls it asks for run (in parallel when
+`AgentContext.toolExecutionStrategy` says so), and the model is called again until it answers without tool calls.
+
 ```
-Initial Query
-     |
-     v
-+----------+     LLM Call      +------------------+
-| InProgress| --------------> | WaitingForTools  |
-+----------+                  +------------------+
-     ^                               |
-     |        Tool Execution         |
-     +-------------------------------+
-     |
-     v (no more tool calls)
-+----------+
-| Complete |
-+----------+
+Query --> model call --> tool calls? --yes--> run tools --> model call ...
+                              |
+                              no
+                              v
+                          Completed
 ```
+
+A turn that needs a human decision ends `Suspended`; answer it with `agent.resume(thread, answers, tools)`. A turn that
+failed part-way (a recoverable error, the step limit, a cancellation) is continued with `agent.recover(thread, tools)`;
+work that completed is not run again.
 
 ### Tool Execution Strategies
 
 Control how multiple tool calls are executed:
 
 ```scala
-import org.llm4s.agent.ToolExecutionStrategy
+import org.llm4s.agent.AgentContext
+import org.llm4s.toolapi.ToolExecutionStrategy
 
 // Sequential (default) - one at a time, safest
 agent.run(query, tools)
 
 // Parallel - all at once, fastest
-agent.runWithStrategy(query, tools, ToolExecutionStrategy.Parallel)
+agent.run(query, tools, context = AgentContext(toolExecutionStrategy = ToolExecutionStrategy.Parallel))
 
 // Parallel with limit - balance speed and resources
-agent.runWithStrategy(query, tools, ToolExecutionStrategy.ParallelWithLimit(3))
+agent.run(
+  query,
+  tools,
+  context = AgentContext(toolExecutionStrategy = ToolExecutionStrategy.ParallelWithLimit(3))
+)
 ```
 
 ---
@@ -235,19 +240,8 @@ agent.run(
 
 ### [Streaming Events](streaming)
 
-Real-time execution feedback:
-
-```scala
-import org.llm4s.agent.streaming._
-
-agent.runWithEvents(query, tools) {
-  case TextDelta(text, _) => print(text)
-  case ToolCallStarted(_, name, _, _) => println(s"Calling $name...")
-  case ToolCallCompleted(_, name, result, _, _, _) => println(s"$name: $result")
-  case AgentCompleted(state, steps, ms, _) => println(s"Done in $steps steps")
-  case _ => ()
-}
-```
+Real-time execution feedback. `Agent.runWithEvents` is not available while the agent loop moves onto the graph
+runtime; the event stream returns on the runtime's run events (#1329). The page describes the event vocabulary.
 
 [Learn more about streaming →](streaming)
 
@@ -332,13 +326,13 @@ agent.runMultiTurn(queries, tools, contextConfig = Some(config))
 Save and resume conversations:
 
 ```scala
-// Save state to disk
-AgentState.saveToFile(state, "/tmp/conversation.json")
+// Save the thread to disk (conversation, system message, options, usage - no tools)
+AgentThread.saveToFile(thread, "/tmp/conversation.json")
 
 // Load and resume
 val result = for {
-  loadedState <- AgentState.loadFromFile("/tmp/conversation.json", tools)
-  resumedState <- agent.continueConversation(loadedState, "Continue our conversation")
+  loaded  <- AgentThread.loadFromFile("/tmp/conversation.json")
+  resumed <- agent.continueConversation(loaded, "Continue our conversation", tools)
 } yield resumedState
 ```
 

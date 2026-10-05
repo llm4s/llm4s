@@ -160,16 +160,10 @@ The LLM sees descriptions and chooses the appropriate specialist.
 
 ### 1. Tools are Generated
 
-When handoffs are provided, the agent generates handoff tools:
-
-```scala
-// Internal tool generated for each handoff
-ToolFunction(
-  name = "handoff_to_math_expert",
-  description = "Transfer to specialist: Mathematical calculations and proofs",
-  function = () => RequestHandoff(targetAgent, transferReason, ...)
-)
-```
+Every handoff has a stable id (`[a-zA-Z0-9_-]{1,52}`, unique in the list), and the agent generates one tool per
+handoff, named `handoff_to_<id>`. Calling it records a request that names the handoff **by id** - never by a reference to
+the target agent - so the request is plain data in the thread's checkpoint. The agent rejects an invalid or repeated id,
+and an id whose tool name clashes with a registered tool, with a `ValidationError` before the model is called.
 
 ### 2. LLM Decides
 
@@ -181,10 +175,11 @@ The LLM can choose to:
 ### 3. Handoff Executes
 
 When handoff is requested:
-1. Agent status changes to `HandoffRequested`
-2. Context is prepared based on settings
-3. Target agent receives the query
-4. Target agent processes and returns response
+1. The tool batch that contained the request finishes, and the source agent's loop ends - it does not call the model again
+2. The agent looks the id up among the handoffs of this call
+3. Context is prepared based on settings (`preserveContext`, `transferSystemMessage`)
+4. The target agent answers on that context, with no tools of its own, and its thread is returned with the source's
+   usage merged in
 
 ### 4. Response Returns
 
@@ -290,43 +285,29 @@ triageAgent.run(
 
 ## Handling Handoff Results
 
-### Check for Handoff Status
+### Reading the Result
+
+A handoff is not a status the caller handles: `run` returns the target agent's thread.
 
 ```scala
-val result = mainAgent.run(query, tools, handoffs)
+val result = mainAgent.run(query, tools, handoffs = handoffs)
 
 result match {
-  case Right(state) if state.status == AgentStatus.Complete =>
-    println(s"Completed: ${state.lastAssistantMessage}")
+  case Right(thread) if thread.status == ThreadStatus.Completed =>
+    println(s"Completed: ${thread.answer.getOrElse("")}")
 
-  case Right(state) if state.status == AgentStatus.HandoffRequested =>
-    // Handoff was requested but you're handling manually
-    val handoffInfo = state.requestedHandoff
-    println(s"Handoff to: ${handoffInfo.targetAgentName}")
+  case Right(thread) =>
+    println(s"Ended as ${thread.status}")
 
   case Left(error) =>
+    // includes a target agent that failed, and a handoff id the model asked for that was not offered
     println(s"Error: $error")
 }
 ```
 
-### With Streaming Events
+### Streaming Events
 
-```scala
-import org.llm4s.agent.streaming._
-
-mainAgent.runWithEvents(query, tools, handoffs) {
-  case HandoffStarted(targetName, reason, preserveContext, _) =>
-    println(s"Handing off to $targetName: $reason")
-
-  case HandoffCompleted(targetName, success, _) =>
-    println(s"Handoff to $targetName: ${if (success) "success" else "failed"}")
-
-  case AgentCompleted(state, _, _, _) =>
-    println(s"Final: ${state.lastAssistantMessage}")
-
-  case _ => ()
-}
-```
+`HandoffStarted` and `HandoffCompleted` belong to the event stream, which returns with the runtime's run events (#1329).
 
 ---
 

@@ -239,7 +239,7 @@ calling too. Core keeps the tool API (`ToolFunction`, `ToolRegistry`, schemas, e
 depend on `llm4s-agent`. `modules/agent` (`llm4s-agent`) then took `org.llm4s.agent` (bar
 `agent.memory`, already in `llm4s-memory`, which does not depend on it) and `org.llm4s.assistant`,
 with fansi. **Nothing in core may import either package** - the tracing contract takes a
-`TraceEvent.AgentStateUpdated`, which `AgentState#toTraceEvent` builds, so core's trace specs
+`TraceEvent.AgentStateUpdated`, which `AgentThread#toTraceEvent` builds, so core's trace specs
 build that event directly and `AgentRunTracingSpec` in the agent module covers `toTraceEvent`.
 `workspaceClient` depends on `llm4s-agent` for `codegen`; `observability` only in Test scope.
 
@@ -494,8 +494,8 @@ for {
   client <- LLMConnect.getClient(providerConfig)
   agent = new Agent(client)
   tools = new ToolRegistry(Seq(myTool))
-  state <- agent.run("Query here", tools)
-} yield state
+  thread <- agent.run("Query here", tools)   // an AgentThread: data only, serializable
+} yield thread
 ```
 
 ### Multi-Turn Conversations
@@ -503,7 +503,8 @@ for {
 ```scala
 for {
   state1 <- agent.run("First query", tools)
-  state2 <- agent.continueConversation(state1, "Follow-up")
+  // tools, guardrails and handoffs are live: supplied again on every call
+  state2 <- agent.continueConversation(state1, "Follow-up", tools)
 } yield state2
 ```
 
@@ -577,20 +578,9 @@ client.complete(conversation, options)
 
 ### Streaming Events
 
-```scala
-import org.llm4s.agent.streaming._
-
-// Get real-time agent execution events
-agent.runWithEvents("Query here", tools) { event =>
-  event match {
-    case TextDelta(text) => print(text)
-    case ToolCallStarted(name, _) => println(s"Calling $name...")
-    case ToolCallCompleted(name, result, _) => println(s"$name returned: $result")
-    case AgentCompleted(state) => println("Done!")
-    case _ => ()
-  }
-}
-```
+The agent event stream (`Agent.runWithEvents`, `runCollectingEvents`) is absent while the loop runs on the graph
+runtime (#1328); it returns on the runtime's run events in #1329. The `AgentEvent` types in
+`org.llm4s.agent.streaming` remain:
 
 Event types: `TextDelta`, `TextComplete`, `ToolCallStarted`, `ToolCallCompleted`, `ToolCallFailed`, `AgentStarted`, `StepStarted`, `StepCompleted`, `AgentCompleted`, `AgentFailed`, `InputGuardrailStarted`, `InputGuardrailCompleted`, `OutputGuardrailStarted`, `OutputGuardrailCompleted`, `HandoffStarted`, `HandoffCompleted`
 

@@ -588,23 +588,17 @@ tracing.traceCost(
 Use context budget methods to prevent runaway costs:
 
 ```scala
-import org.llm4s.agent.{AgentState, ContextWindowConfig}
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.agent.{AgentThread, ContextWindowConfig}
 import org.llm4s.types.HeadroomPercent
 
 // Get available tokens considering model limits and safety margin
 val budget = client.getContextBudget(HeadroomPercent.Standard)
 val config = ContextWindowConfig(maxTokens = Some(budget))
 
-// AgentState.pruneConversation uses a default token counter (words * 1.3)
-// or accepts a custom tokenCounter function for more accurate estimation
-// Build agent state with conversation + tool registry
-val state = AgentState(conversation, ToolRegistry.empty)
-val prunedState =
-  AgentState.pruneConversation(
-    state,
-    config
-  )
+// AgentThread#pruned uses a default token counter (words * 1.3)
+// or accepts a custom tokenCounter function (Message => Int) for more accurate estimation
+val thread = AgentThread("session-1", messages = conversation.messages)
+val prunedThread = thread.pruned(config)
 ```
 
 ---

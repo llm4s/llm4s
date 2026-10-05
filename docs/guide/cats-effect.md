@@ -79,7 +79,7 @@ val agentIO = client.agent()
 
 for {
   state <- agentIO.run(query = "Summarise this", tools = myTools)
-  _     <- IO.println(state.conversation.messages.last)
+  _     <- IO.println(state.messages.last)
 } yield ()
 ```
 
@@ -88,7 +88,7 @@ for {
 ```scala
 for {
   s1 <- agentIO.run("What's the weather in Paris?", tools)
-  s2 <- agentIO.continueConversation(s1, "And London?")
+  s2 <- agentIO.continueConversation(s1, "And London?", tools)
 } yield s2
 ```
 
@@ -128,7 +128,7 @@ Tool calls are not a failure of the effect. When the model calls a tool with arg
 fit the tool's schema, `Agent` hands a structured error result back to the model so it
 can correct itself; the run continues and only the step limit or a provider error ends it, which
 then arrives in the error channel as usual. If you need to see those results, read the
-`ToolMessage`s in the returned `AgentState`. The schema-validated `AgentTool` contract and the
+`ToolMessage`s in the returned `AgentThread`. The schema-validated `AgentTool` contract and the
 graph runtime (`org.llm4s.agent.graph`) are experimental and are not wrapped here; if you pass
 handoffs by calling `Agent` directly, each `Handoff` needs a stable id, as in
 `Handoff.to("physics", agent)`.
