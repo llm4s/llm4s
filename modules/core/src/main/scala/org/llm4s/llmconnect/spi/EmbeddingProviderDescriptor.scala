@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -43,6 +44,7 @@ import org.llm4s.types.Result
  *     Right(JinaEmbeddingProvider.fromConfig(config))
  * }}}
  */
+@Stable
 trait EmbeddingProviderDescriptor:
 
   /**

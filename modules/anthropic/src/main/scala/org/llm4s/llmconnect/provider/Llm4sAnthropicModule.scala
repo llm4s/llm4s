@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
 
 /**
@@ -23,5 +24,6 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  * instantiates the class named in the services file through its public no-arg
  * constructor.
  */
+@Stable
 final class Llm4sAnthropicModule extends Llm4sProviderModule:
   override def chatProviders: Seq[ProviderDescriptor] = Seq(AnthropicProvider)

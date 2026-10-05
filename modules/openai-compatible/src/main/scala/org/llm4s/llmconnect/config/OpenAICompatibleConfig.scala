@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -34,6 +35,7 @@ import org.llm4s.util.Redaction
  *                          off for an endpoint that rejects the field. A named section sets it
  *                          with the `streamUsage` key.
  */
+@Stable
 final case class OpenAICompatibleConfig(
   model: String,
   baseUrl: String,

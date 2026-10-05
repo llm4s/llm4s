@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.annotation.Stable
+
 import java.security.MessageDigest
 import java.nio.charset.StandardCharsets
 
@@ -8,6 +10,7 @@ import java.nio.charset.StandardCharsets
  * Keys should be deterministic (same inputs always produce same key)
  * and collision-resistant (different inputs shouldn't produce same key).
  */
+@Stable
 object CacheKeyGenerator {
 
   /**

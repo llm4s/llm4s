@@ -1,5 +1,6 @@
 package org.llm4s.context
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -46,6 +47,7 @@ import org.slf4j.LoggerFactory
  * @see [[ToolOutputCompressor]] for the tool compaction implementation
  * @see [[CompressionRule]] for individual compression rules
  */
+@Stable
 object DeterministicCompressor {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -159,6 +161,7 @@ object DeterministicCompressor {
  * @param name Identifier for logging and debugging
  * @param apply The transformation function
  */
+@Stable
 case class CompressionRule(name: String, apply: Seq[Message] => Seq[Message])
 
 /**

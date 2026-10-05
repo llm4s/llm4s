@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ CancelledError, ConfigurationError }
 import org.llm4s.llmconnect.model.Completion
 import org.llm4s.llmconnect.provider.MetricsRecording
@@ -21,6 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * and optionally override `releaseResources()` to free provider-specific
  * resources (HTTP clients, SDK connections, etc.).
  */
+@Stable
 trait BaseLifecycleLLMClient extends LLMClient with MetricsRecording {
 
   /** Human-readable label used in the "already closed" error message. */

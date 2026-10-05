@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.llmconnect
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ CancelledError, LLMError, RateLimitError, RecoverableError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -19,6 +20,7 @@ import scala.concurrent.duration.{ Duration, DurationInt, DurationLong, FiniteDu
  * - Otherwise we fall back to local exponential backoff (baseDelay * 2^attempt) to avoid tight retry loops.
  * - The chosen delay is always capped at 30 seconds so waits remain bounded.
  */
+@Stable
 object LLMClientRetry {
 
   /** Maximum retry delay; all delays (provider hint or computed) are capped at this. */

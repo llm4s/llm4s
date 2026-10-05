@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
 import org.llm4s.types.Result
@@ -36,6 +37,7 @@ import scala.util.Try
  * @see `LangfuseTracing` in `llm4s-observability` for production observability
  * @see [[AnsiColors]] for color constants used
  */
+@Stable
 class ConsoleTracing extends Tracing {
   import AnsiColors._
 

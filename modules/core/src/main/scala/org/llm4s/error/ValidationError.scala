@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * Raised when the request parameters or inputs fail validation before being sent to the provider.
  *
@@ -11,6 +13,7 @@ package org.llm4s.error
  * @param field the name of the field that failed validation
  * @param violations list of specific validation rules that were violated
  */
+@Stable
 final case class ValidationError private (
   override val message: String,
   field: String,

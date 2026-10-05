@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, ProviderId }
 import org.llm4s.error.ValidationError
 import org.llm4s.http.HttpResponse.*
@@ -19,6 +20,7 @@ import scala.util.Try
  * `ProviderModelListers.Anthropic` until the provider moved to `llm4s-anthropic`
  * ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */
+@Stable
 object AnthropicModelLister extends ProviderModelLister:
   private val AnthropicVersion = "2023-06-01"
   private val DefaultLimit     = "100"

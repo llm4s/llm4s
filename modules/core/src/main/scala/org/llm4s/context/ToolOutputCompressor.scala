@@ -1,5 +1,6 @@
 package org.llm4s.context
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ContextError
 import org.llm4s.llmconnect.model.{ Message, ToolMessage }
 import org.llm4s.types.{ ArtifactKey, ContentSize, ExternalizationThreshold, ExternalizedContent, Result }
@@ -44,6 +45,7 @@ import scala.util.Try
  * @see [[ArtifactStore]] for content storage interface
  * @see [[DeterministicCompressor]] which uses this for the tool compaction phase
  */
+@Stable
 object ToolOutputCompressor {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -321,6 +323,7 @@ object ToolOutputCompressor {
  * Use [[ArtifactStore.inMemory]] for testing and short-lived sessions.
  * For production, implement with persistent storage (database, S3, etc.).
  */
+@Stable
 trait ArtifactStore {
 
   /** Store content under the given key. */

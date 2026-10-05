@@ -1,5 +1,6 @@
 package org.llm4s
 
+import org.llm4s.annotation.Stable
 import org.llm4s.core.safety.{ DefaultErrorMapper, ErrorMapper, Safety }
 import org.llm4s.types.TryOps
 import org.llm4s.types.{ AsyncResult, Result }
@@ -196,6 +197,7 @@ package object types {
  * It provides a consistent and type-safe way to handle results and errors in the LLM4S.
  */
 
+@Stable
 object Result {
   def success[A](value: A): Result[A]                        = Right(value)
   def failure[A](error: org.llm4s.error.LLMError): Result[A] = Left(error)
@@ -257,6 +259,7 @@ object Result {
   // Resource management: use scala.util.Using + types.TryOps#toResult
 }
 
+@Stable
 object AsyncResult {
   import scala.concurrent.ExecutionContext
 

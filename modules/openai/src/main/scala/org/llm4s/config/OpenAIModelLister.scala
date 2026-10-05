@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderId }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.provider.{ OpenAIProvider, RequestyProvider }
@@ -12,6 +13,7 @@ import org.llm4s.types.Result
  * This was `ProviderModelListers.OpenAI` until the provider moved to
  * `llm4s-openai` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */
+@Stable
 object OpenAIModelLister extends ProviderModelLister:
   private val delegate =
     ProviderModelListers.openAICompatible(
@@ -30,6 +32,7 @@ object OpenAIModelLister extends ProviderModelLister:
  * This was `ProviderModelListers.Requesty` until the provider moved to
  * `llm4s-openai` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */
+@Stable
 object RequestyModelLister extends ProviderModelLister:
   private val delegate =
     ProviderModelListers.openAICompatible(

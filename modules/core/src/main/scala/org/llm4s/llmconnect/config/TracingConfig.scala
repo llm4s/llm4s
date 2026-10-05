@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.trace.TracingMode
 
 /**
@@ -26,6 +27,7 @@ import org.llm4s.trace.TracingMode
  *               keyed by its path within that block (`publicKey`, `headers.Authorization`); a
  *               list or object value is rendered as HOCON. Empty when the block is absent.
  */
+@Stable
 case class TracingSettings(
   mode: TracingMode,
   extras: Map[String, String] = Map.empty

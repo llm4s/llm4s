@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.annotation.Stable
+
 import com.typesafe.config.ConfigUtil
 import org.llm4s.config.SharedCredentials
 import org.llm4s.error.ConfigurationError
@@ -19,6 +21,7 @@ import scala.jdk.CollectionConverters._
  * @param baseUrl `llm4s.embeddings.<id>.baseUrl`.
  * @param model   `llm4s.embeddings.<id>.model`.
  */
+@Stable
 final case class EmbeddingProviderSection(
   apiKey: Option[String] = None,
   baseUrl: Option[String] = None,
@@ -63,6 +66,7 @@ final case class EmbeddingProviderSection(
  *                       shared key, and the error then names the shared path instead.
  * @param modelEnv       the variable the module binds to the model, named likewise.
  */
+@Stable
 final case class EmbeddingConfigSpec private (
   requiresApiKey: Boolean,
   defaultBaseUrl: Option[String],

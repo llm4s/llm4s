@@ -1,5 +1,6 @@
 package org.llm4s.context
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -52,6 +53,7 @@ import scala.util.matching.Regex
  * @see [[SemanticBlocks]] for the block grouping algorithm
  * @see [[StructuredInfo]] for the extracted information types
  */
+@Stable
 object HistoryCompressor {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -242,6 +244,7 @@ object HistoryCompressor {
  * @param toolUsage Tool/function/API call mentions
  * @param outcomes Result and conclusion statements
  */
+@Stable
 case class StructuredInfo(
   identifiers: Seq[String],
   urls: Seq[String],
@@ -263,6 +266,7 @@ case class StructuredInfo(
  * @param content Formatted digest text for inclusion in conversation
  * @param originalTokens Estimated token count of original content
  */
+@Stable
 case class HistoryDigest(
   blockId: String,
   blockType: String,

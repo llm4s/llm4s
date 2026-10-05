@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ObjectSchema
@@ -14,6 +15,7 @@ import scala.util.Try
  * providing a unified interface for completion requests, streaming responses, and token management.
  * Implementations handle provider-specific authentication, message formatting, and tool calling.
  */
+@Stable
 trait LLMClient extends AutoCloseable {
 
   /**

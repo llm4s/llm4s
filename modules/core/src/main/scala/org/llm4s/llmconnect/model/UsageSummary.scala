@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.annotation.Stable
+
 import upickle.default.{ ReadWriter => RW, macroRW, readwriter }
 
 /**
@@ -15,6 +17,7 @@ import upickle.default.{ ReadWriter => RW, macroRW, readwriter }
  * @param thinkingTokens cumulative extended-thinking tokens (Anthropic only; zero for other providers)
  * @param totalCost      cumulative estimated cost in USD; `BigDecimal(0)` when cost data is unavailable
  */
+@Stable
 case class ModelUsage(
   requestCount: Long = 0L,
   inputTokens: Long = 0L,
@@ -89,6 +92,7 @@ object ModelUsage {
  *
  * @see [[ModelUsage]] for the per-model record type
  */
+@Stable
 case class UsageSummary(
   requestCount: Long = 0L,
   inputTokens: Long = 0L,

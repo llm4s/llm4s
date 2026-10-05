@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.util.Redaction
 
 /**
@@ -9,6 +10,7 @@ import org.llm4s.util.Redaction
  * @param model   name of the embedding model to use
  * @param apiKey  authentication key for the provider; redacted in `toString`
  */
+@Stable
 final case class EmbeddingProviderConfig(
   baseUrl: String,
   model: String,

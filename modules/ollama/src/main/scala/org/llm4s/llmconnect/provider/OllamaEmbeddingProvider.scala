@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
@@ -30,6 +31,7 @@ import scala.util.Try
  * namespaces are separate - so `EMBEDDING_MODEL=ollama/nomic-embed-text` and a
  * named chat section with `provider = "ollama"` name the same provider.
  */
+@Stable
 object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   val id: ProviderId = ProviderId("ollama")

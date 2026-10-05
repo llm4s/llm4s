@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, VertexAIConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
@@ -30,6 +31,7 @@ import org.llm4s.types.Result
  * from `endpoint` and the location from `organization`. Both still work as
  * deprecated aliases, with a warning, and will be removed in a later release.
  */
+@Stable
 object VertexAIProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("vertexai")
 

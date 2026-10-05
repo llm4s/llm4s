@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.metrics.MetricsCollector
@@ -27,6 +28,7 @@ import scala.util.Try
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere.
  */
+@Experimental
 class MistralClient(
   config: MistralConfig,
   metrics: MetricsCollector = MetricsCollector.noop,

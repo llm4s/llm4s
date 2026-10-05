@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
@@ -57,6 +58,7 @@ import scala.util.{ Try, Using }
  * @param metrics Receives per-call latency and token-usage events.
  *                Defaults to `MetricsCollector.noop`.
  */
+@Stable
 class OllamaClient(
   config: OllamaConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,

@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * Raised when an internal processing operation fails, such as image or audio processing.
  *
@@ -12,6 +14,7 @@ package org.llm4s.error
  * @param operation the specific processing operation that failed (e.g., "audio-resample")
  * @param cause optional underlying exception that caused the processing to fail
  */
+@Stable
 final case class ProcessingError private (
   override val message: String,
   operation: String,

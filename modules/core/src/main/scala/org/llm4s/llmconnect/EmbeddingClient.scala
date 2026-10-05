@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -9,6 +10,7 @@ import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
+@Stable
 class EmbeddingClient(
   provider: EmbeddingProvider,
   tracer: Option[Tracing] = None,

@@ -1,5 +1,6 @@
 package org.llm4s.syntax
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error
 import org.llm4s.types.Result
 
@@ -18,6 +19,7 @@ import org.llm4s.types.Result
  *   .tap(println)
  * }}}
  */
+@Stable
 object syntax {
 
   /**

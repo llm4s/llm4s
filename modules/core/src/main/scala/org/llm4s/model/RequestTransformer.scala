@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ CompletionOptions, Message, ResponseFormat, SystemMessage, UserMessage }
 import org.llm4s.types.Result
@@ -22,6 +23,7 @@ import org.slf4j.LoggerFactory
  *   }
  * }}}
  */
+@Stable
 trait RequestTransformer {
 
   /**
@@ -255,6 +257,7 @@ final private[model] class DefaultRequestTransformer(
 /**
  * Transformed options and messages for one request, and whether the client must fake streaming.
  */
+@Stable
 case class TransformationResult(
   options: CompletionOptions,
   messages: Seq[Message],

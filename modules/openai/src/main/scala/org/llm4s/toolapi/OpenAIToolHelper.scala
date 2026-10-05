@@ -1,5 +1,7 @@
 package org.llm4s.toolapi
 
+import org.llm4s.annotation.Stable
+
 import com.openai.core.ObjectMappers
 import com.openai.models.chat.completions.{ ChatCompletionCreateParams, ChatCompletionTool }
 
@@ -13,6 +15,7 @@ import scala.jdk.CollectionConverters._
  * deprecated `com.azure:azure-ai-openai` SDK; `llm4s-openai` moved off that SDK in
  * [[https://github.com/llm4s/llm4s/issues/1132 #1132]].
  */
+@Stable
 object OpenAIToolHelper {
 
   /**

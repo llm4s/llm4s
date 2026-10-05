@@ -1,5 +1,7 @@
 package org.llm4s.toolapi
 
+import org.llm4s.annotation.Stable
+
 /**
  * Base trait for all JSON Schema definitions used in tool parameter specifications.
  *
@@ -7,6 +9,7 @@ package org.llm4s.toolapi
  * to a `ujson.Value` for inclusion in OpenAI-compatible tool definitions via
  * [[SchemaDefinition.toJsonSchema]].
  */
+@Stable
 sealed trait SchemaDefinition[T] {
 
   /**
@@ -26,6 +29,7 @@ sealed trait SchemaDefinition[T] {
  * @param minLength    Minimum allowed string length
  * @param maxLength    Maximum allowed string length
  */
+@Stable
 case class StringSchema(
   description: String,
   enumValues: Option[Seq[String]] = None,
@@ -73,6 +77,7 @@ case class StringSchema(
  * @param exclusiveMaximum Exclusive upper bound
  * @param multipleOf       Value must be a multiple of this number
  */
+@Stable
 case class NumberSchema(
   description: String,
   isInteger: Boolean = false,
@@ -134,6 +139,7 @@ case class NumberSchema(
  * @param exclusiveMaximum Exclusive upper bound
  * @param multipleOf       Value must be a multiple of this integer
  */
+@Stable
 case class IntegerSchema(
   description: String,
   minimum: Option[Int] = None,
@@ -189,6 +195,7 @@ case class IntegerSchema(
  *
  * @param description Human-readable description shown to the LLM
  */
+@Stable
 case class BooleanSchema(
   description: String
 ) extends SchemaDefinition[Boolean] {
@@ -208,6 +215,7 @@ case class BooleanSchema(
  * @param maxItems    Maximum number of elements (inclusive)
  * @param uniqueItems When `true`, all elements must be distinct
  */
+@Stable
 case class ArraySchema[A](
   description: String,
   itemSchema: SchemaDefinition[A],
@@ -254,6 +262,7 @@ case class ArraySchema[A](
  * @param schema   Schema applied to the property value
  * @param required Whether the property is required
  */
+@Stable
 case class PropertyDefinition[T](
   name: String,
   schema: SchemaDefinition[T],
@@ -271,6 +280,7 @@ case class PropertyDefinition[T](
  * @param properties           Ordered sequence of property definitions
  * @param additionalProperties Whether to allow extra keys beyond those listed
  */
+@Stable
 case class ObjectSchema[T](
   description: String,
   properties: Seq[PropertyDefinition[_]],
@@ -327,6 +337,7 @@ case class ObjectSchema[T](
  *
  * @param underlying The non-nullable schema to wrap
  */
+@Stable
 case class NullableSchema[T](
   underlying: SchemaDefinition[T]
 ) extends SchemaDefinition[Option[T]] {

@@ -1,5 +1,7 @@
 package org.llm4s.model
 
+import org.llm4s.annotation.Stable
+
 /**
  * Configuration controlling how the model registry data is loaded.
  *
@@ -7,6 +9,7 @@ package org.llm4s.model
  * @param filePath     Optional filesystem path to a model metadata JSON file, overrides `resourcePath` when set.
  * @param url          Optional HTTP URL to fetch model metadata from, overrides both `resourcePath` and `filePath` when set.
  */
+@Stable
 final case class ModelRegistryConfig(
   resourcePath: Option[String] = Some(ModelRegistryConfig.DefaultResourcePath),
   filePath: Option[String] = None,

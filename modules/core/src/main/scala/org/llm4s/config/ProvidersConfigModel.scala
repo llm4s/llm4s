@@ -1,10 +1,12 @@
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.types.Result
 
 /** Shared model types and configuration data structures for the multi-provider configuration system. */
+@Stable
 object ProvidersConfigModel:
   export org.llm4s.types.ProviderModelTypes.*
 

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.types.Result
@@ -24,6 +25,7 @@ import org.llm4s.types.Result
  * @param cache        The storage backend for the embedding vectors.
  * @param keyGenerator Function that maps (text, modelName) to a cache key (defaults to SHA-256).
  */
+@Stable
 class CachedEmbeddingClient(
   baseClient: EmbeddingClient,
   cache: EmbeddingCache[Seq[Double]],

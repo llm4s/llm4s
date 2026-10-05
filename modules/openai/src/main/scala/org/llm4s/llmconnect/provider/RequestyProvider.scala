@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAIConfigKeys, ProviderModelLister, RequestyModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, ProviderConfig }
@@ -15,6 +16,7 @@ import org.llm4s.types.Result
  * Requesty is an OpenAI-compatible router: it reuses both `OpenAIConfig` and
  * `OpenAIClient`, and differs only in its default base URL.
  */
+@Stable
 object RequestyProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("requesty")
 

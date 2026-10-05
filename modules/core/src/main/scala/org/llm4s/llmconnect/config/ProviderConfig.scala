@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -29,6 +30,7 @@ import org.llm4s.types.Result
  * through [[providerId]], [[endpointUrl]] and [[withModel]] rather than by
  * pattern-matching on its runtime type.
  */
+@Stable
 trait ProviderConfig {
 
   /** Canonical id of the provider this config addresses, e.g. `ProviderId("openai")`. */

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAICompatibleConfigKeys, OpenAICompatibleModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
@@ -48,6 +49,7 @@ import java.util.Locale
  * reasoning parameters and no provider-specific decoding. A provider that needs
  * those gets its own [[OpenAICompatibleDialect]] and descriptor in this module.
  */
+@Stable
 object OpenAICompatibleProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId(OpenAICompatibleConfig.ProviderIdName)
 

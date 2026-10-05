@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, ToolCall }
@@ -51,6 +52,7 @@ import scala.util.Try
  *                Defaults to `MetricsCollector.noop`.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere
  */
+@Stable
 class OpenRouterClient(
   config: OpenAIConfig,
   metrics: MetricsCollector = MetricsCollector.noop,

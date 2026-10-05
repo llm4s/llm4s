@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, ValidationError }
 import org.llm4s.http.HttpHeaders
 import org.llm4s.types.Result
@@ -17,6 +18,7 @@ import scala.util.Try
  * typed `Result` errors.  Provider-specific error details are extracted from
  * the JSON response body when possible and truncated to a safe length.
  */
+@Stable
 object HttpErrorMapper {
 
   private val MaxErrorDetailLength = 256

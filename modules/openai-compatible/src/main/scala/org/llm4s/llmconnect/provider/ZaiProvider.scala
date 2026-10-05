@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, ZaiConfig }
@@ -10,6 +11,7 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 /** Registration for the Z.ai GLM API. */
+@Stable
 object ZaiProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("zai")
 

@@ -1,5 +1,7 @@
 package org.llm4s.security
 
+import org.llm4s.annotation.Stable
+
 import java.util.regex.{ Matcher, Pattern, PatternSyntaxException }
 import scala.util.Try
 
@@ -27,6 +29,7 @@ import scala.util.Try
  * because the workspace runner module cannot depend on `core`. Changes to the
  * heuristics or bounds here should be mirrored there.
  */
+@Stable
 object RegexSafetyManager {
 
   private val MaxPatternLength = 1000

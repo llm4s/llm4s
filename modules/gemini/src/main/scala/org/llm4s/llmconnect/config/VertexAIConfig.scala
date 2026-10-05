@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -19,6 +20,7 @@ import org.llm4s.types.Result
  * @param contextWindow      Maximum token capacity for prompt + completion combined.
  * @param reserveCompletion  Tokens reserved for the completion response.
  */
+@Stable
 case class VertexAIConfig(
   projectId: String,
   location: String,

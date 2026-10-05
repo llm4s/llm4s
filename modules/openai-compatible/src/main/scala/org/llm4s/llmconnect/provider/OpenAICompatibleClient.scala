@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
@@ -46,6 +47,7 @@ import scala.util.{ Try, Using }
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere.
  */
+@Stable
 class OpenAICompatibleClient(
   settings: OpenAICompatibleClient.Settings,
   dialect: OpenAICompatibleDialect,

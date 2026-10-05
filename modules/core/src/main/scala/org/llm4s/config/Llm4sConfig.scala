@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoConfigFactory, DisableSyntax.NoSysEnv, DisableSyntax.NoSystemGetenv, DisableSyntax.NoPureConfigDefault
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -67,6 +68,7 @@ import pureconfig.ConfigSource
  * @see [[org.llm4s.config.ConfigKeys]] for the environment variables core's
  *      `reference.conf` binds.
  */
+@Stable
 object Llm4sConfig {
 
   def modelRegistryConfig(): Result[ModelRegistryConfig] =

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
@@ -48,6 +49,7 @@ import scala.util.{ Try, Using }
  * @param exchangeLogging Controls whether raw request/response bodies are recorded.
  * @param httpClient     HTTP client (injectable for testing).
  */
+@Stable
 class VertexAIClient(
   config: VertexAIConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,

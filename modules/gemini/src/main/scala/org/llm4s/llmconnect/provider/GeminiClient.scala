@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.util.Redaction
 import org.llm4s.error.AuthenticationError
 import org.llm4s.error.ValidationError
@@ -62,6 +63,7 @@ import scala.util.{ Try, Using }
  * @param metrics Receives per-call latency and token-usage events.
  *                Defaults to `MetricsCollector.noop`.
  */
+@Stable
 class GeminiClient(
   config: GeminiConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,

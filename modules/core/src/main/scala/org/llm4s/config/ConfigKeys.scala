@@ -1,5 +1,7 @@
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
+
 /**
  * Canonical environment-variable names bound by `llm4s-core`'s `reference.conf`.
  *
@@ -18,6 +20,7 @@ package org.llm4s.config
  *    `langfuse` (`llm4s-observability`), `opentelemetry` (`llm4s-observability-otel`).
  *  - `EMBEDDING_MODEL` — required when using embeddings; format `provider/model`.
  */
+@Stable
 object ConfigKeys {
   // OpenAI, Requesty and Azure OpenAI keys are `OpenAIConfigKeys` in `llm4s-openai`, and the
   // OpenRouter, DeepSeek and Mistral keys `OpenAICompatibleConfigKeys` in

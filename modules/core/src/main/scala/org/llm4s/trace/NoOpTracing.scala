@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
 import org.llm4s.types.Result
 
@@ -28,6 +29,7 @@ import org.llm4s.types.Result
  * @see [[ConsoleTracing]] for development/debugging
  * @see `LangfuseTracing` in `llm4s-observability` for production observability
  */
+@Stable
 class NoOpTracing extends Tracing {
 
   /** Always returns `Right(())` without side effects. */

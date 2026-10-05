@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoSystemGetenv
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ AuthenticationError, NetworkError }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.Llm4sHttpClient
@@ -48,6 +49,7 @@ import scala.util.Try
  * @param envReader          Environment variable reader; injectable for testing.
  * @param fileReader         File reader; injectable for testing.
  */
+@Stable
 class VertexAIAuthProvider(
   credentialFilePath: Option[String],
   httpClient: Llm4sHttpClient,

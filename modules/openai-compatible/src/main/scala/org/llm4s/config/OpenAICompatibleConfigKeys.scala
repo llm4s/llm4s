@@ -1,5 +1,7 @@
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
+
 /**
  * Environment-variable names recognised by `llm4s-openai-compatible`.
  *
@@ -9,6 +11,7 @@ package org.llm4s.config
  * code that reads it, so that `ConfigKeys` does not name variables for a
  * provider that may not be on the classpath.
  */
+@Stable
 object OpenAICompatibleConfigKeys {
   // ---- OpenRouter ---------------------------------------------------------
 

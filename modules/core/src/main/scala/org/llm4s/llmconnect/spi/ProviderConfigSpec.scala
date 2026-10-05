@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.annotation.Stable
+
 /**
  * A provider-specific key in a named provider section: one the fixed fields of
  * `NamedProviderConfig` do not cover.
@@ -33,6 +35,7 @@ package org.llm4s.llmconnect.spi
  *                          [[ProviderConfigSpec.BuiltinAliasKeys]]. `provider`, `model` and
  *                          `headers` cannot be aliases, and a spec naming one fails validation.
  */
+@Stable
 final case class ProviderConfigKey(
   name: String,
   description: String,
@@ -110,6 +113,7 @@ object ProviderConfigKey:
  * know, unlike the instance name. So with `OPENAI_API_KEY` set, a section needs only
  * `provider` and `model`; a section for a second account sets `apiKey` itself.
  */
+@Stable
 final case class ProviderConfigSpec private (
   requiresApiKey: Boolean,
   requiresBaseUrl: Boolean,

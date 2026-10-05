@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.{ CompletionOptions, ResponseFormat, ResponseFormatMapper, ToolCall }
 
 import scala.util.Try
@@ -33,6 +34,7 @@ import scala.util.Try
  * one whose differences do not should extend this trait rather than fork
  * [[OpenAICompatibleClient]] ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */
+@Stable
 trait OpenAICompatibleDialect:
 
   /**

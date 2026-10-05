@@ -1,10 +1,12 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.{ SessionId, FilePath }
 
 /**
  * Assistant-specific error types with rich context and formatting
  */
+@Stable
 sealed abstract class AssistantError extends Product with Serializable {
 
   /** Human-readable error message */

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.serialization
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.ToolCall
 import ujson._
 
@@ -10,6 +11,7 @@ import ujson._
  * Implementations convert the provider-specific JSON structure into a
  * uniform `Vector[ToolCall]`.
  */
+@Stable
 trait ToolCallDeserializer {
 
   /**
@@ -27,6 +29,7 @@ trait ToolCallDeserializer {
  * Expects a flat JSON array of tool call objects, each containing an `id` and
  * a `function` object with `name` and `arguments` fields.
  */
+@Stable
 object StandardToolCallDeserializer extends ToolCallDeserializer {
 
   def deserializeToolCalls(toolCallsJson: Value): Vector[ToolCall] =

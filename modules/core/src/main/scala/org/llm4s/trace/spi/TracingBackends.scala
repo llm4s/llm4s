@@ -1,5 +1,6 @@
 package org.llm4s.trace.spi
 
+import org.llm4s.annotation.Stable
 import org.llm4s.trace.TracingMode
 import org.slf4j.LoggerFactory
 
@@ -21,6 +22,7 @@ import scala.util.control.NonFatal
  * @param discovered whether this set came from classpath discovery rather than
  *                   explicit registration.
  */
+@Stable
 final class TracingBackends private (
   private val backends: Vector[TracingBackend],
   val failures: Vector[String],

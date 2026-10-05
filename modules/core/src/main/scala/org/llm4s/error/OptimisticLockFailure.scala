@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * Error indicating a concurrent modification was detected during an optimistic update.
  *
@@ -11,6 +13,7 @@ package org.llm4s.error
  * @param memoryId         The ID of the memory record that was concurrently modified
  * @param attemptedVersion The version number that was expected but not found
  */
+@Stable
 final case class OptimisticLockFailure private (
   override val message: String,
   memoryId: String,

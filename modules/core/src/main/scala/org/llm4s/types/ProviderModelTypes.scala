@@ -1,5 +1,7 @@
 package org.llm4s.types
 
+import org.llm4s.annotation.Stable
+
 import java.util.Locale
 
 /**
@@ -10,6 +12,7 @@ import java.util.Locale
  * compile error to pass, for example, an [[ApiKey]] where a [[ModelName]] is
  * expected, at zero runtime cost.
  */
+@Stable
 object ProviderModelTypes:
 
   /** A model identifier, e.g. `"gpt-4o"` or `"claude-sonnet-4-5"`. */

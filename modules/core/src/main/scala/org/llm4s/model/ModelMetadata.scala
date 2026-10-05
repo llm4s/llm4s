@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.Result
 import org.llm4s.error.ValidationError
 import upickle.default._
@@ -22,6 +23,7 @@ import upickle.default._
  * @param pricing Detailed pricing information
  * @param deprecationDate Optional deprecation date (YYYY-MM-DD)
  */
+@Stable
 final case class ModelMetadata private (
   modelId: String,
   provider: String,
@@ -193,6 +195,7 @@ object ModelMetadata {
 /**
  * Model operation mode.
  */
+@Stable
 sealed trait ModelMode {
   def name: String
 }
@@ -247,6 +250,7 @@ object ModelMode {
  * @param disallowedParams Set of parameter names that are not supported by this model
  * @param temperatureConstraint Temperature constraint: None = any, Some((min, max)) = restricted range
  */
+@Stable
 final case class ModelCapabilities private (
   supportsFunctionCalling: Option[Boolean] = None,
   supportsParallelFunctionCalling: Option[Boolean] = None,
@@ -439,6 +443,7 @@ object ModelCapabilities {
 /**
  * Detailed pricing information for a model.
  */
+@Stable
 case class ModelPricing(
   inputCostPerToken: Option[Double] = None,
   outputCostPerToken: Option[Double] = None,

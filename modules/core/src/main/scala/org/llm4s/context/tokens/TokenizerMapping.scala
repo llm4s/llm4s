@@ -1,5 +1,6 @@
 package org.llm4s.context.tokens
 
+import org.llm4s.annotation.Stable
 import org.llm4s.identity.TokenizerId
 import org.slf4j.LoggerFactory
 
@@ -41,6 +42,7 @@ import org.slf4j.LoggerFactory
  * @see [[ConversationTokenCounter.forModel]] for the recommended entry point
  * @see [[TokenizerAccuracy]] for accuracy information
  */
+@Stable
 object TokenizerMapping {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -159,6 +161,7 @@ object TokenizerMapping {
  *
  * @see [[TokenizerMapping.getAccuracyInfo]]
  */
+@Stable
 sealed trait TokenizerAccuracy {
 
   /** True if token counts will match actual API usage. */

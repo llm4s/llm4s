@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, ProviderId }
 import org.llm4s.error.ValidationError
 import org.llm4s.http.HttpResponse.*
@@ -18,6 +19,7 @@ import scala.util.Try
  * `ProviderModelListers.Ollama` until the provider moved to `llm4s-ollama`
  * ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */
+@Stable
 object OllamaModelLister extends ProviderModelLister:
   def listModels(
     config: NamedProviderConfig,

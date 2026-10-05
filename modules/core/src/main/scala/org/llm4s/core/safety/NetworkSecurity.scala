@@ -1,5 +1,6 @@
 package org.llm4s.core.safety
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.NetworkError
 import org.llm4s.types.Result
 
@@ -31,6 +32,7 @@ import scala.util.Try
  * NetworkSecurity.validateUrl("http://192.168.1.1/admin") // Left(NetworkError)
  * }}}
  */
+@Stable
 object NetworkSecurity {
 
   /**

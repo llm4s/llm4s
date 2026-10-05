@@ -1,5 +1,6 @@
 package org.llm4s.reliability
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error._
 import scala.concurrent.duration.{ Duration, DurationInt, FiniteDuration, NANOSECONDS }
 
@@ -8,6 +9,7 @@ import scala.concurrent.duration.{ Duration, DurationInt, FiniteDuration, NANOSE
  *
  * Defines how many times to retry and how long to wait between attempts.
  */
+@Stable
 sealed trait RetryPolicy {
 
   /** Maximum number of retry attempts */

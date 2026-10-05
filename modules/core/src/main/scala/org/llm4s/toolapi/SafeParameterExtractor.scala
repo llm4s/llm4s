@@ -1,5 +1,7 @@
 package org.llm4s.toolapi
 
+import org.llm4s.annotation.Stable
+
 import scala.annotation.tailrec
 
 /**
@@ -11,6 +13,7 @@ import scala.annotation.tailrec
  *
  * @param params The JSON parameters to extract from
  */
+@Stable
 case class SafeParameterExtractor(params: ujson.Value) {
   // Helper case class to return both the value and available keys from parent
   private case class NavigationResult(value: Option[ujson.Value], availableKeys: List[String])

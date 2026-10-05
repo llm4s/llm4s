@@ -1,5 +1,6 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
 import org.llm4s.util.DurationText
 
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
@@ -10,6 +11,7 @@ import scala.concurrent.duration.{ DurationInt, FiniteDuration }
  * @param retryAfter the delay the provider asked for before retrying (an HTTP `Retry-After`
  *                   header, usually on a 503), if it gave one
  */
+@Stable
 final case class ServiceError private (
   override val message: String,
   httpStatus: Int,

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.{ ProviderModelLister, ProvidersConfigModel, SharedCredentials }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
@@ -46,6 +47,7 @@ import scala.reflect.ClassTag
  *     ProviderDescriptor.expectConfig[BedrockConfig](id, config).flatMap(BedrockClient(_, options.metrics))
  * }}}
  */
+@Stable
 trait ProviderDescriptor:
 
   /** Canonical id, e.g. `ProviderId("openai")`. Must be unique within a registry. */

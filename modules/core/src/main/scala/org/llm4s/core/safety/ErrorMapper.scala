@@ -1,8 +1,10 @@
 package org.llm4s.core.safety
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error._
 
 /** Maps arbitrary Throwables into domain-specific LLMError values. */
+@Stable
 trait ErrorMapper {
   def apply(t: Throwable): LLMError
 }
@@ -15,6 +17,7 @@ trait ErrorMapper {
  * becomes a [[CancelledError]]. Mapping classifies only and never sets the interrupt flag: it may
  * run on a thread other than the interrupted one, such as a `Future` callback's pool thread.
  */
+@Stable
 object DefaultErrorMapper extends ErrorMapper {
   def apply(t: Throwable): LLMError = t match {
     case ex if CancelledError.isCancellation(ex) =>

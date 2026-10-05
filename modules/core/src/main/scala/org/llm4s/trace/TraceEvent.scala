@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.{ EmbeddingUsage, Message, TokenUsage }
 
 import java.time.Instant
@@ -24,6 +25,7 @@ import scala.concurrent.duration.FiniteDuration
  *
  * @see [[Tracing]] for the interface that consumes these events
  */
+@Stable
 sealed trait TraceEvent {
   def timestamp: Instant
   def eventType: String

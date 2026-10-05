@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 import scala.concurrent.duration.FiniteDuration
 
 /**
@@ -20,6 +22,7 @@ import scala.concurrent.duration.FiniteDuration
  * @see [[NonRecoverableError]] for errors that cannot be recovered
  * @see [[ErrorRecovery]] for retry utilities
  */
+@Stable
 trait RecoverableError extends LLMError {
 
   /** Suggested delay before retrying. */

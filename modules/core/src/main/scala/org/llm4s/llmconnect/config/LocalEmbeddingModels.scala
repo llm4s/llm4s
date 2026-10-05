@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
+
 /**
  * Configuration specifying local model names for non-text modality embedding.
  *
@@ -11,6 +13,7 @@ package org.llm4s.llmconnect.config
  * @param audioModel Local model name for audio embeddings (e.g. "wav2vec2-base").
  * @param videoModel Local model name for video embeddings (e.g. "timesformer-base").
  */
+@Stable
 final case class LocalEmbeddingModels(
   imageModel: String,
   audioModel: String,

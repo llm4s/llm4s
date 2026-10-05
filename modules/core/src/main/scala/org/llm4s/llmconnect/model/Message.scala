@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 import upickle.default.{ macroRW, read, readwriter, write, ReadWriter => RW }
@@ -16,6 +17,7 @@ import upickle.default.{ macroRW, read, readwriter, write, ReadWriter => RW }
  * ensure this invariant. `AssistantMessage.content` returns `""` rather than
  * `null` when the LLM response contains only tool calls and no text.
  */
+@Stable
 sealed trait Message {
   def role: MessageRole
   def content: String
@@ -252,6 +254,7 @@ object Message {
  * The string representation returned by `toString` is the lowercase name
  * forwarded verbatim to the provider (e.g. `"user"`, `"assistant"`).
  */
+@Stable
 sealed trait MessageRole {
   def name: String
   override def toString: String = name
@@ -269,6 +272,7 @@ object MessageRole {
  *
  * @param content Content of the user message.
  */
+@Stable
 final case class UserMessage(content: String) extends Message {
   val role: MessageRole = MessageRole.User
 }
@@ -287,6 +291,7 @@ object UserMessage {
  *
  * @param content Content of the system message.
  */
+@Stable
 final case class SystemMessage(content: String) extends Message {
   val role: MessageRole = MessageRole.System
 }
@@ -312,6 +317,7 @@ object SystemMessage {
  * @param toolCalls  Tool invocations requested by the model; each carries an `id`
  *                   that must be matched by a subsequent [[ToolMessage]].
  */
+@Stable
 case class AssistantMessage(
   contentOpt: Option[String] = None,
   toolCalls: Seq[ToolCall] = Seq.empty
@@ -381,6 +387,7 @@ object AssistantMessage {
  * @param content    Content of the tool message, usually the result of the tool execution, e.g. a json response.
  * @param toolCallId Unique identifier for the tool call (as provided by the ToolCall).
  */
+@Stable
 final case class ToolMessage(
   content: String,
   toolCallId: String
@@ -444,6 +451,7 @@ object ToolMessage {
  * @param name      Name of the tool to invoke; must match a registered [[org.llm4s.toolapi.ToolFunction]].
  * @param arguments Parsed JSON arguments; the schema is defined by the tool's [[org.llm4s.toolapi.Schema]].
  */
+@Stable
 case class ToolCall(
   id: String,
   name: String,

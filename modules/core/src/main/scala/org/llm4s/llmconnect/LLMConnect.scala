@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.metrics.MetricsCollector
@@ -32,6 +33,7 @@ import org.llm4s.types.Result
  * @see [[org.llm4s.config.Llm4sConfig.defaultProvider]] to load the configured default named provider
  * @see [[LLMClient]] for the conversation and completion API
  */
+@Stable
 object LLMConnect {
 
   private def buildClient(config: ProviderConfig, options: LlmClientOptions)(using

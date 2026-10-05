@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.annotation.Stable
+
 /**
  * Represents a completion response from an LLM.
  * This includes the ID, creation timestamp, the assistant's message, and optional token usage statistics.
@@ -16,6 +18,7 @@ package org.llm4s.llmconnect.model
  * @param estimatedCost Optional estimated cost of this completion in USD.
  *                      Computed from token usage and model pricing when available.
  */
+@Stable
 final case class Completion private (
   id: String,
   created: Long,
@@ -99,6 +102,7 @@ object Completion {
  *                            When present, these tokens are billed at the cache-creation rate,
  *                            which is typically higher than the normal input rate.
  */
+@Stable
 final case class TokenUsage private (
   promptTokens: Int,
   completionTokens: Int,
@@ -152,6 +156,7 @@ object TokenUsage {
  * @param promptTokens Number of tokens in the input text(s).
  * @param totalTokens Total tokens used (same as promptTokens for embeddings).
  */
+@Stable
 case class EmbeddingUsage(
   promptTokens: Int,
   totalTokens: Int
@@ -167,6 +172,7 @@ case class EmbeddingUsage(
  * @param thinkingDelta Optional thinking/reasoning content delta.
  *                      Present when streaming extended thinking content.
  */
+@Stable
 final case class StreamedChunk private (
   id: String,
   content: Option[String],
@@ -211,6 +217,7 @@ object StreamedChunk {
 /**
  * Represents a streaming chunk of completion data
  */
+@Stable
 final case class CompletionChunk(
   id: String,
   content: Option[String] = None,
@@ -233,6 +240,7 @@ final case class CompletionChunk(
 /**
  * Delta information for streaming chunks
  */
+@Stable
 final case class ChunkDelta(
   content: Option[String] = None,
   role: Option[String] = None,

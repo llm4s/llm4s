@@ -1,5 +1,6 @@
 package org.llm4s.context
 
+import org.llm4s.annotation.Stable
 import org.llm4s.context.tokens.{ TokenizerMapping, Tokenizer }
 import org.llm4s.error.TokenizerError
 import org.llm4s.identity.TokenizerId
@@ -40,6 +41,7 @@ import org.slf4j.LoggerFactory
  * @see [[ConversationTokenCounter.forModel]] for model-aware counter creation
  * @see [[TokenBreakdown]] for detailed per-message token analysis
  */
+@Stable
 class ConversationTokenCounter private (tokenizer: org.llm4s.context.tokens.StringTokenizer) {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -205,6 +207,7 @@ object ConversationTokenCounter {
 /**
  * Detailed breakdown of token usage in a conversation
  */
+@Stable
 case class TokenBreakdown(
   totalTokens: Int,
   messages: Seq[MessageTokenInfo],
@@ -226,6 +229,7 @@ case class TokenBreakdown(
 /**
  * Token information for a single message
  */
+@Stable
 case class MessageTokenInfo(
   role: String,
   tokens: Int,

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
+
 import com.openai.azure.credential.AzureApiKeyCredential
 import com.openai.azure.{ AzureOpenAIServiceVersion, AzureUrlPathMode }
 import com.openai.client.okhttp.OpenAIOkHttpClient
@@ -96,6 +98,7 @@ private[provider] trait OpenAIClientTransport {
  * @param provider the provider this client serves - `openai`, `azure` or `requesty` - which labels
  *                 its metrics, exchange log and errors
  */
+@Stable
 class OpenAIClient private[provider] (
   private val model: String,
   private val transport: OpenAIClientTransport,

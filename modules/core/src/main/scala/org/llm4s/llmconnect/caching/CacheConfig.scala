@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.annotation.Stable
+
 import scala.concurrent.duration.FiniteDuration
 import org.llm4s.types.Result
 
@@ -20,6 +22,7 @@ import org.llm4s.types.Result
  *                            When the limit is reached the least-recently-used entry
  *                            is evicted automatically.
  */
+@Stable
 sealed abstract case class CacheConfig private (
   similarityThreshold: Double,
   ttl: FiniteDuration,

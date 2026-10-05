@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
@@ -19,6 +20,7 @@ import org.llm4s.types.Result
  * id `local` gets that provider's dimensions, exactly as `EmbeddingClient.from`
  * gets that provider's client.
  */
+@Stable
 object ModelDimensionRegistry {
 
   /** The provider name under which the local non-text encoders are looked up. */

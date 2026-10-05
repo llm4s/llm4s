@@ -1,5 +1,7 @@
 package org.llm4s.util
 
+import org.llm4s.annotation.Stable
+
 import scala.util.matching.Regex
 
 /**
@@ -10,6 +12,7 @@ import scala.util.matching.Regex
  * knows its own pattern, human-readable name, and the placeholder text to use
  * when redacting.
  */
+@Stable
 object SecretPatterns {
 
   /**

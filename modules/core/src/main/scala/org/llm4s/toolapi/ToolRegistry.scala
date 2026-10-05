@@ -1,5 +1,7 @@
 package org.llm4s.toolapi
 
+import org.llm4s.annotation.Stable
+
 import scala.concurrent.{ Await, ExecutionContext, Future, Promise, blocking }
 import scala.concurrent.duration._
 import org.llm4s.error.CancelledError
@@ -19,6 +21,7 @@ import scala.util.control.NonFatal
  * @param arguments    Parsed JSON arguments; typically a JSON object whose fields
  *                     correspond to the tool's declared [[Schema]].
  */
+@Stable
 case class ToolCallRequest(
   functionName: String,
   arguments: ujson.Value
@@ -43,6 +46,7 @@ case class ToolCallRequest(
  *
  * @param initialTools The tools available in this registry
  */
+@Stable
 class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
 
   /** All tools registered in this registry. */

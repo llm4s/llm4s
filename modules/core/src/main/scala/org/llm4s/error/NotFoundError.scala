@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * Error indicating a required configuration or environment value was not found.
  *
@@ -16,6 +18,7 @@ package org.llm4s.error
  * error.context  // Map("key" -> "OPENAI_API_KEY")
  * }}}
  */
+@Stable
 final case class NotFoundError private (
   override val message: String,
   key: String

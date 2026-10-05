@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * Execution errors that might succeed on retry.
  *
@@ -20,6 +22,7 @@ package org.llm4s.error
  *   .withContext("command", "npm install")
  * }}}
  */
+@Stable
 final case class ExecutionError private (
   message: String,
   operation: String,

@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * Raised when the LLM provider rejects the request due to authentication failures.
  *
@@ -11,6 +13,7 @@ package org.llm4s.error
  * @param provider the name of the LLM provider (e.g., "openai", "anthropic")
  * @param code optional error code returned by the provider (e.g., "401", "INVALID_KEY")
  */
+@Stable
 final case class AuthenticationError private (
   override val message: String,
   provider: String,

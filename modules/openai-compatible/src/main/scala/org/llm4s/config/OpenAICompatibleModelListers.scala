@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, ProviderId }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, MistralConfig, OpenAICompatibleConfig }
@@ -12,6 +13,7 @@ import org.llm4s.types.Result
  * This was `ProviderModelListers.DeepSeek` until the provider moved to
  * `llm4s-openai-compatible` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */
+@Stable
 object DeepSeekModelLister extends ProviderModelLister:
   private val delegate =
     ProviderModelListers.openAICompatible(ProviderId("deepseek"), DeepSeekConfig.DEFAULT_BASE_URL)
@@ -27,6 +29,7 @@ object DeepSeekModelLister extends ProviderModelLister:
  * This was `ProviderModelListers.OpenRouter` until the provider moved to
  * `llm4s-openai-compatible` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */
+@Stable
 object OpenRouterModelLister extends ProviderModelLister:
   private val delegate =
     ProviderModelListers.openAICompatible(
@@ -48,6 +51,7 @@ object OpenRouterModelLister extends ProviderModelLister:
  * This was `ProviderModelListers.Mistral` until the provider moved to
  * `llm4s-openai-compatible` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */
+@Stable
 object MistralModelLister extends ProviderModelLister:
   private val delegate =
     ProviderModelListers.openAICompatible(
@@ -69,6 +73,7 @@ object MistralModelLister extends ProviderModelLister:
  * Studio or llama.cpp lists its models without one. The section's `headers`
  * are sent too.
  */
+@Stable
 object OpenAICompatibleModelLister extends ProviderModelLister:
   private val delegate =
     ProviderModelListers.openAICompatible(

@@ -1,5 +1,7 @@
 package org.llm4s.metrics
 
+import org.llm4s.annotation.Stable
+
 import scala.concurrent.duration.FiniteDuration
 
 /**
@@ -30,6 +32,7 @@ import scala.concurrent.duration.FiniteDuration
  * }
  * }}}
  */
+@Stable
 trait MetricsCollector {
 
   /**
@@ -253,6 +256,7 @@ object MetricsCollector {
  * Use [[Outcome.Success]] when the operation completed normally and
  * [[Outcome.Error]] when it failed with a categorized [[ErrorKind]].
  */
+@Stable
 sealed trait Outcome
 
 object Outcome {
@@ -274,6 +278,7 @@ object Outcome {
  * These are stable labels safe for use in metrics dimensions.
  * Do not use exception class names as they may change.
  */
+@Stable
 sealed trait ErrorKind
 
 object ErrorKind {

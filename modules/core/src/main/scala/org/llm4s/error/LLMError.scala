@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 import org.slf4j.MDC
 
 /**
@@ -17,6 +19,7 @@ import org.slf4j.MDC
  * - Private case class constructors with smart constructors
  */
 
+@Stable
 trait LLMError extends Product with Serializable {
 
   /** Human-readable error message */

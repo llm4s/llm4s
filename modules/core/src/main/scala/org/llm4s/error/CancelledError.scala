@@ -1,5 +1,6 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.Result
 
 import java.nio.channels.ClosedByInterruptException
@@ -14,6 +15,7 @@ import java.util.{ Collections, IdentityHashMap }
  *
  * @param operation what was cancelled, e.g. `"http.POST"` or `"openai.complete"`
  */
+@Stable
 final case class CancelledError private (
   message: String,
   operation: String,

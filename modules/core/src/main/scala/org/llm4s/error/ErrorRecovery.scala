@@ -1,5 +1,6 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
 import org.llm4s.Result
 import org.llm4s.types._
 
@@ -13,6 +14,7 @@ import scala.concurrent.duration.{ DurationInt, FiniteDuration }
  * Uses Scala's powerful pattern matching to implement sophisticated
  * error handling strategies with type-safe recovery patterns.
  */
+@Stable
 object ErrorRecovery {
 
   /** Binary-compatible overload — delegates to the full version, sleeping the calling thread. */

@@ -1,9 +1,11 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.model.ModelRegistryService
 import org.slf4j.LoggerFactory
 
 /** Resolves context window and output-reserve token counts for a given model using the model registry. */
+@Stable
 class ContextWindowResolver(service: ModelRegistryService):
   import ContextWindowResolver.logger
 

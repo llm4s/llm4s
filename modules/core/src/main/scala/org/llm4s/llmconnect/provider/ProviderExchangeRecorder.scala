@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
+
 import scala.jdk.DurationConverters.JavaDurationOps
 
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeOutcome }
@@ -9,6 +11,7 @@ import java.time.Instant
 import scala.util.Try
 
 /** Records completed provider exchanges to the configured logging sink. */
+@Stable
 object ProviderExchangeRecorder {
 
   def record(

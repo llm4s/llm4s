@@ -1,11 +1,14 @@
 package org.llm4s.toolapi
 
+import org.llm4s.annotation.Stable
+
 /**
  * Structured error information for tool parameter validation.
  *
  * Represents specific validation failures when parsing tool call arguments,
  * including missing parameters, type mismatches, null values, and invalid nesting.
  */
+@Stable
 sealed trait ToolParameterError {
   def parameterName: String
   def getMessage: String
@@ -103,6 +106,7 @@ object ToolParameterError {
  * Covers the full lifecycle of a tool invocation: unknown function, null arguments,
  * invalid arguments, handler errors, and execution exceptions.
  */
+@Stable
 sealed trait ToolCallError {
   def toolName: String
   def getMessage: String
@@ -230,6 +234,7 @@ object ToolCallError {
  * }
  * }}}
  */
+@Stable
 object ToolCallErrorJson {
 
   /**

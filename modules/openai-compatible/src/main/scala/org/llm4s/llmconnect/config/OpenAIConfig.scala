@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.spi.ProviderConfigKey
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -33,6 +34,7 @@ import org.llm4s.util.Redaction
  *                      `requesty` for Requesty and `openrouter` for OpenRouter. `None` - what a
  *                      config built by hand gets - infers it from `baseUrl`; see [[providerId]].
  */
+@Stable
 case class OpenAIConfig(
   apiKey: String,
   model: String,

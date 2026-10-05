@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.types.Result
 
@@ -27,6 +28,7 @@ import org.llm4s.types.Result
  * @see [[VoyageAIEmbeddingProvider]] for VoyageAI embedding models (`llm4s-voyage`)
  * @see [[OllamaEmbeddingProvider]] for local Ollama embedding models (`llm4s-ollama`)
  */
+@Stable
 trait EmbeddingProvider {
 
   /**

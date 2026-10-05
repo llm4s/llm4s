@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.Result
 import org.llm4s.types.ProviderModelTypes.ModelName
@@ -12,6 +13,7 @@ import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderId }
  *  @param provider the `ProviderId` that owns this model
  *  @param metadata optional key/value pairs of additional model metadata (e.g. display name, token limits)
  */
+@Stable
 final case class DiscoveredModel(
   name: ModelName,
   provider: ProviderId,
@@ -25,6 +27,7 @@ final case class DiscoveredModel(
  * descriptor. Most call `ProviderModelListers.openAICompatible` in `llm4s-openai-compatible`,
  * the factory for the OpenAI `/models` shape; the rest implement this trait.
  */
+@Stable
 trait ProviderModelLister:
   /**
    * Fetches the list of available models for the given provider configuration.

@@ -1,5 +1,7 @@
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
+
 /**
  * Environment-variable names recognised by `llm4s-openai`: OpenAI, Requesty,
  * Azure OpenAI and OpenAI embeddings.
@@ -11,6 +13,7 @@ package org.llm4s.config
  * a provider that may not be on the classpath. OpenRouter's alias is
  * `OpenAICompatibleConfigKeys.OPENROUTER_BASE_URL` in `llm4s-openai-compatible`.
  */
+@Stable
 object OpenAIConfigKeys {
   // ---- OpenAI -------------------------------------------------------------
 

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
@@ -37,6 +38,7 @@ import scala.util.Try
  * @see [[EmbeddingProvider]] for the provider interface
  * @see [[org.llm4s.llmconnect.config.EmbeddingProviderConfig]] for configuration
  */
+@Stable
 object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   val id: ProviderId = ProviderId("openai")

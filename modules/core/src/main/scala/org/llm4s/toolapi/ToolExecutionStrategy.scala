@@ -1,5 +1,7 @@
 package org.llm4s.toolapi
 
+import org.llm4s.annotation.Stable
+
 /**
  * Determines how multiple tool calls in a single agent step are executed by
  * [[ToolRegistry.executeAll]].
@@ -25,6 +27,7 @@ package org.llm4s.toolapi
  * )
  * }}}
  */
+@Stable
 sealed trait ToolExecutionStrategy
 
 /**

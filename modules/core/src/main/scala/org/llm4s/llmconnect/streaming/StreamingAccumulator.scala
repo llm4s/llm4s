@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.streaming
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
@@ -15,6 +16,7 @@ import scala.util.Try
  * included - must carry its call's id; a tool-call chunk with an empty id is ignored. Clients
  * whose wire format identifies continuations only by index must map them back to the id first.
  */
+@Stable
 final class StreamingAccumulator private () {
 
   private val contentBuilder               = new StringBuilder()

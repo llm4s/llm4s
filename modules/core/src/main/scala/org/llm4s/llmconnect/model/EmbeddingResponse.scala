@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.annotation.Stable
+
 /**
  * Successful response carrying embedding vectors and lightweight metadata.
  *
@@ -13,6 +15,7 @@ package org.llm4s.llmconnect.model
  * - Defaults on `metadata`, `modality`, `dim`, and `usage` keep old call-sites source-compatible.
  * - Providers can set `modality`/`dim`/`usage` when they know it; callers can ignore safely.
  */
+@Stable
 final case class EmbeddingResponse(
   embeddings: Seq[Seq[Double]],
   metadata: Map[String, String] = Map.empty,

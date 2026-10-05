@@ -1,5 +1,6 @@
 package org.llm4s.model
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -13,6 +14,7 @@ import scala.util.{ Try, Using }
  * Implementations are immutable snapshots of model metadata that can be passed
  * through the application without relying on global process state.
  */
+@Stable
 trait ModelRegistryService:
   def findByCapability(capability: String): Result[List[ModelMetadata]]
   def listProviders(): Result[List[String]]

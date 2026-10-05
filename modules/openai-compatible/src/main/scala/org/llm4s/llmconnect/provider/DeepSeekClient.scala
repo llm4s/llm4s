@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.metrics.MetricsCollector
@@ -23,6 +24,7 @@ import scala.util.Try
  * @param metrics MetricsCollector for recording request metrics
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere
  */
+@Stable
 class DeepSeekClient(
   config: DeepSeekConfig,
   metrics: MetricsCollector = MetricsCollector.noop,

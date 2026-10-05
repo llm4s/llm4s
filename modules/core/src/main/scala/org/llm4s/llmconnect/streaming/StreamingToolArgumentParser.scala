@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.streaming
 
+import org.llm4s.annotation.Stable
+
 import scala.util.Try
 
 /**
@@ -9,6 +11,7 @@ import scala.util.Try
  * - Valid JSON is parsed as-is.
  * - Invalid/partial JSON is preserved as a raw string for later assembly.
  */
+@Stable
 object StreamingToolArgumentParser {
 
   def parse(raw: String): ujson.Value =

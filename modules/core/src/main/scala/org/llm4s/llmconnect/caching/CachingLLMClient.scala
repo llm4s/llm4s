@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoKeywordCatch
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
@@ -53,6 +54,7 @@ import org.slf4j.LoggerFactory
  * @param tracing Tracing instance for observability.
  * @param clock Clock for TTL verification (defaults to UTC).
  */
+@Stable
 class CachingLLMClient(
   baseClient: LLMClient,
   embeddingClient: EmbeddingClient,

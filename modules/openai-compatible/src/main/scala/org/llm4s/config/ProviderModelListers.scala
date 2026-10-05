@@ -1,5 +1,6 @@
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.{ ApiKey, NamedProviderConfig, ProviderId }
 import org.llm4s.error.ValidationError
 import org.llm4s.http.Llm4sHttpClient
@@ -21,6 +22,7 @@ import scala.util.Try
  * unchanged. A provider module that serves the same shape depends on `llm4s-openai-compatible`
  * and calls [[openAICompatible]]; one that does not implements [[ProviderModelLister]].
  */
+@Stable
 object ProviderModelListers:
 
   /**

@@ -1,5 +1,7 @@
 package org.llm4s.context.tokens
 
+import org.llm4s.annotation.Stable
+
 import com.knuddels.jtokkit.Encodings
 import org.llm4s.identity.TokenizerId
 
@@ -9,6 +11,7 @@ import org.llm4s.identity.TokenizerId
  * The integer corresponds to the token identifier used by the underlying
  * jtokkit / TikToken encoding (e.g. `cl100k_base` for GPT-4).
  */
+@Stable
 case class Token(tokenId: Int) {
   override def toString: String = s"$tokenId"
 }
@@ -20,6 +23,7 @@ case class Token(tokenId: Int) {
  * [[Tokenizer.lookupStringTokenizer]]; the interface is kept minimal to allow
  * test doubles without a real encoding registry.
  */
+@Stable
 trait StringTokenizer {
 
   /** Encodes `text` into a list of BPE [[Token]]s. */
@@ -37,6 +41,7 @@ trait StringTokenizer {
  * @see [[org.llm4s.identity.TokenizerId]] for vocabulary name constants
  * @see [[org.llm4s.context.tokens.TokenizerMapping]] for the model → tokenizer mapping
  */
+@Stable
 object Tokenizer {
   private val registry = Encodings.newDefaultEncodingRegistry
 

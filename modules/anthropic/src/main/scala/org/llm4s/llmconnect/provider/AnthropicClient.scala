@@ -1,4 +1,6 @@
 package org.llm4s.llmconnect.provider
+import org.llm4s.annotation.Stable
+
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
 import com.anthropic.core.{ JsonObject, ObjectMappers }
 import com.anthropic.models.messages.{
@@ -71,6 +73,7 @@ import scala.util.{ Try, Using }
  * @param metrics Receives per-call latency and token-usage events.
  *                Defaults to `MetricsCollector.noop`.
  */
+@Stable
 class AnthropicClient(
   config: AnthropicConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,

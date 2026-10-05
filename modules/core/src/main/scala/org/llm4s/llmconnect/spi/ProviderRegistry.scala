@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -41,6 +42,7 @@ import scala.util.control.NonFatal
  * @param embeddingDescriptors the registered embedding providers, in registration order.
  * @param report               how this registry came to hold them; see [[ProviderRegistryReport]].
  */
+@Stable
 final class ProviderRegistry private (
   val descriptors: Vector[ProviderDescriptor],
   val embeddingDescriptors: Vector[EmbeddingProviderDescriptor],

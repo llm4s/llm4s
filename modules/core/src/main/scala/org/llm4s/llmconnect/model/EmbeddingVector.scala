@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.annotation.Stable
+
 /**
  * Represents a dense embedding vector produced by an embedding model.
  *
@@ -10,6 +12,7 @@ package org.llm4s.llmconnect.model
  * @param values   raw float values of the embedding vector
  * @param meta     optional key-value metadata associated with this embedding
  */
+@Stable
 final case class EmbeddingVector(
   id: String,
   modality: Modality,

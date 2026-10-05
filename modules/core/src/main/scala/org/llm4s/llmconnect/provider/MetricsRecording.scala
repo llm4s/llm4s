@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
 import org.llm4s.types.Result
@@ -12,6 +13,7 @@ import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
  * Extracts the common pattern of timing requests, observing outcomes,
  * recording tokens, and reading costs from completion results.
  */
+@Stable
 trait MetricsRecording {
 
   /**

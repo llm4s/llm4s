@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.annotation.Stable
+
 /**
  * @param size Current number of entries in the cache.
  * @param hits Total number of successful cache lookups.
@@ -7,6 +9,7 @@ package org.llm4s.llmconnect.caching
  * @param totalRequests Combined sum of hits and misses.
  * @param hitRatePercent Percentage of requests served from cache (0.0 to 100.0).
  */
+@Stable
 case class CacheStats(
   size: Int,
   hits: Long,
@@ -20,6 +23,7 @@ case class CacheStats(
  *
  * @tparam Embedding The type of the embedding representation (usually Seq[Double]).
  */
+@Stable
 trait EmbeddingCache[Embedding] {
 
   /** Retrieves an embedding by its unique key. */
