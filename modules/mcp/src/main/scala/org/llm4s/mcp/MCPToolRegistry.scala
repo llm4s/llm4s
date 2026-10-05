@@ -35,8 +35,8 @@ import scala.util.chaining.scalaUtilChainingOps
  *
  * == Error handling ==
  * If an MCP server cannot be reached or returns an error, the failure is
- * logged and that server's tools are omitted from the response — the registry
- * never throws during tool lookup.  A failed client is evicted from the
+ * logged and the tools last fetched from that server (none, if there never were any) are
+ * returned — the registry never throws during tool lookup.  A failed client is evicted from the
  * internal client map so the next call attempts a fresh connection.
  *
  * == Lifecycle ==
@@ -196,7 +196,9 @@ class MCPToolRegistry(
         logger.error("Failed to refresh tools from ${}: {}", server.name, error.message)
         removeServerFromCache(server) // Clean up failed client
     }
-    result.getOrElse(Seq.empty)
+    // A failed refresh keeps the last tool list that was fetched: a transient outage must not make a server's
+    // tools vanish from the model's view. The entry stays expired, so the next lookup tries again.
+    result.getOrElse(Option(toolCache.get(server.name)).map(_.tools).getOrElse(Seq.empty))
   }
 
   private def removeServerFromCache(server: MCPServerConfig): Unit =

@@ -5,7 +5,7 @@ import org.llm4s.error.{ CancelledError, LLMError, SimpleError }
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
-import ujson.{ Value, read => ujsonRead }
+import ujson.Value
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.util.{ Failure, Success, Try }
@@ -20,12 +20,11 @@ import scala.util.{ Failure, Success, Try }
  * back to the older 2024-11-05 HTTP+SSE protocol.  Stdio servers always use the
  * 2024-11-05 protocol.
  *
- * == Error swallowing in `getTools` ==
- * `getTools()` returns a `Left` only for a cancellation: any other failure during tool discovery
- * (network error, parse error, missing transport) is logged and an empty sequence is
- * returned instead. Callers cannot distinguish "server has no tools" from
- * "server could not be reached". An interrupted call is not a failure to hide: it returns
- * `Left(CancelledError)` with the thread's interrupt flag still set (design section 4.4).
+ * == Failures in `getTools` ==
+ * `getTools()` returns a `Left` for any failure during tool discovery (network error, JSON-RPC error,
+ * unreadable listing, missing transport), so "the server has no tools" (`Right(Seq.empty)`) is distinct from
+ * "the server could not be reached". An interrupted call returns `Left(CancelledError)` with the thread's
+ * interrupt flag still set (design section 4.4).
  *
  * == Thread safety ==
  * This class is not thread-safe. Concurrent calls to `initialize`, `getTools`,
@@ -223,18 +222,15 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
    * `ToolFunction` instances that the agent framework can invoke.
    *
    * Calls `initialize()` automatically if not already connected.  Any error
-   * during transport initialisation, tool listing, or JSON parsing is logged
-   * and swallowed: the result is `Right(tools)` where `tools` is the (possibly
-   * empty) sequence of successfully parsed tool definitions. The one failure
-   * that is not swallowed is a cancellation: if the call is interrupted it
-   * returns `Left(CancelledError)`, with the thread's interrupt flag still set.
+   * during transport initialisation, tool listing, or JSON parsing is logged and returned as a `Left`;
+   * `Right(Seq.empty)` means the server advertises no tools. A call that is interrupted returns
+   * `Left(CancelledError)`, with the thread's interrupt flag still set.
    *
    * A listing that fails clears the hints recorded by the last one (see
    * [[getToolHints]]), so a server that is down or sends a list that cannot be
    * read leaves no stale hints behind.
    *
-   * @return `Right`, with `Right(Seq.empty)` on any communication or parse failure;
-   *         `Left(CancelledError)` if the call was interrupted
+   * @return the tools the server advertises, or the `Left` that stopped the listing
    */
   override def getTools(): Result[Seq[ToolFunction[_, _]]] = {
     val result = for {
@@ -242,14 +238,13 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
       transportImpl <- transport.toRight(SimpleError(s"No transport available for ${config.name}"): LLMError)
       tools         <- trySendingRequest(transportImpl)
     } yield tools
-    result match {
-      case Left(cancelled: CancelledError) => Left(cancelled)
-      case Left(error) =>
+    result.left.foreach {
+      case _: CancelledError => ()
+      case error =>
         logger.error(error.message)
         toolHints = Map.empty
-        Right(Seq.empty)
-      case ok => ok
     }
+    result
   }
 
   def trySendingRequest(transportImpl: MCPTransportImpl): Result[Seq[ToolFunction[_, _]]] = {
@@ -260,14 +255,13 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
       tools      <- parseTools(toolsValue)
     } yield tools
 
-    result match {
-      case Left(cancelled: CancelledError) => Left(cancelled)
-      case Left(error) =>
+    result.left.foreach {
+      case _: CancelledError => ()
+      case error =>
         logger.warn(error.message)
         toolHints = Map.empty
-        Right(Seq.empty)
-      case ok => ok
     }
+    result
   }
 
   private def parseTools(value: Value): Result[Seq[ToolFunction[_, _]]] = {
@@ -287,7 +281,9 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
         logger.info("Successfully retrieved from {} {} tools", config.name, tools.size)
       }
     )
-    result.map(_._1).getOrElse(Seq.empty).asRight[LLMError]
+    result.toEither
+      .map(_._1)
+      .leftMap(ex => SimpleError(s"Failed to parse tools from ${config.name}: ${ex.getMessage}"): LLMError)
   }
 
   override def getToolHints(): Map[String, ToolHints] = toolHints
@@ -402,14 +398,14 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
                 // Per the MCP spec a tool-level failure is a normal result flagged `isError: true`
                 val isToolError = result.objOpt.flatMap(_.get("isError")).flatMap(_.boolOpt).contains(true)
                 Try {
-                  // MCP returns content array with text results
-                  val content = result("content").arr
-                  if (content.nonEmpty) {
-                    val firstContent = content(0)
-                    val text         = firstContent("text").str
-
-                    // Try to parse as JSON, fallback to string result
-                    if (isToolError) ujson.Str(text) else Try(ujsonRead(text)).getOrElse(ujson.Str(text))
+                  // A server's structured result is delivered as the JSON value it is; text stays text, so a tool
+                  // that returned the string "24" is not handed back as the number 24.
+                  val structured = if (isToolError) None else result.objOpt.flatMap(_.get("structuredContent"))
+                  val content    = result("content").arr
+                  if (structured.exists(_ != ujson.Null)) {
+                    structured.getOrElse(ujson.Null)
+                  } else if (content.nonEmpty) {
+                    ujson.Str(content(0)("text").str)
                   } else if (isToolError) {
                     ujson.Str("server reported an error")
                   } else {

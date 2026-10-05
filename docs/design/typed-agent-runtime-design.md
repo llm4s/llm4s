@@ -767,8 +767,8 @@ Contract decisions:
   byte as `SimpleError(message)`. The HTTP transports pass the HTTP client's `CancelledError` through; the stdio
   transport returns it for an interrupt while awaiting a response, and for one during startup, when it also stops the
   half-started server (the process was recorded but no reader thread had started, so the next request would have found
-  a live process that never answers). `MCPClientImpl.getTools` still swallows failures into an empty list, as
-  documented, but not a cancellation. `MCPToolRegistry` applies to MCP tools the rule `ToolRegistry` applies to local
+  a live process that never answers). `MCPClientImpl.getTools` returned failures as an empty list but not a
+  cancellation (it now returns every failure as a `Left`, #1319). `MCPToolRegistry` applies to MCP tools the rule `ToolRegistry` applies to local
   ones - a call that ends while its thread is interrupted is cancelled, whatever it returned - and a cancelled
   discovery is not "no such tool", drops no client and caches nothing. A tool handler keeps core's frozen
   `Either[String, _]` shape: the interrupt flag the transport leaves set is how the registry knows. *Rejected:* a

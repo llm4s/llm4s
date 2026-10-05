@@ -174,7 +174,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       readBody(c) should include("Tool not found")
     }
 
-    it("should return TOOL_EXECUTION_ERROR when tool handler returns Left") {
+    it("should return an isError result, not a JSON-RPC error, when tool handler returns Left") {
       val (sid, _) = initSession()
       val c        = sessionConn(sid)
       c.getOutputStream.write(
@@ -182,7 +182,10 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
           .getBytes("UTF-8")
       )
       c.getResponseCode shouldBe 200
-      readBody(c) should include("Tool failed")
+      val body = ujson.read(readBody(c))
+      body.obj.contains("error") shouldBe false
+      body("result")("isError").bool shouldBe true
+      body("result")("content")(0)("text").str should include("intentional failure")
     }
 
     it("should call render() for non-String tool results (Int -> ujson.Num)") {
@@ -193,7 +196,9 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
           .getBytes("UTF-8")
       )
       c.getResponseCode shouldBe 200
-      readBody(c) should include("42")
+      val body = ujson.read(readBody(c))
+      body("result")("content")(0)("text").str shouldBe "42"
+      body("result")("structuredContent") shouldBe ujson.Num(42)
     }
 
     it("should use empty-object default for missing arguments field") {

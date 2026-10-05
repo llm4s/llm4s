@@ -237,13 +237,22 @@ class MCPServer(
               content = Seq(MCPContent(`type` = "text", text = Some(resultString))),
               isError = Some(false)
             )
-            JsonRpcResponse(id = request.id, result = Some(upickle.default.writeJs(response)))
+            val body = upickle.default.writeJs(response)
+            // A result that is not text travels as structuredContent too, so a client gets the value, not its rendering.
+            resultJson match {
+              case _: ujson.Str => ()
+              case other        => body.obj("structuredContent") = other
+            }
+            JsonRpcResponse(id = request.id, result = Some(body))
           case Left(error) =>
-            logger.error(s"Tool execution failed: $toolName - $error")
-            JsonRpcResponse(
-              id = request.id,
-              error = Some(JsonRpcError(MCPErrorCodes.TOOL_EXECUTION_ERROR, s"Tool failed: $error", None))
+            // A tool-level failure is a normal result flagged isError (MCP specification, tools/call); a JSON-RPC
+            // error is for a protocol problem such as an unknown tool.
+            logger.error(s"Tool execution failed: $toolName - ${error.getMessage}")
+            val response = ToolsCallResponse(
+              content = Seq(MCPContent(`type` = "text", text = Some(error.getMessage))),
+              isError = Some(true)
             )
+            JsonRpcResponse(id = request.id, result = Some(upickle.default.writeJs(response)))
         }
       case None =>
         JsonRpcResponse(
