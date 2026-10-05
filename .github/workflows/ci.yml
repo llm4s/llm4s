@@ -205,6 +205,8 @@ jobs:
           gradleDemo/test gradleDemo/coverageReport
           javaApi/test javaApi/coverageReport
           springBootStarter/test springBootStarter/coverageReport
+          llm4sEffect/test llm4sEffect/coverageReport
+          llm4sZio/test llm4sZio/coverageReport
           coverageAggregate
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes
@@ -468,6 +470,26 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/spring-boot-starter/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: spring-boot-starter
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload llm4s-effect coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/llm4s-effect/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: llm4s-effect
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload llm4s-zio coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/llm4s-zio/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: llm4s-zio
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
