@@ -1535,11 +1535,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`llm4s-rag`: re-ingesting a document replaces it, and several inputs return `Left` instead of throwing**
   ([#1318](https://github.com/llm4s/llm4s/issues/1318)): `RAG.ingestText` / `ingestChunks` / `ingest` upserted by
   chunk id, so a document that came back with fewer chunks (or none) kept its old tail and went on matching
-  queries. Indexing now embeds, writes the new chunks over the old ones, then removes the old version's tail -
-  nothing is deleted first, so a document that cannot be embedded or stored keeps a previous version rather than
-  losing every chunk. Finding the tail is one lookup by id, so ingesting a new document costs no scan of the store.
-  `sync` / `syncAsync` no longer delete a changed document's chunks before re-ingesting it, so a changed document
-  that fails to ingest keeps its indexed version. `deleteByPrefix` on the SQLite and
+  queries. Indexing now embeds, writes the new chunks over the old ones, then removes the old version's tail.
+  Nothing is deleted first, and a write that fails in either store - including after the other store was written -
+  is rolled back, so a document that cannot be embedded or stored keeps its previous version in both stores
+  (if the rollback fails too, that is logged at ERROR). Telling whether a document is already stored is one lookup
+  by id, so ingesting a new document costs no scan of the store. `sync` / `syncAsync` no longer delete a changed
+  document's chunks before re-ingesting it, and a failed ingest no longer registers the document's new version,
+  so the next sync retries it instead of treating it as unchanged. `deleteByPrefix` on the SQLite and
   pgvector stores and keyword indexes used the prefix as a `LIKE` pattern, so ids containing `_` or `%` deleted
   other documents' chunks; they are matched literally now. On SQLite it is also case-sensitive (`GLOB`): SQLite's
   `LIKE` folds ASCII case, so deleting or re-ingesting `Doc-A` removed `doc-a`'s chunks too. A reranker returning an out-of-range index made
@@ -1547,8 +1549,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AsyncHybridSearcher` always did. `WeightedScore` fusion no longer scores a channel's weakest genuine hit `0`, the
   score of a miss: it maps to `0.1`, the best to `1`, so weighted scores shift. New `Result`-returning
   `ChunkingConfig.validated`, `ChunkingUtils.chunkTextValidated` and `FusionStrategy.weightedScore` for values
-  that come from input; the constructors keep throwing on an invalid literal. A `WeightedScore` weight must be
-  finite as well as non-negative: an infinite one scored `Inf` or `NaN`. `documentCount` / `chunkCount` count each
+  that come from input; the constructors keep throwing on an invalid literal. `WeightedScore` weights, and their
+  sum, must be finite as well as non-negative: an infinite weight or sum scored `Inf` or `NaN`. `documentCount` / `chunkCount` count each
   document once with its current chunks: a re-ingest replaces its count, one re-ingested empty or deleted (by
   `deleteDocument` or a sync) no longer counts, and an ingest that produced no chunks never did.
 - **The docs taught a configuration route that no longer exists.** Since
