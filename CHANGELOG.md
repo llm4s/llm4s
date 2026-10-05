@@ -8,6 +8,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`llm4s-java-api`: Java interop module** (Beta, `modules/java-api`, package `org.llm4s.javaapi`,
+  [#934](https://github.com/llm4s/llm4s/issues/934)): a facade for Java callers over the client and agent API. `Llm4s.createDefaultClient()`
+  and `createClient(config)` return an `LlmResult<JLlmClient>`; `JLlmClient` (`AutoCloseable`) offers
+  `complete(...)`, `JAgent` offers `run(...)`, and `ConversationBuilder` builds a conversation. Client and
+  agent calls do not throw: a failure comes back inside the `LlmResult`, which has `isSuccess()`,
+  `get()` (throws the `LlmException` on failure), `getOrNull()`, `getError()`, `toOptional()`, `map`,
+  `ifSuccess` / `ifFailure` and `toCompletableFuture()` (an adapter over an already finished result, not
+  an asynchronous call). It depends on core, `llm4s-agent` and the OpenAI, Anthropic, Ollama, Gemini
+  and OpenAI-compatible provider modules.
+- **`llm4s-spring-boot-starter`: Spring Boot auto-configuration** (Beta, `modules/spring-boot-starter`,
+  [#936](https://github.com/llm4s/llm4s/issues/936)): built on `llm4s-java-api`. Properties under `llm4s.*` (`provider`, `model`, `apiKey`,
+  `baseUrl`, `organization`, `contextWindow`, `reserveCompletion`) produce a `JLlmClient` and an
+  `LLM4STemplate` with `complete`, `tryComplete` and a truly asynchronous `completeAsync` (a
+  `CompletableFuture` on the `llm4sTaskExecutor` bean, sized by `llm4s.async.maxThreads` and
+  `queueCapacity`; it is shut down with `shutdownNow`, which interrupts calls still running, and an
+  `ExecutorService` bean named `llm4sTaskExecutor` of your own replaces it, as a `JLlmClient` or
+  `LLM4STemplate` bean of your own replaces those). `llm4s.enabled=false` switches the starter off.
+  With Spring Boot Actuator present, an `LlmHealthIndicator` reports the client; a real one-token provider
+  call per probe is opt-in (`llm4s.health.probe`, off by default because it bills; result reused for
+  `probeTtl`, 60 s, and cancelled after `probeTimeout`, 10 s).
+- **Kotlin coroutine API** (Experimental, `modules/kotlin-api`, [#937](https://github.com/llm4s/llm4s/issues/937)): `LLMClientKt` and `AgentKt`
+  over `llm4s-java-api` with `suspend` functions and `Flow`, built from `Llm4s`. Cancelling a coroutine or
+  a `Flow` collector interrupts the blocking provider call. It is a separate Gradle build (`gradle check`,
+  JaCoCo coverage check, the `Kotlin API` CI job) that consumes `llm4s-java-api` from local Maven, **not
+  part of the sbt build or the MiMa baseline and not yet published to Maven Central**.
+- **`llm4s-effect` and `llm4s-zio`: cats-effect and ZIO integration** (Beta, `modules/llm4s-effect`,
+  `modules/llm4s-zio`, [#935](https://github.com/llm4s/llm4s/issues/935)): `LLMClientIO[F]` and `AgentIO[F]` (package
+  `org.llm4s.effect.cats`, cats-effect 3 and fs2) and `LLMClientZ` and `AgentZ` (package `org.llm4s.zio`,
+  ZIO 2 and ZIO Streams) wrap `LLMClient` and `Agent`. Streaming is incremental through a bounded queue
+  with backpressure, calls are interruptible and cancelling interrupts the provider call, the ZIO client
+  acquires its resources inside `acquireRelease` and leaks no fiber on cancel, and a failure is an
+  `LLMException` carrying the `LLMError`. Coverage floors are 65 for each (measured 65.22% and 65.91%).
+- **`LLMClient.completeStructured[A]` and `LLMClient.extractJson`** ([#932](https://github.com/llm4s/llm4s/issues/932), https://github.com/llm4s/llm4s/pull/977): sends a
+  `ResponseFormat.JsonSchema`, parses the reply into `A`, and returns a `ValidationError` for bad JSON, a
+  null reply or a schema mismatch; `extractJson` strips markdown fences and prose and recovers the first
+  balanced parseable JSON block. OpenAI, Gemini and Vertex AI, and the OpenAI-compatible providers
+  constrain the schema natively. Ollama sends its native `format` field (see the entry below).
+  **Anthropic has no native structured output here: it falls back to a prompt-level instruction that is
+  best effort and NOT schema-enforced, and that fallback has not been run against real Claude.**
+- **Gemini vision client** (Experimental, `llm4s-image`, [#1005](https://github.com/llm4s/llm4s/issues/1005)): `GeminiVisionClient`,
+  `GeminiRequestBody`, `GeminiVisionConfig` and `ImageProcessing.geminiVisionClient`, an
+  `ImageProcessingClient` like the OpenAI and Anthropic ones. The API key travels in the
+  `x-goog-api-key` header and is redacted everywhere; an interrupt returns `CancelledError`; a blocked
+  prompt or an empty or non-text reply is an error naming `blockReason` or `finishReason`; HTTP errors
+  keep their status code. **The default model, `gemini-3.6-flash`, was chosen from Google's deprecation
+  notes and has not been verified against the live API** (`gemini-2.0-flash` was shut down on 2026-06-01);
+  set `model` explicitly if it is not available to you. `llm4s-image`'s coverage floor is now 75.
 - **Agent middleware for graph runs** (Experimental, `org.llm4s.agent.graph.middleware`,
   [#1279](https://github.com/llm4s/llm4s/issues/1279)): `AgentMiddleware` is one ordered extension
   point with four pass-through hooks - `beforeAgent`, `afterAgent`, `wrapModelCall` and
@@ -1220,6 +1267,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **RAG deletes only the chunks of the document you name** (https://github.com/llm4s/llm4s/issues/1000): `RAG.deleteDocumentChunks` deleted
+  by a bare prefix, so deleting or re-syncing `doc-1` also deleted every chunk of `doc-10` and
+  `doc-1-appendix`. It now matches the `<docId>-chunk-` prefix. Also, `FusionStrategy.WeightedScore(0, 0)`
+  now throws `IllegalArgumentException` instead of producing `NaN` scores (https://github.com/llm4s/llm4s/pull/1036).
+- **MCP: a tool result flagged `isError` is a failure** (https://github.com/llm4s/llm4s/issues/1006): `MCPClientImpl` returned a
+  server-reported failure to the agent as a successful tool result. It now returns
+  `Left("Tool call failed: <text>")`, or `Left("Tool call failed: server reported an error")` when the
+  result has no text (https://github.com/llm4s/llm4s/pull/1041).
+- **`VectorMemoryStore` (SQLite) fixes** (https://github.com/llm4s/llm4s/issues/1002, https://github.com/llm4s/llm4s/pull/1306): metadata is stored as escaped JSON (a value
+  containing a double quote or a brace was silently truncated on read; the old format stays readable); the
+  JDBC connection is closed when opening the file fails (it leaked and kept the file locked, which aborted
+  the Windows test suite); and `PRAGMA busy_timeout = 30000` makes concurrent writers wait instead of
+  failing with `SQLITE_BUSY`. Remaining store issues are tracked in [#1320](https://github.com/llm4s/llm4s/issues/1320).
+- **Vertex AI token refresh is serialised** (https://github.com/llm4s/llm4s/pull/1191): concurrent callers with an expired token each fetched
+  a new one; the first now refreshes under a lock and the rest reuse it.
+- **`ToolRegistry` no longer loses a timeout that fires before the tool starts** (https://github.com/llm4s/llm4s/issues/1139, https://github.com/llm4s/llm4s/pull/1194): when
+  the thread pool was busy and the scheduled timeout fired before the tool's worker had started, the
+  timeout was silently dropped and the tool then ran unbounded. Which side records the outcome is now
+  decided by a separate atomic flag, and a worker that starts after the timeout bails out at once.
+- **The `workspace-runner` image builds again** (https://github.com/llm4s/llm4s/pull/1311): the SDKMAN install of Scala 2.13.14, which no
+  longer exists, is dropped and the SDKMAN downloads are retried.
 - **Voyage embeddings post to the right URL.** The default base URL (and the documented
   `VOYAGE_EMBEDDING_BASE_URL`) end in `/v1`, and the client appended `/v1/embeddings`, so every
   request went to `/v1/v1/embeddings`. It now appends `/embeddings`.
