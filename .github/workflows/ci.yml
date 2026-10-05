@@ -85,7 +85,12 @@ jobs:
           cache: 'sbt'
       
       - uses: sbt/setup-sbt@v1
-      
+
+      # Fails when a docs page pins a literal llm4s version in an install snippet: the docs site fills in
+      # `latest_release` from the latest GitHub Release, so a literal one lags the release by design.
+      - name: Check install snippets do not pin a literal version
+        run: scripts/check-doc-versions.sh
+
       # scalafmtCheckAll covers sources only; scalafmtSbtCheck covers build.sbt and project/*.scala.
       - name: Check formatting
         run: sbt scalafmtCheckAll scalafmtSbtCheck

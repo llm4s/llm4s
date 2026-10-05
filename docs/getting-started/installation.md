@@ -58,7 +58,7 @@ Add LLM4S to your `build.sbt`:
 
 ```scala
 // Scala 3
-libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.4.0"
+libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
 ThisBuild / scalaVersion := "3.7.1"
 ```
 
@@ -69,7 +69,7 @@ ThisBuild / scalaVersion := "3.7.1"
 <dependency>
     <groupId>org.llm4s</groupId>
     <artifactId>llm4s-core_3</artifactId>
-    <version>0.4.0</version>
+    <version>{{ site.data.project.latest_release }}</version>
 </dependency>
 
 ```
@@ -83,7 +83,7 @@ Gradle does **not** resolve Scala cross-version suffixes automatically — you m
 repositories { mavenCentral() }
 
 dependencies {
-    implementation("org.llm4s:llm4s-core_3:0.4.1")
+    implementation("org.llm4s:llm4s-core_3:{{ site.data.project.latest_release }}")
 }
 
 // Pin the Scala 3 library (scala3-library_3 only; scala-library stays at 2.13.x)
@@ -103,7 +103,7 @@ configurations.all {
 repositories { mavenCentral() }
 
 dependencies {
-    implementation 'org.llm4s:llm4s-core_3:0.4.1'
+    implementation 'org.llm4s:llm4s-core_3:{{ site.data.project.latest_release }}'
 }
 
 configurations.all {
@@ -130,19 +130,26 @@ lazy val myProject = (project in file("."))
     name := "my-llm-project",
     scalaVersion := "3.7.1",
     libraryDependencies ++= Seq(
-      "org.llm4s" %% "llm4s-core" % "0.4.0"
+      "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
     )
   )
 ```
 
-### Snapshot Versions
+### Unreleased changes (`main`)
 
-To use the latest development snapshot:
+No snapshots are published: releases are cut from tags only, and nothing publishes between them. To try
+what is on `main`, build it and publish it to your local repository:
 
-```scala
-resolvers += Resolver.sonatypeRepo("snapshots")
-libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.4.0-SNAPSHOT"
+```bash
+git clone https://github.com/llm4s/llm4s && cd llm4s
+sbt publishLocal   # for sbt; use `sbt publishM2` for Maven or Gradle (mavenLocal())
+sbt version        # prints the version it published, for example 0.4.1+165-b455b8ea-SNAPSHOT
 ```
+
+Then depend on that version, for example
+`libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.4.1+165-b455b8ea-SNAPSHOT"` (use the one `sbt version`
+printed). `main` describes modules and configuration that the latest release does not have yet, so the
+rest of this guide matches `main`, not the released artifact, wherever it says a module is not yet published.
 
 ---
 
@@ -569,7 +576,7 @@ and for [Prometheus](../reference/migration.md#slice-6-llm4s-observability-prome
 ### For Workspace (Containerized Execution)
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-workspace-client" % "0.4.0"
+libraryDependencies += "org.llm4s" %% "llm4s-workspace-client" % "{{ site.data.project.latest_release }}"
 ```
 
 And install Docker:

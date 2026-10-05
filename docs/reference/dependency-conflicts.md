@@ -54,7 +54,7 @@ On `main` this no longer applies: the library modules depend on `slf4j-api` only
 ### Fix - Gradle (Kotlin DSL)
 
 ```kotlin
-implementation("org.llm4s:llm4s-core_3:0.4.1") {
+implementation("org.llm4s:llm4s-core_3:{{ site.data.project.latest_release }}") {
     exclude(group = "ch.qos.logback", module = "logback-classic")
 }
 ```
@@ -65,7 +65,7 @@ implementation("org.llm4s:llm4s-core_3:0.4.1") {
 <dependency>
     <groupId>org.llm4s</groupId>
     <artifactId>llm4s-core_3</artifactId>
-    <version>0.4.1</version>
+    <version>{{ site.data.project.latest_release }}</version>
     <exclusions>
         <exclusion>
             <groupId>ch.qos.logback</groupId>
@@ -78,7 +78,7 @@ implementation("org.llm4s:llm4s-core_3:0.4.1") {
 ### Fix - sbt
 
 ```scala
-libraryDependencies += ("org.llm4s" %% "llm4s-core" % "0.4.1").exclude("ch.qos.logback", "logback-classic")
+libraryDependencies += ("org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}").exclude("ch.qos.logback", "logback-classic")
 ```
 
 ---
@@ -92,7 +92,7 @@ libraryDependencies += ("org.llm4s" %% "llm4s-core" % "0.4.1").exclude("ch.qos.l
 ### Fix - Gradle (Kotlin DSL)
 
 ```kotlin
-implementation("org.llm4s:llm4s-core_3:0.4.1") {
+implementation("org.llm4s:llm4s-core_3:{{ site.data.project.latest_release }}") {
     exclude(group = "com.azure", module = "azure-ai-openai")
 }
 ```
@@ -134,12 +134,12 @@ dependencies {
 
 ### Root cause
 
-In sbt, `%%` automatically appends the Scala binary version suffix (`_3`). Gradle has no equivalent. If you write `org.llm4s:llm4s-core:0.4.1` without a suffix, Gradle cannot resolve the artifact. LLM4S is Scala 3 only, so the suffix is always `_3`.
+In sbt, `%%` automatically appends the Scala binary version suffix (`_3`). Gradle has no equivalent. If you write `org.llm4s:llm4s-core:{{ site.data.project.latest_release }}` without a suffix, Gradle cannot resolve the artifact. LLM4S is Scala 3 only, so the suffix is always `_3`.
 
 ### Fix
 
 ```kotlin
-implementation("org.llm4s:llm4s-core_3:0.4.1")
+implementation("org.llm4s:llm4s-core_3:{{ site.data.project.latest_release }}")
 ```
 
 ---

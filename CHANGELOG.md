@@ -1280,6 +1280,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   JDBC connection is closed when opening the file fails (it leaked and kept the file locked, which aborted
   the Windows test suite); and `PRAGMA busy_timeout = 30000` makes concurrent writers wait instead of
   failing with `SQLITE_BUSY`. Remaining store issues are tracked in [#1320](https://github.com/llm4s/llm4s/issues/1320).
+- **Install snippets follow the latest release** ([#1281](https://github.com/llm4s/llm4s/issues/1281)): the
+  installation guide, the dependency-conflicts reference, the image-generation guide and the FAQ pinned a literal
+  `0.4.0` or `0.4.1` in sbt, Maven and Gradle snippets, so they said different things (the latest release is
+  0.4.1) and would have sent new users to the old release after 0.5.0. They now use
+  `{{ site.data.project.latest_release }}`, which `pages.yml` sets from the latest GitHub Release at deploy.
+  The committed `docs/_data/project.yml` defaults are 0.4.1. The "Snapshot Versions" section described
+  `0.4.0-SNAPSHOT`, which nothing publishes (releases are cut from tags only, and the build names a snapshot
+  `0.4.1+165-abc1234-SNAPSHOT`); it now says how to build and publish `main` locally. A new check,
+  `scripts/check-doc-versions.sh`, runs in CI quick checks and fails on a literal pin.
 - **Vertex AI token refresh is serialised** (https://github.com/llm4s/llm4s/pull/1191): concurrent callers with an expired token each fetched
   a new one; the first now refreshes under a lock and the rest reuse it.
 - **`ToolRegistry` no longer loses a timeout that fires before the tool starts** (https://github.com/llm4s/llm4s/issues/1139, https://github.com/llm4s/llm4s/pull/1194): when

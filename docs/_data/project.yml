@@ -2,10 +2,10 @@
 # This file is updated during CI builds or manually for releases
 
 # Current version displayed in documentation
-version: "0.4.0"
+version: "0.4.1"
 
 # Latest stable release (updated by CI on release)
-latest_release: "0.4.0"
+latest_release: "0.4.1"
 
 # Supported versions
 scala_versions:
