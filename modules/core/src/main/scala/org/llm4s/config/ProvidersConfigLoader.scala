@@ -67,7 +67,8 @@ final private[config] case class ProviderSections(
         if descriptor.configSpec.requiresApiKey
       yield
         val source =
-          if raw.apiKey.exists(_.trim.nonEmpty) then ApiKeySource.Section(s"llm4s.providers.${name.asName}.apiKey")
+          if raw.auth.isDefined then ApiKeySource.WorkloadIdentity(s"llm4s.providers.${name.asName}.auth")
+          else if raw.apiKey.exists(_.trim.nonEmpty) then ApiKeySource.Section(s"llm4s.providers.${name.asName}.apiKey")
           else ApiKeySource.Credentials(SharedCredentials.apiKeyPath(descriptor.id))
         name -> source
     }.toMap

@@ -27,6 +27,8 @@ final case class TokenExchangeConfig(
   audience: Option[String] = None
 )
 
+/** The RFC 8693 token exchange and its caching provider. */
+@Experimental
 object TokenExchange:
 
   val GrantType: String              = "urn:ietf:params:oauth:grant-type:token-exchange"

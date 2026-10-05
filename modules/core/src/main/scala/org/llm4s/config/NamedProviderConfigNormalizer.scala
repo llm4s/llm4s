@@ -1,9 +1,12 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
+
+import java.nio.file.Path
 
 /** Converts a `RawNamedProviderSection` into a validated `NamedProviderConfig` by resolving string fields. */
 private[config] object NamedProviderConfigNormalizer:
@@ -37,9 +40,39 @@ private[config] object NamedProviderConfigNormalizer:
         .filter(_.nonEmpty)
         .toRight(ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `model`"))
 
+    // The identity token is the one auth key core reads itself: exactly one of a file path (made
+    // absolute now, so the SDKs, which may resolve a relative path differently, get the same one) or
+    // a literal. Every other key is the provider's, and validation decides which are accepted.
+    val authConfig: Result[Option[AuthConfig]] =
+      section.auth match
+        case None => Right(None)
+        case Some(raw) =>
+          val values = raw.collect { case (key, value) if value.trim.nonEmpty => key -> value.trim }
+          val path   = s"llm4s.providers.${providerName.asName}.auth"
+          val rest   = values -- AuthConfig.ReservedKeys
+          (values.get(AuthConfig.IdentityTokenFileKey), values.get(AuthConfig.IdentityTokenKey)) match
+            case (Some(file), None) =>
+              Right(Some(AuthConfig(IdentitySource.File(Path.of(file).toAbsolutePath.normalize), rest)))
+            case (None, Some(token)) =>
+              Right(Some(AuthConfig(IdentitySource.Literal(token), rest)))
+            case (None, None) =>
+              Left(
+                ConfigurationError(
+                  s"$path needs ${AuthConfig.IdentityTokenFileKey} (a path to the identity token file, " +
+                    s"e.g. a SPIFFE JWT-SVID) or ${AuthConfig.IdentityTokenKey}"
+                )
+              )
+            case (Some(_), Some(_)) =>
+              Left(
+                ConfigurationError(
+                  s"$path sets both ${AuthConfig.IdentityTokenFileKey} and ${AuthConfig.IdentityTokenKey}; set only one"
+                )
+              )
+
     for
       id    <- providerType
       model <- modelName
+      auth  <- authConfig
     yield NamedProviderConfig(
       provider = id,
       model = ModelName(model),
@@ -48,5 +81,6 @@ private[config] object NamedProviderConfigNormalizer:
       headers = section.headers.getOrElse(Map.empty),
       // Trimmed and kept as read. Which of these the provider accepts is decided by
       // `NamedProviderSectionValidator`, which knows the descriptor; this does not.
-      extras = section.extras.collect { case (key, value) if value.trim.nonEmpty => key -> value.trim }
+      extras = section.extras.collect { case (key, value) if value.trim.nonEmpty => key -> value.trim },
+      auth = auth
     )

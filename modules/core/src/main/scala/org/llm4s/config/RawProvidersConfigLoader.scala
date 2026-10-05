@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.spi.ProviderConfigSpec
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.{ ProviderName, RawNamedProviderSection, RawProvidersConfig }
 import pureconfig.error.{ ConfigReaderFailures, ConvertFailure, UserValidationFailed }
-import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
+import pureconfig.{ ConfigObjectCursor, ConfigReader => PureConfigReader, ConfigSource }
 
 import scala.jdk.CollectionConverters.*
 
@@ -20,6 +20,42 @@ private[config] object RawProvidersConfigLoader:
       "apiKey",
       "headers"
     )(RawNamedProviderSection(_, _, _, _, _))
+
+  /**
+   * The `auth` block, if there is one, as strings: scalars (strings, numbers, booleans) are read as
+   * strings and a `null` as absent, like the provider-specific keys; an object or a list is an
+   * error. A key bound to an unset `${?VAR}` is not in the object at all, so it is simply absent.
+   */
+  private def readAuth(objCursor: ConfigObjectCursor): Either[ConfigReaderFailures, Option[Map[String, String]]] =
+    val authCursor = objCursor.atKeyOrUndefined("auth")
+    if authCursor.isUndefined || authCursor.isNull then Right(None)
+    else
+      authCursor.asObjectCursor.flatMap { authObj =>
+        authObj.objValue
+          .keySet()
+          .asScala
+          .toList
+          .sorted
+          .foldLeft[Either[ConfigReaderFailures, Map[String, String]]](Right(Map.empty)) { case (accEither, key) =>
+            for
+              acc       <- accEither
+              keyCursor <- authObj.atKey(key)
+              value <-
+                if keyCursor.isNull then Right(None)
+                else
+                  PureConfigReader[String]
+                    .from(keyCursor)
+                    .map(Some(_))
+                    .left
+                    .flatMap(_ =>
+                      keyCursor.failed(
+                        UserValidationFailed(s"auth key '${keyCursor.path}' must be a string, number or boolean")
+                      )
+                    )
+            yield value.fold(acc)(acc.updated(key, _))
+          }
+          .map(Some(_))
+      }
 
   /**
    * The built-in fields, plus every other key as a string in `extras`.
@@ -61,7 +97,8 @@ private[config] object RawProvidersConfigLoader:
                     )
             yield value.fold(acc)(acc.updated(key, _))
         }
-      yield builtins.copy(extras = extras)
+        auth <- readAuth(objCursor)
+      yield builtins.copy(extras = extras, auth = auth)
     }
 
   /** The block as read, each section's read failure kept to that section. */

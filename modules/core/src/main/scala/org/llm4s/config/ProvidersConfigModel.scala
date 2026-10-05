@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.auth.AuthConfig
 import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.types.Result
 
@@ -22,6 +23,8 @@ object ProvidersConfigModel:
    *  @param extras      every other key in the section, as a string: the provider-specific keys a
    *                     descriptor declares in `ProviderConfigSpec.extras`, and anything unknown,
    *                     which validation reports and drops
+   *  @param auth         the section's `auth` block, if any, as scalars: the identity-token key and
+   *                      whatever the provider reads from it
    */
   final private[llm4s] case class RawNamedProviderSection(
     provider: Option[String],
@@ -29,7 +32,8 @@ object ProvidersConfigModel:
     baseUrl: Option[String],
     apiKey: Option[String],
     headers: Option[Map[String, String]] = None,
-    extras: Map[String, String] = Map.empty
+    extras: Map[String, String] = Map.empty,
+    auth: Option[Map[String, String]] = None
   )
 
   /**
@@ -63,6 +67,10 @@ object ProvidersConfigModel:
    *                      OpenAI's `organization`, the generic `openai-compatible` provider's
    *                      `contextWindow` and `reserveCompletion` - so that this type does not
    *                      change as providers come and go.
+   *  @param auth         the section's workload-identity block, if any: the identity token to
+   *                      exchange and the keys its provider declares in
+   *                      `ProviderConfigSpec.authExtras`. Validation guarantees it is never set
+   *                      together with `apiKey`. Redacted in `toString`.
    */
   final case class NamedProviderConfig private (
     provider: ProviderId,
@@ -70,7 +78,8 @@ object ProvidersConfigModel:
     baseUrl: Option[BaseUrl],
     apiKey: Option[ApiKey],
     headers: Map[String, String],
-    extras: Map[String, String]
+    extras: Map[String, String],
+    auth: Option[AuthConfig]
   ):
 
     def withProvider(provider: ProviderId): NamedProviderConfig        = copy(provider = provider)
@@ -81,11 +90,13 @@ object ProvidersConfigModel:
     def withApiKey(apiKey: Option[ApiKey]): NamedProviderConfig        = copy(apiKey = apiKey)
     def withHeaders(headers: Map[String, String]): NamedProviderConfig = copy(headers = headers)
     def withExtras(extras: Map[String, String]): NamedProviderConfig   = copy(extras = extras)
+    def withAuth(auth: AuthConfig): NamedProviderConfig                = copy(auth = Some(auth))
+    def withAuth(auth: Option[AuthConfig]): NamedProviderConfig        = copy(auth = auth)
     // The API key, header values and extra values may be credentials (`x-api-key`, a gateway
     // token, a provider-declared secret), so all are redacted; names are kept because they are
     // what a user needs to debug a section.
     override def toString: String =
-      s"NamedProviderConfig($provider,$model,$baseUrl,${apiKey.map(_ => "***")},${redacted(headers)},${redacted(extras)})"
+      s"NamedProviderConfig($provider,$model,$baseUrl,${apiKey.map(_ => "***")},${redacted(headers)},${redacted(extras)},$auth)"
 
     private def redacted(values: Map[String, String]): String =
       values.keys.map(k => s"$k -> ***").mkString("Map(", ", ", ")")
@@ -146,9 +157,10 @@ object ProvidersConfigModel:
       baseUrl: Option[BaseUrl],
       apiKey: Option[ApiKey],
       headers: Map[String, String] = Map.empty,
-      extras: Map[String, String] = Map.empty
+      extras: Map[String, String] = Map.empty,
+      auth: Option[AuthConfig] = None
     ): NamedProviderConfig =
-      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras)
+      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, auth)
   }
 
   /**
