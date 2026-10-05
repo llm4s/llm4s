@@ -1,12 +1,35 @@
 package org.llm4s.agent.guardrails.builtin
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import org.llm4s.agent.guardrails.{ GuardrailAction, InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.guardrails.patterns.PIIPatterns.PIIType
 import org.llm4s.error.ValidationError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.slf4j.LoggerFactory
+
+import scala.jdk.CollectionConverters._
 
 class PIIDetectorSpec extends AnyFlatSpec with Matchers {
+
+  /** The WARN messages `PIIDetector` logs while `body` runs. */
+  private def warningsLogged(body: => Unit): Seq[String] = {
+    val logger   = LoggerFactory.getLogger(classOf[PIIDetector]).asInstanceOf[LBLogger]
+    val appender = new ListAppender[ILoggingEvent]
+    val previous = logger.getLevel
+    appender.start()
+    logger.addAppender(appender)
+    logger.setLevel(Level.WARN)
+    try body
+    finally {
+      logger.detachAppender(appender)
+      logger.setLevel(previous)
+      appender.stop()
+    }
+    appender.list.asScala.toSeq.filter(_.getLevel == Level.WARN).map(_.getFormattedMessage)
+  }
 
   // ==========================================================================
   // Defaults
@@ -112,6 +135,57 @@ class PIIDetectorSpec extends AnyFlatSpec with Matchers {
   it should "return original when clean" in {
     val detector = PIIDetector(onFail = GuardrailAction.Warn)
     detector.validate("no pii") shouldBe Right("no pii")
+  }
+
+  it should "log one warning that names each type found and how many" in {
+    val detector = PIIDetector(onFail = GuardrailAction.Warn)
+    val text     = "SSN: 123-45-6789, mail a@b.com and c@d.com"
+
+    val warnings = warningsLogged(detector.validate(text))
+
+    warnings should have size 1
+    warnings.head should include("warn mode")
+    warnings.head should include("SSN (1)")
+    warnings.head should include("Email (2)")
+    warnings.head should include("Found types: [")
+  }
+
+  it should "never put the matched text in the log" in {
+    val detector = PIIDetector(onFail = GuardrailAction.Warn)
+
+    val warnings = warningsLogged(detector.validate("SSN: 123-45-6789, mail a@b.com"))
+
+    warnings should have size 1
+    (warnings.head should not).include("123-45-6789")
+    (warnings.head should not).include("a@b.com")
+  }
+
+  it should "log nothing when the text has no PII" in {
+    val detector = PIIDetector(onFail = GuardrailAction.Warn)
+
+    warningsLogged(detector.validate("no pii here")) shouldBe empty
+  }
+
+  it should "log for the monitoring preset" in {
+    val warnings = warningsLogged(PIIDetector.monitoring.validate("mail a@b.com"))
+
+    warnings should have size 1
+    warnings.head should include("Email (1)")
+  }
+
+  it should "be the only mode that logs: Block and Fix do not" in {
+    val text = "mail a@b.com"
+
+    warningsLogged(PIIDetector(onFail = GuardrailAction.Block).validate(text)) shouldBe empty
+    warningsLogged(PIIDetector(onFail = GuardrailAction.Fix).validate(text)) shouldBe empty
+  }
+
+  "PIIDetector in Block mode" should "word its error as before, naming types and counts and what to do" in {
+    val result = PIIDetector(Seq(PIIType.SSN)).validate("SSN: 123-45-6789")
+
+    result.swap.toOption.get.message should include(
+      "PII detected: SSN (1). Found types: [SSN]. Remove or mask sensitive information before processing."
+    )
   }
 
   // ==========================================================================

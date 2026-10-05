@@ -1376,6 +1376,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the thread pool was busy and the scheduled timeout fired before the tool's worker had started, the
   timeout was silently dropped and the tool then ran unbounded. Which side records the outcome is now
   decided by a separate atomic flag, and a worker that starts after the timeout bails out at once.
+- `PIIDetector` in `GuardrailAction.Warn` mode (the `PIIDetector.monitoring` preset) detected PII
+  and then said nothing: the branch let the text through with a comment that it "would log to the
+  trace system". It now logs one WARN naming the PII types found and how many of each - never
+  the matched text - and still returns the text unchanged. `Block` and `Fix` are unchanged, and
+  the `Block` error reads as before. `PromptInjectionDetector`, `GroundingGuardrail` and
+  `ContextRelevanceGuardrail` still have a `Warn` that logs nothing. Reworked from #1094 by
+  @Shubha9807.
 - **The `workspace-runner` image builds again** (https://github.com/llm4s/llm4s/pull/1311): the SDKMAN install of Scala 2.13.14, which no
   longer exists, is dropped and the SDKMAN downloads are retried.
 - **Voyage embeddings post to the right URL.** The default base URL (and the documented
