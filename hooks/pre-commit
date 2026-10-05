@@ -101,6 +101,7 @@ map_file_to_project() {
     modules/openai-compatible/*)          echo "openaiCompatible" ;;
     modules/provider-testkit/*)           echo "providerTestkit" ;;
     modules/providers/bedrock/*)          echo "bedrock" ;;
+    modules/watsonx/*)                    echo "watsonx" ;;
     modules/providers/jina/*)             echo "jina" ;;
     modules/providers/voyage/*)           echo "voyage" ;;
     modules/gradle-demo/*)                echo "gradleDemo" ;;
@@ -204,6 +205,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE openaiCompatible
       set_add DOWNSTREAM_COMPILE voyage
       set_add DOWNSTREAM_COMPILE bedrock
+      set_add DOWNSTREAM_COMPILE watsonx
       set_add DOWNSTREAM_COMPILE jina
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE workspaceClient
@@ -294,6 +296,12 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
       ;;
+    watsonx)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
     voyage)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
@@ -371,6 +379,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE voyage
       set_add DOWNSTREAM_COMPILE bedrock
+      set_add DOWNSTREAM_COMPILE watsonx
       set_add DOWNSTREAM_COMPILE jina
       ;;
     knowledgegraphNeo4j)
