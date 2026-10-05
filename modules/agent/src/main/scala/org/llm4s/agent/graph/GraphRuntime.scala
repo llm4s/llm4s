@@ -255,6 +255,16 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
   }
 
   /**
+   * Whether run `runId` ended as a Block ([[NodeResult.Block]]): the thread's latest checkpoint is that
+   * run's closing one, with status [[CheckpointStatus.Failed]]. An ordinary failure leaves no closing
+   * checkpoint of its own, and a run started on the thread since makes this `false`.
+   */
+  private[agent] def endedBlocked(threadId: ThreadId, runId: RunId): Result[Boolean] =
+    checkpointer
+      .latest(threadId)
+      .map(_.exists(s => s.checkpoint.runId == runId.value && s.checkpoint.status == CheckpointStatus.Failed))
+
+  /**
    * Deletes `threadId` from the runtime's store - its checkpoint, pending writes and event log - so
    * its id names a new thread again. Refused, with nothing deleted, as admission refuses a run: a
    * thread of another tenant is [[GraphError.TenantMismatch]], and one whose run is admitting or

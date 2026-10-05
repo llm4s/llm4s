@@ -152,7 +152,7 @@ final class Agent private[agent] (
       Left(ValidationError("history", "system messages are not imported; prompts belong to agents"))
     else Message.validateConversation(history.toList)
 
-  private def agentRun(handle: RunHandle[TurnOutput]): AgentRun = AgentRun(handle, loop, id, tracing)
+  private def agentRun(handle: RunHandle[TurnOutput]): AgentRun = AgentRun(handle, loop, id, runtime, tracing)
 
 object Agent:
 

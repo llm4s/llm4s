@@ -1598,7 +1598,8 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     val agentB = AgentId.unsafe("b")
     val modelA = ScriptedModel(
       _ => AssistantMessage("hello"),
-      _ => AssistantMessage(None, Seq(ToolCall("h1", HandoffTools.toolName(agentB), ujson.Obj("reason" -> "x"))))
+      _ => AssistantMessage(None, Seq(ToolCall("h1", HandoffTools.toolName(agentB), ujson.Obj("reason" -> "x")))),
+      _ => AssistantMessage("after")
     )
     val modelB = ScriptedModel(_ => AssistantMessage("SECRET from b"))
     val l = ToolLoop
@@ -1622,6 +1623,62 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     messagesOf(state) shouldBe Vector(UserMessage("one"), AssistantMessage("hello"))
     state.get(LoopKeys.activeAgent).value shouldBe Some(agentA)
     state.get(LoopKeys.transfer).value shouldBe None
+
+    // the next turn starts with the root again, from the history before the blocked turn
+    val (next, answer) = turn(runtime, l, "three", 3).answered
+    answer shouldBe "after"
+    modelA.seen.get(2) shouldBe Vector(UserMessage("one"), AssistantMessage("hello"), UserMessage("three"))
+    modelB.calls shouldBe 1
+    messagesOf(next) shouldBe
+      Vector(UserMessage("one"), AssistantMessage("hello"), UserMessage("three"), AssistantMessage("after"))
+  }
+
+  it should "restore a non-empty transfer when an output Block removes a later turn of a handed-off thread" in {
+    val agentB = AgentId.unsafe("b")
+    val modelA = ScriptedModel(_ =>
+      AssistantMessage(None, Seq(ToolCall("h1", HandoffTools.toolName(agentB), ujson.Obj("reason" -> "x"))))
+    )
+    val modelB = ScriptedModel(
+      _ => AssistantMessage("from b"),
+      _ => AssistantMessage("SECRET from b"),
+      _ => AssistantMessage("fine")
+    )
+    val l = ToolLoop
+      .build(
+        "loop",
+        "1",
+        agentA,
+        Vector(
+          LoopAgent(agentA, modelA, set(Tools().echo))
+            .withMiddleware(Seq(gate))
+            .withHandoffs(Vector(LoopHandoff(agentB, None, preserveContext = false))),
+          LoopAgent(agentB, modelB, set(Tools().echo))
+        )
+      )
+      .value
+    val runtime = GraphRuntime(InMemoryCheckpointer())
+
+    // turn one hands off to b, which answers: b is active, with the transfer recorded
+    val (first, _) = turn(runtime, l, "one", 1).answered
+    val transfer   = first.get(LoopKeys.transfer).value
+    transfer.map(_.target) shouldBe Some(agentB)
+
+    // turn two, with b, is blocked by the root's gate: the turn is removed, b and the transfer stay
+    val (blocked, error) = turn(runtime, l, "two", 2).failed
+    error shouldBe ValidationError("output", "blocked")
+    messagesOf(blocked) shouldBe messagesOf(first)
+    blocked.get(LoopKeys.activeAgent).value shouldBe Some(agentB)
+    blocked.get(LoopKeys.transfer).value shouldBe transfer
+
+    // turn three still works: b is sent the question before its transfer, then the transfer onwards
+    val (third, answer) = turn(runtime, l, "three", 3).answered
+    answer shouldBe "fine"
+    val sent = modelB.seen.get(2)
+    sent.head shouldBe UserMessage("one")
+    sent.last shouldBe UserMessage("three")
+    (sent.map(_.content).mkString should not).include("SECRET")
+    third.get(LoopKeys.activeAgent).value shouldBe Some(agentB)
+    modelA.calls shouldBe 1
   }
 
   it should "store the transformed input when an input guardrail transforms rather than blocks" in {

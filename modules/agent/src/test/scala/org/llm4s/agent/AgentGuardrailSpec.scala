@@ -2,7 +2,13 @@ package org.llm4s.agent
 
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.graph.{ GraphError, RunContext }
-import org.llm4s.agent.graph.middleware.{ AgentMiddleware, GuardrailMiddleware, MiddlewareId }
+import org.llm4s.agent.graph.middleware.{
+  AgentMiddleware,
+  GuardrailBlocked,
+  GuardrailMiddleware,
+  MiddlewareId,
+  ModelRequest
+}
 import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.guardrails.builtin.{ JSONValidator, LengthCheck, ProfanityFilter }
 import org.llm4s.error.ValidationError
@@ -198,6 +204,31 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
     next.messages shouldBe Vector(UserMessage("q again"), AssistantMessage("the next answer"))
     client.callCount shouldBe 2
     flaky.calls.get() shouldBe 2
+  }
+
+  /** Fails its first model call with a `GuardrailBlocked`, as a model wrapper (not a boundary hook). */
+  final private class BlockingModelWrapper extends AgentMiddleware {
+    val calls            = new AtomicInteger(0)
+    val id: MiddlewareId = MiddlewareId("model-guard")
+    override def wrapModelCall(request: ModelRequest, context: RunContext)(
+      next: ModelRequest => Result[Completion]
+    ): Result[Completion] =
+      if (calls.incrementAndGet() == 1) Left(GuardrailBlocked("ModelGuard", "not now")) else next(request)
+  }
+
+  "A GuardrailBlocked from a model wrapper" should "fail the run as Left, leaving the thread for recover" in {
+    val client  = answers("the answer")
+    val wrapper = new BlockingModelWrapper
+    val agent   = built(Agent.builder("assistant", client).withMiddleware(wrapper))
+    val thread  = org.llm4s.agent.graph.ThreadId("wrapper-guardrail")
+
+    val error = agent.run(thread, "q").error
+    cause(error) shouldBe GuardrailBlocked("ModelGuard", "not now")
+    // not a Block: the thread is Running, so a new turn is refused and recover continues it
+    agent.run(thread, "another").error shouldBe a[GraphError.IncompleteRun]
+    val recovered = agent.recover(thread).value
+    recovered.answer shouldBe Some("the answer")
+    client.callCount shouldBe 1
   }
 
   // --- root boundary hooks apply to the whole family ---

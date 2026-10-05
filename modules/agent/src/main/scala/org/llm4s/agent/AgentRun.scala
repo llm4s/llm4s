@@ -22,6 +22,7 @@ final class AgentRun private[agent] (
   handle: RunHandle[TurnOutput],
   loop: ToolLoop,
   root: AgentId,
+  runtime: GraphRuntime,
   tracing: Option[AgentRun.TracedRun]
 ):
 
@@ -48,8 +49,12 @@ final class AgentRun private[agent] (
     ended.flatMap {
       case RunResult.Completed(state, output, _) => completed(state, output)
       case suspended: RunResult.Suspended        => this.suspended(suspended)
+      // only a kernel Block - the run closed its thread Failed - is a blocked turn; a GuardrailBlocked
+      // that failed the run another way (from a model or tool wrapper) leaves it for recover, so it is Left
       case RunResult.Failed(state, blocked: GuardrailBlocked) =>
-        snapshot(state, AgentStatus.Blocked(blocked.guardrail, blocked.reason))
+        runtime.endedBlocked(threadId, runId).flatMap { isBlock =>
+          if isBlock then snapshot(state, AgentStatus.Blocked(blocked.guardrail, blocked.reason)) else Left(blocked)
+        }
       case RunResult.Failed(_, error) => Left(error)
     }
 
@@ -100,8 +105,14 @@ private[agent] object AgentRun:
   private val TracingDrain: FiniteDuration = 5.seconds
 
   /** `handle` as an agent run, traced to `tracing` when given. */
-  def apply(handle: RunHandle[TurnOutput], loop: ToolLoop, root: AgentId, tracing: Option[Tracing]): AgentRun =
-    new AgentRun(handle, loop, root, tracing.map(TracedRun(handle, _)))
+  def apply(
+    handle: RunHandle[TurnOutput],
+    loop: ToolLoop,
+    root: AgentId,
+    runtime: GraphRuntime,
+    tracing: Option[Tracing]
+  ): AgentRun =
+    new AgentRun(handle, loop, root, runtime, tracing.map(TracedRun(handle, _)))
 
   /**
    * A run's tracing: a subscription to the run's thread from just before its claim, tracing only
