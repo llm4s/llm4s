@@ -2,7 +2,7 @@ package org.llm4s.kotlin
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runInterruptible
-import org.llm4s.agent.AgentState
+import org.llm4s.agent.AgentThread
 import org.llm4s.javaapi.JAgent
 
 /**
@@ -22,9 +22,9 @@ class AgentKt internal constructor(private val underlying: JAgent) {
 
     /**
      * Suspends until the agent completes the given [query] and returns the
-     * resulting [AgentState]. Throws [LLMException] on failure.
+     * resulting [AgentThread]. Throws [LLMException] on failure.
      */
-    suspend fun run(query: String): AgentState = runInterruptible(Dispatchers.IO) {
+    suspend fun run(query: String): AgentThread = runInterruptible(Dispatchers.IO) {
         underlying.run(query).unwrap("Agent run failed")
     }
 }

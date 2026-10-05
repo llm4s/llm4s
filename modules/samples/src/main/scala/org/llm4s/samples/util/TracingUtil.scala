@@ -1,6 +1,6 @@
 package org.llm4s.samples.util
 
-import org.llm4s.agent.AgentState
+import org.llm4s.agent.AgentThread
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.trace.{ Tracing, TraceEvent }
 
@@ -37,8 +37,8 @@ object TracingUtil {
     )
 
   /** Trace agent state updates */
-  def traceAgentStateUpdate(tracing: Tracing, agentState: AgentState): Unit =
-    tracing.traceEvent(agentState.toTraceEvent)
+  def traceAgentStateUpdate(tracing: Tracing, thread: AgentThread): Unit =
+    tracing.traceEvent(thread.toTraceEvent)
 
   /** Trace successful tool execution with detailed results */
   def traceToolExecution(

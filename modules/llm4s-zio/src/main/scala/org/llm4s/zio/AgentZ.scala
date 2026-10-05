@@ -1,7 +1,7 @@
 package org.llm4s.zio
 
 import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
-import org.llm4s.agent.{ Agent, AgentContext, AgentState }
+import org.llm4s.agent.{ Agent, AgentContext, AgentThread }
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.model.CompletionOptions
 import org.llm4s.toolapi.ToolRegistry
@@ -10,7 +10,7 @@ import zio.ZIO
 /**
  * ZIO wrapper for [[Agent]].
  *
- * Lifts every `Result[AgentState]` return value into `ZIO[Any, LLMError, AgentState]`.
+ * Lifts every `Result[AgentThread]` return value into `ZIO[Any, LLMError, AgentThread]`.
  * The underlying blocking [[Agent]] methods are shifted to ZIO's blocking thread pool and run
  * interruptibly: interrupting the fiber interrupts the running agent loop.
  *
@@ -35,16 +35,17 @@ trait AgentZ {
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions(),
     context: AgentContext = AgentContext.Default
-  ): ZIO[Any, LLMError, AgentState]
+  ): ZIO[Any, LLMError, AgentThread]
 
   def continueConversation(
-    previousState: AgentState,
+    previous: AgentThread,
     newUserMessage: String,
+    tools: ToolRegistry,
     inputGuardrails: Seq[InputGuardrail] = Seq.empty,
     outputGuardrails: Seq[OutputGuardrail] = Seq.empty,
     maxSteps: Option[Int] = None,
     context: AgentContext = AgentContext.Default
-  ): ZIO[Any, LLMError, AgentState]
+  ): ZIO[Any, LLMError, AgentThread]
 }
 
 object AgentZ {
@@ -63,7 +64,7 @@ object AgentZ {
       systemPromptAddition: Option[String] = None,
       completionOptions: CompletionOptions = CompletionOptions(),
       context: AgentContext = AgentContext.Default
-    ): ZIO[Any, LLMError, AgentState] =
+    ): ZIO[Any, LLMError, AgentThread] =
       ZIO
         .attemptBlockingInterrupt(
           agent.run(
@@ -81,21 +82,23 @@ object AgentZ {
         .flatMap(ZIO.fromEither(_))
 
     def continueConversation(
-      previousState: AgentState,
+      previous: AgentThread,
       newUserMessage: String,
+      tools: ToolRegistry,
       inputGuardrails: Seq[InputGuardrail] = Seq.empty,
       outputGuardrails: Seq[OutputGuardrail] = Seq.empty,
       maxSteps: Option[Int] = None,
       context: AgentContext = AgentContext.Default
-    ): ZIO[Any, LLMError, AgentState] =
+    ): ZIO[Any, LLMError, AgentThread] =
       ZIO
         .attemptBlockingInterrupt(
           agent.continueConversation(
-            previousState,
+            previous,
             newUserMessage,
-            inputGuardrails,
-            outputGuardrails,
-            maxSteps,
+            tools,
+            inputGuardrails = inputGuardrails,
+            outputGuardrails = outputGuardrails,
+            maxSteps = maxSteps,
             context = context
           )
         )

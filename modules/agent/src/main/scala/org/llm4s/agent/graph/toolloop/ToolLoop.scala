@@ -245,7 +245,6 @@ object ToolLoop:
     val modelNode = b.declare[Unit]("model")
     val finish    = b.declare[Unit]("finish")
     val collect   = b.declare[Unit]("collect")
-    val handedOff = b.declare[Unit]("handed-off")
     val callTool  = b.declare[ToolTask]("call-tool")
     val approval  = b.declareResume[ApprovalRequest, ApprovalDecision]("approval")
     val batch     = b.dynamicJoin("tool-batch", collect)
@@ -335,7 +334,8 @@ object ToolLoop:
             }
     }
 
-    b.implement(collect, writes = Set(messages, results)) { (_, state, context) =>
+    // `handoff` is declared here, though `collect` only reads it, so the key is registered with every loop
+    b.implement(collect, writes = Set(messages, results, handoff)) { (_, state, context) =>
       NodeResult.fromResult(for
         history  <- state.get(messages)
         recorded <- state.get(results)
@@ -364,16 +364,13 @@ object ToolLoop:
           val content = if r.isError then ujson.Obj("error" -> r.content).render() else r.content
           StoredMessage(s"${context.position.taskId.value}/tool/${r.toolCallId}", ToolMessage(content, r.toolCallId))
         }
-        toolMessages
+        val done = toolMessages
           .foldLeft(Command.empty)((command, m) => command.update(messages, MessageUpdate.Append(m)))
           .remove(results)
-          // a tool asked for a handoff: the loop ends here and the model is not called again
-          .goto(if asked.isDefined then handedOff else modelNode)
+        // a tool asked for a handoff: nothing is routed on, so the run ends here and the model is not called again
+        if asked.isDefined then done else done.goto(modelNode)
       )
     }
-
-    // declared here so the key is registered with every loop, whether or not a tool writes it: `collect` reads it
-    b.implement(handedOff, writes = Set(handoff))((_, _, _) => NodeResult.Continue(Command.empty))
 
     // An input Block (a beforeAgent `Left`) happens before anything is stored: the run ends as a finished failure
     // and the history is unchanged.

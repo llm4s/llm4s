@@ -56,6 +56,7 @@ object MultiTurnToneValidationExample extends App {
     state2 <- agent.continueConversation(
       state1,
       "What are its main features?",
+      new ToolRegistry(Seq.empty),
       inputGuardrails = inputGuardrails,
       outputGuardrails = outputGuardrails
     )
@@ -66,6 +67,7 @@ object MultiTurnToneValidationExample extends App {
     state3 <- agent.continueConversation(
       state2,
       "Can you give me a code example?",
+      new ToolRegistry(Seq.empty),
       inputGuardrails = inputGuardrails,
       outputGuardrails = outputGuardrails
     )

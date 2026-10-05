@@ -68,9 +68,13 @@ object SimpleTriageHandoffExample extends App {
       logger.info("Final Response:")
       logger.info("{}", finalState.conversation.messages.last.content)
 
-      if (finalState.logs.exists(_.contains("handoff"))) {
+      // the handoff tool result is in the conversation the specialist received when the handoff preserves context
+      val handoffs = finalState.messages.collect {
+        case t: org.llm4s.llmconnect.model.ToolMessage if t.content.contains("handoff_requested") => t.content
+      }
+      if (handoffs.nonEmpty) {
         logger.info("Handoff Log:")
-        finalState.logs.filter(_.contains("handoff")).foreach(log => logger.info("  - {}", log))
+        handoffs.foreach(result => logger.info("  - {}", result))
       }
 
     case Left(error) =>

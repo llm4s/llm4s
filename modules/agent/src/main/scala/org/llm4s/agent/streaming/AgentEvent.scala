@@ -1,6 +1,6 @@
 package org.llm4s.agent.streaming
 
-import org.llm4s.agent.AgentState
+import org.llm4s.agent.AgentThread
 import org.llm4s.error.LLMError
 
 import java.time.Instant
@@ -182,7 +182,7 @@ object AgentEvent {
    * @param timestamp When execution completed
    */
   final case class AgentCompleted(
-    finalState: AgentState,
+    finalState: AgentThread,
     totalSteps: Int,
     duration: FiniteDuration,
     timestamp: Instant
@@ -340,7 +340,7 @@ object AgentEvent {
   /**
    * Create an AgentCompleted event with current timestamp.
    */
-  def agentCompleted(finalState: AgentState, totalSteps: Int, duration: FiniteDuration): AgentCompleted =
+  def agentCompleted(finalState: AgentThread, totalSteps: Int, duration: FiniteDuration): AgentCompleted =
     AgentCompleted(finalState, totalSteps, duration, Instant.now())
 
   /**

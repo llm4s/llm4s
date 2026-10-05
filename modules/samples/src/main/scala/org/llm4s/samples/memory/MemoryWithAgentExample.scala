@@ -147,7 +147,8 @@ Provide responses tailored to the user's experience level and preferences."""
       // Continue the conversation
       state2 <- agent.continueConversation(
         state1,
-        "What about validation errors specifically?"
+        "What about validation errors specifically?",
+        ToolRegistry.empty
       )
 
       _ = {

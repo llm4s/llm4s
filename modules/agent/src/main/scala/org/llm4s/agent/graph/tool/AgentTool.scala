@@ -1,8 +1,8 @@
 package org.llm4s.agent.graph.tool
 
 import org.llm4s.agent.graph.{ RunContext, StateKey, StateUpdate, ThreadState }
-import org.llm4s.error.LLMError
-import org.llm4s.toolapi.{ SchemaDefinition, ToolFunction }
+import org.llm4s.error.{ CancelledError, LLMError }
+import org.llm4s.toolapi.{ SchemaDefinition, ToolCallError, ToolFunction }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -187,7 +187,18 @@ object AgentTool:
    * message. It writes no state and never asks. Its name is not checked here; [[ToolSet.of]]
    * refuses an invalid one.
    */
-  def fromToolFunction(tool: ToolFunction[?, ?]): AgentTool[ujson.Value] = new FromToolFunction(tool)
+  def fromToolFunction(tool: ToolFunction[?, ?]): AgentTool[ujson.Value] =
+    new FromToolFunction(tool, args => tool.execute(args))
+
+  /**
+   * As `fromToolFunction(tool)`, running each call through `run` instead of
+   * `tool.execute`: a [[org.llm4s.toolapi.ToolRegistry]] applying a timeout or retry, say. The provider still sees
+   * `tool`'s own definition.
+   */
+  def fromToolFunction(
+    tool: ToolFunction[?, ?],
+    run: ujson.Value => Either[ToolCallError, ujson.Value]
+  ): AgentTool[ujson.Value] = new FromToolFunction(tool, run)
 
   /**
    * Continues `tool`'s call `args` with `question` answered by `answer`, both decoded with the codecs
@@ -203,7 +214,10 @@ object AgentTool:
     tool.resumeErased(args, question, answer, context)
 
   /** Keeps the original function, so [[ToolSet.toolFunctions]] hands it back unchanged. */
-  final private[tool] class FromToolFunction(val function: ToolFunction[?, ?]) extends AgentTool[ujson.Value]:
+  final private[tool] class FromToolFunction(
+    val function: ToolFunction[?, ?],
+    run: ujson.Value => Either[ToolCallError, ujson.Value]
+  ) extends AgentTool[ujson.Value]:
     val spec: AgentToolSpec[ujson.Value] = AgentToolSpec.unchecked[ujson.Value](
       function.name,
       function.description,
@@ -211,9 +225,11 @@ object AgentTool:
     )
 
     def execute(args: ujson.Value, context: ToolContext): ToolOutcome =
-      function.execute(args) match
+      run(args) match
         case Right(json) => ToolOutcome.Success(json)
-        case Left(error) => ToolOutcome.Error(error.getFormattedMessage)
+        // a cancelled call is the run's cancellation, not a result the model should see
+        case Left(_: ToolCallError.Cancelled) => ToolOutcome.Fatal(CancelledError(s"tool ${function.name}"))
+        case Left(error)                      => ToolOutcome.Error(error.getFormattedMessage)
 
   /**
    * A tool that asks questions of type `Q` and takes answers of type `Ans`. Its spec is `base`

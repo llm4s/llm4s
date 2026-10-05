@@ -1,6 +1,6 @@
 package org.llm4s.codegen
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentState, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentContext, AgentThread, ThreadStatus }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
@@ -44,7 +44,7 @@ class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int, clie
     task: String,
     maxSteps: Option[Int] = None,
     traceLogPath: Option[String] = None
-  ): Result[AgentState] = {
+  ): Result[AgentThread] = {
     val infoResponse = workspace.getWorkspaceInfo()
     if (infoResponse.root.isEmpty) {
       return Left(ValidationError("workspace", "Workspace is not initialized"))
@@ -70,7 +70,7 @@ class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int, clie
     result match {
       case Right(finalState) =>
         logger.info(s"Task completed with status: ${finalState.status}")
-        if (finalState.status == AgentStatus.Complete) {
+        if (finalState.status == ThreadStatus.Completed) {
           logger.info("Task completed successfully")
         } else {
           logger.warn(s"Task did not complete successfully: ${finalState.status}")

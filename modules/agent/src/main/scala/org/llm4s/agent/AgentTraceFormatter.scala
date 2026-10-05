@@ -7,13 +7,13 @@ import org.slf4j.{ Logger, LoggerFactory }
 import scala.util.Try
 
 /**
- * Renders [[AgentState]] as a human-readable markdown document and optionally
+ * Renders an [[AgentThread]] as a human-readable markdown document and optionally
  * persists it to a file.
  *
  * == Format stability ==
  *
  * The output format is intentionally '''unstable''' across library versions.
- * Do not parse the markdown programmatically — use the structured [[AgentState]]
+ * Do not parse the markdown programmatically — use the structured [[AgentThread]]
  * directly.  The unstable contract lets us improve the trace output without
  * treating every change as a breaking API change.
  *
@@ -28,7 +28,7 @@ import scala.util.Try
  * == Why system messages are excluded from the conversation section ==
  *
  * System messages are stored separately from conversation history in
- * [[AgentState]] (injected at API call time so they can be updated without
+ * [[AgentThread]] (injected at API call time so they can be updated without
  * re-running the full history).  Including them in the trace would suggest
  * they are part of the mutable conversation, which is misleading.
  */
@@ -37,27 +37,27 @@ private[agent] object AgentTraceFormatter {
   private val logger: Logger = LoggerFactory.getLogger(getClass)
 
   /**
-   * Renders `state` as a markdown document.
+   * Renders `thread` as a markdown document.
    *
-   * Covers the conversation transcript, tool call arguments/results, and
-   * execution log entries.  System messages stored in
-   * [[AgentState.systemMessage]] are intentionally omitted from the
-   * conversation section (see class-level note).
+   * Covers the conversation transcript and tool call arguments/results.  The system message stored in
+   * [[AgentThread.systemMessage]] is intentionally omitted from the conversation section (see class-level
+   * note).  A thread has no execution log: the run events carry what it did.
    *
-   * @param state Agent state to render; may be in any status.
+   * @param thread Agent thread to render; may be in any status.
    * @return A markdown string suitable for human inspection.
    */
-  def formatStateAsMarkdown(state: AgentState): String = {
+  def formatThreadAsMarkdown(thread: AgentThread): String = {
     val sb = new StringBuilder()
 
     sb.append("# Agent Execution Trace\n\n")
-    state.initialQuery.foreach(q => sb.append(s"**Initial Query:** $q\n"))
-    sb.append(s"**Status:** ${state.status}\n")
-    sb.append(s"**Tools Available:** ${state.tools.tools.map(_.name).mkString(", ")}\n\n")
+    thread.messages.collectFirst { case u if u.role == MessageRole.User => u.content }.foreach { q =>
+      sb.append(s"**Initial Query:** $q\n")
+    }
+    sb.append(s"**Status:** ${thread.status}\n\n")
 
     sb.append("## Conversation Flow\n\n")
 
-    state.conversation.messages.zipWithIndex.foreach { case (message, index) =>
+    thread.messages.zipWithIndex.foreach { case (message, index) =>
       val step = index + 1
 
       message.role match {
@@ -118,52 +118,26 @@ private[agent] object AgentTraceFormatter {
       }
     }
 
-    if (state.logs.nonEmpty) {
-      sb.append("## Execution Logs\n\n")
-
-      state.logs.zipWithIndex.foreach { case (log, index) =>
-        sb.append(s"${index + 1}. ")
-
-        log match {
-          case l if l.startsWith("[assistant]") =>
-            sb.append(s"**Assistant:** ${l.stripPrefix("[assistant] ")}\n")
-
-          case l if l.startsWith("[tool]") =>
-            val content = l.stripPrefix("[tool] ")
-            sb.append(s"**Tool Output:** ${content}\n")
-
-          case l if l.startsWith("[tools]") =>
-            sb.append(s"**Tools:** ${l.stripPrefix("[tools] ")}\n")
-
-          case l if l.startsWith("[system]") =>
-            sb.append(s"**System:** ${l.stripPrefix("[system] ")}\n")
-
-          case _ =>
-            sb.append(s"$log\n")
-        }
-      }
-    }
-
     sb.toString
   }
 
   /**
-   * Writes a markdown trace of `state` to `traceLogPath`.
+   * Writes a markdown trace of `thread` to `traceLogPath`.
    *
    * The file is created or truncated on each call.  Write failures are
    * swallowed: errors are logged at ERROR level but never propagated so that
    * trace logging never affects agent control flow.
    *
-   * @param state        Agent state to render and persist.
+   * @param thread       Agent thread to render and persist.
    * @param traceLogPath Absolute or relative path to the output file.
    */
-  def writeTraceLog(state: AgentState, traceLogPath: String): Unit = {
+  def writeTraceLog(thread: AgentThread, traceLogPath: String): Unit = {
     import java.nio.charset.StandardCharsets
     import java.nio.file.{ Files, Paths }
 
     Safety
       .fromTry(Try {
-        val content = formatStateAsMarkdown(state)
+        val content = formatThreadAsMarkdown(thread)
         Files.write(Paths.get(traceLogPath), content.getBytes(StandardCharsets.UTF_8))
       })
       .left

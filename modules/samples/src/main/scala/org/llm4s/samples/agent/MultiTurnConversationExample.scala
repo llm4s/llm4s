@@ -36,11 +36,11 @@ object MultiTurnConversationExample {
       _ = printLastAssistantMessage(state1)
 
       _ = logger.info("Turn 2: Asking about London weather")
-      state2 <- agent.continueConversation(state1, "And what about London?")
+      state2 <- agent.continueConversation(state1, "And what about London?", tools)
       _ = printLastAssistantMessage(state2)
 
       _ = logger.info("Turn 3: Comparing the two")
-      state3 <- agent.continueConversation(state2, "Which city is warmer?")
+      state3 <- agent.continueConversation(state2, "Which city is warmer?", tools)
       _ = printLastAssistantMessage(state3)
 
       _ = logger.info("=== Conversation Complete ===")
@@ -56,7 +56,7 @@ object MultiTurnConversationExample {
     )
   }
 
-  private def printLastAssistantMessage(state: org.llm4s.agent.AgentState): Unit =
+  private def printLastAssistantMessage(state: org.llm4s.agent.AgentThread): Unit =
     state.conversation.messages
       .filter(_.role == MessageRole.Assistant)
       .lastOption

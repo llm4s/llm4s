@@ -125,7 +125,7 @@ object FactualityGuardrailExample extends App {
       logger.info("by the reference context (potential hallucination).")
   }
 
-  def printResult(state: org.llm4s.agent.AgentState, checkName: String): Unit = {
+  def printResult(state: org.llm4s.agent.AgentThread, checkName: String): Unit = {
     val response = state.conversation.messages.last.content
     val preview  = if (response.length > 300) response.take(300) + "..." else response
 

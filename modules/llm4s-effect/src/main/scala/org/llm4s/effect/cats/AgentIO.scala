@@ -3,14 +3,14 @@ package org.llm4s.effect.cats
 import cats.effect.kernel.Async
 import cats.syntax.flatMap.*
 import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
-import org.llm4s.agent.{ Agent, AgentContext, AgentState }
+import org.llm4s.agent.{ Agent, AgentContext, AgentThread }
 import org.llm4s.llmconnect.model.CompletionOptions
 import org.llm4s.toolapi.ToolRegistry
 
 /**
  * cats-effect wrapper for [[Agent]].
  *
- * Lifts every `Result[AgentState]` return value into `F[AgentState]`,
+ * Lifts every `Result[AgentThread]` return value into `F[AgentThread]`,
  * raising `LLMError` as [[LLMException]] in the error channel.
  * The underlying [[Agent.run]] and related methods are blocking — each
  * call is dispatched to the blocking thread pool via `Async[F].interruptible`, so cancelling the
@@ -37,16 +37,17 @@ trait AgentIO[F[_]] {
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions(),
     context: AgentContext = AgentContext.Default
-  ): F[AgentState]
+  ): F[AgentThread]
 
   def continueConversation(
-    previousState: AgentState,
+    previous: AgentThread,
     newUserMessage: String,
+    tools: ToolRegistry,
     inputGuardrails: Seq[InputGuardrail] = Seq.empty,
     outputGuardrails: Seq[OutputGuardrail] = Seq.empty,
     maxSteps: Option[Int] = None,
     context: AgentContext = AgentContext.Default
-  ): F[AgentState]
+  ): F[AgentThread]
 }
 
 object AgentIO {
@@ -65,7 +66,7 @@ object AgentIO {
       systemPromptAddition: Option[String] = None,
       completionOptions: CompletionOptions = CompletionOptions(),
       context: AgentContext = AgentContext.Default
-    ): F[AgentState] =
+    ): F[AgentThread] =
       F.interruptible(
         agent.run(
           query,
@@ -83,20 +84,22 @@ object AgentIO {
       }
 
     def continueConversation(
-      previousState: AgentState,
+      previous: AgentThread,
       newUserMessage: String,
+      tools: ToolRegistry,
       inputGuardrails: Seq[InputGuardrail] = Seq.empty,
       outputGuardrails: Seq[OutputGuardrail] = Seq.empty,
       maxSteps: Option[Int] = None,
       context: AgentContext = AgentContext.Default
-    ): F[AgentState] =
+    ): F[AgentThread] =
       F.interruptible(
         agent.continueConversation(
-          previousState,
+          previous,
           newUserMessage,
-          inputGuardrails,
-          outputGuardrails,
-          maxSteps,
+          tools,
+          inputGuardrails = inputGuardrails,
+          outputGuardrails = outputGuardrails,
+          maxSteps = maxSteps,
           context = context
         )
       ).flatMap {

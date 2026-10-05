@@ -1,20 +1,18 @@
 package org.llm4s.samples.agent
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentContext }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi._
 import org.slf4j.LoggerFactory
 import upickle.default._
 
-import scala.concurrent.ExecutionContext.Implicits.global
-
 /**
- * Example demonstrating the Agent's runWithStrategy method for parallel tool execution.
+ * Example demonstrating parallel tool execution through `AgentContext.toolExecutionStrategy`.
  *
  * When an LLM requests multiple independent tool calls (e.g., weather for several cities),
- * using `runWithStrategy` with `ToolExecutionStrategy.Parallel` can significantly reduce
- * latency by executing all tools simultaneously.
+ * `ToolExecutionStrategy.Parallel` can significantly reduce latency by executing all tools
+ * simultaneously.
  *
  * Requirements: a provider that supports tool calling.
  * Runs against the samples' default provider, the `ollama-local` section of
@@ -57,11 +55,11 @@ object AsyncToolAgentExample {
 
       startTime = System.currentTimeMillis()
 
-      state <- agent.runWithStrategy(
+      state <- agent.run(
         query = "What's the weather in London, Paris, and Tokyo? Give me a brief summary.",
         tools = tools,
-        toolExecutionStrategy = ToolExecutionStrategy.Parallel,
-        maxSteps = Some(5)
+        maxSteps = Some(5),
+        context = AgentContext(toolExecutionStrategy = ToolExecutionStrategy.Parallel)
       )
 
       duration = System.currentTimeMillis() - startTime
@@ -81,8 +79,11 @@ object AsyncToolAgentExample {
         }
 
       logger.info("")
-      logger.info("Execution logs:")
-      state.logs.foreach(log => logger.info("  {}", log))
+      logger.info("Tool calls made in parallel:")
+      state.messages
+        .collect { case msg: org.llm4s.llmconnect.model.AssistantMessage => msg.toolCalls }
+        .flatten
+        .foreach(call => logger.info("  {} {}", call.name, call.arguments.render()))
     }
 
     result match {

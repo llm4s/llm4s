@@ -1,6 +1,6 @@
 package org.llm4s.codegen
 
-import org.llm4s.agent.AgentState
+import org.llm4s.agent.AgentThread
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMConnect
@@ -57,17 +57,14 @@ object CodeGenExample {
     }
   }
 
-  private def logFinalResponse(finalState: AgentState, traceLogPath: String): Unit = {
-    finalState.conversation.messages.lastOption match {
+  private def logFinalResponse(finalState: AgentThread, traceLogPath: String): Unit = {
+    finalState.messages.lastOption match {
       case Some(msg) if msg.role == MessageRole.Assistant =>
         logger.info(s"Final agent response: ${msg.content}")
       case _ =>
         logger.warn("No final assistant message found")
     }
 
-    if (finalState.logs.nonEmpty) {
-      logger.info(s"Execution logs (see also $traceLogPath):")
-      finalState.logs.foreach(logger.info)
-    }
+    logger.info(s"Execution trace: $traceLogPath")
   }
 }

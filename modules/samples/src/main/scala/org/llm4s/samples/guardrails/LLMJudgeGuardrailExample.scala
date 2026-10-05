@@ -135,7 +135,7 @@ object LLMJudgeGuardrailExample extends App {
       logger.error("  {}", error.formatted)
   }
 
-  def printResult(state: org.llm4s.agent.AgentState, checkName: String): Unit = {
+  def printResult(state: org.llm4s.agent.AgentThread, checkName: String): Unit = {
     val response = state.conversation.messages.last.content
     val preview  = if (response.length > 200) response.take(200) + "..." else response
 

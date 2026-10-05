@@ -1,11 +1,10 @@
 package org.llm4s.samples.mcp
 
 import cats.implicits._
-import org.llm4s.agent.{ Agent, AgentState }
+import org.llm4s.agent.{ Agent, AgentContext }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model.MessageRole.Assistant
-import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
 import org.llm4s.mcp._
 import org.llm4s.toolapi.ToolFunction
 import org.slf4j.LoggerFactory
@@ -147,24 +146,19 @@ object PlaywrightExample {
         |If you encounter any issues, explain what happened and suggest alternatives.""".stripMargin
       )
 
-      // Create custom initial state with the browser automation system prompt
-      val initialMessages = Seq(
-        SystemMessage(systemPrompt.getOrElse("You are a helpful assistant with access to tools.")),
-        UserMessage(query)
-      )
-      val initialState = AgentState(
-        conversation = Conversation(initialMessages),
+      // The browser automation prompt is appended to the agent's built-in system prompt
+      agent.run(
+        query = query,
         tools = registry,
-        initialQuery = Some(query)
-      )
-
-      // Use the agent's runUntilCompletion method directly with our custom state
-      runAgentWithCustomPrompt(agent, initialState, Some(15), Some(traceFile)) match {
+        maxSteps = Some(15),
+        systemPromptAddition = systemPrompt,
+        context = AgentContext(traceLogPath = Some(traceFile))
+      ) match {
         case Right(finalState) =>
           logger.info("✅ Query {} completed: {}", queryNum, finalState.status)
 
           // Show final answer
-          finalState.conversation.messages
+          finalState.messages
             .findLast(_.role == Assistant)
             .fold {
               logger.warn("❌ No final answer found")
@@ -176,8 +170,8 @@ object PlaywrightExample {
           // Show execution summary
           logger.info("📊 Summary:")
           logger.info("   Status: {}", finalState.status)
-          logger.info("   Steps: {}", finalState.logs.size)
-          logger.info("   Messages: {}", finalState.conversation.messages.size)
+          logger.info("   Model calls: {}", finalState.usage.requestCount)
+          logger.info("   Messages: {}", finalState.messages.size)
           logger.info("   For detailed tool usage, see trace file: {}", traceFile)
 
         case Left(err) =>
@@ -200,50 +194,6 @@ object PlaywrightExample {
       }
     }
 
-  }
-
-  // Helper method to run agent with custom initial state
-  private def runAgentWithCustomPrompt(
-    agent: Agent,
-    initialState: AgentState,
-    maxSteps: Option[Int],
-    traceLogPath: Option[String]
-  ) = {
-    import org.llm4s.types.Result
-
-    import scala.annotation.tailrec
-
-    // Write initial state if tracing is enabled
-    traceLogPath.foreach(path => agent.writeTraceLog(initialState, path))
-
-    @tailrec
-    def runUntilCompletion(state: AgentState, stepsRemaining: Option[Int] = maxSteps): Result[AgentState] =
-      (state.status, stepsRemaining) match {
-        case (s, Some(0))
-            if s == org.llm4s.agent.AgentStatus.InProgress || s == org.llm4s.agent.AgentStatus.WaitingForTools =>
-          val updatedState = state
-            .log("[system] Step limit reached")
-            .withStatus(org.llm4s.agent.AgentStatus.Failed("Maximum step limit reached"))
-          traceLogPath.foreach(path => agent.writeTraceLog(updatedState, path))
-          Right(updatedState)
-
-        case (org.llm4s.agent.AgentStatus.InProgress | org.llm4s.agent.AgentStatus.WaitingForTools, _) =>
-          agent.runStep(state) match {
-            case Right(newState) =>
-              traceLogPath.foreach(path => agent.writeTraceLog(newState, path))
-              runUntilCompletion(newState, stepsRemaining.map(_ - 1))
-            case Left(error) =>
-              val failedState = state.withStatus(org.llm4s.agent.AgentStatus.Failed(error.toString))
-              traceLogPath.foreach(path => agent.writeTraceLog(failedState, path))
-              Left(error)
-          }
-
-        case (org.llm4s.agent.AgentStatus.Complete, _) | (org.llm4s.agent.AgentStatus.Failed(_), _) |
-            (org.llm4s.agent.AgentStatus.HandoffRequested(_, _), _) =>
-          Right(state)
-      }
-
-    runUntilCompletion(initialState)
   }
 
 }

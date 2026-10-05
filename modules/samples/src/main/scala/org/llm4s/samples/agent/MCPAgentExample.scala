@@ -73,7 +73,7 @@ object MCPAgentExample {
         }
 
         // Show execution summary
-        logger.info(s"📊 Summary: ${finalState.logs.size} execution steps")
+        logger.info(s"📊 Summary: ${finalState.usage.requestCount} model calls, ${finalState.messages.size} messages")
 
       case Left(error) =>
         logger.info(s"❌ Query failed to completed in ${duration}ms")

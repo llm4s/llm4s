@@ -1,10 +1,9 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.agent.{ AgentState, AgentStatus }
+import org.llm4s.agent.AgentThread
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.trace.Tracing
 import org.slf4j.LoggerFactory
 
@@ -45,14 +44,11 @@ object BasicLLMCallingWithTrace {
             tracer.traceCompletion(completion, completion.model)
 
             // Trace the agent state after completion
-            val agentState = AgentState(
-              conversation = conversation.copy(messages = conversation.messages :+ completion.message),
-              tools = new ToolRegistry(Seq()),
-              initialQuery = conversation.messages.collectFirst { case UserMessage(content) => content },
-              status = AgentStatus.Complete,
-              logs = Seq(s"Completion ID=${completion.id}")
+            val thread = AgentThread(
+              threadId = s"completion-${completion.id}",
+              messages = conversation.messages :+ completion.message
             )
-            tracer.traceEvent(agentState.toTraceEvent)
+            tracer.traceEvent(thread.toTraceEvent)
 
             // Trace tool calls if present
             completion.message.toolCalls.foreach { tc =>

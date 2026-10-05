@@ -1,9 +1,8 @@
 package org.llm4s.assistant
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentState, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentContext }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model._
-import org.llm4s.error.{ AssistantError, LLMError, ConfigurationError }
+import org.llm4s.error.AssistantError
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ SessionId, DirectoryPath }
 import cats.implicits._
@@ -124,16 +123,8 @@ class AssistantAgent(
   private def processQuery(query: String, state: SessionState): Either[AssistantError, (SessionState, String)] = {
     logger.debug("Processing user query: {}", query.take(100))
     for {
-      updatedState <- addUserMessage(query, state)
-      finalState <- runAgentToCompletion(updatedState, agentContext).leftMap(llmError =>
-        AssistantError.SessionError(
-          s"Agent execution failed: ${llmError.message}",
-          state.sessionId,
-          "agent-execution",
-          llmCause = Some(llmError)
-        )
-      )
-      response <- extractFinalResponse(finalState)
+      finalState <- runTurn(query, state, agentContext)
+      response   <- extractFinalResponse(finalState)
     } yield {
       logger.debug("Successfully processed query, response length: {}", response.length)
       (finalState, formatAssistantResponse(response))
@@ -180,7 +171,7 @@ class AssistantAgent(
    * Checks if current session has content worth saving
    */
   private def hasContentToSave(state: SessionState): Boolean =
-    state.agentState.exists(_.conversation.messages.nonEmpty)
+    state.thread.exists(_.messages.nonEmpty)
 
   /**
    * Prompts user and gets clean session name with default
@@ -217,13 +208,13 @@ class AssistantAgent(
    * Loads session with given title
    */
   private def loadSession(title: String): Either[AssistantError, SessionState] =
-    sessionManager.loadSession(title, tools)
+    sessionManager.loadSession(title)
 
   /**
    * Counts messages in session state
    */
   private def countMessagesInSession(state: SessionState): Int =
-    state.agentState.map(_.conversation.messages.length).getOrElse(0)
+    state.thread.map(_.messages.length).getOrElse(0)
 
   /**
    * Formats load success message
@@ -302,65 +293,45 @@ class AssistantAgent(
     }
 
   /**
-   * Adds user message to the conversation - initializes if first message
+   * Runs one turn: the first message of a session starts the conversation, each later one continues it.
+   * The turn is capped at [[Agent.DefaultMaxSteps]] model calls.
    */
-  private[assistant] def addUserMessage(query: String, state: SessionState): Either[AssistantError, SessionState] =
-    state.agentState match {
-      case Some(agentState) =>
-        // Existing conversation - add message
-        val updatedAgentState = agentState
-          .addMessage(UserMessage(query))
-          .withStatus(AgentStatus.InProgress)
-        Right(state.withAgentState(updatedAgentState))
-      case None =>
-        // First message - initialize agent
-        agent
-          .initializeSafe(query, tools)
-          .map(state.withAgentState)
-          .leftMap(llmError =>
-            AssistantError.SessionError(
-              s"Agent initialization failed: ${llmError.message}",
-              state.sessionId,
-              "agent-initialization",
-              llmCause = Some(llmError)
-            )
-          )
-    }
-
-  /**
-   * Runs the agent until completion or failure
-   */
-  private[assistant] def runAgentToCompletion(
+  private[assistant] def runTurn(
+    query: String,
     state: SessionState,
     context: AgentContext = AgentContext.Default
-  ): Either[LLMError, SessionState] =
-    state.agentState match {
-      case None => Left(ConfigurationError("No agent state to run"))
-      case Some(agentState) =>
-        def runSteps(currentState: AgentState): Either[org.llm4s.error.LLMError, AgentState] =
-          currentState.status match {
-            case AgentStatus.InProgress | AgentStatus.WaitingForTools =>
-              agent.runStep(currentState, context) match {
-                case Right(newState) => runSteps(newState)
-                case Left(error)     => Left(error)
-              }
-            case _ => Right(currentState)
-          }
-
-        runSteps(agentState)
-          .map(finalAgentState => state.withAgentState(finalAgentState))
+  ): Either[AssistantError, SessionState] = {
+    val turn = state.thread match {
+      case Some(thread) =>
+        agent.continueConversation(
+          thread,
+          query,
+          tools,
+          maxSteps = Some(Agent.DefaultMaxSteps),
+          context = context
+        )
+      case None => agent.run(query, tools, context = context)
     }
+    turn
+      .map(state.withThread)
+      .leftMap(llmError =>
+        AssistantError.SessionError(
+          s"Agent execution failed: ${llmError.message}",
+          state.sessionId,
+          "agent-execution",
+          llmCause = Some(llmError)
+        )
+      )
+  }
 
   /**
-   * Extracts the final response from the agent state
+   * Extracts the final response from the agent thread
    */
   private[assistant] def extractFinalResponse(state: SessionState): Either[AssistantError, String] =
-    state.agentState match {
+    state.thread match {
       case None => Left(AssistantError.SessionError("No agent state available", state.sessionId, "extract-response"))
-      case Some(agentState) =>
-        agentState.conversation.messages.reverse.collectFirst {
-          case msg: AssistantMessage if msg.toolCalls.isEmpty => msg.content
-        } match {
+      case Some(thread) =>
+        thread.answer match {
           case Some(content) => Right(content)
           case None =>
             Left(

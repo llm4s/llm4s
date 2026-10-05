@@ -1,6 +1,6 @@
 package org.llm4s.samples.agent
 
-import org.llm4s.agent.{ Agent, AgentState }
+import org.llm4s.agent.{ Agent, AgentThread }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole
@@ -11,8 +11,9 @@ import org.slf4j.LoggerFactory
 /**
  * Example demonstrating conversation persistence.
  *
- * Shows how to save and load agent state to/from disk,
- * enabling conversation resumption across sessions.
+ * Shows how to save and load an agent thread to/from disk,
+ * enabling conversation resumption across sessions. A thread is plain data: tools
+ * are supplied again when the conversation continues.
  */
 object ConversationPersistenceExample {
 
@@ -43,7 +44,7 @@ object ConversationPersistenceExample {
         .foreach(msg => logger.info("Assistant: {}", msg.content))
 
       _ = logger.info("Saving state to: {}", savePath)
-      _ <- AgentState.saveToFile(state1, savePath)
+      _ <- AgentThread.saveToFile(state1, savePath)
       _ = logger.info("State saved successfully!")
 
     } yield state1
@@ -62,19 +63,19 @@ object ConversationPersistenceExample {
       _ = logger.info("--- Simulating New Session ---")
       _ = logger.info("Part 2: Loading state from: {}", savePath)
 
-      loadedState <- AgentState.loadFromFile(savePath, tools)
-      _ = logger.info("State loaded! Conversation has {} messages", loadedState.conversation.messageCount)
+      loadedState <- AgentThread.loadFromFile(savePath)
+      _ = logger.info("State loaded! Conversation has {} messages", loadedState.messages.length)
 
       _ = logger.info("Continuing conversation with: 'And what about London?'")
-      state2 <- agent.continueConversation(loadedState, "And what about London?")
+      state2 <- agent.continueConversation(loadedState, "And what about London?", tools)
       _ = state2.conversation.messages
         .filter(_.role == MessageRole.Assistant)
         .lastOption
         .foreach(msg => logger.info("Assistant: {}", msg.content))
 
       _ = logger.info("=== Final Statistics ===")
-      _ = logger.info("Total messages: {}", state2.conversation.messageCount)
-      _ = logger.info("Initial query: {}", state2.initialQuery.getOrElse("N/A"))
+      _ = logger.info("Total messages: {}", state2.messages.length)
+      _ = logger.info("Initial query: {}", state2.messages.headOption.map(_.content).getOrElse("N/A"))
       _ = logger.info("Status: {}", state2.status)
 
     } yield state2
