@@ -310,6 +310,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variable to `llm4s.credentials.<id>.apiKey` (`ProviderModuleChecks`); config loading from a
   HOCON string with an injected environment (`ProviderTestConfig`, `CredentialsRoundTrip`); and a
   local stub HTTP server (`LocalProviderTestServer`). Every in-repo provider module uses it.
+- **`CostTrackingExample`: cost tracking end to end** ([#516](https://github.com/llm4s/llm4s/issues/516),
+  reworked from #898 by @gudiwadasruthi): `sbt "samples/runMain org.llm4s.samples.metrics.CostTrackingExample"`
+  shows what a call costs per request (`Completion.estimatedCost`), per agent run (`AgentState.usageSummary`
+  after a real `Agent.run` that calls a tool) and per session (a `CostTracker`); how to price a model the
+  registry does not know with a `ModelRegistryService` built from your own `ModelMetadata`, an immutable
+  snapshot passed as the given registry (nothing global is changed); and `MetricsCollector.compose` feeding two
+  trackers from one client. A model with no price is reported as *unknown*, not as a guessed number, and the
+  output says when a total of `0` means "no price". The sample's logic is tested against a fake provider with
+  fixed token counts and prices (`CostTrackingExampleSpec`).
 - **Vendor credentials: `llm4s.credentials.<provider>.apiKey`**
   ([#1132](https://github.com/llm4s/llm4s/issues/1132), [#1126](https://github.com/llm4s/llm4s/issues/1126)).
   Credentials belong to a vendor, keyed by provider id; clients belong to a use. Each provider
