@@ -182,7 +182,9 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
         case Left(error) =>
           Left(visionFailed(s"OpenAI API call failed - ${error.message}"))
         case Right(response) =>
-          response.statusCode match {
+          // As the `Try(...).flatMap` this replaced did: an exception while reading the reply (a 200
+          // without `choices`, an error body that is not an object) is a failed call, not a throw.
+          Try(response.statusCode match {
             case 200 =>
               Right(extractContentFromResponse(response.body))
             case statusCode =>
@@ -211,7 +213,7 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
                 org.llm4s.util.Redaction.truncateForLog(responseBody)
               )
               Left(visionFailed(s"OpenAI API call failed - $errorMessage"))
-          }
+          }).fold(e => Left(visionFailed(e.getMessage)), identity)
       }
     }
 
