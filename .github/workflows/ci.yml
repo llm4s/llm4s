@@ -99,6 +99,11 @@ jobs:
       - name: Check coverage policy is declared for every module
         run: sbt coveragePolicyCheck
 
+      # Fails when a published llm4s-* artifact has no tier row in v1-scope.md or no install line in
+      # installation.md. A release cannot be amended, so a module that ships undocumented stays so.
+      - name: Check every published artifact is documented
+        run: sbt publishedArtifactsCheck
+
       - name: Compile
         run: sbt compile
 

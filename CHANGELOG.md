@@ -113,6 +113,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Handoff.of(id, agent, reason)` for a `Result`), and `handoffId` is `handoff_to_<id>` rather
   than `handoff_to_agent_<hash>`. Design: `docs/design/typed-agent-runtime-design.md` §4.7, with
   the Stage 0 carry-forward in §4.8.
+- **`sbt publishedArtifactsCheck`: every published artifact has a tier and an install line**
+  ([#1281](https://github.com/llm4s/llm4s/issues/1281)): a CI quick check that fails when a published
+  `llm4s-*` artifact (a project that does not set `publish / skip`) is not named in `docs/reference/v1-scope.md`
+  or `docs/getting-started/installation.md`. `sbt ci-release` publishes the root aggregate as tagged and a Maven
+  Central release cannot be amended, yet nothing connected what the build publishes to the docs that name it:
+  four published artifacts were in neither place. They now are: `llm4s-knowledgegraph-neo4j` and the workspace
+  modules (`llm4s-workspace-client`, `llm4s-workspace-shared`) are **Experimental** in 1.0 Scope, and the
+  installation guide has lines for `llm4s-knowledgegraph-neo4j`, `llm4s-provider-testkit` and
+  `llm4s-workspace-shared`.
 - **Ollama honours `responseFormat`** ([#932](https://github.com/llm4s/llm4s/issues/932)):
   `OllamaClient` now sends the `/api/chat` `format` field for streaming and non-streaming requests,
   so `completeStructured` is constrained natively. `ResponseFormat.Json` sends `"format": "json"`

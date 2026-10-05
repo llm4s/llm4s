@@ -84,6 +84,8 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `agent/memory` (excluding `PostgresMemoryStore`) — **carved** | `llm4s-memory` | Beta |
 | `agent/memory/PostgresMemoryStore` — **carved** | `llm4s-memory-postgres` | Beta |
 | `mcp` - **carved** | `llm4s-mcp` | Beta |
+| `knowledgegraph/neo4j` — the Neo4j graph store (`Neo4jGraphStore`) | `llm4s-knowledgegraph-neo4j` (`modules/knowledgegraph-neo4j`) | Experimental |
+| `workspace`, `shared`, `codegen`, `toolapi/WorkspaceTools` — containerised workspace execution: the client (`ContainerisedWorkspace`, `WorkspaceTools`, the code-generation worker) and the wire protocol it speaks to the runner image (`WorkspaceAgentProtocol`, `WorkspaceAgentInterface`) | `llm4s-workspace-client`, `llm4s-workspace-shared` (`modules/workspace`) | Experimental |
 | `media` - **new** | `llm4s-media` | Beta |
 | `speech` - **carved** | `llm4s-speech` | Experimental |
 | `imagegeneration`, `imageprocessing` - **carved** | `llm4s-image` | Experimental |

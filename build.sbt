@@ -179,6 +179,13 @@ lazy val appLogging = libraryDependencies ++= Seq(Deps.logback, Deps.log4jToSlf4
 // so sbt's unused-setting lint cannot see the use.
 Global / excludeLintKeys += coveragePolicy
 
+// ---- published artifact check ----
+// A module can ship without a stability tier or an install line, because nothing connects what the
+// build publishes to the docs that name it. See project/PublishedArtifacts.scala.
+lazy val publishedArtifactsCheck = taskKey[Unit](
+  "Fail the build if a published llm4s-* artifact is not named in v1-scope.md and installation.md"
+)
+
 // ---- coverage policy check ----
 // Fails the build when a module has neither a coverage floor nor an explicit opt-out.
 // The absence of a decision must be an error, not a silent default.
@@ -246,8 +253,13 @@ lazy val llm4s = (project in file("."))
     relocationKnowledgegraphNeo4j
   )
   .settings(
-    publish / skip       := true,
-    mimaFailOnNoPrevious := false,
+    publish / skip                      := true,
+    mimaFailOnNoPrevious                := false,
+    publishedArtifactsCheck / aggregate := false,
+    publishedArtifactsCheck := {
+      val projects = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
+      PublishedArtifacts.check(projects, (ThisBuild / baseDirectory).value, streams.value.log)
+    },
     // Root is an aggregator with no sources of its own. `coverageAggregate` runs here, and
     // the per-module floors are enforced by each module's own `coverageReport`, so the
     // aggregate number is reported but not gated (a build-wide average is exactly the kind

@@ -566,6 +566,31 @@ names are unchanged. See the migration notes for
 [Langfuse and the collector](../reference/migration.md#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core)
 and for [Prometheus](../reference/migration.md#slice-6-llm4s-observability-prometheus---prometheus-leaves-core).
 
+### For Neo4j (knowledge graph store)
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-knowledgegraph-neo4j" % llm4sVersion
+```
+
+`Neo4jGraphStore`, a graph store for `llm4s-knowledgegraph` backed by Neo4j. It depends on `llm4s-core`
+and `llm4s-knowledgegraph` and brings the Neo4j driver.
+
+### For provider authors (testing a provider module)
+
+{: .note }
+> Not yet published. `llm4s-provider-testkit` exists in the build as of
+> [#1133](https://github.com/llm4s/llm4s/issues/1133) but ships in the next release.
+
+```scala
+// same version as llm4s-core; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-provider-testkit" % llm4sVersion % Test
+```
+
+The checks a provider module's own `Llm4s<Name>ModuleSpec` makes: discovery, sole ownership of its ids,
+explicit registration and the config-to-client round trip. See
+[Writing a provider](../guide/writing-a-provider#testing).
+
 ### For Workspace (Containerized Execution)
 
 ```scala
@@ -584,6 +609,9 @@ sudo apt-get install docker.io
 # Verify
 docker --version
 ```
+
+`llm4s-workspace-client` brings `llm4s-workspace-shared`, the wire protocol the client and the runner image
+speak, so you depend on it directly only if you implement the runner side.
 
 ---
 
