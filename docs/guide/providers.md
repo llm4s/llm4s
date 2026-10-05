@@ -1053,10 +1053,10 @@ nim-local {
 #### Ollama (`/v1`)
 
 [`llm4s-ollama`](#ollama-local-models) (`provider = "ollama"`) is the first-class route to
-Ollama: it uses Ollama's native `/api/chat` API and also provides Ollama embeddings. Use the
-generic provider on Ollama's OpenAI-compatible `/v1` endpoint instead when you need **tool
-calling** - `llm4s-ollama`'s chat client sends no tools and drops tool messages - or when Ollama
-is behind a gateway that exposes only the OpenAI API:
+Ollama: it uses Ollama's native `/api/chat` API, supports **tool calling** (tools are sent, tool
+calls are read - whole or streamed - and tool results go back as `role: tool`) and also provides
+Ollama embeddings. Use the generic provider on Ollama's OpenAI-compatible `/v1` endpoint instead
+when Ollama is behind a gateway that exposes only the OpenAI API, or when you prefer that wire format:
 
 ```hocon
 ollama-openai {
@@ -1527,7 +1527,7 @@ place. Defaults when `baseUrl` is omitted:
 | **Local Option** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ vLLM, LM Studio, llama.cpp |
 | **Context Window** | 128K | 200K | 1M | 128K | 4K-32K | 8K | Model-specific | Set in config (default 8K) |
 | **Vision Support** | ✅ | ✅ | ✅ | ✅ | ⚠️ Limited | ❌ | Model-specific | ❌ Text only |
-| **Function Calling** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ Limited | ✅ If the endpoint supports it |
+| **Function Calling** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ If the model supports it | ✅ If the endpoint supports it |
 | **Reasoning Models** | ✅ o1 | ❌ | ❌ | ✅ (via OpenAI) | ✅ deepseek-reasoner | ❌ | ❌ | ⚠️ Run, but reasoning not configured or read |
 | **Enterprise Support** | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | N/A | Endpoint-specific |
 | **Cost (Budget)** | Medium | Medium | 🏆 Low | High | 🏆 Very Low | Low | Free | Endpoint-specific |

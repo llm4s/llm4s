@@ -297,7 +297,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(msgs.exists(_("role").str == "assistant"))
   }
 
-  test("request body drops ToolMessages silently") {
+  test("request body forwards ToolMessages as role tool") {
     val conv = Conversation(messages =
       Seq(
         UserMessage("Hello"),
@@ -306,9 +306,9 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     )
     val body = OllamaRequestBodyTestHelper.createRequestBody(conv, CompletionOptions(), stream = false)
     val msgs = body("messages").arr
-    // Only the UserMessage should appear; ToolMessage is dropped
-    assert(msgs.size == 1)
-    assert(msgs.head("role").str == "user")
+    assert(msgs.size == 2)
+    assert(msgs(1)("role").str == "tool")
+    assert(msgs(1)("content").str == "tool result")
   }
 
   test("request body maps maxTokens to num_predict in options") {

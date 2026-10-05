@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ifSuccess` / `ifFailure` and `toCompletableFuture()` (an adapter over an already finished result, not
   an asynchronous call). It depends on core, `llm4s-agent` and the OpenAI, Anthropic, Ollama, Gemini
   and OpenAI-compatible provider modules.
+- **`llm4s-ollama`: tool calling in the native client** ([#1219](https://github.com/llm4s/llm4s/issues/1219)):
+  `OllamaClient` sends `CompletionOptions.tools` as `/api/chat`'s `tools`, reads `message.tool_calls` - whole
+  or streamed - into `ToolCall`s, and sends a `ToolMessage` as `role: tool` (with `tool_name`) instead of
+  dropping it; an assistant turn's tool calls go back with object arguments. Ollama sends no call ids, so
+  the client synthesizes unique ones (`call_<12 hex>_<index>`); an id the server sends is kept. A
+  malformed `tool_calls` entry is a `ProcessingError`. Agents on `provider = "ollama"` can now run tools; the
+  `openai-compatible` `/v1` route remains an alternative.
 - **`llm4s-spring-boot-starter`: Spring Boot auto-configuration** (Beta, `modules/spring-boot-starter`,
   [#936](https://github.com/llm4s/llm4s/issues/936)): built on `llm4s-java-api`. Properties under `llm4s.*` (`provider`, `model`, `apiKey`,
   `baseUrl`, `organization`, `contextWindow`, `reserveCompletion`) produce a `JLlmClient` and an

@@ -23,14 +23,16 @@ import scala.util.{ Try, Using }
  * All Ollama-specific protocol details (JSON-lines streaming, token-count
  * field names) are handled internally.
  *
- * == Tool calling limitation ==
+ * == Tool calling ==
  *
- * The Ollama chat API does not support tool results in multi-turn
- * conversations in the same way as cloud providers. As a result,
- * `ToolMessage` values are silently dropped when building the request —
- * only `SystemMessage`, `UserMessage`, and `AssistantMessage` entries
- * are forwarded to the model. Conversations that rely on tool call
- * round-trips should use a different provider.
+ * Tools in [[CompletionOptions.tools]] are sent as the `tools` field
+ * (`{type: "function", function: {name, description, parameters}}`). A reply's
+ * `message.tool_calls` - whole, or streamed - becomes `ToolCall`s. Ollama's native API
+ * sends no call ids, so the client synthesizes them (`call_<12 hex>_<index>`, a fresh prefix per
+ * reply or stream); an id the server does send is kept. A `ToolMessage` is sent as
+ * `role: tool` with the `tool_name` of the call it answers, and an assistant turn's tool calls
+ * are sent back with object arguments. A malformed `tool_calls` entry is a `ProcessingError`.
+ * Whether the model calls tools at all depends on the model.
  *
  * == Structured output ==
  *
@@ -91,7 +93,7 @@ class OllamaClient(
         val result =
           if (response.statusCode >= 200 && response.statusCode < 300) {
             Try(ujson.read(response.body)).toResult
-              .flatMap(json => Try(parseCompletion(json)).toResult)
+              .flatMap(json => Try(parseCompletion(json)).toResult.flatMap(identity))
           } else {
             HttpErrorMapper.mapHttpError(response.statusCode, response.body, providerName, response.headers)
           }
@@ -151,46 +153,65 @@ class OllamaClient(
         )
       case Right(response) =>
         val accumulator = StreamingAccumulator.create()
+        val ids         = new OllamaClient.CallIds
+        var failure     = Option.empty[org.llm4s.error.LLMError]
+        var sawCalls    = false
         val processResult = Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) {
           reader =>
-            Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
-              rawResponse.append(line).append('\n')
-              val trimmed = line.trim
-              if (trimmed.nonEmpty) {
-                val json = ujson.read(trimmed)
-                // Ollama streams incremental content in json lines
-                val done = json.obj.get("done").exists(_.bool)
-                val contentOpt = json.obj
-                  .get("message")
-                  .flatMap(_.obj.get("content"))
-                  .flatMap(_.strOpt)
-                  .filter(_.nonEmpty)
+            Iterator.continually(reader.readLine()).takeWhile(_ != null).takeWhile(_ => failure.isEmpty).foreach {
+              line =>
+                rawResponse.append(line).append('\n')
+                val trimmed = line.trim
+                if (trimmed.nonEmpty) {
+                  val json = ujson.read(trimmed)
+                  // Ollama streams incremental content in json lines
+                  val done = json.obj.get("done").exists(_.bool)
+                  val contentOpt = json.obj
+                    .get("message")
+                    .flatMap(_.obj.get("content"))
+                    .flatMap(_.strOpt)
+                    .filter(_.nonEmpty)
+                  val id = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
 
-                val chunk = StreamedChunk(
-                  id = json.obj.get("id").flatMap(_.strOpt).getOrElse(""),
-                  content = contentOpt,
-                  toolCall = None,
-                  finishReason = if (done) Some("stop") else None
-                )
+                  OllamaClient.parseToolCalls(json.obj.get("message"), ids, fragments = true) match {
+                    case Left(error) => failure = Some(error)
+                    case Right(calls) =>
+                      sawCalls = sawCalls || calls.nonEmpty
+                      val finish = if (done) Some(if (sawCalls) "tool_calls" else "stop") else None
+                      val head =
+                        StreamedChunk(id = id, content = contentOpt, toolCall = None, finishReason = finish)
+                      // a line with calls and nothing else needs no empty content chunk
+                      val chunks =
+                        if (calls.isEmpty) Seq(head)
+                        else {
+                          val callChunks = calls
+                            .map(c => StreamedChunk(id = id, content = None, toolCall = Some(c), finishReason = None))
+                          val withContent = if (contentOpt.isDefined) Seq(head.withFinishReason(None)) else Seq.empty
+                          val closing = if (finish.isDefined) Seq(head.withContent(None: Option[String])) else Seq.empty
+                          withContent ++ callChunks ++ closing
+                        }
+                      chunks.foreach { chunk =>
+                        accumulator.addChunk(chunk)
+                        onChunk(chunk)
+                      }
 
-                accumulator.addChunk(chunk)
-                onChunk(chunk)
-
-                // token counts (if present) only appear at the end
-                if (done) {
-                  val prompt = json.obj.get("prompt_eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
-                  val comp   = json.obj.get("eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
-                  if (prompt > 0 || comp > 0) accumulator.updateTokens(prompt, comp)
+                      // token counts (if present) only appear at the end
+                      if (done) {
+                        val prompt = json.obj.get("prompt_eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
+                        val comp   = json.obj.get("eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
+                        if (prompt > 0 || comp > 0) accumulator.updateTokens(prompt, comp)
+                      }
+                  }
                 }
-              }
             }
         }.toEither.left.map(HttpFailures.streamReadError(_, url, 10.minutes))
 
         val result = processResult
-          .flatMap(_ => accumulator.toCompletion)
+          .flatMap(_ => failure.fold(accumulator.toCompletion)(Left(_)))
           .map { c =>
             val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.withModel(config.model).withEstimatedCost(cost)
+            // the accumulator reports streamed calls on the message only
+            c.withModel(config.model).withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
           }
 
         recordingExchange(startedAt, requestText, rawResponse.result())(result)
@@ -202,11 +223,27 @@ class OllamaClient(
     options: CompletionOptions,
     stream: Boolean
   ): ujson.Obj = {
-    val msgs = ujson.Arr.from(conversation.messages.collect {
+    val toolNames = conversation.messages
+      .collect { case am: AssistantMessage => am.toolCalls }
+      .flatten
+      .map(tc => tc.id -> tc.name)
+      .toMap
+    val msgs = ujson.Arr.from(conversation.messages.map {
       case SystemMessage(content) => ujson.Obj("role" -> "system", "content" -> content)
       case UserMessage(content)   => ujson.Obj("role" -> "user", "content" -> content)
-      case am: AssistantMessage   => ujson.Obj("role" -> "assistant", "content" -> am.content)
-      // Tool messages are not supported by Ollama chat API; drop them
+      case am: AssistantMessage =>
+        val message = ujson.Obj("role" -> "assistant", "content" -> am.content)
+        if (am.toolCalls.nonEmpty)
+          message("tool_calls") = ujson.Arr.from(am.toolCalls.map { tc =>
+            ujson.Obj(
+              "function" -> ujson.Obj("name" -> tc.name, "arguments" -> OllamaClient.requestArguments(tc.arguments))
+            )
+          })
+        message
+      case ToolMessage(content, toolCallId) =>
+        val message = ujson.Obj("role" -> "tool", "content" -> content)
+        toolNames.get(toolCallId).foreach(name => message("tool_name") = name)
+        message
     })
 
     val opts = ujson.Obj(
@@ -221,11 +258,13 @@ class OllamaClient(
       "stream"   -> stream,
       "options"  -> opts
     )
+    if (options.tools.nonEmpty)
+      body("tools") = ujson.Arr.from(options.tools.map(t => OllamaClient.encodeTool(t.toOpenAITool(strict = false))))
     options.responseFormat.foreach(rf => body("format") = OllamaClient.encodeFormat(rf))
     body
   }
 
-  private def parseCompletion(json: ujson.Value): Completion = {
+  private def parseCompletion(json: ujson.Value): Result[Completion] = {
     val id      = json.obj.get("id").flatMap(_.strOpt).getOrElse(java.util.UUID.randomUUID().toString)
     val created = System.currentTimeMillis() / 1000
     val content = json.obj
@@ -242,16 +281,20 @@ class OllamaClient(
     // Estimate cost using CostEstimator
     val cost = usage.flatMap(u => CostEstimator.estimate(config.model, u))
 
-    Completion(
-      id = id,
-      created = created,
-      content = content,
-      toolCalls = List.empty,
-      usage = usage,
-      model = config.model,
-      message = AssistantMessage(content),
-      estimatedCost = cost
-    )
+    OllamaClient.parseToolCalls(json.obj.get("message"), new OllamaClient.CallIds, fragments = false).map { calls =>
+      Completion(
+        id = id,
+        created = created,
+        content = content,
+        toolCalls = calls.toList,
+        usage = usage,
+        model = config.model,
+        message =
+          if (calls.isEmpty) AssistantMessage(content)
+          else AssistantMessage(Some(content).filter(_.nonEmpty), calls),
+        estimatedCost = cost
+      )
+    }
   }
 
   override def getContextWindow(): Int = config.contextWindow
@@ -267,6 +310,76 @@ class OllamaClient(
 
 object OllamaClient {
   import org.llm4s.types.TryOps
+
+  /** Synthesizes call ids - Ollama's native API sends none: `call_<12 hex>_<index>`, one prefix per reply. */
+  final private[provider] class CallIds {
+    private val prefix = "call_" + java.util.UUID.randomUUID().toString.replace("-", "").take(12)
+    private var next   = 0
+    def nextId(): String = {
+      val id = s"${prefix}_$next"
+      next += 1
+      id
+    }
+  }
+
+  private def malformed(detail: String): org.llm4s.error.LLMError =
+    org.llm4s.error.ProcessingError("ollama-tool-calls", s"malformed tool call: $detail")
+
+  /** Arguments of a call as a JSON object; Ollama's request side takes an object, never a string. */
+  private[provider] def requestArguments(arguments: ujson.Value): ujson.Value = arguments match {
+    case o: ujson.Obj => o
+    case ujson.Str(s) => Try(ujson.read(s)).toOption.collect { case o: ujson.Obj => o }.getOrElse(ujson.Obj())
+    case _            => ujson.Obj()
+  }
+
+  /** An OpenAI-format tool definition as Ollama takes it: no `strict`, which Ollama does not know. */
+  private[provider] def encodeTool(tool: ujson.Value): ujson.Value = {
+    val function = ujson.Obj.from(tool("function").obj.filterNot(_._1 == "strict"))
+    ujson.Obj("type" -> "function", "function" -> function)
+  }
+
+  private def normalizeArguments(raw: Option[ujson.Value]): Result[ujson.Value] = raw match {
+    case None | Some(ujson.Null)              => Right(ujson.Obj())
+    case Some(o: ujson.Obj)                   => Right(o)
+    case Some(ujson.Str(s)) if s.trim.isEmpty => Right(ujson.Obj())
+    case Some(ujson.Str(s)) =>
+      Try(ujson.read(s)).toOption match {
+        case Some(o: ujson.Obj) => Right(o)
+        case _                  => Left(malformed("arguments are not a JSON object"))
+      }
+    case Some(_) => Left(malformed("arguments are not a JSON object"))
+  }
+
+  private def parseToolCall(entry: ujson.Value, ids: CallIds, fragments: Boolean): Result[ToolCall] =
+    for {
+      call     <- entry.objOpt.toRight(malformed("entry is not an object"))
+      function <- call.get("function").flatMap(_.objOpt).toRight(malformed("entry has no `function` object"))
+      serverId = call.get("id").flatMap(_.strOpt).filter(_.nonEmpty)
+      name     = function.get("name").flatMap(_.strOpt).map(_.trim).filter(_.nonEmpty)
+      toolCall <- (serverId, name) match {
+        // a continuation of a streamed call: named by its id, carrying a raw piece of the arguments
+        case (Some(id), _) if fragments =>
+          Right(ToolCall(id, name.getOrElse(""), function.get("arguments").filterNot(_.isNull).getOrElse(ujson.Obj())))
+        case (_, None) => Left(malformed("function has no name"))
+        case (_, Some(n)) =>
+          normalizeArguments(function.get("arguments")).map(args => ToolCall(serverId.getOrElse(ids.nextId()), n, args))
+      }
+    } yield toolCall
+
+  /** The `tool_calls` of a reply's `message`; none when absent, null or empty. */
+  private[provider] def parseToolCalls(
+    message: Option[ujson.Value],
+    ids: CallIds,
+    fragments: Boolean
+  ): Result[Seq[ToolCall]] =
+    message.flatMap(_.objOpt).flatMap(_.get("tool_calls")).filterNot(_.isNull) match {
+      case None => Right(Seq.empty)
+      case Some(ujson.Arr(entries)) =>
+        entries.foldLeft[Result[Seq[ToolCall]]](Right(Seq.empty)) { (acc, entry) =>
+          acc.flatMap(done => parseToolCall(entry, ids, fragments).map(done :+ _))
+        }
+      case Some(_) => Left(malformed("`tool_calls` is not an array"))
+    }
 
   /** Value of the `/api/chat` `format` field for a [[ResponseFormat]]; `name` and `strict` are not sent. */
   private[provider] def encodeFormat(format: ResponseFormat): ujson.Value = format match {
