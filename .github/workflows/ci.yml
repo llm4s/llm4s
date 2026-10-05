@@ -102,6 +102,12 @@ jobs:
       - name: Compile
         run: sbt compile
 
+      # Fails when a frozen module resolves a document-parsing, speech, cloud-storage, database,
+      # observability-backend or foreign vendor-SDK dependency, so the programme's definition of done
+      # (#1126) stays true until the 1.0 freeze.
+      - name: Check no frozen module resolves a dependency the modularisation moved out
+        run: sbt frozenDependencyCheck
+
       # Fails when an integration suite in modules/it declares no tier, i.e. when no command
       # and no CI job below would run it. Eleven of eighteen suites were in that state.
       - name: Check every integration suite declares a test tier

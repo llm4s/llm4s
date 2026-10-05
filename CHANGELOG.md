@@ -118,6 +118,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so `completeStructured` is constrained natively. `ResponseFormat.Json` sends `"format": "json"`
   and `ResponseFormat.JsonSchema` sends the schema object (requires Ollama 0.5 or later); `name` and
   `strict` have no Ollama equivalent and are ignored. Previously the field was silently dropped.
+- **`sbt frozenDependencyCheck`: a frozen module may not resolve what the carves moved out**
+  ([#1126](https://github.com/llm4s/llm4s/issues/1126), [#1281](https://github.com/llm4s/llm4s/issues/1281)):
+  a CI quick check that reads the resolved runtime dependencies, transitive ones included, of `llm4s-core`,
+  `llm4s-agent`, `llm4s-openai`, `llm4s-openai-compatible`, `llm4s-anthropic`, `llm4s-gemini` and
+  `llm4s-ollama`, and fails the build for a document-parsing (Tika, POI, PDFBox, jsoup), speech (Vosk, JNA),
+  cloud (AWS SDK, Azure SDK), database (Postgres, SQLite, HikariCP, Neo4j), observability-backend
+  (Prometheus, OpenTelemetry) or WebSocket dependency, or for another provider's vendor SDK
+  (`com.openai` only in `llm4s-openai`, `com.anthropic` only in `llm4s-anthropic`). It says whether the module
+  declares the dependency or reaches it transitively. The programme's definition of done and `CLAUDE.md`
+  already required this and nothing enforced it; today every frozen module passes. See
+  [docs/reference/api-stability.md](docs/reference/api-stability.md#what-a-frozen-module-may-depend-on).
 - **`llm4s-bedrock`: AWS Bedrock chat provider** (`modules/providers/bedrock`,
   [#1008](https://github.com/llm4s/llm4s/issues/1008), rebuilt from #1029 as a `ProviderDescriptor`,
   so `llm4s-core` is untouched and gains no dependency). `provider = "bedrock"` over the Converse API

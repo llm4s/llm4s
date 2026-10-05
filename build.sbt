@@ -186,6 +186,15 @@ lazy val coveragePolicyCheck = taskKey[Unit](
   "Fail the build if any module has not explicitly declared a coverage floor or opt-out"
 )
 
+// ---- frozen dependency check ----
+// A frozen module must not resolve a document-parsing, speech, cloud-storage, database,
+// observability-backend or foreign vendor-SDK dependency, directly or transitively: freezing it
+// would freeze that stack too. See project/FrozenDependencies.scala. The modules are the ones that
+// call `mimaFrozen`.
+lazy val frozenDependencyCheck = taskKey[Unit](
+  "Fail the build if a frozen module resolves a dependency the modularisation moved out of it"
+)
+
 // ---- integration tier check ----
 // Same principle one level down: an integration suite that declares no tier is run by no
 // command and no CI job, and says nothing about it. See project/ItTiers.scala.
@@ -275,6 +284,30 @@ lazy val llm4s = (project in file("."))
              |  coverageDisabled      // with a comment saying why it is not measured
              |Also add a codecov flag for the module in codecov.yml in the same commit.""".stripMargin
         )
+    },
+    frozenDependencyCheck / aggregate := false,
+    frozenDependencyCheck := {
+      def resolved(report: UpdateReport, declared: Seq[ModuleID]) =
+        report
+          .configuration(ConfigRef("runtime"))
+          .map(_.modules)
+          .getOrElse(Vector.empty)
+          .map(m => FrozenDependencies.Resolved(m.module, declared.exists(_.organization == m.module.organization)))
+      FrozenDependencies.check(
+        Seq(
+          "llm4s-core"   -> resolved((core / update).value, (core / libraryDependencies).value),
+          "llm4s-agent"  -> resolved((agent / update).value, (agent / libraryDependencies).value),
+          "llm4s-openai" -> resolved((openai / update).value, (openai / libraryDependencies).value),
+          "llm4s-openai-compatible" -> resolved(
+            (openaiCompatible / update).value,
+            (openaiCompatible / libraryDependencies).value
+          ),
+          "llm4s-anthropic" -> resolved((anthropic / update).value, (anthropic / libraryDependencies).value),
+          "llm4s-gemini"    -> resolved((gemini / update).value, (gemini / libraryDependencies).value),
+          "llm4s-ollama"    -> resolved((ollama / update).value, (ollama / libraryDependencies).value)
+        ),
+        streams.value.log
+      )
     }
   )
 

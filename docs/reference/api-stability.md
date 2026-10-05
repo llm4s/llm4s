@@ -53,6 +53,18 @@ means the stable API is missing something.
 
 ---
 
+## What a Frozen Module May Depend On
+
+Freezing a module freezes what it puts on its users' classpath, so a frozen module may not resolve a
+document-parsing, speech, cloud-storage, database or observability-backend dependency, or another provider's
+vendor SDK, directly or transitively. `sbt frozenDependencyCheck` (a CI quick check) reads each frozen
+module's resolved runtime dependencies and fails the build for a forbidden group, saying whether the module
+declares it or reaches it transitively. The list, and where each group belongs instead, is in
+`project/FrozenDependencies.scala`; change it there, with the reason, if a frozen module genuinely needs one.
+`llm4s-openai` and `llm4s-anthropic` each keep their own vendor SDK; no other frozen module may carry either.
+
+---
+
 ## The Baseline
 
 `mimaBaselineVersion` in `build.sbt` names the release each frozen module is compared with. It is
