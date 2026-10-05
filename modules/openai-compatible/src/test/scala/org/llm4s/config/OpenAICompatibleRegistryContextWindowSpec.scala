@@ -158,6 +158,24 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
 
   "a model the registry cannot give a window for" should {
 
+    "take the default, not the registry's 4096 placeholder, for an 80k-context Fireworks model" in {
+      // The registry lists minimax-m1-80k with 4096 for input, output and total alike.
+      window("https://api.fireworks.ai/inference/v1", "accounts/fireworks/models/minimax-m1-80k") shouldBe Default
+    }
+
+    "still accept a reserveCompletion that fits the default, where the registry's placeholder would reject it" in {
+      val cfg = generic(
+        load(
+          "https://api.fireworks.ai/inference/v1",
+          "accounts/fireworks/models/qwen3-coder-480b-instruct-bf16",
+          "reserveCompletion = 4096"
+        )
+      )
+
+      cfg.contextWindow shouldBe Default
+      cfg.reserveCompletion shouldBe 4096
+    }
+
     "take the default when the registry has no such model under the host's provider" in {
       window("https://api.groq.com/openai/v1", "a-model-groq-has-not-listed") shouldBe Default
     }
@@ -324,13 +342,13 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
   "buildConfig, against a registry of two providers that list the same model name" should {
 
     val entries = Seq(
-      entry("groq/shared-model", "groq", Some(111)),
-      entry("together_ai/shared-model", "together_ai", Some(222))
+      entry("groq/shared-model", "groq", Some(111111)),
+      entry("together_ai/shared-model", "together_ai", Some(222222))
     )
 
     "use the entry of the provider the host names" in {
-      build("https://api.groq.com/openai/v1", "shared-model", Map.empty, entries*) shouldBe Right(111)
-      build("https://api.together.xyz/v1", "shared-model", Map.empty, entries*) shouldBe Right(222)
+      build("https://api.groq.com/openai/v1", "shared-model", Map.empty, entries*) shouldBe Right(111111)
+      build("https://api.together.xyz/v1", "shared-model", Map.empty, entries*) shouldBe Right(222222)
     }
 
     "use the entry of the explicit provider, whichever the host names" in {
@@ -339,7 +357,7 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
         "shared-model",
         Map("registryProvider" -> "together_ai"),
         entries*
-      ) shouldBe Right(222)
+      ) shouldBe Right(222222)
     }
 
     "let a configured contextWindow beat both" in {
@@ -377,13 +395,28 @@ class OpenAICompatibleRegistryContextWindowSpec extends AnyWordSpec with Matcher
       build("https://api.groq.com/openai/v1", "any-model", Map.empty) shouldBe Right(Default)
     }
 
-    "use a window below the default when that is what the registry says" in {
+    "ignore a registry window below the default, which is often a placeholder" in {
       build(
         "https://api.perplexity.ai",
         "small-model",
         Map.empty,
         entry("perplexity/small-model", "perplexity", Some(4096))
-      ) shouldBe Right(4096)
+      ) shouldBe Right(Default)
+      build(
+        "https://llm-gateway.internal.example/v1",
+        "small-model",
+        Map("registryProvider" -> "perplexity"),
+        entry("perplexity/small-model", "perplexity", Some(4096))
+      ) shouldBe Right(Default)
+    }
+
+    "take a registry window equal to the default" in {
+      build(
+        "https://api.groq.com/openai/v1",
+        "edge-model",
+        Map.empty,
+        entry("groq/edge-model", "groq", Some(Default))
+      ) shouldBe Right(Default)
     }
   }
 

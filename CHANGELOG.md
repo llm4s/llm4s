@@ -414,7 +414,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The lookup is strict: only the named provider's own entry for exactly that model id counts, never a partial
   name or another provider's entry for the same name (new `ContextWindowResolver.strictContextWindow`; the
   forgiving `resolve` would have picked up a neighbour's window). Only the window is taken: `reserveCompletion`
-  keeps its rule. The Groq, Fireworks and Perplexity recipes in the providers guide no longer set `contextWindow`;
+  keeps its rule. A registry window below 8192 is ignored, since many Fireworks and Perplexity entries carry a
+  4096 placeholder, so the registry can only enlarge the window. The Groq, Fireworks and Perplexity recipes in the providers guide no longer set `contextWindow`;
   the Together, xAI and NVIDIA NIM recipes keep it, as the registry has no input limit for those models.
   **Behaviour change:** a section for one of those hosts that set no `contextWindow` now gets the registry's
   window instead of 8192; set `contextWindow` to keep the old value.

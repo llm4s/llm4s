@@ -681,7 +681,7 @@ Each named section is one endpoint, so several can sit side by side. The
 | `baseUrl` | yes | Requests go to `<baseUrl>/chat/completions`, and model listing to `<baseUrl>/models`. A trailing `/` is dropped |
 | `model` | yes | Sent as-is in every request |
 | `apiKey` | no | Sent as `Authorization: Bearer <key>`; with none, no `Authorization` header is sent |
-| `contextWindow` | no | The model's context window; overrides the model registry. With none, the registry's window for `model` when it has one (see [where the context window comes from](#where-the-context-window-comes-from)), else 8192, which is deliberately small |
+| `contextWindow` | no | The model's context window; overrides the model registry. With none, the registry's window for `model` when it has one of at least 8192 (see [where the context window comes from](#where-the-context-window-comes-from)), else 8192, which is deliberately small |
 | `reserveCompletion` | no | Tokens held back for the reply. Default 2048, or a quarter of a smaller window |
 | `registryProvider` | no | The [model registry](../MODEL_METADATA.md) provider whose entry for `model` gives the context window when `contextWindow` is not set: `groq`, `together_ai`, `fireworks_ai`, `xai`, `perplexity`, ... Inferred from the `baseUrl` host for those five hosted APIs; naming one here switches the inference off |
 | `headers` | no | Extra headers sent on every request; values are redacted when the config is printed |
@@ -723,6 +723,11 @@ internal-gateway {
   `https://api.groq.com@evil.example/v1` and `https://evil.example/api.groq.com` all get no registry window.
   NVIDIA NIM is not in the table because the registry's three `nvidia_nim` entries carry no chat model with a
   window; `registryProvider = "nvidia_nim"` is still accepted.
+- **The registry can only enlarge the window.** A registry window below 8192 is ignored and the default used:
+  many entries, most of Fireworks' and Perplexity's older ones among them, carry a 4096 placeholder for input,
+  output and total alike (`fireworks_ai/.../minimax-m1-80k` is one), which would cut an 80k-context model's prompt
+  budget in half and reject a `reserveCompletion` that fits 8192. A model whose window really is smaller sets
+  `contextWindow`. The skipped entry is logged like a miss.
 - **Only the window is taken.** `reserveCompletion` keeps its own rule, a quarter of the window up to 2048,
   because a registry entry's output limit can be as large as the whole window.
 - **The registry does not know every model.** It has no input limit for the Together recipe's model, and does

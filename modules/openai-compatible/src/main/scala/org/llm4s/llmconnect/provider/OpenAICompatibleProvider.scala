@@ -40,6 +40,11 @@ import scala.util.Try
  * no registry window. Only the window is taken from the registry: `reserveCompletion` keeps its own rule
  * (a quarter of the window, up to 2048) because a registry entry's output limit can be as large as the whole
  * window. The lookup is strict - only the named provider's own entry for exactly that model id counts, never a substring match or another provider's entry for the same name - and a model the registry does not know, or lists with no input limit, gets the default.
+ * A registry window below the default is ignored too: many entries (most of Fireworks' older and newer
+ * models, Perplexity's retired ones) carry a 4096 placeholder for input, output and total alike, which would
+ * shrink an 80k-context model's prompt budget below the default and reject a `reserveCompletion` that fits it.
+ * The registry can therefore only enlarge the window, never shrink it; a model whose window really is smaller
+ * sets `contextWindow`.
  * Several sections can use it side by side:
  *
  * {{{
@@ -126,7 +131,8 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
         ProviderConfigKey.optional(
           ContextWindowKey,
           s"the model's context window in tokens, a positive whole number; overrides the model registry " +
-            s"(default: the registry's, else ${OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW})"
+            s"(default: the registry's when it is at least ${OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW}, " +
+            s"else ${OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW})"
         ),
         ProviderConfigKey.optional(
           ReserveCompletionKey,
@@ -172,8 +178,9 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
 
   // The context window the model registry gives `model`, under the explicit `registryProvider` or, when the
   // section names none, the provider inferred from the `baseUrl` host. `None` when there is no provider to ask,
-  // the registry has no entry, or its entry has no input limit; the caller then uses the default. A miss under
-  // an explicit provider is a warning, since the section asked for it; under an inferred one it is not.
+  // the registry has no entry, its entry has no input limit, or the limit is below the default (a placeholder
+  // in many entries, and the registry may only enlarge the window); the caller then uses the default. A miss
+  // under an explicit provider is a warning, since the section asked for it; under an inferred one it is not.
   private def registryWindow(
     providerName: String,
     model: String,
@@ -182,6 +189,13 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
   )(using resolver: ContextWindowResolver): Option[Int] =
     explicit.orElse(inferRegistryProvider(baseUrl)).flatMap { registryProvider =>
       resolver.strictContextWindow(registryProvider, model) match
+        case Some(window) if window < OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW =>
+          val message =
+            s"Configured provider '$providerName': ignoring the model registry's contextWindow $window for " +
+              s"$registryProvider/$model, below the default ${OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW} " +
+              s"(often a placeholder); using the default. Set contextWindow to the model's real limit"
+          if explicit.isDefined then logger.warn(message) else logger.info(message)
+          None
         case Some(window) =>
           logger.info(
             s"Configured provider '$providerName': contextWindow $window taken from the model registry " +
