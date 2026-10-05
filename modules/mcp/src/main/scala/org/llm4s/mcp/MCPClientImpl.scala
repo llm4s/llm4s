@@ -100,7 +100,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
           case Left(fallbackError) =>
             logger.error(s"Both transport methods failed. New: ${error.message}, Old: ${fallbackError.message}")
             oldTransport.close()
-            Left(SimpleError(s"Failed to connect with both transports. Latest error: $fallbackError"))
+            Left(SimpleError(s"Failed to connect with both transports. Latest error: ${fallbackError.message}"))
         }
       case Left(error) =>
         logger.error(s"Failed to connect using Streamable HTTP transport: ${error.message}")

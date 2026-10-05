@@ -626,7 +626,7 @@ lazy val mcp = (project in file("modules/mcp"))
     // Measured 70.79% statement coverage (`sbt coverage mcp/test mcp/coverageReport`) on the
     // code as carved out of core. Floor is the measured value rounded down to the nearest 5.
     // Never lower it.
-    coverageFloor(70),
+    coverageFloor(75),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,

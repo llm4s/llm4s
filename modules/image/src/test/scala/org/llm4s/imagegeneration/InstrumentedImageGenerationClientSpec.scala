@@ -164,6 +164,19 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
     metrics.imageGenerationCalls.head._4 shouldBe Outcome.Error(ErrorKind.Cancelled)
   }
 
+  test("generateImage records an error of another kind under that error's own kind") {
+    val metrics = new RecordingMetricsCollector()
+    val tracing = new RecordingTracing()
+    val other   = org.llm4s.error.ConfigurationError("no API key is configured")
+    val client =
+      new InstrumentedImageGenerationClient(new StubDelegate(imageResult = Left(other)), testConfig, metrics, tracing)
+
+    client.generateImage("a cat", ImageGenerationOptions()) shouldBe Left(other)
+
+    metrics.imageGenerationCalls.head._4 shouldBe Outcome.Error(ErrorKind.fromLLMError(other))
+    metrics.imageGenerationCalls.head._4 should not be Outcome.Error(ErrorKind.Unknown)
+  }
+
   test("generateImages delegates and records metrics for every generated image") {
     val metrics = new RecordingMetricsCollector()
     val tracing = new RecordingTracing()
