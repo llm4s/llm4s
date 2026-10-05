@@ -70,6 +70,20 @@ class CommandTokenizerSpec extends AnyFlatSpec with Matchers {
     )
   }
 
+  it should "return no tokens for whitespace-only input" in {
+    CommandTokenizer.tokenize("   \t  ") shouldBe Right(Seq.empty)
+  }
+
+  it should "keep a trailing backslash outside quotes as a literal" in {
+    CommandTokenizer.tokenize("echo a\\") shouldBe Right(Seq("echo", "a\\"))
+  }
+
+  it should "reject a trailing backslash inside an unclosed double quote" in {
+    CommandTokenizer.tokenize("echo \"abc\\").left.map(_.toLowerCase) shouldBe Left(
+      "unclosed double quote in command"
+    )
+  }
+
   it should "tokenize the bypass payload safely" in {
     CommandTokenizer.tokenize("echo hi && rm /tmp/foo") shouldBe Right(
       Seq("echo", "hi", "&&", "rm", "/tmp/foo")

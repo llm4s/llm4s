@@ -1536,6 +1536,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one suite each, in the package of the code they test. They were two independent test sets
   per class, not duplicates - so the merge keeps every case except the three that asserted
   the same behaviour twice.
+- **`ShellConfig.readOnly()` no longer allows `env`** ([#872](https://github.com/llm4s/llm4s/pull/872),
+  reworked from #872 by @kallal79, whose `sh -c` fix landed as #897): the shell tool checks the program a
+  command starts with, and `env` starts whatever follows it, so `env sh -c '...'` ran `sh` under a
+  configuration that allows only read-only programs, and a bare `env` printed the process environment, API
+  keys included. `env` is gone from the read-only list, the Scaladoc names the launchers an allowlist must not
+  contain (`env`, `xargs`, `nice`, `nohup`, `timeout`), and `development()` says plainly that it is not a
+  sandbox. **Behaviour change:** `ShellConfig.isCommandAllowed` takes a program name, which is what the tool
+  always passed it: `isCommandAllowed("ls -la")` is now `false` (it was `true`), `isCommandAllowed("ls")` is
+  unchanged. Tool behaviour is the same apart from `env`.
 
 ## [0.4.1] - 2026-08-29
 
