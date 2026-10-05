@@ -81,6 +81,14 @@ val processed = AudioPreprocessing.standardizeForSTT(
 )
 ```
 
+`AudioPreprocessing.resamplePcm16` (the resampling step of `standardizeForSTT`) checks its arguments before it
+converts anything. The target rate and the source rate must be between 1 and 768000 Hz, the channel count between 1
+and 64, and the bit depth a multiple of 8 from 8 to 32; anything else is a `Left(ValidationError)` naming the field
+(`targetRate`, `source.sampleRate`, `source.numChannels` or `source.bitDepth`). The output has exactly
+`round(frames * targetRate / sourceRate)` frames, so empty input gives empty output and a trailing partial frame is
+ignored. Java Sound's converter delays the signal by a fraction of a millisecond, and the length fit drops the
+matching tail, so the source's final fraction of a millisecond is not in the output.
+
 ---
 
 ## Configuration

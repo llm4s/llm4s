@@ -1524,6 +1524,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read is treated as accepted with a warning, so tracing does not fail on an unexpected shape
   (found in review of [#1239](https://github.com/llm4s/llm4s/pull/1239)).
 
+- **`AudioPreprocessing.resamplePcm16` could hang, and its output length was wrong**
+  ([#1308](https://github.com/llm4s/llm4s/issues/1308)): a target rate of `-8000`, or a source rate of `-1`, sent
+  Java Sound's converter into a loop that never ended (a test JVM spun at 100% CPU for twenty minutes), a target
+  of `0` or `-1` "succeeded" with that nonsense as the new sample rate, and a source rate of `0` or no channels threw
+  `ArithmeticException: / by zero` inside it. The arguments are now checked first - both rates between 1 and
+  768000 Hz, 1 to 64 channels, a bit depth that is a multiple of 8 - and anything else is a `Left(ValidationError)`
+  naming the field (`targetRate`, `source.sampleRate`, `source.numChannels`, `source.bitDepth`), as is an output too
+  large for an array. Reading the converter's output now stops at the end of the stream, at a read that returns
+  nothing, and at the expected length, so it cannot spin. The output has **exactly**
+  `round(frames * targetRate / sourceRate)` frames (it was longer: 2 frames more at 24 to 16 kHz, 4 at 16 to 24, 16 at
+  8 times up), empty input gives empty output (it gave 2 zero frames), equal rates return a copy, and a trailing
+  partial frame is ignored as it is by `toMono` and `trimSilence`. **Behaviour change:** a caller that passed a rate
+  or format outside those bounds used to get a wrong "success" or a generic `ProcessingError` and now gets a
+  `ValidationError`; the output is shorter by the converter's padding, and the source's last fraction of a
+  millisecond (at most 0.3 ms) is no longer in it.
 - **`RAG.refresh` emptied the index when its loader failed, and `RAG.sync` deleted documents it
   could not read** (follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236)).
   `refresh` and `refreshAsync` cleared the index before reading the loader, so a listing
