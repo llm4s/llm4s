@@ -42,7 +42,8 @@ case class OpenAIConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  explicitProviderId: Option[ProviderId] = None
+  explicitProviderId: Option[ProviderId] = None,
+  workloadIdentity: Option[OpenAIWorkloadIdentity] = None
 ) extends ProviderConfig:
   /**
    * The provider this config belongs to: [[explicitProviderId]] when set, otherwise `openai`,
@@ -65,7 +66,8 @@ case class OpenAIConfig(
   override def withModel(model: String): OpenAIConfig = copy(model = model)
   override def toString: String =
     s"OpenAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, organization=$organization, baseUrl=$baseUrl, " +
-      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, providerId=${providerId.asString})"
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, providerId=${providerId.asString}, " +
+      s"workloadIdentity=${workloadIdentity.map(_ => "set").getOrElse("none")})"
 
 object OpenAIConfig {
   private val standardReserve = 4096
@@ -104,7 +106,8 @@ object OpenAIConfig {
    * without manual lookup.
    *
    * @param modelName    Model identifier, e.g. `"gpt-4o"`.
-   * @param apiKey       OpenAI API key; must be non-empty.
+   * @param apiKey       OpenAI API key; must be non-empty, except that it is empty exactly when
+   *                     `workloadIdentity` is set.
    * @param organization Optional OpenAI organisation ID.
    * @param baseUrl      API base URL; must be non-empty. Pass a URL containing
    *                     `"openrouter.ai"` to route through OpenRouter.
@@ -116,10 +119,11 @@ object OpenAIConfig {
     apiKey: String,
     organization: Option[String],
     baseUrl: String,
-    providerId: Option[ProviderId] = None
+    providerId: Option[ProviderId] = None,
+    workloadIdentity: Option[OpenAIWorkloadIdentity] = None
   )(using resolver: ContextWindowResolver): Result[OpenAIConfig] =
     for {
-      _ <- ProviderConfig.nonEmpty("OpenAI", "apiKey", apiKey)
+      _ <- if (workloadIdentity.isDefined) Right(()) else ProviderConfig.nonEmpty("OpenAI", "apiKey", apiKey)
       _ <- ProviderConfig.nonEmpty("OpenAI", "baseUrl", baseUrl)
     } yield {
       val (cw, rc) = resolver.resolve(
@@ -136,7 +140,8 @@ object OpenAIConfig {
         baseUrl = baseUrl,
         contextWindow = cw,
         reserveCompletion = rc,
-        explicitProviderId = providerId
+        explicitProviderId = providerId,
+        workloadIdentity = workloadIdentity
       )
     }
 }

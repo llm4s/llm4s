@@ -3,8 +3,8 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAIConfigKeys, OpenAIModelLister, ProviderModelLister }
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, OpenAIWorkloadIdentity, ProviderConfig }
+import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -24,10 +24,22 @@ object OpenAIProvider extends ProviderDescriptor:
   val DEFAULT_BASE_URL: String = "https://api.openai.com/v1"
 
   /** The key falls back to `llm4s.credentials.openai.apiKey`, bound to `OPENAI_API_KEY`. */
+  /** `auth` keys for OpenAI's workload identity federation. */
+  val IdentityProviderIdKey: String = "identityProviderId"
+  val ServiceAccountIdKey: String   = "serviceAccountId"
+  val ClientIdKey: String           = "clientId"
+
   val configSpec: ProviderConfigSpec =
     ProviderConfigSpec
       .apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAIConfigKeys.OPENAI_API_KEY))
       .withExtras(Seq(OpenAIConfig.OrganizationConfigKey))
+      .withAuthExtras(
+        Seq(
+          ProviderConfigKey.required(IdentityProviderIdKey, "the OpenAI workload identity provider id"),
+          ProviderConfigKey.required(ServiceAccountIdKey, "the OpenAI service account id"),
+          ProviderConfigKey.optional(ClientIdKey, "the client id, if the identity provider requires one")
+        )
+      )
 
   override val modelLister: Option[ProviderModelLister] = Some(OpenAIModelLister)
 
@@ -35,15 +47,30 @@ object OpenAIProvider extends ProviderDescriptor:
     ContextWindowResolver
   ): Result[ProviderConfig] =
     for
-      apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
+      workloadIdentity <- workloadIdentityOf(providerName, section)
+      apiKey <-
+        if (workloadIdentity.isDefined) Right("") else ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
       config <- OpenAIConfig.fromValues(
         section.model.asString,
         apiKey,
         section.extra(OpenAIConfig.OrganizationKey),
-        baseUrl
+        baseUrl,
+        workloadIdentity = workloadIdentity
       )
     yield config
+
+  private def workloadIdentityOf(
+    providerName: String,
+    section: NamedProviderConfig
+  ): Result[Option[OpenAIWorkloadIdentity]] =
+    section.auth match
+      case None => Right(None)
+      case Some(auth) =>
+        for
+          idp <- ProviderDescriptor.requireAuthExtra(providerName, auth, IdentityProviderIdKey)
+          sa  <- ProviderDescriptor.requireAuthExtra(providerName, auth, ServiceAccountIdKey)
+        yield Some(OpenAIWorkloadIdentity(auth.identityToken, idp, sa, auth.extra(ClientIdKey)))
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

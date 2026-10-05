@@ -2,12 +2,14 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 
+import com.fasterxml.jackson.databind.json.JsonMapper
+import com.openai.auth.{ SubjectTokenProvider, SubjectTokenType, WorkloadIdentity }
 import com.openai.azure.credential.AzureApiKeyCredential
 import com.openai.azure.{ AzureOpenAIServiceVersion, AzureUrlPathMode }
 import com.openai.client.okhttp.OpenAIOkHttpClient
 import com.openai.client.{ OpenAIClient => SdkClient }
 import com.openai.core.{ JsonField, ObjectMappers }
-import com.openai.core.http.StreamResponse
+import com.openai.core.http.{ HttpClient => SdkHttpClient, StreamResponse }
 import com.openai.errors.{ OpenAIIoException, OpenAIServiceException }
 import com.openai.models.chat.completions.{
   ChatCompletion,
@@ -28,7 +30,8 @@ import org.llm4s.error.LLMError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
+import org.llm4s.llmconnect.auth.IdentityTokenSource
+import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, OpenAIWorkloadIdentity, ProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
@@ -40,6 +43,7 @@ import org.llm4s.types.Result
 import org.slf4j.{ Logger, LoggerFactory }
 
 import java.time.Instant
+import java.util.concurrent.CompletableFuture
 import scala.annotation.nowarn
 import scala.jdk.CollectionConverters._
 import scala.jdk.OptionConverters._
@@ -805,15 +809,42 @@ private[provider] object OpenAIClientTransport {
    * OpenAI, Requesty or any OpenAI-compatible base URL: a bearer API key, the configured
    * organisation, and requests to `<baseUrl>/chat/completions`.
    */
-  def openAI(config: OpenAIConfig): OpenAIClientTransport =
-    sdk(
-      OpenAIOkHttpClient
-        .builder()
-        .apiKey(config.apiKey)
-        .baseUrl(config.baseUrl)
-        .organization(config.organization.orNull)
-        .build()
-    )
+  def openAI(
+    config: OpenAIConfig,
+    customize: OpenAIOkHttpClient.Builder => OpenAIOkHttpClient.Builder = identity
+  ): OpenAIClientTransport = {
+    val builder = OpenAIOkHttpClient
+      .builder()
+      .baseUrl(config.baseUrl)
+      .organization(config.organization.orNull)
+    config.workloadIdentity match {
+      case Some(wi) => builder.workloadIdentity(sdkWorkloadIdentity(wi))
+      case None     => builder.apiKey(config.apiKey)
+    }
+    sdk(customize(builder).build())
+  }
+
+  /** The SDK's workload identity for `wi`: a JWT subject token read from `wi.identityToken` on each exchange. */
+  private[provider] def sdkWorkloadIdentity(wi: OpenAIWorkloadIdentity): WorkloadIdentity = {
+    val source = IdentityTokenSource.from(wi.identityToken)
+    val subject = new SubjectTokenProvider {
+      override def tokenType(): SubjectTokenType = SubjectTokenType.JWT
+
+      // The SDK's callback contract is exceptions; `mapError` turns this back into a Result.
+      override def getToken(httpClient: SdkHttpClient, jsonMapper: JsonMapper): String =
+        source.fetch().fold(error => throw new IllegalStateException(error.message), identity)
+
+      override def getTokenAsync(httpClient: SdkHttpClient, jsonMapper: JsonMapper): CompletableFuture[String] =
+        CompletableFuture.supplyAsync(() => getToken(httpClient, jsonMapper))
+    }
+    val builder = WorkloadIdentity
+      .builder()
+      .identityProviderId(wi.identityProviderId)
+      .serviceAccountId(wi.serviceAccountId)
+      .provider(subject)
+    wi.clientId.foreach(builder.clientId)
+    builder.build()
+  }
 
   /**
    * Azure OpenAI: an `api-key` header, and requests to
