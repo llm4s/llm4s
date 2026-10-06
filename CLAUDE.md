@@ -239,8 +239,8 @@ calling too. Core keeps the tool API (`ToolFunction`, `ToolRegistry`, schemas, e
 depend on `llm4s-agent`. `modules/agent` (`llm4s-agent`) then took `org.llm4s.agent` (bar
 `agent.memory`, already in `llm4s-memory`, which does not depend on it) and `org.llm4s.assistant`,
 with fansi. **Nothing in core may import either package** - the tracing contract takes a
-`TraceEvent.AgentStateUpdated`, which `AgentState#toTraceEvent` builds, so core's trace specs
-build that event directly and `AgentRunTracingSpec` in the agent module covers `toTraceEvent`.
+`TraceEvent.AgentStateUpdated`, which the agent runtime no longer emits (#1328; its consumers
+move in #1329), so core's trace specs build that event directly.
 `workspaceClient` depends on `llm4s-agent` for `codegen`; `observability` only in Test scope.
 
 With slice 7, `llm4s-core` is the spine: 20.7k lines at the re-audit, 19.1k after the cleanup passes (`types`, `error`, `config`, `model`,
@@ -486,26 +486,40 @@ val apiKey = sys.env.get("OPENAI_API_KEY")
 
 ### Basic Agent Usage
 
+An `Agent` is built once, with its tools, guardrails, handoffs and middleware, and run by `ThreadId`.
+
 ```scala
 for {
   providerConfig  <- Llm4sConfig.defaultProvider()   // llm4s.providers.<default> in application.conf
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client <- LLMConnect.getClient(providerConfig)
-  agent = new Agent(client)
-  tools = new ToolRegistry(Seq(myTool))
-  state <- agent.run("Query here", tools)
-} yield state
+  agent  <- Agent.builder("assistant", client)       // the id is an AgentId
+              .withTools(new ToolRegistry(Seq(myTool)))
+              .withSystemPrompt("You are a helpful assistant")
+              .build()
+  result <- agent.run("Query here")                  // Result[AgentResult]
+} yield result.answer                                // Some(answer) when status is Completed
 ```
+
+`AgentResult` carries `threadId`, `runId`, `activeAgent`, `status`, `messages` and `usage`.
+`AgentStatus` is `Completed(answer)`, `Blocked(guardrail, reason)`, `StepLimitReached` or
+`Suspended(approvals, questions)`; a guardrail block is an outcome, not a `Left`. Provider, tool and
+middleware failures are `Left(GraphError...)`. `agent.start(...)` returns an `AgentRun` with
+`await()` and `cancel()`; `recover(threadId)` and `resume(threadId, answers)` continue a thread
+that failed or suspended.
 
 ### Multi-Turn Conversations
 
 ```scala
 for {
-  state1 <- agent.run("First query", tools)
-  state2 <- agent.continueConversation(state1, "Follow-up")
-} yield state2
+  result1 <- agent.run("First query")
+  result2 <- agent.continueConversation(result1, "Follow-up")   // same thread: run(result1.threadId, ...)
+} yield result2
 ```
+
+To restore a saved conversation, `agent.run(ThreadId("saved-1"), query, RunConfig(), history = saved)`
+imports the messages into a new thread (no system messages in `history`).
 
 ### Built-in Tools
 
@@ -523,16 +537,25 @@ BuiltinTools.development() // All tools (use with caution)
 
 ### Guardrails
 
+Guardrails are middleware on the agent, not per-run arguments.
+
 ```scala
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 
-agent.run(
-  query = "Generate JSON",
-  tools = tools,
-  inputGuardrails = Seq(new LengthCheck(1, 10000), new ProfanityFilter()),
-  outputGuardrails = Seq(new JSONValidator())
-)
+val agent = Agent.builder("assistant", client)
+  .withMiddleware(
+    new GuardrailMiddleware(
+      input = Seq(new LengthCheck(1, 10000), new ProfanityFilter()),
+      output = Seq(new JSONValidator())
+    )
+  )
+  .build()
 ```
+
+A block ends the run `AgentStatus.Blocked(guardrail, reason)`; an output block replaces the stored
+answer with a refusal. `new ContextWindowMiddleware(config)` prunes what is sent to the model, never
+what the thread stores.
 
 Built-in guardrails:
 - **Simple validators**: `LengthCheck`, `ProfanityFilter`, `JSONValidator`, `RegexValidator`, `ToneValidator`
@@ -541,17 +564,20 @@ Built-in guardrails:
 
 ### Handoffs
 
+Handoffs are routes inside one graph, by agent id; the handoff id must equal the target builder's id.
+
 ```scala
 import org.llm4s.agent.Handoff
 
-agent.run(
-  query = "Complex physics question",
-  tools = ToolRegistry.empty,
-  handoffs = Seq(Handoff.to("physics", specialistAgent, "Physics expertise required"))
-)
+val physics = Agent.builder("physics", client).withSystemPrompt("You are a physicist")
+val agent = Agent.builder("triage", client)
+  .withHandoffs(Handoff.to("physics", physics, "Physics expertise required"))
+  .build()
+// A cycle back to the root: physics.withHandoffs(Handoff.toId("triage", "Not a physics question"))
 ```
 
-Use handoffs for simple 2-3 agent delegation. Use DAGs for complex parallel workflows.
+A handoff must be the only tool call in its message. Use handoffs for simple 2-3 agent
+delegation. Use DAGs for complex parallel workflows.
 
 ### Memory
 
@@ -577,22 +603,8 @@ client.complete(conversation, options)
 
 ### Streaming Events
 
-```scala
-import org.llm4s.agent.streaming._
-
-// Get real-time agent execution events
-agent.runWithEvents("Query here", tools) { event =>
-  event match {
-    case TextDelta(text) => print(text)
-    case ToolCallStarted(name, _) => println(s"Calling $name...")
-    case ToolCallCompleted(name, result, _) => println(s"$name returned: $result")
-    case AgentCompleted(state) => println("Done!")
-    case _ => ()
-  }
-}
-```
-
-Event types: `TextDelta`, `TextComplete`, `ToolCallStarted`, `ToolCallCompleted`, `ToolCallFailed`, `AgentStarted`, `StepStarted`, `StepCompleted`, `AgentCompleted`, `AgentFailed`, `InputGuardrailStarted`, `InputGuardrailCompleted`, `OutputGuardrailStarted`, `OutputGuardrailCompleted`, `HandoffStarted`, `HandoffCompleted`
+The agent event stream (`runWithEvents`, `AgentEvent`) was removed in #1328; its replacement is
+[#1329](https://github.com/llm4s/llm4s/issues/1329).
 
 ## Testing
 

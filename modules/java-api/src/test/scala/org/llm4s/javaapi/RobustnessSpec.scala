@@ -213,15 +213,16 @@ class RobustnessSpec extends AnyFlatSpec with Matchers {
     (r.getError().getCause should be).theSameInstanceAs(cause)
   }
 
-  "JAgent.run" should "return a failure for a null query or null tools" in {
+  "JAgent.run" should "return a failure for a null query" in {
     val agent = Llm4s.createAgent(new JLlmClient(client((_, _) => ok("x"))))
     agent.run(null: String).isFailure shouldBe true
-    agent.run("q", null).isFailure shouldBe true
   }
 
-  "Llm4s" should "reject a null client when creating an agent, with a clear message" in {
+  "Llm4s" should "reject a null client or null tools when creating an agent, with a clear message" in {
     val ex = intercept[NullPointerException](Llm4s.createAgent(null))
     ex.getMessage should include("client")
+    val noTools = intercept[NullPointerException](Llm4s.createAgent(new JLlmClient(client((_, _) => ok("x"))), null))
+    noTools.getMessage should include("tools")
   }
 
   it should "return a failure for a null provider config" in {

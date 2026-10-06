@@ -3,21 +3,19 @@ package org.llm4s.codegen
 /**
  * Configuration settings for workspace environment.
  *
- * Defines the directory, Docker image, port, and logging configuration
+ * Defines the directory, Docker image, and port configuration
  * for the containerized code workspace.
  *
  * @param workspaceDir directory path containing the codebase to work with
  * @param imageName Docker image name for the workspace container
  * @param hostPort host port for workspace communication
- * @param traceLogPath path for writing trace/log output
  *
  * @see [[WorkspaceConfigSupport]] for loading settings from configuration
  */
 final case class WorkspaceSettings(
   workspaceDir: String,
   imageName: String,
-  hostPort: Int,
-  traceLogPath: String
+  hostPort: Int
 )
 
 /**

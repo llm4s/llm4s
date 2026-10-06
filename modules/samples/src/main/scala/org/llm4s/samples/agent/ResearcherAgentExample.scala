@@ -4,6 +4,7 @@ package org.llm4s.samples.agent
 import org.llm4s.agent.Agent
 import org.llm4s.config.{ Llm4sConfig, ToolsConfigLoader }
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.samples.util.AgentResults
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.builtin.search.{ BraveSearchTool, SafeSearch }
 import org.llm4s.toolapi.builtin.search.BraveSearchCategory
@@ -75,10 +76,16 @@ object ResearcherAgentExample {
         logger.info("✓ Research tools initialized: {}", tools.map(_.name).mkString(", "))
 
         val registry = new ToolRegistry(tools)
-        val agent    = new Agent(client)
 
         // Execute research workflow
-        executeResearch(agent, registry, researchTopic)
+        Agent
+          .builder("researcher", client)
+          .withTools(registry)
+          .withSystemPrompt(createResearchSystemPrompt())
+          .build() match {
+          case Left(error)  => logger.error("Failed to build the research agent: {}", error.formatted)
+          case Right(agent) => executeResearch(agent, researchTopic)
+        }
 
         logger.info("\n" + "=" * 70)
         logger.info("🔬 === Research Complete ===")
@@ -124,9 +131,7 @@ object ResearcherAgentExample {
 
   // research topic could be moved to config file
 
-  private def executeResearch(agent: Agent, registry: ToolRegistry, researchTopic: String): Unit = {
-    val systemPrompt = createResearchSystemPrompt()
-
+  private def executeResearch(agent: Agent, researchTopic: String): Unit = {
     val researchQuery =
       s"""Conduct comprehensive research on: "$researchTopic"
          |
@@ -146,17 +151,13 @@ object ResearcherAgentExample {
 
     logger.info("\n📊 PHASE 1: Research Planning & Execution\n")
 
-    agent.run(researchQuery, registry, systemPromptAddition = Some(systemPrompt)) match {
+    agent.run(researchQuery) match {
       case Left(error) =>
         logger.error("Research failed: {}", error.formatted)
 
       case Right(state) =>
         // Extract and display the final research summary
-        val finalResponse = state.conversation.messages
-          .filter(_.role == org.llm4s.llmconnect.model.MessageRole.Assistant)
-          .lastOption
-          .map(_.content)
-          .getOrElse("No research summary available")
+        val finalResponse = AgentResults.answerOrStatus(state)
 
         println("\n" + "=" * 70)
         println("📋 RESEARCH SUMMARY")

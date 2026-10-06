@@ -3,6 +3,7 @@ package org.llm4s.samples.agent
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.samples.util.AgentResults
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.builtin._
 import org.llm4s.toolapi.builtin.filesystem._
@@ -64,7 +65,7 @@ object BuiltinToolsAgentExample {
         logger.info("Available tools: {}", tools.map(_.name).mkString(", "))
 
         val registry = new ToolRegistry(tools)
-        val agent    = new Agent(client)
+        val agent    = Agent.builder("builtin-tools-agent", client).withTools(registry).build()
 
         // Example queries that use different built-in tools
         val queries = Seq(
@@ -78,20 +79,16 @@ object BuiltinToolsAgentExample {
         for (query <- queries) {
           logger.info("\n--- Query: {} ---", query)
 
-          agent.run(query, registry) match {
+          agent.flatMap(_.run(query)) match {
             case Left(error) =>
               logger.error("Agent error: {}", error.formatted)
 
             case Right(state) =>
-              // Get the final assistant response from the conversation
-              val lastAssistantMsg = state.conversation.messages
-                .filter(_.role == org.llm4s.llmconnect.model.MessageRole.Assistant)
-                .lastOption
-                .map(_.content)
-                .getOrElse("No response")
+              // The answer, or why the run has none
+              val lastAssistantMsg = AgentResults.answerOrStatus(state)
 
               // Count tool messages to see which tools were used
-              val toolMsgCount = state.conversation.messages.count(
+              val toolMsgCount = state.messages.count(
                 _.role == org.llm4s.llmconnect.model.MessageRole.Tool
               )
 

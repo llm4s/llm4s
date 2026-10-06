@@ -471,14 +471,14 @@ object OllamaTools extends App {
     registry       <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
-    agent = new Agent(client)
-    state <- agent.run("What's the weather in San Francisco?", tools)
-  } yield state
+    agent <- Agent.builder("weather-agent", client).withTools(tools).build()
+    result <- agent.run("What's the weather in San Francisco?")
+  } yield result
 
   result match {
-    case Right(state) =>
+    case Right(r) =>
       println("Final response:")
-      println(state.conversation.messages.last.content)
+      println(r.answer.getOrElse(s"Run ended: ${r.status}"))
     case Left(error) =>
       Console.err.println(s"Error: ${error.formatted}")
   }

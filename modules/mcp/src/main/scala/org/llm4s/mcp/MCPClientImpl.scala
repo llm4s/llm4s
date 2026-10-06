@@ -5,7 +5,7 @@ import org.llm4s.error.{ CancelledError, LLMError, SimpleError }
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
-import ujson.{ Value, read => ujsonRead }
+import ujson.Value
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.util.{ Failure, Success, Try }
@@ -20,12 +20,11 @@ import scala.util.{ Failure, Success, Try }
  * back to the older 2024-11-05 HTTP+SSE protocol.  Stdio servers always use the
  * 2024-11-05 protocol.
  *
- * == Error swallowing in `getTools` ==
- * `getTools()` returns a `Left` only for a cancellation: any other failure during tool discovery
- * (network error, parse error, missing transport) is logged and an empty sequence is
- * returned instead. Callers cannot distinguish "server has no tools" from
- * "server could not be reached". An interrupted call is not a failure to hide: it returns
- * `Left(CancelledError)` with the thread's interrupt flag still set (design section 4.4).
+ * == Failures in `getTools` ==
+ * `getTools()` returns a `Left` for any failure during tool discovery (network error, JSON-RPC error,
+ * unreadable listing, missing transport), so "the server has no tools" (`Right(Seq.empty)`) is distinct from
+ * "the server could not be reached". An interrupted call returns `Left(CancelledError)` with the thread's
+ * interrupt flag still set (design section 4.4).
  *
  * == Thread safety ==
  * This class is not thread-safe. Concurrent calls to `initialize`, `getTools`,
@@ -77,9 +76,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
         protocolVersion = "2025-06-18"
         isTransportInitialized = true // Mark as initialized during testing
         Right(newTransport)
-      case Left(error)
-          if error.message.contains("405") || error.message
-            .contains("404") || error.message.contains("Method Not Allowed") =>
+      case Left(error) if MCPClientImpl.isUnsupportedTransport(error.message) =>
         // Server doesn't support new transport, try fallback
         logger.info(s"Server doesn't support Streamable HTTP, attempting fallback to HTTP+SSE (2024-11-05)")
         newTransport.close()
@@ -223,18 +220,18 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
    * `ToolFunction` instances that the agent framework can invoke.
    *
    * Calls `initialize()` automatically if not already connected.  Any error
-   * during transport initialisation, tool listing, or JSON parsing is logged
-   * and swallowed: the result is `Right(tools)` where `tools` is the (possibly
-   * empty) sequence of successfully parsed tool definitions. The one failure
-   * that is not swallowed is a cancellation: if the call is interrupted it
-   * returns `Left(CancelledError)`, with the thread's interrupt flag still set.
+   * during transport initialisation, tool listing, or JSON parsing is logged and returned as a `Left`;
+   * `Right(Seq.empty)` means the server advertises no tools. A call that is interrupted returns
+   * `Left(CancelledError)`, with the thread's interrupt flag still set.
+   *
+   * A tool entry that cannot be read is skipped and logged, and the tools that can be read are returned; a
+   * listing that cannot be read at all, or none of whose entries can, is a `Left`.
    *
    * A listing that fails clears the hints recorded by the last one (see
    * [[getToolHints]]), so a server that is down or sends a list that cannot be
    * read leaves no stale hints behind.
    *
-   * @return `Right`, with `Right(Seq.empty)` on any communication or parse failure;
-   *         `Left(CancelledError)` if the call was interrupted
+   * @return the tools the server advertises, or the `Left` that stopped the listing
    */
   override def getTools(): Result[Seq[ToolFunction[_, _]]] = {
     val result = for {
@@ -242,14 +239,13 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
       transportImpl <- transport.toRight(SimpleError(s"No transport available for ${config.name}"): LLMError)
       tools         <- trySendingRequest(transportImpl)
     } yield tools
-    result match {
-      case Left(cancelled: CancelledError) => Left(cancelled)
-      case Left(error) =>
+    result.left.foreach {
+      case _: CancelledError => ()
+      case error =>
         logger.error(error.message)
         toolHints = Map.empty
-        Right(Seq.empty)
-      case ok => ok
     }
+    result
   }
 
   def trySendingRequest(transportImpl: MCPTransportImpl): Result[Seq[ToolFunction[_, _]]] = {
@@ -260,20 +256,34 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
       tools      <- parseTools(toolsValue)
     } yield tools
 
-    result match {
-      case Left(cancelled: CancelledError) => Left(cancelled)
-      case Left(error) =>
+    result.left.foreach {
+      case _: CancelledError => ()
+      case error =>
         logger.warn(error.message)
         toolHints = Map.empty
-        Right(Seq.empty)
-      case ok => ok
     }
+    result
   }
 
   private def parseTools(value: Value): Result[Seq[ToolFunction[_, _]]] = {
     val result = Try {
-      val toolsData = value("tools").arr
-      (toolsData.map(convertMCPToolToToolFunction).toSeq, toolsData.map(MCPClientImpl.hintsOf).toMap)
+      // One malformed entry must not hide the tools that are fine: it is skipped and named in the log (its
+      // name or position, and the kind of fault: never the payload, which is the server's text).
+      val entries = value("tools").arr.toSeq
+      val parsed = entries.zipWithIndex.flatMap { case (toolJson, index) =>
+        Try((convertMCPToolToToolFunction(toolJson), MCPClientImpl.hintsOf(toolJson))) match {
+          case Success(tool) => Some(tool)
+          case Failure(ex) =>
+            val label = toolJson.objOpt.flatMap(_.get("name")).flatMap(_.strOpt).getOrElse(s"#$index")
+            logger.warn("Skipping a malformed tool ({}) from {}: {}", label, config.name, ex.getClass.getSimpleName)
+            None
+        }
+      }
+      // A listing none of whose entries can be read is a failure, not a server with no tools.
+      if (entries.nonEmpty && parsed.isEmpty) {
+        throw new IllegalArgumentException(s"none of the ${entries.size} tool entries could be read")
+      }
+      (parsed.map(_._1), parsed.map(_._2).toMap)
     }
     result.fold(
       ex => {
@@ -287,7 +297,9 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
         logger.info("Successfully retrieved from {} {} tools", config.name, tools.size)
       }
     )
-    result.map(_._1).getOrElse(Seq.empty).asRight[LLMError]
+    result.toEither
+      .map(_._1)
+      .leftMap(ex => SimpleError(s"Failed to parse tools from ${config.name}: ${ex.getMessage}"): LLMError)
   }
 
   override def getToolHints(): Map[String, ToolHints] = toolHints
@@ -402,14 +414,15 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
                 // Per the MCP spec a tool-level failure is a normal result flagged `isError: true`
                 val isToolError = result.objOpt.flatMap(_.get("isError")).flatMap(_.boolOpt).contains(true)
                 Try {
-                  // MCP returns content array with text results
-                  val content = result("content").arr
-                  if (content.nonEmpty) {
-                    val firstContent = content(0)
-                    val text         = firstContent("text").str
-
-                    // Try to parse as JSON, fallback to string result
-                    if (isToolError) ujson.Str(text) else Try(ujsonRead(text)).getOrElse(ujson.Str(text))
+                  // A server's structured result is delivered as the JSON value it is; text stays text, so a tool
+                  // that returned the string "24" is not handed back as the number 24.
+                  val structured = if (isToolError) None else result.objOpt.flatMap(_.get("structuredContent"))
+                  // `content` is read only when it is needed: a result that is only `structuredContent` has none.
+                  def content = result("content").arr
+                  if (structured.exists(_ != ujson.Null)) {
+                    structured.getOrElse(ujson.Null)
+                  } else if (content.nonEmpty) {
+                    ujson.Str(content(0)("text").str)
                   } else if (isToolError) {
                     ujson.Str("server reported an error")
                   } else {
@@ -437,6 +450,20 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 }
 
 object MCPClientImpl {
+
+  /**
+   * What `StreamableHTTPTransportImpl` says when the server answered 404 or 405, the replies of a server that does
+   * not speak Streamable HTTP: `Transport error: HTTP error 404: ...`, and for 405 `Transport error: Server does
+   * not support Streamable HTTP transport (405 Method Not Allowed)`. It is anchored to the start of the message on
+   * purpose: the text of any other failure carries a URL and a response body, and `404` or `405` appears in a port
+   * number (`:40413`) or a body without being the status.
+   */
+  private val UnsupportedTransportMessage =
+    """^Transport error: (?:HTTP error (?:404|405)\b|Server does not support Streamable HTTP transport)""".r
+
+  /** Whether `message` reports a 404 or 405 from the server, so the client should try HTTP+SSE instead. */
+  private[mcp] def isUnsupportedTransport(message: String): Boolean =
+    UnsupportedTransportMessage.findFirstIn(message).isDefined
 
   /** A tool's name and the hints its MCP annotations declare (the specification's defaults when it has none). */
   private[mcp] def hintsOf(toolJson: Value): (String, ToolHints) =

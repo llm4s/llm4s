@@ -1,9 +1,10 @@
 package org.llm4s.assistant
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentState, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
+import org.llm4s.agent.graph.{ GraphError, RunConfig, ThreadId }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model._
-import org.llm4s.error.{ AssistantError, LLMError, ConfigurationError }
+import org.llm4s.error.AssistantError
+import org.llm4s.types.Result
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ SessionId, DirectoryPath }
 import cats.implicits._
@@ -42,20 +43,22 @@ object Command {
 }
 
 /**
- * Interactive assistant agent that wraps the existing Agent functionality
- * in a user-friendly conversational loop with session management using functional programming principles.
+ * Interactive assistant agent that wraps an [[org.llm4s.agent.Agent]] in a user-friendly
+ * conversational loop with session management. The agent is built once, from `client` and
+ * `tools`; each query is one turn on the session's thread.
  */
 class AssistantAgent(
   client: LLMClient,
   tools: ToolRegistry,
-  sessionDir: String = "./sessions",
-  agentContext: AgentContext = AgentContext.Default
+  sessionDir: String = "./sessions"
 ) {
 
-  private val logger         = LoggerFactory.getLogger(getClass)
-  private val agent          = new Agent(client)
-  private val sessionManager = new SessionManager(DirectoryPath(sessionDir), agent)
-  private val console        = new ConsoleInterface(tools, sessionManager)
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  /** Built once; a build failure is reported by every query. */
+  private[assistant] val agent: Result[Agent] = Agent.builder("assistant", client).withTools(tools).build()
+  private val sessionManager                  = new SessionManager(DirectoryPath(sessionDir))
+  private val console                         = new ConsoleInterface(tools, sessionManager)
 
   /**
    * Starts the interactive session loop
@@ -64,7 +67,7 @@ class AssistantAgent(
     logger.info("Starting interactive assistant session")
     for {
       _ <- console.showWelcome()
-      initialState = SessionState(None, SessionId(UUID.randomUUID().toString), DirectoryPath(sessionDir))
+      initialState = SessionState(None, None, SessionId(UUID.randomUUID().toString), DirectoryPath(sessionDir))
       _            = logger.info("Created new session: {}", initialState.sessionId)
       _ <- runInteractiveLoop(initialState)
     } yield logger.info("Interactive assistant session ended")
@@ -119,13 +122,13 @@ class AssistantAgent(
     }
 
   /**
-   * Processes a user query through the agent
+   * Processes a user query through the agent: one turn. A turn that ends without an answer -
+   * step limit, pending approval - is still recorded in the session, its reason as the response.
    */
   private def processQuery(query: String, state: SessionState): Either[AssistantError, (SessionState, String)] = {
     logger.debug("Processing user query: {}", query.take(100))
     for {
-      updatedState <- addUserMessage(query, state)
-      finalState <- runAgentToCompletion(updatedState, agentContext).leftMap(llmError =>
+      result <- runTurn(query, state).leftMap(llmError =>
         AssistantError.SessionError(
           s"Agent execution failed: ${llmError.message}",
           state.sessionId,
@@ -133,7 +136,9 @@ class AssistantAgent(
           llmCause = Some(llmError)
         )
       )
-      response <- extractFinalResponse(finalState)
+      // every turn's result is kept, whatever its status, so a later /save includes it
+      finalState = state.withResult(result)
+      response   = extractFinalResponse(finalState).fold(_.message, identity)
     } yield {
       logger.debug("Successfully processed query, response length: {}", response.length)
       (finalState, formatAssistantResponse(response))
@@ -180,7 +185,7 @@ class AssistantAgent(
    * Checks if current session has content worth saving
    */
   private def hasContentToSave(state: SessionState): Boolean =
-    state.agentState.exists(_.conversation.messages.nonEmpty)
+    state.messages.nonEmpty
 
   /**
    * Prompts user and gets clean session name with default
@@ -199,7 +204,22 @@ class AssistantAgent(
    * Creates new session state
    */
   private def createNewSessionState(state: SessionState): SessionState =
-    state.withNewSession()
+    replacing(state, state.withNewSession())
+
+  /**
+   * `next`, having forgotten `previous`'s thread when `next` does not continue it, so an abandoned
+   * conversation does not stay in the agent's runtime.
+   */
+  private def replacing(previous: SessionState, next: SessionState): SessionState = {
+    previous.threadId.filterNot(next.threadId.contains).foreach(forgetThread)
+    next
+  }
+
+  /** Removes `threadId` from the agent's runtime; a failure is logged, since the session moves on either way. */
+  private def forgetThread(threadId: ThreadId): Unit =
+    agent.flatMap(_.forget(threadId)).left.foreach { error =>
+      logger.warn("Could not forget thread {}: {}", threadId.value, error.message)
+    }
 
   /**
    * Formats success message for saved session
@@ -217,13 +237,13 @@ class AssistantAgent(
    * Loads session with given title
    */
   private def loadSession(title: String): Either[AssistantError, SessionState] =
-    sessionManager.loadSession(title, tools)
+    sessionManager.loadSession(title)
 
   /**
    * Counts messages in session state
    */
   private def countMessagesInSession(state: SessionState): Int =
-    state.agentState.map(_.conversation.messages.length).getOrElse(0)
+    state.messages.length
 
   /**
    * Formats load success message
@@ -282,7 +302,7 @@ class AssistantAgent(
       loadedState <- loadSession(title)
       messageCount = countMessagesInSession(loadedState)
       message      = formatLoadSuccessMessage(title, messageCount)
-    } yield (loadedState, message)
+    } yield (replacing(state, loadedState), message)
 
   /**
    * Handles quit command by composing atomic operations (reusing existing methods)
@@ -302,71 +322,52 @@ class AssistantAgent(
     }
 
   /**
-   * Adds user message to the conversation - initializes if first message
+   * Runs `query` as one turn: on the session's thread, or on a new thread seeded with the session's
+   * messages when it has none yet - a loaded session - or when its thread cannot take a new turn
+   * (an earlier turn failed, or is waiting for an approval the assistant cannot give), which is
+   * then forgotten.
    */
-  private[assistant] def addUserMessage(query: String, state: SessionState): Either[AssistantError, SessionState] =
-    state.agentState match {
-      case Some(agentState) =>
-        // Existing conversation - add message
-        val updatedAgentState = agentState
-          .addMessage(UserMessage(query))
-          .withStatus(AgentStatus.InProgress)
-        Right(state.withAgentState(updatedAgentState))
-      case None =>
-        // First message - initialize agent
-        agent
-          .initializeSafe(query, tools)
-          .map(state.withAgentState)
-          .leftMap(llmError =>
-            AssistantError.SessionError(
-              s"Agent initialization failed: ${llmError.message}",
-              state.sessionId,
-              "agent-initialization",
-              llmCause = Some(llmError)
-            )
-          )
-    }
-
-  /**
-   * Runs the agent until completion or failure
-   */
-  private[assistant] def runAgentToCompletion(
-    state: SessionState,
-    context: AgentContext = AgentContext.Default
-  ): Either[LLMError, SessionState] =
-    state.agentState match {
-      case None => Left(ConfigurationError("No agent state to run"))
-      case Some(agentState) =>
-        def runSteps(currentState: AgentState): Either[org.llm4s.error.LLMError, AgentState] =
-          currentState.status match {
-            case AgentStatus.InProgress | AgentStatus.WaitingForTools =>
-              agent.runStep(currentState, context) match {
-                case Right(newState) => runSteps(newState)
-                case Left(error)     => Left(error)
+  private[assistant] def runTurn(query: String, state: SessionState): Result[AgentResult] =
+    agent.flatMap { agent =>
+      def fresh() = agent.run(ThreadId(UUID.randomUUID().toString), query, RunConfig(), state.messages)
+      state.threadId match {
+        case Some(threadId) =>
+          agent.run(threadId, query) match {
+            case Left(_: GraphError.IncompleteRun | _: GraphError.PendingInterrupts) =>
+              fresh().map { result =>
+                forgetThread(threadId)
+                result
               }
-            case _ => Right(currentState)
+            case other => other
           }
-
-        runSteps(agentState)
-          .map(finalAgentState => state.withAgentState(finalAgentState))
+        case None => fresh()
+      }
     }
 
   /**
-   * Extracts the final response from the agent state
+   * The response to show for the latest turn: its answer, or why there is none.
    */
   private[assistant] def extractFinalResponse(state: SessionState): Either[AssistantError, String] =
-    state.agentState match {
-      case None => Left(AssistantError.SessionError("No agent state available", state.sessionId, "extract-response"))
-      case Some(agentState) =>
-        agentState.conversation.messages.reverse.collectFirst {
-          case msg: AssistantMessage if msg.toolCalls.isEmpty => msg.content
-        } match {
-          case Some(content) => Right(content)
-          case None =>
-            Left(
-              AssistantError.SessionError("No final response found from assistant", state.sessionId, "extract-response")
-            )
-        }
+    state.last.map(_.status) match {
+      case None => Left(AssistantError.SessionError("No agent result available", state.sessionId, "extract-response"))
+      case Some(AgentStatus.Completed(answer))       => Right(answer)
+      case Some(AgentStatus.Blocked(guardrail, why)) => Right(s"Blocked by guardrail '$guardrail': $why")
+      case Some(AgentStatus.StepLimitReached) =>
+        Left(
+          AssistantError.SessionError(
+            "The agent reached its step limit without a final answer",
+            state.sessionId,
+            "extract-response"
+          )
+        )
+      case Some(AgentStatus.Suspended(_, _)) =>
+        Left(
+          AssistantError.SessionError(
+            "The agent is waiting for a tool approval, which the assistant cannot give",
+            state.sessionId,
+            "extract-response"
+          )
+        )
     }
 
   /**

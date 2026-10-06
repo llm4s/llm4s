@@ -164,7 +164,7 @@ class MCPToolHintsSpec extends AnyFlatSpec with Matchers {
     client.getToolHints() shouldBe expected
 
     client.transport = Some(new ScriptedTransport(ujson.Arr(ujson.Obj("description" -> "no name"))))
-    client.getTools() shouldBe Right(Seq.empty) // an unreadable listing is logged and swallowed, as before
+    client.getTools().isLeft shouldBe true // an unreadable listing is a failure, not an empty server
 
     client.getToolHints() shouldBe empty
   }
@@ -176,7 +176,7 @@ class MCPToolHintsSpec extends AnyFlatSpec with Matchers {
     client.getToolHints() should not be empty
 
     client.transport = Some(new FailingTransport)
-    client.getTools() shouldBe Right(Seq.empty)
+    client.getTools().isLeft shouldBe true
 
     client.getToolHints() shouldBe empty
   }

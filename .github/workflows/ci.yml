@@ -170,6 +170,8 @@ jobs:
     name: Code Coverage
     needs: [quick-checks]
     runs-on: ubuntu-latest
+    # Healthy runs take about 40 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
+    timeout-minutes: 90
     permissions:
       contents: read
 
@@ -567,6 +569,9 @@ jobs:
         java: [21]
 
     runs-on: ${{ matrix.os }}
+    # Healthy runs take up to about 50 minutes on Windows; the default limit is 360, so a hung run would hold
+    # the PR for six hours.
+    timeout-minutes: 90
     
     steps:
       - uses: actions/checkout@v7
