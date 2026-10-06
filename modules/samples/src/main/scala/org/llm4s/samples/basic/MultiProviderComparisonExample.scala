@@ -76,19 +76,23 @@ object MultiProviderComparisonExample {
    * Ask every named provider the same prompt, one after another. A provider that cannot be loaded or fails
    * does not stop the rest.
    *
+   * @param nanoTime the clock a call is timed with, read once before and once after each `complete`; a test passes
+   *                 a scripted one so a latency does not depend on how fast the machine is
    * @param load resolves a name to its configuration; the sample passes `Llm4sConfig.provider`
    */
-  def compare(names: Seq[String], prompt: String)(
+  def compare(names: Seq[String], prompt: String, nanoTime: () => Long = () => System.nanoTime())(
     load: String => Result[ProviderConfig]
   )(using ModelRegistryService): Seq[Entry] =
-    names.map(name => Entry(name, load(name).flatMap(ask(_, prompt))))
+    names.map(name => Entry(name, load(name).flatMap(ask(_, prompt, nanoTime))))
 
-  private def ask(config: ProviderConfig, prompt: String)(using ModelRegistryService): Result[Reply] =
+  private def ask(config: ProviderConfig, prompt: String, nanoTime: () => Long)(using
+    ModelRegistryService
+  ): Result[Reply] =
     LLMConnect.getClient(config).flatMap { client =>
       Using.resource(client) { c =>
-        val start = System.nanoTime()
+        val start = nanoTime()
         c.complete(Conversation(Seq(UserMessage(prompt)))).map { completion =>
-          Reply(completion.asText.trim, completion.usage.map(_.totalTokens), (System.nanoTime() - start).nanos)
+          Reply(completion.asText.trim, completion.usage.map(_.totalTokens), (nanoTime() - start).nanos)
         }
       }
     }

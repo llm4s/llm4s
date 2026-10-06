@@ -1572,6 +1572,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unreadable object is still skipped. `S3LoaderExample` now reports the failure and stops,
   instead of querying an empty index. See the
   [migration note](docs/reference/migration.md#a-failed-listing-fails-the-sync).
+- **`MCPClientImpl` fell back to the HTTP+SSE transport for a dead server whose port number contained `404`
+  or `405`**, and for any HTTP error whose body mentioned them. It read "the server answered 404/405" off the
+  error text with `contains`, and a refused-connection message carries the URL, so about one run in 150 on an
+  ephemeral port such as `40413` reported "Failed to connect with both transports" instead of the connection
+  error (this failed `MCPErrorPathsSpec` in CI on unrelated pull requests). The check now matches only the
+  messages `StreamableHTTPTransportImpl` writes for those statuses, anchored to the start of the message.
+  A real 404 or 405 still falls back. The `MultiProviderComparisonExample` sample takes its clock as a
+  parameter, so its latency test no longer compares a cold first call with a sleeping one. The `Test` and
+  `Code Coverage` CI jobs have a 90-minute limit instead of GitHub's default 360.
 - **`RAG.build` failed on a vectors table created by `PgSearchIndex`** with
   `column "created_at" does not exist` (found in [#1231](https://github.com/llm4s/llm4s/pull/1231)).
   `RAGConfig.withSearchIndex` points `PgVectorStore` at the `PgSearchIndex` table, but the two had

@@ -77,9 +77,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
         protocolVersion = "2025-06-18"
         isTransportInitialized = true // Mark as initialized during testing
         Right(newTransport)
-      case Left(error)
-          if error.message.contains("405") || error.message
-            .contains("404") || error.message.contains("Method Not Allowed") =>
+      case Left(error) if MCPClientImpl.isUnsupportedTransport(error.message) =>
         // Server doesn't support new transport, try fallback
         logger.info(s"Server doesn't support Streamable HTTP, attempting fallback to HTTP+SSE (2024-11-05)")
         newTransport.close()
@@ -437,6 +435,20 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 }
 
 object MCPClientImpl {
+
+  /**
+   * What `StreamableHTTPTransportImpl` says when the server answered 404 or 405, the replies of a server that does
+   * not speak Streamable HTTP: `Transport error: HTTP error 404: ...`, and for 405 `Transport error: Server does
+   * not support Streamable HTTP transport (405 Method Not Allowed)`. It is anchored to the start of the message on
+   * purpose: the text of any other failure carries a URL and a response body, and `404` or `405` appears in a port
+   * number (`:40413`) or a body without being the status.
+   */
+  private val UnsupportedTransportMessage =
+    """^Transport error: (?:HTTP error (?:404|405)\b|Server does not support Streamable HTTP transport)""".r
+
+  /** Whether `message` reports a 404 or 405 from the server, so the client should try HTTP+SSE instead. */
+  private[mcp] def isUnsupportedTransport(message: String): Boolean =
+    UnsupportedTransportMessage.findFirstIn(message).isDefined
 
   /** A tool's name and the hints its MCP annotations declare (the specification's defaults when it has none). */
   private[mcp] def hintsOf(toolJson: Value): (String, ToolHints) =
