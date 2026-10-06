@@ -279,6 +279,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case is still a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`;
   new `GraphError` and `RunEvent` cases break exhaustive matches. Design:
   `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
+- **CI verifies the documented support matrix** ([#967](https://github.com/llm4s/llm4s/issues/967)):
+  `scripts/check-doc-support.sh`, in the `quick-checks` job, fails when the docs say something the build does not
+  do. It compares the Scala version in the docs with `scala3`, the JDK in the docs with the JDKs `ci.yml` runs,
+  the modules in CLAUDE.md's repository-structure block with the directories on disk and the projects in
+  `build.sbt` (in both directions), and every `sbt` command quoted in the docs with the build's aliases, tasks and
+  projects and with sbt's built-ins. `scripts/test-check-doc-support.sh` breaks each claim in a scratch copy and
+  checks the failure. Three stale claims it found are fixed: `sbt dependencyCheck` (no such task) in the review
+  guidelines, `sbt run "Explain ..."` in the g8 guide (sbt reads the quoted text as a second command; it is now
+  `sbt "run Explain ..."`), and `modules/gradle-demo`, which CLAUDE.md did not name.
 - **Cancellation by interrupt for graph runs and providers** (Experimental, `org.llm4s.agent.graph`,
   [#1270](https://github.com/llm4s/llm4s/issues/1270)): each superstep runs in a bounded Ox scope on
   virtual threads (Ox is a new implementation dependency of `llm4s-agent`). Interrupting the thread

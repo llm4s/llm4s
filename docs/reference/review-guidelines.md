@@ -1869,7 +1869,7 @@ Before adding a new library, check if an existing dependency already provides wh
 
 - [ ] Check if existing deps provide functionality: `ujson` (JSON), `sttp` (HTTP), `PureConfig` (config), `ScalaTest` (
   testing)
-- [ ] Run `sbt dependencyCheck` for CVEs
+- [ ] Check new dependencies for known CVEs (the build has no `dependencyCheck` task; see Dependabot alerts and the library's advisories)
 - [ ] Major version bumps tested against the current Scala 3.7.1 build
 - [ ] Strictly NO use of dependencies (libraries) which are in development version (0.x or 0.x.x)
 

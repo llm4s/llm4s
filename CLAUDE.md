@@ -120,6 +120,7 @@ llm4s/
 │   ├── knowledgegraph-neo4j/  # Neo4j graph store
 │   ├── trace-opentelemetry/   # OpenTelemetry tracing backend, `llm4s-observability-otel` (published)
 │   ├── benchmarks/            # JMH benchmarks
+│   ├── gradle-demo/           # Gradle consumer of llm4s, kept buildable (not published)
 │   └── it/                    # Integration tests
 ├── docs/                # Documentation
 ├── project/             # SBT config

@@ -91,6 +91,13 @@ jobs:
       - name: Check install snippets do not pin a literal version
         run: scripts/check-doc-versions.sh
 
+      # Fails when the docs state a Scala or JDK version, a module or an sbt command the build does not have.
+      # The Scala 2.13 thread began with exactly that kind of claim (#874, #1134); this keeps it corrected.
+      - name: Check the documented support matrix matches the build
+        run: |
+          scripts/test-check-doc-support.sh
+          scripts/check-doc-support.sh
+
       # scalafmtCheckAll covers sources only; scalafmtSbtCheck covers build.sbt and project/*.scala.
       - name: Check formatting
         run: sbt scalafmtCheckAll scalafmtSbtCheck
