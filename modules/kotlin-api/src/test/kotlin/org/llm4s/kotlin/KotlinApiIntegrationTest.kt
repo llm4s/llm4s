@@ -1,6 +1,7 @@
 package org.llm4s.kotlin
 
 import com.sun.net.httpserver.HttpExchange
+import com.typesafe.config.ConfigFactory
 import com.sun.net.httpserver.HttpServer
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,7 @@ import org.llm4s.javaapi.JAgent
 import org.llm4s.javaapi.JLlmClient
 import org.llm4s.javaapi.LlmResult
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
+import org.llm4s.model.ModelRegistryConfig
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.CountDownLatch
@@ -29,6 +31,10 @@ import org.llm4s.javaapi.Llm4s as JLlm4s
 import scala.collection.immutable.`Map$` as ScalaMap
 
 private val NoHeaders = ScalaMap.`MODULE$`
+
+private const val RegistryResource = "llm4s.modelRegistry.resourcePath"
+private const val RegistryFile = "llm4s.modelRegistry.filePath"
+private const val RegistryUrl = "llm4s.modelRegistry.url"
 
 /**
  * Integration tests for the Kotlin API over the real Scala stack:
@@ -48,9 +54,14 @@ class KotlinApiIntegrationTest {
     private val requests = AtomicInteger(0)
     private val lastBody = AtomicReference<String>("")
 
+    /** The registry properties as they were before [setUp], restored in [tearDown]. */
+    private val savedRegistryProperties = mutableMapOf<String, String?>()
+
     @BeforeTest
     fun setUp() {
-        server = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0)
+        pinModelRegistryToBundledResource()
+
+        server =HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0)
         server.executor = java.util.concurrent.Executors.newCachedThreadPool()
         server.createContext("/") { exchange ->
             requests.incrementAndGet()
@@ -68,6 +79,36 @@ class KotlinApiIntegrationTest {
         Llm4s.factory = originalFactory
         server.stop(0)
         (server.executor as java.util.concurrent.ExecutorService).shutdownNow()
+        restoreModelRegistryProperties()
+    }
+
+    /**
+     * `JLlm4s.createClient` loads `Llm4sConfig.modelRegistryService()`, whose source
+     * (`llm4s.modelRegistry.*`) `reference.conf` binds to `LLM4S_MODEL_REGISTRY_RESOURCE`, `_FILE` and
+     * `_URL`. With one of those set the suite would read an arbitrary file or fetch a URL before it
+     * reaches the loopback endpoint. System properties beat those `${?ENV}` bindings, so pin the
+     * bundled snapshot and blank the other two (a blank source counts as unset). Typesafe Config
+     * caches system properties, hence the cache invalidation on the way in and out.
+     */
+    private fun pinModelRegistryToBundledResource() {
+        val pinned = mapOf(
+            RegistryResource to ModelRegistryConfig.DefaultResourcePath(),
+            RegistryFile to "",
+            RegistryUrl to "",
+        )
+        pinned.forEach { (key, value) ->
+            savedRegistryProperties[key] = System.getProperty(key)
+            System.setProperty(key, value)
+        }
+        ConfigFactory.invalidateCaches()
+    }
+
+    private fun restoreModelRegistryProperties() {
+        savedRegistryProperties.forEach { (key, value) ->
+            if (value == null) System.clearProperty(key) else System.setProperty(key, value)
+        }
+        savedRegistryProperties.clear()
+        ConfigFactory.invalidateCaches()
     }
 
     @Test
