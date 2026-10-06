@@ -137,12 +137,12 @@ object AgentZStreamSpec extends ZIOSpecDefault {
           assertTrue(gaps > 0, doneOk, durableEvents(items).last == RunEvent.RunCompleted)
         }
     },
-    test("interrupting the stream cancels the run, releasing the subscription blocked in the buffer") {
+    test("stopping early cancels the run, releasing its subscription") {
       val calls    = new AtomicInteger(0)
       val sent     = new CountDownLatch(1)
       val unparked = new CountDownLatch(1)
-      // the first call floods the subscription with more live text than the buffer and the subscription's
-      // queue hold - so its dispatcher blocks in the buffer's listener - then parks until interrupted
+      // the first call floods the subscription with more live text than the buffer holds, then parks until
+      // interrupted; the consumer stops after the first item
       val client = new Fixtures.Scripted(
         onChunk =>
           if (calls.getAndIncrement() == 0) {
@@ -167,6 +167,36 @@ object AgentZStreamSpec extends ZIOSpecDefault {
         released    <- ZIO.attemptBlocking(Fixtures.awaitCondition(runtime.liveSubscriptions(threadId) == 0))
         recovered   <- AgentZ(agent).recover(threadId)
       } yield assertTrue(first.size == 1, wasUnparked, released, recovered.answer == Some("recovered"))
+    },
+    test("interrupting the stream while the consumer waits for the next event cancels the run") {
+      val calls    = new AtomicInteger(0)
+      val parked   = new CountDownLatch(1)
+      val unparked = new CountDownLatch(1)
+      // the first call sends one delta, then parks mid-call until interrupted; later calls answer
+      val client = new Fixtures.Scripted(
+        onChunk =>
+          if (calls.getAndIncrement() == 0) {
+            onChunk(Fixtures.chunk(0))
+            parked.countDown()
+            if (Fixtures.parkUntilInterrupted()) unparked.countDown()
+            Left(CancelledError("test"))
+          } else Right(completion("recovered")),
+        () => Right(completion("recovered"))
+      )
+      val runtime  = GraphRuntime.inMemory()
+      val agent    = Fixtures.agentOf(client)(_.withRuntime(runtime).withStreaming())
+      val threadId = ThreadId("z8")
+      val seen     = new AtomicInteger(0)
+      for {
+        fiber <- AgentZ(agent).stream(threadId, "hi").tap(_ => ZIO.succeed(seen.incrementAndGet())).runDrain.fork
+        // the model is parked mid-call, so the consumer is blocked in the buffer's take
+        _           <- ZIO.attemptBlocking(parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS))
+        _           <- ZIO.attemptBlocking(Fixtures.awaitCondition(seen.get > 0))
+        _           <- fiber.interrupt.timeoutFail(new RuntimeException("interrupt hung"))(60.seconds)
+        wasUnparked <- ZIO.attemptBlocking(unparked.await(Fixtures.PromptSeconds, TimeUnit.SECONDS))
+        released    <- ZIO.attemptBlocking(Fixtures.awaitCondition(runtime.liveSubscriptions(threadId) == 0))
+        recovered   <- AgentZ(agent).recover(threadId)
+      } yield assertTrue(wasUnparked, released, recovered.answer == Some("recovered"))
     },
     test("streamRecover streams a recovered run to Done") {
       val calls = new AtomicInteger(0)

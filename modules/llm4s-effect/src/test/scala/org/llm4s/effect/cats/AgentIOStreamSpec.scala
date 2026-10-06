@@ -159,13 +159,13 @@ class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     durableEvents(items).last shouldBe RunEvent.RunCompleted
   }
 
-  it should "cancel the run when the stream is interrupted, releasing the subscription blocked in the buffer" in {
+  it should "cancel the run when the consumer stops early, releasing its subscription" in {
     val calls    = new AtomicInteger(0)
     val sent     = new CountDownLatch(1)
     val parked   = new CountDownLatch(1)
     val unparked = new CountDownLatch(1)
-    // the first call floods the subscription with more live text than the buffer and the subscription's
-    // queue hold - so its dispatcher blocks in the buffer's listener - then parks until interrupted
+    // the first call floods the subscription with more live text than the buffer holds, then parks until
+    // interrupted; the consumer stops after the first item
     val client = new Fixtures.Scripted(
       onChunk =>
         if (calls.getAndIncrement() == 0) {
@@ -191,7 +191,39 @@ class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     first should have size 1
     parked.getCount shouldBe 0
     unparked.await(Fixtures.PromptSeconds, TimeUnit.SECONDS) shouldBe true
-    // the dispatcher blocked in the buffer was released, so the subscription has ended
+    // the run's subscription has ended
+    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
+    AgentIO[IO](agent).recover(threadId).unsafeRunSync().answer shouldBe Some("recovered")
+  }
+
+  it should "cancel the run when the stream is interrupted while the consumer waits for the next event" in {
+    val calls    = new AtomicInteger(0)
+    val parked   = new CountDownLatch(1)
+    val unparked = new CountDownLatch(1)
+    // the first call sends one delta, then parks mid-call until interrupted; later calls answer
+    val client = new Fixtures.Scripted(
+      onChunk =>
+        if (calls.getAndIncrement() == 0) {
+          onChunk(Fixtures.chunk(0))
+          parked.countDown()
+          if (Fixtures.parkUntilInterrupted()) unparked.countDown()
+          Left(org.llm4s.error.CancelledError("test"))
+        } else Right(completion("recovered")),
+      () => Right(completion("recovered"))
+    )
+    val runtime  = GraphRuntime.inMemory()
+    val agent    = Fixtures.agentOf(client)(_.withRuntime(runtime).withStreaming())
+    val threadId = ThreadId("f8")
+    val seen     = new AtomicInteger(0)
+    val program = for {
+      fiber <- AgentIO[IO](agent).stream(threadId, "hi").evalTap(_ => IO(seen.incrementAndGet())).compile.drain.start
+      // the model is parked mid-call, so the consumer is blocked in the buffer's take
+      _ <- IO.blocking(parked.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS))
+      _ <- IO.blocking(Fixtures.awaitCondition(seen.get > 0))
+      _ <- fiber.cancel
+    } yield ()
+    program.timeout(60.seconds).unsafeRunSync()
+    unparked.await(Fixtures.PromptSeconds, TimeUnit.SECONDS) shouldBe true // the model call was interrupted
     eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
     AgentIO[IO](agent).recover(threadId).unsafeRunSync().answer shouldBe Some("recovered")
   }
