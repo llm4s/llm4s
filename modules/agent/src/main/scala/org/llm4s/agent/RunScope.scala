@@ -17,7 +17,8 @@ import scala.util.{ Try, Using }
  *  - a `Disconnected` (the listener fell behind or threw, or - for a subscription that replays -
  *    reading the thread's log failed: `ReplayFailed`), after passing it on;
  *  - [[closeWhenQuiet]], for a run that ended without committing a terminal event (a crash, or a
- *    failed terminal commit), once the subscription has delivered everything it had.
+ *    failed terminal commit), once the subscription has delivered everything it had;
+ *  - [[cancel]], when the caller cancels the subscription it was handed.
  *
  * Ending calls `onEnd` and cancels the subscription it is attached to - from the listener when the
  * end is an event, so the cancel neither waits nor interrupts. From then on it passes on nothing, so
@@ -68,6 +69,16 @@ final private[agent] class RunScope(runId: RunId, listener: StreamEvent => Unit,
     subscription.set(Some(s))
     if ended.get then s.cancel()
 
+  /**
+   * Ends for a caller cancelling the subscription it was handed: if the scope has not begun to end,
+   * cancels the subscription - off the listener, so once this returns no listener call is running
+   * and none will start - then calls `onEnd`. If it has, waits for that end, which cancels the
+   * subscription before it completes, rather than cancelling it during `onEnd`. Once only, as every
+   * end is; a second cancel returns at once.
+   */
+  def cancel(): Unit =
+    if !endCancelling() then finished.join(): Unit
+
   /** Whether the scope has ended. */
   def isEnded: Boolean = ending.get
 
@@ -111,15 +122,24 @@ final private[agent] class RunScope(runId: RunId, listener: StreamEvent => Unit,
       val idleFor = (System.nanoTime() - math.max(lastActivity, since)).nanos
       if finished.isDone then done = true
       else if calls.get == 0 && idleFor >= quiet then
-        if ending.compareAndSet(false, true) then
-          subscription.get.foreach(_.cancel())
-          onEnd()
-          ended.set(true)
-          finished.complete(()): Unit
+        endCancelling(): Unit
         done = true
       else
         val wait = if calls.get == 0 then quiet - idleFor else quiet
         Try(finished.get(math.max(1L, wait.toMillis), TimeUnit.MILLISECONDS)): Unit
+
+  /**
+   * Ends - unless an end has begun - cancelling first, so no listener call follows, then calling
+   * `onEnd`: the end of [[closeWhenQuiet]] and [[cancel]]. Whether this call ended the scope.
+   */
+  private def endCancelling(): Boolean =
+    val won = ending.compareAndSet(false, true)
+    if won then
+      subscription.get.foreach(_.cancel())
+      onEnd()
+      ended.set(true)
+      finished.complete(()): Unit
+    won
 
 private[agent] object RunScope:
 

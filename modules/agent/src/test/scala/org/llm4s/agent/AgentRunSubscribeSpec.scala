@@ -12,6 +12,10 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{ Millis, Seconds, Span }
 import upickle.default.{ macroRW, ReadWriter }
+import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
+import org.slf4j.LoggerFactory
 
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.AtomicBoolean
@@ -140,6 +144,27 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     seen.get shouldBe true
   }
 
+  it should "not wait for a subscribe listener whose subscription the caller cancelled before the terminal event" in {
+    val logger   = LoggerFactory.getLogger(classOf[AgentRun]).asInstanceOf[LogbackLogger]
+    val appender = new ListAppender[ILoggingEvent]()
+    appender.start()
+    logger.addAppender(appender)
+    val gate  = new CountDownLatch(1)
+    val agent = agentOf(Scripted(gate, Right(answer("hi"))))
+    val run   = ok(agent.start(ThreadId("s1f"), "hello"))
+    val c     = Received()
+    val sub   = ok(run.subscribe()(c.listener))
+    sub.cancel()
+    gate.countDown()
+    val started = System.nanoTime()
+    ok(run.await()).answer shouldBe Some("hi")
+    val took = (System.nanoTime() - started).nanos
+    logger.detachAppender(appender)
+    took should be < 1.second
+    c.terminalSeen shouldBe false
+    appender.list.asScala.filter(_.getLevel == Level.WARN) shouldBe empty
+  }
+
   "AgentRun.subscribe" should "replay a late subscriber's durable events from the run's start" in {
     val gate  = new CountDownLatch(1)
     val agent = agentOf(Scripted(gate, Right(answer("hi"))))
@@ -264,6 +289,56 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     val sub = CountingSubscription()
     scope.attach(sub)
     sub.cancels.get shouldBe 1
+  }
+
+  it should "end once, cancelling its subscription, when the caller cancels before the terminal event" in {
+    val c     = Received()
+    val ends  = new java.util.concurrent.atomic.AtomicInteger(0)
+    val scope = RunScope(RunId("r1"), c.listener, () => ends.incrementAndGet(): Unit)
+    val sub   = CountingSubscription()
+    scope.attach(sub)
+    scope(record("r1", 1, RunEvent.RunStarted(None, None)))
+    scope.cancel()
+    scope.isEnded shouldBe true
+    scope.awaitEnd(Duration.Zero) shouldBe Right(true)
+    sub.cancels.get shouldBe 1
+    ends.get shouldBe 1
+    scope(record("r1", 2, RunEvent.RunCompleted)) // the race's loser: passed on to nobody, ends nothing
+    scope.cancel()
+    scope.closeWhenQuiet(10.millis)
+    ends.get shouldBe 1
+    c.all shouldBe Vector(record("r1", 1, RunEvent.RunStarted(None, None)))
+  }
+
+  it should "end once when the caller cancels after the terminal event, still cancelling the subscription" in {
+    val ends  = new java.util.concurrent.atomic.AtomicInteger(0)
+    val scope = RunScope(RunId("r1"), _ => (), () => ends.incrementAndGet(): Unit)
+    val sub   = CountingSubscription()
+    scope.attach(sub)
+    scope(record("r1", 1, RunEvent.RunCompleted))
+    scope.cancel()
+    ends.get shouldBe 1
+    sub.cancels.get should be >= 1
+  }
+
+  it should "end exactly once when a caller's cancel races the terminal event" in {
+    (1 to 200).foreach { i =>
+      val ends  = new java.util.concurrent.atomic.AtomicInteger(0)
+      val scope = RunScope(RunId("r1"), _ => (), () => ends.incrementAndGet(): Unit)
+      scope.attach(CountingSubscription())
+      val go = new CountDownLatch(1)
+      val terminal = Thread.ofVirtual().start { () =>
+        go.await(); scope(record("r1", i.toLong, RunEvent.RunCompleted))
+      }
+      val cancel = Thread.ofVirtual().start { () =>
+        go.await(); scope.cancel()
+      }
+      go.countDown()
+      terminal.join()
+      cancel.join()
+      ends.get shouldBe 1
+      scope.awaitEnd(Duration.Zero) shouldBe Right(true)
+    }
   }
 
   it should "end once on a Disconnected, after passing it on" in {
