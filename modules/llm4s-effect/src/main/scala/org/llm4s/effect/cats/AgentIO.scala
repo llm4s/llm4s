@@ -19,7 +19,9 @@ import org.llm4s.types.Result
  *
  * `stream`, `streamResume` and `streamRecover` run a turn as an fs2 stream of its events
  * ([[AgentStreamItem.Event]]), then its result ([[AgentStreamItem.Done]]); interrupting the stream
- * cancels the turn as cancelling `run` does.
+ * cancels the turn as cancelling `run` does. Stopping early (`take(n)`) also cancels the turn, and a
+ * consumer too slow for the stream's buffer (the subscription disconnects as lagging) fails the
+ * stream and cancels the run.
  *
  * A model call that throws instead of returning `Left` ends the turn with a
  * `GraphError.NodeFailed` whose `cause` is the `LLMError` the runtime made of the throwable; it is
