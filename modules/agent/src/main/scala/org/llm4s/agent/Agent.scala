@@ -135,7 +135,8 @@ final class Agent private[agent] (
    * [[start]], with `listener` subscribed before the turn begins, so it receives every event of the
    * turn - live text deltas included - until the turn's terminal event, or a `Disconnected` if it
    * fell behind or threw; the subscription then ends itself. A turn that ends without a terminal
-   * event (a crash, or a failed commit) ends it once it has delivered what it had. A refused start
+   * event (a crash, or a failed commit) ends it as soon as it has delivered the turn's last event,
+   * at the run's end-of-run barrier. A refused start
    * (a blank query, a busy thread, ...) is `Left`, and the listener hears nothing. The run's
    * [[AgentRun.await]] returns only once `listener` has returned from the turn's last event.
    */
@@ -159,7 +160,7 @@ final class Agent private[agent] (
   /**
    * [[stream]], calling `onEnd` once when the subscription ends - after the terminal event or a
    * `Disconnected` has been passed to `listener`, or, for a turn that ends without a terminal event,
-   * once the subscription has delivered what it had. For bridges (the fs2 and ZIO streams) that must
+   * once the subscription has delivered the turn's last event. For bridges (the fs2 and ZIO streams) that must
    * end without a terminal event too. Not called for a refused start. Unlike [[stream]]'s, the run's
    * `await` does not wait for `listener`: a bridge's release cancels and awaits the run while its
    * own listener may still be delivering.

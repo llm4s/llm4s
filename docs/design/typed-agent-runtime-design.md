@@ -933,7 +933,19 @@ Decisions:
 - **Observers at admission.** `GraphRuntime.start`/`recover`/`resume` take `observer: Option[Observer]`,
   subscribed after the claim commits and before the run thread starts. `AgentRun.subscribe(capacity)`
   is run-scoped (this run's `Durable`, `Live`, `LiveGap`, and a `Disconnected` only for `Lagging`,
-  `ListenerFailed` or `ReplayFailed`), ending after the terminal event. `Agent.stream`, `streamResume`
+  `ListenerFailed` or `ReplayFailed`), ending after the terminal event. A run that commits no
+  terminal event (a crash, or a failed terminal commit) ends its run-scoped listeners at a
+  deterministic barrier ([#1378](https://github.com/llm4s/llm4s/issues/1378)): as the run thread
+  exits - after every event of the run was handed to the hub, and before it releases the thread
+  claim, so no later run's event can precede the barrier - the run's handle gives each subscription
+  made for the run (its observer's, each `subscribe`) an end-of-run marker, queued behind everything
+  already queued, or, for a subscription still replaying, behind everything its switch to live
+  catches up. The dispatcher never passes the marker to the listener as an event: it calls the
+  run-scoped listener's `runEnded(runId)`, which ends a scope of that run - once, sharing the end's
+  CAS with the terminal event, a `Disconnected` and the caller's cancel. Thread-scoped subscribers
+  are never given one. The marker is exempt from the queue's capacity, so it never makes a
+  subscriber lag; a subscriber already lagging is given none and ends with its
+  `Disconnected`. This replaced #1329's 1 s quiet close. `Agent.stream`, `streamResume`
   and `streamRecover` subscribe a listener at admission (capacity `Agent.StreamCapacity`, 1024).
   `AgentRun.await` returns only once each such listener has returned from the run's last event,
   waiting at most `AgentRun.Drain` (5 s), then a WARN; the bridges' private variants do not drain.
@@ -978,8 +990,6 @@ Limits:
 - The kernel's `TaskFailed` and `RunFailed` events store error messages, so a guardrail reason that quotes
   user text reaches the log through them. This predates #1329; `agent.*` payloads are content-free.
 - Live events are not replayed, and a late `AgentRun.subscribe` misses earlier ones.
-- A run that ends without a terminal event (a crash, or a failed terminal commit) ends its listeners
-  after a 1 s quiet period, not at a deterministic barrier; [#1378](https://github.com/llm4s/llm4s/issues/1378) replaces it.
 - An approved or edited tool call yields two `agent.tool_executed` events for one call id across runs.
 - `agent.guardrail_blocked` is a guardrail's block only; other middleware refusals emit no agent event.
 

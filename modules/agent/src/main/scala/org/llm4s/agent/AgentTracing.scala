@@ -23,9 +23,9 @@ import scala.util.{ Failure, Try }
  * takes the run's result from its handle (set just after the closing commit) and traces one
  * [[TraceEvent.AgentRunEnded]], its status derived by [[AgentRun.status]] as `await` derives it; a
  * failed run also traces `ErrorOccurred`. A run that ends without a terminal event (a crash, or a
- * failed terminal commit) traces no `AgentRunEnded`: once the subscription has delivered what it
- * had, its error is traced as `ErrorOccurred` and logged at WARN. Tracing failures are logged at
- * WARN and never fail the run.
+ * failed terminal commit) traces no `AgentRunEnded`: once the subscription has delivered the run's
+ * last event, at the run's end-of-run barrier, its error is traced as `ErrorOccurred` and logged at
+ * WARN. Tracing failures are logged at WARN and never fail the run.
  */
 final private[agent] class AgentTracing(
   handle: RunHandle[TurnOutput],
@@ -53,7 +53,6 @@ final private[agent] class AgentTracing(
       s =>
         subscription.set(Some(s))
         scope.attach(s)
-        RunScope.watch(handle, scope)
     )
 
   private def onEvent(event: StreamEvent): Unit = event match
@@ -99,8 +98,9 @@ final private[agent] class AgentTracing(
   /**
    * The scope's end. After the terminal event (traced by [[ended]]) or a `Disconnected` (logged) it
    * only releases `detach`. Otherwise the run ended without a terminal event - it crashed, or its
-   * terminal commit failed - and its result is already set (`RunScope.watch` ends the scope only
-   * after it): warns, and traces its error as `ErrorOccurred`; it traces no `AgentRunEnded`.
+   * terminal commit failed: its end-of-run barrier ended the scope. Takes the run's error from its
+   * result, which the run thread sets just after queuing that barrier, then warns and traces the
+   * error as `ErrorOccurred`; it traces no `AgentRunEnded`.
    */
   private def scopeEnded(): Unit =
     if !terminalSeen.get && !disconnected.get then

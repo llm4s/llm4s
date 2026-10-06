@@ -608,6 +608,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PlanExecutionError`, `STTError.ProcessingFailed`, `TTSError.SynthesisFailed`, `EmbeddingError`, `RerankError` and
   `EvaluationError` stay unmarked: each is one type whose answer depends on a value, not the type. The error
   handling and Basic Usage guides drop the `MatchError` caveat, and Basic Usage calls `isRecoverable` directly.
+- **A crashed run's event stream ends at a barrier, not after a quiet period**
+  ([#1378](https://github.com/llm4s/llm4s/issues/1378), `llm4s-agent`, `llm4s-effect`, `llm4s-zio`): a run
+  that commits no terminal event (`GraphError.RunCrashed`, or `CheckpointWriteFailed` on its terminal
+  commit) used to end its run-scoped listeners - `Agent.stream*`, `AgentRun.subscribe`, agent tracing,
+  `AgentIO.stream*`, `AgentZ.stream*` - once they had been idle for 1 s, which added a second to the
+  stream's end and to `AgentRun.await`. As the run ends - after handing over its last event, before
+  releasing the thread to a later run - each of the run's subscriptions now gets an end-of-run marker
+  queued behind the run's last event (behind its replay, for a `subscribe` made after the run ended),
+  and reaching it ends the listener: the stream ends, and `await` returns, as soon as the last event
+  is delivered. The marker is never passed to a listener and is exempt from the queue's capacity, so
+  it never makes a subscriber lag; a subscriber already lagging gets none and ends with its
+  `Disconnected`. Thread-scoped `GraphRuntime.subscribe` and `RunHandle.subscribe` listeners never get
+  one. No public API changes.
 - **Stage 1 migration: agent runtime** ([#1328](https://github.com/llm4s/llm4s/issues/1328), BREAKING,
   `llm4s-agent`, `llm4s-effect`, `llm4s-zio`, `workspaceClient`): `Agent` runs on `GraphRuntime`
   through a generalised `ToolLoop`; the graph is the only agent loop, and `AgentState` and the
