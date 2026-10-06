@@ -1,8 +1,6 @@
 package org.llm4s.assistant
 
-import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.error.AssistantError
 import org.llm4s.types.{ SessionId, DirectoryPath, FilePath }
 import cats.implicits._
@@ -22,8 +20,8 @@ import upickle.default._
  * across multiple interactions.
  *
  * == Key Features ==
- *  - '''Session Save''': Persists AgentState as JSON with markdown companion
- *  - '''Session Load''': Restores sessions with tool registry reconstruction
+ *  - '''Session Save''': Persists the conversation's messages as JSON with markdown companion
+ *  - '''Session Load''': Restores the messages, which the next turn imports into a new agent thread
  *  - '''Session Listing''': Shows recent sessions sorted by modification time
  *  - '''Filename Sanitization''': Safely handles special characters in titles
  *
@@ -34,7 +32,7 @@ import upickle.default._
  *
  * == Usage Example ==
  * {{{
- * val manager = new SessionManager(DirectoryPath("/path/to/sessions"), agent)
+ * val manager = new SessionManager(DirectoryPath("/path/to/sessions"))
  *
  * // Save current session
  * val info = manager.saveSession(sessionState, Some("My Conversation"))
@@ -43,85 +41,40 @@ import upickle.default._
  * val sessions = manager.listRecentSessions(limit = 5)
  *
  * // Load a previous session
- * val loaded = manager.loadSession("My Conversation", tools)
+ * val loaded = manager.loadSession("My Conversation")
  * }}}
  *
  * @param sessionDir Directory path where sessions are stored
- * @param agent Agent instance for markdown formatting
  * @param uniqueSuffix Generator for the suffix used to disambiguate filename collisions; injectable for testing
  * @see [[SessionState]] for the state being persisted
  * @see [[SessionInfo]] for session metadata returned after save
  */
 class SessionManager(
   sessionDir: DirectoryPath,
-  agent: Agent,
   uniqueSuffix: () => String = () => System.nanoTime().toString
 ) {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
-   * Converts SessionState to JSON format for persistence (using upickle automatic derivation)
-   * Note: We handle ToolRegistry separately since it contains function references
+   * Converts SessionState to JSON for persistence: its identity and the conversation's messages.
+   * The agent thread is not saved; loading imports the messages into a new one.
    */
-  private def sessionStateToJson(state: SessionState): Either[AssistantError, String] = {
-    logger.debug("Starting SessionState serialization")
-
-    // Test each component separately
-    val sessionIdJson = ujson.Str(state.sessionId.value)
-    logger.debug("SessionId serialized successfully")
-
-    val sessionDirJson = ujson.Str(state.sessionDir.value)
-    logger.debug("SessionDir serialized successfully")
-
-    val createdJson = ujson.Str(state.created.toString)
-    logger.debug("Created timestamp serialized successfully")
-
-    val agentStateJsonResult: Either[AssistantError, ujson.Value] = state.agentState match {
-      case None =>
-        logger.debug("No agent state to serialize")
-        Right(ujson.Null)
-      case Some(agentState) =>
-        logger.debug("Serializing agent state components")
-
-        // Test conversation serialization
-        val conversationResult = Try(write(agentState.conversation)).toEither.left.map { ex =>
-          logger.error("Failed to serialize conversation", ex)
-          AssistantError.jsonSerializationFailed("Conversation", ex)
-        }
-
-        // Test status serialization
-        val statusResult = Try(write(agentState.status)).toEither.left.map { ex =>
-          logger.error("Failed to serialize agent status", ex)
-          AssistantError.jsonSerializationFailed("AgentStatus", ex)
-        }
-
-        for {
-          conversationJson <- conversationResult
-          _ = logger.debug("Conversation serialized successfully")
-          statusJson <- statusResult
-          _ = logger.debug("AgentStatus serialized successfully")
-        } yield ujson.Obj(
-          "conversation" -> ujson.read(conversationJson),
-          "initialQuery" -> agentState.initialQuery.map(ujson.Str.apply).getOrElse(ujson.Null),
-          "status"       -> ujson.read(statusJson),
-          "logs"         -> ujson.Arr.from(agentState.logs.map(ujson.Str.apply(_))),
-          "toolNames"    -> ujson.Arr.from(agentState.tools.tools.map(t => ujson.Str(t.name)))
+  private def sessionStateToJson(state: SessionState): Either[AssistantError, String] =
+    Try(writeJs(state.messages)).toEither
+      .leftMap { ex =>
+        logger.error("Failed to serialize messages", ex)
+        AssistantError.jsonSerializationFailed("Messages", ex)
+      }
+      .map { messagesJson =>
+        ujson.write(
+          ujson.Obj(
+            "sessionId"  -> ujson.Str(state.sessionId.value),
+            "sessionDir" -> ujson.Str(state.sessionDir.value),
+            "created"    -> ujson.Str(state.created.toString),
+            "messages"   -> messagesJson
+          )
         )
-    }
-
-    agentStateJsonResult.map { agentStateJson =>
-      val jsonObj = ujson.Obj(
-        "sessionId"  -> sessionIdJson,
-        "sessionDir" -> sessionDirJson,
-        "created"    -> createdJson,
-        "agentState" -> agentStateJson
-      )
-
-      val result = ujson.write(jsonObj)
-      logger.debug("SessionState serialization completed successfully")
-      result
-    }
-  }
+      }
 
   /**
    * Ensures the session directory exists
@@ -137,20 +90,20 @@ class SessionManager(
    * Saves a session in both JSON and markdown formats
    */
   def saveSession(state: SessionState, title: Option[String] = None): Either[AssistantError, SessionInfo] =
-    state.agentState match {
-      case None =>
-        Left(AssistantError.SessionError("No agent state to save", SessionId("unknown"), "save"))
-      case Some(agentState) =>
+    state.messages match {
+      case messages if messages.isEmpty =>
+        Left(AssistantError.SessionError("No conversation to save", SessionId("unknown"), "save"))
+      case messages =>
         val sessionTitle = title.getOrElse("Session")
         logger.info("Saving session {} with title: {}", state.sessionId, sessionTitle)
         ensureSessionDirectory().flatMap { _ =>
           createFilePaths(title).flatMap { case (jsonPath, markdownPath) =>
             for {
               jsonContent     <- createJsonContent(state)
-              markdownContent <- formatSessionContent(agentState, sessionTitle, state.created)
+              markdownContent <- formatSessionContent(messages, sessionTitle, state.created)
               jsonSize        <- writeSessionFile(jsonPath, jsonContent)
               _               <- writeSessionFile(markdownPath, markdownContent)
-              sessionInfo     <- createSessionInfo(state, sessionTitle, jsonPath, agentState, jsonSize)
+              sessionInfo     <- createSessionInfo(state, sessionTitle, jsonPath, messages, jsonSize)
             } yield {
               logger.info("Successfully saved session JSON: {} and markdown: {}", jsonPath, markdownPath)
               sessionInfo
@@ -166,49 +119,25 @@ class SessionManager(
     sessionStateToJson(state)
 
   /**
-   * Converts JSON back to SessionState for loading
-   * Note: We reconstruct ToolRegistry from the provided tools parameter
+   * Converts JSON back to SessionState for loading: the saved messages become the history the
+   * next turn imports.
    */
-  private def jsonToSessionState(json: ujson.Value, tools: ToolRegistry): SessionState = {
+  private def jsonToSessionState(json: ujson.Value): SessionState = {
     val obj = json.obj
-    logger.debug("Parsing sessionId...")
-    val sessionId = SessionId(obj("sessionId").str)
-    logger.debug("Parsing sessionDir...")
-    val sessionDir = DirectoryPath(obj("sessionDir").str)
-    logger.debug("Parsing created timestamp...")
-    val created = LocalDateTime.parse(obj("created").str)
-
-    logger.debug("Parsing agentState...")
-    val agentState = obj("agentState") match {
-      case ujson.Null =>
-        logger.debug("AgentState is null")
-        None
-      case agentObj =>
-        val agentObjMap = agentObj.obj
-        logger.debug("Parsing conversation...")
-        val conversation = read[Conversation](agentObjMap("conversation"))
-        logger.debug("Parsing initialQuery...")
-        val initialQuery = agentObjMap.get("initialQuery") match {
-          case Some(ujson.Str(q)) => Some(q)
-          case Some(ujson.Null)   => None
-          case _                  => None
-        }
-        logger.debug("Parsing status...")
-        val status = read[AgentStatus](agentObjMap("status"))
-        logger.debug("Parsing logs...")
-        val logs = agentObjMap("logs").arr.map(_.str).toSeq
-        logger.debug("Creating AgentState...")
-        Some(AgentState(conversation, tools, initialQuery, status, logs))
-    }
-
-    logger.debug("Creating SessionState...")
-    SessionState(agentState, sessionId, sessionDir, created)
+    SessionState(
+      threadId = None,
+      last = None,
+      sessionId = SessionId(obj("sessionId").str),
+      sessionDir = DirectoryPath(obj("sessionDir").str),
+      created = LocalDateTime.parse(obj("created").str),
+      history = read[Vector[Message]](obj("messages"))
+    )
   }
 
   /**
    * Loads a session from JSON file by title
    */
-  def loadSession(sessionTitle: String, tools: ToolRegistry): Either[AssistantError, SessionState] = {
+  def loadSession(sessionTitle: String): Either[AssistantError, SessionState] = {
     val jsonPath = Paths.get(sessionDir.value, s"${sanitizeFilename(sessionTitle)}.json")
 
     for {
@@ -219,7 +148,7 @@ class SessionManager(
       json <- Try(ujson.read(jsonContent)).toEither
         .leftMap(ex => AssistantError.jsonDeserializationFailed("JSON", ex))
       _ = logger.debug("JSON content keys: {}", json.obj.keySet.mkString(", "))
-      state <- Try(jsonToSessionState(json, tools)).toEither
+      state <- Try(jsonToSessionState(json)).toEither
         .leftMap { ex =>
           logger.error("Failed to deserialize SessionState. JSON content preview: {}", jsonContent.take(500))
           logger.error("Deserialization error details:", ex)
@@ -291,15 +220,11 @@ class SessionManager(
    * Formats session content as markdown
    */
   private def formatSessionContent(
-    agentState: AgentState,
+    messages: Vector[Message],
     title: String,
     created: LocalDateTime
   ): Either[AssistantError, String] =
-    Try {
-      val header        = createSessionHeader(title, created, agentState)
-      val agentMarkdown = agent.formatStateAsMarkdown(agentState)
-      header + agentMarkdown
-    }.toEither.leftMap(ex =>
+    Try(createSessionHeader(title, created, messages) + formatMessages(messages)).toEither.leftMap(ex =>
       AssistantError.SerializationError(
         s"Failed to format session content: ${ex.getMessage}",
         "SessionContent",
@@ -307,6 +232,20 @@ class SessionManager(
         Some(ex)
       )
     )
+
+  /** One markdown section per message, with each assistant tool call's name and arguments. */
+  private def formatMessages(messages: Vector[Message]): String =
+    messages.zipWithIndex
+      .map { case (message, i) =>
+        val calls = message match {
+          case a: AssistantMessage =>
+            a.toolCalls.map(c => s"\n- Tool call `${c.name}` (${c.id}): `${c.arguments.render()}`").mkString
+          case t: ToolMessage => s"\n\n_Result of tool call ${t.toolCallId}_"
+          case _              => ""
+        }
+        s"### ${i + 1}. ${message.role}\n\n${message.content}$calls\n"
+      }
+      .mkString("\n")
 
   /**
    * Writes session content to file and returns file size
@@ -329,7 +268,7 @@ class SessionManager(
     state: SessionState,
     title: String,
     filePath: Path,
-    agentState: AgentState,
+    messages: Vector[Message],
     fileSize: Long
   ): Either[AssistantError, SessionInfo] =
     Try {
@@ -338,7 +277,7 @@ class SessionManager(
         title = title,
         filePath = FilePath(filePath.toString),
         created = state.created,
-        messageCount = agentState.conversation.messages.length,
+        messageCount = messages.length,
         fileSize = fileSize
       )
     }.toEither.leftMap(ex =>
@@ -353,11 +292,11 @@ class SessionManager(
   /**
    * Creates session header markdown
    */
-  private def createSessionHeader(title: String, created: LocalDateTime, agentState: AgentState): String =
+  private def createSessionHeader(title: String, created: LocalDateTime, messages: Vector[Message]): String =
     s"""# $title
        |
        |**Created:** ${created.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))}
-       |**Tools Available:** ${agentState.tools.tools.map(_.name).mkString(", ")}
+       |**Messages:** ${messages.length}
        |
        |---
        |

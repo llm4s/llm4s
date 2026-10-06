@@ -5,6 +5,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.toolapi.ToolRegistry
 
 import java.util.Objects
 
@@ -58,10 +59,19 @@ object Llm4s {
 
   /**
    * Wraps a [[JLlmClient]] in a [[JAgent]] ready to accept natural-language
-   * queries and call tools.
+   * queries, with no tools.
    */
-  def createAgent(client: JLlmClient): JAgent = {
+  def createAgent(client: JLlmClient): JAgent =
+    createAgent(client, ToolRegistry.empty)
+
+  /**
+   * Wraps a [[JLlmClient]] in a [[JAgent]] that can call `tools`. Tools belong
+   * to the agent: an agent whose tools cannot be offered together (a name clash,
+   * an invalid schema) fails every run with the reason.
+   */
+  def createAgent(client: JLlmClient, tools: ToolRegistry): JAgent = {
     Objects.requireNonNull(client, "client must not be null")
-    new JAgent(new Agent(client.underlying))
+    Objects.requireNonNull(tools, "tools must not be null")
+    new JAgent(Agent.builder("assistant", client.underlying).withTools(tools).build())
   }
 }

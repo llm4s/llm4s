@@ -59,7 +59,7 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
             ujson.Obj(
               "name"        -> "test-tool",
               "description" -> "A test tool",
-              "parameters" -> ujson.Obj(
+              "inputSchema" -> ujson.Obj(
                 "type"       -> "object",
                 "properties" -> ujson.Obj()
               )
@@ -88,11 +88,10 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
     val result: org.llm4s.types.Result[Seq[ToolFunction[?, ?]]] = client.getTools()
 
     // Assert
-    result.isRight shouldBe true
-    result.value should be(Seq.empty[ToolFunction[?, ?]])
+    result.map(_.map(_.name)) shouldBe Right(Seq("test-tool"))
   }
 
-  it should "return empty sequence when initialization fails" in {
+  it should "fail when initialization fails" in {
     // Arrange
     val client        = new MCPClientImpl(config)
     val mockTransport = mock[MCPTransportImpl]
@@ -107,11 +106,10 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
     val result = client.getTools()
 
     // Assert
-    result.isRight shouldBe true
-    result.value shouldBe empty
+    result.isLeft shouldBe true
   }
 
-  it should "return empty sequence when no transport is available" in {
+  it should "fail when no transport is available" in {
     // Arrange
     val client = new MCPClientImpl(config)
     client.transport = None
@@ -120,11 +118,10 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
     val result = client.getTools()
 
     // Assert
-    result.isRight shouldBe true
-    result.value shouldBe empty
+    result.isLeft shouldBe true
   }
 
-  it should "handle invalid tool responses" in {
+  it should "fail on an invalid tool listing" in {
     // Arrange
     val client        = new MCPClientImpl(config)
     val mockTransport = mock[MCPTransportImpl]
@@ -156,7 +153,6 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
     val result = client.getTools()
 
     // Assert
-    result.isRight shouldBe true
-    result.value shouldBe empty
+    result.isLeft shouldBe true
   }
 }

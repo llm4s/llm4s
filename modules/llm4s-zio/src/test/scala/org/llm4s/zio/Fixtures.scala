@@ -4,7 +4,10 @@ import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicReference }
 import java.util.concurrent.locks.LockSupport
 
-import org.llm4s.error.{ CancelledError, SimpleError }
+import org.llm4s.agent.{ Agent, AgentBuilder }
+import org.llm4s.agent.graph.{ GraphError, RunContext, ThreadId }
+import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId }
+import org.llm4s.error.{ CancelledError, LLMError, SimpleError, UnknownError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
@@ -147,6 +150,38 @@ private[zio] object Fixtures {
       exited.countDown()
       Left(CancelledError("test"))
     })
+  }
+
+  /** An [[Agent]] over `client`, configured by `configure`; a builder that does not build fails the test. */
+  def agentOf(client: LLMClient)(configure: AgentBuilder => AgentBuilder = identity): Agent =
+    configure(Agent.builder("test", client)).build() match {
+      case Right(agent) => agent
+      case Left(e)      => throw new AssertionError(s"agent did not build: ${e.message}")
+    }
+
+  /** The error a node failed with: the runtime wraps a failing model call in `NodeFailed`. */
+  def causeOf(e: LLMError): LLMError = e match {
+    case GraphError.NodeFailed(_, _, cause) => cause
+    case other                              => other
+  }
+
+  /** The throwable a node threw, as the runtime kept it: `NodeFailed` over an `UnknownError` over the throwable. */
+  def thrownOf(e: LLMError): Option[Throwable] = causeOf(e) match {
+    case u: UnknownError => Some(u.cause)
+    case _               => None
+  }
+
+  /** A middleware that records the thread of the run it sees, for specs that need to `recover` a failed run. */
+  def threadCapture(): (AgentMiddleware, AtomicReference[Option[ThreadId]]) = {
+    val thread = new AtomicReference[Option[ThreadId]](None)
+    val middleware = new AgentMiddleware {
+      val id: MiddlewareId = MiddlewareId("capture")
+      override def beforeAgent(text: String, context: RunContext): Result[String] = {
+        thread.set(Some(context.position.threadId))
+        Right(text)
+      }
+    }
+    (middleware, thread)
   }
 
   val boom: Result[Completion] = Left(SimpleError("boom"))

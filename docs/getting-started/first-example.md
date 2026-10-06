@@ -210,14 +210,16 @@ class ToolExample(client: LLMClient) {
       function = getWeather _
     )
 
-    val tools = new ToolRegistry(Seq(weatherTool))
-    val agent = new Agent(client)
-    
-    val result = agent.run("What's the weather in Paris?", tools)
+    val result = for {
+      agent <- Agent.builder("weather-agent", client)
+        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .build()
+      result <- agent.run("What's the weather in Paris?")
+    } yield result
 
     result.fold(
       error => println(s"Error: $error"),
-      state => println(s"Final response: ${state.finalResponse}")
+      r => println(s"Final response: ${r.answer.getOrElse(r.status.toString)}")
     )
   }
 }
@@ -354,20 +356,19 @@ class ComprehensiveAgent(client: LLMClient) {
       function = calculate _
     )
 
-    val tools = new ToolRegistry(Seq(calcTool))
-    val agent = new Agent(client)
-
-    // Run agent with tool support
-    val result = agent.run(
-      "What is 6 times 7? Please use the calculator.",
-      tools
-    )
+    // Tools belong to the agent, so give them to the builder
+    val result = for {
+      agent <- Agent.builder("calc-agent", client)
+        .withTools(new ToolRegistry(Seq(calcTool)))
+        .build()
+      result <- agent.run("What is 6 times 7? Please use the calculator.")
+    } yield result
 
     result match {
-      case Right(state) =>
+      case Right(r) =>
         println(s"✅ Success!")
-        println(s"Response: ${state.finalResponse}")
-        println(s"Messages exchanged: ${state.messages.length}")
+        println(s"Response: ${r.answer.getOrElse(r.status.toString)}")
+        println(s"Messages exchanged: ${r.messages.length}")
 
       case Left(error) =>
         println(s"❌ Error: $error")
@@ -418,9 +419,10 @@ val response = client.complete(
 
 ```scala
 // Assuming client is injected
-val tools = new ToolRegistry(myTools)
-val agent = new Agent(client)
-val state = agent.run("User query", tools)
+val result = for {
+  agent  <- Agent.builder("assistant", client).withTools(new ToolRegistry(myTools)).build()
+  result <- agent.run("User query")
+} yield result
 ```
 
 ### Pattern 4: Streaming

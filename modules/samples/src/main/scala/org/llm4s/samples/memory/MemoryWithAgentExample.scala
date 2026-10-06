@@ -4,7 +4,7 @@ import org.llm4s.agent.Agent
 import org.llm4s.agent.memory._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.samples.util.AgentResults
 import org.slf4j.LoggerFactory
 import scala.util.chaining._
 
@@ -30,8 +30,6 @@ object MemoryWithAgentExample {
       registryService <- Llm4sConfig.modelRegistryService()
       given org.llm4s.model.ModelRegistryService = registryService
       client <- LLMConnect.getClient(providerCfg)
-      agent = new Agent(client)
-
       // === Part 1: Initialize Memory with Background Knowledge ===
       _ = logger.info("1. Setting up memory with background knowledge")
       _ = logger.info("-" * 40)
@@ -106,14 +104,15 @@ Provide responses tailored to the user's experience level and preferences."""
       _ = logger.info("3. Running agent with memory context")
       _ = logger.info("-" * 40)
 
-      state1 <- agent.run(
-        query = "How should I handle errors in my API endpoints?",
-        tools = ToolRegistry.empty,
-        systemPromptAddition = Some(systemPrompt)
-      )
+      agent <- Agent
+        .builder("memory-with-agent", client)
+        .withSystemPrompt(systemPrompt)
+        .build()
+
+      state1 <- agent.run("How should I handle errors in my API endpoints?")
 
       _ = {
-        val r = state1.conversation.messages.last.content
+        val r = AgentResults.answerOrStatus(state1)
         logger.info("Agent response (context-aware):")
         logger.info("{}", r.take(500) + (if (r.length > 500) "..." else ""))
       }
@@ -122,7 +121,8 @@ Provide responses tailored to the user's experience level and preferences."""
       _ = logger.info("4. Recording the conversation in memory")
       _ = logger.info("-" * 40)
 
-      m6 <- m5.recordConversation(state1.conversation.messages.toSeq, "session-1")
+      _  <- AgentResults.requireCompleted(state1) // record only a completed run
+      m6 <- m5.recordConversation(state1.messages, "session-1")
 
       _ <- m6.stats.tap {
         case Right(s) =>
@@ -151,14 +151,15 @@ Provide responses tailored to the user's experience level and preferences."""
       )
 
       _ = {
-        val r = state2.conversation.messages.last.content
+        val r = AgentResults.answerOrStatus(state2)
         logger.info("Follow-up response:")
         logger.info("{}", r.take(500) + (if (r.length > 500) "..." else ""))
       }
 
       // Record follow-up
+      _ <- AgentResults.requireCompleted(state2)
       m7 <- m6.recordMessage(
-        state2.conversation.messages.last,
+        state2.messages.last,
         "session-1",
         Some(0.8)
       )

@@ -1,9 +1,9 @@
 package org.llm4s.samples.agent
 
-import org.llm4s.agent.{ Agent, AgentContext }
+import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.MessageRole.Assistant
+import org.llm4s.samples.util.AgentResults
 import org.llm4s.mcp._
 import org.llm4s.toolapi.tools.WeatherTool
 import org.slf4j.LoggerFactory
@@ -40,7 +40,6 @@ object MCPAgentExample {
       given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
-      agent = new Agent(client)
       query = "Convert 100 USD to EUR and then check the weather in Paris"
       _     = logger.info(s"🎯 Running agent query: $query")
       agentState <- Using.resource(new MCPToolRegistry(Seq(serverConfig), Seq(weatherTool), 10.minutes)) {
@@ -51,29 +50,28 @@ object MCPAgentExample {
             val source = if (tool.description == "Retrieves current weather for the given location.") "local" else "MCP"
             logger.info(s"   ${index + 1}. ${tool.name} ($source): ${tool.description}")
           }
-          agent.run(
-            query = query,
-            tools = mcpRegistry,
-            maxSteps = Some(5),
-            context = AgentContext(traceLogPath = Some(".log/mcp-agent-example.md"))
-          )
+          Agent
+            .builder("mcp-agent", client)
+            .withTools(mcpRegistry)
+            .withMaxSteps(5)
+            .build()
+            .flatMap(_.run(query))
       }
     } yield agentState
 
     val duration = System.currentTimeMillis() - startTime
     agentState match {
       case Right(finalState) =>
-        logger.info(s"✅ Query successfully completed in ${duration}ms")
-        // Show final answer
-        finalState.conversation.messages.findLast(_.role == Assistant) match {
-          case Some(msg) =>
-            logger.info(s"💬 Agent Response: ${msg.content}")
-          case None =>
-            logger.warn("❌ No final answer found")
+        finalState.status match {
+          case AgentStatus.Completed(answer) =>
+            logger.info(s"✅ Query successfully completed in ${duration}ms")
+            logger.info(s"💬 Agent Response: $answer")
+          case other =>
+            logger.warn(s"❌ Query ended without an answer after ${duration}ms: ${AgentResults.describe(other)}")
         }
 
         // Show execution summary
-        logger.info(s"📊 Summary: ${finalState.logs.size} execution steps")
+        logger.info(s"📊 Summary: ${finalState.messages.size} messages, status ${finalState.status}")
 
       case Left(error) =>
         logger.info(s"❌ Query failed to completed in ${duration}ms")

@@ -67,7 +67,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val agent  = Llm4s.createAgent(client)
     val result = agent.run("What is 6*7?")
     result.isSuccess shouldBe true
-    result.get().status shouldBe AgentStatus.Complete
+    result.get().status shouldBe a[AgentStatus.Completed]
   }
 
   it should "surface the LLM response in the final conversation" in {
@@ -75,7 +75,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val agent  = Llm4s.createAgent(client)
     val result = agent.run("Capital of France?")
     result.isSuccess shouldBe true
-    result.get().conversation.messages.last.content shouldBe "Paris"
+    result.get().messages.last.content shouldBe "Paris"
   }
 
   // ── 2. LlmResult<String> mapping from Right and Left Either values ──
@@ -111,7 +111,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     ex.getMessage should include("oops")
   }
 
-  it should "wrap APIError in LlmException" in {
+  it should "wrap the run's failure, carrying the APIError, in LlmException" in {
     val underlying = new LLMClient {
       override def complete(conv: Conversation, opts: CompletionOptions): Result[Completion] =
         Left(APIError("test-provider", "rate limited"))
@@ -128,7 +128,10 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val result = agent.run("hello")
     result.isFailure shouldBe true
     val ex = intercept[LlmException](result.get())
-    ex.error shouldBe a[APIError]
+    ex.error match {
+      case org.llm4s.agent.graph.GraphError.NodeFailed(_, _, cause) => cause shouldBe a[APIError]
+      case other                                                    => fail(s"expected NodeFailed, got $other")
+    }
   }
 
   // ── 4. ConversationBuilder multi-turn flow end-to-end ──
@@ -185,17 +188,17 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val tools  = echoToolRegistry()
     val mock   = toolCallingClient("echo_tool", ujson.Obj("input" -> ujson.Str("world")), "Done!")
     val client = new JLlmClient(mock)
-    val agent  = Llm4s.createAgent(client)
-    val result = agent.run("Echo 'world'", tools)
+    val agent  = Llm4s.createAgent(client, tools)
+    val result = agent.run("Echo 'world'")
     result.isSuccess shouldBe true
-    result.get().status shouldBe AgentStatus.Complete
+    result.get().status shouldBe a[AgentStatus.Completed]
   }
 
   it should "actually execute the tool and feed its output back into the conversation" in {
     val mock        = toolCallingClient("echo_tool", ujson.Obj("input" -> ujson.Str("world")), "Done!")
-    val agent       = Llm4s.createAgent(new JLlmClient(mock))
-    val result      = agent.run("Echo 'world'", echoToolRegistry())
-    val toolOutputs = result.get().conversation.messages.collect { case t: ToolMessage => t.content }
+    val agent       = Llm4s.createAgent(new JLlmClient(mock), echoToolRegistry())
+    val result      = agent.run("Echo 'world'")
+    val toolOutputs = result.get().messages.collect { case t: ToolMessage => t.content }
     toolOutputs should have size 1
     toolOutputs.head should include("echoed: world")
   }
@@ -204,7 +207,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val mock        = toolCallingClient("echo_tool", ujson.Obj("input" -> ujson.Str("world")), "Done!")
     val agent       = Llm4s.createAgent(new JLlmClient(mock))
     val result      = agent.run("Echo 'world'")
-    val toolOutputs = result.get().conversation.messages.collect { case t: ToolMessage => t.content }
+    val toolOutputs = result.get().messages.collect { case t: ToolMessage => t.content }
     toolOutputs.exists(_.contains("echoed: world")) shouldBe false
   }
 
@@ -212,12 +215,11 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val tools  = echoToolRegistry()
     val mock   = toolCallingClient("echo_tool", ujson.Obj("input" -> ujson.Str("test")), "All done")
     val client = new JLlmClient(mock)
-    val agent  = Llm4s.createAgent(client)
-    val result = agent.run("Echo 'test'", tools)
+    val agent  = Llm4s.createAgent(client, tools)
+    val result = agent.run("Echo 'test'")
     result.isSuccess shouldBe true
     val lastAssistantText = result
       .get()
-      .conversation
       .messages
       .collect { case m: AssistantMessage if m.toolCalls.isEmpty => m.content }
       .lastOption

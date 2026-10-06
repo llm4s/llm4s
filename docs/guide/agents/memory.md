@@ -297,30 +297,29 @@ val manager = SimpleMemoryManager(store = store)
 val result = for {
   providerConfig <- Llm4sConfig.provider()
   client <- LLMConnect.getClient(providerConfig)
-  agent = new Agent(client)
-
   // Get memory manager with existing data
   manager <- loadMemoryManager()
 
   // Get relevant context for the query
   context <- manager.getRelevantContext(userQuery)
 
-  // Build enhanced system message with context
-  systemMessage = s"""You are a helpful assistant.
+  // Build an agent whose system prompt carries the context
+  systemPrompt = s"""You are a helpful assistant.
     |
     |Relevant context from memory:
     |$context""".stripMargin
 
-  // Run agent with context-enhanced system message
-  state <- agent.run(
-    query = userQuery,
-    tools = tools,
-    systemMessage = Some(SystemMessage(systemMessage))
-  )
+  agent <- Agent.builder("assistant", client)
+    .withSystemPrompt(systemPrompt)
+    .withTools(tools)
+    .build()
+
+  // Run the agent
+  result <- agent.run(userQuery)
 
   // Record the conversation
-  _ <- manager.recordConversation(state.conversation, conversationId)
-} yield state
+  _ <- manager.recordConversation(result.messages, conversationId)
+} yield result
 ```
 
 ### Automatic Recording

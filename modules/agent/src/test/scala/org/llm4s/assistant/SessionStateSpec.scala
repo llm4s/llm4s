@@ -14,12 +14,14 @@ class SessionStateSpec extends AnyFlatSpec with Matchers {
 
   "SessionState" should "create with no agent state" in {
     val state = SessionState(
-      agentState = None,
+      threadId = None,
+      last = None,
       sessionId = SessionId("test-123"),
       sessionDir = DirectoryPath("./sessions")
     )
 
-    state.agentState shouldBe None
+    state.last shouldBe None
+    state.messages shouldBe empty
     state.sessionId shouldBe SessionId("test-123")
     state.sessionDir shouldBe DirectoryPath("./sessions")
   }
@@ -27,7 +29,8 @@ class SessionStateSpec extends AnyFlatSpec with Matchers {
   it should "have a default created timestamp" in {
     val before = LocalDateTime.now()
     val state = SessionState(
-      agentState = None,
+      threadId = None,
+      last = None,
       sessionId = SessionId("test"),
       sessionDir = DirectoryPath("./")
     )
@@ -41,7 +44,8 @@ class SessionStateSpec extends AnyFlatSpec with Matchers {
   it should "create new session with withNewSession" in {
     val originalId = SessionId("original-123")
     val original = SessionState(
-      agentState = None,
+      threadId = None,
+      last = None,
       sessionId = originalId,
       sessionDir = DirectoryPath("./sessions")
     )
@@ -50,7 +54,8 @@ class SessionStateSpec extends AnyFlatSpec with Matchers {
     Thread.sleep(2)
     val newState = original.withNewSession()
 
-    newState.agentState shouldBe None
+    newState.last shouldBe None
+    newState.threadId shouldBe None
     newState.sessionId should not be originalId
     newState.sessionDir shouldBe DirectoryPath("./sessions")
     // Verify new session has a fresh timestamp (equal or later than original)

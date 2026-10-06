@@ -35,25 +35,15 @@ import org.slf4j.LoggerFactory
  * Example usage:
  * {{{
  * // Block any input that contains a credential
- * agent.run(
- *   query          = userInput,
- *   tools          = tools,
- *   inputGuardrails = Seq(SecretLeakGuardrail())
- * )
+ * new GuardrailMiddleware(input = Seq(SecretLeakGuardrail()), output = Nil)
  *
  * // Mask secrets automatically and let the query proceed
- * agent.run(
- *   query          = userInput,
- *   tools          = tools,
- *   inputGuardrails = Seq(SecretLeakGuardrail.masking)
- * )
+ * new GuardrailMiddleware(input = Seq(SecretLeakGuardrail.masking), output = Nil)
  *
  * // Also scrub LLM responses
- * agent.run(
- *   query           = userInput,
- *   tools           = tools,
- *   outputGuardrails = Seq(SecretLeakGuardrail.masking)
- * )
+ * new GuardrailMiddleware(input = Nil, output = Seq(SecretLeakGuardrail.masking))
+ *
+ * // each on an agent: Agent.builder("assistant", client).withMiddleware(guardrails).build()
  * }}}
  *
  * @param secretTypes Secret types to detect (default: all common provider keys)
