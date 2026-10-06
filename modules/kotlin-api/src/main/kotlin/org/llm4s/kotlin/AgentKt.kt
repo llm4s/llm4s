@@ -17,6 +17,7 @@ import org.llm4s.javaapi.AgentStreamListener
 import org.llm4s.javaapi.JAgent
 import org.llm4s.javaapi.LlmException
 import org.llm4s.javaapi.LlmResult
+import java.util.concurrent.atomic.AtomicReference
 
 /** An item of an agent turn's [kotlinx.coroutines.flow.Flow]: each of the turn's events, then its result. */
 sealed interface AgentStreamItem {
@@ -122,13 +123,18 @@ class AgentKt internal constructor(private val underlying: JAgent) {
                 items.close(error.toKotlin("Agent stream failed", cancellation = false))
             }
         }
-        val stream = withContext(NonCancellable + Dispatchers.IO) { start(listener) }
-            .unwrap("Agent stream failed", cancellation = false)
+        // set inside the non-cancellable start: withContext can still throw on return when the collector was
+        // cancelled meanwhile, and a turn it started must be cancelled all the same
+        val started = AtomicReference<AgentStream?>(null)
         try {
-            // emitAll cancels the channel if the collection ends early, releasing a listener blocked on it
+            withContext(NonCancellable + Dispatchers.IO) {
+                start(listener).also { if (it.isSuccess) started.set(it.get()) }
+            }.unwrap("Agent stream failed", cancellation = false)
             emitAll(items)
         } finally {
-            withContext(NonCancellable + Dispatchers.IO) { stream.cancel() }
+            // releases a listener blocked on a full channel nobody reads any more
+            items.cancel()
+            started.get()?.let { withContext(NonCancellable + Dispatchers.IO) { it.cancel() } }
         }
     }
 }

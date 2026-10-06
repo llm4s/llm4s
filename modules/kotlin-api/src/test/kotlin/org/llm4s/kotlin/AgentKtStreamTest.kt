@@ -338,6 +338,34 @@ class AgentKtStreamTest {
     }
 
     @Test
+    fun `a turn whose start completes after the collector was cancelled is cancelled, and its listener released`() = runBlocking {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val cancelled = CountDownLatch(1)
+        val delivered = CountDownLatch(1)
+        val handle = mockk<AgentStream>()
+        every { handle.cancel() } answers { cancelled.countDown() }
+        every { mockJAgent.stream("t", "q", any()) } answers {
+            val listener = thirdArg<AgentStreamListener>()
+            entered.countDown()
+            release.await(seconds, TimeUnit.SECONDS)
+            // the turn has started: far more events than the flow's channel holds, from the stream's own thread
+            thread {
+                repeat(1000) { listener.onEvent(StreamEvent.LiveGap.apply(1)) }
+                delivered.countDown()
+            }
+            LlmResult.success(handle)
+        }
+        val job = launch(Dispatchers.Default) { mocked.stream("t", "q").collect { } }
+        assertTrue(withContext(Dispatchers.IO) { entered.await(seconds, TimeUnit.SECONDS) })
+        job.cancel()
+        release.countDown()
+        withTimeout(seconds * 1000) { job.join() }
+        assertTrue(cancelled.await(seconds, TimeUnit.SECONDS), "the started turn was cancelled")
+        assertTrue(delivered.await(seconds, TimeUnit.SECONDS), "the listener was not left blocked on the channel")
+    }
+
+    @Test
     fun `a refused start of the facade throws LLMException`() = runBlocking<Unit> {
         every { mockJAgent.stream("t", "q", any()) } returns
             LlmResult.failure(ValidationError.apply("query", "blank"))
