@@ -16,27 +16,37 @@ import scala.util.matching.Regex
  *
  * The pattern is searched for, not matched against the whole text: `[0-9]+` accepts `order 66`. Anchor the
  * pattern (`^[0-9]+$`) to require that the whole text fits, with one caveat: `$` also matches before a single
- * final line break (`\n`, `\r\n` or `\r`), so `^[0-9]+$` accepts `66` followed by one line break, though not by
- * two line breaks or by a space. A pattern that must cross line breaks needs the `(?s)` (DOTALL) flag, and
- * `^` and `$` anchor to the start and end of the text unless `(?m)` is set.
+ * final line terminator (`\n`, `\r\n`, `\r`, or one of U+0085, U+2028 and U+2029), so `^[0-9]+$` accepts `66`
+ * followed by one line break, though not by two line breaks or by a space. `.` does not match a line terminator
+ * unless the `(?s)` (DOTALL) flag is set, and `^` and `$` anchor to the start and end of the text unless `(?m)`
+ * is set.
  *
  * Patterns are user-supplied, so matching goes through [[org.llm4s.security.RegexSafetyManager]], whichever
- * way the validator was built: a match that exceeds its step budget, or text longer than 100000 characters, is
- * reported as a failure rather than thrown. Only the companion's `String` factories also pre-screen the pattern
- * itself: there an empty pattern, one longer than 1000 characters, or one with a known catastrophic-backtracking
- * shape is refused. A pattern passed as a [[scala.util.matching.Regex]] or a compiled
- * `java.util.regex.Pattern` (the constructors, `RegexValidator(regex)` and the built-in validators) is used as
- * given, with no pre-screen; its matching is still bounded.
+ * way the validator was built: text that is `null` or longer than 100000 characters is rejected before
+ * matching, and a match that exceeds its character-access budget (the guard against catastrophic backtracking)
+ * is aborted. Only the companion's `String` factories also pre-screen the pattern itself: there a blank
+ * pattern, one longer than 1000 characters, or one with a known catastrophic-backtracking shape is refused. The
+ * shape check is a heuristic: it refuses a group followed by `+` or `*` that itself contains `+`, `*` or `|`
+ * (`(a+)+`, `(cat|dog)*`), so some harmless patterns are refused, and it does not catch every dangerous one. A
+ * pattern passed as a [[scala.util.matching.Regex]] or a compiled `java.util.regex.Pattern` (the constructors,
+ * `RegexValidator(regex)`, [[RegexValidator.email]], [[RegexValidator.phone]] and
+ * [[RegexValidator.alphanumeric]]) is used as given, with no pre-screen; its matching is still bounded.
  *
- * `validate` returns a [[org.llm4s.error.ValidationError]] for the field `value`, never an exception. Its detail is
+ * `validate` reports failures as a [[org.llm4s.error.ValidationError]] for the field `value`. Its detail is
  * `errorMessage` when one was given, else `Value does not match pattern: <pattern>`, for a plain mismatch.
- * Three other failures use their own detail: `Regex security error: <reason>` when the text is too long or the
- * match is aborted, and `Invalid or unsafe regex pattern: <reason>` for every text when the pattern was given as
- * a `String` and was refused or did not compile. That last failure replaces any custom message, so a bad
- * pattern shows up on the first validation rather than as a startup error.
+ * Other failures use their own detail: `Regex security error: <reason>` when the text is `null` or too long, or
+ * the match is aborted or otherwise fails, and `Invalid or unsafe regex pattern: <reason>` for every text when
+ * the pattern was given as a `String` and was refused or did not compile. That last failure replaces any custom
+ * message, so a bad pattern shows up on the first validation rather than as a startup error.
  *
- * Prefer the factories in the companion object (`RegexValidator("...")`, [[RegexValidator.email]] and the
- * like); they compile `String` patterns through the safety manager.
+ * One failure is not caught: the JDK regex engine recurses as it matches some patterns, such as `(a|aa)*b`,
+ * and on long enough text it can throw `StackOverflowError` before reaching the character-access budget. The
+ * safety manager does not catch that error, so `validate` propagates it instead of returning a `Left`. The
+ * `String` factories' pre-screen refuses some of these shapes (including that one), but not all of them.
+ *
+ * Prefer the `String` factories (`RegexValidator("...")` and `RegexValidator("...", errorMessage)`) for
+ * patterns that are not fixed in code: they are the only ones that compile through
+ * [[org.llm4s.security.RegexSafetyManager.safeCompile]] and pre-screen the pattern.
  *
  * @example
  * {{{
@@ -103,7 +113,8 @@ class RegexValidator(
    * @param value the text to check
    * @return `Right(value)` unchanged when the pattern is found, otherwise `Left` with a
    *         [[org.llm4s.error.ValidationError]] for the field `value`; see the class documentation for the
-   *         detail of each failure
+   *         detail of each failure, and for the `StackOverflowError` that can escape on a deeply recursive
+   *         match
    */
   def validate(value: String): Result[String] =
     fallbackError match {
