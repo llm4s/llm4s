@@ -140,6 +140,17 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
   }
 
   "recoverability" should {
+    "be decided by the Basic Usage guide's marker-trait match without throwing on an unmarked error" in {
+      def retryable(error: LLMError): Boolean = error match {
+        case _: RecoverableError => true
+        case _                   => false
+      }
+      retryable(NetworkError("down", None, "https://x")) shouldBe true
+      retryable(ValidationError("f", "r")) shouldBe false
+      retryable(EmbeddingError(Some("500"), "provider failed", "openai")) shouldBe false
+      an[MatchError] should be thrownBy LLMError.isRecoverable(EmbeddingError(None, "m", "openai"))
+    }
+
     "follow the marker trait of each error type, as the guide's table says" in {
       val recoverable: List[LLMError] = List(
         NetworkError("m", None, "u"),

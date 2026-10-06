@@ -138,7 +138,7 @@ Some modules add their own `LLMError` subtypes. These carry **neither** marker, 
 |---|---|---|
 | `llm4s-core` | `org.llm4s.llmconnect.model` | `EmbeddingError`, the error type of the embeddings API (`EmbeddingClient.embed` returns a `Result`) |
 | `llm4s-agent` | `org.llm4s.agent.orchestration` | `OrchestrationError`: `PlanValidationError`, `NodeExecutionError` (it has its own `recoverable` flag), `PlanExecutionError`, `TypeMismatchError`, `AgentTimeoutError` |
-| `llm4s-rag` | `org.llm4s.rag.evaluation` | `EvaluationError` |
+| `llm4s-rag` | `org.llm4s.rag.evaluation`, `org.llm4s.reranker` | `EvaluationError`, `RerankError` (the error type of `Reranker.rerank`) |
 | `llm4s-speech` | `org.llm4s.speech.tts`, `.stt`, `.io` | `TTSError`, `STTError` (it has its own `retryable` flag), `WavFileGenerator.WavError`, `AudioIO.AudioIOError` |
 
 These are marked, so `isRecoverable` works on them: `GraphError` in `llm4s-agent`

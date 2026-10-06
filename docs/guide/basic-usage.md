@@ -192,8 +192,15 @@ error match {
   case other                  => println(other.formatted)
 }
 
-LLMError.isRecoverable(error) // true for RateLimitError, NetworkError, TimeoutError, ...
+val retryable = error match {
+  case _: RecoverableError => true  // RateLimitError, NetworkError, TimeoutError, ...
+  case _                   => false // NonRecoverableError, or an error that carries neither marker
+}
 ```
+
+Match on the `RecoverableError` marker trait rather than calling `LLMError.isRecoverable`: some errors
+from other modules (`EmbeddingError`, `RerankError`, a custom `LLMError`) carry neither marker, and
+`isRecoverable` throws a `MatchError` on them.
 
 See the [Error Handling guide](error-handling.md) for every error type, when it is raised, and how
 to handle, convert and test them.
