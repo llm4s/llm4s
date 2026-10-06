@@ -47,9 +47,10 @@
 #               configuration must be one the project has. An sbt command is found wherever `sbt`, `sbtn`
 #               or `./sbt` is the command word of a simple command: at the start of a line, after a shell
 #               separator outside quotes (`;`, `&&`, `||`, `|`, `&`, `(`, `$(`, a backtick - so a quoted
-#               `echo "a; sbt x"` is no command), after `VAR=x` assignments, `env`, `time`, `exec`, `sudo`,
-#               `nohup`, shell keywords (`if`, `then`, `do`) or Dockerfile `RUN`, and as the value of a YAML
-#               command entry (`run: sbt test`, `- run: ...`, `command: ...`, a `- sbt test` list item, and
+#               `echo "a; sbt x"` is no command), inside a `$(...)` or backtick substitution even within double
+#               quotes (`v="$(sbt x)"`; not within single quotes), after `VAR=x` assignments, `env`, `time`,
+#               `exec`, `sudo`, `nohup`, shell keywords (`if`, `then`, `do`) or Dockerfile `RUN`, and as the
+#               value of a YAML command entry (`run: sbt test`, `- run: ...`, `command: ...`, a `- sbt test` list item, and
 #               the script of a `run: |` / `run: >` block scalar). Any other `key: value` line is data.
 #               Redirections (`2>&1`, `> log`) are not arguments. A backslash-continued command is read as
 #               one line, and one the shell cannot parse fails.
@@ -73,7 +74,9 @@
 #                   (`sbt:llm4s> test`), task names in prose, and words starting with `$` or `<` (placeholders).
 #               A `#` starts a comment only where bash would read one: at the start of a word, outside quotes.
 #
-# The Scala and JDK prose checks are pattern matches, not a parser. Out of scope, so mark the line
+# The Scala and JDK prose checks share one claim grammar (`version_claim_re`), matched without regard to case:
+# a subject word, a version, and an optional range, list (`,`, `, and`, `, or`, `and`, `or`, `&`, `/`), floor
+# or ceiling. They are pattern matches, not a parser. Out of scope, so mark the line
 # `doc-support: ignore` or rephrase: versions with a patch or update number (`JDK 21.0.2`, `Java 8u392`);
 # versions without a number (`the latest LTS`, `the current JDK`); `since` / `starting with` (a feature's
 # start or a floor?); a denial in a separate clause (`Scala 2.13, which is not supported`) or implied rather
@@ -307,6 +310,69 @@ for t, where in sorted(targets.items()):
 JDK_FLOOR = min(targets) if targets else (min(ci_jdks) if ci_jdks else None)
 FLOOR_SOURCE = "the build's release target" if targets else "the oldest JDK CI runs"
 
+# ---------------------------------------------------------------- the version-claim grammar
+# Scala and JDK prose is read with one grammar, matched without regard to case (`JDK 21`, `jdk 21`,
+# `SUPPORTS JAVA 17`), only the subject word and the shape of a version differing:
+#
+#   claim   := [prefix] SUBJECT [joiner] VERSION [`LTS`] [`only`] [`(` VERSION `)`] [range] [list] [floor | ceiling]
+#   prefix  := `at least` | `minimum [of]` | `min.`                      (a floor)
+#            | `up to [and including]` | `at most` | `maximum [of]` | `max.`   (a ceiling)
+#            | `between` | [`no` | `not`] (`older` | `newer` | ...) `than` [`a` | `an` | `the`]
+#   joiner  := `>=` | `>` | `<=` | `<` | [`no` | `not`] (`older` | `newer` | ...) `than` | `between` | `:` | ` ` | `-`
+#   range   := (`-` | `–` | `to` | `through` | `thru`) VERSION
+#   list    := (SEP [SUBJECT] VERSION)*  where SEP is `,` | `, and` | `, or` | `, &` | `and` | `or` | `&` | `/`
+#   floor   := `+` | [`,`] (`or` | `and`) [`any` | `a`] (`newer` | `later` | `above` | `up` | ...) | `minimum` | `onwards`
+#   ceiling := [`,`] (`or` | `and`) [`any` | `an`] (`older` | `earlier` | `below` | `lower`)
+#
+# A subject is a word of its own - not after a letter, digit, `.`, `/` or `-`, nor followed by a letter - and a
+# version is not followed by a letter or another version part, so `JavaScript 5`, `java.util`,
+# `java-version: 21`, `jdk17compat`, `scala-library`, a file name (`Foo.scala:42-68`, `Foo.java:42`), a path
+# (`src/main/scala-3`) and an image tag (`eclipse-temurin:21`) are not claims, while `JDK21` is.
+_CMP = r"(?:(?:no|not)\s+)?(?:older|earlier|lower|newer|later|higher|greater)\s+than"
+_LIST_SEP = r"(?:\s*,\s*(?:(?:and|or|&)\s+)?|\s*[/&]\s*|\s+(?:and|or)\s+)"
+
+
+def version_claim_re(subject, version, joiner):
+    """The claim grammar above for one SUBJECT and VERSION; `joiner` is the plain separator between them."""
+    return re.compile(
+        r"(?:(?P<pre>\b(?:at\s+least|minimum(?:\s+of)?|min\.?)\s+)"
+        r"|(?P<precap>\b(?:up\s+to(?:\s+and\s+including)?|at\s+most|maximum(?:\s+of)?|max\.?)\s+)"
+        r"|(?P<between>\bbetween\s+)"
+        rf"|(?P<cmp>\b{_CMP}\s+(?:(?:a|an|the)\s+)?))?"
+        rf"(?P<subject>{subject})"
+        rf"(?:\s*(?P<op>>=|≥|<=|≤|>|<)\s*|\s+(?P<cmp2>{_CMP})\s+|\s+(?P<between2>between)\s+|\s*:\s*|{joiner})"
+        rf"(?P<n>{version})"
+        r"(?:\s*\(?LTS\)?(?![a-z]))?"
+        r"(?:[ -]only\b)?"
+        rf"(?:\s*\((?P<paren>{version})\))?"
+        rf"(?:\s*(?:-|–|\bto\b|\bthrough\b|\bthru\b)\s*(?P<hi>{version}))?"
+        rf"(?P<more>(?:{_LIST_SEP}(?:{subject}{joiner})?{version}(?!\s*[-–]\s*\d))*)"
+        r"(?P<floor>\+|,?\s+(?:or|and)\s+(?:any\s+|a\s+)?(?:newer|later|above|higher|greater|up|beyond)"
+        r"|\s+(?:minimum|onwards?))?"
+        r"(?P<ceil>,?\s+(?:or|and)\s+(?:any\s+|an\s+)?(?:older|earlier|below|lower))?",
+        re.I)
+
+
+# A JDK: `21`, `1.8`; a Scala version: `3`, `3.7`, `3.7.1`, `3.x`, `v3.7.1`. Neither may run on into a longer
+# version or a word (`JDK 21.0.2`, `Scala 3rd`).
+_JV = r"(?:1\.)?\d{1,2}(?!\d)(?!\.\d)(?![a-z])"
+_SV = r"v?\d+(?:\.(?:\d+|x)){0,2}(?!\d)(?!\.\d)(?![a-z])"
+_JDK_WORD = r"(?<![\w./-])(?:OpenJDK|JDK|JRE|Java(?:\s+SE)?|Temurin|Corretto|Zulu)s?(?![a-z])(?:\s+(?:versions?|releases?)\b)?"
+_SCALA_WORD = r"(?<![\w./-])Scala(?![a-z])(?:\s+versions?\b)?"
+JDK_RE = version_claim_re(_JDK_WORD, _JV, r"[ -]?")
+SCALA_RE = version_claim_re(_SCALA_WORD, _SV, r"[ -]")
+
+
+def listed_versions(m, version):
+    """The versions a claim names after its first, other than a range's end: a parenthesised one and the list."""
+    return ([m.group("paren")] if m.group("paren") else []) + re.findall(version, m.group("more") or "", re.I)
+
+
+def claimed_versions(m, version):
+    """Every version a claim names: the first, a range's end, and the listed ones."""
+    return [m.group("n")] + ([m.group("hi")] if m.group("hi") else []) + listed_versions(m, version)
+
+
 # ---------------------------------------------------------------- 1. Scala
 # A version other than the build's may be named only to say it is not supported, in the same clause:
 # a negation before it (`no Scala 2.13 artifact`, `do not rewrite ... to Scala 2.13`), or a deferral or
@@ -342,10 +408,9 @@ def scala_agrees(parts):
     return all(p == "x" or (i < len(SCALA_PARTS) and p == SCALA_PARTS[i]) for i, p in enumerate(parts))
 
 
-# `Scala 3`, `Scala 3.7`, `Scala 3.7.1`, `Scala 3.x`, `Scala-3-only`, `Scala 3 only (3.7.1)`, `scala-3`.
-# A list (`Scala 3.7.1 and 2.13`, `Scala versions 2.13 and 3`) is a claim about each of its versions.
-SCALA_RE = re.compile(r"\b[Ss]cala(?:\s+versions?)?[ -]v?(?:(\d+)(?:[ -]only)? \()?(\d+(?:\.(?:\d+|x)){0,2})(?![\d])"
-                      r"(?P<more>(?:\s*(?:,|/|\band\b|\bor\b)\s*(?:[Ss]cala\s+)?\d(?:\.(?:\d+|x)){0,2}(?![\w.]\w))*)")
+# `Scala 3`, `Scala 3.7`, `Scala 3.7.1`, `Scala 3.x`, `Scala-3-only`, `Scala 3 only (3.7.1)`, `scala 3`.
+# A list (`Scala 3.7.1 and 2.13`, `Scala versions 2.13, 3, and 3.7`) or range (`Scala 3.3-3.7`) is a claim
+# about each of its versions, and so is a floor or ceiling (`Scala 3.3+`): each must be the build's version.
 SUFFIX_RE = re.compile(r"`_(\d+(?:\.\d+)?)`|\bllm4s[\w-]*_(\d+(?:\.\d+)?)(?![\w.])")
 LIBRARY_PIN_RE = re.compile(r"scala3-library_3`?\s+(?:to|at)\s+`?(\d+\.\d+\.\d+)")
 canonical_has_scala = False
@@ -357,11 +422,9 @@ for p in FILES:
     for sm in SCALA_RE.finditer(text):
         if exempt(line_text_at(text, sm.start())):
             continue
-        claims = [sm.group(2).split(".")]
-        if sm.group(1):
-            claims.append([sm.group(1)])
-        claims += [v.split(".") for v in re.findall(r"\d(?:\.(?:\d+|x)){0,2}", sm.group("more") or "")]
-        if rel == "docs/reference/v1-scope.md" and sm.group(2) == SCALA:
+        versions = [v.lower().lstrip("v") for v in claimed_versions(sm, _SV)]
+        claims = [v.split(".") for v in versions]
+        if rel == "docs/reference/v1-scope.md" and SCALA in versions:
             canonical_has_scala = True
         # `the Scala 2.13 \`scala-library\``: the standard library artifact Scala 3 runs on, not a target.
         if re.match(r"\s*`?scala-library\b", text[sm.end():]) and claims[0][:2] == ["2", "13"]:
@@ -397,24 +460,8 @@ if SCALA and not canonical_has_scala:
 # One mention of a JDK, with what is said about it: a floor (`JDK 21+`, `at least Java 21`, `JDK >= 21`,
 # `JDK 21 or newer`, `newer than JDK 20`, `no older than JDK 21`), a ceiling (`JDK 25 or older`, `up to JDK 25`,
 # `at most JDK 25`, `JDK <= 25`, `older than JDK 26`, `no newer than JDK 25`), a range (`JDK 21-25`,
-# `JDK 21 through 25`, `between JDK 21 and 25`) or a JDK and a list (`JDK 21 and 25`, `JDKs 21, 25`).
-_JV = r"(?:1\.)?\d{1,2}(?!\d)(?!\.\d)(?![A-Za-z])"
-_JDK_WORD = r"\b(?:OpenJDK|JDK|JRE|Java(?:\s+SE)?|Temurin|Corretto|Zulu)s?(?:\s+(?:versions?|releases?))?"
-_CMP = (r"(?:(?:no|not)\s+)?(?:older|earlier|lower|newer|later|higher|greater)\s+than")
-JDK_RE = re.compile(
-    r"(?:(?P<pre>\b(?:at\s+least|minimum(?:\s+of)?|min\.?)\s+)"
-    r"|(?P<precap>\b(?:up\s+to(?:\s+and\s+including)?|at\s+most|maximum(?:\s+of)?|max\.?)\s+)"
-    r"|(?P<between>\bbetween\s+)"
-    rf"|(?P<cmp>\b{_CMP}\s+(?:(?:a|an|the)\s+)?))?"
-    rf"{_JDK_WORD}"
-    rf"(?:\s*(?P<op>>=|≥|<=|≤|>|<)\s*|\s+(?P<cmp2>{_CMP})\s+|\s+(?P<between2>between)\s+|\s*:\s*|[ -]?)"
-    rf"(?P<n>{_JV})"
-    r"(?:\s*\(?LTS\)?(?![A-Za-z]))?"
-    rf"(?:\s*(?:-|–|\bto\b|\bthrough\b|\bthru\b)\s*(?P<hi>{_JV}))?"
-    rf"(?P<more>(?:\s*(?:,|/|\band\b|\bor\b)\s*(?:JDK\s*)?{_JV}(?!\s*(?:-|–)\s*\d))*)"
-    r"(?P<floor>\+|\s+(?:or|and)\s+(?:any\s+|a\s+)?(?:newer|later|above|higher|greater|up|beyond)"
-    r"|\s+(?:minimum|onwards?))?"
-    r"(?P<ceil>\s+(?:or|and)\s+(?:any\s+|an\s+)?(?:older|earlier|below|lower))?")
+# `JDK 21 through 25`, `between JDK 21 and 25`) or a JDK and a list (`JDK 21 and 25`, `JDKs 21, 25`,
+# `JDK 21, 25, and 29`, `jdk 21`). JDK_RE is the claim grammar above with the JDK subject words.
 # A JDK named only to say it is not supported, in the same clause: a negation before it (`does not support
 # JDK 20 or older`, `no JDK 17 build`) or a denial after it (`JDK 20 or older is not supported`).
 JDK_NEG_BEFORE = re.compile(
@@ -431,7 +478,7 @@ def jdk_claim(jm):
     including n -, ("range", [lo, hi]) or ("points", [n, ...]). A strict comparison moves by one: `newer
     than JDK 20` is a floor of 21, `older than JDK 22` a ceiling of 21; `no older than JDK 21` is a floor of 21."""
     n = jdk_number(jm.group("n"))
-    listed = [jdk_number(x) for x in re.findall(_JV, jm.group("more") or "")]
+    listed = [jdk_number(x) for x in listed_versions(jm, _JV)]
     words = (jm.group("cmp") or jm.group("cmp2") or "").lower().split()
     if words:
         negated = words[0] in {"no", "not"}
@@ -925,8 +972,12 @@ def strip_comment(line):
 def shell_segments(line):
     """`line` cut into simple commands, as bash reads them, outside quotes: at `;`, `&&`, `||`, `|`, `|&`,
     a background `&` (not the `&` of a redirection such as `2>&1` or `&>`), `(`, `)`, `$(` and backticks.
-    Each piece is returned as written, quotes kept, so a quoted `;` (`echo "a; sbt x"`) stays in its word."""
+    Each piece is returned as written, quotes kept, so a quoted `;` (`echo "a; sbt x"`) stays in its word.
+    A command substitution (`$(...)` or a backtick pair) runs its own commands even inside double quotes
+    (`v="$(sbt x)"`), so it is entered there too, with quoting starting afresh inside it and the double
+    quotes resuming after it; nested substitutions and subshells nest. Single quotes hide everything."""
     out, start, quote, i = [], 0, None, 0
+    frames = []                       # (closer, quote to resume): one per open `$(`, `(` or backtick
 
     def cut(at, width):
         out.append(line[start:at])
@@ -937,21 +988,42 @@ def shell_segments(line):
         if quote == "'":
             if ch == "'":
                 quote = None
-        elif quote == '"':
-            if ch == "\\":
-                i += 1
-            elif ch == '"':
-                quote = None
         elif ch == "\\":
             i += 1
+        elif line.startswith("$(", i):
+            frames.append((")", quote))
+            quote = None
+            i = start = cut(i, 2)
+            continue
+        elif ch == "`" and quote is None and frames and frames[-1][0] == "`":
+            quote = frames.pop()[1]
+            i = start = cut(i, 1)
+            continue
+        elif ch == "`":
+            frames.append(("`", quote))
+            quote = None
+            i = start = cut(i, 1)
+            continue
+        elif quote == '"':
+            if ch == '"':
+                quote = None
         elif ch in "'\"":
             quote = ch
-        elif line.startswith(("&&", "||", "|&", "$("), i):
+        elif line.startswith(("&&", "||", "|&"), i):
             i = start = cut(i, 2)
             continue
         elif ch == "&" and (i > 0 and line[i - 1] in "<>" or line.startswith("&>", i)):
             pass                                         # `2>&1`, `>&2`, `&>file`: a redirection
-        elif ch in ";|&()`":
+        elif ch == "(":
+            frames.append((")", None))
+            i = start = cut(i, 1)
+            continue
+        elif ch == ")":
+            if frames and frames[-1][0] == ")":
+                quote = frames.pop()[1]
+            i = start = cut(i, 1)
+            continue
+        elif ch in ";|&":
             i = start = cut(i, 1)
             continue
         i += 1

@@ -437,6 +437,57 @@ for phrase in "Scala 3.3+ works.:documents Scala 3.3" "Scala 3.3 LTS is supporte
   expect_fail "a false Scala claim: '${phrase%%:*}'" "$d" "${phrase#*:}"
 done
 
+echo "== the version-claim grammar, JDK and Scala alike (round 9)"
+# PHRASE|EXPECT: EXPECT is `pass`, or a message the failure must contain. Subjects are matched without regard
+# to case; lists take `,`, `, and` / `, or` (Oxford comma), `and`, `or`, `&` and `/`; the fixture runs JDK 21
+# and 25 (floor 21) and Scala 3.7.1.
+for row in \
+  "Tested on JDK 21, 25, and 29.|documents JDK 29" \
+  "Tested on JDK 21, 25, or 29.|documents JDK 29" \
+  "Tested on JDK 21, 25 & 29.|documents JDK 29" \
+  "Tested on JDK 21 & 29.|documents JDK 29" \
+  "Tested on JDK 21/29.|documents JDK 29" \
+  "Tested on JDK 21, JDK 25, and JDK 29.|documents JDK 29" \
+  "Tested on JDK 21, and 25.|pass" \
+  "Tested on Java 21, 25, and 21.|pass" \
+  "requires jdk 29|documents JDK 29" \
+  "supports java 17|documents JDK 17" \
+  "Built on openjdk 29.|documents JDK 29" \
+  "Runs on JDK21.|pass" \
+  "SUPPORTS JAVA 17 OR NEWER.|gives JDK 17 as the minimum" \
+  "at least java 17|gives JDK 17 as the minimum" \
+  "Runs on jdk 21, 25, or newer.|pass" \
+  "Runs on jdk 21, 29, or newer.|documents JDK 29" \
+  "Works Up To jdk 25.|or older, which claims JDKs below the floor" \
+  "Runs between jdk 21 and 25.|but CI does not run JDK 22, 23, 24" \
+  "jdk 17 is NOT supported.|pass" \
+  "Previously ran on jdk 17.|pass" \
+  "Bundle it with JavaScript 5 tooling.|pass" \
+  "Pin \`java-version: 17\` in your own workflow.|pass" \
+  "Import java.util and the jdk17compat 2 package.|pass" \
+  "See \`Foo.java:42\`, \`src/main/java-17\` and the \`eclipse-temurin:17\` image.|pass" \
+  "Supports scala 2.13.|documents Scala 2.13" \
+  "SCALA 2.13 works.|documents Scala 2.13" \
+  "Built for Scala 3.7.1, 2.13, and 2.12.|documents Scala 2.13" \
+  "Built for Scala 3.7.1, 3.7, or 2.12.|documents Scala 2.12" \
+  "Built for Scala 3.7.1 & 2.13.|documents Scala 2.13" \
+  "Built for Scala 3.7.1/2.13.|documents Scala 2.13" \
+  "scala versions 3, 3.7, or 2.13.|documents Scala 2.13" \
+  "Built for scala 3.7.1, 3.7, and 3.|pass" \
+  "scala 2.13 support is deferred.|pass" \
+  "SCALA 2.13 is NOT supported.|pass" \
+  "Use scala 3.x and import scala.util.Try 2 times.|pass" \
+  "Add the scala-library 2.13 jar to the classpath.|pass" \
+  "**Location**: \`path/to/file.scala:42-68\`, \`src/main/scala-2.13/\`.|pass"; do
+  phrase="${row%|*}" expect="${row##*|}"
+  d="$(fresh_copy grammar)"; say "$d" "$INSTALL" "$phrase"
+  if [ "$expect" = pass ]; then
+    expect_pass "grammar: '$phrase'" "$d"
+  else
+    expect_fail "grammar: '$phrase'" "$d" "$expect"
+  fi
+done
+
 echo "== JDK release target, from the options sbt resolved"
 d="$(fresh_copy jdk-release-javac)"; edit_model "$d" 'set_options(m, "javacOptions", ["--release", "8"])'
 expect_fail "javac --release N" "$d" "compiles for JDK 8"
@@ -562,6 +613,21 @@ expect_fail "a command in a subshell" "$d" "definitelyNotATask"
 
 d="$(fresh_copy cmd-substitution)"; run_sbt_doc "$d" 'out=$(sbt -batch definitelyNotATask)'
 expect_fail "a command in a \$( ) substitution" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-quoted-substitution)"; run_sbt_doc "$d" 'version="$(sbt definitelyNotATask)"'
+expect_fail "a \$( ) substitution inside double quotes is a command (round 9)" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-quoted-backtick)"; run_sbt_doc "$d" 'echo "built `sbt -batch otherCrossTest`"'
+expect_fail "a backtick substitution inside double quotes is a command (round 9)" "$d" "otherCrossTest"
+
+d="$(fresh_copy cmd-nested-substitution)"; run_sbt_doc "$d" 'v="$(echo "$(sbt crossTestAll)")"; echo "x; sbt alsoNotATask"'
+expect_fail "a nested substitution is a command; quoting resumes after it (round 9)" "$d" "crossTestAll"
+
+d="$(fresh_copy cmd-substitution-quotes-resume)"; run_sbt_doc "$d" 'v="$(sbt compile) ; sbt definitelyNotATask"'
+expect_pass "after a substitution, the rest of the double-quoted word is still quoted (round 9)" "$d"
+
+d="$(fresh_copy cmd-single-quoted-substitution)"; run_sbt_doc "$d" "echo '\$(sbt definitelyNotATask) and \`sbt otherCrossTest\`'"
+expect_pass "a substitution inside single quotes is text (round 9)" "$d"
 
 d="$(fresh_copy cmd-prefixes)"; run_sbt_doc "$d" "$(printf '%s\n' 'SBT_OPTS=-Xmx2g time sbt compile &' 'env -i JAVA_HOME=/x sbt test' 'if sbt compile; then echo ok; fi' 'sudo -E exec ./sbt test 2>&1 | tee log' 'RUN sbt core/test')"
 expect_pass "env, time, exec, sudo, VAR=x and shell keywords before sbt; a redirection & is not a separator" "$d"
