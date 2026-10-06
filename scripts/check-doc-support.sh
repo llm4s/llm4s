@@ -69,7 +69,8 @@
 #                 - test and main class names: `testOnly` / `testQuick` / `runMain` arguments, `run` and
 #                   `Jmh/run` arguments, and the arguments of any other input task;
 #                 - `sbt new` templates, `help` / `about` / `settings` / `tasks` arguments, `alias` definitions,
-#                   `++` / `+` beyond the Scala version they name, and arguments given after an alias;
+#                   a Scala home directory given to `++` in place of a version, and arguments given after an
+#                   alias. (`++ [-v] <version>[!] [<command>]` and `+ [-v] <command>` replay their command);
 #                 - commands that are not on an `sbt` / `sbtn` / `./sbt` command line: sbt shell prompts
 #                   (`sbt:llm4s> test`), task names in prose, and words starting with `$` or `<` (placeholders).
 #               A `#` starts a comment only where bash would read one: at the start of a word, outside quotes.
@@ -261,17 +262,221 @@ else:
     SCALA = scala_versions[0]
 CROSS_BUILDS = any(set(p.cross) - {p.scala} for p in PROJECTS.values())
 
-ci = read(".github/workflows/ci.yml")
+# ---------------------------------------------------------------- the JDKs CI runs, from the workflow's YAML
+# The workflow is parsed, not pattern-matched, so a matrix may be written either way YAML allows - an inline
+# list (`java: [21, 25]`), a block list (`java:` then `- 21`, `- 25`) or `include:` entries (`- java: 25`) -
+# and `java-version: ${{ matrix.java }}` resolves against the matrix of the job it is in. PyYAML is not
+# assumed to be installed, so this reads the subset of YAML that workflows use: block mappings and
+# sequences, flow lists and mappings (`[a, b]`, `{java: 25}`), quoted and plain scalars (a plain scalar may
+# continue on more-indented lines), block scalars (`run: |`) and comments. Anchors and tags are not read.
+class YamlSubset:
+    MAP_ENTRY = re.compile(r"""^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s"'\[\]{}#&*!|>%@`-][^:#]*?|-[^\s:#][^:#]*?)\s*:(?:\s+(.*))?$""")
+
+    def __init__(self, text):
+        self.lines = []
+        for raw in text.splitlines():
+            body = self.strip_comment(raw.replace("\t", "    ")).rstrip()
+            if body.strip() and body.strip() not in {"---", "..."}:
+                self.lines.append((len(body) - len(body.lstrip(" ")), body.strip()))
+        self.i = 0
+
+    @staticmethod
+    def strip_comment(line):
+        quote = None
+        for k, ch in enumerate(line):
+            if quote:
+                if ch == quote:
+                    quote = None
+            elif ch in "\"'" and (k == 0 or line[k - 1] in " \t[{,:-"):
+                quote = ch
+            elif ch == "#" and (k == 0 or line[k - 1] in " \t"):
+                return line[:k]
+        return line
+
+    def peek(self):
+        return self.lines[self.i] if self.i < len(self.lines) else None
+
+    def parse(self):
+        node = self.block(0)
+        return node
+
+    def block(self, min_indent):
+        line = self.peek()
+        if line is None or line[0] < min_indent:
+            return None
+        indent, content = line
+        if content == "-" or content.startswith("- "):
+            return self.sequence(indent)
+        if self.MAP_ENTRY.match(content):
+            return self.mapping(indent)
+        self.i += 1
+        return self.scalar(self.continued(content, indent - 1))
+
+    def skip_deeper(self, indent):
+        while self.peek() is not None and self.peek()[0] > indent:
+            self.i += 1
+
+    def continued(self, text, indent):
+        """A plain or flow value, with the more-indented lines that continue it."""
+        parts = [text]
+        while self.peek() is not None and self.peek()[0] > indent:
+            if text[:1] not in "[{" and self.MAP_ENTRY.match(self.peek()[1]):
+                break
+            parts.append(self.peek()[1])
+            self.i += 1
+        return " ".join(parts)
+
+    def sequence(self, indent):
+        items = []
+        while self.peek() is not None and self.peek()[0] == indent and (self.peek()[1] == "-" or self.peek()[1].startswith("- ")):
+            content = self.peek()[1][1:]
+            rest = content.lstrip()
+            if not rest:
+                self.i += 1
+                items.append(self.block(indent + 1))
+            else:
+                column = indent + 1 + len(content) - len(rest)
+                self.lines[self.i] = (column, rest)         # `- key: value` opens a mapping at the key's column
+                items.append(self.block(column))
+            self.skip_deeper(indent)
+        return items
+
+    def mapping(self, indent):
+        out = {}
+        while self.peek() is not None and self.peek()[0] == indent:
+            m = self.MAP_ENTRY.match(self.peek()[1])
+            if not m or self.peek()[1].startswith("- "):
+                break
+            key, value = self.scalar(m.group(1)), (m.group(2) or "").strip()
+            self.i += 1
+            if not value:
+                nxt = self.peek()
+                if nxt is not None and nxt[0] == indent and (nxt[1] == "-" or nxt[1].startswith("- ")):
+                    out[key] = self.sequence(indent)        # `key:` then `- item` at the key's own indent
+                else:
+                    out[key] = self.block(indent + 1)
+            elif value[0] in "|>":
+                lines = []
+                while self.peek() is not None and self.peek()[0] > indent:
+                    lines.append(self.peek()[1])
+                    self.i += 1
+                out[key] = "\n".join(lines)
+            else:
+                out[key] = self.scalar(self.continued(value, indent))
+            self.skip_deeper(indent)
+        return out
+
+    def scalar(self, text):
+        text = text.strip()
+        if text[:1] in "[{":
+            value, _ = self.flow(text, 0)
+            return value
+        if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+            return text[1:-1].replace("''", "'") if text[0] == "'" else text[1:-1]
+        return text
+
+    def flow(self, text, k):
+        """The flow node starting at `text[k]`, and the index after it."""
+        while k < len(text) and text[k] == " ":
+            k += 1
+        if k < len(text) and text[k] in "[{":
+            closing, is_map = ("]", False) if text[k] == "[" else ("}", True)
+            items, out, k = [], {}, k + 1
+            while k < len(text):
+                while k < len(text) and text[k] in " ,":
+                    k += 1
+                if k < len(text) and text[k] == closing:
+                    return (out if is_map else items), k + 1
+                node, k = self.flow(text, k)
+                if is_map:
+                    key = node
+                    value = None
+                    while k < len(text) and text[k] == " ":
+                        k += 1
+                    if k < len(text) and text[k] == ":":
+                        value, k = self.flow(text, k + 1)
+                    out[key if isinstance(key, str) else str(key)] = value
+                else:
+                    items.append(node)
+            return (out if is_map else items), k
+        if k < len(text) and text[k] in "\"'":
+            quote, end = text[k], k + 1
+            while end < len(text) and text[end] != quote:
+                end += 2 if (quote == '"' and text[end] == "\\") else 1
+            return self.scalar(text[k:end + 1]), end + 1
+        end = k
+        while end < len(text) and text[end] not in ",]}" and not (text[end] == ":" and (end + 1 == len(text) or text[end + 1] == " ")):
+            end += 1
+        return text[k:end].strip(), end
+
+
+def walk_values(node, key):
+    """Every value of `key` anywhere under `node`."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == key:
+                yield v
+            else:
+                yield from walk_values(v, key)
+    elif isinstance(node, list):
+        for v in node:
+            yield from walk_values(v, key)
+
+
+def matrix_values(matrix, key):
+    """The values `${{ matrix.<key> }}` takes in a job: the key's list (inline or block) or scalar, and every
+    `include` entry that sets it. None when the job has no matrix the check can read."""
+    if not isinstance(matrix, dict):
+        return None
+    values = []
+    own = matrix.get(key)
+    if isinstance(own, list):
+        values += own
+    elif own is not None:
+        values.append(own)
+    for entry in matrix.get("include") or []:
+        if isinstance(entry, dict) and key in entry:
+            values.append(entry[key])
+    return values
+
+
+def jdk_release(value):
+    """21 for `21`, `'21'`, `21.0.2`, `21.x`; None for what names no release."""
+    mm = re.fullmatch(r"(\d+)(?:\.[\dx*]+)*", str(value).strip())
+    return int(mm.group(1)) if mm else None
+
+
+CI_WORKFLOW = ".github/workflows/ci.yml"
+ci = read(CI_WORKFLOW)
 ci_jdks = set()
-for jm in re.finditer(r"^[^#\n]*java-version:\s*([^#\n]*?)\s*(?:#.*)?$", ci, re.M):
-    value = jm.group(1).strip("'\"")
-    if value.isdigit():
-        ci_jdks.add(int(value))
-    elif "matrix.java" in value:
-        for mm in re.finditer(r"^[^#\n]*\bjava:\s*\[([^\]]*)\]", ci, re.M):
-            ci_jdks.update(int(x) for x in re.findall(r"\d+", mm.group(1)))
+workflow = YamlSubset(ci).parse() if ci else None
+jobs = workflow.get("jobs") if isinstance(workflow, dict) else None
+for job_id, job in (jobs.items() if isinstance(jobs, dict) else ()):
+    strategy = job.get("strategy") if isinstance(job, dict) else None
+    matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+    for raw in walk_values(job, "java-version"):
+        text = "" if raw is None else str(raw)
+        candidates = []                            # (value, where it came from)
+        for expression in re.findall(r"\$\{\{(.*?)\}\}", text):
+            refs = re.findall(r"\bmatrix\.([\w-]+)", expression)
+            if not refs or expression.strip() != f"matrix.{refs[0]}":
+                fail(CI_WORKFLOW, 1, f"job `{job_id}`: cannot resolve java-version `{text}` to JDK releases")
+                continue
+            values = matrix_values(matrix, refs[0])
+            if not values:
+                fail(CI_WORKFLOW, 1, f"job `{job_id}`: java-version `{text}` uses matrix.{refs[0]}, "
+                                     f"which the job's matrix does not define")
+            candidates += [(v, f"matrix.{refs[0]} value") for v in values or ()]
+        # Outside expressions: one release per word (setup-java takes several, one per line).
+        candidates += [(w, "java-version") for w in re.split(r"[\s,]+", re.sub(r"\$\{\{.*?\}\}", " ", text)) if w]
+        for value, origin in candidates:
+            release = jdk_release(value)
+            if release is None:
+                fail(CI_WORKFLOW, 1, f"job `{job_id}`: {origin} `{value}` names no JDK release")
+            else:
+                ci_jdks.add(release)
 if not ci_jdks:
-    fail(".github/workflows/ci.yml", 1, "no java-version found; cannot establish the JDK CI runs")
+    fail(CI_WORKFLOW, 1, "no java-version found; cannot establish the JDK CI runs")
 
 # The JVM release target, from the options sbt resolved for each project: `-release 17`, `-release:17`,
 # `--release 17`, `--release=17`, `-java-output-version 17`, `-target 17`, `-target:jvm-1.8`, `-Xtarget:8`.
@@ -861,6 +1066,29 @@ def check_set(words, current):
 
 
 INSPECT_MODES = {"tree", "uses", "definitions", "actual"}
+VERBOSE_FLAGS = {"-v", "--verbose"}
+SCALA_VERSION_ARG = re.compile(r"\d+(?:\.(?:\d+|x|\*))*(?:-[\w.-]+)?")
+
+
+def switch_problem(version):
+    """Why `++ version` would not switch to the build's Scala, or None. `version` is sbt's argument: a
+    version (`3.7.1`), forced with a trailing `!`, a wildcard (`3.7.x`, `3.*`), `version=home`, or a Scala
+    home directory - a path, not checked. Anything else (`++ test`) is not a version, and sbt fails on it."""
+    arg = version[:-1] if version.endswith("!") else version
+    arg = arg.split("=", 1)[0]
+    if not arg or arg.startswith(("/", "~", ".", "$", "<")):
+        return None
+    if not SCALA_VERSION_ARG.fullmatch(arg):
+        return f"names `{version}` where sbt reads a Scala version"
+    if not SCALA:
+        return None
+    if "x" in arg or "*" in arg:
+        pattern = r"\.".join(r"\d+" if part in {"x", "*"} else re.escape(part) for part in arg.split("."))
+        if re.match(pattern + r"(?:\.|$)", SCALA):
+            return None
+    elif arg == SCALA:
+        return None
+    return f"switches to Scala {arg}, but the build is Scala {SCALA}"
 
 
 def replay(commands, current, report, expanding=(), report_cycle=None):
@@ -873,14 +1101,33 @@ def replay(commands, current, report, expanding=(), report_cycle=None):
         head = " ".join(words)
         first = words[0]
         if first.startswith("++"):
-            version = first[2:] or (words[1] if len(words) > 1 else "")
-            if SCALA and version and version[0].isdigit() and version.rstrip("!") != SCALA:
-                report(f"`{head}` switches to Scala {version.rstrip('!')}, but the build is Scala {SCALA}")
+            # `++ [-v] <version>[!] [-v] [<command>]`, as sbt's switch parser reads it (the space after `++` is
+            # optional): the version, then the command, which sbt runs in the switched build - so it is replayed.
+            rest = ([first[2:]] if first[2:] else []) + words[1:]
+            while rest and rest[0] in VERBOSE_FLAGS:
+                rest = rest[1:]
+            if not rest:
+                report(f"`{head}` names no Scala version")
+                continue
+            version, rest = rest[0], rest[1:]
+            while rest and rest[0] in VERBOSE_FLAGS:
+                rest = rest[1:]
+            problem = switch_problem(version)
+            if problem:
+                report(f"`{head}` {problem}")
+            if rest:
+                current = replay([rest], current, report, expanding, report_cycle)
             continue
         if first.startswith("+"):
+            # `+ [-v|--verbose] <command>`: the command is required, and runs once per crossScalaVersion.
             if not CROSS_BUILDS:
                 report(f"`{head}` cross-builds, but no project sets other crossScalaVersions")
             words = ([first[1:]] if first[1:] else []) + words[1:]
+            while words and words[0] in VERBOSE_FLAGS:
+                words = words[1:]
+            if not words:
+                report(f"`{head}` names no command to cross-build")
+                continue
         while words and words[0] in {"~", "show"}:      # triggered execution and `show` prefix a key
             words = words[1:]
         if words and words[0].startswith("~"):

@@ -308,6 +308,37 @@ expect_pass "a cross-build command when a project sets crossScalaVersions" "$d"
 d="$(fresh_copy scala-switch)"; run_sbt_doc "$d" "sbt ++2.13.16 test"
 expect_fail "switching to a Scala version the build does not use" "$d" "switches to Scala 2.13.16"
 
+for cmd in 'sbt "++3.7.1 definitelyNotATask"' 'sbt "++ 3.7.1 definitelyNotATask"' 'sbt "++3.7.1! definitelyNotATask"' \
+           'sbt "++ -v 3.7.1 definitelyNotATask"' 'sbt "++3.7.1 -v definitelyNotATask"' 'sbt "++3.7.x definitelyNotATask"'; do
+  d="$(fresh_copy scala-switch-command)"; run_sbt_doc "$d" "$cmd"
+  expect_fail "the command after a ++ version is replayed: $cmd" "$d" "\`definitelyNotATask\` is not an alias"
+done
+
+d="$(fresh_copy scala-switch-project)"; run_sbt_doc "$d" 'sbt "++3.7.1 project core" publishedArtifactsCheck'
+expect_fail "a project switch run by ++ stays in effect" "$d" "\`publishedArtifactsCheck\` is not defined in the current project \`core\`"
+
+d="$(fresh_copy scala-switch-not-a-version)"; run_sbt_doc "$d" 'sbt "++ test"'
+expect_fail "a task where ++ reads a version is not a version" "$d" "names \`test\` where sbt reads a Scala version"
+
+d="$(fresh_copy scala-switch-wildcard)"; run_sbt_doc "$d" 'sbt "++2.13.x test"'
+expect_fail "a wildcard version the build does not match" "$d" "switches to Scala 2.13.x"
+
+d="$(fresh_copy scala-switch-ok)"
+run_sbt_doc "$d" 'sbt "++3.7.1 test" "++ 3.7.1 core/compile" "++3.7.1! test" "++ -v 3.7.1 test" "++3.7.1 -v test" "++3.7.x test" "++3.* test" ++3.7.1 "++ /opt/scala test"'
+expect_pass "++ with the build's version, forced, verbose, wildcard or a home directory, and a real command" "$d"
+
+d="$(fresh_copy scala-cross-command)"; run_sbt_doc "$d" 'sbt "+ -v definitelyNotATask"'
+edit_model "$d" 'proj(m, "core")["crossScalaVersions"] = ["3.7.1", "3.3.5"]'
+expect_fail "the command after + (and -v) is replayed" "$d" "\`definitelyNotATask\` is not an alias"
+
+d="$(fresh_copy scala-cross-no-command)"; run_sbt_doc "$d" 'sbt "+ -v"'
+edit_model "$d" 'proj(m, "core")["crossScalaVersions"] = ["3.7.1", "3.3.5"]'
+expect_fail "+ needs a command" "$d" "names no command to cross-build"
+
+d="$(fresh_copy scala-cross-command-ok)"; run_sbt_doc "$d" 'sbt "+ -v test" "+ --verbose core/compile" "+test"'
+edit_model "$d" 'proj(m, "core")["crossScalaVersions"] = ["3.7.1", "3.3.5"]'
+expect_pass "+ with -v / --verbose and a real command" "$d"
+
 echo "== JDK version"
 d="$(fresh_copy jdk)"; say "$d" "$INSTALL" "JDK 29 is used in CI."
 expect_fail "docs claim a JDK CI does not run" "$d" "documents JDK 29"
@@ -403,7 +434,95 @@ d="$(fresh_copy jdk-range-ok)"; say "$d" "$INSTALL" "Supports JDK 21 through 23.
 sed -i.bak 's/java: \[21, 25\]/java: [21, 22, 23, 25]/' "$d/.github/workflows/ci.yml" && rm "$d/.github/workflows/ci.yml.bak"
 expect_pass "a range whose every JDK CI runs" "$d"
 
-for phrase in "Use JDK 21 LTS." "Java 21 (LTS) or newer." "Java 21+ is required." "Any JDK 21 and above." "JDK 21 and later." \
+# write_ci DIR: replace the copy's CI workflow with stdin.
+write_ci() { cat > "$1/.github/workflows/ci.yml"; }
+
+block_matrix() {
+  write_ci "$1" <<'YML'
+name: CI
+on: [push]
+jobs:
+  quick:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "java: [17]"   # a script, not a matrix
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        java:
+          - 21   # the floor
+          - '25'
+    steps:
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+YML
+}
+d="$(fresh_copy jdk-block-matrix)"; block_matrix "$d"; say "$d" "$INSTALL" "JDK 25 is tested, and JDK 21 is the minimum: Java 21+."
+expect_pass "a block-style matrix list: JDK 25 is run and the floor is 21" "$d"
+
+d="$(fresh_copy jdk-block-matrix-floor)"; block_matrix "$d"; say "$d" "$INSTALL" "Requires JDK 25 or newer."
+expect_fail "a block-style matrix list sets the floor to its oldest JDK" "$d" "gives JDK 25 as the minimum"
+
+d="$(fresh_copy jdk-block-matrix-script)"; block_matrix "$d"; say "$d" "$INSTALL" "JDK 17 is tested."
+expect_fail "a matrix-like line in a run script is not a matrix" "$d" "documents JDK 17"
+
+d="$(fresh_copy jdk-include-matrix)"
+write_ci "$d" <<'YML'
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            java: 21
+          - { os: macos-latest, java: "25" }
+    steps:
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: "${{ matrix.java }}" }
+YML
+say "$d" "$INSTALL" "JDK 25 is tested on macOS."
+expect_pass "a matrix whose JDKs come from include entries, block and flow" "$d"
+
+d="$(fresh_copy jdk-include-matrix-missing)"
+write_ci "$d" <<'YML'
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          - java: 21
+    steps:
+      - uses: actions/setup-java@v6
+        with:
+          java-version: ${{ matrix.java }}
+YML
+say "$d" "$INSTALL" "JDK 25 is tested."
+expect_fail "an include-based matrix without the JDK a doc claims" "$d" "documents JDK 25"
+
+d="$(fresh_copy jdk-matrix-other-job)"
+write_ci "$d" <<'YML'
+jobs:
+  build:
+    steps:
+      - uses: actions/setup-java@v6
+        with:
+          java-version: ${{ matrix.java }}
+  test:
+    strategy:
+      matrix:
+        java: [21, 25]
+    steps:
+      - run: sbt test
+YML
+expect_fail "matrix.java resolves against the job's own matrix, not another job's" "$d" "uses matrix.java, which the job's matrix does not define"
+
+for phrase in "Use JDK 21 LTS.""Java 21 (LTS) or newer." "Java 21+ is required." "Any JDK 21 and above." "JDK 21 and later." \
               "JDKs 21 and 25 are tested." "Java SE 21 or any later version." "From JDK 21 onwards." "Temurin 21, Corretto 25." \
               "Minimum JDK: 21." "JDK >= 21." "Java 21 or higher, JDK 25 recommended."; do
   d="$(fresh_copy jdk-phrasing-ok)"; say "$d" "$INSTALL" "$phrase"
