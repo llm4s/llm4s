@@ -1589,8 +1589,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chunk id, so a document that came back with fewer chunks (or none) kept its old tail and went on matching
   queries. Indexing now embeds, writes the new chunks over the old ones, then removes the old version's tail.
   Nothing is deleted first, and a write that fails in either store - including after the other store was written -
-  is rolled back, so a document that cannot be embedded or stored keeps its previous version in both stores
-  (if the rollback fails too, that is logged at ERROR). Telling whether a document is already stored is one lookup
+  is rolled back, so a document that cannot be embedded or stored keeps its previous version in both stores.
+  The rollback covers the failing write itself, since a store can commit a batch and lose the response (a
+  timed-out Qdrant upsert); if the rollback fails too, that is logged at ERROR and the returned error names both
+  failures. Telling whether a document is already stored is one lookup
   by id, so ingesting a new document costs no scan of the store. `sync` / `syncAsync` no longer delete a changed
   document's chunks before re-ingesting it, and a failed ingest no longer registers the document's new version,
   so the next sync retries it instead of treating it as unchanged. `deleteByPrefix` on the SQLite and

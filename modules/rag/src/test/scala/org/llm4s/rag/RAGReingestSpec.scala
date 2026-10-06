@@ -38,16 +38,43 @@ class RAGReingestSpec extends AnyFlatSpec with Matchers {
       if (failing) Left(ProcessingError("embedding", "the provider is down")) else delegate.embed(request)
   }
 
+  /** How one scripted batch write ends. */
+  private enum Outcome {
+    case Fail(reason: String)
+
+    /** The write is committed but its response is lost, as with a timed-out HTTP request. */
+    case ApplyThenFail(reason: String)
+  }
+
+  /** Runs `write` as the next scripted outcome says, or normally once the script is used up. */
+  private def scripted(script: Outcome*)(store: String): (=> Result[Unit]) => Result[Unit] = {
+    var remaining = script.toList
+    write => {
+      val next = remaining.headOption
+      remaining = remaining.drop(1)
+      next match {
+        case None                                => write
+        case Some(Outcome.Fail(reason))          => Left(ProcessingError(store, reason))
+        case Some(Outcome.ApplyThenFail(reason)) => write.flatMap(_ => Left(ProcessingError(store, reason)))
+      }
+    }
+  }
+
+  private val noScript: (=> Result[Unit]) => Result[Unit] = write => write
+
   /** A vector store whose batch writes or deletes can be told to fail, to check a failed write is rolled back. */
   final private class FlakyVectorStore(underlying: VectorStore) extends VectorStore {
     @volatile var failingWrites: Boolean  = false
     @volatile var failingDeletes: Boolean = false
 
+    /** Scripted outcomes for the next batch writes, checked when `failingWrites` is off. */
+    @volatile var writes: (=> Result[Unit]) => Result[Unit] = noScript
+
     private def down = Left(ProcessingError("vector-store", "the store is down"))
 
     override def upsert(record: VectorRecord): Result[Unit] = upsertBatch(Seq(record))
     override def upsertBatch(records: Seq[VectorRecord]): Result[Unit] =
-      if (failingWrites) down else underlying.upsertBatch(records)
+      if (failingWrites) down else writes(underlying.upsertBatch(records))
     override def search(queryVector: Array[Float], topK: Int, filter: Option[MetadataFilter]) =
       underlying.search(queryVector, topK, filter)
     override def get(id: String)                        = underlying.get(id)
@@ -67,9 +94,13 @@ class RAGReingestSpec extends AnyFlatSpec with Matchers {
   final private class FlakyKeywordIndex(underlying: KeywordIndex) extends KeywordIndex {
     @volatile var failingWrites: Boolean = false
 
+    /** Scripted outcomes for the next batch writes, checked when `failingWrites` is off. */
+    @volatile var writes: (=> Result[Unit]) => Result[Unit] = noScript
+
     override def index(doc: KeywordDocument): Result[Unit] = indexBatch(Seq(doc))
     override def indexBatch(docs: Seq[KeywordDocument]): Result[Unit] =
-      if (failingWrites) Left(ProcessingError("keyword-index", "the index is down")) else underlying.indexBatch(docs)
+      if (failingWrites) Left(ProcessingError("keyword-index", "the index is down"))
+      else writes(underlying.indexBatch(docs))
     override def search(query: String, topK: Int, filter: Option[MetadataFilter]) =
       underlying.search(query, topK, filter)
     override def searchWithHighlights(query: String, topK: Int, snippetLength: Int, filter: Option[MetadataFilter]) =
@@ -221,9 +252,11 @@ class RAGReingestSpec extends AnyFlatSpec with Matchers {
     rag.ingestText(fiveChunks, "doc-a").fold(e => fail(e.message), identity)
     val before = contents(store, keywords, fiveIds)
 
-    store.failingWrites = true
-    rag.ingestText(oneChunk, "doc-a").isLeft shouldBe true
-    store.failingWrites = false
+    // Fails without applying anything: undoing it is a no-op, so the step's own error comes back unchanged.
+    store.writes = scripted(Outcome.Fail("the store is down"))("vector-store")
+    rag.ingestText(oneChunk, "doc-a").left.map(_.message) shouldBe Left(
+      "Processing failed during vector-store: the store is down"
+    )
 
     contents(store, keywords, fiveIds) shouldBe before
     rag.chunkCount shouldBe 5
@@ -236,9 +269,10 @@ class RAGReingestSpec extends AnyFlatSpec with Matchers {
     val before = contents(store, keywords, fiveIds)
     before._1 should have size 5
 
-    keywords.failingWrites = true
-    rag.ingestText(oneChunk, "doc-a").isLeft shouldBe true
-    keywords.failingWrites = false
+    keywords.writes = scripted(Outcome.Fail("the index is down"))("keyword-index")
+    rag.ingestText(oneChunk, "doc-a").left.map(_.message) shouldBe Left(
+      "Processing failed during keyword-index: the index is down"
+    )
 
     // Both stores describe the same, previous version - not new vectors over old keyword entries.
     contents(store, keywords, fiveIds) shouldBe before
@@ -268,6 +302,63 @@ class RAGReingestSpec extends AnyFlatSpec with Matchers {
 
     storedChunks(rag) shouldBe 0L
     (rag.documentCount, rag.chunkCount) shouldBe (0, 0)
+  }
+
+  // A failed write is not necessarily an unapplied one: an HTTP store (Qdrant's wait=true upsert) can commit
+  // a batch and lose the response. The failing step is undone as well, not only the steps before it.
+  it should "keep the previous version when a vector write is applied but reports failure" in {
+    val (store, keywords, searcher) = flakyStores()
+    val rag                         = build(searcher = Some(searcher))
+    rag.ingestText(fiveChunks, "doc-a").fold(e => fail(e.message), identity)
+    val before = contents(store, keywords, fiveIds)
+
+    store.writes = scripted(Outcome.ApplyThenFail("response lost"))("vector-store")
+    rag.ingestText(oneChunk, "doc-a").left.map(_.message) shouldBe Left(
+      "Processing failed during vector-store: response lost"
+    )
+
+    contents(store, keywords, fiveIds) shouldBe before
+    rag.chunkCount shouldBe 5
+  }
+
+  it should "keep the previous version when a keyword write is applied but reports failure" in {
+    val (store, keywords, searcher) = flakyStores()
+    val rag                         = build(searcher = Some(searcher))
+    rag.ingestText(fiveChunks, "doc-a").fold(e => fail(e.message), identity)
+    val before = contents(store, keywords, fiveIds)
+
+    keywords.writes = scripted(Outcome.ApplyThenFail("response lost"))("keyword-index")
+    rag.ingestText(oneChunk, "doc-a").isLeft shouldBe true
+
+    // Neither the new keyword entry nor the new vectors survive alongside the restored old ones.
+    contents(store, keywords, fiveIds) shouldBe before
+    storedChunks(rag) shouldBe 5L
+  }
+
+  it should "leave nothing behind when a new document's write is applied but reports failure" in {
+    val (store, keywords, searcher) = flakyStores()
+    val rag                         = build(searcher = Some(searcher))
+
+    keywords.writes = scripted(Outcome.ApplyThenFail("response lost"))("keyword-index")
+    rag.ingestText(fiveChunks, "doc-a").isLeft shouldBe true
+
+    contents(store, keywords, fiveIds) shouldBe ((Map.empty, Map.empty))
+    (rag.documentCount, rag.chunkCount) shouldBe (0, 0)
+  }
+
+  it should "report both the failure and the failed rollback when the previous version cannot be restored" in {
+    val (store, _, searcher) = flakyStores()
+    val rag                  = build(searcher = Some(searcher))
+    rag.ingestText(fiveChunks, "doc-a").fold(e => fail(e.message), identity)
+
+    store.writes = scripted(Outcome.ApplyThenFail("response lost"), Outcome.Fail("still down"))("vector-store")
+    val error = rag.ingestText(oneChunk, "doc-a").fold(identity, n => fail(s"ingested $n chunks"))
+
+    error shouldBe a[ProcessingError]
+    error.message should include("doc-a")
+    error.message should include("response lost")
+    error.message should include("still down")
+    error.message should include("could not be restored")
   }
 
   it should "re-ingest on the next sync a document whose loader ingest failed" in {

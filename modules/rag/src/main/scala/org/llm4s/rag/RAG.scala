@@ -1224,11 +1224,20 @@ final class RAG private (
 
   /**
    * Write a document's new chunks over `previous`, then remove the previous version's tail, in both
-   * stores. Each step comes with the one that undoes it; when a step fails, the steps before it are
-   * undone, newest first, so both stores go back to `previous` rather than describing different
-   * versions. A step that fails is taken to have done nothing: every built-in store applies a batch
-   * write or delete as one transaction or request. If undoing fails too - the stores are likely still
-   * failing - the document may mix versions until it is next ingested, and that is logged at ERROR.
+   * stores. Each step comes with the one that undoes it. When a step fails, its own undo runs first,
+   * then the undos of the steps before it, newest first, so both stores go back to `previous` rather
+   * than describing different versions.
+   *
+   * The failing step is undone too because a failure does not mean nothing was written: an
+   * HTTP-backed store (Qdrant's `wait=true` upsert, say) can commit a batch and lose the response,
+   * and a store without transactions can apply part of one. Every undo is therefore idempotent and
+   * correct whatever its step did - nothing, part or all of it: it deletes the ids the step could
+   * have added and rewrites the `previous` entries the step could have overwritten or deleted.
+   *
+   * The guarantee is best-effort: undoing writes to the same stores. If an undo fails as well - the
+   * stores are likely still failing - the document may mix versions until it is next ingested; that
+   * is logged at ERROR and the returned error names both the original failure and the undo failures.
+   * Otherwise the step's own error is returned unchanged.
    */
   private def replaceVersion(
     docId: String,
@@ -1264,7 +1273,13 @@ final class RAG private (
           unless(tail.isEmpty)(keywords.indexBatch(tail))
         }
       ),
-      (() => unless(stale.isEmpty)(vectors.deleteBatch(stale)), () => Right(()))
+      (
+        () => unless(stale.isEmpty)(vectors.deleteBatch(stale)),
+        () => {
+          val tail = previous.vectors.filter(record => stale.contains(record.id))
+          unless(tail.isEmpty)(vectors.upsertBatch(tail))
+        }
+      )
     )
 
     @scala.annotation.tailrec
@@ -1273,15 +1288,19 @@ final class RAG private (
         case Nil => Right(())
         case (step, undo) :: rest =>
           step() match {
-            case Right(_) => run(rest, undo :: undos)
+            case Right(_)    => run(rest, undo :: undos)
             case Left(error) =>
-              val undoFailures = undos.flatMap(undo => undo().left.toOption)
-              if (undoFailures.nonEmpty)
-                RAG.logger.error(
-                  s"Re-ingesting '$docId' failed (${error.message}) and its previous version could not be restored " +
+              // The failing step may have applied (a lost response) or partly applied, so its own undo
+              // runs first, then the earlier steps', newest first. Each runs even if one before it fails.
+              val undoFailures = (undo :: undos).flatMap(undo => undo().left.toOption)
+              if (undoFailures.isEmpty) Left(error)
+              else {
+                val detail =
+                  s"re-ingesting '$docId' failed (${error.message}) and its previous version could not be restored " +
                     s"(${undoFailures.map(_.message).mkString("; ")}); its chunks may mix versions until it is ingested again"
-                )
-              Left(error)
+                RAG.logger.error(detail.capitalize)
+                Left(ProcessingError("ingest", detail))
+              }
           }
       }
 
