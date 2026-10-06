@@ -19,8 +19,9 @@ import zio.stream.ZStream
  * `stream`, `streamResume` and `streamRecover` run a turn as a `ZStream` of its events
  * ([[AgentStreamItem.Event]]), then its result ([[AgentStreamItem.Done]]); interrupting the stream
  * cancels the turn as interrupting `run` does. Stopping early (`take(n)`, `runHead`) also cancels the
- * turn, and a consumer too slow for the stream's buffer (the subscription disconnects as lagging)
- * fails the stream and cancels the run.
+ * turn. A consumer too slow for the stream's buffer never holds the run up: it loses live events
+ * (text deltas, tool progress) and receives one `StreamEvent.LiveGap` with their count where they
+ * were dropped; durable events are never dropped, and the run carries on.
  *
  * A model call that throws instead of returning `Left` ends the turn with a
  * `GraphError.NodeFailed` whose `cause` is the `LLMError` the runtime made of the throwable; it
@@ -54,7 +55,8 @@ trait AgentZ {
   /**
    * One turn on `threadId`, as a stream: every event of the turn ([[Agent.stream]]), then
    * `Done(result)`. A refused start or a failed turn fails the stream with the `LLMError`; so does a
-   * consumer that falls so far behind that the subscription disconnects, which also cancels the run.
+   * subscription that disconnects (its listener failed), which also cancels the run. A slow consumer
+   * loses live events and gets a `StreamEvent.LiveGap` instead; it does not cancel the run.
    * Interrupting the stream, or stopping it early (`take(n)`, `runHead`), cancels the turn and returns
    * once it has ended, leaving the thread for `recover`.
    */
@@ -118,9 +120,9 @@ object AgentZ {
      * Starts the turn with a buffer's listener, ending the buffer when the turn's subscription ends -
      * so the stream ends even for a turn that commits no terminal event. The acquire is
      * uninterruptible, so a turn is never started and forgotten; the release cancels the turn unless
-     * the stream completed and the turn has ended, awaits its end and closes the buffer, which frees a
-     * dispatcher blocked on the full buffer. An early stop (`take(n)`) exits successfully, hence the
-     * check on the run's status.
+     * the stream completed and the turn has ended, awaits its end - without waiting on the buffer's
+     * listener, which never blocks - and closes the buffer. An early stop (`take(n)`) exits
+     * successfully, hence the check on the run's status.
      */
     private def streaming(
       start: (() => Unit, StreamEvent => Unit) => Result[AgentRun]

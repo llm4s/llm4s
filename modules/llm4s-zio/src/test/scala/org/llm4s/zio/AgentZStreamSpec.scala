@@ -43,6 +43,23 @@ object AgentZStreamSpec extends ZIOSpecDefault {
     def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
   }
 
+  /** An in-memory store that opens `completed` once a commit carrying `RunCompleted` is stored. */
+  final private class SignalsCompletion extends Checkpointer {
+    private val underlying = InMemoryCheckpointer()
+    val completed          = new CountDownLatch(1)
+    def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = {
+      val stored = underlying.commit(threadId, commit)
+      if (commit.events.exists(_.event == RunEvent.RunCompleted)) completed.countDown()
+      stored
+    }
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = underlying.latest(threadId)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
+      underlying.eventsAfter(threadId, afterSeq, limit)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
+      underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
+  }
+
   private def durableEvents(items: Chunk[AgentStreamItem]): Vector[RunEvent] =
     items.toVector.collect { case AgentStreamItem.Event(StreamEvent.Durable(r)) => r.event }
 
@@ -89,6 +106,36 @@ object AgentZStreamSpec extends ZIOSpecDefault {
         .flip
         .timeoutFail(new RuntimeException("stream hung"))(30.seconds)
         .map(e => assertTrue(e.toString.contains("store down")))
+    },
+    test("a slow consumer gets a LiveGap for the deltas it missed, and the run completes") {
+      // far more live text than the stream's buffer and the subscription's queue hold together
+      val client = new Fixtures.Scripted(
+        onChunk => {
+          (0 until 3000).foreach(i => onChunk(Fixtures.chunk(i)))
+          Right(completion("done"))
+        },
+        () => Right(completion("done"))
+      )
+      val store = SignalsCompletion()
+      val agent = Fixtures.agentOf(client)(_.withRuntime(GraphRuntime(store)).withStreaming())
+      AgentZ(agent)
+        .stream(ThreadId("z7"), "hi")
+        .zipWithIndex
+        // the consumer takes nothing more until the run has completed
+        .tap { case (_, i) =>
+          ZIO.attemptBlocking(if (i == 0) store.completed.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS)).orDie
+        }
+        .map(_._1)
+        .runCollect
+        .timeoutFail(new RuntimeException("hung"))(60.seconds)
+        .map { items =>
+          val gaps = items.toVector.collect { case AgentStreamItem.Event(StreamEvent.LiveGap(n)) => n }.sum
+          val doneOk = items.last match {
+            case AgentStreamItem.Done(r) => r.answer == Some("done")
+            case _                       => false
+          }
+          assertTrue(gaps > 0, doneOk, durableEvents(items).last == RunEvent.RunCompleted)
+        }
     },
     test("interrupting the stream cancels the run, releasing the subscription blocked in the buffer") {
       val calls    = new AtomicInteger(0)

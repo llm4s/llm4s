@@ -12,6 +12,18 @@ class AgentEventBufferSpec extends AnyFlatSpec with Matchers:
   private def durable(seq: Long, event: RunEvent): StreamEvent =
     StreamEvent.Durable(EventRecord("t", seq, "r", None, None, None, Instant.EPOCH, event))
 
+  private def live(n: Int): StreamEvent =
+    StreamEvent.Live("t", "r", "task", "node", "agent.text_delta", 1, ujson.Num(n))
+
+  /** Calls the listener on another thread, failing if it has not returned within a second: it never blocks. */
+  private def offer(buffer: AgentEventBuffer, event: StreamEvent): Unit =
+    val caller = Thread.ofVirtual().start(() => buffer.listener(event))
+    caller.join(1000)
+    withClue(s"the listener blocked on $event: ")(caller.isAlive shouldBe false)
+
+  private def takeAll(buffer: AgentEventBuffer): Vector[StreamEvent] =
+    Iterator.continually(buffer.take()).takeWhile(_.exists(_.isDefined)).flatMap(_.toOption.flatten).toVector
+
   "AgentEventBuffer" should "hand over events in order and end after the terminal event" in {
     val buffer   = AgentEventBuffer(8)
     val started  = durable(1, RunEvent.RunStarted(None, None))
@@ -29,16 +41,50 @@ class AgentEventBufferSpec extends AnyFlatSpec with Matchers:
     buffer.take().isLeft shouldBe true
   }
 
-  it should "block the listener while full, until taken" in {
+  it should "never block the listener: live events past capacity are dropped and reported as a LiveGap where they were dropped" in {
+    val buffer = AgentEventBuffer(2)
+    offer(buffer, durable(1, RunEvent.RunStarted(None, None)))
+    (1 to 5).foreach(i => offer(buffer, live(i)))
+    offer(buffer, durable(2, RunEvent.TaskCompleted))
+    offer(buffer, live(6)) // still full: nothing has been taken
+    offer(buffer, durable(3, RunEvent.RunCompleted))
+    takeAll(buffer) shouldBe Vector(
+      durable(1, RunEvent.RunStarted(None, None)),
+      live(1),
+      live(2),
+      StreamEvent.LiveGap(3),
+      durable(2, RunEvent.TaskCompleted),
+      StreamEvent.LiveGap(1),
+      durable(3, RunEvent.RunCompleted)
+    )
+  }
+
+  it should "always queue durable events, past capacity too" in {
     val buffer = AgentEventBuffer(1)
-    buffer.listener(durable(1, RunEvent.RunStarted(None, None)))
-    val second = new Thread(() => buffer.listener(durable(2, RunEvent.RunCompleted)))
-    second.start()
-    Thread.sleep(100)
-    second.isAlive shouldBe true
-    buffer.take()
-    second.join(1000)
-    second.isAlive shouldBe false
+    val events = (1 to 5).map(i => durable(i.toLong, RunEvent.TaskCompleted)) :+ durable(6, RunEvent.RunCompleted)
+    events.foreach(offer(buffer, _))
+    takeAll(buffer) shouldBe events.toVector
+  }
+
+  it should "count the space taken live events free, and add a kernel LiveGap that does not fit to its own count" in {
+    val buffer = AgentEventBuffer(1)
+    offer(buffer, live(1))
+    offer(buffer, StreamEvent.LiveGap(4)) // the kernel's, while full
+    offer(buffer, live(2))
+    buffer.take() shouldBe Right(Some(live(1)))
+    offer(buffer, live(3))
+    buffer.end()
+    takeAll(buffer) shouldBe Vector(StreamEvent.LiveGap(5), live(3))
+  }
+
+  it should "report live events dropped at the end of the run before ending" in {
+    val buffer = AgentEventBuffer(1)
+    offer(buffer, live(1))
+    offer(buffer, live(2))
+    offer(buffer, live(3))
+    buffer.end()
+    takeAll(buffer) shouldBe Vector(live(1), StreamEvent.LiveGap(2))
+    buffer.take() shouldBe Right(None)
   }
 
   it should "wake a blocked take when closed" in {
@@ -70,19 +116,6 @@ class AgentEventBufferSpec extends AnyFlatSpec with Matchers:
     buffer.end()
     taker.join(1000)
     result.get shouldBe Right(None)
-  }
-
-  it should "release a listener blocked on a full buffer when closed" in {
-    val buffer = AgentEventBuffer(1)
-    buffer.listener(durable(1, RunEvent.RunStarted(None, None)))
-    val second = new Thread(() => buffer.listener(durable(2, RunEvent.RunCompleted)))
-    second.start()
-    Thread.sleep(100)
-    second.isAlive shouldBe true
-    buffer.close()
-    second.join(1000)
-    second.isAlive shouldBe false
-    buffer.take() shouldBe Right(None)
   }
 
   it should "end the stream with a Left after a ListenerFailed disconnect, once the queue is taken" in {

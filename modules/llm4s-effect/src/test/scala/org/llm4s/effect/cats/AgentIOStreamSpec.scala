@@ -51,6 +51,23 @@ class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
   }
 
+  /** An in-memory store that opens `completed` once a commit carrying `RunCompleted` is stored. */
+  final private class SignalsCompletion extends Checkpointer {
+    private val underlying = InMemoryCheckpointer()
+    val completed          = new CountDownLatch(1)
+    def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = {
+      val stored = underlying.commit(threadId, commit)
+      if (commit.events.exists(_.event == RunEvent.RunCompleted)) completed.countDown()
+      stored
+    }
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = underlying.latest(threadId)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
+      underlying.eventsAfter(threadId, afterSeq, limit)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
+      underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
+  }
+
   private def durableEvents(items: Vector[AgentStreamItem]): Vector[RunEvent] =
     items.collect { case AgentStreamItem.Event(StreamEvent.Durable(r)) => r.event }
 
@@ -109,6 +126,37 @@ class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
       case Left(e: LLMException) => e.error.message should include("store down")
       case other                 => fail(s"expected the run's error as an LLMException, got $other")
     }
+  }
+
+  it should "give a slow consumer a LiveGap for the deltas it missed, not cancel the run" in {
+    // far more live text than the stream's buffer and the subscription's queue hold together
+    val client = new Fixtures.Scripted(
+      onChunk => {
+        (0 until 3000).foreach(i => onChunk(Fixtures.chunk(i)))
+        Right(completion("done"))
+      },
+      () => Right(completion("done"))
+    )
+    val store = SignalsCompletion()
+    val agent = Fixtures.agentOf(client)(_.withRuntime(GraphRuntime(store)).withStreaming())
+    val items = AgentIO[IO](agent)
+      .stream(ThreadId("f7"), "hi")
+      .zipWithIndex
+      // the consumer takes nothing more until the run has completed
+      .evalTap { case (_, i) =>
+        IO.blocking(if (i == 0) store.completed.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS))
+      }
+      .map(_._1)
+      .compile
+      .toVector
+      .timeout(60.seconds)
+      .unsafeRunSync()
+    items.collect { case AgentStreamItem.Event(StreamEvent.LiveGap(n)) => n }.sum should be > 0
+    items.last match {
+      case AgentStreamItem.Done(r) => r.answer shouldBe Some("done")
+      case other                   => fail(s"last item was $other")
+    }
+    durableEvents(items).last shouldBe RunEvent.RunCompleted
   }
 
   it should "cancel the run when the stream is interrupted, releasing the subscription blocked in the buffer" in {
