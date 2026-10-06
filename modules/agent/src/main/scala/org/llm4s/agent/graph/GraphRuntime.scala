@@ -131,7 +131,15 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
    */
   def subscribe(threadId: ThreadId, afterSeq: Long = 0L, capacity: Int = 1024)(
     listener: StreamEvent => Unit
-  ): Result[Subscription] =
+  ): Result[Subscription] = dispatched(threadId, afterSeq, capacity, listener)
+
+  /** [[subscribe]], as the hub's subscription, which a run's handle can give its end-of-run barrier. */
+  private def dispatched(
+    threadId: ThreadId,
+    afterSeq: Long,
+    capacity: Int,
+    listener: StreamEvent => Unit
+  ): Result[Dispatched] =
     if capacity < 2 then
       Left(ValidationError("capacity", s"must be at least 2 (one slot is reserved for a LiveGap), was $capacity"))
     else hub.subscribe(threadId, afterSeq, capacity, listener)
@@ -345,7 +353,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
                   run.runId,
                   run.claimSeq,
                   signal,
-                  (afterSeq, capacity, listener) => subscribe(threadId, afterSeq, capacity)(listener),
+                  (afterSeq, capacity, listener) => dispatched(threadId, afterSeq, capacity, listener),
                   subscription
                 )
                 handle.launch(() => run.execute(), run.crashed, () => release(threadId), run.deadline)

@@ -46,8 +46,9 @@ final class AgentRun private[agent] (
    * delivered, and the subscription ends itself after the turn's terminal event, or after a
    * `Disconnected` - which reaches the listener only if it fell behind (`Lagging`), threw
    * (`ListenerFailed`), or the replay could not read the thread's log (`ReplayFailed`). A turn
-   * that ends without a terminal event (a crash, or a failed commit) ends the subscription once it
-   * has delivered what it had, and cancelling the returned subscription ends it at once.
+   * that ends without a terminal event (a crash, or a failed commit) ends the subscription as soon
+   * as it has delivered the turn's last event - also when it subscribed after the turn ended - and
+   * cancelling the returned subscription ends it at once.
    * [[await]] returns only once `listener` has returned from the turn's last event (or the
    * subscription was cancelled), waiting at most 5 seconds.
    */
@@ -55,7 +56,6 @@ final class AgentRun private[agent] (
     val scope = RunScope(runId, listener)
     handle.subscribe(capacity)(scope).map { s =>
       scope.attach(s)
-      RunScope.watch(handle, scope)
       scopes.add(scope)
       // the caller's cancel ends the scope too, or `await` would wait out the drain for a terminal event it never sees
       new Subscription:
@@ -144,10 +144,7 @@ private[agent] object AgentRun:
     scope: Option[RunScope],
     drain: Boolean
   ): AgentRun =
-    scope.foreach { s =>
-      handle.observation.foreach(s.attach)
-      RunScope.watch(handle, s)
-    }
+    scope.foreach(s => handle.observation.foreach(s.attach))
     new AgentRun(
       handle,
       loop,
