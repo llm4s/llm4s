@@ -205,7 +205,7 @@ class OllamaClient(
                     .filter(_.nonEmpty)
                   val id = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
 
-                  OllamaClient.parseToolCalls(json.obj.get("message"), ids, fragments = true) match {
+                  OllamaClient.parseToolCalls(json.obj.get("message"), ids) match {
                     case Left(error) => failure = Some(error)
                     case Right(calls) =>
                       sawCalls = sawCalls || calls.nonEmpty
@@ -240,12 +240,10 @@ class OllamaClient(
 
         val result = processResult
           .flatMap(_ => failure.fold(accumulator.toCompletion)(Left(_)))
-          .flatMap { c =>
+          .map { c =>
             // the accumulator reports streamed calls on the message only
-            OllamaClient.completeStreamedCalls(c.message.toolCalls).map { calls =>
-              val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-              c.withModel(config.model).withToolCalls(calls.toList).withEstimatedCost(cost)
-            }
+            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+            c.withModel(config.model).withToolCalls(c.message.toolCalls.toList).withEstimatedCost(cost)
           }
 
         recordingExchange(startedAt, requestText, rawResponse.result())(result)
@@ -320,7 +318,7 @@ class OllamaClient(
     // Estimate cost using CostEstimator
     val cost = usage.flatMap(u => CostEstimator.estimate(config.model, u))
 
-    OllamaClient.parseToolCalls(json.obj.get("message"), new OllamaClient.CallIds, fragments = false).map { calls =>
+    OllamaClient.parseToolCalls(json.obj.get("message"), new OllamaClient.CallIds).map { calls =>
       Completion(
         id = id,
         created = created,
@@ -366,22 +364,23 @@ object OllamaClient {
       .trim
       .take(200)
 
-  /** Synthesizes call ids - Ollama's native API sends none: `call_<12 hex>_<index>`, one prefix per reply. */
+  /**
+   * The call ids of one reply. Synthesizes them for entries that carry none - older Ollama servers send
+   * none: `call_<12 hex>_<index>`, one prefix per reply - and refuses an id the reply already used.
+   */
   final private[provider] class CallIds {
     private val prefix = "call_" + java.util.UUID.randomUUID().toString.replace("-", "").take(12)
     private var next   = 0
-    private val opened = scala.collection.mutable.Set.empty[String]
+    private val used   = scala.collection.mutable.Set.empty[String]
     def nextId(): String = {
       val id = s"${prefix}_$next"
       next += 1
+      used += id
       id
     }
 
-    /** Whether a streamed call with this server id was accepted earlier in the stream. */
-    def isOpen(id: String): Boolean = opened.contains(id)
-
-    /** Records a streamed call with a server id, so later entries with that id continue it. */
-    def open(id: String): Unit = opened += id
+    /** Records a server-sent id; false when the reply already used it. */
+    def claim(id: String): Boolean = used.add(id)
   }
 
   private def malformed(detail: String): org.llm4s.error.LLMError =
@@ -424,64 +423,38 @@ object OllamaClient {
   }
 
   /**
-   * A raw piece of a streamed call's arguments: absent, a string fragment of their JSON, or an object.
-   * Anything else cannot be part of a JSON object.
+   * One `tool_calls` entry, which is always a whole call: Ollama's tool parsers buffer the model's output
+   * until a call is complete and only then emit it, with `arguments` an object (`api.ToolCallFunctionArguments`
+   * marshals to one) and a fresh id per call. So a streamed entry is checked exactly as a non-streamed one -
+   * a name, and arguments that are a JSON object - and an id the reply already used is malformed: it is never
+   * a continuation to merge, and passing it on would make the streaming accumulator, which keys calls by id,
+   * concatenate two calls' arguments.
    */
-  private def argumentsFragment(raw: Option[ujson.Value]): Result[ujson.Value] = raw match {
-    case None | Some(ujson.Null)                 => Right(ujson.Obj())
-    case Some(v @ (_: ujson.Str | _: ujson.Obj)) => Right(v)
-    case Some(_)                                 => Left(malformed("arguments are not a JSON object"))
-  }
-
-  private def parseToolCall(entry: ujson.Value, ids: CallIds, fragments: Boolean): Result[ToolCall] =
+  private def parseToolCall(entry: ujson.Value, ids: CallIds): Result[ToolCall] =
     for {
       call     <- entry.objOpt.toRight(malformed("entry is not an object"))
       function <- call.get("function").flatMap(_.objOpt).toRight(malformed("entry has no `function` object"))
-      serverId = call.get("id").flatMap(_.strOpt).filter(_.nonEmpty)
-      name     = function.get("name").flatMap(_.strOpt).map(_.trim).filter(_.nonEmpty)
-      toolCall <- (serverId, name) match {
-        // a continuation of a streamed call accepted earlier: named by its id, carrying a piece of the arguments
-        case (Some(id), _) if fragments && ids.isOpen(id) =>
-          argumentsFragment(function.get("arguments")).map(args => ToolCall(id, name.getOrElse(""), args))
-        case (_, None) => Left(malformed("function has no name"))
-        // the first entry of a streamed call with an id: its arguments may continue in later entries, so
-        // only their shape is checked here, and the whole when the stream ends (completeStreamedCalls)
-        case (Some(id), Some(n)) if fragments =>
-          argumentsFragment(function.get("arguments")).map { args =>
-            ids.open(id)
-            ToolCall(id, n, args)
-          }
-        case (_, Some(n)) =>
-          normalizeArguments(function.get("arguments")).map(args => ToolCall(serverId.getOrElse(ids.nextId()), n, args))
+      name <- function
+        .get("name")
+        .flatMap(_.strOpt)
+        .map(_.trim)
+        .filter(_.nonEmpty)
+        .toRight(malformed("function has no name"))
+      args <- normalizeArguments(function.get("arguments"))
+      id <- call.get("id").flatMap(_.strOpt).filter(_.nonEmpty) match {
+        case Some(serverId) =>
+          Either.cond(ids.claim(serverId), serverId, malformed(s"tool call id '$serverId' is used more than once"))
+        case None => Right(ids.nextId())
       }
-    } yield toolCall
+    } yield ToolCall(id, name, args)
 
-  /**
-   * The tool calls a stream put together: each must have a name and arguments that make a JSON object.
-   * A call whose fragments do not is a `ProcessingError`, as a malformed entry is.
-   */
-  private[provider] def completeStreamedCalls(calls: Seq[ToolCall]): Result[Seq[ToolCall]] =
-    calls.foldLeft[Result[Seq[ToolCall]]](Right(Seq.empty)) { (acc, c) =>
-      acc.flatMap { done =>
-        c.arguments match {
-          case _ if c.name.trim.isEmpty => Left(malformed("function has no name"))
-          case _: ujson.Obj             => Right(done :+ c)
-          case _                        => Left(malformed(s"arguments of tool call '${c.name}' are not a JSON object"))
-        }
-      }
-    }
-
-  /** The `tool_calls` of a reply's `message`; none when absent, null or empty. */
-  private[provider] def parseToolCalls(
-    message: Option[ujson.Value],
-    ids: CallIds,
-    fragments: Boolean
-  ): Result[Seq[ToolCall]] =
+  /** The `tool_calls` of a reply's `message`, or of one streamed line; none when absent, null or empty. */
+  private[provider] def parseToolCalls(message: Option[ujson.Value], ids: CallIds): Result[Seq[ToolCall]] =
     message.flatMap(_.objOpt).flatMap(_.get("tool_calls")).filterNot(_.isNull) match {
       case None => Right(Seq.empty)
       case Some(ujson.Arr(entries)) =>
         entries.foldLeft[Result[Seq[ToolCall]]](Right(Seq.empty)) { (acc, entry) =>
-          acc.flatMap(done => parseToolCall(entry, ids, fragments).map(done :+ _))
+          acc.flatMap(done => parseToolCall(entry, ids).map(done :+ _))
         }
       case Some(_) => Left(malformed("`tool_calls` is not an array"))
     }

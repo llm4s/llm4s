@@ -309,6 +309,13 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         "arguments that are a number" -> ujson.Obj(
           "content"    -> "",
           "tool_calls" -> ujson.Arr(call("get_weather", ujson.Num(3)))
+        ),
+        "two calls with one id" -> ujson.Obj(
+          "content" -> "",
+          "tool_calls" -> ujson.Arr(
+            call("get_weather", ujson.Obj("a" -> 1), id = Some("c1")),
+            call("get_time", ujson.Obj(), id = Some("c1"))
+          )
         )
       )
 
@@ -505,44 +512,54 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       }
     }
 
-    "put the fragments of one call, named by an id, back together" in {
+    "read a whole call that carries the server's id, as Ollama streams it" in {
+      withOllama(
+        ndjson(
+          line("", Seq(call("get_weather", ujson.Obj("location" -> "Paris"), id = Some("call_x")))),
+          line("", Seq(call("get_weather", ujson.Str("""{"location":"Rome"}"""), id = Some("call_y")))),
+          doneLine()
+        )
+      ) { (client, _) =>
+        val (result, chunks) = stream(client)
+        val calls            = result.toOption.get.toolCalls
+
+        calls.map(_.id) shouldBe List("call_x", "call_y")
+        calls.map(_.name) shouldBe List("get_weather", "get_weather")
+        calls.map(_.arguments) shouldBe List(ujson.Obj("location" -> "Paris"), ujson.Obj("location" -> "Rome"))
+        chunks.flatMap(_.toolCall).map(_.id) shouldBe List("call_x", "call_y")
+      }
+    }
+
+    // Ollama emits each call whole, with a fresh id; a repeated id is not a continuation to merge, and
+    // passing it to the accumulator, which keys calls by id, would concatenate `{"a":1}{"b":2}`.
+    "reject an id the stream already used, without merging the two entries" in {
+      withOllama(
+        ndjson(
+          line("", Seq(call("get_weather", ujson.Obj("a" -> 1), id = Some("call_y")))),
+          line("", Seq(call("get_weather", ujson.Obj("b" -> 2), id = Some("call_y")))),
+          line("never read"),
+          doneLine()
+        )
+      ) { (client, _) =>
+        val (result, chunks) = stream(client)
+
+        result.left.toOption.get shouldBe a[ProcessingError]
+        result.left.toOption.get.message should include("call_y")
+        chunks.flatMap(_.toolCall) should have size 1
+        chunks.flatMap(_.content) should not contain "never read"
+      }
+    }
+
+    "reject an entry that carries only a fragment of its arguments" in {
       withOllama(
         ndjson(
           line("", Seq(call("get_weather", ujson.Str("""{"location":"""), id = Some("call_x")))),
-          line("", Seq(ujson.Obj("id" -> "call_x", "function" -> ujson.Obj("arguments" -> ujson.Str("\"Paris\"}"))))),
           doneLine()
         )
-      ) { (client, _) =>
-        val calls = stream(client)._1.toOption.get.toolCalls
-
-        calls should have size 1
-        calls.head.id shouldBe "call_x"
-        calls.head.name shouldBe "get_weather"
-        calls.head.arguments shouldBe ujson.Obj("location" -> "Paris")
-      }
+      )((client, _) => stream(client)._1.left.toOption.get shouldBe a[ProcessingError])
     }
 
-    "merge an id's continuation that carries an object into the call it continues" in {
-      withOllama(
-        ndjson(
-          line("", Seq(call("get_weather", ujson.Obj(), id = Some("call_y")))),
-          line(
-            "",
-            Seq(ujson.Obj("id" -> "call_y", "function" -> ujson.Obj("arguments" -> ujson.Obj("location" -> "Rome"))))
-          ),
-          doneLine()
-        )
-      ) { (client, _) =>
-        val calls = stream(client)._1.toOption.get.toolCalls
-
-        calls should have size 1
-        calls.head.id shouldBe "call_y"
-        calls.head.name shouldBe "get_weather"
-        calls.head.arguments shouldBe ujson.Obj("location" -> "Rome")
-      }
-    }
-
-    "reject the first entry of an id that has no name" in {
+    "reject an entry with an id that has no name" in {
       withOllama(
         ndjson(
           line("", Seq(ujson.Obj("id" -> "c1", "function" -> ujson.Obj("arguments" -> ujson.Obj("a" -> 1))))),
@@ -555,35 +572,10 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       }
     }
 
-    "reject the first entry of an id whose arguments are not an object" in {
+    "reject an entry with an id whose arguments are not an object" in {
       withOllama(
         ndjson(
           line("", Seq(ujson.Obj("id" -> "c1", "function" -> ujson.Obj("name" -> "get_weather", "arguments" -> 3)))),
-          doneLine()
-        )
-      )((client, _) => stream(client)._1.left.toOption.get shouldBe a[ProcessingError])
-    }
-
-    "reject the first entry of an id with no name and non-object arguments" in {
-      withOllama(
-        ndjson(line("", Seq(ujson.Obj("id" -> "c1", "function" -> ujson.Obj("arguments" -> 3)))), doneLine())
-      )((client, _) => stream(client)._1.left.toOption.get shouldBe a[ProcessingError])
-    }
-
-    "reject a continuation of an accepted id whose arguments are not an object or a fragment" in {
-      withOllama(
-        ndjson(
-          line("", Seq(call("get_weather", ujson.Str("""{"location":"""), id = Some("call_x")))),
-          line("", Seq(ujson.Obj("id" -> "call_x", "function" -> ujson.Obj("arguments" -> 3)))),
-          doneLine()
-        )
-      )((client, _) => stream(client)._1.left.toOption.get shouldBe a[ProcessingError])
-    }
-
-    "reject a streamed call whose fragments do not make a JSON object" in {
-      withOllama(
-        ndjson(
-          line("", Seq(call("get_weather", ujson.Str("""{"location":"""), id = Some("call_x")))),
           doneLine()
         )
       )((client, _) => stream(client)._1.left.toOption.get shouldBe a[ProcessingError])
