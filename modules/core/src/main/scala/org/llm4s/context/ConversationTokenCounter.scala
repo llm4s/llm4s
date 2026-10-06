@@ -87,7 +87,8 @@ class ConversationTokenCounter private (tokenizer: org.llm4s.context.tokens.Stri
     thinking.map {
       case ThinkingBlock.Text(text, _) => countTextContent(text)
       // opaque encrypted data, not text the tokenizer can measure: estimate from its size
-      case ThinkingBlock.Redacted(data) => ConversationTokenCounter.estimateOpaqueTokens(data)
+      case ThinkingBlock.Redacted(data)  => ConversationTokenCounter.estimateOpaqueTokens(data)
+      case ThinkingBlock.Opaque(_, data) => ConversationTokenCounter.estimateOpaqueTokens(data)
     }.sum
 
   private def countToolMessage(message: ToolMessage): Int =

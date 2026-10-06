@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.ZaiConfig
+import org.llm4s.llmconnect.model.ThinkingBlock
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -92,5 +93,5 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
   override def thinking(obj: ujson.Value): Option[String] =
     OpenAICompatibleDialect.firstString(obj, "reasoning_content").filter(_.nonEmpty)
 
-  override def encodeThinking(message: ujson.Obj, thinking: String): Unit =
-    message("reasoning_content") = thinking
+  override def encodeThinking(message: ujson.Obj, thinking: Seq[ThinkingBlock]): Unit =
+    ThinkingBlock.text(thinking).foreach(text => message("reasoning_content") = text)

@@ -177,6 +177,20 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "leave out another provider's opaque blocks, sending the turn's own signed thinking" in {
+    val mixed = answering(UserMessage("hi"))(
+      AssistantMessage(None, Seq(call)).withThinking(
+        Seq(
+          ThinkingBlock.Opaque("openrouter", """{"type":"reasoning.encrypted","data":"or-data","index":0}"""),
+          ThinkingBlock.Text("Mine.", Some("sig-mine"))
+        )
+      )
+    )
+    val body = requestBody(UserMessage("hi"), mixed, ToolMessage("sunny", call.id))
+    (body.render() should not).include("or-data")
+    body("messages")(1)("content").arr.map(_("type").str) shouldBe Seq("thinking", "tool_use")
+  }
+
   it should "send a signed block whose text was withheld" in {
     val omitted = answering(UserMessage("hi"))(
       AssistantMessage(None, Seq(call)).withThinking(Seq(ThinkingBlock.Text("", Some("sig-omitted"))))

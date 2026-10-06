@@ -91,8 +91,9 @@ private[agent] object ContextPruning {
         val textWords = words(a.content) +
           a.toolCalls.map(c => words(c.name) + words(c.arguments.render())).sum +
           a.thinking.collect { case ThinkingBlock.Text(text, _) if text.nonEmpty => words(text) }.sum
-        val opaque = a.thinking.collect { case ThinkingBlock.Redacted(data) =>
-          org.llm4s.context.ConversationTokenCounter.estimateOpaqueTokens(data)
+        val opaque = a.thinking.collect {
+          case ThinkingBlock.Redacted(data)  => org.llm4s.context.ConversationTokenCounter.estimateOpaqueTokens(data)
+          case ThinkingBlock.Opaque(_, data) => org.llm4s.context.ConversationTokenCounter.estimateOpaqueTokens(data)
         }.sum
         (textWords * 1.3).toInt + opaque
       case other => (words(other.content) * 1.3).toInt

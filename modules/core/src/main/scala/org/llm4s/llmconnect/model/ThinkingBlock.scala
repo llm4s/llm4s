@@ -15,6 +15,10 @@ import upickle.default.{ readwriter, ReadWriter => RW }
  * kept as the provider returned them, and a client replays only what its provider accepts:
  * Anthropic and Bedrock send signed and redacted blocks and leave unsigned text out (they would
  * reject it), the other providers send the text.
+ *
+ * A provider whose replay data does not fit those two shapes - OpenRouter's `reasoning_details`,
+ * whose items carry ids, formats, indices, summaries and encrypted payloads - is kept as
+ * [[ThinkingBlock.Opaque]] blocks, which only that provider's client sends back.
  */
 @Stable
 enum ThinkingBlock:
@@ -36,6 +40,21 @@ enum ThinkingBlock:
    */
   case Redacted(data: String)
 
+  /**
+   * Provider-specific replay data that neither [[Text]] nor [[Redacted]] can hold without loss,
+   * kept exactly as the provider returned it. Only the client of `provider` sends it back, unchanged
+   * and in order; every other client ignores it. It is always sealed (see [[isSealed]]): valid only
+   * beside the message content, tool calls and history it was produced with, and dropped when the
+   * message is unsealed. The reasoning text, when the provider returns it, is carried beside it as
+   * a [[Text]] block, so it survives unsealing and is what [[ThinkingBlock.text]] reports.
+   *
+   * @param provider The id of the provider that produced it, as its client names itself
+   *                 (`"openrouter"` for OpenRouter's `reasoning_details`).
+   * @param data     The provider's own encoding, opaque to everything but that client - for
+   *                 OpenRouter, one `reasoning_details` item rendered as JSON.
+   */
+  case Opaque(provider: String, data: String)
+
 object ThinkingBlock:
 
   /** The concatenated text of the [[Text]] blocks of `blocks`, or `None` when there is none. */
@@ -45,12 +64,14 @@ object ThinkingBlock:
   }
 
   /**
-   * Whether `block` is sealed - signed text or redacted data - and so valid only beside the exact
+   * Whether `block` is sealed - signed text, redacted data or opaque provider data - and so valid
+   * only beside the exact
    * message content and tool calls it came with (see [[AssistantMessage]]).
    */
   def isSealed(block: ThinkingBlock): Boolean = block match {
     case Text(_, signature) => signature.exists(_.nonEmpty)
     case Redacted(_)        => true
+    case Opaque(_, _)       => true
   }
 
   implicit val rw: RW[ThinkingBlock] = readwriter[ujson.Value].bimap[ThinkingBlock](
@@ -59,12 +80,14 @@ object ThinkingBlock:
         val obj = ujson.Obj("type" -> "text", "text" -> text)
         signature.foreach(s => obj("signature") = s)
         obj
-      case Redacted(data) => ujson.Obj("type" -> "redacted", "data" -> data)
+      case Redacted(data)         => ujson.Obj("type" -> "redacted", "data" -> data)
+      case Opaque(provider, data) => ujson.Obj("type" -> "opaque", "provider" -> provider, "data" -> data)
     },
     json => {
       val obj = json.obj
       obj.get("type").flatMap(_.strOpt) match {
         case Some("redacted") => Redacted(obj("data").str)
+        case Some("opaque")   => Opaque(obj("provider").str, obj("data").str)
         case _                => Text(obj("text").str, obj.get("signature").flatMap(_.strOpt))
       }
     }

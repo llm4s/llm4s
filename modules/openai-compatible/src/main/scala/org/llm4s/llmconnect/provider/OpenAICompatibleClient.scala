@@ -80,7 +80,7 @@ class OpenAICompatibleClient(
           logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
           val result =
             if (response.statusCode >= 200 && response.statusCode < 300)
-              Try(parseCompletion(ujson.read(body))).toResult
+              Try(parseCompletion(ujson.read(body))).toResult.map(bindThinking(_, conversation, options))
             else HttpErrorMapper.mapHttpError(response.statusCode, body, providerName, response.headers)
           recordExchange(startedAt, requestText, Some(body), result)
           result
@@ -100,6 +100,7 @@ class OpenAICompatibleClient(
         httpClient
           .postStream(endpoint, requestHeaders, requestText, streamTimeout)
           .flatMap(response => consumeStream(response.statusCode, response.body, rawStream, onChunk, response.headers))
+          .map(bindThinking(_, conversation, options))
       recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), result)
       result
     }
@@ -138,6 +139,7 @@ class OpenAICompatibleClient(
   ): Result[Completion] = {
     val accumulator = StreamingAccumulator.create()
     val toolCalls   = new StreamToolCalls
+    val details     = Vector.newBuilder[ujson.Value]
     val sseParser   = SSEParser.createStreamingParser()
     val reader      = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))
     var usage       = Option.empty[TokenUsage]
@@ -152,6 +154,7 @@ class OpenAICompatibleClient(
             // own with no choices. A later report replaces an earlier one; one without both
             // counts is ignored rather than failing the stream.
             streamedUsage(json).foreach(u => usage = Some(u))
+            details ++= streamedThinkingDetails(json)
             parseStreamingEvent(json, toolCalls).foreach { (chunk, rawArguments) =>
               // The accumulator concatenates argument fragments, so it gets each fragment
               // verbatim. The parsed form handed to `onChunk` cannot be concatenated safely:
@@ -167,14 +170,37 @@ class OpenAICompatibleClient(
     }
     // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
     // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
+    val opaqueThinking = dialect.decodeThinkingDetails(details.result())
     accumulator.toCompletion.map { c =>
       val finalUsage = usage.orElse(c.usage)
-      c.withModel(settings.model)
+      val message =
+        if (opaqueThinking.isEmpty) c.message else c.message.withThinking(c.message.thinking ++ opaqueThinking)
+      c.withMessage(message)
+        .withModel(settings.model)
         .withToolCalls(c.message.toolCalls.toList)
         .withUsage(finalUsage)
         .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
     }
   }
+
+  /** The replay data on a streamed event's delta, if it has one. */
+  private def streamedThinkingDetails(json: ujson.Value): Seq[ujson.Value] =
+    json.obj
+      .get("choices")
+      .flatMap(_.arrOpt)
+      .flatMap(_.headOption)
+      .flatMap(_.obj.get("delta"))
+      .toSeq
+      .flatMap(dialect.thinkingDetails)
+
+  /**
+   * `completion` with any sealed thinking on its message bound to the request it answered, so that
+   * it is replayed only while that request is unchanged (see [[ThinkingReplay]]). A completion with
+   * no sealed thinking is returned as it is.
+   */
+  private def bindThinking(completion: Completion, conversation: Conversation, options: CompletionOptions): Completion =
+    if (!completion.message.hasSealedThinking) completion
+    else completion.withMessage(ThinkingReplay.bind(completion.message, conversation.messages, options))
 
   private def renderRequest(conversation: Conversation, options: CompletionOptions, stream: Boolean): Result[String] =
     // An empty `messages` array is rejected by every chat-completions endpoint; saying so here
@@ -183,7 +209,7 @@ class OpenAICompatibleClient(
     // reduce a non-empty conversation to nothing.
     Either
       .cond(
-        sendableMessages(conversation).nonEmpty,
+        sendableMessages(conversation, options).nonEmpty,
         (),
         ValidationError("conversation", s"${settings.displayName} requires at least one message")
       )
@@ -225,7 +251,9 @@ class OpenAICompatibleClient(
       OpenAICompatibleClient.combineRepeated(dialect.headers)
 
   /**
-   * The messages of `conversation` that go into a request: all of them, except an assistant
+   * The messages of `conversation` that go into a request, as they may be replayed: every assistant
+   * turn whose sealed thinking no longer matches the conversation before it unsealed
+   * ([[ThinkingReplay.replayable]]), and then all of them, except an assistant
    * turn with no text, no tool calls and no thinking the dialect encodes, when the dialect does
    * not send empty turns ([[OpenAICompatibleDialect.sendEmptyAssistantTurns]]). Both the request
    * body and the empty-conversation check use this, so they cannot disagree.
@@ -236,19 +264,19 @@ class OpenAICompatibleClient(
    * that drops thinking ([[OpenAICompatibleDialect.encodeThinking]] adds nothing) the turn is
    * still empty and still left out.
    */
-  private def sendableMessages(conversation: Conversation): Seq[Message] =
-    conversation.messages.filterNot {
+  private def sendableMessages(conversation: Conversation, options: CompletionOptions): Seq[Message] =
+    ThinkingReplay.replayable(conversation.messages, options).filterNot {
       case am: AssistantMessage =>
         !dialect.sendEmptyAssistantTurns && am.contentOpt.forall(_.isEmpty) && am.toolCalls.isEmpty &&
         !encodesThinking(am)
       case _ => false
     }
 
-  /** Whether the dialect adds anything to an assistant message for `am`'s thinking text. */
+  /** Whether the dialect adds anything to an assistant message for `am`'s thinking. */
   private def encodesThinking(am: AssistantMessage): Boolean =
-    am.thinkingText.exists { thinking =>
+    am.hasThinking && {
       val probe = ujson.Obj("role" -> "assistant")
-      dialect.encodeThinking(probe, thinking)
+      dialect.encodeThinking(probe, am.thinking)
       probe.value.keySet != Set("role")
     }
 
@@ -257,7 +285,7 @@ class OpenAICompatibleClient(
    * Scoped to the provider package so specs can inspect it.
    */
   protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
-    val messages = sendableMessages(conversation).map {
+    val messages = sendableMessages(conversation, options).map {
       case UserMessage(content) =>
         ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(content))
       case SystemMessage(content) =>
@@ -281,7 +309,7 @@ class OpenAICompatibleClient(
             )
           })
         }
-        am.thinkingText.foreach(dialect.encodeThinking(message, _))
+        if (am.hasThinking) dialect.encodeThinking(message, am.thinking)
         message
       case ToolMessage(content, toolCallId) =>
         ujson.Obj(
@@ -316,14 +344,17 @@ class OpenAICompatibleClient(
     val toolCalls = message.obj.get("tool_calls").filterNot(_.isNull).map(dialect.parseToolCalls).getOrElse(Seq.empty)
     val content   = message.obj.get("content").flatMap(dialect.decodeContent)
     val usage     = json.obj.get("usage").flatMap(parseUsage)
+    val thinkingText = dialect.thinking(message).orElse(dialect.thinking(choice)).filter(_.nonEmpty)
+    val thinking =
+      thinkingText.map(ThinkingBlock.Text(_)).toSeq ++
+        dialect.decodeThinkingDetails(dialect.thinkingDetails(message))
 
     Completion(
       id = json.obj.get("id").flatMap(_.strOpt).getOrElse(""),
       created = json.obj.get("created").flatMap(_.numOpt).map(_.toLong).getOrElse(0L),
       content = content.getOrElse(""),
       model = json.obj.get("model").flatMap(_.strOpt).getOrElse(settings.model),
-      message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList)
-        .withThinking(dialect.thinking(message).orElse(dialect.thinking(choice)).getOrElse("")),
+      message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList, thinking = thinking),
       toolCalls = toolCalls.toList,
       usage = usage,
       estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u))

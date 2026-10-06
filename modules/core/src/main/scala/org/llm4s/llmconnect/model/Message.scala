@@ -317,16 +317,16 @@ object SystemMessage {
  *
  * Construct one with the companion `apply` and change it with the `with*` setters.
  *
- * '''Sealed thinking.''' A signed [[ThinkingBlock.Text]] or a [[ThinkingBlock.Redacted]] block is
- * valid only in the conversation the provider produced it in. Anthropic signs a thinking block over
+ * '''Sealed thinking.''' A signed [[ThinkingBlock.Text]], a [[ThinkingBlock.Redacted]] or a
+ * [[ThinkingBlock.Opaque]] block is valid only in the conversation the provider produced it in. Anthropic signs a thinking block over
  * everything sent before it - the system prompt, the tools and every earlier message - and rejects
  * it once any of those changes; Bedrock documents its reasoning signature as a hash of all the
  * messages in the conversation. Both also reject a block sent beside content or tool calls other
  * than the ones it came with. Two rules keep llm4s from sending a signed turn that no longer holds:
  *
  *  - '''Its own message.''' `withContent` and `withToolCalls`, given a value different from the
- *    current one, '''unseal''' the thinking: they drop redacted blocks, the signatures of text
- *    blocks and the binding, keeping the reasoning text.
+ *    current one, '''unseal''' the thinking: they drop redacted and opaque blocks, the signatures
+ *    of text blocks and the binding, keeping the reasoning text.
  *  - '''Everything before it.''' The client that receives sealed thinking records, in
  *    `thinkingBinding`, a fingerprint of the request it answered: the system messages, the tools,
  *    the response format and every earlier message. When the message is sent again, the client
@@ -391,7 +391,7 @@ final case class AssistantMessage private (
   private[llm4s] def withThinkingBinding(binding: Option[String]): AssistantMessage = copy(thinkingBinding = binding)
 
   /**
-   * This message with its thinking unsealed: redacted blocks, signatures and the binding dropped,
+   * This message with its thinking unsealed: redacted and opaque blocks, signatures and the binding dropped,
    * the reasoning text kept. Itself when the thinking is not sealed.
    */
   private[llm4s] def unsealed: AssistantMessage =
@@ -411,7 +411,7 @@ final case class AssistantMessage private (
    */
   def hasSealedThinking: Boolean = thinking.exists(ThinkingBlock.isSealed)
 
-  // the thinking with redacted blocks and signatures dropped, keeping the reasoning text
+  // the thinking with redacted and opaque blocks and signatures dropped, keeping the reasoning text
   private def unsealedThinking: Seq[ThinkingBlock] =
     if (!hasSealedThinking) thinking
     else thinking.collect { case ThinkingBlock.Text(text, _) if text.nonEmpty => ThinkingBlock.Text(text) }
@@ -431,8 +431,9 @@ final case class AssistantMessage private (
       Left(ValidationError("Assistant message must have either content or tool calls", "content"))
     } else if (
       thinking.exists {
-        case ThinkingBlock.Text(text, signature) => text.isEmpty && !signature.exists(_.nonEmpty)
-        case ThinkingBlock.Redacted(data)        => data.isEmpty
+        case ThinkingBlock.Text(text, signature)  => text.isEmpty && !signature.exists(_.nonEmpty)
+        case ThinkingBlock.Redacted(data)         => data.isEmpty
+        case ThinkingBlock.Opaque(provider, data) => provider.isEmpty || data.isEmpty
       }
     ) {
       Left(ValidationError("thinking", "an assistant message's thinking block must not be empty"))

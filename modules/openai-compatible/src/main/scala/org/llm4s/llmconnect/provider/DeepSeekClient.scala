@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.DeepSeekConfig
+import org.llm4s.llmconnect.model.ThinkingBlock
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -85,8 +86,8 @@ private[llm4s] object DeepSeekDialect extends OpenAICompatibleDialect:
    * it in every later request of a conversation that carries `tools` - leaving it out is a 400 -
    * and ignores it otherwise.
    */
-  override def encodeThinking(message: ujson.Obj, thinking: String): Unit =
-    message("reasoning_content") = thinking
+  override def encodeThinking(message: ujson.Obj, thinking: Seq[ThinkingBlock]): Unit =
+    ThinkingBlock.text(thinking).foreach(text => message("reasoning_content") = text)
 
   override def reasoningTokens(usage: ujson.Value): Option[Int] =
     usage.obj

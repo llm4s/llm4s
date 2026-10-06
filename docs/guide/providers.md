@@ -658,8 +658,8 @@ its key - `OPENROUTER_API_KEY` or `ZAI_API_KEY` - needs to be set.
 
 OpenRouter maps `CompletionOptions.reasoning` onto the underlying model: a thinking budget for
 Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest. A GLM thinking
-model's `reasoning_content` on Z.ai, and a model's `reasoning` on OpenRouter, are returned on the
-message and sent back (see [Thinking in conversation history](#thinking-in-conversation-history)).
+model's `reasoning_content` on Z.ai, and a model's `reasoning` and `reasoning_details` on OpenRouter,
+are returned on the message and sent back (see [Thinking in conversation history](#thinking-in-conversation-history)).
 
 ---
 
@@ -1496,7 +1496,7 @@ tool calls do, and each client sends it back where its provider takes it:
 | Bedrock (Converse) | `reasoningContent` (text with `signature`, or `redactedContent`) | the same blocks, unchanged and first in the assistant turn |
 | Ollama | `message.thinking` | `thinking` on the assistant message |
 | DeepSeek, Z.ai | `reasoning_content` | `reasoning_content` |
-| OpenRouter | `reasoning` / `thinking` | `reasoning` |
+| OpenRouter | `reasoning` / `thinking`, and `reasoning_details` | `reasoning`, and `reasoning_details` unchanged (same items, order and fields) |
 | Mistral (Magistral) | thinking chunks in `content` | a thinking chunk before the text chunk |
 | OpenAI, Azure, Gemini, Vertex AI, Cohere, generic `openai-compatible` | - | not sent: the API has no field for it |
 
@@ -1509,7 +1509,15 @@ Both clients send a call only when its result is in the run of tool messages str
 those APIs require; a result anywhere else (after a user message, say) goes as
 `[Tool result for <id>]: ...` text, and its call is left out.
 
-Signed and redacted thinking is *sealed*: it is valid only in the conversation it was produced in.
+OpenRouter returns `reasoning_details` when the underlying model's reasoning is signed, summarised
+or encrypted (Claude, Gemini, OpenAI reasoning models), and
+[requires the whole sequence back unchanged](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#preserving-reasoning)
+when a conversation continues after tool calls. Each item is kept, with every field, as a
+`ThinkingBlock.Opaque("openrouter", json)` block after the reasoning text - streamed items are
+joined by `index` first - and only the OpenRouter client sends them back; every other client ignores
+opaque blocks that are not its own.
+
+Signed, redacted and opaque thinking is *sealed*: it is valid only in the conversation it was produced in.
 [Anthropic](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking) validates a
 thinking block against everything sent before it - the top-level system prompt, the tools and every
 earlier message - and rejects it (400) once any of those changes; a block must also come back
@@ -1518,10 +1526,10 @@ as a hash of all the messages in the conversation. llm4s enforces both halves wi
 (`hasSealedThinking` reports which state a message is in):
 
 - **The message itself.** `withContent` and `withToolCalls`, given a changed value, *unseal* the
-  thinking: they drop redacted blocks and signatures and keep the reasoning text. An agent's
+  thinking: they drop redacted and opaque blocks and signatures and keep the reasoning text. An agent's
   `afterAgent` answer rewrite and a tool-call edit go through those setters, and so do the
   Anthropic and Bedrock clients when they leave out an unpaired call.
-- **Everything before it.** When Anthropic or Bedrock returns sealed thinking, the client records a
+- **Everything before it.** When Anthropic, Bedrock or OpenRouter returns sealed thinking, the client records a
   fingerprint of the request on the message (`AssistantMessage.thinkingBinding`): the system
   messages, the tools, the response format and every earlier message, as sent. When the message is
   sent again, the client replays its sealed thinking only if the conversation before it still has

@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.MistralConfig
+import org.llm4s.llmconnect.model.ThinkingBlock
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -128,16 +129,17 @@ private[llm4s] object MistralDialect extends OpenAICompatibleDialect:
       Option.when(text.nonEmpty)(text)
     }
 
-  override def encodeThinking(message: ujson.Obj, thinking: String): Unit = {
-    val thinkingChunk =
-      ujson.Obj("type" -> "thinking", "thinking" -> ujson.Arr(ujson.Obj("type" -> "text", "text" -> thinking)))
-    val textChunk = message.obj
-      .get("content")
-      .flatMap(_.strOpt)
-      .filter(_.nonEmpty)
-      .map(text => ujson.Obj("type" -> "text", "text" -> text))
-    message("content") = ujson.Arr.from(thinkingChunk +: textChunk.toSeq)
-  }
+  override def encodeThinking(message: ujson.Obj, thinking: Seq[ThinkingBlock]): Unit =
+    ThinkingBlock.text(thinking).foreach { thinkingText =>
+      val thinkingChunk =
+        ujson.Obj("type" -> "thinking", "thinking" -> ujson.Arr(ujson.Obj("type" -> "text", "text" -> thinkingText)))
+      val textChunk = message.obj
+        .get("content")
+        .flatMap(_.strOpt)
+        .filter(_.nonEmpty)
+        .map(text => ujson.Obj("type" -> "text", "text" -> text))
+      message("content") = ujson.Arr.from(thinkingChunk +: textChunk.toSeq)
+    }
 
   private def chunkType(chunk: ujson.Value): Option[String] =
     chunk.objOpt.flatMap(_.get("type")).flatMap(_.strOpt)

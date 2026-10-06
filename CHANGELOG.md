@@ -10,15 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Thinking stays in the conversation and goes back to the provider** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
   `AssistantMessage` carries the model's reasoning as `thinking: Seq[ThinkingBlock]` - `ThinkingBlock.Text(text,
-  signature)` or `ThinkingBlock.Redacted(data)`, both `@Stable` - with `withThinking(blocks)` /
+  signature)`, `ThinkingBlock.Redacted(data)` or `ThinkingBlock.Opaque(provider, data)` (provider-specific replay
+  data only that provider's client sends back), `@Stable` - with `withThinking(blocks)` /
   `withThinking(text)`, `thinkingText` and `hasThinking`; its codec writes `thinking` only when present and reads
   JSON without it as none, so stored conversations and agent checkpoints still load. Clients put the thinking on the
   message they return, streamed or not: Anthropic and Bedrock as blocks with their signatures and redacted thinking,
-  Ollama, DeepSeek, Z.ai (newly read from `reasoning_content`), OpenRouter and Mistral as text. They send it back
+  Ollama, DeepSeek, Z.ai (newly read from `reasoning_content`), OpenRouter and Mistral as text, and OpenRouter's
+  `reasoning_details` (whole or streamed, joined by `index`) as one opaque block per item. They send it back
   where the provider takes it: Anthropic and Bedrock replay signed and redacted blocks first in the assistant turn
   (unsigned thinking is left out), Ollama as `thinking`, DeepSeek and Z.ai as `reasoning_content`, OpenRouter as
-  `reasoning`, Mistral as a thinking chunk; a new `OpenAICompatibleDialect.encodeThinking` hook decides, and drops it
-  by default. The agent's tool loop stores the completion's message unchanged, so a run sends a tool-call turn's
+  `reasoning` plus its `reasoning_details` unchanged, Mistral as a thinking chunk; new `OpenAICompatibleDialect` hooks
+  decide - `encodeThinking` (given the turn's blocks), `thinkingDetails` and `decodeThinkingDetails` - and drop it by
+  default. The agent's tool loop stores the completion's message unchanged, so a run sends a tool-call turn's
   thinking in the call after the tool results, and later turns read it back from the checkpoint.
 - **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
   `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
@@ -579,11 +582,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   takes four fields: `case AssistantMessage(content, toolCalls, thinking, thinkingBinding)`. `Completion` loses its `thinking`
   constructor parameter and `withThinking`: `Completion.thinking` is now `message.thinkingText`, so set it with
   `completion.withMessage(completion.message.withThinking(...))`, or build the message with it.
-  Signed or redacted thinking is *sealed*: Anthropic and Bedrock accept it only beside the exact content and tool
-  calls it came with, so `withContent` / `withToolCalls` given a changed value drop redacted blocks and signatures
+  Signed, redacted or opaque thinking is *sealed*: Anthropic, Bedrock and OpenRouter accept it only beside the exact
+  content and tool calls it came with, so `withContent` / `withToolCalls` given a changed value drop redacted and
+  opaque blocks and signatures
   (keeping the reasoning text). Sealed thinking is also valid only after the history it was produced after
   (Anthropic checks the system prompt, tools and every earlier message; Bedrock's signature is a hash of the
-  conversation), so the Anthropic and Bedrock clients bind it to a fingerprint of the request
+  conversation), so the Anthropic, Bedrock and OpenAI-compatible clients bind it to a fingerprint of the request
   (`AssistantMessage.thinkingBinding`) and, at send time, replay it only while the conversation before it still has
   that fingerprint. Pruning, compression, summarisation, an edit or an inserted message anywhere earlier therefore
   unseals every later turn, whoever made the change; `hasSealedThinking` reports the state. Token estimates

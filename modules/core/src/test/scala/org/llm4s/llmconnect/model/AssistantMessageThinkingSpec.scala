@@ -24,6 +24,15 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
     ThinkingBlock.Text("Call the tool.")
   )
 
+  private val withOpaque = AssistantMessage(
+    contentOpt = Some("Checking."),
+    toolCalls = Seq(call),
+    thinking = Seq(
+      ThinkingBlock.Text("The user wants the weather."),
+      ThinkingBlock.Opaque("openrouter", """{"type":"reasoning.encrypted","data":"x","index":0}""")
+    )
+  )
+
   "AssistantMessage thinking" should "round-trip through the AssistantMessage codec, blocks and signatures intact" in {
     read[AssistantMessage](write(signed)) shouldBe signed
   }
@@ -121,5 +130,22 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
   it should "refuse an empty unsigned block or empty redacted data" in {
     AssistantMessage("Hi").withThinking(Seq(ThinkingBlock.Text(""))).validate.isLeft shouldBe true
     AssistantMessage("Hi").withThinking(Seq(ThinkingBlock.Redacted(""))).validate.isLeft shouldBe true
+  }
+
+  it should "refuse an opaque block with no provider or no data" in {
+    AssistantMessage("Hi").withThinking(Seq(ThinkingBlock.Opaque("", "{}"))).validate.isLeft shouldBe true
+    AssistantMessage("Hi").withThinking(Seq(ThinkingBlock.Opaque("openrouter", ""))).validate.isLeft shouldBe true
+  }
+
+  "an opaque thinking block" should "round-trip through the codecs, provider and data intact" in {
+    read[AssistantMessage](write(withOpaque)) shouldBe withOpaque
+    read[Message](write[Message](withOpaque)) shouldBe withOpaque
+  }
+
+  it should "be sealed, contribute no text, and be dropped when the message is unsealed" in {
+    withOpaque.hasSealedThinking shouldBe true
+    withOpaque.thinkingText shouldBe Some("The user wants the weather.")
+    withOpaque.withContent("Changed").thinking shouldBe Seq(ThinkingBlock.Text("The user wants the weather."))
+    withOpaque.validate shouldBe Right(withOpaque)
   }
 }
