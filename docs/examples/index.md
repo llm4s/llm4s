@@ -30,7 +30,7 @@ Explore **70 working examples** covering all LLM4S features.
 | [Guardrails Examples](#guardrails-examples) | 7 | Input/output validation, LLM-as-Judge |
 | [Handoff Examples](#handoff-examples) | 3 | Agent-to-agent delegation |
 | [Memory Examples](#memory-examples) | 6 | Short/long-term memory, vector search, RAG |
-| [Streaming Examples](#streaming-examples) | 4 | Real-time responses (agent events: #1329) |
+| [Streaming Examples](#streaming-examples) | 9 | Real-time responses, agent event streams |
 | [Reasoning Examples](#reasoning-examples) | 1 | Extended thinking modes |
 | [Context Management](#context-management) | 8 | Token windows, compression |
 | [Embeddings](#embeddings) | 5 | Vector search, RAG |
@@ -291,7 +291,7 @@ sbt "samples/runMain org.llm4s.samples.basic.ProviderFallbackExample"
 
 **File:** [`SingleStepAgentExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/SingleStepAgentExample.scala)
 
-A plain agent run with a step limit, printing the messages the run produced. (Step-level events are planned: see #1329.)
+A plain agent run with a step limit, printing the messages the run produced. (For step-level events, see the [streaming examples](#streaming-examples).)
 
 ```bash
 sbt "samples/runMain org.llm4s.samples.agent.SingleStepAgentExample"
@@ -1039,7 +1039,22 @@ Streaming with real-time progress feedback.
 sbt "samples/runMain org.llm4s.samples.streaming.StreamingWithProgressExample"
 ```
 
-Streaming agent events: see #1329.
+### Agent event streams
+
+`agent.stream` with `withStreaming()`: text deltas live, model and tool events as they commit. See the
+[streaming guide](../guide/agents/streaming.md).
+
+| Example | Shows |
+|---------|-------|
+| `StreamingAgentExample` | `withStreaming()`, printing `TextDelta`, attempt resets |
+| `StreamingWithToolsExample` | `ToolCallStarted`/`ToolResult` live, `ToolExecuted` durable with duration |
+| `EventCollectionExample` | collecting one run's events, replaying the durable ones |
+| `AgentStreamIOExample` (`samples/catseffect`) | fs2 stream of `AgentStreamItem` |
+| `AgentStreamZIOExample` (`samples/zio`) | ZStream of `AgentStreamItem` |
+
+```bash
+sbt "samples/runMain org.llm4s.samples.streaming.StreamingAgentExample"
+```
 
 ---
 

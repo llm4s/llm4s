@@ -279,8 +279,8 @@ mainAgent.run(query) match {
 ```
 
 A handoff is not a status: the run continues in the target and ends as any run does.
-Live handoff events (the old `HandoffStarted` / `HandoffCompleted`) return with the agent event
-stream, [#1329](https://github.com/llm4s/llm4s/issues/1329).
+A handoff is reported by the durable `AgentEvents.HandedOff(from, to)` event on the agent's event
+stream (the old `HandoffStarted` / `HandoffCompleted`); see [Streaming Events](streaming).
 
 ---
 

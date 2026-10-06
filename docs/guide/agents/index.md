@@ -28,7 +28,7 @@ The LLM4S Agent Framework provides a production-ready foundation for building LL
 - **Guardrails** - Input/output validation for safety and quality
 - **Memory** - Short and long-term context with semantic search
 - **Handoffs** - Agent-to-agent delegation for specialist routing
-- **Streaming** - Real-time events for responsive UIs (the agent event stream returns in [#1329](https://github.com/llm4s/llm4s/issues/1329))
+- **Streaming** - Real-time events for responsive UIs (`agent.stream`, [streaming guide](streaming))
 - **Orchestration** - Multi-agent workflows with DAG execution
 
 ## Quick Start

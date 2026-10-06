@@ -63,9 +63,10 @@ This guide documents the correct event sequences for common LLM application patt
 }
 ```
 
-> Since #1328 an `Agent` emits the runtime's `graph.*` events through `withTracing`; the event
-> sequences below describe the Langfuse model, and the agent-level events are reworked in
-> [#1329](https://github.com/llm4s/llm4s/issues/1329).
+> An `Agent` built `withTracing` emits the runtime's `graph.*` and the agent's `agent.*` events, then
+> one `TraceEvent.AgentRunEnded` per run. In Langfuse the trace id is the run id and the session id
+> is the thread id, so a conversation's turns group; the event sequences below describe the Langfuse
+> model. See the [observability guide](guide/observability/).
 
 ### **LLM4S Implementation:**
 

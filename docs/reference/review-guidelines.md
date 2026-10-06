@@ -1216,7 +1216,7 @@ see [FP Patterns Reference](../fp-patterns-reference.md).
 | **Adapter**   | Wrapping external API          | Type classes for JSON, HTTP          | Non-intrusive? ISP (focused interface)?                  |
 | **Strategy**  | Swappable behavior             | ADT + pattern match, not inheritance | Sealed trait? Exhaustive match?                          |
 | **Decorator** | Composable enhancements        | HOFs like `withRetry`, `withTimeout` | Pure functions? No class explosion?                      |
-| **Observer**  | Event streams                  | `Tracing` subscribers (events: #1329)   | Resource-safe? Backpressure?                             |
+| **Observer**  | Event streams                  | `Tracing` subscribers (run events)   | Resource-safe? Backpressure?                             |
 
 ### 9.2 Pattern examples
 

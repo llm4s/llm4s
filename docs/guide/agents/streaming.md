@@ -151,7 +151,7 @@ agentZ.stream(threadId, "Explain monads").runForeach { /* same cases */ }
 
 `AgentStreamItem` is `Event(StreamEvent)` or `Done(AgentResult)`, one enum per module. The stream
 ends after `Done`; a `Left` from admission or from the run fails the stream with that error.
-`streamResume` and `streamRecover` exist on both. Stopping early (`take(n)`, `head`) or a consumer
+A run that ends without a terminal event (a crash) still ends the stream shortly after the run ends, and the stream then fails with the run's error. `streamResume` and `streamRecover` exist on both. Stopping early (`take(n)`, `head`) or a consumer
 too slow for the buffer (lagging) cancels the turn. Samples: `AgentStreamIOExample`,
 `AgentStreamZIOExample`.
 
