@@ -1530,8 +1530,10 @@ as a hash of all the messages in the conversation. llm4s enforces both halves wi
   `afterAgent` answer rewrite and a tool-call edit go through those setters, and so do the
   Anthropic and Bedrock clients when they leave out an unpaired call.
 - **Everything before it.** When Anthropic, Bedrock or OpenRouter returns sealed thinking, the client records a
-  fingerprint of the request on the message (`AssistantMessage.thinkingBinding`): the system
-  messages, the tools, the response format and every earlier message, as sent. When the message is
+  fingerprint of the request on the message (`AssistantMessage.thinkingBinding`): every system
+  message, the tools, the response format and every earlier message in order, system messages in
+  their positions (OpenRouter sends them inline, so moving one changes what came before), as sent.
+  When the message is
   sent again, the client replays its sealed thinking only if the conversation before it still has
   that fingerprint, and sends it unsealed otherwise. The check runs at the point of sending, so it
   covers every rewrite of the history - `ContextPruning` and the agent's context-window middleware,

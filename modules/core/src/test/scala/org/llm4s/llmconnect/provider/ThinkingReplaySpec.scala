@@ -68,6 +68,15 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
     ) shouldBe Seq(false)
   }
 
+  it should "unseal a turn after a system message moved, since some clients send them inline" in {
+    val system = SystemMessage("Be brief.")
+    val ask    = UserMessage("Weather?")
+    val turn   = signedTurn(system, ask)
+    turn.thinkingBinding should not be signedTurn(ask, system).thinkingBinding
+    sealedStates(Seq(system, ask, turn)) shouldBe Seq(true)
+    sealedStates(Seq(ask, system, turn)) shouldBe Seq(false)
+  }
+
   it should "unseal a turn after the response format changed" in {
     val turn = signedTurn(UserMessage("Weather?"))
     sealedStates(Seq(UserMessage("Weather?"), turn), options.withResponseFormat(ResponseFormat.Json)) shouldBe

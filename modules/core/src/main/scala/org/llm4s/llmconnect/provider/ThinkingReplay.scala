@@ -23,15 +23,20 @@ import java.security.MessageDigest
  *    not match the fingerprint of the conversation before it now, and any sealed message with no
  *    binding.
  *
- * The fingerprint covers the system messages wherever they sit (the providers lift them all into
- * one top-level system prompt), the non-system messages before the assistant message (each with its
- * own thinking and binding, so unsealing an earlier turn changes the history of every later one and
- * the replayed blocks never have a gap), the tools offered and the response format (which the
- * Anthropic client writes into the system prompt). Everything else on the request - effort, token
- * limits, sampling - is outside what the providers check, and outside the fingerprint.
+ * The fingerprint covers every system message in the conversation, wherever it sits (Anthropic and
+ * Bedrock lift them all into one top-level system prompt, sent before every message), then every
+ * message before the assistant message in order, system messages included in their positions
+ * (OpenAI-compatible clients such as OpenRouter send them inline, so `[system, user]` and
+ * `[user, system]` are different prefixes), each with its own thinking and binding, so unsealing an
+ * earlier turn changes the history of every later one and the replayed blocks never have a gap;
+ * then the tools offered and the response format (which the Anthropic client writes into the system
+ * prompt). One definition serves both layouts: for a client that lifts system messages, a system
+ * message that only moves unseals turns it need not have, which costs only the replay, never a
+ * rejected request. Everything else on the request - model, effort, token limits, sampling - is
+ * outside what the providers check, and outside the fingerprint.
  *
- * Both clients serialise a conversation as a deterministic function of exactly these inputs, so an
- * unchanged fingerprint means an unchanged wire prefix.
+ * Every client serialises a conversation as a deterministic function of exactly these inputs, so
+ * an unchanged fingerprint means an unchanged wire prefix.
  */
 private[llm4s] object ThinkingReplay {
 
@@ -60,7 +65,7 @@ private[llm4s] object ThinkingReplay {
           case other => other
         }
         // the history of later messages is what was sent, so an unsealed turn changes it
-        if (!m.isInstanceOf[SystemMessage]) feed(digest, sent)
+        feed(digest, sent)
         sent
       }
     }
@@ -68,11 +73,11 @@ private[llm4s] object ThinkingReplay {
   /** The fingerprint of `messages`, as sent, as the history before a new assistant message. */
   private def fingerprint(messages: Seq[Message], options: CompletionOptions): String = {
     val digest = header(messages, options)
-    messages.foreach(m => if (!m.isInstanceOf[SystemMessage]) feed(digest, m))
+    messages.foreach(feed(digest, _))
     hex(digest)
   }
 
-  // the system prompt, the tools and the response format, then a separator
+  // every system message (the lifted system prompt), the tools and the response format, then a separator
   private def header(messages: Seq[Message], options: CompletionOptions): MessageDigest = {
     val digest = MessageDigest.getInstance("SHA-256")
     messages.foreach { case s: SystemMessage => feed(digest, s); case _ => () }

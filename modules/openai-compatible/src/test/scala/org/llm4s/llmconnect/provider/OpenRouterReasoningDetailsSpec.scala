@@ -244,6 +244,21 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
     turn("reasoning").str shouldBe "Thinking."
   }
 
+  it should "drop them once a system message moved, since it sends system messages inline where they sit" in {
+    val system = SystemMessage("Answer in French.")
+    val asked  = Seq(system, UserMessage("Weather in Paris?"))
+    val bound  = ThinkingReplay.bind(withDetails, asked, CompletionOptions())
+    def turnAfter(prefix: Seq[Message]): ujson.Value =
+      assistantTurn(
+        client("http://localhost:1/v1")
+          .createRequestBody(Conversation(prefix :+ bound :+ answer), CompletionOptions())
+      )
+    turnAfter(asked)("reasoning_details") shouldBe details
+    val moved = turnAfter(Seq(UserMessage("Weather in Paris?"), system))
+    moved.obj.keySet should not contain "reasoning_details"
+    moved("reasoning").str shouldBe "Thinking."
+  }
+
   it should "not send reasoning_details that no client bound" in {
     val unbound = assistantTurn(
       client("http://localhost:1/v1")
