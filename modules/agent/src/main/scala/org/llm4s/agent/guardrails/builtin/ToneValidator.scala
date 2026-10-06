@@ -51,9 +51,14 @@ object Tone {
  *
  * Detection looks at the whole text, line breaks included, and takes the first rule that applies, in this
  * order:
- *  1. [[Tone.Excited]]: the text contains `!` and some sentence in it (text split on `.`, `!` and `?`) has
- *     fewer than five words. This rule wins over every keyword below; a long, calm text that merely ends in
- *     `!` is not Excited.
+ *  1. [[Tone.Excited]]: the text contains `!` and it has a short sentence. Sentences are counted crudely: the
+ *     text is split on `.`, `!` and `?`, and each piece is split on whitespace, with fewer than five tokens
+ *     counting as short. The first piece is counted exactly, but a later piece begins with the space after
+ *     the delimiter, which counts as an extra token, so a later sentence is short only at three words or
+ *     fewer (`here are four words` is not short). A run of delimiters (`...`, `?!`) leaves an empty piece
+ *     that also counts as short, so `i like it very much... honestly it is quite good!` is Excited although
+ *     every sentence has five words or more. This rule wins over every keyword below; a text of long
+ *     sentences, each ended by a single delimiter, is not Excited even if it ends in `!`.
  *  1. [[Tone.Professional]]: contains `please`, `thank you`, `kindly`, `regards` or `sincerely`.
  *  1. [[Tone.Casual]]: contains `hey`, `cool`, `awesome`, `yeah` or `nah`.
  *  1. [[Tone.Friendly]]: contains `hi`, `hello`, `thanks` or `appreciate`.

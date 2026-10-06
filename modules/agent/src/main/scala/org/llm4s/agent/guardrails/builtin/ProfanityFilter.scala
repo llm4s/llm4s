@@ -22,7 +22,8 @@ import org.llm4s.types.Result
  *    never contain whitespace.
  *  - By default the comparison ignores case, for the built-in words and for `customBadWords` alike. With
  *    `caseSensitive = true` text and entries are compared exactly, so the lower-case built-in words no longer
- *    match `BADWORD`.
+ *    match `BADWORD`. Case is folded with `toLowerCase` in the JVM's default locale, so under a Turkish
+ *    default locale an upper-case `I` folds to the dotless `ı` and does not match an entry spelled with `i`.
  *
  * On a match `validate` returns a [[org.llm4s.error.ValidationError]] for the field `input` (whichever side the
  * filter is used on) whose detail is `Input contains inappropriate content`. The detail never names the word

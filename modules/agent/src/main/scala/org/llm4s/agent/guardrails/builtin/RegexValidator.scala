@@ -15,8 +15,10 @@ import scala.util.matching.Regex
  * a phone number, an order id) or to require that some text is present.
  *
  * The pattern is searched for, not matched against the whole text: `[0-9]+` accepts `order 66`. Anchor the
- * pattern (`^[0-9]+$`) to require that the entire text fits. A pattern that must cross line breaks needs the
- * `(?s)` (DOTALL) flag, and `^` and `$` anchor to the start and end of the text unless `(?m)` is set.
+ * pattern (`^[0-9]+$`) to require that the whole text fits, with one caveat: `$` also matches before a single
+ * final line break (`\n`, `\r\n` or `\r`), so `^[0-9]+$` accepts `66` followed by one line break, though not by
+ * two line breaks or by a space. A pattern that must cross line breaks needs the `(?s)` (DOTALL) flag, and
+ * `^` and `$` anchor to the start and end of the text unless `(?m)` is set.
  *
  * Patterns are user-supplied, so matching goes through [[org.llm4s.security.RegexSafetyManager]]: a
  * pattern with a known catastrophic-backtracking shape, or longer than 1000 characters, is refused, and a match
@@ -39,8 +41,9 @@ import scala.util.matching.Regex
  *
  * val orderId = RegexValidator("^ORD-[0-9]{6}$", "Order ids look like ORD-123456")
  *
- * orderId.validate("ORD-123456") // Right("ORD-123456")
- * orderId.validate("ORD-12")     // Left(ValidationError): "Order ids look like ORD-123456"
+ * orderId.validate("ORD-123456")   // Right("ORD-123456")
+ * orderId.validate("ORD-123456\n") // Right: `$` also accepts one trailing line break
+ * orderId.validate("ORD-12")       // Left(ValidationError): "Order ids look like ORD-123456"
  *
  * agent.run(query, tools, inputGuardrails = Seq(RegexValidator.email))
  * }}}
@@ -197,7 +200,8 @@ object RegexValidator {
 
   /**
    * A validator for phone numbers, using a basic pattern: an optional leading `+` and then 10 to 15 digits, with
-   * no spaces, dashes or brackets. A mismatch reports `Invalid phone number format`.
+   * no spaces, dashes or brackets. The pattern ends with `$`, which also accepts one trailing line break. A
+   * mismatch reports `Invalid phone number format`.
    */
   def phone: RegexValidator = new RegexValidator(
     "^\\+?[0-9]{10,15}$".r,
@@ -206,7 +210,8 @@ object RegexValidator {
 
   /**
    * A validator for non-empty text made only of ASCII letters and digits, so spaces and punctuation are
-   * rejected. A mismatch reports `Content must be alphanumeric`.
+   * rejected. The pattern ends with `$`, which also accepts one trailing line break (`abc` followed by a line
+   * break passes). A mismatch reports `Content must be alphanumeric`.
    */
   def alphanumeric: RegexValidator = new RegexValidator(
     "^[A-Za-z0-9]+$".r,
