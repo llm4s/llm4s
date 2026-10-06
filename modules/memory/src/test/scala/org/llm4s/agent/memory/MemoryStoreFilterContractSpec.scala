@@ -59,7 +59,32 @@ class MemoryStoreFilterContractSpec extends AnyFlatSpec with Matchers {
     memory("upper", "UPPER and lower case", MemoryType.Task, Map("note" -> "Mixed"), 5),
     memory("quote", "a note with quotes", MemoryType.UserFact, Map("quote" -> """say "hi" \ bye"""), 6),
     memory("plain", "plain note", MemoryType.UserFact, Map.empty, 7),
-    memory("back", "path c:\\temp and 100%_done", MemoryType.Conversation, Map("tag" -> """c:\temp"""), 8)
+    memory("back", "path c:\\temp and 100%_done", MemoryType.Conversation, Map("tag" -> """c:\temp"""), 8),
+    // Case folding: `matches` lower-cases with Java, SQL `lower()` folds ASCII only, so these rows tell them apart.
+    memory("ecole-upper", "L\u00c9COLE du soir", MemoryType.Knowledge, Map("lang" -> "fr"), 9),
+    memory("ecole-lower", "l\u00e9cole du matin", MemoryType.Knowledge, Map("lang" -> "FR"), 10),
+    memory("istanbul", "\u0130stanbul calling", MemoryType.Knowledge, Map("lang" -> "tr"), 11),
+    memory("kelvin", "\u212aELVIN scale", MemoryType.Knowledge, Map("lang" -> "en"), 12),
+    memory("strasse", "Stra\u00dfe und STRASSE", MemoryType.Knowledge, Map("lang" -> "de"), 13),
+    memory("decomposed", "e\u0301cole decomposed", MemoryType.Knowledge, Map.empty, 14),
+    // Null columns: no importance, no entity, no conversation. `Not(...)` must still accept this row.
+    Memory(
+      id = MemoryId("bare"),
+      content = "bare row",
+      memoryType = MemoryType.Task,
+      metadata = Map.empty,
+      timestamp = base.plusSeconds(60L * 15),
+      importance = None
+    ),
+    Memory(
+      id = MemoryId("keyed"),
+      content = "keyed row",
+      memoryType = MemoryType.Task,
+      metadata =
+        Map("entity_id" -> "e1", "conversation_id" -> "c1", "a.b" -> "dotted", "a" -> "plain", "x[0]" -> "idx"),
+      timestamp = base.plusSeconds(60L * 16),
+      importance = Some(0.9)
+    )
   )
 
   private val filters: Seq[(String, MemoryFilter)] = Seq(
@@ -89,7 +114,50 @@ class MemoryStoreFilterContractSpec extends AnyFlatSpec with Matchers {
     "ByMetadata with a backslash"                      -> MemoryFilter.ByMetadata("tag", """c:\temp"""),
     "HasMetadata"                                      -> MemoryFilter.HasMetadata("tag"),
     "ByType"                                           -> MemoryFilter.ByType(MemoryType.Conversation),
-    "All"                                              -> MemoryFilter.All
+    "All"                                              -> MemoryFilter.All,
+    // Case folding must mean what String.toLowerCase means, for any text
+    "ContentContains of an accented capital" -> MemoryFilter.ContentContains("\u00e9cole"),
+    "ContentContains of an accented small"   -> MemoryFilter.ContentContains("\u00c9COLE"),
+    "ContentContains of a bare i"            -> MemoryFilter.ContentContains("i"),
+    "ContentContains of a bare k"            -> MemoryFilter.ContentContains("k"),
+    "ContentContains of ss"                  -> MemoryFilter.ContentContains("STRASSE"),
+    "ContentContains of an eszett"           -> MemoryFilter.ContentContains("stra\u00dfe"),
+    "ContentContains of a composed accent"   -> MemoryFilter.ContentContains("\u00e9cole"),
+    "ContentContains of a decomposed accent" -> MemoryFilter.ContentContains("e\u0301cole"),
+    "ContentContains of the empty string"    -> MemoryFilter.ContentContains(""),
+    // Three-valued logic: a NULL column must not make `Not` drop a row `matches` accepts
+    "Not(MinImportance)"    -> MemoryFilter.Not(MemoryFilter.MinImportance(0.4)),
+    "Not(ByEntity)"         -> MemoryFilter.Not(MemoryFilter.ByEntity(EntityId("e1"))),
+    "Not(ByConversation)"   -> MemoryFilter.Not(MemoryFilter.ByConversation("c1")),
+    "Not(ByMetadata)"       -> MemoryFilter.Not(MemoryFilter.ByMetadata("lang", "fr")),
+    "Not(HasMetadata)"      -> MemoryFilter.Not(MemoryFilter.HasMetadata("lang")),
+    "Not(MetadataContains)" -> MemoryFilter.Not(MemoryFilter.MetadataContains("lang", "r")),
+    "Not(ContentContains)"  -> MemoryFilter.Not(MemoryFilter.ContentContains("bare")),
+    "Not(All)"              -> MemoryFilter.Not(MemoryFilter.All),
+    "Not(None)"             -> MemoryFilter.Not(MemoryFilter.None),
+    "Or(MinImportance, Not(MinImportance))" -> MemoryFilter.Or(
+      MemoryFilter.MinImportance(0.4),
+      MemoryFilter.Not(MemoryFilter.MinImportance(0.4))
+    ),
+    // `And(e, c)` is a subset of `e`, so `Not` of it is NOT `Not(e)`: narrowing through it would drop rows
+    "Not(And(ByEntity, Custom))" -> MemoryFilter.Not(
+      MemoryFilter.And(MemoryFilter.ByEntity(EntityId("e1")), MemoryFilter.Custom(_.content.contains("nothing")))
+    ),
+    "Not(Or(ByType, Custom))" -> MemoryFilter.Not(
+      MemoryFilter.Or(MemoryFilter.ByType(MemoryType.Task), MemoryFilter.Custom(_.content.contains("keyed")))
+    ),
+    "And(ByEntity, Custom)" -> MemoryFilter.And(
+      MemoryFilter.ByEntity(EntityId("e1")),
+      MemoryFilter.Custom(_.content.contains("keyed"))
+    ),
+    // Metadata keys that mean something in a JSON path
+    "ByMetadata with a dotted key"        -> MemoryFilter.ByMetadata("a.b", "dotted"),
+    "HasMetadata with a dotted key"       -> MemoryFilter.HasMetadata("a.b"),
+    "MetadataContains with a dotted key"  -> MemoryFilter.MetadataContains("a.b", "dot"),
+    "ByMetadata with a bracket key"       -> MemoryFilter.ByMetadata("x[0]", "idx"),
+    "ByMetadata with a quote in the key"  -> MemoryFilter.ByMetadata("say \"hi\"", "x"),
+    "ByMetadata is case sensitive"        -> MemoryFilter.ByMetadata("lang", "fr"),
+    "ByMetadata is case sensitive, upper" -> MemoryFilter.ByMetadata("lang", "FR")
   )
 
   // ===== The stores under contract =====
@@ -157,6 +225,40 @@ class MemoryStoreFilterContractSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  // ===== Narrowing is sound: no filter tree makes a store drop a row `matches` accepts =====
+
+  /** Leaves for the random trees: SQL-expressible, awkward (case folding, NULLs, JSON-path keys) and `Custom`. */
+  private lazy val leaves: Vector[MemoryFilter] =
+    filters.map(_._2).filter(MemoryStoreFilterContractSpec.isLeaf).toVector
+
+  for (subject <- subjects)
+    subject.name should "answer recall, count and deleteMatching like `matches` for 300 random filter trees" in
+      withLoaded(subject) { store =>
+        val random = new scala.util.Random(20261006L)
+        (1 to 300).foreach { n =>
+          val tree     = MemoryStoreFilterContractSpec.randomTree(leaves, random, 3)
+          val expected = ids(fixtures.filter(tree.matches))
+          withClue(s"tree #$n $tree: ") {
+            ids(right(store.recall(tree, 1000))) shouldBe expected
+            right(store.count(tree)) shouldBe expected.size.toLong
+          }
+        }
+      }
+
+  for (subject <- subjects)
+    subject.name should "delete exactly the rows `matches` accepts for random filter trees" in {
+      val random = new scala.util.Random(20261007L)
+      (1 to 40).foreach { n =>
+        val tree = MemoryStoreFilterContractSpec.randomTree(leaves, random, 3)
+        withLoaded(subject) { store =>
+          val after = right(store.deleteMatching(tree))
+          withClue(s"tree #$n $tree: ")(
+            ids(right(after.recall(MemoryFilter.All, 1000))) shouldBe ids(fixtures.filterNot(tree.matches))
+          )
+        }
+      }
+    }
+
   // ===== Limits apply after the filter, not before it =====
 
   for (subject <- subjects) {
@@ -180,6 +282,21 @@ class MemoryStoreFilterContractSpec extends AnyFlatSpec with Matchers {
 }
 
 object MemoryStoreFilterContractSpec {
+
+  def isLeaf(filter: MemoryFilter): Boolean = filter match {
+    case _: MemoryFilter.And | _: MemoryFilter.Or | _: MemoryFilter.Not => false
+    case _                                                              => true
+  }
+
+  /** A random filter tree of at most `depth` levels over `leaves`, And / Or / Not above them. */
+  def randomTree(leaves: Vector[MemoryFilter], random: scala.util.Random, depth: Int): MemoryFilter =
+    if (depth == 0 || random.nextInt(4) == 0) leaves(random.nextInt(leaves.size))
+    else
+      random.nextInt(3) match {
+        case 0 => MemoryFilter.And(randomTree(leaves, random, depth - 1), randomTree(leaves, random, depth - 1))
+        case 1 => MemoryFilter.Or(randomTree(leaves, random, depth - 1), randomTree(leaves, random, depth - 1))
+        case _ => MemoryFilter.Not(randomTree(leaves, random, depth - 1))
+      }
 
   /** Release a store's connection, if it holds one. */
   def close(store: MemoryStore): Unit = store match {

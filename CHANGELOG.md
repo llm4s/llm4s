@@ -1460,8 +1460,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   match across keys on the file store. `SQLiteMemoryStore(...)` now closes its connection when schema setup fails, so a file that is not a
   database no longer stays locked (it blocked deleting the file on Windows). Also, `SQLiteMemoryStore.search` with a content or metadata
   filter no longer fails with an ambiguous column. **Behaviour change:** `VectorMemoryStore.search` returns a `ConfigurationError` naming
-  both dimensions when a stored embedding and the query embedding differ in size, instead of silently falling back to keyword search;
-  re-embed the store or use the embedding model it was written with. The FTS-only fallback is gone with it.
+  both dimensions when **no** stored embedding has the query embedding's size, instead of silently falling back to keyword search;
+  re-embed the store or use the embedding model it was written with. A store holding vectors of more than one size (the embedding
+  model was changed part way) stays searchable: the memories whose embedding cannot be compared are left out, and counted in a
+  warning in the log. The FTS-only fallback is gone with it.
+  Review follow-up, same entry: SQL now only **narrows** and `matches` decides, as one rule for both stores. A filter next to a
+  `Custom` still narrows in SQL (`And(ByEntity(e), Custom(p))` reads only the rows of `e`, with the limit applied after `p`), and
+  `Not` is pushed to SQL only when what it negates is exact. Case-insensitive `ContentContains` now compares with the very
+  `String.toLowerCase` that `matches` uses (a `java_lower` function registered on the SQLite connection): SQLite's `lower()` folds ASCII
+  only, so `école` did not match `ÉCOLE`, and `i` did not match `İstanbul`. Comparisons with nullable columns are two-valued, so
+  `Not(MinImportance(0.4))`, `Not(ByEntity(...))` and `Not(ByMetadata(...))` no longer drop the memories that have no importance, entity
+  or metadata (both stores). A metadata key with a `.` or `[` in it is a name, not a JSON path step, on `SQLiteMemoryStore`; the file
+  store's `ByMetadata` and `HasMetadata` are now case sensitive (they used `LIKE`, which ignores the case of ASCII letters).
+  `deleteMatching` runs in one transaction on both stores: it is atomic, and 2,000 rows took about 0.3 s instead of about 2 s.
+  **Fix:** `SQLiteMemoryStore` read back metadata containing a backslash sequence wrongly (`c:\temp` came back as `c:`, a tab and
+  `emp`, because the decoder undid its escapes one after another); metadata is now written and read with a JSON parser, and rows
+  written before are read correctly too.
 - **`GuardrailAction.Warn` now logs in five more guardrails**: `Warn` is documented as "log a warning and let
   processing continue", but `PromptInjectionDetector`, `GroundingGuardrail`, `ContextRelevanceGuardrail`,
   `TopicBoundaryGuardrail` and `SourceAttributionGuardrail` passed the text through without a word, so a

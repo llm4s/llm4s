@@ -27,6 +27,7 @@ final class SQLiteMemoryStore private (
 ) extends MemoryStore {
 
   import SQLiteMemoryStore._
+  import FilterSupport.Sql
 
   override def store(memory: Memory): Result[MemoryStore] =
     Try {
@@ -96,21 +97,20 @@ final class SQLiteMemoryStore private (
     limit: Int = 100
   ): Result[Seq[Memory]] =
     Try {
-      // A Custom predicate is code, not SQL: read the rows newest first and let `matches` decide, so the limit
-      // applies to the memories that match and not to the newest rows overall.
-      val custom                = FilterSupport.containsCustom(filter)
-      val (whereClause, params) = if (custom) ("", Seq.empty) else filterToSql(filter)
+      // SQL narrows, `matches` decides: what SQL cannot express exactly (a Custom predicate is code) is decided on
+      // the rows read, newest first, so the limit applies to the memories that match and not to the newest overall.
+      val plan = narrowing(filter)
       val sql =
-        if (custom) "SELECT * FROM memories ORDER BY timestamp DESC"
-        else s"SELECT * FROM memories $whereClause ORDER BY timestamp DESC LIMIT ?"
+        if (plan.needsMatches) s"SELECT * FROM memories ${plan.where} ORDER BY timestamp DESC"
+        else s"SELECT * FROM memories ${plan.where} ORDER BY timestamp DESC LIMIT ?"
       Using.resource(connection.prepareStatement(sql)) { stmt =>
-        params.zipWithIndex.foreach { case (param, idx) =>
+        plan.params.zipWithIndex.foreach { case (param, idx) =>
           setParameter(stmt, idx + 1, param)
         }
-        if (!custom) stmt.setInt(params.length + 1, limit)
+        if (!plan.needsMatches) stmt.setInt(plan.params.length + 1, limit)
         Using.resource(stmt.executeQuery()) { rs =>
           val memories = Iterator.continually(rs).takeWhile(_.next()).map(rowToMemory)
-          (if (custom) memories.filter(filter.matches).take(limit) else memories).toSeq
+          (if (plan.needsMatches) memories.filter(filter.matches).take(limit) else memories).toSeq
         }
       }
     }.toEither.left.map(e => ProcessingError("sqlite-recall", s"Failed to recall memories: ${e.getMessage}"))
@@ -121,13 +121,12 @@ final class SQLiteMemoryStore private (
     filter: MemoryFilter = MemoryFilter.All
   ): Result[Seq[ScoredMemory]] =
     Try {
-      // Use FTS5 for full-text search. A Custom predicate is evaluated in memory, after the full-text match and
-      // before topK, so the limit is applied to the memories the filter accepts.
-      val custom                = FilterSupport.containsCustom(filter)
-      val (whereClause, params) = if (custom) ("", Seq.empty) else filterToSql(filter)
+      // Use FTS5 for full-text search. What SQL cannot narrow exactly is decided by `matches` after the full-text
+      // match and before topK, so the limit is applied to the memories the filter accepts.
+      val plan = narrowing(filter)
 
       // Build query to join with FTS table
-      val sql = if (whereClause.isEmpty) {
+      val sql = if (plan.where.isEmpty) {
         """SELECT m.*, bm25(memories_fts) as score
           |FROM memories m
           |JOIN memories_fts fts ON m.id = fts.id
@@ -136,9 +135,8 @@ final class SQLiteMemoryStore private (
           |LIMIT ?""".stripMargin
       } else {
         // Filter in a subquery: a bare `content` in the filter would be ambiguous with the FTS table's column
-        val innerWhere = whereClause.stripPrefix("WHERE ")
         s"""SELECT m.*, bm25(memories_fts) as score
-           |FROM (SELECT * FROM memories WHERE $innerWhere) m
+           |FROM (SELECT * FROM memories ${plan.where}) m
            |JOIN memories_fts fts ON m.id = fts.id
            |WHERE fts.content MATCH ?
            |ORDER BY score
@@ -146,11 +144,12 @@ final class SQLiteMemoryStore private (
       }
 
       Using.resource(connection.prepareStatement(sql)) { stmt =>
-        params.zipWithIndex.foreach { case (param, idx) =>
+        plan.params.zipWithIndex.foreach { case (param, idx) =>
           setParameter(stmt, idx + 1, param)
         }
-        stmt.setString(params.length + 1, escapeFtsQuery(query))
-        stmt.setInt(params.length + 2, if (custom) -1 else topK) // SQLite: a negative LIMIT means no limit
+        stmt.setString(plan.params.length + 1, escapeFtsQuery(query))
+        // SQLite: a negative LIMIT means no limit
+        stmt.setInt(plan.params.length + 2, if (plan.needsMatches) -1 else topK)
         Using.resource(stmt.executeQuery()) { rs =>
           val scored = Iterator
             .continually(rs)
@@ -162,7 +161,7 @@ final class SQLiteMemoryStore private (
               val normScore = Math.max(0.0, Math.min(1.0, 1.0 / (1.0 + Math.abs(bm25))))
               ScoredMemory(memory, normScore)
             }
-          (if (custom) scored.filter(sm => filter.matches(sm.memory)).take(topK) else scored).toSeq
+          (if (plan.needsMatches) scored.filter(sm => filter.matches(sm.memory)).take(topK) else scored).toSeq
         }
       }
     }.toEither.left.map(e => ProcessingError("sqlite-search", s"Failed to search memories: ${e.getMessage}"))
@@ -182,36 +181,42 @@ final class SQLiteMemoryStore private (
       this
     }.toEither.left.map(e => ProcessingError("sqlite-delete", s"Failed to delete memory: ${e.getMessage}"))
 
-  override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
-    if (FilterSupport.containsCustom(filter)) {
-      // Custom predicates anywhere in tree cannot be translated to SQL; fallback to row-by-row
+  override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] = {
+    val plan = narrowing(filter)
+    if (plan.needsMatches || plan.where.isEmpty) {
+      // SQL cannot say which rows match (or no row is excluded): read the rows `matches` accepts, then delete them
       deleteMatchingRowByRow(filter)
     } else {
-      val (whereClause, params) = filterToSql(filter)
-      if (whereClause.isEmpty) {
-        // Empty WHERE would delete all rows; fallback to safe row-by-row
-        deleteMatchingRowByRow(filter)
-      } else {
-        deleteMatchingBulk(whereClause, params)
-      }
+      deleteMatchingBulk(plan.where, plan.params)
     }
+  }
 
-  /** Fallback: recall matching memories via SQL (where possible), apply in-memory filter, delete one-by-one. */
+  /** Delete the memories `recall` returns, all in one transaction: the whole delete happens or none of it. */
   private def deleteMatchingRowByRow(filter: MemoryFilter): Result[MemoryStore] =
-    for {
-      memories <- recall(filter, Int.MaxValue)
-      toDelete = memories.filter(filter.matches) // Re-apply filter for Custom predicates not handled by SQL
-      _ <- toDelete.foldLeft[Result[Unit]](Right(())) { (acc, memory) =>
-        acc.flatMap(_ => delete(memory.id).map(_ => ()))
-      }
-    } yield this
+    recall(filter, Int.MaxValue).flatMap { memories =>
+      Try {
+        inTransaction {
+          Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { fts =>
+            Using.resource(connection.prepareStatement("DELETE FROM memories WHERE id = ?")) { main =>
+              memories.foreach { memory =>
+                fts.setString(1, memory.id.value)
+                fts.executeUpdate()
+                main.setString(1, memory.id.value)
+                main.executeUpdate()
+              }
+            }
+          }
+        }
+        this: MemoryStore
+      }.toEither.left.map(e =>
+        ProcessingError("sqlite-delete-matching", s"Failed to delete matching memories: ${e.getMessage}")
+      )
+    }
 
   /** Bulk delete with transaction: stream IDs, delete FTS entries row-by-row, bulk delete main table. */
   private def deleteMatchingBulk(whereClause: String, params: Seq[Any]): Result[MemoryStore] =
     Try {
-      val wasAutoCommit = connection.getAutoCommit
-      connection.setAutoCommit(false)
-      try {
+      inTransaction {
         // 1. Select IDs and delete FTS entries row-by-row (streaming, avoids materializing all IDs)
         Using.resource(connection.prepareStatement(s"SELECT id FROM memories $whereClause")) { selectStmt =>
           params.zipWithIndex.foreach { case (param, idx) =>
@@ -235,17 +240,28 @@ final class SQLiteMemoryStore private (
           }
           stmt.executeUpdate()
         }
-
-        connection.commit()
-        this
-      } catch {
-        case e: Throwable =>
-          connection.rollback()
-          throw e
-      } finally connection.setAutoCommit(wasAutoCommit)
+      }
+      this: MemoryStore
     }.toEither.left.map(e =>
       ProcessingError("sqlite-delete-matching", s"Failed to delete matching memories: ${e.getMessage}")
     )
+
+  /**
+   * Run `body` as one transaction: commit if it returns, roll back if it throws, and always restore autocommit,
+   * even if the commit or the rollback fails.
+   */
+  private def inTransaction[A](body: => A): A = {
+    val wasAutoCommit = connection.getAutoCommit
+    connection.setAutoCommit(false)
+    val outcome = Try {
+      val result = body
+      connection.commit()
+      result
+    }
+    if (outcome.isFailure) Try(connection.rollback())
+    Try(connection.setAutoCommit(wasAutoCommit))
+    outcome.get
+  }
 
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
     for {
@@ -259,18 +275,21 @@ final class SQLiteMemoryStore private (
 
   override def count(filter: MemoryFilter = MemoryFilter.All): Result[Long] =
     Try {
-      if (FilterSupport.containsCustom(filter)) {
-        // A Custom predicate is code, not SQL: count the rows `matches` accepts.
-        Using.resource(connection.prepareStatement("SELECT * FROM memories")) { stmt =>
+      val plan = narrowing(filter)
+      if (plan.needsMatches) {
+        // SQL cannot say which rows match exactly: count the rows `matches` accepts among those read.
+        Using.resource(connection.prepareStatement(s"SELECT * FROM memories ${plan.where}")) { stmt =>
+          plan.params.zipWithIndex.foreach { case (param, idx) =>
+            setParameter(stmt, idx + 1, param)
+          }
           Using.resource(stmt.executeQuery()) { rs =>
             Iterator.continually(rs).takeWhile(_.next()).map(rowToMemory).count(filter.matches).toLong
           }
         }
       } else {
-        val (whereClause, params) = filterToSql(filter)
-        val sql                   = s"SELECT COUNT(*) FROM memories $whereClause"
+        val sql = s"SELECT COUNT(*) FROM memories ${plan.where}"
         Using.resource(connection.prepareStatement(sql)) { stmt =>
-          params.zipWithIndex.foreach { case (param, idx) =>
+          plan.params.zipWithIndex.foreach { case (param, idx) =>
             setParameter(stmt, idx + 1, param)
           }
           Using.resource(stmt.executeQuery()) { rs =>
@@ -318,85 +337,68 @@ final class SQLiteMemoryStore private (
     }
   }
 
-  private def filterToSql(filter: MemoryFilter): (String, Seq[Any]) = filter match {
-    case MemoryFilter.All =>
-      ("", Seq.empty)
+  private def narrowing(filter: MemoryFilter): FilterSupport.Narrowing =
+    FilterSupport.narrow(filter)(leafSql)
 
-    case MemoryFilter.None =>
-      ("WHERE 1 = 0", Seq.empty)
-
+  /**
+   * The SQL of one filter, when it means exactly what `matches` means: a row satisfies it if and only if `matches`
+   * accepts the row, and it is never NULL (a NULL under `NOT` would drop a row `Not` accepts), hence the `COALESCE`
+   * around every comparison with a nullable column.
+   */
+  private def leafSql(filter: MemoryFilter): Option[FilterSupport.Sql] = filter match {
     case MemoryFilter.ByType(memoryType) =>
-      ("WHERE memory_type = ?", Seq(memoryTypeToString(memoryType)))
+      Some(Sql("memory_type = ?", Seq(memoryTypeToString(memoryType))))
 
     case MemoryFilter.ByTypes(memoryTypes) =>
-      val placeholders = memoryTypes.map(_ => "?").mkString(",")
-      (s"WHERE memory_type IN ($placeholders)", memoryTypes.map(memoryTypeToString).toSeq)
+      if (memoryTypes.isEmpty) Some(Sql("1 = 0", Seq.empty))
+      else
+        Some(
+          Sql(s"memory_type IN (${memoryTypes.map(_ => "?").mkString(",")})", memoryTypes.map(memoryTypeToString).toSeq)
+        )
 
     case MemoryFilter.ByConversation(conversationId) =>
-      ("WHERE conversation_id = ?", Seq(conversationId))
+      Some(Sql("COALESCE(conversation_id = ?, 0)", Seq(conversationId)))
 
     case MemoryFilter.ByEntity(entityId) =>
-      ("WHERE entity_id = ?", Seq(entityId.value))
+      Some(Sql("COALESCE(entity_id = ?, 0)", Seq(entityId.value)))
 
     case MemoryFilter.ByTimeRange(after, before) =>
       (after, before) match {
-        case (Some(a), Some(b)) =>
-          ("WHERE timestamp >= ? AND timestamp <= ?", Seq(a.toEpochMilli, b.toEpochMilli))
-        case (Some(a), scala.None) =>
-          ("WHERE timestamp >= ?", Seq(a.toEpochMilli))
-        case (scala.None, Some(b)) =>
-          ("WHERE timestamp <= ?", Seq(b.toEpochMilli))
-        case (scala.None, scala.None) =>
-          ("", Seq.empty)
+        case (Some(a), Some(b)) => Some(Sql("timestamp >= ? AND timestamp <= ?", Seq(a.toEpochMilli, b.toEpochMilli)))
+        case (Some(a), scala.None)    => Some(Sql("timestamp >= ?", Seq(a.toEpochMilli)))
+        case (scala.None, Some(b))    => Some(Sql("timestamp <= ?", Seq(b.toEpochMilli)))
+        case (scala.None, scala.None) => Some(FilterSupport.unrestricted)
       }
 
     case MemoryFilter.MinImportance(threshold) =>
-      ("WHERE importance >= ?", Seq(threshold))
+      Some(Sql("COALESCE(importance >= ?, 0)", Seq(threshold)))
 
     case MemoryFilter.ByMetadata(key, value) =>
-      ("WHERE json_extract(metadata_json, ?) = ?", Seq(s"$$.$key", value))
+      jsonPath(key).map(path => Sql("COALESCE(json_extract(metadata_json, ?) = ?, 0)", Seq(path, value)))
 
     case MemoryFilter.HasMetadata(key) =>
-      ("WHERE json_extract(metadata_json, ?) IS NOT NULL", Seq(s"$$.$key"))
+      jsonPath(key).map(path => Sql("json_extract(metadata_json, ?) IS NOT NULL", Seq(path)))
 
     case MemoryFilter.MetadataContains(key, substring) =>
       // instr is a literal, case-sensitive substring test, like String.contains: LIKE would read % and _ as wildcards
-      ("WHERE instr(json_extract(metadata_json, ?), ?) > 0", Seq(s"$$.$key", substring))
+      jsonPath(key).map(path => Sql("COALESCE(instr(json_extract(metadata_json, ?), ?) > 0, 0)", Seq(path, substring)))
 
     case MemoryFilter.ContentContains(substring, caseSensitive) =>
-      // instr is a literal substring test: LIKE would read % and _ as wildcards and is never case sensitive.
-      // lower() folds ASCII only, which is also all LIKE ever folded.
-      if (caseSensitive) ("WHERE instr(content, ?) > 0", Seq(substring))
-      else ("WHERE instr(lower(content), lower(?)) > 0", Seq(substring))
+      // instr is a literal substring test: LIKE would read % and _ as wildcards and is never case sensitive
+      if (caseSensitive) Some(Sql("instr(content, ?) > 0", Seq(substring)))
+      else Some(Sql(s"instr(${FilterSupport.JavaLower}(content), ${FilterSupport.JavaLower}(?)) > 0", Seq(substring)))
 
-    case MemoryFilter.And(left, right) =>
-      val (leftSql, leftParams)   = filterToSql(left)
-      val (rightSql, rightParams) = filterToSql(right)
-      val leftWhere               = leftSql.replace("WHERE ", "")
-      val rightWhere              = rightSql.replace("WHERE ", "")
-      if (leftWhere.isEmpty && rightWhere.isEmpty) ("", Seq.empty)
-      else if (leftWhere.isEmpty) (rightSql, rightParams)
-      else if (rightWhere.isEmpty) (leftSql, leftParams)
-      else (s"WHERE ($leftWhere) AND ($rightWhere)", leftParams ++ rightParams)
-
-    case MemoryFilter.Or(left, right) =>
-      val (leftSql, leftParams)   = filterToSql(left)
-      val (rightSql, rightParams) = filterToSql(right)
-      val leftWhere               = leftSql.replace("WHERE ", "")
-      val rightWhere              = rightSql.replace("WHERE ", "")
-      if (leftWhere.isEmpty || rightWhere.isEmpty) ("", Seq.empty)
-      else (s"WHERE ($leftWhere) OR ($rightWhere)", leftParams ++ rightParams)
-
-    case MemoryFilter.Not(inner) =>
-      val (innerSql, innerParams) = filterToSql(inner)
-      val innerWhere              = innerSql.replace("WHERE ", "")
-      if (innerWhere.isEmpty) ("", Seq.empty)
-      else (s"WHERE NOT ($innerWhere)", innerParams)
-
-    case MemoryFilter.Custom(_) =>
-      // Custom predicates can't be translated to SQL - return all and filter in memory
-      ("", Seq.empty)
+    case _ => scala.None // And, Or, Not, All, None and Custom are narrowed by FilterSupport, not here
   }
+
+  /**
+   * The JSON path of a metadata key, quoted so that a `.` or `[` in the key is part of the name and not a path
+   * step. A key that cannot be quoted this way (empty, or holding a quote, a backslash or a control character)
+   * has no exact path: `None`, and `matches` decides.
+   */
+  private def jsonPath(key: String): Option[String] =
+    if (key.nonEmpty && key.forall(c => c != '"' && c != '\\' && c >= ' ')) Some("$.\"" + key + "\"")
+    else scala.None
 
   private def setParameter(stmt: PreparedStatement, idx: Int, value: Any): Unit = value match {
     case s: String => stmt.setString(idx, s)
@@ -457,6 +459,7 @@ object SQLiteMemoryStore {
       // handle keeps the file locked, which blocks deleting it on Windows.
       Try {
         connection.setAutoCommit(true)
+        FilterSupport.registerJavaLower(connection)
         initializeSchema(connection)
         new SQLiteMemoryStore(dbPath, config, connection)
       }.recoverWith { case e =>
@@ -541,40 +544,38 @@ object SQLiteMemoryStore {
 
   private def metadataToJson(metadata: Map[String, String]): String =
     if (metadata.isEmpty) "{}"
-    else {
-      val entries = metadata.map { case (k, v) =>
-        s""""${escapeJson(k)}":"${escapeJson(v)}""""
-      }
-      s"{${entries.mkString(",")}}"
-    }
+    else ujson.write(ujson.Obj.from(metadata.map { case (k, v) => k -> ujson.Str(v) }))
 
+  /**
+   * Metadata from its stored JSON. A real JSON parser: the hand-written decoder this replaced undid its escapes one
+   * after another, so a stored `c:\temp` came back as `c:`, a tab and `emp`. Rows written by that encoder are valid
+   * JSON, so they read correctly now. Text that is not JSON at all (a control character other than tab, newline
+   * or carriage return was written raw) still goes through the old lenient reading.
+   */
   private def jsonToMetadata(json: String): Map[String, String] =
     if (json == null || json.isEmpty || json == "{}") Map.empty
-    else {
-      // Simple JSON parsing for flat string maps
-      val content = json.trim.stripPrefix("{").stripSuffix("}")
-      if (content.isEmpty) Map.empty
-      else {
-        content
-          .split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)")
-          .flatMap { pair =>
-            val parts = pair.split(":", 2)
-            if (parts.length == 2) {
-              val key   = parts(0).trim.stripPrefix("\"").stripSuffix("\"")
-              val value = parts(1).trim.stripPrefix("\"").stripSuffix("\"")
-              Some(unescapeJson(key) -> unescapeJson(value))
-            } else None
-          }
-          .toMap
-      }
-    }
+    else
+      Try(ujson.read(json).obj.collect { case (k, ujson.Str(v)) => k -> v }.toMap)
+        .getOrElse(lenientJsonToMetadata(json))
 
-  private def escapeJson(s: String): String =
-    s.replace("\\", "\\\\")
-      .replace("\"", "\\\"")
-      .replace("\n", "\\n")
-      .replace("\r", "\\r")
-      .replace("\t", "\\t")
+  private def lenientJsonToMetadata(json: String): Map[String, String] = {
+    // Simple JSON parsing for flat string maps
+    val content = json.trim.stripPrefix("{").stripSuffix("}")
+    if (content.isEmpty) Map.empty
+    else {
+      content
+        .split(",(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)")
+        .flatMap { pair =>
+          val parts = pair.split(":", 2)
+          if (parts.length == 2) {
+            val key   = parts(0).trim.stripPrefix("\"").stripSuffix("\"")
+            val value = parts(1).trim.stripPrefix("\"").stripSuffix("\"")
+            Some(unescapeJson(key) -> unescapeJson(value))
+          } else None
+        }
+        .toMap
+    }
+  }
 
   private def unescapeJson(s: String): String =
     s.replace("\\\"", "\"")
