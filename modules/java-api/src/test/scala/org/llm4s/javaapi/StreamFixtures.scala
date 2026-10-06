@@ -67,6 +67,23 @@ private[javaapi] object StreamFixtures {
     Thread.currentThread().isInterrupted
   }
 
+  /** A model whose first call sends one delta, then parks until interrupted; later calls answer "recovered". */
+  final class ParksOnce {
+    private val calls = new AtomicInteger(0)
+    val unparked      = new CountDownLatch(1)
+    val client: LLMClient = new Scripted(
+      onChunk =>
+        if (calls.getAndIncrement() == 0) {
+          onChunk(chunk(0))
+          if (parkUntilInterrupted()) unparked.countDown()
+          Left(org.llm4s.error.CancelledError("test"))
+        } else Right(completion("recovered")),
+      () => Right(completion("recovered"))
+    )
+  }
+
+  def parksOnce(): ParksOnce = new ParksOnce
+
   /** Spins (yielding) until `cond` holds; false only if the safety deadline passes. */
   def awaitCondition(cond: => Boolean): Boolean = {
     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(DeadlineSeconds)

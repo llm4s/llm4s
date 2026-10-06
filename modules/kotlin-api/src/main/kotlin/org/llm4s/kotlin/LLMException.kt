@@ -24,7 +24,7 @@ internal fun <T> LlmResult<T>.unwrap(defaultMessage: String, cancellation: Boole
  * exception after being cancelled would otherwise be reported as a failure and cancel its parent
  * scope.
  */
-internal fun LlmException.toKotlin(defaultMessage: String, cancellation: Boolean = true): RuntimeException {
+internal fun LlmException.toKotlin(defaultMessage: String, cancellation: Boolean): RuntimeException {
     val message = message ?: defaultMessage
     if (cancellation && error() is CancelledError) {
         return CancellationException(message).also { it.initCause(this) }

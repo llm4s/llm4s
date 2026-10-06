@@ -104,6 +104,7 @@ public final class JavaInteropCheck {
     stream.cancel();
     log.add("answer:" + result.get().answer().get());
     log.add("refused:" + agent.stream("java-thread-2", " ", listener).isFailure());
+    log.add("resume-refused:" + agent.streamResume("java-thread", List.of(Answer.approve("no-such-interrupt")), listener).isFailure());
     return log;
   }
 

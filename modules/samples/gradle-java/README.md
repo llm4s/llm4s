@@ -7,7 +7,7 @@ sample shows both ways to read one.
 
 | File | What it shows |
 |---|---|
-| [`HelloLLM4S.java`](src/main/java/org/llm4s/samples/HelloLLM4S.java) | create a client, one question, a conversation with a system message, an agent turn streamed to a lambda listener, error handling, closing the client |
+| [`HelloLLM4S.java`](src/main/java/org/llm4s/samples/HelloLLM4S.java) | create a client, one question, a conversation with a system message, an agent turn whose text streams to a lambda listener, error handling, closing the client |
 | [`application.conf`](src/main/resources/application.conf) | the provider, as a named section |
 | [`build.gradle.kts`](build.gradle.kts) | the one dependency: `org.llm4s:llm4s-java-api_3` |
 

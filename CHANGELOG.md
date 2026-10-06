@@ -29,12 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to an `AgentStreamListener` - `onEvent` for each, then one of `onComplete(AgentResult)` or
   `onError(LlmException)` - on the stream's own thread. Only `onEvent` is abstract, so a lambda is a listener.
   `AgentStream.await()` returns the outcome once the listener has returned from its last call; `cancel()`
-  cancels the turn and returns once it has ended. `StreamEvents.decode(eventType, event)` reads an event as an
-  `Optional`, and `Llm4s.wrapAgent(agent)` puts an agent built with `Agent.builder` (`withStreaming()`,
-  middleware, runtime) behind the facade. The Kotlin API's `AgentKt.stream`, `streamResume` and
-  `streamRecover` are cold `Flow<AgentStreamItem>`s (`Event(event)`, then `Done(result)`); cancelling the
-  collection (its scope, `take(n)`, a timeout) cancels the turn, and Kotlin's `Llm4s.wrapAgent` matches
-  Java's. As in the fs2 and ZIO streams, a consumer too slow for the stream's 256-event buffer loses live
+  cancels the turn and returns once it has ended. Resume answers are `Answer.approve(id)`, `reject(id, reason)`,
+  `edit(id, argumentsJson)` and `reply(id, json)`. `StreamEvents.decode(eventType, event)` reads an event as an
+  `Optional`. `Llm4s.createAgent(client, tools, streaming)` builds an agent whose model calls stream, so its
+  turns carry text deltas, and `Llm4s.wrapAgent(agent)` puts an agent built with `Agent.builder` behind the
+  facade. The Kotlin API's `AgentKt.stream`, `streamResume` (a `List<Answer>`) and `streamRecover` are cold
+  `Flow<AgentStreamItem>`s (`Event(event)`, then `Done(result)`); cancelling the collection (its scope,
+  `take(n)`, a timeout) cancels the turn, a turn cancelled otherwise fails it with `LLMException`, and Kotlin's
+  `Llm4s.createAgent(client, tools, streaming)` and `wrapAgent` match Java's. As in the fs2 and ZIO streams, a consumer too slow for the stream's 256-event buffer loses live
   events and receives a `StreamEvent.LiveGap` with their count - it never cancels the run - and a run that
   ends without a terminal event still ends the stream with its error. The Java sample streams a turn.
 - **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):

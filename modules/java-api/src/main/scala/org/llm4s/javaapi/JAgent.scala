@@ -60,20 +60,32 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
 
   /**
    * Answers some of `threadId`'s pending approvals and questions and continues, as a stream; see
-   * [[stream]]. Build each answer with the suspended result's `approve`, `reject`, `edit` or `reply`,
-   * e.g. `List.of(result.approve(id))`; for an id answered twice, the last answer counts.
+   * [[stream]]. Build each answer with [[Answer.approve]], [[Answer.reject]], [[Answer.edit]] or
+   * [[Answer.reply]], e.g. `List.of(Answer.approve(id))`; for an id answered twice, the last answer
+   * counts. A `null` or malformed answer is a failed result, and `listener` hears nothing.
    */
   def streamResume(
     threadId: ThreadId,
-    answers: java.util.List[(InterruptId, ujson.Value)],
+    answers: java.util.List[Answer],
     listener: AgentStreamListener
   ): LlmResult[AgentStream] =
     if (threadId.value == null) LlmResult.failure(ValidationError.required("threadId"))
     else if (answers == null) LlmResult.failure(ValidationError.required("answers"))
     else
-      streaming(listener)((agent, onEnd, l) =>
-        agent.streamResumeEnding(threadId, answers.asScala.toMap, RunConfig(), onEnd)(l)
+      decoded(answers).fold(
+        LlmResult.failure,
+        byId =>
+          streaming(listener)((agent, onEnd, l) => agent.streamResumeEnding(threadId, byId, RunConfig(), onEnd)(l))
       )
+
+  /** `answers` by interrupt id, the last answer to an id winning; or the first answer that is not one. */
+  private def decoded(answers: java.util.List[Answer]): Result[Map[InterruptId, ujson.Value]] =
+    answers.asScala.foldLeft[Result[Map[InterruptId, ujson.Value]]](Right(Map.empty)) { (byId, answer) =>
+      for {
+        sofar <- byId
+        pair  <- Option(answer).toRight(ValidationError.required("answer")).flatMap(_.underlying)
+      } yield sofar + pair
+    }
 
   /** Continues `threadId`'s failed or cancelled turn, as a stream; see [[stream]]. */
   def streamRecover(threadId: ThreadId, listener: AgentStreamListener): LlmResult[AgentStream] =

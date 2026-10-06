@@ -27,6 +27,11 @@ import org.llm4s.error.NetworkError
 import org.llm4s.error.ProcessingError
 import org.llm4s.error.ValidationError
 import org.llm4s.javaapi.AgentStream
+import org.llm4s.javaapi.Answer
+import org.llm4s.javaapi.JLlmClient
+import org.llm4s.javaapi.StreamEvents
+import org.llm4s.agent.events.AgentEvents
+import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.javaapi.AgentStreamListener
 import org.llm4s.javaapi.JAgent
 import org.llm4s.javaapi.LlmException
@@ -40,7 +45,6 @@ import org.llm4s.llmconnect.model.StreamedChunk
 import org.llm4s.llmconnect.model.ToolCall
 import scala.Function1
 import scala.Option
-import scala.Tuple2
 import scala.runtime.BoxedUnit
 import scala.util.Either
 import scala.util.Left
@@ -168,6 +172,18 @@ class AgentKtStreamTest {
     }
 
     @Test
+    fun `an agent created with streaming streams text deltas, one without does not`() = runBlocking {
+        val model = Scripted({ onChunk -> onChunk(StreamedChunk.apply("c", Option.apply("he"), Option.empty(), Option.empty(), Option.empty())); completion("hello") })
+        val client = LLMClientKt(JLlmClient(model))
+        suspend fun deltas(agent: AgentKt, threadId: String): List<String> =
+            agent.stream(threadId, "hi").toList().mapNotNull { item ->
+                (item as? AgentStreamItem.Event)?.let { StreamEvents.decode(AgentEvents.TextDelta(), it.event).orElse(null)?.text() }
+            }
+        assertEquals(listOf("he"), deltas(Llm4s.createAgent(client, ToolRegistry.empty(), true), "k8"))
+        assertEquals(emptyList(), deltas(Llm4s.createAgent(client, ToolRegistry.empty(), false), "k9"))
+    }
+
+    @Test
     fun `a failing turn throws LLMException with the turn's error`() = runBlocking<Unit> {
         val down = NetworkError.apply("down", Option.empty(), "http://x")
         val ex = assertFailsWith<LLMException> { agentOf(Scripted({ Left(down) })).stream("k2", "hi").toList() }
@@ -242,9 +258,10 @@ class AgentKtStreamTest {
         val model = ParksOnce()
         val runtime = GraphRuntime.inMemory(Clock.systemUTC())
         val agent = agentOf(model.client, runtime)
-        // the collector holds its first event until the model is parked, so the timeout lands mid-call
+        // the model parks until interrupted, and the timeout is generous enough for it to have parked by then;
+        // the collector also holds its first event until the model is parked, so the timeout lands mid-call
         val outcome = runCatching {
-            withTimeout(500) {
+            withTimeout(5_000) {
                 agent.stream("k7", "hi").collect { withContext(Dispatchers.IO) { model.parked.await(seconds, TimeUnit.SECONDS) } }
             }
         }
@@ -267,7 +284,7 @@ class AgentKtStreamTest {
         }
 
     @Test
-    fun `a turn that ends without a terminal event ends the flow with its error`() = runBlocking<Unit> {
+    fun `the facade's onError ends the flow with LLMException, after the events before it`() = runBlocking<Unit> {
         val handle = mockk<AgentStream>(relaxed = true)
         val event = StreamEvent.LiveGap.apply(3)
         every { mockJAgent.stream("t", "q", any()) } answers {
@@ -284,19 +301,20 @@ class AgentKtStreamTest {
     }
 
     @Test
-    fun `a cancelled turn ends the flow as cancelled, not failed`() = runBlocking<Unit> {
+    fun `a turn cancelled by someone else fails the flow with LLMException, not a swallowed cancellation`() = runBlocking<Unit> {
         val handle = mockk<AgentStream>(relaxed = true)
         every { mockJAgent.streamRecover("t", any()) } answers {
             started(handle) { l -> l.onError(LlmException(CancelledError.apply("run", Option.empty()))) }(secondArg())
         }
-        assertFailsWith<CancellationException> { mocked.streamRecover("t").toList() }
+        val ex = assertFailsWith<LLMException> { mocked.streamRecover("t").toList() }
+        assertIs<CancelledError>(assertIs<LlmException>(ex.cause).error())
     }
 
     @Test
     fun `streamResume passes the answers through and ends with Done`() = runBlocking {
         val handle = mockk<AgentStream>(relaxed = true)
         val result = mockk<AgentResult>()
-        val answers = listOf(Tuple2<String, ujson.Value>("i1", ujson.Str("yes")))
+        val answers = listOf(Answer.approve("i1"), Answer.reply("i2", "\"yes\""))
         every { mockJAgent.streamResume("t", answers, any()) } answers {
             started(handle) { l -> l.onComplete(result) }(thirdArg())
         }

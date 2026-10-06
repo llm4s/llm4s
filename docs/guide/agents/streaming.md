@@ -194,7 +194,8 @@ each event through `onEvent`, then exactly one of `onComplete(AgentResult)` or
 a listener; `StreamEvents.decode` reads an event as an `Optional`:
 
 ```java
-JAgent agent = Llm4s.wrapAgent(streamingAgent);   // or Llm4s.createAgent(client)
+// streaming = true: the agent's model calls stream, so the turn carries text deltas
+JAgent agent = Llm4s.createAgent(client, ToolRegistry.empty(), true);
 LlmResult<AgentStream> started = agent.stream(threadId, "Explain monads", event -> {
     StreamEvents.decode(AgentEvents.TextDelta(), event).ifPresent(d -> System.out.print(d.text()));
     if (event instanceof StreamEvent.LiveGap) System.out.print("[...]");
@@ -203,21 +204,26 @@ LlmResult<AgentResult> result = started.get().await();   // or started.get().can
 ```
 
 `AgentStream.await()` returns once the listener has returned from its last call, with the same
-outcome; `cancel()` cancels the turn, delivers no further event, and the listener's `onError`
-receives the cancellation. A listener that throws from `onEvent` cancels the turn, and `onError`
-receives what it threw. `Llm4s.createAgent(client)` builds an agent that calls `complete`, so its
-stream carries no text deltas: build the agent with `Agent.builder(...).withStreaming()` and wrap
-it with `Llm4s.wrapAgent(agent)` for them. The Java sample in `modules/samples/gradle-java` streams a
-turn.
+outcome. `cancel()` cancels the turn and returns once it has ended; the listener receives at most
+the event already being delivered, then `onError` with the cancellation - or `onComplete`, when the
+turn had already ended. A listener that throws from `onEvent` cancels the turn, and `onError`
+receives what it threw. `Llm4s.createAgent(client)` and `createAgent(client, tools)` build an agent
+that calls the model's `complete`, so its stream carries no text deltas; pass `streaming = true`
+for them. `Llm4s.wrapAgent(agent)` takes an agent built with `Agent.builder`, for middleware, a
+system prompt or a runtime. `streamResume` takes a `List<Answer>`, built with `Answer.approve(id)`,
+`reject(id, reason)`, `edit(id, argumentsJson)` or `reply(id, json)`. The Java sample in
+`modules/samples/gradle-java` streams a turn's text.
 
 **Kotlin.** `AgentKt.stream(threadId, query)` is a cold `Flow<AgentStreamItem>`: each collection
 runs the turn, emitting `AgentStreamItem.Event(event)` for each event, then
 `AgentStreamItem.Done(result)`. A refused start or a failed run throws `LLMException`. Cancelling
 the collection - its scope, `take(n)`, `withTimeout` - cancels the turn; starting and cancelling it
-run on `Dispatchers.IO`.
+run on `Dispatchers.IO`. A turn cancelled by anything but the collection fails it with
+`LLMException`, as in fs2 and ZIO.
 
 ```kotlin
-Llm4s.wrapAgent(streamingAgent).stream(threadId, "Explain monads").collect { item ->
+val agent = Llm4s.createAgent(client, ToolRegistry.empty(), streaming = true)
+agent.stream(threadId, "Explain monads").collect { item ->
     when (item) {
         is AgentStreamItem.Event -> StreamEvents.decode(AgentEvents.TextDelta(), item.event).ifPresent { print(it.text()) }
         is AgentStreamItem.Done  -> println("\n${item.result.status()}")

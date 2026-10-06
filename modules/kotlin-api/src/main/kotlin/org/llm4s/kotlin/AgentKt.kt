@@ -2,21 +2,21 @@ package org.llm4s.kotlin
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import org.llm4s.agent.AgentResult
 import org.llm4s.agent.graph.StreamEvent
 import org.llm4s.javaapi.AgentStream
+import org.llm4s.javaapi.Answer
 import org.llm4s.javaapi.AgentStreamListener
 import org.llm4s.javaapi.JAgent
 import org.llm4s.javaapi.LlmException
 import org.llm4s.javaapi.LlmResult
-import scala.Tuple2
-import ujson.Value
 
 /** An item of an agent turn's [kotlinx.coroutines.flow.Flow]: each of the turn's events, then its result. */
 sealed interface AgentStreamItem {
@@ -88,9 +88,9 @@ class AgentKt internal constructor(private val underlying: JAgent) {
 
     /**
      * Answers some of [threadId]'s pending approvals and questions and continues, as a [Flow]; see
-     * [stream]. Build each answer with the suspended result's `approve`, `reject`, `edit` or `reply`.
+     * [stream]. Build each answer with [Answer.approve], [Answer.reject], [Answer.edit] or [Answer.reply].
      */
-    fun streamResume(threadId: String, answers: List<Tuple2<String, Value>>): Flow<AgentStreamItem> =
+    fun streamResume(threadId: String, answers: List<Answer>): Flow<AgentStreamItem> =
         streaming { underlying.streamResume(threadId, answers, it) }
 
     /** Continues [threadId]'s failed or cancelled turn, as a [Flow]; see [stream]. */
@@ -98,31 +98,37 @@ class AgentKt internal constructor(private val underlying: JAgent) {
         streaming { underlying.streamRecover(threadId, it) }
 
     /**
-     * Starts the turn with a listener that hands each event to the flow's channel - blocking the stream's
-     * own thread, never the turn, when the channel is full - and closes it with the turn's outcome. The
-     * start is not cancellable, so a turn is never started and forgotten; however the collection ends,
-     * the turn is cancelled and awaited (a no-op once it has ended).
+     * Starts the turn with a listener that hands each event to a channel - blocking the stream's own
+     * thread, never the turn, when the channel is full - and closes it with the turn's outcome, then emits
+     * what the channel receives. The start is not cancellable, so a turn is never started and forgotten.
+     * However the collection ends - `Done`, an error, or cancelled - the turn is then cancelled and awaited
+     * (a no-op once it has ended), off the caller's dispatcher.
      */
-    private fun streaming(start: (AgentStreamListener) -> LlmResult<AgentStream>): Flow<AgentStreamItem> =
-        callbackFlow {
-            val listener = object : AgentStreamListener {
-                override fun onEvent(event: StreamEvent) {
-                    trySendBlocking(AgentStreamItem.Event(event))
-                }
-
-                override fun onComplete(result: AgentResult) {
-                    trySendBlocking(AgentStreamItem.Done(result))
-                    channel.close()
-                }
-
-                override fun onError(error: LlmException) {
-                    channel.close(error.toKotlin("Agent stream failed"))
-                }
+    private fun streaming(start: (AgentStreamListener) -> LlmResult<AgentStream>): Flow<AgentStreamItem> = flow {
+        val items = Channel<AgentStreamItem>(Channel.BUFFERED)
+        val listener = object : AgentStreamListener {
+            override fun onEvent(event: StreamEvent) {
+                items.trySendBlocking(AgentStreamItem.Event(event))
             }
-            val stream = withContext(NonCancellable + Dispatchers.IO) { start(listener) }.unwrap("Agent stream failed")
-            // however the collection ends - Done, an error, or cancelled - cancel the turn and wait for its end, off
-            // the caller's dispatcher (one line: awaitClose returns normally even when the collector is cancelled,
-            // closing the channel first, so a separate rethrow line would never count as covered)
-            try { awaitClose() } finally { withContext(NonCancellable + Dispatchers.IO) { stream.cancel() } }
+
+            override fun onComplete(result: AgentResult) {
+                items.trySendBlocking(AgentStreamItem.Done(result))
+                items.close()
+            }
+
+            // a CancelledError here is a turn cancelled by someone other than this collector: an error to the
+            // collector, as fs2 and ZIO raise it, not a CancellationException its coroutine would swallow
+            override fun onError(error: LlmException) {
+                items.close(error.toKotlin("Agent stream failed", cancellation = false))
+            }
         }
+        val stream = withContext(NonCancellable + Dispatchers.IO) { start(listener) }
+            .unwrap("Agent stream failed", cancellation = false)
+        try {
+            // emitAll cancels the channel if the collection ends early, releasing a listener blocked on it
+            emitAll(items)
+        } finally {
+            withContext(NonCancellable + Dispatchers.IO) { stream.cancel() }
+        }
+    }
 }

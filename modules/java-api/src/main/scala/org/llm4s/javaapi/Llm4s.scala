@@ -69,16 +69,24 @@ object Llm4s {
    * to the agent: an agent whose tools cannot be offered together (a name clash,
    * an invalid schema) fails every run with the reason.
    */
-  def createAgent(client: JLlmClient, tools: ToolRegistry): JAgent = {
+  def createAgent(client: JLlmClient, tools: ToolRegistry): JAgent =
+    createAgent(client, tools, false)
+
+  /**
+   * [[createAgent]] with `tools`, whose model calls stream when `streaming` is set: then a
+   * [[JAgent.stream]] of it carries the answer's text deltas (`AgentEvents.TextDelta()`). Without
+   * it, the agent calls the model's `complete`, and a stream carries no deltas.
+   */
+  def createAgent(client: JLlmClient, tools: ToolRegistry, streaming: Boolean): JAgent = {
     Objects.requireNonNull(client, "client must not be null")
     Objects.requireNonNull(tools, "tools must not be null")
-    new JAgent(Agent.builder("assistant", client.underlying).withTools(tools).build())
+    val builder = Agent.builder("assistant", client.underlying).withTools(tools)
+    new JAgent((if (streaming) builder.withStreaming() else builder).build())
   }
 
   /**
    * Wraps an `Agent` built with `Agent.builder`, for what the factories above do not set: its
-   * middleware (guardrails, approvals), handoffs, runtime, or `withStreaming()` - without which a
-   * stream carries no text deltas.
+   * middleware (guardrails, approvals), handoffs, system prompt or runtime.
    */
   def wrapAgent(agent: Agent): JAgent = {
     Objects.requireNonNull(agent, "agent must not be null")

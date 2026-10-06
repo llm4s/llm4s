@@ -24,16 +24,16 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
 
   private val cancelled = new AtomicBoolean(false)
   private val delivered = new CountDownLatch(1)
-  private val outcome =
-    new AtomicReference[Result[AgentResult]](Left(ValidationError("stream", "the stream ended without an outcome")))
+  // set once the listener's events end; empty if the listener threw a fatal error
+  private val outcome = new AtomicReference[Option[Result[AgentResult]]](None)
   private val deliverer: Thread =
-    Thread.ofVirtual().name(s"llm4s-java-stream-${run.threadId.value}").unstarted(() => deliver())
+    Thread.ofVirtual().name(s"llm4s-java-stream-${run.runId.value}").unstarted(() => deliver())
 
   /**
    * Cancels the turn and returns once it has ended; the thread is left for [[JAgent.streamRecover]].
-   * The listener receives no event that it was not already handling, then [[AgentStreamListener.onError]]
-   * with the cancellation - or `onComplete`, for a turn that had already ended. Safe to call more than
-   * once, from any thread, the listener's included.
+   * The listener receives at most the event already being delivered, then
+   * [[AgentStreamListener.onError]] with the cancellation - or `onComplete`, for a turn that had
+   * already ended. Safe to call more than once, from any thread, the listener's included.
    */
   def cancel(): Unit = {
     cancelled.set(true)
@@ -52,13 +52,29 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
   def await(): LlmResult[AgentResult] =
     if (Thread.currentThread() eq deliverer)
       LlmResult.failure(ValidationError("await", "called from the stream's own listener, which it would wait on"))
-    else LlmResult.from(CancelledError.attempt("AgentStream.await")(Right(delivered.await())).flatMap(_ => outcome.get))
+    else
+      LlmResult.from(
+        CancelledError
+          .attempt("AgentStream.await")(Right(delivered.await()))
+          .flatMap(_ =>
+            outcome.get.getOrElse(Left(ValidationError("listener", "the stream's listener failed fatally")))
+          )
+      )
 
-  /** Hands the buffer's events to the listener, then the turn's outcome; always opens `delivered`. */
+  /**
+   * Hands the buffer's events to the listener, then the turn's outcome; always opens `delivered`. A
+   * fatal error from the listener (one `Safety` does not capture) skips the terminal callback; the
+   * turn is cancelled and the buffer closed before the error ends this thread.
+   */
   private def deliver(): Unit =
-    Using.resource(new AutoCloseable { def close(): Unit = delivered.countDown() }) { _ =>
+    Using.resource(new AutoCloseable {
+      def close(): Unit = {
+        if (outcome.get.isEmpty) cancel()
+        delivered.countDown()
+      }
+    }) { _ =>
       val result = events()
-      outcome.set(result)
+      outcome.set(Some(result))
       val terminal = Safety.safely(result.fold(e => listener.onError(new LlmException(e)), listener.onComplete))
       terminal.left.foreach(e =>
         AgentStream.logger.warn(s"An agent stream listener's terminal callback failed: ${e.message}")
