@@ -3,7 +3,14 @@ package org.llm4s.imagegeneration.provider
 import scala.concurrent.duration.FiniteDuration
 
 import org.llm4s.http.{ HttpResponse, MultipartPart }
-import org.llm4s.imagegeneration.{ ImageGenerationOptions, ImageSize, OpenAIConfig, ValidationError }
+import org.llm4s.imagegeneration.{
+  ImageGenerationOptions,
+  ImageServiceError,
+  ImageSize,
+  ImageValidationError,
+  OpenAIConfig,
+  TransientImageServiceError
+}
 import org.llm4s.media.MediaType
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -62,7 +69,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
     val result = c.generateImages(prompt = "a test prompt", count = 2)
 
-    result shouldBe Left(ValidationError("Count must be between 1 and 1 for dall-e-3"))
+    result shouldBe Left(ImageValidationError("Count must be between 1 and 1 for dall-e-3"))
   }
 
   it should "reject empty prompts before any remote call" in {
@@ -70,7 +77,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
     val result = c.generateImages(prompt = "   ", count = 1)
 
-    result shouldBe Left(ValidationError("Prompt cannot be empty"))
+    result shouldBe Left(ImageValidationError("Prompt cannot be empty"))
   }
 
   it should "enforce 1000-char prompt limit for dall-e-2" in {
@@ -79,7 +86,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
     val result = c.generateImages(prompt = prompt, count = 1)
 
-    result shouldBe Left(ValidationError("Prompt cannot exceed 1000 characters for dall-e-2"))
+    result shouldBe Left(ImageValidationError("Prompt cannot exceed 1000 characters for dall-e-2"))
   }
 
   it should "enforce 32000-char prompt limit for gpt-image models" in {
@@ -88,7 +95,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
     val result = c.generateImages(prompt = prompt, count = 1)
 
-    result shouldBe Left(ValidationError("Prompt cannot exceed 32000 characters for gpt-image-1.5"))
+    result shouldBe Left(ImageValidationError("Prompt cannot exceed 32000 characters for gpt-image-1.5"))
   }
 
   it should "reject unsupported generation response format before any remote call" in {
@@ -100,7 +107,21 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
       options = ImageGenerationOptions(responseFormat = Some("xml"))
     )
 
-    result shouldBe Left(ValidationError("Unsupported response format for generation: xml"))
+    result shouldBe Left(ImageValidationError("Unsupported response format for generation: xml"))
+  }
+
+  it should "reject an unsupported output format before any remote call" in {
+    val stub = new StubHttpClient()
+    val c    = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"), stub)
+
+    val result = c.generateImages(
+      prompt = "a test prompt",
+      count = 1,
+      options = ImageGenerationOptions(outputFormat = Some("gif"))
+    )
+
+    result shouldBe Left(ImageValidationError("Unsupported output format: gif"))
+    stub.lastPostBody shouldBe None
   }
 
   it should "reject out-of-range output compression before any remote call" in {
@@ -112,7 +133,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
       options = ImageGenerationOptions(outputCompression = Some(101))
     )
 
-    result shouldBe Left(ValidationError("Output compression must be between 0 and 100, got: 101"))
+    result shouldBe Left(ImageValidationError("Output compression must be between 0 and 100, got: 101"))
   }
 
   it should "not send response_format when caller does not set it" in {
@@ -167,15 +188,27 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
     val result = c.generateImages(prompt = "prompt", count = 1)
 
-    result shouldBe Left(ValidationError("Invalid request: bad request details"))
+    result shouldBe Left(ImageValidationError("Invalid request: bad request details"))
   }
 
-  it should "map malformed response body to UnknownError" in {
+  it should "surface any other error status as an ImageServiceError carrying that status" in {
+    val stub = new StubHttpClient(
+      postResponse = HttpResponse(503, """{"error":{"message":"overloaded"}}""")
+    )
+    val c = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"), stub)
+
+    val result = c.generateImages(prompt = "prompt", count = 1)
+
+    result shouldBe Left(ImageServiceError("API error: overloaded", 503))
+    result.left.toOption.get shouldBe a[TransientImageServiceError]
+  }
+
+  it should "map malformed response body to ImageUnknownError" in {
     val stub = new StubHttpClient(postResponse = HttpResponse(200, "not-json"))
     val c    = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"), stub)
 
     val result = c.generateImages(prompt = "prompt", count = 1)
 
-    result.left.toOption.get shouldBe a[org.llm4s.imagegeneration.UnknownError]
+    result.left.toOption.get shouldBe a[org.llm4s.imagegeneration.ImageUnknownError]
   }
 }

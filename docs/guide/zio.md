@@ -28,7 +28,6 @@ Use `LLMClientZ.layer` to load provider config from the environment, build the
 client, and release it on scope exit:
 
 ```scala
-import org.llm4s.agent.AgentContext
 import org.llm4s.llmconnect.model.{Conversation, UserMessage}
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.zio.LLMClientZ
@@ -70,15 +69,14 @@ client
 
 ## AgentZ
 
-`AgentZ` wraps `Agent`, shifting the blocking agent loop to ZIO's blocking pool.
+`AgentZ` wraps an `Agent`, shifting the blocking agent loop to ZIO's blocking pool. `client.agent(id)(configure)` builds the agent from `Agent.builder(id, client)` with `configure` applied, so tools, guardrails, handoffs and middleware are set there; a builder that does not build fails with its `LLMError`.
 `LLMError` is the native error type — no wrapping needed.
 
 ```scala
-val agentZ = client.agent()
-
 for {
-  state <- agentZ.run(query = "Summarise this", tools = myTools)
-  _     <- ZIO.debug(state.conversation.messages.last.toString)
+  agentZ <- client.agent("assistant")(_.withTools(myTools).withSystemPrompt("You are concise."))
+  result <- agentZ.run("Summarise this")
+  _      <- ZIO.debug(result.answer.toString)
 } yield ()
 ```
 
@@ -86,7 +84,7 @@ for {
 
 ```scala
 for {
-  s1 <- agentZ.run("What's the weather in Paris?", tools)
+  s1 <- agentZ.run("What's the weather in Paris?")
   s2 <- agentZ.continueConversation(s1, "And London?")
 } yield s2
 ```
@@ -114,17 +112,21 @@ variables (`LLM_MODEL`, `OPENAI_API_KEY`, etc.).
 
 ### Differences from `Agent`
 
-`AgentZ` is a deliberately thin wrapper. `run` does not expose `handoffs`, and
-`continueConversation` does not expose `contextWindowConfig`; the `Agent` defaults apply.
-Tracing, debug logging and the trace log path are still available through the `context`
-parameter (`AgentContext`). If you need handoffs or context-window pruning, call `Agent` directly
-inside `ZIO.attemptBlocking`.
+`AgentZ` is a deliberately thin wrapper over `Agent.start` and `AgentRun.await`. It exposes `run`,
+`continueConversation`, `recover` and `resume`, each taking a `RunConfig` and returning
+`ZIO[Any, LLMError, AgentResult]`. It does not expose a named `ThreadId` on `run` (each `run` starts a
+new thread, and `continueConversation` continues the thread of a previous result) or `history`; for
+those, build the `Agent` yourself and call `agent.start(...)` inside `ZIO.attemptBlocking`.
 
-Tool calls are not a failure of the effect. When the model calls a tool with arguments that do not
-fit the tool's schema, `Agent` hands a structured error result back to the model so it
-can correct itself; the run continues and only the step limit or a provider error ends it, which
-then arrives in the error channel as usual. If you need to see those results, read the
-`ToolMessage`s in the returned `AgentState`. The schema-validated `AgentTool` contract and the
-graph runtime (`org.llm4s.agent.graph`) are experimental and are not wrapped here; if you pass
-handoffs by calling `Agent` directly, each `Handoff` needs a stable id, as in
-`Handoff.to("physics", agent)`.
+Interrupting the fiber (or a timeout) cancels the run and returns once its turn has ended, so the
+thread can be recovered at once with `recover`.
+
+Errors arrive in the `LLMError` channel: a provider, tool or middleware failure is a `GraphError`
+(a provider error is `GraphError.NodeFailed(cause)`; an exception thrown by user code arrives as a
+`NodeFailed` carrying the original). A guardrail block, the step limit and a suspension for approval
+are not failures: they are the `AgentResult`'s `status`.
+
+Tool calls are not a failure of the effect either. When the model calls a tool with arguments that do not
+fit the tool's schema, the agent hands a structured error result (`{"error": ...}`) back to the model so it
+can correct itself; the run continues and only the step limit or a provider error ends it. If you
+need to see those results, read the `ToolMessage`s in `AgentResult.messages`.

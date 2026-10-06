@@ -118,8 +118,10 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
             Left(ToolCallError.Cancelled(request.functionName))
           case Right(scala.util.Success(Right(v))) => Right(v)
           case Right(scala.util.Success(Left(e)))  => Left(e)
-          // an interruption the tool wrapped (and so cleared) is still a cancellation, never retried
+          // an interruption the tool wrapped is still a cancellation, never retried; the tool caught it on
+          // this thread and so cleared the flag, so restore it as for a direct throw (design section 4.4)
           case Right(scala.util.Failure(t)) if CancelledError.isCancellation(t) =>
+            Thread.currentThread().interrupt()
             Left(ToolCallError.Cancelled(request.functionName))
           case Right(scala.util.Failure(t)) => Left(ToolCallError.ExecutionError(request.functionName, t))
         }

@@ -60,9 +60,9 @@ import pureconfig.ConfigSource
  *   registry <- Llm4sConfig.modelRegistryService()
  *   cfg      <- Llm4sConfig.defaultProvider()
  *   client   <- LLMConnect.getClient(cfg)(using registry)
- *   agent     = new Agent(client)
- *   state    <- agent.run("Hello", ToolRegistry.empty)
- * } yield state
+ *   agent    <- Agent.builder("assistant", client).build()   // llm4s-agent
+ *   result   <- agent.run("Hello")
+ * } yield result.answer
  * }}}
  *
  * @see [[org.llm4s.config.ConfigKeys]] for the environment variables core's

@@ -20,6 +20,17 @@ import scala.util.matching.Regex
  * - **Jailbreak Phrases**: Common patterns used in known jailbreaks
  * - **Code/SQL Injection**: Attempts to inject executable code
  *
+ * Patterns are matched against a normalised copy of the input (the input itself is returned unchanged):
+ * Unicode NFKD, so fullwidth and other compatibility forms become their plain letters; every combining mark
+ * removed, so accented spellings lose their accents; every format character removed (zero-width space and
+ * joiners, word joiner, byte-order mark, soft hyphen, bidirectional controls), so a phrase split by an
+ * invisible character still matches; then lower-cased with `Locale.ROOT` (so the JVM's default locale has no
+ * effect), with the Turkish dotless `ı` read as `i`. So `IGNORE`, `İGNORE`, `ıgnore`, `ＩＧＮＯＲＥ`, `ïgnöre`
+ * and `ig<U+200B>nore` all match a pattern written as `ignore`. The normalisation does not map look-alike
+ * letters from other scripts (such as Cyrillic `о` for Latin `o`), so it is a defence against common spelling
+ * tricks, not against every evasion; a custom [[InjectionPattern]] should be written in lower-case ASCII to
+ * benefit from it.
+ *
  * Example usage:
  * {{{
  * // Default: Block on injection detection
@@ -30,12 +41,8 @@ import scala.util.matching.Regex
  *   sensitivity = InjectionSensitivity.Medium
  * )
  *
- * // Use as input guardrail
- * agent.run(
- *   query = userInput,
- *   tools = tools,
- *   inputGuardrails = Seq(PromptInjectionDetector())
- * )
+ * // Use as input guardrail: an injection ends the turn AgentStatus.Blocked
+ * Agent.builder("assistant", client).withMiddleware(new GuardrailMiddleware(Seq(PromptInjectionDetector()), Nil)).build()
  * }}}
  *
  * @param patterns Custom injection patterns to detect (in addition to defaults)
@@ -51,7 +58,7 @@ class PromptInjectionDetector(
   private val logger = LoggerFactory.getLogger(getClass)
 
   def validate(value: String): Result[String] = {
-    val normalizedInput = value.toLowerCase
+    val normalizedInput = MatchText.folded(value)
 
     // Find all matching patterns
     val matches = patterns.flatMap { pattern =>

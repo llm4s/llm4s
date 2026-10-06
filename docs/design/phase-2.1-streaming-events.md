@@ -1,5 +1,7 @@
 # Phase 2.1: Event-based Streaming
 
+> **Superseded:** the agent event stream (`runWithEvents`, `AgentEvent`) described here was removed in [#1328](https://github.com/llm4s/llm4s/issues/1328) when the agent loop moved onto the graph runtime; its replacement is [#1329](https://github.com/llm4s/llm4s/issues/1329). Kept as history.
+
 > **Status:** Complete
 > **Last Updated:** 2025-11-26
 > **Related:** Agent Framework Roadmap

@@ -1,10 +1,11 @@
 package org.llm4s.samples.guardrails
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.samples.util.AgentResults
 import org.slf4j.LoggerFactory
 
 /**
@@ -21,6 +22,19 @@ import org.slf4j.LoggerFactory
 object JSONOutputValidationExample extends App {
   private val logger = LoggerFactory.getLogger(getClass)
 
+  // An output guardrail that fails ends the run as AgentStatus.Blocked, not a Left.
+  private def guarded(
+    client: org.llm4s.llmconnect.LLMClient,
+    id: String,
+    guardrails: Seq[org.llm4s.agent.guardrails.OutputGuardrail],
+    query: String
+  ): org.llm4s.types.Result[AgentResult] =
+    Agent
+      .builder(id, client)
+      .withMiddleware(GuardrailMiddleware(Seq.empty, guardrails))
+      .build()
+      .flatMap(_.run(query))
+
   logger.info("=== JSON Output Validation Example ===")
 
   val result = for {
@@ -28,49 +42,37 @@ object JSONOutputValidationExample extends App {
     registryService <- Llm4sConfig.modelRegistryService()
     given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerCfg)
-    agent = new Agent(client)
-
     // Define output guardrails
     outputGuardrails = Seq(
       new JSONValidator()
     )
 
     // Request JSON output with validation
-    state <- agent.run(
-      query = """Generate a JSON object with the following fields:
-                |{
-                |  "name": "Scala",
-                |  "paradigm": "functional and object-oriented",
-                |  "year": 2004
-                |}
-                |Return ONLY the JSON, no other text.""".stripMargin,
-      tools = new ToolRegistry(Seq.empty),
-      outputGuardrails = outputGuardrails
+    state <- guarded(
+      client,
+      "json-output-validation",
+      outputGuardrails,
+      """Generate a JSON object with the following fields:
+        |{
+        |  "name": "Scala",
+        |  "paradigm": "functional and object-oriented",
+        |  "year": 2004
+        |}
+        |Return ONLY the JSON, no other text.""".stripMargin
     )
   } yield state
 
   result match {
     case Right(state) =>
-      logger.info("✓ Output validation passed - response is valid JSON!")
-
-      val response = state.conversation.messages.last.content
-      logger.info("JSON Response:")
-      logger.info("{}", response)
-
-      // Can safely parse the JSON now
-      import scala.util.Try
-      import org.llm4s.types.TryOps
-
-      Try {
-        val json = ujson.read(response)
-        logger.info("Parsed JSON fields:")
-        logger.info("  Name: {}", json("name").str)
-        logger.info("  Paradigm: {}", json("paradigm").str)
-        logger.info("  Year: {}", json("year").num.toInt)
-      }.toResult match {
-        case Right(_) => // Successfully parsed
-        case Left(error) =>
-          logger.warn("  Note: Could not parse all fields: {}", error.message)
+      state.status match {
+        case AgentStatus.Completed(response) =>
+          logger.info("✓ Output validation passed - response is valid JSON!")
+          logger.info("JSON Response:")
+          logger.info("{}", response)
+          parseFields(response)
+        case other =>
+          logger.error("✗ Run did not complete: {}", AgentResults.describe(other))
+          logger.info("If blocked, the LLM likely did not return valid JSON.")
       }
 
     case Left(error) =>
@@ -80,4 +82,22 @@ object JSONOutputValidationExample extends App {
   }
 
   logger.info("=" * 50)
+
+  // Can safely parse the JSON now
+  private def parseFields(response: String): Unit = {
+    import scala.util.Try
+    import org.llm4s.types.TryOps
+
+    Try {
+      val json = ujson.read(response)
+      logger.info("Parsed JSON fields:")
+      logger.info("  Name: {}", json("name").str)
+      logger.info("  Paradigm: {}", json("paradigm").str)
+      logger.info("  Year: {}", json("year").num.toInt)
+    }.toResult match {
+      case Right(_) => // Successfully parsed
+      case Left(error) =>
+        logger.warn("  Note: Could not parse all fields: {}", error.message)
+    }
+  }
 }

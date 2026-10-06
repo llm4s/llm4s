@@ -28,7 +28,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[LLMError, GeneratedImage] =
     generateImages(prompt, 1, options)
-      .flatMap(_.headOption.toRight(ValidationError("No images returned from OpenAI image generation endpoint")))
+      .flatMap(_.headOption.toRight(ImageValidationError("No images returned from OpenAI image generation endpoint")))
 
   override def generateImages(
     prompt: String,
@@ -99,7 +99,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
         )
         .toEither
         .left
-        .map(e => ImageErrors.fromThrowable(e, "openai-image.request")(UnknownError.apply))
+        .map(e => ImageErrors.fromThrowable(e, "openai-image.request")(ImageUnknownError.apply))
         .flatMap { response =>
           if (response.statusCode == 200) {
             parseResponse(
@@ -111,7 +111,11 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
               seed = None
             ).flatMap(images =>
               Either
-                .cond(images.nonEmpty, images, ValidationError("No images returned from OpenAI image edit endpoint"))
+                .cond(
+                  images.nonEmpty,
+                  images,
+                  ImageValidationError("No images returned from OpenAI image edit endpoint")
+                )
             )
           } else {
             handleErrorResponse(response)
@@ -124,7 +128,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     responseFormat match {
       case None                     => Right(())
       case Some("b64_json" | "url") => Right(())
-      case Some(other)              => Left(ValidationError(s"Unsupported response format for edit: $other"))
+      case Some(other)              => Left(ImageValidationError(s"Unsupported response format for edit: $other"))
     }
 
   private def extractOpenAIEditOptions(
@@ -134,7 +138,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       case None                                          => Right(ProviderImageEditOptions.OpenAI())
       case Some(openAI: ProviderImageEditOptions.OpenAI) => Right(openAI)
       case Some(_) =>
-        Left(ValidationError("Unsupported provider-specific edit options for OpenAI image client"))
+        Left(ImageValidationError("Unsupported provider-specific edit options for OpenAI image client"))
     }
 
   private def resolveEditOutputSize(
@@ -149,7 +153,9 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     Either.cond(
       allowedSizes.contains(requested),
       (),
-      ValidationError(s"Unsupported edit size '$requested'. Allowed sizes: ${allowedSizes.toSeq.sorted.mkString(", ")}")
+      ImageValidationError(
+        s"Unsupported edit size '$requested'. Allowed sizes: ${allowedSizes.toSeq.sorted.mkString(", ")}"
+      )
     )
   }
 
@@ -161,7 +167,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       blocking {
         generateImage(prompt, options)
       }
-    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "openai-image.request")(UnknownError.apply)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "openai-image.request")(ImageUnknownError.apply)) }
 
   override def generateImagesAsync(
     prompt: String,
@@ -172,7 +178,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       blocking {
         generateImages(prompt, count, options)
       }
-    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "openai-image.request")(UnknownError.apply)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "openai-image.request")(ImageUnknownError.apply)) }
 
   override def editImageAsync(
     imagePath: Path,
@@ -184,7 +190,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "openai-image.request")(UnknownError.apply)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "openai-image.request")(ImageUnknownError.apply)) }
 
   override def health(): Either[LLMError, ServiceStatus] = {
     val healthUrl = s"${config.baseUrl.stripSuffix("/images/generations").stripSuffix("/v1")}/v1/models"
@@ -199,7 +205,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       .left
       .map(e =>
         ImageErrors.fromThrowable(e, "openai-image.health")(ex =>
-          ServiceError(s"Health check failed: ${ex.getMessage}", 0)
+          ImageServiceError(s"Health check failed: ${ex.getMessage}", 0)
         )
       )
       .map { response =>
@@ -215,9 +221,9 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
 
   private def validatePrompt(prompt: String): Either[LLMError, String] =
     if (prompt.trim.isEmpty) {
-      Left(ValidationError("Prompt cannot be empty"))
+      Left(ImageValidationError("Prompt cannot be empty"))
     } else if (prompt.length > maxPromptLength) {
-      Left(ValidationError(s"Prompt cannot exceed $maxPromptLength characters for ${config.model}"))
+      Left(ImageValidationError(s"Prompt cannot exceed $maxPromptLength characters for ${config.model}"))
     } else {
       Right(prompt)
     }
@@ -225,7 +231,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
   private def validateCount(count: Int): Either[LLMError, Int] = {
     val maxCount = if (isDallE3Model) 1 else 10
     if (count < 1 || count > maxCount) {
-      Left(ValidationError(s"Count must be between 1 and $maxCount for ${config.model}"))
+      Left(ImageValidationError(s"Count must be between 1 and $maxCount for ${config.model}"))
     } else {
       Right(count)
     }
@@ -243,21 +249,21 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     responseFormat match {
       case None                     => Right(())
       case Some("b64_json" | "url") => Right(())
-      case Some(unsupported) => Left(ValidationError(s"Unsupported response format for generation: $unsupported"))
+      case Some(unsupported) => Left(ImageValidationError(s"Unsupported response format for generation: $unsupported"))
     }
 
   private def validateOutputFormat(outputFormat: Option[String]): Either[LLMError, Unit] =
     outputFormat match {
       case None                          => Right(())
       case Some("png" | "jpeg" | "webp") => Right(())
-      case Some(other)                   => Left(ValidationError(s"Unsupported output format: $other"))
+      case Some(other)                   => Left(ImageValidationError(s"Unsupported output format: $other"))
     }
 
   private def validateOutputCompression(outputCompression: Option[Int]): Either[LLMError, Unit] =
     outputCompression match {
       case None                                      => Right(())
       case Some(level) if level >= 0 && level <= 100 => Right(())
-      case Some(level) => Left(ValidationError(s"Output compression must be between 0 and 100, got: $level"))
+      case Some(level) => Left(ImageValidationError(s"Output compression must be between 0 and 100, got: $level"))
     }
 
   private def validateModelOptionCompatibility(options: ImageGenerationOptions): Either[LLMError, Unit] =
@@ -265,7 +271,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       !isGptImageModel && (options.outputFormat.isDefined || options.outputCompression.isDefined || options.background.isDefined)
     ) {
       Left(
-        ValidationError(
+        ImageValidationError(
           s"outputFormat/outputCompression/background are only supported for GPT Image models; got model ${config.model}"
         )
       )
@@ -343,7 +349,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       )
       .toEither
       .left
-      .map(e => ImageErrors.fromThrowable(e, "openai-image.request")(UnknownError.apply))
+      .map(e => ImageErrors.fromThrowable(e, "openai-image.request")(ImageUnknownError.apply))
       .flatMap { response =>
         if (response.statusCode == 200) {
           Right(response)
@@ -360,10 +366,10 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     }.toEither.fold(_ => response.body, identity)
 
     response.statusCode match {
-      case 401  => Left(AuthenticationError("Invalid API key"))
-      case 429  => Left(RateLimitError("Rate limit exceeded"))
-      case 400  => Left(ValidationError(s"Invalid request: $errorMessage"))
-      case code => Left(ServiceError(s"API error: $errorMessage", code))
+      case 401  => Left(ImageAuthenticationError("Invalid API key"))
+      case 429  => Left(ImageRateLimitError("Rate limit exceeded"))
+      case 400  => Left(ImageValidationError(s"Invalid request: $errorMessage"))
+      case code => Left(ImageServiceError(s"API error: $errorMessage", code))
     }
   }
 
@@ -403,7 +409,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
 
       logger.info(s"Successfully generated ${images.length} image(s)")
       images
-    }.toEither.left.map(e => ImageErrors.fromThrowable(e, "openai-image.request")(UnknownError.apply))
+    }.toEither.left.map(e => ImageErrors.fromThrowable(e, "openai-image.request")(ImageUnknownError.apply))
 
   private def warnIfDeprecatedModelConfigured(): Unit =
     if (isDallE2Model || isDallE3Model) {

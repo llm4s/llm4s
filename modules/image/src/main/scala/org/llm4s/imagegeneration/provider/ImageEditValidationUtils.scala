@@ -1,6 +1,6 @@
 package org.llm4s.imagegeneration.provider
 
-import org.llm4s.imagegeneration.{ ImageGenerationError, ImageSize, ServiceError, ValidationError }
+import org.llm4s.imagegeneration.{ ImageGenerationError, ImageSize, ImageServiceError, ImageValidationError }
 
 import java.nio.file.{ Files, Path }
 import javax.imageio.ImageIO
@@ -11,21 +11,21 @@ private[provider] object ImageEditValidationUtils {
 
   def readImageFile(path: Path, label: String): Either[ImageGenerationError, Array[Byte]] =
     if (!Files.exists(path)) {
-      Left(ValidationError(s"$label does not exist at path: $path"))
+      Left(ImageValidationError(s"$label does not exist at path: $path"))
     } else {
       Try(Files.readAllBytes(path)).toEither.left.map(ex =>
-        ServiceError(s"Failed to read $label: ${ex.getMessage}", 500)
+        ImageServiceError(s"Failed to read $label: ${ex.getMessage}", 500)
       )
     }
 
   def readImageSize(path: Path, label: String): Either[ImageGenerationError, ImageSize] =
     if (!Files.exists(path)) {
-      Left(ValidationError(s"$label does not exist at path: $path"))
+      Left(ImageValidationError(s"$label does not exist at path: $path"))
     } else {
       Try(ImageIO.read(path.toFile)).toEither.left
-        .map(ex => ServiceError(s"Failed to read $label dimensions: ${ex.getMessage}", 500))
+        .map(ex => ImageServiceError(s"Failed to read $label dimensions: ${ex.getMessage}", 500))
         .flatMap {
-          case null => Left(ValidationError(s"$label is not a valid image: $path"))
+          case null => Left(ImageValidationError(s"$label is not a valid image: $path"))
           case img  => Right(toImageSize(img.getWidth, img.getHeight))
         }
     }
@@ -42,7 +42,7 @@ private[provider] object ImageEditValidationUtils {
           _ <- Either.cond(
             sourceSize == maskSize,
             (),
-            ValidationError(
+            ImageValidationError(
               s"Mask dimensions (${maskSize.width}x${maskSize.height}) must match source image dimensions (${sourceSize.width}x${sourceSize.height})"
             )
           )

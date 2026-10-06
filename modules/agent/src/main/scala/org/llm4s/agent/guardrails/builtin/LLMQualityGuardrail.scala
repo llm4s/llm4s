@@ -16,7 +16,7 @@ import org.llm4s.llmconnect.LLMClient
  * @example
  * {{{
  * val guardrail = LLMQualityGuardrail(client, "What is Scala?")
- * agent.run(query, tools, outputGuardrails = Seq(guardrail))
+ * Agent.builder("assistant", client).withMiddleware(new GuardrailMiddleware(Nil, Seq(guardrail))).build()
  * }}}
  */
 class LLMQualityGuardrail(

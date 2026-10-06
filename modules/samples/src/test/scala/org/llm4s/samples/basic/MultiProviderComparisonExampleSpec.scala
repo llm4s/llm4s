@@ -137,10 +137,22 @@ class MultiProviderComparisonExampleSpec extends AnyFlatSpec with Matchers {
   it should "measure the call itself" in withProviders { (load, _) =>
     val entries = compare(Seq("alpha", "beta"))(load)
 
-    // beta sleeps 120 ms before answering; alpha does not.
+    // beta sleeps 120 ms before answering, so its call took at least that long. Only the lower bound is
+    // asserted: a cold first call on a slow runner can take far longer than a sleeping one (430 ms against 120 ms
+    // was seen on CI), so "alpha is faster than beta" says nothing about the code under test.
     reply(entries(1)).latency should be >= (Delay - 20.millis)
-    reply(entries.head).latency should be < reply(entries(1)).latency
   }
+
+  it should "time each call with its own start and end, not from the start of the comparison" in
+    withProviders { (load, _) =>
+      // Four readings: before and after alpha's call, before and after beta's.
+      val readings = Iterator(1000L, 1000L + 7.millis.toNanos, 5000L, 5000L + 42.millis.toNanos)
+      val entries = MultiProviderComparisonExample.compare(Seq("alpha", "beta"), Prompt, () => readings.next())(load)(
+        using Registry
+      )
+
+      entries.map(reply(_).latency) shouldBe Seq(7.millis, 42.millis)
+    }
 
   it should "report a provider that fails, and still run the others" in withProviders { (load, fakes) =>
     val entries = compare(Seq("denied", "alpha"))(load)

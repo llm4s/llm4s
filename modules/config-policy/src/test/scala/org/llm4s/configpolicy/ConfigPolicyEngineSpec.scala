@@ -89,5 +89,74 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
       val violations = ConfigPolicyEngine.check(cfg, policy, CatalogEnvironment.Prod)
       violations.map(_.rule) should contain("allowedModelPatterns")
     }
+
+    "match model patterns against the whole value, so a pin is not a prefix" in {
+      val mini   = OpenAIConfig.fromValues("gpt-4o-mini", "k", None, "https://api.openai.com/v1").value
+      val policy = ConfigPolicy.permissive.withAllowedModelPatterns("openai/gpt-4o")
+      ConfigPolicyEngine.check(mini, policy, CatalogEnvironment.Prod).map(_.rule) should contain("allowedModels")
+      val exact = OpenAIConfig.fromValues("gpt-4o", "k", None, "https://api.openai.com/v1").value
+      ConfigPolicyEngine.check(exact, policy, CatalogEnvironment.Prod) shouldBe empty
+    }
+
+    "not let a lookalike host satisfy an anchored base-URL pin" in {
+      val policy = ConfigPolicy.permissive
+        .withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "https://api\\.openai\\.com/v1")
+      Seq(
+        "https://api.openai.com/v1.evil.example",
+        "https://api.openai.com.evil.example/v1",
+        "https://evil.example/?u=https://api.openai.com/v1"
+      ).foreach { url =>
+        val cfg = OpenAIConfig.fromValues("gpt-4o", "k", None, url).value
+        ConfigPolicyEngine.check(cfg, policy, CatalogEnvironment.Prod).map(_.rule) should contain("requiredBaseUrl")
+      }
+    }
+
+    "apply a per-provider base-URL pin in place of the environment-wide one" in {
+      val policy = ConfigPolicy.permissive
+        .withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "https://api\\.openai\\.com/v1")
+        .withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "openai-compatible", "https://api\\.groq\\.com/openai/v1")
+      val groq = OpenAICompatibleConfig.fromValues("m", "https://api.groq.com/openai/v1").value
+      ConfigPolicyEngine.check(groq, policy, CatalogEnvironment.Prod) shouldBe empty
+      val other = OpenAICompatibleConfig.fromValues("m", "https://api.openai.com/v1").value
+      ConfigPolicyEngine.check(other, policy, CatalogEnvironment.Prod).map(_.rule) should contain("requiredBaseUrl")
+      val openai = OpenAIConfig.fromValues("gpt-4o", "k", None, "https://api.openai.com/v1").value
+      ConfigPolicyEngine.check(openai, policy, CatalogEnvironment.Prod) shouldBe empty
+    }
+
+    "let a per-provider context cap override the environment-wide one" in {
+      val policy = ConfigPolicy.permissive
+        .withMaxContextWindow(CatalogEnvironment.Prod, 1000)
+        .withMaxContextWindow(CatalogEnvironment.Prod, "openai", 200000)
+      val cfg = OpenAIConfig.fromValues("gpt-4o", "k", None, "https://api.openai.com/v1").value
+      ConfigPolicyEngine.check(cfg, policy, CatalogEnvironment.Prod) shouldBe empty
+      val ollama = OllamaConfig.fromValues("llama3", "http://localhost:11434").value
+      ConfigPolicyEngine.check(ollama, policy, CatalogEnvironment.Prod).map(_.rule) should contain("maxContextWindow")
+    }
+
+    "accept every model the prod preset allows at its native context window" in {
+      val sections = Seq(
+        """provider = "openai", model = "gpt-4o", apiKey = "k"""",
+        """provider = "anthropic", model = "claude-3-5-sonnet-20241022", apiKey = "k"""",
+        """provider = "gemini", model = "gemini-2.5-pro", apiKey = "k"""",
+        """provider = "deepseek", model = "deepseek-chat", apiKey = "k""""
+      )
+      sections.foreach { section =>
+        val cfg = org.llm4s.config.Llm4sConfig
+          .providerFrom(
+            pureconfig.ConfigSource.string(s"llm4s { providers { provider = \"main\"\n main { $section } } }")
+          )
+          .value
+        withClue(section) {
+          ConfigPolicyEngine.check(cfg, ConfigPolicy.prodSafeDefaults, CatalogEnvironment.Prod) shouldBe empty
+        }
+      }
+    }
+
+    "accept the documented Groq and xAI recipes under the dev preset" in {
+      Seq("https://api.groq.com/openai/v1" -> 131072, "https://api.x.ai/v1" -> 500000).foreach { case (url, window) =>
+        val cfg = OpenAICompatibleConfig.fromValues("m", url, contextWindow = Some(window)).value
+        ConfigPolicyEngine.check(cfg, ConfigPolicy.devSandbox, CatalogEnvironment.Dev) shouldBe empty
+      }
+    }
   }
 }

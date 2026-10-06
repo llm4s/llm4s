@@ -85,6 +85,19 @@ class AudioPreprocessingSpec extends AnyFlatSpec with Matchers {
     result shouldBe Right((data, meta))
   }
 
+  it should "refuse multi-channel metadata with no sample width instead of dividing by zero" in {
+    val meta   = AudioMeta(44100, 2, 0)
+    val result = AudioPreprocessing.toMono(Array.fill[Byte](64)(1), meta)
+    result.isLeft shouldBe true
+    result.left.toOption.get.message should include("not PCM")
+  }
+
+  "trimSilence" should "refuse metadata with no sample width with a specific error" in {
+    val result = AudioPreprocessing.trimSilence(Array.fill[Byte](64)(1), AudioMeta(24000, 1, 0))
+    result.isLeft shouldBe true
+    result.left.toOption.get.message should include("not PCM")
+  }
+
   // ========== wrap ==========
 
   "wrap" should "create GeneratedAudio with WavPcm16 format by default" in {

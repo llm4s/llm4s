@@ -408,7 +408,7 @@ Every named section shares the built-in fields - `provider`, `model`, `baseUrl`,
 | OpenAI, Requesty, OpenRouter | `organization` |
 | Azure OpenAI | `endpoint` (required), `apiVersion` |
 | Vertex AI | `project` (required), `location` |
-| Generic `openai-compatible` | `contextWindow`, `reserveCompletion`, `streamUsage` |
+| Generic `openai-compatible` | `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` |
 
 A required one that is missing fails the config with its name, the section and what it means; a
 key that is neither built-in nor declared by the section's provider is ignored with a warning
@@ -681,16 +681,60 @@ Each named section is one endpoint, so several can sit side by side. The
 | `baseUrl` | yes | Requests go to `<baseUrl>/chat/completions`, and model listing to `<baseUrl>/models`. A trailing `/` is dropped |
 | `model` | yes | Sent as-is in every request |
 | `apiKey` | no | Sent as `Authorization: Bearer <key>`; with none, no `Authorization` header is sent |
-| `contextWindow` | no | The model's context window. Default 8192, which is deliberately small: set the real value |
+| `contextWindow` | no | The model's context window; overrides the model registry. With none, the registry's window for `model` when it has one of at least 8192 (see [where the context window comes from](#where-the-context-window-comes-from)), else 8192, which is deliberately small |
 | `reserveCompletion` | no | Tokens held back for the reply. Default 2048, or a quarter of a smaller window |
+| `registryProvider` | no | The [model registry](../MODEL_METADATA.md) provider whose entry for `model` gives the context window when `contextWindow` is not set: `groq`, `together_ai`, `fireworks_ai`, `xai`, `perplexity`, ... Inferred from the `baseUrl` host for those five hosted APIs; naming one here switches the inference off |
 | `headers` | no | Extra headers sent on every request; values are redacted when the config is printed |
 | `streamUsage` | no | Whether a streaming request asks for token usage with `stream_options.include_usage`. Default `true`; set `false` for an endpoint that rejects the field (see [streamed token usage](#what-the-generic-path-does-and-does-not-do)) |
 
 `baseUrl` is everything before `/chat/completions` in the vendor's endpoint URL. For most vendors
 that is the host plus `/v1`, but some add a prefix - Groq's is `/openai/v1`, Fireworks'
-`/inference/v1` - and Perplexity's Sonar API has no `/v1` at all. Nothing is
-known about the model up front, so set `contextWindow` from the vendor's model page; the recipes
-set it only where the vendor publishes one.
+`/inference/v1` - and Perplexity's Sonar API has no `/v1` at all.
+
+
+
+### Where the context window comes from
+
+The generic provider cannot ask an arbitrary endpoint how large the model's window is, so it takes it from
+the first of these that has an answer:
+
+1. the section's `contextWindow`;
+2. the [model registry](../MODEL_METADATA.md)'s entry for `model` under the `registryProvider` the section names;
+3. when the section names none, the registry's entry under the provider inferred from the `baseUrl` host, for
+   exactly these hosts: `api.groq.com` (`groq`), `api.together.xyz` and `api.together.ai` (`together_ai`),
+   `api.fireworks.ai` (`fireworks_ai`), `api.x.ai` (`xai`) and `api.perplexity.ai` (`perplexity`);
+4. 8192.
+
+```hocon
+internal-gateway {
+  provider = "openai-compatible"
+  baseUrl = "https://llm-gateway.internal.example/v1"   # not a known host, so name the registry provider
+  model = "llama-3.1-8b-instant"
+  registryProvider = "groq"                             # the window comes from groq/llama-3.1-8b-instant
+}
+```
+
+- **An explicit `registryProvider` is an instruction, not a hint.** It switches the host inference off, so a
+  `registryProvider = "perplexity"` on a Groq URL looks in Perplexity's entries only.
+- **The lookup is strict.** Only the named provider's own entry for exactly that model id counts. A partial
+  name does not match, and neither does another provider's entry for the same name, so a model the registry
+  does not list under that provider gets the default, never a neighbour's window.
+- **The host is matched exactly, never by substring.** `https://api.groq.com.evil.example/v1`,
+  `https://api.groq.com@evil.example/v1` and `https://evil.example/api.groq.com` all get no registry window.
+  NVIDIA NIM is not in the table because the registry's three `nvidia_nim` entries carry no chat model with a
+  window; `registryProvider = "nvidia_nim"` is still accepted.
+- **The registry can only enlarge the window.** A registry window below 8192 is ignored and the default used:
+  many entries, most of Fireworks' and Perplexity's older ones among them, carry a 4096 placeholder for input,
+  output and total alike (`fireworks_ai/.../minimax-m1-80k` is one), which would cut an 80k-context model's prompt
+  budget in half and reject a `reserveCompletion` that fits 8192. A model whose window really is smaller sets
+  `contextWindow`. The skipped entry is logged like a miss.
+- **Only the window is taken.** `reserveCompletion` keeps its own rule, a quarter of the window up to 2048,
+  because a registry entry's output limit can be as large as the whole window.
+- **The registry does not know every model.** It has no input limit for the Together recipe's model, and does
+  not list xAI's `grok-4.7` or the NVIDIA NIM model at all, so those recipes keep their `contextWindow`. A miss
+  under an explicit `registryProvider` is logged as a warning, and under an inferred one at info; a hit is
+  logged at info with the entry it used.
+
 
 ### Selecting it, and environment variables
 
@@ -713,7 +757,6 @@ llm4s {
       model = "openai/gpt-oss-120b"
       model = ${?GROQ_MODEL}          # optional override
       apiKey = ${?GROQ_API_KEY}
-      contextWindow = 131072
     }
   }
 }
@@ -825,11 +868,12 @@ groq-main {
   baseUrl = "https://api.groq.com/openai/v1"
   model = "openai/gpt-oss-120b"
   apiKey = ${?GROQ_API_KEY}
-  contextWindow = 131072
   reserveCompletion = 8192
 }
 ```
 
+- The context window, 131072 for this model, comes from the model registry, because `api.groq.com` is
+  a known host. Set `contextWindow` to override it, or for a model the registry does not list.
 - Model ids are Groq's own, including the `openai/` prefix here. `llama-3.3-70b-versatile`,
   which earlier versions of this guide used, was shut down for free and developer tiers on
   16 August 2026.
@@ -850,6 +894,8 @@ together-main {
 }
 ```
 
+- Keep `contextWindow`: the registry lists this model with no input limit, so without it the provider would
+  use 8192. (For a Together model the registry does give a limit for, it is taken automatically.)
 - Model ids are the `<organisation>/<model>` API strings from Together's serverless model list.
 - For a reasoning model on Together, the same reasoning limits apply as for Groq above.
 
@@ -861,10 +907,11 @@ fireworks-main {
   baseUrl = "https://api.fireworks.ai/inference/v1"
   model = "accounts/fireworks/models/gpt-oss-120b"
   apiKey = ${?FIREWORKS_API_KEY}
-  contextWindow = 131072
 }
 ```
 
+- The context window, 131072 for this model, comes from the model registry. Set `contextWindow` to
+  override it, or for a model the registry does not list.
 - Model ids are full paths, `accounts/fireworks/models/<name>`. Not every model in the catalogue
   is available serverless: check its model page before using it with a plain API key.
 - If the prompt plus `max_tokens` exceeds the model's window, Fireworks lowers `max_tokens`
@@ -884,6 +931,8 @@ xai-main {
 }
 ```
 
+- Keep `contextWindow`: the model registry does not list `grok-4.7`, so without it the provider would use
+  8192. (For an xAI model the registry does list, such as `grok-2`, it is taken automatically.)
 - xAI offers Chat Completions as a **legacy** endpoint; its new features ship on the Responses
   API, which the generic path does not speak. Chat, streaming and tools work.
 - `grok-4.7` is a reasoning model (default effort `high`). Its reasoning output is not read, and
@@ -906,6 +955,8 @@ nim-cloud {
 }
 ```
 
+- Keep `contextWindow`: the model registry has no usable chat entry for NVIDIA NIM, and
+  `integrate.api.nvidia.com` is not one of the hosts the registry provider is inferred from.
 - Model ids are `<publisher>/<model>`, as in NVIDIA's API catalogue. For a NIM you run
   yourself, see [NVIDIA NIM (self-hosted)](#nvidia-nim-self-hosted).
 
@@ -925,10 +976,10 @@ perplexity-sonar {
   baseUrl = "https://api.perplexity.ai"    # no /v1: requests go to /chat/completions
   model = "sonar-pro"
   apiKey = ${?PERPLEXITY_API_KEY}
-  contextWindow = 200000
 }
 ```
 
+- The context window, 200000 for `sonar-pro`, comes from the model registry.
 - **Citations and search results are not surfaced.** Sonar returns them in top-level
   `citations` and `search_results` fields, and `Completion` has no field for them, so you get
   the answer text - with its `[1]`-style markers - and not the sources they point to.
@@ -1053,10 +1104,13 @@ nim-local {
 #### Ollama (`/v1`)
 
 [`llm4s-ollama`](#ollama-local-models) (`provider = "ollama"`) is the first-class route to
-Ollama: it uses Ollama's native `/api/chat` API and also provides Ollama embeddings. Use the
-generic provider on Ollama's OpenAI-compatible `/v1` endpoint instead when you need **tool
-calling** - `llm4s-ollama`'s chat client sends no tools and drops tool messages - or when Ollama
-is behind a gateway that exposes only the OpenAI API:
+Ollama: it uses Ollama's native `/api/chat` API, supports **tool calling** (tools are sent, tool
+calls are read - whole or streamed - and tool results go back as `role: tool`) and also provides
+Ollama embeddings. Tool calling needs a model whose Ollama page lists the **tools** capability: for any
+other model Ollama answers HTTP 400 (`... does not support tools`), which the client reports as an
+`Invalid tools: Ollama model '<model>' does not support tool calling ...` validation error rather than
+sending the request again without the tools. Use the generic provider on Ollama's OpenAI-compatible `/v1` endpoint instead
+when Ollama is behind a gateway that exposes only the OpenAI API, or when you prefer that wire format:
 
 ```hocon
 ollama-openai {
@@ -1109,8 +1163,10 @@ val policy = ConfigPolicy.prodSafeDefaults
   )
   .withRequiredBaseUrlPattern(
     CatalogEnvironment.Prod,
-    "^https://(api\\.openai\\.com/v1|api\\.groq\\.com/openai/v1)$"
+    "openai-compatible",
+    "https://api\\.groq\\.com/openai/v1"
   )
+  .withMaxContextWindow(CatalogEnvironment.Prod, "openai-compatible", 131072)
 ```
 
 - `withAllowedProviders` and `withAllowedModelPatterns` **replace** the preset's lists; repeat
@@ -1120,14 +1176,27 @@ val policy = ConfigPolicy.prodSafeDefaults
   optional, so it is not checked; the rule is about sections that would otherwise inherit a
   vendor's shared key.
 - Model patterns match `<provider>/<model>`, so a Groq model is
-  `openai-compatible/openai/gpt-oss-120b`. Patterns are unanchored regular expressions: anchor
-  them with `^` and `$`, or `openai-compatible/.*` slips through under a looser one.
-- The base-URL pattern is **one per environment, checked against every provider's config** in
-  that environment, not only `openai-compatible`'s. Name every endpoint you use in it, as the
-  alternation above does.
-- Both presets cap `contextWindow` at 128000. A recipe above that - Groq, Together or Fireworks
-  at 131072, xAI at 500000 - fails the check with `contextWindow ... exceeds 128000`: lower the
-  section's `contextWindow`, or raise the cap with `withMaxContextWindow`.
+  `openai-compatible/openai/gpt-oss-120b`. Model and base-URL patterns are regular expressions
+  that must match the **whole** value, so `^` and `$` are optional: `openai/gpt-4o` allows
+  neither `openai/gpt-4o-mini` nor a dated snapshot such as `openai/gpt-4o-2024-08-06` (write
+  `openai/gpt-4o(-.*)?` for those). End a base-URL pin that allows paths with `/.*`, never a
+  bare `.*`: `https://api\.groq\.com.*` also accepts `https://api.groq.com.evil.example/v1`.
+- `withRequiredBaseUrlPattern(env, provider, pattern)` pins one provider's endpoint and
+  **replaces** the environment-wide pin for that provider. The environment-wide form,
+  `withRequiredBaseUrlPattern(env, pattern)`, is checked against every provider without a pin of
+  its own, not only `openai-compatible`; if you use it, name every endpoint in it (for example
+  `https://(api\.openai\.com|api\.groq\.com/openai)/v1`).
+- Context caps work the same way. The `prod` preset caps each of its providers at its current
+  models' window (openai and azure 128000, anthropic 200000, gemini 1048576, deepseek 131072) and
+  any other provider, `openai-compatible` included, at an environment-wide 1048576; `dev` caps
+  everything at 1048576. So Groq, Together or Fireworks at 131072 and xAI at 500000 pass as they
+  are. Set a per-provider cap with `withMaxContextWindow(env, provider, max)`, as above, to hold a
+  provider tighter, or to allow a model above 1048576. A section over its cap fails with
+  `contextWindow ... exceeds <max>`. A window taken from the model registry counts too: a Groq
+  section that sets no `contextWindow` resolves to 131072 and is checked at that.
+- Provider names in a per-provider pin or cap are canonicalised like provider ids (`google` is
+  `gemini`). One that names no registered provider and is not in `allowedProviders` is an
+  `[unknownProvider]` violation, so a typo cannot leave a provider unpinned.
 
 See `modules/config-policy/README.md` for the rest of the module.
 
@@ -1176,7 +1245,9 @@ endpoint rejects fields it does not know. Set `streamUsage = false` in the secti
 [streamed token usage](#what-the-generic-path-does-and-does-not-do)); the stream then carries
 usage only if the server sends it unasked.
 
-**Replies cut short, or context errors.** `contextWindow` defaults to 8192. Set it to the
+**Replies cut short, or context errors.** Without a `contextWindow`, the generic provider uses the model
+registry's window when it knows the model (see
+[where the context window comes from](#where-the-context-window-comes-from)), and otherwise 8192. Set it to the
 model's real window, or the server's configured context for a local server.
 
 ### Provider docs
@@ -1527,7 +1598,7 @@ place. Defaults when `baseUrl` is omitted:
 | **Local Option** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ vLLM, LM Studio, llama.cpp |
 | **Context Window** | 128K | 200K | 1M | 128K | 4K-32K | 8K | Model-specific | Set in config (default 8K) |
 | **Vision Support** | ✅ | ✅ | ✅ | ✅ | ⚠️ Limited | ❌ | Model-specific | ❌ Text only |
-| **Function Calling** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ Limited | ✅ If the endpoint supports it |
+| **Function Calling** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ If the model supports it | ✅ If the endpoint supports it |
 | **Reasoning Models** | ✅ o1 | ❌ | ❌ | ✅ (via OpenAI) | ✅ deepseek-reasoner | ❌ | ❌ | ⚠️ Run, but reasoning not configured or read |
 | **Enterprise Support** | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | N/A | Endpoint-specific |
 | **Cost (Budget)** | Medium | Medium | 🏆 Low | High | 🏆 Very Low | Low | Free | Endpoint-specific |

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
+  `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
+  service's MP3 and return its bytes untouched. PCM stays the default. `AudioFormat.Mp3` is a new case
+  (`llm4s-speech` is Experimental), `GeneratedAudio.isPcm` / `requirePcm`, and `AudioIO.saveMp3`. WAV
+  writing, `AudioIO.saveWav` / `saveRawPcm16` and the new `AudioPreprocessing.standardizeForSTT(audio, rate)`
+  reject MP3 with a `ValidationError`; Tacotron2 refuses it. A caller with an exhaustive `match` on
+  `AudioFormat` needs a case for `Mp3`. The `@Cloud` smoke suites check MP3 magic bytes.
 - **`llm4s-java-api`: Java interop module** (Beta, `modules/java-api`, package `org.llm4s.javaapi`,
   [#934](https://github.com/llm4s/llm4s/issues/934)): a facade for Java callers over the client and agent API. `Llm4s.createDefaultClient()`
   and `createClient(config)` return an `LlmResult<JLlmClient>`; `JLlmClient` (`AutoCloseable`) offers
@@ -17,6 +24,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ifSuccess` / `ifFailure` and `toCompletableFuture()` (an adapter over an already finished result, not
   an asynchronous call). It depends on core, `llm4s-agent` and the OpenAI, Anthropic, Ollama, Gemini
   and OpenAI-compatible provider modules.
+- **`llm4s-ollama`: tool calling in the native client** ([#1219](https://github.com/llm4s/llm4s/issues/1219)):
+  `OllamaClient` sends `CompletionOptions.tools` as `/api/chat`'s `tools`, reads `message.tool_calls` - whole
+  or streamed - into `ToolCall`s, and sends a `ToolMessage` as `role: tool` (with `tool_call_id` and `tool_name`) instead of
+  dropping it; an assistant turn's tool calls go back with their ids, consecutive `function.index` values and object
+  arguments, as Ollama's native history records them. Ollama sends no call ids, so
+  the client synthesizes unique ones (`call_<12 hex>_<index>`); an id the server sends is kept. A
+  malformed `tool_calls` entry is a `ProcessingError`. Agents on `provider = "ollama"` can now run tools; the
+  `openai-compatible` `/v1` route remains an alternative. **Behaviour change:** tools are now sent, so a model
+  without the *tools* capability (such as `llama3:latest`, the samples' default) fails the request: Ollama's
+  HTTP 400 `... does not support tools` is reported as a `ValidationError` on `tools` naming the model. Use a
+  tool-capable model (for example `llama3.1`) or send no tools; the request is not retried without them.
+- **config-policy: per-provider pins, anchored patterns, caps that fit current models**
+  ([#1220](https://github.com/llm4s/llm4s/issues/1220)): `ConfigPolicy.withRequiredBaseUrlPattern(env, provider, pattern)` and
+  `withMaxContextWindow(env, provider, max)` take precedence over the environment-wide value. Model and base-URL patterns now
+  must match the **whole** value (previously a substring match, so `openai/gpt-4o` also allowed `gpt-4o-mini` and a lookalike
+  host passed a URL pin). **Migration:** a pattern that relied on a prefix needs a suffix: end a base-URL pin with `/.*`, never a
+  bare `.*` (`https://api\.openai\.com.*` still accepts `https://api.openai.com.evil.example/v1`,
+  `https://api.openai.com:x@evil.example/` and `https://api.openai.com./v1`; `https://api\.openai\.com/.*` rejects all three), and
+  note that the `prod` preset's model patterns are now exact, so `openai/gpt-4o` no longer allows dated snapshots such as
+  `gpt-4o-2024-08-06` (write `openai/gpt-4o(-.*)?`). The `prod` preset caps each provider at its current models' window
+  (anthropic 200000, gemini 1048576, deepseek 131072, openai/azure 128000) and keeps an environment-wide fallback of 1048576 for a
+  provider with no entry of its own (one opted in with `withAllowedProviders`), so allowed models are not rejected for their
+  native window and no provider is uncapped; `dev` caps at 1048576. Provider names in a policy are canonicalised like provider ids
+  (`Locale.ROOT`, aliases such as `google` folded onto `gemini`), and a per-provider cap or pin naming no registered or allowed
+  provider is an `unknownProvider` violation instead of being silently ignored. A per-provider pin replaces the environment-wide
+  one for that provider, so a loose provider pin weakens a strict global one.
 - **`llm4s-spring-boot-starter`: Spring Boot auto-configuration** (Beta, `modules/spring-boot-starter`,
   [#936](https://github.com/llm4s/llm4s/issues/936)): built on `llm4s-java-api`. Properties under `llm4s.*` (`provider`, `model`, `apiKey`,
   `baseUrl`, `organization`, `contextWindow`, `reserveCompletion`) produce a `JLlmClient` and an
@@ -279,6 +312,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case is still a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`;
   new `GraphError` and `RunEvent` cases break exhaustive matches. Design:
   `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
+- **Error handling guide** ([#960](https://github.com/llm4s/llm4s/issues/960)):
+  `docs/guide/error-handling.md` teaches `Result[A]` and `LLMError` in practice: the basic pattern,
+  for-comprehensions, a table of the error types in `org.llm4s.error` with whether each is recoverable and
+  when it is raised, the errors other modules define that carry no recoverability marker (`EmbeddingError`, `RerankError`, ..., on which
+  `LLMError.isRecoverable` throws a `MatchError`, so the guide matches on `RecoverableError`), matching
+  specific errors, converting to and from exceptions, combining results, retry and circuit breaking, and
+  testing. Its snippets after the first section are compiled and run by `ErrorHandlingGuideSpec`. The Basic Usage
+  guide listed error types that do not exist (`ProviderConnectionError`, `InvalidApiKeyError`, ...) and
+  called `LLMError` sealed; it now shows the real ones and links to the guide.
 - **Cancellation by interrupt for graph runs and providers** (Experimental, `org.llm4s.agent.graph`,
   [#1270](https://github.com/llm4s/llm4s/issues/1270)): each superstep runs in a bounded Ox scope on
   virtual threads (Ox is a new implementation dependency of `llm4s-agent`). Interrupting the thread
@@ -404,6 +446,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OpenAIConfigKeys.AZURE_API_KEY` is now `AZURE_OPENAI_API_KEY`; the chat and embeddings
   missing-key messages changed. See the
   [migration note](docs/reference/migration.md#vendor-credentials-a-shared-api-key-per-provider).
+- **`openai-compatible` takes its context window from the model registry** ([#1217](https://github.com/llm4s/llm4s/issues/1217)):
+  without a `contextWindow`, the generic provider used 8192 and never asked the registry, though the registry
+  holds the window of most of the popular compatible hosts' models (`groq/`, `together_ai/`, `fireworks_ai/`,
+  `xai/`, `perplexity/`). A section now takes it from, in order: its own `contextWindow`; the registry's entry for
+  `model` under a new optional `registryProvider` key; the entry under the provider inferred from the `baseUrl`
+  host (an exact match on `api.groq.com`, `api.together.xyz`, `api.together.ai`, `api.fireworks.ai`, `api.x.ai` or
+  `api.perplexity.ai`, never a substring); then 8192. An explicit `registryProvider` switches the inference off.
+  The lookup is strict: only the named provider's own entry for exactly that model id counts, never a partial
+  name or another provider's entry for the same name (new `ContextWindowResolver.strictContextWindow`; the
+  forgiving `resolve` would have picked up a neighbour's window). Only the window is taken: `reserveCompletion`
+  keeps its rule. A registry window below 8192 is ignored, since many Fireworks and Perplexity entries carry a
+  4096 placeholder, so the registry can only enlarge the window. The Groq, Fireworks and Perplexity recipes in the providers guide no longer set `contextWindow`;
+  the Together, xAI and NVIDIA NIM recipes keep it, as the registry has no input limit for those models.
+  **Behaviour change:** a section for one of those hosts that set no `contextWindow` now gets the registry's
+  window instead of 8192; set `contextWindow` to keep the old value.
 - **Provider-specific config keys for named providers** - a descriptor declares keys of its own
   in `ProviderConfigSpec.extras` (`ProviderConfigKey`: name, description, `required`, `default`,
   `env`, `deprecatedAliases`), and reads them from the new `NamedProviderConfig.extras` (or
@@ -485,6 +542,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Stage 1 migration: agent runtime** ([#1328](https://github.com/llm4s/llm4s/issues/1328), BREAKING,
+  `llm4s-agent`, `llm4s-effect`, `llm4s-zio`, `workspaceClient`): `Agent` runs on `GraphRuntime`
+  through a generalised `ToolLoop`; the graph is the only agent loop, and `AgentState` and the
+  legacy loop are deleted, with no shim. Tools, guardrails, handoffs and context pruning belong to
+  the agent, set at build time, and a conversation is carried by `ThreadId`. Do not cut 0.5.0
+  between #1328 and #1329, which adds the event stream #1328 removes. Slices 3 (#1329) and 4
+  (#1330) extend this note; the full guide with examples is in `docs/reference/migration.md`.
+  Design: `docs/design/typed-agent-runtime-design.md` §4.13. Replacements:
+  - `new Agent(client).run(q, tools, ...)` -> `Agent.builder(id, client).withTools(tools)...build()`
+    then `run(q)`; `run` also takes `(threadId, query)`, `(threadId, query, config)` and
+    `(threadId, query, config, history)`. `agent.start(...)`, `startRecover` and `startResume`
+    return an `AgentRun` (`threadId`, `runId`, `status`, `await()`, `cancel()`).
+  - Per-run guardrails -> `.withMiddleware(new GuardrailMiddleware(input, output))`. A block is
+    the runtime's Block (see "A guardrail Block finishes the run"), which `Agent` reports as `Right` with
+    `AgentStatus.Blocked(guardrail, reason)`: the thread stays usable, an input block stores nothing
+    of the turn and an output block removes it (any handoff made in it too), and `usage` keeps its
+    model calls. Another middleware's `beforeAgent`/`afterAgent` `Left` blocks too, returned as that
+    `Left`. A blank query, given or produced by `beforeAgent`, is a `ValidationError` and stores
+    nothing. A transforming guardrail (`PIIMasker`) now applies. The root agent's guardrails and other run-boundary
+    middleware guard the whole handoff family, whichever agent is active.
+  - `continueConversation(state, q)` -> `continueConversation(result, q)`, which reads only
+    `result.threadId`.
+  - Threads stay in the agent's runtime until `agent.forget(threadId)` (`GraphRuntime.deleteThread`)
+    removes them - one-shot `run` threads too; `Checkpointer` gains `deleteThread`.
+  - `runMultiTurn` with `contextWindowConfig` -> an agent built with
+    `new ContextWindowMiddleware(config)`. It prunes only what is sent; the current turn is never
+    pruned (the strategy, `Custom` included, sees only the history before it), the request always
+    starts with a user message, and the system prompt is outside the budget.
+  - `AgentState` fields -> `AgentResult`: `conversation` is `messages`, `status` is `status`,
+    `usageSummary` is `usage`, `logs` is removed (use `withTracing`).
+  - `AgentStatus` -> `Completed(answer)`, `Blocked`, `StepLimitReached`, `Suspended`; `Failed` is
+    `Left(GraphError...)` (provider errors as `GraphError.NodeFailed(cause)`); `InProgress`,
+    `WaitingForTools` and `HandoffRequested` are gone.
+  - `AgentContext` is removed: `tracing` is `withTracing`, which emits the `graph.*` events;
+    `debug` and `traceLogPath` are gone. `TraceEvent.AgentStateUpdated` is no longer emitted.
+  - `Handoff(agent)` -> `Handoff.to(id, builder, reason)` (the id must equal the target builder's
+    id, `preserveContext` optional) or `Handoff.toId(id, reason?, preserveContext?)` for a cycle; `transferSystemMessage` is
+    removed; a self-handoff, and a handoff mixed with other tool calls, are refused.
+  - `runStep`, `initializeSafe`, `runWithStrategy`, `continueConversationWithStrategy`: removed;
+    `RunBudgets.maxConcurrency` bounds parallel tool calls. `ToolExecutionStrategy` stays in core as
+    a `ToolRegistry` feature.
+  - `runWithEvents`, `continueConversationWithEvents`, `runCollectingEvents`, `AgentEvent`,
+    `AgentStreamingExecutor`: removed, pending #1329.
+  - Session files: `AgentState.saveToFile`/`loadFromFile` -> save `result.messages` and import them
+    as `history` of a new thread; `history` is refused on an existing thread and may hold no system
+    message.
+  - `AgentIO`/`AgentZ` wrap the new `Agent`: `LLMClientIO.agent(id)(configure)` and
+    `LLMClientZ.agent(id)(configure)`; `run`, `continueConversation`, `recover`, `resume`; fiber
+    cancellation cancels the run; a thrown exception arrives as `NodeFailed` carrying the original.
+  - `CodeWorker.executeTask` returns `Result[AgentResult]` and loses `traceLogPath`;
+    `WorkspaceSettings.traceLogPath` and `WORKSPACE_TRACE_LOG` are removed.
+  - `ToolLoop.build(id, version, root, agents: Vector[LoopAgent])` builds an agent family;
+    `ModelStep.next` returns the `Completion`.
+  - Samples `StreamingAgentExample`, `StreamingWithToolsExample`, `EventCollectionExample` and
+    `AsyncToolAgentExample` are deleted.
+  - `GuardrailMiddleware`'s Block error is `GuardrailBlocked(guardrail, reason)` (the first failing
+    guardrail's name, every failure's error joined), no longer `CompositeGuardrail`'s aggregate.
+  - `llm4s-java-api`: `JAgent.run(query)` returns `LlmResult<AgentResult>`; tools are given to
+    `Llm4s.createAgent(client, tools)` (`run(query, tools)` is removed); `continueConversation` and
+    `forget` are new. The Kotlin `AgentKt` follows (`run`, `continueConversation`, `forget`).
+- **`Result.traverse` short-circuits** ([#960](https://github.com/llm4s/llm4s/issues/960)): it
+  stops calling the function at the first `Left`, where it used to call it on every element and
+  then return the first failure. **Behaviour change:** side effects in the function no longer run
+  for the elements after a failure. `Result.sequence` returns the same results as before.
+- **`ErrorRecovery.recoverWithBackoff` returns a non-retried error unchanged on every attempt**
+  ([#960](https://github.com/llm4s/llm4s/issues/960)): an error it does not retry, such as a
+  `ValidationError`, came back wrapped in an `ExecutionError` when it happened on the last attempt
+  (always, with `maxAttempts = 1`), losing its type. Only `RateLimitError`, `TimeoutError` and a
+  `ServiceError` that exhaust the attempts are wrapped now. **Behaviour change:** a `ServiceError` is
+  retried only when `isRecoverableStatus` (5xx, 429, 408), as `ReliableClient`'s `RetryPolicy` already
+  did; a 404 or other permanent status comes back unchanged at once. The Scaladoc no longer calls the
+  schedule exponential and describes each type's delay.
 - **Approval resumes through the middleware chain; `ToolLoop` gains a `finish` node**
   ([#1279](https://github.com/llm4s/llm4s/issues/1279)): `Approve` now runs the whole middleware
   chain again with `ToolContext.approved = true`, where it skipped the policy; a deny rule that
@@ -1278,13 +1407,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cancellation; `MCPToolRegistry` reports an interrupted MCP call as cancelled (never "no such tool" or a failed
   tool) and a cancelled stdio startup stops the half-started server; Ollama embeddings stop at the first failed text;
   Whisper and Tacotron2 stop the program they started when interrupted, where it used to be left running.
-  **Breaking, no shims:** `ImageGenerationError` is an `LLMError`, `ServiceError`'s second field is `statusCode`
-  (`code` is the derived `Option[String]`), and the image generation clients return `Either[LLMError, _]`, so a match
-  on their result needs a case for other errors. Being an `LLMError`, each case says whether trying again can help,
-  which `LLMError.isRecoverable` needs (it threw a `MatchError` on an image error otherwise): `RateLimitError` and a
-  `ServiceError` with a transient status (`0`, `408`, `429` or any `5xx`) are `RecoverableError`; the other
-  `ServiceError`s and every other case are `NonRecoverableError`. `ServiceError` is now a sealed type with two cases
-  behind the same `ServiceError(message, status)` and `case ServiceError(message, status)`; `MCPTransportImpl.sendRequest`, `sendNotification`,
+  **Breaking, no shims:** `ImageGenerationError` is an `LLMError`, and the cases whose names `org.llm4s.error`
+  also uses carry an `Image` prefix - `ImageAuthenticationError`, `ImageRateLimitError`, `ImageServiceError`,
+  `ImageValidationError`, `ImageUnknownError` - since a match on the wrong one of two same-named `LLMError`s compiles
+  and never fires. `ImageServiceError`'s second field is `statusCode` (`code` is the derived `Option[String]`), and
+  the image generation clients return `Either[LLMError, _]`, so a match on their result needs a case for other
+  errors. Being an `LLMError`, each case says whether trying again can help, which `LLMError.isRecoverable` needs (it
+  threw a `MatchError` on an image error otherwise): `ImageRateLimitError` and an `ImageServiceError` with a transient
+  status (`0`, `408`, `429` or any `5xx`) are `RecoverableError`; the other `ImageServiceError`s and every other case
+  are `NonRecoverableError`. `ImageServiceError` is a sealed type with two cases (`TransientImageServiceError`,
+  `RejectedImageServiceError`) behind `ImageServiceError(message, status)` and `case ImageServiceError(message, status)`;
+  `ToolRegistry` restores the interrupt flag when a tool throws an interruption wrapped in another exception (it
+  already did for a bare `InterruptedException`), as `MCPToolRegistry` does; `MCPTransportImpl.sendRequest`, `sendNotification`,
   `MCPClient.initialize` and `getTools` return `Result` instead of `Either[String, _]` (read the old string as
   `error.message`; the messages are unchanged); the concrete embedding providers' `embed` returns
   `Result[EmbeddingResponse]`. `llm4s-provider-testkit` gains `assertCallCancelsWhenInterrupted` and
@@ -1447,6 +1581,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Guardrail case folding no longer depends on the JVM default locale**: `ProfanityFilter`, `ToneValidator`
+  and `PromptInjectionDetector` lower-cased text with the default locale, so under a Turkish locale `HI`,
+  `INAPPROPRIATE` and `IGNORE PREVIOUS INSTRUCTIONS` folded to a dotless `ı` and went undetected. They (and the
+  RAG guardrails' parsing of `YES` / `NONE` replies) now fold with `Locale.ROOT`. `Locale.ROOT` alone would
+  have left `İGNORE` (Turkish capital dotted I) as `i` plus a combining dot, a locale-independent bypass, so
+  the three keyword guardrails now match against a normalised copy of the text: Unicode NFKD, combining marks
+  and format characters (zero-width space and joiners, byte-order mark, soft hyphen) removed, lower-cased with
+  `Locale.ROOT`, and the dotless `ı` read as `i`. `İGNORE`, `ıgnore`, fullwidth `ＩＧＮＯＲＥ`, accented
+  `ïgnöre` and `ig<U+200B>nore` are now all detected. Look-alike letters from other scripts are not mapped.
+  `ProfanityFilter` normalises its word list the same way (in case-sensitive mode too, without the case fold),
+  and a non-breaking or other compatibility space now separates tokens there and in `ToneValidator`.
 - **RAG deletes only the chunks of the document you name** (https://github.com/llm4s/llm4s/issues/1000): `RAG.deleteDocumentChunks` deleted
   by a bare prefix, so deleting or re-syncing `doc-1` also deleted every chunk of `doc-10` and
   `doc-1-appendix`. It now matches the `<docId>-chunk-` prefix. Also, `FusionStrategy.WeightedScore(0, 0)`
@@ -1475,7 +1620,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SystemError` and `OptimisticLockFailure` - were never retried by the default `RetryPolicy` (so by `ReliableClient`),
   while `LLMClientRetry` retried every recoverable error and the agent graph's node retries retried every
   recoverable error and a client-error `ServiceError`; a caller who branched on `isRecoverable` could not know what
-  would be retried. There is now one rule, `RetryPolicy.isRetryable`, used by all three: an error is retried if it is
+  would be retried. There is now one rule, `RetryPolicy.isRetryable`, used by all three and by `ErrorRecovery.recoverWithBackoff`: an error is retried if it is
   recoverable, except a response with a client-error HTTP status (any 4xx but 408 and 429, on a `ServiceError` or an
   `APIError`) and an `OptimisticLockFailure`, both of which need the caller first. The `ScalaDoc` of
   `RecoverableError`, `LLMError.isRecoverable` and `RetryPolicy.isRetryable` states the contract, and
@@ -1487,6 +1632,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SystemError` and `APIError`); `LLMClientRetry` no longer retries a 4xx `APIError` or an `OptimisticLockFailure`; and the agent graph's default
   node retry no longer retries a 4xx `ServiceError` or an `OptimisticLockFailure`. `RetryPolicy.recoverableOnly`
   (graph) is renamed `RetryPolicy.transientOnly`, as it is no longer `isRecoverable`.
+  `ErrorRecovery.recoverWithBackoff`, which retried only `RateLimitError`, `TimeoutError` and a 5xx/429/408
+  `ServiceError`, now also retries `NetworkError`, `ExecutionError`, `SystemError` and an `APIError` with no status or a
+  retryable one, waiting `baseDelay` times the attempt number (the schedules of the three it already retried are
+  unchanged); docs/guide/error-handling.md describes the rule.
+- **MCP: text stays text, tool failures are `isError` results, `getTools` returns a `Left`** ([#1319](https://github.com/llm4s/llm4s/issues/1319)):
+  the client no longer turns a text result that parses as JSON into a JSON value (a tool that returned
+  `"24"` is not handed back as the number 24); an object result also travels as the `structuredContent` the
+  server now sends, and the client returns it as that value (the specification types `structuredContent` as a
+  JSON object, so a number, array or `null` result is sent as its JSON text only). `MCPServer` reports a
+  tool that fails as a normal `tools/call` result with `isError: true` and the message as text, as the MCP
+  specification models it; an unknown tool stays a JSON-RPC error. `MCPClientImpl.getTools` returns a `Left`
+  for a failed listing instead of an empty `Seq`, so "no tools" and "unreachable" differ, and it skips (and
+  logs by name) a tool entry it cannot read instead of failing the whole listing (a listing none of whose
+  entries can be read is still a `Left`); a `tools/call` result that
+  carries only `structuredContent` is returned. `MCPToolRegistry` offers no tool of a server whose refresh
+  failed: the failed client is closed, and the tools it served call through that client, so they are dropped
+  with it and fetched again by the next lookup (a refresh that is only cancelled keeps them). Request ids were
+  already unique and are now tested. **Migration:** a caller that read an MCP tool's text result as JSON must
+  parse it itself; a caller of `getTools` must handle `Left`.
 - **Install snippets follow the latest release** ([#1281](https://github.com/llm4s/llm4s/issues/1281)): the
   installation guide, the dependency-conflicts reference, the image-generation guide and the FAQ pinned a literal
   `0.4.0` or `0.4.1` in sbt, Maven and Gradle snippets, so they said different things (the latest release is
@@ -1574,6 +1738,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unreadable object is still skipped. `S3LoaderExample` now reports the failure and stops,
   instead of querying an empty index. See the
   [migration note](docs/reference/migration.md#a-failed-listing-fails-the-sync).
+- **`MCPClientImpl` fell back to the HTTP+SSE transport for a dead server whose port number contained `404`
+  or `405`**, and for any HTTP error whose body mentioned them. It read "the server answered 404/405" off the
+  error text with `contains`, and a refused-connection message carries the URL, so about one run in 150 on an
+  ephemeral port such as `40413` reported "Failed to connect with both transports" instead of the connection
+  error (this failed `MCPErrorPathsSpec` in CI on unrelated pull requests). The check now matches only the
+  messages `StreamableHTTPTransportImpl` writes for those statuses, anchored to the start of the message.
+  A real 404 or 405 still falls back. The `MultiProviderComparisonExample` sample takes its clock as a
+  parameter, so its latency test no longer compares a cold first call with a sleeping one. The `Test` and
+  `Code Coverage` CI jobs have a 90-minute limit instead of GitHub's default 360.
 - **`RAG.build` failed on a vectors table created by `PgSearchIndex`** with
   `column "created_at" does not exist` (found in [#1231](https://github.com/llm4s/llm4s/pull/1231)).
   `RAGConfig.withSearchIndex` points `PgVectorStore` at the `PgSearchIndex` table, but the two had

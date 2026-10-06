@@ -54,7 +54,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
   ): Either[LLMError, GeneratedImage] =
     generateImages(prompt, 1, options).flatMap(
       _.headOption.toRight(
-        ValidationError("No images were generated")
+        ImageValidationError("No images were generated")
       )
     )
 
@@ -105,7 +105,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       blocking {
         generateImage(prompt, options)
       }
-    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "stability-ai.request")(UnknownError.apply)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "stability-ai.request")(ImageUnknownError.apply)) }
 
   /**
    * Generate multiple images asynchronously
@@ -119,7 +119,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       blocking {
         generateImages(prompt, count, options)
       }
-    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "stability-ai.request")(UnknownError.apply)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "stability-ai.request")(ImageUnknownError.apply)) }
 
   /**
    * Edit an existing image asynchronously
@@ -134,7 +134,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "stability-ai.request")(UnknownError.apply)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "stability-ai.request")(ImageUnknownError.apply)) }
 
   /**
    * Check the health/status of the Stability AI API service.
@@ -155,7 +155,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       .left
       .map(e =>
         ImageErrors.fromThrowable(e, "stability-ai.health")(ex =>
-          ServiceError(s"Health check failed: ${ex.getMessage}", 0)
+          ImageServiceError(s"Health check failed: ${ex.getMessage}", 0)
         )
       )
       .map { response =>
@@ -188,9 +188,9 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
    */
   private def validatePrompt(prompt: String): Either[LLMError, String] =
     if (prompt.trim.isEmpty) {
-      Left(ValidationError("Prompt cannot be empty"))
+      Left(ImageValidationError("Prompt cannot be empty"))
     } else if (prompt.length > 10000) {
-      Left(ValidationError("Prompt cannot exceed 10000 characters"))
+      Left(ImageValidationError("Prompt cannot exceed 10000 characters"))
     } else {
       Right(prompt)
     }
@@ -200,7 +200,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
    */
   private def validateCount(count: Int): Either[LLMError, Int] =
     if (count < 1 || count > 10) {
-      Left(ValidationError("Count must be between 1 and 10 for Stability AI"))
+      Left(ImageValidationError("Count must be between 1 and 10 for Stability AI"))
     } else {
       Right(count)
     }
@@ -263,7 +263,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       )
       .toEither
       .left
-      .map(e => ImageErrors.fromThrowable(e, "stability-ai.request")(UnknownError.apply))
+      .map(e => ImageErrors.fromThrowable(e, "stability-ai.request")(ImageUnknownError.apply))
       .flatMap { response => // type of response in inferred - no import needed
         if (response.statusCode == 200) {
           parseResponseBody(response.body, prompt, options)
@@ -278,12 +278,12 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
    */
   private def handleErrorStatus(statusCode: Int): Either[LLMError, Nothing] =
     statusCode match {
-      case 401 => Left(AuthenticationError("Invalid API key"))
-      case 429 => Left(RateLimitError("Rate limit exceeded"))
-      case 400 => Left(ValidationError("Invalid request"))
+      case 401 => Left(ImageAuthenticationError("Invalid API key"))
+      case 429 => Left(ImageRateLimitError("Rate limit exceeded"))
+      case 400 => Left(ImageValidationError("Invalid request"))
       case 402 => Left(InsufficientResourcesError("Payment required or insufficient credits"))
       case code =>
-        Left(ServiceError(s"API error (status $code)", code))
+        Left(ImageServiceError(s"API error (status $code)", code))
     }
 
   // Take String, not Response - no requests.Response in signature
@@ -314,5 +314,5 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
 
       logger.info(s"Successfully generated ${images.length} image(s)")
       images
-    }.toEither.left.map(e => ImageErrors.fromThrowable(e, "stability-ai.request")(UnknownError.apply))
+    }.toEither.left.map(e => ImageErrors.fromThrowable(e, "stability-ai.request")(ImageUnknownError.apply))
 }

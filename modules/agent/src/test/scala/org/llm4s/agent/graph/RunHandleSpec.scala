@@ -163,6 +163,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
   }
 
   "A stop" should "never interrupt the closing commit of a run that has acknowledged it" in {
@@ -298,6 +299,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
   }
 
   /** A clock that throws while `failing` says so for the read numbered by its argument (from 1). */
@@ -365,6 +367,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
     }
     (store, armed)
   }
@@ -414,6 +417,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
     }
     val runtime = GraphRuntime(store)
     runtime.start(thread, instant, "x").left.value match {

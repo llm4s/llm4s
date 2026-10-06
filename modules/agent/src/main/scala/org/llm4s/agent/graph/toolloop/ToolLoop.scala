@@ -1,13 +1,8 @@
 package org.llm4s.agent.graph.toolloop
 
+import org.llm4s.agent.AgentId
 import org.llm4s.agent.graph.*
-import org.llm4s.agent.graph.middleware.{
-  AgentMiddleware,
-  MiddlewareId,
-  MiddlewareStack,
-  ModelRequest,
-  ToolCallRequest
-}
+import org.llm4s.agent.graph.middleware.{ MiddlewareId, MiddlewareStack, ModelRequest, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
@@ -54,9 +49,9 @@ final case class ToolQuestionRequest(
 final case class ToolResult(assistantMessageId: String, toolCallId: String, content: String, isError: Boolean)
     derives ReadWriter
 
-/** The model call: the conversation so far, and the tools on offer, to the next assistant message. */
+/** The model call: the conversation so far, and the tools on offer, to the model's completion. */
 trait ModelStep:
-  def next(messages: Vector[Message], tools: ToolSet): Result[AssistantMessage]
+  def next(messages: Vector[Message], tools: ToolSet): Result[Completion]
 
 object ModelStep:
 
@@ -65,32 +60,51 @@ object ModelStep:
    * [[org.llm4s.agent.graph.tool.ToolSet.toolFunctions]].
    */
   def fromClient(client: LLMClient, options: CompletionOptions = CompletionOptions()): ModelStep =
-    (messages, tools) => client.complete(Conversation(messages), options.withTools(tools.toolFunctions)).map(_.message)
+    (messages, tools) => client.complete(Conversation(messages), options.withTools(tools.toolFunctions))
 
 /**
- * The model/tool loop as a graph - the Stage 0 proof of runtime-owned tool results and resumable
- * approval ((#1269)), running [[org.llm4s.agent.graph.tool.AgentTool]]s ((#1278)):
+ * The model/tool loop of an agent family as one graph - the Stage 0 proof of runtime-owned tool
+ * results and resumable approval ((#1269)), running [[org.llm4s.agent.graph.tool.AgentTool]]s
+ * ((#1278)), for every [[LoopAgent]] of a family ((#1328)). Each agent's nodes are prefixed with
+ * its id; `input` is the one shared entry:
  *
  * {{{
- * input -> model --fan-out, one task per call--> call-tool --(dynamic join "tool-batch")--> collect -> model
- *            \                                       \--suspend--> approval  --/
- *             \--final answer--> finish               \--suspend--> ask/<tool> --/
+ * input -> <id>/model --fan-out, one task per call--> <id>/call-tool --(join "<id>/tool-batch")--> <id>/collect -> <id>/model
+ *              \                                          \--suspend--> <id>/approval  --/
+ *               \--final answer--> <id>/finish             \--suspend--> <id>/ask/<tool> --/
  * }}}
  *
+ *  - A turn takes an [[AgentInput]]. On a new thread `input` imports its `history` - no system
+ *    message, and a valid conversation - and makes the root the active agent; on an existing thread
+ *    a `history` is refused. It then runs the root's `beforeAgent` stack on the query and, when
+ *    another agent is active, that agent's stack on the result, appends the user message, resets
+ *    [[LoopKeys.turn]] and routes to the active agent's model. A `Left` from either stack, or a
+ *    blank query, blocks the run without the query or a model call; a new thread still keeps its
+ *    imported history and the root as its active agent. The turn's [[TurnOutput]] is its outcome
+ *    and the active agent.
+ *  - `<id>/model` counts the turn's steps: at the agent's `maxSteps` it ends the turn with
+ *    [[TurnOutcome.StepLimitReached]] without calling the model. Otherwise it sends the agent's
+ *    system prompt, then the history; the prompt is never stored.
  *  - The middleware stack (#1279) runs at the run's boundaries and around each call: `input` runs
  *    every `beforeAgent` on the user's text, `model` runs `ModelStep.next` inside every
  *    `wrapModelCall`, and `finish` runs every `afterAgent` (in reverse) on the final answer,
- *    replacing the stored answer's content when it changes. A `Left` from `beforeAgent`, and a blank
- *    answer or a `Left` from `afterAgent`, *blocks* the run (design 4.13): it ends as a finished failure
- *    carrying that error, the thread stays usable, and an output Block removes the blocked turn from the
- *    history; a cancellation is not a Block. A middleware's `tools` join the loop's [[org.llm4s.agent.graph.tool.ToolSet]], and its
+ *    replacing the stored answer's content when it changes. The root's boundary hooks guard the
+ *    whole family: `input` runs the root's `beforeAgent` stack, then the active agent's, and
+ *    `<id>/finish` of a handoff target runs its own `afterAgent` stack, then the root's. A `Left`
+ *    from either hook, a blank query from `beforeAgent` and a blank answer from `afterAgent`
+ *    *block* the run (design 4.13): it ends as a finished failure, `RunResult.Failed`, carrying
+ *    that error, and the thread stays usable; a cancellation is not a Block. An input Block
+ *    commits only a new thread's seed - its imported history and the root as active agent - and an
+ *    output Block removes the blocked turn from the history, restoring the agent and transfer the
+ *    turn started with. `wrapModelCall` and `wrapToolCall` stay per agent. A middleware's `tools`
+ *    join the loop's [[org.llm4s.agent.graph.tool.ToolSet]], and its
  *    `writes` are keys its `wrapToolCall` may add to a `Success` update.
  *  - Each call is its own task. Its tool is looked up, its raw arguments validated against the
  *    tool's `argumentSchema`, decoded and checked by the tool's `validateDecoded` - any failure is an
  *    error result the model sees, before any middleware or the tool runs. Then the middleware
  *    stack's `wrapToolCall` chain, the first middleware outermost, with the tool at its centre.
  *  - A `NeedsApproval`, from a wrapper or the tool, suspends the call with an [[ApprovalRequest]]
- *    naming its [[ApprovalSource]], and resumes at the one `approval` node. `Approve` and `Edit`
+ *    naming its [[ApprovalSource]], and resumes at the agent's `approval` node. `Approve` and `Edit`
  *    check the arguments again (an edit's are new) and run the whole chain again with
  *    `ToolContext.approved`, so a deny rule still refuses an edit; a second `NeedsApproval` from an
  *    approved call is an error result. A tool's `Ask` suspends with a [[ToolQuestionRequest]] at
@@ -105,22 +119,40 @@ object ModelStep:
  *  - `collect` runs only when the barrier releases, checks every call of the batch has exactly one
  *    result, and appends the `ToolMessage`s in call order. The model never sees a partial batch.
  *  - The model node re-checks the history with `Message.validateConversation` before every call.
+ *  - Each [[LoopHandoff]] is offered to the agent's model as a stand-in tool `handoff_to_<target>`
+ *    ([[HandoffTools]]), which call-tool never runs. When a handoff is an assistant message's only
+ *    call, `<id>/model` stores the message and `ToolMessage("Transferred to <target>")`, makes the
+ *    target the active agent and routes to `<target>/model`; the next turn starts there too. A
+ *    handoff with other calls, or two handoffs (to one target or to several), is refused: every
+ *    call gets an error result and the same agent is asked again. Both cost the step the model call
+ *    took. The turn's steps are shared by every agent: each model node checks its own agent's
+ *    `maxSteps` against the turn's count so far, so a target with a lower limit than its source can
+ *    end the turn with [[TurnOutcome.StepLimitReached]] before its first call. The handoff call's
+ *    `reason` argument is offered to the model but neither validated nor used for routing; the tool
+ *    name alone picks the target. Each transfer is recorded in [[LoopKeys.transfer]]. With
+ *    `preserveContext = false` the target is sent the last user message before the transfer, then
+ *    the transfer's assistant message onwards; the history itself is untouched. A non-root agent
+ *    with no recorded transfer to it fails the call rather than being sent the full history.
  */
 final class ToolLoop private (
-  val graph: CompiledGraph[String, String],
-  val approval: ResumeRef[ApprovalRequest, ApprovalDecision],
+  val graph: CompiledGraph[AgentInput, TurnOutput],
+  approval: ResumeRef[ApprovalRequest, ApprovalDecision],
+  approvalNodes: Set[NodeId],
   askNodes: Set[NodeId]
 ):
 
-  /** The approval requests a suspended run is waiting on. */
+  /** The approval requests a suspended run is waiting on, at any agent's approval node. */
   def requests(suspended: RunResult.Suspended): Result[Vector[(InterruptId, ApprovalRequest)]] =
-    pending[ApprovalRequest](suspended, _ == approval.node.id)
+    pending[ApprovalRequest](suspended, approvalNodes.contains)
 
   /** The tool questions a suspended run is waiting on; read each one's question with [[ToolLoop.question]]. */
   def questions(suspended: RunResult.Suspended): Result[Vector[(InterruptId, ToolQuestionRequest)]] =
     pending[ToolQuestionRequest](suspended, askNodes.contains)
 
-  /** Answers for [[GraphRuntime.resume]] or [[CompiledGraph.resume]]. */
+  /**
+   * Answers for [[GraphRuntime.resume]] or [[CompiledGraph.resume]]. Every agent's approval node
+   * takes the same answer codec, so a decision encodes the same whichever agent asked.
+   */
   def answers(decisions: (InterruptId, ApprovalDecision)*): Map[InterruptId, ujson.Value] =
     decisions.map((id, decision) => id -> approval.answer(decision)).toMap
 
@@ -155,63 +187,233 @@ object ToolLoop:
       else Right(recorded :+ result)
     }
 
-  def build(
-    id: String,
-    version: String,
-    model: ModelStep,
-    tools: ToolSet,
-    middleware: Seq[AgentMiddleware] = Nil
-  ): Result[ToolLoop] =
+  /**
+   * The loop for a family of `agents`, a new thread starting with `root`. Refuses an empty family,
+   * a root outside it, a duplicate id, and any agent whose tools - its own and its middleware's -
+   * do not form a valid set or declare a key the loop owns.
+   */
+  def build(id: String, version: String, root: AgentId, agents: Vector[LoopAgent]): Result[ToolLoop] =
     for
-      stack <- MiddlewareStack.of(middleware*)
-      // a middleware's tools join the user's, checked as one set: a name clash or invalid schema is refused
-      toolSet <- ToolSet.of(tools.validator, (tools.tools ++ stack.tools)*)
-      _       <- ownedKeysUntouched(toolSet, stack)
-      loop    <- assemble(id, version, model, toolSet, stack)
+      _ <- familyValid(root, agents)
+      prepared <- agents.foldLeft[Result[Vector[Prepared]]](Right(Vector.empty)) { (acc, agent) =>
+        acc.flatMap(done => prepare(agent).map(done :+ _))
+      }
+      loop <- assemble(id, version, root, prepared)
     yield loop
 
-  /** The loop alone writes results and messages: a tool or middleware writing either could break one result per call. */
-  private def ownedKeysUntouched(tools: ToolSet, stack: MiddlewareStack): Result[Unit] =
-    val owned                              = Set(results.id, Messages.key.id)
+  /**
+   * An agent with its middleware stacked and its tools joined with the middleware's, checked. `tools`
+   * are the ones call-tool may run; `offered` adds the handoff stand-ins, for the model only.
+   */
+  final private case class Prepared(agent: LoopAgent, tools: ToolSet, offered: ToolSet, stack: MiddlewareStack)
+
+  private def familyValid(root: AgentId, agents: Vector[LoopAgent]): Result[Unit] =
+    val ids = agents.map(_.id)
+    val problems =
+      Option.when(agents.isEmpty)("a family needs at least one agent").toVector ++
+        Option.when(agents.nonEmpty && !ids.contains(root))(s"the root agent '${root.value}' is not in the family") ++
+        ids.distinct.filter(i => ids.count(_ == i) > 1).map(i => s"duplicate agent id '${i.value}'") ++
+        agents.flatMap(handoffProblems(_, ids.toSet))
+    if problems.isEmpty then Right(()) else Left(ValidationError("tool loop", problems.toList))
+
+  /**
+   * A handoff must target another agent of the family, and an agent hands off to each target at
+   * most once.
+   */
+  private def handoffProblems(agent: LoopAgent, family: Set[AgentId]): Vector[String] =
+    val targets = agent.handoffs.map(_.target)
+    targets.distinct.flatMap { target =>
+      Option.when(target == agent.id)(s"agent '${agent.id.value}' hands off to itself") ++
+        Option.when(!family.contains(target))(
+          s"agent '${agent.id.value}' hands off to '${target.value}', which is not in the family"
+        ) ++
+        Option.when(targets.count(_ == target) > 1)(
+          s"agent '${agent.id.value}' has more than one handoff to '${target.value}'"
+        )
+    }
+
+  private def prepare(agent: LoopAgent): Result[Prepared] =
+    for
+      stack <- MiddlewareStack.of(agent.middleware*)
+      // a middleware's tools join the user's, checked as one set: a name clash or invalid schema is refused
+      toolSet <- ToolSet.of(agent.tools.validator, (agent.tools.tools ++ stack.tools)*)
+      _       <- ownedKeysUntouched(agent.id, toolSet, stack)
+      _       <- handoffNamesFree(agent.id, toolSet, agent.handoffs)
+      offered <- ToolSet.of(toolSet.validator, (toolSet.tools ++ HandoffTools.tools(agent.handoffs))*)
+    yield Prepared(agent, toolSet, offered, stack)
+
+  /** A handoff's stand-in tool may not share a name with one of the agent's tools, or a middleware's. */
+  private def handoffNamesFree(agent: AgentId, tools: ToolSet, handoffs: Vector[LoopHandoff]): Result[Unit] =
+    handoffs.map(h => HandoffTools.toolName(h.target)).filter(tools.get(_).isDefined).toList match
+      case Nil => Right(())
+      case clashing =>
+        Left(
+          ValidationError(
+            "tool loop",
+            clashing.map(n => s"agent '${agent.value}': handoff tool '$n' clashes with a tool of the same name")
+          )
+        )
+
+  /** The loop alone writes its keys: a tool or middleware writing one could break one result per call, or a turn. */
+  private def ownedKeysUntouched(agent: AgentId, tools: ToolSet, stack: MiddlewareStack): Result[Unit] =
+    val owned =
+      Set(
+        results.id,
+        Messages.key.id,
+        LoopKeys.usage.id,
+        LoopKeys.activeAgent.id,
+        LoopKeys.turn.id,
+        LoopKeys.transfer.id
+      )
     def touches(keys: Set[StateKey[?, ?]]) = keys.exists(k => owned.contains(k.id))
-    val clause                             = "declares a key the loop owns ('tool-results' or 'messages')"
-    val byTools      = tools.tools.filter(t => touches(t.writes)).map(t => s"tool '${t.spec.name}' $clause")
-    val byMiddleware = stack.ordered.filter(m => touches(m.writes)).map(m => s"middleware '${m.id.value}' $clause")
+    val clause =
+      "declares a key the loop owns ('tool-results', 'messages', 'usage', 'active-agent', 'turn' or 'transfer')"
+    val byTools =
+      tools.tools.filter(t => touches(t.writes)).map(t => s"agent '${agent.value}': tool '${t.spec.name}' $clause")
+    val byMiddleware =
+      stack.ordered
+        .filter(m => touches(m.writes))
+        .map(m => s"agent '${agent.value}': middleware '${m.id.value}' $clause")
     (byTools ++ byMiddleware).toList match
       case Nil      => Right(())
       case problems => Left(ValidationError("tool loop", problems))
 
-  private def assemble(
-    id: String,
-    version: String,
-    model: ModelStep,
-    tools: ToolSet,
-    stack: MiddlewareStack
-  ): Result[ToolLoop] =
+  /** One agent's node handles, issued before any node is implemented so that agents can route to each other. */
+  final private class AgentNodes(
+    val prepared: Prepared,
+    val model: NodeRef[Unit],
+    val finish: NodeRef[Unit],
+    val collect: NodeRef[Unit],
+    val callTool: NodeRef[ToolTask],
+    val approval: ResumeRef[ApprovalRequest, ApprovalDecision],
+    val batch: DynamicJoin,
+    val askRefs: Map[String, ResumeRef[ToolQuestionRequest, ujson.Value]]
+  ):
+    def agent: LoopAgent             = prepared.agent
+    def tools: ToolSet               = prepared.tools
+    def offered: ToolSet             = prepared.offered
+    def stack: MiddlewareStack       = prepared.stack
+    def asking: Vector[AgentTool[?]] = tools.tools.filter(_.spec.question.isDefined)
+
+  private def declare(b: GraphBuilder, prepared: Prepared): AgentNodes =
+    val prefix  = s"${prepared.agent.id.value}/"
+    val collect = b.declare[Unit](s"${prefix}collect")
+    val askRefs = prepared.tools.tools
+      .filter(_.spec.question.isDefined)
+      .map(t => t.spec.name -> b.declareResume[ToolQuestionRequest, ujson.Value](s"${prefix}ask/${t.spec.name}"))
+      .toMap
+    AgentNodes(
+      prepared,
+      model = b.declare[Unit](s"${prefix}model"),
+      finish = b.declare[Unit](s"${prefix}finish"),
+      collect = collect,
+      callTool = b.declare[ToolTask](s"${prefix}call-tool"),
+      approval = b.declareResume[ApprovalRequest, ApprovalDecision](s"${prefix}approval"),
+      batch = b.dynamicJoin(s"${prefix}tool-batch", collect),
+      askRefs = askRefs
+    )
+
+  private def assemble(id: String, version: String, root: AgentId, prepared: Vector[Prepared]): Result[ToolLoop] =
     val messages = Messages.key
     val b        = GraphBuilder(id, version)
+    val agents   = prepared.map(p => p.agent.id -> declare(b, p)).toMap
+    // whether a transfer keeps the context, by (source, target)
+    val preserves = prepared.flatMap(p => p.agent.handoffs.map(h => (p.agent.id, h.target) -> h.preserveContext)).toMap
+    prepared.foreach(p => implement(b, agents(p.agent.id), agents, root, preserves))
+
+    // An input Block (a beforeAgent `Left`, or a blank query) stores nothing of the turn: the run ends as a
+    // finished failure, committing only a new thread's seed - its imported history and the root as active agent.
+    val input = b.node[AgentInput]("input", writes = Set(messages, LoopKeys.activeAgent, LoopKeys.turn)) {
+      (in, state, context) =>
+        val taskId = context.position.taskId.value
+        val outcome = for
+          active   <- state.get(LoopKeys.activeAgent)
+          history  <- state.get(messages)
+          transfer <- state.get(LoopKeys.transfer)
+          start <- active match
+            case None =>
+              imported(in.history, history, taskId).map(seed => root -> seed.update(LoopKeys.activeAgent, root))
+            case Some(current) =>
+              if in.history.nonEmpty then Left(ValidationError("history", "history is imported only into a new thread"))
+              else Right(current -> Command.empty)
+          (agentId, seeded) = start
+          nodes <- agents
+            .get(agentId)
+            .toRight(ValidationError("tool loop", s"the thread's agent '${agentId.value}' is not in this loop"))
+        yield
+          // the root's boundary hooks guard the whole family; the active agent's own run inside them
+          val stacks = if agentId == root then Vector(nodes.stack) else Vector(agents(root).stack, nodes.stack)
+          stacks.foldLeft[Result[String]](Right(in.query))((acc, s) => acc.flatMap(s.beforeAgent(_, context))) match
+            case Left(error)                                    => boundary(error, seeded.update)
+            case Right(transformed) if transformed.trim.isEmpty =>
+              // stored, a blank query would fail every model call and every recover after it
+              boundary(ValidationError("query", "beforeAgent returned a blank query"), seeded.update)
+            case Right(transformed) =>
+              NodeResult.Continue(
+                seeded
+                  .update(messages, MessageUpdate.Append(StoredMessage(s"$taskId/user", UserMessage(transformed))))
+                  .update(LoopKeys.turn, TurnState(0, None, Some(agentId), transfer))
+                  .goto(nodes.model)
+              )
+        outcome.fold(NodeResult.Fail(_), identity)
+    }
+
+    b.compile(input) { state =>
+      for
+        turn    <- state.get(LoopKeys.turn)
+        active  <- state.get(LoopKeys.activeAgent)
+        outcome <- turn.outcome.toRight(ValidationError("tool loop", "the run ended without an outcome"))
+      yield TurnOutput(outcome, active.getOrElse(root))
+    }.map { graph =>
+      val all = agents.values.toVector
+      new ToolLoop(
+        graph,
+        agents(root).approval,
+        all.map(_.approval.node.id).toSet,
+        all.flatMap(_.askRefs.values.map(_.node.id)).toSet
+      )
+    }
+
+  /**
+   * The appends that seed a new thread with `history`, each message's id derived from the input
+   * task. Refused when the thread already has messages, when `history` holds a system message -
+   * prompts belong to agents - or when it is not a valid conversation.
+   */
+  private def imported(history: Vector[Message], stored: Vector[StoredMessage], taskId: String): Result[Command] =
+    if history.isEmpty then Right(Command.empty)
+    else if stored.nonEmpty then Left(ValidationError("history", "history is imported only into a new thread"))
+    else if history.exists { case _: SystemMessage => true; case _ => false } then
+      Left(ValidationError("history", "system messages are not imported; prompts belong to agents"))
+    else
+      Message.validateConversation(history.toList).map { _ =>
+        history.zipWithIndex.foldLeft(Command.empty) { case (command, (message, i)) =>
+          command.update(Messages.key, MessageUpdate.Append(StoredMessage(s"$taskId/history/$i", message)))
+        }
+      }
+
+  /** Implements one agent's nodes on the shared builder. */
+  private def implement(
+    b: GraphBuilder,
+    nodes: AgentNodes,
+    family: Map[AgentId, AgentNodes],
+    root: AgentId,
+    preserves: Map[(AgentId, AgentId), Boolean]
+  ): Unit =
+    val messages = Messages.key
+    val agent    = nodes.agent
+    val tools    = nodes.tools
+    val stack    = nodes.stack
+    val pipeline = Pipeline(tools, stack, nodes.approval, nodes.askRefs)
     // the call-tool, approval and ask nodes may write any tool's keys; each call is checked against its own tool's
     val callWrites: Set[StateKey[?, ?]] = tools.tools.flatMap(_.writes).toSet ++ stack.writes ++ Set(results, messages)
 
-    val modelNode = b.declare[Unit]("model")
-    val finish    = b.declare[Unit]("finish")
-    val collect   = b.declare[Unit]("collect")
-    val callTool  = b.declare[ToolTask]("call-tool")
-    val approval  = b.declareResume[ApprovalRequest, ApprovalDecision]("approval")
-    val batch     = b.dynamicJoin("tool-batch", collect)
-    val asking    = tools.tools.filter(_.spec.question.isDefined)
-    val askRefs: Map[String, ResumeRef[ToolQuestionRequest, ujson.Value]] =
-      asking.map(t => t.spec.name -> b.declareResume[ToolQuestionRequest, ujson.Value](s"ask/${t.spec.name}")).toMap
-
-    val pipeline = Pipeline(tools, stack, approval, askRefs)
-
-    b.implement(callTool, writes = callWrites) { (task, state, context) =>
+    b.implement(nodes.callTool, writes = callWrites) { (task, state, context) =>
       tools.get(task.call.name) match
         case None       => pipeline.error(task, s"Unknown tool '${task.call.name}'")
         case Some(tool) => pipeline.admit(tool, task, state, context)
     }
 
-    b.implement(approval.node, writes = callWrites) { (resumed, state, context) =>
+    b.implement(nodes.approval.node, writes = callWrites) { (resumed, state, context) =>
       val request = resumed.question
       val task    = ToolTask(request.assistantMessageId, request.call)
       resumed.answer match
@@ -229,55 +431,109 @@ object ToolLoop:
             case failed                                => failed
     }
 
-    asking.foreach { tool =>
-      b.implement(askRefs(tool.spec.name).node, writes = callWrites) { (resumed, state, context) =>
+    nodes.asking.foreach { tool =>
+      b.implement(nodes.askRefs(tool.spec.name).node, writes = callWrites) { (resumed, state, context) =>
         pipeline.answered(tool, resumed.question, resumed.answer, state, context)
       }
     }
 
-    b.implement(modelNode, writes = Set(messages)) { (_, state, context) =>
-      NodeResult.fromResult(for
-        history   <- state.get(messages)
-        _         <- Message.validateConversation(history.map(_.message).toList)
-        assistant <- stack.wrapModelCall(ModelRequest(history.map(_.message), tools), context)(callModel(model))
-        // a blank answer without tool calls is refused before it is stored, so the history stays valid
-        // and recover asks the model again
-        _ <- assistant.validate
-      yield
-        val stored   = StoredMessage(s"${context.position.taskId.value}/assistant", assistant)
-        val appended = Command.empty.update(messages, MessageUpdate.Append(stored))
-        if assistant.toolCalls.isEmpty then appended.goto(finish)
-        else appended.fanOut(batch, callTool, assistant.toolCalls.toVector.map(ToolTask(stored.id, _)))
-      )
+    val prompt = agent.systemPrompt.map(SystemMessage(_)).toVector
+    // this agent's handoff tool names, to their targets' nodes
+    val handoffs: Map[String, AgentNodes] =
+      agent.handoffs.map(h => HandoffTools.toolName(h.target) -> family(h.target)).toMap
+
+    val modelWrites: Set[StateKey[?, ?]] =
+      Set(messages, LoopKeys.usage, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)
+    b.implement(nodes.model, writes = modelWrites) { (_, state, context) =>
+      NodeResult.fromResult(state.get(LoopKeys.turn).flatMap { turn =>
+        // at the limit the turn ends here: no route, so the run completes without calling the model
+        if turn.steps >= agent.maxSteps then
+          Right(Command.empty.update(LoopKeys.turn, turn.copy(outcome = Some(TurnOutcome.StepLimitReached))))
+        else
+          for
+            history  <- state.get(messages)
+            _        <- Message.validateConversation(history.map(_.message).toList)
+            transfer <- state.get(LoopKeys.transfer)
+            view     <- sent(agent.id, history, transfer, root, preserves)
+            request = ModelRequest(prompt ++ view, nodes.offered)
+            completion <- stack.wrapModelCall(request, context)(callModel(agent.model))
+            assistant = completion.message
+            // a blank answer without tool calls is refused before it is stored, so the history stays valid
+            // and recover asks the model again
+            _ <- assistant.validate
+          yield
+            val taskId = context.position.taskId.value
+            val stored = StoredMessage(s"$taskId/assistant", assistant)
+            val call = UsageSummary()
+              .add(completion.model, completion.usage.getOrElse(TokenUsage(0, 0, 0)), completion.estimatedCost)
+            val appended = Command.empty
+              .update(messages, MessageUpdate.Append(stored))
+              .update(LoopKeys.usage, call)
+              .update(LoopKeys.turn, turn.copy(steps = turn.steps + 1))
+            val calls = assistant.toolCalls.toVector
+            def toolMessage(call: ToolCall, content: String) =
+              MessageUpdate.Append(StoredMessage(s"$taskId/tool/${call.id}", ToolMessage(content, call.id)))
+            calls.filter(c => handoffs.contains(c.name)) match
+              case none if none.isEmpty =>
+                if calls.isEmpty then appended.goto(nodes.finish)
+                else appended.fanOut(nodes.batch, nodes.callTool, calls.map(ToolTask(stored.id, _)))
+              case Vector(transfer) if calls.size == 1 =>
+                val target = handoffs(transfer.name)
+                appended
+                  .update(messages, toolMessage(transfer, HandoffTools.transferred(target.agent.id)))
+                  .update(LoopKeys.activeAgent, target.agent.id)
+                  .update(LoopKeys.transfer, Some(Transfer(agent.id, target.agent.id, stored.id)))
+                  .goto(target.model)
+              case _ =>
+                // a handoff with other calls, or several: nothing runs, every call gets the rule as its error
+                val error = ujson.Obj("error" -> HandoffTools.MixedBatch).render()
+                calls
+                  .foldLeft(appended)((command, c) => command.update(messages, toolMessage(c, error)))
+                  .goto(nodes.model)
+      })
     }
 
-    // the final answer, through every afterAgent; a changed answer replaces the stored message's content
+    // this agent's afterAgent stack, then - for a handoff target - the root's, which guards the whole family
+    val boundaryStacks =
+      if agent.id == root then Vector(stack) else Vector(stack, family(root).stack)
+
+    // the final answer, through every afterAgent; a changed answer replaces the stored message's content.
     // An output Block (an afterAgent `Left`, or a blank answer) ends the run as a finished failure and removes the
-    // blocked turn from the history, so no blocked content is stored and the thread continues from before it.
-    b.implement(finish, writes = Set(messages)) { (_, state, context) =>
-      state.get(messages) match
-        case Left(error) => NodeResult.Fail(error)
-        case Right(history) =>
+    // blocked turn from the history, so no blocked content is stored and the thread continues from before it, with
+    // the agent and transfer the turn started with.
+    b.implement(nodes.finish, writes = Set(messages, LoopKeys.turn, LoopKeys.activeAgent, LoopKeys.transfer)) {
+      (_, state, context) =>
+        val outcome = for
+          history <- state.get(messages)
+          turn    <- state.get(LoopKeys.turn)
+          last <- history.lastOption
+            .collect { case StoredMessage(id, a: AssistantMessage) if a.toolCalls.isEmpty => id -> a }
+            .toRight(ValidationError("tool loop", "finish found no final assistant message"))
+        yield
+          val (answerId, assistant) = last
           val removeTurn = history.reverseIterator
             .collectFirst { case StoredMessage(id, _: UserMessage) => id }
             .fold(StateUpdate.empty)(id => StateUpdate.update(messages, MessageUpdate.RemoveTurn(id)))
-          history.lastOption
-            .collect { case StoredMessage(id, a: AssistantMessage) if a.toolCalls.isEmpty => id -> a }
-            .fold[NodeResult](
-              NodeResult.Fail(ValidationError("tool loop", "finish found no final assistant message"))
-            ) { (answerId, assistant) =>
-              stack.afterAgent(assistant.content, context) match
-                case Left(error) => boundary(error, removeTurn)
-                case Right(changed) if changed.trim.isEmpty =>
-                  boundary(ValidationError("tool loop", "afterAgent returned a blank answer"), removeTurn)
-                case Right(changed) if changed == assistant.content => NodeResult.Continue(Command.empty)
-                case Right(changed) =>
-                  val replaced = StoredMessage(answerId, assistant.copy(contentOpt = Some(changed)))
-                  NodeResult.Continue(Command.empty.update(messages, MessageUpdate.Replace(answerId, replaced)))
-            }
+          val rollback = turn.startAgent.fold(removeTurn)(agentId =>
+            removeTurn
+              .combine(StateUpdate.update(LoopKeys.activeAgent, agentId))
+              .combine(StateUpdate.update(LoopKeys.transfer, turn.startTransfer))
+          )
+          val completed = Command.empty.update(LoopKeys.turn, turn.copy(outcome = Some(TurnOutcome.Completed)))
+          boundaryStacks.foldLeft[Result[String]](Right(assistant.content))((acc, s) =>
+            acc.flatMap(s.afterAgent(_, context))
+          ) match
+            case Left(error) => boundary(error, rollback)
+            case Right(changed) if changed.trim.isEmpty =>
+              boundary(ValidationError("tool loop", "afterAgent returned a blank answer"), rollback)
+            case Right(changed) if changed == assistant.content => NodeResult.Continue(completed)
+            case Right(changed) =>
+              val replaced = StoredMessage(answerId, assistant.copy(contentOpt = Some(changed)))
+              NodeResult.Continue(completed.update(messages, MessageUpdate.Replace(answerId, replaced)))
+        outcome.fold(NodeResult.Fail(_), identity)
     }
 
-    b.implement(collect, writes = Set(messages, results)) { (_, state, context) =>
+    b.implement(nodes.collect, writes = Set(messages, results)) { (_, state, context) =>
       NodeResult.fromResult(for
         history  <- state.get(messages)
         recorded <- state.get(results)
@@ -308,40 +564,46 @@ object ToolLoop:
         toolMessages
           .foldLeft(Command.empty)((command, m) => command.update(messages, MessageUpdate.Append(m)))
           .remove(results)
-          .goto(modelNode)
+          .goto(nodes.model)
       )
     }
 
-    // An input Block (a beforeAgent `Left`) happens before anything is stored: the run ends as a finished failure
-    // and the history is unchanged.
-    val input = b.node[String]("input", writes = Set(messages)) { (text, _, context) =>
-      stack.beforeAgent(text, context) match
-        case Left(error) => boundary(error)
-        case Right(transformed) =>
-          NodeResult.Continue(
-            Command.empty
-              .update(
-                messages,
-                MessageUpdate.Append(StoredMessage(s"${context.position.taskId.value}/user", UserMessage(transformed)))
-              )
-              .goto(modelNode)
-          )
-    }
-
-    b.compile(input) { state =>
-      state.get(messages).flatMap { history =>
-        history.lastOption.map(_.message) match
-          case Some(answer: AssistantMessage) if answer.toolCalls.isEmpty => Right(answer.content)
-          case _ => Left(ValidationError("tool loop", "the run ended without a final assistant message"))
-      }
-    }.map(new ToolLoop(_, approval, askRefs.values.map(_.node.id).toSet))
+  /**
+   * What `agent`'s model is sent of `history`, computed at each call and never stored. All of it,
+   * unless the recorded [[Transfer]] to `agent` did not preserve context: then the last user message
+   * before the transfer's assistant message, followed by that message onwards, so the request starts
+   * with the user's question. A non-root agent with no transfer to it recorded, or a transfer whose
+   * message or (source, target) pair is unknown, is refused rather than sent the full history.
+   */
+  private def sent(
+    agent: AgentId,
+    history: Vector[StoredMessage],
+    transfer: Option[Transfer],
+    root: AgentId,
+    preserves: Map[(AgentId, AgentId), Boolean]
+  ): Result[Vector[Message]] =
+    val all                  = history.map(_.message)
+    def refused(why: String) = Left(ValidationError("handoff", s"agent '${agent.value}' $why"))
+    transfer.filter(_.target == agent) match
+      case None =>
+        if agent == root then Right(all) else refused("is active, but no transfer to it is recorded")
+      case Some(t) =>
+        preserves.get((t.source, t.target)) match
+          case None       => refused(s"has no handoff from '${t.source.value}' in this loop")
+          case Some(true) => Right(all)
+          case Some(false) =>
+            history.indexWhere(_.id == t.messageId) match
+              case -1 => refused(s"was transferred to by message '${t.messageId}', which is not in the history")
+              case at =>
+                val question = all.take(at).reverseIterator.collectFirst { case u: UserMessage => u }
+                Right(question.toVector ++ all.drop(at))
 
   /**
    * A run-boundary failure (a `beforeAgent` or `afterAgent` `Left`): a guardrail's Block, which ends the run as a
    * finished failure and commits `update` first (design 4.13). A cancellation is not a Block: it fails the run
    * as before, leaving the checkpoint `Running` for `recover`.
    */
-  private def boundary(error: LLMError, update: StateUpdate = StateUpdate.empty): NodeResult = error match
+  private def boundary(error: LLMError, update: StateUpdate): NodeResult = error match
     case cancelled: CancelledError => NodeResult.Fail(cancelled)
     case other                     => NodeResult.Block(update, other)
 
@@ -353,7 +615,7 @@ object ToolLoop:
    * the interrupt flag and is `Left(CancelledError)`. Either way it is the model's failure, not a
    * wrapper's.
    */
-  private def callModel(model: ModelStep)(request: ModelRequest): Result[AssistantMessage] =
+  private def callModel(model: ModelStep)(request: ModelRequest): Result[Completion] =
     if Thread.currentThread().isInterrupted then Left(CancelledError("model"))
     else
       attempt(model.next(request.messages, request.tools)) match
@@ -363,7 +625,7 @@ object ToolLoop:
             case Some(cancellation) =>
               Thread.currentThread().interrupt()
               Left(cancellation)
-            case None => Failure[AssistantMessage](thrown).toResult
+            case None => Failure[Completion](thrown).toResult
 
   /**
    * Runs `body`, returning what it throws as `Left`: a NonFatal exception, or a bare

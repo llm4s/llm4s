@@ -94,10 +94,11 @@ class AgentMCPServerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
     val config   = MCPServerConfig.streamableHTTP("agent-mcp", s"http://127.0.0.1:$port/mcp", 10.seconds)
     val registry = new MCPToolRegistry(Seq(config), Seq.empty, 5.minutes, initializeOnStartup = false)
     try {
-      val state = new Agent(new OneToolCallLLM(toolName, args))
-        .run("compute", registry)
-        .fold(e => fail(s"agent run failed: ${e.formatted}"), identity)
-      state.conversation.messages.collect { case m: ToolMessage => m }
+      val result = (for {
+        agent <- Agent.builder("mcp", new OneToolCallLLM(toolName, args)).withTools(registry).build()
+        done  <- agent.run("compute")
+      } yield done).fold(e => fail(s"agent run failed: ${e.formatted}"), identity)
+      result.messages.collect { case m: ToolMessage => m }
     } finally registry.close()
   }
 

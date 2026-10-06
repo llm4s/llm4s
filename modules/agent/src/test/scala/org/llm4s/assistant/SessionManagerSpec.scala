@@ -3,9 +3,8 @@ package org.llm4s.assistant
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
-import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
+import org.llm4s.agent.{ AgentResultFixture, AgentStatus }
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ DirectoryPath, SessionId }
 
 import java.nio.file.{ Files, Path }
@@ -21,8 +20,6 @@ import scala.util.Try
 class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   private var tempDir: Path = _
-  private val mockClient    = null.asInstanceOf[org.llm4s.llmconnect.LLMClient]
-  private val emptyTools    = new ToolRegistry(Seq.empty)
 
   override def beforeEach(): Unit =
     tempDir = Files.createTempDirectory("session-manager-test")
@@ -33,37 +30,24 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
       Files.walk(tempDir).sorted(java.util.Comparator.reverseOrder()).forEach(Files.delete(_))
     }
 
-  private def createTestAgent(): Agent = new Agent(mockClient)
-
-  private def createTestState(sessionId: String = "test-session"): SessionState = {
-    val agentState = AgentState(
-      conversation = Conversation(
-        Seq(
-          UserMessage("Hello"),
-          AssistantMessage("Hi there!")
-        )
-      ),
-      tools = emptyTools,
-      initialQuery = Some("Hello"),
-      status = AgentStatus.Complete,
-      logs = Seq("Started", "Completed")
-    )
-
+  private def stateWith(messages: Vector[Message], sessionId: String): SessionState =
     SessionState(
-      agentState = Some(agentState),
+      threadId = None,
+      last = None,
       sessionId = SessionId(sessionId),
       sessionDir = DirectoryPath(tempDir.toString),
       created = LocalDateTime.now()
-    )
-  }
+    ).withResult(AgentResultFixture(AgentStatus.Completed("done"), messages))
+
+  private def createTestState(sessionId: String = "test-session"): SessionState =
+    stateWith(Vector(UserMessage("Hello"), AssistantMessage("Hi there!")), sessionId)
 
   // ==========================================================================
   // Session Save Tests
   // ==========================================================================
 
   "SessionManager.saveSession" should "save session with default title" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
     val state   = createTestState()
 
     val result = manager.saveSession(state, Some("Test Session"))
@@ -75,8 +59,7 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   }
 
   it should "create both JSON and markdown files" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
     val state   = createTestState()
 
     manager.saveSession(state, Some("My Session"))
@@ -88,11 +71,11 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     markdownExists shouldBe true
   }
 
-  it should "return error when no agent state to save" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
+  it should "return error when there is no conversation to save" in {
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
     val state = SessionState(
-      agentState = None,
+      threadId = None,
+      last = None,
       sessionId = SessionId("empty"),
       sessionDir = DirectoryPath(tempDir.toString),
       created = LocalDateTime.now()
@@ -104,8 +87,7 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   }
 
   it should "sanitize special characters in title" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
     val state   = createTestState()
 
     manager.saveSession(state, Some("Test/Session:With*Special?Chars"))
@@ -124,11 +106,9 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   }
 
   it should "use the injected suffix generator to disambiguate a filename collision" in {
-    val agent = createTestAgent()
     var calls = 0
     val manager = new SessionManager(
       DirectoryPath(tempDir.toString),
-      agent,
       uniqueSuffix = () => { calls += 1; s"stub-$calls" }
     )
 
@@ -144,41 +124,40 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   // ==========================================================================
 
   "SessionManager.loadSession" should "load previously saved session" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
     val state   = createTestState("original-session")
 
     manager.saveSession(state, Some("LoadTest"))
 
-    val loadResult = manager.loadSession("LoadTest", emptyTools)
+    val loadResult = manager.loadSession("LoadTest")
 
     loadResult.isRight shouldBe true
     val loaded = loadResult.toOption.get
     loaded.sessionId.value shouldBe "original-session"
-    loaded.agentState.isDefined shouldBe true
-    loaded.agentState.get.conversation.messages should have size 2
+    loaded.threadId shouldBe None
+    loaded.last shouldBe None
+    loaded.history should have size 2
+    loaded.messages shouldBe loaded.history
   }
 
   it should "preserve conversation content" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
     val state   = createTestState()
 
     manager.saveSession(state, Some("ContentTest"))
-    val loadResult = manager.loadSession("ContentTest", emptyTools)
+    val loadResult = manager.loadSession("ContentTest")
 
     val loaded   = loadResult.toOption.get
-    val messages = loaded.agentState.get.conversation.messages
+    val messages = loaded.history
 
     messages.head.content shouldBe "Hello"
     messages(1).content shouldBe "Hi there!"
   }
 
   it should "return error for non-existent session" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
 
-    val result = manager.loadSession("NonExistent", emptyTools)
+    val result = manager.loadSession("NonExistent")
 
     result.isLeft shouldBe true
   }
@@ -188,8 +167,7 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   // ==========================================================================
 
   "SessionManager.listRecentSessions" should "list saved sessions" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
 
     // Save multiple sessions
     manager.saveSession(createTestState("s1"), Some("Session1"))
@@ -206,8 +184,7 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   }
 
   it should "limit number of results" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
 
     // Save multiple sessions
     (1 to 10).foreach { i =>
@@ -222,8 +199,7 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   }
 
   it should "return most recent sessions first" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
 
     manager.saveSession(createTestState("s1"), Some("OldSession"))
     Thread.sleep(50)
@@ -237,8 +213,7 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   }
 
   it should "return empty list for empty directory" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
 
     val result = manager.listRecentSessions()
 
@@ -250,87 +225,37 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
   // Round-trip Tests
   // ==========================================================================
 
-  "SessionManager" should "round-trip session with logs" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
-
-    val agentState = AgentState(
-      conversation = Conversation(Seq(UserMessage("Test"))),
-      tools = emptyTools,
-      logs = Seq("Log entry 1", "Log entry 2", "Log entry 3")
+  "SessionManager" should "round-trip tool calls and their results" in {
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
+    val call    = ToolCall("call-1", "lookup", ujson.Obj("q" -> "weather"))
+    val messages = Vector(
+      UserMessage("What is the weather?"),
+      AssistantMessage(None, Seq(call)),
+      ToolMessage("""{"forecast":"sun"}""", "call-1"),
+      AssistantMessage("Sunny.")
     )
 
-    val state = SessionState(
-      agentState = Some(agentState),
-      sessionId = SessionId("log-test"),
-      sessionDir = DirectoryPath(tempDir.toString),
-      created = LocalDateTime.now()
-    )
+    manager.saveSession(stateWith(messages, "tools-test"), Some("ToolsTest"))
+    val loaded = manager.loadSession("ToolsTest").toOption.get
 
-    manager.saveSession(state, Some("LogTest"))
-    val loaded = manager.loadSession("LogTest", emptyTools).toOption.get
-
-    loaded.agentState.get.logs shouldBe Seq("Log entry 1", "Log entry 2", "Log entry 3")
+    loaded.history shouldBe messages
   }
 
-  it should "round-trip session with initial query" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
-
-    val agentState = AgentState(
-      conversation = Conversation(Seq(UserMessage("What is 2+2?"))),
-      tools = emptyTools,
-      initialQuery = Some("What is 2+2?")
+  it should "write each message, and each tool call, to the markdown companion" in {
+    val manager = new SessionManager(DirectoryPath(tempDir.toString))
+    val call    = ToolCall("call-1", "lookup", ujson.Obj("q" -> "weather"))
+    val state = stateWith(
+      Vector(UserMessage("What is the weather?"), AssistantMessage(None, Seq(call)), ToolMessage("sun", "call-1")),
+      "markdown-test"
     )
 
-    val state = SessionState(
-      agentState = Some(agentState),
-      sessionId = SessionId("query-test"),
-      sessionDir = DirectoryPath(tempDir.toString),
-      created = LocalDateTime.now()
-    )
+    manager.saveSession(state, Some("Markdown"))
+    val markdown = Files.readString(tempDir.resolve("Markdown.md"))
 
-    manager.saveSession(state, Some("QueryTest"))
-    val loaded = manager.loadSession("QueryTest", emptyTools).toOption.get
-
-    loaded.agentState.get.initialQuery shouldBe Some("What is 2+2?")
-  }
-
-  it should "round-trip session with different statuses" in {
-    val agent   = createTestAgent()
-    val manager = new SessionManager(DirectoryPath(tempDir.toString), agent)
-
-    val statuses = Seq(
-      AgentStatus.Complete,
-      AgentStatus.InProgress,
-      AgentStatus.WaitingForTools,
-      AgentStatus.Failed("Test error")
-    )
-
-    statuses.zipWithIndex.foreach { case (status, idx) =>
-      val agentState = AgentState(
-        conversation = Conversation(Seq(UserMessage("Test"))),
-        tools = emptyTools,
-        status = status
-      )
-
-      val state = SessionState(
-        agentState = Some(agentState),
-        sessionId = SessionId(s"status-test-$idx"),
-        sessionDir = DirectoryPath(tempDir.toString),
-        created = LocalDateTime.now()
-      )
-
-      manager.saveSession(state, Some(s"StatusTest$idx"))
-      val loaded = manager.loadSession(s"StatusTest$idx", emptyTools).toOption.get
-
-      status match {
-        case AgentStatus.Failed(error) =>
-          loaded.agentState.get.status shouldBe a[AgentStatus.Failed]
-          loaded.agentState.get.status.asInstanceOf[AgentStatus.Failed].error shouldBe error
-        case _ =>
-          loaded.agentState.get.status shouldBe status
-      }
-    }
+    markdown should include("# Markdown")
+    markdown should include("**Messages:** 3")
+    markdown should include("What is the weather?")
+    markdown should include("Tool call `lookup` (call-1)")
+    markdown should include("_Result of tool call call-1_")
   }
 }

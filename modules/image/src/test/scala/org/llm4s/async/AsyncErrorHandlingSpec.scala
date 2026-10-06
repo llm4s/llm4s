@@ -46,11 +46,11 @@ class AsyncErrorHandlingSpec extends AnyFlatSpec with Matchers with ScalaFutures
         blocking {
           client.generateImage("a cat")
         }
-      }.recover { case ex => Left(UnknownError(ex)) }
+      }.recover { case ex => Left(ImageUnknownError(ex)) }
 
     whenReady(future) { result =>
       result.isLeft shouldBe true
-      result.swap.toOption.get shouldBe an[UnknownError]
+      result.swap.toOption.get shouldBe an[ImageUnknownError]
     }
   }
 
@@ -62,11 +62,11 @@ class AsyncErrorHandlingSpec extends AnyFlatSpec with Matchers with ScalaFutures
         blocking {
           client.generateImages("a cat", 2)
         }
-      }.recover { case ex => Left(UnknownError(ex)) }
+      }.recover { case ex => Left(ImageUnknownError(ex)) }
 
     whenReady(future) { result =>
       result.isLeft shouldBe true
-      result.swap.toOption.get shouldBe an[UnknownError]
+      result.swap.toOption.get shouldBe an[ImageUnknownError]
     }
   }
 
@@ -78,11 +78,11 @@ class AsyncErrorHandlingSpec extends AnyFlatSpec with Matchers with ScalaFutures
         blocking {
           client.editImage(java.nio.file.Paths.get("/fake"), "edit")
         }
-      }.recover { case ex => Left(UnknownError(ex)) }
+      }.recover { case ex => Left(ImageUnknownError(ex)) }
 
     whenReady(future) { result =>
       result.isLeft shouldBe true
-      result.swap.toOption.get shouldBe an[UnknownError]
+      result.swap.toOption.get shouldBe an[ImageUnknownError]
     }
   }
 
@@ -92,7 +92,7 @@ class AsyncErrorHandlingSpec extends AnyFlatSpec with Matchers with ScalaFutures
         blocking {
           Right("success"): Either[ImageGenerationError, String]
         }
-      }.recover { case ex => Left(UnknownError(ex)) }
+      }.recover { case ex => Left(ImageUnknownError(ex)) }
 
     whenReady(future)(result => result shouldBe Right("success"))
   }
