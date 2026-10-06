@@ -4,8 +4,6 @@ import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
-import java.util.Locale
-
 import scala.util.matching.Regex
 
 /**
@@ -48,8 +46,14 @@ object Tone {
  * Rejects LLM output whose detected [[Tone]] is not in an allowed set.
  *
  * An [[OutputGuardrail]] only: it checks what the model says, not what the user sends. Detection is a fixed
- * keyword heuristic over the text lower-cased with `Locale.ROOT`, with no model call, so it is fast and
- * deterministic (the JVM's default locale does not affect it), and it is crude. For a judgement that understands context, use [[LLMToneGuardrail]] instead.
+ * keyword heuristic with no model call, so it is fast and deterministic, and it is crude. For a judgement that
+ * understands context, use [[LLMToneGuardrail]] instead.
+ *
+ * The heuristic runs over a normalised copy of the text: Unicode NFKD (fullwidth letters and punctuation
+ * become ASCII, compatibility spaces such as a non-breaking space become an ASCII space), with every combining
+ * mark and every format character (zero-width space and joiners, byte-order mark, soft hyphen) removed, then
+ * lower-cased with `Locale.ROOT` (so the JVM's default locale has no effect) and the Turkish dotless `ı` read
+ * as `i`. So `HI`, `Hİ`, `ＨＩ` and `h<U+200B>i` are all `hi`; an accented spelling such as `hí` is too.
  *
  * Detection looks at the whole text, line breaks included, and takes the first rule that applies, in this
  * order:
@@ -57,8 +61,8 @@ object Tone {
  *     token-count heuristic, not sentence detection: the text is cut at every `.`, `!` and `?`, each piece is
  *     split on ASCII whitespace, and a piece that yields fewer than five tokens is short. The token count
  *     depends on spacing as well as on words: whitespace at the start of a piece (such as the space after a
- *     delimiter) adds an empty token, other Unicode spaces (such as a non-breaking space) do not separate
- *     tokens, and a piece with no words at all (the gap inside a run such as `...` or `?!`, or a space or line
+ *     delimiter) adds an empty token, a space that normalisation does not turn into an ASCII space (such as
+ *     the line separator U+2028) does not separate tokens, and a piece with no words at all (the gap inside a run such as `...` or `?!`, or a space or line
  *     break after the final `!`) is short, though completely empty pieces at the very end of the text are
  *     dropped. The outcome therefore follows no fixed word count: whether a sentence of four or so words
  *     counts as short depends on the punctuation and spacing around it, and text made only of long sentences
@@ -131,7 +135,7 @@ class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
    * - More sophisticated linguistic analysis
    */
   private def detectTone(text: String): Tone = {
-    val lower = text.toLowerCase(Locale.ROOT)
+    val lower = MatchText.folded(text)
 
     // Check for excitement indicators (short sentences with exclamation marks)
     if (lower.contains("!") && lower.split("[.!?]").exists(_.split("\\s+").length < 5)) {

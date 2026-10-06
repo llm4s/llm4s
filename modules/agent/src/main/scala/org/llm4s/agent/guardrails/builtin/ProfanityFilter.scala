@@ -4,8 +4,6 @@ import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
-import java.util.Locale
-
 /**
  * Rejects text that contains a word from a fixed word list.
  *
@@ -17,17 +15,24 @@ import java.util.Locale
  * guardrail for context-aware filtering.
  *
  * Matching rules, which decide what the filter does and does not catch:
- *  - The text is split on ASCII whitespace (the regex class `\s`: space, tab, `\n`, `\r`, form feed and
- *    vertical tab) and each token is compared with the word list as a whole. `badwords` does not match
- *    `badword`, and a token with punctuation attached (`badword!`, `"badword"`) does not match either. Any
- *    other character is part of a token, including other Unicode spaces and line separators (such as a
- *    non-breaking space or U+2028), so `badword` joined to a neighbouring word by one is not caught.
- *  - Entries are single words. An entry that contains ASCII whitespace (a phrase) can never match, because
- *    tokens never contain it.
- *  - By default the comparison ignores case, for the built-in words and for `customBadWords` alike. With
- *    `caseSensitive = true` text and entries are compared exactly, so the lower-case built-in words no longer
- *    match `BADWORD`. Case is folded with `Locale.ROOT`, so the result does not depend on the JVM's default
- *    locale (under a Turkish default locale `BADWORD` and `INAPPROPRIATE` still match).
+ *  - Text and word-list entries are first normalised the same way: Unicode NFKD (fullwidth letters become
+ *    ASCII, compatibility spaces such as a non-breaking space become an ASCII space), then every combining
+ *    mark and every format character (zero-width space and joiners, byte-order mark, soft hyphen) is removed.
+ *    So `bädword`, `ｂａｄｗｏｒｄ` and `bad<U+200B>word` match `badword`. Look-alike letters from other
+ *    scripts (such as Cyrillic `а` for Latin `a`) are not mapped, so are not caught. Because marks are removed
+ *    on both sides, entries that differ only in accents or other marks match the same tokens.
+ *  - The normalised text is split on ASCII whitespace (the regex class `\s`: space, tab, `\n`, `\r`, form
+ *    feed and vertical tab) and each token is compared with the word list as a whole. `badwords` does not
+ *    match `badword`, and a token with punctuation attached (`badword!`, `"badword"`) does not match either.
+ *    Any other character is part of a token, including the line and paragraph separators U+2028 and U+2029,
+ *    so `badword` joined to a neighbouring word by one is not caught.
+ *  - Entries are single words. An entry that contains whitespace (a phrase) can never match, because tokens
+ *    never contain it.
+ *  - By default the comparison ignores case, for the built-in words and for `customBadWords` alike: after
+ *    normalisation both sides are lower-cased with `Locale.ROOT` (so the JVM's default locale has no effect)
+ *    and the Turkish dotless `ı` is read as `i`, so `BADWORD`, `İNAPPROPRIATE` and `ınappropriate` all match.
+ *    With `caseSensitive = true` the normalised text and entries are compared without case folding, so the
+ *    lower-case built-in words no longer match `BADWORD`.
  *
  * On a match `validate` returns a [[org.llm4s.error.ValidationError]] for the field `input` (whichever side the
  * filter is used on) whose detail is `Input contains inappropriate content`. The detail never names the word
@@ -51,7 +56,8 @@ import java.util.Locale
  *
  * @param customBadWords Words to reject in addition to the built-in list; empty by default. Single words only
  *                       (see the matching rules above).
- * @param caseSensitive  `false` (the default) compares without regard to case; `true` compares exactly.
+ * @param caseSensitive  `false` (the default) compares without regard to case; `true` compares the normalised
+ *                       text without case folding.
  */
 class ProfanityFilter(
   customBadWords: Set[String] = Set.empty,
@@ -69,7 +75,7 @@ class ProfanityFilter(
 
   private val badWords: Set[String] = {
     val combined = defaultBadWords ++ customBadWords
-    if (caseSensitive) combined else combined.map(_.toLowerCase(Locale.ROOT))
+    if (caseSensitive) combined.map(MatchText.canonical) else combined.map(MatchText.folded)
   }
 
   /**
@@ -81,7 +87,7 @@ class ProfanityFilter(
    *         matching word
    */
   def validate(value: String): Result[String] = {
-    val checkValue = if (caseSensitive) value else value.toLowerCase(Locale.ROOT)
+    val checkValue = if (caseSensitive) MatchText.canonical(value) else MatchText.folded(value)
     val words      = checkValue.split("\\s+")
 
     val foundBadWords = words.filter(badWords.contains)
@@ -130,8 +136,8 @@ object ProfanityFilter {
   /**
    * Create a case-sensitive profanity filter.
    *
-   * Text and word-list entries are compared exactly, so the lower-case built-in words do not match their
-   * upper-case spellings.
+   * Text and word-list entries are compared without case folding (after the same Unicode normalisation), so
+   * the lower-case built-in words do not match their upper-case spellings.
    *
    * @param customWords single words to reject in addition to the built-in list; empty by default
    * @return a filter equivalent to `new ProfanityFilter(customWords, caseSensitive = true)`

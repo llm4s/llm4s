@@ -1465,7 +1465,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Guardrail case folding no longer depends on the JVM default locale**: `ProfanityFilter`, `ToneValidator`
   and `PromptInjectionDetector` lower-cased text with the default locale, so under a Turkish locale `HI`,
   `INAPPROPRIATE` and `IGNORE PREVIOUS INSTRUCTIONS` folded to a dotless `ı` and went undetected. They (and the
-  RAG guardrails' parsing of `YES` / `NONE` replies) now fold with `Locale.ROOT`.
+  RAG guardrails' parsing of `YES` / `NONE` replies) now fold with `Locale.ROOT`. `Locale.ROOT` alone would
+  have left `İGNORE` (Turkish capital dotted I) as `i` plus a combining dot, a locale-independent bypass, so
+  the three keyword guardrails now match against a normalised copy of the text: Unicode NFKD, combining marks
+  and format characters (zero-width space and joiners, byte-order mark, soft hyphen) removed, lower-cased with
+  `Locale.ROOT`, and the dotless `ı` read as `i`. `İGNORE`, `ıgnore`, fullwidth `ＩＧＮＯＲＥ`, accented
+  `ïgnöre` and `ig<U+200B>nore` are now all detected. Look-alike letters from other scripts are not mapped.
+  `ProfanityFilter` normalises its word list the same way (in case-sensitive mode too, without the case fold),
+  and a non-breaking or other compatibility space now separates tokens there and in `ToneValidator`.
 - **RAG deletes only the chunks of the document you name** (https://github.com/llm4s/llm4s/issues/1000): `RAG.deleteDocumentChunks` deleted
   by a bare prefix, so deleting or re-syncing `doc-1` also deleted every chunk of `doc-10` and
   `doc-1-appendix`. It now matches the `<docId>-chunk-` prefix. Also, `FusionStrategy.WeightedScore(0, 0)`

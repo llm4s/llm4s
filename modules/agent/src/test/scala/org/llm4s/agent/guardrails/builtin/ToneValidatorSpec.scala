@@ -340,4 +340,18 @@ class ToneValidatorSpec extends AnyFlatSpec with Matchers {
       new ToneValidator(Set(Tone.Neutral)).validate("HI THERE").isLeft shouldBe true
     }
   }
+
+  it should "detect keywords spelt with dotted capital I, fullwidth letters or a zero-width split" in {
+    val friendly = new ToneValidator(Set(Tone.Friendly))
+    Seq("Hİ THERE", "ＨＩ there", "h​ello there", "hı there").foreach { text =>
+      friendly.validate(text) shouldBe Right(text)
+    }
+  }
+
+  it should "still classify non-ASCII text without keywords as Neutral" in {
+    val neutral = new ToneValidator(Set(Tone.Neutral))
+    Seq("Der Bericht ist fertig", "Ce rapport est terminé", "报告已完成").foreach { text =>
+      neutral.validate(text) shouldBe Right(text)
+    }
+  }
 }
