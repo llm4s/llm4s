@@ -1,12 +1,12 @@
 package org.llm4s.speech.processing
 
-import org.llm4s.error.{ ProcessingError, ValidationError }
+import org.llm4s.error.{ LLMError, ProcessingError, ValidationError }
 import org.llm4s.types.Result
 import org.llm4s.speech.{ AudioFormat, AudioMeta, GeneratedAudio }
 import org.llm4s.speech.io.BinaryReader
 import BinaryReader._
 
-import java.io.{ ByteArrayInputStream, ByteArrayOutputStream, IOException }
+import java.io.{ ByteArrayInputStream, IOException }
 import javax.sound.sampled.{
   AudioInputStream,
   AudioSystem,
@@ -30,11 +30,24 @@ object AudioPreprocessing {
   /** Most channels [[resamplePcm16]] accepts. */
   private[speech] val MaxChannels = 64
 
-  /** The largest byte array the JVM can reliably allocate. */
-  private val MaxArrayBytes = Int.MaxValue - 8L
+  /**
+   * The most bytes [[resamplePcm16]] will produce: 256 MiB, about 46 minutes of 48 kHz mono or 23 minutes of 48 kHz
+   * stereo at 16 bits. Speech preprocessing works on clips far shorter than that; a longer one should be resampled in
+   * pieces. The bound is what keeps a small input with a tiny declared rate (10 MB claiming 100 Hz, converted to
+   * 16 kHz, would be 1.6 GB) from asking for an array the JVM cannot give: running out of memory is an `Error`, which
+   * nothing in the `Result` model catches.
+   */
+  private[speech] val MaxOutputBytes = 256L * 1024 * 1024
 
   /**
-   * Resample PCM little-endian bytes to `targetRate` using Java Sound.
+   * How many output frames the converter may deliver short of the expected count before it is a fault. Java Sound's
+   * converter ends a frame or two early when it downsamples, so the shortfall is padded with silence; a larger one is
+   * a converter fault and is reported as a `ProcessingError` instead of being hidden as a success.
+   */
+  private[speech] val MaxShortfallFrames = 8
+
+  /**
+   * Resample signed little-endian PCM (8, 16, 24 or 32 bit, despite the name) to `targetRate` using Java Sound.
    *
    * The contract:
    *  - '''Arguments are checked first.''' The target rate and the source's sample rate must be between
@@ -49,8 +62,11 @@ object AudioPreprocessing {
    *    kHz, measured on JDK 21) and the source's final fraction of a millisecond is not in it.
    *  - '''Empty input gives empty output''', and so does input too short to make a single output frame.
    *  - '''Equal rates return a copy of the whole frames''' without converting.
-   *  - '''An output too large for a byte array is a `Left(ValidationError)` on `targetRate`''', checked before anything
-   *    is allocated.
+   *  - '''An output larger than [[MaxOutputBytes]] (256 MiB) is a `Left(ValidationError)` on `targetRate`''', checked
+   *    from the expected frame count before anything is allocated. The output is then written into one array of exactly
+   *    the expected size.
+   *  - '''A converter that delivers fewer than the expected frames''' (by more than [[MaxShortfallFrames]], or no
+   *    frames at all) is a `Left(ProcessingError)`; a shortfall within that is padded with silence.
    *  - '''It cannot loop without making progress:''' reading stops at the end of the stream, at a read that returns no
    *    bytes, and once the expected number of bytes has been read, whichever comes first.
    *
@@ -63,7 +79,7 @@ object AudioPreprocessing {
       frameSize <- validated(source, targetRate)
       inFrames  = bytes.length / frameSize
       outFrames = expectedFrames(inFrames, source.sampleRate, targetRate)
-      outBytes <- outputSize(outFrames, frameSize, targetRate)
+      outBytes <- outputSize(outFrames, frameSize, MaxOutputBytes)
       resampled <-
         if (outFrames == 0) Right(Array.emptyByteArray)
         else if (source.sampleRate == targetRate) Right(java.util.Arrays.copyOf(bytes, outBytes))
@@ -93,11 +109,16 @@ object AudioPreprocessing {
   private[processing] def expectedFrames(inFrames: Long, sourceRate: Int, targetRate: Int): Long =
     (inFrames * targetRate * 2 + sourceRate) / (2L * sourceRate)
 
-  private def outputSize(outFrames: Long, frameSize: Int, targetRate: Int): Result[Int] = {
+  /** The output size in bytes, or a `ValidationError` when it is above `limit` (at most [[MaxOutputBytes]]). */
+  private[processing] def outputSize(outFrames: Long, frameSize: Int, limit: Long): Result[Int] = {
     val bytes = outFrames * frameSize
-    if (bytes > MaxArrayBytes)
+    if (bytes > limit)
       Left(
-        ValidationError("targetRate", s"a resampled output of $bytes bytes at $targetRate Hz would not fit in an array")
+        ValidationError(
+          "targetRate",
+          s"the resampled output would be $bytes bytes, above the limit of $limit bytes; resample the audio in " +
+            "smaller pieces"
+        )
       )
     else Right(bytes.toInt)
   }
@@ -116,42 +137,59 @@ object AudioPreprocessing {
       val srcAis    = new AudioInputStream(new ByteArrayInputStream(bytes), srcFormat, inFrames)
       val dstFormat = new JAudioFormat(targetRate.toFloat, source.bitDepth, source.numChannels, true, false)
       Using.resource(AudioSystem.getAudioInputStream(dstFormat, srcAis)) { converted =>
-        // Java Sound pads its output by a few frames; stopping at outBytes drops the padding, and a short read is
-        // padded with silence so the length is always the contract's.
-        java.util.Arrays.copyOf(drain(converted.read(_), outBytes), outBytes)
+        // Java Sound pads its output by a few frames; stopping at outBytes drops the padding. The output array is
+        // allocated once, at the contract's size, and filled in place.
+        val out    = new Array[Byte](outBytes)
+        val filled = drain(converted.read(_, _, _), out)
+        checkedFill(out, filled, source.numChannels * (source.bitDepth / 8))
       }
     }
-    attempt.toEither.left.map {
-      case ex: UnsupportedAudioFileException =>
-        ProcessingError.audioResample(
-          s"Unsupported audio format: ${source.bitDepth}-bit, ${source.numChannels} channels",
-          Some(ex)
-        )
-      case ex: LineUnavailableException => ProcessingError.audioResample("Audio line unavailable", Some(ex))
-      case ex: IOException              => ProcessingError.audioResample("IO error during resampling", Some(ex))
-      case ex: IllegalArgumentException =>
-        ProcessingError.audioResample(s"Invalid audio parameters: rate=$targetRate", Some(ex))
-      case ex: Exception => ProcessingError.audioResample("Resample operation failed", Some(ex))
-    }
+    attempt.toEither.left
+      .map[LLMError] {
+        case ex: UnsupportedAudioFileException =>
+          ProcessingError.audioResample(
+            s"Unsupported audio format: ${source.bitDepth}-bit, ${source.numChannels} channels",
+            Some(ex)
+          )
+        case ex: LineUnavailableException => ProcessingError.audioResample("Audio line unavailable", Some(ex))
+        case ex: IOException              => ProcessingError.audioResample("IO error during resampling", Some(ex))
+        case ex: IllegalArgumentException =>
+          ProcessingError.audioResample(s"Invalid audio parameters: rate=$targetRate", Some(ex))
+        case ex: Exception => ProcessingError.audioResample("Resample operation failed", Some(ex))
+      }
+      .flatMap(identity)
   }
 
   /**
-   * Reads until the end of the stream (`-1`), a read that returns nothing, or `maxBytes`, whichever comes first.
-   * Every pass either stops or stores at least one byte, so it ends after at most `maxBytes` passes.
+   * Reads into `into` until it is full, the end of the stream (`-1`), or a read that returns nothing, whichever comes
+   * first, and returns how many bytes it holds. `read(buffer, offset, length)` has the contract of `InputStream.read`.
+   * Every pass either stops or stores at least one byte, so it ends after at most `into.length` passes.
    */
-  private[processing] def drain(read: Array[Byte] => Int, maxBytes: Int): Array[Byte] = {
-    val out = new ByteArrayOutputStream(math.min(maxBytes, 1 << 16))
-    val buf = new Array[Byte](8192)
-    @tailrec def loop(): Unit =
-      if (out.size < maxBytes) {
-        val n = read(buf)
-        if (n > 0) {
-          out.write(buf, 0, math.min(n, maxBytes - out.size))
-          loop()
-        }
+  private[processing] def drain(read: (Array[Byte], Int, Int) => Int, into: Array[Byte]): Int = {
+    @tailrec def loop(filled: Int): Int =
+      if (filled >= into.length) filled
+      else {
+        val n = read(into, filled, math.min(8192, into.length - filled))
+        if (n > 0) loop(math.min(into.length, filled + n)) else filled
       }
-    loop()
-    out.toByteArray
+    loop(0)
+  }
+
+  /**
+   * `out` (whose length is the expected size) when `filled` bytes of it came from the converter and the rest, a
+   * shortfall of at most [[MaxShortfallFrames]] frames, is the silence it was allocated as. A larger shortfall, or
+   * nothing at all, is a converter fault.
+   */
+  private[processing] def checkedFill(out: Array[Byte], filled: Int, frameSize: Int): Result[Array[Byte]] = {
+    val missingFrames = (out.length - filled + frameSize - 1) / frameSize
+    if (missingFrames == 0) Right(out)
+    else if (filled == 0 || missingFrames > MaxShortfallFrames)
+      Left(
+        ProcessingError.audioResample(
+          s"The converter returned ${filled / frameSize} of ${out.length / frameSize} expected frames"
+        )
+      )
+    else Right(out)
   }
 
   /** Convert to mono by averaging channels (PCM16 little-endian). */

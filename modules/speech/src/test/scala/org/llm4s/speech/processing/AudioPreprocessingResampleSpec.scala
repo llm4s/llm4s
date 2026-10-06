@@ -5,6 +5,8 @@ import org.llm4s.speech.AudioMeta
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import scala.concurrent.duration.*
+
 /**
  * `resamplePcm16` through its public API.
  *
@@ -84,10 +86,38 @@ class AudioPreprocessingResampleSpec extends AnyFlatSpec with Matchers with Time
     resample(sine(440, 24000, 100), mono16, 768000).isRight shouldBe true
   }
 
-  it should "refuse an output that would not fit in a byte array, without allocating it" in {
+  it should "refuse an output above the output limit, without allocating it" in {
     // 1 Hz to 768 kHz turns a million frames into 7.7e11: far beyond any array
     val oneHertz = AudioMeta(1, 1, 16)
     validationField(resample(new Array[Byte](2000000), oneHertz, 768000)) shouldBe "targetRate"
+  }
+
+  it should "refuse 10 MB declared at 100 Hz and converted to 16 kHz, which would be 1.6 GB, at once" in {
+    // the case that ran a small JVM out of memory: an Error, which nothing in Result catches
+    val result = resample(new Array[Byte](10 * 1000 * 1000), AudioMeta(100, 1, 16), 16000)
+    validationField(result) shouldBe "targetRate"
+    result.left.toOption.map(_.message).getOrElse("") should include(AudioPreprocessing.MaxOutputBytes.toString)
+  }
+
+  it should "still convert a large input whose output is well within the limit" in {
+    // 1 MB of 8 kHz mono, 500,000 frames, to 48 kHz: 3,000,000 frames, 6 MB
+    val result =
+      timed(60.seconds)(AudioPreprocessing.resamplePcm16(new Array[Byte](1000000), AudioMeta(8000, 1, 16), 48000))
+    result.map(_._1.length) shouldBe Right(6000000)
+  }
+
+  it should "convert every pair of common speech rates with the exact length, never a short or failed conversion" in {
+    // pins the shortfall tolerance: the real converter must stay inside it for every rate a caller would use
+    val rates = List(8000, 11025, 16000, 22050, 24000, 44100, 48000)
+    for {
+      from <- rates
+      to   <- rates
+      n    <- List(1, 5, 480, 4410, 12345)
+    } {
+      val expected = math.round(n.toDouble * to / from).toInt
+      val result   = resample(sine(300, from, n), AudioMeta(from, 1, 16), to)
+      withClue(s"$n frames, $from Hz to $to Hz: ")(result.map(_._1.length / 2) shouldBe Right(expected))
+    }
   }
 
   // --- the length contract ---------------------------------------------------------------------------------------

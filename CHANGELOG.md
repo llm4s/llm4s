@@ -1530,9 +1530,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `0` or `-1` "succeeded" with that nonsense as the new sample rate, and a source rate of `0` or no channels threw
   `ArithmeticException: / by zero` inside it. The arguments are now checked first - both rates between 1 and
   768000 Hz, 1 to 64 channels, a bit depth that is a multiple of 8 - and anything else is a `Left(ValidationError)`
-  naming the field (`targetRate`, `source.sampleRate`, `source.numChannels`, `source.bitDepth`), as is an output too
-  large for an array. Reading the converter's output now stops at the end of the stream, at a read that returns
-  nothing, and at the expected length, so it cannot spin. The output has **exactly**
+  naming the field (`targetRate`, `source.sampleRate`, `source.numChannels`, `source.bitDepth`), as is an output
+  above 256 MiB (a 10 MB input declared at 100 Hz and converted to 16 kHz would be 1.6 GB, and used to run a small
+  JVM out of memory, an `Error` that no `Result` catches; the bound is checked from the expected frame count before
+  anything is allocated, and the output is written into a single array of exactly that size). Reading the
+  converter's output now stops at the end of the stream, at a read that returns nothing, and at the expected
+  length, so it cannot spin; a converter that delivers more than 8 frames fewer than expected, or none, is a
+  `Left(ProcessingError)` instead of being padded with silence and reported as a success. The output has **exactly**
   `round(frames * targetRate / sourceRate)` frames (it was longer: 2 frames more at 24 to 16 kHz, 4 at 16 to 24, 16 at
   8 times up), empty input gives empty output (it gave 2 zero frames), equal rates return a copy, and a trailing
   partial frame is ignored as it is by `toMono` and `trimSilence`. **Behaviour change:** a caller that passed a rate
