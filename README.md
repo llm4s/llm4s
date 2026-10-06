@@ -898,4 +898,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 [llm4s]: https://github.com/llm4s/llm4s
 [Scala 3]: https://dotty.epfl.ch/
-[Scala 2]: https://www.scala-lang.org/

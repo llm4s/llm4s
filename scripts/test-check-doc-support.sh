@@ -26,18 +26,36 @@ SCALA_SHORT_STALE="$S_MAJOR.$((S_MINOR + 1))"
 JDK_LIST="$(grep -oE 'java: \[[^]]*\]' "$REPO_ROOT/.github/workflows/ci.yml" | head -1 | grep -oE '[0-9]+' | sort -n)"
 [ -n "$JDK_LIST" ] || { echo "SETUP: no 'java: [N]' matrix in .github/workflows/ci.yml"; exit 2; }
 JDK="$(tail -1 <<<"$JDK_LIST")"                         # the newest JDK CI runs
+JDK_MIN="$(head -1 <<<"$JDK_LIST")"                     # the oldest: the supported floor
 JDK_UNRUN=$((JDK + 4))                                  # a JDK CI does not run
 
+# The files the check reads, built once: Markdown only from docs/ (the tree is ~170 MB, nearly all PDFs
+# and images the check never opens), the build files, CI, and the module directories without contents.
+TEMPLATE="$WORK/.template"
+mkdir -p "$TEMPLATE/.github/workflows" "$TEMPLATE/project"
+(cd "$REPO_ROOT" && find docs -name '*.md' -type f) | while read -r f; do
+  mkdir -p "$TEMPLATE/$(dirname "$f")"
+  cp "$REPO_ROOT/$f" "$TEMPLATE/$f"
+done
+cp "$REPO_ROOT/CLAUDE.md" "$REPO_ROOT/README.md" "$REPO_ROOT/build.sbt" "$TEMPLATE/"
+cp "$REPO_ROOT"/project/*.scala "$REPO_ROOT/project/plugins.sbt" "$TEMPLATE/project/"
+cp "$REPO_ROOT/.github/workflows/ci.yml" "$TEMPLATE/.github/workflows/"
+(cd "$REPO_ROOT" && find modules -maxdepth 3 -type d -not -path '*/src*' -not -path '*/target*' -not -path '*/node_modules*') |
+  while read -r d; do mkdir -p "$TEMPLATE/$d"; done
+
+# fresh_copy NAME: a scratch copy of the template; expect_fail / expect_pass delete it once checked.
 fresh_copy() {
   local dir="$WORK/$1"
-  mkdir -p "$dir/.github/workflows" "$dir/project"
-  cp -R "$REPO_ROOT/docs" "$dir/docs"
-  cp "$REPO_ROOT/CLAUDE.md" "$REPO_ROOT/README.md" "$REPO_ROOT/build.sbt" "$dir/"
-  cp "$REPO_ROOT"/project/*.scala "$REPO_ROOT/project/plugins.sbt" "$dir/project/"
-  cp "$REPO_ROOT/.github/workflows/ci.yml" "$dir/.github/workflows/"
-  (cd "$REPO_ROOT" && find modules -maxdepth 3 -type d -not -path '*/src*' -not -path '*/target*' -not -path '*/node_modules*') |
-    while read -r d; do mkdir -p "$dir/$d"; done
+  cp -R "$TEMPLATE" "$dir"
   echo "$dir"
+}
+
+# discard DIR: remove one case's copy, which must be under $WORK.
+discard() {
+  case "$1" in
+    "$WORK"/?*) rm -rf -- "$1" ;;
+    *) echo "SETUP: refusing to delete '$1', which is not under $WORK"; exit 2 ;;
+  esac
 }
 
 # mutate FILE OLD NEW: replace every literal OLD in FILE; exit 2 if OLD is not there.
@@ -66,6 +84,7 @@ expect_fail() {
   if ! grep -qF -- "$needle" <<<"$out"; then
     echo "FAIL [$name]: the check failed but did not mention '$needle'. Output:"; echo "$out"; exit 1
   fi
+  discard "$dir"
   echo "ok   [$name]"
 }
 
@@ -76,6 +95,7 @@ expect_pass() {
   if [ "$status" -ne 0 ]; then
     echo "FAIL [$name]: the check rejected a true claim. Output:"; echo "$out"; exit 1
   fi
+  discard "$dir"
   echo "ok   [$name]"
 }
 
@@ -121,6 +141,42 @@ d="$(fresh_copy scala-ignore)"
 append_line "$d/docs/getting-started/installation.md" "<!-- doc-support: ignore --> Scala 3.3.5 is the LTS line."
 expect_pass "an opted-out line" "$d"
 
+d="$(fresh_copy scala-other-major)"
+append_line "$d/docs/getting-started/installation.md" "LLM4S supports Scala 2.13."
+expect_fail "a claim of another Scala major version" "$d" "documents Scala 2.13"
+
+d="$(fresh_copy scala-other-major-bare)"
+append_line "$d/docs/getting-started/installation.md" "Works with Scala 2 projects with no extra setup."
+expect_fail "a bare other major version, a negation elsewhere in the clause" "$d" "documents Scala 2"
+
+d="$(fresh_copy scala-other-major-but)"
+append_line "$d/docs/getting-started/installation.md" "LLM4S supports Scala 2.13 but not Scala 2.12."
+expect_fail "a support claim next to a denial in another clause" "$d" "documents Scala 2.13"
+
+d="$(fresh_copy scala-list)"
+append_line "$d/docs/getting-started/installation.md" "Built with Scala $SCALA and 2.13."
+expect_fail "every version of a list is a claim" "$d" "documents Scala 2.13"
+
+d="$(fresh_copy scala-deferred)"
+append_line "$d/docs/getting-started/installation.md" "Scala 2.13 support is deferred to post-1.0. There is no Scala 2.13 artifact, Scala 2 is not supported, and you should not expect Scala 2.12."
+expect_pass "statements that another Scala version is not supported" "$d"
+
+d="$(fresh_copy scala-suffix)"
+append_line "$d/docs/getting-started/installation.md" 'Add `"org.llm4s" % "llm4s-core_2.13"` to your build.'
+expect_fail "an artifact suffix for another Scala version" "$d" "_2.13"
+
+d="$(fresh_copy scala-version-setting)"
+append_line "$d/docs/getting-started/installation.md" "$(printf '```scala\nscalaVersion := "%s"\n```' "$SCALA_STALE")"
+expect_fail "a scalaVersion setting in a snippet" "$d" "pins Scala $SCALA_STALE"
+
+d="$(fresh_copy scala-cross)"
+printf '\n```bash\nsbt +test\n```\n' >> "$d/CLAUDE.md"
+expect_fail "a cross-build command when the build cross-builds nothing" "$d" "cross-builds"
+
+d="$(fresh_copy scala-switch)"
+printf '\n```bash\nsbt ++2.13.16 test\n```\n' >> "$d/CLAUDE.md"
+expect_fail "switching to a Scala version the build does not use" "$d" "switches to Scala 2.13.16"
+
 echo "== JDK version"
 d="$(fresh_copy jdk)"
 mutate "$d/docs/reference/v1-scope.md" "JDK $JDK is used in CI" "JDK $JDK_UNRUN is used in CI"
@@ -146,8 +202,40 @@ append_line "$d/docs/getting-started/installation.md" "We test on OpenJDK $JDK_U
 expect_fail "'OpenJDK N' is read like 'JDK N'" "$d" "JDK $JDK_UNRUN"
 
 d="$(fresh_copy jdk-floor-ok)"
-append_line "$d/docs/getting-started/installation.md" "Any JDK $((JDK - 4))+ can run the compiled jars."
-expect_pass "a floor at or below the JDK CI runs" "$d"
+append_line "$d/docs/getting-started/installation.md" "Any JDK $JDK_MIN+ can run the compiled jars; you need JDK $JDK_MIN or newer, at least Java $JDK_MIN."
+expect_pass "a floor that is the oldest JDK CI runs" "$d"
+
+d="$(fresh_copy jdk-floor-too-low)"
+append_line "$d/docs/getting-started/installation.md" "LLM4S runs on JDK 8 or newer."
+expect_fail "a floor below every JDK CI runs" "$d" "gives JDK 8 as the minimum"
+
+d="$(fresh_copy jdk-floor-plus-too-low)"
+append_line "$d/docs/getting-started/installation.md" "Requires Java $((JDK_MIN - 4))+."
+expect_fail "a 'Java N+' floor below the oldest JDK CI runs" "$d" "gives JDK $((JDK_MIN - 4)) as the minimum"
+
+d="$(fresh_copy jdk-floor-at-least)"
+append_line "$d/docs/getting-started/installation.md" "You need at least Java 1.8 to run it."
+expect_fail "'at least Java 1.8' is a floor of JDK 8" "$d" "gives JDK 8 as the minimum"
+
+d="$(fresh_copy jdk-range)"
+append_line "$d/docs/getting-started/installation.md" "Tested on JDK $((JDK_MIN - 4))-$JDK."
+expect_fail "a range starting below the oldest JDK CI runs" "$d" "gives JDK $((JDK_MIN - 4)) as the minimum"
+
+d="$(fresh_copy jdk-through)"
+append_line "$d/docs/getting-started/installation.md" "Supports Java versions 11 through $JDK; minimum JDK: 17."
+expect_fail "'Java versions N through M' and 'minimum JDK: N'" "$d" "gives JDK 17 as the minimum"
+
+d="$(fresh_copy jdk-list)"
+append_line "$d/docs/getting-started/installation.md" "Tested on JDK $JDK and $JDK_UNRUN."
+expect_fail "every JDK of a list must be one CI runs" "$d" "documents JDK $JDK_UNRUN"
+
+d="$(fresh_copy jdk-ceiling)"
+append_line "$d/docs/getting-started/installation.md" "Works on JDK $JDK_UNRUN or earlier."
+expect_fail "a ceiling claims every older JDK" "$d" "supports JDK $JDK_UNRUN or older"
+
+d="$(fresh_copy jdk-release-target)"
+printf '\nThisBuild / javacOptions ++= Seq("--release", "8")\n' >> "$d/build.sbt"
+expect_fail "a release target CI does not exercise" "$d" "compiles for JDK 8"
 
 d="$(fresh_copy jdk-floor-too-high)"
 append_line "$d/docs/getting-started/installation.md" "Requires JDK $JDK_UNRUN or newer."
@@ -243,6 +331,58 @@ expect_fail "a task one module sets, scoped to another" "$d" "itTierCheck\` is s
 d="$(fresh_copy cmd-task-where-set)"
 printf '\n```bash\nsbt publishedArtifactsCheck it/itTierCheck llm4s/stabilityTierCheck core/test\n```\n' >> "$d/CLAUDE.md"
 expect_pass "tasks run where the build sets them, built-ins anywhere" "$d"
+
+d="$(fresh_copy cmd-unscoped-not-aggregated)"
+printf '\nlazy val loner = (project in file("modules/loner"))\n  .settings(lonerCheck := {})\nlazy val lonerCheck = taskKey[Unit]("x")\n' >> "$d/build.sbt"
+printf '\n```bash\nsbt lonerCheck\n```\n' >> "$d/CLAUDE.md"
+expect_fail "an unscoped task set only in a project the root does not aggregate" "$d" "which the root \`llm4s\` does not aggregate"
+
+d="$(fresh_copy cmd-unscoped-aggregated)"
+printf '\nlazy val loner = (project in file("modules/loner"))\n  .settings(lonerCheck := {})\nlazy val lonerCheck = taskKey[Unit]("x")\n' >> "$d/build.sbt"
+printf '\n```bash\nsbt itTierCheck loner/lonerCheck\n```\n' >> "$d/CLAUDE.md"
+expect_pass "an unscoped task the root reaches by aggregation; a scoped one where it is set" "$d"
+
+echo "== sbt tasks the build declares but never sets"
+d="$(fresh_copy cmd-declared-unassigned)"
+mutate "$d/build.sbt" "itTierCheck := ItTiers.check(" "itTierCheckRemoved := ItTiers.check("
+expect_fail "a declared task whose := was removed" "$d" "\`itTierCheck\` is declared in the build but never set"
+
+d="$(fresh_copy cmd-only-scoped-setting)"
+# `stabilityTierCheck / aggregate := false` sets `aggregate`; it must not count as setting the task.
+mutate "$d/build.sbt" "stabilityTierCheck := StabilityTiers.check(" "stabilityTierCheckRemoved := StabilityTiers.check("
+expect_fail "a task with only a setting scoped to it left" "$d" "\`stabilityTierCheck\` is declared in the build but never set"
+
+d="$(fresh_copy cmd-commented-alias)"
+mutate "$d/build.sbt" 'addCommandAlias("buildAll"' '// addCommandAlias("buildAll"'
+expect_fail "a commented-out alias is not an alias" "$d" "buildAll"
+
+d="$(fresh_copy cmd-commented-assignment)"
+mutate "$d/build.sbt" "itTierCheck := ItTiers.check(" "/* itTierCheck := */ ItTiers.check("
+expect_fail "a commented-out assignment does not set a task" "$d" "\`itTierCheck\` is declared in the build but never set"
+
+d="$(fresh_copy cmd-alias-body)"
+mutate "$d/build.sbt" '";clean;compile;test")' '";clean;compile;tset")'
+expect_fail "an alias whose body names an unknown task" "$d" "tset"
+
+d="$(fresh_copy cmd-after-and)"
+printf '\n```bash\ncd modules/core && sbt crossTestAll\n```\n' >> "$d/CLAUDE.md"
+expect_fail "a command after && in a code block" "$d" "crossTestAll"
+
+d="$(fresh_copy cmd-after-and-inline)"
+printf '\nOr `cd x && sbt otherCrossTest`.\n' >> "$d/README.md"
+expect_fail "a command after && in inline code" "$d" "otherCrossTest"
+
+d="$(fresh_copy cmd-thin-client)"
+printf '\n```bash\n./sbt crossTestAll\nsbtn otherCrossTest\n```\n' >> "$d/CLAUDE.md"
+expect_fail "the ./sbt launcher and sbtn are read like sbt" "$d" "otherCrossTest"
+
+d="$(fresh_copy cmd-spaced-scopes-ok)"
+printf '\nRun `sbt "core / Test / compile"`, `sbt "project core" test` or `sbtn test`.\n' >> "$d/README.md"
+expect_pass "spaced scope slashes, a project switch and the thin client" "$d"
+
+d="$(fresh_copy cmd-project-switch)"
+printf '\n```bash\nsbt "project nonexistentProject" test\n```\n' >> "$d/CLAUDE.md"
+expect_fail "'project X' names a project the build does not define" "$d" "nonexistentProject"
 
 echo "== sbt commands that come from plugins"
 d="$(fresh_copy plugin-removed)"

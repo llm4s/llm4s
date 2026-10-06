@@ -92,7 +92,7 @@ Target: **0.5.0** for the baseline, **1.0** for enforcement.
 | Stability tiers in code; compatibility and deprecation policy | **Landed** | `@Stable`/`@Experimental`; [policy](compatibility-policy) published. |
 | MiMa binary-compatibility checks | **In progress** | Wired in the build; baseline set at **0.5.0**, enforced from **1.0** once the frozen surface has survived two releases. |
 | Package-level Scaladoc | **In progress** | Public API intent documented; the published Scaladoc covers every module. |
-| Scala 2.13 support for the frozen spine | **Deferred** | After 1.0 ([#874](https://github.com/llm4s/llm4s/issues/874)); 1.0 is Scala 3 only. |
+| Deferred Scala 2.13 support for the frozen spine | **Deferred** | After 1.0 ([#874](https://github.com/llm4s/llm4s/issues/874)); 1.0 is Scala 3 only. |
 
 ### Phase 2: Provider Capability Matrix And Contract Tests
 
@@ -206,7 +206,7 @@ Broader idea list (agents, RAG, data pipelines, hardware design, demos): [GSoC P
 |------|-----------|
 | **Pre-1.0 releases** | Regular previews while APIs stabilize. 0.4.x was the artifact rename and fixes; **0.5.0** completes the modularisation, publishes the separate artifacts, and sets the MiMa baseline. |
 | **v1.0** | Freeze the stable modules once they have survived two releases, publish a migration guide, document known limitations, and require compatibility/security/performance gates. Scala 3 only. |
-| **Post-1.0** | Semantic Versioning with binary compatibility checks for stable modules; Scala 2.13 for the frozen spine is considered then ([#874](https://github.com/llm4s/llm4s/issues/874)). Experimental modules may retain separate compatibility notes. |
+| **Post-1.0** | Semantic Versioning with binary compatibility checks for stable modules; deferred Scala 2.13 support for the frozen spine is considered then ([#874](https://github.com/llm4s/llm4s/issues/874)). Experimental modules may retain separate compatibility notes. |
 
 ## Design Documents
 

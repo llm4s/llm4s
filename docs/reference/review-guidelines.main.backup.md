@@ -515,7 +515,7 @@ Before submitting a PR, verify:
 **Testing:**
 - [ ] Unit tests for new behavior
 - [ ] Tests for failure/edge cases
-- [ ] Tests pass with `sbt +test`
+- [ ] Tests pass with `sbt test`
 
 **Hygiene:**
 - [ ] No new heavy dependencies in core without discussion

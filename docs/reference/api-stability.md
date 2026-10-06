@@ -133,7 +133,7 @@ decide that they are frozen too. `llm4s-agent` may also wait for the graph runti
 `mimaFrozen("llm4s-agent")` from `modules/agent` until then.
 
 The build is Scala 3 only, so one `sbt mimaReportBinaryIssues` covers every artifact. If a second Scala
-version returns, run `sbt +mimaReportBinaryIssues` in CI.
+version returns, CI must run it cross-built (with sbt's `+` prefix) to check each version.
 
 ---
 
