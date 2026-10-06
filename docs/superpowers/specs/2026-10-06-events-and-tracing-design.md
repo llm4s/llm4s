@@ -159,7 +159,8 @@ replay could not read the log). Today's `TracedRun` filtering becomes this one i
 **`await` drains the listeners.** The dispatcher delivers asynchronously, and the run's result is set
 after its last events are queued but before they are delivered. So `AgentRun.await` on a run with a
 listener - from `stream*` or `subscribe` - returns only once each listener has returned from the
-run's last event (its terminal event, a `Disconnected`, or a crashed run's last delivered event),
+run's last event (its terminal event, a `Disconnected`, or a crashed run's last delivered event -
+reached at the run's end-of-run barrier, [#1378](https://github.com/llm4s/llm4s/issues/1378)),
 waiting at most `AgentRun.Drain` (5 s) in all, like `AgentTracing.Drain`; past that it logs a WARN
 and returns. A call from inside a listener does not wait for that listener. The bridges' private
 `*Ending` variants do not drain: their release cancels and awaits the run while their own listener

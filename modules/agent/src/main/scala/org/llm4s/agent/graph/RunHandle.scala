@@ -90,18 +90,29 @@ final private[graph] class StopSignal:
  * The runtime's [[RunHandle]]. [[launch]] starts the run thread, which completes `result` on every
  * exit - normal, interrupted, or by an unexpected throwable - after releasing the thread claim, so
  * a caller that has seen the result can start the next run at once.
+ *
+ * Every subscription made for the run - its `observation`, and each [[subscribe]] - is given the
+ * run's end-of-run barrier ([[Dispatched.endOfRun]]) once `result` is set: at once for a
+ * subscription made after that, otherwise by the run thread as it sets the result. Each run's
+ * events were all handed to the hub before its result is set, so the barrier follows them.
  */
 final private[graph] class DefaultRunHandle[O](
   val threadId: ThreadId,
   val runId: RunId,
   claimSeq: Long,
   signal: StopSignal,
-  subscribeFrom: (Long, Int, StreamEvent => Unit) => Result[Subscription],
-  val observation: Option[Subscription]
+  subscribeFrom: (Long, Int, StreamEvent => Unit) => Result[Dispatched],
+  val observation: Option[Dispatched]
 ) extends RunHandle[O]:
 
   private val result                      = new CompletableFuture[RunResult[O]]()
   @volatile private var runThread: Thread = null
+
+  observation.foreach(endsWithRun)
+
+  /** Gives `subscription` this run's end-of-run barrier once the result is set. */
+  private def endsWithRun(subscription: Dispatched): Unit =
+    result.whenComplete((_, _) => subscription.endOfRun(runId)): Unit
 
   def status: RunStatus =
     if !result.isDone then RunStatus.Running
@@ -137,7 +148,10 @@ final private[graph] class DefaultRunHandle[O](
   @volatile private[graph] var beforeInterrupt: () => Unit = () => ()
 
   def subscribe(capacity: Int = 1024)(listener: StreamEvent => Unit): Result[Subscription] =
-    subscribeFrom(claimSeq - 1, capacity, listener)
+    subscribeFrom(claimSeq - 1, capacity, listener).map { subscription =>
+      endsWithRun(subscription)
+      subscription
+    }
 
   /**
    * Starts the run thread, running `body`. A throwable escaping it becomes `crashed(throwable)`;

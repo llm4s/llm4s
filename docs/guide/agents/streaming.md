@@ -120,8 +120,11 @@ start again. A task that `recover` runs again starts at attempt 1 under a new ta
 Both are run-scoped: a listener sees only this run's events, even when other runs share the thread,
 and ends after the run's terminal event (`RunCompleted`, `RunSuspended`, `RunFailed`,
 `RunCancelled`, `RunTimedOut`), or after a `Disconnected` (`Lagging`, `ListenerFailed`, or - for
-`subscribe`, which replays - `ReplayFailed`). A run that crashes without a terminal event ends its
-stream shortly after the run does. Either way, `await` waits for the listener as described above.
+`subscribe`, which replays - `ReplayFailed`). A run that crashes without a terminal event (or whose
+terminal commit fails) ends its stream as soon as the listener has returned from the run's last
+event: once the run's result is set, a marker is queued behind its last event, and reaching it ends
+the subscription - also for a `subscribe` made after the run ended, once its replay is done. There
+is no fixed delay. Either way, `await` waits for the listener as described above.
 
 ## Falling behind
 
@@ -162,8 +165,8 @@ agentZ.stream(threadId, "Explain monads").runForeach { /* same cases */ }
 
 `AgentStreamItem` is `Event(StreamEvent)` or `Done(AgentResult)`, one enum per module. The stream
 ends after `Done`; a `Left` from admission or from the run fails the stream with that error.
-A run that ends without a terminal event (a crash) still ends the stream shortly after the run ends,
-and the stream then fails with the run's error. `streamResume` and `streamRecover` exist on both.
+A run that ends without a terminal event (a crash) still ends the stream, as soon as the run's last
+event has been delivered, and the stream then fails with the run's error. `streamResume` and `streamRecover` exist on both.
 Interrupting the stream or stopping early (`take(n)`, `head`) cancels the turn.
 
 A slow consumer does not: the stream's buffer never holds up the run's subscription. Durable events

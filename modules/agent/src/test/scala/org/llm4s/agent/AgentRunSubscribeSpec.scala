@@ -307,7 +307,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     ends.get shouldBe 1
     scope(record("r1", 2, RunEvent.RunCompleted)) // the race's loser: passed on to nobody, ends nothing
     scope.cancel()
-    scope.closeWhenQuiet(10.millis)
+    scope.runEnded(RunId("r1"))
     ends.get shouldBe 1
     c.all shouldBe Vector(record("r1", 1, RunEvent.RunStarted(None, None)))
   }
@@ -402,27 +402,40 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     scope.isEnded shouldBe true
   }
 
-  it should "end itself when quiet, cancelling first, if the run's terminal event never comes" in {
+  it should "end at its run's barrier, once, after what was delivered before it, and then pass on nothing" in {
+    val c     = Received()
     val order = new CopyOnWriteArrayList[String]()
-    val scope = RunScope(RunId("r1"), _ => (), () => order.add("onEnd"): Unit)
+    val scope = RunScope(RunId("r1"), c.listener, () => order.add("onEnd"): Unit)
     scope.attach(new Subscription { def cancel(): Unit = order.add("cancel"): Unit })
     scope(record("r1", 1, RunEvent.RunStarted(None, None)))
-    scope.closeWhenQuiet(50.millis)
+    scope.runEnded(RunId("r1"))
     scope.isEnded shouldBe true
-    order.asScala.toVector shouldBe Vector("cancel", "onEnd")
-    scope.closeWhenQuiet(50.millis) // already ended: returns at once, ends nothing again
-    order.asScala.toVector shouldBe Vector("cancel", "onEnd")
+    scope.awaitEnd(Duration.Zero) shouldBe Right(true)
+    // ended from the listener's thread, as on a terminal event: onEnd, then the cancel
+    order.asScala.toVector shouldBe Vector("onEnd", "cancel")
+    scope.runEnded(RunId("r1")) // already ended: ends nothing again
+    scope(record("r1", 2, RunEvent.RunCompleted))
+    order.asScala.toVector shouldBe Vector("onEnd", "cancel")
+    c.all shouldBe Vector(record("r1", 1, RunEvent.RunStarted(None, None)))
   }
 
-  it should "count its quiet period from the close, not from an earlier idle spell" in {
-    val c     = Received()
-    val scope = RunScope(RunId("r1"), c.listener)
-    scope.attach(new Subscription { def cancel(): Unit = () })
-    Thread.sleep(150) // idle since construction for longer than the quiet period below
-    val closing = Thread.ofVirtual().start(() => scope.closeWhenQuiet(100.millis))
-    Thread.sleep(30) // the run's last queued event, delivered just after the close began
-    scope(record("r1", 1, RunEvent.RunStarted(None, None)))
-    closing.join()
+  it should "ignore another run's barrier" in {
+    val ends  = new java.util.concurrent.atomic.AtomicInteger(0)
+    val scope = RunScope(RunId("r2"), _ => (), () => ends.incrementAndGet(): Unit)
+    val sub   = CountingSubscription()
+    scope.attach(sub)
+    scope.runEnded(RunId("r1"))
+    scope.isEnded shouldBe false
+    ends.get shouldBe 0
+    sub.cancels.get shouldBe 0
+  }
+
+  it should "let onEnd cancel the scope from the barrier's thread without waiting on itself" in {
+    val scopeRef = new java.util.concurrent.atomic.AtomicReference[RunScope]()
+    val scope    = RunScope(RunId("r1"), _ => (), () => scopeRef.get.cancel())
+    scopeRef.set(scope)
+    scope.attach(CountingSubscription())
+    val ending = Thread.ofVirtual().start(() => scope.runEnded(RunId("r1")))
+    ending.join(java.time.Duration.ofSeconds(2)) shouldBe true
     scope.isEnded shouldBe true
-    c.all shouldBe Vector(record("r1", 1, RunEvent.RunStarted(None, None)))
   }

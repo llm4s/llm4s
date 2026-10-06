@@ -13,9 +13,39 @@ private[agent] def withLock[A](lock: ReentrantLock)(body: => A): A =
   Using.resource(new AutoCloseable { def close(): Unit = lock.unlock() })(_ => body)
 
 /**
+ * A run-scoped listener: one run's view of a subscription made for that run ([[RunHandle.subscribe]],
+ * or the run's [[Observer]]). Its dispatcher calls [[runEnded]] - on the dispatcher thread, like any
+ * listener call, but never with an event - when it reaches the run's end-of-run barrier, which
+ * follows everything of the run queued to it. A listener that is not a `RunListener` - every
+ * thread-scoped one - is never told.
+ */
+private[agent] trait RunListener extends (StreamEvent => Unit):
+  /** The run `runId` has ended and everything of it queued to this listener has been delivered. */
+  def runEnded(runId: RunId): Unit
+
+/** A subscription the [[EventHub]] dispatches: one that can be given a run's end-of-run barrier. */
+private[graph] trait Dispatched extends Subscription:
+  /**
+   * Queues run `runId`'s end-of-run barrier behind everything queued so far, or - while the
+   * subscription is still replaying - behind everything its switch to live catches up. Called once
+   * the run's result is set, so after every event of the run was handed to the hub. A no-op unless
+   * the listener is a [[RunListener]], and once the subscription is cancelled or lagging: a lagging
+   * subscription ends with its `Disconnected` instead, so a scope never ends as if it had seen
+   * everything when it has not.
+   */
+  def endOfRun(runId: RunId): Unit
+
+/**
  * Delivers a runtime's events to subscribers. Each subscription has its own dispatcher: a bounded
  * queue drained in order by one virtual thread, the only thread its listener is called on. The
  * commit path hands events to every queue and returns without waiting on a listener.
+ *
+ * A run-scoped subscription ([[RunListener]]) also gets its run's end-of-run barrier
+ * ([[Dispatched.endOfRun]]) once the run's result is set: a marker queued behind the run's last
+ * event that is never passed to the listener as an event. Reaching it, the dispatcher calls
+ * [[RunListener.runEnded]], which ends a scope whose run committed no terminal event. The barrier
+ * may take one slot beyond `capacity` (two with a pending gap): it is never dropped, and never
+ * makes a subscriber lag.
  *
  * Durable events reach each subscriber in ascending `seq`, at most once, and only after the commit
  * that numbered them. A durable event that does not fit disconnects the subscriber as lagging once
@@ -40,7 +70,7 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     afterSeq: Long,
     capacity: Int,
     listener: StreamEvent => Unit
-  ): Result[Subscription] =
+  ): Result[Dispatched] =
     val dispatcher = new Dispatcher(threadId, afterSeq, capacity, listener)
     dispatcher.start()
     Right(dispatcher)
@@ -59,7 +89,7 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
   /** A dispatcher joined by [[observe]], to be started or abandoned exactly once. */
   final class Observation private[EventHub] (dispatcher: Dispatcher):
     /** Starts delivery; `lastSeq` is what a `Disconnected` names if nothing durable is delivered. */
-    def start(lastSeq: Long): Subscription =
+    def start(lastSeq: Long): Dispatched =
       dispatcher.startObserved(lastSeq)
       dispatcher
 
@@ -97,6 +127,9 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     case Cancelled
     case Disconnect(reason: DisconnectReason)
 
+  /** A run's end-of-run barrier in a dispatcher's queue; never passed to a listener as an event. */
+  final private case class RunEnd(runId: RunId)
+
   /**
    * One subscriber. It replays the log directly to the listener, then, under `hubLock`, reads what
    * was committed since and joins the live set - commits hand events over under the same lock, so
@@ -110,7 +143,7 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     capacity: Int,
     listener: StreamEvent => Unit,
     preJoined: Boolean = false
-  ) extends Subscription:
+  ) extends Dispatched:
     private val lock                = new ReentrantLock()
     private val notEmpty: Condition = lock.newCondition()
 
@@ -118,11 +151,15 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     private val idle: Condition = lock.newCondition()
 
     // guarded by `lock`; `lastQueuedSeq` is also advanced by replay, before the dispatcher joins
-    private val queue               = new java.util.ArrayDeque[StreamEvent]()
+    private val queue               = new java.util.ArrayDeque[StreamEvent | RunEnd]()
     private var lastQueuedSeq       = afterSeq
     private var droppedLive         = 0
     private var lagging             = false
     @volatile private var cancelled = false
+
+    /** Whether the dispatcher has joined the live set; until then a barrier waits in `pendingEnds`. */
+    private var joined      = preJoined
+    private var pendingEnds = Vector.empty[RunId]
 
     /** A listener call is in progress; set, with `cancelled` checked, under `lock`. */
     private var delivering = false
@@ -190,6 +227,25 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
         queue.add(StreamEvent.LiveGap(droppedLive))
         droppedLive = 0
 
+    def endOfRun(runId: RunId): Unit =
+      listener match
+        case _: RunListener =>
+          withLock(lock) {
+            if joined then queueEnd(runId) else pendingEnds = pendingEnds :+ runId
+          }
+        case _ => ()
+
+    /**
+     * Queues `runId`'s barrier, holding `lock`, unless cancelled or lagging; a pending gap goes
+     * first, so the listener learns of live events of the run dropped before it. Exempt from
+     * `capacity`.
+     */
+    private def queueEnd(runId: RunId): Unit =
+      if !cancelled && !lagging then
+        flushGap()
+        queue.add(RunEnd(runId))
+        notEmpty.signal()
+
     private def run(): Unit =
       // leaves the live set on every exit, including one by a fatal error
       Using.resource(new AutoCloseable { def close(): Unit = leave(threadId, Dispatcher.this) }) { _ =>
@@ -198,7 +254,9 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
         ending match
           case End.Disconnect(reason) =>
             leave(threadId, this)
-            reportPendingGap(reason).foreach(ending => call(StreamEvent.Disconnected(lastDeliveredSeq, ending)): Unit)
+            reportPendingGap(reason).foreach(ending =>
+              call(() => listener(StreamEvent.Disconnected(lastDeliveredSeq, ending))): Unit
+            )
           case End.Cancelled => ()
       }
 
@@ -250,12 +308,20 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
             case Right(page) =>
               page.foreach(offerDurable)
               if page.size < PageSize || withLock(lock)(lagging) then Right(()) else catchUp()
-        catchUp().map(_ => join(threadId, this))
+        catchUp().map { _ =>
+          join(threadId, this)
+          // barriers of runs that ended during the replay go behind everything caught up
+          withLock(lock) {
+            joined = true
+            pendingEnds.foreach(queueEnd)
+            pendingEnds = Vector.empty
+          }
+        }
       }
 
     /** Takes queued events in order; ends when cancelled, or when lagging and drained. */
     @tailrec private def drain(): End =
-      val next: Either[End, Option[StreamEvent]] =
+      val next: Either[End, Option[StreamEvent | RunEnd]] =
         CancelledError.catchInterrupt(withLock(lock) {
           awaitWork()
           if cancelled then Left(End.Cancelled)
@@ -267,10 +333,19 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
       next match
         case Left(stop)  => stop
         case Right(None) => drain()
-        case Right(Some(event)) =>
-          deliver(event) match
+        case Right(Some(item)) =>
+          val delivered = item match
+            case RunEnd(runId)      => reachEnd(runId)
+            case event: StreamEvent => deliver(event)
+          delivered match
             case Right(_)   => drain()
             case Left(stop) => stop
+
+    /** At `runId`'s barrier: tells a [[RunListener]], as a listener call, that its run has ended. */
+    private def reachEnd(runId: RunId): Either[End, Unit] =
+      listener match
+        case run: RunListener => outcome(call(() => run.runEnded(runId)))
+        case _                => Right(())
 
     /** Waits, holding `lock`, until there is something to deliver or a reason to stop. */
     @tailrec private def awaitWork(): Unit =
@@ -280,25 +355,27 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
 
     /** Calls the listener; a throw ends the subscription, and a delivered durable event advances `lastDeliveredSeq`. */
     private def deliver(event: StreamEvent): Either[End, Unit] =
-      call(event) match
-        case None                 => Left(End.Cancelled)
-        case Some(_) if cancelled => Left(End.Cancelled)
-        case Some(outcome) =>
-          outcome match
-            case Right(Success(_)) =>
-              event match
-                case StreamEvent.Durable(record) => lastDeliveredSeq = record.seq
-                case _                           => ()
-              Right(())
-            case Right(Failure(cause)) => Left(End.Disconnect(DisconnectReason.ListenerFailed(cause)))
-            case Left(interrupted)     => Left(End.Disconnect(DisconnectReason.ListenerFailed(interrupted)))
+      outcome(call(() => listener(event))).map { _ =>
+        event match
+          case StreamEvent.Durable(record) => lastDeliveredSeq = record.seq
+          case _                           => ()
+      }
+
+    /** How a listener call ended: on, or stopped - cancelled, or the listener threw. */
+    private def outcome(called: Option[Either[InterruptedException, Try[Unit]]]): Either[End, Unit] =
+      called match
+        case None                        => Left(End.Cancelled)
+        case Some(_) if cancelled        => Left(End.Cancelled)
+        case Some(Right(Success(_)))     => Right(())
+        case Some(Right(Failure(cause))) => Left(End.Disconnect(DisconnectReason.ListenerFailed(cause)))
+        case Some(Left(interrupted))     => Left(End.Disconnect(DisconnectReason.ListenerFailed(interrupted)))
 
     /**
      * Calls the listener unless cancelled - checked, and the call marked as in progress, atomically
      * under `lock`, so a `cancel` that returns has either prevented the call or waited for it.
      * `None` if cancelled first.
      */
-    private def call(event: StreamEvent): Option[Either[InterruptedException, Try[Unit]]] =
+    private def call(body: () => Unit): Option[Either[InterruptedException, Try[Unit]]] =
       val admitted = withLock(lock) {
         if !cancelled then delivering = true
         delivering
@@ -309,7 +386,7 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
             delivering = false
             idle.signalAll()
           }
-        })(_ => CancelledError.catchInterrupt(Try(listener(event))))
+        })(_ => CancelledError.catchInterrupt(Try(body())))
       }
 
     /** The next page after `lastQueuedSeq`; a failed or interrupted read ends the subscription. */

@@ -412,7 +412,7 @@ An agent built with `Agent.builder(...).withTracing(tracing)` sends, for each ru
   `agent.model_call_completed` events, not the thread's total, so per-run figures add up.
 
 A run that crashes without a terminal event is traced as `ErrorOccurred`, with a WARN, and has no
-`AgentRunEnded`. Message content reaches tracing only in `AgentRunEnded.messages`; a blocked turn's
+`AgentRunEnded`; it is traced as soon as the run's last event has been, with no fixed delay. Message content reaches tracing only in `AgentRunEnded.messages`; a blocked turn's
 content is not in it. (The kernel's own `TracingSubscriber`, used for graphs that are not agents,
 names agent events `graph.custom`; `withTracing` on an agent names them `agent.*`.)
 
