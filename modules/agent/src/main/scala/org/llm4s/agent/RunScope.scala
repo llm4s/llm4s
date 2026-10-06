@@ -72,12 +72,14 @@ final private[agent] class RunScope(runId: RunId, listener: StreamEvent => Unit,
   /**
    * Ends for a caller cancelling the subscription it was handed: if the scope has not begun to end,
    * cancels the subscription - off the listener, so once this returns no listener call is running
-   * and none will start - then calls `onEnd`. If it has, waits for that end, which cancels the
-   * subscription before it completes, rather than cancelling it during `onEnd`. Once only, as every
-   * end is; a second cancel returns at once.
+   * and none will start - then calls `onEnd`. If an end has begun, waits for it to complete (it
+   * cancels the subscription before completing) rather than cancelling during its `onEnd` - except
+   * on the listener's own thread, which returns at once, as the kernel subscription's cancel does
+   * there: the end in progress may itself be waiting for the listener call to return. Ends once
+   * only; a cancel after the end has completed returns at once.
    */
   def cancel(): Unit =
-    if !endCancelling() then finished.join(): Unit
+    if !endCancelling() && !listenerThread.exists(_ eq Thread.currentThread()) then finished.join(): Unit
 
   /** Whether the scope has ended. */
   def isEnded: Boolean = ending.get

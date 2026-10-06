@@ -19,6 +19,7 @@ import org.slf4j.LoggerFactory
 
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.AtomicBoolean
+import scala.util.Using
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
@@ -149,19 +150,20 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     val appender = new ListAppender[ILoggingEvent]()
     appender.start()
     logger.addAppender(appender)
-    val gate  = new CountDownLatch(1)
-    val agent = agentOf(Scripted(gate, Right(answer("hi"))))
-    val run   = ok(agent.start(ThreadId("s1f"), "hello"))
-    val c     = Received()
-    val sub   = ok(run.subscribe()(c.listener))
-    sub.cancel()
-    gate.countDown()
-    val started = System.nanoTime()
-    ok(run.await()).answer shouldBe Some("hi")
-    val took = (System.nanoTime() - started).nanos
-    logger.detachAppender(appender)
+    val took = Using.resource(new AutoCloseable { def close(): Unit = logger.detachAppender(appender): Unit }) { _ =>
+      val gate  = new CountDownLatch(1)
+      val agent = agentOf(Scripted(gate, Right(answer("hi"))))
+      val run   = ok(agent.start(ThreadId("s1f"), "hello"))
+      val c     = Received()
+      val sub   = ok(run.subscribe()(c.listener))
+      sub.cancel()
+      gate.countDown()
+      val started = System.nanoTime()
+      ok(run.await()).answer shouldBe Some("hi")
+      c.terminalSeen shouldBe false
+      (System.nanoTime() - started).nanos
+    }
     took should be < 1.second
-    c.terminalSeen shouldBe false
     appender.list.asScala.filter(_.getLevel == Level.WARN) shouldBe empty
   }
 
@@ -318,7 +320,40 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     scope(record("r1", 1, RunEvent.RunCompleted))
     scope.cancel()
     ends.get shouldBe 1
-    sub.cancels.get should be >= 1
+    sub.cancels.get shouldBe 1
+  }
+
+  it should "not block a listener that cancels while another thread's cancel waits for it" in {
+    val ends         = new java.util.concurrent.atomic.AtomicInteger(0)
+    val winnerIn     = new CountDownLatch(1) // the other thread's cancel is waiting for the listener
+    val listenerDone = new CountDownLatch(1)
+    val entered      = new CountDownLatch(1)
+    val scopeRef     = new java.util.concurrent.atomic.AtomicReference[RunScope]()
+    val scope = RunScope(
+      RunId("r1"),
+      _ =>
+        entered.countDown()
+        winnerIn.await(5, TimeUnit.SECONDS)
+        scopeRef.get.cancel() // loses the end to the waiting cancel: must return, not wait for it
+        listenerDone.countDown()
+      ,
+      () => ends.incrementAndGet(): Unit
+    )
+    scopeRef.set(scope)
+    // like the kernel's: a cancel off the dispatcher waits for the listener call in progress
+    scope.attach(new Subscription {
+      def cancel(): Unit =
+        winnerIn.countDown()
+        listenerDone.await(10, TimeUnit.SECONDS): Unit
+    })
+    val listening =
+      Thread.ofVirtual().start(() => scope(StreamEvent.Live("t", "r1", "x", "n", "this.run", 1, ujson.Null)))
+    entered.await(5, TimeUnit.SECONDS) shouldBe true // the listener call is in progress
+    val cancelling = Thread.ofVirtual().start(() => scope.cancel())
+    cancelling.join(java.time.Duration.ofSeconds(2)) shouldBe true
+    listening.join(java.time.Duration.ofSeconds(2)) shouldBe true
+    ends.get shouldBe 1
+    scope.awaitEnd(Duration.Zero) shouldBe Right(true)
   }
 
   it should "end exactly once when a caller's cancel races the terminal event" in {
