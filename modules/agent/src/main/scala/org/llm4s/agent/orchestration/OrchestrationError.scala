@@ -1,12 +1,17 @@
 package org.llm4s.agent.orchestration
 
-import org.llm4s.error.LLMError
+import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
 import org.llm4s.util.DurationText
 
 import scala.concurrent.duration.FiniteDuration
 
 /**
- * Orchestration-specific error types following LLM4S error patterns
+ * Orchestration-specific error types following LLM4S error patterns.
+ *
+ * `PlanValidationError` and `TypeMismatchError` are [[NonRecoverableError]]s: the plan itself is wrong.
+ * `AgentTimeoutError` is a [[RecoverableError]], as a core `TimeoutError` is. `NodeExecutionError` carries its
+ * own `recoverable` flag, which `Policies.withRetry` reads, and `PlanExecutionError` wraps whatever failed; neither
+ * carries a marker, so `LLMError.isRecoverable` reports them as not recoverable.
  */
 sealed trait OrchestrationError extends LLMError
 
@@ -19,7 +24,8 @@ object OrchestrationError {
     override val message: String,
     planId: Option[String],
     validationFailures: List[String]
-  ) extends OrchestrationError {
+  ) extends OrchestrationError
+      with NonRecoverableError {
 
     override val context: Map[String, String] = Map(
       "component"    -> "plan-validation",
@@ -129,7 +135,8 @@ object OrchestrationError {
     targetNode: String,
     expectedType: String,
     actualType: String
-  ) extends OrchestrationError {
+  ) extends OrchestrationError
+      with NonRecoverableError {
 
     override val context: Map[String, String] = Map(
       "component"    -> "type-validation",
@@ -158,7 +165,8 @@ object OrchestrationError {
     override val message: String,
     agentName: String,
     timeout: FiniteDuration
-  ) extends OrchestrationError {
+  ) extends OrchestrationError
+      with RecoverableError {
 
     override val context: Map[String, String] = Map(
       "component" -> "agent-timeout",

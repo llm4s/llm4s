@@ -101,8 +101,9 @@ Every error is an `LLMError`, carrying a `message`, an optional `code` and a `co
   something first (wait, re-read a record, correct the request).
 - **Non-recoverable** (`NonRecoverableError`): trying again will not help; something has to change.
 
-`LLMError.isRecoverable(error)` tells you which, for an error that carries a marker. Some errors from
-other modules carry neither; see [errors defined by other modules](#errors-defined-by-other-modules).
+`LLMError.isRecoverable(error)` tells you which. It answers for every error: one that carries neither marker,
+as some errors from other modules do (see [errors defined by other modules](#errors-defined-by-other-modules)),
+is not recoverable, since nothing says a retry can help.
 
 | Error | Recoverable | Where the library raises it |
 |---|---|---|
@@ -164,26 +165,32 @@ service status to `ServiceError`, and any other client failure to `NetworkError`
 
 ### Errors defined by other modules
 
-Some modules add their own `LLMError` subtypes. These carry **neither** marker, so
-`LLMError.isRecoverable` throws a `MatchError` on them today:
+Some modules add their own `LLMError` subtypes. The errors below carry **neither** marker, so
+`LLMError.isRecoverable` reports them as not recoverable and the library's automatic retries leave them alone.
+For each, the right answer depends on more than the type (a status inside a string `code`, a flag, a wrapped
+cause, which of several failures it reports), so none carries a marker:
 
 | Module | Package | Errors |
 |---|---|---|
 | `llm4s-core` | `org.llm4s.llmconnect.model` | `EmbeddingError`: how `EmbeddingClient.embed` and the embedding providers (OpenAI, Ollama, Voyage, Cohere, Jina) report a failure other than cancellation, except that the Cohere provider reports a 429 as a `RateLimitError` |
-| `llm4s-agent` | `org.llm4s.agent.orchestration` | `OrchestrationError`: `PlanValidationError`, `PlanExecutionError` and `TypeMismatchError` from `PlanRunner`; `NodeExecutionError` from `PlanRunner` and `TypedAgent` (it has its own `recoverable` flag); `AgentTimeoutError` from `Policies.withTimeout` |
+| `llm4s-agent` | `org.llm4s.agent.orchestration` | `OrchestrationError.PlanExecutionError` from `PlanRunner`; `NodeExecutionError` from `PlanRunner` and `TypedAgent`, which has its own `recoverable` flag (`Policies.withRetry` reads it) |
 | `llm4s-rag` | `org.llm4s.rag.evaluation`, `org.llm4s.reranker` | `EvaluationError` from RAGAS evaluation and the RAG benchmark tools; `RerankError` from the Cohere and LLM rerankers (`Reranker.rerank`) |
-| `llm4s-speech` | `org.llm4s.speech.tts`, `.stt`, `.io` | `TTSError` from the text-to-speech clients; `STTError` from the speech-to-text clients (it has its own `retryable` flag); `WavFileGenerator.WavError` and `AudioIO.AudioIOError` from generating and saving audio files |
+| `llm4s-speech` | `org.llm4s.speech.stt`, `.tts` | `STTError.ProcessingFailed` from the speech-to-text clients (an empty transcription, no recognisable speech, an unparseable response; its `retryable` flag says `true`); `TTSError.SynthesisFailed` from the text-to-speech clients (an empty audio body) |
 
-These are marked, so `isRecoverable` works on them: `GraphError` in `llm4s-agent`
+The rest of those families are marked:
+
+| Module | Recoverable | Non-recoverable |
+|---|---|---|
+| `llm4s-agent` (`org.llm4s.agent.orchestration`) | `OrchestrationError.AgentTimeoutError`, from `Policies.withTimeout` | `PlanValidationError` and `TypeMismatchError`, from `PlanRunner` |
+| `llm4s-speech` (`org.llm4s.speech.stt`, `.tts`, `.io`) | `STTError.EngineNotAvailable`, `TTSError.EngineNotAvailable` | `STTError.UnsupportedFormat`, `STTError.InvalidInput`, `WavFileGenerator.WavError`, `AudioIO.AudioIOError` |
+
+So are two whole families: `GraphError` in `llm4s-agent`
 (`org.llm4s.agent.graph`, from the graph runtime; every case is non-recoverable except `DeadlineExceeded`)
 and `ImageGenerationError` in `llm4s-image` (`org.llm4s.imagegeneration`, from the image-generation
 clients; a `ServiceError` there is recoverable only for a transient status). The image module reuses the
 names `AuthenticationError`, `RateLimitError`, `ServiceError`, `ValidationError` and `UnknownError`, so
 import those by package instead of with a wildcard next to `org.llm4s.error._`. Its vision clients
 (`org.llm4s.imageprocessing`) return the core errors in the table above.
-
-`isRecoverable` should be made total in a later change. Until then, match on the marker trait, as the next
-section does, which is safe for every error.
 
 ## 5. Handling specific error types
 
@@ -213,8 +220,8 @@ Two things to know:
   with a `case Left(e)`.
 - **A custom error must say what kind it is.** If you define your own error type, mix in
   `RecoverableError` or `NonRecoverableError` as well as `LLMError`.
-  `LLMError.isRecoverable` throws a `MatchError` for a type that is neither, as it does for the library
-  errors listed above. Matching on `RecoverableError`, as `describe` does, never throws.
+  `LLMError.isRecoverable` reports a type that is neither as not recoverable, so a transient failure that
+  forgets its marker is never retried.
 
 ```scala
 import org.llm4s.error.{ LLMError, NonRecoverableError }
@@ -389,8 +396,8 @@ See the [Testing Guide](../getting-started/testing-guide.md).
 - Return `Result` from your own functions; do not throw.
 - Convert exceptions to errors where they enter your code, and errors to exceptions only where a
   framework forces you to, in one place.
-- Match on specific types first, then on `RecoverableError`, then a catch-all. Call
-  `LLMError.isRecoverable` only on an error you know carries a marker.
+- Match on specific types first, then on `RecoverableError`, then a catch-all. `LLMError.isRecoverable`
+  asks the same question of any error.
 - Retry only what is recoverable, with a limit and a delay; never retry a `CancelledError`. The
   library's own retries also leave out a client-error status and an `OptimisticLockFailure`.
 - Log `error.formatted`, show `error.message`, and never put an API key in either.

@@ -559,6 +559,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **`LLMError.isRecoverable` is total** ([#1380](https://github.com/llm4s/llm4s/issues/1380), `llm4s-core`,
+  `llm4s-agent`, `llm4s-speech`): it matched only `RecoverableError` and `NonRecoverableError` and threw a
+  `MatchError` on any other `LLMError` (`EmbeddingError`, `RerankError`, `EvaluationError`, the orchestration and
+  speech errors, a custom error), and so did `recoverableErrors` / `nonRecoverableErrors` on a list holding one.
+  An unmarked error is now not recoverable, as `RetryPolicy.isRetryable` and `ErrorRecovery` already treated it.
+  Markers are added where the answer is clear: `OrchestrationError.AgentTimeoutError`, `STTError.EngineNotAvailable`
+  and `TTSError.EngineNotAvailable` are `RecoverableError`s (so the library's retries, such as a graph node's
+  default retry or `recoverWithBackoff`, now retry them); `PlanValidationError`, `TypeMismatchError`,
+  `STTError.UnsupportedFormat`, `STTError.InvalidInput`, `WavFileGenerator.WavError` and `AudioIO.AudioIOError` are
+  `NonRecoverableError`s (no behaviour change). `NodeExecutionError` (its own `recoverable` flag),
+  `PlanExecutionError`, `STTError.ProcessingFailed`, `TTSError.SynthesisFailed`, `EmbeddingError`, `RerankError` and
+  `EvaluationError` stay unmarked: each is one type whose answer depends on a value, not the type. The error
+  handling and Basic Usage guides drop the `MatchError` caveat, and Basic Usage calls `isRecoverable` directly.
 - **Stage 1 migration: agent runtime** ([#1328](https://github.com/llm4s/llm4s/issues/1328), BREAKING,
   `llm4s-agent`, `llm4s-effect`, `llm4s-zio`, `workspaceClient`): `Agent` runs on `GraphRuntime`
   through a generalised `ToolLoop`; the graph is the only agent loop, and `AgentState` and the
