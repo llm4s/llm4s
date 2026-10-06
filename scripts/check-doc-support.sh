@@ -36,6 +36,24 @@
 #               that project aggregates others and the key's `aggregate` is not false, in one of them. A
 #               configuration must be one the project has. A backslash-continued command is read as one
 #               line, a command after `&&`, `||` or `|` is read too, and one the shell cannot parse fails.
+#               An alias replays its body inline, in the project current when it runs (aliases inside it
+#               too, an alias that runs itself fails), and a `project X` in the body stays in effect after
+#               it; every alias body is also replayed from the root on its own, quoted or not. `set` and
+#               `set every` must name, left of `:=` / `+=` / `++=` / `-=` / `--=` / `~=`, a key that
+#               resolves where the expression scopes it: `[ThisBuild|Global|Zero|project /][Config /]
+#               [task /]key` or `key in (project, Config, task)`, in the current project without
+#               aggregation; at ThisBuild, Global or with `every` some scope must define it. A left side
+#               in neither form fails. `inspect [tree|uses|definitions|actual] KEY`, `last KEY` and
+#               `export KEY` must name a key that resolves like a task does.
+#
+#               Not checked, on purpose - the build model cannot answer them, or only by running code:
+#                 - Scala expressions: the right side of `set`, and all of `eval`;
+#                 - test and main class names: `testOnly` / `testQuick` / `runMain` arguments, `run` and
+#                   `Jmh/run` arguments, and the arguments of any other input task;
+#                 - `sbt new` templates, `help` / `about` / `settings` / `tasks` arguments, `alias` definitions,
+#                   `++` / `+` beyond the Scala version they name, and arguments given after an alias;
+#                 - commands that are not on an `sbt` / `sbtn` / `./sbt` command line: sbt shell prompts
+#                   (`sbt:llm4s> test`), task names in prose, and words starting with `$` or `<` (placeholders).
 #
 # Usage: scripts/check-doc-support.sh [--model FILE] [REPO_ROOT]
 #   --model FILE   a model written by `sbt "dumpBuildModel FILE"` (also $DOC_SUPPORT_MODEL). Without one the
@@ -524,12 +542,16 @@ def parse_key(word, current):
     return project, config, task, segments[0], explicit
 
 
-def check_key(word, current):
-    """None if `word` runs from `current`; otherwise why not."""
+def check_key(word, current, aggregate=True):
+    """None if `word` runs from `current`; otherwise why not. `aggregate=False` for a command that acts
+    on the one project it names (or the current one) and not on what that project aggregates."""
     parsed = parse_key(word, current)
     if isinstance(parsed, str):
         return parsed
-    project, config, task, key, explicit = parsed
+    return resolve_key(*parsed, aggregate=aggregate)
+
+
+def resolve_key(project, config, task, key, explicit, aggregate=True):
     if key not in ALL_KEYS:
         return f"`{key}` is not an alias, a command, nor a task or setting the build defines"
     if task is not None and task not in ALL_KEYS:
@@ -540,7 +562,7 @@ def check_key(word, current):
         if configs_ok and any(t in tasks for _, t in SHARED_KEYS.get(key, set())):
             return None
         return f"`{key}` is not defined in {project}"
-    targets = reached(project, key)
+    targets = reached(project, key) if aggregate else [project]
     has_config = [q for q in targets if config is None or PROJECTS[q].config_name(config) is not None]
     if not has_config:
         owners = sorted(q.id for q in PROJECTS.values() if q.config_name(config) is not None)
@@ -562,21 +584,142 @@ def check_key(word, current):
     return f"`{scope}` is not defined in `{project}`" + (" or what it aggregates" if len(targets) > 1 else "") + where
 
 
-def replay(path, line, commands, shown):
-    """Run `commands` through the model as sbt would, from the root project."""
-    current = ROOT
+# ---- `set`: the scoped key left of the operator must exist where the expression puts it
+SET_OPERATORS = ("++=", "--=", ":=", "+=", "-=", "~=")
+# A Scala identifier naming a project, configuration or key: `core`, `Test`, `Keys.fork` (qualified),
+# `` `it` `` (backquoted), `LocalProject("it")`.
+SET_IDENT = r'(?:`[^`]+`|LocalProject\(\s*"[^"]+"\s*\)|[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)'
+SET_IN_AXIS = rf"(?:{SET_IDENT}|\(\s*{SET_IDENT}(?:\s*,\s*{SET_IDENT}){{0,2}}\s*\))"
+
+
+def set_ident(token):
+    token = token.strip()
+    lp = re.fullmatch(r'LocalProject\(\s*"([^"]+)"\s*\)', token)
+    if lp:
+        return lp.group(1)
+    if token.startswith("`"):
+        return token.strip("`")
+    return token.rsplit(".", 1)[-1]
+
+
+def set_lhs(expression):
+    """The text before the first top-level `:=`, `+=`, `++=`, `-=`, `--=` or `~=` of a setting expression,
+    or None when it has none."""
+    depth, quote, i = 0, None, 0
+    while i < len(expression):
+        ch = expression[i]
+        if quote:
+            if ch == "\\":
+                i += 1
+            elif ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+        elif ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif depth == 0:
+            for op in SET_OPERATORS:
+                if expression.startswith(op, i):
+                    return expression[:i]
+        i += 1
+    return None
+
+
+def classify_axis(axis):
+    if axis in SCOPE_AXES or axis in PROJECTS:
+        return "project"
+    if axis in ALL_CONFIG_IDS:
+        return "config"
+    if axis in ALL_KEYS:
+        return "task"
+    return None
+
+
+def parse_set_scope(lhs, current):
+    """`[ThisBuild|Global|Zero|project /][Config /][task /]key` (slash syntax) or `key in X`, `key in (X, Y)`
+    (the old `in` syntax), as (project, config, task, key, explicit); an error string for a name that is
+    none of those; None when `lhs` is in neither form."""
+    lhs = lhs.strip()
+    in_form = re.fullmatch(rf"({SET_IDENT})((?:\s+in\s+{SET_IN_AXIS})+)", lhs)
+    if in_form:
+        key = set_ident(in_form.group(1))
+        axes = [set_ident(a) for a in re.findall(SET_IDENT, in_form.group(2)) if a != "in"]
+        slots = {}
+        for axis in axes:
+            slot = classify_axis(axis)
+            if slot is None:
+                return f"`{axis}` is not a project, configuration or key the build defines"
+            if slot in slots:
+                return f"`{lhs}` names the {slot} axis twice"
+            slots[slot] = axis
+        project = slots.get("project")
+        return (project or current), slots.get("config"), slots.get("task"), key, project is not None
+    parts = lhs.split("/")
+    if len(parts) > 4 or not all(re.fullmatch(SET_IDENT, part.strip()) for part in parts):
+        return None
+    parts = [set_ident(part) for part in parts]
+    key, axes = parts[-1], parts[:-1]
+    project, explicit, config, task = current, False, None, None
+    if axes and (axes[0] in SCOPE_AXES or axes[0] in PROJECTS):
+        project, explicit, axes = axes[0], True, axes[1:]
+    if axes and (axes[0] in ALL_CONFIG_IDS or axes[0] == "Zero"):
+        config, axes = (None if axes[0] == "Zero" else axes[0]), axes[1:]
+    if axes and (axes[0] in ALL_KEYS or axes[0] == "Zero"):
+        task, axes = (None if axes[0] == "Zero" else axes[0]), axes[1:]
+    if axes:
+        return f"`{axes[0]}` is not a project, configuration or key the build defines"
+    return project, config, task, key, explicit
+
+
+def check_set(words, current):
+    """None if `set [every] <setting>` names a key the build defines where it puts it; otherwise why not.
+    A setting applies to the one project it is scoped to (or the current one), so aggregation does not
+    count, while ThisBuild, Global and `every` need only some scope of the build to define the key."""
+    every = bool(words) and words[0] == "every"
+    expression = " ".join(words[1:] if every else words)
+    shown = f"`set every {expression}`" if every else f"`set {expression}`"
+    lhs = set_lhs(expression)
+    if lhs is None:
+        return f"{shown}: no `:=`, `+=`, `++=`, `-=`, `--=` or `~=`, so it cannot be checked as a setting"
+    parsed = parse_set_scope(lhs, current)
+    if parsed is None:
+        return (f"{shown}: cannot read `{lhs.strip()}` as `[project /][Config /][task /]key` or `key in (...)`;"
+                f" write it in one of those forms, or mark the line `doc-support: ignore`")
+    if isinstance(parsed, str):
+        return f"{shown}: {parsed}"
+    project, config, task, key, explicit = parsed
+    if key not in ALL_KEYS:
+        return f"{shown}: `{key}` is not a task or setting the build defines"
+    if task is not None and task not in ALL_KEYS:
+        return f"{shown}: `{task}` is not a task or setting the build defines"
+    if every or project in SCOPE_AXES:
+        return None
+    problem = resolve_key(project, config, task, key, explicit, aggregate=False)
+    return f"{shown}: {problem}" if problem else None
+
+
+INSPECT_MODES = {"tree", "uses", "definitions", "actual"}
+
+
+def replay(commands, current, report, expanding=(), report_cycle=None):
+    """Run `commands` through the model as sbt would, from project `current`, calling `report(problem)` for
+    each command that would not run; returns the project current after them. An alias runs its body here,
+    in the current project, and a `project X` in that body stays in effect after it, as in sbt. An alias
+    that runs itself, directly or not, goes to `report_cycle` (the outermost reporter), never silenced."""
+    report_cycle = report_cycle or report
     for words in commands:
         head = " ".join(words)
         first = words[0]
         if first.startswith("++"):
             version = first[2:] or (words[1] if len(words) > 1 else "")
             if SCALA and version and version[0].isdigit() and version.rstrip("!") != SCALA:
-                fail(path, line, f"{shown}: `{head}` switches to Scala {version.rstrip('!')}, "
-                                 f"but the build is Scala {SCALA}")
+                report(f"`{head}` switches to Scala {version.rstrip('!')}, but the build is Scala {SCALA}")
             continue
         if first.startswith("+"):
             if not CROSS_BUILDS:
-                fail(path, line, f"{shown}: `{head}` cross-builds, but no project sets other crossScalaVersions")
+                report(f"`{head}` cross-builds, but no project sets other crossScalaVersions")
             words = ([first[1:]] if first[1:] else []) + words[1:]
         while words and words[0] in {"~", "show"}:      # triggered execution and `show` prefix a key
             words = words[1:]
@@ -593,13 +736,37 @@ def replay(path, line, commands, shown):
                 elif target == "/":
                     current = ROOT
                 elif not target.startswith("{") and target not in {"..", "-"}:
-                    fail(path, line, f"{shown}: `{head}` names project `{target}`, which the build does not define")
+                    report(f"`{head}` names project `{target}`, which the build does not define")
             continue
-        if first in ALIASES or first in COMMANDS:
+        if first in ALIASES:
+            if first in expanding:
+                report_cycle(f"alias `{first}` runs itself ({' -> '.join(expanding + (first,))})")
+                continue
+            # From the root the body replays exactly as the standalone alias check below does, so its problems
+            # are reported once, there; from any other project they are reported here, naming that project.
+            inner = ((lambda problem: None) if current == ROOT
+                     else (lambda problem, name=first, cur=current: report(f"alias `{name}` run in `{cur}`: {problem}")))
+            current = replay(body_commands(ALIASES[first]), current, inner, expanding + (first,), report_cycle)
+            continue
+        if first == "set" and first in COMMANDS:
+            problem = check_set(words[1:], current)
+            if problem:
+                report(problem)
+            continue
+        if first in {"inspect", "last", "export"} and first in COMMANDS:
+            # `inspect [tree|uses|definitions|actual] key` reads one scope, `last key` and `export key` the
+            # key's runs: each names a key, which must resolve as it would if run.
+            rest = [w for w in words[1:] if not w.startswith("-") and not (first == "inspect" and w in INSPECT_MODES)]
+            problem = check_key(rest[0], current, aggregate=first != "inspect") if rest else None
+            if problem:
+                report(f"`{head}`: {problem}")
+            continue
+        if first in COMMANDS:
             continue
         problem = check_key(first, current)
         if problem:
-            fail(path, line, f"{shown}: {problem}")
+            report(problem)
+    return current
 
 
 def check_invocation(path, line, argument_string):
@@ -607,13 +774,15 @@ def check_invocation(path, line, argument_string):
     if commands is None:
         fail(path, line, f"`sbt {argument_string}` cannot be parsed by the shell (unbalanced quotes?)")
         return
-    replay(path, line, commands, f"`sbt {argument_string}`")
+    replay(commands, ROOT, lambda problem: fail(path, line, f"`sbt {argument_string}`: {problem}"))
 
 
 # An alias is a command line too: each command of its body (as sbt holds it, whatever Scala computed it)
 # must run from the root, so an alias whose task was removed fails even when no document quotes it.
 for name, body in sorted(ALIASES.items()):
-    replay(MODEL_NAME, 1, body_commands(body), f"alias `{name}` (`{body.strip()}`)")
+    replay(body_commands(body), ROOT,
+           lambda problem, shown=f"alias `{name}` (`{body.strip()}`)": fail(MODEL_NAME, 1, f"{shown}: {problem}"),
+           (name,))
 
 
 def shell_segments(line):

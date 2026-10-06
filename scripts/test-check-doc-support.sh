@@ -37,10 +37,11 @@ JMH = {"id": "Jmh", "name": "jmh", "extends": ["test"]}
 # What sbt and the build's plugins define in every project (a small, representative part of it).
 ZERO_KEYS = ["clean", "publish", "publishLocal", "publishM2", "publishSigned", "update", "version", "name",
              "scalaVersion", "scalafmtAll", "scalafmtCheckAll", "scalafmtSbtCheck", "scalafixAll", "coverageReport",
-             "coverageAggregate", "dependencyUpdates", "mimaReportBinaryIssues", "aggregate"]
+             "coverageAggregate", "dependencyUpdates", "mimaReportBinaryIssues", "aggregate", "coverageEnabled",
+             "coverageMinimumStmtTotal", "coverageFailOnMinimum"]
 CONFIG_KEYS = ["compile", "doc", "run", "runMain", "console", "package", "scalafix", "scalafmt", "scalafmtCheck",
                "scalacOptions", "javacOptions", "sources"]
-TEST_KEYS = ["test", "testOnly", "testQuick", "testOptions"]
+TEST_KEYS = ["test", "testOnly", "testQuick", "testOptions", "fork"]
 
 
 def project(pid, base, aggregate=(), configs=(), extra=(), no_aggregate=()):
@@ -81,9 +82,10 @@ def base_model():
             project("benchmarks", "modules/benchmarks", configs=[JMH], extra=[["jmh", "", "run"], ["jmh", "", "compile"]]),
             project("relocationCore", "modules/relocations/core"),
         ],
-        "buildKeys": [["", "", "scalaVersion"], ["", "", "organization"], ["", "", "dockerBaseImage"]],
+        "buildKeys": [["", "", "scalaVersion"], ["", "", "organization"], ["", "", "dockerBaseImage"],
+                      ["", "", "coverageEnabled"]],
         "globalKeys": [["", "", "onLoad"], ["", "", "concurrentRestrictions"]],
-        "commands": [";", "~", "about", "alias", "ci-release", "eval", "exit", "help", "inspect", "last", "new",
+        "commands": [";", "~", "about", "alias", "ci-release", "eval", "exit", "export", "help", "inspect", "last", "new",
                      "plugins", "project", "projects", "reload", "session", "set", "settings", "shell", "tasks"],
         "aliases": [
             {"name": "buildAll", "body": ";clean;compile;test"},
@@ -537,5 +539,81 @@ expect_fail "an alias body with a key scoped to the wrong project" "$d" "\`itTie
 d="$(fresh_copy cmd-alias-body-switch)"
 edit_model "$d" 'm["aliases"].append({"name": "checkCore", "body": ";project core;publishedArtifactsCheck"})'
 expect_fail "an alias body's project switch persists" "$d" "not defined in the current project \`core\`"
+
+echo "== set: the key a setting expression names must exist where it is scoped (round 5)"
+d="$(fresh_copy set-removed-key)"; run_sbt_doc "$d" 'sbt "set coverageMinimumStmtTotal := 85" clean coverage test coverageReport'
+edit_model "$d" 'drop_key(m, "coverageMinimumStmtTotal")'
+expect_fail "set of a key the build no longer defines" "$d" "\`set coverageMinimumStmtTotal := 85\`: \`coverageMinimumStmtTotal\` is not a task or setting the build defines"
+
+d="$(fresh_copy set-removed-key-in)"; run_sbt_doc "$d" 'sbt "set fork in (core, Test) := true"'
+edit_model "$d" 'drop_key(m, "fork")'
+expect_fail "set of a removed key in the old in syntax" "$d" "\`fork\` is not a task or setting the build defines"
+
+d="$(fresh_copy set-removed-build-key)"
+edit_model "$d" 'drop_key(m, "coverageEnabled"); m["buildKeys"] = [k for k in m["buildKeys"] if k[2] != "coverageEnabled"]'
+expect_fail "an alias body that sets a removed ThisBuild key" "$d" "alias \`coverage\` (\`;set ThisBuild / coverageEnabled := true\`): \`set ThisBuild / coverageEnabled := true\`: \`coverageEnabled\` is not a task or setting"
+
+d="$(fresh_copy set-ok)"
+run_sbt_doc "$d" "$(cat <<'SH'
+sbt "set coverageMinimumStmtTotal := 85" "set coverageFailOnMinimum := false" "set ThisBuild / coverageEnabled := true"
+sbt "set core / Test / fork := true" 'set it / Test / test / testOptions += Tests.Argument("-l", "x")' "set Global / concurrentRestrictions := Nil"
+sbt "set fork in Test := true" "set fork in (core, Test) := true" "set testOptions in (it, Test, test) ++= Nil" "set every fork := true"
+sbt 'set LocalProject("core") / Test / Keys.fork := true' "set core / Zero / version ~= identity" 'set scalacOptions -= "-feature"'
+sbt "project core" "set Test / fork := true" "set version := \"1\""
+SH
+)"
+expect_pass "set of real keys, in slash, in, every, ThisBuild, Global, LocalProject and qualified forms" "$d"
+
+d="$(fresh_copy set-wrong-project)"; run_sbt_doc "$d" 'sbt "set core / itTierCheck := {}"'
+expect_fail "set of a key in a project that does not define it" "$d" "\`itTierCheck\` is not defined in \`core\`; it is defined in it"
+
+d="$(fresh_copy set-after-switch)"; run_sbt_doc "$d" 'sbt "project core" "set publishedArtifactsCheck := {}"'
+expect_fail "set after a project switch resolves in the new project" "$d" "\`publishedArtifactsCheck\` is not defined in the current project \`core\`"
+
+d="$(fresh_copy set-no-aggregation)"; run_sbt_doc "$d" 'sbt "set itTierCheck := {}"'
+expect_fail "set does not reach what the current project aggregates" "$d" "\`itTierCheck\` is not defined in the current project \`llm4s\`; it is defined in it"
+
+d="$(fresh_copy set-unknown-axis)"; run_sbt_doc "$d" 'sbt "set nonexistent / fork := true"'
+expect_fail "set scoped to a name the build does not define" "$d" "\`nonexistent\` is not a project, configuration or key the build defines"
+
+d="$(fresh_copy set-unknown-config)"; run_sbt_doc "$d" 'sbt "set core / Jmh / run := {}"'
+expect_fail "set scoped to a configuration the project lacks" "$d" "configuration \`Jmh\` is not defined in \`core\`"
+
+d="$(fresh_copy set-unparseable)"; run_sbt_doc "$d" 'sbt "set (core / fork) := true"'
+expect_fail "set whose left side is in no form the check reads" "$d" "cannot read \`(core / fork)\`"
+
+d="$(fresh_copy set-no-operator)"; run_sbt_doc "$d" 'sbt "set Seq(fork := true)"'
+expect_fail "set with no top-level operator" "$d" "so it cannot be checked as a setting"
+
+echo "== aliases replay in the project they are run from (round 5)"
+d="$(fresh_copy alias-after-switch)"; run_sbt_doc "$d" 'sbt "project core" rootOnly'
+edit_model "$d" 'm["aliases"].append({"name": "rootOnly", "body": ";publishedArtifactsCheck"})'
+expect_fail "'project core' then an alias whose body is root-only" "$d" "alias \`rootOnly\` run in \`core\`: \`publishedArtifactsCheck\` is not defined in the current project \`core\`"
+
+d="$(fresh_copy alias-nested-after-switch)"; run_sbt_doc "$d" 'sbt "project core" outer'
+edit_model "$d" 'm["aliases"] += [{"name": "rootOnly", "body": ";publishedArtifactsCheck"}, {"name": "outer", "body": ";compile;rootOnly"}]'
+expect_fail "an alias calling an alias, from another project" "$d" "alias \`outer\` run in \`core\`: alias \`rootOnly\` run in \`core\`: \`publishedArtifactsCheck\`"
+
+d="$(fresh_copy alias-switches-project)"; run_sbt_doc "$d" 'sbt toCore publishedArtifactsCheck'
+edit_model "$d" 'm["aliases"].append({"name": "toCore", "body": ";project core"})'
+expect_fail "an alias's project switch applies to the commands after it" "$d" "\`publishedArtifactsCheck\` is not defined in the current project \`core\`"
+
+d="$(fresh_copy alias-switch-ok)"; run_sbt_doc "$d" 'sbt toCore buildAll "project llm4s" publishedArtifactsCheck rootOnly'
+edit_model "$d" 'm["aliases"] += [{"name": "toCore", "body": ";project core"}, {"name": "rootOnly", "body": ";publishedArtifactsCheck"}]'
+expect_pass "aliases that run where their keys are defined" "$d"
+
+d="$(fresh_copy alias-cycle)"
+edit_model "$d" 'm["aliases"] += [{"name": "ping", "body": ";compile;pong"}, {"name": "pong", "body": ";ping"}]'
+expect_fail "an alias that runs itself" "$d" "alias \`ping\` runs itself (ping -> pong -> ping)"
+
+echo "== inspect, last and export name keys (round 5)"
+d="$(fresh_copy inspect-unknown)"; run_sbt_doc "$d" 'sbt "inspect tree core/definitelyNotATask"'
+expect_fail "inspect of a key the build does not define" "$d" "\`inspect tree core/definitelyNotATask\`: \`definitelyNotATask\` is not an alias"
+
+d="$(fresh_copy inspect-wrong-project)"; run_sbt_doc "$d" 'sbt "project core" "last publishedArtifactsCheck"'
+expect_fail "last of a key the current project does not define" "$d" "\`last publishedArtifactsCheck\`: \`publishedArtifactsCheck\` is not defined in the current project \`core\`"
+
+d="$(fresh_copy inspect-ok)"; run_sbt_doc "$d" 'sbt "inspect tree core/compile" "inspect actual Test/fork" "last compile" "export core/Test/compile" inspect last'
+expect_pass "inspect, last and export of real keys" "$d"
 
 echo "all cases behaved"
