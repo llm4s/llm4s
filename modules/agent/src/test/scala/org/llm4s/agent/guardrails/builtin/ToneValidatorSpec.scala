@@ -332,4 +332,12 @@ class ToneValidatorSpec extends AnyFlatSpec with Matchers {
     Tone.Excited.name shouldBe "Excited"
     Tone.Neutral.name shouldBe "Neutral"
   }
+
+  it should "detect keywords in upper-case text under a Turkish default locale" in {
+    TurkishLocale {
+      // the default-locale toLowerCase would turn "HI" into "hı", which the \bhi\b pattern does not match
+      new ToneValidator(Set(Tone.Friendly)).validate("HI THERE") shouldBe Right("HI THERE")
+      new ToneValidator(Set(Tone.Neutral)).validate("HI THERE").isLeft shouldBe true
+    }
+  }
 }

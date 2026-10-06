@@ -4,6 +4,8 @@ import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
+import java.util.Locale
+
 import scala.util.matching.Regex
 
 /**
@@ -46,8 +48,8 @@ object Tone {
  * Rejects LLM output whose detected [[Tone]] is not in an allowed set.
  *
  * An [[OutputGuardrail]] only: it checks what the model says, not what the user sends. Detection is a fixed
- * keyword heuristic over the lower-cased text, with no model call, so it is fast and deterministic, and it
- * is crude. For a judgement that understands context, use [[LLMToneGuardrail]] instead.
+ * keyword heuristic over the text lower-cased with `Locale.ROOT`, with no model call, so it is fast and
+ * deterministic (the JVM's default locale does not affect it), and it is crude. For a judgement that understands context, use [[LLMToneGuardrail]] instead.
  *
  * Detection looks at the whole text, line breaks included, and takes the first rule that applies, in this
  * order:
@@ -129,7 +131,7 @@ class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
    * - More sophisticated linguistic analysis
    */
   private def detectTone(text: String): Tone = {
-    val lower = text.toLowerCase
+    val lower = text.toLowerCase(Locale.ROOT)
 
     // Check for excitement indicators (short sentences with exclamation marks)
     if (lower.contains("!") && lower.split("[.!?]").exists(_.split("\\s+").length < 5)) {

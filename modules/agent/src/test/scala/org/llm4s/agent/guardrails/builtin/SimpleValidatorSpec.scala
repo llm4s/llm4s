@@ -144,6 +144,15 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
     filter.validate("bAdWoRd here").isLeft shouldBe true
   }
 
+  it should "detect upper-case bad words under a Turkish default locale" in {
+    TurkishLocale {
+      // the default-locale toLowerCase would fold "I" to the dotless "ı" and miss both words
+      val filter = ProfanityFilter.withCustomWords(Set("idiot"))
+      filter.validate("INAPPROPRIATE behavior").isLeft shouldBe true
+      filter.validate("what an IDIOT").isLeft shouldBe true
+    }
+  }
+
   it should "NOT detect wrong-case words in case-sensitive mode" in {
     val filter = ProfanityFilter.caseSensitive()
     // Default words are lowercase; uppercase should pass in case-sensitive mode

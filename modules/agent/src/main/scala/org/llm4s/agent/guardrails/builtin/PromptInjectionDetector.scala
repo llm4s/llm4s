@@ -5,6 +5,8 @@ import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
+import java.util.Locale
+
 import scala.util.matching.Regex
 
 /**
@@ -51,7 +53,7 @@ class PromptInjectionDetector(
   private val logger = LoggerFactory.getLogger(getClass)
 
   def validate(value: String): Result[String] = {
-    val normalizedInput = value.toLowerCase
+    val normalizedInput = value.toLowerCase(Locale.ROOT)
 
     // Find all matching patterns
     val matches = patterns.flatMap { pattern =>

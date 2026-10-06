@@ -7,6 +7,8 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
+import java.util.Locale
+
 import scala.util.Try
 
 /**
@@ -230,14 +232,14 @@ class GroundingGuardrail(
     }
 
     val groundedOpt = lines.find(_.startsWith("GROUNDED:")).map { line =>
-      line.stripPrefix("GROUNDED:").trim.toUpperCase.startsWith("YES")
+      line.stripPrefix("GROUNDED:").trim.toUpperCase(Locale.ROOT).startsWith("YES")
     }
 
     val ungroundedClaims = lines
       .find(_.startsWith("UNGROUNDED_CLAIMS:"))
       .map { line =>
         val claims = line.stripPrefix("UNGROUNDED_CLAIMS:").trim
-        if (claims.toUpperCase == "NONE" || claims.isEmpty) Seq.empty
+        if (claims.toUpperCase(Locale.ROOT) == "NONE" || claims.isEmpty) Seq.empty
         else claims.split(",").map(_.trim).filter(_.nonEmpty).toSeq
       }
       .getOrElse(Seq.empty)

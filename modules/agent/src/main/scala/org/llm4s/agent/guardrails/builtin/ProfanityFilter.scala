@@ -4,6 +4,8 @@ import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
+import java.util.Locale
+
 /**
  * Rejects text that contains a word from a fixed word list.
  *
@@ -24,8 +26,8 @@ import org.llm4s.types.Result
  *    tokens never contain it.
  *  - By default the comparison ignores case, for the built-in words and for `customBadWords` alike. With
  *    `caseSensitive = true` text and entries are compared exactly, so the lower-case built-in words no longer
- *    match `BADWORD`. Case is folded with `toLowerCase` in the JVM's default locale, so under a Turkish
- *    default locale an upper-case `I` folds to the dotless `ı` and does not match an entry spelled with `i`.
+ *    match `BADWORD`. Case is folded with `Locale.ROOT`, so the result does not depend on the JVM's default
+ *    locale (under a Turkish default locale `BADWORD` and `INAPPROPRIATE` still match).
  *
  * On a match `validate` returns a [[org.llm4s.error.ValidationError]] for the field `input` (whichever side the
  * filter is used on) whose detail is `Input contains inappropriate content`. The detail never names the word
@@ -67,7 +69,7 @@ class ProfanityFilter(
 
   private val badWords: Set[String] = {
     val combined = defaultBadWords ++ customBadWords
-    if (caseSensitive) combined else combined.map(_.toLowerCase)
+    if (caseSensitive) combined else combined.map(_.toLowerCase(Locale.ROOT))
   }
 
   /**
@@ -79,7 +81,7 @@ class ProfanityFilter(
    *         matching word
    */
   def validate(value: String): Result[String] = {
-    val checkValue = if (caseSensitive) value else value.toLowerCase
+    val checkValue = if (caseSensitive) value else value.toLowerCase(Locale.ROOT)
     val words      = checkValue.split("\\s+")
 
     val foundBadWords = words.filter(badWords.contains)

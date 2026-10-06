@@ -1462,6 +1462,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Guardrail case folding no longer depends on the JVM default locale**: `ProfanityFilter`, `ToneValidator`
+  and `PromptInjectionDetector` lower-cased text with the default locale, so under a Turkish locale `HI`,
+  `INAPPROPRIATE` and `IGNORE PREVIOUS INSTRUCTIONS` folded to a dotless `ı` and went undetected. They (and the
+  RAG guardrails' parsing of `YES` / `NONE` replies) now fold with `Locale.ROOT`.
 - **RAG deletes only the chunks of the document you name** (https://github.com/llm4s/llm4s/issues/1000): `RAG.deleteDocumentChunks` deleted
   by a bare prefix, so deleting or re-syncing `doc-1` also deleted every chunk of `doc-10` and
   `doc-1-appendix`. It now matches the `<docId>-chunk-` prefix. Also, `FusionStrategy.WeightedScore(0, 0)`
