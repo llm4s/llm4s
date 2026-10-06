@@ -1477,8 +1477,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   JSON object, so a number, array or `null` result is sent as its JSON text only). `MCPServer` reports a
   tool that fails as a normal `tools/call` result with `isError: true` and the message as text, as the MCP
   specification models it; an unknown tool stays a JSON-RPC error. `MCPClientImpl.getTools` returns a `Left`
-  for a failed listing instead of an empty `Seq`, so "no tools" and "unreachable" differ; `MCPToolRegistry`
-  keeps a server's last known tools when a refresh fails and retries on the next lookup. Request ids were
+  for a failed listing instead of an empty `Seq`, so "no tools" and "unreachable" differ, and it skips (and
+  logs by name) a tool entry it cannot read instead of failing the whole listing (a listing none of whose
+  entries can be read is still a `Left`); a `tools/call` result that
+  carries only `structuredContent` is returned. `MCPToolRegistry` offers no tool of a server whose refresh
+  failed: the failed client is closed, and the tools it served call through that client, so they are dropped
+  with it and fetched again by the next lookup (a refresh that is only cancelled keeps them). Request ids were
   already unique and are now tested. **Migration:** a caller that read an MCP tool's text result as JSON must
   parse it itself; a caller of `getTools` must handle `Left`.
 - **Install snippets follow the latest release** ([#1281](https://github.com/llm4s/llm4s/issues/1281)): the

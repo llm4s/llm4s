@@ -226,6 +226,9 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
    * `Right(Seq.empty)` means the server advertises no tools. A call that is interrupted returns
    * `Left(CancelledError)`, with the thread's interrupt flag still set.
    *
+   * A tool entry that cannot be read is skipped and logged, and the tools that can be read are returned; a
+   * listing that cannot be read at all, or none of whose entries can, is a `Left`.
+   *
    * A listing that fails clears the hints recorded by the last one (see
    * [[getToolHints]]), so a server that is down or sends a list that cannot be
    * read leaves no stale hints behind.
@@ -266,8 +269,23 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 
   private def parseTools(value: Value): Result[Seq[ToolFunction[_, _]]] = {
     val result = Try {
-      val toolsData = value("tools").arr
-      (toolsData.map(convertMCPToolToToolFunction).toSeq, toolsData.map(MCPClientImpl.hintsOf).toMap)
+      // One malformed entry must not hide the tools that are fine: it is skipped and named in the log (its
+      // name or position, and the kind of fault: never the payload, which is the server's text).
+      val entries = value("tools").arr.toSeq
+      val parsed = entries.zipWithIndex.flatMap { case (toolJson, index) =>
+        Try((convertMCPToolToToolFunction(toolJson), MCPClientImpl.hintsOf(toolJson))) match {
+          case Success(tool) => Some(tool)
+          case Failure(ex) =>
+            val label = toolJson.objOpt.flatMap(_.get("name")).flatMap(_.strOpt).getOrElse(s"#$index")
+            logger.warn("Skipping a malformed tool ({}) from {}: {}", label, config.name, ex.getClass.getSimpleName)
+            None
+        }
+      }
+      // A listing none of whose entries can be read is a failure, not a server with no tools.
+      if (entries.nonEmpty && parsed.isEmpty) {
+        throw new IllegalArgumentException(s"none of the ${entries.size} tool entries could be read")
+      }
+      (parsed.map(_._1), parsed.map(_._2).toMap)
     }
     result.fold(
       ex => {
@@ -401,7 +419,8 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
                   // A server's structured result is delivered as the JSON value it is; text stays text, so a tool
                   // that returned the string "24" is not handed back as the number 24.
                   val structured = if (isToolError) None else result.objOpt.flatMap(_.get("structuredContent"))
-                  val content    = result("content").arr
+                  // `content` is read only when it is needed: a result that is only `structuredContent` has none.
+                  def content = result("content").arr
                   if (structured.exists(_ != ujson.Null)) {
                     structured.getOrElse(ujson.Null)
                   } else if (content.nonEmpty) {

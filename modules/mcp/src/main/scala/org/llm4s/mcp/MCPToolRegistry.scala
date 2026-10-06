@@ -35,9 +35,11 @@ import scala.util.chaining.scalaUtilChainingOps
  *
  * == Error handling ==
  * If an MCP server cannot be reached or returns an error, the failure is
- * logged and the tools last fetched from that server (none, if there never were any) are
- * returned — the registry never throws during tool lookup.  A failed client is evicted from the
- * internal client map so the next call attempts a fresh connection.
+ * logged and that server contributes no tools — the registry never throws during tool lookup.  Its
+ * client is closed and evicted, and its cached tools and hints are dropped with it, because those
+ * tools call through that client: the model is never offered a tool that cannot be called.  The next
+ * lookup attempts a fresh connection.  A refresh that is only cancelled (the thread was interrupted)
+ * keeps the client and the tools already fetched.
  *
  * == Lifecycle ==
  * Implements `AutoCloseable`; call `close()` (or use `Using.resource`) to
@@ -194,10 +196,13 @@ class MCPToolRegistry(
       case _: CancelledError => logger.debug("Refreshing tools from {} was cancelled", server.name)
       case error =>
         logger.error("Failed to refresh tools from ${}: {}", server.name, error.message)
-        removeServerFromCache(server) // Clean up failed client
+        // Closing the failed client ends the connection the cached tools call through, so those tools can no
+        // longer be called: drop them with the client. Advertising them would have the model call tools that
+        // are certain to fail. The next lookup reconnects and fetches the list again.
+        toolCache.remove(server.name)
+        removeServerFromCache(server)
     }
-    // A failed refresh keeps the last tool list that was fetched: a transient outage must not make a server's
-    // tools vanish from the model's view. The entry stays expired, so the next lookup tries again.
+    // A cancelled refresh leaves the client open, so the tools fetched before it are still callable.
     result.getOrElse(Option(toolCache.get(server.name)).map(_.tools).getOrElse(Seq.empty))
   }
 
