@@ -228,6 +228,28 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       }
     }
 
+    "read `message.thinking` beside the tool calls as the completion's thinking" in {
+      val message = ujson.Obj(
+        "role"       -> "assistant",
+        "content"    -> "",
+        "thinking"   -> "The user wants Paris weather; call the tool.",
+        "tool_calls" -> ujson.Arr(call("get_weather", ujson.Obj("location" -> "Paris")))
+      )
+      withOllama(rawReply(message)) { (client, _) =>
+        val completion = ask(client).toOption.get
+
+        completion.thinking shouldBe Some("The user wants Paris weather; call the tool.")
+        completion.toolCalls.map(_.name) shouldBe List("get_weather")
+      }
+    }
+
+    "report no thinking when `message.thinking` is absent or empty" in {
+      withOllama(reply("Hi"))((client, _) => ask(client).toOption.get.thinking shouldBe None)
+      withOllama(rawReply(ujson.Obj("role" -> "assistant", "content" -> "Hi", "thinking" -> ""))) { (client, _) =>
+        ask(client).toOption.get.thinking shouldBe None
+      }
+    }
+
     "read several tool calls in order, with distinct ids" in {
       withOllama(
         reply("", call("get_weather", ujson.Obj("location" -> "Paris")), call("get_time", ujson.Obj("zone" -> "UTC")))
@@ -460,6 +482,24 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       }
     }
 
+    "accumulate streamed `thinking` into the completion, including thinking on the tool-call line" in {
+      withOllama(
+        ndjson(
+          line("", thinking = Some("The user wants ")),
+          line("", Seq(call("get_weather", ujson.Obj("location" -> "Paris"))), thinking = Some("Paris weather.")),
+          doneLine()
+        )
+      ) { (client, _) =>
+        val (result, chunks) = stream(client)
+        val completion       = result.toOption.get
+
+        chunks.flatMap(_.thinkingDelta) shouldBe List("The user wants ", "Paris weather.")
+        completion.thinking shouldBe Some("The user wants Paris weather.")
+        completion.toolCalls.map(_.name) shouldBe List("get_weather")
+        chunks.last.finishReason shouldBe Some("tool_calls")
+      }
+    }
+
     "finish with `stop` when no tool was called" in {
       withOllama(ndjson(line("Hello"), doneLine())) { (client, _) =>
         val (result, chunks) = stream(client)
@@ -664,9 +704,10 @@ private object OllamaToolCallingSpec {
     )
 
   /** One NDJSON line of a streamed reply. */
-  def line(content: String, calls: Seq[ujson.Value] = Nil): ujson.Value = {
+  def line(content: String, calls: Seq[ujson.Value] = Nil, thinking: Option[String] = None): ujson.Value = {
     val message = ujson.Obj("role" -> "assistant", "content" -> content)
     if (calls.nonEmpty) message("tool_calls") = ujson.Arr.from(calls)
+    thinking.foreach(t => message("thinking") = t)
     ujson.Obj("message" -> message, "done" -> false)
   }
 

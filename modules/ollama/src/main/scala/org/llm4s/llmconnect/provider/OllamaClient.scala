@@ -40,6 +40,13 @@ import scala.util.{ Try, Using }
  * [[org.llm4s.error.ValidationError]] on `tools` naming the model, and the request is not retried without its tools.
  * Whether the model calls tools at all depends on the model.
  *
+ * == Thinking ==
+ *
+ * A reply's `message.thinking` becomes [[Completion.thinking]]; streamed, each line's `thinking` is a
+ * [[StreamedChunk.thinkingDelta]] and the accumulated text is the completion's `thinking`. It is not
+ * sent back in later requests: [[AssistantMessage]] has no field to carry it, so a thinking model's
+ * follow-up turn after a tool call omits its earlier reasoning.
+ *
  * == Structured output ==
  *
  * [[CompletionOptions.responseFormat]] is honoured through the top-level `format`
@@ -203,24 +210,35 @@ class OllamaClient(
                     .flatMap(_.obj.get("content"))
                     .flatMap(_.strOpt)
                     .filter(_.nonEmpty)
-                  val id = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
+                  val thinkingOpt = OllamaClient.thinking(json.obj.get("message"))
+                  val id          = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
 
                   OllamaClient.parseToolCalls(json.obj.get("message"), ids) match {
                     case Left(error) => failure = Some(error)
                     case Right(calls) =>
                       sawCalls = sawCalls || calls.nonEmpty
                       val finish = if (done) Some(if (sawCalls) "tool_calls" else "stop") else None
-                      val head =
-                        StreamedChunk(id = id, content = contentOpt, toolCall = None, finishReason = finish)
+                      val head = StreamedChunk(
+                        id = id,
+                        content = contentOpt,
+                        toolCall = None,
+                        finishReason = finish,
+                        thinkingDelta = thinkingOpt
+                      )
                       // a line with calls and nothing else needs no empty content chunk
                       val chunks =
                         if (calls.isEmpty) Seq(head)
                         else {
                           val callChunks = calls
                             .map(c => StreamedChunk(id = id, content = None, toolCall = Some(c), finishReason = None))
-                          val withContent = if (contentOpt.isDefined) Seq(head.withFinishReason(None)) else Seq.empty
-                          val closing = if (finish.isDefined) Seq(head.withContent(None: Option[String])) else Seq.empty
-                          withContent ++ callChunks ++ closing
+                          val withText =
+                            if (contentOpt.isDefined || thinkingOpt.isDefined) Seq(head.withFinishReason(None))
+                            else Seq.empty
+                          val closing =
+                            if (finish.isDefined)
+                              Seq(head.withContent(None: Option[String]).withThinkingDelta(None: Option[String]))
+                            else Seq.empty
+                          withText ++ callChunks ++ closing
                         }
                       chunks.foreach { chunk =>
                         accumulator.addChunk(chunk)
@@ -329,6 +347,7 @@ class OllamaClient(
         message =
           if (calls.isEmpty) AssistantMessage(content)
           else AssistantMessage(Some(content).filter(_.nonEmpty), calls),
+        thinking = OllamaClient.thinking(json.obj.get("message")),
         estimatedCost = cost
       )
     }
@@ -447,6 +466,10 @@ object OllamaClient {
         case None => Right(ids.nextId())
       }
     } yield ToolCall(id, name, args)
+
+  /** The `thinking` of a reply's `message`, or of one streamed line; none when absent, null or empty. */
+  private[provider] def thinking(message: Option[ujson.Value]): Option[String] =
+    message.flatMap(_.objOpt).flatMap(_.get("thinking")).flatMap(_.strOpt).filter(_.nonEmpty)
 
   /** The `tool_calls` of a reply's `message`, or of one streamed line; none when absent, null or empty. */
   private[provider] def parseToolCalls(message: Option[ujson.Value], ids: CallIds): Result[Seq[ToolCall]] =
