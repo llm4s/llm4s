@@ -522,6 +522,83 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       }
     }
 
+    "merge an id's continuation that carries an object into the call it continues" in {
+      withOllama(
+        ndjson(
+          line("", Seq(call("get_weather", ujson.Obj(), id = Some("call_y")))),
+          line(
+            "",
+            Seq(ujson.Obj("id" -> "call_y", "function" -> ujson.Obj("arguments" -> ujson.Obj("location" -> "Rome"))))
+          ),
+          doneLine()
+        )
+      ) { (client, _) =>
+        val calls = stream(client)._1.toOption.get.toolCalls
+
+        calls should have size 1
+        calls.head.id shouldBe "call_y"
+        calls.head.name shouldBe "get_weather"
+        calls.head.arguments shouldBe ujson.Obj("location" -> "Rome")
+      }
+    }
+
+    "reject the first entry of an id that has no name" in {
+      withOllama(
+        ndjson(
+          line("", Seq(ujson.Obj("id" -> "c1", "function" -> ujson.Obj("arguments" -> ujson.Obj("a" -> 1))))),
+          doneLine()
+        )
+      ) { (client, _) =>
+        val result = stream(client)._1
+        result.left.toOption.get shouldBe a[ProcessingError]
+        result.left.toOption.get.message should include("no name")
+      }
+    }
+
+    "reject the first entry of an id whose arguments are not an object" in {
+      withOllama(
+        ndjson(
+          line("", Seq(ujson.Obj("id" -> "c1", "function" -> ujson.Obj("name" -> "get_weather", "arguments" -> 3)))),
+          doneLine()
+        )
+      )((client, _) => stream(client)._1.left.toOption.get shouldBe a[ProcessingError])
+    }
+
+    "reject the first entry of an id with no name and non-object arguments" in {
+      withOllama(
+        ndjson(line("", Seq(ujson.Obj("id" -> "c1", "function" -> ujson.Obj("arguments" -> 3)))), doneLine())
+      )((client, _) => stream(client)._1.left.toOption.get shouldBe a[ProcessingError])
+    }
+
+    "reject a continuation of an accepted id whose arguments are not an object or a fragment" in {
+      withOllama(
+        ndjson(
+          line("", Seq(call("get_weather", ujson.Str("""{"location":"""), id = Some("call_x")))),
+          line("", Seq(ujson.Obj("id" -> "call_x", "function" -> ujson.Obj("arguments" -> 3)))),
+          doneLine()
+        )
+      )((client, _) => stream(client)._1.left.toOption.get shouldBe a[ProcessingError])
+    }
+
+    "reject a streamed call whose fragments do not make a JSON object" in {
+      withOllama(
+        ndjson(
+          line("", Seq(call("get_weather", ujson.Str("""{"location":"""), id = Some("call_x")))),
+          doneLine()
+        )
+      )((client, _) => stream(client)._1.left.toOption.get shouldBe a[ProcessingError])
+    }
+
+    "reject an entry with no id and no name, even after a call was accepted" in {
+      withOllama(
+        ndjson(
+          line("", Seq(call("get_weather", ujson.Obj("location" -> "Paris")))),
+          line("", Seq(ujson.Obj("function" -> ujson.Obj("index" -> 0, "arguments" -> ujson.Obj())))),
+          doneLine()
+        )
+      )((client, _) => stream(client)._1.left.toOption.get shouldBe a[ProcessingError])
+    }
+
     "turn a malformed streamed tool call into a typed error and stop reading" in {
       withOllama(
         ndjson(
