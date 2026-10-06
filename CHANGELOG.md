@@ -513,6 +513,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stops calling the function at the first `Left`, where it used to call it on every element and
   then return the first failure. **Behaviour change:** side effects in the function no longer run
   for the elements after a failure. `Result.sequence` returns the same results as before.
+- **`ErrorRecovery.recoverWithBackoff` returns a non-retried error unchanged on every attempt**
+  ([#960](https://github.com/llm4s/llm4s/issues/960)): an error it does not retry, such as a
+  `ValidationError`, came back wrapped in an `ExecutionError` when it happened on the last attempt
+  (always, with `maxAttempts = 1`), losing its type. Only `RateLimitError`, `TimeoutError` and a
+  `ServiceError` that exhaust the attempts are wrapped now. **Behaviour change:** a `ServiceError` is
+  retried only when `isRecoverableStatus` (5xx, 429, 408), as `ReliableClient`'s `RetryPolicy` already
+  did; a 404 or other permanent status comes back unchanged at once. The Scaladoc no longer calls the
+  schedule exponential and describes each type's delay.
 - **Approval resumes through the middleware chain; `ToolLoop` gains a `finish` node**
   ([#1279](https://github.com/llm4s/llm4s/issues/1279)): `Approve` now runs the whole middleware
   chain again with `ToolContext.approved = true`, where it skipped the policy; a deny rule that
