@@ -62,7 +62,7 @@ object HttpErrorMapper {
   ): Result[Nothing] = {
     val details = extractErrorDetails(body, statusCode, provider)
     statusCode match {
-      case 401 | 403 => Left(AuthenticationError(provider, details))
+      case 401 | 403 => Left(AuthenticationError(provider, details, statusCode.toString))
       case 429 =>
         retryAfter(headers, clock) match {
           case Some(delay) => Left(RateLimitError(provider, delay))

@@ -240,14 +240,16 @@ class OpenAICompatibleClient(
       OpenAICompatibleClient.combineRepeated(dialect.headers)
 
   /**
-   * Sends with the current token; when the credential is dynamic and the reply is an
-   * `AuthenticationError` (401 or 403), reports the token rejected, fetches a fresh one and sends
-   * exactly once more. A failure to obtain a token is returned as is, never retried here.
+   * Sends with the current token; when the credential is dynamic and the reply is a 401, reports the
+   * token rejected, fetches a fresh one and sends exactly once more. A 403 is not retried: the token
+   * was accepted and it is the permission that is missing, which a new token does not change. A
+   * failure to obtain a token is returned as is, never retried here.
    */
   private def withAuthRetry[A](send: Map[String, String] => Result[A]): Result[A] =
     bearer().flatMap { token =>
       (send(requestHeaders(token)), settings.credential, token) match
-        case (Left(_: AuthenticationError), OpenAICompatibleClient.Credential.Dynamic(provider), Some(rejected)) =>
+        case (Left(e: AuthenticationError), OpenAICompatibleClient.Credential.Dynamic(provider), Some(rejected))
+            if e.code.contains("401") =>
           provider.invalidate(rejected)
           bearer().flatMap(fresh => send(requestHeaders(fresh)))
         case (result, _, _) => result
@@ -519,10 +521,11 @@ object OpenAICompatibleClient {
         s"credential=$credential, contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
   }
 
-  /** The settings the generic `openai-compatible` provider derives from its config. */
   /**
-   * `exchangeClient` carries the token exchange of a config with workload-identity auth; it is
-   * created only then.
+   * The settings the generic `openai-compatible` provider derives from its config.
+   *
+   * @param exchangeClient the HTTP client for the token exchange of a config with workload-identity auth;
+   *                       created only then.
    */
   def settings(
     config: OpenAICompatibleConfig,

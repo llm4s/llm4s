@@ -5,7 +5,7 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAICompatibleConfigKeys, OpenAICompatibleModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.auth.TokenExchangeConfig
+import org.llm4s.llmconnect.auth.{ TokenExchange, TokenExchangeConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
@@ -217,17 +217,21 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
     section.auth match
       case None => Right(None)
       case Some(auth) =>
-        ProviderDescriptor.requireAuthExtra(providerName, auth, TokenUrlKey).map { tokenUrl =>
-          Some(
-            TokenExchangeConfig(
-              auth.identityToken,
-              tokenUrl,
-              auth.extra(ClientIdKey),
-              auth.extra(ScopeKey),
-              auth.extra(AudienceKey)
-            )
+        for
+          tokenUrl <- ProviderDescriptor.requireAuthExtra(providerName, auth, TokenUrlKey)
+          _ <- TokenExchange
+            .requireSecureUrl(tokenUrl)
+            .left
+            .map(e => ConfigurationError(s"llm4s.providers.$providerName.auth.$TokenUrlKey: ${e.message}"))
+        yield Some(
+          TokenExchangeConfig(
+            auth.identityToken,
+            tokenUrl,
+            auth.extra(ClientIdKey),
+            auth.extra(ScopeKey),
+            auth.extra(AudienceKey)
           )
-        }
+        )
 
   // The context window the model registry gives `model`, under the explicit `registryProvider` or, when the
   // section names none, the provider inferred from the `baseUrl` host. `None` when there is no provider to ask,

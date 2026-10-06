@@ -23,12 +23,15 @@ object OpenAIProvider extends ProviderDescriptor:
    */
   val DEFAULT_BASE_URL: String = "https://api.openai.com/v1"
 
-  /** The key falls back to `llm4s.credentials.openai.apiKey`, bound to `OPENAI_API_KEY`. */
   /** `auth` keys for OpenAI's workload identity federation. */
   val IdentityProviderIdKey: String = "identityProviderId"
   val ServiceAccountIdKey: String   = "serviceAccountId"
   val ClientIdKey: String           = "clientId"
 
+  /**
+   * The key falls back to `llm4s.credentials.openai.apiKey`, bound to `OPENAI_API_KEY`; a section with an
+   * `auth` block uses workload identity federation instead and needs no key.
+   */
   val configSpec: ProviderConfigSpec =
     ProviderConfigSpec
       .apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAIConfigKeys.OPENAI_API_KEY))

@@ -90,6 +90,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `credential: OpenAICompatibleClient.Credential` (`Anonymous`, `Static(key)`, `Dynamic(provider)`);
   `OpenAICompatibleClient.settings` gained an optional second parameter. `llm4s-provider-testkit`
   gains `FakeTokenExchangeServer` and `TestJwt`. (#1354)
+
+  **Hardening of the token exchange:** `tokenUrl` must be `https` (plain `http` only for a loopback host
+  - `localhost`, `127.x.y.z`, `[::1]` - judged on the URL's real host, so `http://localhost@evil.example/` is
+  refused), because the request carries the identity token; refused at configuration time and again before
+  any request. `expires_in` that is not a finite, non-negative number is an `AuthenticationError` instead of an
+  `ArithmeticException`, and a huge one is clamped to `TokenExchange.MaxLifetime` (24 hours). A failed token
+  fetch is shared for 5 seconds, so N callers during an outage wait for one attempt, not N in turn. Only a 401
+  triggers the refresh-and-retry; a 403 (valid token, missing permission) does not. To tell them apart
+  `HttpErrorMapper` now sets `AuthenticationError.code` to the HTTP status (`"401"`/`"403"`) for the 401 and 403 it
+  maps, for every provider; an `identityTokenFile` that is not a valid path is a `ConfigurationError`.
 - **`@Stable` and `@Experimental`: the tier of a public type, in the code** ([#1281](https://github.com/llm4s/llm4s/issues/1281),
   `org.llm4s.annotation` in `llm4s-core`): Java annotations with runtime retention, so an IDE, a tool or a
   Java caller can read them. Every top-level public type of `llm4s-core`, `llm4s-openai`,

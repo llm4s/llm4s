@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.auth
 
 import org.llm4s.annotation.Experimental
+import org.llm4s.error.LLMError
 import org.llm4s.types.Result
 
 import java.time.{ Clock, Duration as JDuration, Instant }
@@ -29,7 +30,10 @@ trait AccessTokenProvider:
 /**
  * Caches the token `fetch` returns until `refreshMargin` before it expires - or half-way through
  * its life, if it lives shorter than twice the margin. Concurrent callers share one in-flight
- * fetch. A failed fetch is not cached: the next call tries again.
+ * fetch. A failed fetch is shared for a brief window (`FailureTtl`, 5 seconds): the callers waiting
+ * behind it get the same failure at once instead of each making their own attempt in turn, which
+ * during an outage would hold the last of N callers for N times the exchange's timeout. After the
+ * window the next call tries again; a success, or a rejected cached token, ends it sooner.
  */
 @Experimental
 final class CachingAccessTokenProvider(
@@ -40,7 +44,10 @@ final class CachingAccessTokenProvider(
 
   final private case class Cached(token: AccessToken, refreshAt: Instant)
 
+  final private case class Failed(error: LLMError, until: Instant)
+
   @volatile private var cached: Option[Cached] = None
+  @volatile private var failed: Option[Failed] = None
   // Not `synchronized`: the fetch is blocking I/O, and a monitor pins a virtual thread's carrier
   // for its whole duration, which can starve the very I/O the holder waits on.
   private val lock = new ReentrantLock()
@@ -57,14 +64,29 @@ final class CachingAccessTokenProvider(
           fresh() match
             case Some(value) => Right(value)
             case None =>
-              fetch().map { token =>
-                cached = Some(Cached(token, refreshAt(token)))
-                token.value
-              }
+              recentFailure() match
+                case Some(error) => Left(error)
+                case None =>
+                  fetch() match
+                    case Right(token) =>
+                      cached = Some(Cached(token, refreshAt(token)))
+                      failed = None
+                      Right(token.value)
+                    case Left(error) =>
+                      failed =
+                        Some(Failed(error, clock.instant().plusMillis(CachingAccessTokenProvider.FailureTtl.toMillis)))
+                      Left(error)
         }
 
   def invalidate(rejected: String): Unit =
-    locked { cached = cached.filterNot(_.token.value == rejected) }
+    locked {
+      if cached.exists(_.token.value == rejected) then
+        cached = None
+        failed = None
+    }
+
+  private def recentFailure(): Option[LLMError] =
+    failed.collect { case Failed(error, until) if clock.instant().isBefore(until) => error }
 
   private def fresh(): Option[String] =
     cached.collect { case Cached(token, at) if clock.instant().isBefore(at) => token.value }
@@ -80,3 +102,6 @@ final class CachingAccessTokenProvider(
 
 object CachingAccessTokenProvider:
   val DefaultRefreshMargin: FiniteDuration = 60.seconds
+
+  /** How long a failed fetch is shared with the callers that arrive meanwhile. */
+  private[auth] val FailureTtl: FiniteDuration = 5.seconds

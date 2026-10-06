@@ -17,13 +17,16 @@ import org.llm4s.types.Result
 object AnthropicProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("anthropic")
 
-  /** The key falls back to `llm4s.credentials.anthropic.apiKey`, bound to `ANTHROPIC_API_KEY`. */
   /** `auth` keys for Anthropic's workload identity federation. */
   val FederationRuleIdKey: String = "federationRuleId"
   val OrganizationIdKey: String   = "organizationId"
   val ServiceAccountIdKey: String = "serviceAccountId"
   val WorkspaceIdKey: String      = "workspaceId"
 
+  /**
+   * The key falls back to `llm4s.credentials.anthropic.apiKey`, bound to `ANTHROPIC_API_KEY`; a section with an
+   * `auth` block uses workload identity federation instead and needs no key.
+   */
   val configSpec: ProviderConfigSpec =
     ProviderConfigSpec
       .apiKeyAndDefaultBaseUrl(

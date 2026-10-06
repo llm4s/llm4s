@@ -23,14 +23,22 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
 
   private val conversation = Conversation(Seq(UserMessage("hi")))
 
+  // A Windows path has backslashes, which a quoted HOCON string reads as escapes (`\U` is not one).
+  private def hoconEscaped(value: String): String = value.replace("\\", "\\\\")
+
   private def section(baseUrl: String, svid: String, idTokenKey: String = "identityTokenFile") =
     s"""provider = "anthropic"
        |model = "claude-test"
        |baseUrl = "$baseUrl"
-       |auth { $idTokenKey = "$svid", federationRuleId = "fdrl_1", organizationId = "org_1", workspaceId = "wrkspc_1" }""".stripMargin
+       |auth { $idTokenKey = "${hoconEscaped(
+        svid
+      )}", federationRuleId = "fdrl_1", organizationId = "org_1", workspaceId = "wrkspc_1" }""".stripMargin
+
+  // On POSIX the name gets a backslash, as every Windows path has, so the HOCON escaping is exercised everywhere.
+  private val svidPrefix = if java.io.File.separatorChar == '/' then "svid\\Ufile" else "svid"
 
   private def svidFile(jwt: String) =
-    val file = Files.createTempFile("svid", ".jwt")
+    val file = Files.createTempFile(svidPrefix, ".jwt")
     file.toFile.deleteOnExit()
     Files.writeString(file, jwt)
 

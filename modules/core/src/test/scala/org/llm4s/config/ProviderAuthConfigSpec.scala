@@ -56,6 +56,13 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
       config.auth.value.extras shouldBe Map("tokenUrl" -> "https://t", "scope" -> "all-apis")
     }
 
+    "report an identity-token path the platform cannot represent as a configuration error, not an exception" in {
+      // HOCON turns the escape into a NUL character, which no platform accepts in a path.
+      val error = load(section("auth { identityTokenFile = \"svid\\u0000file\", tokenUrl = \"https://t\" }")).left.value
+      error shouldBe a[ConfigurationError]
+      error.message should include("identityTokenFile")
+    }
+
     "accept a literal identity token" in {
       load(
         section("""auth { identityToken = "eyJ.x.y", tokenUrl = "https://t" }""")

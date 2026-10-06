@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.auth
 
-import org.llm4s.error.{ AuthenticationError, ServiceError }
+import org.llm4s.error.{ AuthenticationError, ConfigurationError, ServiceError }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.matchers.should.Matchers
@@ -66,6 +66,34 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
       TokenExchange.rfc8693(config(), http, clock)().value.expiresAt shouldBe now.plusSeconds(60)
     }
 
+    "clamp an absurdly long lifetime to the documented maximum instead of overflowing" in {
+      for body <- Seq(
+          """{"access_token":"a","expires_in":1e30}""",
+          """{"access_token":"a","expires_in":"1e30"}""",
+          """{"access_token":"a","expires_in":9223372036854775807}"""
+        )
+      do
+        val http = MockHttpClient(Seq(HttpResponse(200, body)))
+        TokenExchange.rfc8693(config(), http, clock)().value.expiresAt shouldBe
+          now.plusSeconds(TokenExchange.MaxLifetime.toSeconds)
+    }
+
+    "reject a lifetime that is not a finite, non-negative number, as AuthenticationError and never by throwing" in {
+      for value <- Seq(""""Infinity"""", """"-Infinity"""", """"NaN"""", "-1", "-0.5", """"-60"""")
+      do
+        val http  = MockHttpClient(Seq(HttpResponse(200, s"""{"access_token":"a","expires_in":$value}""")))
+        val error = TokenExchange.rfc8693(config(), http, clock)().left.value
+        withClue(s"expires_in=$value: ")(error shouldBe an[AuthenticationError])
+        error.message should include("expires_in")
+    }
+
+    "accept a zero or fractional lifetime, truncated to whole seconds" in {
+      val zero = MockHttpClient(Seq(HttpResponse(200, """{"access_token":"a","expires_in":0}""")))
+      TokenExchange.rfc8693(config(), zero, clock)().value.expiresAt shouldBe now
+      val fraction = MockHttpClient(Seq(HttpResponse(200, """{"access_token":"a","expires_in":59.9}""")))
+      TokenExchange.rfc8693(config(), fraction, clock)().value.expiresAt shouldBe now.plusSeconds(59)
+    }
+
     "map 400, 401 and 403 from the token endpoint to AuthenticationError" in {
       for status <- Seq(400, 401, 403) do
         val http = MockHttpClient(Seq(HttpResponse(status, """{"error":"invalid_grant"}""")))
@@ -106,6 +134,56 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
 
     "keep a literal identity token out of TokenExchangeConfig.toString" in {
       (config().toString should not).include(jwt)
+    }
+  }
+
+  "TokenExchange's token URL" should {
+    def post(url: String) =
+      val http = MockHttpClient(Seq(ok))
+      val cfg  = config().copy(tokenUrl = url)
+      (TokenExchange.rfc8693(cfg, http, clock)(), http.postCallCount)
+
+    "be https, or http only for a loopback host" in {
+      for url <- Seq(
+          "https://ws.example/oidc/v1/token",
+          "HTTPS://ws.example/oidc/v1/token",
+          "http://localhost/t",
+          "http://LOCALHOST:8080/t",
+          "http://127.0.0.1:9999/t",
+          "http://127.1.2.3/t",
+          "http://[::1]:9/t"
+        )
+      do
+        val (result, calls) = post(url)
+        withClue(url)(result.isRight shouldBe true)
+        calls shouldBe 1
+    }
+
+    "refuse to send the identity token anywhere else, before any request is made" in {
+      for url <- Seq(
+          "http://ws.example/oidc/v1/token",
+          "HTTP://evil.example/t",
+          "http://localhost@evil.example/t", // the real host is evil.example
+          "http://127.0.0.1@evil.example/t",
+          "http://127.0.0.1.evil.example/t",
+          "http://localhost.evil.example/t",
+          "http://128.0.0.1/t",
+          "http://127.0.0.256/t",
+          "https:///nohost",
+          "ftp://ws.example/t",
+          "ws.example/t",
+          "not a url",
+          ""
+        )
+      do
+        val (result, calls) = post(url)
+        withClue(url)(result.left.value shouldBe a[ConfigurationError])
+        calls shouldBe 0
+    }
+
+    "never appear in the refusal, since a URL can carry credentials" in {
+      val (result, _) = post("http://user:hunter2@evil.example/t")
+      (result.left.value.message should not).include("hunter2")
     }
   }
 

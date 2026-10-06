@@ -26,6 +26,7 @@ final class FakeTokenExchangeServer private (server: HttpServer, executor: Execu
   private val issued         = mutable.Buffer.empty[String]
   private val expiresIn      = new AtomicLong(3600)
   private val toReject       = new AtomicInteger(0)
+  private val rejectStatus   = new AtomicInteger(401)
   @volatile private var validator: String => Either[String, Unit] =
     token => Either.cond(token.trim.nonEmpty, (), "empty subject token")
 
@@ -42,7 +43,12 @@ final class FakeTokenExchangeServer private (server: HttpServer, executor: Execu
   def setExpiresIn(seconds: Long): Unit = expiresIn.set(seconds)
 
   /** Answers the next `n` API calls with 401, whatever token they carry. */
-  def rejectNextApiCalls(n: Int): Unit = toReject.set(n)
+  def rejectNextApiCalls(n: Int): Unit = rejectNextApiCalls(n, 401)
+
+  /** Answers the next `n` API calls with `status` (401, or 403 for a token that is valid but not allowed). */
+  def rejectNextApiCalls(n: Int, status: Int): Unit =
+    rejectStatus.set(status)
+    toReject.set(n)
 
   /** Decides whether a presented subject token is acceptable; the default accepts anything non-blank. */
   def setSubjectValidator(f: String => Either[String, Unit]): Unit = validator = f
@@ -90,7 +96,8 @@ final class FakeTokenExchangeServer private (server: HttpServer, executor: Execu
     val latest   = lock.synchronized(issued.lastOption)
     val rejected = toReject.getAndUpdate(n => math.max(0, n - 1)) > 0
     if rejected || latest.forall(t => auth != s"Bearer $t") then
-      send(ex, 401, "application/json", """{"error":{"type":"authentication_error","message":"invalid token"}}""")
+      val status = if rejected then rejectStatus.get else 401
+      send(ex, status, "application/json", """{"error":{"type":"authentication_error","message":"invalid token"}}""")
     else
       val (status, contentType, out) = reply(text)
       send(ex, status, contentType, out)

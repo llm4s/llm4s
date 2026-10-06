@@ -33,17 +33,23 @@ class OpenAICompatibleWorkloadIdentitySpec
 
   private val conversation = Conversation(Seq(UserMessage("hi")))
 
+  // On POSIX the name gets a backslash, as every Windows path has, so the HOCON escaping is exercised everywhere.
+  private val svidPrefix = if java.io.File.separatorChar == '/' then "svid\\Ufile" else "svid"
+
   private def svidFile(jwt: String): Path =
-    val f = Files.createTempFile("svid", ".jwt")
+    val f = Files.createTempFile(svidPrefix, ".jwt")
     f.toFile.deleteOnExit()
     Files.writeString(f, jwt)
+
+  // A Windows path has backslashes, which a quoted HOCON string reads as escapes (`\U` is not one).
+  private def hoconEscaped(path: Path): String = path.toString.replace("\\", "\\\\")
 
   private def authBlock(fake: FakeTokenExchangeServer, svid: Path): String =
     s"""provider = "openai-compatible"
        |model    = "databricks-model"
        |baseUrl  = "${fake.baseUrl}/serving-endpoints"
        |auth {
-       |  identityTokenFile = "$svid"
+       |  identityTokenFile = "${hoconEscaped(svid)}"
        |  tokenUrl = "${fake.baseUrl}${FakeTokenExchangeServer.TokenPath}"
        |  clientId = "sp-uuid"
        |  scope    = "all-apis"
@@ -53,6 +59,34 @@ class OpenAICompatibleWorkloadIdentitySpec
     assertBuildsClient(OpenAICompatibleProvider, sectionOf(authBlock(fake, svid)))
 
   private def freshSvid: Path = svidFile(TestJwt.es256("spiffe://llm4s.test/app", "databricks"))
+
+  "an openai-compatible section whose tokenUrl is not https" should {
+    def load(tokenUrl: String) =
+      ProviderTestConfig.loadProvider(
+        "main",
+        s"""llm4s.providers.main {
+           |  provider = "openai-compatible"
+           |  model    = "m"
+           |  baseUrl  = "https://api.example/v1"
+           |  auth { identityTokenFile = "/var/run/svid", tokenUrl = "$tokenUrl" }
+           |}""".stripMargin
+      )
+
+    "be refused at configuration time, naming the key" in {
+      val error = load("http://ws.example/oidc/v1/token").left.value
+      error.message should include("llm4s.providers.main.auth.tokenUrl")
+      error.message should include("https")
+    }
+
+    "be refused when its real host is not the loopback one it starts with" in {
+      load("http://localhost@evil.example/t").isLeft shouldBe true
+    }
+
+    "be accepted over https, and over http to a loopback host" in {
+      load("https://ws.example/oidc/v1/token").isRight shouldBe true
+      load("http://127.0.0.1:9/t").isRight shouldBe true
+    }
+  }
 
   "an openai-compatible section with auth" should {
     "exchange the SVID and send the access token on complete and stream" in FakeTokenExchangeServer.withServer { fake =>
@@ -82,6 +116,16 @@ class OpenAICompatibleWorkloadIdentitySpec
       c.complete(conversation, CompletionOptions()).isRight shouldBe true
       fake.apiAuthorizations shouldBe Seq("Bearer t1", "Bearer t1", "Bearer t2")
     }
+
+    "not refresh or retry on a 403: the token is valid, it is the permission that is missing" in
+      FakeTokenExchangeServer.withServer { fake =>
+        val c = client(fake, freshSvid)
+        c.complete(conversation, CompletionOptions()).isRight shouldBe true
+        fake.rejectNextApiCalls(1, 403)
+        c.complete(conversation, CompletionOptions()).left.value shouldBe an[AuthenticationError]
+        fake.apiAuthorizations shouldBe Seq("Bearer t1", "Bearer t1")
+        fake.issuedTokens shouldBe Seq("t1")
+      }
 
     "refresh and retry once on a 401 while streaming" in FakeTokenExchangeServer.withServer { fake =>
       val c = client(fake, freshSvid)

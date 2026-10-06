@@ -7,6 +7,7 @@ import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 
 import java.nio.file.Path
+import scala.util.Try
 
 /** Converts a `RawNamedProviderSection` into a validated `NamedProviderConfig` by resolving string fields. */
 private[config] object NamedProviderConfigNormalizer:
@@ -52,7 +53,13 @@ private[config] object NamedProviderConfigNormalizer:
           val rest   = values -- AuthConfig.ReservedKeys
           (values.get(AuthConfig.IdentityTokenFileKey), values.get(AuthConfig.IdentityTokenKey)) match
             case (Some(file), None) =>
-              Right(Some(AuthConfig(IdentitySource.File(Path.of(file).toAbsolutePath.normalize), rest)))
+              Try(Path.of(file).toAbsolutePath.normalize).toEither.left
+                .map(e =>
+                  ConfigurationError(
+                    s"$path.${AuthConfig.IdentityTokenFileKey} is not a valid path on this platform: ${e.getMessage}"
+                  )
+                )
+                .map(absolute => Some(AuthConfig(IdentitySource.File(absolute), rest)))
             case (None, Some(token)) =>
               Right(Some(AuthConfig(IdentitySource.Literal(token), rest)))
             case (None, None) =>
