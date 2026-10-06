@@ -85,7 +85,7 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
 
     client.transport = Some(mockTransport)
     // Act
-    val result: Either[String, Seq[ToolFunction[?, ?]]] = client.getTools()
+    val result: org.llm4s.types.Result[Seq[ToolFunction[?, ?]]] = client.getTools()
 
     // Assert
     result.isRight shouldBe true
@@ -99,7 +99,7 @@ class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with 
 
     (mockTransport.sendRequest _)
       .expects(*)
-      .returning(Left("Initialization failed"))
+      .returning(Left(org.llm4s.error.SimpleError("Initialization failed")))
 
     client.transport = Some(mockTransport)
 

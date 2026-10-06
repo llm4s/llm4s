@@ -205,7 +205,7 @@ config-policy `prod` preset flags any section that does not (see
 | `endpoint`, `apiVersion` | Azure OpenAI: the resource endpoint (required) and API version |
 | `project`, `location` | Vertex AI: the GCP project id (required) and region (default `us-central1`) |
 | `region`, `profile`, `accessKeyId`, `secretAccessKey`, `sessionToken` | AWS Bedrock: the AWS region (required, never defaulted); a shared-config profile; or explicit credentials, with a session token for temporary ones. With none of the credential keys the AWS default credential chain is used. `baseUrl` overrides the endpoint |
-| `contextWindow`, `reserveCompletion`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
+| `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
 
 The first five keys are shared by every provider. The rest belong to the providers named, which
 declare them ([provider-specific keys](../guide/providers#provider-specific-keys)); in a section for

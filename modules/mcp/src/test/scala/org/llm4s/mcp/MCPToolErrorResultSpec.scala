@@ -15,7 +15,7 @@ class MCPToolErrorResultSpec extends AnyFlatSpec with Matchers {
   private class ScriptedTransport(callResult: ujson.Value) extends MCPTransportImpl {
     override val name: String = "scripted"
 
-    override def sendRequest(request: JsonRpcRequest): Either[String, JsonRpcResponse] = {
+    override def sendRequest(request: JsonRpcRequest): org.llm4s.types.Result[JsonRpcResponse] = {
       val result: ujson.Value = request.method match {
         case "initialize" => ujson.Obj("protocolVersion" -> "2025-06-18")
         case "tools/list" =>
@@ -33,8 +33,8 @@ class MCPToolErrorResultSpec extends AnyFlatSpec with Matchers {
       Right(JsonRpcResponse(id = request.id, result = Some(result)))
     }
 
-    override def sendNotification(notification: JsonRpcNotification): Either[String, Unit] = Right(())
-    override def close(): Unit                                                             = ()
+    override def sendNotification(notification: JsonRpcNotification): org.llm4s.types.Result[Unit] = Right(())
+    override def close(): Unit                                                                     = ()
   }
 
   private def execute(callResult: ujson.Value): Either[org.llm4s.toolapi.ToolCallError, ujson.Value] = {

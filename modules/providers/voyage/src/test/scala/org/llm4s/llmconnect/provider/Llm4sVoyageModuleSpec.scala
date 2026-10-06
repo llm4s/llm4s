@@ -1,8 +1,9 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.VoyageConfigKeys
+import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
+import org.llm4s.testkit.{ CredentialsRoundTrip, LocalProviderTestServer, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -51,5 +52,15 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       config.model shouldBe "voyage-3"
       config.apiKey shouldBe "pa-test"
       assertBuildsEmbeddingProvider(VoyageAIEmbeddingProvider, config)
+    }
+  }
+
+  "the voyage embedding provider" should {
+
+    "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
+      LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
+        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "voyage-3", apiKey = "test-key")
+        assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(VoyageAIEmbeddingProvider, config))
+      }
     }
   }

@@ -466,7 +466,7 @@ Testkit decisions:
 
 Limits (owners in §4.9):
 
-- Embedding, reranker, MCP, image and speech clients are not yet brought under the cancellation contract. Some of them flatten every error into their own type.
+- Embedding, reranker, MCP, image and speech clients follow the contract since §4.12.
 - On a platform thread, cancelling an SDK client call is not prompt.
 - Cancellation, the concurrency limit and deadlines have no public API until `RunHandle`, `RunConfig` and `RunBudgets`, which §4.6 added.
 - `CancellationToken` remains for `PlanRunner` until it is rebuilt.
@@ -646,7 +646,7 @@ Source breaks, with no shims (the CHANGELOG lists the same):
 Limits (owners in §4.9):
 
 - Only tool-call approval suspends; model wrappers and guardrails cannot ask typed questions.
-- `ToolHints` are not yet read from MCP tool annotations by `llm4s-mcp`.
+- `llm4s-mcp` reads `ToolHints` from MCP tool annotations since §4.12.
 - The legacy `Agent` still runs guardrails through `GuardrailApplicator`; Stage 1 moves it onto `ToolLoop` and `GuardrailMiddleware`.
 - A guardrail `Block` - any `beforeAgent`/`afterAgent` `Left` - fails the run and leaves the checkpoint `Running`. `start` on the thread then returns `IncompleteRun`, and `recover` replays the same input or answer through the same guardrail, which refuses it again, so the thread cannot continue. An output `Block` also leaves the unguarded assistant answer committed, in thread state and in `RunResult.Failed`'s state. Decided: a `Block` becomes a terminal failure that leaves the thread usable (§9, "Guardrail Block outcome"); Stage 1 implements it.
 
@@ -657,12 +657,10 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 | Item | Left by | Owner |
 |---|---|---|
 | Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only) | #1279 | Stage 1, if the agent loop needs it |
-| `ToolHints` read from MCP tool annotations in `llm4s-mcp` | #1279 | Stage 1 |
 | A guardrail Block (any run-boundary `Left`) leaves the thread `Running` with no way forward, and an output Block leaves the blocked answer in state. Decided (§9, "Guardrail Block outcome"): a terminal failure - a finished-but-failed checkpoint status that `start` accepts, with the blocked turn (its input, any tool calls and results, and the answer) removed from history - built before `Agent.run` builds on the loop | #1279 | Stage 1 |
 | Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6 | #1279 | Stage 3 |
 | `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool`; `ModelStep` streaming through live progress; `PlanRunner` rebuilt or removed; `AgentEvent` replaced | #1269 | Stage 1 |
 | Delete `CancellationToken` with the `PlanRunner` rebuild | #1270 | Stage 1 |
-| Embedding, reranker, MCP, image and speech clients under the `CancelledError` contract (today: chat clients and core only) | #1270 | Stage 1 |
 | Prompt cancellation of SDK client calls on platform threads (today: prompt on virtual threads, where the runtime runs tasks) | #1270 | - |
 | Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
 | Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit and in `RunPosition` (today: the optimistic parent check, and `ThreadBusy` for a run still executing in the same runtime) | #1268, #1269, #1277 | Stage 2 |
@@ -681,6 +679,8 @@ Closed by [#1278](https://github.com/llm4s/llm4s/issues/1278) (§4.7): `AgentToo
 Closed by [#1279](https://github.com/llm4s/llm4s/issues/1279) (§4.8): `AgentMiddleware` with ordered wrap hooks replacing `ToolCallPolicy`, approval as middleware, guardrails as middleware (left by #1269 and #1278); and policy metadata on `AgentToolSpec` as MCP-style `ToolHints` (left by #1278).
 
 Closed by [#1327](https://github.com/llm4s/llm4s/issues/1327) (§4.11): per-node retry and cache policy (left by #1268), Mermaid export (left by #1267), and `ToolContext`, `GraphError.ToolFailed`, `ModelRequest` and `ToolCallRequest` in the growth-prone type pattern with typed IDs (left by #1278).
+
+Closed by [#1331](https://github.com/llm4s/llm4s/issues/1331) (§4.12): embedding, reranker, MCP, image and speech clients under the `CancelledError` contract (left by #1270), and `ToolHints` read from MCP tool annotations in `llm4s-mcp` (left by #1279).
 
 ### 4.10 Durable workflow API
 
@@ -706,6 +706,124 @@ Decisions:
 Source breaks (pre-1.0, no shims): the four types lose their public constructor, `copy` and field-type compatibility (`String` to `ToolCallId` / `ToolName`); `GraphBuilder.implement`, `node` and `resumeNode` gain two defaulted parameters before the node body.
 
 Limits: `ToolLoop` sets no policy on its nodes, so the tool loop is unchanged; the agent-loop cutover ([#1328](https://github.com/llm4s/llm4s/issues/1328)) decides whether a tool call or a model step retries. The retry condition looks at the node's error, not at provider hints such as `Retry-After`, which the provider clients already honour inside the call (§4.4).
+
+### 4.12 Stage 1 slice 5: cancellation for non-chat clients and ToolHints from MCP annotations ([#1331](https://github.com/llm4s/llm4s/issues/1331))
+
+§4.4 made `CancelledError` the result of an interrupted call for core and every chat client and left the rest of the
+network clients flattening an interrupt into an error type of their own. This slice brings the rest under the same
+rule, and reads `ToolHints` from the annotations an MCP server attaches to its tools. The checks are
+`ProviderModuleChecks.assertCallCancelsWhenInterrupted` and `assertEmbeddingCancelsWhenInterrupted` (new in
+`llm4s-provider-testkit`: run on a virtual thread against a server that never answers, interrupt, and require
+`Left(CancelledError)` promptly with the interrupt flag still set), and the specs named below.
+
+Contract decisions:
+
+- **A cancellation passes through; it is not mapped.** Where a client turned an `Llm4sHttpClient` failure into its
+  own error (`EmbeddingError`, `RerankError`, `UnknownError`, `SimpleError`), a `CancelledError` is now returned as it
+  is, and the public call is wrapped in `CancelledError.attempt`, which also turns any failure that ends with the
+  thread interrupted into a cancellation. *Rejected:* a `cancelled` flag on each client's error type - a caller would
+  need one check per client, and the retry layers recognise only `CancelledError`.
+- **Embeddings** (Voyage, Jina, Ollama, OpenAI, Cohere): `embed` is declared `Result[EmbeddingResponse]`, which is what
+  `EmbeddingProvider` already promised; the concrete providers had narrowed it to `Either[EmbeddingError, _]`, which
+  could not carry the cancellation. Ollama sends one request per text and now stops at the first failure, so a
+  cancelled batch does not go on to send the rest. `llm4s-cohere` (#1348) landed after this slice was cut and
+  follows the same rule: its module spec runs `assertEmbeddingCancelsWhenInterrupted`, so the rule holds for every
+  embedding provider on `main`.
+- **Rerankers.** `CohereReranker` as above. `LLMReranker` gives a batch the model fails on neutral scores so that one
+  bad answer does not lose the ranking; a cancellation is not a bad answer, and used to be swallowed the same way, so
+  a cancelled rerank went on through the remaining batches and returned `Right`. It now ends the call at once with
+  the `CancelledError`, and an ordinary failure keeps its neutral scores.
+- **Speech.** The five cloud clients already returned the HTTP client's `CancelledError` untouched, and
+  `CloudSpeechCancellationSpec` pins that. Whisper and Tacotron2 run a command-line program with `scala.sys.process`'s
+  `!` and `!!`, which do not honour interruption: the interrupted wait throws `InterruptedException`, which `Try` does
+  not catch, so it escaped a `Result`-returning method and left the program running. `CommandRuns` runs the program,
+  destroys it on interrupt, sets the flag again and reports the interrupt, which the engine returns as
+  `CancelledError`; every other outcome is what `!` and `!!` gave. *Rejected:* catching around `!!` - it cannot
+  reach the process to destroy it.
+- **Image processing.** The OpenAI and Anthropic vision clients turned an HTTP failure into a `RuntimeException` and
+  then into a generic `apiCallFailed`; they return the HTTP client's `CancelledError` as it is, and every other message
+  is unchanged. `GeminiVisionClient` already did.
+- **Image generation** *(a call for Rory)*. The clients returned `Either[ImageGenerationError, _]`, a hierarchy of
+  their own that is not an `LLMError`, so a `CancelledError` could not be returned at all. `ImageGenerationError` now
+  extends `LLMError`, the client methods return `Either[LLMError, _]`, and every place a provider turns a `Throwable`
+  into an error goes through one classifier, `ImageErrors.fromThrowable`. `ServiceError(message, code: Int)` clashed
+  with `LLMError.code: Option[String]`: the field is `statusCode`, and `code` is derived from it. The instrumented
+  client records a cancelled call as `ErrorKind.Cancelled`. *Rejected:* an `ImageGenerationError.Cancelled` case -
+  callers would have to special-case a second cancellation type, and no retry layer would recognise it; and retiring
+  the hierarchy for core's errors, a larger break that this slice does not need.
+  **Every case also says whether a retry can help**, because an `LLMError` must: `LLMError.isRecoverable` (and
+  `recoverableErrors`, `nonRecoverableErrors`, `RetryPolicy.recoverableOnly`) match only `RecoverableError` and
+  `NonRecoverableError` and threw a `MatchError` on an image error, which before this slice could not reach them.
+  `RateLimitError` is recoverable, and so is a `ServiceError` whose status is transient (`0` - no answer at all, as in
+  a failed health check - `408`, `429`, any `5xx`); a rejected credential, request or prompt, `InsufficientResources`,
+  an unsupported operation and an `UnknownError` are not (an unknown failure is not retried blindly). A status is a
+  value and a marker trait is a type, so `ServiceError` is a sealed type with two cases behind the same
+  `ServiceError(message, status)` and `case ServiceError(message, status)`, picked by `ServiceError.isTransientStatus`.
+  *Rejected:* marking every `ServiceError` recoverable, as core's own `ServiceError` is - a `400` or `403` would be
+  retried to the same answer; and a default case in `LLMError.isRecoverable` - it is frozen core API, and a silent
+  default would hide the next error type that forgets to say.
+- **MCP.** The error channel was a `String` (`Either[String, _]` on the transports, `MCPClient.initialize` and
+  `getTools`), which cannot carry a cancellation. These return `Result`, and every existing message is kept byte for
+  byte as `SimpleError(message)`. The HTTP transports pass the HTTP client's `CancelledError` through; the stdio
+  transport returns it for an interrupt while awaiting a response, and for one during startup, when it also stops the
+  half-started server (the process was recorded but no reader thread had started, so the next request would have found
+  a live process that never answers). `MCPClientImpl.getTools` still swallows failures into an empty list, as
+  documented, but not a cancellation. `MCPToolRegistry` applies to MCP tools the rule `ToolRegistry` applies to local
+  ones - a call that ends while its thread is interrupted is cancelled, whatever it returned - and a cancelled
+  discovery is not "no such tool", drops no client and caches nothing. A tool handler keeps core's frozen
+  `Either[String, _]` shape: the interrupt flag the transport leaves set is how the registry knows. *Rejected:* a
+  dedicated `MCPError` type (`SimpleError` carries the message and nothing more is needed); changing
+  `ToolFunction.handler`'s error type (frozen core API).
+
+`ToolHints` from MCP annotations *(a call for Rory)*:
+
+- `MCPToolAnnotations` models what a server sends (`title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`,
+  `openWorldHint`; every one optional) and is read leniently - a missing object, an unknown key or a hint of the wrong
+  type is ignored, since annotations are advisory and must not fail a tool list. `toToolHints` fills a missing hint
+  with the specification's conservative default, which are `ToolHints.default`'s. `MCPClientImpl` records the hints
+  of every tool it lists (`MCPClient.getToolHints`, empty by default so implementors are unaffected) and
+  `MCPToolRegistry.toolHints(name)` answers by name, with none for a tool a local tool shadows. A listing that
+  fails, whatever the reason short of a cancellation, and `close()` clear the recorded hints: `getTools` turns a
+  failure into `Right(Seq.empty)`, which the registry takes for a refresh that worked, so a tool the server no longer
+  advertises would otherwise keep answering with its old hints.
+- **A server's annotations are untrusted unless the caller says otherwise** *(a call for Rory)*. The MCP
+  specification requires a client to treat annotations from an untrusted server as untrusted, and
+  `ApprovalMiddleware.unlessReadOnly` skips approval for a tool whose hints say read-only. Hints that came straight
+  from the server would let a server mark `delete_everything` read-only and have it run unapproved by an application
+  that followed the documented path, `AgentTool.fromToolFunction(tool, registry.toolHints(name).getOrElse(ToolHints.default))`.
+  `MCPServerConfig` therefore has `trustAnnotations: Boolean = false` (a new field with a default, and a parameter of
+  the `stdio`, `streamableHTTP` and `sse` factories). For a server that is not trusted `MCPClient.getToolHints` is
+  empty and `MCPToolRegistry.toolHints` is `None`, so `ToolHints.default` - approval required - applies; only a server
+  the caller has chosen to trust, because they operate or have reviewed it, can relax approval. The check is made once,
+  in the client, so every way to read the hints is safe by default. *Rejected:* enforcing it only in the registry - a
+  caller of `MCPClient.getToolHints` directly would still see untrusted hints; trusting by default and documenting the
+  risk - the first malicious server wins; a per-tool or per-hint trust setting - configuration the specification does
+  not ask for and nobody would keep up to date; and not mapping `readOnlyHint` at all - it loses the legitimate case,
+  a server the application itself runs.
+- **`ToolHints` moves from `llm4s-agent` to `llm4s-core`** (`org.llm4s.toolapi.ToolHints`, `@Experimental` like the tool
+  contract it belongs to). `llm4s-mcp` cannot depend on `llm4s-agent` without pulling the agent runtime, Ox and fansi
+  into every MCP client, and a frozen module cannot depend on `llm4s-mcp`, so core is the one module both see.
+  *Rejected:* hints on `ToolFunction` (growing a frozen type); and keeping `ToolHints` in the agent and exposing only
+  the raw annotations from `llm4s-mcp`, which leaves the conversion to every application. `AgentTool.fromToolFunction(
+  tool, hints)` attaches hints to the adapted tool.
+
+Source breaks, with no shims (the CHANGELOG lists the same):
+
+- `ToolHints` is `org.llm4s.toolapi.ToolHints`.
+- `llm4s-image`: `ImageGenerationError` is an `LLMError`; `ServiceError`'s second field is `statusCode`; the generation
+  clients return `Either[LLMError, _]`, so a match on their result needs a case for other errors.
+- `llm4s-mcp`: `MCPTransportImpl.sendRequest`, `sendNotification`, `MCPClient.initialize` and `getTools` return
+  `Result`; read the old string as `error.message`. `MCPServerConfig` gains `trustAnnotations` (default `false`);
+  source-compatible for construction, but a pattern match on the case class needs the fourth field.
+- The concrete embedding providers' `embed` returns `Result[EmbeddingResponse]`.
+
+Limits:
+
+- Vosk recognises in-process, through JNA, and an interrupt does not stop it mid-recognition.
+- `MCPServer` (the server half) is not changed; it does not advertise annotations.
+- Only logback was exercised for the logs these paths write.
+- On a platform thread an interrupt is not prompt for a client on a blocking socket (§4.4); the specs run on virtual
+  threads, as the runtime does.
 
 ### 4.13 Stage 1 slice 2: the agent loop on the graph runtime ([#1328](https://github.com/llm4s/llm4s/issues/1328))
 

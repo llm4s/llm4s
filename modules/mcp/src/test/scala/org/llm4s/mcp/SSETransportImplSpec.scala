@@ -359,7 +359,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("session expired"))
+      result.left.map(_.message should include("session expired"))
     }
 
     "handle HTTP 400+ errors with body in error message" in {
@@ -371,7 +371,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("500"))
+      result.left.map(_.message should include("500"))
     }
 
     "handle JSON-RPC error responses" in {
@@ -385,8 +385,8 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("-32600"))
-      result.left.map(_ should include("Invalid Request"))
+      result.left.map(_.message should include("-32600"))
+      result.left.map(_.message should include("Invalid Request"))
     }
 
     "handle malformed JSON in response" in {
@@ -398,7 +398,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("Transport error"))
+      result.left.map(_.message should include("Transport error"))
     }
 
     "handle network exceptions" in {
@@ -412,7 +412,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("Transport error"))
+      result.left.map(_.message should include("Transport error"))
     }
 
     "handle connection failures" in {
@@ -426,7 +426,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("Transport error"))
+      result.left.map(_.message should include("Transport error"))
     }
 
     "handle empty SSE stream with no valid JSON-RPC response" in {
@@ -449,7 +449,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("No valid JSON-RPC response"))
+      result.left.map(_.message should include("No valid JSON-RPC response"))
     }
   }
 
@@ -659,7 +659,7 @@ class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val result = transport.sendNotification(notification)
       result.isLeft shouldBe true
-      result.left.map(_ should include("500"))
+      result.left.map(_.message should include("500"))
     }
   }
 

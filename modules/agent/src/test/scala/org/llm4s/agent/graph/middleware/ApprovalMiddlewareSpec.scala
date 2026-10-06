@@ -6,7 +6,7 @@ import org.llm4s.agent.graph.tool.*
 import org.llm4s.agent.graph.toolloop.*
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.*
-import org.llm4s.toolapi.Schema
+import org.llm4s.toolapi.{ Schema, ToolHints }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec

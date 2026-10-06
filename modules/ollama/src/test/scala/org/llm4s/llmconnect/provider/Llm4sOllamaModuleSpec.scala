@@ -2,9 +2,10 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendJsonResponse, streamThenHold, withServer }
-import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
+import org.llm4s.testkit.{ CredentialsRoundTrip, LocalProviderTestServer, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -101,5 +102,15 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with ProviderModul
       OllamaEmbeddingProvider.configSpec.apiKeyEnv shouldBe empty
       CredentialsRoundTrip.chatSectionKey("ollama", Map.empty, """baseUrl = "http://localhost:11434"""") shouldBe
         Right(None)
+    }
+  }
+
+  "the ollama embedding provider" should {
+
+    "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
+      LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
+        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "nomic-embed-text", apiKey = "test-key")
+        assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(OllamaEmbeddingProvider, config))
+      }
     }
   }
