@@ -17,15 +17,25 @@
 #               far as it goes. So do `scalaVersion := "..."` and `scala3-library_3` pins in snippets, and
 #               `_<binary>` artifact suffixes. Naming another version is fine only to say it is not
 #               supported: in the same clause a negation before it (`no Scala 2.13 artifact`) or a deferral
-#               or denial after it (`Scala 2.13 support is deferred`, `... is not supported`). Unless a
-#               project sets other `crossScalaVersions`, `crossScalaVersions` and `sbt +task` are claims too.
-#   2. JDK    - every `JDK N` (also `Java N`, `Java SE N`, `Java 1.N`, `JRE N`, `OpenJDK N`, `Temurin N`,
-#               `Corretto N`, `Zulu N`) is a JDK .github/workflows/ci.yml runs, and so is each JDK of a list
-#               or range. The floor is the JVM release target the build compiles for (`-release N`,
-#               `-release:N`, `--release N`, `--release=N`, `-java-output-version N`, `-target ...` in the
-#               resolved scalacOptions or javacOptions), else the oldest JDK CI runs; a target must also be
-#               a JDK CI runs. A floor (`JDK N+`, `JDK N or newer`, `at least JDK N`, `JDK >= N`) or a
-#               range's start must be that floor, and a ceiling (`JDK N or older`) is the floor or wrong.
+#               or denial after it (`Scala 2.13 support is deferred`, `... is planned`, `... is not
+#               supported`, `Scala 2 projects cannot ...`). Unless a project sets other
+#               `crossScalaVersions`, `crossScalaVersions` and `sbt +task` are claims too.
+#   2. JDK    - every `JDK N` (also `JDKs N`, `Java N`, `Java SE N`, `Java 1.N`, `JRE N`, `OpenJDK N`,
+#               `Temurin N`, `Corretto N`, `Zulu N`, with or without `LTS`) is a JDK .github/workflows/ci.yml
+#               runs, and so is each JDK of a list (`JDK 21 and 25`) and every release of a range (`JDK 21-25`,
+#               `21 through 25`, `between JDK 21 and 25`). The floor is the JVM release target the build
+#               compiles for (`-release N`, `-release:N`, `--release N`, `--release=N`,
+#               `-java-output-version N`, `-target ...` in the resolved scalacOptions or javacOptions), else
+#               the oldest JDK CI runs; a target must also be a JDK CI runs. A floor (`JDK N+`, `JDK N or
+#               newer/later/above/higher`, `JDK N and up`, `from JDK N onwards`, `at least JDK N`, `minimum
+#               JDK: N`, `JDK >= N`, `JDK > N-1`, `newer than JDK N-1`, `no older than JDK N`) or a range's
+#               start must be that floor. A ceiling (`JDK N or older/earlier/below/lower`, `up to JDK N`, `at
+#               most JDK N`, `JDK <= N`, `older than JDK N+1`, `no newer than JDK N`) claims every older JDK
+#               too, so it always reaches below the floor and always fails. A JDK may be named to say it is
+#               not supported, in the same clause: a negation before it or a denial after it, as for Scala
+#               (`does not support JDK 20 or older`, `JDK 17 is not supported`). Such a statement is not
+#               checked, except that a negated ceiling must stay below the floor (`JDK 21 or older is not
+#               supported` fails when the floor is 21).
 #   3. Module - every module in CLAUDE.md's repository-structure block exists on disk, and every project
 #               base directory under modules/ is named there (itself or a parent directory).
 #   4. sbt    - every `sbt ...` command quoted in the docs, and every alias body, is replayed the way sbt
@@ -54,6 +64,15 @@
 #                   `++` / `+` beyond the Scala version they name, and arguments given after an alias;
 #                 - commands that are not on an `sbt` / `sbtn` / `./sbt` command line: sbt shell prompts
 #                   (`sbt:llm4s> test`), task names in prose, and words starting with `$` or `<` (placeholders).
+#               A `#` starts a comment only where bash would read one: at the start of a word, outside quotes.
+#
+# The Scala and JDK prose checks are pattern matches, not a parser. Out of scope, so mark the line
+# `doc-support: ignore` or rephrase: versions with a patch or update number (`JDK 21.0.2`, `Java 8u392`);
+# versions without a number (`the latest LTS`, `the current JDK`); `since` / `starting with` (a feature's
+# start or a floor?); a denial in a separate clause (`Scala 2.13, which is not supported`) or implied rather
+# than stated (`Scala 2.13 users must upgrade`); past tense other than the history words below
+# (`supported Scala 2.13 until 0.4`); and a negation that does not deny support (`you do not need JDK 25`
+# reads as a denial and is not checked).
 #
 # Usage: scripts/check-doc-support.sh [--model FILE] [REPO_ROOT]
 #   --model FILE   a model written by `sbt "dumpBuildModel FILE"` (also $DOC_SUPPORT_MODEL). Without one the
@@ -63,10 +82,11 @@
 # Release notes, migration guides and design documents name old versions and commands on purpose and are
 # not checked. Elsewhere, a line is exempt from checks 1, 2 and 4 when it says it describes the past
 # (`previously`, `formerly`, `no longer`, `dropped`, `used to`, `upgrading from`, `legacy`, `was`, `were`,
-# `prior to`, `before v1.2`, a dated entry such as `2025-06-01`), or carries the marker
+# `ran`, `prior to`, `before v1.2`, a dated entry such as `2025-06-01`), or carries the marker
 # `doc-support: ignore` (in an HTML comment in prose, or `# doc-support: ignore` in a code block). A JDK
-# ceiling (`JDK N or older`) states what is supported now and is checked even on such a line; only the
-# marker exempts it. Exit code 0 = the matrix is true. Non-zero = file:line and the claim, one per line.
+# ceiling (`JDK N or older`), denied or not, states what is supported now and is checked even on such a
+# line; only the marker exempts it. Exit code 0 = the matrix is true. Non-zero = file:line and the claim,
+# one per line.
 set -euo pipefail
 
 MODEL="${DOC_SUPPORT_MODEL:-}"
@@ -116,7 +136,7 @@ IGNORE_MARKER = "doc-support: ignore"
 # Words that say a sentence is about the past, so it may name an old version. Deliberately specific:
 # a comparative such as `older` or `earlier` is how a support ceiling is phrased, not a sign of history.
 HISTORICAL = re.compile(
-    r"\b(?:previously|formerly|no longer|dropped|used to|upgrading from|legacy|was|were|prior to"
+    r"\b(?:previously|formerly|no longer|dropped|used to|upgrading from|legacy|was|were|ran|prior to"
     r"|before\s+v?\d+\.\d+|(?:19|20)\d\d-\d\d(?:-\d\d)?)\b", re.I)
 
 
@@ -288,6 +308,7 @@ CLAUSE_BREAK = re.compile(r"(?<!\d)\.(?!\d)|\.(?=\s|$)|[;,|()—–:!?]| - |\bbu
 NEG_BEFORE = re.compile(r"\b(?:not|no|never|deferred|without|nor|cannot|can't|don't|doesn't|isn't|aren't|won't)\b", re.I)
 NEG_AFTER = re.compile(
     r"\b(?:deferred|unsupported|(?:is|are|was|were|will be)\s+not|isn't|aren't|wasn't|won't|never|"
+    r"(?:does|do|will)\s+not|doesn't|don't|cannot|can't|planned|"
     r"not\s+(?:supported|published|available|built)|post-1\.0|after 1\.0)\b", re.I)
 
 
@@ -366,20 +387,71 @@ if SCALA and not canonical_has_scala:
     fail("docs/reference/v1-scope.md", 1, f"does not state Scala {SCALA}, which the build uses")
 
 # ---------------------------------------------------------------- 2. JDK
+# One mention of a JDK, with what is said about it: a floor (`JDK 21+`, `at least Java 21`, `JDK >= 21`,
+# `JDK 21 or newer`, `newer than JDK 20`, `no older than JDK 21`), a ceiling (`JDK 25 or older`, `up to JDK 25`,
+# `at most JDK 25`, `JDK <= 25`, `older than JDK 26`, `no newer than JDK 25`), a range (`JDK 21-25`,
+# `JDK 21 through 25`, `between JDK 21 and 25`) or a JDK and a list (`JDK 21 and 25`, `JDKs 21, 25`).
 _JV = r"(?:1\.)?\d{1,2}(?!\d)(?!\.\d)(?![A-Za-z])"
+_JDK_WORD = r"\b(?:OpenJDK|JDK|JRE|Java(?:\s+SE)?|Temurin|Corretto|Zulu)s?(?:\s+(?:versions?|releases?))?"
+_CMP = (r"(?:(?:no|not)\s+)?(?:older|earlier|lower|newer|later|higher|greater)\s+than")
 JDK_RE = re.compile(
-    r"(?P<pre>\b(?:at least|minimum(?: of)?|min\.?)\s+)?"
-    r"\b(?:OpenJDK|JDK|JRE|Java(?:\s+SE)?|Temurin|Corretto|Zulu)(?:\s+versions?)?(?:\s*(?P<ge>>=|≥)\s*|\s*:\s*|[ -]?)"
+    r"(?:(?P<pre>\b(?:at\s+least|minimum(?:\s+of)?|min\.?)\s+)"
+    r"|(?P<precap>\b(?:up\s+to(?:\s+and\s+including)?|at\s+most|maximum(?:\s+of)?|max\.?)\s+)"
+    r"|(?P<between>\bbetween\s+)"
+    rf"|(?P<cmp>\b{_CMP}\s+(?:(?:a|an|the)\s+)?))?"
+    rf"{_JDK_WORD}"
+    rf"(?:\s*(?P<op>>=|≥|<=|≤|>|<)\s*|\s+(?P<cmp2>{_CMP})\s+|\s+(?P<between2>between)\s+|\s*:\s*|[ -]?)"
     rf"(?P<n>{_JV})"
-    rf"(?:\s*(?:-|–|\bto\b|\bthrough\b)\s*(?P<hi>{_JV}))?"
+    r"(?:\s*\(?LTS\)?(?![A-Za-z]))?"
+    rf"(?:\s*(?:-|–|\bto\b|\bthrough\b|\bthru\b)\s*(?P<hi>{_JV}))?"
     rf"(?P<more>(?:\s*(?:,|/|\band\b|\bor\b)\s*(?:JDK\s*)?{_JV}(?!\s*(?:-|–)\s*\d))*)"
-    r"(?P<floor>\+|\s+(?:or|and)\s+(?:newer|later|above|higher|greater|up|beyond)|\s+(?:minimum|or\s+any\s+later))?"
-    r"(?P<ceil>\s+(?:or|and)\s+(?:older|earlier|below|lower)|\s*(?:<=|≤))?")
+    r"(?P<floor>\+|\s+(?:or|and)\s+(?:any\s+|a\s+)?(?:newer|later|above|higher|greater|up|beyond)"
+    r"|\s+(?:minimum|onwards?))?"
+    r"(?P<ceil>\s+(?:or|and)\s+(?:any\s+|an\s+)?(?:older|earlier|below|lower))?")
+# A JDK named only to say it is not supported, in the same clause: a negation before it (`does not support
+# JDK 20 or older`, `no JDK 17 build`) or a denial after it (`JDK 20 or older is not supported`).
+JDK_NEG_BEFORE = re.compile(
+    r"\b(?:not|no|never|nor|cannot|can't|don't|doesn't|isn't|aren't|won't|unsupported)\b", re.I)
 
 
 def jdk_number(token):
     token = token.strip()
     return int(token[2:]) if token.startswith("1.") else int(token)
+
+
+def jdk_claim(jm):
+    """(kind, numbers) for one mention: ("floor", [n, listed...]), ("ceiling", [n]) - every JDK up to and
+    including n -, ("range", [lo, hi]) or ("points", [n, ...]). A strict comparison moves by one: `newer
+    than JDK 20` is a floor of 21, `older than JDK 22` a ceiling of 21; `no older than JDK 21` is a floor of 21."""
+    n = jdk_number(jm.group("n"))
+    listed = [jdk_number(x) for x in re.findall(_JV, jm.group("more") or "")]
+    words = (jm.group("cmp") or jm.group("cmp2") or "").lower().split()
+    if words:
+        negated = words[0] in {"no", "not"}
+        newer = (words[1] if negated else words[0]) in {"newer", "later", "higher", "greater"}
+        if newer:
+            return ("ceiling", [n]) if negated else ("floor", [n + 1])
+        return ("floor", [n]) if negated else ("ceiling", [n - 1])
+    op = jm.group("op")
+    if jm.group("pre") or op in {">=", "≥"} or jm.group("floor"):
+        return "floor", [n] + listed          # `JDK 21, 25 or newer`: the floor, and each JDK listed
+    if op == ">":
+        return "floor", [n + 1]
+    if jm.group("precap") or op in {"<=", "≤"} or jm.group("ceil"):
+        return "ceiling", [n]
+    if op == "<":
+        return "ceiling", [n - 1]
+    if jm.group("hi"):
+        return "range", sorted([n, jdk_number(jm.group("hi"))])
+    if (jm.group("between") or jm.group("between2")) and listed:
+        return "range", sorted([n, listed[0]])
+    return "points", [n] + listed
+
+
+def jdk_negated(text, jm):
+    ls = text.rfind("\n", 0, jm.start()) + 1
+    before, after = clause_around(line_text_at(text, jm.start()), jm.start() - ls, jm.end() - ls)
+    return JDK_NEG_BEFORE.search(before) is not None or NEG_AFTER.search(after) is not None
 
 
 runs = ", ".join(str(j) for j in sorted(ci_jdks))
@@ -391,28 +463,44 @@ for p in FILES:
         if not ci_jdks or IGNORE_MARKER in line_text:
             continue
         line = line_of(text, jm.start())
-        n = jdk_number(jm.group("n"))
+        kind, nums = jdk_claim(jm)
+        negated = jdk_negated(text, jm)
         # A ceiling says what runs today, whatever else the line says: checked before the history exemption.
-        if jm.group("ceil"):
-            if n != JDK_FLOOR:
-                fail(rel, line, f"supports JDK {n} or older, but the floor ({FLOOR_SOURCE}) is JDK {JDK_FLOOR}")
+        if kind == "ceiling":
+            c = nums[0]
+            if not negated:
+                # `JDK N or older` claims every JDK below N as well, so it always reaches below the floor.
+                fail(rel, line, f"supports JDK {c} or older, which claims JDKs below the floor ({FLOOR_SOURCE}), "
+                                f"JDK {JDK_FLOOR}; state the floor instead (`JDK {JDK_FLOOR}+`)")
+            elif c >= JDK_FLOOR:
+                fail(rel, line, f"says JDK {c} and older are unsupported, but the floor ({FLOOR_SOURCE}) "
+                                f"is JDK {JDK_FLOOR}")
             continue
-        if HISTORICAL.search(line_text):
+        if negated or HISTORICAL.search(line_text):
             continue
-        listed = [jdk_number(x) for x in re.findall(_JV, jm.group("more") or "")]
-        hi = jdk_number(jm.group("hi")) if jm.group("hi") else None
-        is_floor = bool(jm.group("pre") or jm.group("ge") or jm.group("floor"))
-        if is_floor or hi is not None:
+        if kind == "floor":
+            n = nums[0]
             if n != JDK_FLOOR:
                 fail(rel, line, f"gives JDK {n} as the minimum, but the minimum supported runtime "
                                 f"({FLOOR_SOURCE}) is JDK {JDK_FLOOR}")
-            if is_floor and n > max(ci_jdks):
+            if n > max(ci_jdks):
                 fail(rel, line, f"requires JDK {n} or newer, but CI only runs JDK {runs}")
-        elif n not in ci_jdks:
-            fail(rel, line, f"documents JDK {n}, but CI runs JDK {runs}")
-        for other in ([hi] if hi is not None else []) + listed:
-            if other not in ci_jdks:
-                fail(rel, line, f"documents JDK {other}, but CI runs JDK {runs}")
+            for other in nums[1:]:
+                if other not in ci_jdks:
+                    fail(rel, line, f"documents JDK {other}, but CI runs JDK {runs}")
+        elif kind == "range":
+            lo, hi = nums
+            if lo != JDK_FLOOR:
+                fail(rel, line, f"gives JDK {lo} as the minimum, but the minimum supported runtime "
+                                f"({FLOOR_SOURCE}) is JDK {JDK_FLOOR}")
+            missing = [j for j in range(lo, hi + 1) if j not in ci_jdks]
+            if missing:
+                fail(rel, line, f"documents JDK {lo} to {hi}, but CI does not run JDK "
+                                f"{', '.join(str(j) for j in missing)} (it runs JDK {runs})")
+        else:
+            for other in nums:
+                if other not in ci_jdks:
+                    fail(rel, line, f"documents JDK {other}, but CI runs JDK {runs}")
 
 # ---------------------------------------------------------------- 3. modules
 claude = read("CLAUDE.md")
@@ -785,6 +873,30 @@ for name, body in sorted(ALIASES.items()):
            (name,))
 
 
+def strip_comment(line):
+    """`line` without its shell comment: a `#` that starts a word outside quotes, as bash reads it. A `#`
+    inside quotes (`sbt "run explain #123"`), escaped, or within a word (`a#b`) is kept."""
+    quote, i = None, 0
+    while i < len(line):
+        ch = line[i]
+        if quote == "'":
+            if ch == "'":
+                quote = None
+        elif quote == '"':
+            if ch == "\\":
+                i += 1
+            elif ch == '"':
+                quote = None
+        elif ch == "\\":
+            i += 1
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] in " \t;&|()<>"):
+            return line[:i]
+        i += 1
+    return line
+
+
 def shell_segments(line):
     """`line` split at `&&`, `||` and `|` outside quotes: each piece is one shell command."""
     out, cur, quote, i = [], [], None, 0
@@ -837,7 +949,7 @@ for p in FILES:
         for offset, raw in logical_lines(fm.group(1)):
             if raw.lstrip().startswith("#") or exempt(raw):
                 continue
-            for segment in shell_segments(re.sub(r"\s+#.*$", "", raw)):
+            for segment in shell_segments(strip_comment(raw)):
                 sm = SBT_CALL.match(segment)
                 if sm:
                     check_invocation(p.as_posix(), body_line + offset, sm.group(1))
@@ -846,7 +958,7 @@ for p in FILES:
     for im in INLINE.finditer(outside):
         if exempt(line_text_at(outside, im.start())):
             continue
-        for segment in shell_segments(im.group(1)):
+        for segment in shell_segments(strip_comment(im.group(1))):
             sm = SBT_CALL.match(segment)
             if sm:
                 check_invocation(p.as_posix(), line_of(outside, im.start()), sm.group(1))

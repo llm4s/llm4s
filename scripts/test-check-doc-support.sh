@@ -352,8 +352,8 @@ expect_fail "'JDK N or older' is a ceiling, not history" "$d" "supports JDK 25 o
 d="$(fresh_copy jdk-ceiling-on-history-line)"; say "$d" "$INSTALL" "Requires JDK 25 or older; it previously ran on JDK 17."
 expect_fail "a ceiling is checked even on a line that also names history" "$d" "supports JDK 25 or older"
 
-d="$(fresh_copy jdk-ceiling-floor)"; say "$d" "$INSTALL" "Compiled class files load on JDK 21 or later, never JDK 21 or older releases that predate it."
-expect_pass "a ceiling at the floor itself" "$d"
+d="$(fresh_copy jdk-ceiling-floor)"; say "$d" "$INSTALL" "Compiled class files load on JDK 21 or later, never on JDK 20 or older releases that predate it."
+expect_pass "a negated ceiling just below the floor" "$d"
 
 d="$(fresh_copy jdk-floor-too-high)"; say "$d" "$INSTALL" "Requires JDK 29 or newer."
 expect_fail "a floor above every JDK CI runs" "$d" "JDK 29"
@@ -363,6 +363,79 @@ expect_pass "an old JDK named as history" "$d"
 
 d="$(fresh_copy jdk-history-dated)"; say "$d" "$INSTALL" "- 2025-03-01: CI moved off JDK 17."
 expect_pass "a dated entry is history" "$d"
+
+echo "== JDK ceilings, ranges and negations (round 6)"
+# A positive ceiling claims every older JDK as well, so it reaches below the floor whatever its number.
+for phrase in "Supports JDK 21 or older." "Runs on Java 21 and earlier." "Works up to JDK 25." "Runs on at most JDK 25." \
+              "Requires JDK <= 25." "Any JDK older than 26 works." "Runs on a JDK no newer than 25." "Use Java 25 or lower."; do
+  d="$(fresh_copy jdk-ceiling-positive)"; say "$d" "$INSTALL" "$phrase"
+  expect_fail "a positive ceiling is rejected: '$phrase'" "$d" "or older, which claims JDKs below the floor"
+done
+
+for phrase in "LLM4S does not support JDK 20 or older." "JDK 20 or older is not supported." "Requires newer than JDK 20." \
+              "Requires a JDK no older than 21." "It won't run on JDK 20 and earlier." "Any JDK older than 21 is unsupported." \
+              "JDK 17 is not supported, and JDK 11 isn't either." "There is no JDK 17 build."; do
+  d="$(fresh_copy jdk-negated-ok)"; say "$d" "$INSTALL" "$phrase"
+  expect_pass "a negated statement is allowed: '$phrase'" "$d"
+done
+
+d="$(fresh_copy jdk-negated-ceiling-wrong)"; say "$d" "$INSTALL" "JDK 21 or older is not supported."
+expect_fail "a negated ceiling that excludes the floor itself" "$d" "says JDK 21 and older are unsupported, but the floor"
+
+d="$(fresh_copy jdk-negation-other-clause)"; say "$d" "$INSTALL" "JDK 17 is not the default, but JDK 21 or older works."
+expect_fail "negation is scoped to the clause it is in" "$d" "supports JDK 21 or older"
+
+d="$(fresh_copy jdk-negation-other-clause-point)"; say "$d" "$INSTALL" "Do not use the system JDK; install JDK 29."
+expect_fail "a negation in an earlier clause does not cover a later JDK" "$d" "documents JDK 29"
+
+d="$(fresh_copy jdk-strict-floor-wrong)"; say "$d" "$INSTALL" "Requires a JDK newer than 17."
+expect_fail "'newer than JDK N' is a floor of N+1" "$d" "gives JDK 18 as the minimum"
+
+d="$(fresh_copy jdk-not-older-than-wrong)"; say "$d" "$INSTALL" "Use a JDK not older than 17."
+expect_fail "'not older than JDK N' is a floor of N" "$d" "gives JDK 17 as the minimum"
+
+for phrase in "Supports JDK 21 through 25." "Tested on Java 21-25." "Runs on JDK 21 to 25." "Runs on any JDK between 21 and 25."; do
+  d="$(fresh_copy jdk-range-gap)"; say "$d" "$INSTALL" "$phrase"
+  expect_fail "every JDK of a range must be one CI runs: '$phrase'" "$d" "but CI does not run JDK 22, 23, 24"
+done
+
+d="$(fresh_copy jdk-range-ok)"; say "$d" "$INSTALL" "Supports JDK 21 through 23."
+sed -i.bak 's/java: \[21, 25\]/java: [21, 22, 23, 25]/' "$d/.github/workflows/ci.yml" && rm "$d/.github/workflows/ci.yml.bak"
+expect_pass "a range whose every JDK CI runs" "$d"
+
+for phrase in "Use JDK 21 LTS." "Java 21 (LTS) or newer." "Java 21+ is required." "Any JDK 21 and above." "JDK 21 and later." \
+              "JDKs 21 and 25 are tested." "Java SE 21 or any later version." "From JDK 21 onwards." "Temurin 21, Corretto 25." \
+              "Minimum JDK: 21." "JDK >= 21." "Java 21 or higher, JDK 25 recommended."; do
+  d="$(fresh_copy jdk-phrasing-ok)"; say "$d" "$INSTALL" "$phrase"
+  expect_pass "a true JDK claim: '$phrase'" "$d"
+done
+
+for phrase in "Use JDK 17 LTS.:documents JDK 17" "Java 17 (LTS) or newer.:gives JDK 17 as the minimum" \
+              "JDKs 21 and 29 are tested.:documents JDK 29" "From JDK 17 onwards.:gives JDK 17 as the minimum" \
+              "JDK > 17.:gives JDK 18 as the minimum" "Corretto 21 or 22.:documents JDK 22" \
+              "JDK 21, 29 or newer.:documents JDK 29"; do
+  d="$(fresh_copy jdk-phrasing-wrong)"; say "$d" "$INSTALL" "${phrase%%:*}"
+  expect_fail "a false JDK claim: '${phrase%%:*}'" "$d" "${phrase#*:}"
+done
+
+d="$(fresh_copy jdk-past-tense)"; say "$d" "$INSTALL" "CI ran on JDK 17 until 0.4; it was tested on Java 11 before that."
+expect_pass "past tense is history" "$d"
+
+echo "== Scala prose (round 6)"
+for phrase in "Scala 2.13 support is planned for later." "Scala 2.13 projects cannot depend on LLM4S." "Scala 2 doesn't work." \
+              "LLM4S targets Scala 3.7+." "Use Scala 3.x." "Built with Scala 3.7.x." "Scala.js 1.16 and Scala Native 0.5 are not targets." \
+              "Install Scala CLI 1.5 to try it."; do
+  d="$(fresh_copy scala-phrasing-ok)"; say "$d" "$INSTALL" "$phrase"
+  expect_pass "a true or out-of-scope Scala statement: '$phrase'" "$d"
+done
+
+for phrase in "Scala 3.3+ works.:documents Scala 3.3" "Scala 3.3 LTS is supported.:documents Scala 3.3" \
+              "Supports Scala 2.13 or older.:documents Scala 2.13" "Use Scala 2.x.:documents Scala 2.x" \
+              "Works on Scala 3.3-3.7.:documents Scala 3.3" "Scala 2.13 and Scala 3 are both supported.:documents Scala 2.13" \
+              "Scala 2.13 is the target, not Scala 3.:documents Scala 2.13"; do
+  d="$(fresh_copy scala-phrasing-wrong)"; say "$d" "$INSTALL" "${phrase%%:*}"
+  expect_fail "a false Scala claim: '${phrase%%:*}'" "$d" "${phrase#*:}"
+done
 
 echo "== JDK release target, from the options sbt resolved"
 d="$(fresh_copy jdk-release-javac)"; edit_model "$d" 'set_options(m, "javacOptions", ["--release", "8"])'
@@ -445,7 +518,17 @@ expect_fail "an inline command the shell cannot parse" "$d" "cannot be parsed"
 d="$(fresh_copy cmd-ignore)"; run_sbt_doc "$d" "sbt crossTestAll   # doc-support: ignore"
 expect_pass "an opted-out sbt line" "$d"
 
-d="$(fresh_copy cmd-after-and)"; run_sbt_doc "$d" "cd modules/core && sbt crossTestAll"
+d="$(fresh_copy cmd-hash-in-quotes)"; run_sbt_doc "$d" "$(printf '%s\n' 'sbt "core/run explain #123"   # run it' "sbt 'core/run #1' test" 'sbt "core/runMain org.Foo \"#2\"" # done')"
+say "$d" README.md 'Run `sbt "core/run issue #7"` or `sbt compile # then test`.'
+expect_pass "a # inside quotes or a word is not a comment; one starting a word is (round 6)" "$d"
+
+d="$(fresh_copy cmd-hash-comment-then-bad)"; run_sbt_doc "$d" 'sbt "core/run #1" crossTestAll # comment'
+expect_fail "a command after a quoted # is still checked" "$d" "crossTestAll"
+
+d="$(fresh_copy cmd-hash-in-word)"; run_sbt_doc "$d" 'sbt compile test#x'
+expect_fail "a # within a word does not start a comment" "$d" "\`test#x\` is not an alias"
+
+d="$(fresh_copy cmd-after-and)";run_sbt_doc "$d" "cd modules/core && sbt crossTestAll"
 expect_fail "a command after && in a code block" "$d" "crossTestAll"
 
 d="$(fresh_copy cmd-after-and-inline)"; say "$d" README.md 'Or `cd x && sbt otherCrossTest`.'
