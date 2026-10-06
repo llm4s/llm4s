@@ -1505,6 +1505,16 @@ calls, and reject a thinking block without a signature, so unsigned thinking - f
 provider earlier in the conversation, or set by hand with `withThinking(text)` - is left out of
 their requests. The Anthropic client sends tool calls and their results as `tool_use` and
 `tool_result` blocks for the same reason: the thinking has to sit in the turn that made the calls.
+Both clients send a call only when its result is in the run of tool messages straight after it, as
+those APIs require; a result anywhere else (after a user message, say) goes as
+`[Tool result for <id>]: ...` text, and its call is left out.
+
+Signed and redacted thinking is *sealed*: it is valid only beside the exact content and tool calls
+it came with. So `withContent` and `withToolCalls`, given a changed value, drop redacted blocks and
+signatures and keep the reasoning text (`hasSealedThinking` reports which state a message is in).
+Context compression, an agent's `afterAgent` answer rewrite and a tool-call edit all go through
+those setters, so none of them sends Anthropic or Bedrock a modified signed turn. Thinking also
+counts toward token estimates (`ConversationTokenCounter`), since most providers resend it.
 
 ```scala
 for {
