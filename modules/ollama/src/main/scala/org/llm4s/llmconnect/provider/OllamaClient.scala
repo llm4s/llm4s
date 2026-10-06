@@ -188,7 +188,9 @@ class OllamaClient(
         var sawCalls    = false
         val processResult = Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) {
           reader =>
-            Iterator.continually(reader.readLine()).takeWhile(_ != null).takeWhile(_ => failure.isEmpty).foreach {
+            // Check `failure` before reading: a downstream predicate runs only after the next
+            // `readLine()`, which would block on a server that holds the connection open.
+            Iterator.continually(if (failure.isEmpty) reader.readLine() else null).takeWhile(_ != null).foreach {
               line =>
                 rawResponse.append(line).append('\n')
                 val trimmed = line.trim

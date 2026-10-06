@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ NetworkError, RateLimitError, TimeoutError }
+import org.llm4s.error.{ NetworkError, ProcessingError, RateLimitError, TimeoutError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.OllamaConfig
@@ -456,6 +456,42 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       case Left(err: RateLimitError) => assert(err.retryDelay.contains(9.seconds))
       case other                     => fail(s"Expected RateLimitError, got: $other")
     }
+  }
+
+  test("streamComplete() stops at a malformed streamed tool call without reading another line") {
+    // Serves one line whose tool call has no name, then holds the connection open: any further
+    // read means the client went back for another line after it had already failed.
+    val badLine =
+      "{\"message\":{\"content\":\"\",\"tool_calls\":[{\"function\":{\"arguments\":{}}}]},\"done\":false}\n"
+        .getBytes(StandardCharsets.UTF_8)
+    val readAfterBadLine = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val heldOpen = new java.io.InputStream {
+      private var served            = false
+      override def available(): Int = 0
+      override def read(): Int = {
+        val one = new Array[Byte](1)
+        if (read(one, 0, 1) < 0) -1 else one(0) & 0xff
+      }
+      override def read(b: Array[Byte], off: Int, len: Int): Int =
+        if (!served && len >= badLine.length) {
+          served = true
+          System.arraycopy(badLine, 0, b, off, badLine.length)
+          badLine.length
+        } else {
+          readAfterBadLine.set(true)
+          throw new java.io.IOException("read after the malformed line")
+        }
+    }
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, heldOpen)))
+
+    val result = mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+
+    result match {
+      case Left(_: ProcessingError) => ()
+      case other                    => fail(s"Expected ProcessingError, got: $other")
+    }
+    assert(!readAfterBadLine.get(), "the client read from the stream after the malformed tool call")
   }
 
   test("streamComplete() returns an error for a malformed JSON line, and records what it read") {

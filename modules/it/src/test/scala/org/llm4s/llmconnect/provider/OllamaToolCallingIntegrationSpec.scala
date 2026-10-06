@@ -49,11 +49,12 @@ class OllamaToolCallingIntegrationSpec extends AnyFlatSpec with Matchers {
     Conversation(Seq(UserMessage("What is the weather in Paris? Use the get_weather tool.")))
 
   /**
-   * Whether a small model calls the tool is not deterministic, so a reply without a call cancels the test
-   * (visible as canceled, with this reason) instead of passing without having checked a tool call at all.
+   * Whether a small model calls the tool is not deterministic, so locally a reply without a call cancels
+   * the test (visible as canceled, with this reason) instead of passing without having checked a tool
+   * call at all. Under `LLM4S_IT_STRICT=true` it fails: the tier must exercise tool calling to pass.
    */
   private def assumeToolCalled(calls: Seq[ToolCall]): Unit =
-    assume(calls.nonEmpty, s"$testModel did not call the tool; the shape of a tool call was not exercised")
+    Tier.require(calls.nonEmpty, s"$testModel did not call the tool; the shape of a tool call was not exercised")
 
   private def withClient[T](f: OllamaClient => T): T = {
     val client = new OllamaClient(config)
