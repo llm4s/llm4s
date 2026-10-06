@@ -133,8 +133,10 @@ final class Agent private[agent] (
 
   /**
    * [[start]], with `listener` subscribed before the turn begins, so it receives every event of the
-   * turn - live text deltas included - until the turn's terminal event. A refused start (a blank
-   * query, a busy thread, ...) is `Left`, and the listener hears nothing.
+   * turn - live text deltas included - until the turn's terminal event, or a `Disconnected` if it
+   * fell behind or threw; the subscription then ends itself. A turn that ends without a terminal
+   * event (a crash, or a failed commit) ends it once it has delivered what it had. A refused start
+   * (a blank query, a busy thread, ...) is `Left`, and the listener hears nothing.
    */
   def stream(threadId: ThreadId, query: String, config: RunConfig = RunConfig(), history: Seq[Message] = Nil)(
     listener: StreamEvent => Unit

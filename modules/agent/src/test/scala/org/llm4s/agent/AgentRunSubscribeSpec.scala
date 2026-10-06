@@ -15,6 +15,7 @@ import upickle.default.{ macroRW, ReadWriter }
 
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.AtomicBoolean
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
 /** Run-scoped event delivery: `Agent.stream*` and a late `AgentRun.subscribe`. */
@@ -231,4 +232,42 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     val sub = CountingSubscription()
     scope.attach(sub)
     sub.cancels.get shouldBe 1
+  }
+
+  it should "end once on a Disconnected, after passing it on" in {
+    val c     = Received()
+    val ends  = new java.util.concurrent.atomic.AtomicInteger(0)
+    val scope = RunScope(RunId("r1"), c.listener, () => ends.incrementAndGet(): Unit)
+    val sub   = CountingSubscription()
+    scope.attach(sub)
+    scope(record("r1", 1, RunEvent.RunStarted(None, None)))
+    scope(StreamEvent.Disconnected(1, DisconnectReason.Lagging))
+    scope(StreamEvent.Disconnected(1, DisconnectReason.Lagging))
+    scope(record("r1", 2, RunEvent.RunCompleted))
+    ends.get shouldBe 1
+    sub.cancels.get shouldBe 1
+    c.all shouldBe Vector(
+      record("r1", 1, RunEvent.RunStarted(None, None)),
+      StreamEvent.Disconnected(1, DisconnectReason.Lagging)
+    )
+  }
+
+  it should "end even when the listener throws on the Disconnected" in {
+    val ends  = new java.util.concurrent.atomic.AtomicInteger(0)
+    val scope = RunScope(RunId("r1"), _ => throw new IllegalStateException("boom"), () => ends.incrementAndGet(): Unit)
+    an[IllegalStateException] should be thrownBy scope(StreamEvent.Disconnected(0, DisconnectReason.Lagging))
+    ends.get shouldBe 1
+    scope.isEnded shouldBe true
+  }
+
+  it should "end itself when quiet, cancelling first, if the run's terminal event never comes" in {
+    val order = new CopyOnWriteArrayList[String]()
+    val scope = RunScope(RunId("r1"), _ => (), () => order.add("onEnd"): Unit)
+    scope.attach(new Subscription { def cancel(): Unit = order.add("cancel"): Unit })
+    scope(record("r1", 1, RunEvent.RunStarted(None, None)))
+    scope.closeWhenQuiet(50.millis)
+    scope.isEnded shouldBe true
+    order.asScala.toVector shouldBe Vector("cancel", "onEnd")
+    scope.closeWhenQuiet(50.millis) // already ended: returns at once, ends nothing again
+    order.asScala.toVector shouldBe Vector("cancel", "onEnd")
   }

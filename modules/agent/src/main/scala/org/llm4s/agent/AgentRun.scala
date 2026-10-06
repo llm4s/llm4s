@@ -39,13 +39,16 @@ final class AgentRun private[agent] (
    * Subscribes `listener` to this turn's events: its durable events replayed from the turn's start,
    * then live; its live events from now on (a live event sent before this call is missed - use
    * [[Agent.stream]] to receive every one). Run-scoped: nothing of another run on the thread is
-   * delivered, and the subscription ends itself after the turn's terminal event. A `Disconnected`
-   * reaches the listener only if it fell behind (`Lagging`) or threw.
+   * delivered, and the subscription ends itself after the turn's terminal event, or after a
+   * `Disconnected` - which reaches the listener only if it fell behind (`Lagging`) or threw. A turn
+   * that ends without a terminal event (a crash, or a failed commit) ends the subscription once it
+   * has delivered what it had.
    */
   def subscribe(capacity: Int = Agent.StreamCapacity)(listener: StreamEvent => Unit): Result[Subscription] =
     val scope = RunScope(runId, listener)
     handle.subscribe(capacity)(scope).map { s =>
       scope.attach(s)
+      RunScope.watch(handle, scope)
       s
     }
 
@@ -130,7 +133,10 @@ private[agent] object AgentRun:
     tracing: Option[Tracing],
     scope: Option[RunScope]
   ): AgentRun =
-    scope.foreach(s => handle.observation.foreach(s.attach))
+    scope.foreach { s =>
+      handle.observation.foreach(s.attach)
+      RunScope.watch(handle, s)
+    }
     new AgentRun(handle, loop, root, runtime, tracing.map(TracedRun(handle, _)))
 
   /**
