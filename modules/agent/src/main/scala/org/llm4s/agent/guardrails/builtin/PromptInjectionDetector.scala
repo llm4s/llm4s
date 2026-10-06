@@ -30,12 +30,8 @@ import scala.util.matching.Regex
  *   sensitivity = InjectionSensitivity.Medium
  * )
  *
- * // Use as input guardrail
- * agent.run(
- *   query = userInput,
- *   tools = tools,
- *   inputGuardrails = Seq(PromptInjectionDetector())
- * )
+ * // Use as input guardrail: an injection ends the turn AgentStatus.Blocked
+ * Agent.builder("assistant", client).withMiddleware(new GuardrailMiddleware(Seq(PromptInjectionDetector()), Nil)).build()
  * }}}
  *
  * @param patterns Custom injection patterns to detect (in addition to defaults)

@@ -205,7 +205,7 @@ config-policy `prod` preset flags any section that does not (see
 | `endpoint`, `apiVersion` | Azure OpenAI: the resource endpoint (required) and API version |
 | `project`, `location` | Vertex AI: the GCP project id (required) and region (default `us-central1`) |
 | `region`, `profile`, `accessKeyId`, `secretAccessKey`, `sessionToken` | AWS Bedrock: the AWS region (required, never defaulted); a shared-config profile; or explicit credentials, with a session token for temporary ones. With none of the credential keys the AWS default credential chain is used. `baseUrl` overrides the endpoint |
-| `contextWindow`, `reserveCompletion`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
+| `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
 
 The first five keys are shared by every provider. The rest belong to the providers named, which
 declare them ([provider-specific keys](../guide/providers#provider-specific-keys)); in a section for
@@ -713,7 +713,7 @@ also set in `application.conf` or with `-D`.
 | `CHUNK_SIZE`, `CHUNK_OVERLAP`, `CHUNKING_ENABLED` | `llm4s.embeddings.chunking.*` | `llm4s-core` |
 | `LLM4S_EXCHANGE_LOGGING_ENABLED`, `LLM4S_EXCHANGE_LOGGING_DIR` | `llm4s.exchangeLogging.*` | `llm4s-core` |
 | `LLM4S_MODEL_REGISTRY_RESOURCE`, `LLM4S_MODEL_REGISTRY_FILE`, `LLM4S_MODEL_REGISTRY_URL` | `llm4s.modelRegistry.*` | `llm4s-core` |
-| `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT`, `WORKSPACE_TRACE_LOG` | `llm4s.workspace.*` | `llm4s-core` |
+| `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT` | `llm4s.workspace.*` | `llm4s-core` |
 | `BRAVE_SEARCH_API_KEY`, `EXA_API_KEY` and the other `BRAVE_*`, `EXA_*` variables, `DUCK_DUCK_GO_SEARCH_API_URL` | `llm4s.tools.*` | `llm4s-core` |
 | `OPENAI_API_KEY` | `llm4s.credentials.openai.apiKey` (OpenAI chat sections and embeddings) | `llm4s-openai` |
 | `AZURE_OPENAI_API_KEY` | `llm4s.credentials.azure.apiKey` | `llm4s-openai` |

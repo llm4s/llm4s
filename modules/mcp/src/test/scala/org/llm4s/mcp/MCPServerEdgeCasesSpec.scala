@@ -30,7 +30,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
   override def beforeAll(): Unit = {
     silenceLogs()
     val opts = MCPServerOptions(0, "/mcp", "EdgeServer", "1.0")
-    server = new MCPServer(opts, Seq(buildPingTool(), buildFailTool(), buildIntTool()))
+    server = new MCPServer(opts, Seq(buildPingTool(), buildFailTool(), buildIntTool(), buildObjTool()))
     server.start().fold(e => throw e, _ => ())
     port = server.boundPort
   }
@@ -174,7 +174,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       readBody(c) should include("Tool not found")
     }
 
-    it("should return TOOL_EXECUTION_ERROR when tool handler returns Left") {
+    it("should return an isError result, not a JSON-RPC error, when tool handler returns Left") {
       val (sid, _) = initSession()
       val c        = sessionConn(sid)
       c.getOutputStream.write(
@@ -182,7 +182,10 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
           .getBytes("UTF-8")
       )
       c.getResponseCode shouldBe 200
-      readBody(c) should include("Tool failed")
+      val body = ujson.read(readBody(c))
+      body.obj.contains("error") shouldBe false
+      body("result")("isError").bool shouldBe true
+      body("result")("content")(0)("text").str should include("intentional failure")
     }
 
     it("should call render() for non-String tool results (Int -> ujson.Num)") {
@@ -193,7 +196,23 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
           .getBytes("UTF-8")
       )
       c.getResponseCode shouldBe 200
-      readBody(c) should include("42")
+      val body = ujson.read(readBody(c))
+      body("result")("content")(0)("text").str shouldBe "42"
+      // structuredContent is a JSON object in the specification, so a number is sent as text only.
+      body("result").obj.contains("structuredContent") shouldBe false
+    }
+
+    it("should send an object result as structuredContent as well as text") {
+      val (sid, _) = initSession()
+      val c        = sessionConn(sid)
+      c.getOutputStream.write(
+        rpc("t-5", "tools/call", Some(ujson.Obj("name" -> "obj_tool", "arguments" -> ujson.Obj())))
+          .getBytes("UTF-8")
+      )
+      c.getResponseCode shouldBe 200
+      val body = ujson.read(readBody(c))
+      body("result")("structuredContent") shouldBe ujson.Obj("answer" -> 42)
+      ujson.read(body("result")("content")(0)("text").str) shouldBe ujson.Obj("answer" -> 42)
     }
 
     it("should use empty-object default for missing arguments field") {
@@ -439,6 +458,14 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val schema = Schema.`object`[Map[String, Any]]("Params")
     ToolBuilder[Map[String, Any], Int]("int_tool", "Returns integer 42", schema)
       .withHandler((_: SafeParameterExtractor) => Right(42))
+      .buildSafe()
+      .fold(e => throw new RuntimeException(e.formatted), identity)
+  }
+
+  private def buildObjTool() = {
+    val schema = Schema.`object`[Map[String, Any]]("Params")
+    ToolBuilder[Map[String, Any], Map[String, Int]]("obj_tool", "Returns an object", schema)
+      .withHandler((_: SafeParameterExtractor) => Right(Map("answer" -> 42)))
       .buildSafe()
       .fold(e => throw new RuntimeException(e.formatted), identity)
   }

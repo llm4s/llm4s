@@ -91,4 +91,25 @@ class InMemoryCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValu
     store.eventsAfter(thread, 5L, 10).value shouldBe empty
     store.commit(thread, Commit(None, Vector.empty, Vector(event("e6")))).value.map(_.seq) shouldBe Vector(6L)
   }
+
+  it should "delete a thread's checkpoint, pending writes and events, leaving other threads alone" in {
+    val store = InMemoryCheckpointer()
+    val other = ThreadId("other")
+    store.commit(thread, Commit(Some(checkpoint("c1", None)), Vector.empty, Vector(event("a"), event("b"))))
+    store.commit(thread, Commit(None, Vector(write("c1", "0.0")), Vector.empty))
+    store.commit(other, Commit(Some(checkpoint("o1", None)), Vector.empty, Vector(event("x"))))
+
+    store.deleteThread(thread).value shouldBe (())
+
+    store.latest(thread).value shouldBe None
+    store.eventsAfter(thread, 0L, 10).value shouldBe empty
+    store.latest(other).value.map(_.checkpoint.id) shouldBe Some("o1")
+    store.eventsAfter(other, 0L, 10).value.map(_.seq) shouldBe Vector(1L)
+    // the id is a new thread again: a first checkpoint is accepted, its events numbered from 1
+    store
+      .commit(thread, Commit(Some(checkpoint("c1", None)), Vector.empty, Vector(event("again"))))
+      .value
+      .map(_.seq) shouldBe Vector(1L)
+    store.deleteThread(ThreadId("unknown")).value shouldBe (())
+  }
 }

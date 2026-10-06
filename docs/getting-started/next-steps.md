@@ -162,8 +162,8 @@ Choose your path based on what you want to build:
 Build sophisticated multi-turn agents with automatic tool calling.
 
 ```scala
-val agent = new Agent(client)
-val state = agent.run("Your query", tools)
+val agent = Agent.builder("assistant", client).withTools(tools).build()
+val result = agent.flatMap(_.run("Your query"))
 ```
 
 [Learn more →](/examples/#agent-examples)
@@ -189,7 +189,7 @@ val tool = ToolFunction(
 Functional conversation management without mutation.
 
 ```scala
-val state2 = agent.continueConversation(state1, "Next question")
+val result2 = agent.continueConversation(result1, "Next question")
 ```
 
 [Learn more →](/guide/multi-turn)
@@ -359,10 +359,9 @@ val result = for {
   registry <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registry
   client <- LLMConnect.getClient(providerConfig)
-  tools = new ToolRegistry(Seq(timeTool))
-  agent = new Agent(client)
-  state <- agent.run("What time is it?", tools)
-} yield state.finalResponse
+  agent <- Agent.builder("time-agent", client).withTools(new ToolRegistry(Seq(timeTool))).build()
+  result <- agent.run("What time is it?")
+} yield result.answer
 ```
 
 ### Recipe 3: Streaming Chat
@@ -396,6 +395,7 @@ def streamChat(message: String): Unit = {
 
 ```scala
 import org.llm4s.agent.{ Agent, ContextWindowConfig, PruningStrategy }
+import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 
 val config = ContextWindowConfig(
   maxMessages = Some(20),
@@ -403,15 +403,16 @@ val config = ContextWindowConfig(
   pruningStrategy = PruningStrategy.OldestFirst
 )
 
-// Turn 1
-val state1 = agent.run("First question", tools)
-
-// Turn 2 with pruning
-val state2 = agent.continueConversation(
-  state1.getOrElse(???),
-  "Follow-up question",
-  contextWindowConfig = Some(config)
-)
+// Pruning is middleware on the agent: it trims what each model call is sent,
+// and the thread keeps the full history
+val result = for {
+  agent  <- Agent.builder("assistant", client)
+    .withTools(tools)
+    .withMiddleware(ContextWindowMiddleware(config))
+    .build()
+  first  <- agent.run("First question")                              // Turn 1
+  second <- agent.continueConversation(first, "Follow-up question")  // Turn 2, pruned when sent
+} yield second
 ```
 
 ---

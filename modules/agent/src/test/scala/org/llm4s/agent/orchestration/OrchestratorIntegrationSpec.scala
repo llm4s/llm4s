@@ -2,6 +2,7 @@ package org.llm4s.agent.orchestration
 
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.agent.{ Agent, CompletionFixture, FailingLLMClient, Handoff, NTurnFakeLLMClient }
+import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{ NetworkError, RateLimitError, SimpleError, UnknownError }
 import org.llm4s.types.Result
 import org.llm4s.llmconnect.model.{ AssistantMessage, ToolMessage }
@@ -77,9 +78,13 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
     // depends on the tool really having executed rather than on the canned model reply.
     val agentNode = TypedAgent.fromFuture[String, String]("tool-caller") { query =>
       Future {
-        new Agent(client)
-          .run(query, new ToolRegistry(Seq(adderTool(invocations))), maxSteps = Some(5))
-          .map(_.conversation.messages.collect { case m: ToolMessage => m.content }.mkString("|"))
+        Agent
+          .builder("tool-caller", client)
+          .withTools(new ToolRegistry(Seq(adderTool(invocations))))
+          .withMaxSteps(5)
+          .build()
+          .flatMap(_.run(query))
+          .map(_.messages.collect { case m: ToolMessage => m.content }.mkString("|"))
       }
     }
     val downstream = TypedAgent.fromFunction[String, String]("downstream")(s => Right(s"downstream:$s"))
@@ -97,17 +102,22 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
   }
 
   it should "resolve a handoff to a specialist and pass the specialist's answer downstream" in {
-    val specialist = new Agent(new NTurnFakeLLMClient(CompletionFixture.simple("Specialist answer: 42")))
-    val handoff    = Handoff.to("math-specialist", specialist, "Math specialist")
+    val specialist =
+      Agent.builder("math-specialist", new NTurnFakeLLMClient(CompletionFixture.simple("Specialist answer: 42")))
+    val handoff = Handoff.to("math-specialist", specialist, "Math specialist")
     val primary = new NTurnFakeLLMClient(
       CompletionFixture.withToolCall(handoff.handoffId, ujson.Obj("reason" -> "Needs specialist"), "call_handoff")
     )
 
     val handoffNode = TypedAgent.fromFuture[String, String]("handoff-agent") { query =>
       Future {
-        new Agent(primary)
-          .run(query, ToolRegistry.empty, handoffs = Seq(handoff), maxSteps = Some(10))
-          .map(_.conversation.messages.collect { case m: AssistantMessage => m.content }.filter(_.nonEmpty).last)
+        Agent
+          .builder("primary", primary)
+          .withHandoffs(handoff)
+          .withMaxSteps(10)
+          .build()
+          .flatMap(_.run(query))
+          .map(_.messages.collect { case m: AssistantMessage => m.content }.filter(_.nonEmpty).last)
       }
     }
     val downstream = TypedAgent.fromFunction[String, String]("post-handoff")(s => Right(s"received:$s"))
@@ -342,17 +352,22 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
     }
   }
 
-  "An LLM error inside an Agent node" should "come out of the plan unchanged" in {
+  "An LLM error inside an Agent node" should "come out of the plan as the agent's model failure, its cause unchanged" in {
     val original = RateLimitError("provider", 30.seconds)
     val agentNode = TypedAgent.fromFuture[String, String]("llm-agent") { q =>
-      Future(new Agent(new FailingLLMClient(original)).run(q, ToolRegistry.empty).map(_.status.toString))
+      Future(
+        Agent.builder("llm-agent", new FailingLLMClient(original)).build().flatMap(_.run(q)).map(_.status.toString)
+      )
     }
     val n    = node("llm-agent", agentNode)
     val next = node("next", fn[String, String]("next")(s => Right(s"after:$s")))
     val plan = Plan.builder.addNode(n).addNode(next).addEdge(Edge("e", n, next)).build
 
     whenReady(PlanRunner().execute(plan, Map("llm-agent" -> "hello"))) { result =>
-      result.fold(identity, o => fail(s"expected failure, got $o")) shouldBe original
+      result.fold(identity, o => fail(s"expected failure, got $o")) match {
+        case GraphError.NodeFailed(_, _, cause) => cause shouldBe theSameInstanceAs(original)
+        case other                              => fail(s"expected the model node's failure, got $other")
+      }
     }
   }
 
@@ -364,16 +379,21 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
         CompletionFixture.simple("sum computed")
       )
       Future(
-        new Agent(client)
-          .run(q, new ToolRegistry(Seq(adderTool(invocations))))
-          .map(_.conversation.messages.collect { case m: ToolMessage => m.content }.mkString)
+        Agent
+          .builder("adder", client)
+          .withTools(new ToolRegistry(Seq(adderTool(invocations))))
+          .build()
+          .flatMap(_.run(q))
+          .map(_.messages.collect { case m: ToolMessage => m.content }.mkString)
       )
     }
     val talker = TypedAgent.fromFuture[String, String]("talker") { q =>
       Future(
-        new Agent(new NTurnFakeLLMClient(CompletionFixture.simple(s"echo $q")))
-          .run(q, ToolRegistry.empty)
-          .map(_.conversation.messages.last.content)
+        Agent
+          .builder("talker", new NTurnFakeLLMClient(CompletionFixture.simple(s"echo $q")))
+          .build()
+          .flatMap(_.run(q))
+          .map(_.messages.last.content)
       )
     }
     val a    = node("adder", adder)

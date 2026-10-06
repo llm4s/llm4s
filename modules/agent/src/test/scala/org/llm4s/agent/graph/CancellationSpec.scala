@@ -298,6 +298,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
     }
     val f       = afterOthers(blockOn = Set("b"), others = 1, onBlock = () => broken.set(true))
     val runtime = GraphRuntime(failing)
@@ -333,6 +334,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
     }
     val f       = Fixture(blockOn = Set.empty)
     val runtime = GraphRuntime(slow)
@@ -384,6 +386,7 @@ class CancellationSpec extends AnyFlatSpec with Matchers with EitherValues {
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
   }
 
   private def eventsOf(store: Checkpointer): Vector[EventRecord] = store.eventsAfter(thread, 0L, 1000).value

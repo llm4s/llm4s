@@ -1,6 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.agent.AgentStatus
+import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{ APIError, LLMError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -47,20 +48,19 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
     override def getReserveCompletion(): Int = 512
   }
 
-  "run(String)" should "return a successful AgentState when the LLM completes normally" in {
+  "run(String)" should "return a completed AgentResult when the LLM completes normally" in {
     val agent  = Llm4s.createAgent(new JLlmClient(completingClient("42")))
     val result = agent.run("What is 6*7?")
     result.isSuccess shouldBe true
-    val state = result.get()
-    state.status shouldBe AgentStatus.Complete
+    result.get().status shouldBe AgentStatus.Completed("42")
   }
 
-  it should "return the LLM answer in the final conversation" in {
+  it should "return the LLM answer as the last message of the conversation" in {
     val agent  = Llm4s.createAgent(new JLlmClient(completingClient("Paris")))
     val result = agent.run("Capital of France?")
     result.isSuccess shouldBe true
-    val lastMessage = result.get().conversation.messages.last
-    lastMessage.content shouldBe "Paris"
+    result.get().messages.last.content shouldBe "Paris"
+    result.get().answer shouldBe Some("Paris")
   }
 
   it should "return a failure result when the underlying LLM call fails" in {
@@ -70,17 +70,40 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
     result.isFailure shouldBe true
   }
 
-  "run(String, ToolRegistry)" should "succeed with an empty tool registry" in {
-    val agent  = Llm4s.createAgent(new JLlmClient(completingClient("done")))
-    val result = agent.run("query", ToolRegistry.empty)
+  "createAgent(client, tools)" should "succeed with an empty tool registry" in {
+    val agent  = Llm4s.createAgent(new JLlmClient(completingClient("done")), ToolRegistry.empty)
+    val result = agent.run("query")
     result.isSuccess shouldBe true
   }
 
   it should "return failure when the LLM fails, even with tools provided" in {
     val error  = APIError("test-provider", "server error")
-    val agent  = Llm4s.createAgent(new JLlmClient(failingClient(error)))
-    val result = agent.run("query", ToolRegistry.empty)
+    val agent  = Llm4s.createAgent(new JLlmClient(failingClient(error)), ToolRegistry.empty)
+    val result = agent.run("query")
     result.isFailure shouldBe true
-    result.getError().error shouldBe error
+    result.getError().error shouldBe a[GraphError.NodeFailed]
+  }
+
+  "continueConversation" should "run the next turn on the same conversation" in {
+    val agent  = Llm4s.createAgent(new JLlmClient(completingClient("ok")))
+    val first  = agent.run("one").get()
+    val second = agent.continueConversation(first, "two").get()
+    second.threadId shouldBe first.threadId
+    second.messages.map(_.content) shouldBe Vector("one", "ok", "two", "ok")
+  }
+
+  it should "return a failure for a null previous result or query" in {
+    val agent = Llm4s.createAgent(new JLlmClient(completingClient("ok")))
+    val first = agent.run("one").get()
+    agent.continueConversation(null, "two").isFailure shouldBe true
+    agent.continueConversation(first, null).isFailure shouldBe true
+  }
+
+  "forget" should "remove the conversation, so its thread starts afresh" in {
+    val agent = Llm4s.createAgent(new JLlmClient(completingClient("ok")))
+    val first = agent.run("one").get()
+    agent.forget(first).isSuccess shouldBe true
+    agent.continueConversation(first, "two").get().messages.map(_.content) shouldBe Vector("two", "ok")
+    agent.forget(null).isFailure shouldBe true
   }
 }

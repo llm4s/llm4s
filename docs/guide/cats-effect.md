@@ -72,14 +72,13 @@ client
 
 ## AgentIO
 
-`AgentIO[F[_]]` wraps `Agent`, shifting the blocking agent loop to the blocking pool.
+`AgentIO[F[_]]` wraps an `Agent`, shifting the blocking agent loop to the blocking pool. `client.agent(id)(configure)` builds the agent from `Agent.builder(id, client)` with `configure` applied, so tools, guardrails, handoffs and middleware are set there; a builder that does not build fails the effect with its error.
 
 ```scala
-val agentIO = client.agent()
-
 for {
-  state <- agentIO.run(query = "Summarise this", tools = myTools)
-  _     <- IO.println(state.conversation.messages.last)
+  agentIO <- client.agent("assistant")(_.withTools(myTools).withSystemPrompt("You are concise."))
+  result  <- agentIO.run("Summarise this")
+  _       <- IO.println(result.answer)
 } yield ()
 ```
 
@@ -87,7 +86,7 @@ for {
 
 ```scala
 for {
-  s1 <- agentIO.run("What's the weather in Paris?", tools)
+  s1 <- agentIO.run("What's the weather in Paris?")
   s2 <- agentIO.continueConversation(s1, "And London?")
 } yield s2
 ```
@@ -118,17 +117,21 @@ variables (`LLM_MODEL`, `OPENAI_API_KEY`, etc.).
 
 ### Differences from `Agent`
 
-`AgentIO` is a deliberately thin wrapper. `run` does not expose `handoffs`, and
-`continueConversation` does not expose `contextWindowConfig`; the `Agent` defaults apply.
-Tracing, debug logging and the trace log path are still available through the `context`
-parameter (`AgentContext`). If you need handoffs or context-window pruning, call `Agent` directly
-inside `Async[F].blocking`.
+`AgentIO` is a deliberately thin wrapper over `Agent.start` and `AgentRun.await`. It exposes `run`,
+`continueConversation`, `recover` and `resume`, each taking a `RunConfig` and returning an `F[AgentResult]`.
+It does not expose a named `ThreadId` on `run` (each `run` starts a new thread, and
+`continueConversation` continues the thread of a previous result) or `history`; for those, build the
+`Agent` yourself and call `agent.start(...)` inside `IO.blocking`.
 
-Tool calls are not a failure of the effect. When the model calls a tool with arguments that do not
-fit the tool's schema, `Agent` hands a structured error result back to the model so it
-can correct itself; the run continues and only the step limit or a provider error ends it, which
-then arrives in the error channel as usual. If you need to see those results, read the
-`ToolMessage`s in the returned `AgentState`. The schema-validated `AgentTool` contract and the
-graph runtime (`org.llm4s.agent.graph`) are experimental and are not wrapped here; if you pass
-handoffs by calling `Agent` directly, each `Handoff` needs a stable id, as in
-`Handoff.to("physics", agent)`.
+Cancelling the fiber cancels the run and returns once its turn has ended, so the thread can be
+recovered at once with `recover`.
+
+Errors arrive as `LLMException` in the effect's error channel: a provider, tool or middleware failure
+is a `GraphError` (a provider error is `GraphError.NodeFailed(cause)`; an exception thrown by user
+code arrives as a `NodeFailed` carrying the original). A guardrail block, the step limit and a
+suspension for approval are not failures: they are the `AgentResult`'s `status`.
+
+Tool calls are not a failure of the effect either. When the model calls a tool with arguments that do not
+fit the tool's schema, the agent hands a structured error result (`{"error": ...}`) back to the model so it
+can correct itself; the run continues and only the step limit or a provider error ends it. If you
+need to see those results, read the `ToolMessage`s in `AgentResult.messages`.
