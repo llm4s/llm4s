@@ -50,7 +50,7 @@ class KotlinApiIntegrationTest {
 
     @BeforeTest
     fun setUp() {
-        server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
+        server = HttpServer.create(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0)
         server.executor = java.util.concurrent.Executors.newCachedThreadPool()
         server.createContext("/") { exchange ->
             requests.incrementAndGet()
