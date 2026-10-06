@@ -17,7 +17,7 @@ class ContextWindowMiddlewareSpec extends AnyFlatSpec with Matchers with EitherV
 
   final private class ScriptedModel extends ModelStep {
     val seen = new CopyOnWriteArrayList[Vector[Message]]()
-    def next(messages: Vector[Message], tools: ToolSet): Result[Completion] = {
+    def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] = {
       seen.add(messages)
       Right(completion(AssistantMessage("ok")))
     }

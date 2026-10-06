@@ -24,7 +24,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
   /** A model that plays `turns` in order, then fails; records every message list it was sent. */
   final private class ScriptedModel(turns: (Vector[Message] => AssistantMessage)*) extends ModelStep {
     val seen = new CopyOnWriteArrayList[Vector[Message]]()
-    def next(messages: Vector[Message], tools: ToolSet): Result[Completion] = {
+    def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] = {
       val turn = seen.size
       seen.add(messages)
       turns
@@ -38,7 +38,7 @@ class AgentFamilySpec extends AnyFlatSpec with Matchers with EitherValues {
   /** A model that calls `echo` on every turn, never answering. */
   final private class Looping extends ModelStep {
     val seen = new CopyOnWriteArrayList[Vector[Message]]()
-    def next(messages: Vector[Message], tools: ToolSet): Result[Completion] = {
+    def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] = {
       seen.add(messages)
       val call = ToolCall(s"c${seen.size}", "echo", ujson.Obj("text" -> s"step ${seen.size}"))
       Right(completion(AssistantMessage(None, Seq(call))))

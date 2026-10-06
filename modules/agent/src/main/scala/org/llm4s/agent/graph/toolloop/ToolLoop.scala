@@ -1,6 +1,8 @@
 package org.llm4s.agent.graph.toolloop
 
 import org.llm4s.agent.AgentId
+import org.llm4s.agent.events
+import org.llm4s.agent.events.AgentEvents
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.{ MiddlewareId, MiddlewareStack, ModelRequest, ToolCallRequest }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
@@ -10,7 +12,7 @@ import org.llm4s.llmconnect.model.*
 import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
 import scala.util.{ Failure, Success, Try }
 
 /** Who asked for an approval: the tool itself, or a middleware's tool wrapper. All resume at the same approval node. */
@@ -49,18 +51,40 @@ final case class ToolQuestionRequest(
 final case class ToolResult(assistantMessageId: String, toolCallId: String, content: String, isError: Boolean)
     derives ReadWriter
 
+/** One invocation of an agent's model: the task's [[RunContext]], the agent, and this attempt's number (from 1). */
+final class ModelCall private[toolloop] (val context: RunContext, val agent: AgentId, val attempt: Int):
+  def textDelta(text: String): Unit = AgentEvents.TextDelta.progress(context, events.TextDelta(attempt, text))
+  def thinkingDelta(text: String): Unit =
+    AgentEvents.ThinkingDelta.progress(context, events.ThinkingDelta(attempt, text))
+
 /** The model call: the conversation so far, and the tools on offer, to the model's completion. */
 trait ModelStep:
-  def next(messages: Vector[Message], tools: ToolSet): Result[Completion]
+  def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion]
 
 object ModelStep:
 
   /**
    * Calls `client` with `options`, its `tools` replaced by the loop's
-   * [[org.llm4s.agent.graph.tool.ToolSet.toolFunctions]].
+   * [[org.llm4s.agent.graph.tool.ToolSet.toolFunctions]]. With `streaming`, it calls
+   * `streamComplete`, sending each chunk's text as a `TextDelta` and its thinking as a
+   * `ThinkingDelta`, and returns the accumulated completion; otherwise `complete`.
    */
-  def fromClient(client: LLMClient, options: CompletionOptions = CompletionOptions()): ModelStep =
-    (messages, tools) => client.complete(Conversation(messages), options.withTools(tools.toolFunctions))
+  def fromClient(
+    client: LLMClient,
+    options: CompletionOptions = CompletionOptions(),
+    streaming: Boolean = false
+  ): ModelStep =
+    (messages, tools, call) =>
+      val withTools = options.withTools(tools.toolFunctions)
+      if !streaming then client.complete(Conversation(messages), withTools)
+      else
+        client.streamComplete(
+          Conversation(messages),
+          withTools,
+          chunk =>
+            chunk.thinkingDelta.filter(_.nonEmpty).foreach(call.thinkingDelta)
+            chunk.content.filter(_.nonEmpty).foreach(call.textDelta)
+        )
 
 /**
  * The model/tool loop of an agent family as one graph - the Stage 0 proof of runtime-owned tool
@@ -455,13 +479,25 @@ object ToolLoop:
             _        <- Message.validateConversation(history.map(_.message).toList)
             transfer <- state.get(LoopKeys.transfer)
             view     <- sent(agent.id, history, transfer, root, preserves)
-            request = ModelRequest(prompt ++ view, nodes.offered)
-            completion <- stack.wrapModelCall(request, context)(callModel(agent.model))
+            request  = ModelRequest(prompt ++ view, nodes.offered)
+            attempts = AtomicInteger(0)
+            completion <- stack.wrapModelCall(request, context)(callModel(agent.model, agent.id, context, attempts))
             assistant = completion.message
             // a blank answer without tool calls is refused before it is stored, so the history stays valid
             // and recover asks the model again
             _ <- assistant.validate
           yield
+            // every successful call, whatever it routes to; counts and usage only, never content
+            AgentEvents.ModelCallCompleted.emit(
+              context,
+              events.ModelCallCompleted(
+                agent.id.value,
+                completion.model,
+                attempts.get,
+                assistant.toolCalls.size,
+                completion.usage.map(events.CallUsage.fromTokenUsage)
+              )
+            )
             val taskId = context.position.taskId.value
             val stored = StoredMessage(s"$taskId/assistant", assistant)
             val call = UsageSummary()
@@ -479,6 +515,7 @@ object ToolLoop:
                 else appended.fanOut(nodes.batch, nodes.callTool, calls.map(ToolTask(stored.id, _)))
               case Vector(transfer) if calls.size == 1 =>
                 val target = handoffs(transfer.name)
+                AgentEvents.HandedOff.emit(context, events.HandedOff(agent.id.value, target.agent.id.value))
                 appended
                   .update(messages, toolMessage(transfer, HandoffTools.transferred(target.agent.id)))
                   .update(LoopKeys.activeAgent, target.agent.id)
@@ -609,16 +646,21 @@ object ToolLoop:
 
   /**
    * The model wrappers' innermost function: `model.next`, guarded, since the stack guards only its
-   * hooks. It refuses to call the model while the thread is interrupted, returning
-   * `Left(CancelledError)`, so a wrapper that retries never calls a cancelled model again. A
-   * NonFatal throw is `Left`; a thrown cancellation - a bare `InterruptedException` too - restores
-   * the interrupt flag and is `Left(CancelledError)`. Either way it is the model's failure, not a
-   * wrapper's.
+   * hooks. Each invocation is an attempt, numbered from 1 by `attempts` (one counter per model task)
+   * and announced live with `ModelCallStarted`. It refuses to call the model while the thread is
+   * interrupted, returning `Left(CancelledError)`, so a wrapper that retries never calls a cancelled
+   * model again. A NonFatal throw is `Left`; a thrown cancellation - a bare `InterruptedException`
+   * too - restores the interrupt flag and is `Left(CancelledError)`. Either way it is the model's
+   * failure, not a wrapper's.
    */
-  private def callModel(model: ModelStep)(request: ModelRequest): Result[Completion] =
+  private def callModel(model: ModelStep, agent: AgentId, context: RunContext, attempts: AtomicInteger)(
+    request: ModelRequest
+  ): Result[Completion] =
     if Thread.currentThread().isInterrupted then Left(CancelledError("model"))
     else
-      attempt(model.next(request.messages, request.tools)) match
+      val n = attempts.incrementAndGet()
+      AgentEvents.ModelCallStarted.progress(context, events.ModelCallStarted(agent.value, n))
+      attempt(model.next(request.messages, request.tools, ModelCall(context, agent, n))) match
         case Right(result) => result
         case Left(thrown) =>
           CancelledError.fromThrowable(thrown, "model") match

@@ -26,7 +26,7 @@ class HandoffRouteSpec extends AnyFlatSpec with Matchers with EitherValues {
   final private class ScriptedModel(turns: (Vector[Message] => AssistantMessage)*) extends ModelStep {
     val seen      = new CopyOnWriteArrayList[Vector[Message]]()
     val toolNames = new CopyOnWriteArrayList[Vector[String]]()
-    def next(messages: Vector[Message], tools: ToolSet): Result[Completion] = {
+    def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] = {
       val turn = seen.size
       seen.add(messages)
       toolNames.add(tools.tools.map(_.spec.name))

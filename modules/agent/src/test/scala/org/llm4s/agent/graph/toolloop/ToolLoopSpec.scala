@@ -71,7 +71,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   final private class ScriptedModel(turns: (Vector[Message] => AssistantMessage)*) extends ModelStep {
     val seen      = new CopyOnWriteArrayList[Vector[Message]]()
     val toolNames = new CopyOnWriteArrayList[Vector[String]]()
-    def next(messages: Vector[Message], tools: ToolSet): Result[Completion] = {
+    def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] = {
       val turn = seen.size
       seen.add(messages)
       toolNames.add(tools.tools.map(_.spec.name))
@@ -1253,7 +1253,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     )
     final class Cancelling(cancel: () => Result[Completion]) extends ModelStep {
       val calls = new AtomicInteger()
-      def next(messages: Vector[Message], tools: ToolSet): Result[Completion] =
+      def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] =
         calls.incrementAndGet()
         cancel()
     }
@@ -1363,7 +1363,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     // a model that fails its first call; the wrapper retries once
     val attempts = new AtomicInteger()
     val flaky = new ModelStep {
-      def next(messages: Vector[Message], tools: ToolSet): Result[Completion] =
+      def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] =
         if attempts.incrementAndGet() == 1 then Left(ValidationError("model", "rate limited"))
         else Right(completion(AssistantMessage("second time lucky")))
     }
@@ -1763,7 +1763,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
 
   it should "fail the run as the model's own failure, not a middleware's, when the ModelStep throws" in {
     val throwing = new ModelStep {
-      def next(messages: Vector[Message], tools: ToolSet): Result[Completion] =
+      def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] =
         throw new IllegalStateException("model broke")
     }
     val l             = buildSingle(throwing, set(Tools().echo), Seq(middleware("passing"))).value
@@ -1773,7 +1773,7 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     cause.message should include("model broke")
 
     val interrupted = new ModelStep {
-      def next(messages: Vector[Message], tools: ToolSet): Result[Completion] =
+      def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] =
         throw new RuntimeException("wrapped", new InterruptedException("stop"))
     }
     val c = buildSingle(interrupted, set(Tools().echo), Seq(middleware("passing"))).value
