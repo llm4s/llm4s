@@ -9,8 +9,8 @@ import org.scalatest.wordspec.AnyWordSpec
 /**
  * Pins the `llm4s-rag` row of the "errors defined by other modules" table in
  * `docs/guide/error-handling.md`: these errors carry neither recoverability marker, so
- * `LLMError.isRecoverable` cannot classify them and the guide's marker-trait match must be used.
- * If one gains a marker, move it out of that table and update this spec.
+ * `LLMError.isRecoverable` reports them as not recoverable, and agrees with the guide's marker-trait match.
+ * If one gains a marker, update that table and this spec.
  */
 class RagErrorMarkersSpec extends AnyWordSpec with Matchers {
 
@@ -36,6 +36,12 @@ class RagErrorMarkersSpec extends AnyWordSpec with Matchers {
 
     "be classified safely by the guide's marker-trait match" in {
       unmarked.map(retryable).distinct shouldBe List(false)
+    }
+
+    "be reported as not recoverable by LLMError.isRecoverable, which is total" in {
+      unmarked.map(LLMError.isRecoverable).distinct shouldBe List(false)
+      LLMError.recoverableErrors(unmarked) shouldBe empty
+      LLMError.nonRecoverableErrors(unmarked) shouldBe unmarked
     }
   }
 }

@@ -125,7 +125,7 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
       describe(Left(FlakyVendorError("blip"))) shouldBe "transient, may succeed on retry: blip"
     }
 
-    "route an error with no marker to the catch-all instead of throwing, which isRecoverable cannot promise" in {
+    "route an error with no marker to the catch-all" in {
       // The guide lists the library errors that carry neither marker. If one of these gains a marker,
       // update the guide's table of errors defined by other modules together with this assertion.
       val embedding = EmbeddingError(Some("500"), "provider failed", "openai")
@@ -140,15 +140,38 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
   }
 
   "recoverability" should {
-    "be decided by the Basic Usage guide's marker-trait match without throwing on an unmarked error" in {
+    "be answered by isRecoverable for every error, as the Basic Usage guide calls it, an unmarked one included" in {
+      LLMError.isRecoverable(NetworkError("down", None, "https://x")) shouldBe true
+      LLMError.isRecoverable(ValidationError("f", "r")) shouldBe false
+      LLMError.isRecoverable(EmbeddingError(Some("500"), "provider failed", "openai")) shouldBe false
+
+      final case class UnmarkedError(message: String) extends LLMError
+      LLMError.isRecoverable(UnmarkedError("no marker")) shouldBe false
+    }
+
+    "agree with the marker-trait match the guide shows, including on an unmarked error" in {
       def retryable(error: LLMError): Boolean = error match {
         case _: RecoverableError => true
         case _                   => false
       }
-      retryable(NetworkError("down", None, "https://x")) shouldBe true
-      retryable(ValidationError("f", "r")) shouldBe false
-      retryable(EmbeddingError(Some("500"), "provider failed", "openai")) shouldBe false
-      an[MatchError] should be thrownBy LLMError.isRecoverable(EmbeddingError(None, "m", "openai"))
+      final case class UnmarkedError(message: String) extends LLMError
+      val errors: List[LLMError] = List(
+        NetworkError("down", None, "https://x"),
+        ValidationError("f", "r"),
+        EmbeddingError(Some("500"), "provider failed", "openai"),
+        UnmarkedError("no marker")
+      )
+      errors.foreach(e => withClue(e.toString)(LLMError.isRecoverable(e) shouldBe retryable(e)))
+    }
+
+    "partition a list holding an unmarked error instead of throwing" in {
+      final case class UnmarkedError(message: String) extends LLMError
+      val network                = NetworkError("down", None, "https://x")
+      val unmarked               = UnmarkedError("no marker")
+      val errors: List[LLMError] = List(network, unmarked, ValidationError("f", "r"))
+      LLMError.recoverableErrors(errors) shouldBe List(network)
+      LLMError.nonRecoverableErrors(errors) should have size 2
+      LLMError.nonRecoverableErrors(errors) should contain(unmarked)
     }
 
     "follow the marker trait of each error type, as the guide's table says" in {

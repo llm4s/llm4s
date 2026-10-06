@@ -28,8 +28,8 @@ import org.llm4s.error.{ CancelledError, LLMError, NonRecoverableError, Recovera
  * [[org.llm4s.error.CancelledError]] when their thread is interrupted - the contract of every llm4s
  * client - next to these cases: they return `Either[LLMError, _]`.
  *
- * Every case says whether trying again can help, as an `LLMError` must: `LLMError.isRecoverable` (and the
- * retry policies built on it) matches only [[org.llm4s.error.RecoverableError]] and
+ * Every case says whether trying again can help, with a marker: `LLMError.isRecoverable` (and the retry policies
+ * built on it) is `true` only for a [[org.llm4s.error.RecoverableError]], and every other case is a
  * [[org.llm4s.error.NonRecoverableError]]. Recoverable: [[ImageRateLimitError]], and an [[ImageServiceError]] whose status
  * is transient (see [[ImageServiceError.isTransientStatus]]). Everything else is not: a rejected credential, request
  * or prompt gets the same answer on the next call, and an [[ImageUnknownError]] is not retried blindly.

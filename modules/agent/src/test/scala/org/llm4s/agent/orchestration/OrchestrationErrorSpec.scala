@@ -1,6 +1,6 @@
 package org.llm4s.agent.orchestration
 
-import org.llm4s.error.LLMError
+import org.llm4s.error.{ LLMError, NonRecoverableError, RecoverableError }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import scala.concurrent.duration._
@@ -181,6 +181,40 @@ class OrchestrationErrorSpec extends AnyFlatSpec with Matchers {
       error shouldBe an[OrchestrationError]
       error.message should not be empty
       error.context should not be empty
+    }
+  }
+
+  // ==========================================================================
+  // Recoverability markers (docs/guide/error-handling.md, errors defined by other modules)
+  // ==========================================================================
+
+  "OrchestrationError recoverability" should "follow each case's marker, and report an unmarked case as not recoverable" in {
+    val timeout = OrchestrationError.AgentTimeoutError("a", 1.second)
+    timeout shouldBe a[RecoverableError]
+    LLMError.isRecoverable(timeout) shouldBe true
+
+    val permanent: List[LLMError] = List(
+      OrchestrationError.PlanValidationError("cycle"),
+      OrchestrationError.TypeMismatchError("a", "b", "Int", "String")
+    )
+    permanent.foreach { e =>
+      withClue(e.toString) {
+        e shouldBe a[NonRecoverableError]
+        LLMError.isRecoverable(e) shouldBe false
+      }
+    }
+
+    val unmarked: List[LLMError] = List(
+      OrchestrationError.NodeExecutionError("n", "node", "failed"),
+      OrchestrationError.NodeExecutionError.nonRecoverable("n", "node", "failed"),
+      OrchestrationError.PlanExecutionError("failed")
+    )
+    unmarked.foreach { e =>
+      withClue(e.toString) {
+        e should not be a[RecoverableError]
+        e should not be a[NonRecoverableError]
+        LLMError.isRecoverable(e) shouldBe false
+      }
     }
   }
 }

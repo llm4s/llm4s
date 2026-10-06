@@ -579,12 +579,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   takes three fields: `case AssistantMessage(content, toolCalls, thinking)`. `Completion` loses its `thinking`
   constructor parameter and `withThinking`: `Completion.thinking` is now `message.thinkingText`, so set it with
   `completion.withMessage(completion.message.withThinking(...))`, or build the message with it.
+  Signed or redacted thinking is *sealed*: Anthropic and Bedrock accept it only beside the exact content and tool
+  calls it came with, so `withContent` / `withToolCalls` given a changed value drop redacted blocks and signatures
+  (keeping the reasoning text). Context compression, an `afterAgent` answer rewrite and a tool-call edit therefore
+  never send a modified signed turn; `hasSealedThinking` reports the state. Token estimates
+  (`ConversationTokenCounter`, the agent's default pruning counter) now count thinking, which providers resend.
 - **`llm4s-anthropic`: tool calls and results as content blocks** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
   an assistant turn's tool calls go to Anthropic as `tool_use` blocks after its text, and each `ToolMessage` as a
   `tool_result` block, consecutive results in one user turn. Before, a tool-call turn was dropped and its results
-  sent as `[Tool result for <id>]: ...` user text, which left nowhere to replay the turn's signed thinking. A tool
-  call no `ToolMessage` answers is left out, and a `ToolMessage` whose call is not in the conversation is still sent
-  as prefixed user text.
+  sent as `[Tool result for <id>]: ...` user text, which left nowhere to replay the turn's signed thinking. A call
+  is sent only when its result is in the run of tool messages straight after it; otherwise the call is left out and
+  the result goes as prefixed user text, after the turn's `tool_result` blocks. `llm4s-bedrock` pairs calls and
+  results by the same rule (it sent every call and result before, which Converse rejects when they do not pair).
+- **`LLMError.isRecoverable` is total** ([#1380](https://github.com/llm4s/llm4s/issues/1380), `llm4s-core`,
+  `llm4s-agent`, `llm4s-speech`): it matched only `RecoverableError` and `NonRecoverableError` and threw a
+  `MatchError` on any other `LLMError` (`EmbeddingError`, `RerankError`, `EvaluationError`, the orchestration and
+  speech errors, a custom error), and so did `recoverableErrors` / `nonRecoverableErrors` on a list holding one.
+  An unmarked error is now not recoverable, as `RetryPolicy.isRetryable` and `ErrorRecovery` already treated it.
+  Markers are added where the answer is clear: `OrchestrationError.AgentTimeoutError`, `STTError.EngineNotAvailable`
+  and `TTSError.EngineNotAvailable` are `RecoverableError`s (so the library's retries, such as a graph node's
+  default retry or `recoverWithBackoff`, now retry them); `PlanValidationError`, `TypeMismatchError`,
+  `STTError.UnsupportedFormat`, `STTError.InvalidInput`, `WavFileGenerator.WavError` and `AudioIO.AudioIOError` are
+  `NonRecoverableError`s (no behaviour change). `NodeExecutionError` (its own `recoverable` flag),
+  `PlanExecutionError`, `STTError.ProcessingFailed`, `TTSError.SynthesisFailed`, `EmbeddingError`, `RerankError` and
+  `EvaluationError` stay unmarked: each is one type whose answer depends on a value, not the type. The error
+  handling and Basic Usage guides drop the `MatchError` caveat, and Basic Usage calls `isRecoverable` directly.
 - **Stage 1 migration: agent runtime** ([#1328](https://github.com/llm4s/llm4s/issues/1328), BREAKING,
   `llm4s-agent`, `llm4s-effect`, `llm4s-zio`, `workspaceClient`): `Agent` runs on `GraphRuntime`
   through a generalised `ToolLoop`; the graph is the only agent loop, and `AgentState` and the

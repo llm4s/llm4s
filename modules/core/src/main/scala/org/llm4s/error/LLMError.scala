@@ -48,7 +48,12 @@ object LLMError {
 
   /**
    * Whether the error may succeed if tried again, perhaps after the caller does something first: `true` for a
-   * [[RecoverableError]], `false` for a [[NonRecoverableError]].
+   * [[RecoverableError]], `false` for anything else.
+   *
+   * It is total. An error that carries neither marker - a library error whose recoverability depends on more than
+   * its type, such as `EmbeddingError`, or a custom `LLMError` that does not say - is not recoverable, as
+   * [[org.llm4s.reliability.RetryPolicy.isRetryable]] and [[ErrorRecovery]] already treat it: nothing says it can
+   * succeed on a retry. Mix in [[RecoverableError]] or [[NonRecoverableError]] to say which an error is.
    *
    * This is wider than what the library retries by itself. [[org.llm4s.reliability.RetryPolicy.isRetryable]] is the
    * rule for automatic retry of the identical request; it is derived from this check and excludes a client-error
@@ -57,15 +62,16 @@ object LLMError {
    * @param error LLMError
    * @return whether the error is recoverable
    */
-
   def isRecoverable(error: LLMError): Boolean = error match {
-    case _: RecoverableError    => true
-    case _: NonRecoverableError => false
+    case _: RecoverableError => true
+    case _                   => false
   }
 
+  /** The errors that are [[isRecoverable]]. */
   def recoverableErrors(errors: List[LLMError]): List[LLMError] =
     errors.filter(isRecoverable)
 
+  /** The errors that are not [[isRecoverable]]: every [[NonRecoverableError]], and every error with no marker. */
   def nonRecoverableErrors(errors: List[LLMError]): List[LLMError] =
     errors.filterNot(isRecoverable)
 
