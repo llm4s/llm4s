@@ -24,12 +24,10 @@ import org.llm4s.llmconnect.LLMClient
  *   RAGGuardrails.standard(llmClient)
  *
  * // Use in agent
- * agent.run(
- *   query = userQuery,
- *   tools = tools,
- *   inputGuardrails = inputGuardrails,
- *   outputGuardrails = outputGuardrails
- * )
+ * Agent
+ *   .builder("assistant", llmClient)
+ *   .withMiddleware(new GuardrailMiddleware(inputGuardrails, outputGuardrails))
+ *   .build()
  *
  * // Use RAG guardrails separately
  * ragGuardrails.foreach { guardrail =>

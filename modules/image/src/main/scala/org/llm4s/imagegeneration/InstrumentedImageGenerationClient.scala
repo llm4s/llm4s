@@ -120,14 +120,14 @@ class InstrumentedImageGenerationClient(
 
   private def errorKindFromImageError(err: LLMError): ErrorKind = err match {
     case _: CancelledError             => ErrorKind.Cancelled
-    case _: AuthenticationError        => ErrorKind.Authentication
-    case _: RateLimitError             => ErrorKind.RateLimit
-    case _: ServiceError               => ErrorKind.ServiceError
-    case _: ValidationError            => ErrorKind.Validation
+    case _: ImageAuthenticationError   => ErrorKind.Authentication
+    case _: ImageRateLimitError        => ErrorKind.RateLimit
+    case _: ImageServiceError          => ErrorKind.ServiceError
+    case _: ImageValidationError       => ErrorKind.Validation
     case _: InvalidPromptError         => ErrorKind.Validation
     case _: InsufficientResourcesError => ErrorKind.ServiceError
     case _: UnsupportedOperation       => ErrorKind.Validation
-    case _: UnknownError               => ErrorKind.Unknown
+    case _: ImageUnknownError          => ErrorKind.Unknown
     case other                         => ErrorKind.fromLLMError(other)
   }
 

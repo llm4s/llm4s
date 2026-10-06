@@ -51,7 +51,10 @@ object PruningStrategy {
 
   /**
    * Custom pruning function.
-   * Receives all messages and returns the subset to keep.
+   * Receives the history before the current turn (the latest user message onwards, which is never
+   * pruned and is appended afterwards) and returns the messages to send in its place - a subset, or
+   * copies it has changed. The result is then repaired: a tool call left without its results, or a
+   * result without its call, is dropped, and the history starts with a user message.
    * The function should be pure (no side effects) and deterministic.
    *
    * @param fn Function that takes messages and returns pruned messages

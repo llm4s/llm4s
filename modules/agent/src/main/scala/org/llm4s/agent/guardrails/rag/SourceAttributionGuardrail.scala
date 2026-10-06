@@ -7,6 +7,8 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
+import java.util.Locale
+
 import scala.util.Try
 
 /**
@@ -238,7 +240,7 @@ class SourceAttributionGuardrail(
     val lines = response.split("\n").map(_.trim).filter(_.nonEmpty)
 
     val hasAttributions = lines.find(_.startsWith("HAS_ATTRIBUTIONS:")).exists { line =>
-      line.stripPrefix("HAS_ATTRIBUTIONS:").trim.toUpperCase.startsWith("YES")
+      line.stripPrefix("HAS_ATTRIBUTIONS:").trim.toUpperCase(Locale.ROOT).startsWith("YES")
     }
 
     val attributionScore = lines
@@ -253,7 +255,7 @@ class SourceAttributionGuardrail(
       .find(_.startsWith("CITED_SOURCES:"))
       .map { line =>
         val sources = line.stripPrefix("CITED_SOURCES:").trim
-        if (sources.toUpperCase == "NONE" || sources.isEmpty) Seq.empty
+        if (sources.toUpperCase(Locale.ROOT) == "NONE" || sources.isEmpty) Seq.empty
         else sources.split(",").map(_.trim).filter(_.nonEmpty).toSeq
       }
       .getOrElse(Seq.empty)
@@ -262,7 +264,7 @@ class SourceAttributionGuardrail(
       .find(_.startsWith("UNCITED_CLAIMS:"))
       .map { line =>
         val claims = line.stripPrefix("UNCITED_CLAIMS:").trim
-        if (claims.toUpperCase == "NONE" || claims.isEmpty) Seq.empty
+        if (claims.toUpperCase(Locale.ROOT) == "NONE" || claims.isEmpty) Seq.empty
         else claims.split(",").map(_.trim).filter(_.nonEmpty).toSeq
       }
       .getOrElse(Seq.empty)

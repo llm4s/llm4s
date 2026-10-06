@@ -2,7 +2,7 @@ package org.llm4s.agent.graph.middleware
 
 import org.llm4s.agent.graph.{ RunContext, StateKey, ToolCallId, ToolName }
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContext, ToolOutcome, ToolSet }
-import org.llm4s.llmconnect.model.{ AssistantMessage, Message, ToolCall }
+import org.llm4s.llmconnect.model.{ Completion, Message, ToolCall }
 import org.llm4s.types.Result
 import upickle.default.ReadWriter
 
@@ -102,8 +102,8 @@ trait AgentMiddleware:
    * control: a tool the model calls anyway still runs through `wrapToolCall`, where denial belongs.
    */
   def wrapModelCall(request: ModelRequest, @unused context: RunContext)(
-    next: ModelRequest => Result[AssistantMessage]
-  ): Result[AssistantMessage] = next(request)
+    next: ModelRequest => Result[Completion]
+  ): Result[Completion] = next(request)
 
   /**
    * Wraps one tool call, after its arguments were validated. A wrapper denies with

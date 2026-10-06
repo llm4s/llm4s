@@ -1,50 +1,48 @@
 package org.llm4s.zio
 
-import org.llm4s.agent.guardrails.{ InputGuardrail, OutputGuardrail }
-import org.llm4s.agent.{ Agent, AgentContext, AgentState }
+import org.llm4s.agent.{ Agent, AgentResult, AgentRun }
+import org.llm4s.agent.graph.{ InterruptId, RunConfig, ThreadId }
 import org.llm4s.error.LLMError
-import org.llm4s.llmconnect.model.CompletionOptions
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.types.Result
 import zio.ZIO
 
 /**
  * ZIO wrapper for [[Agent]].
  *
- * Lifts every `Result[AgentState]` return value into `ZIO[Any, LLMError, AgentState]`.
- * The underlying blocking [[Agent]] methods are shifted to ZIO's blocking thread pool and run
- * interruptibly: interrupting the fiber interrupts the running agent loop.
+ * Lifts every `Result[AgentResult]` into `ZIO[Any, LLMError, AgentResult]`. `run` and
+ * `continueConversation` start the turn on ZIO's blocking pool and then await it, so interrupting
+ * the fiber cancels the turn itself ([[AgentRun.cancel]]) and returns once it has ended: its model call and tool calls are
+ * interrupted, and the thread is left for `recover`. `recover` and `resume` do the same through
+ * `Agent.startRecover` and `Agent.startResume`.
  *
- * Intentionally a thin wrapper: `run` does not expose `handoffs`, and `continueConversation` does
- * not expose `contextWindowConfig`; the underlying [[Agent]] defaults apply. Tracing, debug logging
- * and the trace log path are still available through the `context` parameter. Use [[Agent]]
- * directly (inside `ZIO.attemptBlockingInterrupt`) when you need handoffs or context-window pruning.
+ * A model call that throws instead of returning `Left` ends the turn with a
+ * `GraphError.NodeFailed` whose `cause` is the `LLMError` the runtime made of the throwable; it
+ * fails the effect with that error, not as a defect.
  *
- * Tool calls are not a failure of the effect: `Agent` hands a call with invalid arguments back to the
- * model as a structured error tool result and the run continues. The experimental
- * schema-validated `AgentTool` contract and the graph runtime (`org.llm4s.agent.graph`) are not
- * wrapped here.
+ * Intentionally a thin wrapper: build the [[Agent]] with its tools, middleware (guardrails),
+ * handoffs and options through `Agent.builder`, or `LLMClientZ.agent`.
  */
 trait AgentZ {
 
-  def run(
-    query: String,
-    tools: ToolRegistry,
-    inputGuardrails: Seq[InputGuardrail] = Seq.empty,
-    outputGuardrails: Seq[OutputGuardrail] = Seq.empty,
-    maxSteps: Option[Int] = Some(Agent.DefaultMaxSteps),
-    systemPromptAddition: Option[String] = None,
-    completionOptions: CompletionOptions = CompletionOptions(),
-    context: AgentContext = AgentContext.Default
-  ): ZIO[Any, LLMError, AgentState]
+  /** One turn on a new thread; see [[Agent.run]]. */
+  def run(query: String, config: RunConfig = RunConfig()): ZIO[Any, LLMError, AgentResult]
 
+  /** The next turn on `previous`'s thread; see [[Agent.continueConversation]]. */
   def continueConversation(
-    previousState: AgentState,
-    newUserMessage: String,
-    inputGuardrails: Seq[InputGuardrail] = Seq.empty,
-    outputGuardrails: Seq[OutputGuardrail] = Seq.empty,
-    maxSteps: Option[Int] = None,
-    context: AgentContext = AgentContext.Default
-  ): ZIO[Any, LLMError, AgentState]
+    previous: AgentResult,
+    query: String,
+    config: RunConfig = RunConfig()
+  ): ZIO[Any, LLMError, AgentResult]
+
+  /** Continues `threadId`'s failed or interrupted run; see [[Agent.recover]]. */
+  def recover(threadId: ThreadId, config: RunConfig = RunConfig()): ZIO[Any, LLMError, AgentResult]
+
+  /** Answers pending approvals and questions and continues; see [[Agent.resume]]. */
+  def resume(
+    threadId: ThreadId,
+    answers: Map[InterruptId, ujson.Value],
+    config: RunConfig = RunConfig()
+  ): ZIO[Any, LLMError, AgentResult]
 }
 
 object AgentZ {
@@ -54,52 +52,38 @@ object AgentZ {
 
   final private class Impl(agent: Agent) extends AgentZ {
 
-    def run(
-      query: String,
-      tools: ToolRegistry,
-      inputGuardrails: Seq[InputGuardrail] = Seq.empty,
-      outputGuardrails: Seq[OutputGuardrail] = Seq.empty,
-      maxSteps: Option[Int] = Some(Agent.DefaultMaxSteps),
-      systemPromptAddition: Option[String] = None,
-      completionOptions: CompletionOptions = CompletionOptions(),
-      context: AgentContext = AgentContext.Default
-    ): ZIO[Any, LLMError, AgentState] =
-      ZIO
-        .attemptBlockingInterrupt(
-          agent.run(
-            query,
-            tools,
-            inputGuardrails,
-            outputGuardrails,
-            maxSteps = maxSteps,
-            systemPromptAddition = systemPromptAddition,
-            completionOptions = completionOptions,
-            context = context
-          )
-        )
-        .orDie
-        .flatMap(ZIO.fromEither(_))
+    def run(query: String, config: RunConfig): ZIO[Any, LLMError, AgentResult] =
+      awaiting(agent.start(ThreadId(java.util.UUID.randomUUID().toString), query, config))
 
-    def continueConversation(
-      previousState: AgentState,
-      newUserMessage: String,
-      inputGuardrails: Seq[InputGuardrail] = Seq.empty,
-      outputGuardrails: Seq[OutputGuardrail] = Seq.empty,
-      maxSteps: Option[Int] = None,
-      context: AgentContext = AgentContext.Default
-    ): ZIO[Any, LLMError, AgentState] =
-      ZIO
-        .attemptBlockingInterrupt(
-          agent.continueConversation(
-            previousState,
-            newUserMessage,
-            inputGuardrails,
-            outputGuardrails,
-            maxSteps,
-            context = context
-          )
-        )
-        .orDie
-        .flatMap(ZIO.fromEither(_))
+    def continueConversation(previous: AgentResult, query: String, config: RunConfig): ZIO[Any, LLMError, AgentResult] =
+      awaiting(agent.start(previous.threadId, query, config))
+
+    def recover(threadId: ThreadId, config: RunConfig): ZIO[Any, LLMError, AgentResult] =
+      awaiting(agent.startRecover(threadId, config))
+
+    def resume(
+      threadId: ThreadId,
+      answers: Map[InterruptId, ujson.Value],
+      config: RunConfig
+    ): ZIO[Any, LLMError, AgentResult] =
+      awaiting(agent.startResume(threadId, answers, config))
+
+    /**
+     * Starts the turn and awaits it. The start is uninterruptible, so a turn is never started and
+     * forgotten; the wait is interruptible, and an interrupted wait cancels the turn.
+     */
+    private def awaiting(start: => Result[AgentRun]): ZIO[Any, LLMError, AgentResult] =
+      ZIO.uninterruptibleMask { restore =>
+        ZIO.attemptBlocking(start).orDie.flatMap(ZIO.fromEither(_)).flatMap { run =>
+          restore(ZIO.attemptBlockingInterrupt(run.await()).orDie.flatMap(ZIO.fromEither(_)))
+            .onInterrupt(
+              // Interruption returns once the turn has ended, so its thread can be recovered at once.
+              ZIO.attemptBlocking {
+                run.cancel()
+                run.await()
+              }.ignore
+            )
+        }
+      }
   }
 }

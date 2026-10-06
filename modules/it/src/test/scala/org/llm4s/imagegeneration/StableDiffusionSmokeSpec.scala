@@ -53,11 +53,11 @@ class StableDiffusionSmokeSpec extends AnyFlatSpec with Matchers with EitherValu
       options = ImageGenerationOptions(size = ImageSize.Square1024)
     )
 
-    // The client maps 401 to AuthenticationError; Stability may answer a bad key with 403 too.
+    // The client maps 401 to ImageAuthenticationError; Stability may answer a bad key with 403 too.
     result.left.value match {
-      case _: AuthenticationError               => succeed
-      case ServiceError(_, code) if code == 403 => succeed
-      case other                                => fail(s"Expected an authentication failure, got $other")
+      case _: ImageAuthenticationError               => succeed
+      case ImageServiceError(_, code) if code == 403 => succeed
+      case other                                     => fail(s"Expected an authentication failure, got $other")
     }
   }
 }

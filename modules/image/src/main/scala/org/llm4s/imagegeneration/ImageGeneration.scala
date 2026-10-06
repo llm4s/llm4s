@@ -30,55 +30,63 @@ import org.llm4s.error.{ CancelledError, LLMError, NonRecoverableError, Recovera
  *
  * Every case says whether trying again can help, as an `LLMError` must: `LLMError.isRecoverable` (and the
  * retry policies built on it) matches only [[org.llm4s.error.RecoverableError]] and
- * [[org.llm4s.error.NonRecoverableError]]. Recoverable: [[RateLimitError]], and a [[ServiceError]] whose status
- * is transient (see [[ServiceError.isTransientStatus]]). Everything else is not: a rejected credential, request
- * or prompt gets the same answer on the next call, and an [[UnknownError]] is not retried blindly.
+ * [[org.llm4s.error.NonRecoverableError]]. Recoverable: [[ImageRateLimitError]], and an [[ImageServiceError]] whose status
+ * is transient (see [[ImageServiceError.isTransientStatus]]). Everything else is not: a rejected credential, request
+ * or prompt gets the same answer on the next call, and an [[ImageUnknownError]] is not retried blindly.
+ *
+ * The cases that would share a name with an [[org.llm4s.error]] type carry an `Image` prefix
+ * (`ImageAuthenticationError`, `ImageRateLimitError`, `ImageServiceError`, `ImageValidationError`,
+ * `ImageUnknownError`): both families are `LLMError`s, so a match on the wrong one would compile and never fire.
  */
 sealed trait ImageGenerationError extends LLMError {
   def message: String
 }
 
-case class AuthenticationError(message: String) extends ImageGenerationError with NonRecoverableError
-case class RateLimitError(message: String)      extends ImageGenerationError with RecoverableError
+case class ImageAuthenticationError(message: String) extends ImageGenerationError with NonRecoverableError
+case class ImageRateLimitError(message: String)      extends ImageGenerationError with RecoverableError
 
 /**
  * The provider's service failed or refused the call, with the HTTP status it answered (`0` when it did not
  * answer at all, as in a failed health check).
  *
  * Whether trying again can help follows from the status, which a class cannot express by itself, so there
- * are two cases behind this type and [[ServiceError.apply]] picks one: a transient status gives a
- * [[org.llm4s.error.RecoverableError]], any other a [[org.llm4s.error.NonRecoverableError]]. Build and match
- * it as before, `ServiceError(message, status)` and `case ServiceError(message, status)`.
+ * are two cases behind this type and [[ImageServiceError.apply]] picks one: a transient status gives a
+ * [[org.llm4s.error.RecoverableError]], any other a [[org.llm4s.error.NonRecoverableError]]. Build it with
+ * `ImageServiceError(message, status)` and match it with `case ImageServiceError(message, status)`.
  */
-sealed trait ServiceError extends ImageGenerationError {
+sealed trait ImageServiceError extends ImageGenerationError {
   def statusCode: Int
   override def code: Option[String] = Some(statusCode.toString)
 }
 
-object ServiceError {
+object ImageServiceError {
 
   /** Statuses worth retrying: no answer (0), request timeout (408), rate limited (429) and every 5xx. */
   def isTransientStatus(statusCode: Int): Boolean =
     statusCode == 0 || statusCode == 408 || statusCode == 429 || statusCode >= 500
 
-  def apply(message: String, statusCode: Int): ServiceError =
-    if (isTransientStatus(statusCode)) TransientServiceError(message, statusCode)
-    else RejectedServiceError(message, statusCode)
+  def apply(message: String, statusCode: Int): ImageServiceError =
+    if (isTransientStatus(statusCode)) TransientImageServiceError(message, statusCode)
+    else RejectedImageServiceError(message, statusCode)
 
-  def unapply(error: ServiceError): Some[(String, Int)] = Some((error.message, error.statusCode))
+  def unapply(error: ImageServiceError): Some[(String, Int)] = Some((error.message, error.statusCode))
 }
 
-/** A [[ServiceError]] with a transient status: trying again can help. */
-final case class TransientServiceError(message: String, statusCode: Int) extends ServiceError with RecoverableError
+/** An [[ImageServiceError]] with a transient status: trying again can help. */
+final case class TransientImageServiceError(message: String, statusCode: Int)
+    extends ImageServiceError
+    with RecoverableError
 
-/** A [[ServiceError]] the provider refused for good: the same call gets the same answer. */
-final case class RejectedServiceError(message: String, statusCode: Int) extends ServiceError with NonRecoverableError
+/** An [[ImageServiceError]] the provider refused for good: the same call gets the same answer. */
+final case class RejectedImageServiceError(message: String, statusCode: Int)
+    extends ImageServiceError
+    with NonRecoverableError
 
-case class ValidationError(message: String)            extends ImageGenerationError with NonRecoverableError
+case class ImageValidationError(message: String)       extends ImageGenerationError with NonRecoverableError
 case class InvalidPromptError(message: String)         extends ImageGenerationError with NonRecoverableError
 case class InsufficientResourcesError(message: String) extends ImageGenerationError with NonRecoverableError
 case class UnsupportedOperation(message: String)       extends ImageGenerationError with NonRecoverableError
-case class UnknownError(throwable: Throwable) extends ImageGenerationError with NonRecoverableError {
+case class ImageUnknownError(throwable: Throwable) extends ImageGenerationError with NonRecoverableError {
   def message: String = throwable.getMessage
 }
 
@@ -224,7 +232,7 @@ case class GeneratedImage(
   def saveToFile(path: Path): Either[ImageGenerationError, GeneratedImage] = {
     import java.nio.file.Files
     Try(Files.write(path, asBytes)).toEither.left
-      .map(UnknownError.apply)
+      .map(ImageUnknownError.apply)
       .map(_ => copy(filePath = Some(path)))
   }
 }

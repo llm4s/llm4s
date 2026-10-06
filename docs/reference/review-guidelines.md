@@ -156,7 +156,7 @@ llm4s/
 |--------------|-------------------------------------------|-----------------------------|
 | `types`      | `Result[A]`, `ModelName`, `ApiKey`        | Newtypes, no primitives     |
 | `llmconnect` | `LLMClient`, `Conversation`, `Completion` | Trait abstractions, DIP     |
-| `agent`      | `Agent`, `AgentState`, `Handoff`          | Pure state transformations  |
+| `agent`      | `Agent`, `AgentResult`, `Handoff`          | Pure state transformations  |
 | `toolapi`    | `ToolFunction`, `ToolRegistry`            | Type-safe schemas           |
 | `config`     | `Llm4sConfig`                             | Config boundary enforcement |
 | `error`      | `LLMError`                                | ADT, no exceptions          |
@@ -1024,7 +1024,7 @@ Iterator.continually(rs).takeWhile(_.next()).map(extractRow).toSeq
 **Problem**: Renaming `Agent.execute` to `Agent.run` breaks existing code
 **Fix**: Keep `execute` as deprecated wrapper for 1 version:
 @deprecated("Use run() instead", "0.x.0")
-def execute(q: String): Result[AgentState] = run(q)
+def execute(q: String): Result[AgentResult] = run(q)
 **Reference**: Section 6.1
 ```
 
@@ -1216,7 +1216,7 @@ see [FP Patterns Reference](../fp-patterns-reference.md).
 | **Adapter**   | Wrapping external API          | Type classes for JSON, HTTP          | Non-intrusive? ISP (focused interface)?                  |
 | **Strategy**  | Swappable behavior             | ADT + pattern match, not inheritance | Sealed trait? Exhaustive match?                          |
 | **Decorator** | Composable enhancements        | HOFs like `withRetry`, `withTimeout` | Pure functions? No class explosion?                      |
-| **Observer**  | Event streams                  | `agent.runWithEvents()` (fs2.Stream) | Resource-safe? Backpressure?                             |
+| **Observer**  | Event streams                  | `Tracing` subscribers (events: #1329)   | Resource-safe? Backpressure?                             |
 
 ### 9.2 Pattern examples
 
@@ -1360,7 +1360,7 @@ Quick reference for catching SOLID violations in PRs.
 ```scala
 // SRP violation - mixed concerns
 class Agent {
-  def run(): Result[AgentState] = ???
+  def run(): Result[AgentResult] = ???
 
   def logToFile(): Unit = ??? // Logging is separate concern
 }
@@ -1401,7 +1401,7 @@ trait LLMClient {
 
 // DIP violation - depends on concrete class
 class Agent(client: OpenAIClient) { // Should depend on LLMClient trait
-  def run(): Result[AgentState] = client.complete(.
+  def run(): Result[AgentResult] = client.complete(.
 
 ..)
 }
@@ -1667,7 +1667,7 @@ def complete(conv: Conversation): Result[Response] =
 ```scala
 // BAD - tests interfere with each other
 class AgentSpec extends AnyFlatSpec {
-  val sharedAgent = new Agent(client) // Mutable shared state
+  val sharedAgent = Agent.builder("a", client).build() // Mutable shared state
 
   "run" should "process query" in {
     sharedAgent.run("query1")
@@ -1683,7 +1683,7 @@ class AgentSpec extends AnyFlatSpec {
 
 // GOOD - isolated tests
 class AgentSpec extends AnyFlatSpec {
-  def freshAgent(): Agent = new Agent(mockClient)
+  def freshAgent(): Result[Agent] = Agent.builder("a", mockClient).build()
 
   "run" should "process query" in {
     val agent = freshAgent()
@@ -1742,13 +1742,13 @@ class AgentSpec extends AnyFlatSpec {
  * @param query      user input message
  * @param tools      available tools for agent to call
  * @param guardrails input/output validation rules
- * @return Right(AgentState) on success, Left(LLMError) on failure
+ * @return Right(AgentResult) on success, Left(LLMError) on failure
  */
 def run(
          query: String,
          tools: ToolRegistry,
          guardrails: Seq[Guardrail] = Seq.empty
-       ): Result[AgentState]
+       ): Result[AgentResult]
 ```
 
 ### 12.3 Internal documentation
@@ -2164,7 +2164,7 @@ scala.io.Source.fromInputStream(connection.getInputStream).mkString
 **Smell**:
 
 ```scala
-case class AgentState(messages: mutable.ListBuffer[Message], // Mutable!
+case class AgentResult(messages: mutable.ListBuffer[Message], // Mutable!
                       status: AgentStatus)
 ```
 
@@ -2175,11 +2175,11 @@ case class AgentState(messages: mutable.ListBuffer[Message], // Mutable!
 
 **Problem**: Exposes mutable collection in case class. Breaks functional purity, allows external modification.
 **Fix**: Use immutable collection:
-case class AgentState(
+case class AgentResult(
 messages: List[Message], // Immutable
 status: AgentStatus
 ) {
-def addMessage(msg: Message): AgentState = copy(messages = messages :+ msg)
+def addMessage(msg: Message): AgentResult = copy(messages = messages :+ msg)
 }
 **Reference**: Section 3 P1 - Functional purity over imperative mutation.
 ```
@@ -2299,7 +2299,7 @@ stateDiagram-v2
 note right of WaitingForTools: Missing: WaitingForTools -> Complete?
 **Suggestion**: Add explicit transitions or document why they're invalid.
 
-**Location**: `modules/core/.../AgentState.scala:28-45`
+**Location**: `modules/example/.../OrderState.scala:28-45`
 
 ### 17.7 Color standards
 

@@ -3,7 +3,8 @@ package org.llm4s.agent.graph.middleware
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolFixtures, AgentToolSpec, ToolContext, ToolOutcome, ToolSet }
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
-import org.llm4s.llmconnect.model.{ AssistantMessage, ToolCall, UserMessage }
+import org.llm4s.agent.graph.toolloop.ToolLoopFixtures
+import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, ToolCall, UserMessage }
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -35,8 +36,8 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
       log.add(s"$name:afterAgent")
       Right(s"$answer<$name")
     override def wrapModelCall(request: ModelRequest, context: RunContext)(
-      next: ModelRequest => Result[AssistantMessage]
-    ): Result[AssistantMessage] =
+      next: ModelRequest => Result[Completion]
+    ): Result[Completion] =
       log.add(s"$name:before")
       val result = next(request.withMessages(request.messages :+ UserMessage(name)))
       log.add(s"$name:after")
@@ -58,8 +59,8 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     override def beforeAgent(input: String, context: RunContext): Result[String] = throw thrown()
     override def afterAgent(answer: String, context: RunContext): Result[String] = throw thrown()
     override def wrapModelCall(request: ModelRequest, context: RunContext)(
-      next: ModelRequest => Result[AssistantMessage]
-    ): Result[AssistantMessage] = throw thrown()
+      next: ModelRequest => Result[Completion]
+    ): Result[Completion] = throw thrown()
     override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
       throw thrown()
 
@@ -285,7 +286,7 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   "wrapModelCall" should "nest the first middleware outermost and pass each rewritten request inward" in {
     val log    = newLog
-    val answer = AssistantMessage("hi")
+    val answer = ToolLoopFixtures.completion(AssistantMessage("hi"))
     val result = stack(Rec("a", log), Rec("b", log)).wrapModelCall(modelRequest, runContext) { req =>
       log.add(s"model:${req.messages.map(_.content).mkString(",")}")
       Right(answer)
@@ -301,14 +302,14 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     val a = new AgentMiddleware:
       val id: MiddlewareId = MiddlewareId("a")
       override def wrapModelCall(request: ModelRequest, context: RunContext)(
-        next: ModelRequest => Result[AssistantMessage]
-      ): Result[AssistantMessage] =
+        next: ModelRequest => Result[Completion]
+      ): Result[Completion] =
         val r = next(request)
         seen.add(r.toString)
         r
     val result = stack(a, new Throwing("b", () => boom)).wrapModelCall(modelRequest, runContext) { _ =>
       log.add("model")
-      Right(AssistantMessage("hi"))
+      Right(ToolLoopFixtures.completion(AssistantMessage("hi")))
     }
     result shouldBe Left(GraphError.MiddlewareFailed("b", boom))
     seen.asScala.toList shouldBe List(Left(GraphError.MiddlewareFailed("b", boom)).toString)
@@ -319,7 +320,9 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
     Seq[() => Throwable](() => new RuntimeException(new InterruptedException()), () => new InterruptedException())
       .foreach { thrown =>
         val result =
-          stack(new Throwing("b", thrown)).wrapModelCall(modelRequest, runContext)(_ => Right(AssistantMessage("hi")))
+          stack(new Throwing("b", thrown)).wrapModelCall(modelRequest, runContext)(_ =>
+            Right(ToolLoopFixtures.completion(AssistantMessage("hi")))
+          )
         Thread.interrupted() shouldBe true
         result.left.value shouldBe a[CancelledError]
       }

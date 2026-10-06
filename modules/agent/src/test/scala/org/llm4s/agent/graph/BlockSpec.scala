@@ -147,6 +147,7 @@ class BlockSpec extends AnyFlatSpec with Matchers with EitherValues with OptionV
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
     }
 
     val (_, error) = GraphRuntime(closing).start(thread, guarded, "bad-1").awaited.value.failed

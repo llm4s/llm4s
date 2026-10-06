@@ -102,7 +102,8 @@ why, and a CHANGELOG entry. Before 1.0 that is a minor-release change; after it,
 
 ## Deprecating and removing
 
-**Until the 0.5.0 baseline is set**, a Frozen module gains no speculative public types and no
+**Until the 0.5.0 baseline is set**, nothing is frozen: a Frozen-at-1.0 API that is wrong is fixed
+outright, with a CHANGELOG entry and a migration note, not kept for compatibility. A Frozen module gains no speculative public types and no
 `@deprecated` members: an API that should not be frozen is deleted, with a migration note, not deprecated.
 The [migration guide](migration) records each such removal.
 

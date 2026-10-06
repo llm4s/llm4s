@@ -7,6 +7,8 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
+import java.util.Locale
+
 import scala.util.Try
 
 /**
@@ -201,7 +203,7 @@ class TopicBoundaryGuardrail(
     val lines = response.split("\n").map(_.trim).filter(_.nonEmpty)
 
     val isOnTopic = lines.find(_.startsWith("IS_ON_TOPIC:")).exists { line =>
-      line.stripPrefix("IS_ON_TOPIC:").trim.toUpperCase.startsWith("YES")
+      line.stripPrefix("IS_ON_TOPIC:").trim.toUpperCase(Locale.ROOT).startsWith("YES")
     }
 
     val relevanceScore = lines
@@ -216,7 +218,7 @@ class TopicBoundaryGuardrail(
       .find(_.startsWith("MATCHED_TOPICS:"))
       .map { line =>
         val topics = line.stripPrefix("MATCHED_TOPICS:").trim
-        if (topics.toUpperCase == "NONE" || topics.isEmpty) Seq.empty
+        if (topics.toUpperCase(Locale.ROOT) == "NONE" || topics.isEmpty) Seq.empty
         else topics.split(",").map(_.trim).filter(_.nonEmpty).toSeq
       }
       .getOrElse(Seq.empty)

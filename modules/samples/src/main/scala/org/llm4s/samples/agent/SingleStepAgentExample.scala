@@ -1,6 +1,6 @@
 package org.llm4s.samples.agent
 
-import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
@@ -9,7 +9,8 @@ import org.slf4j.LoggerFactory
 import scala.util.chaining._
 
 /**
- * Example demonstrating step-by-step agent execution for debugging
+ * Example of a plain agent run with a step limit: it prints the messages the run produced.
+ * Step-level events are planned: see #1329.
  */
 object SingleStepAgentExample {
 
@@ -22,63 +23,26 @@ object SingleStepAgentExample {
       given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
-      toolRegistry = new ToolRegistry(Seq(weatherTool))
-      agent        = new Agent(client)
-
-      traceLogPath = ".log/single-step-trace.md"
-        .tap(p => logger.info("Trace log will be written to: {}", p))
+      agent <- Agent
+        .builder("single-step-agent", client)
+        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .withMaxSteps(5)
+        .build()
 
       query = "I'm planning a trip to Paris. What's the weather like there now?"
         .tap(q => logger.info("User Query: {}", q))
 
-      _ = logger.info("=== Running Step-by-Step ===")
+      _ = logger.info("=== Running Agent ===")
 
-      initialState <- agent.initializeSafe(query, toolRegistry)
-      _ = logger.info("Initial state initialized with {} messages", initialState.conversation.messages.length)
+      finalResult <- agent.run(query)
 
-      _ = agent.writeTraceLog(initialState, traceLogPath)
-
-      // We use a block here to run the steps and return the FINAL state
-      finalState = {
-        var stepCount = 0
-        var state     = initialState
-
-        while (
-          (state.status == AgentStatus.InProgress || state.status == AgentStatus.WaitingForTools) && stepCount < 5
-        ) {
-          logger.info("Running step {}...", stepCount + 1)
-
-          agent.runStep(state) match {
-            case Right(newState) =>
-              state = newState
-              logger.info("Step completed with status: {}", state.status)
-
-              state.conversation.messages.lastOption.foreach { msg =>
-                val preview = msg.content.take(100) + (if (msg.content.length > 100) "..." else "")
-                logger.info("Last message ({}): {}", msg.role, preview)
-              }
-
-              agent.writeTraceLog(state, traceLogPath)
-
-            case Left(error) =>
-              logger.error("Error running step: {}", error.formatted)
-              state = state.withStatus(AgentStatus.Failed(error.toString))
-              agent.writeTraceLog(state, traceLogPath)
-          }
-
-          stepCount += 1
-        }
-
-        logger.info("=== Step-by-Step Run Complete ===")
-        logger.info("Final status: {}", state.status)
-        logger.info("Total messages: {}", state.conversation.messages.length)
-        logger.info("Trace log has been written to: {}", traceLogPath)
-
-        state // Return the updated state
+      _ = logger.info("=== Run Complete ===")
+      _ = logger.info("Final status: {}", finalResult.status)
+      _ = logger.info("Total messages: {}", finalResult.messages.length)
+      _ = finalResult.messages.foreach { msg =>
+        val preview = msg.content.take(100) + (if (msg.content.length > 100) "..." else "")
+        logger.info("[{}] {}", msg.role, preview)
       }
-
-      _ = logger.info("=== Complete Agent State Dump ===")
-      _ = finalState.dump()
 
     } yield ()
 

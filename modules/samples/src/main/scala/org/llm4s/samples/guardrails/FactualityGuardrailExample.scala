@@ -1,10 +1,11 @@
 package org.llm4s.samples.guardrails
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.samples.util.AgentResults
 import org.slf4j.LoggerFactory
 
 /**
@@ -29,6 +30,19 @@ import org.slf4j.LoggerFactory
 object FactualityGuardrailExample extends App {
   private val logger = LoggerFactory.getLogger(getClass)
 
+  // An output guardrail that fails ends the run as AgentStatus.Blocked, not a Left.
+  private def guarded(
+    client: org.llm4s.llmconnect.LLMClient,
+    id: String,
+    guardrails: Seq[org.llm4s.agent.guardrails.OutputGuardrail],
+    query: String
+  ): org.llm4s.types.Result[AgentResult] =
+    Agent
+      .builder(id, client)
+      .withMiddleware(GuardrailMiddleware(Seq.empty, guardrails))
+      .build()
+      .flatMap(_.run(query))
+
   logger.info("=== Factuality Guardrail Example (RAG Use Case) ===")
 
   // Simulated retrieved document content (in real RAG, this comes from vector search)
@@ -49,8 +63,6 @@ object FactualityGuardrailExample extends App {
     registryService <- Llm4sConfig.modelRegistryService()
     given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerCfg)
-    agent = new Agent(client)
-
     // === Example 1: Standard Factuality Check ===
     _ = logger.info("1. Standard Factuality Check")
     _ = logger.info("-" * 40)
@@ -65,10 +77,11 @@ object FactualityGuardrailExample extends App {
     // Query that should be answerable from the context
     query1 = "When was Scala first released and who created it?"
 
-    state1 <- agent.run(
-      query = s"Based on the following context, answer this question: $query1\n\nContext: $retrievedContext",
-      tools = ToolRegistry.empty,
-      outputGuardrails = Seq(factualityGuardrail)
+    state1 <- guarded(
+      client,
+      "factuality-state1",
+      Seq(factualityGuardrail),
+      s"Based on the following context, answer this question: $query1\n\nContext: $retrievedContext"
     )
 
     _ = printResult(state1, "Standard Factuality")
@@ -81,10 +94,11 @@ object FactualityGuardrailExample extends App {
 
     query2 = "What does the name Scala stand for?"
 
-    state2 <- agent.run(
-      query = s"Based on the following context, answer: $query2\n\nContext: $retrievedContext",
-      tools = ToolRegistry.empty,
-      outputGuardrails = Seq(strictGuardrail)
+    state2 <- guarded(
+      client,
+      "factuality-state2",
+      Seq(strictGuardrail),
+      s"Based on the following context, answer: $query2\n\nContext: $retrievedContext"
     )
 
     _ = printResult(state2, "Strict Factuality")
@@ -101,10 +115,11 @@ object FactualityGuardrailExample extends App {
 
     query3 = "What are the key features of Scala?"
 
-    state3 <- agent.run(
-      query = s"Based on the context, describe: $query3\n\nContext: $retrievedContext",
-      tools = ToolRegistry.empty,
-      outputGuardrails = combinedGuardrails
+    state3 <- guarded(
+      client,
+      "factuality-state3",
+      combinedGuardrails,
+      s"Based on the context, describe: $query3\n\nContext: $retrievedContext"
     )
 
     _ = printResult(state3, "Combined Safety + Factuality")
@@ -125,9 +140,14 @@ object FactualityGuardrailExample extends App {
       logger.info("by the reference context (potential hallucination).")
   }
 
-  def printResult(state: org.llm4s.agent.AgentState, checkName: String): Unit = {
-    val response = state.conversation.messages.last.content
-    val preview  = if (response.length > 300) response.take(300) + "..." else response
+  def printResult(state: AgentResult, checkName: String): Unit =
+    state.status match {
+      case AgentStatus.Completed(answer) => printPassed(answer, checkName)
+      case other => logger.warn("✗ {} did not pass: {}", checkName, AgentResults.describe(other))
+    }
+
+  private def printPassed(response: String, checkName: String): Unit = {
+    val preview = if (response.length > 300) response.take(300) + "..." else response
 
     logger.info("✓ {} Check PASSED (response grounded in context)", checkName)
     logger.info("Response:\n{}", preview)
