@@ -20,10 +20,13 @@ import scala.util.matching.Regex
  * two line breaks or by a space. A pattern that must cross line breaks needs the `(?s)` (DOTALL) flag, and
  * `^` and `$` anchor to the start and end of the text unless `(?m)` is set.
  *
- * Patterns are user-supplied, so matching goes through [[org.llm4s.security.RegexSafetyManager]]: a
- * pattern with a known catastrophic-backtracking shape, or longer than 1000 characters, is refused, and a match
- * that exceeds its step budget, or text longer than 100000 characters, is reported as a failure. None of
- * these throws.
+ * Patterns are user-supplied, so matching goes through [[org.llm4s.security.RegexSafetyManager]], whichever
+ * way the validator was built: a match that exceeds its step budget, or text longer than 100000 characters, is
+ * reported as a failure rather than thrown. Only the companion's `String` factories also pre-screen the pattern
+ * itself: there an empty pattern, one longer than 1000 characters, or one with a known catastrophic-backtracking
+ * shape is refused. A pattern passed as a [[scala.util.matching.Regex]] or a compiled
+ * `java.util.regex.Pattern` (the constructors, `RegexValidator(regex)` and the built-in validators) is used as
+ * given, with no pre-screen; its matching is still bounded.
  *
  * `validate` returns a [[org.llm4s.error.ValidationError]] for the field `value`, never an exception. Its detail is
  * `errorMessage` when one was given, else `Value does not match pattern: <pattern>`, for a plain mismatch.
@@ -48,7 +51,8 @@ import scala.util.matching.Regex
  * agent.run(query, tools, inputGuardrails = Seq(RegexValidator.email))
  * }}}
  *
- * @param compiledPattern    the pattern to search for, already compiled
+ * @param compiledPattern    the pattern to search for, already compiled; used as given, without the safety
+ *                           manager's pre-screen
  * @param patternDescription the pattern's source text, used in the default error and in `description`
  * @param errorMessage       the detail to report on a plain mismatch; the default message names the pattern
  * @param fallbackError      when set, `validate` fails every text with this detail, ignoring the pattern; the
@@ -66,8 +70,8 @@ class RegexValidator(
   /**
    * Build a validator from a Scala [[scala.util.matching.Regex]].
    *
-   * The pattern is used as given, without the safety manager's pre-screen of its shape; matching is still
-   * bounded.
+   * The pattern is used as given, without the safety manager's pre-screen of its shape and length; matching is
+   * still bounded.
    *
    * @param pattern       the pattern to search for
    * @param errorMessage  the detail to report on a plain mismatch
@@ -155,8 +159,8 @@ object RegexValidator {
   /**
    * Create a validator that searches for a [[scala.util.matching.Regex]].
    *
-   * The pattern is used as given: unlike the `String` factories it is not pre-screened for dangerous shapes,
-   * though matching is still bounded.
+   * The pattern is used as given: unlike the `String` factories it is not pre-screened for dangerous shapes or
+   * length, though matching is still bounded.
    *
    * @param pattern the pattern to search for
    * @return a validator whose mismatch message is `Value does not match pattern: <pattern>`
