@@ -2,6 +2,7 @@ package org.llm4s.speech
 
 import org.llm4s.error.ValidationError
 import org.llm4s.http.{ HttpRawResponse, HttpResponse }
+import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.provider.HttpErrorMapper
 import org.llm4s.types.{ Result, TryOps }
 
@@ -45,6 +46,10 @@ private[speech] object CloudSpeechSupport {
         provider,
         response.headers
       )
+
+  /** `apiKey` unless it is blank, which would be sent as an empty credential (`Authorization: Bearer `). */
+  def requireApiKey(provider: String, apiKey: String): Result[Unit] =
+    ProviderConfig.nonEmpty(provider, "apiKey", apiKey)
 
   def requireText(text: String): Result[String] =
     if (text.trim.isEmpty) Left(ValidationError("text", "must not be empty")) else Right(text)

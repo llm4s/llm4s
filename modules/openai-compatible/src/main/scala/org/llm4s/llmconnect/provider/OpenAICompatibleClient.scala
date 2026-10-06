@@ -71,6 +71,12 @@ class OpenAICompatibleClient(
     .insecureDynamicCredential(settings)
     .foreach(message => throw new IllegalArgumentException(message))
 
+  // A blank static key would be sent as `Authorization: Bearer `: a server that needs no key takes
+  // `Credential.Anonymous`, which sends no `Authorization` header at all.
+  OpenAICompatibleClient
+    .blankStaticKey(settings)
+    .foreach(message => throw new IllegalArgumentException(message))
+
   // Scoped to the provider package so specs can substitute one
   protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
   private val logger                                  = org.slf4j.LoggerFactory.getLogger(getClass)
@@ -484,6 +490,18 @@ object OpenAICompatibleClient {
     checks.collectFirst { case Left(error) => error.message }
   }
 
+  /**
+   * Why `settings` may not carry its credential, if it is a [[Credential.Static]] whose key is blank:
+   * it would be sent as `Authorization: Bearer `. A server that needs no key takes [[Credential.Anonymous]].
+   */
+  private[provider] def blankStaticKey(settings: Settings): Option[String] =
+    settings.credential match
+      case Credential.Static(key) if key.trim.isEmpty =>
+        Some(
+          s"${settings.displayName} apiKey must be non-empty: a blank key would be sent as an empty bearer token"
+        )
+      case _ => None
+
   /** `headers` with each repeated name (matched case-insensitively) sent once, its values comma-joined in order. */
   private[provider] def combineRepeated(headers: Seq[(String, String)]): Seq[(String, String)] =
     headers
@@ -532,7 +550,7 @@ object OpenAICompatibleClient {
     /** No `Authorization` header, for servers that need none. */
     case Anonymous
 
-    /** `Authorization: Bearer <key>`. */
+    /** `Authorization: Bearer <key>`; `key` must not be blank - the client refuses an empty bearer. */
     case Static(key: String)
 
     /**
@@ -589,7 +607,8 @@ object OpenAICompatibleClient {
       baseUrl = config.baseUrl,
       credential = config.tokenExchange match {
         case Some(exchange) => Credential.Exchange(exchange)
-        case None           => config.apiKey.fold(Credential.Anonymous)(Credential.Static(_))
+        // A blank key is no key, as `fromValues` treats it: never an empty bearer.
+        case None => config.apiKey.filter(_.trim.nonEmpty).fold(Credential.Anonymous)(Credential.Static(_))
       },
       contextWindow = config.contextWindow,
       reserveCompletion = config.reserveCompletion

@@ -24,6 +24,17 @@ class OpenAITTSClientSpec extends AnyFlatSpec with Matchers {
     audio.format shouldBe AudioFormat.RawPcm16
   }
 
+  it should "refuse a blank apiKey before any request, rather than send an empty bearer" in {
+    for key <- Seq("", "  ") do
+      val http = new StubHttpClient(body = Array[Byte](1, 2, 3))
+      new OpenAITTSClient(cfg.copy(apiKey = key), http)
+        .synthesize("Say this text")
+        .left
+        .toOption
+        .get shouldBe a[org.llm4s.error.ConfigurationError]
+      http.requests shouldBe empty
+  }
+
   it should "POST model, voice, input and the pcm response format with a bearer token" in {
     val http   = new StubHttpClient(body = Array[Byte](1, 2, 3))
     val client = new OpenAITTSClient(cfg, http)

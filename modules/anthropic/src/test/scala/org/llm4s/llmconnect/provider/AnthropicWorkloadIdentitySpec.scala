@@ -208,4 +208,13 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         an[IllegalArgumentException] should be thrownBy new AnthropicClient(config)
       AnthropicClient(valid).value.close()
     }
+
+    "leave AnthropicClient refusing a blank apiKey once the identity is removed, rather than send no credential" in {
+      val keyless = fromValues("https://api.anthropic.com").value.copy(workloadIdentity = None)
+      for key <- Seq("", "  ") do
+        val error = AnthropicClient(keyless.copy(apiKey = key)).left.value
+        error shouldBe a[ConfigurationError]
+        error.message should include("apiKey")
+        an[IllegalArgumentException] should be thrownBy new AnthropicClient(keyless.copy(apiKey = key))
+    }
   }

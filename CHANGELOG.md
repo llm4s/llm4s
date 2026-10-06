@@ -137,6 +137,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (or, for `Exchange`, a `tokenUrl`) that is not `https` or loopback `http`. The `openai-compatible` model
   lister builds its config through the same path as chat (`OpenAICompatibleProvider.buildConfig`), so
   `Llm4sConfig.listModels` refuses what chat refuses before it exchanges anything.
+  **No client falls back to an empty key:** `OpenRouterClient` refuses an `OpenAIConfig` with
+  `workloadIdentity` (from `apply` as a `ConfigurationError`, from the constructor as an
+  `IllegalArgumentException`) even when `OpenAIConfig.validate` accepts it, rather than drop the identity
+  and send `Authorization: Bearer `. A blank `apiKey` is refused wherever a key is the only credential:
+  `OpenAIConfig` and `AnthropicConfig` without workload identity (and so `OpenAIClient`, `AnthropicClient`
+  and `OpenRouterClient`), `DeepSeekClient`, `ZaiClient`, `MistralClient`, `CohereClient`, an
+  `OpenAICompatibleClient` built with a blank `Credential.Static`, `OpenAIEmbeddingProvider`,
+  `OpenAIImageClient`, `OpenAIVisionClient`, `OpenAITTSClient` and `OpenAISTTClient`. An
+  `OpenAICompatibleConfig` whose `apiKey` is blank is treated as having none (`Credential.Anonymous`), as
+  `fromValues` already did.
   **Migration:** `OpenAICompatibleConfig` follows the growth-prone data-type pattern: its constructor
   and `copy` are private; build it with the companion `apply` (defaults unchanged) and adjust it with
   `withBaseUrl`, `withApiKey`, `withContextWindow`, `withReserveCompletion`, `withHeaders`, `withHeader`,

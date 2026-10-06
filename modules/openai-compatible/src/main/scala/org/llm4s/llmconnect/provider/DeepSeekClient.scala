@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.DeepSeekConfig
+import org.llm4s.llmconnect.config.{ DeepSeekConfig, ProviderConfig }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -52,13 +52,19 @@ object DeepSeekClient {
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[DeepSeekClient] =
-    Try(new DeepSeekClient(config, metrics, exchangeLogging)).toResult
+    ProviderConfig
+      .nonEmpty("DeepSeek", "apiKey", config.apiKey)
+      .flatMap(_ => Try(new DeepSeekClient(config, metrics, exchangeLogging)).toResult)
 
   def apply(config: DeepSeekConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[DeepSeekClient] =
-    Try(new DeepSeekClient(config, metrics)).toResult
+    ProviderConfig
+      .nonEmpty("DeepSeek", "apiKey", config.apiKey)
+      .flatMap(_ => Try(new DeepSeekClient(config, metrics)).toResult)
 
   def apply(config: DeepSeekConfig)(using ModelRegistryService): Result[DeepSeekClient] =
-    Try(new DeepSeekClient(config, MetricsCollector.noop)).toResult
+    ProviderConfig
+      .nonEmpty("DeepSeek", "apiKey", config.apiKey)
+      .flatMap(_ => Try(new DeepSeekClient(config, MetricsCollector.noop)).toResult)
 }
 
 /**

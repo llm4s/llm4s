@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.CohereConfig
+import org.llm4s.llmconnect.config.{ CohereConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.ResponseFormat
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
@@ -55,17 +55,21 @@ class CohereClient(
 object CohereClient {
 
   def apply(config: CohereConfig)(using ModelRegistryService): Result[CohereClient] =
-    Try(new CohereClient(config)).toResult
+    ProviderConfig.nonEmpty("Cohere", "apiKey", config.apiKey).flatMap(_ => Try(new CohereClient(config)).toResult)
 
   def apply(config: CohereConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[CohereClient] =
-    Try(new CohereClient(config, metrics)).toResult
+    ProviderConfig
+      .nonEmpty("Cohere", "apiKey", config.apiKey)
+      .flatMap(_ => Try(new CohereClient(config, metrics)).toResult)
 
   def apply(
     config: CohereConfig,
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[CohereClient] =
-    Try(new CohereClient(config, metrics, exchangeLogging)).toResult
+    ProviderConfig
+      .nonEmpty("Cohere", "apiKey", config.apiKey)
+      .flatMap(_ => Try(new CohereClient(config, metrics, exchangeLogging)).toResult)
 }
 
 /**

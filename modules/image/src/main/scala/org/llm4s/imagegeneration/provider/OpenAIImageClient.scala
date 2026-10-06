@@ -2,6 +2,7 @@ package org.llm4s.imagegeneration.provider
 
 import org.llm4s.http.{ HttpResponse, MultipartPart }
 import org.llm4s.imagegeneration._
+import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.media.{ ImageMediaType, MediaType }
 import org.slf4j.LoggerFactory
 import ujson._
@@ -38,6 +39,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     logger.info(s"Generating $count image(s) with prompt: ${prompt.take(100)}...")
 
     for {
+      _           <- requireApiKey
       validPrompt <- validatePrompt(prompt)
       validCount  <- validateCount(count)
       _           <- validateGenerationOptions(options)
@@ -60,6 +62,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     options: ImageEditOptions = ImageEditOptions()
   ): Either[LLMError, Seq[GeneratedImage]] = {
     val validated = for {
+      _             <- requireApiKey
       _             <- validatePrompt(prompt)
       _             <- validateCount(options.n)
       openAIOptions <- extractOpenAIEditOptions(options)
@@ -195,19 +198,22 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
   override def health(): Either[LLMError, ServiceStatus] = {
     val healthUrl = s"${config.baseUrl.stripSuffix("/images/generations").stripSuffix("/v1")}/v1/models"
 
-    httpClient
-      .get(
-        healthUrl,
-        headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
-        timeout = 5.seconds
-      )
-      .toEither
-      .left
-      .map(e =>
-        ImageErrors.fromThrowable(e, "openai-image.health")(ex =>
-          ImageServiceError(s"Health check failed: ${ex.getMessage}", 0)
-        )
-      )
+    requireApiKey
+      .flatMap { _ =>
+        httpClient
+          .get(
+            healthUrl,
+            headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
+            timeout = 5.seconds
+          )
+          .toEither
+          .left
+          .map(e =>
+            ImageErrors.fromThrowable(e, "openai-image.health")(ex =>
+              ImageServiceError(s"Health check failed: ${ex.getMessage}", 0)
+            )
+          )
+      }
       .map { response =>
         if (response.statusCode == 200) {
           ServiceStatus(status = HealthStatus.Healthy, message = "OpenAI API is responding")
@@ -218,6 +224,10 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
         }
       }
   }
+
+  /** A blank `apiKey` would be sent as `Authorization: Bearer `: refused before any request. */
+  private def requireApiKey: Either[LLMError, Unit] =
+    ProviderConfig.nonEmpty("OpenAI image", "apiKey", config.apiKey)
 
   private def validatePrompt(prompt: String): Either[LLMError, String] =
     if (prompt.trim.isEmpty) {

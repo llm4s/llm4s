@@ -74,14 +74,16 @@ object AnthropicConfig {
   /**
    * The rules every [[AnthropicConfig]] must meet, whichever way it was built: [[fromValues]] applies
    * them, and `AnthropicClient` applies them again to a config built with the constructor or `copy`.
-   * With `workloadIdentity` set, `apiKey` must be empty (a config authenticates one way) and
+   * Without `workloadIdentity`, `apiKey` must not be blank: it is the only credential. With
+   * `workloadIdentity` set, `apiKey` must be empty (a config authenticates one way) and
    * `baseUrl` must be `https` to one of [[WorkloadIdentityHosts]] - or a loopback host, for tests -
    * since the SDK posts the identity token to `<baseUrl>/v1/oauth/token` and sends the access token
    * it gets back with every request.
    */
   private[llm4s] def validate(config: AnthropicConfig): Result[AnthropicConfig] =
     config.workloadIdentity match
-      case None => Right(config)
+      // Without workload identity the key is the only credential: a blank one would authenticate as nobody.
+      case None => ProviderConfig.nonEmpty("Anthropic", "apiKey", config.apiKey).map(_ => config)
       case Some(_) =>
         for
           _ <- Either.cond(

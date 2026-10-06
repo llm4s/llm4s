@@ -282,4 +282,23 @@ class OpenAIWorkloadIdentitySpec
       OpenRouterClient(valid.copy(baseUrl = "https://openrouter.ai/api/v1")).left.value shouldBe a[ConfigurationError]
       OpenAIClient(valid).value.close()
     }
+
+    "be refused by OpenRouterClient even when OpenAIConfig.validate accepts it, rather than send an empty bearer" in {
+      val valid = fromValues().value
+      OpenRouterClient(valid).left.value.message should include("workloadIdentity")
+      an[IllegalArgumentException] should be thrownBy new OpenRouterClient(valid)
+    }
+
+    "leave OpenAIClient refusing a blank apiKey once the identity is removed, rather than send an empty bearer" in {
+      val keyless = fromValues().value.copy(workloadIdentity = None)
+      Seq("", "   ").foreach { key =>
+        val error = OpenAIClient(keyless.copy(apiKey = key)).left.value
+        error shouldBe a[ConfigurationError]
+        error.message should include("apiKey")
+        an[IllegalArgumentException] should be thrownBy new OpenAIClient(
+          keyless.copy(apiKey = key),
+          org.llm4s.metrics.MetricsCollector.noop
+        )
+      }
+    }
   }

@@ -108,7 +108,8 @@ object OpenAIConfig {
   /**
    * The rules every [[OpenAIConfig]] must meet, whichever way it was built: [[fromValues]] applies
    * them, and `OpenAIClient` applies them again to a config built with the constructor or `copy`.
-   * With `workloadIdentity` set, `apiKey` must be empty (a config authenticates one way), the
+   * Without `workloadIdentity`, `apiKey` must not be blank: it is the only credential, and a blank one
+   * would be sent as an empty bearer. With `workloadIdentity` set, `apiKey` must be empty (a config authenticates one way), the
    * config must belong to `openai`, and `baseUrl` must be `https` to one of [[WorkloadIdentityHosts]]
    * (or a loopback host, for tests): the token OpenAI's exchange issues is an OpenAI credential, sent
    * as the bearer of every request to `baseUrl`, so a Requesty, OpenRouter, proxy or other custom
@@ -117,7 +118,8 @@ object OpenAIConfig {
    */
   private[llm4s] def validate(config: OpenAIConfig): Result[OpenAIConfig] =
     config.workloadIdentity match
-      case None => Right(config)
+      // Without workload identity the key is the only credential: a blank one would send `Authorization: Bearer `.
+      case None => ProviderConfig.nonEmpty("OpenAI", "apiKey", config.apiKey).map(_ => config)
       case Some(_) =>
         for
           _ <- Either.cond(
