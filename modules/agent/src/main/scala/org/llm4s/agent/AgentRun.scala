@@ -3,16 +3,10 @@ package org.llm4s.agent
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
 import org.llm4s.agent.graph.toolloop.{ LoopKeys, Messages, ToolLoop, TurnOutcome, TurnOutput }
-import org.llm4s.error.{ CancelledError, ValidationError }
-import org.llm4s.llmconnect.model.AssistantMessage
+import org.llm4s.error.ValidationError
+import org.llm4s.llmconnect.model.{ AssistantMessage, Message, UserMessage }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
-import org.slf4j.LoggerFactory
-
-import java.util.concurrent.{ CompletableFuture, TimeUnit, TimeoutException }
-import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
-import scala.concurrent.duration.*
-import scala.util.{ Failure, Try }
 
 /**
  * A running agent turn, from [[Agent.start]]: cancel it, or await its [[AgentResult]]. The turn runs
@@ -23,7 +17,7 @@ final class AgentRun private[agent] (
   loop: ToolLoop,
   root: AgentId,
   runtime: GraphRuntime,
-  tracing: Option[AgentRun.TracedRun]
+  tracing: Option[AgentTracing]
 ):
 
   def threadId: ThreadId = handle.threadId
@@ -116,11 +110,6 @@ final class AgentRun private[agent] (
 
 private[agent] object AgentRun:
 
-  private val logger = LoggerFactory.getLogger(classOf[AgentRun])
-
-  /** How long `await` waits, after the run ends, for its tracing subscription to deliver the run's last event. */
-  private val TracingDrain: FiniteDuration = 5.seconds
-
   /**
    * `handle` as an agent run, traced to `tracing` when given. `scope`, when given, is the listener
    * of the observer the run was admitted with, and ends the handle's observation after the run.
@@ -137,50 +126,13 @@ private[agent] object AgentRun:
       handle.observation.foreach(s.attach)
       RunScope.watch(handle, s)
     }
-    new AgentRun(handle, loop, root, runtime, tracing.map(TracedRun(handle, _)))
+    new AgentRun(handle, loop, root, runtime, tracing.map(AgentTracing(handle, root, _)))
 
-  /**
-   * A run's tracing: a subscription to the run's thread from just before its claim, tracing only
-   * this run's events. It cancels itself on the run's last event; `detach` waits up to
-   * [[TracingDrain]] for that event to be traced, then cancels it, so a run's trace is complete
-   * when `await` returns.
-   */
-  final class TracedRun(handle: RunHandle[?], tracing: Tracing):
-    private val delivered    = new CompletableFuture[Unit]()
-    private val subscription = new AtomicReference[Option[Subscription]](None)
-    private val detached     = new AtomicBoolean(false)
-    private val trace        = TracingSubscriber.listener(handle.threadId, tracing)
-
-    handle
-      .subscribe() {
-        case event @ StreamEvent.Durable(record) if record.runId == handle.runId.value =>
-          trace(event)
-          if RunScope.terminal(record.event) then finish()
-        case StreamEvent.Durable(_) => ()
-        case event @ StreamEvent.Disconnected(_, _) =>
-          trace(event)
-          delivered.complete(()): Unit
-        case _ => ()
-      }
-      .fold(
-        // nothing to wait for: the run is untraced
-        _ => delivered.complete(()): Unit,
-        s =>
-          subscription.set(Some(s))
-          if delivered.isDone then s.cancel()
-      )
-
-    private def finish(): Unit =
-      delivered.complete(()): Unit
-      subscription.get.foreach(_.cancel())
-
-    def detach(): Unit =
-      if detached.compareAndSet(false, true) then
-        CancelledError.catchInterrupt(Try(delivered.get(TracingDrain.toMillis, TimeUnit.MILLISECONDS))) match
-          case Left(_) => Thread.currentThread().interrupt()
-          case Right(Failure(_: TimeoutException)) =>
-            logger.warn(
-              s"Tracing of run ${handle.runId.value} on ${handle.threadId.value} did not deliver the run's last event within $TracingDrain; its trace may be incomplete"
-            )
-          case Right(_) => ()
-        subscription.get.foreach(_.cancel())
+  /** The current turn's messages: from the last user message on. */
+  def turnMessages(state: ThreadState): Result[Vector[Message]] =
+    state.get(Messages.key).map { stored =>
+      val all = stored.map(_.message)
+      all.lastIndexWhere { case _: UserMessage => true; case _ => false } match
+        case -1 => all
+        case at => all.drop(at)
+    }

@@ -106,7 +106,10 @@ final class AgentBuilder private (
    */
   def withRuntime(runtime: GraphRuntime): AgentBuilder = copy(runtime = Some(runtime))
 
-  /** Traces each run's events, as `graph.*` custom events, to `tracing`. */
+  /**
+   * Traces each run to `tracing`: its events as `graph.*` and `agent.*` custom events, each model
+   * call's usage as `TokenUsageRecorded`, and its end as one `AgentRunEnded`.
+   */
   def withTracing(tracing: Tracing): AgentBuilder = copy(tracing = Some(tracing))
 
   /**

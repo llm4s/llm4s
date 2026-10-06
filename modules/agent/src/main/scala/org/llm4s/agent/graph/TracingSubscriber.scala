@@ -14,6 +14,10 @@ import org.slf4j.LoggerFactory
  * `StreamEvent.Disconnected(lastSeq, DisconnectReason.Lagging)` ends tracing, and is only logged.
  * Nothing re-attaches by itself: to keep tracing, the caller attaches again with
  * `afterSeq = lastSeq`, which replays from the first event not traced.
+ *
+ * Attach it to any graph's thread, kernel graphs included. An `Agent` built `withTracing` traces
+ * through `AgentTracing` instead, which adds usage and `AgentRunEnded`; use `attach` for graphs of
+ * your own.
  */
 object TracingSubscriber:
 
@@ -46,7 +50,7 @@ object TracingSubscriber:
   private[graph] def snake(name: String): String =
     name.flatMap(c => if c.isUpper then s"_${c.toLower}" else c.toString).stripPrefix("_")
 
-  private def toTrace(r: EventRecord): TraceEvent.CustomEvent =
+  private[agent] def toTrace(r: EventRecord): TraceEvent.CustomEvent =
     def opt(value: Option[String]): ujson.Value = value.fold[ujson.Value](ujson.Null)(ujson.Str(_))
     val data = ujson.Obj(
       "threadId"     -> r.threadId,

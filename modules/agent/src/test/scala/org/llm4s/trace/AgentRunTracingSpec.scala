@@ -7,19 +7,26 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.types.Result
+import org.llm4s.agent.AgentStatus
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.guardrails.builtin.LengthCheck
+import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.time.{ Millis, Seconds, Span }
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ macroRW, ReadWriter }
 
-import java.util.concurrent.{ ConcurrentLinkedQueue, CopyOnWriteArrayList }
+import java.util.concurrent.{ ConcurrentLinkedQueue, CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import scala.jdk.CollectionConverters._
 
 /**
- * How an agent run reaches the tracing contract: `withTracing` traces each run's durable events as
- * `graph.*` custom events, complete by the time the run returns, and only that run's. The agent
- * produces no other trace event; core's tracing specs build the agent-state event directly.
+ * `withTracing` traces each run's durable events as `graph.*`/`agent.*` custom events, its model
+ * calls' usage as `TokenUsageRecorded`, and ends each run with one `AgentRunEnded`.
  */
-class AgentRunTracingSpec extends AnyFlatSpec with Matchers {
+class AgentRunTracingSpec extends AnyFlatSpec with Matchers with Eventually {
+
+  implicit override val patienceConfig: PatienceConfig =
+    PatienceConfig(timeout = Span(5, Seconds), interval = Span(20, Millis))
 
   /** Records every event; with `failing`, reports each as a failure, which must not fail the run. */
   final private class Recording(failing: Boolean = false) extends Tracing {
@@ -28,8 +35,11 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers {
       events.add(event)
       if (failing) Left(UnknownError("tracing down", new RuntimeException("x"))) else Right(())
     }
-    def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-    def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
+    def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
+    def traceError(error: Throwable, context: String): Result[Unit] = {
+      events.add(TraceEvent.ErrorOccurred(error, context))
+      Right(())
+    }
     def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
     def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
 
@@ -149,12 +159,138 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers {
     tracing.names.last shouldBe "graph.run_completed"
   }
 
-  it should "trace nothing but graph custom events" in {
+  it should "trace nothing but graph and agent custom events, usage and the run's end" in {
     val tracing = new Recording()
     ok(traced(new Scripted(Right(answer("hello"))), tracing).run("hi"))
 
     tracing.custom.size should be > 0
-    tracing.all.filterNot(_.isInstanceOf[TraceEvent.CustomEvent]) shouldBe empty
-    tracing.names.foreach(_ should startWith("graph."))
+    tracing.all.filter {
+      case _: TraceEvent.CustomEvent | _: TraceEvent.TokenUsageRecorded | _: TraceEvent.AgentRunEnded => false
+      case _                                                                                          => true
+    } shouldBe empty
+    tracing.names.foreach(n => (n.startsWith("graph.") || n.startsWith("agent.")) shouldBe true)
+  }
+
+  private def endedOf(tracing: Recording): Vector[TraceEvent.AgentRunEnded] =
+    tracing.all.collect { case e: TraceEvent.AgentRunEnded => e }
+
+  "A traced run" should "end with one AgentRunEnded carrying the turn's messages" in {
+    val tracing = Recording()
+    val agent   = traced(Scripted(Right(toolCallCompletion), Right(answer("done"))), tracing)
+    val first   = agent.run(ThreadId("t1"), "first").fold(e => fail(e.message), identity)
+    val ended   = endedOf(tracing)
+    ended.size shouldBe 1
+    ended.head.threadId shouldBe "t1"
+    ended.head.runId shouldBe first.runId.value
+    ended.head.agent shouldBe "assistant"
+    ended.head.status shouldBe "completed"
+    ended.head.messages.head shouldBe UserMessage("first")
+    ended.head.messages.last shouldBe AssistantMessage("done")
+    ended.head.usage.inputTokens shouldBe 40 // two calls of 20
+  }
+
+  it should "send only the turn's messages on the second turn" in {
+    val tracing = Recording()
+    val agent   = traced(Scripted(Right(answer("answer one")), Right(answer("answer two"))), tracing)
+    ok(agent.run(ThreadId("t2"), "one"))
+    val second = ok(agent.run(ThreadId("t2"), "two"))
+    val ended  = endedOf(tracing)
+    ended.size shouldBe 2
+    ended.last.runId shouldBe second.runId.value
+    ended.last.messages shouldBe Seq(UserMessage("two"), AssistantMessage("answer two"))
+  }
+
+  it should "trace usage as TokenUsageRecorded per model call" in {
+    val tracing = Recording()
+    ok(traced(Scripted(Right(toolCallCompletion), Right(answer("done"))), tracing).run(ThreadId("t3"), "go"))
+    val recorded = tracing.all.collect { case e: TraceEvent.TokenUsageRecorded => e }
+    recorded.size shouldBe 2
+    recorded.foreach { e =>
+      e.usage.promptTokens shouldBe 20
+      e.usage.completionTokens shouldBe 10
+      e.usage.totalTokens shouldBe 30
+      e.model shouldBe "test-model"
+      e.operation shouldBe "agent_completion"
+    }
+  }
+
+  it should "trace agent events as agent.* custom events" in {
+    val tracing = Recording()
+    ok(traced(Scripted(Right(toolCallCompletion), Right(answer("done"))), tracing).run(ThreadId("t4"), "go"))
+    tracing.names should contain("agent.model_call_completed")
+    tracing.names should contain("agent.tool_executed")
+  }
+
+  it should "complete without anyone calling await" in {
+    val tracing = Recording()
+    val agent   = traced(Scripted(Right(answer("done"))), tracing)
+    agent.start(ThreadId("t5"), "go").fold(e => fail(e.message), identity) // never awaited
+    eventually(endedOf(tracing).size shouldBe 1)
+  }
+
+  it should "trace a blocked turn with no messages and status blocked:<guardrail>" in {
+    val marker  = "SECRET-42"
+    val tracing = Recording()
+    val guard   = new LengthCheck(1, 3)
+    val agent = Agent
+      .builder("assistant", Scripted(Right(answer(s"leaking $marker"))))
+      .withMiddleware(new GuardrailMiddleware(input = Nil, output = Seq(guard)))
+      .withTracing(tracing)
+      .build()
+      .fold(e => fail(e.message), identity)
+    ok(agent.run(ThreadId("t6"), "tell me")).status should matchPattern { case AgentStatus.Blocked(_, _) => }
+    val ended = endedOf(tracing)
+    ended.size shouldBe 1
+    ended.head.status shouldBe s"blocked:${guard.name}"
+    ended.head.messages shouldBe empty
+    tracing.all.foreach(e => (e.toJson.render() should not).include(marker))
+  }
+
+  it should "trace a failed run as failed, with ErrorOccurred" in {
+    val tracing = Recording()
+    traced(Scripted(Left(NetworkError("down", None, "mock://llm"))), tracing)
+      .run(ThreadId("t7"), "hi")
+      .isLeft shouldBe true
+    val ended = endedOf(tracing)
+    ended.size shouldBe 1
+    ended.head.status shouldBe "failed"
+    ended.head.messages shouldBe empty
+    tracing.all.collect { case e: TraceEvent.ErrorOccurred => e }.size shouldBe 1
+  }
+
+  it should "trace a cancelled run as cancelled" in {
+    val tracing = Recording()
+    val entered = new CountDownLatch(1)
+    val blocking = new LLMClient {
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+        entered.countDown()
+        new CountDownLatch(1).await() // until interrupted
+        Right(answer("never"))
+      }
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      override def getContextWindow(): Int     = 4096
+      override def getReserveCompletion(): Int = 1024
+    }
+    val run = traced(blocking, tracing).start(ThreadId("t8"), "go").fold(e => fail(e.message), identity)
+    entered.await(5, TimeUnit.SECONDS) shouldBe true
+    run.cancel()
+    run.await()
+    eventually(endedOf(tracing).map(_.status) shouldBe Vector("cancelled"))
+  }
+
+  it should "keep two runs on one thread apart" in {
+    val tracing = Recording()
+    val agent   = traced(Scripted(Right(answer("first answer")), Right(answer("second answer"))), tracing)
+    val one     = agent.run(ThreadId("t9"), "one").fold(e => fail(e.message), identity)
+    val two     = agent.run(ThreadId("t9"), "two").fold(e => fail(e.message), identity)
+    eventually(endedOf(tracing).size shouldBe 2)
+    val ended = endedOf(tracing)
+    ended.map(_.runId) shouldBe Vector(one.runId.value, two.runId.value)
+    ended.map(_.messages.head) shouldBe Vector(UserMessage("one"), UserMessage("two"))
+    ended.map(_.messages.last) shouldBe Vector(AssistantMessage("first answer"), AssistantMessage("second answer"))
   }
 }
