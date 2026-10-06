@@ -569,10 +569,28 @@ def split_commands(argument_string):
     return commands
 
 
+def sbt_split(body):
+    """`body` cut at each `;` outside sbt's own quotes: sbt's parser takes a double-quoted argument, with
+    backslash escapes inside it, so `run "explain a;b"` is one command, not `run "explain a` and `b"`."""
+    parts, start, quoted, i = [], 0, False, 0
+    while i < len(body):
+        ch = body[i]
+        if quoted and ch == "\\":
+            i += 1                       # an escaped character, `\"` included
+        elif ch == '"':
+            quoted = not quoted
+        elif ch == ";" and not quoted:
+            parts.append(body[start:i])
+            start = i + 1
+        i += 1
+    parts.append(body[start:])
+    return parts
+
+
 def body_commands(body):
     """`a; b c` as [[a], [b, c]]; `core / Test / compile` is one word."""
     out = []
-    for command in body.split(";"):
+    for command in sbt_split(body):
         words = command.split()
         if words and words[0] not in {"set", "eval"}:
             words = re.sub(r"\s*/\s*", "/", command).split()
@@ -972,26 +990,61 @@ def shell_words(segment):
 
 
 SBT_LAUNCHERS = {"sbt", "sbtn", "./sbt", "./sbtn"}
-# Words that run the command after them: shell keywords, wrappers (their `-x` flags are skipped too), a
-# prompt marker, and Dockerfile's RUN. `VAR=value` assignments are skipped wherever they lead.
-COMMAND_PREFIXES = {"env", "time", "exec", "sudo", "nohup", "command", "nice", "if", "then", "else", "elif",
-                    "while", "until", "do", "!", "{", "$", ">", "RUN"}
+# Words that run the command after them: shell keywords, a prompt marker, and Dockerfile's RUN.
+# `VAR=value` assignments are skipped wherever they lead.
+COMMAND_PREFIXES = {"if", "then", "else", "elif", "while", "until", "do", "!", "{", "$", ">", "RUN"}
+# Wrappers that run the command after their options, as (short options that take a value, long options that
+# take a value, positional arguments before the command). A wrapper not listed here is not guessed at: its
+# command word is not found, so nothing is checked rather than the wrong word.
+WRAPPERS = {
+    "sudo": ("ughpCDRTU", {"--user", "--group", "--host", "--prompt", "--close-from", "--chdir", "--chroot",
+                           "--role", "--type", "--command-timeout", "--other-user"}, 0),
+    "env": ("uCS", {"--unset", "--chdir", "--split-string"}, 0),
+    "nice": ("n", {"--adjustment"}, 0),
+    "nohup": ("", set(), 0),
+    "time": ("fo", {"--format", "--output"}, 0),
+    "exec": ("a", set(), 0),
+    "command": ("", set(), 0),
+    "timeout": ("ks", {"--kill-after", "--signal"}, 1),    # timeout [OPTION]... DURATION COMMAND
+}
 ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
 REDIRECTION = re.compile(r"^(?:\d+|&)?(?:>>?|<<?|>&|<&|>\|)(.*)$")
+
+
+def skip_wrapper(words, i, wrapper):
+    """The index of the first word after `wrapper`'s options and positional arguments, from words[i]. An option
+    and its value are consumed together: `-u ci`, `-uci`, `-Eu ci`, `--user ci`, `--user=ci`; `--` ends them."""
+    short, long_opts, positional = WRAPPERS[wrapper]
+    while i < len(words):
+        word = words[i][0]
+        if word == "--":
+            i += 1
+            break
+        if word.startswith("--"):
+            i += 2 if "=" not in word and word in long_opts else 1
+        elif word.startswith("-") and len(word) > 1:
+            i += 1
+            for k, ch in enumerate(word[1:], 1):
+                if ch in short:
+                    if k == len(word) - 1:
+                        i += 1           # `-u ci`: the value is the next word; in `-uci` it is attached
+                    break
+        else:
+            break
+    return min(i + positional, len(words))
 
 
 def sbt_arguments(segment):
     """The argument string of `segment` when its command word is an sbt launcher, else None. `sbt` must be the
     command word itself - `addSbtPlugin(...)`, `sbt-plugin`, `which sbt` or a path containing sbt are not."""
     words = shell_words(segment)
-    i, wrapped = 0, False
+    i = 0
     while i < len(words):
         word = words[i][0]
-        if ASSIGNMENT.match(word) or (wrapped and word.startswith("-")):
+        if ASSIGNMENT.match(word) or word in COMMAND_PREFIXES:
             i += 1
-        elif word in COMMAND_PREFIXES:
-            wrapped = True
-            i += 1
+        elif word in WRAPPERS:
+            i = skip_wrapper(words, i + 1, word)
         else:
             break
     if i >= len(words) or words[i][0] not in SBT_LAUNCHERS:

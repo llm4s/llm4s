@@ -569,6 +569,30 @@ expect_pass "env, time, exec, sudo, VAR=x and shell keywords before sbt; a redir
 d="$(fresh_copy cmd-prefix-bad)"; run_sbt_doc "$d" "env FOO=1 nohup sbt definitelyNotATask"
 expect_fail "a command after wrapper words is still checked" "$d" "definitelyNotATask"
 
+d="$(fresh_copy cmd-wrapper-values-ok)"; run_sbt_doc "$d" "$(printf '%s\n' 'sudo -u ci sbt test' 'sudo --user=ci -E sbt test' 'env -u NAME -C /tmp sbt compile' 'nice -n 10 sbt test' 'timeout -s KILL 30m sbt compile' 'exec -a name sbt test')"
+expect_pass "a wrapper option's value is not taken for the command word" "$d"
+
+d="$(fresh_copy cmd-sudo-user)"; run_sbt_doc "$d" "sudo -u ci sbt definitelyNotATask"
+expect_fail "sudo -u USER: the command after the user is checked" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-sudo-combined)"; run_sbt_doc "$d" "sudo -Eu ci -- sbt definitelyNotATask"
+expect_fail "sudo -Eu USER --: a combined short option and a terminator" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-env-unset)"; run_sbt_doc "$d" "env -u NAME sbt definitelyNotATask"
+expect_fail "env -u NAME: the command after the name is checked" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-nice-n)"; run_sbt_doc "$d" "nice -n 10 sbt definitelyNotATask"
+expect_fail "nice -n N: the command after the adjustment is checked" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-timeout)"; run_sbt_doc "$d" "timeout 30m sbt definitelyNotATask"
+expect_fail "timeout DURATION: the command after the duration is checked" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-sbt-quoted-semicolon)"; run_sbt_doc "$d" "$(printf '%s\n' "sbt 'run \"explain a;b\"'" "sbt 'core/run \"say \\\"x;y\\\" now\"'")"
+expect_pass "a ; inside an sbt-quoted argument does not split the command" "$d"
+
+d="$(fresh_copy cmd-sbt-quoted-semicolon-bad)"; run_sbt_doc "$d" "sbt 'run \"x;y\"; definitelyNotATask'"
+expect_fail "a ; outside sbt quotes still splits the command" "$d" "definitelyNotATask"
+
 d="$(fresh_copy cmd-not-command-word)"; run_sbt_doc "$d" "$(printf '%s\n' 'addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.5.2")' 'brew install sbt sbtn' 'which sbt && ls ~/.sbt/boot' 'cp -r project/sbt build/' 'curl -L https://example.com/sbt test.tgz')"
 say "$d" README.md 'Install the `sbt-ci-release` plugin with `addSbtPlugin("x" % "sbt-ci-release" % "1")`, or see `/usr/share/sbt foo`.'
 expect_pass "sbt not in command position is not a command" "$d"
