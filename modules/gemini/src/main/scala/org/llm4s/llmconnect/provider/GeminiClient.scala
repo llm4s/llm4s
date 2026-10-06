@@ -231,7 +231,7 @@ class GeminiClient(
           "parts" -> ujson.Arr(ujson.Obj("text" -> content))
         )
 
-      case AssistantMessage(contentOpt, toolCalls) =>
+      case AssistantMessage(contentOpt, toolCalls, _) => // the format has no field for earlier thinking
         if (toolCalls.nonEmpty) {
           // Assistant message with tool calls
           val parts = scala.collection.mutable.ArrayBuffer[ujson.Value]()

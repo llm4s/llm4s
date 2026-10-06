@@ -51,8 +51,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
       created = 1234567890L,
       content = "The answer is 4",
       model = "claude-3",
-      message = AssistantMessage("The answer is 4"),
-      thinking = Some("Let me calculate 2 + 2...")
+      message = AssistantMessage("The answer is 4").withThinking("Let me calculate 2 + 2...")
     )
 
     completion.hasThinking shouldBe true
@@ -64,8 +63,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
       created = 1234567890L,
       content = "Hello",
       model = "gpt-4",
-      message = AssistantMessage("Hello"),
-      thinking = Some("")
+      message = AssistantMessage("Hello").withThinking("")
     )
 
     completion.hasThinking shouldBe false
@@ -77,8 +75,7 @@ class CompletionSpec extends AnyFunSuite with Matchers {
       created = 1234567890L,
       content = "The answer is 4",
       model = "claude-3",
-      message = AssistantMessage("The answer is 4"),
-      thinking = Some("Let me think...")
+      message = AssistantMessage("The answer is 4").withThinking("Let me think...")
     )
 
     completion.fullContent should include("<thinking>")

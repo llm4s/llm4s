@@ -611,7 +611,10 @@ llm4s {
 
 - **Chat:** `deepseek-chat` (best for general use)
 - **Reasoning:** `deepseek-reasoner` (extended thinking). Its chain of thought
-  (`reasoning_content`) is returned as `Completion.thinking`, and streamed as thinking deltas.
+  (`reasoning_content`) is returned on the message as `AssistantMessage.thinking` (and so
+  `Completion.thinking`), streamed as thinking deltas, and sent back as `reasoning_content` in later
+  requests, which DeepSeek's thinking mode requires once tools are involved
+  (see [Thinking in conversation history](#thinking-in-conversation-history)).
 
 ### Costs
 
@@ -654,7 +657,9 @@ Both sections are shown together for brevity. Only the section you load is valid
 its key - `OPENROUTER_API_KEY` or `ZAI_API_KEY` - needs to be set.
 
 OpenRouter maps `CompletionOptions.reasoning` onto the underlying model: a thinking budget for
-Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest.
+Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest. A GLM thinking
+model's `reasoning_content` on Z.ai, and a model's `reasoning` on OpenRouter, are returned on the
+message and sent back (see [Thinking in conversation history](#thinking-in-conversation-history)).
 
 ---
 
@@ -1475,6 +1480,40 @@ Free! Just compute (CPU or GPU needed).
 - Works offline (no internet needed)
 - Use GPU for faster inference
 - Ideal for sensitive data (runs locally)
+
+---
+
+## Thinking in conversation history
+
+A model's reasoning is returned on the message it produced, as `AssistantMessage.thinking` - a
+sequence of `ThinkingBlock`s - and `Completion.thinking` is that message's thinking text. Because it
+lives on the message, it stays in the conversation (and in an agent's thread) like the content and
+tool calls do, and each client sends it back where its provider takes it:
+
+| Provider | Read from | Sent back as |
+|---|---|---|
+| Anthropic | `thinking` blocks (each with its `signature`) and `redacted_thinking` | the same blocks, unchanged and first in the assistant turn |
+| Bedrock (Converse) | `reasoningContent` (text with `signature`, or `redactedContent`) | the same blocks, unchanged and first in the assistant turn |
+| Ollama | `message.thinking` | `thinking` on the assistant message |
+| DeepSeek, Z.ai | `reasoning_content` | `reasoning_content` |
+| OpenRouter | `reasoning` / `thinking` | `reasoning` |
+| Mistral (Magistral) | thinking chunks in `content` | a thinking chunk before the text chunk |
+| OpenAI, Azure, Gemini, Vertex AI, Cohere, generic `openai-compatible` | - | not sent: the API has no field for it |
+
+Anthropic and Bedrock require the signed blocks back when a thinking model's turn ends in tool
+calls, and reject a thinking block without a signature, so unsigned thinking - from another
+provider earlier in the conversation, or set by hand with `withThinking(text)` - is left out of
+their requests. The Anthropic client sends tool calls and their results as `tool_use` and
+`tool_result` blocks for the same reason: the thinking has to sit in the turn that made the calls.
+
+```scala
+for {
+  first <- client.complete(conversation, options)     // a tool-call turn, with thinking
+  results = runTools(first.message.toolCalls)          // your tool execution: Seq[ToolMessage]
+  next    = conversation.addMessage(first.message).addMessages(results) // keeps the thinking
+  answer <- client.complete(next, options)             // the provider gets it back
+} yield answer
+```
 
 ---
 

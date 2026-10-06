@@ -66,7 +66,9 @@ object DeepSeekClient {
  * reasoner's `reasoning_content`, which is its thinking. The old
  * `DeepSeekClient` ignored `reasoning_content`, so `deepseek-reasoner`'s
  * thinking was dropped ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
- * DeepSeek reports reasoning tokens under `completion_tokens_details`.
+ * DeepSeek reports reasoning tokens under `completion_tokens_details`. An assistant turn's
+ * thinking is sent back as its `reasoning_content`, which thinking mode requires once tools are
+ * in play.
  *
  * Streamed usage is asked for with the standard `stream_options.include_usage`, which
  * DeepSeek's chat-completion reference documents (it also reports usage on a stream's last
@@ -77,6 +79,14 @@ private[llm4s] object DeepSeekDialect extends OpenAICompatibleDialect:
 
   override def thinking(obj: ujson.Value): Option[String] =
     OpenAICompatibleDialect.firstString(obj, "reasoning_content")
+
+  /**
+   * Sent back as the assistant turn's `reasoning_content`. DeepSeek's thinking-mode guide requires
+   * it in every later request of a conversation that carries `tools` - leaving it out is a 400 -
+   * and ignores it otherwise.
+   */
+  override def encodeThinking(message: ujson.Obj, thinking: String): Unit =
+    message("reasoning_content") = thinking
 
   override def reasoningTokens(usage: ujson.Value): Option[Int] =
     usage.obj

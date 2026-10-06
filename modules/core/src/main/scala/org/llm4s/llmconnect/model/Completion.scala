@@ -13,8 +13,6 @@ import org.llm4s.annotation.Stable
  * @param message The assistant's message in response to the user's input.
  * @param toolCalls List of tool calls made by the assistant.
  * @param usage Optional token usage statistics for the completion.
- * @param thinking Optional thinking/reasoning content from extended thinking models.
- *                 Present when using reasoning modes with Claude or o1/o3 models.
  * @param estimatedCost Optional estimated cost of this completion in USD.
  *                      Computed from token usage and model pricing when available.
  */
@@ -27,7 +25,6 @@ final case class Completion private (
   message: AssistantMessage,
   toolCalls: List[ToolCall],
   usage: Option[TokenUsage],
-  thinking: Option[String],
   estimatedCost: Option[Double]
 ) {
   def withId(id: String): Completion                               = copy(id = id)
@@ -38,8 +35,6 @@ final case class Completion private (
   def withToolCalls(toolCalls: List[ToolCall]): Completion         = copy(toolCalls = toolCalls)
   def withUsage(usage: TokenUsage): Completion                     = copy(usage = Some(usage))
   def withUsage(usage: Option[TokenUsage]): Completion             = copy(usage = usage)
-  def withThinking(thinking: String): Completion                   = copy(thinking = Some(thinking))
-  def withThinking(thinking: Option[String]): Completion           = copy(thinking = thinking)
   def withEstimatedCost(estimatedCost: Double): Completion         = copy(estimatedCost = Some(estimatedCost))
   def withEstimatedCost(estimatedCost: Option[Double]): Completion = copy(estimatedCost = estimatedCost)
 
@@ -54,9 +49,16 @@ final case class Completion private (
   def hasToolCalls: Boolean = toolCalls.nonEmpty
 
   /**
+   * The text of the model's thinking/reasoning, when the provider reports it: the thinking
+   * text of [[message]] (see [[AssistantMessage.thinking]]), which is where clients put it so
+   * that it stays in the conversation history. Set it with `withMessage(message.withThinking(...))`.
+   */
+  def thinking: Option[String] = message.thinkingText
+
+  /**
    * Check if completion includes thinking/reasoning content.
    */
-  def hasThinking: Boolean = thinking.exists(_.nonEmpty)
+  def hasThinking: Boolean = thinking.nonEmpty
 
   /**
    * Get the full response including thinking content (if available).
@@ -81,10 +83,9 @@ object Completion {
     message: AssistantMessage,
     toolCalls: List[ToolCall] = List.empty,
     usage: Option[TokenUsage] = None,
-    thinking: Option[String] = None,
     estimatedCost: Option[Double] = None
   ): Completion =
-    new Completion(id, created, content, model, message, toolCalls, usage, thinking, estimatedCost)
+    new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost)
 }
 
 /**

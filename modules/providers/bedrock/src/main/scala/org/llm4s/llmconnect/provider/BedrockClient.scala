@@ -28,6 +28,7 @@ import software.amazon.awssdk.auth.credentials.{
   ProfileCredentialsProvider,
   StaticCredentialsProvider
 }
+import software.amazon.awssdk.core.SdkBytes
 import software.amazon.awssdk.core.document.Document
 import software.amazon.awssdk.http.Protocol
 import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient
@@ -45,6 +46,8 @@ import software.amazon.awssdk.services.bedrockruntime.model.{
   ConverseStreamResponseHandler,
   InferenceConfiguration,
   Message => BedrockMessage,
+  ReasoningContentBlock,
+  ReasoningTextBlock,
   ServiceQuotaExceededException,
   SystemContentBlock,
   ThrottlingException,
@@ -227,8 +230,16 @@ class BedrockClient(
         Option(delta.toolUse()).flatMap(tu => Option(tu.input())).filter(_.nonEmpty).foreach { fragment =>
           queue.put(StreamSignal.ToolArgs(e.contentBlockIndex(), fragment))
         }
-        Option(delta.reasoningContent()).flatMap(r => Option(r.text())).filter(_.nonEmpty).foreach { t =>
-          queue.put(StreamSignal.Reasoning(t))
+        Option(delta.reasoningContent()).foreach { reasoning =>
+          Option(reasoning.text()).filter(_.nonEmpty).foreach { t =>
+            queue.put(StreamSignal.Reasoning(e.contentBlockIndex(), t))
+          }
+          Option(reasoning.signature()).filter(_.nonEmpty).foreach { sig =>
+            queue.put(StreamSignal.ReasoningSignature(e.contentBlockIndex(), sig))
+          }
+          Option(reasoning.redactedContent()).map(_.asByteArray()).filter(_.nonEmpty).foreach { bytes =>
+            queue.put(StreamSignal.ReasoningRedacted(e.contentBlockIndex(), BedrockClient.encodeRedacted(bytes)))
+          }
         }
       }
       .onMessageStop(e => queue.put(StreamSignal.Stop(e.stopReasonAsString())))
@@ -258,6 +269,8 @@ class BedrockClient(
     val accumulator = StreamingAccumulator.create()
     val messageId   = java.util.UUID.randomUUID().toString
     val toolIds     = scala.collection.mutable.Map.empty[Int, String]
+    // reasoning blocks by content-block index, so each keeps its own text and signature
+    val reasoning = scala.collection.mutable.TreeMap.empty[Int, BedrockClient.StreamedReasoning]
 
     def emit(chunk: StreamedChunk): Unit = {
       accumulator.addChunk(chunk)
@@ -278,8 +291,15 @@ class BedrockClient(
             case StreamSignal.Text(text) =>
               emit(StreamedChunk(messageId, Some(text), None, None))
               drain()
-            case StreamSignal.Reasoning(text) =>
+            case StreamSignal.Reasoning(index, text) =>
+              reasoning.getOrElseUpdate(index, BedrockClient.StreamedReasoning()).text.append(text)
               emit(StreamedChunk(messageId, None, None, None, thinkingDelta = Some(text)))
+              drain()
+            case StreamSignal.ReasoningSignature(index, signature) =>
+              reasoning.getOrElseUpdate(index, BedrockClient.StreamedReasoning()).signature = Some(signature)
+              drain()
+            case StreamSignal.ReasoningRedacted(index, data) =>
+              reasoning.getOrElseUpdate(index, BedrockClient.StreamedReasoning()).redacted = Some(data)
               drain()
             case StreamSignal.ToolStart(index, id, name) =>
               toolIds(index) = id
@@ -304,7 +324,12 @@ class BedrockClient(
               Left(NetworkError("ConverseStream ended before messageStop", None, endpointLabel))
             case StreamSignal.Finished(None) =>
               accumulator.toCompletion.map { c =>
+                // the accumulator knows only the reasoning text; the blocks carry their signatures
+                val message =
+                  if (reasoning.isEmpty) c.message
+                  else c.message.withThinking(reasoning.values.map(_.toBlock).toSeq)
                 c.withModel(config.model)
+                  .withMessage(message)
                   .withToolCalls(c.message.toolCalls.toList)
                   .withEstimatedCost(c.usage.flatMap(u => CostEstimator.estimate(config.model, u)))
               }
@@ -386,14 +411,29 @@ class BedrockClient(
         Some(BedrockMessage.builder().role(ConversationRole.USER).content(ContentBlock.fromText(content)).build())
 
       case msg: AssistantMessage =>
+        // signed and redacted reasoning goes back first, unchanged; unsigned reasoning (from
+        // another provider) is left out, since Bedrock's Claude models reject it unsigned
+        val reasoningBlocks = msg.thinking.collect {
+          case ThinkingBlock.Text(text, Some(signature)) if signature.nonEmpty =>
+            ContentBlock.fromReasoningContent(
+              ReasoningContentBlock
+                .builder()
+                .reasoningText(ReasoningTextBlock.builder().text(text).signature(signature).build())
+                .build()
+            )
+          case ThinkingBlock.Redacted(data) =>
+            ContentBlock.fromReasoningContent(
+              ReasoningContentBlock.builder().redactedContent(BedrockClient.decodeRedacted(data)).build()
+            )
+        }
         val textBlocks = msg.contentOpt.filter(_.nonEmpty).map(ContentBlock.fromText).toSeq
         val toolBlocks = msg.toolCalls.map { tc =>
           ContentBlock.fromToolUse(
             ToolUseBlock.builder().toolUseId(tc.id).name(tc.name).input(ujsonToDocument(tc.arguments)).build()
           )
         }
-        val blocks = textBlocks ++ toolBlocks
-        Option.when(blocks.nonEmpty)(
+        val blocks = reasoningBlocks ++ textBlocks ++ toolBlocks
+        Option.when(textBlocks.nonEmpty || toolBlocks.nonEmpty)(
           BedrockMessage.builder().role(ConversationRole.ASSISTANT).content(blocks.asJava).build()
         )
 
@@ -432,12 +472,18 @@ class BedrockClient(
       .flatMap(b => Option(b.text()).filter(_.nonEmpty))
       .mkString
 
-    val thinking = Option(
-      blocks
-        .filter(_.`type`() == ContentBlock.Type.REASONING_CONTENT)
-        .flatMap(b => Option(b.reasoningContent()).flatMap(r => Option(r.reasoningText())).map(_.text()))
-        .mkString
-    ).filter(_.nonEmpty)
+    // every reasoning block with its signature, and redacted reasoning, in order
+    val thinking: Seq[ThinkingBlock] = blocks
+      .filter(_.`type`() == ContentBlock.Type.REASONING_CONTENT)
+      .flatMap(b => Option(b.reasoningContent()))
+      .flatMap { r =>
+        Option(r.reasoningText())
+          .map(t => ThinkingBlock.Text(Option(t.text()).getOrElse(""), Option(t.signature()).filter(_.nonEmpty)))
+          .orElse(
+            Option(r.redactedContent())
+              .map(bytes => ThinkingBlock.Redacted(BedrockClient.encodeRedacted(bytes.asByteArray())))
+          )
+      }
 
     val toolCalls = blocks
       .filter(_.`type`() == ContentBlock.Type.TOOL_USE)
@@ -446,7 +492,8 @@ class BedrockClient(
         ToolCall(id = tu.toolUseId(), name = tu.name(), arguments = documentToUjson(tu.input()))
       }
 
-    val message = AssistantMessage(contentOpt = Option(textContent).filter(_.nonEmpty), toolCalls = toolCalls)
+    val message =
+      AssistantMessage(contentOpt = Option(textContent).filter(_.nonEmpty), toolCalls = toolCalls, thinking = thinking)
 
     val usage = Option(response.usage()).map { u =>
       TokenUsage(
@@ -464,7 +511,6 @@ class BedrockClient(
       message = message,
       toolCalls = toolCalls,
       usage = usage,
-      thinking = thinking,
       estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model, u))
     )
   }
@@ -552,13 +598,35 @@ object BedrockClient {
   /** What the SDK's stream callbacks hand to the thread that is waiting on the stream. */
   private[provider] enum StreamSignal {
     case Text(text: String)
-    case Reasoning(text: String)
+    case Reasoning(index: Int, text: String)
+    case ReasoningSignature(index: Int, signature: String)
+    case ReasoningRedacted(index: Int, data: String)
     case ToolStart(index: Int, id: String, name: String)
     case ToolArgs(index: Int, fragment: String)
     case Stop(reason: String)
     case Usage(inputTokens: Int, outputTokens: Int)
     case Finished(error: Option[Throwable])
   }
+
+  /** A reasoning block being assembled from a stream. */
+  final private[provider] case class StreamedReasoning(
+    text: StringBuilder = new StringBuilder,
+    var signature: Option[String] = None,
+    var redacted: Option[String] = None
+  ) {
+    def toBlock: ThinkingBlock =
+      redacted.fold[ThinkingBlock](ThinkingBlock.Text(text.toString, signature))(ThinkingBlock.Redacted(_))
+  }
+
+  /** Redacted reasoning is bytes on the wire; [[ThinkingBlock.Redacted]] holds them base64-encoded. */
+  private[provider] def encodeRedacted(bytes: Array[Byte]): String =
+    java.util.Base64.getEncoder.encodeToString(bytes)
+
+  /** The bytes of a [[ThinkingBlock.Redacted]]; data that is not base64 is sent as its UTF-8 bytes. */
+  private[provider] def decodeRedacted(data: String): SdkBytes =
+    SdkBytes.fromByteArray(
+      Try(java.util.Base64.getDecoder.decode(data)).getOrElse(data.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    )
 
   def apply(
     config: BedrockConfig,

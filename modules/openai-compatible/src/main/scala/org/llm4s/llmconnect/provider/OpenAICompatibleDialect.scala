@@ -21,7 +21,8 @@ import scala.util.Try
  *    ([[sendEmptyAssistantTurns]]); the tool-call ids the provider
  *    accepts ([[encodeToolCallId]]); the `response_format` shape
  *    ([[encodeResponseFormat]]); whether a stream asks for usage
- *    ([[streamUsageOption]]); and any reasoning fields ([[addReasoning]]).
+ *    ([[streamUsageOption]]); any reasoning fields ([[addReasoning]]); and whether, and
+ *    where, an assistant turn's earlier thinking goes back ([[encodeThinking]]).
  *  - '''Response:''' how `content` is read back ([[decodeContent]]); where the
  *    model's thinking is ([[thinking]]); where its reasoning-token count is
  *    ([[reasoningTokens]]); and how a non-streaming `tool_calls` array is
@@ -103,6 +104,19 @@ trait OpenAICompatibleDialect:
    * `CompletionOptions.reasoning` is ignored.
    */
   def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): Unit = ()
+
+  /**
+   * Adds an assistant turn's thinking - the text of its
+   * [[org.llm4s.llmconnect.model.AssistantMessage.thinking]] - to that turn's encoded `message`,
+   * after its `content` and `tool_calls` are set. Called only when the turn has thinking text.
+   *
+   * Standard: adds nothing, so the thinking is dropped. The OpenAI format has no field for it, and
+   * an unknown field can fail a request. A provider that documents a field for a model's earlier
+   * reasoning overrides this: DeepSeek and Z.ai (`reasoning_content`, which both require back
+   * across a tool-calling turn), OpenRouter (`reasoning`) and Mistral (a thinking chunk in
+   * `content`).
+   */
+  def encodeThinking(message: ujson.Obj, thinking: String): Unit = ()
 
   /**
    * Reads the text of a reply's `content` value - on a completion's `message`

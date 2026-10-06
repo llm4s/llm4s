@@ -232,8 +232,8 @@ class OpenAICompatibleClient(
    */
   private def sendableMessages(conversation: Conversation): Seq[Message] =
     conversation.messages.filterNot {
-      case AssistantMessage(content, toolCalls) =>
-        content.forall(_.isEmpty) && toolCalls.isEmpty && !dialect.sendEmptyAssistantTurns
+      case am: AssistantMessage =>
+        am.contentOpt.forall(_.isEmpty) && am.toolCalls.isEmpty && !dialect.sendEmptyAssistantTurns
       case _ => false
     }
 
@@ -247,8 +247,10 @@ class OpenAICompatibleClient(
         ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(content))
       case SystemMessage(content) =>
         ujson.Obj("role" -> dialect.systemRole, "content" -> dialect.encodeContent(content))
-      case AssistantMessage(content, toolCalls) =>
-        val message = ujson.Obj("role" -> "assistant")
+      case am: AssistantMessage =>
+        val content   = am.contentOpt
+        val toolCalls = am.toolCalls
+        val message   = ujson.Obj("role" -> "assistant")
         content.filter(_.nonEmpty) match {
           case Some(text) => message("content") = dialect.encodeContent(text)
           case None if dialect.alwaysSendAssistantContent =>
@@ -264,6 +266,7 @@ class OpenAICompatibleClient(
             )
           })
         }
+        am.thinkingText.foreach(dialect.encodeThinking(message, _))
         message
       case ToolMessage(content, toolCallId) =>
         ujson.Obj(
@@ -304,10 +307,10 @@ class OpenAICompatibleClient(
       created = json.obj.get("created").flatMap(_.numOpt).map(_.toLong).getOrElse(0L),
       content = content.getOrElse(""),
       model = json.obj.get("model").flatMap(_.strOpt).getOrElse(settings.model),
-      message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList),
+      message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList)
+        .withThinking(dialect.thinking(message).orElse(dialect.thinking(choice)).getOrElse("")),
       toolCalls = toolCalls.toList,
       usage = usage,
-      thinking = dialect.thinking(message).orElse(dialect.thinking(choice)),
       estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u))
     )
   }

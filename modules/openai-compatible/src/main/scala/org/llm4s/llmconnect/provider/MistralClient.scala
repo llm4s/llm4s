@@ -81,7 +81,9 @@ object MistralClient {
  *    chunks rather than a string: `{"type":"thinking","thinking":[{"type":"text",...}]}`
  *    for its reasoning and `{"type":"text","text":...}` for the answer. Streamed deltas take
  *    either shape. The text chunks are the content; the thinking chunks are `thinking`, on a
- *    completion and as streamed thinking deltas.
+ *    completion and as streamed thinking deltas. An assistant turn's thinking goes back the same
+ *    way - its `content` becomes a thinking chunk followed by a text chunk - since Mistral's
+ *    reasoning guide asks for the thinking chunks to be replayed, not stripped.
  *
  * Everything else - roles, `tools`, `response_format`, `usage`, SSE framing with `[DONE]`,
  * streamed tool calls with an `index` - is the standard format. `CompletionOptions.reasoning`
@@ -125,6 +127,17 @@ private[llm4s] object MistralDialect extends OpenAICompatibleDialect:
         .mkString
       Option.when(text.nonEmpty)(text)
     }
+
+  override def encodeThinking(message: ujson.Obj, thinking: String): Unit = {
+    val thinkingChunk =
+      ujson.Obj("type" -> "thinking", "thinking" -> ujson.Arr(ujson.Obj("type" -> "text", "text" -> thinking)))
+    val textChunk = message.obj
+      .get("content")
+      .flatMap(_.strOpt)
+      .filter(_.nonEmpty)
+      .map(text => ujson.Obj("type" -> "text", "text" -> text))
+    message("content") = ujson.Arr.from(thinkingChunk +: textChunk.toSeq)
+  }
 
   private def chunkType(chunk: ujson.Value): Option[String] =
     chunk.objOpt.flatMap(_.get("type")).flatMap(_.strOpt)

@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Thinking stays in the conversation and goes back to the provider** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
+  `AssistantMessage` carries the model's reasoning as `thinking: Seq[ThinkingBlock]` - `ThinkingBlock.Text(text,
+  signature)` or `ThinkingBlock.Redacted(data)`, both `@Stable` - with `withThinking(blocks)` /
+  `withThinking(text)`, `thinkingText` and `hasThinking`; its codec writes `thinking` only when present and reads
+  JSON without it as none, so stored conversations and agent checkpoints still load. Clients put the thinking on the
+  message they return, streamed or not: Anthropic and Bedrock as blocks with their signatures and redacted thinking,
+  Ollama, DeepSeek, Z.ai (newly read from `reasoning_content`), OpenRouter and Mistral as text. They send it back
+  where the provider takes it: Anthropic and Bedrock replay signed and redacted blocks first in the assistant turn
+  (unsigned thinking is left out), Ollama as `thinking`, DeepSeek and Z.ai as `reasoning_content`, OpenRouter as
+  `reasoning`, Mistral as a thinking chunk; a new `OpenAICompatibleDialect.encodeThinking` hook decides, and drops it
+  by default. The agent's tool loop stores the completion's message unchanged, so a run sends a tool-call turn's
+  thinking in the call after the tool results, and later turns read it back from the checkpoint.
 - **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
   `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
   service's MP3 and return its bytes untouched. PCM stays the default. `AudioFormat.Mp3` is a new case
@@ -559,6 +571,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **`AssistantMessage` is a growth-prone data type; `Completion.thinking` comes from the message**
+  ([#1381](https://github.com/llm4s/llm4s/issues/1381)): `AssistantMessage` is `final case class AssistantMessage
+  private (contentOpt, toolCalls, thinking)` with a companion `apply` (named arguments, defaults as before, plus the
+  `apply(content)` / `apply(content, toolCalls)` overloads) and `withContent`, `withToolCalls`, `withThinking`;
+  `.copy` is private, so replace `msg.copy(contentOpt = Some(t))` with `msg.withContent(t)`. A positional pattern
+  takes three fields: `case AssistantMessage(content, toolCalls, thinking)`. `Completion` loses its `thinking`
+  constructor parameter and `withThinking`: `Completion.thinking` is now `message.thinkingText`, so set it with
+  `completion.withMessage(completion.message.withThinking(...))`, or build the message with it.
+- **`llm4s-anthropic`: tool calls and results as content blocks** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
+  an assistant turn's tool calls go to Anthropic as `tool_use` blocks after its text, and each `ToolMessage` as a
+  `tool_result` block, consecutive results in one user turn. Before, a tool-call turn was dropped and its results
+  sent as `[Tool result for <id>]: ...` user text, which left nowhere to replay the turn's signed thinking. A tool
+  call no `ToolMessage` answers is left out, and a `ToolMessage` whose call is not in the conversation is still sent
+  as prefixed user text.
 - **Stage 1 migration: agent runtime** ([#1328](https://github.com/llm4s/llm4s/issues/1328), BREAKING,
   `llm4s-agent`, `llm4s-effect`, `llm4s-zio`, `workspaceClient`): `Agent` runs on `GraphRuntime`
   through a generalised `ToolLoop`; the graph is the only agent loop, and `AgentState` and the

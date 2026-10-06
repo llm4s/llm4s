@@ -301,7 +301,8 @@ object SystemMessage {
 }
 
 /**
- * A response from the LLM, optionally containing text, tool-call requests, or both.
+ * A response from the LLM, optionally containing text, tool-call requests, or both, and the
+ * reasoning the model produced before them.
  *
  * `content` always returns a non-null `String`; it returns `""` when the LLM
  * response contains only tool calls and no accompanying text (`contentOpt` is
@@ -312,19 +313,43 @@ object SystemMessage {
  *  - `contentOpt.exists(_.trim.nonEmpty)` — the LLM produced text.
  *  - `toolCalls.nonEmpty` — the LLM requested one or more tool invocations.
  *
+ * Thinking alone does not make a message well-formed.
+ *
+ * Construct one with the companion `apply` and change it with the `with*` setters.
+ *
  * @param contentOpt Text portion of the response; `None` when the model produced
  *                   only tool calls.
  * @param toolCalls  Tool invocations requested by the model; each carries an `id`
  *                   that must be matched by a subsequent [[ToolMessage]].
+ * @param thinking   The model's reasoning, as the provider returned it; empty when there was none
+ *                   or the provider does not report it. Clients put it here so that it stays in
+ *                   the conversation history, and send it back where their provider accepts it
+ *                   (see [[ThinkingBlock]]).
  */
 @Stable
-case class AssistantMessage(
-  contentOpt: Option[String] = None,
-  toolCalls: Seq[ToolCall] = Seq.empty
+final case class AssistantMessage private (
+  contentOpt: Option[String],
+  toolCalls: Seq[ToolCall],
+  thinking: Seq[ThinkingBlock]
 ) extends Message {
   val role: MessageRole = MessageRole.Assistant
 
   def content: String = contentOpt.getOrElse("")
+
+  def withContent(content: String): AssistantMessage               = copy(contentOpt = Some(content))
+  def withContent(content: Option[String]): AssistantMessage       = copy(contentOpt = content)
+  def withToolCalls(toolCalls: Seq[ToolCall]): AssistantMessage    = copy(toolCalls = toolCalls)
+  def withThinking(thinking: Seq[ThinkingBlock]): AssistantMessage = copy(thinking = thinking)
+
+  /** Sets the thinking to `text` as one unsigned [[ThinkingBlock.Text]], or to none when it is empty. */
+  def withThinking(text: String): AssistantMessage =
+    copy(thinking = if (text.isEmpty) Seq.empty else Seq(ThinkingBlock.Text(text)))
+
+  /** The text of the thinking blocks, concatenated; `None` when there is none. */
+  def thinkingText: Option[String] = ThinkingBlock.text(thinking)
+
+  /** Whether the message carries any thinking, text or redacted. */
+  def hasThinking: Boolean = thinking.nonEmpty
 
   override def toString: String = {
     val toolCallsStr = if (toolCalls.nonEmpty) {
@@ -338,28 +363,48 @@ case class AssistantMessage(
 
   override def validate: Result[Message] =
     if (content.trim.isEmpty && toolCalls.isEmpty) {
-      Left(
-        ValidationError(
-          "Assistant message must have either content or tool calls",
-          "content"
-        )
-      )
+      Left(ValidationError("Assistant message must have either content or tool calls", "content"))
+    } else if (
+      thinking.exists {
+        case ThinkingBlock.Text(text, signature) => text.isEmpty && !signature.exists(_.nonEmpty)
+        case ThinkingBlock.Redacted(data)        => data.isEmpty
+      }
+    ) {
+      Left(ValidationError("thinking", "an assistant message's thinking block must not be empty"))
     } else {
       Right(this)
     }
 }
 
 object AssistantMessage {
-  // Manual ReadWriter for AssistantMessage due to macro issues with default parameters
+
+  /** Creates an [[AssistantMessage]]. Named arguments are the supported way to construct one. */
+  def apply(
+    contentOpt: Option[String] = None,
+    toolCalls: Seq[ToolCall] = Seq.empty,
+    thinking: Seq[ThinkingBlock] = Seq.empty
+  ): AssistantMessage =
+    new AssistantMessage(contentOpt, toolCalls, thinking)
+
+  def apply(content: String): AssistantMessage =
+    new AssistantMessage(Some(content), Seq.empty, Seq.empty)
+  def apply(content: String, toolCalls: Seq[ToolCall]): AssistantMessage =
+    new AssistantMessage(Some(content), toolCalls, Seq.empty)
+
+  // Manual ReadWriter: `thinking` is written only when present and read as empty when absent,
+  // so JSON written before it existed still reads
   implicit val rw: RW[AssistantMessage] = readwriter[ujson.Value].bimap[AssistantMessage](
-    msg =>
-      ujson.Obj(
+    msg => {
+      val obj = ujson.Obj(
         "contentOpt" -> (msg.contentOpt match {
           case None          => ujson.Null
           case Some(content) => ujson.Str(content)
         }),
         "toolCalls" -> ujson.read(write(msg.toolCalls))
-      ),
+      )
+      if (msg.thinking.nonEmpty) obj("thinking") = ujson.read(write(msg.thinking))
+      obj
+    },
     json => {
       val obj = json.obj
       val contentOpt = obj.get("contentOpt") match {
@@ -371,14 +416,13 @@ object AssistantMessage {
         case Some(toolCallsJson) => read[Seq[ToolCall]](toolCallsJson)
         case _                   => Seq.empty
       }
-      AssistantMessage(contentOpt, toolCalls)
+      val thinking = obj.get("thinking") match {
+        case Some(ujson.Null) | None => Seq.empty
+        case Some(thinkingJson)      => read[Seq[ThinkingBlock]](thinkingJson)
+      }
+      new AssistantMessage(contentOpt, toolCalls, thinking)
     }
   )
-
-  def apply(content: String): AssistantMessage =
-    AssistantMessage(Some(content), Seq.empty)
-  def apply(content: String, toolCalls: Seq[ToolCall]): AssistantMessage =
-    AssistantMessage(Some(content), toolCalls)
 }
 
 /**

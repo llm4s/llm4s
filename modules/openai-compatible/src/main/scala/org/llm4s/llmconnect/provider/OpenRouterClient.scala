@@ -106,7 +106,8 @@ object OpenRouterClient {
  *  - an assistant turn always carries `content`, `""` or `null` when it has no text;
  *  - reasoning requested per underlying model family (see [[addReasoning]]);
  *  - thinking read from `thinking` or `reasoning` (on the message, then the
- *    choice, and on a streamed delta), and `usage.reasoning_tokens`;
+ *    choice, and on a streamed delta), and `usage.reasoning_tokens`; an assistant turn's
+ *    thinking sent back as its `reasoning`, which OpenRouter documents for preserving reasoning;
  *  - strict tool-call parsing: a call missing its `id` or `name`, or with
  *    unparseable arguments, fails the completion rather than being defaulted.
  */
@@ -156,6 +157,9 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
 
   override def thinking(obj: ujson.Value): Option[String] =
     OpenAICompatibleDialect.firstString(obj, "thinking", "reasoning")
+
+  override def encodeThinking(message: ujson.Obj, thinking: String): Unit =
+    message("reasoning") = thinking
 
   override def reasoningTokens(usage: ujson.Value): Option[Int] =
     usage.obj.get("reasoning_tokens").flatMap(_.numOpt).map(_.toInt)
