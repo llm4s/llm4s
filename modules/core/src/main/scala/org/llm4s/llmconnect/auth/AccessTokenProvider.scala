@@ -30,10 +30,21 @@ trait AccessTokenProvider:
 /**
  * Caches the token `fetch` returns until `refreshMargin` before it expires - or half-way through
  * its life, if it lives shorter than twice the margin. Concurrent callers share one in-flight
- * fetch. A failed fetch is shared for a brief window (`FailureTtl`, 5 seconds): the callers waiting
- * behind it get the same failure at once instead of each making their own attempt in turn, which
- * during an outage would hold the last of N callers for N times the exchange's timeout. After the
- * window the next call tries again; a success, or a rejected cached token, ends it sooner.
+ * fetch.
+ *
+ * A failed fetch is shared for a brief window: the callers waiting behind it get the same failure
+ * at once instead of each making their own attempt in turn, which during an outage would hold the
+ * last of N callers for N times the exchange's timeout. A rejection (an authentication or
+ * configuration error, or any other error not marked recoverable) is shared for `FailureTtl`
+ * (5 seconds); a transient failure (a [[org.llm4s.error.RecoverableError]]: network, timeout, rate
+ * limit, 5xx) for `TransientFailureTtl` (1 second) - long enough for the callers queued behind the
+ * fetch, short enough that a blip does not outlive itself. After the window the next call tries
+ * again; a success, or a rejected cached token, ends it sooner.
+ *
+ * A cancellation is never shared. A fetch whose thread is interrupted - it returns
+ * `CancelledError`, throws `InterruptedException`, or fails while the flag is set - returns
+ * `CancelledError` to that caller alone, with its interrupt flag set, and caches nothing: the next
+ * caller through the lock makes its own fetch.
  */
 @Experimental
 final class CachingAccessTokenProvider(
@@ -73,14 +84,18 @@ final class CachingAccessTokenProvider(
               recentFailure() match
                 case Some(error) => Left(error)
                 case None =>
-                  fetch() match
+                  CancelledError.attempt(CachingAccessTokenProvider.Operation)(fetch()) match
                     case Right(token) =>
                       cached = Some(Cached(token, refreshAt(token)))
                       failed = None
                       Right(token.value)
+                    case Left(cancelled: CancelledError) =>
+                      // Caller-local: this thread was cancelled, not the exchange. Sharing it would
+                      // hand a cancellation to callers nobody interrupted.
+                      if !Thread.currentThread().isInterrupted then Thread.currentThread().interrupt()
+                      Left(cancelled)
                     case Left(error) =>
-                      failed =
-                        Some(Failed(error, clock.instant().plusMillis(CachingAccessTokenProvider.FailureTtl.toMillis)))
+                      failed = Some(Failed(error, clock.instant().plusMillis(failureTtl(error).toMillis)))
                       Left(error)
         }
 
@@ -91,6 +106,10 @@ final class CachingAccessTokenProvider(
         cached = None
         failed = None
     }
+
+  private def failureTtl(error: LLMError): FiniteDuration =
+    if LLMError.isRecoverable(error) then CachingAccessTokenProvider.TransientFailureTtl
+    else CachingAccessTokenProvider.FailureTtl
 
   private def recentFailure(): Option[LLMError] =
     failed.collect { case Failed(error, until) if clock.instant().isBefore(until) => error }
@@ -113,5 +132,8 @@ object CachingAccessTokenProvider:
   /** The operation a [[CancelledError]] names when a caller is interrupted waiting for a token. */
   val Operation: String = "workload-identity.token"
 
-  /** How long a failed fetch is shared with the callers that arrive meanwhile. */
+  /** How long a rejected fetch (not recoverable) is shared with the callers that arrive meanwhile. */
   private[auth] val FailureTtl: FiniteDuration = 5.seconds
+
+  /** How long a transient failure (a recoverable error) is shared with the callers that arrive meanwhile. */
+  private[auth] val TransientFailureTtl: FiniteDuration = 1.second

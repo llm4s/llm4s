@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.auth
 
-import org.llm4s.error.AuthenticationError
+import org.llm4s.error.{ AuthenticationError, CancelledError, NetworkError }
 import org.llm4s.types.Result
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -166,6 +166,90 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       provider.invalidate("t1")
       Thread.interrupted() shouldBe true
       provider.token() shouldBe Right("t1")
+    }
+
+    "return a cancelled fetch to its caller alone, so a waiter and a later caller fetch afresh" in {
+      val clock   = MutableClock(start)
+      val calls   = new AtomicInteger(0)
+      val entered = new java.util.concurrent.CountDownLatch(1)
+      val release = new java.util.concurrent.CountDownLatch(1)
+      // The first fetch behaves as the HTTP layer does when its thread is interrupted: it returns
+      // CancelledError and keeps the flag. Later fetches succeed.
+      val fetch = () =>
+        calls.incrementAndGet() match
+          case 1 =>
+            entered.countDown()
+            CancelledError.catchInterrupt(release.await()) match
+              case Left(e) =>
+                Thread.currentThread().interrupt()
+                Left(CancelledError("http.POST", Some(e)))
+              case Right(()) => Right(AccessToken("t1", clock.instant().plusSeconds(600)))
+          case n => Right(AccessToken(s"t$n", clock.instant().plusSeconds(600)))
+      val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
+      val outcomeA = new java.util.concurrent.atomic.AtomicReference[(Result[String], Boolean)]()
+      val outcomeB = new java.util.concurrent.atomic.AtomicReference[(Result[String], Boolean)]()
+      val callerA =
+        Thread.ofVirtual().start(() => outcomeA.set(provider.token() -> Thread.currentThread().isInterrupted))
+      entered.await()
+      val callerB =
+        Thread.ofVirtual().start(() => outcomeB.set(provider.token() -> Thread.currentThread().isInterrupted))
+      while callerB.getState != Thread.State.WAITING do Thread.onSpinWait() // B is parked behind A's fetch
+      callerA.interrupt()
+      callerA.join(5000)
+      callerB.join(5000)
+      val (resultA, interruptedA) = outcomeA.get
+      resultA.left.toOption.get shouldBe a[CancelledError]
+      interruptedA shouldBe true
+      outcomeB.get shouldBe (Right("t2") -> false) // its own fetch, not A's cancellation
+      provider.token() shouldBe Right("t2") // C: the token B fetched, no cached cancellation
+      calls.get shouldBe 2
+    }
+
+    "treat an InterruptedException thrown by the fetch as a cancellation, and cache nothing" in {
+      val clock = MutableClock(start)
+      val calls = new AtomicInteger(0)
+      val fetch = () =>
+        if calls.incrementAndGet() == 1 then throw new InterruptedException("cancelled")
+        else Right(AccessToken("t2", clock.instant().plusSeconds(600)))
+      val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
+      val result   = provider.token()
+      Thread.interrupted() shouldBe true // the flag is set again, and cleared here for what follows
+      result.left.toOption.get shouldBe a[CancelledError]
+      provider.token() shouldBe Right("t2")
+      calls.get shouldBe 2
+    }
+
+    "treat a failure that ends while the caller is interrupted as a cancellation, and cache nothing" in {
+      val clock = MutableClock(start)
+      val calls = new AtomicInteger(0)
+      val fetch = () =>
+        if calls.incrementAndGet() == 1 then
+          // On a virtual thread an interrupted socket read surfaces as a plain network error.
+          Thread.currentThread().interrupt()
+          Left(NetworkError("socket closed", None, "token-exchange"))
+        else Right(AccessToken("t2", clock.instant().plusSeconds(600)))
+      val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
+      val result   = provider.token()
+      Thread.interrupted() shouldBe true
+      result.left.toOption.get shouldBe a[CancelledError]
+      provider.token() shouldBe Right("t2")
+      calls.get shouldBe 2
+    }
+
+    "share a transient failure for a shorter window than a rejection" in {
+      val clock = MutableClock(start)
+      val calls = new AtomicInteger(0)
+      val fetch = () =>
+        if calls.incrementAndGet() == 1 then Left(NetworkError("connection refused", None, "token-exchange"))
+        else Right(AccessToken("t2", clock.instant().plusSeconds(600)))
+      val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
+      CachingAccessTokenProvider.TransientFailureTtl should be < CachingAccessTokenProvider.FailureTtl
+      provider.token().left.toOption.get shouldBe a[NetworkError]
+      provider.token().left.toOption.get shouldBe a[NetworkError] // inside the window: shared
+      calls.get shouldBe 1
+      clock.advance(CachingAccessTokenProvider.TransientFailureTtl + 1.millis)
+      provider.token() shouldBe Right("t2")
+      calls.get shouldBe 2
     }
 
     "redact the token value in AccessToken.toString" in {
