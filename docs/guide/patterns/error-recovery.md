@@ -342,14 +342,16 @@ object GracefulDegradation {
     try {
       val sources = ragSystem.retrieve(query)
       val context = sources.map(_.content).mkString("\n")
-      val answer = agent.run(
-        s"Answer this question using the context:\n$context\n\nQuestion: $query"
-      )
+      val answer = agent
+        .run(s"Answer this question using the context:\n$context\n\nQuestion: $query")
+        .toOption
+        .flatMap(_.answer)   // Some only for a Completed turn
+        .getOrElse("")
       
-      val groundingScore = ragSystem.checkGrounding(answer.message, sources)
+      val groundingScore = ragSystem.checkGrounding(answer, sources)
       
       RAGResult(
-        answer = answer.message,
+        answer = answer,
         sources = sources.map(_.url),
         groundingScore = groundingScore,
         degradedMode = false
@@ -358,9 +360,9 @@ object GracefulDegradation {
       case e: Exception =>
         println(s"RAG pipeline failed: ${e.getMessage}. Using degraded mode.")
         // Fall back to simple generation without RAG
-        val answer = agent.run(query)
+        val answer = agent.run(query).toOption.flatMap(_.answer).getOrElse("")
         RAGResult(
-          answer = answer.message,
+          answer = answer,
           sources = List(), // No sources
           groundingScore = 0.0, // Unknown grounding
           degradedMode = true

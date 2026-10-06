@@ -91,7 +91,7 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
   }
 
   it should "execute add and return the computed sum" in withClient { client =>
-    toolNamed(client, "add").execute(ujson.Obj("a" -> 3, "b" -> 4)) shouldBe Right(ujson.Num(7))
+    toolNamed(client, "add").execute(ujson.Obj("a" -> 3, "b" -> 4)) shouldBe Right(ujson.Str("7"))
   }
 
   it should "execute reverse and return the reversed text" in withClient { client =>
@@ -106,6 +106,12 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
     val params = toolNamed(client, "add").toOpenAITool(strict = false)("function")("parameters")
     params("required").arr.map(_.str).toSet shouldBe Set("a", "b")
     params("properties")("a")("type").str shouldBe "integer"
+  }
+
+  it should "return text that looks like JSON as the text the tool returned" in withClient { client =>
+    toolNamed(client, "reverse").execute(ujson.Obj("text" -> "42")) shouldBe Right(ujson.Str("24"))
+    toolNamed(client, "echo").execute(ujson.Obj("text" -> "true")) shouldBe Right(ujson.Str("true"))
+    toolNamed(client, "echo").execute(ujson.Obj("text" -> """{"a":1}""")) shouldBe Right(ujson.Str("""{"a":1}"""))
   }
 
   it should "execute a tool that takes no arguments" in withClient { client =>
@@ -134,7 +140,7 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
     val add                           = toolNamed(client, "add")
     val calls   = (1 to 24).map(i => Future(i -> add.execute(ujson.Obj("a" -> i, "b" -> (i * 100)))))
     val results = Await.result(Future.sequence(calls), 60.seconds)
-    results.foreach { case (i, r) => r shouldBe Right(ujson.Num(i * 101)) }
+    results.foreach { case (i, r) => r shouldBe Right(ujson.Str((i * 101).toString)) }
   }
 
   it should "fail a call made after the client was closed instead of hanging" in {
@@ -172,7 +178,7 @@ class MCPEmbeddedServerRoundTripSpec extends AnyFlatSpec with Matchers with Befo
     )
     try {
       registry.getAllTools.map(_.name).toSet shouldBe AllTools
-      registry.execute(ToolCallRequest("add", ujson.Obj("a" -> 20, "b" -> 22))) shouldBe Right(ujson.Num(42))
+      registry.execute(ToolCallRequest("add", ujson.Obj("a" -> 20, "b" -> 22))) shouldBe Right(ujson.Str("42"))
       registry.execute(ToolCallRequest("nope", ujson.Obj())).isLeft shouldBe true
       registry.execute(ToolCallRequest("fail", ujson.Obj())).isLeft shouldBe true
       registry.execute(ToolCallRequest("ping", ujson.Obj())) shouldBe Right(ujson.Str("pong"))

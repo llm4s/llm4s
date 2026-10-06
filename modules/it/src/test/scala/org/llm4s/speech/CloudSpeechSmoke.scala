@@ -31,6 +31,20 @@ object CloudSpeechSmoke extends Assertions with Matchers with EitherValues {
     Array.tabulate(pcm.length / 2)(i => buf.getShort(i * 2))
   }
 
+  /** True when `bytes` start with an ID3v2 tag or an MPEG audio frame sync (11 set bits: `0xFF`, `0xEx`+). */
+  def hasMp3Magic(bytes: Array[Byte]): Boolean =
+    bytes.length >= 3 && (
+      (bytes(0) == 'I'.toByte && bytes(1) == 'D'.toByte && bytes(2) == '3'.toByte) ||
+        ((bytes(0) & 0xff) == 0xff && (bytes(1) & 0xe0) == 0xe0)
+    )
+
+  /** Asserts `audio` is MP3 the service returned untouched: tagged `Mp3`, MP3 magic bytes, not a WAV or an error body. */
+  def requireMp3(audio: GeneratedAudio, minBytes: Int = 4000): Unit = {
+    audio.format shouldBe AudioFormat.Mp3
+    withClue("MP3 magic bytes (ID3 tag or MPEG frame sync): ")(hasMp3Magic(audio.data) shouldBe true)
+    audio.data.length should be >= minBytes
+  }
+
   /**
    * Asserts `audio` is audible speech-length PCM in the format the clients promise, and that it
    * saves as a WAV file whose RIFF header matches the data.

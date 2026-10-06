@@ -3,6 +3,7 @@ package org.llm4s.samples.agent
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.samples.util.AgentResults
 import org.llm4s.llmconnect.model.MessageRole
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.tools.WeatherTool
@@ -28,11 +29,13 @@ object MultiTurnConversationExample {
       given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
-      tools = new ToolRegistry(Seq(weatherTool))
-      agent = new Agent(client)
+      agent <- Agent
+        .builder("multi-turn-conversation", client)
+        .withTools(new ToolRegistry(Seq(weatherTool)))
+        .build()
 
       _ = logger.info("Turn 1: Asking about Paris weather")
-      state1 <- agent.run("What's the weather in Paris?", tools)
+      state1 <- agent.run("What's the weather in Paris?")
       _ = printLastAssistantMessage(state1)
 
       _ = logger.info("Turn 2: Asking about London weather")
@@ -44,9 +47,9 @@ object MultiTurnConversationExample {
       _ = printLastAssistantMessage(state3)
 
       _ = logger.info("=== Conversation Complete ===")
-      _ = logger.info("Total messages: {}", state3.conversation.messageCount)
-      _ = logger.info("User messages: {}", state3.conversation.filterByRole(MessageRole.User).length)
-      _ = logger.info("Assistant messages: {}", state3.conversation.filterByRole(MessageRole.Assistant).length)
+      _ = logger.info("Total messages: {}", state3.messages.length)
+      _ = logger.info("User messages: {}", state3.messages.count(_.role == MessageRole.User))
+      _ = logger.info("Assistant messages: {}", state3.messages.count(_.role == MessageRole.Assistant))
 
     } yield state3
 
@@ -56,9 +59,6 @@ object MultiTurnConversationExample {
     )
   }
 
-  private def printLastAssistantMessage(state: org.llm4s.agent.AgentState): Unit =
-    state.conversation.messages
-      .filter(_.role == MessageRole.Assistant)
-      .lastOption
-      .foreach(msg => logger.info("Assistant: {}", msg.content))
+  private def printLastAssistantMessage(state: org.llm4s.agent.AgentResult): Unit =
+    logger.info("Assistant: {}", AgentResults.answerOrStatus(state))
 }

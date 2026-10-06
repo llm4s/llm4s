@@ -2,12 +2,12 @@ package org.llm4s.zio
 
 import java.util.concurrent.CountDownLatch
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentBuilder }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
-import zio.{ Queue, Unsafe, ZIO, ZLayer }
+import zio.{ IO, Queue, Unsafe, ZIO, ZLayer }
 import zio.stream.{ Take, ZStream }
 
 /**
@@ -41,8 +41,11 @@ trait LLMClientZ {
     options: CompletionOptions = CompletionOptions()
   ): ZStream[Any, LLMError, StreamedChunk]
 
-  /** Creates an [[AgentZ]] backed by this client. */
-  def agent(): AgentZ
+  /**
+   * Creates an [[AgentZ]] backed by this client: `Agent.builder(id, client)` with `configure`
+   * applied. A builder that does not build fails with its `LLMError`.
+   */
+  def agent(id: String)(configure: AgentBuilder => AgentBuilder = identity): IO[LLMError, AgentZ]
 }
 
 object LLMClientZ {
@@ -128,6 +131,7 @@ object LLMClientZ {
         } yield ZStream.fromQueue(queue).flattenTake
       }
 
-    def agent(): AgentZ = AgentZ(new Agent(underlying))
+    def agent(id: String)(configure: AgentBuilder => AgentBuilder): IO[LLMError, AgentZ] =
+      ZIO.attempt(configure(Agent.builder(id, underlying)).build()).orDie.flatMap(ZIO.fromEither(_)).map(AgentZ(_))
   }
 }

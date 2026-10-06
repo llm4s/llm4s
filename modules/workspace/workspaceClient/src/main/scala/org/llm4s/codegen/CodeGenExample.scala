@@ -1,10 +1,9 @@
 package org.llm4s.codegen
 
-import org.llm4s.agent.AgentState
+import org.llm4s.agent.AgentResult
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.MessageRole
 import org.slf4j.LoggerFactory
 
 import scala.util.Using
@@ -16,8 +15,6 @@ object CodeGenExample {
   private val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {
-    // Trace log path comes from settings below
-
     val task =
       """Create a simple sbt project containing a hello world example that prints the current date and time.
         |Use 'sbt compile' and 'sbt run' to test the generated code.
@@ -29,7 +26,6 @@ object CodeGenExample {
       ws <- WorkspaceConfigSupport.load()
 
       _ = logger.info(s"Using workspace directory: ${ws.workspaceDir}")
-      _ = logger.info(s"Trace log will be written to: ${ws.traceLogPath}")
 
       providerCfg <- Llm4sConfig.defaultProvider()
 
@@ -43,8 +39,8 @@ object CodeGenExample {
       ) { codeWorker =>
         for {
           _          <- Either.cond(codeWorker.initialize(), (), SimpleError("Failed to initialize CodeWorker"))
-          finalState <- codeWorker.executeTask(task, Some(20), Some(ws.traceLogPath))
-          _ = logFinalResponse(finalState, ws.traceLogPath)
+          finalState <- codeWorker.executeTask(task, Some(20))
+          _ = logFinalResponse(finalState)
         } yield finalState
       }
     } yield finalState
@@ -57,17 +53,9 @@ object CodeGenExample {
     }
   }
 
-  private def logFinalResponse(finalState: AgentState, traceLogPath: String): Unit = {
-    finalState.conversation.messages.lastOption match {
-      case Some(msg) if msg.role == MessageRole.Assistant =>
-        logger.info(s"Final agent response: ${msg.content}")
-      case _ =>
-        logger.warn("No final assistant message found")
+  private def logFinalResponse(result: AgentResult): Unit =
+    result.answer match {
+      case Some(answer) => logger.info(s"Final agent response: $answer")
+      case None         => logger.warn(s"No final answer; status: ${result.status}")
     }
-
-    if (finalState.logs.nonEmpty) {
-      logger.info(s"Execution logs (see also $traceLogPath):")
-      finalState.logs.foreach(logger.info)
-    }
-  }
 }

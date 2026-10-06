@@ -162,7 +162,7 @@ Since 0.3.2 ([#903](https://github.com/llm4s/llm4s/pull/903)) llm4s no longer re
 
 Expected areas of change before 1.0:
 
-- Finalise and stabilise the agent streaming event model (`AgentEvent` hierarchy)
+- Land and stabilise the agent event stream that replaces the removed `AgentEvent` hierarchy ([#1329](https://github.com/llm4s/llm4s/issues/1329))
 - Decide on cross-module artifact split (`llm4s-core` vs `llm4s-agent` vs `llm4s-rag`)
 - Remove all remaining `0.x`-deprecated symbols
 - Enforce MiMa binary-compatibility checks against the 1.0 baseline (see [issue #924](https://github.com/llm4s/llm4s/issues/924))

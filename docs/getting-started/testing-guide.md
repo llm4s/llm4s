@@ -301,6 +301,8 @@ class LLMIntegrationSpec extends AnyFlatSpec with Matchers {
 Always test error paths:
 
 ```scala
+import org.llm4s.agent.Agent
+import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{RateLimitError, AuthenticationError, NetworkError}
 
 class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
@@ -322,11 +324,11 @@ class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
       }
     }
 
-    val agent = new Agent(new RateLimitedClient)
-    val result = agent.run("test query", tools = ToolRegistry.empty)
+    // A provider error ends the run as GraphError.NodeFailed, carrying the client's error as its cause
+    val result = Agent.builder("test-agent", new RateLimitedClient).build().flatMap(_.run("test query"))
 
     result match {
-      case Left(_: RateLimitError) => succeed
+      case Left(GraphError.NodeFailed(_, _, _: RateLimitError)) => succeed
       case other => fail(s"Expected RateLimitError but got: $other")
     }
   }
@@ -348,8 +350,7 @@ class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
       }
     }
 
-    val agent = new Agent(new UnauthorizedClient)
-    val result = agent.run("test", tools = ToolRegistry.empty)
+    val result = Agent.builder("test-agent", new UnauthorizedClient).build().flatMap(_.run("test"))
 
     result.isLeft shouldBe true
   }
@@ -372,11 +373,10 @@ class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
       }
     }
 
-    val agent = new Agent(new TimeoutClient)
-    val result = agent.run("test", tools = ToolRegistry.empty)
+    val result = Agent.builder("test-agent", new TimeoutClient).build().flatMap(_.run("test"))
 
     result match {
-      case Left(_: NetworkError) => succeed
+      case Left(GraphError.NodeFailed(_, _, _: NetworkError)) => succeed
       case other => fail(s"Expected NetworkError but got: $other")
     }
   }
@@ -442,10 +442,11 @@ class ToolCallingSpec extends AnyFlatSpec with Matchers {
       }
     }
 
-    val tools = new ToolRegistry(List(weatherTool))
-    val agent = new Agent(new ToolCallingMock)
-    
-    agent.run("What's the weather in London?", tools)
+    Agent
+      .builder("test-agent", new ToolCallingMock)
+      .withTools(new ToolRegistry(List(weatherTool)))
+      .build()
+      .flatMap(_.run("What's the weather in London?"))
 
     toolWasCalled shouldBe true
     capturedCity shouldBe Some("London")

@@ -16,12 +16,15 @@ As conversations grow, token counts increase, leading to:
 - **Slower responses** - Longer context = slower processing
 - **Context window limits** - Models have maximum input token limits
 
-LLM4S provides automatic context window management via `ContextWindowConfig` with multiple pruning strategies to keep conversations within budget while preserving important context.
+LLM4S provides context window management via `ContextWindowConfig` and `ContextWindowMiddleware`, with multiple pruning strategies to keep conversations within budget while preserving important context. The middleware trims what is sent to the model on each call; the thread keeps its full history.
+
+Two rules hold for every strategy: the current turn (the latest user message onward) is never pruned, so the request always starts with a user message and may exceed the budget; and a tool call is never separated from its result. The agent's system prompt is outside the budget.
 
 ## Configuration Basics
 
 ```scala
 import org.llm4s.agent.{ Agent, ContextWindowConfig, PruningStrategy }
+import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 
 val contextConfig = ContextWindowConfig(
   maxTokens = Some(4096),              // Keep max 4K tokens
@@ -31,12 +34,11 @@ val contextConfig = ContextWindowConfig(
   pruningStrategy = PruningStrategy.OldestFirst  // How to prune
 )
 
-agent.runMultiTurn(
-  initialQuery = "...",
-  followUpQueries = Seq(...),
-  tools = tools,
-  contextWindowConfig = Some(contextConfig)
-)
+val agent = Agent.builder("assistant", client)
+  .withMiddleware(new ContextWindowMiddleware(contextConfig))
+  .build()
+
+agent.flatMap(_.runMultiTurn("...", Seq(...)))
 ```
 
 ## Pruning Strategies
@@ -494,29 +496,34 @@ println(s"Conversation: $conversationTokens tokens = \$$totalCost")
 
 ### Inspect pruning results
 
-Pruning happens automatically inside `runMultiTurn`. To observe it explicitly, apply
-`AgentState.pruneConversation` before running and compare message counts:
+Pruning happens in `ContextWindowMiddleware`, on each model call, and never changes the thread.
+The thread's `AgentResult.messages` is the full history; to see what was sent, wrap the model call
+with a small middleware of your own, placed after the context window middleware with `runsAfter`:
 
 ```scala
-import org.llm4s.agent.AgentState
+import org.llm4s.agent.graph.middleware.{ AgentMiddleware, MiddlewareId }
 
-val before = state.conversation.messages.length
-val pruned = AgentState.pruneConversation(state, config)
-val after  = pruned.conversation.messages.length
+class LogSentMessages(logger: Logger) extends AgentMiddleware {
+  val id = MiddlewareId("log-sent-messages")
+  override def runsAfter = Set(MiddlewareId("context-window"))
 
-if (after < before)
-  logger.info(s"Pruned ${before - after} messages (${before} → ${after})")
+  override def wrapModelCall(request: ModelRequest, context: RunContext)(
+    next: ModelRequest => Result[Completion]
+  ): Result[Completion] = {
+    logger.info(s"Sending ${request.messages.length} messages")
+    next(request)
+  }
+}
 ```
 
 ### Log pruning performance
 
-```scala
-val pruned = AgentState.pruneConversation(state, config, tokenCounter)
-val tokenBefore = tokenCounter.countConversation(state.conversation)
-val tokenAfter = tokenCounter.countConversation(pruned.conversation)
+`ContextWindowMiddleware` takes an optional token counter (`new ContextWindowMiddleware(config, tokenCounter)`),
+and `AgentResult.usage` reports the tokens the provider actually billed across the thread, which is
+the number to compare with and without pruning:
 
-logger.info(s"Pruning efficiency: saved ${tokenBefore - tokenAfter} tokens")
-logger.info(s"Cost savings: $${(tokenBefore - tokenAfter) * costPerToken}")
+```scala
+logger.info(s"Thread usage: ${result.usage}")
 ```
 
 ---
@@ -525,20 +532,17 @@ logger.info(s"Cost savings: $${(tokenBefore - tokenAfter) * costPerToken}")
 
 ### Issue: Conversation keeps growing despite pruning
 
-**Cause:** `contextWindowConfig` not passed to agent method
+**Cause:** the agent was built without a `ContextWindowMiddleware`
 
 **Solution:**
 ```scala
 // ❌ Wrong: pruning not enabled
-agent.runMultiTurn(query, followUps, tools)
+Agent.builder("assistant", client).build()
 
 // ✅ Right: pruning enabled
-agent.runMultiTurn(
-  query, 
-  followUps, 
-  tools,
-  contextWindowConfig = Some(config)  // Must specify!
-)
+Agent.builder("assistant", client)
+  .withMiddleware(new ContextWindowMiddleware(config))  // Must add it!
+  .build()
 ```
 
 ### Issue: Important context is being removed

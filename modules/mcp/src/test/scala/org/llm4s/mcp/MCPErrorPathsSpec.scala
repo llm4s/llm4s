@@ -168,24 +168,24 @@ class MCPErrorPathsSpec extends AnyFlatSpec with Matchers {
 
   // ---- the client's tool listing
 
-  "MCPClientImpl.getTools" should "return no tools, not an error, when the server fails the listing" in {
+  "MCPClientImpl.getTools" should "fail, not look empty, when the server fails the listing" in {
     assume(!isWindows, "bash is not available on Windows")
     withClient(server("initialize" -> initialized, "tools/list" -> rpcError(-32603, "internal error"))) { client =>
-      client.getTools() shouldBe Right(Seq.empty)
+      client.getTools().isLeft shouldBe true
     }
   }
 
-  it should "return no tools when the listing carries no result" in {
+  it should "fail when the listing carries no result" in {
     assume(!isWindows, "bash is not available on Windows")
     withClient(server("initialize" -> initialized, "tools/list" -> noResult)) { client =>
-      client.getTools() shouldBe Right(Seq.empty)
+      client.getTools().isLeft shouldBe true
     }
   }
 
-  it should "return no tools when the server cannot be initialized" in {
+  it should "fail when the server cannot be initialized" in {
     assume(!isWindows, "bash is not available on Windows")
     val unknown = result("""{"protocolVersion":"1999-01-01","capabilities":{}}""")
-    withClient(server("initialize" -> unknown))(client => client.getTools() shouldBe Right(Seq.empty))
+    withClient(server("initialize" -> unknown))(client => client.getTools().isLeft shouldBe true)
   }
 
   // ---- annotations and hints

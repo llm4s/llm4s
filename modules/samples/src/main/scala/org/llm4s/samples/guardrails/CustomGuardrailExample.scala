@@ -1,11 +1,12 @@
 package org.llm4s.samples.guardrails
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.InputGuardrail
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.samples.util.AgentResults
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -57,24 +58,28 @@ object CustomGuardrailExample extends App {
     registryService <- Llm4sConfig.modelRegistryService()
     given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerCfg)
-    agent = new Agent(client)
 
     // Create custom guardrail
     customGuardrail = new KeywordRequirementGuardrail(Set("scala", "programming"))
 
     // Run with custom guardrail
-    state <- agent.run(
-      query = "Tell me about Scala programming language features",
-      tools = new ToolRegistry(Seq.empty),
-      inputGuardrails = Seq(customGuardrail)
-    )
+    agent <- Agent
+      .builder("custom-guardrail", client)
+      .withMiddleware(GuardrailMiddleware(Seq(customGuardrail), Seq.empty))
+      .build()
+    state <- agent.run("Tell me about Scala programming language features")
   } yield state
 
   result match {
     case Right(state) =>
-      logger.info("✓ Query contained required keywords (scala, programming)")
-      logger.info("Agent response:")
-      state.conversation.messages.last.content.split("\n").take(5).foreach(line => logger.info("  {}", line))
+      state.status match {
+        case AgentStatus.Completed(answer) =>
+          logger.info("✓ Query contained required keywords (scala, programming)")
+          logger.info("Agent response:")
+          answer.split("\n").take(5).foreach(line => logger.info("  {}", line))
+        case other =>
+          logger.warn("✗ Run did not complete: {}", AgentResults.describe(other))
+      }
 
     case Left(error) =>
       logger.error("✗ Validation failed:")
@@ -91,20 +96,25 @@ object CustomGuardrailExample extends App {
     registryService <- Llm4sConfig.modelRegistryService()
     given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerCfg)
-    agent           = new Agent(client)
     customGuardrail = new KeywordRequirementGuardrail(Set("scala", "programming"))
+    agent <- Agent
+      .builder("custom-guardrail-missing", client)
+      .withMiddleware(GuardrailMiddleware(Seq(customGuardrail), Seq.empty))
+      .build()
 
-    // This should fail - doesn't contain required keywords
-    state <- agent.run(
-      query = "What's the weather like today?",
-      tools = new ToolRegistry(Seq.empty),
-      inputGuardrails = Seq(customGuardrail)
-    )
+    // This should be blocked - doesn't contain required keywords
+    state <- agent.run("What's the weather like today?")
   } yield state
 
   failureResult match {
-    case Right(_) =>
-      logger.warn("Unexpected success")
+    case Right(state) =>
+      state.status match {
+        case AgentStatus.Blocked(guardrail, reason) =>
+          logger.info("✓ Expected validation failure:")
+          logger.info("  Blocked by {}: {}", guardrail, reason)
+        case AgentStatus.Completed(_) => logger.warn("Unexpected success")
+        case other                    => logger.warn("✗ Run did not complete: {}", AgentResults.describe(other))
+      }
 
     case Left(error) =>
       logger.info("✓ Expected validation failure:")

@@ -86,18 +86,18 @@ class StableDiffusionClientTest extends AnyFunSuite with Matchers with ScalaFutu
     result.map(_.status) shouldBe Right(HealthStatus.Degraded)
   }
 
-  test("health check returns ServiceError when request fails") {
+  test("health check returns ImageServiceError when request fails") {
     val httpClient = new MockHttpClient(Failure(new Exception("Connection refused")))
     val client     = new StableDiffusionClient(config, httpClient)
 
     val result = client.health()
-    result should matchPattern { case Left(ServiceError(_, _)) => }
+    result should matchPattern { case Left(ImageServiceError(_, _)) => }
   }
 
   test("editImage fails if image path is invalid") {
     val client = new StableDiffusionClient(config, new MockHttpClient(Success(createResponse(200, "{}"))))
     val result = client.editImage(Paths.get("non-existent-file.png"), "prompt")
-    result should matchPattern { case Left(ValidationError(_)) => }
+    result should matchPattern { case Left(ImageValidationError(_)) => }
   }
 
   test("editImage success flow") {
@@ -133,7 +133,7 @@ class StableDiffusionClientTest extends AnyFunSuite with Matchers with ScalaFutu
       val client       = new StableDiffusionClient(config, httpClient)
 
       val result = client.editImage(tempImage, "prompt")
-      result should matchPattern { case Left(ServiceError(_, 500)) => }
+      result should matchPattern { case Left(ImageServiceError(_, 500)) => }
     } finally Files.deleteIfExists(tempImage)
   }
 
@@ -145,7 +145,7 @@ class StableDiffusionClientTest extends AnyFunSuite with Matchers with ScalaFutu
       val client     = new StableDiffusionClient(config, httpClient)
 
       val result = client.editImage(tempImage, "prompt")
-      result should matchPattern { case Left(UnknownError(_)) => }
+      result should matchPattern { case Left(ImageUnknownError(_)) => }
     } finally Files.deleteIfExists(tempImage)
   }
 
@@ -154,7 +154,7 @@ class StableDiffusionClientTest extends AnyFunSuite with Matchers with ScalaFutu
     val client     = new StableDiffusionClient(config, httpClient)
 
     val result = client.generateImages("prompt", 1)
-    result should matchPattern { case Left(UnknownError(_)) => }
+    result should matchPattern { case Left(ImageUnknownError(_)) => }
   }
 
   test("async methods delegate to sync methods") {

@@ -1,5 +1,7 @@
 # LLM4S Agent Framework: Deep Agents and LangGraph Gap Analysis
 
+> **Superseded in part:** this document describes the pre-#1328 agent API (`new Agent(client)`, `AgentState`, per-run tools and guardrails). `Agent` now runs on the graph runtime and is built with `Agent.builder(...)`; see [typed-agent-runtime-design.md §4.13](typed-agent-runtime-design.md) and the [Stage 1 migration note](../reference/migration.md#stage-1-migration-agent-runtime). Kept as history.
+
 **Review date:** 2026-10-02
 **Scope:** Repository agent framework compared with LangGraph and the Deep Agents harness.
 **Purpose:** Define the material capability gaps and recommend an updated LLM4S agent model.

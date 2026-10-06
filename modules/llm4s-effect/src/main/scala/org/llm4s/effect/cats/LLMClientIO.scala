@@ -5,7 +5,7 @@ import cats.effect.std.{ Dispatcher, Queue }
 import cats.syntax.applicativeError.*
 import cats.syntax.flatMap.*
 import fs2.Stream
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentBuilder }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, StreamedChunk }
@@ -41,8 +41,11 @@ trait LLMClientIO[F[_]] {
     options: CompletionOptions = CompletionOptions()
   ): Stream[F, StreamedChunk]
 
-  /** Creates an [[AgentIO]] backed by this client. */
-  def agent(): AgentIO[F]
+  /**
+   * Creates an [[AgentIO]] backed by this client: `Agent.builder(id, client)` with `configure`
+   * applied. A builder that does not build is raised as [[LLMException]].
+   */
+  def agent(id: String)(configure: AgentBuilder => AgentBuilder = identity): F[AgentIO[F]]
 }
 
 object LLMClientIO {
@@ -123,6 +126,10 @@ object LLMClientIO {
         }
       }
 
-    def agent(): AgentIO[F] = AgentIO[F](new Agent(underlying))
+    def agent(id: String)(configure: AgentBuilder => AgentBuilder): F[AgentIO[F]] =
+      F.delay(configure(Agent.builder(id, underlying)).build()).flatMap {
+        case Right(built) => F.pure(AgentIO[F](built))
+        case Left(e)      => F.raiseError(new LLMException(e))
+      }
   }
 }

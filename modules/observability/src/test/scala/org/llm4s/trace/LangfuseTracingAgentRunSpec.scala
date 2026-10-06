@@ -1,6 +1,6 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -13,9 +13,9 @@ import upickle.default.{ macroRW, ReadWriter }
 import scala.collection.mutable
 
 /**
- * What `LangfuseTracing` sends for a whole agent run - a mock LLM that asks for one tool call,
- * then answers - rather than for one event at a time, which `LangfuseTracingSpec` and
- * `LangfuseTracingEdgeCasesSpec` cover (#1003).
+ * What `LangfuseTracing` sends for a whole agent run, which the agent traces as `graph.*` custom
+ * events - a mock LLM that asks for one tool call, then answers - rather than for one event at a
+ * time, which `LangfuseTracingSpec` and `LangfuseTracingEdgeCasesSpec` cover (#1003).
  *
  * Nothing leaves the JVM: batches go to a `MockHttpClient`.
  *
@@ -107,17 +107,20 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
     val http    = new MockHttpClient(HttpResponse(200, """{"successes":1}"""))
     val tracing = new RecordingLangfuseTracing(http)
 
-    val result = echoTool.flatMap { tool =>
-      new Agent(client())
-        .run("Echo hello", new ToolRegistry(Seq(tool)), context = AgentContext(tracing = Some(tracing)))
-    }
+    val result = for {
+      tool  <- echoTool
+      agent <- Agent.builder("assistant", client()).withTools(new ToolRegistry(Seq(tool))).withTracing(tracing).build()
+      done  <- agent.run("Echo hello")
+    } yield done
 
-    result.map(_.status) shouldBe Right(AgentStatus.Complete)
+    result.map(_.status) shouldBe Right(AgentStatus.Completed("Echoed."))
     (tracing, http, tracing.batches.toSeq.flatten)
   }
 
-  private def ofType(events: Seq[ujson.Obj], eventType: String): Seq[ujson.Obj] =
-    events.filter(_("type").str == eventType)
+  private def graphEvents(events: Seq[ujson.Obj]): Seq[ujson.Obj] =
+    events.filter(e => e("type").str == "event-create" && e("body")("name").str.startsWith("graph."))
+
+  private def names(events: Seq[ujson.Obj]): Seq[String] = graphEvents(events).map(_("body")("name").str)
 
   "LangfuseTracing, for an agent run with a tool call" should "post every batch it builds to the ingestion endpoint" in {
     val (tracing, http, _) = run()
@@ -128,47 +131,36 @@ class LangfuseTracingAgentRunSpec extends AnyFlatSpec with Matchers {
     ujson.read(http.lastBody.getOrElse(fail("nothing was posted")))("batch").arr should not be empty
   }
 
-  it should "send a generation per LLM call, and a span for the tool between them" in {
+  it should "send the run's graph events as custom events, from its start to its completion" in {
     val (_, _, events) = run()
 
-    val generations = ofType(events, "generation-create")
-    generations.map(_("body")("metadata")("completion_id").str) shouldBe Seq("turn-1", "turn-2")
-    generations.map(_("body")("model").str).distinct shouldBe Seq("test-model")
-
-    val tools = ofType(events, "span-create").filter(_("body")("name").str == "Tool Execution: echo")
-    tools should have size 1
-    tools.head("body")("input")("arguments").str shouldBe """{"message":"hello"}"""
-    tools.head("body")("metadata")("success").bool shouldBe true
-
-    val order = events.indexOf(generations.head) < events.indexOf(tools.head) &&
-      events.indexOf(tools.head) < events.indexOf(generations(1))
-    withClue("the tool span should come after the first generation and before the second: ")(order shouldBe true)
+    val all = names(events)
+    all.head shouldBe "graph.run_started"
+    all.last shouldBe "graph.run_completed"
+    all should contain("graph.task_completed")
+    graphEvents(events).foreach(_("body")("metadata")("source").str shouldBe "custom_event")
   }
 
-  it should "record the token usage of each LLM call" in {
+  it should "send a task for each model call, and for the tool between them" in {
     val (_, _, events) = run()
 
-    val usage = ofType(events, "event-create").filter(_("body")("name").str.startsWith("Token Usage"))
-    usage.map(_("body")("output")("prompt_tokens").num.toInt) shouldBe Seq(20, 30)
-    usage.map(_("body")("output")("total_tokens").num.toInt) shouldBe Seq(30, 35)
+    val completed = graphEvents(events).filter(_("body")("name").str == "graph.task_completed")
+    completed.map(_("body")("input")("nodeId").str) shouldBe Seq(
+      "input",
+      "assistant/model",
+      "assistant/call-tool",
+      "assistant/collect",
+      "assistant/model",
+      "assistant/finish"
+    )
   }
 
-  it should "end with a trace of the whole conversation, whose spans all belong to it" in {
-    val (tracing, _, _) = run()
+  it should "give every event the same run and thread, in order" in {
+    val (_, _, events) = run()
 
-    val last  = tracing.batches.last
-    val trace = last.head
-    trace("type").str shouldBe "trace-create"
-    trace("body")("name").str shouldBe "LLM4S Agent Run"
-    trace("body")("input").str shouldBe "Echo hello"
-    trace("body")("output").str shouldBe "Echoed."
-    trace("body")("metadata")("status").str shouldBe AgentStatus.Complete.toString
-
-    val spans = last.tail
-    spans.map(_("type").str).distinct shouldBe Seq("span-create")
-    // user, assistant asking for the tool, tool result, final assistant answer
-    spans.map(_("body")("metadata")("message_type").str) shouldBe
-      Seq("UserMessage", "AssistantMessage", "ToolMessage", "AssistantMessage")
-    spans.foreach(_("body")("traceId").str shouldBe trace("body")("id").str)
+    val inputs = graphEvents(events).map(_("body")("input"))
+    inputs.map(_("runId").str).distinct should have size 1
+    inputs.map(_("threadId").str).distinct should have size 1
+    inputs.map(_("seq").num) shouldBe sorted
   }
 }
