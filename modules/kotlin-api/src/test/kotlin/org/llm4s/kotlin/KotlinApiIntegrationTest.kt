@@ -83,15 +83,16 @@ class KotlinApiIntegrationTest {
     }
 
     @Test
-    fun `streamComplete emits the response as a flow, once per collection`() = runBlocking<Unit> {
+    fun `streamComplete emits the response text as a cold flow, once per collection`() = runBlocking<Unit> {
         handler.set { reply(it, 200, completion("chunk")) }
 
         Llm4s.createDefaultClient().use { client ->
             val flow = client.streamComplete("go")
             assertEquals(0, requests.get(), "cold: nothing is sent until collected")
 
-            assertEquals(listOf("chunk"), flow.toList())
-            assertEquals(listOf("chunk"), flow.toList())
+            // The concatenated text, not the chunk count: it stays true when real token streaming lands.
+            assertEquals("chunk", flow.toList().joinToString(""))
+            assertEquals("chunk", flow.toList().joinToString(""))
         }
 
         assertEquals(2, requests.get())
@@ -120,13 +121,27 @@ class KotlinApiIntegrationTest {
     }
 
     @Test
-    fun `cancelling a call that is blocked on the endpoint does not hang`() = runBlocking<Unit> {
+    fun `cancelling a call that is blocked on the endpoint does not hang and aborts the request`() = runBlocking<Unit> {
         val reached = CountDownLatch(1)
         val release = CountDownLatch(1)
-        handler.set {
+        val clientAborted = CountDownLatch(1)
+        handler.set { exchange ->
             reached.countDown()
             release.await(30, TimeUnit.SECONDS)
-            reply(it, 200, completion("too late"))
+            // Stream a large body once released: a client that aborted the request makes a write fail (broken
+            // pipe) within a few chunks, whereas one still reading it, a leaked request, takes all of it.
+            exchange.responseHeaders.add("Content-Type", "application/json")
+            val chunk = ByteArray(64 * 1024) { 'x'.code.toByte() }
+            try {
+                exchange.sendResponseHeaders(200, 0)
+                repeat(256) {
+                    exchange.responseBody.write(chunk)
+                    exchange.responseBody.flush()
+                }
+                exchange.close()
+            } catch (e: java.io.IOException) {
+                clientAborted.countDown()
+            }
         }
 
         try {
@@ -138,6 +153,12 @@ class KotlinApiIntegrationTest {
 
                 withTimeout(10_000) { job.cancelAndJoin() }
                 assertTrue(job.isCancelled)
+
+                release.countDown()
+                assertTrue(
+                    clientAborted.await(10, TimeUnit.SECONDS),
+                    "cancelling the call aborts the in-flight request: the endpoint's writes must fail once released",
+                )
             }
         } finally {
             release.countDown()
