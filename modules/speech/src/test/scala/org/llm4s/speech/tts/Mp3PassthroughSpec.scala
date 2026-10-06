@@ -4,7 +4,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.speech.{ AudioFormat, AudioMeta, GeneratedAudio, StubHttpClient }
 import org.llm4s.speech.config.TTSConfig
 import org.llm4s.speech.io.{ AudioIO, WavFileGenerator }
-import org.llm4s.speech.processing.AudioPreprocessing
+import org.llm4s.speech.processing.{ AudioPreprocessing, AudioValidator }
 import org.llm4s.speech.tts.provider.{ AzureTTSClient, ElevenLabsTTSClient, OpenAITTSClient }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -100,6 +100,15 @@ class Mp3PassthroughSpec extends AnyFlatSpec with Matchers {
       error.message should include("Bit depth")
       entryCount(dir) shouldBe 0
     } finally deleteDir(dir)
+  }
+
+  it should "be refused by the STT validators with an error, not an ArithmeticException" in {
+    val input = mp3Audio.data -> mp3Audio.meta
+    Seq(
+      AudioValidator.sttValidator.validate(input),
+      AudioValidator.AudioDataValidator().validate(input),
+      AudioValidator.validatedSttValidatorAsResult(input)
+    ).foreach(result => result.left.toOption.get.message should include("no PCM frame size"))
   }
 
   "AudioIO.saveMp3" should "write the bytes as they are, and refuse PCM" in {

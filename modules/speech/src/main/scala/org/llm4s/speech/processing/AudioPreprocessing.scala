@@ -52,33 +52,54 @@ object AudioPreprocessing {
   /** Convert to mono by averaging channels (PCM16 little-endian). */
   def toMono(bytes: Array[Byte], meta: AudioMeta): Result[(Array[Byte], AudioMeta)] =
     if (meta.numChannels <= 1) Right((bytes, meta))
-    else {
-      val frameSize     = (meta.bitDepth / 8) * meta.numChannels
-      val numFrames     = bytes.length / frameSize
-      val monoFrameSize = meta.bitDepth / 8
-      val out           = new Array[Byte](numFrames * monoFrameSize)
-
-      (0 until numFrames).foreach { frameIndex =>
-        val sum = (0 until meta.numChannels).foldLeft(0) { (acc, ch) =>
-          val base = frameIndex * frameSize + ch * (meta.bitDepth / 8)
-          // Use implicit binary reader for cleaner code
-          val (sample, _) = bytes.read[Short](base)
-          acc + sample.toInt
-        }
-
-        val avg: Short   = (sum / meta.numChannels).toShort
-        val outByteIndex = frameIndex * 2
-
-        // Write avg as little-endian short (low byte first)
-        out(outByteIndex) = (avg & 0xff).toByte
-        out(outByteIndex + 1) = ((avg >> 8) & 0xff).toByte
+    else
+      AudioValidations.pcmFrameSize(meta) match {
+        case None =>
+          Left(
+            ProcessingError.audioValidation(
+              s"Cannot convert to mono: ${meta.numChannels} channels at ${meta.bitDepth}-bit is not PCM " +
+                "(compressed audio such as MP3 has no sample width)"
+            )
+          )
+        case Some(frameSize) => Right(downmix(bytes, meta, frameSize))
       }
 
-      Right(out -> meta.copy(numChannels = 1))
+  private def downmix(bytes: Array[Byte], meta: AudioMeta, frameSize: Int): (Array[Byte], AudioMeta) = {
+    val numFrames     = bytes.length / frameSize
+    val monoFrameSize = meta.bitDepth / 8
+    val out           = new Array[Byte](numFrames * monoFrameSize)
+
+    (0 until numFrames).foreach { frameIndex =>
+      val sum = (0 until meta.numChannels).foldLeft(0) { (acc, ch) =>
+        val base = frameIndex * frameSize + ch * (meta.bitDepth / 8)
+        // Use implicit binary reader for cleaner code
+        val (sample, _) = bytes.read[Short](base)
+        acc + sample.toInt
+      }
+
+      val avg: Short   = (sum / meta.numChannels).toShort
+      val outByteIndex = frameIndex * 2
+
+      // Write avg as little-endian short (low byte first)
+      out(outByteIndex) = (avg & 0xff).toByte
+      out(outByteIndex + 1) = ((avg >> 8) & 0xff).toByte
     }
 
+    out -> meta.copy(numChannels = 1)
+  }
+
   /** Trim leading and trailing silence using a simple amplitude threshold on PCM16. */
-  def trimSilence(bytes: Array[Byte], meta: AudioMeta, threshold: Int = 512): Result[(Array[Byte], AudioMeta)] = {
+  def trimSilence(bytes: Array[Byte], meta: AudioMeta, threshold: Int = 512): Result[(Array[Byte], AudioMeta)] =
+    if (AudioValidations.pcmFrameSize(meta).isEmpty)
+      Left(
+        ProcessingError.audioTrimming(
+          s"Cannot trim silence: ${meta.numChannels} channels at ${meta.bitDepth}-bit is not PCM " +
+            "(compressed audio such as MP3 has no sample width)"
+        )
+      )
+    else trimPcmSilence(bytes, meta, threshold)
+
+  private def trimPcmSilence(bytes: Array[Byte], meta: AudioMeta, threshold: Int): Result[(Array[Byte], AudioMeta)] = {
     val attempt = Try {
       val sampleSize = meta.bitDepth / 8
       val frameSize  = sampleSize * meta.numChannels
