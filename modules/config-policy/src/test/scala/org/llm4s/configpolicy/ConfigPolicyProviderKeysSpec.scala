@@ -189,4 +189,38 @@ class ConfigPolicyProviderKeysSpec extends AnyWordSpec with Matchers with Either
       ) should not contain "allowedModels"
     }
   }
+
+  // The recipe in docs/guide/providers.md ("OpenAI-compatible endpoints"): keep the two in step.
+  "the providers-guide production recipe" should {
+    val recipe = ConfigPolicy.prodSafeDefaults
+      .withAllowedProviders("openai", "anthropic", "azure", "gemini", "deepseek", "openai-compatible")
+      .withAllowedModelPatterns("^openai/gpt-4o(-mini)?$", "^openai-compatible/openai/gpt-oss-120b$")
+      .withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "openai-compatible", "https://api\\.groq\\.com/openai/v1")
+      .withMaxContextWindow(CatalogEnvironment.Prod, "openai-compatible", 131072)
+
+    def groq(url: String, window: Int): ProviderConfig =
+      OpenAICompatibleConfig.fromValues("openai/gpt-oss-120b", url, contextWindow = Some(window)).value
+
+    "accept the Groq section at its native window" in {
+      rules(groq("https://api.groq.com/openai/v1", 131072), recipe, CatalogEnvironment.Prod) shouldBe empty
+    }
+
+    "reject another endpoint and a window over the per-provider cap" in {
+      rules(groq("https://api.groq.com.evil.example/openai/v1", 131072), recipe, CatalogEnvironment.Prod) should
+        contain("requiredBaseUrl")
+      rules(groq("https://api.groq.com/openai/v1", 500000), recipe, CatalogEnvironment.Prod) should
+        contain("maxContextWindow")
+    }
+
+    "leave an openai section to the environment-wide rules, not the Groq pin" in {
+      rules(openai("https://api.openai.com/v1"), recipe, CatalogEnvironment.Prod) should not contain "requiredBaseUrl"
+    }
+  }
+
+  "the prod preset's fallback cap" should {
+    "admit an opted-in provider at 500000 (xAI) without a cap of its own" in {
+      val xai = OpenAICompatibleConfig.fromValues("grok-4", "https://api.x.ai/v1", contextWindow = Some(500000)).value
+      rules(xai, optedIn, CatalogEnvironment.Prod) should not contain "maxContextWindow"
+    }
+  }
 }
