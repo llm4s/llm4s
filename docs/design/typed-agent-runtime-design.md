@@ -929,11 +929,15 @@ Decisions:
   `wrapModelCall`.
 - **Observers at admission.** `GraphRuntime.start`/`recover`/`resume` take `observer: Option[Observer]`,
   subscribed after the claim commits and before the run thread starts. `AgentRun.subscribe(capacity)`
-  is run-scoped (this run's `Durable`, `Live`, `LiveGap`, and a `Disconnected` only for `Lagging` or
-  `ListenerFailed`), ending after the terminal event. `Agent.stream`, `streamResume` and
-  `streamRecover` subscribe a listener at admission (capacity `Agent.StreamCapacity`, 1024).
+  is run-scoped (this run's `Durable`, `Live`, `LiveGap`, and a `Disconnected` only for `Lagging`,
+  `ListenerFailed` or `ReplayFailed`), ending after the terminal event. `Agent.stream`, `streamResume`
+  and `streamRecover` subscribe a listener at admission (capacity `Agent.StreamCapacity`, 1024).
+  `AgentRun.await` returns only once each such listener has returned from the run's last event,
+  waiting at most `AgentRun.Drain` (5 s), then a WARN; the bridges' private variants do not drain.
 - **`AgentRunEnded` replaces `AgentStateUpdated`.** One event per traced run - thread, run, active
-  agent, status, this turn's messages, the thread's cumulative `UsageSummary` - sent by `AgentTracing`
+  agent, status, this turn's messages, the run's own `UsageSummary` (summed from its
+  `ModelCallCompleted` events, so per-operation backend conventions such as `gen_ai.usage.*` do not
+  double count) - sent by `AgentTracing`
   on the run-scoped subscription together with the run's `graph.*`/`agent.*` custom events and a
   `TokenUsageRecorded` per model call. A run is recognised as Blocked by its own durable
   `agent.guardrail_blocked` event, not the thread's latest checkpoint, so a later run on the thread
@@ -941,11 +945,20 @@ Decisions:
   with a WARN. Langfuse: trace id = run id, session id = thread id; OpenTelemetry: an "Agent Run" span;
   `TraceCollector`: an `AgentCall` span.
 - **fs2 and ZIO.** `AgentIO.stream*` and `AgentZ.stream*` yield `AgentStreamItem.Event | Done` over a
-  bounded queue; interrupting, stopping early or lagging cancels the turn.
+  buffer that never blocks the dispatcher: durable events are always queued, and live events past its
+  capacity are dropped and reported as one `LiveGap`, so a slow consumer loses deltas, not the run.
+  Interrupting or stopping early cancels the turn; a kernel `Disconnected` fails the stream.
+- **Durable names are the agent's.** `ToolExecuted.tool` is `"<unknown>"` for a tool the agent does
+  not have; each non-handoff call of a mixed handoff batch is reported as `Errored`. The live tool
+  result is `ToolCallResult` (`agent.tool_call_result`), apart from the loop's `toolloop.ToolResult`.
 
 Refinements found in implementation: `Completion` has no finish reason, so `ModelCallCompleted` has no
 `finishReason`; the model step needs the attempt, hence `next(messages, tools, call)` rather than a
-bare `RunContext`; `TokenUsage` has no codec, so the durable payload carries `CallUsage` (plain ints).
+bare `RunContext`; `TokenUsage` has no codec, so the durable payload carries `CallUsage` (plain ints),
+with the completion's `estimatedCost` so a run's usage keeps its cost. The final review changed four
+things: `await` drains the listeners; the fs2/ZIO bridge never blocks (it had disconnected a slow
+consumer as `Lagging` and cancelled the run); `AgentRunEnded.usage` is per run; the live tool result
+was renamed `ToolCallResult`.
 
 Specs added: `EventTypeSpec`, `ObserverAdmissionSpec`, `AgentStreamingSpec`, `AgentEventsSpec`
 (including that no `agent.*` payload holds message content), `AgentRunSubscribeSpec`,
@@ -962,7 +975,8 @@ Limits:
 - The kernel's `TaskFailed` and `RunFailed` events store error messages, so a guardrail reason that quotes
   user text reaches the log through them. This predates #1329; `agent.*` payloads are content-free.
 - Live events are not replayed, and a late `AgentRun.subscribe` misses earlier ones.
-- `AgentRunEnded.usage` is the thread's cumulative usage, not per run.
+- A run that ends without a terminal event (a crash, or a failed terminal commit) ends its listeners
+  after a 1 s quiet period, not at a deterministic barrier; a follow-up replaces it.
 - An approved or edited tool call yields two `agent.tool_executed` events for one call id across runs.
 - `agent.guardrail_blocked` is a guardrail's block only; other middleware refusals emit no agent event.
 

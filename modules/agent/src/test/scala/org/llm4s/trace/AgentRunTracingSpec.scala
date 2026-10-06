@@ -351,4 +351,45 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers with Eventually {
       e.usage.byModel.keySet shouldBe Set("test-model")
     }
   }
+
+  it should "keep two runs on one thread apart while run 1's tracer is still blocked on its terminal event" in {
+    val recording = Recording()
+    val held      = new CountDownLatch(1) // run 1's tracer is inside its terminal event
+    val release   = new CountDownLatch(1)
+    val first     = new java.util.concurrent.atomic.AtomicBoolean(true)
+    // blocks the first run_completed - run 1's - until released
+    val gated = new Tracing {
+      def traceEvent(event: TraceEvent): Result[Unit] = {
+        event match {
+          case c: TraceEvent.CustomEvent if c.name == "graph.run_completed" && first.compareAndSet(true, false) =>
+            held.countDown()
+            release.await(10, TimeUnit.SECONDS)
+          case _ => ()
+        }
+        recording.traceEvent(event)
+      }
+      def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
+      def traceError(error: Throwable, context: String): Result[Unit]          = recording.traceError(error, context)
+      def traceCompletion(completion: Completion, model: String): Result[Unit] = Right(())
+      def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
+    }
+    val agent = traced(Scripted(Right(answer("first answer")), Right(answer("second answer"))), gated)
+    val one   = agent.start(ThreadId("t12"), "one").fold(e => fail(e.message), identity)
+    held.await(5, TimeUnit.SECONDS) shouldBe true
+    eventually(one.status should not be org.llm4s.agent.graph.RunStatus.Running)
+    // run 2 starts and ends while run 1's tracer is still blocked
+    val two = ok(agent.run(ThreadId("t12"), "two"))
+    endedOf(recording).map(_.runId) shouldBe Vector(two.runId.value)
+    release.countDown()
+    ok(one.await())
+    eventually(endedOf(recording).size shouldBe 2)
+    val ended = endedOf(recording).sortBy(_.messages.head.content)
+    ended.map(_.runId) shouldBe Vector(one.runId.value, two.runId.value)
+    ended.map(_.messages) shouldBe Vector(
+      Seq(UserMessage("one"), AssistantMessage("first answer")),
+      Seq(UserMessage("two"), AssistantMessage("second answer"))
+    )
+    ended.map(_.status) shouldBe Vector("completed", "completed")
+    ended.map(_.usage.requestCount) shouldBe Vector(1L, 1L)
+  }
 }

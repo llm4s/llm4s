@@ -14,7 +14,8 @@ import scala.util.{ Try, Using }
  * The scope ends - once - at the first of:
  *  - the run's terminal durable event (`RunCompleted`, `RunSuspended`, `RunFailed`, `RunCancelled`,
  *    `RunTimedOut`), after passing it on;
- *  - a `Disconnected` (the listener fell behind or threw), after passing it on;
+ *  - a `Disconnected` (the listener fell behind or threw, or - for a subscription that replays -
+ *    reading the thread's log failed: `ReplayFailed`), after passing it on;
  *  - [[closeWhenQuiet]], for a run that ended without committing a terminal event (a crash, or a
  *    failed terminal commit), once the subscription has delivered everything it had.
  *

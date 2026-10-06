@@ -92,14 +92,22 @@ Durable, name `agent.<snake case>`, version 1, no content:
 
 | Event | Fields | Emitted by |
 |---|---|---|
-| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls: Int`, `usage: Option[TokenUsage]`, `finishReason: Option[String]` | `<id>/model`, after the wrapped call returns `Right` |
-| `ToolExecuted` | `agent`, `toolCallId`, `tool`, `duration: FiniteDuration`, `outcome: ToolExecutionOutcome` | `<id>/call-tool`, the approval node and `<id>/ask/<tool>`, for the outcome they record |
+| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls: Int`, `usage: Option[CallUsage]`, `estimatedCost: Option[Double]` | `<id>/model`, after the wrapped call returns `Right` |
+| `ToolExecuted` | `agent`, `toolCallId`, `tool`, `duration: FiniteDuration`, `outcome: ToolExecutionOutcome` | `<id>/call-tool`, the approval node and `<id>/ask/<tool>`, for the outcome they record; `<id>/model` for each non-handoff call of a mixed handoff batch |
 | `HandedOff` | `from`, `to` | `<id>/model`, when it routes a handoff |
 | `GuardrailBlocked` | `guardrail`, `phase: GuardrailPhase` (`Input`, `Output`) | `input` and `<id>/finish`, with the Block's update |
 
 `ToolExecutionOutcome` is `Succeeded`, `Errored`, `Denied`, `Rejected`, `NeedsApproval` or `Asked`.
 `Denied` is an `Error` whose content a middleware produced with the `Denied:` prefix; `Rejected` is a
 reviewer's `Reject`. Durations use `DurationJson.millisRW` on the wire.
+
+`attempts` is 0 when a model middleware answered without calling the model. `ToolExecuted.tool` is
+the tool's name only when the agent has that tool; a call to any other name records `"<unknown>"`
+(`ToolLoop.UnknownTool`), since a name the model invented is content. Each non-handoff call of a
+mixed handoff batch - which runs nothing and gets the batch rule as its error - is reported as an
+unknown tool is: a live `ToolCallResult` and a durable `ToolExecuted(Errored)` of zero duration.
+(*Refined in the final review:* `Completion` has no `finishReason`; `TokenUsage` has no codec, so the
+payload carries `CallUsage`; the cost lets tracing build a run's own usage.)
 
 Live, same naming, no `seq`, never replayed:
 
@@ -145,8 +153,17 @@ existing `ValidationError`, returned before anything is claimed.
 run-scoped, unlike the kernel's thread-scoped subscription: it passes on this run's `Durable` and
 `Live` events and every `LiveGap`, and cancels itself after the run's terminal durable event
 (`RunCompleted`, `RunSuspended`, `RunFailed`, `RunCancelled`, `RunTimedOut`). A `Disconnected`
-reaches the listener only for `Lagging` or `ListenerFailed`. Today's `TracedRun` filtering becomes
-this one implementation.
+reaches the listener only for `Lagging`, `ListenerFailed` or `ReplayFailed` (the late subscriber's
+replay could not read the log). Today's `TracedRun` filtering becomes this one implementation.
+
+**`await` drains the listeners.** The dispatcher delivers asynchronously, and the run's result is set
+after its last events are queued but before they are delivered. So `AgentRun.await` on a run with a
+listener - from `stream*` or `subscribe` - returns only once each listener has returned from the
+run's last event (its terminal event, a `Disconnected`, or a crashed run's last delivered event),
+waiting at most `AgentRun.Drain` (5 s) in all, like `AgentTracing.Drain`; past that it logs a WARN
+and returns. A call from inside a listener does not wait for that listener. The bridges' private
+`*Ending` variants do not drain: their release cancels and awaits the run while their own listener
+may still be delivering, and they end on the scope's `onEnd`, never on `await`.
 
 **`Agent`.** Each `start*` has a sibling that takes a listener and subscribes it at admission:
 
@@ -197,7 +214,11 @@ case class AgentRunEnded(
 - `messages` are this turn's messages, from its user message on - not the whole thread, which made
   every trace repeat the history. A turn resumed across runs traces from its user message in each.
   Empty when blocked, cancelled, timed out or failed.
-- `usage` is the thread's committed `UsageSummary` (core `llmconnect.model`).
+- `usage` is this run's own `UsageSummary` (core `llmconnect.model`): `AgentTracing` sums the run's
+  `ModelCallCompleted` events (model, `CallUsage`, `estimatedCost`) as the loop sums
+  `LoopKeys.usage`. It is not the thread's cumulative usage, which `AgentResult.usage` reports:
+  backends report it per run (OpenTelemetry's `gen_ai.usage.*` are per-operation), and the
+  thread's total would count earlier runs again.
 - `eventType` is `agent_run_ended`; `toJson` is a flat summary without messages, with
   `message_count` and token totals.
 
@@ -234,10 +255,15 @@ arrives once, in `AgentRunEnded.messages`.
 `AgentZ.stream(...)` returns `ZStream[Any, LLMError, AgentStreamItem]`, each with `streamResume` and
 `streamRecover` variants. `AgentStreamItem` is `Event(StreamEvent)` or `Done(AgentResult)`, one enum
 per module. The stream ends after `Done`; a `Left` from admission or from the run fails the stream
-with that error. Interrupting the stream cancels the run. The bridge is a bounded queue that the
-dispatcher thread offers into, blocking: a slow consumer backs up only its own subscription, which
-the kernel then disconnects as `Lagging`, failing the stream with a `ValidationError` naming the last
-delivered `seq`.
+with that error. Interrupting the stream cancels the run. The bridge is a queue that the dispatcher
+thread offers into and that never blocks it (*changed in the final review* from a blocking bridge,
+where a slow consumer filled the kernel queue with deltas until the next durable event disconnected
+it as `Lagging` and the release cancelled the paid run). Durable events are always queued. A live
+event - or a kernel `LiveGap` - that arrives while the bridge already holds its capacity (256) of live
+events is dropped, and the consumer receives one `StreamEvent.LiveGap` with the dropped count at the
+position of the drops, as the kernel reports its own. A slow consumer therefore loses deltas, never
+the run. A kernel `Disconnected` (`ListenerFailed`, or `Lagging`, which the non-blocking bridge makes
+unlikely) still fails the stream with a `ValidationError` naming the last delivered `seq`.
 
 ## Samples
 
@@ -279,8 +305,8 @@ Deterministic, on canned clients and fixtures; no network.
 | `AgentStreamingSpec` | deltas in order; attempts increment under a retrying `wrapModelCall`; streaming off sends no deltas; the `Completion` is the same either way |
 | `AgentEventsSpec` | durable events once per committed task - none for a failed task, none duplicated by `recover`; handoff and guardrail events; no durable payload in a run's whole log holds message content |
 | `AgentRunSubscribeSpec` | run-scoped filtering across two runs on one thread; the subscription ends after the terminal event |
-| `AgentRunTracingSpec` | traces arrive without `await`; a blocked turn traces no blocked content; usage reaches `TokenUsageRecorded`; `AgentRunEnded` carries the turn's messages only |
-| `AgentIOSpec`, `AgentZSpec` | events then `Done`; failure fails the stream; interrupting cancels the run; a slow consumer fails with `Lagging` |
+| `AgentRunTracingSpec` | traces arrive without `await`; a blocked turn traces no blocked content; usage reaches `TokenUsageRecorded`; `AgentRunEnded` carries the turn's messages only, and the run's own usage; two runs on a thread stay apart, also while run 1's tracer is blocked |
+| `AgentIOStreamSpec`, `AgentZStreamSpec` | events then `Done`; failure fails the stream; interrupting the stream while the consumer waits in `take` cancels the run; stopping early cancels it; a slow consumer gets a `LiveGap` and `Done`, and the run completes |
 
 Updated: core's trace specs (`TraceEventSpec`, `ConsoleTracingSpec`, `NoOpTracingSpec`,
 `TracingSpec`, `TracingEdgeCasesSpec`), `LangfuseTracingEdgeCasesSpec`, `TraceCollectorTracingSpec`,

@@ -408,7 +408,8 @@ An agent built with `Agent.builder(...).withTracing(tracing)` sends, for each ru
 - one `TraceEvent.AgentRunEnded` when the run ends: thread id, run id, the active agent, a status
   (`completed`, `suspended`, `step_limit_reached`, `blocked:<guardrail>`, `cancelled`, `timed_out`,
   `failed`), this turn's messages (from its user message on; empty when blocked, cancelled, timed
-  out or failed) and the thread's cumulative `UsageSummary`.
+  out or failed) and the run's own `UsageSummary` - the model calls this run made, summed from its
+  `agent.model_call_completed` events, not the thread's total, so per-run figures add up.
 
 A run that crashes without a terminal event is traced as `ErrorOccurred`, with a WARN, and has no
 `AgentRunEnded`. Message content reaches tracing only in `AgentRunEnded.messages`; a blocked turn's

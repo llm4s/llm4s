@@ -44,7 +44,10 @@ for
 yield result
 ```
 
-`stream` returns the `AgentRun` at once; `await()` gives the `AgentResult` as for `run`.
+`stream` returns the `AgentRun` at once; `await()` gives the `AgentResult` as for `run`, and returns
+only once the listener has returned from the run's last event - so everything the listener collected
+is there when `await` returns. It waits at most 5 seconds for a listener that is
+still busy, then logs a WARN and returns.
 `streamResume(threadId, answers)` and `streamRecover(threadId)` are the streaming siblings of
 `startResume` and `startRecover`. A listener runs on its own dispatcher thread, so a slow listener
 never slows the run. Runnable version: `StreamingAgentExample` in `modules/samples`.
@@ -59,7 +62,7 @@ never duplicated by a retry or a `recover`. They carry no message content.
 
 | Event | Fields | Sent |
 |---|---|---|
-| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage` | after a model call returns successfully |
+| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage`, `estimatedCost` | after a model call returns successfully |
 | `ToolExecuted` | `agent`, `toolCallId`, `tool`, `duration`, `outcome` (`Succeeded`, `Errored`, `Denied`, `Rejected`, `NeedsApproval`, `Asked`) | when a tool call's outcome is recorded |
 | `HandedOff` | `from`, `to` | when the model routes a handoff |
 | `GuardrailBlocked` | `guardrail`, `phase` (`Input`, `Output`) | when a guardrail blocks a turn |
@@ -76,6 +79,10 @@ never duplicated by a retry or a `recover`. They carry no message content.
 
 Notes on the durable events:
 
+- `attempts` is 0 when a model middleware answered without calling the model.
+- `ToolExecuted.tool` names the tool only when the agent has it; a call to a name the model invented
+  is recorded as `"<unknown>"` (the live `ToolCallResult` still carries the call). Each non-handoff
+  call of a batch that mixes a handoff with other calls runs nothing and is reported as `Errored`.
 - A tool call that is approved or edited produces two `agent.tool_executed` events for one call id,
   across two runs: `NeedsApproval` when it suspends, then the final outcome after `resume`.
 - `agent.guardrail_blocked` fires only for a guardrail's block. Other middleware refusals (a blank
@@ -112,8 +119,9 @@ start again. A task that `recover` runs again starts at attempt 1 under a new ta
 
 Both are run-scoped: a listener sees only this run's events, even when other runs share the thread,
 and ends after the run's terminal event (`RunCompleted`, `RunSuspended`, `RunFailed`,
-`RunCancelled`, `RunTimedOut`). A run that crashes without a terminal event ends its stream shortly
-after the run does.
+`RunCancelled`, `RunTimedOut`), or after a `Disconnected` (`Lagging`, `ListenerFailed`, or - for
+`subscribe`, which replays - `ReplayFailed`). A run that crashes without a terminal event ends its
+stream shortly after the run does. Either way, `await` waits for the listener as described above.
 
 ## Falling behind
 
@@ -123,7 +131,10 @@ Each listener has a bounded buffer (1024 events for `stream*`). If it is full:
   a UI can note that text is missing. The final answer is still in the `AgentResult`.
 - If the listener still cannot keep up, it is disconnected with
   `StreamEvent.Disconnected(lastSeq, DisconnectReason.Lagging)`. Durable events are in the log, so
-  resubscribe from where you were: `GraphRuntime.subscribe(threadId, afterSeq = lastSeq)`.
+  you can resubscribe from where you were with `GraphRuntime.subscribe(threadId, afterSeq = lastSeq)`.
+  That needs the agent's runtime: build the agent `withRuntime(runtime)` and subscribe on that
+  `runtime`. The subscription is thread-scoped, not run-scoped - it delivers every later run on the
+  thread too - and does not end itself: cancel it when you are done.
 
 A listener that throws is disconnected with `ListenerFailed`; the run is unaffected.
 
@@ -151,8 +162,14 @@ agentZ.stream(threadId, "Explain monads").runForeach { /* same cases */ }
 
 `AgentStreamItem` is `Event(StreamEvent)` or `Done(AgentResult)`, one enum per module. The stream
 ends after `Done`; a `Left` from admission or from the run fails the stream with that error.
-A run that ends without a terminal event (a crash) still ends the stream shortly after the run ends, and the stream then fails with the run's error. `streamResume` and `streamRecover` exist on both. Stopping early (`take(n)`, `head`) or a consumer
-too slow for the buffer (lagging) cancels the turn. Samples: `AgentStreamIOExample`,
+A run that ends without a terminal event (a crash) still ends the stream shortly after the run ends,
+and the stream then fails with the run's error. `streamResume` and `streamRecover` exist on both.
+Interrupting the stream or stopping early (`take(n)`, `head`) cancels the turn.
+
+A slow consumer does not: the stream's buffer never holds up the run's subscription. Durable events
+are always kept; live events beyond the buffer's 256 are dropped, and the consumer receives one
+`StreamEvent.LiveGap(n)` with their count where they were dropped, then the rest of the run and
+`Done`. Only a `Disconnected` from the runtime fails the stream. Samples: `AgentStreamIOExample`,
 `AgentStreamZIOExample`.
 
 ## Your own graphs
@@ -178,7 +195,6 @@ listener { case Checked(v) => ... } // None for another name, version or an unde
   or tool's error quotes content (a guardrail reason that echoes the user's text), that text reaches
   the log through the kernel event, not through an `agent.*` event.
 - **Live events are not replayed**, and a late `subscribe` misses earlier ones.
-- `AgentRunEnded.usage` (tracing) is the thread's cumulative usage, not the run's.
 
 See also the [observability guide](../observability/), the
 [migration note](../../reference/migration.html), and

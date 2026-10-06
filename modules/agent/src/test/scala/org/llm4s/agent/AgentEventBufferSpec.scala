@@ -126,3 +126,14 @@ class AgentEventBufferSpec extends AnyFlatSpec with Matchers:
     buffer.take() shouldBe Right(Some(started))
     buffer.take().isLeft shouldBe true
   }
+
+  it should "return the disconnect's Left after a close, and Right(None) after a close without one" in {
+    val failed = AgentEventBuffer(4)
+    failed.listener(StreamEvent.Disconnected(1L, DisconnectReason.Lagging))
+    failed.close()
+    failed.take().isLeft shouldBe true
+    val closed = AgentEventBuffer(4)
+    closed.listener(durable(1, RunEvent.RunStarted(None, None)))
+    closed.close()
+    closed.take() shouldBe Right(None)
+  }

@@ -174,6 +174,11 @@ vocabulary; `TraceEvent.AgentStateUpdated` is replaced by `TraceEvent.AgentRunEn
 | `context.progress(payload)` | `context.progress(name, version, payload)`, or an `EventType` |
 | `ModelStep.next(messages, tools)` | `next(messages, tools, call)` |
 
+`await()` returns once the listener has returned from the run's last event, so whatever it collected
+is complete. `AgentRunEnded.usage` is the run's own usage, not the thread's: a dashboard that summed
+the old cumulative figure per run double counted. A slow `AgentIO.stream`/`AgentZ.stream` consumer
+loses live events and gets a `StreamEvent.LiveGap` with their count; it no longer cancels the run.
+
 See the [streaming guide](../guide/agents/streaming.md).
 
 ---

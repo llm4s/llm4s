@@ -44,10 +44,11 @@ final class AgentRun private[agent] (
    * then live; its live events from now on (a live event sent before this call is missed - use
    * [[Agent.stream]] to receive every one). Run-scoped: nothing of another run on the thread is
    * delivered, and the subscription ends itself after the turn's terminal event, or after a
-   * `Disconnected` - which reaches the listener only if it fell behind (`Lagging`) or threw. A turn
+   * `Disconnected` - which reaches the listener only if it fell behind (`Lagging`), threw
+   * (`ListenerFailed`), or the replay could not read the thread's log (`ReplayFailed`). A turn
    * that ends without a terminal event (a crash, or a failed commit) ends the subscription once it
    * has delivered what it had. [[await]] returns only once `listener` has returned from the turn's
-   * last event, within [[AgentRun.Drain]].
+   * last event, waiting at most 5 seconds.
    */
   def subscribe(capacity: Int = Agent.StreamCapacity)(listener: StreamEvent => Unit): Result[Subscription] =
     val scope = RunScope(runId, listener)
@@ -69,7 +70,7 @@ final class AgentRun private[agent] (
    * With a listener - from [[Agent.stream]], [[Agent.streamResume]], [[Agent.streamRecover]] or
    * [[subscribe]] - a call that returns the outcome returns only once each listener has returned
    * from the turn's last event (its terminal event, a `Disconnected`, or, for a turn that ended
-   * without a terminal event, its last delivered one), waiting at most [[AgentRun.Drain]] in all;
+   * without a terminal event, its last delivered one), waiting at most 5 seconds in all;
    * past that it logs a WARN and returns. A call made from a listener does not wait for that
    * listener.
    */
