@@ -270,12 +270,12 @@ class OpenAICompatibleWorkloadIdentitySpec
       fromValues(tokenExchange = exchange.withTokenUrl("http://127.0.0.1:9/token")).isRight shouldBe true
     }
 
-    "be refused by OpenAICompatibleClient when built with the constructor or copy" in {
+    "be refused by OpenAICompatibleClient when built with apply or the with* setters" in {
       val valid = fromValues().value
       val bad = Seq(
-        valid.copy(headers = Map("authorization" -> "Bearer stale")),
-        valid.copy(apiKey = Some("k")),
-        valid.copy(tokenExchange = Some(exchange.withTokenUrl("http://ws.example/t"))),
+        valid.withHeaders(Map("authorization" -> "Bearer stale")),
+        valid.withApiKey("k"),
+        valid.withTokenExchange(exchange.withTokenUrl("http://ws.example/t")),
         OpenAICompatibleConfig(
           model = "m",
           baseUrl = "https://ws.example/v1",

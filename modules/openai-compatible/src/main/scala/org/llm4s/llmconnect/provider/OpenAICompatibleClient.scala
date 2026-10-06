@@ -582,7 +582,7 @@ object OpenAICompatibleClient {
     metrics: MetricsCollector = MetricsCollector.noop,
     exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
   )(using ModelRegistryService): Result[OpenAICompatibleClient] =
-    // A config built with the constructor or `copy` skipped `fromValues`; its rules are applied here too.
+    // A config built with `apply` or the `with*` setters skipped `fromValues`; its rules are applied here too.
     OpenAICompatibleConfig
       .validate(config)
       .flatMap(valid =>

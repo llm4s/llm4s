@@ -126,7 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   says so. `llm4s-provider-testkit` gains `FakeTokenExchangeServer` and `TestJwt`. (#1354)
   **The rules hold on every construction path:** `AnthropicConfig.fromValues`, `OpenAIConfig.fromValues`
   and `OpenAICompatibleConfig.fromValues` apply them, and the named-section path goes through those
-  factories rather than its own copy; a config built with the constructor or `copy` is refused by its client
+  factories rather than its own copy; a config built with the constructor, `copy` or (for `OpenAICompatibleConfig`) `apply` and the `with*` setters is refused by its client
   (`AnthropicClient`, `OpenAIClient`, `OpenRouterClient`, `OpenAICompatibleClient`: `apply` returns a
   `ConfigurationError`, the constructor throws `IllegalArgumentException`). With workload identity a config
   may not also set `apiKey`; an `OpenAICompatibleConfig.tokenExchange` refuses an `Authorization` header in
@@ -134,7 +134,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `baseUrl`; and an `OpenAIConfig.workloadIdentity` is refused unless the config belongs to `openai`, since
   a Requesty or OpenRouter config would send the OpenAI token to that provider. An `OpenAICompatibleClient`
   whose credential is `Dynamic` or `Exchange` refuses a dialect that sets `Authorization`.
-  **Migration:** `OpenAICompatibleClient.Settings.apiKey: Option[String]` became
+  **Migration:** `OpenAICompatibleConfig` follows the growth-prone data-type pattern: its constructor
+  and `copy` are private; build it with the companion `apply` (defaults unchanged) and adjust it with
+  `withBaseUrl`, `withApiKey`, `withContextWindow`, `withReserveCompletion`, `withHeaders`, `withHeader`,
+  `withStreamUsage` and `withTokenExchange`. Java and Kotlin, which see no Scala default arguments, use
+  `OpenAICompatibleConfig.apply(model, baseUrl)` and the setters, so a new field no longer breaks them.
+  `OpenAICompatibleClient.Settings.apiKey: Option[String]` became
   `credential: OpenAICompatibleClient.Credential` (`Anonymous`, `Static(key)`, `Dynamic(provider)`,
   `Exchange(config)`). An `Exchange` credential exchanges through the client's own HTTP client, which
   `close()` releases.

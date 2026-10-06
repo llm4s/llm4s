@@ -19,8 +19,12 @@ import org.llm4s.util.Redaction
  * model's real limits so context compression neither truncates early nor
  * overflows.
  *
- * Prefer [[OpenAICompatibleConfig.fromValues]], which validates the values,
- * over the primary constructor.
+ * Prefer [[OpenAICompatibleConfig.fromValues]], which validates the values.
+ * The constructor is private: build one with the companion `apply`, whose
+ * defaults cover every field after `baseUrl`, and adjust it with the `with*`
+ * setters. Java and Kotlin, which cannot see Scala default arguments, use
+ * `OpenAICompatibleConfig.apply(model, baseUrl)` and the setters, so adding a
+ * field never breaks them.
  *
  * @param model             model identifier sent in every request.
  * @param baseUrl           API base URL; requests go to `<baseUrl>/chat/completions`.
@@ -43,19 +47,35 @@ import org.llm4s.util.Redaction
  *                          breaks them.
  */
 @Stable
-final case class OpenAICompatibleConfig(
+final case class OpenAICompatibleConfig private (
   model: String,
   baseUrl: String,
-  apiKey: Option[String] = None,
-  contextWindow: Int = OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW,
-  reserveCompletion: Int = OpenAICompatibleConfig.DEFAULT_RESERVE_COMPLETION,
-  headers: Map[String, String] = Map.empty,
-  streamUsage: Boolean = true,
-  tokenExchange: Option[TokenExchangeConfig] = None
+  apiKey: Option[String],
+  contextWindow: Int,
+  reserveCompletion: Int,
+  headers: Map[String, String],
+  streamUsage: Boolean,
+  tokenExchange: Option[TokenExchangeConfig]
 ) extends ProviderConfig:
   override def providerId: ProviderId                           = ProviderId(OpenAICompatibleConfig.ProviderIdName)
   override def endpointUrl: Option[String]                      = Some(baseUrl)
   override def withModel(model: String): OpenAICompatibleConfig = copy(model = model)
+
+  def withBaseUrl(baseUrl: String): OpenAICompatibleConfig          = copy(baseUrl = baseUrl)
+  def withApiKey(apiKey: String): OpenAICompatibleConfig            = copy(apiKey = Some(apiKey))
+  def withApiKey(apiKey: Option[String]): OpenAICompatibleConfig    = copy(apiKey = apiKey)
+  def withContextWindow(contextWindow: Int): OpenAICompatibleConfig = copy(contextWindow = contextWindow)
+  def withReserveCompletion(reserveCompletion: Int): OpenAICompatibleConfig =
+    copy(reserveCompletion = reserveCompletion)
+  def withHeaders(headers: Map[String, String]): OpenAICompatibleConfig = copy(headers = headers)
+
+  /** Adds (or replaces) one header, for Java and Kotlin callers that would otherwise build a Scala `Map`. */
+  def withHeader(name: String, value: String): OpenAICompatibleConfig = copy(headers = headers.updated(name, value))
+  def withStreamUsage(streamUsage: Boolean): OpenAICompatibleConfig   = copy(streamUsage = streamUsage)
+  def withTokenExchange(tokenExchange: TokenExchangeConfig): OpenAICompatibleConfig =
+    copy(tokenExchange = Some(tokenExchange))
+  def withTokenExchange(tokenExchange: Option[TokenExchangeConfig]): OpenAICompatibleConfig =
+    copy(tokenExchange = tokenExchange)
   override def toString: String =
     s"OpenAICompatibleConfig(model=$model, baseUrl=$baseUrl, apiKey=${Redaction.secretOpt(apiKey)}, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, " +
@@ -77,9 +97,41 @@ object OpenAICompatibleConfig {
   val DEFAULT_RESERVE_COMPLETION: Int = 2048
 
   /**
+   * Builds a config without validating it; [[fromValues]] validates. Every field after `baseUrl`
+   * has a default.
+   */
+  def apply(
+    model: String,
+    baseUrl: String,
+    apiKey: Option[String] = None,
+    contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
+    reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
+    headers: Map[String, String] = Map.empty,
+    streamUsage: Boolean = true,
+    tokenExchange: Option[TokenExchangeConfig] = None
+  ): OpenAICompatibleConfig =
+    new OpenAICompatibleConfig(
+      model,
+      baseUrl,
+      apiKey,
+      contextWindow,
+      reserveCompletion,
+      headers,
+      streamUsage,
+      tokenExchange
+    )
+
+  /**
+   * The model and base URL, every other field at its default: the entry point for Java and
+   * Kotlin, which do not see Scala default arguments. Set the rest with the `with*` setters.
+   */
+  def apply(model: String, baseUrl: String): OpenAICompatibleConfig =
+    apply(model, baseUrl, apiKey = None)
+
+  /**
    * The rules every [[OpenAICompatibleConfig]] must meet, whichever way it was built: [[fromValues]]
    * applies them, and `OpenAICompatibleClient` applies them again to a config built with the
-   * constructor or `copy`. With `tokenExchange` set:
+   * companion `apply` or the `with*` setters. With `tokenExchange` set:
    *
    *  - `apiKey` must be absent or blank: a config authenticates one way;
    *  - `headers` must have no `Authorization` entry, in any case: the exchanged token is the

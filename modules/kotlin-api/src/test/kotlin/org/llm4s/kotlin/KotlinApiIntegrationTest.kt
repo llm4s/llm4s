@@ -28,9 +28,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.llm4s.javaapi.Llm4s as JLlm4s
-import scala.collection.immutable.`Map$` as ScalaMap
-
-private val NoHeaders = ScalaMap.`MODULE$`
 
 private const val RegistryResource = "llm4s.modelRegistry.resourcePath"
 private const val RegistryFile = "llm4s.modelRegistry.filePath"
@@ -209,7 +206,7 @@ class KotlinApiIntegrationTest {
 
     private class EndpointFactory(private val baseUrl: String) : ClientFactory {
         override fun createDefault(): LlmResult<JLlmClient> =
-            JLlm4s.createClient(OpenAICompatibleConfig("test-model", baseUrl, scala.Option.apply("test-key"), 8192, 2048, NoHeaders.empty<String, String>(), true))
+            JLlm4s.createClient(OpenAICompatibleConfig.apply("test-model", baseUrl).withApiKey("test-key"))
 
         override fun createAgent(client: JLlmClient): JAgent = JLlm4s.createAgent(client)
     }
