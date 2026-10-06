@@ -2,7 +2,7 @@ package org.llm4s.agent
 
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.middleware.GuardrailBlocked
-import org.llm4s.agent.graph.toolloop.{ LoopKeys, Messages, ToolLoop, TurnOutcome, TurnOutput }
+import org.llm4s.agent.graph.toolloop.{ LoopKeys, Messages, StoredMessage, ToolLoop, TurnOutcome, TurnOutput }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ AssistantMessage, Message, UserMessage }
 import org.llm4s.trace.Tracing
@@ -57,56 +57,29 @@ final class AgentRun private[agent] (
   def await(): Result[AgentResult] =
     val ended = handle.await()
     if handle.status != RunStatus.Running then tracing.foreach(_.detach())
-    ended.flatMap {
-      case RunResult.Completed(state, output, _) => completed(state, output)
-      case suspended: RunResult.Suspended        => this.suspended(suspended)
+    for
+      result <- ended
       // only a kernel Block - the run closed its thread Failed - is a blocked turn; a GuardrailBlocked
       // that failed the run another way (from a model or tool wrapper) leaves it for recover, so it is Left
-      case RunResult.Failed(state, blocked: GuardrailBlocked) =>
-        runtime.endedBlocked(threadId, runId).flatMap { isBlock =>
-          if isBlock then snapshot(state, AgentStatus.Blocked(blocked.guardrail, blocked.reason)) else Left(blocked)
-        }
-      case RunResult.Failed(_, error) => Left(error)
-    }
+      isBlock <- result match
+        case RunResult.Failed(_, _: GuardrailBlocked) => runtime.endedBlocked(threadId, runId)
+        case _                                        => Right(false)
+      status <- AgentRun.status(result, isBlock, loop)
+      agentResult <- result match
+        case RunResult.Completed(state, output, _) => summary(state, Some(output.activeAgent), status)
+        case suspended: RunResult.Suspended        => summary(suspended.state, None, status)
+        // a blocked turn: the thread as the Block committed it - an input block stores nothing of the
+        // turn, an output block removes it - with the usage the turn's model calls added
+        case RunResult.Failed(state, _) => summary(state, None, status)
+    yield agentResult
 
-  private def completed(state: ThreadState, output: TurnOutput): Result[AgentResult] =
+  /** The turn's result: `state`'s messages and usage, with `active` or else the thread's active agent. */
+  private def summary(state: ThreadState, active: Option[AgentId], status: AgentStatus): Result[AgentResult] =
     for
       messages <- state.get(Messages.key).map(_.map(_.message))
       usage    <- state.get(LoopKeys.usage)
-      status <- output.outcome match
-        case TurnOutcome.Completed =>
-          messages.reverseIterator
-            .collectFirst { case a: AssistantMessage => AgentStatus.Completed(a.content) }
-            .toRight(ValidationError("agent", "the turn completed without an assistant message"))
-        case TurnOutcome.StepLimitReached => Right(AgentStatus.StepLimitReached)
-    yield AgentResult(threadId, runId, output.activeAgent, status, messages, usage)
-
-  /**
-   * A blocked turn: the thread as the Block committed it - an input block stores nothing of the turn,
-   * an output block removes it - with the usage the turn's model calls added.
-   */
-  private def snapshot(state: ThreadState, status: AgentStatus): Result[AgentResult] =
-    for
-      messages <- state.get(Messages.key).map(_.map(_.message))
-      usage    <- state.get(LoopKeys.usage)
-      active   <- state.get(LoopKeys.activeAgent)
-    yield AgentResult(threadId, runId, active.getOrElse(root), status, messages, usage)
-
-  private def suspended(result: RunResult.Suspended): Result[AgentResult] =
-    for
-      approvals <- loop.requests(result)
-      questions <- loop.questions(result)
-      messages  <- result.state.get(Messages.key).map(_.map(_.message))
-      usage     <- result.state.get(LoopKeys.usage)
-      active    <- result.state.get(LoopKeys.activeAgent)
-    yield AgentResult(
-      threadId,
-      runId,
-      active.getOrElse(root),
-      AgentStatus.Suspended(approvals, questions),
-      messages,
-      usage
-    )
+      stored   <- state.get(LoopKeys.activeAgent)
+    yield AgentResult(threadId, runId, active.orElse(stored).getOrElse(root), status, messages, usage)
 
 private[agent] object AgentRun:
 
@@ -126,7 +99,34 @@ private[agent] object AgentRun:
       handle.observation.foreach(s.attach)
       RunScope.watch(handle, s)
     }
-    new AgentRun(handle, loop, root, runtime, tracing.map(AgentTracing(handle, root, _)))
+    new AgentRun(handle, loop, root, runtime, tracing.map(AgentTracing(handle, root, loop, _)))
+
+  /**
+   * How a turn ended, from its run's result: the status [[AgentRun.await]] reports, or the error it
+   * returns. The one derivation of a turn's status - `await` and [[AgentTracing]] both use it.
+   * `isBlock` is whether a failed result is the run's guardrail Block: `await` reads it from the
+   * thread's closing checkpoint, tracing from the run's own `agent.guardrail_blocked` event. A
+   * completed turn without an assistant message is a `ValidationError`.
+   */
+  def status(result: RunResult[TurnOutput], isBlock: Boolean, loop: ToolLoop): Result[AgentStatus] =
+    result match
+      case RunResult.Completed(state, output, _) =>
+        output.outcome match
+          case TurnOutcome.Completed =>
+            state.get(Messages.key).flatMap { stored =>
+              stored.reverseIterator
+                .collectFirst { case StoredMessage(_, a: AssistantMessage) => AgentStatus.Completed(a.content) }
+                .toRight(ValidationError("agent", "the turn completed without an assistant message"))
+            }
+          case TurnOutcome.StepLimitReached => Right(AgentStatus.StepLimitReached)
+      case suspended: RunResult.Suspended =>
+        for
+          approvals <- loop.requests(suspended)
+          questions <- loop.questions(suspended)
+        yield AgentStatus.Suspended(approvals, questions)
+      case RunResult.Failed(_, blocked: GuardrailBlocked) if isBlock =>
+        Right(AgentStatus.Blocked(blocked.guardrail, blocked.reason))
+      case RunResult.Failed(_, error) => Left(error)
 
   /** The current turn's messages: from the last user message on. */
   def turnMessages(state: ThreadState): Result[Vector[Message]] =

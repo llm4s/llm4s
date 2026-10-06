@@ -1,8 +1,17 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.{ Agent, AgentResult }
-import org.llm4s.agent.graph.ThreadId
-import org.llm4s.error.{ NetworkError, UnknownError }
+import org.llm4s.agent.graph.{
+  Checkpointer,
+  Commit,
+  EventRecord,
+  GraphRuntime,
+  InMemoryCheckpointer,
+  RunEvent,
+  StoredCheckpoint,
+  ThreadId
+}
+import org.llm4s.error.{ NetworkError, ProcessingError, UnknownError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
@@ -174,6 +183,20 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers with Eventually {
   private def endedOf(tracing: Recording): Vector[TraceEvent.AgentRunEnded] =
     tracing.all.collect { case e: TraceEvent.AgentRunEnded => e }
 
+  /** A store that refuses every commit carrying a `RunCompleted`: the run ends without a terminal event. */
+  final private class NoTerminal extends Checkpointer {
+    private val underlying = new InMemoryCheckpointer()
+    def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
+      if (!commit.events.exists(_.event == RunEvent.RunCompleted)) underlying.commit(threadId, commit)
+      else Left(ProcessingError("store", "store down"))
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = underlying.latest(threadId)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
+      underlying.eventsAfter(threadId, afterSeq, limit)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] =
+      underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId): Result[Unit] = underlying.deleteThread(threadId)
+  }
+
   "A traced run" should "end with one AgentRunEnded carrying the turn's messages" in {
     val tracing = Recording()
     val agent   = traced(Scripted(Right(toolCallCompletion), Right(answer("done"))), tracing)
@@ -280,6 +303,23 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers with Eventually {
     run.cancel()
     run.await()
     eventually(endedOf(tracing).map(_.status) shouldBe Vector("cancelled"))
+  }
+
+  it should "trace a run that ends without a terminal event as ErrorOccurred, with no AgentRunEnded" in {
+    val tracing = Recording()
+    val agent = Agent
+      .builder("assistant", Scripted(Right(answer("done"))))
+      .withRuntime(GraphRuntime(new NoTerminal()))
+      .withTracing(tracing)
+      .build()
+      .fold(e => fail(e.message), identity)
+    val run = agent.start(ThreadId("t10"), "go").fold(e => fail(e.message), identity)
+    eventually(tracing.all.collect { case e: TraceEvent.ErrorOccurred => e }.size shouldBe 1)
+    run.await().isLeft shouldBe true
+    tracing.names should contain("graph.run_started")
+    tracing.names should not contain "graph.run_completed"
+    endedOf(tracing) shouldBe empty
+    tracing.all.collect { case e: TraceEvent.ErrorOccurred => e }.size shouldBe 1
   }
 
   it should "keep two runs on one thread apart" in {

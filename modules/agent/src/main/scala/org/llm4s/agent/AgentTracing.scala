@@ -2,7 +2,8 @@ package org.llm4s.agent
 
 import org.llm4s.agent.events.AgentEvents
 import org.llm4s.agent.graph.*
-import org.llm4s.agent.graph.toolloop.{ LoopKeys, TurnOutcome, TurnOutput }
+import org.llm4s.agent.graph.toolloop.{ LoopKeys, ToolLoop, TurnOutput }
+import org.llm4s.types.Result
 import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.model.UsageSummary
 import org.llm4s.trace.{ TraceEvent, Tracing }
@@ -19,19 +20,27 @@ import scala.util.{ Failure, Try }
  * each as `TracingSubscriber` does - `graph.*` custom events, with agent events named `agent.*` - plus each model call's
  * usage as `TokenUsageRecorded(usage, model, "agent_completion")`. On the run's terminal event it
  * takes the run's result from its handle (set just after the closing commit) and traces one
- * [[TraceEvent.AgentRunEnded]]; a failed run also traces `ErrorOccurred`. A run that ends without a
- * terminal event (a crash, or a failed terminal commit) traces no `AgentRunEnded`: its scope ends
- * once the subscription has delivered what it had, which ends the tracing. Tracing failures are
- * logged at WARN and never fail the run.
+ * [[TraceEvent.AgentRunEnded]], its status derived by [[AgentRun.status]] as `await` derives it; a
+ * failed run also traces `ErrorOccurred`. A run that ends without a terminal event (a crash, or a
+ * failed terminal commit) traces no `AgentRunEnded`: once the subscription has delivered what it
+ * had, its error is traced as `ErrorOccurred` and logged at WARN. Tracing failures are logged at
+ * WARN and never fail the run.
  */
-final private[agent] class AgentTracing(handle: RunHandle[TurnOutput], root: AgentId, tracing: Tracing):
+final private[agent] class AgentTracing(
+  handle: RunHandle[TurnOutput],
+  root: AgentId,
+  loop: ToolLoop,
+  tracing: Tracing
+):
   private val delivered    = new CompletableFuture[Unit]()
   private val detached     = new AtomicBoolean(false)
   private val blockedBy    = new AtomicReference[Option[String]](None)
   private val subscription = new AtomicReference[Option[Subscription]](None)
+  private val terminalSeen = new AtomicBoolean(false)
+  private val disconnected = new AtomicBoolean(false)
 
   // ends - once - after the terminal event is traced, after a Disconnected, or when the run lacks a terminal event
-  private val scope = RunScope(handle.runId, onEvent, () => delivered.complete(()): Unit)
+  private val scope = RunScope(handle.runId, onEvent, () => scopeEnded())
 
   handle
     .subscribe()(scope)
@@ -52,44 +61,51 @@ final private[agent] class AgentTracing(handle: RunHandle[TurnOutput], root: Age
           m.usage.foreach(u => trace(TraceEvent.TokenUsageRecorded(u.toTokenUsage, m.model, "agent_completion")))
         case AgentEvents.GuardrailBlocked(g) => blockedBy.set(Some(g.guardrail))
         case _                               => ()
-      if RunScope.terminal(record.event) then ended(record.event)
+      if RunScope.terminal(record.event) then
+        terminalSeen.set(true)
+        ended(record.event)
     case StreamEvent.Disconnected(lastSeq, reason) =>
+      disconnected.set(true)
       AgentTracing.logger.warn(
         s"Tracing of run ${handle.runId.value} on ${handle.threadId.value} ended after seq $lastSeq: $reason"
       )
     case _ => ()
 
-  /** Traces the run's AgentRunEnded from its own result, which the run thread sets just after the closing commit. */
+  /**
+   * Traces the run's AgentRunEnded from its own result, which the run thread sets just after the
+   * closing commit, with the status [[AgentRun.status]] derives - as `await` does.
+   */
   private def ended(terminal: RunEvent): Unit =
     val result = handle.await()
-    val state = result.toOption.map {
-      case RunResult.Completed(s, _, _) => s
-      case s: RunResult.Suspended       => s.state
-      case RunResult.Failed(s, _)       => s
-    }
+    val state  = result.toOption.map(AgentTracing.stateOf)
     val usage  = state.flatMap(_.get(LoopKeys.usage).toOption).getOrElse(UsageSummary())
     val active = state.flatMap(_.get(LoopKeys.activeAgent).toOption.flatten).getOrElse(root)
-    val (status, messages) = (terminal, result) match
-      case (RunEvent.RunCompleted, Right(RunResult.Completed(s, out, _))) =>
-        val status = out.outcome match
-          case TurnOutcome.Completed        => "completed"
-          case TurnOutcome.StepLimitReached => "step_limit_reached"
-        (status, AgentRun.turnMessages(s).getOrElse(Vector.empty))
-      case (_: RunEvent.RunSuspended, Right(s: RunResult.Suspended)) =>
-        ("suspended", AgentRun.turnMessages(s.state).getOrElse(Vector.empty))
-      case (RunEvent.RunCancelled, _) => ("cancelled", Vector.empty)
-      case (RunEvent.RunTimedOut, _)  => ("timed_out", Vector.empty)
-      case (_: RunEvent.RunFailed, _) =>
-        blockedBy.get match
-          case Some(guardrail) => (s"blocked:$guardrail", Vector.empty)
-          case None =>
-            result match
-              case Right(RunResult.Failed(_, error)) => traceError(error.message)
-              case Left(error)                       => traceError(error.message)
-              case _                                 => ()
-            ("failed", Vector.empty)
-      case _ => ("failed", Vector.empty)
-    trace(TraceEvent.AgentRunEnded(handle.threadId.value, handle.runId.value, active.value, status, messages, usage))
+    val status = result.flatMap(r => AgentRun.status(r, blockedBy.get.isDefined, loop))
+    val label  = AgentTracing.label(terminal, status)
+    val messages = status match
+      case Right(_: AgentStatus.Blocked) | Left(_) => Vector.empty
+      case Right(_) => state.flatMap(AgentRun.turnMessages(_).toOption).getOrElse(Vector.empty)
+    status.left.foreach(error => if label == "failed" then traceError(error.message))
+    trace(TraceEvent.AgentRunEnded(handle.threadId.value, handle.runId.value, active.value, label, messages, usage))
+
+  /**
+   * The scope's end. After the terminal event (traced by [[ended]]) or a `Disconnected` (logged) it
+   * only releases `detach`. Otherwise the run ended without a terminal event - it crashed, or its
+   * terminal commit failed - and its result is already set (`RunScope.watch` ends the scope only
+   * after it): warns, and traces its error as `ErrorOccurred`; it traces no `AgentRunEnded`.
+   */
+  private def scopeEnded(): Unit =
+    if !terminalSeen.get && !disconnected.get then
+      val error = handle.await() match
+        case Right(RunResult.Failed(_, e)) => Some(e)
+        case Left(e)                       => Some(e)
+        case Right(_)                      => None
+      AgentTracing.logger.warn(
+        s"Run ${handle.runId.value} on ${handle.threadId.value} ended without a terminal event${error
+            .fold("")(e => s": ${e.message}")}; its trace has no AgentRunEnded"
+      )
+      error.foreach(e => traceError(e.message))
+    delivered.complete(()): Unit
 
   private def traceError(message: String): Unit =
     Try(tracing.traceError(new RuntimeException(message), "agent run")).toEither
@@ -132,6 +148,27 @@ private[agent] object AgentTracing:
     record.event match
       case RunEvent.Custom(name, _, _) if AgentEvents.durable(name) => traced.copy(name = name)
       case _                                                        => traced
+
+  private def stateOf(result: RunResult[TurnOutput]): ThreadState = result match
+    case RunResult.Completed(s, _, _) => s
+    case s: RunResult.Suspended       => s.state
+    case RunResult.Failed(s, _)       => s
+
+  /**
+   * The `AgentRunEnded` status of a run whose terminal event is `terminal` and whose turn ended with
+   * `status` ([[AgentRun.status]]): `completed`, `step_limit_reached`, `suspended`,
+   * `blocked:<guardrail>`, `cancelled`, `timed_out` or `failed` - a turn `await` refuses is `failed`.
+   */
+  def label(terminal: RunEvent, status: Result[AgentStatus]): String = status match
+    case Right(_: AgentStatus.Completed)          => "completed"
+    case Right(AgentStatus.StepLimitReached)      => "step_limit_reached"
+    case Right(_: AgentStatus.Suspended)          => "suspended"
+    case Right(AgentStatus.Blocked(guardrail, _)) => s"blocked:$guardrail"
+    case Left(_) =>
+      terminal match
+        case RunEvent.RunCancelled => "cancelled"
+        case RunEvent.RunTimedOut  => "timed_out"
+        case _                     => "failed"
 
   /** How long `detach` waits, after the run ends, for its last event to be traced. */
   val Drain: FiniteDuration = 5.seconds
