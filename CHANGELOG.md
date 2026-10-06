@@ -23,6 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decide - `encodeThinking` (given the turn's blocks), `thinkingDetails` and `decodeThinkingDetails` - and drop it by
   default. The agent's tool loop stores the completion's message unchanged, so a run sends a tool-call turn's
   thinking in the call after the tool results, and later turns read it back from the checkpoint.
+- **Agent event streams for Java and Kotlin** ([#1377](https://github.com/llm4s/llm4s/issues/1377)):
+  `llm4s-java-api`'s `JAgent.stream(threadId, query, listener)`, `streamResume(threadId, answers, listener)`
+  and `streamRecover(threadId, listener)` return an `LlmResult<AgentStream>` at once and hand the turn's events
+  to an `AgentStreamListener` - `onEvent` for each, then one of `onComplete(AgentResult)` or
+  `onError(LlmException)` - on the stream's own thread. Only `onEvent` is abstract, so a lambda is a listener.
+  `AgentStream.await()` returns the outcome once the listener has returned from its last call; `cancel()`
+  cancels the turn and returns once it has ended. `StreamEvents.decode(eventType, event)` reads an event as an
+  `Optional`, and `Llm4s.wrapAgent(agent)` puts an agent built with `Agent.builder` (`withStreaming()`,
+  middleware, runtime) behind the facade. The Kotlin API's `AgentKt.stream`, `streamResume` and
+  `streamRecover` are cold `Flow<AgentStreamItem>`s (`Event(event)`, then `Done(result)`); cancelling the
+  collection (its scope, `take(n)`, a timeout) cancels the turn, and Kotlin's `Llm4s.wrapAgent` matches
+  Java's. As in the fs2 and ZIO streams, a consumer too slow for the stream's 256-event buffer loses live
+  events and receives a `StreamEvent.LiveGap` with their count - it never cancels the run - and a run that
+  ends without a terminal event still ends the stream with its error. The Java sample streams a turn.
 - **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
   `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
   service's MP3 and return its bytes untouched. PCM stays the default. `AudioFormat.Mp3` is a new case
@@ -775,7 +789,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `AgentCall` span.
   - Samples `StreamingAgentExample`, `StreamingWithToolsExample` and `EventCollectionExample` are
     back, with `AgentStreamIOExample` and `AgentStreamZIOExample`.
-  Limits: Java and Kotlin streams are a follow-up ([#1377](https://github.com/llm4s/llm4s/issues/1377)); the kernel's `TaskFailed`/`RunFailed` events
+  Limits: the kernel's `TaskFailed`/`RunFailed` events
   store error messages, which may quote content.
 - **Approval resumes through the middleware chain; `ToolLoop` gains a `finish` node**
   ([#1279](https://github.com/llm4s/llm4s/issues/1279)): `Approve` now runs the whole middleware

@@ -1,9 +1,31 @@
 package org.llm4s.kotlin
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.withContext
 import org.llm4s.agent.AgentResult
+import org.llm4s.agent.graph.StreamEvent
+import org.llm4s.javaapi.AgentStream
+import org.llm4s.javaapi.AgentStreamListener
 import org.llm4s.javaapi.JAgent
+import org.llm4s.javaapi.LlmException
+import org.llm4s.javaapi.LlmResult
+import scala.Tuple2
+import ujson.Value
+
+/** An item of an agent turn's [kotlinx.coroutines.flow.Flow]: each of the turn's events, then its result. */
+sealed interface AgentStreamItem {
+    /** One event of the turn: a `StreamEvent.Durable`, a `StreamEvent.Live`, or a `StreamEvent.LiveGap`. */
+    data class Event(val event: StreamEvent) : AgentStreamItem
+
+    /** The turn's result: the last item. */
+    data class Done(val result: AgentResult) : AgentStreamItem
+}
 
 /**
  * Kotlin coroutine wrapper around [JAgent].
@@ -12,7 +34,10 @@ import org.llm4s.javaapi.JAgent
  * Scala [org.llm4s.javaapi.LlmResult] errors into [LLMException]. A conversation is a thread of the agent's
  * in-memory runtime, kept until [forget] removes it.
  *
- * Obtain instances via [Llm4s.createAgent].
+ * [stream], [streamResume] and [streamRecover] run a turn on a thread you name as a cold [Flow] of its
+ * events ([AgentStreamItem.Event]), then its result ([AgentStreamItem.Done]).
+ *
+ * Obtain instances via [Llm4s.createAgent] or [Llm4s.wrapAgent].
  *
  * ```kotlin
  * val agent  = Llm4s.createAgent(client)
@@ -45,4 +70,59 @@ class AgentKt internal constructor(private val underlying: JAgent) {
         underlying.forget(previous).unwrap("Agent forget failed")
         Unit
     }
+
+    /**
+     * Runs [query] as one turn on [threadId] - a new conversation, or the next turn of one - as a cold
+     * [Flow]: each collection starts the turn, emits every event of it, then [AgentStreamItem.Done].
+     *
+     * A refused start (a blank query, a busy thread) or a failed turn throws [LLMException], as does a
+     * turn that ends without a terminal event (a crash). Cancelling the collection - its scope, a
+     * `take(n)`, a timeout - cancels the turn and returns once it has ended, leaving the thread for
+     * [streamRecover]. A collector too slow for the stream's buffer never holds the turn up: it loses
+     * live events (text deltas, tool progress) and receives one `StreamEvent.LiveGap` with their count
+     * where they were dropped; durable events are never dropped. Starting and cancelling the turn run
+     * on [Dispatchers.IO]; the events are handed over from the stream's own thread.
+     */
+    fun stream(threadId: String, query: String): Flow<AgentStreamItem> =
+        streaming { underlying.stream(threadId, query, it) }
+
+    /**
+     * Answers some of [threadId]'s pending approvals and questions and continues, as a [Flow]; see
+     * [stream]. Build each answer with the suspended result's `approve`, `reject`, `edit` or `reply`.
+     */
+    fun streamResume(threadId: String, answers: List<Tuple2<String, Value>>): Flow<AgentStreamItem> =
+        streaming { underlying.streamResume(threadId, answers, it) }
+
+    /** Continues [threadId]'s failed or cancelled turn, as a [Flow]; see [stream]. */
+    fun streamRecover(threadId: String): Flow<AgentStreamItem> =
+        streaming { underlying.streamRecover(threadId, it) }
+
+    /**
+     * Starts the turn with a listener that hands each event to the flow's channel - blocking the stream's
+     * own thread, never the turn, when the channel is full - and closes it with the turn's outcome. The
+     * start is not cancellable, so a turn is never started and forgotten; however the collection ends,
+     * the turn is cancelled and awaited (a no-op once it has ended).
+     */
+    private fun streaming(start: (AgentStreamListener) -> LlmResult<AgentStream>): Flow<AgentStreamItem> =
+        callbackFlow {
+            val listener = object : AgentStreamListener {
+                override fun onEvent(event: StreamEvent) {
+                    trySendBlocking(AgentStreamItem.Event(event))
+                }
+
+                override fun onComplete(result: AgentResult) {
+                    trySendBlocking(AgentStreamItem.Done(result))
+                    channel.close()
+                }
+
+                override fun onError(error: LlmException) {
+                    channel.close(error.toKotlin("Agent stream failed"))
+                }
+            }
+            val stream = withContext(NonCancellable + Dispatchers.IO) { start(listener) }.unwrap("Agent stream failed")
+            // however the collection ends - Done, an error, or cancelled - cancel the turn and wait for its end, off
+            // the caller's dispatcher (one line: awaitClose returns normally even when the collector is cancelled,
+            // closing the channel first, so a separate rethrow line would never count as covered)
+            try { awaitClose() } finally { withContext(NonCancellable + Dispatchers.IO) { stream.cancel() } }
+        }
 }

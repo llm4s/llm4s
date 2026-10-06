@@ -1,9 +1,17 @@
 package org.llm4s.samples;
 
+import java.util.UUID;
+
+import org.llm4s.agent.AgentResult;
+import org.llm4s.agent.events.AgentEvents;
+import org.llm4s.agent.graph.StreamEvent;
+import org.llm4s.javaapi.AgentStream;
 import org.llm4s.javaapi.ConversationBuilder;
+import org.llm4s.javaapi.JAgent;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.LlmResult;
+import org.llm4s.javaapi.StreamEvents;
 import org.llm4s.llmconnect.model.Conversation;
 
 /**
@@ -37,7 +45,8 @@ public final class HelloLLM4S {
         try (JLlmClient client = created.get()) {
             boolean first = oneQuestion(client);
             boolean second = aConversation(client);
-            return first && second ? 0 : 1;
+            boolean third = aStreamedAgentTurn(client);
+            return first && second && third ? 0 : 1;
         } catch (Exception e) {
             System.err.println("Closing the client failed: " + e.getMessage());
             return 1;
@@ -70,6 +79,39 @@ public final class HelloLLM4S {
             return false;
         }
         System.out.println(answer.get());
+        return true;
+    }
+
+    /**
+     * An agent turn as a stream: the listener (a lambda) receives each event of the turn as it happens, on the
+     * stream's own thread, and {@code await} returns the turn's result once the listener has seen the last one.
+     */
+    private static boolean aStreamedAgentTurn(JLlmClient client) {
+        System.out.println("== A streamed agent turn");
+        JAgent agent = Llm4s.createAgent(client);
+        String threadId = UUID.randomUUID().toString();
+
+        LlmResult<AgentStream> started = agent.stream(threadId, "Name three JVM languages, comma separated.", event -> {
+            StreamEvents.decode(AgentEvents.ModelCallCompleted(), event)
+                .ifPresent(call -> System.out.println("[model call: " + call.model() + "]"));
+            if (event instanceof StreamEvent.LiveGap) {
+                System.out.println("[" + ((StreamEvent.LiveGap) event).dropped() + " live events dropped]");
+            }
+        });
+        if (started.isFailure()) {
+            System.err.println("The turn was refused: " + started.getError().getMessage());
+            return false;
+        }
+
+        // stream.cancel() would cancel the turn instead
+        LlmResult<AgentResult> result = started.get().await();
+        if (result.isFailure()) {
+            System.err.println("The turn failed: " + result.getError().getMessage());
+            return false;
+        }
+        System.out.println(result.get().answer().isDefined() ? result.get().answer().get() : result.get().status());
+        // the conversation stays in the agent's runtime until forgotten
+        agent.forget(result.get());
         return true;
     }
 }

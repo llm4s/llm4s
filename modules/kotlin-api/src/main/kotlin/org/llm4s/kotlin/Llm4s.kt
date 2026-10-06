@@ -1,5 +1,6 @@
 package org.llm4s.kotlin
 
+import org.llm4s.agent.Agent
 import org.llm4s.javaapi.JAgent
 import org.llm4s.javaapi.JLlmClient
 import org.llm4s.javaapi.LlmResult
@@ -47,4 +48,11 @@ object Llm4s {
         val jAgent = factory.createAgent(client.underlying)
         return AgentKt(jAgent)
     }
+
+    /**
+     * Wraps an [Agent] built with `Agent.builder`, for what [createAgent] does not set: its middleware
+     * (guardrails, approvals), handoffs, runtime, or `withStreaming()` - without which a stream carries
+     * no text deltas.
+     */
+    fun wrapAgent(agent: Agent): AgentKt = AgentKt(JLlm4s.wrapAgent(agent))
 }

@@ -46,6 +46,41 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     )
   }
 
+  "a streamed agent turn" should "compile from Java, with a lambda listener, and run end to end" in {
+    val streaming = StreamFixtures.Scripted(
+      onChunk => {
+        onChunk(StreamedChunk(id = "c", content = Some("4")))
+        Right(Completion("id", 0L, "4", "m", AssistantMessage("4")))
+      },
+      () => Right(Completion("id", 0L, "4", "m", AssistantMessage("4")))
+    )
+    val log = JavaInteropCheck
+      .streaming(StreamFixtures.jAgentOf(streaming)(_.withStreaming()), new java.util.concurrent.CountDownLatch(0))
+      .asScala
+      .toList
+    log should contain("durable")
+    log should contain("delta:4")
+    log.takeRight(2) shouldBe List("answer:4", "refused:true")
+  }
+
+  it should "report a LiveGap to a Java listener" in {
+    // a gap is matched with instanceof; the flood outruns a listener that waits for the run to complete
+    val store = StreamFixtures.SignalsCompletion()
+    val flooding = StreamFixtures.Scripted(
+      onChunk => {
+        (0 until 3000).foreach(i => onChunk(StreamFixtures.chunk(i)))
+        Right(StreamFixtures.completion("4"))
+      },
+      () => Right(StreamFixtures.completion("4"))
+    )
+    val agent = StreamFixtures.jAgentOf(flooding)(
+      _.withRuntime(org.llm4s.agent.graph.GraphRuntime(store)).withStreaming()
+    )
+    val log = JavaInteropCheck.streaming(agent, store.completed).asScala.toList
+    log.exists(_.startsWith("gap:")) shouldBe true
+    log.takeRight(2) shouldBe List("answer:4", "refused:true")
+  }
+
   "the public Java-visible surface" should "not expose scala.* types outside the allowlisted internals" in {
     val classes = List(
       classOf[LlmResult[_]],
@@ -53,7 +88,10 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
       classOf[JAgent],
       Class.forName("org.llm4s.javaapi.Llm4s"),
       classOf[ConversationBuilder],
-      classOf[LlmException]
+      classOf[LlmException],
+      classOf[AgentStream],
+      classOf[AgentStreamListener],
+      Class.forName("org.llm4s.javaapi.StreamEvents")
     )
     val offenders = for {
       cls <- classes

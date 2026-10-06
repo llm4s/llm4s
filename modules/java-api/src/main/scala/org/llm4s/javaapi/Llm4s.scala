@@ -74,4 +74,14 @@ object Llm4s {
     Objects.requireNonNull(tools, "tools must not be null")
     new JAgent(Agent.builder("assistant", client.underlying).withTools(tools).build())
   }
+
+  /**
+   * Wraps an `Agent` built with `Agent.builder`, for what the factories above do not set: its
+   * middleware (guardrails, approvals), handoffs, runtime, or `withStreaming()` - without which a
+   * stream carries no text deltas.
+   */
+  def wrapAgent(agent: Agent): JAgent = {
+    Objects.requireNonNull(agent, "agent must not be null")
+    new JAgent(Right(agent))
+  }
 }
