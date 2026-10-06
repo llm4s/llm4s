@@ -17,7 +17,13 @@ object AudioInput {
   final case class StreamAudio(stream: InputStream, sampleRate: Int, numChannels: Int = 1) extends AudioInput
 }
 
-/** Basic audio metadata */
+/**
+ * Basic audio metadata.
+ *
+ * For [[AudioFormat.Mp3]] audio `bitDepth` is `0`, meaning "not applicable": MP3 is compressed, so it has no sample
+ * width, and a duration or frame count cannot be computed from `data.length` and these fields. `sampleRate` and
+ * `numChannels` are then the service's nominal values for the format it was asked for, not read from the stream.
+ */
 final case class AudioMeta(sampleRate: Int, numChannels: Int, bitDepth: Int)
 
 /**

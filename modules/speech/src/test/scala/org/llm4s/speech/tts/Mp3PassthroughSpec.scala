@@ -16,7 +16,7 @@ class Mp3PassthroughSpec extends AnyFlatSpec with Matchers {
 
   private val mp3Bytes = Array[Byte]('I', 'D', '3', 3, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4)
   private val mp3      = TTSOptions(outputFormat = AudioFormat.Mp3)
-  private val mp3Audio = GeneratedAudio(mp3Bytes, AudioMeta(24000, 1, 16), AudioFormat.Mp3)
+  private val mp3Audio = GeneratedAudio(mp3Bytes, AudioMeta(24000, 1, 0), AudioFormat.Mp3)
 
   private val openai = TTSConfig("openai", "tts-1", "alloy", "sk-test-key", "https://api.openai.com")
   private val eleven =
@@ -31,7 +31,7 @@ class Mp3PassthroughSpec extends AnyFlatSpec with Matchers {
     ujson.read(http.only.text)("response_format").str shouldBe "mp3"
     audio.data shouldBe mp3Bytes
     audio.format shouldBe AudioFormat.Mp3
-    audio.meta shouldBe OpenAITTSClient.Mp3Meta
+    audio.meta shouldBe AudioMeta(sampleRate = 24000, numChannels = 1, bitDepth = 0)
   }
 
   it should "keep requesting pcm by default" in {
@@ -47,7 +47,7 @@ class Mp3PassthroughSpec extends AnyFlatSpec with Matchers {
     http.only.url shouldBe "https://api.elevenlabs.io/v1/text-to-speech/voice123?output_format=mp3_44100_128"
     audio.data shouldBe mp3Bytes
     audio.format shouldBe AudioFormat.Mp3
-    audio.meta.sampleRate shouldBe 44100
+    audio.meta shouldBe AudioMeta(sampleRate = 44100, numChannels = 1, bitDepth = 0)
   }
 
   it should "keep requesting pcm_24000 by default" in {
@@ -63,7 +63,7 @@ class Mp3PassthroughSpec extends AnyFlatSpec with Matchers {
     http.only.headers("X-Microsoft-OutputFormat") shouldBe "audio-24khz-48kbitrate-mono-mp3"
     audio.data shouldBe mp3Bytes
     audio.format shouldBe AudioFormat.Mp3
-    audio.meta.sampleRate shouldBe 24000
+    audio.meta shouldBe AudioMeta(sampleRate = 24000, numChannels = 1, bitDepth = 0)
   }
 
   it should "keep requesting raw PCM by default" in {
@@ -84,6 +84,22 @@ class Mp3PassthroughSpec extends AnyFlatSpec with Matchers {
       AudioIO.saveWav(mp3Audio, dir.resolve("b.wav")).left.toOption.get shouldBe a[ValidationError]
       AudioIO.saveRawPcm16(mp3Audio, dir.resolve("c.pcm")).left.toOption.get shouldBe a[ValidationError]
       AudioPreprocessing.standardizeForSTT(mp3Audio, 16000).left.toOption.get shouldBe a[ValidationError]
+      Files.list(dir).count() shouldBe 0
+    } finally {
+      Files.list(dir).forEach(p => Files.deleteIfExists(p))
+      Files.deleteIfExists(dir)
+    }
+  }
+
+  "An MP3 AudioMeta" should "not claim a sample width, so PCM code that is handed it anyway refuses it" in {
+    Seq(OpenAITTSClient.Mp3Meta, ElevenLabsTTSClient.Mp3Meta, AzureTTSClient.Mp3Meta).foreach(_.bitDepth shouldBe 0)
+
+    // Bypass the format guard by relabelling the audio as PCM: the metadata alone must still be refused.
+    val dir = Files.createTempDirectory("llm4s-mp3-meta")
+    try {
+      val relabelled = mp3Audio.copy(format = AudioFormat.WavPcm16)
+      val error      = WavFileGenerator.saveAsWav(relabelled, dir.resolve("a.wav")).left.toOption.get
+      error.message should include("Bit depth")
       Files.list(dir).count() shouldBe 0
     } finally {
       Files.list(dir).forEach(p => Files.deleteIfExists(p))

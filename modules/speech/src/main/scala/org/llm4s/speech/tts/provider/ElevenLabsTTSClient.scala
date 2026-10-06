@@ -47,8 +47,12 @@ object ElevenLabsTTSClient {
   /** ElevenLabs' `pcm_24000` output: 24 kHz, 16-bit, mono. */
   val PcmMeta: AudioMeta = AudioMeta(sampleRate = 24000, numChannels = 1, bitDepth = 16)
 
-  /** ElevenLabs' `mp3_44100_128` output (opt-in): 44.1 kHz mono; the bytes are returned untouched. */
-  val Mp3Meta: AudioMeta = AudioMeta(sampleRate = 44100, numChannels = 1, bitDepth = 16)
+  /**
+   * ElevenLabs' `mp3_44100_128` output (opt-in); the bytes are returned untouched. The 44.1 kHz mono labels are
+   * nominal: the sample rate is the one in the format name, the channel count is assumed, and neither is verified
+   * against the service; `bitDepth = 0` because MP3 has no sample width.
+   */
+  val Mp3Meta: AudioMeta = AudioMeta(sampleRate = 44100, numChannels = 1, bitDepth = 0)
 
   private[tts] val OutputFormat    = "pcm_24000"
   private[tts] val Mp3OutputFormat = "mp3_44100_128"

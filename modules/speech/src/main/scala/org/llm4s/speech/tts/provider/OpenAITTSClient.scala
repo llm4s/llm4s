@@ -58,8 +58,12 @@ object OpenAITTSClient {
   /** OpenAI's raw PCM output: 24 kHz, 16-bit, mono. */
   val PcmMeta: AudioMeta = AudioMeta(sampleRate = 24000, numChannels = 1, bitDepth = 16)
 
-  /** OpenAI's `mp3` output (opt-in): 24 kHz mono; the bytes are returned untouched. */
-  val Mp3Meta: AudioMeta = AudioMeta(sampleRate = 24000, numChannels = 1, bitDepth = 16)
+  /**
+   * OpenAI's `mp3` output (opt-in); the bytes are returned untouched. The 24 kHz mono labels are nominal (OpenAI
+   * documents no sample rate for MP3, so they match its PCM output) and are not verified against the service;
+   * `bitDepth = 0` because MP3 has no sample width.
+   */
+  val Mp3Meta: AudioMeta = AudioMeta(sampleRate = 24000, numChannels = 1, bitDepth = 0)
 
   private[tts] val ResponseFormat    = "pcm"
   private[tts] val Mp3ResponseFormat = "mp3"
