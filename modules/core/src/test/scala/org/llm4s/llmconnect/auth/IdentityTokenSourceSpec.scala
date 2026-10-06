@@ -27,9 +27,11 @@ class IdentityTokenSourceSpec extends AnyWordSpec with Matchers with EitherValue
       source.fetch() shouldBe Right("second")
     }
     "fail with AuthenticationError for a missing file" in {
-      val error = IdentityTokenSource.file(Path.of("/no/such/svid")).fetch().left.value
+      val missing = Path.of("/no/such/svid")
+      val error   = IdentityTokenSource.file(missing).fetch().left.value
       error shouldBe an[AuthenticationError]
-      error.message should include("/no/such/svid")
+      // The message carries the platform's rendering of the path (`\no\such\svid` on Windows).
+      error.message should include(missing.toString)
     }
     "fail with AuthenticationError for an empty or whitespace-only file" in {
       IdentityTokenSource.file(tempFile("")).fetch().left.value shouldBe an[AuthenticationError]

@@ -40,7 +40,7 @@ class OpenAIWorkloadIdentitySpec
       val openai = config.asInstanceOf[OpenAIConfig]
       openai.apiKey shouldBe ""
       openai.workloadIdentity.value shouldBe OpenAIWorkloadIdentity(
-        IdentitySource.File(Path.of("/var/run/svid")),
+        IdentitySource.File(Path.of("/var/run/svid").toAbsolutePath),
         "idp_1",
         "sa_1",
         Some("c_1")
@@ -79,7 +79,8 @@ class OpenAIWorkloadIdentitySpec
     "fail a request, without touching the network, when the identity token file is missing" in {
       val missing = Files.createTempFile("svid", ".jwt")
       Files.delete(missing)
-      val body  = section.replace("/var/run/svid", missing.toString)
+      // Forward slashes: a Windows path's backslashes would be read as escapes inside the quoted HOCON string.
+      val body  = section.replace("/var/run/svid", missing.toString.replace('\\', '/'))
       val c     = assertBuildsClient(OpenAIProvider, sectionOf(body))
       val error = c.complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions()).left.value
       error.message should include("workload-identity")

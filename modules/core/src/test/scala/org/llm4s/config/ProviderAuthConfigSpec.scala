@@ -52,7 +52,7 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
     "parse the identity-token file and pass the other keys as auth extras, defaults applied" in {
       val config = load(section("""auth { identityTokenFile = "/var/run/svid", tokenUrl = "https://t" }""")).value
       config.apiKey shouldBe None
-      config.auth.value.identityToken shouldBe IdentitySource.File(Path.of("/var/run/svid"))
+      config.auth.value.identityToken shouldBe IdentitySource.File(Path.of("/var/run/svid").toAbsolutePath)
       config.auth.value.extras shouldBe Map("tokenUrl" -> "https://t", "scope" -> "all-apis")
     }
 
