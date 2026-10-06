@@ -217,6 +217,155 @@ class MemoryStoreSqlPlanSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     }
   }
 
+  // ===== deleteMatching reads no rows for an exact filter, and no embeddings unless a Custom can look at them =====
+
+  /** Rows in the main table and in the full-text index, counted on a separate connection. */
+  private def tableCounts(): (Long, Long) =
+    Using.resource(DriverManager.getConnection(s"jdbc:sqlite:$dbPath")) { c =>
+      def count(table: String): Long =
+        Using.resource(c.createStatement())(st =>
+          Using.resource(st.executeQuery(s"SELECT COUNT(*) FROM $table")) { rs =>
+            rs.next(); rs.getLong(1)
+          }
+        )
+      (count("memories"), count("memories_fts"))
+    }
+
+  /** The SELECTs that read whole rows (or embeddings) from the memories table. */
+  private def rowReads(recording: RecordingConnection): Seq[String] =
+    recording.prepared.filter(sql => sql.startsWith("SELECT") && sql.contains("FROM memories"))
+
+  private def withRecordingVector[A](f: (VectorMemoryStore, RecordingConnection) => A): A = {
+    val recording = new RecordingConnection(DriverManager.getConnection(s"jdbc:sqlite:$dbPath"))
+    val store = VectorMemoryStore
+      .open(dbPath, MockEmbeddingService(dimensions = 8), MemoryStoreConfig.default, _ => recording.proxy)
+      .fold(e => fail(e.message), identity)
+    Using.resource(new AutoCloseable { override def close(): Unit = store.close() })(_ => f(store, recording))
+  }
+
+  "SQLiteMemoryStore.deleteMatching" should "delete an exact filter's rows, and their index entries, in SQL alone" in
+    withRecording { (store, recording) =>
+      val rows = (1 to 6).map(i => memory(s"m$i", s"row $i", Some(if (i % 2 == 0) "even" else "odd")))
+      store.storeAll(rows.map(_.withEmbedding(Array.fill(8)(0.5f)))) shouldBe a[Right[_, _]]
+      recording.clear()
+
+      store.deleteMatching(MemoryFilter.ByEntity(EntityId("even"))) shouldBe a[Right[_, _]]
+
+      rowReads(recording) shouldBe empty
+      recording.prepared should contain("DELETE FROM memories WHERE COALESCE(entity_id = ?, 0)")
+      recording.calls.count(_ == "commit") shouldBe 1
+      tableCounts() shouldBe ((3L, 3L))
+      store.recall(MemoryFilter.All, 10).map(_.map(_.id.value).toSet) shouldBe Right(Set("m1", "m3", "m5"))
+      store.search("row", 10).map(_.map(_.memory.id.value).toSet) shouldBe Right(Set("m1", "m3", "m5"))
+    }
+
+  it should "clear both tables for All without reading a row" in withRecording { (store, recording) =>
+    store.storeAll((1 to 4).map(i => memory(s"m$i", s"row $i"))) shouldBe a[Right[_, _]]
+    recording.clear()
+
+    store.deleteMatching(MemoryFilter.All) shouldBe a[Right[_, _]]
+
+    rowReads(recording) shouldBe empty
+    tableCounts() shouldBe ((0L, 0L))
+  }
+
+  it should "leave the embedding column out when `matches` decides a filter that cannot read it" in
+    withRecording { (store, recording) =>
+      store.storeAll(Seq(memory("a", "alpha"), memory("b", "beta").copy(metadata = Map("" -> "x")))) shouldBe
+        a[Right[_, _]]
+      recording.clear()
+
+      // An empty metadata key has no exact JSON path, so `matches` decides it
+      store.deleteMatching(MemoryFilter.HasMetadata("")) shouldBe a[Right[_, _]]
+      store.count(MemoryFilter.HasMetadata("")) shouldBe Right(0L)
+
+      val reads = rowReads(recording)
+      reads should have size 2
+      reads.foreach(sql => withClue(sql)(sql should (include("NULL AS embedding_blob").and(not.include("SELECT *")))))
+      tableCounts() shouldBe ((1L, 1L))
+      store.recall(MemoryFilter.All, 10).map(_.map(_.id.value)) shouldBe Right(Seq("a"))
+    }
+
+  it should "give a Custom predicate the embedding, and delete exactly the rows it accepts" in
+    withRecording { (store, recording) =>
+      store.storeAll(
+        Seq(memory("with", "has a vector").withEmbedding(Array.fill(8)(0.1f)), memory("without", "no vector"))
+      ) shouldBe a[Right[_, _]]
+      recording.clear()
+
+      store.deleteMatching(MemoryFilter.Custom(_.embedding.exists(_.length == 8))) shouldBe a[Right[_, _]]
+
+      store.recall(MemoryFilter.All, 10).map(_.map(_.id.value)) shouldBe Right(Seq("without"))
+      tableCounts() shouldBe ((1L, 1L))
+      rowReads(recording).head should (include("embedding_blob").and(not.include("NULL AS")))
+    }
+
+  "VectorMemoryStore.deleteMatching" should "delete an exact filter's rows, and their index entries, in SQL alone" in
+    withRecordingVector { (vector, recording) =>
+      val rows = (1 to 6).map(i => memory(s"m$i", s"row $i", Some(if (i % 2 == 0) "even" else "odd")))
+      vector.storeAll(rows) shouldBe a[Right[_, _]]
+      recording.clear()
+
+      vector.deleteMatching(MemoryFilter.ByEntity(EntityId("even"))) shouldBe a[Right[_, _]]
+
+      rowReads(recording) shouldBe empty
+      recording.prepared.exists(
+        _.startsWith("DELETE FROM memories_fts WHERE id IN (SELECT id FROM memories WHERE")
+      ) shouldBe
+        true
+      recording.calls.count(_ == "commit") shouldBe 1
+      tableCounts() shouldBe ((3L, 3L))
+      vector.recall(MemoryFilter.All, 10).map(_.map(_.id.value).toSet) shouldBe Right(Set("m1", "m3", "m5"))
+    }
+
+  it should "clear both tables for All without reading a row" in withRecordingVector { (vector, recording) =>
+    vector.storeAll((1 to 4).map(i => memory(s"m$i", s"row $i"))) shouldBe a[Right[_, _]]
+    recording.clear()
+
+    vector.deleteMatching(MemoryFilter.All) shouldBe a[Right[_, _]]
+
+    rowReads(recording) shouldBe empty
+    tableCounts() shouldBe ((0L, 0L))
+  }
+
+  it should "leave the embedding column out when `matches` decides a filter that cannot read it" in
+    withRecordingVector { (vector, recording) =>
+      vector.storeAll(
+        Seq(
+          memory("a", "alpha").copy(metadata = Map("tag" -> "keep")),
+          memory("b", "beta").copy(metadata = Map("tag" -> "drop me"))
+        )
+      ) shouldBe a[Right[_, _]]
+      recording.clear()
+
+      // The file store has no exact SQL for MetadataContains, so `matches` decides it
+      vector.deleteMatching(MemoryFilter.MetadataContains("tag", "drop")) shouldBe a[Right[_, _]]
+      vector.count(MemoryFilter.MetadataContains("tag", "drop")) shouldBe Right(0L)
+
+      val reads = rowReads(recording)
+      reads should have size 2
+      reads.foreach(sql => withClue(sql)(sql should (include("NULL AS embedding").and(not.include("SELECT *")))))
+      tableCounts() shouldBe ((1L, 1L))
+      vector.recall(MemoryFilter.All, 10).map(_.map(_.id.value)) shouldBe Right(Seq("a"))
+    }
+
+  it should "give a Custom predicate the embedding, and delete exactly the rows it accepts" in
+    withRecordingVector { (vector, recording) =>
+      vector.storeAll(
+        Seq(
+          memory("eight", "x").withEmbedding(Array.fill(8)(0.1f)),
+          memory("four", "y").withEmbedding(Array.fill(4)(0.1f))
+        )
+      ) shouldBe a[Right[_, _]]
+      recording.clear()
+
+      vector.deleteMatching(MemoryFilter.Custom(_.embedding.exists(_.length == 4))) shouldBe a[Right[_, _]]
+
+      rowReads(recording).head should (include("embedding").and(not.include("NULL AS")))
+      tableCounts() shouldBe ((1L, 1L))
+      vector.recall(MemoryFilter.All, 10).map(_.map(_.id.value)) shouldBe Right(Seq("eight"))
+    }
+
   // ===== A store holding vectors of more than one dimension stays searchable =====
 
   private def withVector[A](service: EmbeddingService)(f: VectorMemoryStore => A): A = {

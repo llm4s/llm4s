@@ -250,24 +250,67 @@ final class VectorMemoryStore private (
 
   override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
     Try {
-      // Decide with the same rule as recall, then delete exactly those rows from both tables, all in one
-      // transaction: the whole delete happens or none of it, and the commit is paid once, not once per row.
-      val ids = queryMemories(filter, None).map(_.id.value)
+      val plan = narrowing(filter)
+      // One transaction: the whole delete happens or none of it, and the commit is paid once, not once per row.
       inTransaction {
-        Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { fts =>
-          Using.resource(connection.prepareStatement("DELETE FROM memories WHERE id = ?")) { main =>
-            ids.foreach { id =>
-              fts.setString(1, id)
-              fts.executeUpdate()
-              main.setString(1, id)
-              main.executeUpdate()
-            }
-          }
+        if (plan.exact) {
+          // SQL says exactly which rows go: delete them in SQL, from the full-text index and the table, without
+          // reading a single row (or decoding a single embedding) into memory.
+          bindAndUpdate(s"DELETE FROM memories_fts WHERE id IN (SELECT id FROM memories ${plan.where})", plan.params)
+          bindAndUpdate(s"DELETE FROM memories ${plan.where}", plan.params)
+        } else {
+          // `matches` decides: stream the narrowed rows (without the embedding unless the filter can read it),
+          // keep only the ids it accepts, then delete those.
+          val ids = Vector.newBuilder[String]
+          foreachMatching(filter, plan)(m => ids += m.id.value)
+          deleteIds(ids.result())
         }
       }
 
       this: MemoryStore
     }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to delete matching memories: ${e.getMessage}"))
+
+  private def bindAndUpdate(sql: String, params: Seq[Any]): Int =
+    Using.resource(connection.prepareStatement(sql)) { stmt =>
+      params.zipWithIndex.foreach { case (param, idx) =>
+        setParameter(stmt, idx + 1, param)
+      }
+      stmt.executeUpdate()
+    }
+
+  /** Delete `ids` from the full-text index and the table, as two batches. */
+  private def deleteIds(ids: Seq[String]): Unit =
+    if (ids.nonEmpty)
+      Seq("DELETE FROM memories_fts WHERE id = ?", "DELETE FROM memories WHERE id = ?").foreach { sql =>
+        Using.resource(connection.prepareStatement(sql)) { stmt =>
+          ids.foreach { id =>
+            stmt.setString(1, id)
+            stmt.addBatch()
+          }
+          stmt.executeBatch()
+        }
+      }
+
+  /**
+   * Call `f` on each memory `filter` accepts among the rows `plan` narrows to, one row at a time: nothing is
+   * materialised. The embedding is read and decoded only if the filter can look at it (a `Custom` predicate).
+   */
+  private def foreachMatching(filter: MemoryFilter, plan: FilterSupport.Narrowing)(f: Memory => Unit): Unit = {
+    val embedding = if (FilterSupport.readsEmbedding(filter)) "embedding" else "NULL AS embedding"
+    val sql =
+      s"SELECT id, content, memory_type, metadata, timestamp, importance, $embedding FROM memories ${plan.where}"
+    Using.resource(connection.prepareStatement(sql)) { stmt =>
+      plan.params.zipWithIndex.foreach { case (param, idx) =>
+        setParameter(stmt, idx + 1, param)
+      }
+      Using.resource(stmt.executeQuery()) { rs =>
+        while (rs.next()) {
+          val memory = rowToMemory(rs)
+          if (filter.matches(memory)) f(memory)
+        }
+      }
+    }
+  }
 
   /**
    * Run `body` as one transaction: commit if it returns, roll back if it throws, and always restore autocommit,
@@ -304,8 +347,11 @@ final class VectorMemoryStore private (
   override def count(filter: MemoryFilter): Result[Long] =
     Try {
       val plan = narrowing(filter)
-      if (plan.needsMatches) queryMemories(filter, None).size.toLong
-      else {
+      if (plan.needsMatches) {
+        var n = 0L
+        foreachMatching(filter, plan)(_ => n += 1)
+        n
+      } else {
         val sql = s"SELECT COUNT(*) FROM memories ${plan.where}"
         Using.resource(connection.prepareStatement(sql)) { stmt =>
           plan.params.zipWithIndex.foreach { case (param, idx) =>
@@ -536,9 +582,18 @@ object VectorMemoryStore {
     embeddingService: EmbeddingService,
     config: MemoryStoreConfig = MemoryStoreConfig.default
   ): Result[VectorMemoryStore] =
+    open(dbPath, embeddingService, config, path => DriverManager.getConnection(s"jdbc:sqlite:$path"))
+
+  /** Open the store on a connection from `connect`; the seam lets a test record the SQL the store sends. */
+  private[memory] def open(
+    dbPath: String,
+    embeddingService: EmbeddingService,
+    config: MemoryStoreConfig,
+    connect: String => Connection
+  ): Result[VectorMemoryStore] =
     Try {
       Class.forName("org.sqlite.JDBC")
-      val connection = DriverManager.getConnection(s"jdbc:sqlite:$dbPath")
+      val connection = connect(dbPath)
       // If schema setup fails (e.g. the file is not a database) the connection must not leak:
       // an open handle keeps the file locked, which blocks deletion on Windows.
       Try {

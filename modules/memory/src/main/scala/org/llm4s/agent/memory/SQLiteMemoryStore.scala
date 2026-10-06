@@ -181,70 +181,70 @@ final class SQLiteMemoryStore private (
       this
     }.toEither.left.map(e => ProcessingError("sqlite-delete", s"Failed to delete memory: ${e.getMessage}"))
 
-  override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] = {
-    val plan = narrowing(filter)
-    if (plan.needsMatches || plan.where.isEmpty) {
-      // SQL cannot say which rows match (or no row is excluded): read the rows `matches` accepts, then delete them
-      deleteMatchingRowByRow(filter)
-    } else {
-      deleteMatchingBulk(plan.where, plan.params)
-    }
-  }
-
-  /** Delete the memories `recall` returns, all in one transaction: the whole delete happens or none of it. */
-  private def deleteMatchingRowByRow(filter: MemoryFilter): Result[MemoryStore] =
-    recall(filter, Int.MaxValue).flatMap { memories =>
-      Try {
-        inTransaction {
-          Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { fts =>
-            Using.resource(connection.prepareStatement("DELETE FROM memories WHERE id = ?")) { main =>
-              memories.foreach { memory =>
-                fts.setString(1, memory.id.value)
-                fts.executeUpdate()
-                main.setString(1, memory.id.value)
-                main.executeUpdate()
-              }
-            }
-          }
-        }
-        this: MemoryStore
-      }.toEither.left.map(e =>
-        ProcessingError("sqlite-delete-matching", s"Failed to delete matching memories: ${e.getMessage}")
-      )
-    }
-
-  /** Bulk delete with transaction: stream IDs, delete FTS entries row-by-row, bulk delete main table. */
-  private def deleteMatchingBulk(whereClause: String, params: Seq[Any]): Result[MemoryStore] =
+  override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
     Try {
+      val plan = narrowing(filter)
+      // One transaction: the whole delete happens or none of it, and the commit is paid once, not once per row.
       inTransaction {
-        // 1. Select IDs and delete FTS entries row-by-row (streaming, avoids materializing all IDs)
-        Using.resource(connection.prepareStatement(s"SELECT id FROM memories $whereClause")) { selectStmt =>
-          params.zipWithIndex.foreach { case (param, idx) =>
-            setParameter(selectStmt, idx + 1, param)
-          }
-          Using.resource(selectStmt.executeQuery()) { rs =>
-            Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { deleteStmt =>
-              while (rs.next()) {
-                val id = rs.getString("id")
-                deleteStmt.setString(1, id)
-                deleteStmt.executeUpdate()
-              }
-            }
-          }
-        }
-
-        // 2. Bulk delete from main table
-        Using.resource(connection.prepareStatement(s"DELETE FROM memories $whereClause")) { stmt =>
-          params.zipWithIndex.foreach { case (param, idx) =>
-            setParameter(stmt, idx + 1, param)
-          }
-          stmt.executeUpdate()
+        if (plan.exact) {
+          // SQL says exactly which rows go: delete them in SQL, from the full-text index and the table, without
+          // reading a single row into memory.
+          bindAndUpdate(s"DELETE FROM memories_fts WHERE id IN (SELECT id FROM memories ${plan.where})", plan.params)
+          bindAndUpdate(s"DELETE FROM memories ${plan.where}", plan.params)
+        } else {
+          // `matches` decides: stream the narrowed rows (without the embedding unless the filter can read it),
+          // keep only the ids it accepts, then delete those.
+          val ids = Vector.newBuilder[String]
+          foreachMatching(filter, plan)(m => ids += m.id.value)
+          deleteIds(ids.result())
         }
       }
       this: MemoryStore
     }.toEither.left.map(e =>
       ProcessingError("sqlite-delete-matching", s"Failed to delete matching memories: ${e.getMessage}")
     )
+
+  private def bindAndUpdate(sql: String, params: Seq[Any]): Int =
+    Using.resource(connection.prepareStatement(sql)) { stmt =>
+      params.zipWithIndex.foreach { case (param, idx) =>
+        setParameter(stmt, idx + 1, param)
+      }
+      stmt.executeUpdate()
+    }
+
+  /** Delete `ids` from the full-text index and the table, as two batches. */
+  private def deleteIds(ids: Seq[String]): Unit =
+    if (ids.nonEmpty)
+      Seq("DELETE FROM memories_fts WHERE id = ?", "DELETE FROM memories WHERE id = ?").foreach { sql =>
+        Using.resource(connection.prepareStatement(sql)) { stmt =>
+          ids.foreach { id =>
+            stmt.setString(1, id)
+            stmt.addBatch()
+          }
+          stmt.executeBatch()
+        }
+      }
+
+  /**
+   * Call `f` on each memory `filter` accepts among the rows `plan` narrows to, one row at a time: nothing is
+   * materialised. The embedding is read and decoded only if the filter can look at it (a `Custom` predicate).
+   */
+  private def foreachMatching(filter: MemoryFilter, plan: FilterSupport.Narrowing)(f: Memory => Unit): Unit = {
+    val embedding = if (FilterSupport.readsEmbedding(filter)) "embedding_blob" else "NULL AS embedding_blob"
+    val sql =
+      s"SELECT id, content, memory_type, timestamp, importance, metadata_json, $embedding FROM memories ${plan.where}"
+    Using.resource(connection.prepareStatement(sql)) { stmt =>
+      plan.params.zipWithIndex.foreach { case (param, idx) =>
+        setParameter(stmt, idx + 1, param)
+      }
+      Using.resource(stmt.executeQuery()) { rs =>
+        while (rs.next()) {
+          val memory = rowToMemory(rs)
+          if (filter.matches(memory)) f(memory)
+        }
+      }
+    }
+  }
 
   /**
    * Run `body` as one transaction: commit if it returns, roll back if it throws, and always restore autocommit,
@@ -278,14 +278,9 @@ final class SQLiteMemoryStore private (
       val plan = narrowing(filter)
       if (plan.needsMatches) {
         // SQL cannot say which rows match exactly: count the rows `matches` accepts among those read.
-        Using.resource(connection.prepareStatement(s"SELECT * FROM memories ${plan.where}")) { stmt =>
-          plan.params.zipWithIndex.foreach { case (param, idx) =>
-            setParameter(stmt, idx + 1, param)
-          }
-          Using.resource(stmt.executeQuery()) { rs =>
-            Iterator.continually(rs).takeWhile(_.next()).map(rowToMemory).count(filter.matches).toLong
-          }
-        }
+        var n = 0L
+        foreachMatching(filter, plan)(_ => n += 1)
+        n
       } else {
         val sql = s"SELECT COUNT(*) FROM memories ${plan.where}"
         Using.resource(connection.prepareStatement(sql)) { stmt =>

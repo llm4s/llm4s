@@ -86,6 +86,20 @@ private[memory] object FilterSupport {
       }
   }
 
+  /**
+   * True if deciding `filter` with `matches` may look at a memory's embedding. Only a `Custom` predicate can (it is
+   * code that sees the whole [[Memory]]); every other filter reads content, type, metadata, time or importance. A
+   * store that reads rows only to run `matches` on them leaves the embedding column out when this is false, so it
+   * neither reads nor decodes a vector per row.
+   */
+  def readsEmbedding(filter: MemoryFilter): Boolean = filter match {
+    case _: MemoryFilter.Custom        => true
+    case MemoryFilter.And(left, right) => readsEmbedding(left) || readsEmbedding(right)
+    case MemoryFilter.Or(left, right)  => readsEmbedding(left) || readsEmbedding(right)
+    case MemoryFilter.Not(inner)       => readsEmbedding(inner)
+    case _                             => false
+  }
+
   /** The SQL for a condition that holds for every row, for a leaf that restricts nothing (an unbounded time range). */
   val unrestricted: Sql = Everything
 
