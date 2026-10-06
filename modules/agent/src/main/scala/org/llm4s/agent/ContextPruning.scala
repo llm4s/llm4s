@@ -79,12 +79,24 @@ private[agent] object ContextPruning {
   }
 
   /**
-   * Default token counter (rough estimate: words * 1.3).
+   * Default token counter (rough estimate: words * 1.3), over everything a provider is sent for
+   * the message: an assistant message's tool calls and thinking count as well as its content, since
+   * a short answer can carry long arguments or thousands of reasoning tokens.
    * For more accurate counting, integrate with the org.llm4s.context.tokens module.
    */
   private[agent] def defaultTokenCounter(message: Message): Int = {
-    val words = message.content.split("\\s+").length
-    (words * 1.3).toInt
+    def words(text: String): Int = text.split("\\s+").length
+    message match {
+      case a: AssistantMessage =>
+        val textWords = words(a.content) +
+          a.toolCalls.map(c => words(c.name) + words(c.arguments.render())).sum +
+          a.thinking.collect { case ThinkingBlock.Text(text, _) if text.nonEmpty => words(text) }.sum
+        val opaque = a.thinking.collect { case ThinkingBlock.Redacted(data) =>
+          org.llm4s.context.ConversationTokenCounter.estimateOpaqueTokens(data)
+        }.sum
+        (textWords * 1.3).toInt + opaque
+      case other => (words(other.content) * 1.3).toInt
+    }
   }
 
   private def pruneOldestFirst(

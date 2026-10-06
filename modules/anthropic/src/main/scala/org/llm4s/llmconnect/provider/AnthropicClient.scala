@@ -10,6 +10,7 @@ import com.anthropic.models.messages.{
   MessageParam,
   RawMessageStreamEvent,
   RedactedThinkingBlockParam,
+  TextBlockParam,
   ThinkingBlockParam,
   ThinkingConfigEnabled,
   Tool,
@@ -450,60 +451,63 @@ curl https://api.anthropic.com/v1/messages \
     // Track if we've seen a system message
     var hasSystemMessage = false
 
-    // a tool_use goes out only with its tool_result, and a tool_result only after its tool_use:
-    // Anthropic rejects either without the other
-    val answered = conversation.messages.collect { case tm: ToolMessage => tm.toolCallId }.toSet
-    val sentCalls = conversation.messages
-      .collect { case am: AssistantMessage => am.toolCalls.map(_.id) }
-      .flatten
-      .filter(answered)
-      .toSet
+    // a tool_use goes out only with its tool_result, in the user turn straight after it, and a
+    // tool_result only right after its tool_use: Anthropic rejects either without the other, and a
+    // result that a user message or a later turn separates from its call
+    val pairing = ToolResultPairing.of(conversation.messages)
 
-    // consecutive tool results share one user turn
+    // a run of tool messages becomes one user turn: the paired results first, as Anthropic requires,
+    // then any unpaired ones as text
     val pendingResults = mutable.ListBuffer.empty[ContentBlockParam]
+    val pendingTexts   = mutable.ListBuffer.empty[ContentBlockParam]
     def flushResults(): Unit =
-      if (pendingResults.nonEmpty) {
+      if (pendingResults.nonEmpty || pendingTexts.nonEmpty) {
+        val blocks = (pendingResults ++ pendingTexts).toList
         paramsBuilder.addMessage(
-          MessageParam.builder().role(MessageParam.Role.USER).contentOfBlockParams(pendingResults.toList.asJava).build()
+          MessageParam.builder().role(MessageParam.Role.USER).contentOfBlockParams(blocks.asJava).build()
         )
         pendingResults.clear()
+        pendingTexts.clear()
       }
 
     // Process messages in order
-    conversation.messages.foreach {
-      case SystemMessage(content) =>
+    conversation.messages.zipWithIndex.foreach {
+      case (SystemMessage(content), _) =>
         paramsBuilder.system(appendJsonInstruction(content, options))
         hasSystemMessage = true
 
-      case UserMessage(content) =>
+      case (UserMessage(content), _) =>
         flushResults()
         paramsBuilder.addUserMessage(content)
 
-      case am: AssistantMessage =>
+      case (am: AssistantMessage, index) =>
         flushResults()
-        val thinking = AnthropicClient.thinkingBlockParams(am.thinking)
-        val calls    = am.toolCalls.filter(tc => sentCalls.contains(tc.id))
-        if (thinking.isEmpty && calls.isEmpty) {
+        val calls = am.toolCalls.filter(tc => pairing.callPaired(index, tc.id))
+        val text  = am.contentOpt.filter(_.nonEmpty)
+        if (calls.isEmpty && text.isEmpty) {
+          // nothing to send: every tool call went unanswered, and thinking cannot stand alone
+        } else if (am.thinking.isEmpty && calls.isEmpty) {
           // a plain text turn; one whose every tool call went unanswered keeps only its text
-          if (am.toolCalls.isEmpty) paramsBuilder.addAssistantMessage(am.content)
-          else am.contentOpt.filter(_.nonEmpty).foreach(text => paramsBuilder.addAssistantMessage(text))
+          text.foreach(t => paramsBuilder.addAssistantMessage(t))
         } else {
-          val text   = am.contentOpt.filter(_.nonEmpty).map(t => ContentBlockParam.ofText(t)).toList
-          val blocks = thinking ++ text ++ calls.map(AnthropicClient.toolUseBlockParam)
+          val blocks = AnthropicClient.thinkingBlockParams(am.thinking) ++
+            text.map(t => ContentBlockParam.ofText(TextBlockParam.builder().text(t).build())).toList ++
+            calls.map(AnthropicClient.toolUseBlockParam)
           paramsBuilder.addMessage(
             MessageParam.builder().role(MessageParam.Role.ASSISTANT).contentOfBlockParams(blocks.asJava).build()
           )
         }
 
-      case ToolMessage(content, toolCallId) if sentCalls.contains(toolCallId) =>
+      case (ToolMessage(content, toolCallId), index) if pairing.resultPaired(index) =>
         pendingResults += ContentBlockParam.ofToolResult(
           ToolResultBlockParam.builder().toolUseId(toolCallId).content(content).build()
         )
 
-      case ToolMessage(content, toolCallId) =>
-        // its tool call is not in the conversation, so there is no tool_use to answer
-        flushResults()
-        paramsBuilder.addUserMessage(s"[Tool result for $toolCallId]: $content")
+      case (ToolMessage(content, toolCallId), _) =>
+        // no tool_use it can answer here (pruned, or not straight before it), so it goes as text
+        pendingTexts += ContentBlockParam.ofText(
+          TextBlockParam.builder().text(s"[Tool result for $toolCallId]: $content").build()
+        )
     }
     flushResults()
 

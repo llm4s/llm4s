@@ -317,6 +317,17 @@ object SystemMessage {
  *
  * Construct one with the companion `apply` and change it with the `with*` setters.
  *
+ * '''Sealed thinking.''' A signed [[ThinkingBlock.Text]] or a [[ThinkingBlock.Redacted]] block is
+ * valid only beside the exact content and tool calls the provider returned it with: Anthropic and
+ * Bedrock require such a turn to be sent back unchanged and reject it otherwise. So
+ * `withContent` and `withToolCalls`, given a value different from the current one, '''unseal''' the
+ * thinking: they drop redacted blocks and the signatures of text blocks, keeping the reasoning
+ * text, which those providers then leave out of the request and the others still receive.
+ * Every rewrite of a stored message - context compression, an `afterAgent` answer replacement,
+ * a tool-call edit - goes through these setters, so none can send a signed turn modified. To
+ * keep signed thinking, leave the message as it is; to replace it deliberately, use
+ * `withThinking`.
+ *
  * @param contentOpt Text portion of the response; `None` when the model produced
  *                   only tool calls.
  * @param toolCalls  Tool invocations requested by the model; each carries an `id`
@@ -336,9 +347,18 @@ final case class AssistantMessage private (
 
   def content: String = contentOpt.getOrElse("")
 
-  def withContent(content: String): AssistantMessage               = copy(contentOpt = Some(content))
-  def withContent(content: Option[String]): AssistantMessage       = copy(contentOpt = content)
-  def withToolCalls(toolCalls: Seq[ToolCall]): AssistantMessage    = copy(toolCalls = toolCalls)
+  /** Sets the content; a changed content unseals the thinking (see "Sealed thinking" above). */
+  def withContent(content: String): AssistantMessage = withContent(Some(content))
+
+  /** Sets the content; a changed content unseals the thinking (see "Sealed thinking" above). */
+  def withContent(content: Option[String]): AssistantMessage =
+    if (content == contentOpt) this else copy(contentOpt = content, thinking = unsealedThinking)
+
+  /** Sets the tool calls; changed tool calls unseal the thinking (see "Sealed thinking" above). */
+  def withToolCalls(toolCalls: Seq[ToolCall]): AssistantMessage =
+    if (toolCalls == this.toolCalls) this else copy(toolCalls = toolCalls, thinking = unsealedThinking)
+
+  /** Replaces the thinking, sealed or not, as given. */
   def withThinking(thinking: Seq[ThinkingBlock]): AssistantMessage = copy(thinking = thinking)
 
   /** Sets the thinking to `text` as one unsigned [[ThinkingBlock.Text]], or to none when it is empty. */
@@ -350,6 +370,17 @@ final case class AssistantMessage private (
 
   /** Whether the message carries any thinking, text or redacted. */
   def hasThinking: Boolean = thinking.nonEmpty
+
+  /**
+   * Whether the thinking is sealed: it holds a signed text block or a redacted block, valid only with
+   * this exact content and these tool calls (see "Sealed thinking" above).
+   */
+  def hasSealedThinking: Boolean = thinking.exists(ThinkingBlock.isSealed)
+
+  // the thinking with redacted blocks and signatures dropped, keeping the reasoning text
+  private def unsealedThinking: Seq[ThinkingBlock] =
+    if (!hasSealedThinking) thinking
+    else thinking.collect { case ThinkingBlock.Text(text, _) if text.nonEmpty => ThinkingBlock.Text(text) }
 
   override def toString: String = {
     val toolCallsStr = if (toolCalls.nonEmpty) {

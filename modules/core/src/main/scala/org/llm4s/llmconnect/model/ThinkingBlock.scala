@@ -44,6 +44,15 @@ object ThinkingBlock:
     Option.when(joined.nonEmpty)(joined)
   }
 
+  /**
+   * Whether `block` is sealed - signed text or redacted data - and so valid only beside the exact
+   * message content and tool calls it came with (see [[AssistantMessage]]).
+   */
+  def isSealed(block: ThinkingBlock): Boolean = block match {
+    case Text(_, signature) => signature.exists(_.nonEmpty)
+    case Redacted(_)        => true
+  }
+
   implicit val rw: RW[ThinkingBlock] = readwriter[ujson.Value].bimap[ThinkingBlock](
     {
       case Text(text, signature) =>

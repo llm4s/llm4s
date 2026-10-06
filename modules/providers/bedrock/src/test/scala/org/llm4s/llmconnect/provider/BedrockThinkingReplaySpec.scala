@@ -108,6 +108,55 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
     }
   }
 
+  /** The request body Converse receives for `messages`. */
+  private def sentMessages(messages: Message*): Seq[ujson.Value] = {
+    val seen = new ConcurrentLinkedQueue[ujson.Value]()
+    withServer("/") { ex =>
+      seen.add(ujson.read(new String(ex.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)))
+      sendJsonResponse(ex, 200, converseResponse("ok"))
+    } { url =>
+      val client = new BedrockClient(config(url))
+      client.complete(Conversation(messages), CompletionOptions()).isRight shouldBe true
+      client.close()
+    }
+    seen.peek()("messages").arr.toSeq
+  }
+
+  private def weather = ToolCall("tc-1", "get_weather", ujson.Obj("city" -> "Paris"))
+
+  "tool results" should {
+    "not pair with a call that a user message separates them from: the call is left out, the result sent as text" in {
+      val messages = sentMessages(
+        UserMessage("Weather?"),
+        AssistantMessage(Some("Checking."), Seq(weather)),
+        UserMessage("Still there?"),
+        ToolMessage("sunny", "tc-1")
+      )
+      val rendered = messages.map(_.render()).mkString
+      (rendered should not).include("toolUse")
+      (rendered should not).include("toolResult")
+      messages.map(_("role").str) shouldBe Seq("user", "assistant", "user")
+      messages(2)("content").arr.map(_("text").str) shouldBe Seq("Still there?", "[Tool result for tc-1]: sunny")
+    }
+
+    "come first in their user turn, before an unpaired result's text" in {
+      val time = ToolCall("tc-2", "get_time", ujson.Obj())
+      val messages = sentMessages(
+        UserMessage("Weather, then time?"),
+        AssistantMessage(None, Seq(weather)),
+        ToolMessage("sunny", "tc-1"),
+        AssistantMessage(None, Seq(time)),
+        ToolMessage("late duplicate", "tc-1"),
+        ToolMessage("noon", "tc-2")
+      )
+      messages.map(_("role").str) shouldBe Seq("user", "assistant", "user", "assistant", "user")
+      val last = messages(4)("content").arr
+      last.map(_.obj.keySet.head) shouldBe Seq("toolResult", "text")
+      last(0)("toolResult")("toolUseId").str shouldBe "tc-2"
+      last(1)("text").str shouldBe "[Tool result for tc-1]: late duplicate"
+    }
+  }
+
   "a ConverseStream response" should {
     "assemble each reasoning block with its signature on the message" in {
       def delta(index: Int, inner: ujson.Obj) =

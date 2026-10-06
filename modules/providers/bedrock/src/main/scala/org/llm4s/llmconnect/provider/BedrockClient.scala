@@ -393,24 +393,36 @@ class BedrockClient(
    * Converse needs user and assistant turns to alternate. llm4s keeps one message per tool result,
    * so an assistant turn with parallel tool calls is followed by several user messages (and an
    * empty assistant message is dropped between two user ones); each run of same-role messages
-   * becomes one turn carrying all their content blocks, in order.
+   * becomes one turn carrying all their content blocks, in order - except that a user turn's tool
+   * results come first, since Converse rejects a tool result after text in the same turn.
    */
   private def mergeAdjacentRoles(messages: Seq[BedrockMessage]): Seq[BedrockMessage] =
     messages.foldLeft(Vector.empty[BedrockMessage]) { (acc, next) =>
       acc.lastOption match {
         case Some(prev) if prev.role() == next.role() =>
-          val blocks = prev.content().asScala ++ next.content().asScala
-          acc.init :+ BedrockMessage.builder().role(prev.role()).content(blocks.asJava).build()
+          val blocks = prev.content().asScala.toSeq ++ next.content().asScala
+          val ordered =
+            if (prev.role() == ConversationRole.USER) {
+              val (results, rest) = blocks.partition(_.toolResult() != null)
+              results ++ rest
+            } else blocks
+          acc.init :+ BedrockMessage.builder().role(prev.role()).content(ordered.asJava).build()
         case _ => acc :+ next
       }
     }
 
-  private def convertMessages(messages: Seq[Message]): Seq[BedrockMessage] =
-    messages.flatMap {
-      case UserMessage(content) =>
+  /**
+   * A tool call goes out only if its result is in the run of tool messages straight after it, and
+   * that result as a native tool result; Converse rejects a call without its result and a result not
+   * right after its call. Any other tool result goes as user text (see [[ToolResultPairing]]).
+   */
+  private def convertMessages(messages: Seq[Message]): Seq[BedrockMessage] = {
+    val pairing = ToolResultPairing.of(messages)
+    messages.zipWithIndex.flatMap {
+      case (UserMessage(content), _) =>
         Some(BedrockMessage.builder().role(ConversationRole.USER).content(ContentBlock.fromText(content)).build())
 
-      case msg: AssistantMessage =>
+      case (msg: AssistantMessage, index) =>
         // signed and redacted reasoning goes back first, unchanged; unsigned reasoning (from
         // another provider) is left out, since Bedrock's Claude models reject it unsigned
         val reasoningBlocks = msg.thinking.collect {
@@ -427,7 +439,7 @@ class BedrockClient(
             )
         }
         val textBlocks = msg.contentOpt.filter(_.nonEmpty).map(ContentBlock.fromText).toSeq
-        val toolBlocks = msg.toolCalls.map { tc =>
+        val toolBlocks = msg.toolCalls.filter(tc => pairing.callPaired(index, tc.id)).map { tc =>
           ContentBlock.fromToolUse(
             ToolUseBlock.builder().toolUseId(tc.id).name(tc.name).input(ujsonToDocument(tc.arguments)).build()
           )
@@ -437,7 +449,11 @@ class BedrockClient(
           BedrockMessage.builder().role(ConversationRole.ASSISTANT).content(blocks.asJava).build()
         )
 
-      case msg: ToolMessage =>
+      case (msg: ToolMessage, index) if !pairing.resultPaired(index) =>
+        val text = s"[Tool result for ${msg.toolCallId}]: ${msg.content}"
+        Some(BedrockMessage.builder().role(ConversationRole.USER).content(ContentBlock.fromText(text)).build())
+
+      case (msg: ToolMessage, _) =>
         val resultBlock = ToolResultBlock
           .builder()
           .toolUseId(msg.toolCallId)
@@ -447,8 +463,9 @@ class BedrockClient(
           BedrockMessage.builder().role(ConversationRole.USER).content(ContentBlock.fromToolResult(resultBlock)).build()
         )
 
-      case _: SystemMessage => None
+      case (_: SystemMessage, _) => None
     }
+  }
 
   private def convertTool(toolFunction: ToolFunction[?, ?]): Tool = {
     val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[?]]

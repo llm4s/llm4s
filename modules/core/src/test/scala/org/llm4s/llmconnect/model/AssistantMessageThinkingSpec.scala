@@ -18,6 +18,12 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
     )
   )
 
+  // signed with the redacted block dropped and the signature stripped
+  private val unsealed = Seq(
+    ThinkingBlock.Text("The user wants the weather."),
+    ThinkingBlock.Text("Call the tool.")
+  )
+
   "AssistantMessage thinking" should "round-trip through the AssistantMessage codec, blocks and signatures intact" in {
     read[AssistantMessage](write(signed)) shouldBe signed
   }
@@ -48,9 +54,49 @@ class AssistantMessageThinkingSpec extends AnyFlatSpec with Matchers {
     AssistantMessage("Hi").withThinking("hmm").withThinking("").thinking shouldBe Seq.empty
   }
 
-  it should "be kept by withContent and withToolCalls" in {
-    signed.withContent("Changed").thinking shouldBe signed.thinking
-    signed.withToolCalls(Seq.empty).thinking shouldBe signed.thinking
+  it should "be sealed when it holds a signed or redacted block" in {
+    signed.hasSealedThinking shouldBe true
+    AssistantMessage(thinking = Seq(ThinkingBlock.Redacted("x"))).hasSealedThinking shouldBe true
+    AssistantMessage("Hi").withThinking("plain").hasSealedThinking shouldBe false
+    AssistantMessage("Hi").withThinking(Seq(ThinkingBlock.Text("t", Some("")))).hasSealedThinking shouldBe false
+  }
+
+  it should "be unsealed by a changed content: redacted blocks and signatures dropped, the text kept" in {
+    val changed = signed.withContent("Changed")
+    changed.content shouldBe "Changed"
+    changed.toolCalls shouldBe signed.toolCalls
+    changed.thinking shouldBe unsealed
+    changed.hasSealedThinking shouldBe false
+    changed.thinkingText shouldBe signed.thinkingText
+    signed.withContent(None: Option[String]).thinking shouldBe unsealed
+  }
+
+  it should "be unsealed by changed tool calls" in {
+    val edited = signed.withToolCalls(Seq(call.copy(arguments = ujson.Obj("city" -> "Lyon"))))
+    edited.thinking shouldBe unsealed
+    signed.withToolCalls(Seq.empty).thinking shouldBe unsealed
+  }
+
+  it should "stay sealed when a setter is given the current value" in {
+    signed.withContent("Checking.") shouldBe signed
+    signed.withContent(Some("Checking.")) shouldBe signed
+    signed.withToolCalls(Seq(call)) shouldBe signed
+  }
+
+  it should "drop a signed block with no text when unsealed, rather than leave an empty block" in {
+    val omitted = AssistantMessage("Hi").withThinking(Seq(ThinkingBlock.Text("", Some("sig"))))
+    omitted.withContent("Bye").thinking shouldBe Seq.empty
+    omitted.withContent("Bye").validate.isRight shouldBe true
+  }
+
+  it should "keep unsigned thinking through any change" in {
+    val plain = AssistantMessage("Hi", Seq(call)).withThinking("reasoning")
+    plain.withContent("Changed").thinking shouldBe Seq(ThinkingBlock.Text("reasoning"))
+    plain.withToolCalls(Seq.empty).thinking shouldBe Seq(ThinkingBlock.Text("reasoning"))
+  }
+
+  it should "be replaced as given by withThinking, sealed or not" in {
+    AssistantMessage("Hi").withThinking(signed.thinking).thinking shouldBe signed.thinking
   }
 
   it should "be what Completion.thinking reports" in {

@@ -187,4 +187,48 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
     messages.map(_("role").str) shouldBe Seq("user", "assistant", "user", "user")
     messages(2)("content").arr.map(_("tool_use_id").str) shouldBe Seq("toolu_1", "toolu_2")
   }
+
+  // the conversation validator accepts a user message between a call and its result; Anthropic
+  // does not accept a tool_result that is not straight after its tool_use, nor one after text
+  it should "omit a tool_use whose result a user message separates from it, and send that result as text" in {
+    val body = requestBody(
+      UserMessage("Weather in Paris?"),
+      AssistantMessage(Some("Checking."), Seq(call)),
+      UserMessage("Still there?"),
+      ToolMessage("sunny", call.id)
+    )
+    (body.render() should not).include("tool_use")
+    (body.render() should not).include("tool_result")
+    val messages = body("messages").arr
+    messages.map(_("role").str) shouldBe Seq("user", "assistant", "user", "user")
+    messages(3)("content")(0)("text").str shouldBe "[Tool result for toolu_1]: sunny"
+  }
+
+  it should "pair a result only with the turn straight before it" in {
+    val second = ToolCall("toolu_2", "get_time", ujson.Obj("zone" -> "CET"))
+    val body = requestBody(
+      UserMessage("Weather, then time?"),
+      AssistantMessage(None, Seq(call)),
+      ToolMessage("sunny", call.id),
+      AssistantMessage(None, Seq(second)),
+      ToolMessage("late duplicate", call.id),
+      ToolMessage("noon", second.id)
+    )
+    val messages = body("messages").arr
+    messages.map(_("role").str) shouldBe Seq("user", "assistant", "user", "assistant", "user")
+    messages(3)("content").arr.map(_("id").str) shouldBe Seq("toolu_2")
+    // the paired result first, as Anthropic requires, then the unpaired one as text
+    val lastTurn = messages(4)("content").arr
+    lastTurn.map(_("type").str) shouldBe Seq("tool_result", "text")
+    lastTurn(0)("tool_use_id").str shouldBe "toolu_2"
+    lastTurn(1)("text").str shouldBe "[Tool result for toolu_1]: late duplicate"
+  }
+
+  it should "not send a turn of thinking alone when its every tool call went unanswered" in {
+    val unanswered =
+      AssistantMessage(None, Seq(call)).withThinking(Seq(ThinkingBlock.Text("t", Some("sig-unanswered"))))
+    val body = requestBody(UserMessage("hi"), unanswered, UserMessage("again"))
+    body("messages").arr.map(_("role").str) shouldBe Seq("user", "user")
+    (body.render() should not).include("sig-unanswered")
+  }
 }
