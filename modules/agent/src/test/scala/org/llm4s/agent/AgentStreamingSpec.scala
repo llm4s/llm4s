@@ -10,7 +10,7 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
+import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch }
 import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 
@@ -70,7 +70,7 @@ class AgentStreamingSpec extends AnyFlatSpec with Matchers:
     val agent  = builder.build().fold(e => fail(e.message), identity)
     val c      = Seen()
     val result = agent.stream(ThreadId(java.util.UUID.randomUUID().toString), query)(c.listener).flatMap(_.await())
-    c.ended.await(5, TimeUnit.SECONDS) shouldBe true
+    c.ended.getCount shouldBe 0 // await drained the listener
     (result, c)
 
   "A streaming agent" should "send the answer's text as TextDelta events, in order" in {

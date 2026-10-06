@@ -7,6 +7,12 @@ import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ AssistantMessage, Message, UserMessage }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
+
+import java.util.concurrent.ConcurrentLinkedQueue
+import scala.annotation.tailrec
+import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
 
 /**
  * A running agent turn, from [[Agent.start]]: cancel it, or await its [[AgentResult]]. The turn runs
@@ -17,8 +23,12 @@ final class AgentRun private[agent] (
   loop: ToolLoop,
   root: AgentId,
   runtime: GraphRuntime,
-  tracing: Option[AgentTracing]
+  tracing: Option[AgentTracing],
+  listening: Option[RunScope]
 ):
+  // the listener scopes `await` drains: the `stream*` listener's, and every `subscribe`'s
+  private val scopes = new ConcurrentLinkedQueue[RunScope]()
+  listening.foreach(scopes.add)
 
   def threadId: ThreadId = handle.threadId
   def runId: RunId       = handle.runId
@@ -36,13 +46,15 @@ final class AgentRun private[agent] (
    * delivered, and the subscription ends itself after the turn's terminal event, or after a
    * `Disconnected` - which reaches the listener only if it fell behind (`Lagging`) or threw. A turn
    * that ends without a terminal event (a crash, or a failed commit) ends the subscription once it
-   * has delivered what it had.
+   * has delivered what it had. [[await]] returns only once `listener` has returned from the turn's
+   * last event, within [[AgentRun.Drain]].
    */
   def subscribe(capacity: Int = Agent.StreamCapacity)(listener: StreamEvent => Unit): Result[Subscription] =
     val scope = RunScope(runId, listener)
     handle.subscribe(capacity)(scope).map { s =>
       scope.attach(s)
       RunScope.watch(handle, scope)
+      scopes.add(scope)
       s
     }
 
@@ -53,10 +65,19 @@ final class AgentRun private[agent] (
    * `Left(CancelledError)` instead, with the interrupt flag still set, and the turn keeps running: a
    * later call returns its outcome, and only [[cancel]] stops it. With tracing, the turn's trace is
    * complete when a call returns the turn's outcome.
+   *
+   * With a listener - from [[Agent.stream]], [[Agent.streamResume]], [[Agent.streamRecover]] or
+   * [[subscribe]] - a call that returns the outcome returns only once each listener has returned
+   * from the turn's last event (its terminal event, a `Disconnected`, or, for a turn that ended
+   * without a terminal event, its last delivered one), waiting at most [[AgentRun.Drain]] in all;
+   * past that it logs a WARN and returns. A call made from a listener does not wait for that
+   * listener.
    */
   def await(): Result[AgentResult] =
     val ended = handle.await()
-    if handle.status != RunStatus.Running then tracing.foreach(_.detach())
+    if handle.status != RunStatus.Running then
+      drain()
+      tracing.foreach(_.detach())
     for
       result <- ended
       // only a kernel Block - the run closed its thread Failed - is a blocked turn; a GuardrailBlocked
@@ -73,6 +94,23 @@ final class AgentRun private[agent] (
         case RunResult.Failed(state, _) => summary(state, None, status)
     yield agentResult
 
+  /** Waits, within [[AgentRun.Drain]] in all, for every listener scope to end; see [[await]]. */
+  private def drain(): Unit =
+    val deadline = System.nanoTime() + AgentRun.Drain.toNanos
+    @tailrec def next(open: List[RunScope]): Unit = open match
+      case Nil => ()
+      case scope :: rest =>
+        scope.awaitEnd(math.max(0L, deadline - System.nanoTime()).nanos) match
+          case Left(_)     => Thread.currentThread().interrupt() // stop waiting; the outcome is still returned
+          case Right(true) => next(rest)
+          case Right(false) =>
+            if !scope.isEnded && System.nanoTime() >= deadline then
+              AgentRun.logger.warn(
+                s"A listener of run ${runId.value} on ${threadId.value} did not return from the run's last event within ${AgentRun.Drain}; await returns without it"
+              )
+            next(rest)
+    next(scopes.asScala.toList)
+
   /** The turn's result: `state`'s messages and usage, with `active` or else the thread's active agent. */
   private def summary(state: ThreadState, active: Option[AgentId], status: AgentStatus): Result[AgentResult] =
     for
@@ -82,10 +120,16 @@ final class AgentRun private[agent] (
     yield AgentResult(threadId, runId, active.orElse(stored).getOrElse(root), status, messages, usage)
 
 private[agent] object AgentRun:
+  private val logger = LoggerFactory.getLogger(classOf[AgentRun])
+
+  /** How long [[AgentRun.await]] waits, after the run ends, for its listeners to return from its last event. */
+  val Drain: FiniteDuration = 5.seconds
 
   /**
    * `handle` as an agent run, traced to `tracing` when given. `scope`, when given, is the listener
-   * of the observer the run was admitted with, and ends the handle's observation after the run.
+   * of the observer the run was admitted with, and ends the handle's observation after the run;
+   * `await` drains it when `drain` is set. The bridges (fs2, ZIO) pass `drain = false`: they end on
+   * the scope's `onEnd`, and their release awaits the run without waiting on their own listener.
    */
   def apply(
     handle: RunHandle[TurnOutput],
@@ -93,13 +137,21 @@ private[agent] object AgentRun:
     root: AgentId,
     runtime: GraphRuntime,
     tracing: Option[Tracing],
-    scope: Option[RunScope]
+    scope: Option[RunScope],
+    drain: Boolean
   ): AgentRun =
     scope.foreach { s =>
       handle.observation.foreach(s.attach)
       RunScope.watch(handle, s)
     }
-    new AgentRun(handle, loop, root, runtime, tracing.map(AgentTracing(handle, root, loop, _)))
+    new AgentRun(
+      handle,
+      loop,
+      root,
+      runtime,
+      tracing.map(AgentTracing(handle, root, loop, _)),
+      scope.filter(_ => drain)
+    )
 
   /**
    * How a turn ended, from its run's result: the status [[AgentRun.await]] reports, or the error it

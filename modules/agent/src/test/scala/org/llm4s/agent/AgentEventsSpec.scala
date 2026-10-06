@@ -15,7 +15,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ macroRW, ReadWriter }
 
-import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
+import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch }
 import scala.jdk.CollectionConverters.*
 
 /** The tool and guardrail events of an agent run, and what the durable ones may carry. */
@@ -91,7 +91,7 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     val agent  = builder.build().fold(e => fail(e.message), identity)
     val c      = Gathered(runs)
     val result = body(agent, ThreadId(java.util.UUID.randomUUID().toString), c.listener)
-    c.ended.await(5, TimeUnit.SECONDS) shouldBe true
+    c.ended.getCount shouldBe 0 // await drained the listener
     (result, c)
 
   private def collect(builder: AgentBuilder, query: String): (Result[AgentResult], Gathered) =

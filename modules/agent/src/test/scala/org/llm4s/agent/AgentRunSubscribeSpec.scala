@@ -90,7 +90,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     val c     = Received()
     val run   = ok(agent.stream(ThreadId("s1"), "hello")(c.listener))
     run.await().isRight shouldBe true
-    eventually(c.terminalSeen shouldBe true)
+    c.terminalSeen shouldBe true // await drained the listener
     durableRuns(c).distinct shouldBe Vector(run.runId.value)
     c.all.collectFirst { case StreamEvent.Durable(r) => r.event } shouldBe Some(RunEvent.RunStarted(None, None))
     lastIsTerminal(c, RunEvent.RunCompleted)
@@ -100,12 +100,44 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     val agent = agentOf(Scripted(open, Right(answer("one")), Right(answer("two"))))
     val c     = Received()
     val first = ok(agent.stream(ThreadId("s2"), "one")(c.listener).flatMap(_.await()))
-    eventually(c.terminalSeen shouldBe true)
+    c.terminalSeen shouldBe true // await drained the listener
     val second = ok(agent.run(ThreadId("s2"), "two"))
     second.answer shouldBe Some("two")
     Thread.sleep(200)
     durableRuns(c).toSet shouldBe Set(first.runId.value)
     lastIsTerminal(c, RunEvent.RunCompleted)
+  }
+
+  "AgentRun.await" should "return only once a stream listener has returned from the run's terminal event" in {
+    val agent = agentOf(Scripted(open, Right(answer("hi"))))
+    val seen  = new AtomicBoolean(false)
+    // slow on the terminal event: without the drain, await returns while the listener is still in it
+    val listener: StreamEvent => Unit = {
+      case StreamEvent.Durable(r) if RunScope.terminal(r.event) =>
+        Thread.sleep(300)
+        seen.set(true)
+      case _ => ()
+    }
+    ok(agent.stream(ThreadId("s1d"), "hello")(listener).flatMap(_.await())).answer shouldBe Some("hi")
+    seen.get shouldBe true
+  }
+
+  it should "return only once a subscribe listener has returned from the run's terminal event" in {
+    val gate  = new CountDownLatch(1)
+    val agent = agentOf(Scripted(gate, Right(answer("hi"))))
+    val run   = ok(agent.start(ThreadId("s1e"), "hello"))
+    val seen  = new AtomicBoolean(false)
+    run
+      .subscribe() {
+        case StreamEvent.Durable(r) if RunScope.terminal(r.event) =>
+          Thread.sleep(300)
+          seen.set(true)
+        case _ => ()
+      }
+      .isRight shouldBe true
+    gate.countDown()
+    ok(run.await())
+    seen.get shouldBe true
   }
 
   "AgentRun.subscribe" should "replay a late subscriber's durable events from the run's start" in {
@@ -116,7 +148,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     run.subscribe()(c.listener).isRight shouldBe true
     gate.countDown()
     ok(run.await())
-    eventually(c.terminalSeen shouldBe true)
+    c.terminalSeen shouldBe true // await drained the listener
     c.all.collectFirst { case StreamEvent.Durable(r) => r.event } shouldBe Some(RunEvent.RunStarted(None, None))
     val seqs = c.all.collect { case StreamEvent.Durable(r) => r.seq }
     seqs shouldBe sorted
@@ -153,7 +185,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     val c       = Received()
     val resumed = ok(agent.streamResume(ThreadId("s4"), Map(first.approve(id)))(c.listener))
     ok(resumed.await()).answer shouldBe Some("fine")
-    eventually(c.terminalSeen shouldBe true)
+    c.terminalSeen shouldBe true // await drained the listener
     durableRuns(c).distinct shouldBe Vector(resumed.runId.value)
     c.all.collectFirst { case StreamEvent.Durable(r) => r.event } should matchPattern {
       case Some(RunEvent.RunResumed(_, _, _)) =>
@@ -167,7 +199,7 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     val c         = Received()
     val recovered = ok(agent.streamRecover(ThreadId("s5"))(c.listener))
     ok(recovered.await()).answer shouldBe Some("back")
-    eventually(c.terminalSeen shouldBe true)
+    c.terminalSeen shouldBe true // await drained the listener
     durableRuns(c).distinct shouldBe Vector(recovered.runId.value)
     c.all.collectFirst { case StreamEvent.Durable(r) => r.event } should matchPattern {
       case Some(RunEvent.RunRecovered(_, _, _)) =>

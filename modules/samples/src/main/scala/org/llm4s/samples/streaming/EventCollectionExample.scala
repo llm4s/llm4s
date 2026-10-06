@@ -43,7 +43,8 @@ object EventCollectionExample:
         .withRuntime(runtime)
         .build()
       live = Vector.newBuilder[StreamEvent]
-      run  <- agent.stream(threadId, "Name three Scala collections.")(e => live.synchronized { live += e; () })
+      run <- agent.stream(threadId, "Name three Scala collections.")(e => live.synchronized { live += e; () })
+      // await returns once the listener has returned from the run's last event, so `live` is complete
       done <- run.await()
       liveEvents = live.synchronized(live.result())
       durableCount = liveEvents.count {

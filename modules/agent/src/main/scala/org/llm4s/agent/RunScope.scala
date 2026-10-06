@@ -33,6 +33,8 @@ final private[agent] class RunScope(runId: RunId, listener: StreamEvent => Unit,
   // listener calls in progress, and when the last one began or returned: what `closeWhenQuiet` waits on
   private val calls                  = new AtomicInteger(0)
   @volatile private var lastActivity = System.nanoTime()
+  // the thread the listener is called on, once it has been: `awaitEnd` from the listener cannot wait for itself
+  @volatile private var listenerThread: Option[Thread] = None
 
   def apply(event: StreamEvent): Unit =
     if !ending.get then
@@ -51,6 +53,7 @@ final private[agent] class RunScope(runId: RunId, listener: StreamEvent => Unit,
         case gap: StreamEvent.LiveGap => deliver(gap)
 
   private def deliver(event: StreamEvent): Unit =
+    listenerThread = Some(Thread.currentThread())
     calls.incrementAndGet()
     lastActivity = System.nanoTime()
     Using.resource(new AutoCloseable {
@@ -66,6 +69,21 @@ final private[agent] class RunScope(runId: RunId, listener: StreamEvent => Unit,
 
   /** Whether the scope has ended. */
   def isEnded: Boolean = ending.get
+
+  /**
+   * Waits up to `timeout` for the scope to end: `Right(true)` once it has - after the listener
+   * returned from the run's terminal event or a `Disconnected`, or after a quiet close - and
+   * `Right(false)` if it is still open at the bound, or at once when called from the listener
+   * itself, which cannot wait for its own return. `Left` if the waiting thread is interrupted; the
+   * interrupt flag is then clear.
+   */
+  def awaitEnd(timeout: FiniteDuration): Either[InterruptedException, Boolean] =
+    if finished.isDone then Right(true)
+    else if listenerThread.exists(_ eq Thread.currentThread()) then Right(false)
+    else
+      org.llm4s.error.CancelledError
+        .catchInterrupt(Try(finished.get(math.max(0L, timeout.toMillis), TimeUnit.MILLISECONDS)))
+        .map(_ => finished.isDone)
 
   /** Ends from the listener: `onEnd`, then the cancel, which from the listener returns at once. */
   private def end(): Unit =
