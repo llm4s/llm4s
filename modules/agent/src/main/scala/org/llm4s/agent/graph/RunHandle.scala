@@ -197,16 +197,19 @@ final private[graph] class DefaultRunHandle[O](
   /**
    * The run thread's body. `crashed` must not throw (see [[DefaultRunHandle.guarded]]). `result` is
    * completed on every exit: by `close`, after `release`, even if `release` throws or something
-   * escapes [[DefaultRunHandle.guarded]] (a `ControlThrowable`). Before `release`, `close` gives the
-   * run's subscriptions their end-of-run barriers, so the thread cannot yet be claimed by a later run.
+   * escapes [[DefaultRunHandle.guarded]] (a `ControlThrowable`). `close` first settles the outcome -
+   * `crashed` for an abnormal exit, which closes the run's committer and so hands over its last
+   * events - then gives the run's subscriptions their end-of-run barriers, and only then releases the
+   * thread, so the barriers follow every event of the run and precede any of a later run.
    */
   private def run(body: () => RunResult[O], crashed: Throwable => RunResult[O], release: () => Unit): Unit =
     var outcome: Option[RunResult[O]] = None
     Using.resource(new AutoCloseable {
       def close(): Unit =
+        val settled = outcome.getOrElse(crashed(new IllegalStateException("run thread ended abnormally")))
         DefaultRunHandle.guarded(handedOver.complete(())): Unit
         DefaultRunHandle.guarded(release()): Unit
-        result.complete(outcome.getOrElse(crashed(new IllegalStateException("run thread ended abnormally")))): Unit
+        result.complete(settled): Unit
     })(_ => outcome = Some(DefaultRunHandle.guarded(body()).fold(crashed, identity)))
 
 private[graph] object DefaultRunHandle:

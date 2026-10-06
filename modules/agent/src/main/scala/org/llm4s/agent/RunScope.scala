@@ -1,6 +1,7 @@
 package org.llm4s.agent
 
 import org.llm4s.agent.graph.*
+import org.llm4s.error.CancelledError
 
 import java.util.concurrent.{ CompletableFuture, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
@@ -18,8 +19,8 @@ import scala.util.Try
  *    reading the thread's log failed: `ReplayFailed`), after passing it on;
  *  - the run's end-of-run barrier ([[runEnded]]), which the subscription's dispatcher reaches once
  *    it has delivered everything of the run: the run thread queues it as it exits, after handing
- *    over its last event and before releasing the thread to a later run, so it follows them all - or, for a subscription still
- *    replaying, behind everything its switch to live catches up. It ends a run that committed no
+ *    over its last event and before releasing the thread to a later run, so it follows them all -
+ *    or, for a subscription still replaying, behind everything its switch to live catches up. It ends a run that committed no
  *    terminal event (a crash, or a failed terminal commit) as soon as its last event is delivered;
  *    after a terminal event or a `Disconnected` the scope has already ended and it does nothing;
  *  - [[cancel]], when the caller cancels the subscription it was handed.
@@ -101,7 +102,7 @@ final private[agent] class RunScope(runId: RunId, listener: StreamEvent => Unit,
     if finished.isDone then Right(true)
     else if listenerThread.exists(_ eq Thread.currentThread()) then Right(false)
     else
-      org.llm4s.error.CancelledError
+      CancelledError
         .catchInterrupt(Try(finished.get(math.max(0L, timeout.toMillis), TimeUnit.MILLISECONDS)))
         .map(_ => finished.isDone)
 
@@ -136,7 +137,7 @@ private[agent] object RunScope:
 
   /** Runs `body`, keeping a non-fatal throw or an interrupt to rethrow once the end has completed. */
   private def attempt(body: => Unit): Either[InterruptedException, Try[Unit]] =
-    org.llm4s.error.CancelledError.catchInterrupt(Try(body))
+    CancelledError.catchInterrupt(Try(body))
 
   /** Rethrows what [[attempt]] kept: a throw as it was; an interrupt as the thread's flag, set again. */
   private def rethrow(ran: Either[InterruptedException, Try[Unit]]): Unit =

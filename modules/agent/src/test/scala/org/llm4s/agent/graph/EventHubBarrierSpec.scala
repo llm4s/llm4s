@@ -31,13 +31,14 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     val seen    = new CopyOnWriteArrayList[String]()
     val ends    = new AtomicInteger(0)
     val reached = new CountDownLatch(1)
+    // recorded before `onEvent`, so a latch it counts down is seen only after the record
     def apply(event: StreamEvent): Unit =
-      onEvent(event)
       seen.add(event match
         case StreamEvent.Durable(r)              => r.seq.toString
         case StreamEvent.Disconnected(_, reason) => s"Disconnected($reason)"
         case other                               => other.toString
-      ): Unit
+      )
+      onEvent(event)
     def runEnded(runId: RunId): Unit =
       ends.incrementAndGet()
       seen.add(s"end:${runId.value}")
@@ -67,33 +68,39 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     hub.liveCount(thread) shouldBe 0
   }
 
-  /** A log of `records` whose reads block until `release` opens, signalling `reading` first. */
-  final private class BlockingLog(initial: Vector[EventRecord]) extends Checkpointer:
+  /**
+   * A log of `records` whose `blockOn`th read (counting from 1) signals `reading`, then blocks until
+   * `release` opens; it returns what `records` holds once released.
+   */
+  final private class BlockingLog(initial: Vector[EventRecord], blockOn: Int) extends Checkpointer:
     private val underlying                                                      = InMemoryCheckpointer()
+    private val reads                                                           = new AtomicInteger(0)
     @volatile var records                                                       = initial
     val reading                                                                 = new CountDownLatch(1)
     val release                                                                 = new CountDownLatch(1)
     def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = underlying.commit(threadId, commit)
     def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]]            = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
-      reading.countDown()
-      release.await(5, TimeUnit.SECONDS)
+      if reads.incrementAndGet() == blockOn then
+        reading.countDown()
+        release.await(5, TimeUnit.SECONDS): Unit
       Right(records.filter(_.seq > afterSeq).take(limit))
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
     def deleteThread(threadId: ThreadId): Result[Unit]                   = underlying.deleteThread(threadId)
 
-  "A barrier given while the dispatcher replays" should "be reached after everything replayed and caught up" in {
-    val log      = BlockingLog(Vector(record(1), record(2)))
+  "A barrier given before the dispatcher joins the live set" should "be reached after its catch-up" in {
+    // replay reads [1, 2], then an empty page; the third read is switchToLive's catch-up, under hubLock
+    val log      = BlockingLog(Vector(record(1), record(2)), blockOn = 3)
     val listener = Recording()
     val hub      = EventHub(log)
     val sub      = hub.subscribe(thread, afterSeq = 0L, capacity = 16, listener).fold(e => fail(e.message), identity)
-    log.reading.await(5, TimeUnit.SECONDS) shouldBe true // replay is blocked in its first read
-    // committed while the dispatcher is not yet live, then the run ends: the barrier must wait
+    log.reading.await(5, TimeUnit.SECONDS) shouldBe true // the catch-up read is blocked; not yet joined
+    // the run's last event, committed after the replay, is visible only to the catch-up; then the run ends
     log.records = log.records :+ record(3)
     sub.endOfRun(run)
-    hub.liveCount(thread) shouldBe 0
     log.release.countDown()
     listener.reached.await(5, TimeUnit.SECONDS) shouldBe true
+    // a barrier queued at once, ignoring that the dispatcher has not joined, would precede 3
     listener.seen.asScala.toVector shouldBe Vector("1", "2", "3", "end:r1")
     sub.cancel()
     hub.liveCount(thread) shouldBe 0

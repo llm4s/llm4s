@@ -943,8 +943,8 @@ Decisions:
   catches up. The dispatcher never passes the marker to the listener as an event: it calls the
   run-scoped listener's `runEnded(runId)`, which ends a scope of that run - once, sharing the end's
   CAS with the terminal event, a `Disconnected` and the caller's cancel. Thread-scoped subscribers
-  are never given one. The marker is exempt from the queue's capacity, so it is never dropped and
-  never makes a subscriber lag; a subscriber already lagging is given none and ends with its
+  are never given one. The marker is exempt from the queue's capacity, so it never makes a
+  subscriber lag; a subscriber already lagging is given none and ends with its
   `Disconnected`. This replaced #1329's 1 s quiet close. `Agent.stream`, `streamResume`
   and `streamRecover` subscribe a listener at admission (capacity `Agent.StreamCapacity`, 1024).
   `AgentRun.await` returns only once each such listener has returned from the run's last event,
