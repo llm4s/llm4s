@@ -14,7 +14,8 @@
 #   3. Module - every module in CLAUDE.md's repository-structure block exists on disk, and every module
 #               build.sbt defines is named there (itself or a parent directory).
 #   4. sbt    - every `sbt ...` command quoted in the docs is a build alias, a task the build defines,
-#               an sbt built-in, or a task in a project the build defines.
+#               an sbt built-in, or such a task scoped to a project the build defines (`core/test`). A
+#               backslash-continued command is read as one line; one the shell cannot parse fails.
 #
 # Usage: scripts/check-doc-support.sh [REPO_ROOT]    (the root defaults to this script's repository)
 # Release notes, migration guides and design documents name old versions and commands on purpose and
@@ -49,7 +50,7 @@ SBT_BUILTINS = {
     "dependencyTree", "dependencyUpdates", "dependencyBrowseTree", "mimaReportBinaryIssues",
     "version", "name", "scalaVersion", "stage", "assembly", "evicted", "dumpLicenseReport", "ci-release", "sonatypeBundleRelease",
 }
-SCOPE_WORDS = {"ThisBuild", "Global", "Test", "Compile", "Docker", "IntegrationTest", "Runtime"}
+SCOPE_WORDS = {"ThisBuild", "Global", "Test", "Compile", "Docker", "IntegrationTest", "Runtime", "Jmh"}
 
 errors = []
 sbt_unknown = []
@@ -212,11 +213,12 @@ projects = set(re.findall(r"lazy val (\w+)\s*=\s*\(?\s*project\b", build))
 
 
 def command_heads(argument_string):
-    """The sbt command words quoted after `sbt`: flags are dropped, `;` separates commands."""
+    """The sbt command words quoted after `sbt`: flags are dropped, `;` separates commands.
+    None when the shell could not parse the line (unbalanced quotes): a reader pasting it gets an error."""
     try:
         tokens = shlex.split(argument_string)
     except ValueError:
-        return []
+        return None
     heads = []
     for index, token in enumerate(tokens):
         if token.startswith("-") or token.startswith("$") or token.startswith("<"):
@@ -238,14 +240,54 @@ def check_head(path, line, head):
     if re.fullmatch(r"[\w.-]+:[\w-]+", word):   # config:task such as docker:publishLocal
         word = word.split(":", 1)[1]
     if "/" in word:
-        scope = word.split("/", 1)[0]
+        # project/task, Config/task, project/Config/task: the scope must exist and so must the task.
+        segments = word.split("/")
+        scope, middle, word = segments[0], segments[1:-1], segments[-1]
+        if re.fullmatch(r"[\w.-]+:[\w-]+", word):   # project/config:task such as workspaceRunner/docker:publishLocal
+            word = word.split(":", 1)[1]
         if scope not in projects and scope not in SCOPE_WORDS:
             fail(path, line, f"`sbt {head}` names project `{scope}`, which build.sbt does not define")
+            return
+        for axis in middle:
+            if axis not in SCOPE_WORDS and axis not in keys and axis not in SBT_BUILTINS:
+                fail(path, line, f"`sbt {head}`: `{axis}` is not a configuration or task the build knows")
+                return
+        if word in keys or word in SBT_BUILTINS:
+            return
+        sbt_unknown.append(word)
+        fail(path, line, f"`sbt {head}`: `{word}` is not a task the build defines, nor an sbt built-in")
         return
     if word in aliases or word in keys or word in SBT_BUILTINS:
         return
     sbt_unknown.append(word)
     fail(path, line, f"`sbt {head}`: `{word}` is not an alias or task the build defines, nor an sbt built-in")
+
+
+def check_invocation(path, line, argument_string):
+    heads = command_heads(argument_string)
+    if heads is None:
+        fail(path, line, f"`sbt {argument_string}` cannot be parsed by the shell (unbalanced quotes?)")
+        return
+    for head in heads:
+        check_head(path, line, head)
+
+
+def logical_lines(body):
+    """(offset, line) for each shell line of a code block, a backslash-continued line joined with the
+    lines it continues onto, so `sbt -Dk=v \\` followed by `"run"` is read as one invocation."""
+    out, pending, start = [], None, 0
+    for offset, raw in enumerate(body.splitlines()):
+        if pending is None:
+            start, pending = offset, ""
+        stripped = raw.rstrip()
+        if stripped.endswith("\\"):
+            pending += stripped[:-1] + " "
+            continue
+        out.append((start, pending + raw))
+        pending = None
+    if pending is not None:
+        out.append((start, pending))
+    return out
 
 
 FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
@@ -254,19 +296,17 @@ for p in FILES:
     text = p.read_text(encoding="utf-8")
     for fm in FENCE.finditer(text):
         body_line = line_of(text, fm.start(1))
-        for offset, raw in enumerate(fm.group(1).splitlines()):
-            sm = re.match(r"^\s*(?:[$>]\s*)?sbt\s+(.*?)\s*\\?$", raw)
+        for offset, raw in logical_lines(fm.group(1)):
+            sm = re.match(r"^\s*(?:[$>]\s*)?sbt\s+(.*?)\s*$", raw)
             if sm and not raw.lstrip().startswith("#") and IGNORE_MARKER not in raw and not HISTORICAL.search(raw):
                 arg = re.sub(r"\s+#.*$", "", sm.group(1))
-                for head in command_heads(arg):
-                    check_head(p.as_posix(), body_line + offset, head)
+                check_invocation(p.as_posix(), body_line + offset, arg)
     # Inline code outside fences: blank the fenced spans first so a block is not read twice.
     outside = FENCE.sub(lambda mm: "\n" * mm.group(0).count("\n"), text)
     for im in INLINE.finditer(outside):
         if exempt(line_text_at(outside, im.start())):
             continue
-        for head in command_heads(im.group(1)[len("sbt"):].strip()):
-            check_head(p.as_posix(), line_of(outside, im.start()), head)
+        check_invocation(p.as_posix(), line_of(outside, im.start()), im.group(1)[len("sbt"):].strip())
 
 if errors:
     print("The documented support matrix does not match the build:", file=sys.stderr)

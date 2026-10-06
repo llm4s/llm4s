@@ -199,6 +199,34 @@ d="$(fresh_copy cmd-project)"
 printf '\nRun `sbt "nonexistentProject/test"` to check it.\n' >> "$d/README.md"
 expect_fail "unknown sbt project" "$d" "nonexistentProject"
 
+d="$(fresh_copy cmd-scoped-task)"
+printf '\nRun `sbt "core/definitelyNotATask"` to check it.\n' >> "$d/README.md"
+expect_fail "unknown task in a project the build defines" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-scoped-config-task)"
+printf '\n```bash\nsbt core/Test/definitelyNotATask\n```\n' >> "$d/CLAUDE.md"
+expect_fail "unknown task after a project and configuration" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-scoped-ok)"
+printf '\n```bash\nsbt core/Test/compile docs/doc\n```\n' >> "$d/CLAUDE.md"
+expect_pass "a known task in a project the build defines" "$d"
+
+d="$(fresh_copy cmd-continued)"
+printf '\n```bash\nsbt -Dllm4s.x=y \\\n    -Dllm4s.z=w \\\n    "definitelyNotATask"\n```\n' >> "$d/CLAUDE.md"
+expect_fail "an unknown task on a continuation line" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-continued-ok)"
+printf '\n```bash\nsbt -Dllm4s.x=y \\\n    "run"\n```\n' >> "$d/CLAUDE.md"
+expect_pass "a known task on a continuation line" "$d"
+
+d="$(fresh_copy cmd-malformed-quotes)"
+printf '\n```bash\nsbt "core/test\n```\n' >> "$d/CLAUDE.md"
+expect_fail "a command the shell cannot parse" "$d" "cannot be parsed"
+
+d="$(fresh_copy cmd-malformed-quotes-inline)"
+printf '\nRun `sbt "testOnly org.llm4s.Foo` to check it.\n' >> "$d/README.md"
+expect_fail "an inline command the shell cannot parse" "$d" "cannot be parsed"
+
 d="$(fresh_copy cmd-ignore)"
 printf '\n```bash\nsbt crossTestAll   # doc-support: ignore\n```\n' >> "$d/CLAUDE.md"
 expect_pass "an opted-out sbt line" "$d"
