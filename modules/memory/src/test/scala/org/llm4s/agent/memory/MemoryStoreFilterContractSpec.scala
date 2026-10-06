@@ -150,6 +150,14 @@ class MemoryStoreFilterContractSpec extends AnyFlatSpec with Matchers {
       MemoryFilter.ByEntity(EntityId("e1")),
       MemoryFilter.Custom(_.content.contains("keyed"))
     ),
+    // Every form of a type and a time range
+    "ByTypes"                    -> MemoryFilter.ByTypes(Set(MemoryType.Task, MemoryType.Knowledge)),
+    "ByTypes of one custom type" -> MemoryFilter.ByTypes(Set(MemoryType.Custom("nothing"))),
+    "ByTypes of none"            -> MemoryFilter.ByTypes(Set.empty),
+    "ByTimeRange after"          -> MemoryFilter.ByTimeRange(Some(base.plusSeconds(60L * 9)), None),
+    "ByTimeRange before"         -> MemoryFilter.ByTimeRange(None, Some(base.plusSeconds(60L * 4))),
+    "ByTimeRange between" -> MemoryFilter.ByTimeRange(Some(base.plusSeconds(60L * 3)), Some(base.plusSeconds(60L * 8))),
+    "ByTimeRange unbounded" -> MemoryFilter.ByTimeRange(None, None),
     // Metadata keys that mean something in a JSON path
     "ByMetadata with a dotted key"        -> MemoryFilter.ByMetadata("a.b", "dotted"),
     "HasMetadata with a dotted key"       -> MemoryFilter.HasMetadata("a.b"),

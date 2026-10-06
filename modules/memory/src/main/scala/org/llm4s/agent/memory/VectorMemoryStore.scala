@@ -472,8 +472,10 @@ final class VectorMemoryStore private (
       Some(Sql("memory_type = ?", Seq(memoryType.name)))
 
     case MemoryFilter.ByTypes(types) =>
-      if (types.isEmpty) Some(Sql("1 = 0", Seq.empty))
-      else Some(Sql(s"memory_type IN (${types.map(_ => "?").mkString(",")})", types.map(_.name).toSeq))
+      // A Seq, not the Set: mapping a Set to "?" would collapse the placeholders into one
+      val names = types.toSeq.map(_.name)
+      if (names.isEmpty) Some(Sql("1 = 0", Seq.empty))
+      else Some(Sql(s"memory_type IN (${names.map(_ => "?").mkString(",")})", names))
 
     case MemoryFilter.ByMetadata(key, value) =>
       // Metadata is stored as JSON text, so look for the JSON form of the pair. instr is a literal, case-sensitive

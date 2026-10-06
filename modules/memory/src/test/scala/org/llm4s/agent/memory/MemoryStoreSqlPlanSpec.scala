@@ -108,6 +108,28 @@ class MemoryStoreSqlPlanSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     store.get(MemoryId("awkward")).map(_.map(_.metadata)) shouldBe Right(Some(awkward))
   }
 
+  it should "still read a row whose stored metadata is not valid JSON, as the old encoder could write it" in {
+    // The old encoder wrote a control character other than tab, newline and carriage return raw
+    val bell = "\u0007"
+    store(dbPath)(first => first.store(memory("legacy", "legacy row")) shouldBe a[Right[_, _]])
+    Using.resource(DriverManager.getConnection(s"jdbc:sqlite:$dbPath")) { c =>
+      Using.resource(c.prepareStatement("UPDATE memories SET metadata_json = ? WHERE id = 'legacy'")) { stmt =>
+        stmt.setString(1, s"""{"note":"ring${bell}ing","tag":"plain"}""")
+        stmt.executeUpdate()
+      }
+    }
+
+    store(dbPath) { reopened =>
+      reopened.get(MemoryId("legacy")).map(_.map(_.metadata)) shouldBe
+        Right(Some(Map("note" -> s"ring${bell}ing", "tag" -> "plain")))
+    }
+  }
+
+  private def store[A](path: String)(f: SQLiteMemoryStore => A): A = {
+    val opened = SQLiteMemoryStore(path).fold(e => fail(e.message), identity)
+    Using.resource(new AutoCloseable { override def close(): Unit = opened.close() })(_ => f(opened))
+  }
+
   // ===== deleteMatching is one transaction, not one commit per row =====
 
   it should "delete the rows a Custom filter accepts in a single transaction" in withRecording { (store, recording) =>
@@ -149,6 +171,49 @@ class MemoryStoreSqlPlanSpec extends AnyFlatSpec with Matchers with BeforeAndAft
       store.search("row", 10).map(_.size) shouldBe Right(5)
       recording.calls.count(_ == "rollback") shouldBe 1
       recording.calls.filter(_.startsWith("setAutoCommit")).last shouldBe "setAutoCommit(true)"
+    }
+  }
+
+  it should "register a java_lower function that lower-cases like String.toLowerCase and passes NULL through" in {
+    Using.resource(DriverManager.getConnection("jdbc:sqlite::memory:")) { c =>
+      FilterSupport.registerJavaLower(c)
+      Using.resource(c.createStatement()) { st =>
+        Using.resource(st.executeQuery("SELECT java_lower('\u00c9COLE'), java_lower('\u0130'), java_lower(NULL)")) {
+          rs =>
+            rs.next() shouldBe true
+            rs.getString(1) shouldBe "\u00c9COLE".toLowerCase
+            rs.getString(2) shouldBe "\u0130".toLowerCase
+            rs.getString(3) shouldBe null
+        }
+      }
+    }
+  }
+
+  "VectorMemoryStore.deleteMatching" should "roll back, leaving every row, when a delete fails midway" in {
+    withVector(MockEmbeddingService(dimensions = 8)) { vector =>
+      vector.storeAll((1 to 5).map(i => memory(s"m$i", s"row $i"))) shouldBe a[Right[_, _]]
+      Using.resource(DriverManager.getConnection(s"jdbc:sqlite:$dbPath")) { other =>
+        Using.resource(other.createStatement())(
+          _.execute(
+            "CREATE TRIGGER stop_midway BEFORE DELETE ON memories WHEN (SELECT COUNT(*) FROM memories) <= 2 " +
+              "BEGIN SELECT RAISE(ABORT, 'stop midway'); END"
+          )
+        )
+      }
+
+      vector.deleteMatching(MemoryFilter.Custom(_ => true)).isLeft shouldBe true
+
+      vector.count() shouldBe Right(5L)
+    }
+  }
+
+  it should "delete the rows a Custom filter accepts, and no others" in {
+    withVector(MockEmbeddingService(dimensions = 8)) { vector =>
+      vector.storeAll((1 to 6).map(i => memory(s"m$i", s"row $i"))) shouldBe a[Right[_, _]]
+
+      vector.deleteMatching(MemoryFilter.Custom(_.id.value.endsWith("3"))) shouldBe a[Right[_, _]]
+
+      vector.recall(MemoryFilter.All, 10).map(_.map(_.id.value).toSet) shouldBe Right(Set("m1", "m2", "m4", "m5", "m6"))
     }
   }
 

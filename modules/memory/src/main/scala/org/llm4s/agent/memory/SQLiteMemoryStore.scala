@@ -350,11 +350,10 @@ final class SQLiteMemoryStore private (
       Some(Sql("memory_type = ?", Seq(memoryTypeToString(memoryType))))
 
     case MemoryFilter.ByTypes(memoryTypes) =>
-      if (memoryTypes.isEmpty) Some(Sql("1 = 0", Seq.empty))
-      else
-        Some(
-          Sql(s"memory_type IN (${memoryTypes.map(_ => "?").mkString(",")})", memoryTypes.map(memoryTypeToString).toSeq)
-        )
+      // A Seq, not the Set: mapping a Set to "?" would collapse the placeholders into one
+      val names = memoryTypes.toSeq.map(memoryTypeToString)
+      if (names.isEmpty) Some(Sql("1 = 0", Seq.empty))
+      else Some(Sql(s"memory_type IN (${names.map(_ => "?").mkString(",")})", names))
 
     case MemoryFilter.ByConversation(conversationId) =>
       Some(Sql("COALESCE(conversation_id = ?, 0)", Seq(conversationId)))

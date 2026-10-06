@@ -1491,6 +1491,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Fix:** `SQLiteMemoryStore` read back metadata containing a backslash sequence wrongly (`c:\temp` came back as `c:`, a tab and
   `emp`, because the decoder undid its escapes one after another); metadata is now written and read with a JSON parser, and rows
   written before are read correctly too.
+  **Fix:** `MemoryFilter.ByTypes` with two or more types failed on both stores with an index error (the placeholders were built by
+  mapping the `Set` of types, which collapsed them into one `?`).
 - **`GuardrailAction.Warn` now logs in five more guardrails**: `Warn` is documented as "log a warning and let
   processing continue", but `PromptInjectionDetector`, `GroundingGuardrail`, `ContextRelevanceGuardrail`,
   `TopicBoundaryGuardrail` and `SourceAttributionGuardrail` passed the text through without a word, so a
