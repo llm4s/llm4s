@@ -99,13 +99,14 @@ class KotlinApiIntegrationTest {
     }
 
     @Test
-    fun `an agent run returns a state whose last message is the endpoint's answer`() = runBlocking<Unit> {
+    fun `an agent run returns a result whose answer and last message are the endpoint's reply`() = runBlocking<Unit> {
         handler.set { reply(it, 200, completion("the answer")) }
 
         Llm4s.createDefaultClient().use { client ->
-            val state = Llm4s.createAgent(client).run("a question")
+            val result = Llm4s.createAgent(client).run("a question")
 
-            assertEquals("the answer", state.conversation().messages().last().content())
+            assertEquals(scala.Option.apply("the answer"), result.answer())
+            assertEquals("the answer", result.messages().last().content())
         }
     }
 
