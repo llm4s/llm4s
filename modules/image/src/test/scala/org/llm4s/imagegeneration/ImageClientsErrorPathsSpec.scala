@@ -144,6 +144,51 @@ class ImageClientsErrorPathsSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  "HuggingFace and Stability AI editImageAsync" should "return an ImageUnknownError when editImage throws, not a failed future" in {
+    val huggingFace = new HuggingFaceClient(HuggingFaceConfig(apiKey = "k"), Failing) {
+      override def editImage(
+        imagePath: Path,
+        prompt: String,
+        maskPath: Option[Path],
+        options: ImageEditOptions
+      ): Either[LLMError, Seq[GeneratedImage]] = throw boom
+    }
+    val stability = new StabilityAIClient(StabilityAIConfig(apiKey = "k"), Failing) {
+      override def editImage(
+        imagePath: Path,
+        prompt: String,
+        maskPath: Option[Path],
+        options: ImageEditOptions
+      ): Either[LLMError, Seq[GeneratedImage]] = throw boom
+    }
+
+    Seq[(String, ImageGenerationClient)]("huggingface" -> huggingFace, "stability-ai" -> stability).foreach {
+      case (name, client) =>
+        val result = await(client.editImageAsync(png(), "make it blue"))
+        withClue(s"$name editImageAsync: ") {
+          result.left.toOption.get shouldBe a[ImageUnknownError]
+          message(result) should include("the connection broke")
+        }
+    }
+  }
+
+  // ---- HuggingFace's own steps report a failure inside them as a Left
+
+  "HuggingFaceClient" should "report a failure while encoding, building the payload or assembling images as an ImageServiceError" in {
+    val client = new HuggingFaceClient(HuggingFaceConfig(apiKey = "k"), Failing)
+
+    val encoded   = client.convertToBase64(null)
+    val payload   = client.buildPayload("a cat", null)
+    val assembled = client.generateAllImages("a cat", 1, null, "Zm9v")
+
+    Seq("convertToBase64" -> encoded, "buildPayload" -> payload, "generateAllImages" -> assembled).foreach {
+      case (step, result) =>
+        withClue(s"$step: ") {
+          result.left.toOption.get should matchPattern { case ImageServiceError(_, 500) => }
+        }
+    }
+  }
+
   // ---- the health check
 
   "ImageGeneration.healthCheck" should "report a reachable service as healthy and a failing one as degraded" in {

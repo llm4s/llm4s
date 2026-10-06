@@ -1,6 +1,6 @@
 package org.llm4s.imagegeneration.provider
 
-import org.llm4s.imagegeneration.{ ImageSize, ImageValidationError }
+import org.llm4s.imagegeneration.{ ImageServiceError, ImageSize, ImageValidationError }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -26,6 +26,19 @@ class ImageEditValidationUtilsTest extends AnyFlatSpec with Matchers {
   it should "return validation error for missing files" in {
     val result = ImageEditValidationUtils.readImageFile(java.nio.file.Path.of("missing.bin"), "source")
     result should matchPattern { case Left(_: ImageValidationError) => }
+  }
+
+  it should "return a service error when the path exists but cannot be read" in {
+    val dir = Files.createTempDirectory("image-edit-utils-dir")
+    try {
+      val result = ImageEditValidationUtils.readImageFile(dir, "source")
+      result match {
+        case Left(ImageServiceError(message, status)) =>
+          message should startWith("Failed to read source:")
+          status shouldBe 500
+        case other => fail(s"Expected a service error, got: $other")
+      }
+    } finally Files.deleteIfExists(dir)
   }
 
   "readImageSize" should "return validation error for non-image files" in {

@@ -3,7 +3,14 @@ package org.llm4s.imagegeneration.provider
 import scala.concurrent.duration.FiniteDuration
 
 import org.llm4s.http.{ HttpResponse, MultipartPart }
-import org.llm4s.imagegeneration.{ ImageGenerationOptions, ImageSize, OpenAIConfig, ImageValidationError }
+import org.llm4s.imagegeneration.{
+  ImageGenerationOptions,
+  ImageServiceError,
+  ImageSize,
+  ImageValidationError,
+  OpenAIConfig,
+  TransientImageServiceError
+}
 import org.llm4s.media.MediaType
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -103,6 +110,20 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
     result shouldBe Left(ImageValidationError("Unsupported response format for generation: xml"))
   }
 
+  it should "reject an unsupported output format before any remote call" in {
+    val stub = new StubHttpClient()
+    val c    = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"), stub)
+
+    val result = c.generateImages(
+      prompt = "a test prompt",
+      count = 1,
+      options = ImageGenerationOptions(outputFormat = Some("gif"))
+    )
+
+    result shouldBe Left(ImageValidationError("Unsupported output format: gif"))
+    stub.lastPostBody shouldBe None
+  }
+
   it should "reject out-of-range output compression before any remote call" in {
     val c = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"))
 
@@ -168,6 +189,18 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
     val result = c.generateImages(prompt = "prompt", count = 1)
 
     result shouldBe Left(ImageValidationError("Invalid request: bad request details"))
+  }
+
+  it should "surface any other error status as an ImageServiceError carrying that status" in {
+    val stub = new StubHttpClient(
+      postResponse = HttpResponse(503, """{"error":{"message":"overloaded"}}""")
+    )
+    val c = client(OpenAIConfig(apiKey = "test-key", model = "gpt-image-1"), stub)
+
+    val result = c.generateImages(prompt = "prompt", count = 1)
+
+    result shouldBe Left(ImageServiceError("API error: overloaded", 503))
+    result.left.toOption.get shouldBe a[TransientImageServiceError]
   }
 
   it should "map malformed response body to ImageUnknownError" in {

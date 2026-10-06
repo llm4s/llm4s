@@ -526,6 +526,18 @@ class ImageGenerationClientsTest
     result.left.value shouldBe a[InsufficientResourcesError]
   }
 
+  test("StabilityAIClient should report any other error status as an ImageServiceError carrying that status") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(503, "unavailable")))
+
+    val result = client.generateImage(prompt)
+    result.left.value shouldBe ImageServiceError("API error (status 503)", 503)
+    result.left.value shouldBe a[TransientImageServiceError]
+  }
+
   test("StabilityAIClient should validate prompt") {
     val mockHttpClient = stub[HttpClient]
     val config         = StabilityAIConfig(apiKey = "test-key")
