@@ -238,9 +238,9 @@ calling too. Core keeps the tool API (`ToolFunction`, `ToolRegistry`, schemas, e
 `UsageSummary`/`ModelUsage` moved to `org.llm4s.llmconnect.model` so `llm4s-observability` need not
 depend on `llm4s-agent`. `modules/agent` (`llm4s-agent`) then took `org.llm4s.agent` (bar
 `agent.memory`, already in `llm4s-memory`, which does not depend on it) and `org.llm4s.assistant`,
-with fansi. **Nothing in core may import either package** - the tracing contract takes a
-`TraceEvent.AgentStateUpdated`, which the agent runtime no longer emits (#1328; its consumers
-move in #1329), so core's trace specs build that event directly.
+with fansi. **Nothing in core may import either package** - the tracing contract's
+agent event is `TraceEvent.AgentRunEnded` (built from core types; it replaced `AgentStateUpdated`
+in #1329), so core's trace specs build it directly.
 `workspaceClient` depends on `llm4s-agent` for `codegen`; `observability` only in Test scope.
 
 With slice 7, `llm4s-core` is the spine: 20.7k lines at the re-audit, 19.1k after the cleanup passes (`types`, `error`, `config`, `model`,
@@ -610,8 +610,11 @@ client.complete(conversation, options)
 
 ### Streaming Events
 
-The agent event stream (`runWithEvents`, `AgentEvent`) was removed in #1328; its replacement is
-[#1329](https://github.com/llm4s/llm4s/issues/1329).
+`AgentBuilder.withStreaming()` streams the model's answer; `agent.stream(threadId, query)(listener)`
+delivers every event of the turn as a `StreamEvent`, matched with `AgentEvents` (`TextDelta`,
+`ToolCallStarted`, `ToolExecuted`, `ModelCallCompleted`, ...). Durable events carry no message
+content; content is live-only. `AgentRun.subscribe` is run-scoped; `AgentIO.stream`/`AgentZ.stream`
+wrap it as fs2/ZIO streams. Tracing ends each run with `TraceEvent.AgentRunEnded` (#1329).
 
 ## Testing
 

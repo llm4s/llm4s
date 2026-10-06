@@ -398,7 +398,7 @@ val tracer: Tracing = Llm4sConfig
 tracer.traceEvent("Starting LLM operation")
 tracer.traceCompletion(completion, completion.model) // prefer the model reported by the API
 tracer.traceTokenUsage(tokenUsage, completion.model, "chat-completion")
-tracer.traceEvent(agentState.toTraceEvent)           // agent state is an ordinary TraceEvent
+// An agent built withTracing(tracer) ends each run with a TraceEvent.AgentRunEnded
 ```
 
 ### Usage using starter kit `llm4s.g8`

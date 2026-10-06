@@ -256,9 +256,11 @@ val agent = Agent.builder("triage", client)
 
 ### [Streaming Events](streaming)
 
-The agent event stream (`runWithEvents`, `AgentEvent`) was removed with the move to the graph
-runtime; its replacement - subscription to a run's events and token streaming - is
-[#1329](https://github.com/llm4s/llm4s/issues/1329).
+`Agent.builder(...).withStreaming()` streams the model's answer, and
+`agent.stream(threadId, query)(listener)` delivers every event of the turn - text deltas, tool
+calls, model calls, handoffs, guardrail blocks - as a `StreamEvent`, matched with `AgentEvents`.
+Durable events carry no message content; content is live-only. `AgentIO.stream` and `AgentZ.stream`
+give the same events as fs2 and ZIO streams.
 
 [Learn more about streaming →](streaming)
 

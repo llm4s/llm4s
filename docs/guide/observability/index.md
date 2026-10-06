@@ -397,6 +397,31 @@ Trace: "RAG Query Processing"
 └── Event: "Response Delivered"
 ```
 
+### What an agent run sends
+
+An agent built with `Agent.builder(...).withTracing(tracing)` sends, for each run:
+
+- `graph.*` custom events for the runtime's own events (run, task and checkpoint lifecycle), and
+  `agent.*` custom events for the agent's durable events (`agent.model_call_completed`,
+  `agent.tool_executed`, `agent.handed_off`, `agent.guardrail_blocked`), which carry no message content;
+- a `TokenUsageRecorded` for each model call that reports usage;
+- one `TraceEvent.AgentRunEnded` when the run ends: thread id, run id, the active agent, a status
+  (`completed`, `suspended`, `step_limit_reached`, `blocked:<guardrail>`, `cancelled`, `timed_out`,
+  `failed`), this turn's messages (from its user message on; empty when blocked, cancelled, timed
+  out or failed) and the thread's cumulative `UsageSummary`.
+
+A run that crashes without a terminal event is traced as `ErrorOccurred`, with a WARN, and has no
+`AgentRunEnded`. Message content reaches tracing only in `AgentRunEnded.messages`; a blocked turn's
+content is not in it. (The kernel's own `TracingSubscriber`, used for graphs that are not agents,
+names agent events `graph.custom`; `withTracing` on an agent names them `agent.*`.)
+
+| Backend | What `AgentRunEnded` shows |
+|---------|----------------------------|
+| Langfuse | One trace per run (trace id = run id), grouped in a session per thread (session id = thread id); input is the first user message, output the last assistant message; metadata holds the agent, status and usage; one span per message |
+| OpenTelemetry | An `INTERNAL` span "Agent Run" with thread, run, agent, status, message count and `gen_ai.usage.*` totals |
+| `TraceCollector` | A `SpanKind.AgentCall` span with the same attributes |
+| Console | One summary line |
+
 ### Environment Setup
 
 Langfuse is served by `llm4s-observability`:
@@ -433,8 +458,8 @@ tracing.traceEvent(TraceEvent.CustomEvent("cache_hit", ujson.Obj("key" -> "query
 // Trace token usage explicitly
 tracing.traceTokenUsage(usage, model = "gpt-4o", operation = "completion")
 
-// Trace an agent state snapshot (the agent does this after each step)
-tracing.traceEvent(agentState.toTraceEvent)
+// Trace a finished agent run (an agent built withTracing does this itself, once per run)
+tracing.traceEvent(TraceEvent.AgentRunEnded(threadId, runId, agent, status, messages, usage))
 
 // Trace costs
 tracing.traceCost(

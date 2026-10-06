@@ -659,7 +659,7 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 | Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only) | #1279 | Stage 1, if the agent loop needs it |
 | ~~A guardrail Block (any run-boundary `Left`) leaves the thread `Running` with no way forward, and an output Block leaves the blocked answer in state~~ **closed by #1350 and #1328** (§4.13: `CheckpointStatus.Failed`, the blocked turn removed, `AgentStatus.Blocked`) | #1279 | Stage 1 |
 | Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6 | #1279 | Stage 3 |
-| `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool` (**closed by #1328**); `ModelStep` streaming through live progress, `AgentEvent` replaced (#1329); `PlanRunner` rebuilt or removed (#1330) | #1269 | Stage 1 |
+| `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool` (**closed by #1328**); `ModelStep` streaming through live progress, `AgentEvent` replaced (**closed by #1329**); `PlanRunner` rebuilt or removed (#1330) | #1269 | Stage 1 |
 | Delete `CancellationToken` with the `PlanRunner` rebuild | #1270 | Stage 1 |
 | Prompt cancellation of SDK client calls on platform threads (today: prompt on virtual threads, where the runtime runs tasks) | #1270 | - |
 | Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
@@ -683,6 +683,8 @@ Closed by [#1327](https://github.com/llm4s/llm4s/issues/1327) (§4.11): per-node
 Closed by [#1331](https://github.com/llm4s/llm4s/issues/1331) (§4.12): embedding, reranker, MCP, image and speech clients under the `CancelledError` contract (left by #1270), and `ToolHints` read from MCP tool annotations in `llm4s-mcp` (left by #1279).
 
 Closed by [#1328](https://github.com/llm4s/llm4s/issues/1328) (§4.13): `Agent.run`, `continueConversation` and `runMultiTurn` on the runtime through `ToolLoop` and `AgentTool` (left by #1269), and, with #1350, a terminal outcome for a guardrail block - the thread `Failed` but usable, the blocked turn removed, `AgentStatus.Blocked` at the `Agent` (left by #1279).
+
+Closed by [#1329](https://github.com/llm4s/llm4s/issues/1329) (§4.14): `ModelStep` token streaming through live progress and the replacement of `AgentEvent` by `AgentEvents` run events (left by #1269).
 
 ### 4.10 Durable workflow API
 
@@ -889,7 +891,7 @@ Guardrails, pruning and errors:
 - **A blank query is refused before it is stored.** `Agent.run`/`start` refuse a blank query with a `ValidationError` before any thread is claimed. A `beforeAgent` that turns the query blank blocks the run (`ValidationError("query", ...)`, no update but a new thread's seed), so the thread is `Failed` and usable instead of `Running` with a user message every model call and every `recover` would reject; `Agent` returns it as `Left`.
 - **Pruning trims what is sent, not what is stored.** `ContextWindowMiddleware(config)` is a `wrapModelCall` middleware applying the configured `PruningStrategy`. It never separates a tool call from its result, never prunes the current turn (the latest user message onward), and the request always starts with a user message, so it may exceed the budget. The system prompt is outside the budget.
 - **Errors are `GraphError`s.** A provider, tool or model/tool-wrapper failure is `Left(GraphError...)`, provider errors as `GraphError.NodeFailed(cause)`; the thread stays `Running` and `recover` re-runs only failed or unstarted work. The error content a tool failure gives the model is `{"error": ...}`. Runtime refusals (`ThreadBusy`, `IncompleteRun`, `PendingInterrupts`) are returned unchanged. No agent error hierarchy is added.
-- **Tracing is the runtime's.** `withTracing` attaches `TracingSubscriber` to each run and emits the `graph.*` custom events of §4.6. `TraceEvent.AgentStateUpdated` is no longer emitted; the type stays in core until #1329 moves its consumers.
+- **Tracing is the runtime's.** `withTracing` attaches `TracingSubscriber` to each run and emits the `graph.*` custom events of §4.6. `TraceEvent.AgentStateUpdated` is no longer emitted; #1329 removed the type and replaced it with `TraceEvent.AgentRunEnded` (§4.14).
 
 Callers moved with it: `AssistantAgent` builds its agent once and keeps a `ThreadId`; `AgentIO` and `AgentZ` (`LLMClientIO.agent(id)(configure)`, `LLMClientZ.agent(id)(configure)`) expose `run`, `continueConversation`, `recover` and `resume`, fiber cancellation cancels the run, and a thrown exception arrives as `NodeFailed` carrying the original; `CodeWorker.executeTask` returns `Result[AgentResult]` and loses `traceLogPath`; the samples use the builder.
 
@@ -897,9 +899,72 @@ Source breaks, with no shims (the CHANGELOG lists the same): `AgentState`, `Agen
 
 Limits (owners in §4.9):
 
-- Agent-level event subscription, model token streaming and `AgentEvent`'s replacement are #1329. 0.5.0 is not cut between #1328 and #1329.
+- Agent-level event subscription, model token streaming and `AgentEvent`'s replacement: closed by #1329 (§4.14).
 - `PlanRunner`, `DAG`, `TypedAgent` and `CancellationToken` are #1330.
 - `ToolLoop` sets no retry or cache policy (#1327) on its nodes: a failed model step or tool call is continued by `recover`. Durable checkpointers are Stage 2.
+
+### 4.14 Stage 1 slice 3: events and tracing ([#1329](https://github.com/llm4s/llm4s/issues/1329))
+
+Implemented. Spec: `docs/superpowers/specs/2026-10-06-events-and-tracing-design.md`; guide:
+`docs/guide/agents/streaming.md`.
+
+Decisions:
+
+- **Durable events carry no content.** Agent events stored in the log hold identifiers, names, usage,
+  durations and outcomes, never assistant text, thinking, tool arguments or results, or guardrail
+  reasons. Content is live-only, and reaches tracing once, in `AgentRunEnded.messages`, from the run's
+  final state, where a Block has already removed the blocked turn. The §4.13 Block guarantee is
+  unchanged.
+- **One vocabulary, typed payloads.** Listeners receive the kernel's `StreamEvent`; agent events are
+  `EventType[A]` values (`org.llm4s.agent.graph`) in `org.llm4s.agent.events.AgentEvents`, named
+  `agent.<snake_case>`, version 1. `EventType.emit` is durable (`RunEvent.Custom`), `progress` is
+  live (`StreamEvent.Live`, which gains `name` and `version`), and `unapply` is `None` for another
+  name or version or an undecodable payload. Durable: `ModelCallCompleted`, `ToolExecuted`,
+  `HandedOff`, `GuardrailBlocked`, emitted by the node whose task commits them, so they inherit the
+  commit gate (no duplicate from a retry, failed task or `recover`). Live: `ModelCallStarted`,
+  `TextDelta`, `ThinkingDelta`, `ToolCallStarted`, `ToolResult`.
+- **Streaming is opt-in** (`AgentBuilder.withStreaming()`, not part of the graph fingerprint).
+  `ModelStep.next` takes the call (`next(messages, tools, call)`: the `RunContext`, agent id and
+  attempt) so a streaming step sends deltas and `callModel` numbers attempts under a retrying
+  `wrapModelCall`.
+- **Observers at admission.** `GraphRuntime.start`/`recover`/`resume` take `observer: Option[Observer]`,
+  subscribed after the claim commits and before the run thread starts. `AgentRun.subscribe(capacity)`
+  is run-scoped (this run's `Durable`, `Live`, `LiveGap`, and a `Disconnected` only for `Lagging` or
+  `ListenerFailed`), ending after the terminal event. `Agent.stream`, `streamResume` and
+  `streamRecover` subscribe a listener at admission (capacity `Agent.StreamCapacity`, 1024).
+- **`AgentRunEnded` replaces `AgentStateUpdated`.** One event per traced run - thread, run, active
+  agent, status, this turn's messages, the thread's cumulative `UsageSummary` - sent by `AgentTracing`
+  on the run-scoped subscription together with the run's `graph.*`/`agent.*` custom events and a
+  `TokenUsageRecorded` per model call. A run is recognised as Blocked by its own durable
+  `agent.guardrail_blocked` event, not the thread's latest checkpoint, so a later run on the thread
+  is never mistaken for it. A run that crashes without a terminal event is traced as `ErrorOccurred`
+  with a WARN. Langfuse: trace id = run id, session id = thread id; OpenTelemetry: an "Agent Run" span;
+  `TraceCollector`: an `AgentCall` span.
+- **fs2 and ZIO.** `AgentIO.stream*` and `AgentZ.stream*` yield `AgentStreamItem.Event | Done` over a
+  bounded queue; interrupting, stopping early or lagging cancels the turn.
+
+Refinements found in implementation: `Completion` has no finish reason, so `ModelCallCompleted` has no
+`finishReason`; the model step needs the attempt, hence `next(messages, tools, call)` rather than a
+bare `RunContext`; `TokenUsage` has no codec, so the durable payload carries `CallUsage` (plain ints).
+
+Specs added: `EventTypeSpec`, `ObserverAdmissionSpec`, `AgentStreamingSpec`, `AgentEventsSpec`
+(including that no `agent.*` payload holds message content), `AgentRunSubscribeSpec`,
+`AgentRunTracingSpec`, `AgentIOSpec` and `AgentZSpec` stream cases.
+
+Source breaks, with no shims (the CHANGELOG lists the same): `RunContext.progress(payload)` is
+`progress(name, version, payload)`; `ModelStep.next` takes the call; `TraceEvent.AgentStateUpdated`
+and `AgentState#toTraceEvent` are removed for `AgentRunEnded`; `TracingSubscriber` no longer serves
+`Agent`.
+
+Limits:
+
+- Java (`JAgent`) and Kotlin (`AgentKt`) event streams are not yet available; a follow-up issue covers them.
+- The kernel's `TaskFailed` and `RunFailed` events store error messages, so a guardrail reason that quotes
+  user text reaches the log through them. This predates #1329; `agent.*` payloads are content-free.
+- Live events are not replayed, and a late `AgentRun.subscribe` misses earlier ones.
+- `AgentRunEnded.usage` is the thread's cumulative usage, not per run.
+- An approved or edited tool call yields two `agent.tool_executed` events for one call id across runs.
+- `agent.guardrail_blocked` is a guardrail's block only; other middleware refusals emit no agent event.
 
 ## 5. Harness capabilities
 

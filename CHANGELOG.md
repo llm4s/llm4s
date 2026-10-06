@@ -596,7 +596,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `ToolLoop.build(id, version, root, agents: Vector[LoopAgent])` builds an agent family;
     `ModelStep.next` returns the `Completion`.
   - Samples `StreamingAgentExample`, `StreamingWithToolsExample`, `EventCollectionExample` and
-    `AsyncToolAgentExample` are deleted.
+    `AsyncToolAgentExample` are deleted (the first three return in #1329, on `Agent.stream`).
   - `GuardrailMiddleware`'s Block error is `GuardrailBlocked(guardrail, reason)` (the first failing
     guardrail's name, every failure's error joined), no longer `CompositeGuardrail`'s aggregate.
   - `llm4s-java-api`: `JAgent.run(query)` returns `LlmResult<AgentResult>`; tools are given to
@@ -614,6 +614,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retried only when `isRecoverableStatus` (5xx, 429, 408), as `ReliableClient`'s `RetryPolicy` already
   did; a 404 or other permanent status comes back unchanged at once. The Scaladoc no longer calls the
   schedule exponential and describes each type's delay.
+- **Agent run events, streaming and run-end tracing** ([#1329](https://github.com/llm4s/llm4s/issues/1329),
+  BREAKING, `llm4s-core`, `llm4s-agent`, `llm4s-observability`, `llm4s-observability-otel`,
+  `llm4s-effect`, `llm4s-zio`): slice 3 of the Stage 1 migration, which restores the event stream
+  #1328 removed, on the runtime's own events. Design: `docs/design/typed-agent-runtime-design.md`
+  §4.14; guide: `docs/guide/agents/streaming.md`. Durable agent events (`agent.*`) carry no message
+  content; content is live-only and, for tracing, in `AgentRunEnded.messages`. Source breaks, with no shims:
+  - `RunContext.progress(payload)` -> `progress(name, version, payload)`, or an `EventType`;
+    `StreamEvent.Live` gains `name` and `version`.
+  - `ModelStep.next(messages, tools)` -> `next(messages, tools, call)`.
+  - `GraphRuntime.start`/`recover`/`resume` gain a defaulted `observer` parameter (source-compatible
+    for callers, not for subclasses).
+  - `TraceEvent.AgentStateUpdated` is removed, with `AgentState#toTraceEvent`: use
+    `TraceEvent.AgentRunEnded`.
+  - `TracingSubscriber` no longer serves `Agent`; `withTracing` traces each run through
+    `AgentTracing`, with `agent.*` event names where the kernel subscriber uses `graph.custom`.
+  New:
+  - `AgentBuilder.withStreaming()`; `Agent.stream`, `streamResume` and `streamRecover` take a
+    listener, subscribed at admission so it sees every event of the run; `AgentRun.subscribe(capacity)`
+    is run-scoped; `Agent.StreamCapacity` is 1024.
+  - `org.llm4s.agent.events.AgentEvents` (`ModelCallStarted`, `ModelCallCompleted`, `TextDelta`,
+    `ThinkingDelta`, `ToolCallStarted`, `ToolResult`, `ToolExecuted`, `HandedOff`,
+    `GuardrailBlocked`) with typed extractors; `EventType[A]` and `Observer` in
+    `org.llm4s.agent.graph`.
+  - `AgentIO.stream*` (fs2) and `AgentZ.stream*` (ZIO ZStream) yield `AgentStreamItem.Event` or
+    `Done`; stopping early, or a consumer too slow for the buffer, cancels the turn.
+  - `TraceEvent.AgentRunEnded(threadId, runId, agent, status, messages, usage)`, sent once per
+    traced run, with `TokenUsageRecorded` per model call. `usage` is the thread's cumulative usage.
+    Langfuse traces now use the run id as the trace id and the thread id as the session id (a
+    conversation's turns group); OpenTelemetry gets an "Agent Run" span; `TraceCollector` an
+    `AgentCall` span.
+  - Samples `StreamingAgentExample`, `StreamingWithToolsExample` and `EventCollectionExample` are
+    back, with `AgentStreamIOExample` and `AgentStreamZIOExample`.
+  Limits: Java and Kotlin streams are a follow-up; the kernel's `TaskFailed`/`RunFailed` events
+  store error messages, which may quote content.
 - **Approval resumes through the middleware chain; `ToolLoop` gains a `finish` node**
   ([#1279](https://github.com/llm4s/llm4s/issues/1279)): `Approve` now runs the whole middleware
   chain again with `ToolContext.approved = true`, where it skipped the policy; a deny rule that

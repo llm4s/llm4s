@@ -156,13 +156,34 @@ Since 0.3.2 ([#903](https://github.com/llm4s/llm4s/pull/903)) llm4s no longer re
 
 ---
 
+## Agent event stream replaced (#1329)
+
+The `AgentEvent` hierarchy and `runWithEvents` are replaced by `Agent.stream` and the `AgentEvents`
+vocabulary; `TraceEvent.AgentStateUpdated` is replaced by `TraceEvent.AgentRunEnded`.
+
+| Before | After |
+|---|---|
+| `agent.runWithEvents(query)(onEvent)` | `agent.stream(threadId, query)(listener).flatMap(_.await())` |
+| `runCollectingEvents` | collect in the listener, or replay with `GraphRuntime.subscribe(threadId, afterSeq = 0)` |
+| `AgentEvent.TextDelta(delta)` | `AgentEvents.TextDelta(d)` (`d.text`, `d.attempt`) with `withStreaming()` |
+| `ToolCallStarted`/`ToolCallCompleted`/`ToolCallFailed` | `AgentEvents.ToolCallStarted`, `ToolResult` (live), `ToolExecuted` (durable, with outcome) |
+| `HandoffStarted`/`HandoffCompleted` | `AgentEvents.HandedOff` |
+| `InputGuardrail*`/`OutputGuardrail*` | `AgentEvents.GuardrailBlocked` (on a block); the outcome on `AgentStatus.Blocked` |
+| `AgentStarted`/`AgentCompleted`/`AgentFailed`, `StepStarted`/`StepCompleted` | kernel events: `RunStarted`, `RunCompleted`, `RunFailed`; `ModelCallStarted`/`ModelCallCompleted` |
+| `TraceEvent.AgentStateUpdated` | `TraceEvent.AgentRunEnded` |
+| `context.progress(payload)` | `context.progress(name, version, payload)`, or an `EventType` |
+| `ModelStep.next(messages, tools)` | `next(messages, tools, call)` |
+
+See the [streaming guide](../guide/agents/streaming.md).
+
+---
+
 ## Towards v1.0
 
 > **Note:** v1.0 has not shipped yet. This section will be completed when the 1.0 release is cut.
 
 Expected areas of change before 1.0:
 
-- Land and stabilise the agent event stream that replaces the removed `AgentEvent` hierarchy ([#1329](https://github.com/llm4s/llm4s/issues/1329))
 - Decide on cross-module artifact split (`llm4s-core` vs `llm4s-agent` vs `llm4s-rag`)
 - Remove all remaining `0.x`-deprecated symbols
 - Enforce MiMa binary-compatibility checks against the 1.0 baseline (see [issue #924](https://github.com/llm4s/llm4s/issues/924))
