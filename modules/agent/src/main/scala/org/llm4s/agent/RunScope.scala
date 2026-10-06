@@ -145,7 +145,8 @@ private[agent] object RunScope:
 
   /**
    * How long a scope whose run ended without a terminal event waits for its subscription to go
-   * idle before ending itself.
+   * idle before ending itself. A heuristic, not a barrier;
+   * [[https://github.com/llm4s/llm4s/issues/1378 #1378]] replaces it with a deterministic one.
    */
   val Quiet: FiniteDuration = 1.second
 

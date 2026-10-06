@@ -651,7 +651,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `AgentCall` span.
   - Samples `StreamingAgentExample`, `StreamingWithToolsExample` and `EventCollectionExample` are
     back, with `AgentStreamIOExample` and `AgentStreamZIOExample`.
-  Limits: Java and Kotlin streams are a follow-up; the kernel's `TaskFailed`/`RunFailed` events
+  Limits: Java and Kotlin streams are a follow-up ([#1377](https://github.com/llm4s/llm4s/issues/1377)); the kernel's `TaskFailed`/`RunFailed` events
   store error messages, which may quote content.
 - **Approval resumes through the middleware chain; `ToolLoop` gains a `finish` node**
   ([#1279](https://github.com/llm4s/llm4s/issues/1279)): `Approve` now runs the whole middleware

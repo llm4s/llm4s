@@ -971,12 +971,12 @@ and `AgentState#toTraceEvent` are removed for `AgentRunEnded`; `TracingSubscribe
 
 Limits:
 
-- Java (`JAgent`) and Kotlin (`AgentKt`) event streams are not yet available; a follow-up issue covers them.
+- Java (`JAgent`) and Kotlin (`AgentKt`) event streams are not yet available; [#1377](https://github.com/llm4s/llm4s/issues/1377) covers them.
 - The kernel's `TaskFailed` and `RunFailed` events store error messages, so a guardrail reason that quotes
   user text reaches the log through them. This predates #1329; `agent.*` payloads are content-free.
 - Live events are not replayed, and a late `AgentRun.subscribe` misses earlier ones.
 - A run that ends without a terminal event (a crash, or a failed terminal commit) ends its listeners
-  after a 1 s quiet period, not at a deterministic barrier; a follow-up replaces it.
+  after a 1 s quiet period, not at a deterministic barrier; [#1378](https://github.com/llm4s/llm4s/issues/1378) replaces it.
 - An approved or edited tool call yields two `agent.tool_executed` events for one call id across runs.
 - `agent.guardrail_blocked` is a guardrail's block only; other middleware refusals emit no agent event.
 

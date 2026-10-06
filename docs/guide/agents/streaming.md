@@ -189,7 +189,7 @@ listener { case Checked(v) => ... } // None for another name, version or an unde
 
 ## Limits
 
-- **Java and Kotlin streams** are not yet available. A follow-up issue covers a listener stream for
+- **Java and Kotlin streams** are not yet available. [#1377](https://github.com/llm4s/llm4s/issues/1377) covers a listener stream for
   `JAgent` and a `Flow` for `AgentKt`.
 - **Kernel failure messages.** `TaskFailed` and `RunFailed` store an error message. If a guardrail's
   or tool's error quotes content (a guardrail reason that echoes the user's text), that text reaches
