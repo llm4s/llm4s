@@ -109,7 +109,7 @@ class OpenTelemetryTracing(
     }
 
   private[trace] def getSpanKind(event: TraceEvent): SpanKind = event match {
-    case _: TraceEvent.AgentInitialized | _: TraceEvent.AgentStateUpdated | _: TraceEvent.TokenUsageRecorded =>
+    case _: TraceEvent.AgentInitialized | _: TraceEvent.AgentRunEnded | _: TraceEvent.TokenUsageRecorded =>
       SpanKind.INTERNAL
     case _ =>
       SpanKind.CLIENT
@@ -191,15 +191,19 @@ class OpenTelemetryTracing(
             .build()
         )
 
-      case e: TraceEvent.AgentStateUpdated =>
+      case e: TraceEvent.AgentRunEnded =>
         (
-          "Agent State Updated",
+          "Agent Run",
           Attributes
             .builder()
-            .put(TraceAttributes.EventType, "state-update")
+            .put(TraceAttributes.EventType, "agent-run")
+            .put("thread_id", e.threadId)
+            .put("run_id", e.runId)
+            .put("agent", e.agent)
             .put("status", e.status)
-            .put("message_count", e.messageCount.toLong)
-            .put("log_count", e.logCount.toLong)
+            .put("message_count", e.messages.size.toLong)
+            .put("gen_ai.usage.input_tokens", e.usage.inputTokens)
+            .put("gen_ai.usage.output_tokens", e.usage.outputTokens)
             .build()
         )
 

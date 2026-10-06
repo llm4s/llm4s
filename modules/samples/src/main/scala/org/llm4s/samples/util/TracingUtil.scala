@@ -39,16 +39,18 @@ object TracingUtil {
   /** Trace the state an agent run ended in */
   def traceAgentStateUpdate(tracing: Tracing, result: AgentResult): Unit =
     tracing.traceEvent(
-      TraceEvent.AgentStateUpdated(
+      TraceEvent.AgentRunEnded(
+        threadId = result.threadId.value,
+        runId = result.runId.value,
+        agent = result.activeAgent.value,
         status = result.status match {
-          case AgentStatus.Completed(_)     => "Complete"
-          case AgentStatus.Blocked(_, _)    => "Blocked"
-          case AgentStatus.StepLimitReached => "StepLimitReached"
-          case AgentStatus.Suspended(_, _)  => "Suspended"
+          case AgentStatus.Completed(_)     => "completed"
+          case AgentStatus.Blocked(g, _)    => s"blocked:$g"
+          case AgentStatus.StepLimitReached => "step_limit_reached"
+          case AgentStatus.Suspended(_, _)  => "suspended"
         },
-        messageCount = result.messages.size,
-        logCount = 0,
-        messages = result.messages
+        messages = result.messages,
+        usage = result.usage
       )
     )
 

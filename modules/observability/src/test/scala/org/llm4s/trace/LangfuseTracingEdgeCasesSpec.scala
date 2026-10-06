@@ -9,6 +9,9 @@ import scala.concurrent.duration.*
 
 class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
+  private def ended(status: String, messages: Seq[Message]): TraceEvent.AgentRunEnded =
+    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", status, messages, UsageSummary())
+
   private def makeTracing(mockClient: MockHttpClient) = new LangfuseTracing(
     langfuseUrl = "https://cloud.langfuse.com",
     publicKey = "pk-test",
@@ -103,20 +106,20 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   // =========================================================================
-  // traceEvent - AgentStateUpdated
+  // traceEvent - AgentRunEnded
   // =========================================================================
 
-  it should "handle AgentStateUpdated event" in {
+  it should "handle AgentRunEnded event" in {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val result = tracing.traceEvent(TraceEvent.AgentStateUpdated("InProgress", 5, 3))
+    val result = tracing.traceEvent(ended("failed", Seq.empty))
 
     result.isRight shouldBe true
     val body  = ujson.read(mock.lastBody.get)
     val event = body("batch")(0)
     event("type").str shouldBe "trace-create"
-    event("body")("metadata")("status").str shouldBe "InProgress"
+    event("body")("metadata")("status").str shouldBe "failed"
   }
 
   // =========================================================================
@@ -251,19 +254,16 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   // =========================================================================
-  // AgentStateUpdated carrying the conversation (hierarchical trace).
-  // This was traceAgentState(AgentState) until D5 (#1133) made it an ordinary event.
+  // AgentRunEnded carrying the conversation (hierarchical trace): trace id = run, session = thread.
   // =========================================================================
 
   it should "create hierarchical trace for agent state with messages" in {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val event = TraceEvent.AgentStateUpdated(
-      status = "Complete",
-      messageCount = 3,
-      logCount = 1,
-      messages = Seq(
+    val event = ended(
+      "completed",
+      Seq(
         SystemMessage("You are helpful"),
         UserMessage("Hello"),
         AssistantMessage(Some("Hi there!"), Seq.empty)
@@ -284,9 +284,11 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     batch(0)("type").str shouldBe "trace-create"
     batch(0)("body")("input").str shouldBe "Hello"
     batch(0)("body")("output").str shouldBe "Hi there!"
-    batch(0)("body")("metadata")("status").str shouldBe "Complete"
+    batch(0)("body")("id").str shouldBe "run-1"
+    batch(0)("body")("sessionId").str shouldBe "thread-1"
+    batch(0)("body")("metadata")("status").str shouldBe "completed"
+    batch(0)("body")("metadata")("agent").str shouldBe "assistant"
     batch(0)("body")("metadata")("message_count").num shouldBe 3
-    batch(0)("body")("metadata")("log_count").num shouldBe 1
 
     // Child spans
     batch(1)("type").str shouldBe "span-create"
@@ -305,12 +307,9 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracing = makeTracing(mock)
     val call    = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
 
-    val event = TraceEvent.AgentStateUpdated(
-      status = "Complete",
-      messageCount = 4,
-      logCount = 0,
-      messages =
-        Seq(UserMessage("1 + 2?"), AssistantMessage(None, Seq(call)), ToolMessage("3", "call-1"), AssistantMessage("3"))
+    val event = ended(
+      "completed",
+      Seq(UserMessage("1 + 2?"), AssistantMessage(None, Seq(call)), ToolMessage("3", "call-1"), AssistantMessage("3"))
     )
 
     tracing.traceEvent(event) shouldBe Right(())
@@ -329,11 +328,11 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     (spans.map(_("id").str) ++ spans.map(_("body")("id").str)).distinct should have size 8
   }
 
-  it should "send the summary trace when the state event carries no messages" in {
+  it should "send the summary trace when the run carries no messages" in {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val event = TraceEvent.AgentStateUpdated(status = "InProgress", messageCount = 0, logCount = 0)
+    val event = ended("blocked:profanity", Seq.empty)
 
     val result = tracing.traceEvent(event)
 
@@ -342,18 +341,15 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val batch = ujson.read(mock.lastBody.get)("batch").arr
     batch should have size 1
     batch(0)("body")("metadata")("message_count").num shouldBe 0
+    batch(0)("body")("input").str shouldBe ""
+    batch(0)("body")("output").str shouldBe ""
   }
 
   it should "report a failed export of the conversation trace" in {
     val mock    = new MockHttpClient(HttpResponse(500, "boom"))
     val tracing = makeTracing(mock)
 
-    val event = TraceEvent.AgentStateUpdated(
-      status = "Complete",
-      messageCount = 1,
-      logCount = 0,
-      messages = Seq(UserMessage("Hello"))
-    )
+    val event = ended("completed", Seq(UserMessage("Hello")))
 
     tracing.traceEvent(event).isLeft shouldBe true
   }

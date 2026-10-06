@@ -155,10 +155,10 @@ class LangfuseTracing(
   }
 
   def traceEvent(event: TraceEvent): Result[Unit] = event match {
-    // An agent state snapshot that carries its conversation becomes one trace with a child
-    // span per message. This was traceAgentState(AgentState) until D5 (#1133).
-    case e: TraceEvent.AgentStateUpdated if e.messages.nonEmpty => traceConversation(e)
-    case other                                                  => traceSingleEvent(other)
+    // An ended agent run becomes one trace (id = run, session = thread) with a child span per
+    // message, whether or not it carries messages.
+    case e: TraceEvent.AgentRunEnded => traceConversation(e)
+    case other                       => traceSingleEvent(other)
   }
 
   private def traceSingleEvent(event: TraceEvent): Result[Unit] = {
@@ -282,38 +282,19 @@ class LangfuseTracing(
           )
         )
 
-      case e: TraceEvent.AgentStateUpdated =>
+      // `traceEvent` sends an ended run through `traceConversation`; this case keeps the match
+      // exhaustive and records the flat summary if it is ever reached directly.
+      case e: TraceEvent.AgentRunEnded =>
         ujson.Obj(
           "id"        -> uuid,
           "timestamp" -> now,
-          "type"      -> "trace-create",
+          "type"      -> "event-create",
           "body" -> ujson.Obj(
-            "id"          -> traceId,
-            "timestamp"   -> now,
-            "environment" -> environment,
-            "release"     -> release,
-            "version"     -> version,
-            "public"      -> true,
-            "name"        -> "LLM4S Agent Run",
-            "input" -> ujson.Obj(
-              "status"        -> e.status,
-              "message_count" -> e.messageCount,
-              "log_count"     -> e.logCount
-            ),
-            "output" -> ujson.Obj(
-              "status"   -> e.status,
-              "messages" -> e.messageCount,
-              "logs"     -> e.logCount
-            ),
-            "userId"    -> "llm4s-user",
-            "sessionId" -> s"session-${System.currentTimeMillis()}",
-            "metadata" -> ujson.Obj(
-              "framework"     -> "llm4s",
-              "status"        -> e.status,
-              "message_count" -> e.messageCount,
-              "log_count"     -> e.logCount
-            ),
-            "tags" -> ujson.Arr("llm4s", "agent", "state-update")
+            "id"        -> uuid,
+            "timestamp" -> now,
+            "traceId"   -> e.runId,
+            "name"      -> e.eventType,
+            "metadata"  -> e.toJson
           )
         )
 
@@ -509,18 +490,18 @@ class LangfuseTracing(
     sendBatch(batchEvents.toSeq)
   }
 
-  private def traceConversation(state: TraceEvent.AgentStateUpdated): Result[Unit] = {
+  private def traceConversation(run: TraceEvent.AgentRunEnded): Result[Unit] = {
     // Send hierarchical structure: one main trace with child spans for each message
     val batchEvents = scala.collection.mutable.ArrayBuffer[ujson.Obj]()
-    val traceId     = uuid
-    val sessionId   = s"session-${System.currentTimeMillis()}"
+    val traceId     = run.runId
+    val sessionId   = run.threadId
 
     // Get the first user message and last assistant message for main trace input/output
-    val firstUserMessage = state.messages.find(_.isInstanceOf[org.llm4s.llmconnect.model.UserMessage])
+    val firstUserMessage = run.messages.find(_.isInstanceOf[org.llm4s.llmconnect.model.UserMessage])
     val lastAssistantMessage =
-      state.messages.findLast(_.isInstanceOf[org.llm4s.llmconnect.model.AssistantMessage])
+      run.messages.findLast(_.isInstanceOf[org.llm4s.llmconnect.model.AssistantMessage])
 
-    // 1. Create the main trace with exact input/output like old system
+    // 1. Create the main trace; a blocked run has neither input nor output
     val mainTrace = ujson.Obj(
       "id"        -> traceId,
       "timestamp" -> nowIso,
@@ -533,15 +514,19 @@ class LangfuseTracing(
         "version"     -> version,
         "public"      -> true,
         "name"        -> "LLM4S Agent Run",
-        "input"       -> ujson.Str(firstUserMessage.map(_.content).getOrElse("No user input")),
-        "output"      -> ujson.Str(lastAssistantMessage.map(_.content).getOrElse("No response")),
+        "input"       -> ujson.Str(firstUserMessage.map(_.content).getOrElse("")),
+        "output"      -> ujson.Str(lastAssistantMessage.map(_.content).getOrElse("")),
         "userId"      -> "llm4s-user",
         "sessionId"   -> sessionId,
         "metadata" -> ujson.Obj(
           "framework"     -> "llm4s",
-          "status"        -> state.status,
-          "message_count" -> state.messageCount,
-          "log_count"     -> state.logCount
+          "agent"         -> run.agent,
+          "status"        -> run.status,
+          "thread_id"     -> run.threadId,
+          "message_count" -> run.messages.size,
+          "input_tokens"  -> run.usage.inputTokens.toDouble,
+          "output_tokens" -> run.usage.outputTokens.toDouble,
+          "total_cost"    -> run.usage.totalCost.toDouble
         ),
         "tags" -> ujson.Arr("llm4s", "agent", "conversation")
       )
@@ -549,7 +534,7 @@ class LangfuseTracing(
     batchEvents += mainTrace
 
     // 2. Create child spans for each message
-    state.messages.zipWithIndex.foreach { case (message, index) =>
+    run.messages.zipWithIndex.foreach { case (message, index) =>
       val messageName = message match {
         case _: org.llm4s.llmconnect.model.SystemMessage    => "System Message"
         case _: org.llm4s.llmconnect.model.UserMessage      => "User Input"

@@ -66,11 +66,13 @@ object EnhancedTracingExample {
         // Trace a simple agent state snapshot
         val finalMessages = conversation.messages :+ completion.message
         tracer.traceEvent(
-          TraceEvent.AgentStateUpdated(
-            status = "Complete",
-            messageCount = finalMessages.size,
-            logCount = 2,
-            messages = finalMessages
+          TraceEvent.AgentRunEnded(
+            threadId = "sample-thread",
+            runId = java.util.UUID.randomUUID().toString,
+            agent = "sample-agent",
+            status = "completed",
+            messages = finalMessages,
+            usage = UsageSummary()
           )
         )
 

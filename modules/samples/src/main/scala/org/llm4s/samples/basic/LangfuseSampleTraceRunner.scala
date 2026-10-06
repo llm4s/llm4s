@@ -1,7 +1,7 @@
 package org.llm4s.samples.basic
 
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.model.{ AssistantMessage, SystemMessage, ToolCall, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, SystemMessage, ToolCall, ToolMessage, UsageSummary, UserMessage }
 import org.llm4s.trace.{ ConsoleTracing, TraceEvent, Tracing }
 
 object LangfuseSampleTraceRunner {
@@ -16,11 +16,13 @@ object LangfuseSampleTraceRunner {
     val userMsg      = UserMessage("How do I integrate Scala with Langfuse?")
     val sysMsg       = SystemMessage("You are a helpful assistant.")
     val messages     = Seq(sysMsg, userMsg, assistantMsg, toolMsg)
-    val fakeState = TraceEvent.AgentStateUpdated(
-      status = "Complete",
-      messageCount = messages.size,
-      logCount = 2,
-      messages = messages
+    val fakeState = TraceEvent.AgentRunEnded(
+      threadId = "sample-thread",
+      runId = java.util.UUID.randomUUID().toString,
+      agent = "sample-agent",
+      status = "completed",
+      messages = messages,
+      usage = UsageSummary()
     )
     val tracer = Llm4sConfig
       .tracing()

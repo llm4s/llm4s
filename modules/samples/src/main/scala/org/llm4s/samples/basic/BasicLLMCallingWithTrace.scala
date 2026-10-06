@@ -45,11 +45,13 @@ object BasicLLMCallingWithTrace {
             // Trace the agent state after completion
             val finalMessages = conversation.messages :+ completion.message
             tracer.traceEvent(
-              TraceEvent.AgentStateUpdated(
-                status = "Complete",
-                messageCount = finalMessages.size,
-                logCount = 1,
-                messages = finalMessages
+              TraceEvent.AgentRunEnded(
+                threadId = "sample-thread",
+                runId = java.util.UUID.randomUUID().toString,
+                agent = "sample-agent",
+                status = "completed",
+                messages = finalMessages,
+                usage = UsageSummary()
               )
             )
 

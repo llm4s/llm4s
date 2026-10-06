@@ -1,6 +1,6 @@
 package org.llm4s.trace
 
-import org.llm4s.llmconnect.model.{ AssistantMessage, EmbeddingUsage, TokenUsage, UserMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, EmbeddingUsage, TokenUsage, UsageSummary, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -150,34 +150,29 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
     json("total_tokens").num shouldBe 150
   }
 
-  // ============ AgentStateUpdated ============
+  // ============ AgentRunEnded ============
 
-  "TraceEvent.AgentStateUpdated" should "have correct event type" in {
-    val event = TraceEvent.AgentStateUpdated("running", 5, 10, timestamp = fixedTimestamp)
-
-    event.eventType shouldBe "agent_state_updated"
-    event.status shouldBe "running"
-    event.messageCount shouldBe 5
-    event.logCount shouldBe 10
-  }
-
-  it should "serialize to JSON correctly" in {
-    val event = TraceEvent.AgentStateUpdated("completed", 10, 20, timestamp = fixedTimestamp)
-
-    val json = event.toJson
-
-    json("event_type").str shouldBe "agent_state_updated"
+  "AgentRunEnded" should "serialise a flat summary without messages" in {
+    val usage = UsageSummary().add("m", TokenUsage(10, 5, 15), None)
+    val e = TraceEvent.AgentRunEnded(
+      "thread-1",
+      "run-1",
+      "assistant",
+      "completed",
+      Seq(UserMessage("hi"), AssistantMessage("hello")),
+      usage,
+      Instant.EPOCH
+    )
+    e.eventType shouldBe "agent_run_ended"
+    val json = e.toJson
+    json("thread_id").str shouldBe "thread-1"
+    json("run_id").str shouldBe "run-1"
+    json("agent").str shouldBe "assistant"
     json("status").str shouldBe "completed"
-    json("message_count").num shouldBe 10
-    json("log_count").num shouldBe 20
-  }
-
-  it should "carry the conversation for backends, but keep it out of the flat JSON summary" in {
-    val messages = Seq(UserMessage("hi"), AssistantMessage(Some("hello"), Seq.empty))
-    val event    = TraceEvent.AgentStateUpdated("completed", 2, 0, messages, fixedTimestamp)
-
-    event.messages shouldBe messages
-    event.toJson.obj.keySet shouldBe Set("event_type", "timestamp", "status", "message_count", "log_count")
+    json("message_count").num shouldBe 2
+    json("input_tokens").num shouldBe 10
+    json("output_tokens").num shouldBe 5
+    json.obj.contains("messages") shouldBe false
   }
 
   // ============ CustomEvent ============
@@ -311,7 +306,7 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
       TraceEvent.ToolExecuted("t", "i", "o", 0.millis, true, fixedTimestamp),
       TraceEvent.ErrorOccurred(new Exception(), "", fixedTimestamp),
       TraceEvent.TokenUsageRecorded(TokenUsage(0, 0, 0), "m", "o", fixedTimestamp),
-      TraceEvent.AgentStateUpdated("s", 0, 0, timestamp = fixedTimestamp),
+      TraceEvent.AgentRunEnded("t", "r", "a", "s", Seq.empty, UsageSummary(), fixedTimestamp),
       TraceEvent.CustomEvent("n", ujson.Obj(), fixedTimestamp),
       TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(0, 0), "m", "o", 0, fixedTimestamp),
       TraceEvent.CostRecorded(0.0, "m", "o", 0, "t", fixedTimestamp),
@@ -328,7 +323,7 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
       TraceEvent.ToolExecuted("t", "i", "o", 0.millis, true),
       TraceEvent.ErrorOccurred(new Exception("e"), ""),
       TraceEvent.TokenUsageRecorded(TokenUsage(0, 0, 0), "m", "o"),
-      TraceEvent.AgentStateUpdated("s", 0, 0),
+      TraceEvent.AgentRunEnded("t", "r", "a", "s", Seq.empty, UsageSummary()),
       TraceEvent.CustomEvent("n", ujson.Obj()),
       TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(0, 0), "m", "o", 0),
       TraceEvent.CostRecorded(0.0, "m", "o", 0, "t"),

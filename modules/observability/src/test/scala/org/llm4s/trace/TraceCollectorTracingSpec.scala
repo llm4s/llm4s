@@ -1,6 +1,7 @@
 package org.llm4s.trace
 
 import cats.Id
+import org.llm4s.llmconnect.model.{ AssistantMessage, TokenUsage, UsageSummary, UserMessage }
 import org.llm4s.trace.model.{ SpanKind, SpanStatus }
 import org.llm4s.trace.store.InMemoryTraceStore
 import org.scalatest.{ BeforeAndAfterEach, LoneElement }
@@ -121,27 +122,39 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     span.attributes("hit").asBoolean shouldBe Some(false)
   }
 
-  it should "convert AgentInitialized and AgentStateUpdated to AgentCall spans" in {
-    val initEvent   = TraceEvent.AgentInitialized("test query", Vector("tool1", "tool2"))
-    val updateEvent = TraceEvent.AgentStateUpdated("running", 5, 10)
+  it should "convert AgentInitialized and AgentRunEnded to AgentCall spans" in {
+    val initEvent = TraceEvent.AgentInitialized("test query", Vector("tool1", "tool2"))
+    val endEvent  = TraceEvent.AgentRunEnded("t", "r", "a", "completed", Seq.empty, UsageSummary())
     collector.traceEvent(initEvent) shouldBe Right(())
-    collector.traceEvent(updateEvent) shouldBe Right(())
+    collector.traceEvent(endEvent) shouldBe Right(())
 
     val spans = store.getSpans(collector.traceId)
     spans should have size 2
     spans.foreach(_.kind shouldBe SpanKind.AgentCall)
   }
 
-  // Agent runs used to reach the store through `traceAgentState`, which named this span
-  // `agent-state-update`. They now arrive as an event and take its event type, like every other span.
-  it should "name the agent state span after its event type and keep the old attributes" in {
-    collector.traceEvent(TraceEvent.AgentStateUpdated("Complete", 5, 1)) shouldBe Right(())
+  it should "name the agent run span after its event type and carry the run summary" in {
+    val usage = UsageSummary().add("m", TokenUsage(10, 5, 15), None)
+    val event = TraceEvent.AgentRunEnded(
+      "thread-1",
+      "run-1",
+      "assistant",
+      "completed",
+      Seq(UserMessage("hi"), AssistantMessage("hello")),
+      usage
+    )
+    collector.traceEvent(event) shouldBe Right(())
 
     val span = store.getSpans(collector.traceId).loneElement
-    span.name shouldBe "agent_state_updated"
-    span.attributes("status").asString shouldBe Some("Complete")
-    span.attributes("message_count").asLong shouldBe Some(5L)
-    span.attributes("log_count").asLong shouldBe Some(1L)
+    span.kind shouldBe SpanKind.AgentCall
+    span.name shouldBe "agent_run_ended"
+    span.attributes("thread_id").asString shouldBe Some("thread-1")
+    span.attributes("run_id").asString shouldBe Some("run-1")
+    span.attributes("agent").asString shouldBe Some("assistant")
+    span.attributes("status").asString shouldBe Some("completed")
+    span.attributes("message_count").asLong shouldBe Some(2L)
+    span.attributes("input_tokens").asLong shouldBe Some(10L)
+    span.attributes("output_tokens").asLong shouldBe Some(5L)
   }
 
   it should "convert CustomEvent and CostRecorded to Internal spans" in {

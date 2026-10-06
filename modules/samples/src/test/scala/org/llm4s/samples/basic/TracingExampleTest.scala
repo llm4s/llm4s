@@ -3,7 +3,7 @@ package org.llm4s.samples.basic
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.trace.{ Tracing, TracingComposer, TraceEvent, TracingMode }
-import org.llm4s.llmconnect.model.TokenUsage
+import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
 import org.llm4s.llmconnect.config.TracingSettings
 import scala.concurrent.duration.*
 
@@ -110,18 +110,20 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
     result shouldBe a[Right[_, Unit]]
   }
 
-  test("should trace agent state updates") {
+  test("should trace agent run ended") {
     val tracer = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
 
     val messages = Seq(
       org.llm4s.llmconnect.model.SystemMessage("You are a helpful assistant"),
       org.llm4s.llmconnect.model.UserMessage("Hello")
     )
-    val event = TraceEvent.AgentStateUpdated(
-      status = "InProgress",
-      messageCount = messages.size,
-      logCount = 2,
-      messages = messages
+    val event = TraceEvent.AgentRunEnded(
+      threadId = "t",
+      runId = "r",
+      agent = "a",
+      status = "completed",
+      messages = messages,
+      usage = UsageSummary()
     )
 
     val result = tracer.traceEvent(event)
@@ -166,7 +168,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
       TraceEvent.ToolExecuted("tool", "input", "output", 100.millis, true),
       TraceEvent.ErrorOccurred(new RuntimeException("error"), "context"),
       TraceEvent.TokenUsageRecorded(TokenUsage(1, 2, 3), "model", "op"),
-      TraceEvent.AgentStateUpdated("status", 5, 3),
+      TraceEvent.AgentRunEnded("t", "r", "a", "completed", Seq.empty, UsageSummary()),
       TraceEvent.CustomEvent("name", ujson.Obj("key" -> "value"))
     )
 
