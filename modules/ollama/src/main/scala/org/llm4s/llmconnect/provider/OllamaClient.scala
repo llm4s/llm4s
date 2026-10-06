@@ -31,9 +31,11 @@ import scala.util.{ Try, Using }
  * (`{type: "function", function: {name, description, parameters}}`). A reply's
  * `message.tool_calls` - whole, or streamed - becomes `ToolCall`s. Ollama's native API
  * sends no call ids, so the client synthesizes them (`call_<12 hex>_<index>`, a fresh prefix per
- * reply or stream); an id the server does send is kept. A `ToolMessage` is sent as
- * `role: tool` with the `tool_name` of the call it answers, and an assistant turn's tool calls
- * are sent back with object arguments. A malformed `tool_calls` entry is a `ProcessingError`.
+ * reply or stream); an id the server does send is kept. An assistant turn's tool calls are sent
+ * back as Ollama's native history records them: each with its `id`, its position in the turn as
+ * `function.index` (Ollama reads an omitted index as `0`, so parallel calls would collide) and
+ * object arguments. A `ToolMessage` is sent as `role: tool` with the `tool_call_id` it answers
+ * and, when that call is in the conversation, its `tool_name`. A malformed `tool_calls` entry is a `ProcessingError`.
  * A model without the tools capability makes Ollama answer HTTP 400 (`... does not support tools`); that is a
  * [[org.llm4s.error.ValidationError]] on `tools` naming the model, and the request is not retried without its tools.
  * Whether the model calls tools at all depends on the model.
@@ -262,9 +264,11 @@ class OllamaClient(
       case am: AssistantMessage =>
         val message = ujson.Obj("role" -> "assistant", "content" -> am.content)
         if (am.toolCalls.nonEmpty)
-          message("tool_calls") = ujson.Arr.from(am.toolCalls.map { tc =>
+          message("tool_calls") = ujson.Arr.from(am.toolCalls.zipWithIndex.map { case (tc, index) =>
             ujson.Obj(
+              "id" -> tc.id,
               "function" -> ujson.Obj(
+                "index"     -> index,
                 "name"      -> tc.name,
                 "arguments" -> OllamaClient.requestArguments(tc.name, tc.arguments)
               )
@@ -272,7 +276,7 @@ class OllamaClient(
           })
         message
       case ToolMessage(content, toolCallId) =>
-        val message = ujson.Obj("role" -> "tool", "content" -> content)
+        val message = ujson.Obj("role" -> "tool", "content" -> content, "tool_call_id" -> toolCallId)
         toolNames.get(toolCallId).foreach(name => message("tool_name") = name)
         message
     })

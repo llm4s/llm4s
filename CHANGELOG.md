@@ -19,8 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and OpenAI-compatible provider modules.
 - **`llm4s-ollama`: tool calling in the native client** ([#1219](https://github.com/llm4s/llm4s/issues/1219)):
   `OllamaClient` sends `CompletionOptions.tools` as `/api/chat`'s `tools`, reads `message.tool_calls` - whole
-  or streamed - into `ToolCall`s, and sends a `ToolMessage` as `role: tool` (with `tool_name`) instead of
-  dropping it; an assistant turn's tool calls go back with object arguments. Ollama sends no call ids, so
+  or streamed - into `ToolCall`s, and sends a `ToolMessage` as `role: tool` (with `tool_call_id` and `tool_name`) instead of
+  dropping it; an assistant turn's tool calls go back with their ids, consecutive `function.index` values and object
+  arguments, as Ollama's native history records them. Ollama sends no call ids, so
   the client synthesizes unique ones (`call_<12 hex>_<index>`); an id the server sends is kept. A
   malformed `tool_calls` entry is a `ProcessingError`. Agents on `provider = "ollama"` can now run tools; the
   `openai-compatible` `/v1` route remains an alternative. **Behaviour change:** tools are now sent, so a model

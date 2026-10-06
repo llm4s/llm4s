@@ -84,7 +84,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       function.obj.contains("strict") shouldBe false
     }
 
-    "forward an assistant turn's tool calls with object arguments and no ids" in {
+    "forward an assistant turn's tool calls with their ids and object arguments" in {
       val body = requestBody(
         Conversation(
           Seq(UserMessage("weather?"), AssistantMessage(None, Seq(weather)), ToolMessage("Sunny", weather.id))
@@ -98,7 +98,40 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       calls should have size 1
       calls.head("function")("name").str shouldBe "get_weather"
       calls.head("function")("arguments") shouldBe ujson.Obj("location" -> "Paris")
-      calls.head.obj.contains("id") shouldBe false
+      calls.head("id").str shouldBe weather.id
+      calls.head("function")("index").num shouldBe 0
+    }
+
+    "give each of an assistant turn's parallel tool calls its own consecutive `function.index`" in {
+      val body = requestBody(
+        Conversation(
+          Seq(
+            UserMessage("both?"),
+            AssistantMessage(None, Seq(weather, time, ToolCall("c3", "get_weather", ujson.Obj("location" -> "Rome"))))
+          )
+        )
+      )
+
+      val calls = body("messages")(1)("tool_calls").arr
+      calls.map(_("function")("index").num.toInt) shouldBe Seq(0, 1, 2)
+      calls.map(_("id").str) shouldBe Seq(weather.id, time.id, "c3")
+    }
+
+    "number `function.index` afresh in each assistant turn" in {
+      val body = requestBody(
+        Conversation(
+          Seq(
+            UserMessage("q"),
+            AssistantMessage(None, Seq(weather)),
+            ToolMessage("Sunny", weather.id),
+            AssistantMessage(None, Seq(time)),
+            ToolMessage("12:00", time.id)
+          )
+        )
+      )
+
+      body("messages")(1)("tool_calls")(0)("function")("index").num shouldBe 0
+      body("messages")(3)("tool_calls")(0)("function")("index").num shouldBe 0
     }
 
     "keep the text of an assistant turn that has both text and tool calls" in {
@@ -136,6 +169,19 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       result("role").str shouldBe "tool"
       result("content").str shouldBe "Sunny"
       result("tool_name").str shouldBe "get_weather"
+      result("tool_call_id").str shouldBe weather.id
+    }
+
+    "send a server-provided call id on both the assistant's call and the result that answers it" in {
+      val serverCall = ToolCall("call_from_server_7", "get_weather", ujson.Obj("location" -> "Paris"))
+      val body = requestBody(
+        Conversation(
+          Seq(UserMessage("weather?"), AssistantMessage(None, Seq(serverCall)), ToolMessage("Sunny", serverCall.id))
+        )
+      )
+
+      body("messages")(1)("tool_calls")(0)("id").str shouldBe "call_from_server_7"
+      body("messages")(2)("tool_call_id").str shouldBe "call_from_server_7"
     }
 
     "match each of several tool results to its own call by id, whatever order they come in" in {
@@ -159,6 +205,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
 
       body("messages")(1)("role").str shouldBe "tool"
       body("messages")(1).obj.contains("tool_name") shouldBe false
+      body("messages")(1)("tool_call_id").str shouldBe "call_unknown"
     }
   }
 
