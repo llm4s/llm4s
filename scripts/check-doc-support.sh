@@ -6,9 +6,11 @@
 # #1134 corrected the prose; this keeps it corrected. It checks the handful of documented facts that can
 # be compared with the build, not the prose around them:
 #
-#   1. Scala  - every `Scala 3.x.y` in the docs equals `scala3` in project/Dependencies.scala, and
-#               build.sbt's scalaVersion is that value.
-#   2. JDK    - every `JDK N` in the docs is a JDK that .github/workflows/ci.yml runs.
+#   1. Scala  - every `Scala 3.x.y` in the docs equals `scala3` in project/Dependencies.scala, every
+#               `Scala 3.x` is that value's major.minor, and build.sbt's scalaVersion is that value.
+#   2. JDK    - every `JDK N` (also `Java N`, `OpenJDK N`, `Temurin N`, `Corretto N`) in the docs is a JDK
+#               that .github/workflows/ci.yml runs; a floor (`JDK N+`, `JDK N or newer`) is fine when N is
+#               at or below the newest JDK CI runs.
 #   3. Module - every module in CLAUDE.md's repository-structure block exists on disk, and every module
 #               build.sbt defines is named there (itself or a parent directory).
 #   4. sbt    - every `sbt ...` command quoted in the docs is a build alias, a task the build defines,
@@ -16,7 +18,10 @@
 #
 # Usage: scripts/check-doc-support.sh [REPO_ROOT]    (the root defaults to this script's repository)
 # Release notes, migration guides and design documents name old versions and commands on purpose and
-# are not checked. Exit code 0 = the matrix is true. Non-zero = file:line and the claim, one per line.
+# are not checked. Elsewhere, a line is exempt from checks 1, 2 and 4 when it says it is history
+# (`previously`, `formerly`, `no longer`, `dropped`, `until`, `legacy`, `older`, `used to`, `upgrading from`)
+# or carries the marker `doc-support: ignore` (in an HTML comment in prose, or `# doc-support: ignore` in a
+# code block). Exit code 0 = the matrix is true. Non-zero = file:line and the claim, one per line.
 set -euo pipefail
 
 REPO_ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -47,6 +52,22 @@ SBT_BUILTINS = {
 SCOPE_WORDS = {"ThisBuild", "Global", "Test", "Compile", "Docker", "IntegrationTest", "Runtime"}
 
 errors = []
+sbt_unknown = []
+
+IGNORE_MARKER = "doc-support: ignore"
+HISTORICAL = re.compile(
+    r"\b(previously|formerly|no longer|dropped|until|legacy|older|used to|upgrading from)\b", re.I)
+
+
+def exempt(line_text):
+    """A line that opts out, or says it is describing the past: it names an old version on purpose."""
+    return IGNORE_MARKER in line_text or HISTORICAL.search(line_text) is not None
+
+
+def line_text_at(text, index):
+    start = text.rfind("\n", 0, index) + 1
+    end = text.find("\n", index)
+    return text[start:len(text) if end < 0 else end]
 
 
 def fail(path, line, message):
@@ -102,26 +123,42 @@ if not ci_jdks:
 
 # ---------------------------------------------------------------- 1. Scala
 canonical_has_scala = False
+SCALA_SHORT = ".".join(SCALA.split(".")[:2]) if SCALA else None
 for p in FILES:
     text = p.read_text(encoding="utf-8")
-    for sm in re.finditer(r"Scala (?:3 only \()?(3\.\d+\.\d+)", text):
+    for sm in re.finditer(r"Scala (?:3 only \()?(3\.\d+(?:\.\d+)?)", text):
         found = sm.group(1)
-        if p.as_posix() == "docs/reference/v1-scope.md" and found == SCALA:
+        if exempt(line_text_at(text, sm.start())):
+            continue
+        full = found.count(".") == 2
+        if full and p.as_posix() == "docs/reference/v1-scope.md" and found == SCALA:
             canonical_has_scala = True
-        if SCALA and found != SCALA:
+        if SCALA and full and found != SCALA:
+            fail(p.as_posix(), line_of(text, sm.start()),
+                 f"documents Scala {found}, but the build is Scala {SCALA}")
+        elif SCALA and not full and found != SCALA_SHORT:
             fail(p.as_posix(), line_of(text, sm.start()),
                  f"documents Scala {found}, but the build is Scala {SCALA}")
 if SCALA and not canonical_has_scala:
     fail("docs/reference/v1-scope.md", 1, f"does not state Scala {SCALA}, which the build uses")
 
 # ---------------------------------------------------------------- 2. JDK
+JDK_RE = re.compile(
+    r"\b(?:OpenJDK|JDK|Java|Temurin|Corretto)[ -]?(\d{1,2})(?!\d)(?![A-Za-z])(\+| or (?:newer|later|above))?")
 for p in FILES:
     text = p.read_text(encoding="utf-8")
-    for jm in re.finditer(r"\bJDK ?(\d{2})(\+?)", text):
+    for jm in JDK_RE.finditer(text):
+        if not ci_jdks or exempt(line_text_at(text, jm.start())):
+            continue
         n = int(jm.group(1))
-        if ci_jdks and n not in ci_jdks:
+        runs = ", ".join(str(j) for j in sorted(ci_jdks))
+        if jm.group(2):
+            if n > max(ci_jdks):
+                fail(p.as_posix(), line_of(text, jm.start()),
+                     f"requires JDK {n} or newer, but CI only runs JDK {runs}")
+        elif n not in ci_jdks:
             fail(p.as_posix(), line_of(text, jm.start()),
-                 f"documents JDK {n}{jm.group(2)}, but CI runs JDK {', '.join(str(j) for j in sorted(ci_jdks))}")
+                 f"documents JDK {n}, but CI runs JDK {runs}")
 
 # ---------------------------------------------------------------- 3. modules
 claude = read("CLAUDE.md")
@@ -207,6 +244,7 @@ def check_head(path, line, head):
         return
     if word in aliases or word in keys or word in SBT_BUILTINS:
         return
+    sbt_unknown.append(word)
     fail(path, line, f"`sbt {head}`: `{word}` is not an alias or task the build defines, nor an sbt built-in")
 
 
@@ -218,13 +256,15 @@ for p in FILES:
         body_line = line_of(text, fm.start(1))
         for offset, raw in enumerate(fm.group(1).splitlines()):
             sm = re.match(r"^\s*(?:[$>]\s*)?sbt\s+(.*?)\s*\\?$", raw)
-            if sm and not raw.lstrip().startswith("#"):
+            if sm and not raw.lstrip().startswith("#") and IGNORE_MARKER not in raw and not HISTORICAL.search(raw):
                 arg = re.sub(r"\s+#.*$", "", sm.group(1))
                 for head in command_heads(arg):
                     check_head(p.as_posix(), body_line + offset, head)
     # Inline code outside fences: blank the fenced spans first so a block is not read twice.
     outside = FENCE.sub(lambda mm: "\n" * mm.group(0).count("\n"), text)
     for im in INLINE.finditer(outside):
+        if exempt(line_text_at(outside, im.start())):
+            continue
         for head in command_heads(im.group(1)[len("sbt"):].strip()):
             check_head(p.as_posix(), line_of(outside, im.start()), head)
 
@@ -233,6 +273,10 @@ if errors:
     for e in errors:
         print("  " + e, file=sys.stderr)
     print(f"{len(errors)} stale claim(s). Fix the docs, or the build if the docs are right.", file=sys.stderr)
+    if sbt_unknown:
+        print("For an `sbt` command that is real but unknown to this script (an sbt built-in or a plugin task "
+              "the build loads), add it to SBT_BUILTINS in scripts/check-doc-support.sh; for a command in a "
+              "document that describes the past, mark the line `doc-support: ignore`.", file=sys.stderr)
     sys.exit(1)
 print(f"Support matrix verified: Scala {SCALA}, JDK {', '.join(str(j) for j in sorted(ci_jdks))}, "
       f"{len(doc_paths)} documented modules, {len(aliases)} aliases and {len(keys)} tasks known.")

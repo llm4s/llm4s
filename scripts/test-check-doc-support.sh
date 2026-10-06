@@ -3,13 +3,30 @@
 # with a message naming it. Each case copies the files the check reads into a scratch directory, breaks
 # one thing, and runs the check against that copy.
 #
-# Exit code 0 = every case behaved. Non-zero = the first case that did not.
+# Nothing here hard-codes a version: the Scala and JDK versions come from project/Dependencies.scala and
+# .github/workflows/ci.yml, and each mutation is computed to differ from them, so a version bump that
+# keeps docs and build in step does not break this test. A mutation that finds nothing to change is a
+# SETUP error (exit 2) that says which file moved, never a silent no-op.
+#
+# Exit code 0 = every case behaved. 1 = a case did not. 2 = the test needs updating for a moved file.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHECK="$REPO_ROOT/scripts/check-doc-support.sh"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+
+# ---- the build's own facts
+SCALA="$(sed -n 's/.*val scala3 *= *"\([^"]*\)".*/\1/p' "$REPO_ROOT/project/Dependencies.scala" | head -1)"
+[ -n "$SCALA" ] || { echo "SETUP: no 'val scala3' in project/Dependencies.scala"; exit 2; }
+IFS=. read -r S_MAJOR S_MINOR S_PATCH <<<"$SCALA"
+SCALA_STALE="$S_MAJOR.$S_MINOR.$((S_PATCH + 1))"      # a claim the build does not make
+SCALA_NEXT="$S_MAJOR.$((S_MINOR + 1)).0"               # the build moving on
+SCALA_SHORT_STALE="$S_MAJOR.$((S_MINOR + 1))"
+JDK_LIST="$(grep -oE 'java: \[[^]]*\]' "$REPO_ROOT/.github/workflows/ci.yml" | head -1 | grep -oE '[0-9]+' | sort -n)"
+[ -n "$JDK_LIST" ] || { echo "SETUP: no 'java: [N]' matrix in .github/workflows/ci.yml"; exit 2; }
+JDK="$(tail -1 <<<"$JDK_LIST")"                         # the newest JDK CI runs
+JDK_UNRUN=$((JDK + 4))                                  # a JDK CI does not run
 
 fresh_copy() {
   local dir="$WORK/$1"
@@ -22,6 +39,22 @@ fresh_copy() {
     while read -r d; do mkdir -p "$dir/$d"; done
   echo "$dir"
 }
+
+# mutate FILE OLD NEW: replace every literal OLD in FILE; exit 2 if OLD is not there.
+mutate() {
+  python3 - "$1" "$2" "$3" <<'PY'
+import sys
+path, old, new = sys.argv[1:4]
+text = open(path, encoding="utf-8").read()
+if old not in text:
+    print(f"SETUP: '{old}' is not in {path}; update scripts/test-check-doc-support.sh for the moved text")
+    sys.exit(2)
+open(path, "w", encoding="utf-8").write(text.replace(old, new))
+PY
+}
+
+# append_line FILE TEXT: add a paragraph to a doc.
+append_line() { printf '\n%s\n' "$2" >> "$1"; }
 
 # expect_fail NAME DIR EXPECTED_SUBSTRING: the check must exit non-zero and mention the substring.
 expect_fail() {
@@ -36,46 +69,114 @@ expect_fail() {
   echo "ok   [$name]"
 }
 
-echo "== the real repository"
+# expect_pass NAME DIR: the check must accept the repository.
+expect_pass() {
+  local name="$1" dir="$2" out status=0
+  out="$("$CHECK" "$dir" 2>&1)" || status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "FAIL [$name]: the check rejected a true claim. Output:"; echo "$out"; exit 1
+  fi
+  echo "ok   [$name]"
+}
+
+echo "== the real repository (Scala $SCALA, JDK $JDK_LIST)"
 "$CHECK" "$REPO_ROOT" >/dev/null || { echo "FAIL: the check fails on the repository itself:"; "$CHECK" "$REPO_ROOT"; exit 1; }
 echo "ok   [repository passes]"
 
 echo "== Scala version"
 d="$(fresh_copy scala)"
-sed -i.bak 's/Scala 3\.7\.1/Scala 3.3.5/' "$d/docs/getting-started/installation.md"
-expect_fail "stale Scala version in a getting-started page" "$d" "Scala 3.3.5"
+mutate "$d/docs/getting-started/installation.md" "Scala $SCALA" "Scala $SCALA_STALE"
+expect_fail "stale Scala version in a getting-started page" "$d" "Scala $SCALA_STALE"
 
 d="$(fresh_copy scala-build)"
-sed -i.bak 's/val scala3 = "3\.7\.1"/val scala3 = "3.8.0"/' "$d/project/Dependencies.scala"
-expect_fail "build moved on, docs did not" "$d" "3.8.0"
+mutate "$d/project/Dependencies.scala" "val scala3 = \"$SCALA\"" "val scala3 = \"$SCALA_NEXT\""
+expect_fail "build moved on, docs did not" "$d" "$SCALA_NEXT"
+
+d="$(fresh_copy scala-bump)"
+# A bump that keeps docs and build together must pass: this is what makes the test above survive a bump.
+python3 - "$d" "$SCALA" "$SCALA_NEXT" <<'PY'
+import pathlib, sys
+root, old, new = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+for rel in ["project/Dependencies.scala", "CLAUDE.md", "README.md"] + [p.relative_to(root).as_posix() for p in (root / "docs").rglob("*.md")]:
+    p = root / rel
+    text = p.read_text(encoding="utf-8")
+    if old in text:
+        p.write_text(text.replace(old, new), encoding="utf-8")
+PY
+expect_pass "docs and build bumped together" "$d"
+
+d="$(fresh_copy scala-short)"
+append_line "$d/docs/getting-started/installation.md" "LLM4S targets Scala $SCALA_SHORT_STALE."
+expect_fail "a major.minor claim that is not the build's" "$d" "Scala $SCALA_SHORT_STALE"
+
+d="$(fresh_copy scala-short-ok)"
+append_line "$d/docs/getting-started/installation.md" "LLM4S targets Scala $S_MAJOR.$S_MINOR."
+expect_pass "a major.minor claim that is the build's" "$d"
+
+d="$(fresh_copy scala-history)"
+append_line "$d/docs/getting-started/installation.md" "Releases before 0.5 were built with Scala 3.3.5, which is no longer supported."
+expect_pass "an old Scala version named as history" "$d"
+
+d="$(fresh_copy scala-ignore)"
+append_line "$d/docs/getting-started/installation.md" "<!-- doc-support: ignore --> Scala 3.3.5 is the LTS line."
+expect_pass "an opted-out line" "$d"
 
 echo "== JDK version"
 d="$(fresh_copy jdk)"
-sed -i.bak 's/JDK 21 is used in CI/JDK 17 is used in CI/' "$d/docs/reference/v1-scope.md"
-expect_fail "docs claim a JDK CI does not run" "$d" "JDK 17"
+mutate "$d/docs/reference/v1-scope.md" "JDK $JDK is used in CI" "JDK $JDK_UNRUN is used in CI"
+expect_fail "docs claim a JDK CI does not run" "$d" "JDK $JDK_UNRUN"
 
 d="$(fresh_copy jdk-ci)"
-sed -i.bak 's/java: \[21\]/java: [25]/' "$d/.github/workflows/ci.yml"
-sed -i.bak 's/java-version: 21/java-version: 25/' "$d/.github/workflows/ci.yml"
-expect_fail "CI moved to another JDK, docs did not" "$d" "JDK 21"
+python3 - "$d/.github/workflows/ci.yml" "$JDK_UNRUN" <<'PY'
+import re, sys
+path, jdk = sys.argv[1], sys.argv[2]
+text = open(path, encoding="utf-8").read()
+text = re.sub(r"java: \[[^\]]*\]", f"java: [{jdk}]", text)
+text = re.sub(r"java-version: *\d+", f"java-version: {jdk}", text)
+open(path, "w", encoding="utf-8").write(text)
+PY
+expect_fail "CI moved to another JDK, docs did not" "$d" "JDK $JDK"
+
+d="$(fresh_copy jdk-java-word)"
+append_line "$d/docs/getting-started/installation.md" "You need Java $JDK_UNRUN to build."
+expect_fail "'Java N' is read like 'JDK N'" "$d" "JDK $JDK_UNRUN"
+
+d="$(fresh_copy jdk-openjdk-word)"
+append_line "$d/docs/getting-started/installation.md" "We test on OpenJDK $JDK_UNRUN."
+expect_fail "'OpenJDK N' is read like 'JDK N'" "$d" "JDK $JDK_UNRUN"
+
+d="$(fresh_copy jdk-floor-ok)"
+append_line "$d/docs/getting-started/installation.md" "Any JDK $((JDK - 4))+ can run the compiled jars."
+expect_pass "a floor at or below the JDK CI runs" "$d"
+
+d="$(fresh_copy jdk-floor-too-high)"
+append_line "$d/docs/getting-started/installation.md" "Requires JDK $JDK_UNRUN or newer."
+expect_fail "a floor above every JDK CI runs" "$d" "JDK $JDK_UNRUN"
+
+d="$(fresh_copy jdk-history)"
+append_line "$d/docs/getting-started/installation.md" "The build previously ran on JDK $((JDK - 4))."
+expect_pass "an old JDK named as history" "$d"
 
 echo "== modules"
 d="$(fresh_copy module-missing)"
-rmdir "$d/modules/ollama"
-expect_fail "documented module has no directory" "$d" "modules/ollama"
+rmdir "$d/modules/core"
+expect_fail "documented module has no directory" "$d" "modules/core"
 
 d="$(fresh_copy module-invented)"
-sed -i.bak 's#│   ├── core/                  \# Core library (published)#│   ├── core/                  \# Core library (published)\n│   ├── crossTest/             \# Cross-version tests#' "$d/CLAUDE.md"
+python3 - "$d/CLAUDE.md" <<'PY'
+import re, sys
+path = sys.argv[1]
+text = open(path, encoding="utf-8").read()
+m = re.search(r"^│   ├── core/.*$", text, re.M)
+if not m:
+    print("SETUP: no '│   ├── core/' line in CLAUDE.md's repository-structure block; update the test")
+    sys.exit(2)
+open(path, "w", encoding="utf-8").write(text.replace(m.group(0), m.group(0) + "\n│   ├── crossTest/             # Cross-version tests", 1))
+PY
 expect_fail "documented module that never existed" "$d" "modules/crossTest"
 
 d="$(fresh_copy module-undocumented)"
-python3 - "$d/build.sbt" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-s += '\nlazy val secretModule = (project in file("modules/secret-module"))\n'
-open(p, "w").write(s)
-PY
+printf '\nlazy val secretModule = (project in file("modules/secret-module"))\n' >> "$d/build.sbt"
 mkdir -p "$d/modules/secret-module/src"
 expect_fail "build module the docs never name" "$d" "modules/secret-module"
 
@@ -83,20 +184,40 @@ expect_fail "build module the docs never name" "$d" "modules/secret-module"
 d="$(fresh_copy module-build-output-only)"
 printf '\nlazy val aggregateOnly = (project in file("modules/aggregate-only"))\n' >> "$d/build.sbt"
 mkdir -p "$d/modules/aggregate-only/target"
-"$CHECK" "$d" >/dev/null || { echo "FAIL [build-output-only dir]: flagged a project with no sources"; exit 1; }
-echo "ok   [project with only build output is not a module]"
+expect_pass "project with only build output is not a module" "$d"
 
 echo "== sbt commands quoted in the docs"
 d="$(fresh_copy cmd-bare)"
 printf '\n```bash\nsbt crossTestAll\n```\n' >> "$d/CLAUDE.md"
 expect_fail "unknown sbt task" "$d" "crossTestAll"
 
+d="$(fresh_copy cmd-hint)"
+printf '\n```bash\nsbt crossTestAll\n```\n' >> "$d/CLAUDE.md"
+expect_fail "an unknown sbt task says how to allow it" "$d" "SBT_BUILTINS"
+
 d="$(fresh_copy cmd-project)"
 printf '\nRun `sbt "nonexistentProject/test"` to check it.\n' >> "$d/README.md"
 expect_fail "unknown sbt project" "$d" "nonexistentProject"
 
+d="$(fresh_copy cmd-ignore)"
+printf '\n```bash\nsbt crossTestAll   # doc-support: ignore\n```\n' >> "$d/CLAUDE.md"
+expect_pass "an opted-out sbt line" "$d"
+
 d="$(fresh_copy cmd-alias-removed)"
-sed -i.bak '/addCommandAlias("buildAll"/d' "$d/build.sbt"
-expect_fail "documented alias removed from the build" "$d" "buildAll"
+# An alias the docs quote: the first build.sbt alias that CLAUDE.md or README.md tells the reader to run.
+alias_name="$(python3 - "$d" <<'PY'
+import pathlib, re, sys
+root = pathlib.Path(sys.argv[1])
+build = (root / "build.sbt").read_text(encoding="utf-8")
+docs = (root / "CLAUDE.md").read_text(encoding="utf-8") + (root / "README.md").read_text(encoding="utf-8")
+for name in re.findall(r'addCommandAlias\(\s*"([^"]+)"', build):
+    if re.search(r"\bsbt\s+" + re.escape(name) + r"\b", docs):
+        print(name)
+        break
+PY
+)"
+[ -n "$alias_name" ] || { echo "SETUP: no build.sbt alias is quoted as 'sbt <alias>' in CLAUDE.md or README.md; update the test"; exit 2; }
+sed -i.bak "/addCommandAlias(\"$alias_name\"/d" "$d/build.sbt"
+expect_fail "documented alias removed from the build" "$d" "$alias_name"
 
 echo "all cases behaved"
