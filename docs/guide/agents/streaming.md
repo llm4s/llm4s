@@ -72,7 +72,7 @@ never duplicated by a retry or a `recover`. They carry no message content.
 | `TextDelta` | `attempt`, `text` | per chunk of the answer (needs `withStreaming()`) |
 | `ThinkingDelta` | `attempt`, `text` | per chunk of the model's reasoning (needs `withStreaming()`) |
 | `ToolCallStarted` | `toolCallId`, `tool`, `arguments` | after the arguments validate, before middleware runs |
-| `ToolResult` | `toolCallId`, `content`, `isError` | when the call's result is recorded |
+| `ToolCallResult` | `toolCallId`, `content`, `isError` | when the call's result is recorded |
 
 Notes on the durable events:
 

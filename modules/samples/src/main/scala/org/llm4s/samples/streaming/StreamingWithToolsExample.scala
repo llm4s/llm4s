@@ -10,7 +10,7 @@ import org.llm4s.toolapi.builtin.BuiltinTools
 import org.slf4j.LoggerFactory
 
 /**
- * Tool activity as events: `ToolCallStarted` (live, with the arguments), `ToolResult` (live, with the
+ * Tool activity as events: `ToolCallStarted` (live, with the arguments), `ToolCallResult` (live, with the
  * content) and `ToolExecuted` (durable, outcome and duration only).
  *
  * To run: sbt "samples/runMain org.llm4s.samples.streaming.StreamingWithToolsExample"
@@ -33,7 +33,7 @@ object StreamingWithToolsExample:
         .build()
       run <- agent.stream(ThreadId("streaming-tools-sample"), "What is 17 * 23, and what time is it in UTC?") {
         case AgentEvents.ToolCallStarted(t) => println(s"\n[call ${t.tool} ${ujson.write(t.arguments)}]")
-        case AgentEvents.ToolResult(r)      => println(s"[result ${r.content.take(200)}]")
+        case AgentEvents.ToolCallResult(r)  => println(s"[result ${r.content.take(200)}]")
         case AgentEvents.ToolExecuted(t) =>
           println(s"[${t.tool}: ${t.outcome} in ${t.duration.toMillis} ms]")
         case AgentEvents.TextDelta(d) => print(d.text)

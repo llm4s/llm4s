@@ -634,7 +634,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     listener, subscribed at admission so it sees every event of the run; `AgentRun.subscribe(capacity)`
     is run-scoped; `Agent.StreamCapacity` is 1024.
   - `org.llm4s.agent.events.AgentEvents` (`ModelCallStarted`, `ModelCallCompleted`, `TextDelta`,
-    `ThinkingDelta`, `ToolCallStarted`, `ToolResult`, `ToolExecuted`, `HandedOff`,
+    `ThinkingDelta`, `ToolCallStarted`, `ToolCallResult`, `ToolExecuted`, `HandedOff`,
     `GuardrailBlocked`) with typed extractors; `EventType[A]` and `Observer` in
     `org.llm4s.agent.graph`.
   - `AgentIO.stream*` (fs2) and `AgentZ.stream*` (ZIO ZStream) yield `AgentStreamItem.Event` or

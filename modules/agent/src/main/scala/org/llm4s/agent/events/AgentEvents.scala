@@ -16,7 +16,7 @@ import org.llm4s.agent.graph.EventType
  *
  * Durable (stored, replayed, no content): [[ModelCallCompleted]], [[ToolExecuted]], [[HandedOff]],
  * [[GuardrailBlocked]]. Live (current subscribers only): [[ModelCallStarted]], [[TextDelta]],
- * [[ThinkingDelta]], [[ToolCallStarted]], [[ToolResult]].
+ * [[ThinkingDelta]], [[ToolCallStarted]], [[ToolCallResult]].
  */
 object AgentEvents:
   val ModelCallCompleted: EventType[org.llm4s.agent.events.ModelCallCompleted] =
@@ -29,7 +29,7 @@ object AgentEvents:
   val TextDelta: EventType[org.llm4s.agent.events.TextDelta]               = EventType("agent.text_delta", 1)
   val ThinkingDelta: EventType[org.llm4s.agent.events.ThinkingDelta]       = EventType("agent.thinking_delta", 1)
   val ToolCallStarted: EventType[org.llm4s.agent.events.ToolCallStarted]   = EventType("agent.tool_call_started", 1)
-  val ToolResult: EventType[org.llm4s.agent.events.ToolResult]             = EventType("agent.tool_result", 1)
+  val ToolCallResult: EventType[org.llm4s.agent.events.ToolCallResult]     = EventType("agent.tool_call_result", 1)
 
   /** The names of the durable agent events. */
   val durable: Set[String] = Set(ModelCallCompleted, ToolExecuted, HandedOff, GuardrailBlocked).map(_.name)

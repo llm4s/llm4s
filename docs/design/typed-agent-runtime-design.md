@@ -922,7 +922,7 @@ Decisions:
   name or version or an undecodable payload. Durable: `ModelCallCompleted`, `ToolExecuted`,
   `HandedOff`, `GuardrailBlocked`, emitted by the node whose task commits them, so they inherit the
   commit gate (no duplicate from a retry, failed task or `recover`). Live: `ModelCallStarted`,
-  `TextDelta`, `ThinkingDelta`, `ToolCallStarted`, `ToolResult`.
+  `TextDelta`, `ThinkingDelta`, `ToolCallStarted`, `ToolCallResult`.
 - **Streaming is opt-in** (`AgentBuilder.withStreaming()`, not part of the graph fingerprint).
   `ModelStep.next` takes the call (`next(messages, tools, call)`: the `RunContext`, agent id and
   attempt) so a streaming step sends deltas and `callModel` numbers attempts under a retrying

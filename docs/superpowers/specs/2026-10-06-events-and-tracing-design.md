@@ -109,7 +109,7 @@ Live, same naming, no `seq`, never replayed:
 | `TextDelta` | `attempt`, `text` | a streaming model step, per content chunk |
 | `ThinkingDelta` | `attempt`, `text` | a streaming model step, per thinking chunk |
 | `ToolCallStarted` | `toolCallId`, `tool`, `arguments: ujson.Value` | `<id>/call-tool`, after validation, before the middleware chain |
-| `ToolResult` | `toolCallId`, `content`, `isError` | the node that records the call's result |
+| `ToolCallResult` | `toolCallId`, `content`, `isError` | the node that records the call's result |
 
 A live event's `taskId` identifies the model call. `attempt` counts calls of the innermost model
 function within one task, from 1: a higher attempt on the same task means the earlier attempt's text
@@ -244,7 +244,7 @@ delivered `seq`.
 In `modules/samples/src/main/scala/org/llm4s/samples/`:
 
 - `streaming/StreamingAgentExample` - `withStreaming()`, printing `TextDelta`, showing attempt resets.
-- `streaming/StreamingWithToolsExample` - `ToolCallStarted`/`ToolResult` live, `ToolExecuted` durable
+- `streaming/StreamingWithToolsExample` - `ToolCallStarted`/`ToolCallResult` live, `ToolExecuted` durable
   with its duration.
 - `streaming/EventCollectionExample` - collects one run's events, then replays the durable ones with
   `GraphRuntime.subscribe(threadId, afterSeq = 0)`, showing structure without content.

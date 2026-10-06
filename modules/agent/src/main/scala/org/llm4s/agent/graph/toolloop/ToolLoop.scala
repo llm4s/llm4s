@@ -731,7 +731,7 @@ object ToolLoop:
       NodeResult.Fail(error)
 
     /**
-     * Records the call's result, sending it live as `ToolResult` and its outcome durably as
+     * Records the call's result, sending it live as `ToolCallResult` and its outcome durably as
      * `ToolExecuted`. Every result the loop records passes through here, bar a `Success`, which keeps
      * the tool's update (see [[outcome]]).
      */
@@ -743,7 +743,7 @@ object ToolLoop:
       outcome: ToolExecutionOutcome,
       duration: FiniteDuration
     ): NodeResult =
-      AgentEvents.ToolResult.progress(context, events.ToolResult(task.call.id, content, isError))
+      AgentEvents.ToolCallResult.progress(context, events.ToolCallResult(task.call.id, content, isError))
       executed(task, context, outcome, duration)
       NodeResult.Continue(
         Command.empty.update(results, ToolResult(task.assistantMessageId, task.call.id, content, isError))
@@ -953,7 +953,7 @@ object ToolLoop:
             update.operations.map(_.key.id).filterNot(k => allowed.exists(_.id == k)).map(_.value).distinct
           if undeclared.isEmpty then
             val result = rendered(content)
-            AgentEvents.ToolResult.progress(context, events.ToolResult(call.id, result, isError = false))
+            AgentEvents.ToolCallResult.progress(context, events.ToolCallResult(call.id, result, isError = false))
             executed(task, context, ToolExecutionOutcome.Succeeded, took)
             NodeResult.Continue(
               Command(update, Nil)

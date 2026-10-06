@@ -90,4 +90,4 @@ final case class ThinkingDelta(attempt: Int, text: String) derives ReadWriter
 final case class ToolCallStarted(toolCallId: String, tool: String, arguments: ujson.Value) derives ReadWriter
 
 /** The result the loop recorded for a call, as the model will see it. */
-final case class ToolResult(toolCallId: String, content: String, isError: Boolean) derives ReadWriter
+final case class ToolCallResult(toolCallId: String, content: String, isError: Boolean) derives ReadWriter

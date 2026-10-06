@@ -1047,7 +1047,7 @@ sbt "samples/runMain org.llm4s.samples.streaming.StreamingWithProgressExample"
 | Example | Shows |
 |---------|-------|
 | `StreamingAgentExample` | `withStreaming()`, printing `TextDelta`, attempt resets |
-| `StreamingWithToolsExample` | `ToolCallStarted`/`ToolResult` live, `ToolExecuted` durable with duration |
+| `StreamingWithToolsExample` | `ToolCallStarted`/`ToolCallResult` live, `ToolExecuted` durable with duration |
 | `EventCollectionExample` | collecting one run's events, replaying the durable ones |
 | `AgentStreamIOExample` (`samples/catseffect`) | fs2 stream of `AgentStreamItem` |
 | `AgentStreamZIOExample` (`samples/zio`) | ZStream of `AgentStreamItem` |

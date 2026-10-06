@@ -99,12 +99,12 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
 
   private def ok[A](result: Result[A]): A = result.fold(e => fail(e.message), identity)
 
-  "A tool call" should "send ToolCallStarted and ToolResult live, and ToolExecuted durable" in {
+  "A tool call" should "send ToolCallStarted and ToolCallResult live, and ToolExecuted durable" in {
     val (result, c) = collect(agentWith(Scripted(Right(toolCallCompletion), Right(answer("done"))), echoTool), "go")
     result.map(_.answer) shouldBe Right(Some("done"))
     c.all.collect { case AgentEvents.ToolCallStarted(s) => s.tool -> s.arguments } shouldBe
       Vector("echo" -> ujson.Obj("message" -> "hello"))
-    c.all.collect { case AgentEvents.ToolResult(r) => r.toolCallId -> r.isError } shouldBe Vector("call-1" -> false)
+    c.all.collect { case AgentEvents.ToolCallResult(r) => r.toolCallId -> r.isError } shouldBe Vector("call-1" -> false)
     val executed = c.all.collect { case AgentEvents.ToolExecuted(t) => t }
     executed.map(t => (t.agent, t.tool, t.toolCallId, t.outcome)) shouldBe
       Vector(("assistant", "echo", "call-1", ToolExecutionOutcome.Succeeded))
@@ -112,17 +112,17 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     c.durable.collect { case AgentEvents.ToolExecuted(t) => t }.size shouldBe 1 // it is durable
     // the live events are never stored
     c.durable.collect { case AgentEvents.ToolCallStarted(s) => s } shouldBe empty
-    c.durable.collect { case AgentEvents.ToolResult(r) => r } shouldBe empty
+    c.durable.collect { case AgentEvents.ToolCallResult(r) => r } shouldBe empty
   }
 
-  it should "send ToolCallStarted before ToolResult, and ToolResult with the recorded content" in {
+  it should "send ToolCallStarted before ToolCallResult, and ToolCallResult with the recorded content" in {
     val (_, c) = collect(agentWith(Scripted(Right(toolCallCompletion), Right(answer("done"))), echoTool), "go")
     val kinds = c.all.collect {
       case AgentEvents.ToolCallStarted(_) => "started"
-      case AgentEvents.ToolResult(_)      => "result"
+      case AgentEvents.ToolCallResult(_)  => "result"
     }
     kinds shouldBe Vector("started", "result")
-    c.all.collect { case AgentEvents.ToolResult(r) => ujson.read(r.content) } shouldBe
+    c.all.collect { case AgentEvents.ToolCallResult(r) => ujson.read(r.content) } shouldBe
       Vector(ujson.Obj("echo" -> "hello"))
   }
 
@@ -132,7 +132,7 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
       collect(agentWith(Scripted(Right(calling(unknown)), Right(answer("sorry"))), echoTool), "go")
     result.map(_.answer) shouldBe Right(Some("sorry"))
     c.all.collect { case AgentEvents.ToolCallStarted(s) => s } shouldBe empty
-    c.all.collect { case AgentEvents.ToolResult(r) => r.toolCallId -> r.isError } shouldBe Vector("call-9" -> true)
+    c.all.collect { case AgentEvents.ToolCallResult(r) => r.toolCallId -> r.isError } shouldBe Vector("call-9" -> true)
     val executed = c.durable.collect { case AgentEvents.ToolExecuted(t) => t }
     executed.map(t => (t.tool, t.toolCallId, t.outcome, t.duration)) shouldBe
       Vector(("nope", "call-9", ToolExecutionOutcome.Errored, scala.concurrent.duration.Duration.Zero))
@@ -156,7 +156,7 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     val (result, c) = collect(builder, "go")
     result.map(_.answer) shouldBe Right(Some("ok"))
     c.all.collect { case AgentEvents.ToolCallStarted(s) => s.toolCallId } shouldBe Vector("call-1")
-    c.all.collect { case AgentEvents.ToolResult(r) => r.content -> r.isError } shouldBe
+    c.all.collect { case AgentEvents.ToolCallResult(r) => r.content -> r.isError } shouldBe
       Vector("Denied: not today" -> true)
     c.durable.collect { case AgentEvents.ToolExecuted(t) => t.outcome } shouldBe Vector(ToolExecutionOutcome.Denied)
   }
@@ -179,12 +179,12 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
       Vector(ToolExecutionOutcome.NeedsApproval)
     firstRun.collect { case e @ AgentEvents.ToolExecuted(_) => e }.forall(_.isInstanceOf[StreamEvent.Durable]) shouldBe
       true
-    firstRun.collect { case AgentEvents.ToolResult(r) => r } shouldBe empty
+    firstRun.collect { case AgentEvents.ToolCallResult(r) => r } shouldBe empty
 
     val secondRun = c.of(second.runId)
     secondRun.collect { case AgentEvents.ToolExecuted(t) => t.outcome -> t.duration } shouldBe
       Vector(ToolExecutionOutcome.Rejected -> scala.concurrent.duration.Duration.Zero)
-    secondRun.collect { case AgentEvents.ToolResult(r) => r.content -> r.isError } shouldBe
+    secondRun.collect { case AgentEvents.ToolCallResult(r) => r.content -> r.isError } shouldBe
       Vector("Rejected: no thanks" -> true)
     secondRun.collect { case AgentEvents.ToolCallStarted(s) => s } shouldBe empty
   }
