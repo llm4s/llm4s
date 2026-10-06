@@ -534,6 +534,45 @@ expect_fail "a command after && in a code block" "$d" "crossTestAll"
 d="$(fresh_copy cmd-after-and-inline)"; say "$d" README.md 'Or `cd x && sbt otherCrossTest`.'
 expect_fail "a command after && in inline code" "$d" "otherCrossTest"
 
+echo "== sbt commands anywhere on a shell line (round 8)"
+d="$(fresh_copy cmd-yaml-run)"; run_sbt_doc "$d" "$(printf '%s\n' 'steps:' '  - name: Build' '    run: sbt definitelyNotATask')"
+expect_fail "a YAML run: entry is a command line" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-yaml-run-ok)"; run_sbt_doc "$d" "$(printf '%s\n' 'steps:' '  - run: sbt test' '  - name: Unit tests (sbt fast)' '    run: "sbt \"core/testOnly *UnitSpec\""' '    command: sbt compile')"
+expect_pass "YAML run:, - run: and command: entries with real tasks" "$d"
+
+d="$(fresh_copy cmd-yaml-block)"; run_sbt_doc "$d" "$(printf '%s\n' 'steps:' '  - name: Build' '    run: |' '      cd modules/core' '      sbt compile \' '        definitelyNotATask' '  - run: sbt test')"
+expect_fail "a command in a YAML block scalar" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-yaml-folded)"; run_sbt_doc "$d" "$(printf '%s\n' '  - run: >-' '      sbt compile' '      otherCrossTest')"
+expect_fail "a folded YAML block scalar is one command line" "$d" "otherCrossTest"
+
+d="$(fresh_copy cmd-semicolon)"; run_sbt_doc "$d" "cd modules/core; sbt definitelyNotATask"
+expect_fail "a command after a shell ;" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-semicolon-inline)"; say "$d" README.md 'Or `cd x; sbt otherCrossTest`.'
+expect_fail "a command after a shell ; in inline code" "$d" "otherCrossTest"
+
+d="$(fresh_copy cmd-quoted-semicolon)"; run_sbt_doc "$d" "$(printf '%s\n' 'echo "a; sbt definitelyNotATask"' "echo 'b && sbt otherCrossTest'")"
+say "$d" README.md 'Print it with `echo "x | sbt crossTestAll"`.'
+expect_pass "a separator inside quotes does not start a command" "$d"
+
+d="$(fresh_copy cmd-subshell)"; run_sbt_doc "$d" "cd x && (sbt definitelyNotATask)"
+expect_fail "a command in a subshell" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-substitution)"; run_sbt_doc "$d" 'out=$(sbt -batch definitelyNotATask)'
+expect_fail "a command in a \$( ) substitution" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-prefixes)"; run_sbt_doc "$d" "$(printf '%s\n' 'SBT_OPTS=-Xmx2g time sbt compile &' 'env -i JAVA_HOME=/x sbt test' 'if sbt compile; then echo ok; fi' 'sudo -E exec ./sbt test 2>&1 | tee log' 'RUN sbt core/test')"
+expect_pass "env, time, exec, sudo, VAR=x and shell keywords before sbt; a redirection & is not a separator" "$d"
+
+d="$(fresh_copy cmd-prefix-bad)"; run_sbt_doc "$d" "env FOO=1 nohup sbt definitelyNotATask"
+expect_fail "a command after wrapper words is still checked" "$d" "definitelyNotATask"
+
+d="$(fresh_copy cmd-not-command-word)"; run_sbt_doc "$d" "$(printf '%s\n' 'addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.5.2")' 'brew install sbt sbtn' 'which sbt && ls ~/.sbt/boot' 'cp -r project/sbt build/' 'curl -L https://example.com/sbt test.tgz')"
+say "$d" README.md 'Install the `sbt-ci-release` plugin with `addSbtPlugin("x" % "sbt-ci-release" % "1")`, or see `/usr/share/sbt foo`.'
+expect_pass "sbt not in command position is not a command" "$d"
+
 d="$(fresh_copy cmd-thin-client)"; run_sbt_doc "$d" "$(printf './sbt crossTestAll\nsbtn otherCrossTest')"
 expect_fail "the ./sbt launcher and sbtn are read like sbt" "$d" "otherCrossTest"
 

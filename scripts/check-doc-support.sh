@@ -44,8 +44,15 @@
 #               that resolves - through sbt's delegation to the configurations a configuration extends,
 #               `ThisBuild` and `Global` - in the project it is scoped to (or the current one), or, when
 #               that project aggregates others and the key's `aggregate` is not false, in one of them. A
-#               configuration must be one the project has. A backslash-continued command is read as one
-#               line, a command after `&&`, `||` or `|` is read too, and one the shell cannot parse fails.
+#               configuration must be one the project has. An sbt command is found wherever `sbt`, `sbtn`
+#               or `./sbt` is the command word of a simple command: at the start of a line, after a shell
+#               separator outside quotes (`;`, `&&`, `||`, `|`, `&`, `(`, `$(`, a backtick - so a quoted
+#               `echo "a; sbt x"` is no command), after `VAR=x` assignments, `env`, `time`, `exec`, `sudo`,
+#               `nohup`, shell keywords (`if`, `then`, `do`) or Dockerfile `RUN`, and as the value of a YAML
+#               command entry (`run: sbt test`, `- run: ...`, `command: ...`, a `- sbt test` list item, and
+#               the script of a `run: |` / `run: >` block scalar). Any other `key: value` line is data.
+#               Redirections (`2>&1`, `> log`) are not arguments. A backslash-continued command is read as
+#               one line, and one the shell cannot parse fails.
 #               An alias replays its body inline, in the project current when it runs (aliases inside it
 #               too, an alias that runs itself fails), and a `project X` in the body stays in effect after
 #               it; every alias body is also replayed from the root on its own, quoted or not. `set` and
@@ -898,35 +905,148 @@ def strip_comment(line):
 
 
 def shell_segments(line):
-    """`line` split at `&&`, `||` and `|` outside quotes: each piece is one shell command."""
-    out, cur, quote, i = [], [], None, 0
+    """`line` cut into simple commands, as bash reads them, outside quotes: at `;`, `&&`, `||`, `|`, `|&`,
+    a background `&` (not the `&` of a redirection such as `2>&1` or `&>`), `(`, `)`, `$(` and backticks.
+    Each piece is returned as written, quotes kept, so a quoted `;` (`echo "a; sbt x"`) stays in its word."""
+    out, start, quote, i = [], 0, None, 0
+
+    def cut(at, width):
+        out.append(line[start:at])
+        return at + width
+
     while i < len(line):
         ch = line[i]
-        if quote:
-            if ch == quote:
+        if quote == "'":
+            if ch == "'":
                 quote = None
+        elif quote == '"':
+            if ch == "\\":
+                i += 1
+            elif ch == '"':
+                quote = None
+        elif ch == "\\":
+            i += 1
         elif ch in "'\"":
             quote = ch
-        elif line.startswith("&&", i) or line.startswith("||", i):
-            out.append("".join(cur)); cur = []; i += 2
+        elif line.startswith(("&&", "||", "|&", "$("), i):
+            i = start = cut(i, 2)
             continue
-        elif ch == "|":
-            out.append("".join(cur)); cur = []; i += 1
+        elif ch == "&" and (i > 0 and line[i - 1] in "<>" or line.startswith("&>", i)):
+            pass                                         # `2>&1`, `>&2`, `&>file`: a redirection
+        elif ch in ";|&()`":
+            i = start = cut(i, 1)
             continue
-        cur.append(ch)
         i += 1
-    out.append("".join(cur))
+    out.append(line[start:])
     return out
 
 
-SBT_CALL = re.compile(r"^\s*(?:[$>]\s*)?\(?\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:\./)?sbtn?\s+(.*?)\s*\)?\s*$")
+def shell_words(segment):
+    """(raw word, end offset) for each word of `segment`, split at whitespace outside quotes."""
+    words, quote, i, begin = [], None, 0, None
+    while i < len(segment):
+        ch = segment[i]
+        if quote is None and ch in " \t":
+            if begin is not None:
+                words.append((segment[begin:i], i)); begin = None
+            i += 1
+            continue
+        if begin is None:
+            begin = i
+        if quote == "'":
+            if ch == "'":
+                quote = None
+        elif quote == '"':
+            if ch == "\\":
+                i += 1
+            elif ch == '"':
+                quote = None
+        elif ch == "\\":
+            i += 1
+        elif ch in "'\"":
+            quote = ch
+        i += 1
+    if begin is not None:
+        words.append((segment[begin:], len(segment)))
+    return words
 
 
-def logical_lines(body):
-    """(offset, line) for each shell line of a code block, a backslash-continued line joined with the
-    lines it continues onto, so `sbt -Dk=v \\` followed by `"run"` is read as one invocation."""
+SBT_LAUNCHERS = {"sbt", "sbtn", "./sbt", "./sbtn"}
+# Words that run the command after them: shell keywords, wrappers (their `-x` flags are skipped too), a
+# prompt marker, and Dockerfile's RUN. `VAR=value` assignments are skipped wherever they lead.
+COMMAND_PREFIXES = {"env", "time", "exec", "sudo", "nohup", "command", "nice", "if", "then", "else", "elif",
+                    "while", "until", "do", "!", "{", "$", ">", "RUN"}
+ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=")
+REDIRECTION = re.compile(r"^(?:\d+|&)?(?:>>?|<<?|>&|<&|>\|)(.*)$")
+
+
+def sbt_arguments(segment):
+    """The argument string of `segment` when its command word is an sbt launcher, else None. `sbt` must be the
+    command word itself - `addSbtPlugin(...)`, `sbt-plugin`, `which sbt` or a path containing sbt are not."""
+    words = shell_words(segment)
+    i, wrapped = 0, False
+    while i < len(words):
+        word = words[i][0]
+        if ASSIGNMENT.match(word) or (wrapped and word.startswith("-")):
+            i += 1
+        elif word in COMMAND_PREFIXES:
+            wrapped = True
+            i += 1
+        else:
+            break
+    if i >= len(words) or words[i][0] not in SBT_LAUNCHERS:
+        return None
+    # The arguments as written (quotes kept, for shlex), less redirections: `2>&1`, `> log`, `>>log`, `<in`.
+    args, rest = [], iter(w for w, _ in words[i + 1:])
+    for word in rest:
+        r = REDIRECTION.match(word)
+        if r:
+            if not r.group(1):
+                next(rest, None)                 # `> log`: the target is the next word
+            continue
+        args.append(word)
+    return " ".join(args) or None
+
+
+# A YAML entry whose value is a shell command: `run: ...`, `- run: ...`, `command: ...`, `script: ...`.
+YAML_COMMAND_KEYS = r"(?:run|command|cmd|script|entrypoint|shell_command)"
+YAML_COMMAND = re.compile(r"^\s*(?:-\s+)?" + YAML_COMMAND_KEYS + r"\s*:\s+(?=\S)")
+YAML_BLOCK = re.compile(r"^(\s*)(?:-\s+)?" + YAML_COMMAND_KEYS + r"\s*:\s*([|>])[-+0-9]*\s*(?:#.*)?$")
+YAML_DASH = re.compile(r"^\s*-\s+(?=\S)")
+# Any other `key: value` line is data, not a command (`- name: Unit tests (sbt fast)`, a Scala parameter).
+YAML_OTHER_KEY = re.compile(r"^\s*(?:-\s+)?[A-Za-z_][\w.-]*\s*:(?:\s|$)")
+
+
+def yaml_unquote(value):
+    """A YAML scalar's text: `"sbt \\"x\\""` and `'sbt ''x'''` unquoted, a plain scalar as it is."""
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        return re.sub(r'\\(.)', r'\1', value[1:-1])
+    if len(value) >= 2 and value[0] == value[-1] == "'":
+        return value[1:-1].replace("''", "'")
+    return value
+
+
+def sbt_calls(line):
+    """The argument string of every sbt invocation on one shell line. The line may be a YAML command entry
+    (`run: sbt test`, `- run: "sbt test"`) or a list item (`- sbt test`); a line keyed by anything else
+    (`name: ...`) is data, not a command. It is cut into simple commands at shell separators, outside
+    quotes, and a `#` comment is dropped where bash would drop it."""
+    line = strip_comment(line)
+    m = YAML_COMMAND.match(line)
+    if not m and YAML_OTHER_KEY.match(line):
+        return []
+    m = m or YAML_DASH.match(line)
+    if m:
+        line = strip_comment(yaml_unquote(line[m.end():]))
+    return [args for args in map(sbt_arguments, shell_segments(line)) if args]
+
+
+def logical_lines(lines):
+    """(offset, line) for each shell line of `lines` ((offset, text) pairs), a backslash-continued line
+    joined with the lines it continues onto, so `sbt -Dk=v \\` followed by `"run"` is read as one invocation."""
     out, pending, start = [], None, 0
-    for offset, raw in enumerate(body.splitlines()):
+    for offset, raw in lines:
         if pending is None:
             start, pending = offset, ""
         stripped = raw.rstrip()
@@ -940,28 +1060,53 @@ def logical_lines(body):
     return out
 
 
+def shell_lines(body):
+    """(offset, line) for each shell line of a code block. A YAML block scalar under a command key (`run: |`
+    or `run: >` and the lines indented under it) is a script: a literal one is read line by line, a folded
+    one as its lines joined with spaces. Every other line is read as a shell line."""
+    raw = body.splitlines()
+    out, i = [], 0
+    while i < len(raw):
+        m = YAML_BLOCK.match(raw[i])
+        if not m:
+            out.append((i, raw[i]))
+            i += 1
+            continue
+        indent, style = len(m.group(1)), m.group(2)
+        j, content = i + 1, []
+        while j < len(raw) and (not raw[j].strip() or len(raw[j]) - len(raw[j].lstrip()) > indent):
+            content.append((j, raw[j]))
+            j += 1
+        while content and not content[-1][1].strip():
+            content.pop()
+        if style == ">":
+            text = " ".join(t.strip() for _, t in content if t.strip())
+            if content:
+                out.append((content[0][0], text))
+        else:
+            out.extend(content)
+        i = j
+    return logical_lines(out)
+
+
 FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
 INLINE = re.compile(r"`([^`\n]*\bsbtn?\s[^`\n]+)`")
 for p in FILES:
     text = TEXTS[p]
     for fm in FENCE.finditer(text):
         body_line = line_of(text, fm.start(1))
-        for offset, raw in logical_lines(fm.group(1)):
+        for offset, raw in shell_lines(fm.group(1)):
             if raw.lstrip().startswith("#") or exempt(raw):
                 continue
-            for segment in shell_segments(strip_comment(raw)):
-                sm = SBT_CALL.match(segment)
-                if sm:
-                    check_invocation(p.as_posix(), body_line + offset, sm.group(1))
+            for args in sbt_calls(raw):
+                check_invocation(p.as_posix(), body_line + offset, args)
     # Inline code outside fences: blank the fenced spans first so a block is not read twice.
     outside = FENCE.sub(lambda mm: "\n" * mm.group(0).count("\n"), text)
     for im in INLINE.finditer(outside):
         if exempt(line_text_at(outside, im.start())):
             continue
-        for segment in shell_segments(strip_comment(im.group(1))):
-            sm = SBT_CALL.match(segment)
-            if sm:
-                check_invocation(p.as_posix(), line_of(outside, im.start()), sm.group(1))
+        for args in sbt_calls(im.group(1)):
+            check_invocation(p.as_posix(), line_of(outside, im.start()), args)
 
 if errors:
     print("The documented support matrix does not match the build:", file=sys.stderr)
