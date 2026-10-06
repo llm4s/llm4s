@@ -507,13 +507,15 @@ object ToolLoop:
                 completion.model,
                 attempts.get,
                 assistant.toolCalls.size,
-                completion.usage.map(events.CallUsage.fromTokenUsage)
+                completion.usage.map(events.CallUsage.fromTokenUsage),
+                completion.estimatedCost
               )
             )
             val taskId = context.position.taskId.value
             val stored = StoredMessage(s"$taskId/assistant", assistant)
             val call = UsageSummary()
               .add(completion.model, completion.usage.getOrElse(TokenUsage(0, 0, 0)), completion.estimatedCost)
+            // AgentTracing builds a run's usage from its ModelCallCompleted events the same way
             val appended = Command.empty
               .update(messages, MessageUpdate.Append(stored))
               .update(LoopKeys.usage, call)

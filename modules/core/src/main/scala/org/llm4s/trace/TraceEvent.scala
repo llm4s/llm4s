@@ -133,7 +133,9 @@ object TraceEvent {
    *                 `cancelled`, `timed_out` or `failed`
    * @param messages this turn's messages, from its user message on; empty when blocked, cancelled,
    *                 timed out or failed. Not included in [[toJson]], which stays a flat summary.
-   * @param usage    the thread's token usage and cost, per model
+   * @param usage    this run's own token usage and cost, per model: the model calls the run made,
+   *                 never the thread's earlier runs, so a backend can report it per run (as
+   *                 OpenTelemetry's per-operation `gen_ai.usage.*`) without double counting
    */
   case class AgentRunEnded(
     threadId: String,

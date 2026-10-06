@@ -5,7 +5,7 @@ import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.toolloop.{ LoopKeys, ToolLoop, TurnOutput }
 import org.llm4s.types.Result
 import org.llm4s.error.CancelledError
-import org.llm4s.llmconnect.model.UsageSummary
+import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary }
 import org.llm4s.trace.{ TraceEvent, Tracing }
 import org.slf4j.LoggerFactory
 
@@ -18,7 +18,8 @@ import scala.util.{ Failure, Try }
  * One run's tracing. Subscribes to the run's events from its claim (durable replay; live events are
  * not traced) through a [[RunScope]], so nothing of another run on the thread is traced, and traces
  * each as `TracingSubscriber` does - `graph.*` custom events, with agent events named `agent.*` - plus each model call's
- * usage as `TokenUsageRecorded(usage, model, "agent_completion")`. On the run's terminal event it
+ * usage as `TokenUsageRecorded(usage, model, "agent_completion")`, which it also sums into the run's
+ * own usage (the shape of `AgentResult.usage`, for this run's calls only). On the run's terminal event it
  * takes the run's result from its handle (set just after the closing commit) and traces one
  * [[TraceEvent.AgentRunEnded]], its status derived by [[AgentRun.status]] as `await` derives it; a
  * failed run also traces `ErrorOccurred`. A run that ends without a terminal event (a crash, or a
@@ -38,6 +39,8 @@ final private[agent] class AgentTracing(
   private val subscription = new AtomicReference[Option[Subscription]](None)
   private val terminalSeen = new AtomicBoolean(false)
   private val disconnected = new AtomicBoolean(false)
+  // this run's own usage, from its ModelCallCompleted events; the thread's LoopKeys.usage spans every run
+  private val usage = new AtomicReference(UsageSummary())
 
   // ends - once - after the terminal event is traced, after a Disconnected, or when the run lacks a terminal event
   private val scope = RunScope(handle.runId, onEvent, () => scopeEnded())
@@ -58,6 +61,9 @@ final private[agent] class AgentTracing(
       trace(AgentTracing.toTrace(record))
       event match
         case AgentEvents.ModelCallCompleted(m) =>
+          usage.updateAndGet(
+            _.add(m.model, m.usage.map(_.toTokenUsage).getOrElse(TokenUsage(0, 0, 0)), m.estimatedCost)
+          ): Unit
           m.usage.foreach(u => trace(TraceEvent.TokenUsageRecorded(u.toTokenUsage, m.model, "agent_completion")))
         case AgentEvents.GuardrailBlocked(g) => blockedBy.set(Some(g.guardrail))
         case _                               => ()
@@ -73,12 +79,12 @@ final private[agent] class AgentTracing(
 
   /**
    * Traces the run's AgentRunEnded from its own result, which the run thread sets just after the
-   * closing commit, with the status [[AgentRun.status]] derives - as `await` does.
+   * closing commit, with the status [[AgentRun.status]] derives - as `await` does - and the run's own
+   * usage, summed from its `ModelCallCompleted` events (the thread's usage spans every run on it).
    */
   private def ended(terminal: RunEvent): Unit =
     val result = handle.await()
     val state  = result.toOption.map(AgentTracing.stateOf)
-    val usage  = state.flatMap(_.get(LoopKeys.usage).toOption).getOrElse(UsageSummary())
     val active = state.flatMap(_.get(LoopKeys.activeAgent).toOption.flatten).getOrElse(root)
     val status = result.flatMap(r => AgentRun.status(r, blockedBy.get.isDefined, loop))
     val label  = AgentTracing.label(terminal, status)
@@ -86,7 +92,9 @@ final private[agent] class AgentTracing(
       case Right(_: AgentStatus.Blocked) | Left(_) => Vector.empty
       case Right(_) => state.flatMap(AgentRun.turnMessages(_).toOption).getOrElse(Vector.empty)
     status.left.foreach(error => if label == "failed" then traceError(error.message))
-    trace(TraceEvent.AgentRunEnded(handle.threadId.value, handle.runId.value, active.value, label, messages, usage))
+    trace(
+      TraceEvent.AgentRunEnded(handle.threadId.value, handle.runId.value, active.value, label, messages, usage.get)
+    )
 
   /**
    * The scope's end. After the terminal event (traced by [[ended]]) or a `Disconnected` (logged) it

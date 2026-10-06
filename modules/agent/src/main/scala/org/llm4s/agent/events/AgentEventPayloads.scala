@@ -17,13 +17,18 @@ object CallUsage:
   def fromTokenUsage(u: TokenUsage): CallUsage =
     CallUsage(u.promptTokens, u.completionTokens, u.totalTokens, u.thinkingTokens)
 
-/** `agent`'s model call returned; `attempts` counts the calls its model wrappers made, the last one succeeding. */
+/**
+ * `agent`'s model call returned. `attempts` counts the calls its model wrappers made to the model,
+ * the last one succeeding; it is 0 when a model middleware answered without calling the model.
+ * `usage` and `estimatedCost` (USD) are the completion's, when the provider reported them.
+ */
 final case class ModelCallCompleted(
   agent: String,
   model: String,
   attempts: Int,
   toolCalls: Int,
-  usage: Option[CallUsage]
+  usage: Option[CallUsage],
+  estimatedCost: Option[Double]
 ) derives ReadWriter
 
 /** How a tool call ended for the loop. */

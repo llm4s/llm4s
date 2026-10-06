@@ -333,4 +333,22 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers with Eventually {
     ended.map(_.messages.head) shouldBe Vector(UserMessage("one"), UserMessage("two"))
     ended.map(_.messages.last) shouldBe Vector(AssistantMessage("first answer"), AssistantMessage("second answer"))
   }
+
+  it should "report each run's own usage on its AgentRunEnded, not the thread's" in {
+    val tracing = Recording()
+    val costed  = (text: String) => answer(text).withEstimatedCost(Some(0.25))
+    val agent   = traced(Scripted(Right(costed("first answer")), Right(costed("second answer"))), tracing)
+    ok(agent.run(ThreadId("t11"), "one"))
+    val two = ok(agent.run(ThreadId("t11"), "two"))
+    two.usage.requestCount shouldBe 2 // the thread's, as await reports it
+    val ended = endedOf(tracing)
+    ended.size shouldBe 2
+    ended.foreach { e =>
+      e.usage.requestCount shouldBe 1
+      e.usage.inputTokens shouldBe 20
+      e.usage.outputTokens shouldBe 10
+      e.usage.totalCost shouldBe BigDecimal("0.25")
+      e.usage.byModel.keySet shouldBe Set("test-model")
+    }
+  }
 }

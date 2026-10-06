@@ -122,6 +122,19 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     event("body")("metadata")("status").str shouldBe "failed"
   }
 
+  it should "carry the run's usage in the AgentRunEnded trace's metadata" in {
+    val mock    = new MockHttpClient(HttpResponse(200, ""))
+    val tracing = makeTracing(mock)
+    val usage   = UsageSummary().add("m", TokenUsage(10, 5, 15), Some(0.5)).add("m", TokenUsage(2, 1, 3), None)
+    val event   = TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("hi")), usage)
+
+    tracing.traceEvent(event).isRight shouldBe true
+    val metadata = ujson.read(mock.lastBody.get)("batch")(0)("body")("metadata")
+    metadata("input_tokens").num shouldBe 12
+    metadata("output_tokens").num shouldBe 6
+    metadata("total_cost").num shouldBe 0.5
+  }
+
   // =========================================================================
   // traceEvent - CustomEvent
   // =========================================================================
