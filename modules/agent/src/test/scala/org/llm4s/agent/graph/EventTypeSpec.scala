@@ -60,16 +60,16 @@ class EventTypeSpec extends AnyFlatSpec with Matchers:
     val graph = b.compile(entry)(_ => Right(())).fold(e => fail(e.message), identity)
     val seen  = new CopyOnWriteArrayList[Ping]()
     val done  = new CountDownLatch(1)
-    runtime
-      .subscribe(ThreadId("t1")) {
-        case ping(p)                                                    => seen.add(p): Unit
-        case StreamEvent.Durable(r) if r.event == RunEvent.RunCompleted => done.countDown()
-        case _                                                          => ()
-      }
+    val listener: StreamEvent => Unit = {
+      case ping(p)                                                    => seen.add(p): Unit
+      case StreamEvent.Durable(r) if r.event == RunEvent.RunCompleted => done.countDown()
+      case _                                                          => ()
+    }
+    val run = runtime
+      .start(ThreadId("t1"), graph, (), observer = Some(Observer(1024, listener)))
       .fold(e => fail(e.message), identity)
-    Thread.sleep(200)
-    val run = runtime.start(ThreadId("t1"), graph, ()).fold(e => fail(e.message), identity)
     run.await().isRight shouldBe true
     done.await(5, TimeUnit.SECONDS) shouldBe true
     seen.asScala.toSet shouldBe Set(Ping(1), Ping(2))
+    run.observation.foreach(_.cancel())
   }
