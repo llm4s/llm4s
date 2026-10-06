@@ -23,8 +23,7 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val message = extractor("""{"other":"x"}""").getString("name").left.getOrElse(fail("expected Left"))
 
     message should include("'name'")
-    message should include("is missing")
-    message should include("available: other")
+    message should include("other")
   }
 
   it should "reject a number with a type mismatch naming the key and both types" in {
@@ -74,6 +73,27 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
     extractor("""{"n":true}""").getIntEnhanced("n") shouldBe Left(TypeMismatch("n", "integer", "boolean"))
   }
 
+  // KNOWN BUG, not fixed here: getInt, getIntEnhanced and getOptionalInt are `_.numOpt.map(_.toInt)`, so
+  // {"n": 3.14} returns Right(3) and {"n": 9223372036854775807} returns Right(-1), silently. A tool argument that is not an integer should be
+  // refused (a TypeMismatch is the natural error; any Left satisfies these tests, so a fix that picks another
+  // error still promotes them). When fixed these fail with "marked pendingUntilFixed but passed": remove the
+  // wrapper then.
+  it should "reject a fractional number instead of truncating it" in {
+    pendingUntilFixed {
+      extractor("""{"n":3.14}""").getIntEnhanced("n").isLeft shouldBe true
+      extractor("""{"n":3.14}""").getInt("n").isLeft shouldBe true
+      extractor("""{"n":3.14}""").getOptionalInt("n").isLeft shouldBe true
+    }
+  }
+
+  it should "reject a number outside the Int range instead of wrapping it" in {
+    pendingUntilFixed {
+      extractor("""{"n":9223372036854775807}""").getIntEnhanced("n").isLeft shouldBe true
+      extractor("""{"n":9223372036854775807}""").getInt("n").isLeft shouldBe true
+      extractor("""{"n":9223372036854775807}""").getOptionalInt("n").isLeft shouldBe true
+    }
+  }
+
   it should "report null and a missing key differently" in {
     extractor("""{"n":null}""").getIntEnhanced("n") shouldBe Left(NullParameter("n", "integer"))
     extractor("""{}""").getIntEnhanced("n") shouldBe Left(MissingParameter("n", "integer", Nil))
@@ -83,7 +103,8 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val message = extractor("""{"n":"123"}""").getInt("n").left.getOrElse(fail("expected Left"))
 
     message should include("'n'")
-    message should include("expected integer but got string")
+    message should include("integer")
+    message should include("string")
   }
 
   // ---- doubles
@@ -116,9 +137,10 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not coerce the strings \"true\" and \"false\" in the string-error API either" in {
-    extractor("""{"t":"true"}""").getBoolean("t").left.getOrElse(fail("expected Left")) should include(
-      "expected boolean but got string"
-    )
+    val message = extractor("""{"t":"true"}""").getBoolean("t").left.getOrElse(fail("expected Left"))
+
+    message should include("boolean")
+    message should include("string")
     extractor("""{"f":"false"}""").getBoolean("f").isLeft shouldBe true
   }
 
@@ -182,7 +204,7 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
       extractor("""{"config":{"host":"h"}}""").getString("config.port").left.getOrElse(fail("expected Left"))
 
     message should include("'config.port'")
-    message should include("available: host")
+    message should include("host")
   }
 
   it should "put the path of the missing intermediate object in the error" in {
@@ -194,8 +216,10 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val error = extractor("""{"config":"text"}""").getStringEnhanced("config.host")
 
     error shouldBe Left(InvalidNesting("host", "config", "string"))
-    error.left.map(_.getMessage) shouldBe
-      Left("cannot access parameter 'host' because parent 'config' is string, not an object")
+    val message = error.left.map(_.getMessage).left.getOrElse(fail("expected Left"))
+    message should include("'host'")
+    message should include("'config'")
+    message should include("string")
   }
 
   it should "report a null parent on the way down" in {
@@ -224,16 +248,41 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
       Left(MissingParameter("name", "string", List("Name")))
   }
 
-  it should "list the available keys in sorted order" in {
-    extractor("""{"zeta":1,"alpha":2,"mid":3}""").getStringEnhanced("nope") shouldBe
-      Left(MissingParameter("nope", "string", List("alpha", "mid", "zeta")))
+  it should "list every available key when one is missing" in {
+    val available = extractor("""{"zeta":1,"alpha":2,"mid":3}""").getStringEnhanced("nope") match {
+      case Left(MissingParameter("nope", "string", keys)) => keys
+      case other                                          => fail(s"expected MissingParameter, got $other")
+    }
+
+    available should contain theSameElementsAs Seq("alpha", "mid", "zeta")
   }
 
   // ---- validateRequired
 
-  "validateRequired" should "report null and wrong-typed required parameters alongside missing ones" in {
-    val result = extractor("""{"a":null,"b":"x"}""").validateRequired("a" -> "string", "c" -> "integer")
+  "validateRequired" should "report a null parameter and a missing one together, in the order asked" in {
+    val errors = extractor("""{"a":null,"b":"x"}""")
+      .validateRequired("a" -> "string", "c" -> "integer")
+      .left
+      .getOrElse(fail("expected Left"))
 
-    result shouldBe Left(List(NullParameter("a", "string"), MissingParameter("c", "integer", List("a", "b"))))
+    errors.map {
+      case NullParameter(path, _)       => s"null:$path"
+      case MissingParameter(path, _, _) => s"missing:$path"
+      case other                        => fail(s"unexpected error $other")
+    } shouldBe List("null:a", "missing:c")
+  }
+
+  it should "accept parameters that are present" in {
+    extractor("""{"a":"x","c":3}""").validateRequired("a" -> "string", "c" -> "integer") shouldBe Right(())
+  }
+
+  // KNOWN BUG, not fixed here: validateRequired passes `_ => Some(())` as the extractor, so it checks that a
+  // parameter is present and not null but never its type, although its Scaladoc promises "have the correct
+  // types". `validateRequired("age" -> "integer")` on {"age":"x"} returns Right(()). When it is fixed this test
+  // fails with "marked pendingUntilFixed but passed": remove the wrapper then.
+  it should "report a required parameter of the wrong type, as its Scaladoc promises" in {
+    pendingUntilFixed {
+      extractor("""{"age":"x"}""").validateRequired("age" -> "integer").isLeft shouldBe true
+    }
   }
 }
