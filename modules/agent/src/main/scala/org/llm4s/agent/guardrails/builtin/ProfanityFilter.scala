@@ -15,10 +15,11 @@ import org.llm4s.types.Result
  * guardrail for context-aware filtering.
  *
  * Matching rules, which decide what the filter does and does not catch:
- *  - The text is split on ASCII whitespace (space, tab, line breaks, form feed) and each token is compared
- *    with the word list as a whole. `badwords` does not match `badword`, and a token with punctuation attached
- *    (`badword!`, `"badword"`) does not match either. Other Unicode spaces, such as a non-breaking space, do
- *    not split tokens, so `badword` joined to the next word by one is not caught.
+ *  - The text is split on ASCII whitespace (the regex class `\s`: space, tab, `\n`, `\r`, form feed and
+ *    vertical tab) and each token is compared with the word list as a whole. `badwords` does not match
+ *    `badword`, and a token with punctuation attached (`badword!`, `"badword"`) does not match either. Any
+ *    other character is part of a token, including other Unicode spaces and line separators (such as a
+ *    non-breaking space or U+2028), so `badword` joined to a neighbouring word by one is not caught.
  *  - Entries are single words. An entry that contains ASCII whitespace (a phrase) can never match, because
  *    tokens never contain it.
  *  - By default the comparison ignores case, for the built-in words and for `customBadWords` alike. With

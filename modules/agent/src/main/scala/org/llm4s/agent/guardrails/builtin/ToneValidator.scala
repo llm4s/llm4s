@@ -51,26 +51,27 @@ object Tone {
  *
  * Detection looks at the whole text, line breaks included, and takes the first rule that applies, in this
  * order:
- *  1. [[Tone.Excited]]: the text contains `!` and it has a short sentence. Sentences are counted crudely: the
- *     text is split on `.`, `!` and `?`, and each piece is split on whitespace, with fewer than five tokens
- *     counting as short. The first piece is counted exactly (unless the text starts with whitespace, which
- *     adds a token), but a later piece begins with the space after the delimiter, which counts as an extra
- *     token, so a later sentence is short only at three words or fewer (`here are four words` is not short).
- *     A run of delimiters (`...`, `?!`) inside the text leaves an empty piece that also counts as
- *     short, so `i like it very much... honestly it is quite good!` is Excited although every sentence has
- *     five words or more; at the very end of the text the empty pieces are dropped, so a closing `?!` or
- *     `!!!` does not count. This rule wins over every keyword below; a text of long sentences, each ended by a
- *     single delimiter, is not Excited even if it ends in `!`.
+ *  1. [[Tone.Excited]]: the text contains `!` somewhere and some piece of it is "short". This is a rough
+ *     token-count heuristic, not sentence detection: the text is cut at every `.`, `!` and `?`, each piece is
+ *     split on ASCII whitespace, and a piece that yields fewer than five tokens is short. The token count
+ *     depends on spacing as well as on words: whitespace at the start of a piece (such as the space after a
+ *     delimiter) adds an empty token, other Unicode spaces (such as a non-breaking space) do not separate
+ *     tokens, and a piece with no words at all (the gap inside a run such as `...` or `?!`, or a space or line
+ *     break after the final `!`) is short, though completely empty pieces at the very end of the text are
+ *     dropped. The outcome therefore follows no fixed word count: whether a sentence of four or so words
+ *     counts as short depends on the punctuation and spacing around it, and text made only of long sentences
+ *     can still come out Excited. Treat the rule as a coarse signal. It wins over every keyword below.
  *  1. [[Tone.Professional]]: contains `please`, `thank you`, `kindly`, `regards` or `sincerely`.
  *  1. [[Tone.Casual]]: contains `hey`, `cool`, `awesome`, `yeah` or `nah`.
  *  1. [[Tone.Friendly]]: contains `hi`, `hello`, `thanks` or `appreciate`.
  *  1. [[Tone.Formal]]: contains `furthermore`, `moreover`, `consequently` or `therefore`.
  *  1. [[Tone.Neutral]]: none of the above, including empty text.
  *
- * Keywords match whole words only (`pleased` is not `please`), so a text with keywords of several tones is
- * classified by the earliest rule above, not by how many keywords it has. Because the lists are short and in
- * English, text in another language, or in none of these registers, comes out Neutral (unless the Excited
- * rule applies); allow [[Tone.Neutral]] (or use `allowAll`) if that should pass.
+ * Keywords are matched at regular-expression word boundaries (`\b`), so `pleased` is not `please`, though
+ * `hi-fi` does contain `hi`. A text with keywords of several tones is classified by the earliest rule above,
+ * not by how many keywords it has. Because the lists are short and in English, text in another language, or
+ * in none of these registers, usually comes out Neutral; allow [[Tone.Neutral]] (or use `allowAll`) if that
+ * should pass.
  *
  * On a mismatch `validate` returns a [[org.llm4s.error.ValidationError]] for the field `output`, whose detail
  * names the detected tone and the allowed ones, for example

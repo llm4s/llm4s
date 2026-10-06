@@ -15,19 +15,19 @@ import scala.util.matching.Regex
  * a phone number, an order id) or to require that some text is present.
  *
  * The pattern is searched for, not matched against the whole text: `[0-9]+` accepts `order 66`. Anchor the
- * pattern (`^[0-9]+$`) to require that the whole text fits, with one caveat: `$` also matches before a single
- * final line terminator (`\n`, `\r\n`, `\r`, or one of U+0085, U+2028 and U+2029), so `^[0-9]+$` accepts `66`
- * followed by one line break, though not by two line breaks or by a space. `.` does not match a line terminator
- * unless the `(?s)` (DOTALL) flag is set, and `^` and `$` anchor to the start and end of the text unless `(?m)`
- * is set.
+ * pattern (`^[0-9]+$`) to require that the whole text fits, with one caveat: by default `$` also matches just
+ * before a line terminator that ends the text, so `^[0-9]+$` accepts `66` followed by one line break. These are
+ * standard `java.util.regex` semantics, and inline flags such as `(?m)`, `(?s)` and `(?d)` change them; see
+ * `java.util.regex.Pattern` for the details.
  *
  * Patterns are user-supplied, so matching goes through [[org.llm4s.security.RegexSafetyManager]], whichever
  * way the validator was built: text that is `null` or longer than 100000 characters is rejected before
  * matching, and a match that exceeds its character-access budget (the guard against catastrophic backtracking)
- * is aborted. Only the companion's `String` factories also pre-screen the pattern itself: there a blank
- * pattern, one longer than 1000 characters, or one with a known catastrophic-backtracking shape is refused. The
- * shape check is a heuristic: it refuses a group followed by `+` or `*` that itself contains `+`, `*` or `|`
- * (`(a+)+`, `(cat|dog)*`), so some harmless patterns are refused, and it does not catch every dangerous one. A
+ * is aborted. Only the companion's `String` factories also pre-screen the pattern itself: there a pattern that
+ * is `null`, empty after trimming, longer than 1000 characters, or matches a known catastrophic-backtracking
+ * shape is refused. The shape check is a rough textual heuristic aimed at nested quantifiers and quantified
+ * alternation (it refuses `(a+)+` and `(cat|dog)*`): it refuses some harmless patterns and misses some
+ * dangerous ones. A
  * pattern passed as a [[scala.util.matching.Regex]] or a compiled `java.util.regex.Pattern` (the constructors,
  * `RegexValidator(regex)`, [[RegexValidator.email]], [[RegexValidator.phone]] and
  * [[RegexValidator.alphanumeric]]) is used as given, with no pre-screen; its matching is still bounded.
