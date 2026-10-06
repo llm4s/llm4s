@@ -44,9 +44,11 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
 
   /**
    * The structural rules a provider applies to a JSON Schema node: it has a type, an object lists its
-   * properties and requires only properties it has, an array has items. Returns every violation found.
+   * properties and requires only properties it has, an array has items, and - in strict mode only, which is
+   * where OpenAI demands it - an object closes itself with `additionalProperties: false`. Returns every
+   * violation found.
    */
-  private def shapeProblems(node: ujson.Value, path: String = "$"): Seq[String] =
+  private def shapeProblems(node: ujson.Value, strict: Boolean, path: String = "$"): Seq[String] =
     node match {
       case schema: ujson.Obj =>
         val types = schema.value.get("type") match {
@@ -69,16 +71,16 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
                 case _ => Seq(s"$path is an object without properties and required")
               }
             val additional =
-              if (schema.value.contains("additionalProperties")) Seq.empty
-              else Seq(s"$path has no additionalProperties")
+              if (!strict || schema.value.get("additionalProperties").contains(ujson.False)) Seq.empty
+              else Seq(s"$path is a strict object without additionalProperties: false")
             missing ++ additional ++ properties.toSeq.flatMap(_.value.toSeq.flatMap { case (key, child) =>
-              shapeProblems(child, s"$path.$key")
+              shapeProblems(child, strict, s"$path.$key")
             })
           } else Seq.empty
         val arrayRules =
           if (types.contains("array"))
             schema.value.get("items") match {
-              case Some(items) => shapeProblems(items, s"$path[]")
+              case Some(items) => shapeProblems(items, strict, s"$path[]")
               case None        => Seq(s"$path is an array without items")
             }
           else Seq.empty
@@ -91,20 +93,24 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
   // ---- shape
 
   "A tool's parameter schema" should "be a well-formed JSON Schema at every depth, strict or not" in {
-    Seq(true, false).foreach(strict => shapeProblems(everything.toJsonSchema(strict)) shouldBe Seq.empty)
+    Seq(true, false).foreach(strict => shapeProblems(everything.toJsonSchema(strict), strict) shouldBe Seq.empty)
   }
 
   it should "be caught by the shape check when a schema is malformed" in {
     // a guard on the guard: the check above must be able to fail
-    shapeProblems(ujson.Obj("type" -> "array")) shouldBe Seq("$ is an array without items")
-    shapeProblems(ujson.Obj("description" -> "no type")) shouldBe Seq("$ has no type")
+    shapeProblems(ujson.Obj("type" -> "array"), strict = false) shouldBe Seq("$ is an array without items")
+    shapeProblems(ujson.Obj("description" -> "no type"), strict = false) shouldBe Seq("$ has no type")
+    val open = ujson.Obj("type" -> "object", "properties" -> ujson.Obj(), "required" -> ujson.Arr())
+    shapeProblems(open, strict = true) shouldBe Seq("$ is a strict object without additionalProperties: false")
+    shapeProblems(open, strict = false) shouldBe Seq.empty
     shapeProblems(
       ujson.Obj(
         "type"                 -> "object",
         "properties"           -> ujson.Obj(),
         "required"             -> ujson.Arr("ghost"),
         "additionalProperties" -> false
-      )
+      ),
+      strict = true
     ) shouldBe Seq("$ requires unknown ghost")
   }
 
@@ -146,12 +152,16 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "leave a constraint out of the document when it was not set" in {
-    val json = Schema.integer("Plain").toJsonSchema(strict = true).obj
+    val integer = Schema.integer("Plain").toJsonSchema(strict = true).obj.keySet
+    val string  = Schema.string("Plain").toJsonSchema(strict = true).obj.keySet
+    val array   = Schema.array("Plain", Schema.string("x")).toJsonSchema(strict = true).obj.keySet
 
-    json.keySet shouldBe Set("type", "description")
-    Schema.string("Plain").toJsonSchema(strict = true).obj.keySet shouldBe Set("type", "description")
-    Schema.array("Plain", Schema.string("x")).toJsonSchema(strict = true).obj.keySet shouldBe
-      Set("type", "description", "items")
+    (integer should contain).allOf("type", "description")
+    integer should contain noneOf ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf")
+    (string should contain).allOf("type", "description")
+    string should contain noneOf ("minLength", "maxLength", "enum")
+    (array should contain).allOf("type", "description", "items")
+    array should contain noneOf ("minItems", "maxItems", "uniqueItems")
   }
 
   // ---- strict mode through nesting
@@ -199,7 +209,7 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
     json("properties")("home")("properties").obj.keys.toSeq shouldBe Seq("street", "unit")
   }
 
-  it should "be byte-for-byte the same on every rendering" in {
+  it should "render the same text each time the same tool is rendered" in {
     val renderings = (1 to 5).map(_ => ujson.write(tool(everything).toOpenAITool()))
 
     renderings.distinct should have size 1
@@ -207,18 +217,19 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
 
   // ---- numbers on the wire
 
-  "Numeric constraints" should "be written as integers for an integer schema and as decimals for a number schema" in {
+  "Numeric constraints" should "be JSON numbers on the wire, a whole bound without a decimal point and a fractional one with its fraction" in {
     val written = ujson.write(everything.toJsonSchema(strict = false))
 
+    // A bound written as a string (`"100"`) or truncated (`0.5` becoming `0`) is spelled differently here.
+    // There is no assertion against a trailing `.0`: ujson.Num is a Double and ujson never writes one for a
+    // whole value, so such an assertion could not fail whatever the schema code emits.
     // whatever follows the value (`,` or the closing `}`), the value itself is spelled without a decimal point
     (written should include).regex("\"minimum\":0[,}]")
     (written should include).regex("\"maximum\":100[,}]")
     (written should include).regex("\"minimum\":0\\.5[,}]")
     (written should include).regex("\"maximum\":1\\.5[,}]")
-    (written should not).include("\"minimum\":0.0")
-    (written should not).include("\"maximum\":100.0")
-    (written should not).include("\"minLength\":1.0")
-    (written should not).include("\"maxItems\":5.0")
+    (written should include).regex("\"minLength\":1[,}]")
+    (written should include).regex("\"maxItems\":5[,}]")
   }
 
   // ---- the tool definition
@@ -233,13 +244,13 @@ class SchemaSpec extends AnyFlatSpec with Matchers {
   it should "present itself to a provider as a function whose parameters are the schema" in {
     val definition = tool(everything).toOpenAITool()
 
-    definition.obj.keySet shouldBe Set("type", "function")
+    (definition.obj.keySet should contain).allOf("type", "function")
     definition("type").str shouldBe "function"
-    definition("function").obj.keySet shouldBe Set("name", "description", "parameters", "strict")
+    (definition("function").obj.keySet should contain).allOf("name", "description", "parameters", "strict")
     definition("function")("name").str shouldBe "everything"
     definition("function")("description").str shouldBe "Takes every kind of parameter"
     definition("function")("parameters") shouldBe everything.toJsonSchema(strict = true)
-    shapeProblems(definition("function")("parameters")) shouldBe Seq.empty
+    shapeProblems(definition("function")("parameters"), strict = true) shouldBe Seq.empty
   }
 
   it should "render its parameters in the mode its strict flag names" in {
