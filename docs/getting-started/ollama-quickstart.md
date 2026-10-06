@@ -431,7 +431,16 @@ object StreamingOllama extends App {
 
 ## Tool Calling with Ollama
 
-Ollama supports tool calling (function calling) with compatible models, and `llm4s-ollama`'s native client sends the tools and reads the calls (streamed or not) itself - no `/v1` OpenAI-compatible workaround is needed:
+Ollama supports tool calling (function calling) with compatible models, and `llm4s-ollama`'s native client sends the tools and reads the calls (streamed or not) itself - no `/v1` OpenAI-compatible workaround is needed.
+
+Only models whose Ollama page lists the **tools** capability can do this (`llama3.1` can; the original `llama3`
+does not). Sending tools to any other model fails, and the client reports it instead of dropping the tools:
+
+```text
+Invalid tools: Ollama model 'llama3:latest' does not support tool calling (the server said: registry.ollama.ai/library/llama3:latest does not support tools). Use a model whose Ollama page lists the 'tools' capability, or send no tools.
+```
+
+Pull a tool-capable model (`ollama pull llama3.1`) and set `OLLAMA_MODEL` to it:
 
 ```scala
 import org.llm4s.agent.Agent

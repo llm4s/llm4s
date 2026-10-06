@@ -23,7 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dropping it; an assistant turn's tool calls go back with object arguments. Ollama sends no call ids, so
   the client synthesizes unique ones (`call_<12 hex>_<index>`); an id the server sends is kept. A
   malformed `tool_calls` entry is a `ProcessingError`. Agents on `provider = "ollama"` can now run tools; the
-  `openai-compatible` `/v1` route remains an alternative.
+  `openai-compatible` `/v1` route remains an alternative. **Behaviour change:** tools are now sent, so a model
+  without the *tools* capability (such as `llama3:latest`, the samples' default) fails the request: Ollama's
+  HTTP 400 `... does not support tools` is reported as a `ValidationError` on `tools` naming the model. Use a
+  tool-capable model (for example `llama3.1`) or send no tools; the request is not retried without them.
 - **`llm4s-spring-boot-starter`: Spring Boot auto-configuration** (Beta, `modules/spring-boot-starter`,
   [#936](https://github.com/llm4s/llm4s/issues/936)): built on `llm4s-java-api`. Properties under `llm4s.*` (`provider`, `model`, `apiKey`,
   `baseUrl`, `organization`, `contextWindow`, `reserveCompletion`) produce a `JLlmClient` and an

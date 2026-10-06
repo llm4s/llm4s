@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.ProcessingError
+import org.llm4s.error.{ ProcessingError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
@@ -118,6 +118,10 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
 
       argumentsSent(ujson.Str("""{"location":"Rome"}""")) shouldBe ujson.Obj("location" -> "Rome")
       argumentsSent(ujson.Str("not json")) shouldBe ujson.Obj()
+      argumentsSent(ujson.Str("[1,2]")) shouldBe ujson.Obj()
+      argumentsSent(ujson.Str("\"Paris\"")) shouldBe ujson.Obj()
+      argumentsSent(ujson.Arr(1, 2)) shouldBe ujson.Obj()
+      argumentsSent(ujson.Num(7)) shouldBe ujson.Obj()
       argumentsSent(ujson.Null) shouldBe ujson.Obj()
     }
 
@@ -270,6 +274,71 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
           }
         }
       }
+    }
+  }
+
+  "a model without tool support" should {
+
+    /** A fake `/api/chat` that answers every request with `status` and `body`. */
+    def withStatus(status: Int, body: String)(test: OllamaClient => Any): Unit =
+      withServer("/api/chat")(exchange => sendJsonResponse(exchange, status, body)) { baseUrl =>
+        val client = new OllamaClient(config(baseUrl))
+        try test(client)
+        finally client.close()
+      }
+
+    // What Ollama answers (HTTP 400) when `tools` is sent to a model whose capabilities lack it.
+    val unsupported = """{"error":"registry.ollama.ai/library/llama3:latest does not support tools"}"""
+
+    def streamAsk(client: OllamaClient, tools: Seq[ToolFunction[_, _]] = Seq(weatherTool)): Result[Completion] =
+      client.streamComplete(
+        Conversation(Seq(UserMessage("What is the weather in Paris?"))),
+        CompletionOptions().withTools(tools),
+        _ => ()
+      )
+
+    def validation(result: Result[Completion]): ValidationError =
+      result.left.toOption.getOrElse(fail("expected a failure")) match {
+        case error: ValidationError => error
+        case other                  => fail(s"expected a ValidationError, got $other")
+      }
+
+    "be a ValidationError on `tools` that names the model and the missing capability" in {
+      withStatus(400, unsupported) { client =>
+        val error = validation(ask(client))
+        error.field shouldBe "tools"
+        error.message should include("llama3.1")
+        error.message should include("does not support tool calling")
+      }
+    }
+
+    "be reported the same way when streaming" in {
+      withStatus(400, unsupported) { client =>
+        val error = validation(streamAsk(client))
+        error.field shouldBe "tools"
+        error.message should include("llama3.1")
+      }
+    }
+
+    "be recognised whatever the case of the server's message" in {
+      withStatus(400, """{"error":"Model DOES NOT SUPPORT TOOLS"}""") { client =>
+        validation(ask(client)).field shouldBe "tools"
+      }
+    }
+
+    "leave any other 400 to the generic mapping" in {
+      withStatus(400, """{"error":"invalid option: temperature"}""") { client =>
+        validation(ask(client)).field shouldBe "request"
+        validation(streamAsk(client)).field shouldBe "request"
+      }
+    }
+
+    "leave the same message alone when the request sent no tools" in {
+      withStatus(400, unsupported)(client => validation(ask(client, tools = Seq.empty)).field shouldBe "request")
+    }
+
+    "leave the same message alone on any other status" in {
+      withStatus(500, unsupported)(client => ask(client).left.toOption.get shouldBe a[ServiceError])
     }
   }
 

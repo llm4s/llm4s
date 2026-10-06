@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
+import org.llm4s.error.ValidationError
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
@@ -9,6 +10,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
+import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
@@ -25,13 +27,15 @@ import scala.util.{ Try, Using }
  *
  * == Tool calling ==
  *
- * Tools in [[CompletionOptions.tools]] are sent as the `tools` field
+ * Tools in `CompletionOptions.tools` are sent as the `tools` field
  * (`{type: "function", function: {name, description, parameters}}`). A reply's
  * `message.tool_calls` - whole, or streamed - becomes `ToolCall`s. Ollama's native API
  * sends no call ids, so the client synthesizes them (`call_<12 hex>_<index>`, a fresh prefix per
  * reply or stream); an id the server does send is kept. A `ToolMessage` is sent as
  * `role: tool` with the `tool_name` of the call it answers, and an assistant turn's tool calls
  * are sent back with object arguments. A malformed `tool_calls` entry is a `ProcessingError`.
+ * A model without the tools capability makes Ollama answer HTTP 400 (`... does not support tools`); that is a
+ * [[org.llm4s.error.ValidationError]] on `tools` naming the model, and the request is not retried without its tools.
  * Whether the model calls tools at all depends on the model.
  *
  * == Structured output ==
@@ -95,11 +99,35 @@ class OllamaClient(
             Try(ujson.read(response.body)).toResult
               .flatMap(json => Try(parseCompletion(json)).toResult.flatMap(identity))
           } else {
-            HttpErrorMapper.mapHttpError(response.statusCode, response.body, providerName, response.headers)
+            mapError(response.statusCode, response.body, response.headers, options)
           }
         recordingExchange(startedAt, requestText, response.body)(result)
     }
   }
+
+  /**
+   * Maps a non-2xx reply. An HTTP 400 whose message says the model has no tool support, on a request
+   * that sent tools, becomes a [[org.llm4s.error.ValidationError]] on `tools` that names the model: Ollama
+   * answers that way (`... does not support tools`) to a model whose capabilities lack tool calling.
+   * Every other reply goes through [[HttpErrorMapper]]. The request is never retried without its tools:
+   * dropping them would change what the caller asked for.
+   */
+  private def mapError(
+    status: Int,
+    body: String,
+    headers: Map[String, Seq[String]],
+    options: CompletionOptions
+  ): Result[Nothing] =
+    if (status == 400 && options.tools.nonEmpty && OllamaClient.reportsNoToolSupport(body))
+      Left(
+        ValidationError(
+          "tools",
+          s"Ollama model '${config.model}' does not support tool calling " +
+            s"(the server said: ${OllamaClient.serverMessage(body)}). " +
+            "Use a model whose Ollama page lists the 'tools' capability, or send no tools."
+        )
+      )
+    else HttpErrorMapper.mapHttpError(status, body, providerName, headers)
 
   private def recordExchange(
     startedAt: Instant,
@@ -149,7 +177,7 @@ class OllamaClient(
       case Right(response) if response.statusCode != 200 =>
         val err = Using(response.body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)).getOrElse("")
         recordingExchange(startedAt, requestText, err)(
-          HttpErrorMapper.mapHttpError(response.statusCode, err, providerName, response.headers)
+          mapError(response.statusCode, err, response.headers, options)
         )
       case Right(response) =>
         val accumulator = StreamingAccumulator.create()
@@ -236,7 +264,10 @@ class OllamaClient(
         if (am.toolCalls.nonEmpty)
           message("tool_calls") = ujson.Arr.from(am.toolCalls.map { tc =>
             ujson.Obj(
-              "function" -> ujson.Obj("name" -> tc.name, "arguments" -> OllamaClient.requestArguments(tc.arguments))
+              "function" -> ujson.Obj(
+                "name"      -> tc.name,
+                "arguments" -> OllamaClient.requestArguments(tc.name, tc.arguments)
+              )
             )
           })
         message
@@ -311,6 +342,22 @@ class OllamaClient(
 object OllamaClient {
   import org.llm4s.types.TryOps
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  /** Whether an error body says the model cannot do tool calling (matched whatever the case). */
+  private[provider] def reportsNoToolSupport(body: String): Boolean =
+    body.toLowerCase(java.util.Locale.ROOT).contains("does not support tools")
+
+  /** The `error` text of an Ollama error body, or the body itself when it is not that JSON; at most 200 characters. */
+  private[provider] def serverMessage(body: String): String =
+    Try(ujson.read(body)).toOption
+      .flatMap(_.objOpt)
+      .flatMap(_.get("error"))
+      .flatMap(_.strOpt)
+      .getOrElse(body)
+      .trim
+      .take(200)
+
   /** Synthesizes call ids - Ollama's native API sends none: `call_<12 hex>_<index>`, one prefix per reply. */
   final private[provider] class CallIds {
     private val prefix = "call_" + java.util.UUID.randomUUID().toString.replace("-", "").take(12)
@@ -325,11 +372,22 @@ object OllamaClient {
   private def malformed(detail: String): org.llm4s.error.LLMError =
     org.llm4s.error.ProcessingError("ollama-tool-calls", s"malformed tool call: $detail")
 
-  /** Arguments of a call as a JSON object; Ollama's request side takes an object, never a string. */
-  private[provider] def requestArguments(arguments: ujson.Value): ujson.Value = arguments match {
-    case o: ujson.Obj => o
-    case ujson.Str(s) => Try(ujson.read(s)).toOption.collect { case o: ujson.Obj => o }.getOrElse(ujson.Obj())
-    case _            => ujson.Obj()
+  /**
+   * Arguments of a call as a JSON object; Ollama's request side takes an object, never a string.
+   * An object is sent as it is, and a string that parses to an object is parsed. Anything else (a string
+   * that is not JSON or not an object, an array, a number) cannot be sent: it goes as `{}`, with a
+   * WARN naming the tool, never the arguments, which can hold secrets.
+   */
+  private[provider] def requestArguments(toolName: String, arguments: ujson.Value): ujson.Value = {
+    val parsed = arguments match {
+      case o: ujson.Obj => Some(o)
+      case ujson.Str(s) => Try(ujson.read(s)).toOption.collect { case o: ujson.Obj => o }
+      case _            => None
+    }
+    parsed.getOrElse {
+      logger.warn(s"Sending an empty object as the arguments of tool call '$toolName': they are not a JSON object")
+      ujson.Obj()
+    }
   }
 
   /** An OpenAI-format tool definition as Ollama takes it: no `strict`, which Ollama does not know. */

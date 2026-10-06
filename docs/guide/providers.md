@@ -1055,7 +1055,10 @@ nim-local {
 [`llm4s-ollama`](#ollama-local-models) (`provider = "ollama"`) is the first-class route to
 Ollama: it uses Ollama's native `/api/chat` API, supports **tool calling** (tools are sent, tool
 calls are read - whole or streamed - and tool results go back as `role: tool`) and also provides
-Ollama embeddings. Use the generic provider on Ollama's OpenAI-compatible `/v1` endpoint instead
+Ollama embeddings. Tool calling needs a model whose Ollama page lists the **tools** capability: for any
+other model Ollama answers HTTP 400 (`... does not support tools`), which the client reports as an
+`Invalid tools: Ollama model '<model>' does not support tool calling ...` validation error rather than
+sending the request again without the tools. Use the generic provider on Ollama's OpenAI-compatible `/v1` endpoint instead
 when Ollama is behind a gateway that exposes only the OpenAI API, or when you prefer that wire format:
 
 ```hocon

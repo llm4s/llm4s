@@ -48,6 +48,13 @@ class OllamaToolCallingIntegrationSpec extends AnyFlatSpec with Matchers {
   private val question =
     Conversation(Seq(UserMessage("What is the weather in Paris? Use the get_weather tool.")))
 
+  /**
+   * Whether a small model calls the tool is not deterministic, so a reply without a call cancels the test
+   * (visible as canceled, with this reason) instead of passing without having checked a tool call at all.
+   */
+  private def assumeToolCalled(calls: Seq[ToolCall]): Unit =
+    assume(calls.nonEmpty, s"$testModel did not call the tool; the shape of a tool call was not exercised")
+
   private def withClient[T](f: OllamaClient => T): T = {
     val client = new OllamaClient(config)
     try f(client)
@@ -59,7 +66,9 @@ class OllamaToolCallingIntegrationSpec extends AnyFlatSpec with Matchers {
     withClient { client =>
       val result = client.complete(question, options)
       withClue(s"complete failed: ${result.swap.toOption}")(result.isRight shouldBe true)
-      result.toOption.get.toolCalls.foreach { call =>
+      val calls = result.toOption.get.toolCalls
+      assumeToolCalled(calls)
+      calls.foreach { call =>
         call.id should not be empty
         call.name shouldBe "get_weather"
         call.arguments shouldBe a[ujson.Obj]
@@ -73,7 +82,9 @@ class OllamaToolCallingIntegrationSpec extends AnyFlatSpec with Matchers {
       val chunks = ListBuffer.empty[StreamedChunk]
       val result = client.streamComplete(question, options, chunks += _)
       withClue(s"streamComplete failed: ${result.swap.toOption}")(result.isRight shouldBe true)
-      result.toOption.get.toolCalls.foreach { call =>
+      val calls = result.toOption.get.toolCalls
+      assumeToolCalled(calls)
+      calls.foreach { call =>
         call.id should not be empty
         call.name shouldBe "get_weather"
       }
@@ -84,11 +95,11 @@ class OllamaToolCallingIntegrationSpec extends AnyFlatSpec with Matchers {
     Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
     withClient { client =>
       val first = client.complete(question, options).toOption.get
-      first.toolCalls.headOption.foreach { call =>
-        val followUp = Conversation(question.messages ++ Seq(first.message, ToolMessage("Sunny, 22C", call.id)))
-        val result   = client.complete(followUp, options)
-        withClue(s"follow-up failed: ${result.swap.toOption}")(result.isRight shouldBe true)
-      }
+      assumeToolCalled(first.toolCalls)
+      val call     = first.toolCalls.head
+      val followUp = Conversation(question.messages ++ Seq(first.message, ToolMessage("Sunny, 22C", call.id)))
+      val result   = client.complete(followUp, options)
+      withClue(s"follow-up failed: ${result.swap.toOption}")(result.isRight shouldBe true)
     }
   }
 }
