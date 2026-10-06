@@ -260,7 +260,9 @@ parseAll(List("1", "2", "3")) // Right(List(1, 2, 3))
 parseAll(List("1", "x", "y")) // Left(...), the first failure
 ```
 
-- `Result.traverse` and `Result.sequence` stop at the first failure.
+- `Result.traverse` stops at the first failure: it does not call the function on the elements after
+  it, so side effects and expensive work stop there too. `Result.sequence` returns the first failure
+  in a list of results that have already been computed.
 - `Result.validateAll(items)(check)` runs every check and returns **all** the failures as a
   `Left(List[LLMError])`: use it when you want to report every problem at once.
 - `Result.combine(a, b)` joins two independent results into a tuple.

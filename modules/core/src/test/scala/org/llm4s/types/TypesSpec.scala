@@ -208,6 +208,28 @@ class TypesSpec extends AnyFlatSpec with Matchers {
     result shouldBe Right(List(2, 4, 6))
   }
 
+  it should "stop calling f after the first failure" in {
+    val error = ValidationError("test", "error")
+    var calls = List.empty[Int]
+    val result = Result.traverse(List(1, 2, 3, 4)) { n =>
+      calls = calls :+ n
+      if (n == 2) Left(error) else Right(n)
+    }
+    result shouldBe Left(error)
+    calls shouldBe List(1, 2)
+  }
+
+  it should "return the first of several failures" in {
+    val first  = ValidationError("first", "error")
+    val second = ValidationError("second", "error")
+    Result.traverse(List(1, 2, 3))(n => if (n == 1) Right(n) else if (n == 2) Left(first) else Left(second)) shouldBe
+      Left(first)
+  }
+
+  it should "handle a large list without overflowing the stack" in {
+    Result.traverse((1 to 100000).toList)(n => Right(n)).map(_.size) shouldBe Right(100000)
+  }
+
   "Result.combine" should "combine two results into tuple" in {
     val result = Result.combine(Right(1), Right("a"))
     result shouldBe Right((1, "a"))

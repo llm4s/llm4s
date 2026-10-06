@@ -205,16 +205,31 @@ object Result {
   def fromOption[A](opt: Option[A], error: => org.llm4s.error.LLMError): Result[A] =
     opt.toRight(error)
 
+  /**
+   * Collects a list of results into a result of a list: the values in order, or the first
+   * `Left` in the list.
+   */
   def sequence[A](results: List[Result[A]]): Result[List[A]] =
-    results.foldRight(success(List.empty[A])) { (result, acc) =>
-      for {
-        value <- result
-        list  <- acc
-      } yield value :: list
-    }
+    traverse(results)(result => result)
 
-  def traverse[A, B](list: List[A])(f: A => Result[B]): Result[List[B]] =
-    sequence(list.map(f))
+  /**
+   * Applies `f` to each element in order and collects the values, stopping at the first `Left`:
+   * `f` is not called on any element after the first failure, so side effects and expensive work
+   * in `f` stop there too.
+   */
+  def traverse[A, B](list: List[A])(f: A => Result[B]): Result[List[B]] = {
+    @scala.annotation.tailrec
+    def loop(remaining: List[A], acc: List[B]): Result[List[B]] =
+      remaining match {
+        case Nil => Right(acc.reverse)
+        case head :: tail =>
+          f(head) match {
+            case Right(value) => loop(tail, value :: acc)
+            case Left(error)  => Left(error)
+          }
+      }
+    loop(list, Nil)
+  }
 
   // Combinators for multiple Results
   def combine[A, B](ra: Result[A], rb: Result[B]): Result[(A, B)] =

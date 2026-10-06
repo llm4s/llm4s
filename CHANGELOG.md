@@ -509,6 +509,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **`Result.traverse` short-circuits** ([#960](https://github.com/llm4s/llm4s/issues/960)): it
+  stops calling the function at the first `Left`, where it used to call it on every element and
+  then return the first failure. **Behaviour change:** side effects in the function no longer run
+  for the elements after a failure. `Result.sequence` returns the same results as before.
 - **Approval resumes through the middleware chain; `ToolLoop` gains a `finish` node**
   ([#1279](https://github.com/llm4s/llm4s/issues/1279)): `Approve` now runs the whole middleware
   chain again with `ToolContext.approved = true`, where it skipped the policy; a deny rule that
