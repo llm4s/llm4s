@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.{ ApiKey, BaseUrl, NamedProviderConfig, ProviderId }
+import org.llm4s.error.ConfigurationError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.auth.TokenExchange
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, MistralConfig, OpenAICompatibleConfig }
@@ -95,6 +96,16 @@ object OpenAICompatibleModelLister extends ProviderModelLister:
   private def exchanged(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[NamedProviderConfig] =
     OpenAICompatibleProvider.tokenExchangeOf("model-lister", config).flatMap {
       case None => Right(config)
+      // Section validation refuses this pair; a NamedProviderConfig built by hand is refused here, as
+      // `OpenAICompatibleConfig.validate` refuses it for chat, so the header cannot replace the token.
+      case Some(_) if config.headers.keys.exists(_.equalsIgnoreCase("Authorization")) =>
+        Left(
+          ConfigurationError(
+            "an Authorization header cannot be set with auth: the request's Authorization is the exchanged token " +
+              "- remove the header",
+            List("headers")
+          )
+        )
       case Some(exchange) =>
         TokenExchange
           .rfc8693(exchange, httpClient)()

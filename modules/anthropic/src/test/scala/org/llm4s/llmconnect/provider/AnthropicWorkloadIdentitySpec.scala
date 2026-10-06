@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.config.{ AnthropicConfig, AnthropicWorkloadIdentity, ContextWindowResolver }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.{ FakeTokenExchangeServer, ProviderModuleChecks, ProviderTestConfig, TestJwt }
@@ -10,7 +11,7 @@ import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.nio.file.Files
+import java.nio.file.{ Files, Path }
 
 class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with EitherValues with ProviderModuleChecks:
 
@@ -110,5 +111,47 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       sectionResult(
         section("https://api.anthropic.com", "/s").replace("federationRuleId = \"fdrl_1\", ", "")
       ).isLeft shouldBe true
+    }
+  }
+
+  "an AnthropicConfig with workload identity built without a named section" should {
+    given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+    given ContextWindowResolver                = ContextWindowResolver(summon[org.llm4s.model.ModelRegistryService])
+
+    val identity = AnthropicWorkloadIdentity(Path.of("/var/run/svid.jwt"), "fdrl_1", "org_1")
+
+    def fromValues(baseUrl: String, apiKey: String = "") =
+      AnthropicConfig.fromValues("claude-test", apiKey, baseUrl, Some(identity))
+
+    "be refused by fromValues with a plain-http baseUrl to a non-loopback host" in {
+      val error = fromValues("http://api.example").left.value
+      error shouldBe a[ConfigurationError]
+      error.message should (include("baseUrl").and(include("https")))
+    }
+
+    "be accepted by fromValues over https, and over plain http only to a loopback host" in {
+      for url <- Seq("https://api.anthropic.com", "http://127.0.0.1:9", "http://localhost:9") do
+        fromValues(url).isRight shouldBe true
+    }
+
+    "be refused by fromValues with an apiKey as well" in {
+      fromValues("https://api.anthropic.com", apiKey = "sk-ant").left.value shouldBe a[ConfigurationError]
+    }
+
+    "leave a plain-http baseUrl alone without workload identity" in {
+      AnthropicConfig.fromValues("claude-test", "sk-ant", "http://api.example").isRight shouldBe true
+    }
+
+    "be refused by AnthropicClient when built with the constructor or copy" in {
+      val valid = fromValues("https://api.anthropic.com").value
+      val bad = Seq(
+        valid.copy(baseUrl = "http://api.example"),
+        valid.copy(apiKey = "sk-ant"),
+        AnthropicConfig("", "claude-test", "http://localhost@api.example", 200000, 4096, Some(identity))
+      )
+      for config <- bad do
+        AnthropicClient(config).left.value shouldBe a[ConfigurationError]
+        an[IllegalArgumentException] should be thrownBy new AnthropicClient(config)
+      AnthropicClient(valid).value.close()
     }
   }

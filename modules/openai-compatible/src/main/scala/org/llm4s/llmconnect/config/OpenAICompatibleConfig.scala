@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.auth.TokenExchangeConfig
+import org.llm4s.llmconnect.auth.{ TokenExchange, TokenExchangeConfig }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -36,7 +36,11 @@ import org.llm4s.util.Redaction
  *                          off for an endpoint that rejects the field. A named section sets it
  *                          with the `streamUsage` key.
  * @param tokenExchange     workload-identity auth: the identity token is exchanged here for the bearer
- *                          token, which replaces `apiKey`; never set together with `apiKey`.
+ *                          token, which replaces `apiKey`; never set together with `apiKey` or an
+ *                          `Authorization` entry in `headers`, and its `tokenUrl` must be `https` (plain
+ *                          `http` only to a loopback host). [[OpenAICompatibleConfig.fromValues]] checks
+ *                          these, and `OpenAICompatibleClient` refuses a config built any other way that
+ *                          breaks them.
  */
 @Stable
 final case class OpenAICompatibleConfig(
@@ -73,11 +77,52 @@ object OpenAICompatibleConfig {
   val DEFAULT_RESERVE_COMPLETION: Int = 2048
 
   /**
+   * The rules every [[OpenAICompatibleConfig]] must meet, whichever way it was built: [[fromValues]]
+   * applies them, and `OpenAICompatibleClient` applies them again to a config built with the
+   * constructor or `copy`. With `tokenExchange` set:
+   *
+   *  - `apiKey` must be absent or blank: a config authenticates one way;
+   *  - `headers` must have no `Authorization` entry, in any case: the exchanged token is the
+   *    request's bearer, and a configured header would replace it - so a 401 would retry with the
+   *    same stale header rather than a fresh token;
+   *  - `tokenExchange.tokenUrl` must be `https`, or plain `http` to a loopback host, since the
+   *    exchange carries the identity token.
+   */
+  private[llm4s] def validate(config: OpenAICompatibleConfig): Result[OpenAICompatibleConfig] =
+    config.tokenExchange match
+      case None => Right(config)
+      case Some(exchange) =>
+        for
+          _ <- Either.cond(
+            config.apiKey.forall(_.trim.isEmpty),
+            (),
+            ConfigurationError(
+              "OpenAI-compatible config sets both apiKey and tokenExchange; use one",
+              List("apiKey", "auth")
+            )
+          )
+          _ <- Either.cond(
+            !config.headers.keys.exists(_.equalsIgnoreCase("Authorization")),
+            (),
+            ConfigurationError(
+              "an Authorization header cannot be set with tokenExchange: the request's Authorization is the " +
+                "exchanged token - remove the header",
+              List("headers")
+            )
+          )
+          _ <- TokenExchange
+            .requireSecureUrl(exchange.tokenUrl)
+            .left
+            .map(e => ConfigurationError(e.message, List("tokenExchange.tokenUrl")))
+        yield config
+
+  /**
    * Builds and validates a config.
    *
    * @return `Left(ConfigurationError)` for a blank `model` or `baseUrl`, a
-   *         non-positive context window, or a reserve that is negative or does
-   *         not leave room for a prompt. A blank `apiKey` is treated as none.
+   *         non-positive context window, a reserve that is negative or does
+   *         not leave room for a prompt, or a `tokenExchange` that [[validate]]
+   *         refuses. A blank `apiKey` is treated as none.
    */
   def fromValues(
     model: String,
@@ -95,14 +140,6 @@ object OpenAICompatibleConfig {
       _ <- ProviderConfig.nonEmpty("OpenAI-compatible", "model", model)
       _ <- ProviderConfig.nonEmpty("OpenAI-compatible", "baseUrl", baseUrl)
       _ <- Either.cond(
-        apiKey.forall(_.trim.isEmpty) || tokenExchange.isEmpty,
-        (),
-        ConfigurationError(
-          "OpenAI-compatible config sets both apiKey and tokenExchange; use one",
-          List("apiKey", "auth")
-        )
-      )
-      _ <- Either.cond(
         window > 0,
         (),
         ConfigurationError(s"OpenAI-compatible contextWindow must be positive, got $window", List("contextWindow"))
@@ -115,14 +152,17 @@ object OpenAICompatibleConfig {
           List("reserveCompletion")
         )
       )
-    yield OpenAICompatibleConfig(
-      model = model.trim,
-      baseUrl = baseUrl.trim.stripSuffix("/"),
-      apiKey = apiKey.map(_.trim).filter(_.nonEmpty),
-      contextWindow = window,
-      reserveCompletion = reserve,
-      headers = headers,
-      streamUsage = streamUsage,
-      tokenExchange = tokenExchange
-    )
+      config <- validate(
+        OpenAICompatibleConfig(
+          model = model.trim,
+          baseUrl = baseUrl.trim.stripSuffix("/"),
+          apiKey = apiKey.map(_.trim).filter(_.nonEmpty),
+          contextWindow = window,
+          reserveCompletion = reserve,
+          headers = headers,
+          streamUsage = streamUsage,
+          tokenExchange = tokenExchange
+        )
+      )
+    yield config
 }

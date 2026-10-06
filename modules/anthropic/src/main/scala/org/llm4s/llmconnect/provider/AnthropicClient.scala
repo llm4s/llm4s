@@ -91,6 +91,10 @@ class AnthropicClient(
   // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
 
+  // A config built with the constructor or `copy` skipped `fromValues`: `apply` refuses it as a
+  // ConfigurationError, and the constructor here, so a plain-http baseUrl never receives the identity token.
+  AnthropicConfig.validate(config).left.foreach(error => throw new IllegalArgumentException(error.message))
+
   // Initialize Anthropic client
   private val client = {
     val builder = AnthropicOkHttpClient.builder().baseUrl(config.baseUrl)
@@ -751,12 +755,14 @@ object AnthropicClient {
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
   )(using ModelRegistryService): Result[AnthropicClient] =
-    Try(new AnthropicClient(config, metrics)).toResult
+    AnthropicConfig.validate(config).flatMap(valid => Try(new AnthropicClient(valid, metrics)).toResult)
 
   def apply(
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[AnthropicClient] =
-    Try(new AnthropicClient(config, metrics, exchangeLogging)).toResult
+    AnthropicConfig
+      .validate(config)
+      .flatMap(valid => Try(new AnthropicClient(valid, metrics, exchangeLogging)).toResult)
 }

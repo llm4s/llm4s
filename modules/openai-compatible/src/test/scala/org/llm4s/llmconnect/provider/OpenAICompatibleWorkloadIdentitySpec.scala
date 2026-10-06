@@ -2,9 +2,9 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.OpenAICompatibleModelLister
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.error.AuthenticationError
+import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient }
-import org.llm4s.llmconnect.auth.{ IdentitySource, TokenExchangeConfig }
+import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentitySource, TokenExchangeConfig }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
@@ -226,5 +226,113 @@ class OpenAICompatibleWorkloadIdentitySpec
         OpenAICompatibleModelLister.listModels(section, Llm4sHttpClient.create())
       models.value.map(_.name.toString) shouldBe List("fake-model")
       fake.apiAuthorizations shouldBe Seq("Bearer t1")
+    }
+  }
+
+  "an exchanging OpenAICompatibleConfig built without a named section" should {
+    given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+
+    val exchange =
+      TokenExchangeConfig(IdentitySource.Literal("eyJ.svid.sig"), "https://ws.example/oidc/v1/token")
+
+    def fromValues(
+      headers: Map[String, String] = Map.empty,
+      apiKey: Option[String] = None,
+      tokenExchange: TokenExchangeConfig = exchange
+    ) =
+      OpenAICompatibleConfig.fromValues(
+        model = "m",
+        baseUrl = "https://ws.example/serving-endpoints",
+        apiKey = apiKey,
+        headers = headers,
+        tokenExchange = Some(tokenExchange)
+      )
+
+    "be refused by fromValues with an Authorization header, in any case" in {
+      for name <- Seq("Authorization", "authorization", "AUTHORIZATION") do
+        val error = fromValues(headers = Map(name -> "Bearer stale")).left.value
+        error shouldBe a[ConfigurationError]
+        error.message should include("Authorization header")
+    }
+
+    "be accepted by fromValues with other headers" in {
+      fromValues(headers = Map("X-Gateway" -> "g")).value.headers shouldBe Map("X-Gateway" -> "g")
+    }
+
+    "be refused by fromValues with an apiKey as well" in {
+      fromValues(apiKey = Some("k")).left.value shouldBe a[ConfigurationError]
+    }
+
+    "be refused by fromValues with a plain-http tokenUrl to a non-loopback host" in {
+      val error = fromValues(tokenExchange = exchange.withTokenUrl("http://ws.example/oidc/v1/token")).left.value
+      error shouldBe a[ConfigurationError]
+      error.message should include("https")
+      fromValues(tokenExchange = exchange.withTokenUrl("http://127.0.0.1:9/token")).isRight shouldBe true
+    }
+
+    "be refused by OpenAICompatibleClient when built with the constructor or copy" in {
+      val valid = fromValues().value
+      val bad = Seq(
+        valid.copy(headers = Map("authorization" -> "Bearer stale")),
+        valid.copy(apiKey = Some("k")),
+        valid.copy(tokenExchange = Some(exchange.withTokenUrl("http://ws.example/t"))),
+        OpenAICompatibleConfig(
+          model = "m",
+          baseUrl = "https://ws.example/v1",
+          headers = Map("Authorization" -> "Bearer stale"),
+          tokenExchange = Some(exchange)
+        )
+      )
+      for config <- bad do OpenAICompatibleClient(config).left.value shouldBe a[ConfigurationError]
+      OpenAICompatibleClient(valid).value.close()
+    }
+
+    "be refused when the section path carries an Authorization header past validation" in {
+      // Section validation refuses the header; a NamedProviderConfig changed afterwards reaches buildConfig with it.
+      val section = sectionOf(
+        """provider = "openai-compatible"
+          |model    = "m"
+          |baseUrl  = "https://ws.example/v1"
+          |auth { identityToken = "eyJ.svid.sig", tokenUrl = "https://ws.example/oidc/v1/token" }""".stripMargin
+      ).withHeaders(Map("Authorization" -> "Bearer stale"))
+      given org.llm4s.llmconnect.config.ContextWindowResolver =
+        org.llm4s.llmconnect.config.ContextWindowResolver(summon[org.llm4s.model.ModelRegistryService])
+      OpenAICompatibleProvider.buildConfig("main", section).left.value.message should
+        (include("llm4s.providers.main.headers").and(include("Authorization header")))
+      OpenAICompatibleModelLister.listModels(section, Llm4sHttpClient.create()).left.value shouldBe
+        a[ConfigurationError]
+    }
+  }
+
+  "an OpenAICompatibleClient with a refreshed credential" should {
+    given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+
+    val dynamic = new AccessTokenProvider:
+      def token(): Result[String]            = Right("t")
+      def invalidate(rejected: String): Unit = ()
+
+    def settings(credential: OpenAICompatibleClient.Credential) =
+      OpenAICompatibleClient.Settings("p", "P", "m", "https://h/v1", credential, 8192, 2048)
+
+    "refuse a dialect that sets Authorization, in any case" in {
+      val credentials = Seq(
+        OpenAICompatibleClient.Credential.Dynamic(dynamic),
+        OpenAICompatibleClient.Credential.Exchange(
+          TokenExchangeConfig(IdentitySource.Literal("eyJ.svid.sig"), "https://h/token")
+        )
+      )
+      for
+        credential <- credentials
+        name       <- Seq("Authorization", "authorization")
+      do
+        an[IllegalArgumentException] should be thrownBy
+          new OpenAICompatibleClient(settings(credential), OpenAICompatibleDialect.standard(Seq(name -> "Bearer x")))
+    }
+
+    "accept a static key beside a dialect Authorization header, as before" in {
+      new OpenAICompatibleClient(
+        settings(OpenAICompatibleClient.Credential.Static("k")),
+        OpenAICompatibleDialect.standard(Seq("Authorization" -> "Bearer x"))
+      ).close()
     }
   }

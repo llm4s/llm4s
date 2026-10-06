@@ -751,19 +751,19 @@ object OpenAIClient {
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[OpenAIClient] =
-    Try(new OpenAIClient(config, metrics, exchangeLogging)).toResult
+    OpenAIConfig.validate(config).flatMap(valid => Try(new OpenAIClient(valid, metrics, exchangeLogging)).toResult)
 
   def apply(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector
   )(using ModelRegistryService): Result[OpenAIClient] =
-    Try(new OpenAIClient(config, metrics)).toResult
+    OpenAIConfig.validate(config).flatMap(valid => Try(new OpenAIClient(valid, metrics)).toResult)
 
   /**
    * Convenience overload with noop metrics.
    */
   def apply(config: OpenAIConfig)(using ModelRegistryService): Result[OpenAIClient] =
-    Try(new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)).toResult
+    apply(config, org.llm4s.metrics.MetricsCollector.noop)
 
   /**
    * Creates an OpenAI client for Azure OpenAI service.
@@ -816,6 +816,9 @@ private[provider] object OpenAIClientTransport {
     config: OpenAIConfig,
     customize: OpenAIOkHttpClient.Builder => OpenAIOkHttpClient.Builder = identity
   ): OpenAIClientTransport = {
+    // A config built with the constructor or `copy` skipped `fromValues`: `OpenAIClient.apply` refuses it as a
+    // ConfigurationError, and every constructor here, so an exchanged OpenAI token never goes to another provider.
+    OpenAIConfig.validate(config).left.foreach(error => throw new IllegalArgumentException(error.message))
     val builder = OpenAIOkHttpClient
       .builder()
       .baseUrl(config.baseUrl)

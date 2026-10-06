@@ -89,14 +89,16 @@ object OpenRouterClient {
     config: OpenAIConfig,
     metrics: MetricsCollector = MetricsCollector.noop
   )(using ModelRegistryService): Result[OpenRouterClient] =
-    Try(new OpenRouterClient(config, metrics)).toResult
+    OpenAIConfig.validate(config).flatMap(valid => Try(new OpenRouterClient(valid, metrics)).toResult)
 
   def apply(
     config: OpenAIConfig,
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[OpenRouterClient] =
-    Try(new OpenRouterClient(config, metrics, exchangeLogging)).toResult
+    OpenAIConfig
+      .validate(config)
+      .flatMap(valid => Try(new OpenRouterClient(valid, metrics, exchangeLogging)).toResult)
 }
 
 /**

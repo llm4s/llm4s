@@ -57,6 +57,12 @@ class OpenAICompatibleClient(
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
+  // A refreshed bearer must reach the request: a dialect `Authorization` header would replace it, and a 401
+  // would retry with the same stale header. `OpenAICompatibleConfig.validate` refuses the generic provider's
+  // config; this covers settings and dialects built by hand.
+  if (OpenAICompatibleClient.overridesDynamicBearer(settings.credential, dialect.headers))
+    throw new IllegalArgumentException(OpenAICompatibleClient.AuthorizationHeaderRefusal)
+
   // Scoped to the provider package so specs can substitute one
   protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
   private val logger                                  = org.slf4j.LoggerFactory.getLogger(getClass)
@@ -445,6 +451,16 @@ class OpenAICompatibleClient(
 
 object OpenAICompatibleClient {
 
+  private[provider] val AuthorizationHeaderRefusal: String =
+    "an Authorization header cannot be sent with a Dynamic or Exchange credential: the request's Authorization " +
+      "is the credential's token - remove the header"
+
+  /** Whether `headers` set `Authorization` (in any case) over a `credential` whose token is refreshed. */
+  private[provider] def overridesDynamicBearer(credential: Credential, headers: Seq[(String, String)]): Boolean =
+    credential match
+      case Credential.Dynamic(_) | Credential.Exchange(_) => headers.exists(_._1.equalsIgnoreCase("Authorization"))
+      case _                                              => false
+
   /** `headers` with each repeated name (matched case-insensitively) sent once, its values comma-joined in order. */
   private[provider] def combineRepeated(headers: Seq[(String, String)]): Seq[(String, String)] =
     headers
@@ -566,12 +582,17 @@ object OpenAICompatibleClient {
     metrics: MetricsCollector = MetricsCollector.noop,
     exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
   )(using ModelRegistryService): Result[OpenAICompatibleClient] =
-    Try(
-      new OpenAICompatibleClient(
-        settings(config),
-        OpenAICompatibleDialect.standard(config.headers.toSeq, config.streamUsage),
-        metrics,
-        exchangeLogging
+    // A config built with the constructor or `copy` skipped `fromValues`; its rules are applied here too.
+    OpenAICompatibleConfig
+      .validate(config)
+      .flatMap(valid =>
+        Try(
+          new OpenAICompatibleClient(
+            settings(valid),
+            OpenAICompatibleDialect.standard(valid.headers.toSeq, valid.streamUsage),
+            metrics,
+            exchangeLogging
+          )
+        ).toResult
       )
-    ).toResult
 }

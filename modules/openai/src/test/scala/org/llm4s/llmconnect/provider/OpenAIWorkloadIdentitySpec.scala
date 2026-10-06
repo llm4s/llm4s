@@ -4,7 +4,7 @@ import com.openai.auth.SubjectTokenType
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.llmconnect.auth.IdentitySource
-import org.llm4s.llmconnect.config.{ OpenAIConfig, OpenAIWorkloadIdentity }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, OpenAIWorkloadIdentity }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.{ ProviderModuleChecks, ProviderTestConfig }
@@ -143,5 +143,55 @@ class OpenAIWorkloadIdentitySpec
              |model = "m"
              |auth { identityTokenFile = "/s" }""".stripMargin
         ).isLeft shouldBe true
+    }
+  }
+
+  "an OpenAIConfig with workload identity built without a named section" should {
+    given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+    given ContextWindowResolver                = ContextWindowResolver(summon[org.llm4s.model.ModelRegistryService])
+
+    val identity = OpenAIWorkloadIdentity(IdentitySource.File(Path.of("/var/run/svid")), "idp_1", "sa_1")
+
+    def fromValues(
+      apiKey: String = "",
+      baseUrl: String = OpenAIProvider.DEFAULT_BASE_URL,
+      providerId: Option[org.llm4s.types.ProviderModelTypes.ProviderId] = None
+    ) =
+      OpenAIConfig.fromValues("gpt-4o-mini", apiKey, None, baseUrl, providerId, Some(identity))
+
+    "be accepted by fromValues for openai, with no key" in {
+      fromValues().value.workloadIdentity.value shouldBe identity
+    }
+
+    "be refused by fromValues with an apiKey as well" in {
+      fromValues(apiKey = "sk-x").left.value shouldBe a[ConfigurationError]
+    }
+
+    "be refused by fromValues for a config belonging to another provider, which would receive the OpenAI token" in {
+      val refused = Seq(
+        fromValues(providerId = Some(org.llm4s.types.ProviderModelTypes.ProviderId("requesty"))),
+        fromValues(baseUrl = "https://openrouter.ai/api/v1")
+      )
+      for result <- refused do
+        val error = result.left.value
+        error shouldBe a[ConfigurationError]
+        error.message should include("provider openai only")
+    }
+
+    "be refused by OpenAIClient and OpenRouterClient when built with the constructor or copy" in {
+      val valid = fromValues().value
+      val bad = Seq(
+        valid.copy(apiKey = "sk-x"),
+        valid.copy(explicitProviderId = Some(org.llm4s.types.ProviderModelTypes.ProviderId("requesty"))),
+        valid.copy(baseUrl = "https://openrouter.ai/api/v1")
+      )
+      for config <- bad do
+        OpenAIClient(config).left.value shouldBe a[ConfigurationError]
+        an[IllegalArgumentException] should be thrownBy new OpenAIClient(
+          config,
+          org.llm4s.metrics.MetricsCollector.noop
+        )
+      OpenRouterClient(valid.copy(baseUrl = "https://openrouter.ai/api/v1")).left.value shouldBe a[ConfigurationError]
+      OpenAIClient(valid).value.close()
     }
   }

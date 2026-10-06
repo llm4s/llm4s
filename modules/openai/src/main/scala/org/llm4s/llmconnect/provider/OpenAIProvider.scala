@@ -54,13 +54,16 @@ object OpenAIProvider extends ProviderDescriptor:
       apiKey <-
         if (workloadIdentity.isDefined) Right("") else ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      config <- OpenAIConfig.fromValues(
-        section.model.asString,
-        apiKey,
-        section.extra(OpenAIConfig.OrganizationKey),
-        baseUrl,
-        workloadIdentity = workloadIdentity
-      )
+      config <- OpenAIConfig
+        .fromValues(
+          section.model.asString,
+          apiKey,
+          section.extra(OpenAIConfig.OrganizationKey),
+          baseUrl,
+          workloadIdentity = workloadIdentity
+        )
+        .left
+        .map(ProviderConfig.inSection(providerName))
     yield config
 
   private def workloadIdentityOf(
