@@ -1637,6 +1637,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`RegexSafetyManager` returns an error instead of letting `StackOverflowError` escape** (#1379): the JDK
+  regex engine recurses for patterns such as `(a|aa)*b` and overflowed the stack on long input before the
+  character-access budget tripped; `scala.util.Try` does not catch that fatal error, so it escaped
+  `safeFind` / `safeMatches` and `RegexValidator.validate`. The match guard now catches `StackOverflowError`
+  explicitly and returns a `Left` (`Regex matching aborted: pattern recursed too deeply for the input (stack
+  overflow)`), which `RegexValidator` reports as a `Regex security error` `ValidationError`. Other fatal errors
+  still propagate. The workspace runner's `WorkspaceRegexSafetyManager` has the same fix.
 - **Guardrail case folding no longer depends on the JVM default locale**: `ProfanityFilter`, `ToneValidator`
   and `PromptInjectionDetector` lower-cased text with the default locale, so under a Turkish locale `HI`,
   `INAPPROPRIATE` and `IGNORE PREVIOUS INSTRUCTIONS` folded to a dotless `ı` and went undetected. They (and the
