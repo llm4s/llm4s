@@ -48,7 +48,7 @@ module that has neither annotation or both, and for a Beta dialect that lives in
 and is not `@Experimental`: today the Mistral and Cohere dialects of `llm4s-openai-compatible`, listed in
 `build.sbt`. It reads sources, not classes, because Scala compiles `private[llm4s]` to a public
 bytecode member. It covers `llm4s-core`, `llm4s-openai`, `llm4s-openai-compatible`,
-`llm4s-anthropic`, `llm4s-gemini` and `llm4s-ollama`. **`llm4s-agent` is frozen by 1.0 Scope but is not
+`llm4s-anthropic`, `llm4s-gemini` and `llm4s-ollama`. **`llm4s-agent` is in 1.0 Scope's Frozen-at-1.0 tier but is not
 covered yet**: the typed graph runtime ([#1266](https://github.com/llm4s/llm4s/issues/1266)) is
 replacing its execution model and its tier is an open question in
 [#1281](https://github.com/llm4s/llm4s/issues/1281). Add it to `stabilityTierModules` in `build.sbt`
@@ -133,7 +133,7 @@ decide that they are frozen too. `llm4s-agent` may also wait for the graph runti
 `mimaFrozen("llm4s-agent")` from `modules/agent` until then.
 
 The build is Scala 3 only, so one `sbt mimaReportBinaryIssues` covers every artifact. If a second Scala
-version returns, run `sbt +mimaReportBinaryIssues` in CI.
+version returns, CI must run it cross-built (with sbt's `+` prefix) to check each version.
 
 ---
 

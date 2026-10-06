@@ -1,5 +1,7 @@
 package org.llm4s.agent.graph.middleware
 
+import org.llm4s.agent.AgentId
+import org.llm4s.agent.graph.toolloop.ToolLoopFixtures.{ answered, completion }
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.GraphTestSupport.*
 import org.llm4s.agent.graph.tool.*
@@ -25,10 +27,13 @@ class ApprovalMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues
 
   final private class ScriptedModel(turns: (Vector[Message] => AssistantMessage)*) extends ModelStep {
     val seen = new CopyOnWriteArrayList[Vector[Message]]()
-    def next(messages: Vector[Message], tools: ToolSet): Result[AssistantMessage] = {
+    def next(messages: Vector[Message], tools: ToolSet, call: ModelCall): Result[Completion] = {
       val turn = seen.size
       seen.add(messages)
-      turns.lift(turn).map(play => Right(play(messages))).getOrElse(Left(ValidationError("model", s"no turn $turn")))
+      turns
+        .lift(turn)
+        .map(play => Right(completion(play(messages))))
+        .getOrElse(Left(ValidationError("model", s"no turn $turn")))
     }
   }
 
@@ -57,13 +62,20 @@ class ApprovalMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues
   private val deploy = tool("deploy", ToolHints.default)
 
   private def build(model: ModelStep, mw: ApprovalMiddleware) =
-    ToolLoop.build("assistant", "v1", model, ToolSet.of(lookup, deploy).value, Seq(mw)).value
+    ToolLoop
+      .build(
+        "assistant",
+        "v1",
+        AgentId.unsafe("a"),
+        Vector(LoopAgent(AgentId.unsafe("a"), model, ToolSet.of(lookup, deploy).value).withMiddleware(Seq(mw)))
+      )
+      .value
 
   "ApprovalMiddleware.unlessReadOnly" should "run a read-only tool without suspending" in {
     runs.clear()
     val model       = ScriptedModel(call("c1", "lookup", "x"), summarise)
     val l           = build(model, ApprovalMiddleware.unlessReadOnly)
-    val (_, answer) = runInMemory(l.graph, "go").completed
+    val (_, answer) = runInMemory(l.graph, AgentInput("go")).answered
     answer shouldBe "done: ran lookup"
     runs.asScala.toVector shouldBe Vector("lookup:x")
   }
@@ -72,24 +84,24 @@ class ApprovalMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues
     runs.clear()
     val model    = ScriptedModel(call("c1", "deploy", "prod"), summarise)
     val l        = build(model, ApprovalMiddleware.unlessReadOnly)
-    val first    = runInMemory(l.graph, "go").suspended
+    val first    = runInMemory(l.graph, AgentInput("go")).suspended
     val requests = l.requests(first).value
     requests.map((_, r) => (r.source, r.reason)) shouldBe
       Vector((ApprovalSource.Middleware(MiddlewareId("approval")), "tool 'deploy' is not read-only"))
     runs.size shouldBe 0
     val (id, _) = requests.head
     val (_, answer) =
-      drive(l.graph, l.graph.resume(first.execution, l.answers(id -> ApprovalDecision.Approve)).value).completed
+      drive(l.graph, l.graph.resume(first.execution, l.answers(id -> ApprovalDecision.Approve)).value).answered
     answer shouldBe "done: ran deploy"
     runs.asScala.toVector shouldBe Vector("deploy:prod")
 
     runs.clear()
     val model2   = ScriptedModel(call("c1", "deploy", "prod"), summarise)
     val l2       = build(model2, ApprovalMiddleware.unlessReadOnly)
-    val first2   = runInMemory(l2.graph, "go").suspended
+    val first2   = runInMemory(l2.graph, AgentInput("go")).suspended
     val (id2, _) = l2.requests(first2).value.head
     val rejected = ApprovalDecision.Reject("no")
-    drive(l2.graph, l2.graph.resume(first2.execution, l2.answers(id2 -> rejected)).value).completed
+    drive(l2.graph, l2.graph.resume(first2.execution, l2.answers(id2 -> rejected)).value).answered
     runs.size shouldBe 0
     model2.seen.get(1).collect { case t: ToolMessage => ujson.read(t.content)("error").str } shouldBe Vector(
       "Rejected: no"
@@ -100,7 +112,7 @@ class ApprovalMiddlewareSpec extends AnyFlatSpec with Matchers with EitherValues
     runs.clear()
     val model = ScriptedModel(call("c1", "deploy", "prod"), summarise)
     val l     = build(model, new ApprovalMiddleware(_ => None))
-    runInMemory(l.graph, "go").completed
+    runInMemory(l.graph, AgentInput("go")).answered
     runs.asScala.toVector shouldBe Vector("deploy:prod")
   }
 }

@@ -107,13 +107,20 @@ class TraceCollectorPropertySpec
       ts        <- genInstant
     } yield TraceEvent.TokenUsageRecorded(usage, model, operation, ts)
 
-  val genAgentStateUpdated: Gen[TraceEvent] =
+  val genAgentRunEnded: Gen[TraceEvent] =
     for {
       status <- genNonEmptyString
-      msgs   <- Gen.choose(0, 100)
-      logs   <- Gen.choose(0, 100)
+      msgs   <- Gen.choose(0, 10)
       ts     <- genInstant
-    } yield TraceEvent.AgentStateUpdated(status, msgs, logs, timestamp = ts)
+    } yield TraceEvent.AgentRunEnded(
+      "thread",
+      "run",
+      "agent",
+      status,
+      Seq.fill(msgs)(org.llm4s.llmconnect.model.UserMessage("m")),
+      org.llm4s.llmconnect.model.UsageSummary(),
+      ts
+    )
 
   val genEmbeddingUsageRecorded: Gen[TraceEvent] =
     for {
@@ -161,7 +168,7 @@ class TraceCollectorPropertySpec
     genToolExecutedFailure,
     genErrorOccurred,
     genTokenUsageRecorded,
-    genAgentStateUpdated,
+    genAgentRunEnded,
     genEmbeddingUsageRecorded,
     genCostRecorded,
     genRAGOperationCompleted,

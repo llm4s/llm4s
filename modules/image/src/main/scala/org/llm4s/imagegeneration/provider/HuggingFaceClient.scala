@@ -57,7 +57,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
    * @return Either an `ImageGenerationError` if the validation fails, or the original valid prompt as a `String`.
    */
   def validatePrompt(prompt: String): Either[LLMError, String] =
-    Either.cond(prompt.trim.nonEmpty, prompt, ValidationError("Prompt cannot be empty"))
+    Either.cond(prompt.trim.nonEmpty, prompt, ImageValidationError("Prompt cannot be empty"))
 
   /**
    * Validates the provided count to ensure it is within the allowable range
@@ -68,7 +68,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
    *         or the valid count as an `Int` if the validation succeeds.
    */
   def validateCount(count: Int): Either[LLMError, Int] =
-    Either.cond(count > 0 && count <= 4, count, ValidationError("Count must be between 1 and 4 for HuggingFace"))
+    Either.cond(count > 0 && count <= 4, count, ImageValidationError("Count must be between 1 and 4 for HuggingFace"))
 
   /**
    * Base64-encodes raw image bytes received directly from the HTTP layer.
@@ -85,7 +85,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
   def convertToBase64(imageBytes: Array[Byte]): Either[LLMError, String] = Try {
     Base64.getEncoder.encodeToString(imageBytes)
   }.toEither.left.map(exception =>
-    ImageErrors.fromThrowable(exception, "huggingface-image.request")(ex => ServiceError(ex.getMessage, 500))
+    ImageErrors.fromThrowable(exception, "huggingface-image.request")(ex => ImageServiceError(ex.getMessage, 500))
   )
 
   /**
@@ -122,7 +122,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     (1 to count).foreach(i => logger.debug("Generated image: {}", i))
     images
   }.toEither.left.map(exception =>
-    ImageErrors.fromThrowable(exception, "huggingface-image.request")(ex => ServiceError(ex.getMessage, 500))
+    ImageErrors.fromThrowable(exception, "huggingface-image.request")(ex => ImageServiceError(ex.getMessage, 500))
   )
 
   /**
@@ -177,7 +177,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       blocking {
         generateImage(prompt, options)
       }
-    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "huggingface-image.request")(UnknownError.apply)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "huggingface-image.request")(ImageUnknownError.apply)) }
 
   override def generateImagesAsync(
     prompt: String,
@@ -188,7 +188,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       blocking {
         generateImages(prompt, count, options)
       }
-    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "huggingface-image.request")(UnknownError.apply)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "huggingface-image.request")(ImageUnknownError.apply)) }
 
   override def editImageAsync(
     imagePath: Path,
@@ -200,7 +200,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "huggingface-image.request")(UnknownError.apply)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "huggingface-image.request")(ImageUnknownError.apply)) }
 
   /**
    * Check the health status of the HuggingFace Inference API.
@@ -220,7 +220,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       .left
       .map(e =>
         ImageErrors.fromThrowable(e, "huggingface-image.health")(ex =>
-          ServiceError(s"Health check failed: ${ex.getMessage}", 0)
+          ImageServiceError(s"Health check failed: ${ex.getMessage}", 0)
         )
       )
       .map { response =>
@@ -255,7 +255,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     logger.debug("Payload: {} - Json: {}", payload, jsonStr)
     jsonStr
   }.toEither.left.map(exception =>
-    ImageErrors.fromThrowable(exception, "huggingface-image.request")(ex => ServiceError(ex.getMessage, 500))
+    ImageErrors.fromThrowable(exception, "huggingface-image.request")(ex => ImageServiceError(ex.getMessage, 500))
   )
 
   /**
@@ -280,14 +280,14 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       .toEither
       .left
       .map(exception =>
-        ImageErrors.fromThrowable(exception, "huggingface-image.request")(ex => ServiceError(ex.getMessage, 500))
+        ImageErrors.fromThrowable(exception, "huggingface-image.request")(ex => ImageServiceError(ex.getMessage, 500))
       )
       .flatMap { response =>
         response.statusCode match {
           case 200 => Right(response.body)
-          case 401 => Left(AuthenticationError("Unauthorized"))
-          case 429 => Left(RateLimitError("Rate limit"))
-          case _   => Left(ServiceError(new String(response.body, java.nio.charset.StandardCharsets.UTF_8), 500))
+          case 401 => Left(ImageAuthenticationError("Unauthorized"))
+          case 429 => Left(ImageRateLimitError("Rate limit"))
+          case _   => Left(ImageServiceError(new String(response.body, java.nio.charset.StandardCharsets.UTF_8), 500))
         }
       }
   }

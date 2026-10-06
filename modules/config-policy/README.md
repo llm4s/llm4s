@@ -46,11 +46,29 @@ val policy = ConfigPolicy.prodSafeDefaults
 ```
 
 Note that `withAllowedProviders` and `withAllowedModelPatterns` replace the preset's lists rather
-than adding to them, so repeat the entries you want to keep. Patterns are unanchored regular
-expressions matched against `<provider>/<model>`, so anchor them. The base-URL pattern is one
-per environment and is checked against every provider's config in that environment, not only
-`openai-compatible`'s, so it must name every endpoint you use. Both presets cap `contextWindow` at
-128000. Per-provider recipes are in the
+than adding to them, so repeat the entries you want to keep. Patterns are regular
+expressions that must match the **whole** `<provider>/<model>` (or URL): `openai/gpt-4o` no longer
+allows `openai/gpt-4o-mini`, nor a dated snapshot such as `openai/gpt-4o-2024-08-06` (write
+`openai/gpt-4o(-.*)?` for those).
+
+**End a base-URL pin with `/.*`, never a bare `.*`.** The pin `https://api\.openai\.com.*` accepts
+`https://api.openai.com.evil.example/v1`, `https://api.openai.com:x@evil.example/` and the
+trailing-dot host `https://api.openai.com./v1`; `https://api\.openai\.com/.*` rejects all three
+(`ConfigPolicyProviderKeysSpec` pins both claims).
+
+A base-URL pattern can be pinned per provider with
+`withRequiredBaseUrlPattern(env, "openai-compatible", pattern)`, which **replaces** the
+environment-wide pin for that provider (so a loose provider pin weakens a strict global one);
+without one, the environment-wide pin is checked against every provider. Context caps work the
+same way (`withMaxContextWindow(env, provider, max)`). Provider names are canonicalised like
+provider ids (trimmed, `Locale.ROOT`, an alias such as `google` folded onto `gemini`), and a
+per-provider cap or pin that names no registered provider and is not in `allowedProviders` is an
+`[unknownProvider]` violation, so a typo cannot leave a provider silently unpinned.
+
+The `prod` preset caps each provider at its current models' window (openai/azure 128000, anthropic
+200000, gemini 1048576, deepseek 131072) and keeps an environment-wide fallback of 1048576 for any
+provider without an entry (one added with `withAllowedProviders`, such as `openai-compatible`);
+a model above it needs an explicit per-provider cap. `dev` caps at 1048576. Per-provider recipes are in the
 [providers guide](../../docs/guide/providers.md#openai-compatible-endpoints).
 
 ## Run locally

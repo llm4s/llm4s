@@ -30,7 +30,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       options: ImageGenerationOptions = ImageGenerationOptions()
     ): Either[ImageGenerationError, GeneratedImage] = {
       if (prompt.trim.isEmpty) {
-        return Left(ValidationError("Prompt cannot be empty"))
+        return Left(ImageValidationError("Prompt cannot be empty"))
       }
       if (prompt.toLowerCase.contains("inappropriate")) {
         return Left(InvalidPromptError("Prompt contains inappropriate content"))
@@ -51,7 +51,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       count: Int,
       options: ImageGenerationOptions = ImageGenerationOptions()
     ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
-      if (count <= 0) return Left(ValidationError("Count must be positive"))
+      if (count <= 0) return Left(ImageValidationError("Count must be positive"))
       if (count > 10) return Left(InsufficientResourcesError("Cannot generate more than 10 images at once"))
 
       generateImage(prompt, options) match {
@@ -69,10 +69,10 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       options: ImageEditOptions = ImageEditOptions()
     ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
       if (prompt.trim.isEmpty) {
-        return Left(ValidationError("Prompt cannot be empty"))
+        return Left(ImageValidationError("Prompt cannot be empty"))
       }
       if (imagePath.toString.trim.isEmpty) {
-        return Left(ValidationError("Image path cannot be empty"))
+        return Left(ImageValidationError("Image path cannot be empty"))
       }
       generateImage(prompt, ImageGenerationOptions(size = options.size.getOrElse(ImageSize.Square512))).map(Seq(_))
     }
@@ -316,9 +316,9 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     // Empty prompt
     val result1 = mockClient.generateImage("")
     result1 match {
-      case Left(_: ValidationError) => succeed
-      case Left(other)              => fail(s"Expected ValidationError, got $other")
-      case Right(img)               => fail(s"Expected error, but got image: $img")
+      case Left(_: ImageValidationError) => succeed
+      case Left(other)                   => fail(s"Expected ImageValidationError, got $other")
+      case Right(img)                    => fail(s"Expected error, but got image: $img")
     }
 
     // Inappropriate content
@@ -367,8 +367,8 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
 
   test("Mock client validates image count") {
     // Test negative/zero count
-    mockClient.generateImages("Test", -1) should matchPattern { case Left(_: ValidationError) => }
-    mockClient.generateImages("Test", 0) should matchPattern { case Left(_: ValidationError) => }
+    mockClient.generateImages("Test", -1) should matchPattern { case Left(_: ImageValidationError) => }
+    mockClient.generateImages("Test", 0) should matchPattern { case Left(_: ImageValidationError) => }
 
     // Test too many images
     mockClient.generateImages("Test", 15) match {
@@ -395,10 +395,10 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
   // ===== ERROR HANDLING TESTS =====
 
   test("Error types have correct messages") {
-    val authError       = AuthenticationError("Invalid API key")
-    val serviceError    = ServiceError("Server error", 500)
-    val validationError = ValidationError("Invalid prompt")
-    val unknownError    = UnknownError(new RuntimeException("Something went wrong"))
+    val authError       = ImageAuthenticationError("Invalid API key")
+    val serviceError    = ImageServiceError("Server error", 500)
+    val validationError = ImageValidationError("Invalid prompt")
+    val unknownError    = ImageUnknownError(new RuntimeException("Something went wrong"))
 
     authError.message shouldBe "Invalid API key"
     serviceError.message shouldBe "Server error"

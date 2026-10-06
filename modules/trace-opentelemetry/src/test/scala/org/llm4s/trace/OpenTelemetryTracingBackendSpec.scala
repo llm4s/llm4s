@@ -1,6 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.llmconnect.config.{ OpenTelemetryConfig, TracingSettings }
+import org.llm4s.llmconnect.model.{ TokenUsage, UsageSummary, UserMessage }
 import org.llm4s.trace.spi.TracingBackends
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -57,14 +58,21 @@ class OpenTelemetryTracingBackendSpec extends AnyWordSpec with Matchers with Eit
 
   "OpenTelemetryTracing" should {
 
-    "trace an agent state snapshot as an ordinary event, since traceAgentState was removed (D5)" in {
+    "map an ended agent run to an Agent Run span" in {
       val tracing = new OpenTelemetryTracing("backend-spec", "http://localhost:4317", Map.empty)
-      val event   = TraceEvent.AgentStateUpdated("Complete", 2, 1)
+      val usage   = UsageSummary().add("m", TokenUsage(10, 5, 15), None)
+      val event = TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("hi")), usage)
 
+      tracing.getSpanKind(event) shouldBe io.opentelemetry.api.trace.SpanKind.INTERNAL
       val (name, attributes) = tracing.mapEventToAttributes(event)
-      name shouldBe "Agent State Updated"
-      attributes.get(io.opentelemetry.api.common.AttributeKey.stringKey("status")) shouldBe "Complete"
-      attributes.get(io.opentelemetry.api.common.AttributeKey.longKey("message_count")) shouldBe 2L
+      name shouldBe "Agent Run"
+      attributes.get(io.opentelemetry.api.common.AttributeKey.stringKey("thread_id")) shouldBe "thread-1"
+      attributes.get(io.opentelemetry.api.common.AttributeKey.stringKey("run_id")) shouldBe "run-1"
+      attributes.get(io.opentelemetry.api.common.AttributeKey.stringKey("agent")) shouldBe "assistant"
+      attributes.get(io.opentelemetry.api.common.AttributeKey.stringKey("status")) shouldBe "completed"
+      attributes.get(io.opentelemetry.api.common.AttributeKey.longKey("message_count")) shouldBe 1L
+      attributes.get(io.opentelemetry.api.common.AttributeKey.longKey("gen_ai.usage.input_tokens")) shouldBe 10L
+      attributes.get(io.opentelemetry.api.common.AttributeKey.longKey("gen_ai.usage.output_tokens")) shouldBe 5L
 
       tracing.traceEvent(event) shouldBe Right(())
       tracing.shutdown()

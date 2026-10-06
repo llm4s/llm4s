@@ -49,13 +49,13 @@ class DALLESmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
   }
 
-  it should "reject an invalid API key with AuthenticationError" in {
+  it should "reject an invalid API key with ImageAuthenticationError" in {
     val result = ImageGeneration.generateImage(
       prompt = "a blue circle on a white background",
       config = OpenAIConfig(apiKey = "sk-invalid-key-for-testing", model = "gpt-image-1"),
       options = ImageGenerationOptions(size = ImageSize.Square1024, quality = Some("low"))
     )
 
-    result.left.value shouldBe an[AuthenticationError]
+    result.left.value shouldBe an[ImageAuthenticationError]
   }
 }

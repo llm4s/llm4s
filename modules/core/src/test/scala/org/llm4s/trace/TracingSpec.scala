@@ -124,7 +124,9 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     tracing.traceEvent(TraceEvent.ToolExecuted("tool", "in", "out", 100.millis, true)).isRight shouldBe true
     tracing.traceEvent(TraceEvent.ErrorOccurred(new Exception("e"), "ctx")).isRight shouldBe true
     tracing.traceEvent(TraceEvent.TokenUsageRecorded(TokenUsage(1, 1, 2), "m", "o")).isRight shouldBe true
-    tracing.traceEvent(TraceEvent.AgentStateUpdated("running", 5, 10)).isRight shouldBe true
+    tracing
+      .traceEvent(TraceEvent.AgentRunEnded("t", "r", "a", "completed", Seq.empty, UsageSummary()))
+      .isRight shouldBe true
     tracing.traceEvent(TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(100, 100), "m", "o", 5)).isRight shouldBe true
     tracing.traceEvent(TraceEvent.CostRecorded(0.001, "m", "o", 100, "t")).isRight shouldBe true
     tracing.traceEvent(TraceEvent.RAGOperationCompleted("search", 150.millis)).isRight shouldBe true
@@ -296,12 +298,11 @@ class TracingSpec extends AnyFlatSpec with Matchers {
   // ============ Helper Methods and Classes ============
 
   /**
-   * The event an in-progress agent's `AgentState#toTraceEvent` produces. Built directly, as the
-   * tracing contract sees it: the agent runtime is in `llm4s-agent`, whose specs cover
-   * `toTraceEvent` itself (#1242).
+   * The event an ended agent run carries. Built directly, as the tracing contract sees it: the
+   * agent runtime is in `llm4s-agent`, whose specs cover building it.
    */
-  private def agentStateEvent(): TraceEvent.AgentStateUpdated =
-    TraceEvent.AgentStateUpdated("InProgress", messageCount = 1, logCount = 1, messages = Seq(UserMessage("Hello")))
+  private def agentStateEvent(): TraceEvent.AgentRunEnded =
+    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("Hello")), UsageSummary())
 
   private def createTestCompletion(): Completion =
     Completion(

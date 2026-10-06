@@ -31,7 +31,7 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
     prompt = "a cat"
   )
 
-  private val failure = ServiceError("provider is down", 503)
+  private val failure = ImageServiceError("provider is down", 503)
 
   private val healthy = ServiceStatus(HealthStatus.Healthy, "ok")
 
@@ -266,6 +266,35 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
       client.generateImage("a red square", ImageGenerationOptions())
 
       metrics.imageGenerationCalls.map(_._1) shouldBe Seq(expected)
+    }
+  }
+
+  test("records each image error case under its metrics error kind") {
+    val cases: Seq[(LLMError, ErrorKind)] = Seq(
+      ImageAuthenticationError("bad key")                 -> ErrorKind.Authentication,
+      ImageRateLimitError("slow down")                    -> ErrorKind.RateLimit,
+      ImageServiceError("rejected", 403)                  -> ErrorKind.ServiceError,
+      ImageValidationError("bad size")                    -> ErrorKind.Validation,
+      InvalidPromptError("bad prompt")                    -> ErrorKind.Validation,
+      InsufficientResourcesError("no credits")            -> ErrorKind.ServiceError,
+      UnsupportedOperation("no edits")                    -> ErrorKind.Validation,
+      ImageUnknownError(new RuntimeException("surprise")) -> ErrorKind.Unknown
+    )
+
+    cases.foreach { case (error, expected) =>
+      val metrics = new RecordingMetricsCollector()
+      val client = new InstrumentedImageGenerationClient(
+        new StubDelegate(imageResult = Left(error)),
+        testConfig,
+        metrics,
+        new RecordingTracing()
+      )
+
+      client.generateImage("a cat", ImageGenerationOptions()) shouldBe Left(error)
+
+      withClue(s"$error: ") {
+        metrics.imageGenerationCalls.map(_._4) shouldBe Seq(Outcome.Error(expected))
+      }
     }
   }
 

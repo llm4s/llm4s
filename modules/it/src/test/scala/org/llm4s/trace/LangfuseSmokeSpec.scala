@@ -1,6 +1,6 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.config.LangfuseConfigLoader
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.it.Tier
@@ -116,11 +116,15 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
     // The query is the conversation trace's input, so a unique one finds this run's trace.
     val query   = s"llm4s smoke ${UUID.randomUUID()}: echo hello"
     val tracing = new CheckedLangfuseTracing(publicKey, secretKey)
-    val state = echoTool.flatMap { tool =>
-      new Agent(client).run(query, new ToolRegistry(Seq(tool)), context = AgentContext(tracing = Some(tracing)))
-    }
+    val result = for {
+      tool  <- echoTool
+      agent <- Agent.builder("smoke", client).withTools(new ToolRegistry(Seq(tool))).withTracing(tracing).build()
+      done  <- agent.run(query)
+    } yield done
 
-    state.map(_.status) shouldBe Right(AgentStatus.Complete)
+    result.map(_.status) shouldBe Right(AgentStatus.Completed("Echoed."))
+    val done     = result.fold(e => fail(e.message), identity)
+    val threadId = done.threadId.value
     tracing.results should not be empty
     all(tracing.results) shouldBe Right(())
 
@@ -131,21 +135,24 @@ class LangfuseSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with
 
     eventually {
       val response = http.get(
-        s"$apiBase/api/public/traces",
+        s"$apiBase/api/public/observations",
         headers = Map("Authorization" -> auth),
-        params = Map("name" -> "LLM4S Agent Run", "limit" -> "50"),
+        params = Map("name" -> "graph.run_completed", "limit" -> "50"),
         timeout = scala.concurrent.duration.Duration(30, "seconds")
       ) match {
         case Right(r)    => r
-        case Left(error) => fail(s"GET /api/public/traces failed: ${error.message}")
+        case Left(error) => fail(s"GET /api/public/observations failed: ${error.message}")
       }
-      withClue(s"GET /api/public/traces returned ${response.statusCode}: ") {
+      withClue(s"GET /api/public/observations returned ${response.statusCode}: ") {
         response.statusCode shouldBe 200
       }
-      val ours = ujson.read(response.body)("data").arr.filter(_("input").strOpt.contains(query))
+      // The agent traces its run as graph.* events, each carrying the thread it ran on.
+      val ours = ujson
+        .read(response.body)("data")
+        .arr
+        .filter(_("input").objOpt.exists(_.get("threadId").exists(_.str == threadId)))
       ours should not be empty
-      // The last state the agent traced is the finished conversation.
-      ours.map(_("output").strOpt) should contain(Some("Echoed."))
+      ours.map(_("input")("runId").str) shouldBe Seq(done.runId.value)
     }
   }
 }

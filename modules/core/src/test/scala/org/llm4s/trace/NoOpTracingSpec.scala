@@ -21,7 +21,7 @@ import scala.util.Try
  *
  * `TracingSpec` already checks that each method returns `Right(())` once, and
  * `TracingEdgeCasesSpec` that `shutdown()` does not throw. This spec covers what those do not:
- * every `TraceEvent` variant, including `AgentStateUpdated`; that `NoOpTracing` never reads what it is given; that it writes
+ * every `TraceEvent` variant, including `AgentRunEnded`; that `NoOpTracing` never reads what it is given; that it writes
  * nothing to stdout, stderr or the log; repeated and concurrent calls; and calls after
  * `shutdown()`.
  *
@@ -44,11 +44,11 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
   )
 
   /**
-   * The event a completed agent's `AgentState#toTraceEvent` produces, built directly: the agent
-   * runtime is in `llm4s-agent`, whose `AgentRunTracingSpec` covers `toTraceEvent` (#1242).
+   * The event a completed agent run ends with, built directly: the agent runtime is in
+   * `llm4s-agent`, whose `AgentRunTracingSpec` covers building it.
    */
-  private val agentStateEvent =
-    TraceEvent.AgentStateUpdated("Complete", runMessages.size, logCount = 2, messages = runMessages)
+  private val agentRunEnded =
+    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", runMessages, UsageSummary())
 
   private val completionWithToolCalls = Completion(
     id = "completion-1",
@@ -70,7 +70,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
     TraceEvent.ToolExecuted("calculator", "{}", "missing argument 'a'", duration = 1.millis, success = false),
     TraceEvent.ErrorOccurred(new IllegalStateException("boom", new RuntimeException("cause")), "agent step"),
     TraceEvent.TokenUsageRecorded(usage, "test-model", "completion"),
-    agentStateEvent,
+    agentRunEnded,
     TraceEvent.CustomEvent("custom", ujson.Obj("nested" -> ujson.Arr(1, 2, 3))),
     TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(100, 100), "embed-model", "indexing", inputCount = 4),
     TraceEvent.CostRecorded(0.002, "test-model", "completion", tokenCount = 20, costType = "total"),
@@ -127,7 +127,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
     (out.toString, err.toString, appender.list.asScala.toList.filter(_.getThreadName == thread))
   }
 
-  "NoOpTracing" should "accept every TraceEvent variant, including AgentStateUpdated" in {
+  "NoOpTracing" should "accept every TraceEvent variant, including AgentRunEnded" in {
     val tracing = new NoOpTracing()
 
     everyEvent.foreach(event => withClue(event.eventType)(tracing.traceEvent(event) shouldBe Right(())))
@@ -137,10 +137,10 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "trace agent state as an ordinary event, whatever the state holds" in {
     val tracing = new NoOpTracing()
-    val empty   = TraceEvent.AgentStateUpdated("InProgress", messageCount = 0, logCount = 0)
-    val failed  = agentStateEvent.copy(status = "Failed(tool crashed)")
+    val empty   = agentRunEnded.copy(messages = Seq.empty)
+    val failed  = agentRunEnded.copy(status = "failed")
 
-    tracing.traceEvent(agentStateEvent) shouldBe Right(())
+    tracing.traceEvent(agentRunEnded) shouldBe Right(())
     tracing.traceEvent(empty) shouldBe Right(())
     tracing.traceEvent(failed) shouldBe Right(())
   }

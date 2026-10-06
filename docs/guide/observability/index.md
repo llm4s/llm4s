@@ -218,10 +218,14 @@ val store  = InMemoryTraceStore()
 // apply returns Result[TraceCollectorTracing]; InMemoryTraceStore never fails
 val tracer = TraceCollectorTracing(store).getOrElse(sys.error("tracing init failed"))
 
-// pass tracer to any agent run
-agent.run("query", tools, tracing = tracer)
+// give the tracer to the agent: every run it makes is traced
+val result = for {
+  agent  <- Agent.builder("assistant", client).withTools(tools).withTracing(tracer).build()
+  result <- agent.run("query")
+} yield result
 
-// retrieve all spans for this run
+// retrieve all spans; an agent's runs are recorded as `graph.*` custom events,
+// spans named `custom:graph.run_started`, `custom:graph.task_completed`, ...
 val spans = store.getSpans(tracer.traceId)
 ```
 
@@ -302,21 +306,26 @@ class AgentBehaviourSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
 
   override def afterEach(): Unit = store.clear()
 
-  "agent" should "call the calculator tool exactly once" in {
-    agent.run("what is 6 * 7?", tools, tracing = tracer)
+  // built once per spec, with a scripted client and the tracer
+  def agent = Agent.builder("assistant", client).withTools(tools).withTracing(tracer).build()
+    .getOrElse(fail("agent build failed"))
 
-    val toolSpans = store.getSpans(tracer.traceId)
-      .filter(_.kind == SpanKind.ToolCall)
-
-    toolSpans should have size 1
-    toolSpans.head.attributes("tool_name").asString shouldBe Some("calculator")
+  /** One span per graph task the agent's `call-tool` node completed: one per tool call. */
+  def toolCalls = store.getSpans(tracer.traceId).filter { s =>
+    s.name == "custom:graph.task_completed" &&
+    s.attributes.get("nodeId").flatMap(_.asString).exists(_.endsWith("/call-tool"))
   }
 
-  "agent" should "record no errors on a valid query" in {
-    agent.run("hello", tools, tracing = tracer)
+  "agent" should "call a tool exactly once" in {
+    agent.run("what is 6 * 7?") shouldBe a[Right[_, _]]
 
-    store.getSpans(tracer.traceId)
-      .filter(_.status.isInstanceOf[SpanStatus.Error]) shouldBe empty
+    toolCalls should have size 1
+  }
+
+  "agent" should "record no failed task on a valid query" in {
+    agent.run("hello") shouldBe a[Right[_, _]]
+
+    store.getSpans(tracer.traceId).map(_.name) should not contain "custom:graph.task_failed"
   }
 }
 ```
@@ -333,10 +342,11 @@ val collector = TraceCollectorTracing(store).getOrElse(sys.error("tracing init f
 val langfuse  = LangfuseTracing.from(LangfuseConfigLoader.default().getOrElse(sys.error("bad langfuse config")))
 
 val tracer = TracingComposer.combine(collector, langfuse)
-agent.run("query", tools, tracing = tracer)
+val agent  = Agent.builder("assistant", client).withTools(tools).withTracing(tracer).build()
+agent.flatMap(_.run("query"))
 
 // local span queries still work
-val cacheSpans = store.getSpans(collector.traceId).filter(_.kind == SpanKind.Cache)
+val graphSpans = store.getSpans(collector.traceId).filter(_.name.startsWith("custom:graph."))
 ```
 
 ### Span JSON Round-Trip
@@ -387,6 +397,32 @@ Trace: "RAG Query Processing"
 └── Event: "Response Delivered"
 ```
 
+### What an agent run sends
+
+An agent built with `Agent.builder(...).withTracing(tracing)` sends, for each run:
+
+- `graph.*` custom events for the runtime's own events (run, task and checkpoint lifecycle), and
+  `agent.*` custom events for the agent's durable events (`agent.model_call_completed`,
+  `agent.tool_executed`, `agent.handed_off`, `agent.guardrail_blocked`), which carry no message content;
+- a `TokenUsageRecorded` for each model call that reports usage;
+- one `TraceEvent.AgentRunEnded` when the run ends: thread id, run id, the active agent, a status
+  (`completed`, `suspended`, `step_limit_reached`, `blocked:<guardrail>`, `cancelled`, `timed_out`,
+  `failed`), this turn's messages (from its user message on; empty when blocked, cancelled, timed
+  out or failed) and the run's own `UsageSummary` - the model calls this run made, summed from its
+  `agent.model_call_completed` events, not the thread's total, so per-run figures add up.
+
+A run that crashes without a terminal event is traced as `ErrorOccurred`, with a WARN, and has no
+`AgentRunEnded`. Message content reaches tracing only in `AgentRunEnded.messages`; a blocked turn's
+content is not in it. (The kernel's own `TracingSubscriber`, used for graphs that are not agents,
+names agent events `graph.custom`; `withTracing` on an agent names them `agent.*`.)
+
+| Backend | What `AgentRunEnded` shows |
+|---------|----------------------------|
+| Langfuse | One trace per run (trace id = run id), grouped in a session per thread (session id = thread id); input is the first user message, output the last assistant message; metadata holds the agent, status and usage; one span per message |
+| OpenTelemetry | An `INTERNAL` span "Agent Run" with thread, run, agent, status, message count and `gen_ai.usage.*` totals |
+| `TraceCollector` | A `SpanKind.AgentCall` span with the same attributes, token totals as `input_tokens`/`output_tokens`, and no cost |
+| Console | A multi-line "Agent Run Ended" block: agent, status, thread, run, message count, token totals |
+
 ### Environment Setup
 
 Langfuse is served by `llm4s-observability`:
@@ -423,8 +459,8 @@ tracing.traceEvent(TraceEvent.CustomEvent("cache_hit", ujson.Obj("key" -> "query
 // Trace token usage explicitly
 tracing.traceTokenUsage(usage, model = "gpt-4o", operation = "completion")
 
-// Trace an agent state snapshot (the agent does this after each step)
-tracing.traceEvent(agentState.toTraceEvent)
+// Trace a finished agent run (an agent built withTracing does this itself, once per run)
+tracing.traceEvent(TraceEvent.AgentRunEnded(threadId, runId, agent, status, messages, usage))
 
 // Trace costs
 tracing.traceCost(
@@ -588,23 +624,19 @@ tracing.traceCost(
 Use context budget methods to prevent runaway costs:
 
 ```scala
-import org.llm4s.agent.{AgentState, ContextWindowConfig}
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.agent.{Agent, ContextWindowConfig}
+import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 import org.llm4s.types.HeadroomPercent
 
 // Get available tokens considering model limits and safety margin
 val budget = client.getContextBudget(HeadroomPercent.Standard)
 val config = ContextWindowConfig(maxTokens = Some(budget))
 
-// AgentState.pruneConversation uses a default token counter (words * 1.3)
+// ContextWindowMiddleware uses a default token counter (words * 1.3)
 // or accepts a custom tokenCounter function for more accurate estimation
-// Build agent state with conversation + tool registry
-val state = AgentState(conversation, ToolRegistry.empty)
-val prunedState =
-  AgentState.pruneConversation(
-    state,
-    config
-  )
+val agent = Agent.builder("assistant", client)
+  .withMiddleware(new ContextWindowMiddleware(config))
+  .build()
 ```
 
 ---

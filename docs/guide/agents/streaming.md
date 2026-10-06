@@ -9,7 +9,7 @@ grand_parent: User Guide
 # Streaming Events
 {: .no_toc }
 
-Real-time visibility into agent execution for responsive UIs.
+Watch an agent's turn as it happens: the answer token by token, each tool call, each model call.
 {: .fs-6 .fw-300 }
 
 ## Table of contents
@@ -20,483 +20,182 @@ Real-time visibility into agent execution for responsive UIs.
 
 ---
 
-## Overview
+## Streaming a turn
 
-The streaming events system provides real-time feedback during agent execution:
-
-- **Text streaming** - Token-by-token output as the LLM generates
-- **Tool events** - Know when tools start, complete, or fail
-- **Lifecycle events** - Track agent steps and completion
-- **Guardrail events** - Monitor validation progress
-- **Handoff events** - Track agent-to-agent delegation
-
----
-
-## Quick Start
+`AgentBuilder.withStreaming()` makes every model call of the agent stream its answer (the default
+is off: the agent calls `complete`). `agent.stream(threadId, query)(listener)` runs a turn and hands
+every event of it to `listener`, which receives the runtime's `StreamEvent`. Match the agent's events
+with the extractors in `AgentEvents`; they need no `ujson`:
 
 ```scala
-import org.llm4s.agent.streaming._
+import org.llm4s.agent.Agent
+import org.llm4s.agent.events.AgentEvents
+import org.llm4s.agent.graph.ThreadId
 
-agent.runWithEvents(query, tools) {
-  case TextDelta(text, _) =>
-    print(text)  // Real-time token output
-
-  case ToolCallStarted(_, name, _, _) =>
-    println(s"\nCalling $name...")
-
-  case ToolCallCompleted(_, name, result, _, duration, _) =>
-    println(s"$name completed in ${duration.toMillis}ms")
-
-  case AgentCompleted(state, steps, duration, _) =>
-    println(s"\nDone in $steps steps (${duration.toMillis}ms)")
-
-  case _ => ()  // Ignore other events
-}
-```
-
----
-
-## Event Types
-
-### Text Events
-
-| Event | Description | Fields |
-|-------|-------------|--------|
-| `TextDelta` | Token-level streaming chunk | `delta`, `timestamp` |
-| `TextComplete` | Full text generation finished | `fullText`, `timestamp` |
-
-```scala
-case TextDelta(delta, timestamp) =>
-  // delta: The new text chunk
-  // timestamp: When this chunk was received
-  print(delta)
-
-case TextComplete(fullText, timestamp) =>
-  // fullText: Complete generated text
-  println(s"\n--- Complete: ${fullText.length} chars ---")
-```
-
-### Tool Events
-
-| Event | Description | Fields |
-|-------|-------------|--------|
-| `ToolCallStarted` | Tool execution beginning | `toolCallId`, `toolName`, `arguments`, `timestamp` |
-| `ToolCallCompleted` | Tool finished successfully | `toolCallId`, `toolName`, `result`, `success`, `duration` (a `FiniteDuration`), `timestamp` |
-| `ToolCallFailed` | Tool execution failed | `toolCallId`, `toolName`, `error`, `timestamp` |
-
-```scala
-case ToolCallStarted(id, name, args, _) =>
-  println(s"[$id] Starting $name with args: $args")
-
-case ToolCallCompleted(id, name, result, success, duration, _) =>
-  println(s"[$id] $name: $result (${duration.toMillis}ms)")
-
-case ToolCallFailed(id, name, error, _) =>
-  println(s"[$id] $name FAILED: $error")
-```
-
-### Agent Lifecycle Events
-
-| Event | Description | Fields |
-|-------|-------------|--------|
-| `AgentStarted` | Agent execution beginning | `query`, `toolCount`, `timestamp` |
-| `StepStarted` | New reasoning step | `stepNumber`, `timestamp` |
-| `StepCompleted` | Step finished | `stepNumber`, `hasToolCalls`, `timestamp` |
-| `AgentCompleted` | Agent finished successfully | `finalState`, `totalSteps`, `duration` (a `FiniteDuration`), `timestamp` |
-| `AgentFailed` | Agent execution failed | `error`, `stepNumber`, `timestamp` |
-
-```scala
-case AgentStarted(query, toolCount, _) =>
-  println(s"Starting agent with $toolCount tools: $query")
-
-case StepStarted(stepNum, _) =>
-  println(s"--- Step $stepNum ---")
-
-case StepCompleted(stepNum, hasToolCalls, _) =>
-  println(s"Step $stepNum done, tools called: $hasToolCalls")
-
-case AgentCompleted(state, steps, duration, _) =>
-  println(s"Completed in $steps steps (${duration.toMillis}ms)")
-  println(s"Final answer: ${state.lastAssistantMessage}")
-
-case AgentFailed(error, stepNum, _) =>
-  println(s"Failed at step $stepNum: $error")
-```
-
-### Guardrail Events
-
-| Event | Description | Fields |
-|-------|-------------|--------|
-| `InputGuardrailStarted` | Input validation starting | `guardrailName`, `timestamp` |
-| `InputGuardrailCompleted` | Input validation done | `guardrailName`, `passed`, `timestamp` |
-| `OutputGuardrailStarted` | Output validation starting | `guardrailName`, `timestamp` |
-| `OutputGuardrailCompleted` | Output validation done | `guardrailName`, `passed`, `timestamp` |
-
-```scala
-case InputGuardrailStarted(name, _) =>
-  println(s"Validating input: $name")
-
-case InputGuardrailCompleted(name, passed, _) =>
-  println(s"Input $name: ${if (passed) "PASS" else "FAIL"}")
-
-case OutputGuardrailStarted(name, _) =>
-  println(s"Validating output: $name")
-
-case OutputGuardrailCompleted(name, passed, _) =>
-  println(s"Output $name: ${if (passed) "PASS" else "FAIL"}")
-```
-
-### Handoff Events
-
-| Event | Description | Fields |
-|-------|-------------|--------|
-| `HandoffStarted` | Agent delegation starting | `targetAgentName`, `reason`, `preserveContext`, `timestamp` |
-| `HandoffCompleted` | Delegation finished | `targetAgentName`, `success`, `timestamp` |
-
-```scala
-case HandoffStarted(targetName, reason, preserveContext, _) =>
-  println(s"Handing off to $targetName: $reason")
-  println(s"Context preserved: $preserveContext")
-
-case HandoffCompleted(targetName, success, _) =>
-  println(s"Handoff to $targetName: ${if (success) "success" else "failed"}")
-```
-
----
-
-## Usage Patterns
-
-### Basic Streaming UI
-
-```scala
-agent.runWithEvents(query, tools) { event =>
-  event match {
-    case TextDelta(text, _) =>
-      print(text)
-      System.out.flush()
-
-    case AgentCompleted(_, steps, duration, _) =>
-      println(s"\n\n✓ Completed in $steps steps (${duration.toMillis}ms)")
-
-    case AgentFailed(error, step, _) =>
-      println(s"\n\n✗ Failed at step $step: $error")
-
-    case _ => ()
+for
+  agent <- Agent.builder("assistant", client).withSystemPrompt("You are concise.").withStreaming().build()
+  run <- agent.stream(ThreadId("t1"), "Explain monads in three sentences.") {
+    case AgentEvents.TextDelta(d)          => print(d.text)
+    case AgentEvents.ToolCallStarted(c)    => println(s"\n[${c.tool}]")
+    case AgentEvents.ModelCallCompleted(m) => println(s"\n(${m.usage})")
+    case _                                 => ()
   }
-}
+  result <- run.await()
+yield result
 ```
 
-### Progress Indicator
+`stream` returns the `AgentRun` at once; `await()` gives the `AgentResult` as for `run`, and returns
+only once the listener has returned from the run's last event - so everything the listener collected
+is there when `await` returns. It waits at most 5 seconds for a listener that is
+still busy, then logs a WARN and returns.
+`streamResume(threadId, answers)` and `streamRecover(threadId)` are the streaming siblings of
+`startResume` and `startRecover`. A listener runs on its own dispatcher thread, so a slow listener
+never slows the run. Runnable version: `StreamingAgentExample` in `modules/samples`.
+
+## The events
+
+Every event is an `EventType` in `org.llm4s.agent.events.AgentEvents`, named `agent.<snake_case>`,
+version 1.
+
+**Durable** events are committed with the task that emits them, so they are stored, replayed, and
+never duplicated by a retry or a `recover`. They carry no message content.
+
+| Event | Fields | Sent |
+|---|---|---|
+| `ModelCallCompleted` | `agent`, `model`, `attempts`, `toolCalls`, `usage`, `estimatedCost` | after a model call returns successfully |
+| `ToolExecuted` | `agent`, `toolCallId`, `tool`, `duration`, `outcome` (`Succeeded`, `Errored`, `Denied`, `Rejected`, `NeedsApproval`, `Asked`) | when a tool call's outcome is recorded |
+| `HandedOff` | `from`, `to` | when the model routes a handoff |
+| `GuardrailBlocked` | `guardrail`, `phase` (`Input`, `Output`) | when a guardrail blocks a turn |
+
+**Live** events are for watching. They carry content, have no `seq`, and are never stored or replayed.
+
+| Event | Fields | Sent |
+|---|---|---|
+| `ModelCallStarted` | `agent`, `attempt` | before each attempt of a model call |
+| `TextDelta` | `attempt`, `text` | per chunk of the answer (needs `withStreaming()`) |
+| `ThinkingDelta` | `attempt`, `text` | per chunk of the model's reasoning (needs `withStreaming()`) |
+| `ToolCallStarted` | `toolCallId`, `tool`, `arguments` | after the arguments validate, before middleware runs |
+| `ToolCallResult` | `toolCallId`, `content`, `isError` | when the call's result is recorded |
+
+Notes on the durable events:
+
+- `attempts` is 0 when a model middleware answered without calling the model.
+- `ToolExecuted.tool` names the tool only when the agent has it; a call to a name the model invented
+  is recorded as `"<unknown>"` (the live `ToolCallResult` still carries the call). Each non-handoff
+  call of a batch that mixes a handoff with other calls runs nothing and is reported as `Errored`.
+- A tool call that is approved or edited produces two `agent.tool_executed` events for one call id,
+  across two runs: `NeedsApproval` when it suspends, then the final outcome after `resume`.
+- `agent.guardrail_blocked` fires only for a guardrail's block. Other middleware refusals (a blank
+  query or answer, a custom `Left`) emit none.
+- The kernel's own events (`RunStarted`, `RunCompleted`, `RunFailed`, ...) arrive in the same
+  stream, as `StreamEvent.Durable`.
+
+## Durable vs live, and the content rule
+
+Durable events hold identifiers, names, usage, durations and outcomes, never message content:
+no assistant text, thinking, tool arguments, tool results or guardrail reasons. Content travels
+only in live events, and in `AgentRunEnded.messages` at the end of a traced run.
+
+The reason is the guardrail Block guarantee. When an output guardrail blocks a turn, the runtime
+removes the blocked turn from the thread. If the log held the content, a Block would also have to
+redact the log. Replaying a run therefore shows its structure (which model calls, which tools, how
+long, with what usage), and a blocked answer is in no stored event.
+
+## Attempts
+
+`attempt` counts the calls of the innermost model function within one task, from 1. A model
+wrapper that retries or falls back (`wrapModelCall`) calls it again, so a higher `attempt` on the
+same task means the text streamed so far for that task is discarded: clear what you have shown and
+start again. A task that `recover` runs again starts at attempt 1 under a new task id.
+
+## `stream*` vs `subscribe`
+
+- `Agent.stream`, `streamResume` and `streamRecover` subscribe your listener during admission,
+  before the run thread starts, so it sees every durable and every live event of the run, from the
+  claim on.
+- `AgentRun.subscribe(capacity = 1024)(listener)` attaches later, to a run you started with
+  `start`. It replays the run's durable events from its start, then delivers new ones, but it
+  misses live events sent before it attached.
+
+Both are run-scoped: a listener sees only this run's events, even when other runs share the thread,
+and ends after the run's terminal event (`RunCompleted`, `RunSuspended`, `RunFailed`,
+`RunCancelled`, `RunTimedOut`), or after a `Disconnected` (`Lagging`, `ListenerFailed`, or - for
+`subscribe`, which replays - `ReplayFailed`). A run that crashes without a terminal event ends its
+stream shortly after the run does. Either way, `await` waits for the listener as described above.
+
+## Falling behind
+
+Each listener has a bounded buffer (1024 events for `stream*`). If it is full:
+
+- Live events are dropped, and the listener gets `StreamEvent.LiveGap(n)` with the number lost, so
+  a UI can note that text is missing. The final answer is still in the `AgentResult`.
+- If the listener still cannot keep up, it is disconnected with
+  `StreamEvent.Disconnected(lastSeq, DisconnectReason.Lagging)`. Durable events are in the log, so
+  you can resubscribe from where you were with `GraphRuntime.subscribe(threadId, afterSeq = lastSeq)`.
+  That needs the agent's runtime: build the agent `withRuntime(runtime)` and subscribe on that
+  `runtime`. The subscription is thread-scoped, not run-scoped - it delivers every later run on the
+  thread too - and does not end itself: cancel it when you are done.
+
+A listener that throws is disconnected with `ListenerFailed`; the run is unaffected.
+
+## Replay
+
+Durable events outlive the run. `GraphRuntime.subscribe(threadId, afterSeq = 0)` replays a thread's
+events from the start, which gives the structure of every run without any content. See
+`EventCollectionExample`.
+
+## fs2 and ZIO
+
+`llm4s-effect` and `llm4s-zio` expose the same stream as a value:
 
 ```scala
-var currentStep = 0
+// cats-effect / fs2: Stream[IO, AgentStreamItem]
+agentIO.stream(threadId, "Explain monads").evalMap {
+  case AgentStreamItem.Event(AgentEvents.TextDelta(d)) => IO.print(d.text)
+  case AgentStreamItem.Event(_)                       => IO.unit
+  case AgentStreamItem.Done(result)                   => IO.println(s"\n${result.status}")
+}.compile.drain
 
-agent.runWithEvents(query, tools) { event =>
-  event match {
-    case StepStarted(stepNum, _) =>
-      currentStep = stepNum
-      print(s"\rStep $stepNum...")
-
-    case ToolCallStarted(_, name, _, _) =>
-      print(s"\rStep $currentStep: $name...")
-
-    case ToolCallCompleted(_, name, _, _, duration, _) =>
-      print(s"\rStep $currentStep: $name ✓ (${duration.toMillis}ms)")
-
-    case AgentCompleted(_, steps, duration, _) =>
-      println(s"\rCompleted in $steps steps (${duration.toMillis}ms)      ")
-
-    case _ => ()
-  }
-}
+// ZIO: ZStream[Any, LLMError, AgentStreamItem]
+agentZ.stream(threadId, "Explain monads").runForeach { /* same cases */ }
 ```
 
-### Event Collection
+`AgentStreamItem` is `Event(StreamEvent)` or `Done(AgentResult)`, one enum per module. The stream
+ends after `Done`; a `Left` from admission or from the run fails the stream with that error.
+A run that ends without a terminal event (a crash) still ends the stream shortly after the run ends,
+and the stream then fails with the run's error. `streamResume` and `streamRecover` exist on both.
+Interrupting the stream or stopping early (`take(n)`, `head`) cancels the turn.
 
-Collect all events for post-processing:
+A slow consumer does not: the stream's buffer never holds up the run's subscription. Durable events
+are always kept; live events beyond the buffer's 256 are dropped, and the consumer receives one
+`StreamEvent.LiveGap(n)` with their count where they were dropped, then the rest of the run and
+`Done`. Only a `Disconnected` from the runtime fails the stream. Samples: `AgentStreamIOExample`,
+`AgentStreamZIOExample`.
+
+## Your own graphs
+
+The same machinery serves graphs that are not agents. An `EventType[A]` names a payload once:
 
 ```scala
-import scala.concurrent.duration.Duration
+val Checked = EventType[Checked]("myapp.checked", 1)   // name matches [a-z0-9_.]{1,64}
 
-val (state, events) = agent.runCollectingEvents(query, tools)
+Checked.emit(context, value)       // durable: stored with the task's commit
+Checked.progress(context, value)   // live: sent now, never stored
 
-// Analyze events
-val toolCalls = events.collect { case e: ToolCallCompleted => e }
-val totalToolTime = toolCalls.map(_.duration).foldLeft(Duration.Zero)(_ + _)
-
-println(s"Total tool execution time: ${totalToolTime.toMillis}ms")
-println(s"Tool calls: ${toolCalls.map(_.toolName).mkString(", ")}")
+listener { case Checked(v) => ... } // None for another name, version or an undecodable payload
 ```
 
-### Metrics Collection
+`RunContext.progress(name, version, payload)` is the untyped form.
 
-```scala
-import org.llm4s.agent.streaming.StreamingAccumulator
+## Limits
 
-val accumulator = StreamingAccumulator.create()
+- **Java and Kotlin streams** are not yet available. [#1377](https://github.com/llm4s/llm4s/issues/1377) covers a listener stream for
+  `JAgent` and a `Flow` for `AgentKt`.
+- **Kernel failure messages.** `TaskFailed` and `RunFailed` store an error message. If a guardrail's
+  or tool's error quotes content (a guardrail reason that echoes the user's text), that text reaches
+  the log through the kernel event, not through an `agent.*` event.
+- **Live events are not replayed**, and a late `subscribe` misses earlier ones.
 
-agent.runWithEvents(query, tools) { event =>
-  accumulator.record(event)
-
-  // Also handle real-time display
-  event match {
-    case TextDelta(text, _) => print(text)
-    case _ => ()
-  }
-}
-
-// Get metrics after completion
-val metrics = accumulator.getMetrics()
-println(s"Total tokens: ${metrics.tokenCount}")
-println(s"Time to first token: ${metrics.timeToFirstToken}ms")
-println(s"Tool calls: ${metrics.toolCallCount}")
-println(s"Total duration: ${metrics.totalDuration}ms")
-```
-
----
-
-## Advanced Patterns
-
-### Timeout Handling
-
-```scala
-import scala.concurrent.duration._
-
-val result = agent.runWithEvents(
-  query = query,
-  tools = tools,
-  timeout = Some(30.seconds),
-  onEvent = { event =>
-    event match {
-      case TextDelta(text, _) => print(text)
-      case AgentFailed(error, _, _) =>
-        if (error.contains("timeout")) {
-          println("\n⏰ Request timed out")
-        }
-      case _ => ()
-    }
-  }
-)
-```
-
-### Cancellation
-
-```scala
-import java.util.concurrent.atomic.AtomicBoolean
-
-val cancelled = new AtomicBoolean(false)
-
-// In another thread or signal handler
-def cancel(): Unit = cancelled.set(true)
-
-agent.runWithEvents(
-  query = query,
-  tools = tools,
-  cancellationCheck = () => cancelled.get(),
-  onEvent = { event =>
-    event match {
-      case TextDelta(text, _) =>
-        print(text)
-      case AgentFailed(error, _, _) if error.contains("cancelled") =>
-        println("\n🛑 Cancelled")
-      case _ => ()
-    }
-  }
-)
-```
-
-### Web Socket Integration
-
-```scala
-import org.llm4s.agent.streaming._
-
-def handleWebSocketQuery(query: String, socket: WebSocket): Unit = {
-  agent.runWithEvents(query, tools) { event =>
-    val message = event match {
-      case TextDelta(text, _) =>
-        s"""{"type":"text","content":"$text"}"""
-
-      case ToolCallStarted(id, name, _, _) =>
-        s"""{"type":"tool_start","id":"$id","name":"$name"}"""
-
-      case ToolCallCompleted(id, name, result, _, duration, _) =>
-        s"""{"type":"tool_complete","id":"$id","name":"$name","result":"$result","ms":${duration.toMillis}}"""
-
-      case AgentCompleted(state, steps, duration, _) =>
-        s"""{"type":"complete","steps":$steps,"ms":${duration.toMillis}}"""
-
-      case AgentFailed(error, step, _) =>
-        s"""{"type":"error","message":"$error","step":$step}"""
-
-      case _ => null
-    }
-
-    if (message != null) {
-      socket.send(message)
-    }
-  }
-}
-```
-
-### React/Frontend Integration
-
-```scala
-// Backend endpoint returning Server-Sent Events
-def streamQuery(query: String): Source[ServerSentEvent] = {
-  Source.fromIterator { () =>
-    val events = collection.mutable.Buffer[ServerSentEvent]()
-
-    agent.runWithEvents(query, tools) { event =>
-      val sse = event match {
-        case TextDelta(text, _) =>
-          ServerSentEvent(data = text, eventType = Some("text"))
-
-        case ToolCallStarted(_, name, _, _) =>
-          ServerSentEvent(data = name, eventType = Some("tool_start"))
-
-        case AgentCompleted(_, _, _, _) =>
-          ServerSentEvent(data = "done", eventType = Some("complete"))
-
-        case _ => null
-      }
-
-      if (sse != null) events += sse
-    }
-
-    events.iterator
-  }
-}
-```
-
----
-
-## Event Filtering
-
-### By Type
-
-```scala
-agent.runWithEvents(query, tools) { event =>
-  // Only handle text and completion events
-  event match {
-    case e: TextDelta => handleText(e)
-    case e: AgentCompleted => handleComplete(e)
-    case _ => () // Ignore all other events
-  }
-}
-```
-
-### Custom Filter
-
-```scala
-def onlySignificantEvents(event: AgentEvent): Boolean = event match {
-  case _: TextDelta => true
-  case _: ToolCallCompleted => true
-  case _: AgentCompleted => true
-  case _: AgentFailed => true
-  case _ => false
-}
-
-agent.runWithEvents(query, tools) { event =>
-  if (onlySignificantEvents(event)) {
-    processEvent(event)
-  }
-}
-```
-
----
-
-## Performance Considerations
-
-### 1. Keep Event Handlers Fast
-
-```scala
-// Good - fast handler
-agent.runWithEvents(query, tools) { event =>
-  event match {
-    case TextDelta(text, _) =>
-      buffer.append(text)  // Fast operation
-    case _ => ()
-  }
-}
-
-// Bad - slow handler blocks streaming
-agent.runWithEvents(query, tools) { event =>
-  event match {
-    case TextDelta(text, _) =>
-      database.insert(text)  // Slow I/O in handler
-    case _ => ()
-  }
-}
-```
-
-### 2. Use Async for Heavy Processing
-
-```scala
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
-
-agent.runWithEvents(query, tools) { event =>
-  event match {
-    case TextDelta(text, _) =>
-      // Display immediately
-      print(text)
-
-    case e: ToolCallCompleted =>
-      // Log asynchronously
-      Future {
-        database.logToolCall(e)
-      }
-
-    case _ => ()
-  }
-}
-```
-
-### 3. Batch Updates for UI
-
-```scala
-import java.util.concurrent.atomic.AtomicReference
-
-val textBuffer = new AtomicReference[StringBuilder](new StringBuilder)
-var lastRender = System.currentTimeMillis()
-
-agent.runWithEvents(query, tools) { event =>
-  event match {
-    case TextDelta(text, _) =>
-      textBuffer.get().append(text)
-
-      // Batch UI updates every 50ms
-      val now = System.currentTimeMillis()
-      if (now - lastRender > 50) {
-        renderUI(textBuffer.get().toString)
-        lastRender = now
-      }
-
-    case AgentCompleted(_, _, _, _) =>
-      // Final render
-      renderUI(textBuffer.get().toString)
-
-    case _ => ()
-  }
-}
-```
-
----
-
-## Examples
-
-| Example | Description |
-|---------|-------------|
-| [StreamingAgentExample](/examples/#streaming-examples) | Basic streaming with events |
-| [EventCollectionExample](/examples/#streaming-examples) | Collecting and analyzing events |
-| [StreamingWithProgressExample](/examples/#streaming-examples) | Progress indicators and metrics |
-
-[Browse all examples →](/examples/)
-
----
-
-## Next Steps
-
-- [Memory Guide](memory) - Persistent context
-- [Handoffs Guide](handoffs) - Agent delegation
-- [Guardrails Guide](guardrails) - Input/output validation
+See also the [observability guide](../observability/), the
+[migration note](../../reference/migration.html), and
+[Typed Agent Runtime §4.14](/design/typed-agent-runtime-design).

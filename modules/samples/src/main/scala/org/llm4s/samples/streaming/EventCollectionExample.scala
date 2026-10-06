@@ -1,106 +1,73 @@
 package org.llm4s.samples.streaming
 
 import org.llm4s.agent.Agent
-import org.llm4s.agent.streaming.AgentEvent._
+import org.llm4s.agent.graph.{ GraphRuntime, RunEvent, StreamEvent, ThreadId }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.toolapi.ToolRegistry
 import org.slf4j.LoggerFactory
 
+import java.util.concurrent.CountDownLatch
+import scala.collection.mutable
+
 /**
- * Example demonstrating how to collect and analyze streaming events.
+ * Live versus durable events. A run's events are collected as it streams; afterwards the runtime's
+ * log is replayed with `runtime.subscribe(threadId, afterSeq = 0)`. The replay holds the durable
+ * events - structure and counts, no text, arguments or tool results.
  *
- * This example shows how to:
- * - Use `runCollectingEvents` to gather all events
- * - Analyze events after execution
- * - Extract metrics from event data
- *
- * Run with: sbt "samples/runMain org.llm4s.samples.streaming.EventCollectionExample"
- *
- * Runs against the samples' default provider, the `ollama-local` section of
- * `modules/samples/src/main/resources/application.conf`. For another provider, add a
- * section to `application.local.conf` beside it and select it with `LLM4S_PROVIDER`
- * (docs/getting-started/configuration.md#running-the-samples).
+ * To run: sbt "samples/runMain org.llm4s.samples.streaming.EventCollectionExample"
  */
-object EventCollectionExample extends App {
+object EventCollectionExample:
   private val logger = LoggerFactory.getLogger(getClass)
 
-  logger.info("=" * 60)
-  logger.info("Event Collection Example")
-  logger.info("=" * 60)
+  private def isTerminal(e: RunEvent): Boolean = e match
+    case RunEvent.RunCompleted | RunEvent.RunSuspended(_) | RunEvent.RunCancelled | RunEvent.RunTimedOut => true
+    case RunEvent.RunFailed(_)                                                                           => true
+    case _                                                                                               => false
 
-  val result = for {
-    providerCfg     <- Llm4sConfig.defaultProvider()
-    registryService <- Llm4sConfig.modelRegistryService()
-    given org.llm4s.model.ModelRegistryService = registryService
-    client <- LLMConnect.getClient(providerCfg)
-    agent = new Agent(client)
+  private def nameOf(e: RunEvent): String = e match
+    case RunEvent.Custom(name, _, _) => name
+    case other                       => other.productPrefix
 
-    // Run and collect all events
-    stateAndEvents <- agent.runCollectingEvents(
-      query = "Write a haiku about programming in Scala.",
-      tools = ToolRegistry.empty,
-      maxSteps = Some(3)
-    )
-  } yield stateAndEvents
-
-  result match {
-    case Right((state, events)) =>
-      // Analyze the collected events
-      logger.info("Collected Events Summary")
-      logger.info("-" * 40)
-      logger.info("Total events: {}", events.size)
-
-      // Count by type
-      val textDeltas   = events.collect { case e: TextDelta => e }
-      val textComplete = events.collect { case e: TextComplete => e }
-      val steps        = events.collect { case e: StepStarted => e }
-      val toolCalls    = events.collect { case e: ToolCallStarted => e }
-      val completions  = events.collect { case e: AgentCompleted => e }
-
-      logger.info("Event breakdown:")
-      logger.info("  - TextDelta events: {}", textDeltas.size)
-      logger.info("  - TextComplete events: {}", textComplete.size)
-      logger.info("  - StepStarted events: {}", steps.size)
-      logger.info("  - ToolCallStarted events: {}", toolCalls.size)
-      logger.info("  - AgentCompleted events: {}", completions.size)
-
-      // Calculate total streamed characters
-      val totalChars = textDeltas.map(_.delta.length).sum
-      logger.info("Total characters streamed: {}", totalChars)
-
-      // Show timing if available
-      completions.headOption.foreach { completion =>
-        logger.info("Total duration: {}ms", completion.duration.toMillis)
-        logger.info("Total steps: {}", completion.totalSteps)
+  def main(args: Array[String]): Unit =
+    val runtime  = GraphRuntime.inMemory()
+    val threadId = ThreadId("event-collection-sample")
+    val result = for
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
+      agent <- Agent
+        .builder("assistant", client)
+        .withSystemPrompt("You are concise.")
+        .withStreaming()
+        .withRuntime(runtime)
+        .build()
+      live = Vector.newBuilder[StreamEvent]
+      run <- agent.stream(threadId, "Name three Scala collections.")(e => live.synchronized { live += e; () })
+      // await returns once the listener has returned from the run's last event, so `live` is complete
+      done <- run.await()
+      liveEvents = live.synchronized(live.result())
+      durableCount = liveEvents.count {
+        case _: StreamEvent.Durable => true
+        case _                      => false
       }
-
-      // Show event timeline
-      logger.info("Event Timeline:")
-      logger.info("-" * 40)
-      events.zipWithIndex.foreach { case (event, idx) =>
-        val eventType = event.getClass.getSimpleName
-        val summary = event match {
-          case TextDelta(delta, _)                     => s"'${delta.take(20)}${if (delta.length > 20) "..." else ""}'"
-          case TextComplete(full, _)                   => s"${full.length} chars total"
-          case AgentStarted(query, _, _)               => s"'${query.take(30)}'"
-          case StepStarted(n, _)                       => s"step $n"
-          case StepCompleted(n, hasTc, _)              => s"step $n (toolCalls: $hasTc)"
-          case AgentCompleted(_, steps, ms, _)         => s"$steps steps, ${ms.toMillis}ms"
-          case ToolCallStarted(_, name, _, _)          => s"calling $name"
-          case ToolCallCompleted(_, name, _, _, ms, _) => s"$name completed in ${ms.toMillis}ms"
-          case _                                       => ""
+      _        = println(s"Live: ${liveEvents.size - durableCount}, durable: $durableCount")
+      replayed = mutable.ArrayBuffer.empty[StreamEvent]
+      latch    = new CountDownLatch(1)
+      sub <- runtime.subscribe(threadId, afterSeq = 0) { e =>
+        replayed.synchronized {
+          replayed += e
+          e match
+            case StreamEvent.Durable(r) if isTerminal(r.event) => latch.countDown()
+            case _: StreamEvent.Disconnected                   => latch.countDown()
+            case _                                             => ()
         }
-        logger.info(f"  $idx%3d. $eventType%-25s $summary")
       }
-
-      // Show final response
-      logger.info("Final Response:")
-      logger.info("-" * 40)
-      state.conversation.messages.lastOption.foreach(msg => logger.info("{}", msg.content))
-
-    case Left(error) =>
-      logger.error("Error: {}", error.message)
-      System.exit(1)
-  }
-}
+      _ = latch.await()
+      _ = sub.cancel()
+      _ = replayed.synchronized(replayed.toList).foreach {
+        case StreamEvent.Durable(r) => println(s"  #${r.seq} ${nameOf(r.event)}")
+        case _                      => ()
+      }
+    yield done
+    result.fold(e => logger.error("Failed: {}", e.formatted), r => logger.info("Status: {}", r.status))

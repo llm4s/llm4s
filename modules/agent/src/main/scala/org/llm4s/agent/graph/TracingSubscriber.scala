@@ -14,6 +14,10 @@ import org.slf4j.LoggerFactory
  * `StreamEvent.Disconnected(lastSeq, DisconnectReason.Lagging)` ends tracing, and is only logged.
  * Nothing re-attaches by itself: to keep tracing, the caller attaches again with
  * `afterSeq = lastSeq`, which replays from the first event not traced.
+ *
+ * Attach it to any graph's thread, kernel graphs included. An `Agent` built `withTracing` traces
+ * through `AgentTracing` instead, which adds usage and `AgentRunEnded`; use `attach` for graphs of
+ * your own.
  */
 object TracingSubscriber:
 
@@ -26,24 +30,27 @@ object TracingSubscriber:
     tracing: Tracing,
     afterSeq: Long = 0L
   ): Result[Subscription] =
-    runtime.subscribe(threadId, afterSeq) {
-      case StreamEvent.Durable(record) =>
-        tracing.traceEvent(toTrace(record)).left.foreach { error =>
-          logger.warn(
-            s"Tracing ${record.event.productPrefix} (seq ${record.seq}) of ${threadId.value} failed: ${error.message}"
-          )
-        }
-      case StreamEvent.Disconnected(lastSeq, reason) =>
+    runtime.subscribe(threadId, afterSeq)(listener(threadId, tracing))
+
+  /** The listener [[attach]] subscribes: traces each durable event, and logs a disconnection. */
+  private[agent] def listener(threadId: ThreadId, tracing: Tracing): StreamEvent => Unit = {
+    case StreamEvent.Durable(record) =>
+      tracing.traceEvent(toTrace(record)).left.foreach { error =>
         logger.warn(
-          s"Tracing subscription to ${threadId.value} ended after seq $lastSeq: $reason; attach again with afterSeq = $lastSeq to resume"
+          s"Tracing ${record.event.productPrefix} (seq ${record.seq}) of ${threadId.value} failed: ${error.message}"
         )
-      case _ => ()
-    }
+      }
+    case StreamEvent.Disconnected(lastSeq, reason) =>
+      logger.warn(
+        s"Tracing subscription to ${threadId.value} ended after seq $lastSeq: $reason; attach again with afterSeq = $lastSeq to resume"
+      )
+    case _ => ()
+  }
 
   private[graph] def snake(name: String): String =
     name.flatMap(c => if c.isUpper then s"_${c.toLower}" else c.toString).stripPrefix("_")
 
-  private def toTrace(r: EventRecord): TraceEvent.CustomEvent =
+  private[agent] def toTrace(r: EventRecord): TraceEvent.CustomEvent =
     def opt(value: Option[String]): ujson.Value = value.fold[ujson.Value](ujson.Null)(ujson.Str(_))
     val data = ujson.Obj(
       "threadId"     -> r.threadId,

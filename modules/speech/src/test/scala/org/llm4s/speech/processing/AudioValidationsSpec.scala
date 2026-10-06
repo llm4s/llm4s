@@ -52,6 +52,33 @@ class AudioValidationsSpec extends AnyWordSpec with Matchers with OptionValues {
       errors.head.message should include("Audio data length")
       errors.head.message should include("frame size")
     }
+
+    "reject metadata with no PCM frame size instead of dividing by zero" in {
+      val bytes = Array.fill[Byte](417)(0)
+      Seq(
+        AudioMeta(sampleRate = 24_000, numChannels = 1, bitDepth = 0), // MP3: no sample width
+        AudioMeta(sampleRate = 16_000, numChannels = 1, bitDepth = 4), // sub-byte sample
+        AudioMeta(sampleRate = 16_000, numChannels = 0, bitDepth = 16),
+        AudioMeta(sampleRate = 16_000, numChannels = -2, bitDepth = 16)
+      ).foreach { meta =>
+        val errors = AudioValidations.validateFrameSize(bytes -> meta).swap.toOption.value.toList
+        errors should have size 1
+        errors.head.message should include("no PCM frame size")
+      }
+    }
+  }
+
+  "pcmFrameSize" should {
+    "be channels times whole bytes per sample for PCM metadata" in {
+      AudioValidations.pcmFrameSize(AudioMeta(16_000, 2, 16)) shouldBe Some(4)
+      AudioValidations.pcmFrameSize(AudioMeta(16_000, 1, 24)) shouldBe Some(3)
+    }
+
+    "be None for compressed or malformed metadata" in {
+      AudioValidations.pcmFrameSize(AudioMeta(24_000, 1, 0)) shouldBe None
+      AudioValidations.pcmFrameSize(AudioMeta(16_000, 0, 16)) shouldBe None
+      AudioValidations.pcmFrameSize(AudioMeta(16_000, -1, -16)) shouldBe None
+    }
   }
 
   "validateSampleRate" should {

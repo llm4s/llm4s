@@ -659,13 +659,15 @@ class VectorMemoryStoreFilePersistenceSpec extends AnyFlatSpec with Matchers wit
     }
   }
 
-  it should "still answer search without throwing when reopened with a different embedding dimension" in {
+  it should "report an embedding dimension mismatch on search instead of falling back to keyword search" in {
     withStore(_.store(first))
 
     withStoreAt(dbPath, MockEmbeddingService(dimensions = 64)) { other =>
-      // The stored 1536-dim vector cannot be compared with a 64-dim query: the store must degrade
-      // (keyword fallback) rather than throw or return a bogus ranking.
-      other.search("Scala", topK = 3).isRight shouldBe true
+      // The stored 1536-dim vector cannot be compared with a 64-dim query: hiding that behind a keyword
+      // fallback would hide a misconfigured embedding model.
+      val result = other.search("Scala", topK = 3)
+      result.isLeft shouldBe true
+      result.left.toOption.get.message should (include("64").and(include("1536")))
       other.get(first.id).toOption.flatten.map(_.content) shouldBe Some(first.content)
     }
   }

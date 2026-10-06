@@ -25,7 +25,7 @@ What has actually moved so far, in the build but not yet in a release:
 | [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`; `llm4s-observability-prometheus` (Prometheus). The tracing and metrics contracts stay in `llm4s-core`, which declares no observability dependency | in the build, unpublished |
 | [7](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (the built-in tools and their config), `llm4s-agent` (`agent`, `assistant`) | in the build, unpublished |
 
-The latest release tag is `v0.4.1`, which is still a single `llm4s-core` (0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). The first release to publish separate module artifacts will be **0.5.0**, after slice 6; it is also the MiMa baseline.
+The latest release tag is `v0.4.1`, which is still a single `llm4s-core` (0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). The first release to publish separate module artifacts will be **0.5.0**, in slice 8 ([#1281](https://github.com/llm4s/llm4s/issues/1281)); it is also the MiMa baseline. Until it is published nothing is frozen: "Frozen at 1.0" is the tier a module will hold, not a constraint on changing it now.
 
 ## Maturity Legend
 

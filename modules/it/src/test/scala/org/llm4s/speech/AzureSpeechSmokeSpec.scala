@@ -42,6 +42,12 @@ class AzureSpeechSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
     CloudSpeechSmoke.requireSpeechPcm(audio)
   }
 
+  it should "return real MP3 on request (ID3 tag or MPEG frame sync)" in {
+    CloudSpeechSmoke.requireMp3(
+      tts.synthesize(CloudSpeechSmoke.Phrase, TTSOptions(outputFormat = AudioFormat.Mp3)).value
+    )
+  }
+
   it should "use the voice from TTSOptions" in {
     val jenny = tts.synthesize(CloudSpeechSmoke.Phrase).value
     val guy   = tts.synthesize(CloudSpeechSmoke.Phrase, TTSOptions(voice = Some("en-US-GuyNeural"))).value

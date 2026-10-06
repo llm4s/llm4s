@@ -41,6 +41,20 @@ class CloudSpeechSmokeHelperSpec extends AnyFlatSpec with Matchers with EitherVa
   private def mustFail(a: GeneratedAudio, clue: String): Unit =
     withClue(clue)(an[TestFailedException] should be thrownBy CloudSpeechSmoke.requireSpeechPcm(a))
 
+  "requireMp3" should "accept an ID3-tagged or frame-synced MP3 and refuse PCM, an error body and a wrong tag" in {
+    val body                                                     = Array.fill[Byte](5000)(7)
+    def mp3(head: Array[Byte], f: AudioFormat = AudioFormat.Mp3) = audio(head ++ body, f = f)
+    CloudSpeechSmoke.requireMp3(mp3(Array('I'.toByte, 'D'.toByte, '3'.toByte)))
+    CloudSpeechSmoke.requireMp3(mp3(Array(0xff.toByte, 0xfb.toByte)))
+    an[TestFailedException] should be thrownBy CloudSpeechSmoke.requireMp3(audio(speechLike(2.0)))
+    an[TestFailedException] should be thrownBy CloudSpeechSmoke.requireMp3(
+      audio("""{"error":"bad key"}""".getBytes(US_ASCII) ++ body, f = AudioFormat.Mp3)
+    )
+    an[TestFailedException] should be thrownBy CloudSpeechSmoke.requireMp3(
+      mp3(Array('I'.toByte, 'D'.toByte, '3'.toByte), AudioFormat.WavPcm16)
+    )
+  }
+
   "requireSpeechPcm" should "accept audible speech-length PCM and return a WAV that matches it" in {
     val data = speechLike(2.0)
     val wav  = CloudSpeechSmoke.requireSpeechPcm(audio(data))

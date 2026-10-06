@@ -9,8 +9,9 @@ import scala.concurrent.duration.*
  * How a node is run again after its own failure, inside the run.
  *
  * A node that throws, or returns [[NodeResult.Fail]], is run again against the same committed
- * snapshot while its error passes `retryOn` and attempts remain. By default only a recoverable
- * error is retried (`LLMError.isRecoverable`). A cancellation, a result the kernel rejects (an
+ * snapshot while its error passes `retryOn` and attempts remain. By default an error is retried by the library's
+ * one retry rule, `org.llm4s.reliability.RetryPolicy.isRetryable`: a recoverable error, except a client-error
+ * response and an optimistic-lock failure, which repeating the node cannot fix. A cancellation, a result the kernel rejects (an
  * undeclared write, an invalid route) and a suspension are never retried.
  *
  * The wait after the n-th failed attempt is `initialBackoff * backoffFactor^(n-1)`, at most
@@ -55,8 +56,12 @@ final case class RetryPolicy private (
 
 object RetryPolicy:
 
-  /** Retry only what the error says can be retried: `LLMError.isRecoverable`. */
-  val recoverableOnly: LLMError => Boolean = error => LLMError.isRecoverable(error)
+  /**
+   * Retry what the library's one retry rule retries, so a node and an LLM call agree about an error: a recoverable
+   * error, except a client-error response and an optimistic-lock failure. See
+   * `org.llm4s.reliability.RetryPolicy.isRetryable`.
+   */
+  val transientOnly: LLMError => Boolean = error => org.llm4s.reliability.RetryPolicy.isTransient(error)
 
   private def problems(
     maxAttempts: Int,
@@ -81,7 +86,7 @@ object RetryPolicy:
     initialBackoff: FiniteDuration = 100.millis,
     backoffFactor: Double = 2.0,
     maxBackoff: FiniteDuration = 5.seconds,
-    retryOn: LLMError => Boolean = recoverableOnly
+    retryOn: LLMError => Boolean = transientOnly
   ): RetryPolicy =
     val found = problems(maxAttempts, initialBackoff, backoffFactor, maxBackoff)
     require(found.isEmpty, found.mkString("; "))
@@ -92,7 +97,7 @@ object RetryPolicy:
     initialBackoff: FiniteDuration = 100.millis,
     backoffFactor: Double = 2.0,
     maxBackoff: FiniteDuration = 5.seconds,
-    retryOn: LLMError => Boolean = recoverableOnly
+    retryOn: LLMError => Boolean = transientOnly
   ): Result[RetryPolicy] =
     problems(maxAttempts, initialBackoff, backoffFactor, maxBackoff) match
       case Nil   => Right(new RetryPolicy(maxAttempts, initialBackoff, backoffFactor, maxBackoff, retryOn))

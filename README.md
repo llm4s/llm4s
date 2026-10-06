@@ -398,7 +398,7 @@ val tracer: Tracing = Llm4sConfig
 tracer.traceEvent("Starting LLM operation")
 tracer.traceCompletion(completion, completion.model) // prefer the model reported by the API
 tracer.traceTokenUsage(tokenUsage, completion.model, "chat-completion")
-tracer.traceEvent(agentState.toTraceEvent)           // agent state is an ordinary TraceEvent
+// An agent built withTracing(tracer) ends each run with a TraceEvent.AgentRunEnded
 ```
 
 ### Usage using starter kit `llm4s.g8`
@@ -462,7 +462,7 @@ Recommended usage patterns:
 - Model name for display: `Llm4sConfig.defaultProvider().map(_.model)` or prefer `completion.model` from API responses.
 - Tracing:
   - `Llm4sConfig.tracing().flatMap(Tracing.fromSettings)`, or `.map(Tracing.create)` to fall back to no tracing.
-- Workspace (samples): `WorkspaceConfigSupport.load()` to get `workspaceDir`, `imageName`, `hostPort`, `traceLogPath`.
+- Workspace (samples): `WorkspaceConfigSupport.load()` to get `workspaceDir`, `imageName`, `hostPort`.
 - Embeddings sample (samples): `EmbeddingUiSettings.loadFromEnv`, `EmbeddingTargets.loadFromEnv`, `EmbeddingQuery.loadFromEnv` (sample helpers backed by `Llm4sConfig`).
 
 ### Config Keys → Typed Settings
@@ -481,7 +481,7 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
   - Loader: `Llm4sConfig.tracing()` → then `Tracing.fromSettings` or `Tracing.create`
 
 - Workspace settings (samples)
-  - Keys: `llm4s.workspace.dir` | `WORKSPACE_DIR`, `llm4s.workspace.image` | `WORKSPACE_IMAGE`, `llm4s.workspace.port` | `WORKSPACE_PORT`, `llm4s.workspace.traceLogPath` | `WORKSPACE_TRACE_LOG`
+  - Keys: `llm4s.workspace.dir` | `WORKSPACE_DIR`, `llm4s.workspace.image` | `WORKSPACE_IMAGE`, `llm4s.workspace.port` | `WORKSPACE_PORT`
   - Type: `WorkspaceSettings`
   - Loader: `WorkspaceConfigSupport.load()`
 
@@ -898,4 +898,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 [llm4s]: https://github.com/llm4s/llm4s
 [Scala 3]: https://dotty.epfl.ch/
-[Scala 2]: https://www.scala-lang.org/

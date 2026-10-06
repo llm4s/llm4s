@@ -657,9 +657,9 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 | Item | Left by | Owner |
 |---|---|---|
 | Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only) | #1279 | Stage 1, if the agent loop needs it |
-| A guardrail Block (any run-boundary `Left`) leaves the thread `Running` with no way forward, and an output Block leaves the blocked answer in state. Decided (§9, "Guardrail Block outcome"): a terminal failure - a finished-but-failed checkpoint status that `start` accepts, with the blocked turn (its input, any tool calls and results, and the answer) removed from history - built before `Agent.run` builds on the loop | #1279 | Stage 1 |
+| ~~A guardrail Block (any run-boundary `Left`) leaves the thread `Running` with no way forward, and an output Block leaves the blocked answer in state~~ **closed by #1350 and #1328** (§4.13: `CheckpointStatus.Failed`, the blocked turn removed, `AgentStatus.Blocked`) | #1279 | Stage 1 |
 | Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6 | #1279 | Stage 3 |
-| `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool`; `ModelStep` streaming through live progress; `PlanRunner` rebuilt or removed; `AgentEvent` replaced | #1269 | Stage 1 |
+| `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool` (**closed by #1328**); `ModelStep` streaming through live progress, `AgentEvent` replaced (**closed by #1329**); `PlanRunner` rebuilt or removed (#1330) | #1269 | Stage 1 |
 | Delete `CancellationToken` with the `PlanRunner` rebuild | #1270 | Stage 1 |
 | Prompt cancellation of SDK client calls on platform threads (today: prompt on virtual threads, where the runtime runs tasks) | #1270 | - |
 | Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
@@ -682,6 +682,10 @@ Closed by [#1327](https://github.com/llm4s/llm4s/issues/1327) (§4.11): per-node
 
 Closed by [#1331](https://github.com/llm4s/llm4s/issues/1331) (§4.12): embedding, reranker, MCP, image and speech clients under the `CancelledError` contract (left by #1270), and `ToolHints` read from MCP tool annotations in `llm4s-mcp` (left by #1279).
 
+Closed by [#1328](https://github.com/llm4s/llm4s/issues/1328) (§4.13): `Agent.run`, `continueConversation` and `runMultiTurn` on the runtime through `ToolLoop` and `AgentTool` (left by #1269), and, with #1350, a terminal outcome for a guardrail block - the thread `Failed` but usable, the blocked turn removed, `AgentStatus.Blocked` at the `Agent` (left by #1279).
+
+Closed by [#1329](https://github.com/llm4s/llm4s/issues/1329) (§4.14): `ModelStep` token streaming through live progress and the replacement of `AgentEvent` by `AgentEvents` run events (left by #1269).
+
 ### 4.10 Durable workflow API
 
 Explore a Scala `Workflow[A]`/`Durable[A]` for-comprehension as a peer frontend to the graph DSL. It should compile to the same runtime/checkpoint kernel, not create a second durable engine. Durable boundaries must be explicit named steps with serializable inputs/outputs; arbitrary Scala closures are not replayable. The workflow API can express sequence, parallel composition, retry, timeout, and typed suspension in direct Scala style. Prototype after the superstep kernel exists, and adopt only if it substantially improves ordinary Scala ergonomics.
@@ -692,7 +696,7 @@ The kernel items Stage 0 left: a per-node retry policy, a per-node cache policy,
 
 Decisions:
 
-- **A retry re-runs a node after its own failure, inside the run.** `GraphBuilder.implement`, `node` and `resumeNode` take `retry: RetryPolicy` (default `RetryPolicy.none`, one attempt). A node that throws, or returns `NodeResult.Fail`, is run again against the same committed snapshot while its error passes `retryOn` and attempts remain. `retryOn` defaults to `LLMError.isRecoverable`, so a `NonRecoverableError` ends the retries at once. What is never retried: a cancellation (`CancelledError`), a result that fails the kernel's checks (an undeclared write, an invalid route, a rejected update: running the node again returns the same thing), and a suspension. The error that fails the run is the last attempt's, unchanged, in `GraphError.NodeFailed`.
+- **A retry re-runs a node after its own failure, inside the run.** `GraphBuilder.implement`, `node` and `resumeNode` take `retry: RetryPolicy` (default `RetryPolicy.none`, one attempt). A node that throws, or returns `NodeResult.Fail`, is run again against the same committed snapshot while its error passes `retryOn` and attempts remain. `retryOn` defaults to `RetryPolicy.transientOnly`, the library's one retry rule (`reliability.RetryPolicy.isRetryable`): a recoverable error, except a client-error response and an `OptimisticLockFailure`, so a `NonRecoverableError` ends the retries at once. What is never retried: a cancellation (`CancelledError`), a result that fails the kernel's checks (an undeclared write, an invalid route, a rejected update: running the node again returns the same thing), and a suspension. The error that fails the run is the last attempt's, unchanged, in `GraphError.NodeFailed`.
 - **Backoff is exponential, capped, and has no jitter.** The wait after the n-th failed attempt is `initialBackoff * backoffFactor^(n-1)`, at most `maxBackoff`. Every value is validated like `RunBudgets`: `apply` and the `with*` setters throw `IllegalArgumentException`, `RetryPolicy.of` returns a `ValidationError`. Jitter is rejected for now: it exists to spread many clients over one overloaded service, which a single run does not need, and it would make the schedule untestable without a seeded source. A field can be added later by the pattern in §4.11's last decision.
 - **A wait is an interruptible wait, so retries obey cancellation and the deadline.** The wait goes through `CancelledError.attempt`: an interrupt during it returns `Left(CancelledError)` with the flag set, and no further attempt starts. `RunBudgets.timeout` interrupts the run, so it bounds all attempts together, not each one.
 - **Attempts are per run, not per task.** A run that exhausts a node's attempts fails and leaves its checkpoint `Running`; `recover` runs the task again with the node's full policy. The old "recover retries once" becomes "recover runs it again"; the worst case across `recover` calls is attempts times calls, which the caller controls.
@@ -747,33 +751,37 @@ Contract decisions:
   their own that is not an `LLMError`, so a `CancelledError` could not be returned at all. `ImageGenerationError` now
   extends `LLMError`, the client methods return `Either[LLMError, _]`, and every place a provider turns a `Throwable`
   into an error goes through one classifier, `ImageErrors.fromThrowable`. `ServiceError(message, code: Int)` clashed
-  with `LLMError.code: Option[String]`: the field is `statusCode`, and `code` is derived from it. The instrumented
+  with `LLMError.code: Option[String]`: the field is `statusCode`, and `code` is derived from it. Five cases shared a
+  name with an `org.llm4s.error` type, and as `LLMError`s both of each pair can reach the same `match`, where the
+  wrong import compiles and never fires; they carry an `Image` prefix (`ImageAuthenticationError`,
+  `ImageRateLimitError`, `ImageServiceError`, `ImageValidationError`, `ImageUnknownError`). The instrumented
   client records a cancelled call as `ErrorKind.Cancelled`. *Rejected:* an `ImageGenerationError.Cancelled` case -
   callers would have to special-case a second cancellation type, and no retry layer would recognise it; and retiring
   the hierarchy for core's errors, a larger break that this slice does not need.
   **Every case also says whether a retry can help**, because an `LLMError` must: `LLMError.isRecoverable` (and
-  `recoverableErrors`, `nonRecoverableErrors`, `RetryPolicy.recoverableOnly`) match only `RecoverableError` and
+  `recoverableErrors`, `nonRecoverableErrors`, and the graph's former `RetryPolicy.recoverableOnly`, now `transientOnly`) match only `RecoverableError` and
   `NonRecoverableError` and threw a `MatchError` on an image error, which before this slice could not reach them.
-  `RateLimitError` is recoverable, and so is a `ServiceError` whose status is transient (`0` - no answer at all, as in
+  `ImageRateLimitError` is recoverable, and so is an `ImageServiceError` whose status is transient (`0` - no answer at all, as in
   a failed health check - `408`, `429`, any `5xx`); a rejected credential, request or prompt, `InsufficientResources`,
-  an unsupported operation and an `UnknownError` are not (an unknown failure is not retried blindly). A status is a
-  value and a marker trait is a type, so `ServiceError` is a sealed type with two cases behind the same
-  `ServiceError(message, status)` and `case ServiceError(message, status)`, picked by `ServiceError.isTransientStatus`.
-  *Rejected:* marking every `ServiceError` recoverable, as core's own `ServiceError` is - a `400` or `403` would be
-  retried to the same answer; and a default case in `LLMError.isRecoverable` - it is frozen core API, and a silent
-  default would hide the next error type that forgets to say.
+  an unsupported operation and an `ImageUnknownError` are not (an unknown failure is not retried blindly). A status is
+  a value and a marker trait is a type, so `ImageServiceError` is a sealed type with two cases behind
+  `ImageServiceError(message, status)` and `case ImageServiceError(message, status)`, picked by
+  `ImageServiceError.isTransientStatus`. *Rejected:* marking every `ImageServiceError` recoverable, as core's own
+  `ServiceError` is - a `400` or `403` would be retried to the same answer; and a default case in
+  `LLMError.isRecoverable` - a silent default would hide the next error type that forgets to say.
 - **MCP.** The error channel was a `String` (`Either[String, _]` on the transports, `MCPClient.initialize` and
   `getTools`), which cannot carry a cancellation. These return `Result`, and every existing message is kept byte for
   byte as `SimpleError(message)`. The HTTP transports pass the HTTP client's `CancelledError` through; the stdio
   transport returns it for an interrupt while awaiting a response, and for one during startup, when it also stops the
   half-started server (the process was recorded but no reader thread had started, so the next request would have found
-  a live process that never answers). `MCPClientImpl.getTools` still swallows failures into an empty list, as
-  documented, but not a cancellation. `MCPToolRegistry` applies to MCP tools the rule `ToolRegistry` applies to local
-  ones - a call that ends while its thread is interrupted is cancelled, whatever it returned - and a cancelled
-  discovery is not "no such tool", drops no client and caches nothing. A tool handler keeps core's frozen
-  `Either[String, _]` shape: the interrupt flag the transport leaves set is how the registry knows. *Rejected:* a
+  a live process that never answers). `MCPClientImpl.getTools` returned failures as an empty list but not a
+  cancellation (it now returns every failure as a `Left`, #1319). `MCPToolRegistry` applies to MCP tools the rule
+  `ToolRegistry` applies to local ones - a call that ends while its thread is interrupted is cancelled, whatever it
+  returned, and a tool that throws an interruption wrapped in another exception is cancelled with the flag restored,
+  in both registries - and a cancelled discovery is not "no such tool", drops no client and caches nothing. A tool
+  handler keeps core's `Either[String, _]` shape: the interrupt flag the transport leaves set is how the registry knows. *Rejected:* a
   dedicated `MCPError` type (`SimpleError` carries the message and nothing more is needed); changing
-  `ToolFunction.handler`'s error type (frozen core API).
+  `ToolFunction.handler`'s error type, which would change every tool, local ones included, for MCP's sake alone.
 
 `ToolHints` from MCP annotations *(a call for Rory)*:
 
@@ -802,8 +810,9 @@ Contract decisions:
   a server the application itself runs.
 - **`ToolHints` moves from `llm4s-agent` to `llm4s-core`** (`org.llm4s.toolapi.ToolHints`, `@Experimental` like the tool
   contract it belongs to). `llm4s-mcp` cannot depend on `llm4s-agent` without pulling the agent runtime, Ox and fansi
-  into every MCP client, and a frozen module cannot depend on `llm4s-mcp`, so core is the one module both see.
-  *Rejected:* hints on `ToolFunction` (growing a frozen type); and keeping `ToolHints` in the agent and exposing only
+  into every MCP client, and `llm4s-agent` depending on `llm4s-mcp` would put the MCP client on every agent user's
+  classpath, so core is the one module both see. *Rejected:* hints on `ToolFunction` (every tool would carry a field
+  only the agent's middleware reads); and keeping `ToolHints` in the agent and exposing only
   the raw annotations from `llm4s-mcp`, which leaves the conversion to every application. `AgentTool.fromToolFunction(
   tool, hints)` attaches hints to the adapted tool.
 
@@ -827,35 +836,149 @@ Limits:
 
 ### 4.13 Stage 1 slice 2: the agent loop on the graph runtime ([#1328](https://github.com/llm4s/llm4s/issues/1328))
 
-Slice 2 of [#1326](https://github.com/llm4s/llm4s/issues/1326): the graph runtime becomes the only agent loop. It is large, so it lands in the order below, each step compiling and passing on its own. **Step 1 is implemented by the PR that adds this section. Steps 2 to 6 are proposals that need review before the destructive part (deleting `AgentState` and migrating every caller) is written.**
+Slice 2 of [#1326](https://github.com/llm4s/llm4s/issues/1326): the graph runtime is the only agent loop. This section is the implemented record; the proposals it held before the cutover (token usage through the model step, data-only thread state, the `Agent` front end, handoffs by stable id as a route on the same thread, deleting the legacy loop) are implemented as described below.
 
-**Step 1. The terminal outcome of a guardrail Block (implements the decision of [#1322](https://github.com/llm4s/llm4s/pull/1322)).**
+**The terminal outcome of a guardrail Block (#1350, the decision of [#1322](https://github.com/llm4s/llm4s/pull/1322)).** Landed first, on the old front end; the kernel half of the cutover.
 
-- A run-boundary guardrail `Left` (any `beforeAgent` or `afterAgent` failure other than a cancellation) fails the run with the guardrail's error, so callers still get the error the legacy `Agent` returned. What changes is that the failure is a *finished* outcome, not an interrupted run.
+- A run-boundary guardrail `Left` (any `beforeAgent` or `afterAgent` failure other than a cancellation) fails the run with the guardrail's error, so callers of the kernel get the error the legacy `Agent` returned (the cutover's `Agent` reports a guardrail's Block as `AgentStatus.Blocked`, below). What changes is that the failure is a *finished* outcome, not an interrupted run.
 - `NodeResult.Block(error, update)` is the node's way to say so. The superstep commits `update` together with every sibling's result, and the run's closing checkpoint gets the new status `CheckpointStatus.Failed`, with a `RunFailed` event; the caller receives `RunResult.Failed(state, error)`. The status is terminal: `start` accepts a `Failed` thread exactly like a `Completed` one (it restores the committed state and applies the new input), `recover` refuses it (`NothingToRecover`), and `resume` refuses it (`NotSuspended`).
-- `MessageUpdate.RemoveTurn(id)` removes the stored message `id` and every message after it. `RemoveThrough` drops history *up to* a message; a turn's writes are the user input, the assistant messages, the tool calls and results, and the answer, all of which come after the turn's user message. An *input* Block happens before the loop stores anything, so it commits no update. An *output* Block commits `RemoveTurn` of the turn's user message: the closing checkpoint holds no blocked content, and the next `start` continues from the history before the turn. The answer was committed once, by the model step's superstep, before `finish` guarded it. That snapshot is the latest checkpoint only until the closing commit, so a crash in between leaves it there until `recover` blocks again. Stage 2 history and fork must not keep it (§4.9).
+- `MessageUpdate.RemoveTurn(id)` removes the stored message `id` and every message after it. `RemoveThrough` drops history *up to* a message; a turn's writes are the user input, the assistant messages, the tool calls and results, and the answer, all of which come after the turn's user message. An *input* Block happens before the loop stores anything, so it commits no update (the cutover commits a new thread's history seed; below). An *output* Block commits `RemoveTurn` of the turn's user message: the closing checkpoint holds no blocked content, and the next `start` continues from the history before the turn. The answer was committed once, by the model step's superstep, before `finish` guarded it. That snapshot is the latest checkpoint only until the closing commit, so a crash in between leaves it there until `recover` blocks again. Stage 2 history and fork must not keep it (§4.9).
 - Not changed: a cancellation or deadline, a tool or model-wrapper failure (`ToolFailed`, `MiddlewareFailed`) and a checkpoint-store failure still leave the checkpoint `Running`, so `recover` continues them. Only the run boundaries block.
 - A blocked task records no pending write, because its error cannot be replayed from data; if the process dies between the guardrail's decision and the closing commit, `recover` runs the guardrail again, which is the behaviour of any other task that had not completed.
 - `Checkpoint.CurrentFormat` becomes 4, with an identity migration from 3: a build that predates the status refuses format 4 rather than misreading `Failed`.
-- Rejected: a refusal answer that completes the run (callers would inspect a typed result instead of an error, a behaviour change for guardrail users); guarding output before it is stored (alone it leaves the thread stuck, and `recover` would ask the model again).
+- Rejected: a refusal answer that completes the run (it stores an answer nobody gave; the `Agent`'s typed `Blocked` result is derived from the Block, not stored); guarding output before it is stored (alone it leaves the thread stuck, and `recover` would ask the model again).
 
-**Step 2. Token usage through the model step (proposal).** `ModelStep.next` returns only an `AssistantMessage`, so the usage a completion reports is dropped, and `AgentState.usageSummary` has no source on the runtime. The step returns the message with its `TokenUsage`, and the loop accumulates a `UsageSummary` in a state key that the thread snapshot reads.
+**The cutover.** `org.llm4s.agent.Agent` now runs on `GraphRuntime` through a generalised `ToolLoop`, with `AgentTool`s and `AgentMiddleware`: the graph is the sole agent loop. `AgentState`, `AgentContext`, the step loop, `ToolProcessor`, `GuardrailApplicator`, `HandoffExecutor` and the event-streaming executor are deleted, with no shim running the old loop beside the new one. Tools, guardrails, handoffs and the context window belong to the agent, set at build time, because the compiled graph's fingerprint must cover them. A conversation is carried by `ThreadId`, not by a value passed back in. Nothing in `llm4s-core` changes. The specs are `AgentRunSpec`, `AgentConversationSpec`, `AgentGuardrailSpec`, `AgentHandoffSpec`, `AgentRecoverySpec`, `AgentSuspensionSpec`, `AgentFingerprintSpec`, `AgentUsageSpec`, `AgentErrorPropagationSpec`, `ContextWindowMiddlewareSpec` and `AgentRunTracingSpec`.
 
-**Step 3. Data-only thread state (proposal).** A thread's state is its checkpoint, so the replacement for `AgentState` is a snapshot read from it, never a live object:
+```scala
+val agent: Result[Agent] = Agent
+  .builder("assistant", client)                    // AgentId, LLMClient
+  .withTools(tools)                                // ToolSet, or a ToolRegistry
+  .withSystemPrompt("You are ...")
+  .withMiddleware(new GuardrailMiddleware(...), new ContextWindowMiddleware(config))
+  .withHandoffs(Handoff.to("physics", physicsBuilder, "physics questions"))
+  .withMaxSteps(50)
+  .withTracing(tracing)
+  .build()
 
-| `AgentState` field | Replacement |
-|---|---|
-| `conversation` | `messages`, the loop's `Messages` key |
-| `tools`, `completionOptions`, `systemMessage`, `availableHandoffs` | not state: run configuration of the `Agent`, supplied again on every call, never serialized |
-| `status` | the checkpoint's status plus, when finished, the outcome: completed with an answer, or failed with the error |
-| `usageSummary` | the usage state key (step 2) |
-| `logs`, `initialQuery` | dropped: events and tracing carry what the logs did (slice #1329) |
+agent.flatMap(_.run("Hello"))                      // Result[AgentResult]
+```
 
-**Step 4. The `Agent` front end (proposal).** `Agent.run(query, tools, ...)` stays the simple entry point; it takes a `ThreadId` (a fresh one by default), builds a `ToolLoop` from the tools, the guardrails as `GuardrailMiddleware` and the model step over the client, starts it on the runtime and awaits the result. `continueConversation` is `run` on the same thread, `runMultiTurn` is a sequence of those, and `recover` and `resume` are the runtime's, with the thread snapshot as the return value. Context-window pruning moves to a message update applied before the turn.
+Construction and running:
 
-**Step 5. Handoffs by stable ID (proposal, needs a decision).** `Handoff` already carries a stable `id`, but it holds the target `Agent`, a live reference that cannot be stored. The thread records only the *id* of the agent that is active; the `Agent` that runs it is resolved from the handoffs supplied on each call. Two shapes are possible: (a) the handoff tool switches the active agent on the same thread, so the target continues with the history (the legacy behaviour, `preserveContext`), or (b) the handoff tool runs the target as a child run and returns its answer as the tool result, which is the Stage 4 delegation of §5.5. This section proposes (a), so existing handoff users keep their behaviour, and leaves (b) to Stage 4.
+- **`AgentBuilder` is immutable and `build()` checks the whole agent.** It refuses tool name clashes, owned-key conflicts, an invalid or duplicate handoff id, one `AgentId` reached with two different builders, and `maxSteps < 1`. `AgentId` is an opaque type with the handoff id's pattern.
+- **Blocking calls are `start` then `await`.** `Agent.start`, `startRecover` and `startResume` return an `AgentRun` (`threadId`, `runId`, `status`, `await(): Result[AgentResult]`, `cancel()`); `run`, `recover` and `resume` await it. `run` has four overloads: `run(query, config)` on a new thread, `run(threadId, query)`, `run(threadId, query, config)` and `run(threadId, query, config, history)`. `continueConversation(previous, query, config)` reads only `previous.threadId`. There is no `subscribe` until #1329.
+- **Threads are kept until forgotten.** `forget(threadId, config)` removes a thread through `GraphRuntime.deleteThread` and `Checkpointer.deleteThread`; one-shot `run(query)` threads stay in the runtime until then. It refuses a thread with an active run (`ThreadBusy`) or of another tenant (`TenantMismatch`).
+- **`history` imports conversation, not execution.** It is accepted only on a thread that does not exist, after `Message.validateConversation`, and system messages in it are refused: prompts belong to the agents. On an existing thread it is a `ValidationError`.
+- **`AgentResult` is a value to read.** `threadId`, `runId`, `activeAgent`, `status`, `messages` (the thread's full history, never a system prompt) and `usage`, with `answer` and the `approve`/`reject`/`edit`/`reply` helpers that build `resume` answers. It follows the growth-prone pattern (private constructor, no public `copy`) and is built only by `Agent`.
 
-**Step 6. What is deleted, what stays.** Deleted with the cutover: `ToolProcessor`, `GuardrailApplicator`, `HandoffExecutor`, `AgentState`, `AgentStatus`, and `AgentStreamingExecutor` as superseded. Not deleted here, because other slices own them: `AgentEvent` and `runWithEvents`, `runCollectingEvents` and `continueConversationWithEvents` (#1329), the `TraceEvent.AgentStateUpdated` consumers (#1329), and `PlanRunner`, `DAG`, `TypedAgent` and `CancellationToken` (#1330). `AgentStreamingExecutor` is the one overlap: the issue lists it as superseded here, but the streaming entry points that use it are replaced by the run events of #1329. Until that slice lands, either a minimal bridge keeps them or they are absent; this section proposes **absent**, so no second engine remains, and the streaming samples and guide move with #1329.
+Graph and state decisions:
+
+- **One graph per agent family.** The root and every agent reachable through handoffs are compiled together, keyed by `AgentId`, with per-agent node prefixes (`<id>/model`, `<id>/call-tool`, `<id>/approval`, `<id>/ask/<tool>`, `<id>/collect`, `<id>/finish`) and one shared `input` node. The graph version hashes each agent's id, tool names and schemas, middleware ids, handoff targets and system prompt, so a thread from a changed family is refused rather than misread. The completion options and client are rebound on restore, as §4.6 defines.
+- **Data-only thread state.** Loop-owned keys hold the shared messages, the active agent, the last transfer, per-model usage and the turn (`steps`, `outcome`, and the agent and transfer it started with, for an output Block to restore). No live `ToolRegistry`, `Handoff` or `Agent` is in state. A system prompt is prepended to each request and never stored.
+- **Step limit per turn.** The current agent's `maxSteps` is compared with a step count shared by the whole turn, so a handoff does not reset it. At the limit the turn ends `StepLimitReached` without calling the model, and the next turn works.
+
+Handoffs:
+
+- **A handoff is a route inside the graph.** The model sees each target as `handoff_to_<id>`. `Handoff.to(id, builder, reason)` requires `id` to equal the target builder's id; `Handoff.toId(id, reason?, preserveContext?)` names a target by id, which is how a cycle (A to B, B back to A) is written. `transferSystemMessage` is removed. A self-handoff is refused at build.
+- **A handoff must be the only tool call in its message.** A handoff mixed with other calls, or two handoffs, is refused: every call in the message gets an error result and the batch returns to the same agent's model. The model never sees a partial batch.
+- **The root's boundary hooks are family-wide.** The root agent's `beforeAgent` stack runs on every turn's query, before the active agent's own, and its `afterAgent` stack on every final answer, after the answering agent's own, so a root `GuardrailMiddleware` keeps guarding a conversation after a handoff. `wrapModelCall` and `wrapToolCall` stay per agent.
+- **`preserveContext = false` narrows what the target is sent.** The target receives the last user message before the transfer, then the transfer onwards, so its request starts with the user's question. The transfers are recorded in a loop-owned key and the view is computed on each call, never stored; the history is untouched. The next turn starts with the active agent.
+
+Guardrails, pruning and errors:
+
+- **A guardrail block is a Block, reported as an outcome.** The kernel semantics are the Block above, unchanged. `GuardrailMiddleware` fails with `GuardrailBlocked(guardrail, reason)` - the first failing guardrail's name and every failure's error - so the guardrail can be named; `Agent` maps a run that ends as a Block with it (its closing checkpoint `Failed`) to `Right(AgentResult)` with `AgentStatus.Blocked(guardrail, reason)`, `messages` the thread's committed history (an input block stores nothing of the turn, an output block removes it) and `usage` as committed, which keeps the blocked turn's model calls. Every other failure stays `Left`, a `GuardrailBlocked` that a model or tool wrapper returns included (an ordinary failure: the thread stays `Running` for `recover`); a Block whose error is not `GuardrailBlocked` (another middleware's `beforeAgent`/`afterAgent` `Left`, a blank answer from `afterAgent`) is `Left` with the thread usable. `run` and `continueConversation` on a blocked thread work, since `start` accepts `Failed`. An input block on a new thread commits the thread's seed - its imported `history` and the root as active agent - as the Block's update, so the history survives. An output block also restores the active agent and last transfer the turn started with, which the turn records in its `TurnState`: a handoff inside the removed turn would otherwise leave a target active whose transfer message no longer exists. A guardrail that transforms (`PIIMasker`) completes with the transformed text stored. *Rejected:* a refusal message stored in place of a blocked answer (an earlier draft of this slice) - it keeps a fabricated assistant turn in the history and diverges from the kernel's Block.
+- **A blank query is refused before it is stored.** `Agent.run`/`start` refuse a blank query with a `ValidationError` before any thread is claimed. A `beforeAgent` that turns the query blank blocks the run (`ValidationError("query", ...)`, no update but a new thread's seed), so the thread is `Failed` and usable instead of `Running` with a user message every model call and every `recover` would reject; `Agent` returns it as `Left`.
+- **Pruning trims what is sent, not what is stored.** `ContextWindowMiddleware(config)` is a `wrapModelCall` middleware applying the configured `PruningStrategy`. It never separates a tool call from its result, never prunes the current turn (the latest user message onward), and the request always starts with a user message, so it may exceed the budget. The system prompt is outside the budget.
+- **Errors are `GraphError`s.** A provider, tool or model/tool-wrapper failure is `Left(GraphError...)`, provider errors as `GraphError.NodeFailed(cause)`; the thread stays `Running` and `recover` re-runs only failed or unstarted work. The error content a tool failure gives the model is `{"error": ...}`. Runtime refusals (`ThreadBusy`, `IncompleteRun`, `PendingInterrupts`) are returned unchanged. No agent error hierarchy is added.
+- **Tracing is the runtime's.** `withTracing` attaches `TracingSubscriber` to each run and emits the `graph.*` custom events of §4.6. `TraceEvent.AgentStateUpdated` is no longer emitted; #1329 removed the type and replaced it with `TraceEvent.AgentRunEnded` (§4.14).
+
+Callers moved with it: `AssistantAgent` builds its agent once and keeps a `ThreadId`; `AgentIO` and `AgentZ` (`LLMClientIO.agent(id)(configure)`, `LLMClientZ.agent(id)(configure)`) expose `run`, `continueConversation`, `recover` and `resume`, fiber cancellation cancels the run, and a thrown exception arrives as `NodeFailed` carrying the original; `CodeWorker.executeTask` returns `Result[AgentResult]` and loses `traceLogPath`; the samples use the builder.
+
+Source breaks, with no shims (the CHANGELOG lists the same): `AgentState`, `AgentContext` and the old `AgentStatus` are removed; `runStep`, `runWithStrategy`, `runWithEvents` and their relatives are removed; `ToolExecutionStrategy` stays in core as a `ToolRegistry` feature, and only the agent's use of it is gone (`RunBudgets.maxConcurrency` bounds parallel tool calls).
+
+Limits (owners in §4.9):
+
+- Agent-level event subscription, model token streaming and `AgentEvent`'s replacement: closed by #1329 (§4.14).
+- `PlanRunner`, `DAG`, `TypedAgent` and `CancellationToken` are #1330.
+- `ToolLoop` sets no retry or cache policy (#1327) on its nodes: a failed model step or tool call is continued by `recover`. Durable checkpointers are Stage 2.
+
+### 4.14 Stage 1 slice 3: events and tracing ([#1329](https://github.com/llm4s/llm4s/issues/1329))
+
+Implemented. Spec: `docs/superpowers/specs/2026-10-06-events-and-tracing-design.md`; guide:
+`docs/guide/agents/streaming.md`.
+
+Decisions:
+
+- **Durable events carry no content.** Agent events stored in the log hold identifiers, names, usage,
+  durations and outcomes, never assistant text, thinking, tool arguments or results, or guardrail
+  reasons. Content is live-only, and reaches tracing once, in `AgentRunEnded.messages`, from the run's
+  final state, where a Block has already removed the blocked turn. The §4.13 Block guarantee is
+  unchanged.
+- **One vocabulary, typed payloads.** Listeners receive the kernel's `StreamEvent`; agent events are
+  `EventType[A]` values (`org.llm4s.agent.graph`) in `org.llm4s.agent.events.AgentEvents`, named
+  `agent.<snake_case>`, version 1. `EventType.emit` is durable (`RunEvent.Custom`), `progress` is
+  live (`StreamEvent.Live`, which gains `name` and `version`), and `unapply` is `None` for another
+  name or version or an undecodable payload. Durable: `ModelCallCompleted`, `ToolExecuted`,
+  `HandedOff`, `GuardrailBlocked`, emitted by the node whose task commits them, so they inherit the
+  commit gate (no duplicate from a retry, failed task or `recover`). Live: `ModelCallStarted`,
+  `TextDelta`, `ThinkingDelta`, `ToolCallStarted`, `ToolCallResult`.
+- **Streaming is opt-in** (`AgentBuilder.withStreaming()`, not part of the graph fingerprint).
+  `ModelStep.next` takes the call (`next(messages, tools, call)`: the `RunContext`, agent id and
+  attempt) so a streaming step sends deltas and `callModel` numbers attempts under a retrying
+  `wrapModelCall`.
+- **Observers at admission.** `GraphRuntime.start`/`recover`/`resume` take `observer: Option[Observer]`,
+  subscribed after the claim commits and before the run thread starts. `AgentRun.subscribe(capacity)`
+  is run-scoped (this run's `Durable`, `Live`, `LiveGap`, and a `Disconnected` only for `Lagging`,
+  `ListenerFailed` or `ReplayFailed`), ending after the terminal event. `Agent.stream`, `streamResume`
+  and `streamRecover` subscribe a listener at admission (capacity `Agent.StreamCapacity`, 1024).
+  `AgentRun.await` returns only once each such listener has returned from the run's last event,
+  waiting at most `AgentRun.Drain` (5 s), then a WARN; the bridges' private variants do not drain.
+- **`AgentRunEnded` replaces `AgentStateUpdated`.** One event per traced run - thread, run, active
+  agent, status, this turn's messages, the run's own `UsageSummary` (summed from its
+  `ModelCallCompleted` events, so per-operation backend conventions such as `gen_ai.usage.*` do not
+  double count) - sent by `AgentTracing`
+  on the run-scoped subscription together with the run's `graph.*`/`agent.*` custom events and a
+  `TokenUsageRecorded` per model call. A run is recognised as Blocked by its own durable
+  `agent.guardrail_blocked` event, not the thread's latest checkpoint, so a later run on the thread
+  is never mistaken for it. A run that crashes without a terminal event is traced as `ErrorOccurred`
+  with a WARN. Langfuse: trace id = run id, session id = thread id; OpenTelemetry: an "Agent Run" span;
+  `TraceCollector`: an `AgentCall` span.
+- **fs2 and ZIO.** `AgentIO.stream*` and `AgentZ.stream*` yield `AgentStreamItem.Event | Done` over a
+  buffer that never blocks the dispatcher: durable events are always queued, and live events past its
+  capacity are dropped and reported as one `LiveGap`, so a slow consumer loses deltas, not the run.
+  Interrupting or stopping early cancels the turn; a kernel `Disconnected` fails the stream.
+- **Durable names are the agent's.** `ToolExecuted.tool` is `"<unknown>"` for a tool the agent does
+  not have; each non-handoff call of a mixed handoff batch is reported as `Errored`. The live tool
+  result is `ToolCallResult` (`agent.tool_call_result`), apart from the loop's `toolloop.ToolResult`.
+
+Refinements found in implementation: `Completion` has no finish reason, so `ModelCallCompleted` has no
+`finishReason`; the model step needs the attempt, hence `next(messages, tools, call)` rather than a
+bare `RunContext`; `TokenUsage` has no codec, so the durable payload carries `CallUsage` (plain ints),
+with the completion's `estimatedCost` so a run's usage keeps its cost. The final review changed four
+things: `await` drains the listeners; the fs2/ZIO bridge never blocks (it had disconnected a slow
+consumer as `Lagging` and cancelled the run); `AgentRunEnded.usage` is per run; the live tool result
+was renamed `ToolCallResult`.
+
+Specs added: `EventTypeSpec`, `ObserverAdmissionSpec`, `AgentStreamingSpec`, `AgentEventsSpec`
+(including that no `agent.*` payload holds message content), `AgentRunSubscribeSpec`,
+`AgentRunTracingSpec`, `AgentIOSpec` and `AgentZSpec` stream cases.
+
+Source breaks, with no shims (the CHANGELOG lists the same): `RunContext.progress(payload)` is
+`progress(name, version, payload)`; `ModelStep.next` takes the call; `TraceEvent.AgentStateUpdated`
+and `AgentState#toTraceEvent` are removed for `AgentRunEnded`; `TracingSubscriber` no longer serves
+`Agent`.
+
+Limits:
+
+- Java (`JAgent`) and Kotlin (`AgentKt`) event streams are not yet available; [#1377](https://github.com/llm4s/llm4s/issues/1377) covers them.
+- The kernel's `TaskFailed` and `RunFailed` events store error messages, so a guardrail reason that quotes
+  user text reaches the log through them. This predates #1329; `agent.*` payloads are content-free.
+- Live events are not replayed, and a late `AgentRun.subscribe` misses earlier ones.
+- A run that ends without a terminal event (a crash, or a failed terminal commit) ends its listeners
+  after a 1 s quiet period, not at a deterministic barrier; [#1378](https://github.com/llm4s/llm4s/issues/1378) replaces it.
+- An approved or edited tool call yields two `agent.tool_executed` events for one call id across runs.
+- `agent.guardrail_blocked` is a guardrail's block only; other middleware refusals emit no agent event.
 
 ## 5. Harness capabilities
 
@@ -988,7 +1111,7 @@ The migration note should give direct replacements for existing state/event/Plan
 | Workspace dependency direction | **Adjusted.** Define `SandboxBackend` in `llm4s-agent`; implement it in `workspaceClient`, which already depends on agent. Do not add an agent-to-workspace dependency. |
 | Thread position, multi-turn, and partial approvals | **Accepted.** Put thread/checkpoint/task/node IDs in `RunContext`; apply new input to an existing completed thread's latest checkpoint; reject `start` with pending interrupts; permit incremental resume answers. |
 | Guardrails and state-update tracing | **Accepted.** Preserve guardrails as lifecycle middleware and migrate `TraceEvent.AgentStateUpdated` consumers to graph state/update events in the single migration note. |
-| Guardrail Block outcome | **Decided: a Block is a terminal failure.** A guardrail `Block` - any `beforeAgent`/`afterAgent` `Left` - still fails the run, so the caller gets the guardrail's error as the legacy `Agent` returns `Left`. The failure is a finished outcome, not an interrupted run: the checkpoint gets a terminal failed status, which `start` accepts like `Completed` (and `recover` refuses, as there is nothing to resume), and an output `Block` removes the blocked turn from history - its input, any tool calls and results, and the answer - so the thread's state keeps no blocked content, as the legacy `Agent`, which kept no thread, left none. The answer is still committed once before it is guarded: the model step's superstep stores it, and `afterAgent` runs in the next one. Until that next commit, a process that dies leaves the answer in the latest checkpoint, and `recover` then blocks and removes it. The store keeps only the latest checkpoint (§4.3), so the next commit overwrites that snapshot, and events carry no message content. Checkpoint history and fork (Stage 2, §4.9) must therefore never keep or expose a snapshot whose turn a later `Block` removed, or the loop must guard the answer before its first commit. The thread stays usable: the next `start` continues from the history before the blocked turn. Rejected: a refusal answer that completes the run (callers would have to inspect a typed result instead of an error; a behaviour change for guardrail users), and guarding output before it is stored (on its own it leaves the thread stuck, and `recover` would ask the model again). Needs a terminal failed checkpoint status and a node able to remove the turn's earlier writes in the same run (`MessageUpdate` has no such operation today: `RemoveThrough` drops the history up to a message, not after it); owned by Stage 1 (§4.9). |
+| Guardrail Block outcome | **Decided: a Block is a terminal failure.** A guardrail `Block` - any `beforeAgent`/`afterAgent` `Left` - still fails the run, so the caller gets the guardrail's error as the legacy `Agent` returns `Left`. The failure is a finished outcome, not an interrupted run: the checkpoint gets a terminal failed status, which `start` accepts like `Completed` (and `recover` refuses, as there is nothing to resume), and an output `Block` removes the blocked turn from history - its input, any tool calls and results, and the answer - so the thread's state keeps no blocked content, as the legacy `Agent`, which kept no thread, left none. The answer is still committed once before it is guarded: the model step's superstep stores it, and `afterAgent` runs in the next one. Until that next commit, a process that dies leaves the answer in the latest checkpoint, and `recover` then blocks and removes it. The store keeps only the latest checkpoint (§4.3), so the next commit overwrites that snapshot, and events carry no message content. Checkpoint history and fork (Stage 2, §4.9) must therefore never keep or expose a snapshot whose turn a later `Block` removed, or the loop must guard the answer before its first commit. The thread stays usable: the next `start` continues from the history before the blocked turn. Rejected: a refusal answer that completes the run (callers would have to inspect a typed result instead of an error; a behaviour change for guardrail users), and guarding output before it is stored (on its own it leaves the thread stuck, and `recover` would ask the model again). Needs a terminal failed checkpoint status and a node able to remove the turn's earlier writes in the same run (`MessageUpdate` has no such operation today: `RemoveThrough` drops the history up to a message, not after it); owned by Stage 1 (§4.9). **Amended by #1328:** the kernel decision stands; `Agent` reports a guardrail Block as `AgentStatus.Blocked` (§4.13). |
 | Checkpoint fencing and stream delivery | **Accepted.** Fence task writes as well as snapshots with the run claim; serialize/version events and deliver them in sequence on an ordered dispatcher. |
 | Explicit joins and partial resume | **Accepted.** Static joins wait for declared arrivals; dynamic joins record expected fan-out task IDs. The tool-call batch feeds a barrier, so an approved branch cannot advance the model while other calls are unresolved. Quiescence with parked continuations reports `Suspended`; an impossible join fails explicitly. |
 | Tool-result ownership | **Accepted.** `AgentTool` returns content/effects/outcomes. The runtime creates the correlated provider-valid result message for success, failure, rejection, denial, and unknown tools, and the join enforces one result per call. Edited approvals replace the originating assistant message before execution. |

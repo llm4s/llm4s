@@ -2,6 +2,7 @@ package org.llm4s.error
 
 import org.llm4s.annotation.Stable
 import org.llm4s.Result
+import org.llm4s.reliability.RetryPolicy
 import org.llm4s.types._
 
 import scala.annotation.tailrec
@@ -26,7 +27,29 @@ object ErrorRecovery {
     recoverWithBackoff(operation, maxAttempts, baseDelay, threadSleep)
 
   /**
-   * Intelligent error recovery with exponential backoff.
+   * Retries `operation` while it fails with a transient error, up to `maxAttempts` calls in all.
+   *
+   * What is retried is the library's one rule for automatic retry,
+   * [[org.llm4s.reliability.RetryPolicy.isRetryable]], which `ReliableClient`, `LLMClientRetry` and the
+   * agent graph's node retries use too: a [[RecoverableError]], except a [[ServiceError]] or an [[APIError]]
+   * with a client-error status (any 4xx but 408 and 429) and an [[OptimisticLockFailure]]. Each retried
+   * error waits on its own schedule:
+   *  - [[RateLimitError]]: waits its [[RateLimitError.retryDelay]], which is the provider's
+   *    `retryAfter` hint, else [[RateLimitError.DefaultRetryDelay]] (30 seconds). `baseDelay` is not used.
+   *  - [[ServiceError]] with a 5xx, 429 or 408 status: waits the provider's `retryAfter` hint, else
+   *    `baseDelay * n` after the n-th attempt (linear: `baseDelay`, `2 * baseDelay`, ...). Its
+   *    [[ServiceError.retryDelay]] default is not used.
+   *  - [[TimeoutError]]: waits `baseDelay` before every retry.
+   *  - Any other retried error ([[NetworkError]], [[ExecutionError]], [[SystemError]], an [[APIError]] with
+   *    no status or a 5xx, 429 or 408 one): waits `baseDelay * n` after the n-th attempt, as an unhinted
+   *    `ServiceError` does.
+   *
+   * Every other error, including a [[CancelledError]], is returned unchanged at once, whatever the
+   * attempt count. An interrupt during a wait returns a [[CancelledError]]. When the last attempt
+   * fails with a retried error, the result is an [[ExecutionError]] (itself a retried
+   * [[RecoverableError]]) whose message names the number of attempts made and the last error's
+   * message, and whose `operation` is the last error's `formatted` text. The operation is always
+   * called at least once, even when `maxAttempts` is below 1.
    *
    * @param sleepFn pauses between attempts (default: sleeps the calling thread); override for testing
    */
@@ -43,48 +66,43 @@ object ErrorRecovery {
         CancelledError("error-recovery", Some(e))
       }
 
+    /** The wait before the next attempt, or `None` when `error` is not retried. */
+    def retryDelay(error: LLMError, attemptNumber: Int): Option[FiniteDuration] =
+      if (!RetryPolicy.isTransient(error)) None
+      else
+        error match {
+          case re: RateLimitError => Some(re.retryAfter.getOrElse(RateLimitError.DefaultRetryDelay))
+          case se: ServiceError   => Some(se.retryAfter.getOrElse(baseDelay * attemptNumber.toLong))
+          case _: TimeoutError    => Some(baseDelay)
+          case _                  => Some(baseDelay * attemptNumber.toLong)
+        }
+
     @tailrec
     def attempt(attemptNumber: Int): Result[A] =
       CancelledError.attempt("error-recovery")(operation()) match {
-        // Success - return immediately
         case success @ Right(_) => success
 
-        // Cancellation - never retried, never wrapped
-        case cancelled @ Left(_: CancelledError) => cancelled
+        case failure @ Left(error) =>
+          retryDelay(error, attemptNumber) match {
+            // Not retried (including CancelledError) - returned unchanged, whatever the attempt count
+            case None => failure
 
-        // Recoverable errors - retry with backoff
-        case Left(error) if attemptNumber < maxAttempts =>
-          error match {
-            case re: RateLimitError =>
-              val delay = re.retryDelay.getOrElse(baseDelay * Math.pow(2, attemptNumber).toLong)
+            // Retried, attempts left - wait, then try again
+            case Some(delay) if attemptNumber < maxAttempts =>
               sleepOrCancel(delay) match {
-                case Right(())   => attempt(attemptNumber + 1)
-                case Left(error) => Left(error)
+                case Right(())       => attempt(attemptNumber + 1)
+                case Left(cancelled) => Left(cancelled)
               }
 
-            case se: ServiceError =>
-              sleepOrCancel(se.retryAfter.getOrElse(baseDelay * attemptNumber.toLong)) match {
-                case Right(())   => attempt(attemptNumber + 1)
-                case Left(error) => Left(error)
-              }
-
-            case _: TimeoutError =>
-              sleepOrCancel(baseDelay) match {
-                case Right(())   => attempt(attemptNumber + 1)
-                case Left(error) => Left(error)
-              }
-
-            case _ => Left(error) // Non-recoverable
+            // Retried, attempts exhausted
+            case Some(_) =>
+              Left(
+                ExecutionError(
+                  message = s"Operation failed after $attemptNumber attempts. Last error: ${error.message}",
+                  operation = error.formatted
+                )
+              )
           }
-
-        // Max attempts reached
-        case Left(error) =>
-          Left(
-            ExecutionError(
-              message = s"Operation failed after $maxAttempts attempts. Last error: ${error.message}",
-              operation = error.formatted
-            )
-          )
       }
 
     attempt(1)

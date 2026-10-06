@@ -27,12 +27,8 @@ import org.llm4s.types.Result
  * // Mask only specific types
  * val emailMasker = PIIMasker(Seq(PIIType.Email, PIIType.Phone))
  *
- * // Use with agent
- * agent.run(
- *   query = userInput,
- *   tools = tools,
- *   inputGuardrails = Seq(PIIMasker())
- * )
+ * // Use with an agent: the stored and sent query is the masked one
+ * Agent.builder("assistant", client).withMiddleware(new GuardrailMiddleware(Seq(PIIMasker()), Nil)).build()
  * }}}
  *
  * @param piiTypes The types of PII to mask (default: SSN, CreditCard, Email, Phone)

@@ -47,9 +47,15 @@ trait LLMError extends Product with Serializable {
 object LLMError {
 
   /**
-   * Type-safe recoverability checks
+   * Whether the error may succeed if tried again, perhaps after the caller does something first: `true` for a
+   * [[RecoverableError]], `false` for a [[NonRecoverableError]].
+   *
+   * This is wider than what the library retries by itself. [[org.llm4s.reliability.RetryPolicy.isRetryable]] is the
+   * rule for automatic retry of the identical request; it is derived from this check and excludes a client-error
+   * response and an [[OptimisticLockFailure]], which need the caller first.
+   *
    * @param error LLMError
-   * @return
+   * @return whether the error is recoverable
    */
 
   def isRecoverable(error: LLMError): Boolean = error match {

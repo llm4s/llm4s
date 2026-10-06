@@ -1,10 +1,11 @@
 package org.llm4s.samples.guardrails
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.samples.util.AgentResults
 import org.slf4j.LoggerFactory
 
 /**
@@ -39,50 +40,42 @@ object MultiTurnToneValidationExample extends App {
     registryService <- Llm4sConfig.modelRegistryService()
     given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerCfg)
-    agent = new Agent(client)
+    agent <- Agent
+      .builder("multi-turn-tone-validation", client)
+      .withMiddleware(GuardrailMiddleware(inputGuardrails, outputGuardrails))
+      .build()
 
     // Turn 1: Ask about Scala
     _ = logger.info("Turn 1: Asking about Scala...")
-    state1 <- agent.run(
-      "What is Scala?",
-      new ToolRegistry(Seq.empty),
-      inputGuardrails = inputGuardrails,
-      outputGuardrails = outputGuardrails
-    )
-    _ = logger.info("  ✓ Response passed tone validation")
+    state1 <- agent.run("What is Scala?")
+    _ = logger.info("  Turn 1 status: {}", state1.status)
 
     // Turn 2: Ask for details
     _ = logger.info("Turn 2: Asking for main features...")
-    state2 <- agent.continueConversation(
-      state1,
-      "What are its main features?",
-      inputGuardrails = inputGuardrails,
-      outputGuardrails = outputGuardrails
-    )
-    _ = logger.info("  ✓ Response passed tone validation")
+    state2 <- agent.continueConversation(state1, "What are its main features?")
+    _ = logger.info("  Turn 2 status: {}", state2.status)
 
     // Turn 3: Ask for examples
     _ = logger.info("Turn 3: Asking for code example...")
-    state3 <- agent.continueConversation(
-      state2,
-      "Can you give me a code example?",
-      inputGuardrails = inputGuardrails,
-      outputGuardrails = outputGuardrails
-    )
-    _ = logger.info("  ✓ Response passed tone validation")
+    state3 <- agent.continueConversation(state2, "Can you give me a code example?")
+    _ = logger.info("  Turn 3 status: {}", state3.status)
 
   } yield state3
 
   result match {
     case Right(finalState) =>
-      logger.info("✓ All turns completed successfully!")
       logger.info("Final conversation stats:")
       logger.info("  Status: {}", finalState.status)
-      logger.info("  Total messages: {}", finalState.conversation.messages.length)
-      logger.info("  Turns completed: 3")
+      logger.info("  Total messages: {}", finalState.messages.length)
 
-      logger.info("Final response:")
-      finalState.conversation.messages.last.content.split("\n").take(5).foreach(line => logger.info("  {}", line))
+      finalState.status match {
+        case AgentStatus.Completed(answer) =>
+          logger.info("✓ All turns completed successfully!")
+          logger.info("Final response:")
+          answer.split("\n").take(5).foreach(line => logger.info("  {}", line))
+        case other =>
+          logger.warn("✗ The conversation did not complete: {}", AgentResults.describe(other))
+      }
 
     case Left(error) =>
       logger.error("✗ Validation or execution failed:")

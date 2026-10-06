@@ -81,6 +81,16 @@ val processed = AudioPreprocessing.standardizeForSTT(
 )
 ```
 
+`AudioPreprocessing.resamplePcm16` (the resampling step of `standardizeForSTT`) checks its arguments before it
+converts anything. The target rate and the source rate must be between 1 and 768000 Hz, the channel count between 1
+and 64, and the bit depth a multiple of 8 from 8 to 32; anything else is a `Left(ValidationError)` naming the field
+(`targetRate`, `source.sampleRate`, `source.numChannels` or `source.bitDepth`). An output above 256 MiB (about 46
+minutes of 48 kHz mono) is a `ValidationError` on `targetRate` too, checked before anything is allocated: resample a
+longer recording in pieces. The output has exactly `round(frames * targetRate / sourceRate)` frames, so empty input
+gives empty output and a trailing partial frame is ignored; a converter that delivers noticeably fewer frames than
+that is a `ProcessingError`, not a silently padded success. Java Sound's converter delays the signal by a fraction of a millisecond, and the length fit drops the
+matching tail, so the source's final fraction of a millisecond is not in the output.
+
 ---
 
 ## Configuration
@@ -195,7 +205,16 @@ Behaviour worth knowing:
 
 - **Audio is raw PCM.** The TTS clients request raw 24 kHz, 16-bit, mono PCM from each service, so
   `GeneratedAudio.data` is headerless PCM with an accurate `AudioMeta`, the same shape Tacotron2
-  produces. Write a playable file with `WavFileGenerator.saveAsWav(audio, path)`. MP3 is not offered.
+  produces. Write a playable file with `WavFileGenerator.saveAsWav(audio, path)`. The default
+  `GeneratedAudio.format` is labelled `AudioFormat.WavPcm16` but, as above, the bytes carry no WAV header.
+- **MP3 is opt-in.** `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure
+  clients request the service's MP3 (`response_format=mp3`, `output_format=mp3_44100_128`,
+  `audio-24khz-48kbitrate-mono-mp3`) and return its bytes untouched: no decoding, no resampling.
+  `GeneratedAudio.format` is `AudioFormat.Mp3`, so the PCM helpers (`WavFileGenerator.saveAsWav`,
+  `AudioIO.saveWav` / `saveRawPcm16`, `AudioPreprocessing.standardizeForSTT(audio, rate)`) refuse it with a
+  `ValidationError`; save it with `AudioIO.saveMp3(audio, path)`. `AudioMeta` carries the requested
+  sample rate and channel count as nominal labels (not verified against the service) and `bitDepth = 0`: MP3 has
+  no sample width, so do not compute a duration from the byte count. Tacotron2 produces PCM only and refuses MP3. The default stays PCM.
 - **OpenAI TTS limits are checked locally**: text over 4096 characters and a `speakingRate` outside
   0.25 to 4.0 are a `ValidationError` before any request is sent. Split long text yourself; the clients
   do not chunk it.

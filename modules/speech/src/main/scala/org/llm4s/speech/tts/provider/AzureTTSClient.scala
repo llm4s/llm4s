@@ -2,7 +2,7 @@ package org.llm4s.speech.tts.provider
 
 import org.llm4s.error.ValidationError
 import org.llm4s.http.Llm4sHttpClient
-import org.llm4s.speech.{ AudioMeta, CloudSpeechSupport, GeneratedAudio }
+import org.llm4s.speech.{ AudioFormat, AudioMeta, CloudSpeechSupport, GeneratedAudio }
 import org.llm4s.speech.config.TTSConfig
 import org.llm4s.speech.tts.{ TTSError, TTSOptions, TextToSpeech }
 import org.llm4s.types.Result
@@ -15,6 +15,9 @@ import scala.concurrent.duration._
  * Requests the `raw-24khz-16bit-mono-pcm` output format, so [[GeneratedAudio.data]] is headerless
  * 24 kHz, 16-bit, mono PCM described by an honest [[AudioMeta]]. Write it out with
  * [[org.llm4s.speech.io.WavFileGenerator.saveAsWav]].
+ *
+ * With `options.outputFormat = AudioFormat.Mp3` it requests `audio-24khz-48kbitrate-mono-mp3` and returns the
+ * MP3 bytes untouched.
  *
  * `options.voice` overrides the configured voice name; `options.language` sets `xml:lang` (default:
  * the locale prefix of the voice name, else `en-US`); `options.speakingRate` becomes a `prosody` rate.
@@ -38,7 +41,7 @@ final class AzureTTSClient(config: TTSConfig, httpClient: Llm4sHttpClient = Llm4
         Map(
           "Ocp-Apim-Subscription-Key" -> config.apiKey,
           "Content-Type"              -> "application/ssml+xml",
-          "X-Microsoft-OutputFormat"  -> AzureTTSClient.OutputFormat,
+          "X-Microsoft-OutputFormat"  -> AzureTTSClient.outputFormat(options.outputFormat),
           "User-Agent"                -> "llm4s"
         ),
         AzureTTSClient.ssml(input, voice, options),
@@ -46,7 +49,7 @@ final class AzureTTSClient(config: TTSConfig, httpClient: Llm4sHttpClient = Llm4
       )
       audio <- CloudSpeechSupport.rawBody(name, response, config.apiKey)
       _     <- Either.cond(audio.nonEmpty, (), TTSError.SynthesisFailed("Azure TTS returned an empty audio body"))
-    } yield GeneratedAudio(audio, AzureTTSClient.PcmMeta, options.outputFormat)
+    } yield GeneratedAudio(audio, AzureTTSClient.metaFor(options.outputFormat), options.outputFormat)
 }
 
 object AzureTTSClient {
@@ -54,7 +57,21 @@ object AzureTTSClient {
   /** Azure's `raw-24khz-16bit-mono-pcm` output: 24 kHz, 16-bit, mono. */
   val PcmMeta: AudioMeta = AudioMeta(sampleRate = 24000, numChannels = 1, bitDepth = 16)
 
-  private[tts] val OutputFormat = "raw-24khz-16bit-mono-pcm"
+  /**
+   * Azure's `audio-24khz-48kbitrate-mono-mp3` output (opt-in); the bytes are returned untouched. The 24 kHz mono
+   * labels come from the format name and are not verified against the service; `bitDepth = 0` because MP3 has no
+   * sample width.
+   */
+  val Mp3Meta: AudioMeta = AudioMeta(sampleRate = 24000, numChannels = 1, bitDepth = 0)
+
+  private[tts] val OutputFormat    = "raw-24khz-16bit-mono-pcm"
+  private[tts] val Mp3OutputFormat = "audio-24khz-48kbitrate-mono-mp3"
+
+  private[tts] def outputFormat(format: AudioFormat): String =
+    if (format == AudioFormat.Mp3) Mp3OutputFormat else OutputFormat
+
+  private[tts] def metaFor(format: AudioFormat): AudioMeta =
+    if (format == AudioFormat.Mp3) Mp3Meta else PcmMeta
 
   /** Azure documents prosody `rate` as a multiplier that "should be within 0.5 to 2 times the original audio". */
   private[tts] val MinRate: Double = 0.5

@@ -50,6 +50,12 @@ trait RunHandle[O]:
    */
   def subscribe(capacity: Int = 1024)(listener: StreamEvent => Unit): Result[Subscription]
 
+  /**
+   * The subscription of the [[Observer]] this run was admitted with; `None` without one. Like any
+   * subscription it is the thread's and keeps delivering later runs: cancel it when done.
+   */
+  def observation: Option[Subscription]
+
 /**
  * Why a run stops, recorded once: the first cause recorded wins. `Cancelled` and `Expired` are
  * recorded by [[DefaultRunHandle.stop]], which interrupts the run only if its cause was the first.
@@ -90,7 +96,8 @@ final private[graph] class DefaultRunHandle[O](
   val runId: RunId,
   claimSeq: Long,
   signal: StopSignal,
-  subscribeFrom: (Long, Int, StreamEvent => Unit) => Result[Subscription]
+  subscribeFrom: (Long, Int, StreamEvent => Unit) => Result[Subscription],
+  val observation: Option[Subscription]
 ) extends RunHandle[O]:
 
   private val result                      = new CompletableFuture[RunResult[O]]()

@@ -58,6 +58,6 @@ object ServiceError {
 
   // Make ServiceError recoverable or non-recoverable based on HTTP status
   implicit class ServiceErrorOps(error: ServiceError) {
-    def isRecoverableStatus: Boolean = error.httpStatus >= 500 || error.httpStatus == 429 || error.httpStatus == 408
+    def isRecoverableStatus: Boolean = org.llm4s.reliability.RetryPolicy.isRetryableStatus(error.httpStatus)
   }
 }

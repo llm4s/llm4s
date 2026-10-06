@@ -125,7 +125,7 @@ Run the app
 4. Run with default or custom prompt:
    ```bash
     sbt run
-    sbt run "Explain what a Monad is in scala"
+    sbt "run Explain what a Monad is in scala"
    ```
    
 5. Development:

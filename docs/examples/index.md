@@ -25,12 +25,12 @@ Explore **70 working examples** covering all LLM4S features.
 |----------|-------|-------------|
 | [Playground](#playground) | 1 | Offline demo — no API key needed |
 | [Basic Examples](#basic-examples) | 9 | Getting started, streaming, tracing |
-| [Agent Examples](#agent-examples) | 8 | Multi-turn agents, persistence, async tools |
+| [Agent Examples](#agent-examples) | 8 | Multi-turn agents, persistence, built-in tools |
 | [Tool Examples](#tool-examples) | 7 | Tool calling, built-in tools, parallel execution |
 | [Guardrails Examples](#guardrails-examples) | 7 | Input/output validation, LLM-as-Judge |
 | [Handoff Examples](#handoff-examples) | 3 | Agent-to-agent delegation |
 | [Memory Examples](#memory-examples) | 6 | Short/long-term memory, vector search, RAG |
-| [Streaming Examples](#streaming-examples) | 4 | Real-time responses, agent events |
+| [Streaming Examples](#streaming-examples) | 9 | Real-time responses, agent event streams |
 | [Reasoning Examples](#reasoning-examples) | 1 | Extended thinking modes |
 | [Context Management](#context-management) | 8 | Token windows, compression |
 | [Embeddings](#embeddings) | 5 | Vector search, RAG |
@@ -291,19 +291,18 @@ sbt "samples/runMain org.llm4s.samples.basic.ProviderFallbackExample"
 
 **File:** [`SingleStepAgentExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/SingleStepAgentExample.scala)
 
-Step-by-step agent execution with detailed debugging output.
+A plain agent run with a step limit, printing the messages the run produced. (For step-level events, see the [streaming examples](#streaming-examples).)
 
 ```bash
 sbt "samples/runMain org.llm4s.samples.agent.SingleStepAgentExample"
 ```
 
 **What it demonstrates:**
-- Manual control over agent execution
-- Debugging agent behavior
-- Step-by-step tool calling
-- State inspection
+- `Agent.builder(...).withMaxSteps(n)`
+- Tool calling in a run
+- Reading `AgentResult.messages`
 
-**Perfect for:** Understanding how agents work internally
+**Perfect for:** Understanding what a run produces
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/SingleStepAgentExample.scala)
 
@@ -341,13 +340,13 @@ sbt "samples/runMain org.llm4s.samples.agent.MultiTurnConversationExample"
 
 **What it demonstrates:**
 - `continueConversation()` pattern
-- Immutable state management
+- Immutable results, a conversation carried by its thread
 - No `var` or mutation
 - Clean functional style
 
 **Key code:**
 ```scala
-val state2 = agent.continueConversation(state1, "Follow-up question")
+val result2 = agent.continueConversation(result1, "Follow-up question")
 ```
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/MultiTurnConversationExample.scala)
@@ -386,22 +385,22 @@ val config = ContextWindowConfig(
 
 **File:** [`ConversationPersistenceExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/ConversationPersistenceExample.scala)
 
-Save and load agent state for resumable conversations.
+Save a run's messages and load them as the `history` of a new thread.
 
 ```bash
 sbt "samples/runMain org.llm4s.samples.agent.ConversationPersistenceExample"
 ```
 
 **What it demonstrates:**
-- Saving conversation state to disk
-- Loading and resuming conversations
+- Saving a completed run's messages to disk
+- Loading them as `history` on a new thread
 - JSON serialization
 - Session management
 
 **Key code:**
 ```scala
-AgentState.saveToFile(state, "/tmp/conversation.json")
-val loadedState = AgentState.loadFromFile("/tmp/conversation.json", tools)
+Files.writeString(path, write(result.messages))
+agent.run(newThreadId, "Next question", RunConfig(), history = loaded)
 ```
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/ConversationPersistenceExample.scala)
@@ -422,20 +421,6 @@ sbt "samples/runMain org.llm4s.samples.agent.MCPAgentExample"
 - MCP tool integration in agents
 - External tool servers
 - Protocol fallback handling
-
----
-
-### AsyncToolAgentExample
-
-**File:** [`AsyncToolAgentExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/AsyncToolAgentExample.scala)
-
-Agent with parallel tool execution using different strategies.
-
-```bash
-sbt "samples/runMain org.llm4s.samples.agent.AsyncToolAgentExample"
-```
-
-[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/AsyncToolAgentExample.scala)
 
 ---
 
@@ -1054,29 +1039,22 @@ Streaming with real-time progress feedback.
 sbt "samples/runMain org.llm4s.samples.streaming.StreamingWithProgressExample"
 ```
 
-### StreamingAgentExample
+### Agent event streams
 
-**File:** [`StreamingAgentExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/streaming/StreamingAgentExample.scala)
+`agent.stream` with `withStreaming()`: text deltas live, model and tool events as they commit. See the
+[streaming guide](../guide/agents/streaming.md).
 
-Agent with real-time event streaming using `runWithEvents()`.
+| Example | Shows |
+|---------|-------|
+| `StreamingAgentExample` | `withStreaming()`, printing `TextDelta`, attempt resets |
+| `StreamingWithToolsExample` | `ToolCallStarted`/`ToolCallResult` live, `ToolExecuted` durable with duration |
+| `EventCollectionExample` | collecting one run's events, replaying the durable ones |
+| `AgentStreamIOExample` (`samples/catseffect`) | fs2 stream of `AgentStreamItem` |
+| `AgentStreamZIOExample` (`samples/zio`) | ZStream of `AgentStreamItem` |
 
 ```bash
 sbt "samples/runMain org.llm4s.samples.streaming.StreamingAgentExample"
 ```
-
-[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/streaming/StreamingAgentExample.scala)
-
-### EventCollectionExample
-
-**File:** [`EventCollectionExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/streaming/EventCollectionExample.scala)
-
-Collecting and processing agent execution events.
-
-```bash
-sbt "samples/runMain org.llm4s.samples.streaming.EventCollectionExample"
-```
-
-[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/streaming/EventCollectionExample.scala)
 
 ---
 
@@ -1119,7 +1097,7 @@ sbt "samples/runMain org.llm4s.samples.model.ModelMetadataExample"
 **File:** [`CostTrackingExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/metrics/CostTrackingExample.scala)
 
 What a call costs, at three levels: per request (`Completion.estimatedCost`), per agent run
-(`AgentState.usageSummary` after a real `Agent.run` that calls a tool), and per session (a `CostTracker`
+(`AgentResult.usage` after a real `Agent.run` that calls a tool), and per session (a `CostTracker`
 the client reports to). It also shows how to price a model the registry does not know, with a
 `ModelRegistryService` built from your own `ModelMetadata` (an immutable snapshot, so nothing global
 changes), and how `MetricsCollector.compose` feeds several collectors from one client. A model with no price

@@ -1104,10 +1104,13 @@ nim-local {
 #### Ollama (`/v1`)
 
 [`llm4s-ollama`](#ollama-local-models) (`provider = "ollama"`) is the first-class route to
-Ollama: it uses Ollama's native `/api/chat` API and also provides Ollama embeddings. Use the
-generic provider on Ollama's OpenAI-compatible `/v1` endpoint instead when you need **tool
-calling** - `llm4s-ollama`'s chat client sends no tools and drops tool messages - or when Ollama
-is behind a gateway that exposes only the OpenAI API:
+Ollama: it uses Ollama's native `/api/chat` API, supports **tool calling** (tools are sent, tool
+calls are read - whole or streamed - and tool results go back as `role: tool`) and also provides
+Ollama embeddings. Tool calling needs a model whose Ollama page lists the **tools** capability: for any
+other model Ollama answers HTTP 400 (`... does not support tools`), which the client reports as an
+`Invalid tools: Ollama model '<model>' does not support tool calling ...` validation error rather than
+sending the request again without the tools. Use the generic provider on Ollama's OpenAI-compatible `/v1` endpoint instead
+when Ollama is behind a gateway that exposes only the OpenAI API, or when you prefer that wire format:
 
 ```hocon
 ollama-openai {
@@ -1160,8 +1163,10 @@ val policy = ConfigPolicy.prodSafeDefaults
   )
   .withRequiredBaseUrlPattern(
     CatalogEnvironment.Prod,
-    "^https://(api\\.openai\\.com/v1|api\\.groq\\.com/openai/v1)$"
+    "openai-compatible",
+    "https://api\\.groq\\.com/openai/v1"
   )
+  .withMaxContextWindow(CatalogEnvironment.Prod, "openai-compatible", 131072)
 ```
 
 - `withAllowedProviders` and `withAllowedModelPatterns` **replace** the preset's lists; repeat
@@ -1171,16 +1176,27 @@ val policy = ConfigPolicy.prodSafeDefaults
   optional, so it is not checked; the rule is about sections that would otherwise inherit a
   vendor's shared key.
 - Model patterns match `<provider>/<model>`, so a Groq model is
-  `openai-compatible/openai/gpt-oss-120b`. Patterns are unanchored regular expressions: anchor
-  them with `^` and `$`, or `openai-compatible/.*` slips through under a looser one.
-- The base-URL pattern is **one per environment, checked against every provider's config** in
-  that environment, not only `openai-compatible`'s. Name every endpoint you use in it, as the
-  alternation above does.
-- Both presets cap `contextWindow` at 128000. A recipe above that - Groq, Together or Fireworks
-  at 131072, xAI at 500000 - fails the check with `contextWindow ... exceeds 128000`: lower the
-  section's `contextWindow`, or raise the cap with `withMaxContextWindow`. A window taken from the model
-  registry counts too: a Groq section that sets no `contextWindow` still resolves to 131072 and fails the same
-  way, so set one below the cap there.
+  `openai-compatible/openai/gpt-oss-120b`. Model and base-URL patterns are regular expressions
+  that must match the **whole** value, so `^` and `$` are optional: `openai/gpt-4o` allows
+  neither `openai/gpt-4o-mini` nor a dated snapshot such as `openai/gpt-4o-2024-08-06` (write
+  `openai/gpt-4o(-.*)?` for those). End a base-URL pin that allows paths with `/.*`, never a
+  bare `.*`: `https://api\.groq\.com.*` also accepts `https://api.groq.com.evil.example/v1`.
+- `withRequiredBaseUrlPattern(env, provider, pattern)` pins one provider's endpoint and
+  **replaces** the environment-wide pin for that provider. The environment-wide form,
+  `withRequiredBaseUrlPattern(env, pattern)`, is checked against every provider without a pin of
+  its own, not only `openai-compatible`; if you use it, name every endpoint in it (for example
+  `https://(api\.openai\.com|api\.groq\.com/openai)/v1`).
+- Context caps work the same way. The `prod` preset caps each of its providers at its current
+  models' window (openai and azure 128000, anthropic 200000, gemini 1048576, deepseek 131072) and
+  any other provider, `openai-compatible` included, at an environment-wide 1048576; `dev` caps
+  everything at 1048576. So Groq, Together or Fireworks at 131072 and xAI at 500000 pass as they
+  are. Set a per-provider cap with `withMaxContextWindow(env, provider, max)`, as above, to hold a
+  provider tighter, or to allow a model above 1048576. A section over its cap fails with
+  `contextWindow ... exceeds <max>`. A window taken from the model registry counts too: a Groq
+  section that sets no `contextWindow` resolves to 131072 and is checked at that.
+- Provider names in a per-provider pin or cap are canonicalised like provider ids (`google` is
+  `gemini`). One that names no registered provider and is not in `allowedProviders` is an
+  `[unknownProvider]` violation, so a typo cannot leave a provider unpinned.
 
 See `modules/config-policy/README.md` for the rest of the module.
 
@@ -1582,7 +1598,7 @@ place. Defaults when `baseUrl` is omitted:
 | **Local Option** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ vLLM, LM Studio, llama.cpp |
 | **Context Window** | 128K | 200K | 1M | 128K | 4K-32K | 8K | Model-specific | Set in config (default 8K) |
 | **Vision Support** | ✅ | ✅ | ✅ | ✅ | ⚠️ Limited | ❌ | Model-specific | ❌ Text only |
-| **Function Calling** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ Limited | ✅ If the endpoint supports it |
+| **Function Calling** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ If the model supports it | ✅ If the endpoint supports it |
 | **Reasoning Models** | ✅ o1 | ❌ | ❌ | ✅ (via OpenAI) | ✅ deepseek-reasoner | ❌ | ❌ | ⚠️ Run, but reasoning not configured or read |
 | **Enterprise Support** | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | N/A | Endpoint-specific |
 | **Cost (Budget)** | Medium | Medium | 🏆 Low | High | 🏆 Very Low | Low | Free | Endpoint-specific |

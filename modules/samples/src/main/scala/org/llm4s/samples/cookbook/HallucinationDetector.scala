@@ -7,6 +7,8 @@ import org.llm4s.samples.config.SamplesConfigLoader
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.builtin.search.{ ExaSearchTool, ExaSearchConfig }
 import org.llm4s.agent.Agent
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.samples.util.AgentResults
 import org.llm4s.types.TryOps
 import org.slf4j.LoggerFactory
 import pureconfig.ConfigSource
@@ -70,7 +72,6 @@ object HallucinationDetector {
 
           case Right(exaSearchTool) =>
             val registry = new ToolRegistry(List(exaSearchTool))
-            val agent    = new Agent(client)
 
             // Use the typed config loaded at the edge
             val text = detectorConfig.text
@@ -79,11 +80,11 @@ object HallucinationDetector {
 
             // step 1 : extract claims from the text
             logger.info("\n🔍 Extracting claims from text...")
-            val claims = extractClaims(text, agent)
+            val claims = extractClaims(text, client)
             logger.info(s"✓ Extracted ${claims.length} claims\n")
 
             // step 2 : verify each claim using exa search
-            val verifiedClaims = verifyClaims(claims, agent, registry)
+            val verifiedClaims = verifyClaims(claims, client, registry)
 
             logger.info("\n" + "=" * 70)
             logger.info("🔬 Hallucination Detection Results")
@@ -116,7 +117,7 @@ object HallucinationDetector {
     }
   }
 
-  private def extractClaims(text: String, agent: Agent): List[String] = {
+  private def extractClaims(text: String, client: LLMClient): List[String] = {
     val systemPrompt =
       """
   You are a factual claim extraction system.
@@ -149,16 +150,12 @@ object HallucinationDetector {
   Return the extracted claims as a JSON array of strings.
   """
 
-    agent.run(userPrompt, ToolRegistry.empty, systemPromptAddition = Some(systemPrompt)) match {
+    Agent.builder("claim-extractor", client).withSystemPrompt(systemPrompt).build().flatMap(_.run(userPrompt)) match {
       case Left(error) =>
         logger.error("❌ Claim extraction failed: {}", error.formatted)
         List.empty[String]
       case Right(state) =>
-        val finalResponse = state.conversation.messages
-          .filter(_.role == org.llm4s.llmconnect.model.MessageRole.Assistant)
-          .lastOption
-          .map(_.content)
-          .getOrElse("No claims extracted")
+        val finalResponse = AgentResults.answerOrStatus(state)
 
         val parseResult = for {
           cleaned <- Try(cleanJsonResponse(finalResponse)).toResult
@@ -176,7 +173,7 @@ object HallucinationDetector {
     }
   }
 
-  private def verifyClaims(claims: List[String], agent: Agent, registry: ToolRegistry): List[ujson.Value] = {
+  private def verifyClaims(claims: List[String], client: LLMClient, registry: ToolRegistry): List[ujson.Value] = {
     logger.info("🔍 Verifying claims with Exa Search...")
 
     val systemPrompt = """
@@ -206,16 +203,17 @@ ${claims.zipWithIndex.map { case (claim, idx) => s"${idx + 1}. $claim" }.mkStrin
 For each claim, use the exa_search tool to find evidence, then return the structured JSON results.
 """
 
-    agent.run(userPrompt, registry, systemPromptAddition = Some(systemPrompt)) match {
+    Agent
+      .builder("claim-verifier", client)
+      .withTools(registry)
+      .withSystemPrompt(systemPrompt)
+      .build()
+      .flatMap(_.run(userPrompt)) match {
       case Left(error) =>
         logger.error("❌ Claim verification failed: {}", error.formatted)
         List.empty[ujson.Value]
       case Right(state) =>
-        val finalResponse = state.conversation.messages
-          .filter(_.role == org.llm4s.llmconnect.model.MessageRole.Assistant)
-          .lastOption
-          .map(_.content)
-          .getOrElse("[]")
+        val finalResponse = AgentResults.answerOrStatus(state)
 
         val parseResult = for {
           cleaned <- Try(cleanJsonResponse(finalResponse)).toResult

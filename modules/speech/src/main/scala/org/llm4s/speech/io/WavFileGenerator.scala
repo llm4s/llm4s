@@ -90,6 +90,7 @@ object WavFileGenerator {
    */
   def saveAsWav(audio: GeneratedAudio, path: Path): Result[Path] =
     for {
+      _ <- audio.requirePcm("Saving as WAV")
       _ <- validateMetadata(audio.meta)
       result <- ManagedResource
         .audioInputStream(audio.data, createJavaAudioFormat(audio.meta))

@@ -3,7 +3,7 @@ package org.llm4s.agent.graph.middleware
 import org.llm4s.agent.graph.{ GraphError, RunContext, StateKey }
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
 import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
-import org.llm4s.llmconnect.model.AssistantMessage
+import org.llm4s.llmconnect.model.Completion
 import org.llm4s.types.Result
 
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -44,8 +44,8 @@ final class MiddlewareStack private (val ordered: Vector[AgentMiddleware]):
 
   /** Runs the model call through every `wrapModelCall`, the first outermost, with `innermost` at the centre. */
   private[graph] def wrapModelCall(request: ModelRequest, context: RunContext)(
-    innermost: ModelRequest => Result[AssistantMessage]
-  ): Result[AssistantMessage] =
+    innermost: ModelRequest => Result[Completion]
+  ): Result[Completion] =
     val chain = ordered.foldRight(innermost) { (m, next) => (req: ModelRequest) =>
       guarded(m)(m.wrapModelCall(req, context)(next))
     }

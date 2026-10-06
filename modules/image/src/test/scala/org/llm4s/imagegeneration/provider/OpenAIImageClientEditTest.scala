@@ -2,7 +2,7 @@ package org.llm4s.imagegeneration.provider
 
 import scala.concurrent.duration.FiniteDuration
 
-import org.llm4s.imagegeneration.{ ImageEditOptions, OpenAIConfig, ProviderImageEditOptions, ValidationError }
+import org.llm4s.imagegeneration.{ ImageEditOptions, OpenAIConfig, ProviderImageEditOptions, ImageValidationError }
 import org.llm4s.http.{ HttpResponse, MultipartPart }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -23,7 +23,7 @@ class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
       prompt = "add clouds"
     )
 
-    result should matchPattern { case Left(_: ValidationError) => }
+    result should matchPattern { case Left(_: ImageValidationError) => }
   }
 
   it should "fail when response format is unsupported" in {
@@ -39,7 +39,7 @@ class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
       )
     )
 
-    result shouldBe Left(ValidationError("Unsupported response format for edit: xml"))
+    result shouldBe Left(ImageValidationError("Unsupported response format for edit: xml"))
   }
 
   it should "fail when mask dimensions do not match source image dimensions" in {
@@ -55,7 +55,7 @@ class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
         maskPath = Some(mask)
       )
 
-      result should matchPattern { case Left(_: ValidationError) => }
+      result should matchPattern { case Left(_: ImageValidationError) => }
     }
   }
 
@@ -70,7 +70,7 @@ class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
       )
     )
 
-    result shouldBe Left(ValidationError("Unsupported provider-specific edit options for OpenAI image client"))
+    result shouldBe Left(ImageValidationError("Unsupported provider-specific edit options for OpenAI image client"))
   }
 
   it should "fail early when edit output size is unsupported" in {
@@ -84,7 +84,7 @@ class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
         prompt = "inpaint sky"
       )
 
-      result should matchPattern { case Left(_: ValidationError) => }
+      result should matchPattern { case Left(_: ImageValidationError) => }
     }
   }
 
@@ -100,7 +100,7 @@ class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
         prompt = "inpaint sky"
       )
 
-      result shouldBe Left(ValidationError("No images returned from OpenAI image edit endpoint"))
+      result shouldBe Left(ImageValidationError("No images returned from OpenAI image edit endpoint"))
     }
   }
 

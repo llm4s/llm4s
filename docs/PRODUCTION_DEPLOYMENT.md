@@ -603,20 +603,17 @@ Key considerations:
 Use `LLMClient.getContextBudget()` to stay within limits:
 
 ```scala
-import org.llm4s.agent.AgentState
-import org.llm4s.agent.ContextWindowConfig
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.agent.{Agent, ContextWindowConfig}
+import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 
 val budgetTokens = client.getContextBudget(HeadroomPercent.Standard)
 
-// Prune conversation using the AgentState pruning API
-val state = AgentState(conversation, ToolRegistry.empty)
-
-val prunedConversation =
-  AgentState.pruneConversation(
-    state,
-    ContextWindowConfig(maxTokens = Some(budgetTokens))
+// Prune what is sent to the model with ContextWindowMiddleware
+val agent = Agent.builder("assistant", client)
+  .withMiddleware(
+    new ContextWindowMiddleware(ContextWindowConfig(maxTokens = Some(budgetTokens)))
   )
+  .build()
 ```
 
 ### Conversation Pruning
@@ -624,22 +621,20 @@ val prunedConversation =
 For long-running conversations, use built-in pruning strategies:
 
 ```scala
-import org.llm4s.agent.AgentState
-import org.llm4s.agent.ContextWindowConfig
-import org.llm4s.agent.PruningStrategy
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.agent.{Agent, ContextWindowConfig, PruningStrategy}
+import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 
-// Prune when context exceeds configured limits
-val state = AgentState(conversation, ToolRegistry.empty)
-
-val prunedConversation =
-  AgentState.pruneConversation(
-    state,
-    ContextWindowConfig(
-      maxMessages = Some(50),
-      pruningStrategy = PruningStrategy.OldestFirst
+// Prune when context exceeds configured limits; the thread keeps its full history
+val agent = Agent.builder("assistant", client)
+  .withMiddleware(
+    new ContextWindowMiddleware(
+      ContextWindowConfig(
+        maxMessages = Some(50),
+        pruningStrategy = PruningStrategy.OldestFirst
+      )
     )
   )
+  .build()
 ```
 
 ### Caching Considerations
@@ -752,7 +747,7 @@ Current limitations to be aware of in production:
 
 - **No built-in circuit breaker** - Implement at application level or use Resilience4j
 - **No automatic provider fallback** - Must implement manually
-- **Tool registries not serializable** - Reconstruct on `AgentState` restore
+- **Tool registries not serializable** - Tools belong to the `Agent`, so rebuild the agent on restart and import saved messages with `history`; the in-memory runtime does not survive a restart (durable checkpointers are Stage 2 of the typed agent runtime)
 - **Advanced semantic/embedding caching not included** - Add Redis/vector cache for high-volume RAG
 
 These are tracked for improvement in the [Production Readiness Roadmap](reference/roadmap.md#production-readiness).

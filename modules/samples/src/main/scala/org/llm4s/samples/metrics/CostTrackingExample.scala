@@ -18,7 +18,7 @@ import scala.util.Using
  * Cost tracking end to end, at three levels, plus how to price a model the registry does not know.
  *
  *  1. '''Per request''': `Completion.estimatedCost` after one call.
- *  1. '''Per agent run''': `AgentState.usageSummary` after a multi-step `Agent.run` that calls a tool.
+ *  1. '''Per agent run''': `AgentResult.usage` after a multi-step `Agent.run` that calls a tool.
  *  1. '''Per session''': a `CostTracker`, a `MetricsCollector` the client reports to, so it sees every call
  *     made through that client.
  *  1. '''Custom pricing''': a `ModelRegistryService` built with your own `ModelMetadata`, passed to the client
@@ -76,7 +76,7 @@ object CostTrackingExample {
    * @param model        the configured model, which every demo prices
    * @param priced       whether the registry has a price for `model`
    * @param perRequest   demo 1
-   * @param agent        demo 2: `AgentState.usageSummary`
+   * @param agent        demo 2: `AgentResult.usage`
    * @param session      the session tracker after demos 1 and 2
    * @param custom       demo 4
    * @param sessionTotal the session tracker after all of them
@@ -140,8 +140,10 @@ object CostTrackingExample {
     for {
       perRequest <- requestCost(client)
       tools      <- BuiltinTools.coreSafe
-      state      <- new Agent(client).run(AgentPrompt, new ToolRegistry(tools))
-    } yield LevelsOneAndTwo(perRequest, state.usageSummary, session.snapshot)
+      agent      <- Agent.builder("cost-demo", client).withTools(new ToolRegistry(tools)).build()
+      result     <- agent.run(AgentPrompt)
+      _          <- agent.forget(result.threadId)
+    } yield LevelsOneAndTwo(perRequest, result.usage, session.snapshot)
 
   private def requestCost(client: LLMClient): Result[RequestCost] =
     for {
@@ -239,7 +241,7 @@ object CostTrackingExample {
       s"  cost:   ${costOrUnknown(report.perRequest)}"
     )
 
-    val agent = header("2. Per agent run: AgentState.usageSummary") ++ Seq(
+    val agent = header("2. Per agent run: AgentResult.usage") ++ Seq(
       s"  requests: ${report.agent.requestCount} (one per model call the agent made, including the one after the tool ran)",
       s"  tokens:   ${tokens(report.agent)}",
       s"  cost:     ${dollars(report.agent.totalCost)}"

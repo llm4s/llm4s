@@ -69,11 +69,8 @@ final class AsyncHybridSearcher private (
                 Left(ProcessingError("reranking", s"Reranking failed: ${ex.getMessage}"))
               }
               .map {
-                case Left(err) => Left(err)
-                case Right(response) =>
-                  Right(
-                    response.results.flatMap(rr => candidates.lift(rr.index).map(_.copy(score = rr.score)))
-                  )
+                case Left(err)       => Left(err)
+                case Right(response) => RerankMapping.applyRerank(candidates, response.results)
               }
           case None =>
             Future.successful(Right(candidates.take(topK)))
@@ -189,15 +186,8 @@ final class AsyncHybridSearcher private (
       vectorResults  <- vEither
       keywordResults <- kEither
     } yield {
-      val vectorScores           = vectorResults.map(_.score)
-      val (vectorMin, vectorMax) = if (vectorScores.isEmpty) (0.0, 1.0) else (vectorScores.min, vectorScores.max)
-
-      val keywordScores            = keywordResults.map(_.score)
-      val (keywordMin, keywordMax) = if (keywordScores.isEmpty) (0.0, 1.0) else (keywordScores.min, keywordScores.max)
-
-      def normalizeVector(s: Double) = if (vectorMax == vectorMin) 1.0 else (s - vectorMin) / (vectorMax - vectorMin)
-      def normalizeKeyword(s: Double) =
-        if (keywordMax == keywordMin) 1.0 else (s - keywordMin) / (keywordMax - keywordMin)
+      val normalizeVector  = ScoreNormalisation.over(vectorResults.map(_.score))
+      val normalizeKeyword = ScoreNormalisation.over(keywordResults.map(_.score))
 
       val vectorMap  = vectorResults.map(sr => sr.record.id -> sr).toMap
       val keywordMap = keywordResults.map(ksr => ksr.id -> ksr).toMap

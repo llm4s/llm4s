@@ -33,7 +33,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       val worker = b.node[String]("worker", writes = Set(results)) { (item, _, context) =>
         calls.computeIfAbsent(item, _ => new AtomicInteger()).incrementAndGet()
         onWorker(item)
-        context.progress(ujson.Str(s"working on $item"))
+        context.progress("test.progress", 1, ujson.Str(s"working on $item"))
         context.emit("worked", 1, ujson.Obj("item" -> item))
         if failOnce.remove(item) then NodeResult.Fail(ValidationError("worker", s"$item failed"))
         else continue(Command.empty.update(results, item.toUpperCase))
@@ -113,6 +113,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     def latest(threadId: ThreadId)                                  = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                            = underlying.deleteThread(threadId)
   }
 
   private def kinds(records: Vector[EventRecord]): Vector[String] =
@@ -358,6 +359,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
         store.latest(threadId).map(_.map(s => s.copy(pendingWrites = s.pendingWrites.map(change))))
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = store.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long)          = store.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                            = store.deleteThread(threadId)
     }
     GraphRuntime(tampered(_.copy(nodeId = "summarize")))
       .recover(thread, f.graph, RunConfig().withRunId(RunId("run-2")))

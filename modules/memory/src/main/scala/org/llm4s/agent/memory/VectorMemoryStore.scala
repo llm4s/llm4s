@@ -1,9 +1,10 @@
 package org.llm4s.agent.memory
 
 import org.llm4s.types.Result
-import org.llm4s.error.ProcessingError
+import org.llm4s.error.{ ConfigurationError, ProcessingError }
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
+import org.slf4j.LoggerFactory
 
 import java.sql.{ Connection, DriverManager, PreparedStatement, ResultSet }
 import java.time.Instant
@@ -31,6 +32,7 @@ final class VectorMemoryStore private (
 ) extends MemoryStore {
 
   import VectorMemoryStore._
+  import FilterSupport.Sql
 
   // Initialize schema on creation
   initializeSchema()
@@ -162,115 +164,72 @@ final class VectorMemoryStore private (
 
   override def recall(filter: MemoryFilter, limit: Int): Result[Seq[Memory]] =
     Try {
-      val (whereClause, params) = filterToSql(filter)
-      val sql                   = s"SELECT * FROM memories WHERE $whereClause ORDER BY timestamp DESC LIMIT ?"
-
-      Using.resource(connection.prepareStatement(sql)) { stmt =>
-        params.zipWithIndex.foreach { case (param, idx) =>
-          setParameter(stmt, idx + 1, param)
-        }
-        stmt.setInt(params.size + 1, limit)
-
-        Using.resource(stmt.executeQuery()) { rs =>
-          val memories = ArrayBuffer.empty[Memory]
-          while (rs.next())
-            memories += rowToMemory(rs)
-          memories.toSeq
-        }
-      }
+      queryMemories(filter, Some(limit))
     }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to recall memories: ${e.getMessage}"))
+
+  /** Memories matching `filter`, newest first; `limit` applies to the matches, after any in-memory filtering. */
+  private def queryMemories(filter: MemoryFilter, limit: Option[Int]): Seq[Memory] = {
+    val plan = narrowing(filter)
+    val sql =
+      if (plan.needsMatches || limit.isEmpty) s"SELECT * FROM memories ${plan.where} ORDER BY timestamp DESC"
+      else s"SELECT * FROM memories ${plan.where} ORDER BY timestamp DESC LIMIT ?"
+
+    Using.resource(connection.prepareStatement(sql)) { stmt =>
+      plan.params.zipWithIndex.foreach { case (param, idx) =>
+        setParameter(stmt, idx + 1, param)
+      }
+      if (!plan.needsMatches) limit.foreach(l => stmt.setInt(plan.params.size + 1, l))
+
+      Using.resource(stmt.executeQuery()) { rs =>
+        val memories = Iterator.continually(rs).takeWhile(_.next()).map(rowToMemory)
+        val matching = if (plan.needsMatches) memories.filter(filter.matches) else memories
+        (if (plan.needsMatches) limit.fold(matching)(matching.take) else matching).toSeq
+      }
+    }
+  }
 
   override def search(query: String, topK: Int, filter: MemoryFilter): Result[Seq[ScoredMemory]] =
     // Generate query embedding
     embeddingService.embed(query).flatMap { queryEmbedding =>
       Try {
-        // Get all memories matching filter that have embeddings
-        val (whereClause, params) = filterToSql(filter)
-        val sql                   = s"SELECT * FROM memories WHERE $whereClause AND embedding IS NOT NULL"
+        // Memories matching the filter that have embeddings; topK applies to those the filter accepts
+        val candidates = queryMemories(filter, None).flatMap(m => m.embedding.filter(_.nonEmpty).map(e => (m, e)))
+        val (comparable, mismatched) = candidates.partition(_._2.length == queryEmbedding.length)
 
-        Using.resource(connection.prepareStatement(sql)) { stmt =>
-          params.zipWithIndex.foreach { case (param, idx) =>
-            setParameter(stmt, idx + 1, param)
-          }
-
-          Using.resource(stmt.executeQuery()) { rs =>
-            val candidates = ArrayBuffer.empty[(Memory, Array[Float])]
-
-            while (rs.next()) {
-              val memory    = rowToMemory(rs)
-              val embedding = memory.embedding.getOrElse(Array.empty[Float])
-              if (embedding.nonEmpty) {
-                candidates += ((memory, embedding))
-              }
-            }
-
-            // Calculate similarities and return top-K
-            candidates
-              .map { case (memory, embedding) =>
-                val similarity = VectorOps.cosineSimilarity(queryEmbedding, embedding)
-                // Normalize to 0-1 range (cosine similarity is -1 to 1)
-                val normalizedScore = (similarity + 1) / 2
-                ScoredMemory(memory, normalizedScore)
-              }
-              .sortBy(-_.score)
-              .take(topK)
-              .toSeq
-          }
+        mismatched.headOption match {
+          case Some((memory, stored)) if comparable.isEmpty =>
+            // Nothing stored can be compared with the query: the store was written with a different embedding
+            // model, and hiding that behind a keyword fallback or an empty result would hide the misconfiguration.
+            Left(
+              ConfigurationError(
+                s"Embedding dimension mismatch: the query embedding has ${queryEmbedding.length} dimensions but " +
+                  s"memory ${memory.id.value} was stored with ${stored.length}. The store was written with a " +
+                  "different embedding model; use that model, or re-embed the store."
+              )
+            )
+          case _ =>
+            // A store that holds vectors of more than one dimension (the embedding model was changed part way)
+            // stays searchable: the memories that cannot be compared are left out, and counted in the log.
+            if (mismatched.nonEmpty)
+              logger.warn(
+                s"Vector search skipped ${mismatched.size} memories whose embedding has a different dimension than " +
+                  s"the query's ${queryEmbedding.length}; re-embed the store to include them"
+              )
+            Right(
+              comparable
+                .map { case (memory, embedding) =>
+                  val similarity = VectorOps.cosineSimilarity(queryEmbedding, embedding)
+                  // Normalize to 0-1 range (cosine similarity is -1 to 1)
+                  ScoredMemory(memory, (similarity + 1) / 2)
+                }
+                .sortBy(-_.score)
+                .take(topK)
+            )
         }
       }.toEither.left
-        .map(_ => ProcessingError("vector-store", "Vector search failed"))
-        .orElse(keywordSearch(query, topK, filter))
+        .map(e => ProcessingError("vector-store", s"Vector search failed: ${e.getMessage}"))
+        .flatMap(identity)
     }
-
-  /**
-   * Keyword-based fallback search using FTS5.
-   */
-  private def keywordSearch(query: String, topK: Int, filter: MemoryFilter): Result[Seq[ScoredMemory]] =
-    Try {
-      val escapedQuery          = escapeFtsQuery(query)
-      val (whereClause, params) = filterToSql(filter)
-
-      val sql =
-        s"""SELECT m.*, bm25(memories_fts) as score
-           |FROM memories m
-           |JOIN memories_fts fts ON m.id = fts.id
-           |WHERE fts.content MATCH ? AND $whereClause
-           |ORDER BY score
-           |LIMIT ?""".stripMargin
-
-      Using.resource(connection.prepareStatement(sql)) { stmt =>
-        stmt.setString(1, escapedQuery)
-        params.zipWithIndex.foreach { case (param, idx) =>
-          setParameter(stmt, idx + 2, param)
-        }
-        stmt.setInt(params.size + 2, topK)
-
-        Using.resource(stmt.executeQuery()) { rs =>
-          val results = ArrayBuffer.empty[ScoredMemory]
-          while (rs.next()) {
-            val memory = rowToMemory(rs)
-            val bm25   = rs.getDouble("score")
-            // Normalize BM25 score to 0-1 range (BM25 is typically negative, closer to 0 is better)
-            val score = math.max(0.0, math.min(1.0, 1.0 / (1.0 + math.abs(bm25))))
-            results += ScoredMemory(memory, score)
-          }
-          results.toSeq
-        }
-      }
-    }.toEither.left.map(e => ProcessingError("vector-store", s"Keyword search failed: ${e.getMessage}"))
-
-  private def escapeFtsQuery(query: String): String = {
-    // Split into words and use OR for broader matching
-    val words = query
-      .replace("\"", "")
-      .replace("'", "")
-      .split("\\s+")
-      .filter(_.nonEmpty)
-      .map(w => s""""$w"""")
-
-    if (words.isEmpty) "\"\""
-    else words.mkString(" OR ")
-  }
 
   override def delete(id: MemoryId): Result[MemoryStore] =
     Try {
@@ -291,41 +250,84 @@ final class VectorMemoryStore private (
 
   override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
     Try {
-      // First get IDs to delete
-      val (whereClause, params) = filterToSql(filter)
-      val selectSql             = s"SELECT id FROM memories WHERE $whereClause"
-
-      val ids = Using.resource(connection.prepareStatement(selectSql)) { stmt =>
-        params.zipWithIndex.foreach { case (param, idx) =>
-          setParameter(stmt, idx + 1, param)
+      val plan = narrowing(filter)
+      // One transaction: the whole delete happens or none of it, and the commit is paid once, not once per row.
+      inTransaction {
+        if (plan.exact) {
+          // SQL says exactly which rows go: delete them in SQL, from the full-text index and the table, without
+          // reading a single row (or decoding a single embedding) into memory.
+          bindAndUpdate(s"DELETE FROM memories_fts WHERE id IN (SELECT id FROM memories ${plan.where})", plan.params)
+          bindAndUpdate(s"DELETE FROM memories ${plan.where}", plan.params)
+        } else {
+          // `matches` decides: stream the narrowed rows (without the embedding unless the filter can read it),
+          // keep only the ids it accepts, then delete those.
+          val ids = Vector.newBuilder[String]
+          foreachMatching(filter, plan)(m => ids += m.id.value)
+          deleteIds(ids.result())
         }
-        Using.resource(stmt.executeQuery()) { rs =>
-          val buffer = ArrayBuffer.empty[String]
-          while (rs.next())
-            buffer += rs.getString("id")
-          buffer.toSeq
-        }
-      }
-
-      // Delete from FTS
-      ids.foreach { id =>
-        Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { stmt =>
-          stmt.setString(1, id)
-          stmt.executeUpdate()
-        }
-      }
-
-      // Delete from main table
-      val deleteSql = s"DELETE FROM memories WHERE $whereClause"
-      Using.resource(connection.prepareStatement(deleteSql)) { stmt =>
-        params.zipWithIndex.foreach { case (param, idx) =>
-          setParameter(stmt, idx + 1, param)
-        }
-        stmt.executeUpdate()
       }
 
       this: MemoryStore
     }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to delete matching memories: ${e.getMessage}"))
+
+  private def bindAndUpdate(sql: String, params: Seq[Any]): Int =
+    Using.resource(connection.prepareStatement(sql)) { stmt =>
+      params.zipWithIndex.foreach { case (param, idx) =>
+        setParameter(stmt, idx + 1, param)
+      }
+      stmt.executeUpdate()
+    }
+
+  /** Delete `ids` from the full-text index and the table, as two batches. */
+  private def deleteIds(ids: Seq[String]): Unit =
+    if (ids.nonEmpty)
+      Seq("DELETE FROM memories_fts WHERE id = ?", "DELETE FROM memories WHERE id = ?").foreach { sql =>
+        Using.resource(connection.prepareStatement(sql)) { stmt =>
+          ids.foreach { id =>
+            stmt.setString(1, id)
+            stmt.addBatch()
+          }
+          stmt.executeBatch()
+        }
+      }
+
+  /**
+   * Call `f` on each memory `filter` accepts among the rows `plan` narrows to, one row at a time: nothing is
+   * materialised. The embedding is read and decoded only if the filter can look at it (a `Custom` predicate).
+   */
+  private def foreachMatching(filter: MemoryFilter, plan: FilterSupport.Narrowing)(f: Memory => Unit): Unit = {
+    val embedding = if (FilterSupport.readsEmbedding(filter)) "embedding" else "NULL AS embedding"
+    val sql =
+      s"SELECT id, content, memory_type, metadata, timestamp, importance, $embedding FROM memories ${plan.where}"
+    Using.resource(connection.prepareStatement(sql)) { stmt =>
+      plan.params.zipWithIndex.foreach { case (param, idx) =>
+        setParameter(stmt, idx + 1, param)
+      }
+      Using.resource(stmt.executeQuery()) { rs =>
+        while (rs.next()) {
+          val memory = rowToMemory(rs)
+          if (filter.matches(memory)) f(memory)
+        }
+      }
+    }
+  }
+
+  /**
+   * Run `body` as one transaction: commit if it returns, roll back if it throws, and always restore autocommit,
+   * even if the commit or the rollback fails.
+   */
+  private def inTransaction[A](body: => A): A = {
+    val wasAutoCommit = connection.getAutoCommit
+    connection.setAutoCommit(false)
+    val outcome = Try {
+      val result = body
+      connection.commit()
+      result
+    }
+    if (outcome.isFailure) Try(connection.rollback())
+    Try(connection.setAutoCommit(wasAutoCommit))
+    outcome.get
+  }
 
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
     get(id).flatMap {
@@ -344,16 +346,21 @@ final class VectorMemoryStore private (
 
   override def count(filter: MemoryFilter): Result[Long] =
     Try {
-      val (whereClause, params) = filterToSql(filter)
-      val sql                   = s"SELECT COUNT(*) FROM memories WHERE $whereClause"
-
-      Using.resource(connection.prepareStatement(sql)) { stmt =>
-        params.zipWithIndex.foreach { case (param, idx) =>
-          setParameter(stmt, idx + 1, param)
-        }
-        Using.resource(stmt.executeQuery()) { rs =>
-          rs.next()
-          rs.getLong(1)
+      val plan = narrowing(filter)
+      if (plan.needsMatches) {
+        var n = 0L
+        foreachMatching(filter, plan)(_ => n += 1)
+        n
+      } else {
+        val sql = s"SELECT COUNT(*) FROM memories ${plan.where}"
+        Using.resource(connection.prepareStatement(sql)) { stmt =>
+          plan.params.zipWithIndex.foreach { case (param, idx) =>
+            setParameter(stmt, idx + 1, param)
+          }
+          Using.resource(stmt.executeQuery()) { rs =>
+            rs.next()
+            rs.getLong(1)
+          }
         }
       }
     }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to count memories: ${e.getMessage}"))
@@ -369,22 +376,7 @@ final class VectorMemoryStore private (
 
   override def recent(limit: Int, filter: MemoryFilter): Result[Seq[Memory]] =
     Try {
-      val (whereClause, params) = filterToSql(filter)
-      val sql                   = s"SELECT * FROM memories WHERE $whereClause ORDER BY timestamp DESC LIMIT ?"
-
-      Using.resource(connection.prepareStatement(sql)) { stmt =>
-        params.zipWithIndex.foreach { case (param, idx) =>
-          setParameter(stmt, idx + 1, param)
-        }
-        stmt.setInt(params.size + 1, limit)
-
-        Using.resource(stmt.executeQuery()) { rs =>
-          val memories = ArrayBuffer.empty[Memory]
-          while (rs.next())
-            memories += rowToMemory(rs)
-          memories.toSeq
-        }
-      }
+      queryMemories(filter, Some(limit))
     }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to get recent memories: ${e.getMessage}"))
 
   /**
@@ -510,70 +502,59 @@ final class VectorMemoryStore private (
     )
   }
 
-  private def filterToSql(filter: MemoryFilter): (String, Seq[Any]) = filter match {
-    case MemoryFilter.All  => ("1=1", Seq.empty)
-    case MemoryFilter.None => ("1=0", Seq.empty)
+  private def narrowing(filter: MemoryFilter): FilterSupport.Narrowing =
+    FilterSupport.narrow(filter)(leafSql)
 
+  private def jsonString(text: String): String = ujson.write(ujson.Str(text))
+
+  /**
+   * The SQL of one filter, when it means exactly what `matches` means: a row satisfies it if and only if `matches`
+   * accepts the row, and it is never NULL (a NULL under `NOT` would drop a row `Not` accepts), hence the `COALESCE`
+   * around every comparison with a nullable column. A `MetadataContains` has none: metadata is stored as JSON text,
+   * where a substring test can match across keys, so `matches` decides it.
+   */
+  private def leafSql(filter: MemoryFilter): Option[Sql] = filter match {
     case MemoryFilter.ByType(memoryType) =>
-      ("memory_type = ?", Seq(memoryType.name))
+      Some(Sql("memory_type = ?", Seq(memoryType.name)))
 
     case MemoryFilter.ByTypes(types) =>
-      val placeholders = types.map(_ => "?").mkString(",")
-      (s"memory_type IN ($placeholders)", types.map(_.name).toSeq)
+      // A Seq, not the Set: mapping a Set to "?" would collapse the placeholders into one
+      val names = types.toSeq.map(_.name)
+      if (names.isEmpty) Some(Sql("1 = 0", Seq.empty))
+      else Some(Sql(s"memory_type IN (${names.map(_ => "?").mkString(",")})", names))
 
     case MemoryFilter.ByMetadata(key, value) =>
-      (s"metadata LIKE ?", Seq(s"%\"$key\":\"$value\"%"))
+      // Metadata is stored as JSON text, so look for the JSON form of the pair. instr is a literal, case-sensitive
+      // search: LIKE would read % and _ as wildcards and ignore the case of ASCII letters.
+      Some(Sql("COALESCE(instr(metadata, ?) > 0, 0)", Seq(s"${jsonString(key)}:${jsonString(value)}")))
 
     case MemoryFilter.HasMetadata(key) =>
-      (s"metadata LIKE ?", Seq(s"%\"$key\":%"))
-
-    case MemoryFilter.MetadataContains(key, substring) =>
-      (s"metadata LIKE ?", Seq(s"%\"$key\":\"%$substring%\"%"))
+      Some(Sql("COALESCE(instr(metadata, ?) > 0, 0)", Seq(s"${jsonString(key)}:")))
 
     case MemoryFilter.ByEntity(entityId) =>
-      ("entity_id = ?", Seq(entityId.value))
+      Some(Sql("COALESCE(entity_id = ?, 0)", Seq(entityId.value)))
 
     case MemoryFilter.ByConversation(conversationId) =>
-      ("conversation_id = ?", Seq(conversationId))
+      Some(Sql("COALESCE(conversation_id = ?, 0)", Seq(conversationId)))
 
     case MemoryFilter.ByTimeRange(afterOpt, beforeOpt) =>
       (afterOpt, beforeOpt) match {
         case (Some(after), Some(before)) =>
-          ("timestamp >= ? AND timestamp <= ?", Seq(after.toEpochMilli, before.toEpochMilli))
-        case (Some(after), None) =>
-          ("timestamp >= ?", Seq(after.toEpochMilli))
-        case (None, Some(before)) =>
-          ("timestamp <= ?", Seq(before.toEpochMilli))
-        case (None, None) =>
-          ("1=1", Seq.empty)
+          Some(Sql("timestamp >= ? AND timestamp <= ?", Seq(after.toEpochMilli, before.toEpochMilli)))
+        case (Some(after), None)  => Some(Sql("timestamp >= ?", Seq(after.toEpochMilli)))
+        case (None, Some(before)) => Some(Sql("timestamp <= ?", Seq(before.toEpochMilli)))
+        case (None, None)         => Some(FilterSupport.unrestricted)
       }
 
     case MemoryFilter.MinImportance(threshold) =>
-      ("importance >= ?", Seq(threshold))
+      Some(Sql("COALESCE(importance >= ?, 0)", Seq(threshold)))
 
     case MemoryFilter.ContentContains(substring, caseSensitive) =>
-      if (caseSensitive)
-        ("content LIKE ?", Seq(s"%$substring%"))
-      else
-        ("LOWER(content) LIKE LOWER(?)", Seq(s"%$substring%"))
+      // instr is a literal substring test; LIKE would read % and _ as wildcards and is never case sensitive
+      if (caseSensitive) Some(Sql("instr(content, ?) > 0", Seq(substring)))
+      else Some(Sql(s"instr(${FilterSupport.JavaLower}(content), ${FilterSupport.JavaLower}(?)) > 0", Seq(substring)))
 
-    case MemoryFilter.And(left, right) =>
-      val (leftSql, leftParams)   = filterToSql(left)
-      val (rightSql, rightParams) = filterToSql(right)
-      (s"($leftSql AND $rightSql)", leftParams ++ rightParams)
-
-    case MemoryFilter.Or(left, right) =>
-      val (leftSql, leftParams)   = filterToSql(left)
-      val (rightSql, rightParams) = filterToSql(right)
-      (s"($leftSql OR $rightSql)", leftParams ++ rightParams)
-
-    case MemoryFilter.Not(inner) =>
-      val (innerSql, innerParams) = filterToSql(inner)
-      (s"NOT ($innerSql)", innerParams)
-
-    case _: MemoryFilter.Custom =>
-      // Custom filters can't be translated to SQL, match all and filter in memory
-      ("1=1", Seq.empty)
+    case _ => None // MetadataContains here; And, Or, Not, All, None and Custom are narrowed by FilterSupport
   }
 
   private def setParameter(stmt: PreparedStatement, index: Int, value: Any): Unit = value match {
@@ -589,6 +570,8 @@ final class VectorMemoryStore private (
 
 object VectorMemoryStore {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   private val BusyTimeoutMillis = 30000
 
   /**
@@ -599,13 +582,23 @@ object VectorMemoryStore {
     embeddingService: EmbeddingService,
     config: MemoryStoreConfig = MemoryStoreConfig.default
   ): Result[VectorMemoryStore] =
+    open(dbPath, embeddingService, config, path => DriverManager.getConnection(s"jdbc:sqlite:$path"))
+
+  /** Open the store on a connection from `connect`; the seam lets a test record the SQL the store sends. */
+  private[memory] def open(
+    dbPath: String,
+    embeddingService: EmbeddingService,
+    config: MemoryStoreConfig,
+    connect: String => Connection
+  ): Result[VectorMemoryStore] =
     Try {
       Class.forName("org.sqlite.JDBC")
-      val connection = DriverManager.getConnection(s"jdbc:sqlite:$dbPath")
+      val connection = connect(dbPath)
       // If schema setup fails (e.g. the file is not a database) the connection must not leak:
       // an open handle keeps the file locked, which blocks deletion on Windows.
       Try {
         connection.setAutoCommit(true)
+        FilterSupport.registerJavaLower(connection)
         // Wait for a competing writer on the same file instead of failing immediately with SQLITE_BUSY
         Using.resource(connection.createStatement())(_.execute(s"PRAGMA busy_timeout = $BusyTimeoutMillis"))
         new VectorMemoryStore(dbPath, embeddingService, config, connection)
@@ -626,6 +619,7 @@ object VectorMemoryStore {
       Class.forName("org.sqlite.JDBC")
       val connection = DriverManager.getConnection("jdbc:sqlite::memory:")
       connection.setAutoCommit(true)
+      FilterSupport.registerJavaLower(connection)
       new VectorMemoryStore(":memory:", embeddingService, config, connection)
     }.toEither.left.map(e =>
       ProcessingError("vector-store", s"Failed to create in-memory vector store: ${e.getMessage}")

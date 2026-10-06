@@ -2,8 +2,9 @@
 package org.llm4s.llmconnect
 
 import org.llm4s.annotation.Stable
-import org.llm4s.error.{ CancelledError, LLMError, RateLimitError, RecoverableError, ServiceError, ValidationError }
+import org.llm4s.error.{ CancelledError, LLMError, RateLimitError, ServiceError, ValidationError }
 import org.llm4s.llmconnect.model._
+import org.llm4s.reliability.RetryPolicy
 import org.llm4s.types.Result
 
 import scala.annotation.tailrec
@@ -12,7 +13,8 @@ import scala.concurrent.duration.{ Duration, DurationInt, DurationLong, FiniteDu
 /**
  * Stateless helper functions for retrying LLM completion and streaming calls.
  *
- * Retries only on recoverable errors (e.g. rate limit, timeout). Fails immediately on non-recoverable errors.
+ * Retries the errors `RetryPolicy.isRetryable` retries (e.g. rate limit, timeout, a 5xx), by the same rule. Fails
+ * immediately on any other error, including a client-error response.
  *
  * '''Retry delay precedence''' (honors upstream backpressure):
  * - If the error provides a provider retry-delay hint (e.g. `retryDelay` on [[org.llm4s.error.RateLimitError]],
@@ -142,16 +144,8 @@ object LLMClientRetry {
         attempt(1)
     }
 
-  /** ServiceError is retried only for 5xx, 429, or 408; other status codes are non-recoverable. */
-  private def isRetryableServiceError(e: ServiceError): Boolean =
-    e.httpStatus >= 500 || e.httpStatus == 429 || e.httpStatus == 408
-
-  private def isRetryable(e: LLMError): Boolean = e match {
-    case _: CancelledError   => false
-    case s: ServiceError     => isRetryableServiceError(s)
-    case _: RecoverableError => true
-    case _                   => false
-  }
+  /** The library's one retry rule, shared with `RetryPolicy.isRetryable` and the agent graph's node retries. */
+  private def isRetryable(e: LLMError): Boolean = RetryPolicy.isTransient(e)
 
   /** Validate maxAttempts and baseDelay; return ValidationError if invalid so Result contract is preserved. */
   private def validateRetryParams(maxAttempts: Int, baseDelay: FiniteDuration): Result[Unit] =

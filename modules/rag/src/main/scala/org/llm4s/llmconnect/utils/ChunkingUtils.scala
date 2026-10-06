@@ -18,8 +18,18 @@ object ChunkingUtils {
   }
 
   // ------------------------------ TEXT CHUNKING ------------------------------
+  /** As [[chunkText]], but an invalid `size` or `overlap` is a `Left(ValidationError)` rather than a throw. */
+  def chunkTextValidated(text: String, size: Int, overlap: Int): org.llm4s.types.Result[Seq[String]] =
+    if (size <= 0) Left(org.llm4s.error.ValidationError("size", "Chunk size must be greater than 0"))
+    else if (overlap < 0 || overlap >= size)
+      Left(org.llm4s.error.ValidationError("overlap", "Overlap must be non-negative and less than chunk size"))
+    else Right(chunkText(text, size, overlap))
+
   /**
    * Splits a long text into chunks with specified size and overlap.
+   *
+   * Throws `IllegalArgumentException` on an invalid `size` or `overlap`; use [[chunkTextValidated]]
+   * when they come from input.
    *
    * @param text    Input string.
    * @param size    Maximum characters per chunk (> 0).

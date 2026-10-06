@@ -8,7 +8,7 @@ import scala.annotation.tailrec
 import scala.util.{ Failure, Success, Try, Using }
 
 /** Runs `body` holding `lock`, releasing it on every exit, an `InterruptedException` included. */
-private[graph] def withLock[A](lock: ReentrantLock)(body: => A): A =
+private[agent] def withLock[A](lock: ReentrantLock)(body: => A): A =
   lock.lock()
   Using.resource(new AutoCloseable { def close(): Unit = lock.unlock() })(_ => body)
 
@@ -45,6 +45,31 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     dispatcher.start()
     Right(dispatcher)
 
+  /**
+   * A dispatcher that joins the thread's live set now, with no replay, and is not yet running: it
+   * queues everything committed or sent on the thread from this moment. The caller holds the thread
+   * exclusively, so the next commit is its run's claim. [[Observation.start]] starts it;
+   * [[Observation.abandon]] removes it, delivering nothing.
+   */
+  def observe(threadId: ThreadId, capacity: Int, listener: StreamEvent => Unit): Observation =
+    val dispatcher = new Dispatcher(threadId, afterSeq = 0L, capacity, listener, preJoined = true)
+    withLock(hubLock)(join(threadId, dispatcher))
+    new Observation(dispatcher)
+
+  /** A dispatcher joined by [[observe]], to be started or abandoned exactly once. */
+  final class Observation private[EventHub] (dispatcher: Dispatcher):
+    /** Starts delivery; `lastSeq` is what a `Disconnected` names if nothing durable is delivered. */
+    def start(lastSeq: Long): Subscription =
+      dispatcher.startObserved(lastSeq)
+      dispatcher
+
+    /** Leaves the live set; the listener is never called. */
+    def abandon(): Unit = dispatcher.cancel()
+
+  /** How many dispatchers are in the thread's live set; for tests. */
+  private[graph] def liveCount(threadId: ThreadId): Int =
+    withLock(hubLock)(subscribers.getOrElse(threadId.value, Vector.empty).size)
+
   /** Offers committed `records` to the thread's subscribers; never blocks on a listener. */
   def durable(threadId: ThreadId, records: Vector[EventRecord]): Unit =
     if records.nonEmpty then
@@ -76,13 +101,15 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
    * One subscriber. It replays the log directly to the listener, then, under `hubLock`, reads what
    * was committed since and joins the live set - commits hand events over under the same lock, so
    * none lands between the last read and joining, and the `seq` check drops any already read.
-   * After that it drains its queue. The listener is never called while a lock is held.
+   * After that it drains its queue. The listener is never called while a lock is held. A
+   * `preJoined` dispatcher ([[observe]]) joined the live set before it started, and only drains.
    */
   final private class Dispatcher(
     threadId: ThreadId,
     afterSeq: Long,
     capacity: Int,
-    listener: StreamEvent => Unit
+    listener: StreamEvent => Unit,
+    preJoined: Boolean = false
   ) extends Subscription:
     private val lock                = new ReentrantLock()
     private val notEmpty: Condition = lock.newCondition()
@@ -108,6 +135,11 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
 
     def start(): Unit =
       thread = Some(Thread.ofVirtual().name(s"llm4s-subscriber-${threadId.value}").start(() => run()))
+
+    /** Starts a pre-joined dispatcher: it never replays, and has been in the live set since `observe`. */
+    def startObserved(lastSeq: Long): Unit =
+      lastDeliveredSeq = lastSeq
+      start()
 
     /**
      * Stops the dispatcher. Off the dispatcher thread, waits for a listener call in progress to end
@@ -161,7 +193,8 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     private def run(): Unit =
       // leaves the live set on every exit, including one by a fatal error
       Using.resource(new AutoCloseable { def close(): Unit = leave(threadId, Dispatcher.this) }) { _ =>
-        val ending = replay().flatMap(_ => switchToLive()).fold(identity, _ => drain())
+        val ready  = if preJoined then Right(()) else replay().flatMap(_ => switchToLive())
+        val ending = ready.fold(identity, _ => drain())
         ending match
           case End.Disconnect(reason) =>
             leave(threadId, this)

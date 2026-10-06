@@ -156,13 +156,39 @@ Since 0.3.2 ([#903](https://github.com/llm4s/llm4s/pull/903)) llm4s no longer re
 
 ---
 
+## Agent event stream replaced (#1329)
+
+The `AgentEvent` hierarchy and `runWithEvents` are replaced by `Agent.stream` and the `AgentEvents`
+vocabulary; `TraceEvent.AgentStateUpdated` is replaced by `TraceEvent.AgentRunEnded`.
+
+| Before | After |
+|---|---|
+| `agent.runWithEvents(query)(onEvent)` | `agent.stream(threadId, query)(listener).flatMap(_.await())` |
+| `runCollectingEvents` | collect in the listener, or replay with `GraphRuntime.subscribe(threadId, afterSeq = 0)` |
+| `AgentEvent.TextDelta(delta)` | `AgentEvents.TextDelta(d)` (`d.text`, `d.attempt`) with `withStreaming()` |
+| `ToolCallStarted`/`ToolCallCompleted`/`ToolCallFailed` | `AgentEvents.ToolCallStarted`, `ToolCallResult` (live), `ToolExecuted` (durable, with outcome) |
+| `HandoffStarted`/`HandoffCompleted` | `AgentEvents.HandedOff` |
+| `InputGuardrail*`/`OutputGuardrail*` | `AgentEvents.GuardrailBlocked` (on a block); the outcome on `AgentStatus.Blocked` |
+| `AgentStarted`/`AgentCompleted`/`AgentFailed`, `StepStarted`/`StepCompleted` | kernel events: `RunStarted`, `RunCompleted`, `RunFailed`; `ModelCallStarted`/`ModelCallCompleted` |
+| `TraceEvent.AgentStateUpdated` | `TraceEvent.AgentRunEnded` |
+| `context.progress(payload)` | `context.progress(name, version, payload)`, or an `EventType` |
+| `ModelStep.next(messages, tools)` | `next(messages, tools, call)` |
+
+`await()` returns once the listener has returned from the run's last event, so whatever it collected
+is complete. `AgentRunEnded.usage` is the run's own usage, not the thread's: a dashboard that summed
+the old cumulative figure per run double counted. A slow `AgentIO.stream`/`AgentZ.stream` consumer
+loses live events and gets a `StreamEvent.LiveGap` with their count; it no longer cancels the run.
+
+See the [streaming guide](../guide/agents/streaming.md).
+
+---
+
 ## Towards v1.0
 
 > **Note:** v1.0 has not shipped yet. This section will be completed when the 1.0 release is cut.
 
 Expected areas of change before 1.0:
 
-- Finalise and stabilise the agent streaming event model (`AgentEvent` hierarchy)
 - Decide on cross-module artifact split (`llm4s-core` vs `llm4s-agent` vs `llm4s-rag`)
 - Remove all remaining `0.x`-deprecated symbols
 - Enforce MiMa binary-compatibility checks against the 1.0 baseline (see [issue #924](https://github.com/llm4s/llm4s/issues/924))

@@ -54,6 +54,12 @@ object FusionStrategy {
    * Normalizes scores from each source to [0, 1] and combines with weights.
    * Score = vectorWeight * normalizedVectorScore + keywordWeight * normalizedKeywordScore
    *
+   * Invalid weights are a programming error, like any `require`-guarded value here: the constructor throws
+   * `IllegalArgumentException` for a NaN, infinite, negative or all-zero pair, or one whose sum overflows (an
+   * infinite weight scores `Inf`, or `NaN` where a channel scored 0, and breaks the ranking). There is no `Result`
+   * twin: `RAGConfig.withWeightedScore` is a chainable builder that returns a `RAGConfig`, and a `Left` cannot be
+   * chained. Validate weights that come from user input before building the strategy (#1318, item 5).
+   *
    * @param vectorWeight Weight for vector similarity (default: 0.5)
    * @param keywordWeight Weight for keyword matching (default: 0.5)
    */
@@ -61,8 +67,12 @@ object FusionStrategy {
     vectorWeight: Double = 0.5,
     keywordWeight: Double = 0.5
   ) extends FusionStrategy {
-    require(vectorWeight >= 0 && keywordWeight >= 0, "Weights must be non-negative")
+    require(
+      vectorWeight.isFinite && keywordWeight.isFinite && vectorWeight >= 0 && keywordWeight >= 0,
+      "Weights must be finite and non-negative"
+    )
     require(vectorWeight + keywordWeight > 0, "At least one weight must be positive")
+    require((vectorWeight + keywordWeight).isFinite, "The weights' sum must be finite")
   }
 
   /**
@@ -185,12 +195,7 @@ final class HybridSearcher private (
             documents = candidates.map(_.content),
             topK = Some(topK)
           )
-          r.rerank(request).map { response =>
-            response.results.map { rr =>
-              // Preserve original metadata but update score from reranker
-              candidates(rr.index).copy(score = rr.score)
-            }
-          }
+          r.rerank(request).flatMap(response => RerankMapping.applyRerank(candidates, response.results))
         case None =>
           Right(candidates.take(topK))
       }
@@ -303,24 +308,9 @@ final class HybridSearcher private (
       vectorResults  <- vectorStore.search(queryEmbedding, topK * 2, filter)
       keywordResults <- keywordIndex.searchWithHighlights(queryText, topK * 2, filter = filter)
     } yield {
-      // Normalize scores to [0, 1]
-      val vectorScores = vectorResults.map(_.score)
-      val (vectorMin, vectorMax) =
-        if (vectorScores.isEmpty) (0.0, 1.0)
-        else (vectorScores.min, vectorScores.max)
-
-      val keywordScores = keywordResults.map(_.score)
-      val (keywordMin, keywordMax) =
-        if (keywordScores.isEmpty) (0.0, 1.0)
-        else (keywordScores.min, keywordScores.max)
-
-      def normalizeVector(score: Double): Double =
-        if (vectorMax == vectorMin) 1.0
-        else (score - vectorMin) / (vectorMax - vectorMin)
-
-      def normalizeKeyword(score: Double): Double =
-        if (keywordMax == keywordMin) 1.0
-        else (score - keywordMin) / (keywordMax - keywordMin)
+      // Normalize each channel's scores to (0, 1]; a chunk a channel did not find scores 0 there.
+      val normalizeVector  = ScoreNormalisation.over(vectorResults.map(_.score))
+      val normalizeKeyword = ScoreNormalisation.over(keywordResults.map(_.score))
 
       // Build maps
       val vectorMap: Map[String, ScoredRecord] =
@@ -522,4 +512,41 @@ object HybridSearcher {
       vectorStore  <- VectorStoreFactory.create(config.vectorStoreConfig)
       keywordIndex <- SQLiteKeywordIndex(config.keywordIndexConfig)
     } yield new HybridSearcher(vectorStore, keywordIndex, config.defaultStrategy)
+}
+
+private[vectorstore] object RerankMapping {
+
+  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+
+  /**
+   * Map a reranker's results back onto the candidates it was given.
+   *
+   *  - A result naming no candidate is dropped and logged at WARN: one bad index from the reranker must not
+   *    cost the caller every other result, or an exception. (`AsyncHybridSearcher` always behaved this way; the
+   *    synchronous searcher used to throw `IndexOutOfBoundsException`, #1318.)
+   *  - A candidate named more than once is returned once, with the score of its first occurrence.
+   *  - A response that is not empty but names no candidate at all is a failure, not "no results": the reranker
+   *    did not do its job, and an empty success would hide that from the caller. An empty response stays an
+   *    empty success.
+   */
+  def applyRerank(
+    candidates: Seq[HybridSearchResult],
+    results: Seq[org.llm4s.reranker.RerankResult]
+  ): Result[Seq[HybridSearchResult]] = {
+    val (valid, invalid) = results.partition(rr => candidates.indices.contains(rr.index))
+    if (invalid.nonEmpty)
+      logger.warn(
+        s"Reranker returned ${invalid.size} result(s) with an index outside 0 until ${candidates.size}: " +
+          invalid.map(_.index).mkString(", ")
+      )
+    if (valid.isEmpty && invalid.nonEmpty)
+      Left(
+        org.llm4s.error.ProcessingError(
+          "rerank",
+          s"The reranker returned ${invalid.size} result(s) but no usable result: every index is outside " +
+            s"0 until ${candidates.size}"
+        )
+      )
+    else Right(valid.distinctBy(_.index).map(rr => candidates(rr.index).copy(score = rr.score)))
+  }
 }

@@ -14,23 +14,23 @@ class ImageGenerationErrorRecoverabilitySpec extends AnyFlatSpec with Matchers {
 
   /** What each case should answer. Exhaustive on purpose: a new `ImageGenerationError` does not compile until it is classified here. */
   private def retryable(error: ImageGenerationError): Boolean = error match {
-    case _: RateLimitError => true
-    case s: ServiceError   => ServiceError.isTransientStatus(s.statusCode)
-    case _: AuthenticationError | _: ValidationError | _: InvalidPromptError | _: InsufficientResourcesError |
-        _: UnsupportedOperation | _: UnknownError =>
+    case _: ImageRateLimitError => true
+    case s: ImageServiceError   => ImageServiceError.isTransientStatus(s.statusCode)
+    case _: ImageAuthenticationError | _: ImageValidationError | _: InvalidPromptError | _: InsufficientResourcesError |
+        _: UnsupportedOperation | _: ImageUnknownError =>
       false
   }
 
   private val everyCase: Seq[ImageGenerationError] = Seq(
-    AuthenticationError("bad key"),
-    RateLimitError("slow down"),
-    ServiceError("provider is down", 503),
-    ServiceError("provider refused", 400),
-    ValidationError("size not supported"),
+    ImageAuthenticationError("bad key"),
+    ImageRateLimitError("slow down"),
+    ImageServiceError("provider is down", 503),
+    ImageServiceError("provider refused", 400),
+    ImageValidationError("size not supported"),
     InvalidPromptError("prompt rejected"),
     InsufficientResourcesError("out of credits"),
     UnsupportedOperation("no edits here"),
-    UnknownError(new RuntimeException("something else"))
+    ImageUnknownError(new RuntimeException("something else"))
   )
 
   "LLMError.isRecoverable" should "answer for every ImageGenerationError, and not throw a MatchError" in {
@@ -38,21 +38,21 @@ class ImageGenerationErrorRecoverabilitySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "call a rate limit recoverable and a rejected request, credential or prompt not" in {
-    LLMError.isRecoverable(RateLimitError("slow down")) shouldBe true
-    LLMError.isRecoverable(AuthenticationError("bad key")) shouldBe false
-    LLMError.isRecoverable(ValidationError("bad size")) shouldBe false
+    LLMError.isRecoverable(ImageRateLimitError("slow down")) shouldBe true
+    LLMError.isRecoverable(ImageAuthenticationError("bad key")) shouldBe false
+    LLMError.isRecoverable(ImageValidationError("bad size")) shouldBe false
     LLMError.isRecoverable(InvalidPromptError("bad prompt")) shouldBe false
     LLMError.isRecoverable(UnsupportedOperation("no edits")) shouldBe false
     LLMError.isRecoverable(InsufficientResourcesError("no credits")) shouldBe false
-    LLMError.isRecoverable(UnknownError(new RuntimeException("?"))) shouldBe false
+    LLMError.isRecoverable(ImageUnknownError(new RuntimeException("?"))) shouldBe false
   }
 
-  it should "judge a ServiceError by the status the provider answered" in {
+  it should "judge an ImageServiceError by the status the provider answered" in {
     Seq(0, 408, 429, 500, 502, 503, 504, 599).foreach { status =>
-      withClue(s"status $status")(LLMError.isRecoverable(ServiceError("down", status)) shouldBe true)
+      withClue(s"status $status")(LLMError.isRecoverable(ImageServiceError("down", status)) shouldBe true)
     }
     Seq(400, 401, 403, 404, 409, 422).foreach { status =>
-      withClue(s"status $status")(LLMError.isRecoverable(ServiceError("refused", status)) shouldBe false)
+      withClue(s"status $status")(LLMError.isRecoverable(ImageServiceError("refused", status)) shouldBe false)
     }
   }
 
@@ -60,29 +60,29 @@ class ImageGenerationErrorRecoverabilitySpec extends AnyFlatSpec with Matchers {
     val errors = everyCase.toList
 
     LLMError.recoverableErrors(errors).map(_.getClass.getSimpleName).toSet shouldBe
-      Set("RateLimitError", "TransientServiceError")
+      Set("ImageRateLimitError", "TransientImageServiceError")
     LLMError.nonRecoverableErrors(errors) should have size (errors.size - 2).toLong
   }
 
-  "ServiceError" should "still be built and matched as (message, status)" in {
-    val transient: ServiceError = ServiceError("down", 503)
-    val rejected: ServiceError  = ServiceError("refused", 403)
+  "ImageServiceError" should "still be built and matched as (message, status)" in {
+    val transient: ImageServiceError = ImageServiceError("down", 503)
+    val rejected: ImageServiceError  = ImageServiceError("refused", 403)
 
-    transient should matchPattern { case ServiceError("down", 503) => }
-    rejected should matchPattern { case ServiceError("refused", 403) => }
+    transient should matchPattern { case ImageServiceError("down", 503) => }
+    rejected should matchPattern { case ImageServiceError("refused", 403) => }
     transient.statusCode shouldBe 503
     transient.code shouldBe Some("503")
     rejected.code shouldBe Some("403")
   }
 
   it should "compare by what it says, whichever case it is" in {
-    ServiceError("down", 503) shouldBe ServiceError("down", 503)
-    ServiceError("down", 503) should not be ServiceError("down", 502)
-    ServiceError("refused", 403) shouldBe ServiceError("refused", 403)
+    ImageServiceError("down", 503) shouldBe ImageServiceError("down", 503)
+    ImageServiceError("down", 503) should not be ImageServiceError("down", 502)
+    ImageServiceError("refused", 403) shouldBe ImageServiceError("refused", 403)
   }
 
   it should "carry the marker that matches its status" in {
-    ServiceError("down", 503) shouldBe a[RecoverableError]
-    ServiceError("refused", 403) shouldBe a[NonRecoverableError]
+    ImageServiceError("down", 503) shouldBe a[RecoverableError]
+    ImageServiceError("refused", 403) shouldBe a[NonRecoverableError]
   }
 }

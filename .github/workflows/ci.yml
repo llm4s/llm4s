@@ -91,6 +91,17 @@ jobs:
       - name: Check install snippets do not pin a literal version
         run: scripts/check-doc-versions.sh
 
+      # Fails when the docs state a Scala or JDK version, a module or an sbt command the build does not have.
+      # The Scala 2.13 thread began with exactly that kind of claim (#874, #1134); this keeps it corrected.
+      # The build's side is what sbt loaded (project/BuildModel.scala), not a reading of build.sbt's text.
+      - name: Write the build model
+        run: sbt -batch "dumpBuildModel target/build-model.json"
+
+      - name: Check the documented support matrix matches the build
+        run: |
+          scripts/test-check-doc-support.sh target/build-model.json
+          scripts/check-doc-support.sh --model target/build-model.json
+
       # scalafmtCheckAll covers sources only; scalafmtSbtCheck covers build.sbt and project/*.scala.
       - name: Check formatting
         run: sbt scalafmtCheckAll scalafmtSbtCheck
@@ -170,6 +181,8 @@ jobs:
     name: Code Coverage
     needs: [quick-checks]
     runs-on: ubuntu-latest
+    # Healthy runs take about 40 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
+    timeout-minutes: 90
     permissions:
       contents: read
 
@@ -567,6 +580,9 @@ jobs:
         java: [21]
 
     runs-on: ${{ matrix.os }}
+    # Healthy runs take up to about 50 minutes on Windows; the default limit is 360, so a hung run would hold
+    # the PR for six hours.
+    timeout-minutes: 90
     
     steps:
       - uses: actions/checkout@v7

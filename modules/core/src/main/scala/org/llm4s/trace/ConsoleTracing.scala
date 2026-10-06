@@ -110,13 +110,15 @@ class ConsoleTracing extends Tracing {
           println(s"${MAGENTA}Total Tokens: ${e.usage.totalTokens}$RESET")
           println()
 
-        case e: TraceEvent.AgentStateUpdated =>
+        case e: TraceEvent.AgentRunEnded =>
           println()
-          printSubHeader("AGENT STATE UPDATED", BLUE)
+          printSubHeader("AGENT RUN ENDED", BLUE)
           println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
-          println(s"${BLUE}Status: ${e.status}$RESET")
-          println(s"${BLUE}Messages: ${e.messageCount}$RESET")
-          println(s"${BLUE}Logs: ${e.logCount}$RESET")
+          println(s"${BLUE}Agent: ${e.agent}  Status: ${e.status}$RESET")
+          println(s"${BLUE}Thread: ${e.threadId}  Run: ${e.runId}$RESET")
+          println(
+            s"${BLUE}Messages: ${e.messages.size}  Tokens: ${e.usage.inputTokens} in / ${e.usage.outputTokens} out$RESET"
+          )
           println()
 
         case e: TraceEvent.CustomEvent =>

@@ -42,9 +42,9 @@ import scala.util.control.NonFatal
  *
  * == Agent state ==
  *
- * There is no `traceAgentState(AgentState)`: agent state is traced as an ordinary
- * [[TraceEvent.AgentStateUpdated]], built with `AgentState#toTraceEvent`, so the
- * tracing contract does not depend on the agent runtime (D5, #1133).
+ * There is no `traceAgentState(AgentState)`. An agent run reports its end with
+ * [[TraceEvent.AgentRunEnded]]; the agent's per-step events arrive as `CustomEvent`s named
+ * `graph.*` and `agent.*`.
  *
  * == Composition ==
  *

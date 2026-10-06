@@ -1,8 +1,7 @@
 package org.llm4s.samples.zio
 
-import org.llm4s.agent.AgentContext
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.samples.util.AgentResults
 import org.llm4s.zio.LLMClientZ
 import zio.{ ZIO, ZIOAppDefault }
 
@@ -35,12 +34,8 @@ object ZIOAgentExample extends ZIOAppDefault {
       _ <- ZIO.debug(chunks.map(_.content.getOrElse("")).mkString)
 
       // Agent with tool support
-      agentZ = client.agent()
-      state <- agentZ.run(
-        query = "What day is it today?",
-        tools = ToolRegistry.empty,
-        context = AgentContext.Default
-      )
-      _ <- ZIO.debug(s"Agent: ${state.conversation.messages.last}")
+      agentZ <- client.agent("zio-agent-example")()
+      result <- agentZ.run("What day is it today?")
+      _      <- ZIO.debug(s"Agent: ${AgentResults.answerOrStatus(result)}")
     } yield ()).provide(LLMClientZ.layer)
 }
