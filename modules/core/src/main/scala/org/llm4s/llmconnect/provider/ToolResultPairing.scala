@@ -25,6 +25,15 @@ final private[llm4s] case class ToolResultPairing(calls: Map[Int, Set[String]], 
 
   /** Whether the tool message at `index` is paired. */
   def resultPaired(index: Int): Boolean = results.contains(index)
+
+  /**
+   * The assistant message at `index` as it may be sent: with only its paired calls, set through
+   * [[AssistantMessage.withToolCalls]], so that dropping a call unseals the thinking (see
+   * "Sealed thinking" on [[AssistantMessage]]) - a signed turn may go back only with the exact calls
+   * it was returned with. With every call paired it is `message` itself, signatures intact.
+   */
+  def replayable(index: Int, message: AssistantMessage): AssistantMessage =
+    message.withToolCalls(message.toolCalls.filter(tc => callPaired(index, tc.id)))
 }
 
 private[llm4s] object ToolResultPairing {

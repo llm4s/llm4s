@@ -480,17 +480,20 @@ curl https://api.anthropic.com/v1/messages \
         flushResults()
         paramsBuilder.addUserMessage(content)
 
-      case (am: AssistantMessage, index) =>
+      case (original: AssistantMessage, index) =>
         flushResults()
-        val calls = am.toolCalls.filter(tc => pairing.callPaired(index, tc.id))
-        val text  = am.contentOpt.filter(_.nonEmpty)
+        // only the paired calls; dropping one unseals the thinking, which then stays out
+        val am             = pairing.replayable(index, original)
+        val calls          = am.toolCalls
+        val text           = am.contentOpt.filter(_.nonEmpty)
+        val sealedThinking = AnthropicClient.thinkingBlockParams(am.thinking)
         if (calls.isEmpty && text.isEmpty) {
           // nothing to send: every tool call went unanswered, and thinking cannot stand alone
-        } else if (am.thinking.isEmpty && calls.isEmpty) {
+        } else if (sealedThinking.isEmpty && calls.isEmpty) {
           // a plain text turn; one whose every tool call went unanswered keeps only its text
           text.foreach(t => paramsBuilder.addAssistantMessage(t))
         } else {
-          val blocks = AnthropicClient.thinkingBlockParams(am.thinking) ++
+          val blocks = sealedThinking ++
             text.map(t => ContentBlockParam.ofText(TextBlockParam.builder().text(t).build())).toList ++
             calls.map(AnthropicClient.toolUseBlockParam)
           paramsBuilder.addMessage(

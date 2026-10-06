@@ -34,6 +34,10 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   private val call = ToolCall("toolu_1", "get_weather", ujson.Obj("city" -> "Paris"))
 
+  private val sealedThinking =
+    Seq(ThinkingBlock.Text("Weather and time.", Some("sig-pair")), ThinkingBlock.Redacted("opaque-pair"))
+  private val timeCall = ToolCall("toolu_2", "get_time", ujson.Obj("zone" -> "CET"))
+
   private def requestBody(messages: Message*): ujson.Value = {
     val builder = MessageCreateParams.builder().model(testConfig.model).maxTokens(4096)
     new AnthropicClient(testConfig).addMessagesToParams(Conversation(messages), builder, CompletionOptions())
@@ -230,5 +234,29 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
     val body = requestBody(UserMessage("hi"), unanswered, UserMessage("again"))
     body("messages").arr.map(_("role").str) shouldBe Seq("user", "user")
     (body.render() should not).include("sig-unanswered")
+  }
+
+  it should "unseal a signed turn whose calls are not all paired, sending only the paired call" in {
+    val turnMsg = AssistantMessage(Some("Checking."), Seq(call, timeCall)).withThinking(sealedThinking)
+    val body    = requestBody(UserMessage("Weather and time?"), turnMsg, ToolMessage("sunny", call.id))
+    val turn    = body("messages")(1)("content").arr
+    turn.map(_("type").str) shouldBe Seq("text", "tool_use")
+    turn(1)("id").str shouldBe "toolu_1"
+    (body.render() should not).include("sig-pair")
+    (body.render() should not).include("opaque-pair")
+  }
+
+  it should "keep a signed turn's thinking when every call is paired" in {
+    val turnMsg = AssistantMessage(None, Seq(call, timeCall)).withThinking(sealedThinking)
+    val body = requestBody(
+      UserMessage("Weather and time?"),
+      turnMsg,
+      ToolMessage("sunny", call.id),
+      ToolMessage("noon", timeCall.id)
+    )
+    val turn = body("messages")(1)("content").arr
+    turn.map(_("type").str) shouldBe Seq("thinking", "redacted_thinking", "tool_use", "tool_use")
+    turn(0)("signature").str shouldBe "sig-pair"
+    turn(1)("data").str shouldBe "opaque-pair"
   }
 }

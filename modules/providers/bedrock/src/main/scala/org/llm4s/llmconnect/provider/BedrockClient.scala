@@ -422,9 +422,11 @@ class BedrockClient(
       case (UserMessage(content), _) =>
         Some(BedrockMessage.builder().role(ConversationRole.USER).content(ContentBlock.fromText(content)).build())
 
-      case (msg: AssistantMessage, index) =>
+      case (original: AssistantMessage, index) =>
+        // only the paired calls; dropping one unseals the thinking (see ToolResultPairing.replayable)
+        val msg = pairing.replayable(index, original)
         // signed and redacted reasoning goes back first, unchanged; unsigned reasoning (from
-        // another provider) is left out, since Bedrock's Claude models reject it unsigned
+        // another provider, or unsealed above) is left out, since Bedrock's Claude models reject it
         val reasoningBlocks = msg.thinking.collect {
           case ThinkingBlock.Text(text, Some(signature)) if signature.nonEmpty =>
             ContentBlock.fromReasoningContent(
@@ -439,7 +441,7 @@ class BedrockClient(
             )
         }
         val textBlocks = msg.contentOpt.filter(_.nonEmpty).map(ContentBlock.fromText).toSeq
-        val toolBlocks = msg.toolCalls.filter(tc => pairing.callPaired(index, tc.id)).map { tc =>
+        val toolBlocks = msg.toolCalls.map { tc =>
           ContentBlock.fromToolUse(
             ToolUseBlock.builder().toolUseId(tc.id).name(tc.name).input(ujsonToDocument(tc.arguments)).build()
           )

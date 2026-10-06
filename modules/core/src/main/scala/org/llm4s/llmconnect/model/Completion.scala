@@ -56,9 +56,10 @@ final case class Completion private (
   def thinking: Option[String] = message.thinkingText
 
   /**
-   * Check if completion includes thinking/reasoning content.
+   * Whether the completion carries thinking, text or redacted (see [[AssistantMessage.hasThinking]]).
+   * A completion whose only reasoning is redacted has thinking but no [[thinking]] text.
    */
-  def hasThinking: Boolean = thinking.nonEmpty
+  def hasThinking: Boolean = message.hasThinking
 
   /**
    * Get the full response including thinking content (if available).

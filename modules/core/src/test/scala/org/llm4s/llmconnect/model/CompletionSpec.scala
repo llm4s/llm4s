@@ -57,6 +57,19 @@ class CompletionSpec extends AnyFunSuite with Matchers {
     completion.hasThinking shouldBe true
   }
 
+  test("Completion.hasThinking returns true when the only thinking is redacted") {
+    val completion = Completion(
+      id = "test-id",
+      created = 1234567890L,
+      content = "The answer is 4",
+      model = "claude-3",
+      message = AssistantMessage("The answer is 4").withThinking(Seq(ThinkingBlock.Redacted("opaque")))
+    )
+
+    completion.thinking shouldBe None
+    completion.hasThinking shouldBe true
+  }
+
   test("Completion.hasThinking returns false when thinking is empty") {
     val completion = Completion(
       id = "test-id",

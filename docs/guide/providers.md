@@ -1513,7 +1513,9 @@ Signed and redacted thinking is *sealed*: it is valid only beside the exact cont
 it came with. So `withContent` and `withToolCalls`, given a changed value, drop redacted blocks and
 signatures and keep the reasoning text (`hasSealedThinking` reports which state a message is in).
 Context compression, an agent's `afterAgent` answer rewrite and a tool-call edit all go through
-those setters, so none of them sends Anthropic or Bedrock a modified signed turn. Thinking also
+those setters, so none of them sends Anthropic or Bedrock a modified signed turn - and so do those
+clients when they leave out an unpaired call: a signed turn sent with fewer calls than it was returned
+with goes without its signed and redacted blocks. Thinking also
 counts toward token estimates (`ConversationTokenCounter`), since most providers resend it.
 
 ```scala

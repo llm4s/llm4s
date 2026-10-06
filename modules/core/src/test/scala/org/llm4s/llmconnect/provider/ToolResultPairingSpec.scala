@@ -8,6 +8,8 @@ class ToolResultPairingSpec extends AnyFlatSpec with Matchers {
 
   private def call(id: String) = ToolCall(id, "weather", ujson.Obj())
 
+  private val sealedThinking = Seq(ThinkingBlock.Text("t", Some("sig")), ThinkingBlock.Redacted("opaque"))
+
   "ToolResultPairing" should "pair calls with the run of tool messages straight after them" in {
     val messages = Seq(
       UserMessage("weather?"),
@@ -74,5 +76,20 @@ class ToolResultPairingSpec extends AnyFlatSpec with Matchers {
     val pairing = ToolResultPairing.of(messages)
     pairing.resultPaired(1) shouldBe true
     pairing.resultPaired(3) shouldBe true
+  }
+
+  "replayable" should "drop unpaired calls and unseal the thinking" in {
+    val turn     = AssistantMessage(None, Seq(call("a"), call("b"))).withThinking(sealedThinking)
+    val messages = Seq(turn, ToolMessage("sunny", "a"))
+    val replay   = ToolResultPairing.of(messages).replayable(0, turn)
+    replay.toolCalls.map(_.id) shouldBe Seq("a")
+    replay.thinking shouldBe Seq(ThinkingBlock.Text("t"))
+    replay.hasSealedThinking shouldBe false
+  }
+
+  it should "return the message itself, signatures intact, when every call is paired" in {
+    val turn     = AssistantMessage(None, Seq(call("a"), call("b"))).withThinking(sealedThinking)
+    val messages = Seq(turn, ToolMessage("sunny", "a"), ToolMessage("rainy", "b"))
+    (ToolResultPairing.of(messages).replayable(0, turn) should be).theSameInstanceAs(turn)
   }
 }

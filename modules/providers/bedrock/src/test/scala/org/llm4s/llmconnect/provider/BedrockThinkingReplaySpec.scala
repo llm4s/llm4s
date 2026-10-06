@@ -157,6 +157,38 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
     }
   }
 
+  "a signed tool-call turn" should {
+    val time = ToolCall("tc-2", "get_time", ujson.Obj())
+    val sealedThinking =
+      Seq(ThinkingBlock.Text("Weather and time.", Some("sig-pair")), ThinkingBlock.Redacted(redacted))
+
+    "be unsealed, with only its paired call, when one of its calls is unpaired" in {
+      val messages = sentMessages(
+        UserMessage("Weather and time?"),
+        AssistantMessage(Some("Checking."), Seq(weather, time)).withThinking(sealedThinking),
+        ToolMessage("sunny", "tc-1")
+      )
+      val turn = messages(1)
+      turn("role").str shouldBe "assistant"
+      turn("content").arr.map(_.obj.keySet.head) shouldBe Seq("text", "toolUse")
+      turn("content")(1)("toolUse")("toolUseId").str shouldBe "tc-1"
+      (turn.render() should not).include("reasoningContent")
+    }
+
+    "keep its signed and redacted reasoning when every call is paired" in {
+      val messages = sentMessages(
+        UserMessage("Weather and time?"),
+        AssistantMessage(None, Seq(weather, time)).withThinking(sealedThinking),
+        ToolMessage("sunny", "tc-1"),
+        ToolMessage("noon", "tc-2")
+      )
+      val blocks = messages(1)("content").arr
+      blocks.map(_.obj.keySet.head) shouldBe Seq("reasoningContent", "reasoningContent", "toolUse", "toolUse")
+      blocks(0)("reasoningContent")("reasoningText")("signature").str shouldBe "sig-pair"
+      blocks(1)("reasoningContent")("redactedContent").str shouldBe redacted
+    }
+  }
+
   "a ConverseStream response" should {
     "assemble each reasoning block with its signature on the message" in {
       def delta(index: Int, inner: ujson.Obj) =
