@@ -85,13 +85,18 @@ object TokenExchange:
    * Whether `url` may receive the identity token: `https`, or `http` only when the URL's real host - the
    * one after any `userinfo@`, so `http://localhost@evil.example/` is `evil.example` - is a loopback
    * literal (`localhost`, `127.x.y.z`, `[::1]`; names are not resolved). The refusal does not echo the URL,
-   * which may carry credentials; it names `key`, the setting the URL came from.
+   * which may carry credentials; it names `key`, the setting the URL came from, and `carries`, the secret
+   * the request would expose.
    */
-  private[llm4s] def requireSecureUrl(url: String, key: String = "tokenUrl"): Result[Unit] =
+  private[llm4s] def requireSecureUrl(
+    url: String,
+    key: String = "tokenUrl",
+    carries: String = "the identity token"
+  ): Result[Unit] =
     val refusal = Left(
       ConfigurationError(
         s"$key must be an https URL (plain http is accepted only for a loopback host such as localhost or " +
-          "127.0.0.1), because the request carries the identity token"
+          s"127.0.0.1), because the request carries $carries"
       )
     )
     Try(new URI(url.trim)).toOption.flatMap(uri =>
@@ -100,6 +105,41 @@ object TokenExchange:
       case Some((uri, "https")) if Option(uri.getHost).exists(_.nonEmpty) => Right(())
       case Some((uri, "http")) if Option(uri.getHost).exists(isLoopback)  => Right(())
       case _                                                              => refusal
+
+  /**
+   * Whether `url` may receive a vendor's workload-identity credential: `https` to a host that is exactly
+   * one of `trustedHosts`, or `http`/`https` to a loopback literal (the same exemption as
+   * [[requireSecureUrl]], for local test servers). It is an allow-list, so a third-party host, a lookalike
+   * (`api.openai.com.evil.example`, `evilapi.openai.com`), a trailing-dot form or an IP address is refused.
+   * The host compares case-insensitively; a URL with `userinfo@` is refused outright, since it can only be
+   * a mistake or an attempt to dress one host up as another. `trustedHosts` must be lower case. The refusal
+   * names `vendor` and `key` and lists `trustedHosts`, but not the URL, which may carry credentials.
+   */
+  private[llm4s] def requireTrustedHost(
+    url: String,
+    key: String,
+    vendor: String,
+    trustedHosts: Set[String]
+  ): Result[Unit] =
+    val refusal = Left(
+      ConfigurationError(
+        s"$key must be an https URL to ${trustedHosts.toSeq.sorted.mkString(" or ")} with $vendor workload " +
+          s"identity, because requests to it carry the $vendor credential (plain http is accepted only for a " +
+          "loopback host such as localhost or 127.0.0.1)",
+        List(key)
+      )
+    )
+    Try(new URI(url.trim)).toOption
+      .filter(uri => uri.getRawUserInfo == null)
+      .flatMap(uri =>
+        for
+          scheme <- Option(uri.getScheme).map(_.toLowerCase(Locale.ROOT))
+          host   <- Option(uri.getHost).map(_.toLowerCase(Locale.ROOT)).filter(_.nonEmpty)
+        yield (scheme, host)
+      ) match
+      case Some(("https", host)) if trustedHosts.contains(host) => Right(())
+      case Some(("https" | "http", host)) if isLoopback(host)   => Right(())
+      case _                                                    => refusal
 
   private def isLoopback(host: String): Boolean =
     val h = host.toLowerCase(Locale.ROOT)

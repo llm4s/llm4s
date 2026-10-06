@@ -41,8 +41,9 @@ import org.llm4s.util.Redaction
  *                          with the `streamUsage` key.
  * @param tokenExchange     workload-identity auth: the identity token is exchanged here for the bearer
  *                          token, which replaces `apiKey`; never set together with `apiKey` or an
- *                          `Authorization` entry in `headers`, and its `tokenUrl` must be `https` (plain
- *                          `http` only to a loopback host). [[OpenAICompatibleConfig.fromValues]] checks
+ *                          `Authorization` entry in `headers`, and its `tokenUrl` and `baseUrl` must be
+ *                          `https` (plain `http` only to a loopback host). The exchanged token goes to
+ *                          `baseUrl`, a host the user chooses, so no host is allow-listed here. [[OpenAICompatibleConfig.fromValues]] checks
  *                          these, and `OpenAICompatibleClient` refuses a config built any other way that
  *                          breaks them.
  */
@@ -138,7 +139,14 @@ object OpenAICompatibleConfig {
    *    request's bearer, and a configured header would replace it - so a 401 would retry with the
    *    same stale header rather than a fresh token;
    *  - `tokenExchange.tokenUrl` must be `https`, or plain `http` to a loopback host, since the
-   *    exchange carries the identity token.
+   *    exchange carries the identity token;
+   *  - `baseUrl` must be `https`, or plain `http` to a loopback host, since every request carries the
+   *    exchanged token as its bearer.
+   *
+   * Unlike OpenAI's and Anthropic's workload identity, the hosts are not allow-listed: this provider
+   * talks to an endpoint the user chooses (Databricks, a gateway, a self-hosted server), and the
+   * token exchange is configured for that endpoint. The exchanged token goes to `baseUrl`, so
+   * `tokenUrl` and `baseUrl` must belong to the same trusted service - check both when configuring.
    */
   private[llm4s] def validate(config: OpenAICompatibleConfig): Result[OpenAICompatibleConfig] =
     config.tokenExchange match
@@ -166,6 +174,10 @@ object OpenAICompatibleConfig {
             .requireSecureUrl(exchange.tokenUrl)
             .left
             .map(e => ConfigurationError(e.message, List("tokenExchange.tokenUrl")))
+          _ <- TokenExchange
+            .requireSecureUrl(config.baseUrl, "baseUrl", "the exchanged token")
+            .left
+            .map(e => ConfigurationError(e.message, List("baseUrl")))
         yield config
 
   /**

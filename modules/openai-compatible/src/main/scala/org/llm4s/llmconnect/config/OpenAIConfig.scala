@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.auth.TokenExchange
 import org.llm4s.llmconnect.spi.ProviderConfigKey
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -97,11 +98,22 @@ object OpenAIConfig {
     }
 
   /**
+   * The OpenAI API hosts a config with `workloadIdentity` may target: the global API and the
+   * data-residency regions, as listed by the OpenAI Java SDK's `com.openai.core.DataResidency`
+   * (`GLOBAL`, `US`, `EU`, `AE`).
+   */
+  private[llm4s] val WorkloadIdentityHosts: Set[String] =
+    Set("api.openai.com", "us.api.openai.com", "eu.api.openai.com", "ae.api.openai.com")
+
+  /**
    * The rules every [[OpenAIConfig]] must meet, whichever way it was built: [[fromValues]] applies
    * them, and `OpenAIClient` applies them again to a config built with the constructor or `copy`.
-   * With `workloadIdentity` set, `apiKey` must be empty (a config authenticates one way), and the
-   * config must belong to `openai`: the token OpenAI's exchange issues is an OpenAI credential, and
-   * a Requesty or OpenRouter config would send it to that third party.
+   * With `workloadIdentity` set, `apiKey` must be empty (a config authenticates one way), the
+   * config must belong to `openai`, and `baseUrl` must be `https` to one of [[WorkloadIdentityHosts]]
+   * (or a loopback host, for tests): the token OpenAI's exchange issues is an OpenAI credential, sent
+   * as the bearer of every request to `baseUrl`, so a Requesty, OpenRouter, proxy or other custom
+   * endpoint would receive it. The provider label alone is not enough - an `openai` config with a
+   * custom `baseUrl` still reports `openai` - so the host is checked against an allow-list.
    */
   private[llm4s] def validate(config: OpenAIConfig): Result[OpenAIConfig] =
     config.workloadIdentity match
@@ -125,6 +137,7 @@ object OpenAIConfig {
               List("workloadIdentity")
             )
           )
+          _ <- TokenExchange.requireTrustedHost(config.baseUrl, "baseUrl", "OpenAI", WorkloadIdentityHosts)
         yield config
 
   /**
@@ -146,7 +159,9 @@ object OpenAIConfig {
    * @param providerId   the provider the config belongs to, e.g. `ProviderId("requesty")`;
    *                     `None` infers it from `baseUrl`, as [[OpenAIConfig.providerId]] describes.
    * @param workloadIdentity OpenAI workload identity federation instead of `apiKey`; only for a
-   *                     config belonging to `openai`.
+   *                     config belonging to `openai` whose `baseUrl` is an OpenAI API host
+   *                     (`https://api.openai.com/v1` or a data-residency region such as
+   *                     `https://eu.api.openai.com/v1`).
    * @return `Left(ConfigurationError)` for a blank field or a config [[validate]] refuses.
    */
   def fromValues(

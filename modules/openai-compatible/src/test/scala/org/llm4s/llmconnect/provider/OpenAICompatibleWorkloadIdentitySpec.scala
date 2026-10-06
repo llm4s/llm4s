@@ -238,11 +238,12 @@ class OpenAICompatibleWorkloadIdentitySpec
     def fromValues(
       headers: Map[String, String] = Map.empty,
       apiKey: Option[String] = None,
-      tokenExchange: TokenExchangeConfig = exchange
+      tokenExchange: TokenExchangeConfig = exchange,
+      baseUrl: String = "https://ws.example/serving-endpoints"
     ) =
       OpenAICompatibleConfig.fromValues(
         model = "m",
-        baseUrl = "https://ws.example/serving-endpoints",
+        baseUrl = baseUrl,
         apiKey = apiKey,
         headers = headers,
         tokenExchange = Some(tokenExchange)
@@ -270,12 +271,25 @@ class OpenAICompatibleWorkloadIdentitySpec
       fromValues(tokenExchange = exchange.withTokenUrl("http://127.0.0.1:9/token")).isRight shouldBe true
     }
 
+    "be refused by fromValues with a plain-http baseUrl to a non-loopback host, which would receive the exchanged token" in {
+      val error = fromValues(baseUrl = "http://ws.example/serving-endpoints").left.value
+      error shouldBe a[ConfigurationError]
+      error.message should (include("baseUrl").and(include("exchanged token")))
+      fromValues(baseUrl = "http://localhost@evil.example/v1").isLeft shouldBe true
+      fromValues(baseUrl = "http://127.0.0.1:9/v1").isRight shouldBe true
+    }
+
+    "accept any https baseUrl, since the endpoint is the user's choice" in {
+      fromValues(baseUrl = "https://gateway.example/v1").isRight shouldBe true
+    }
+
     "be refused by OpenAICompatibleClient when built with apply or the with* setters" in {
       val valid = fromValues().value
       val bad = Seq(
         valid.withHeaders(Map("authorization" -> "Bearer stale")),
         valid.withApiKey("k"),
         valid.withTokenExchange(exchange.withTokenUrl("http://ws.example/t")),
+        valid.withBaseUrl("http://ws.example/v1"),
         OpenAICompatibleConfig(
           model = "m",
           baseUrl = "https://ws.example/v1",

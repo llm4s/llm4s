@@ -143,8 +143,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `credential: OpenAICompatibleClient.Credential` (`Anonymous`, `Static(key)`, `Dynamic(provider)`,
   `Exchange(config)`). An `Exchange` credential exchanges through the client's own HTTP client, which
   `close()` releases.
-  **The token exchange:** `tokenUrl`, and Anthropic's `baseUrl` when the section uses `auth`, must
-  be `https`; plain `http` is accepted only for a loopback host (`localhost`, `127.x.y.z` or
+  **The token exchange:** `tokenUrl`, and an `openai-compatible` section's `baseUrl` when it uses
+  `auth`, must be `https`; with `auth`, OpenAI's and Anthropic's `baseUrl` must be `https` to the
+  vendor's own API host - `api.openai.com`, `us.`/`eu.`/`ae.api.openai.com`, or `api.anthropic.com`,
+  an exact, case-insensitive match with no userinfo - because the exchanged token is a vendor
+  credential; plain `http` is accepted only for a loopback host (`localhost`, `127.x.y.z` or
   `[::1]`, judged on the URL's real host, so `http://localhost@evil.example/` is refused), because
   the request carries the identity token. `expires_in` is optional: without it the token's lifetime
   is the access token's `exp` claim when it is a JWT, and otherwise `TokenExchange.DefaultLifetime`

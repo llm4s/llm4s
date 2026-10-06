@@ -232,6 +232,56 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
     }
   }
 
+  "TokenExchange.requireTrustedHost" should {
+    val trusted            = Set("api.vendor.example", "eu.api.vendor.example")
+    def check(url: String) = TokenExchange.requireTrustedHost(url, "baseUrl", "Vendor", trusted)
+
+    "accept https to an allow-listed host, whatever its case, port or path" in {
+      for url <- Seq(
+          "https://api.vendor.example/v1",
+          "https://eu.api.vendor.example/v1",
+          "HTTPS://API.Vendor.Example/v1",
+          "https://api.vendor.example:443/v1",
+          "  https://api.vendor.example  "
+        )
+      do withClue(url)(check(url) shouldBe Right(()))
+    }
+
+    "accept a loopback host over http or https, for test servers" in {
+      for url <- Seq("http://127.0.0.1:9/v1", "http://localhost:9", "https://localhost:9", "http://[::1]:9/v1") do
+        withClue(url)(check(url) shouldBe Right(()))
+    }
+
+    "refuse every other host, lookalike, scheme or userinfo, without echoing the URL" in {
+      for url <- Seq(
+          "https://attacker.example/v1",
+          "http://api.vendor.example/v1",
+          "ftp://api.vendor.example/v1",
+          "https://api.vendor.example.evil.example/v1",
+          "https://evilapi.vendor.example/v1",
+          "https://us.api.vendor.example/v1",
+          "https://vendor.example/v1",
+          "https://api.vendor.example./v1",
+          "https://user:s3cr3t@api.vendor.example/v1",
+          "https://api.vendor.example@attacker.example/v1",
+          "http://localhost@attacker.example/v1",
+          "https://api.vendor.example\\@attacker.example/v1",
+          "https://10.0.0.1/v1",
+          "api.vendor.example/v1",
+          "https:///v1",
+          ""
+        )
+      do
+        withClue(url) {
+          val error = check(url).left.value
+          error shouldBe a[ConfigurationError]
+          error.message should (include("baseUrl").and(include("api.vendor.example")).and(include("Vendor")))
+          (error.message should not).include("s3cr3t")
+          (error.message should not).include("attacker")
+        }
+    }
+  }
+
   "TokenExchange.provider" should {
     "cache the exchanged token between calls" in {
       val http     = MockHttpClient(Seq(ok))

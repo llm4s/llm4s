@@ -178,12 +178,62 @@ class OpenAIWorkloadIdentitySpec
         error.message should include("provider openai only")
     }
 
+    "be accepted by fromValues for OpenAI's API hosts, including the data-residency regions" in {
+      for url <- Seq(
+          "https://api.openai.com/v1",
+          "https://us.api.openai.com/v1",
+          "https://eu.api.openai.com/v1",
+          "https://ae.api.openai.com/v1",
+          "HTTPS://API.OPENAI.COM/v1",
+          "http://127.0.0.1:9/v1",
+          "http://localhost:9/v1"
+        )
+      do withClue(url)(fromValues(baseUrl = url).value.baseUrl shouldBe url)
+    }
+
+    "be refused by fromValues for a baseUrl that is not an OpenAI API host, though the config still reports openai" in {
+      for url <- Seq(
+          "https://attacker.example/v1",
+          "http://attacker.example/v1",
+          "http://api.openai.com/v1",
+          "https://api.openai.com.evil.example/v1",
+          "https://evilapi.openai.com/v1",
+          "https://openai.com/v1",
+          "https://api.openai.com./v1",
+          "https://u:pw@api.openai.com/v1",
+          "https://api.openai.com@attacker.example/v1",
+          "http://localhost@attacker.example/v1"
+        )
+      do
+        withClue(url) {
+          OpenAIConfig(
+            "",
+            "gpt-4o-mini",
+            None,
+            url,
+            8192,
+            4096,
+            None,
+            Some(identity)
+          ).providerId.asString shouldBe "openai"
+          val error = fromValues(baseUrl = url).left.value
+          error shouldBe a[ConfigurationError]
+          error.message should (include("baseUrl").and(include("api.openai.com")))
+        }
+    }
+
+    "leave a custom baseUrl alone with an apiKey" in {
+      OpenAIConfig.fromValues("gpt-4o-mini", "sk-x", None, "http://proxy.example/v1").isRight shouldBe true
+    }
+
     "be refused by OpenAIClient and OpenRouterClient when built with the constructor or copy" in {
       val valid = fromValues().value
       val bad = Seq(
         valid.copy(apiKey = "sk-x"),
         valid.copy(explicitProviderId = Some(org.llm4s.types.ProviderModelTypes.ProviderId("requesty"))),
-        valid.copy(baseUrl = "https://openrouter.ai/api/v1")
+        valid.copy(baseUrl = "https://openrouter.ai/api/v1"),
+        valid.copy(baseUrl = "https://attacker.example/v1"),
+        valid.copy(baseUrl = "http://api.openai.com/v1")
       )
       for config <- bad do
         OpenAIClient(config).left.value shouldBe a[ConfigurationError]

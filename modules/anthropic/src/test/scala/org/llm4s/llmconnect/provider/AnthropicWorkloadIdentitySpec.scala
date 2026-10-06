@@ -134,6 +134,25 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         fromValues(url).isRight shouldBe true
     }
 
+    "be refused by fromValues for an https baseUrl that is not api.anthropic.com" in {
+      for url <- Seq(
+          "https://gateway.example",
+          "https://api.anthropic.com.evil.example",
+          "https://evilapi.anthropic.com",
+          "https://anthropic.com",
+          "https://api.anthropic.com.",
+          "https://u:pw@api.anthropic.com",
+          "https://api.anthropic.com@gateway.example"
+        )
+      do
+        withClue(url) {
+          val error = fromValues(url).left.value
+          error shouldBe a[ConfigurationError]
+          error.message should (include("baseUrl").and(include("api.anthropic.com")))
+        }
+      fromValues("HTTPS://API.ANTHROPIC.COM").isRight shouldBe true
+    }
+
     "be refused by fromValues with an apiKey as well" in {
       fromValues("https://api.anthropic.com", apiKey = "sk-ant").left.value shouldBe a[ConfigurationError]
     }
@@ -146,6 +165,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       val valid = fromValues("https://api.anthropic.com").value
       val bad = Seq(
         valid.copy(baseUrl = "http://api.example"),
+        valid.copy(baseUrl = "https://gateway.example"),
         valid.copy(apiKey = "sk-ant"),
         AnthropicConfig("", "claude-test", "http://localhost@api.example", 200000, 4096, Some(identity))
       )

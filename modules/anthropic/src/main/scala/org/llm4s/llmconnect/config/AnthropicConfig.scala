@@ -20,8 +20,9 @@ import org.llm4s.util.Redaction
  * @param contextWindow Model's total token capacity (prompt + completion combined).
  * @param reserveCompletion Tokens held back from prompt history for the completion.
  * @param workloadIdentity  workload identity federation instead of `apiKey`, which is then empty. The SDK
- *                          posts the identity token to `<baseUrl>/v1/oauth/token`, so `baseUrl` must be
- *                          `https` (plain `http` only to a loopback host). [[AnthropicConfig.fromValues]]
+ *                          posts the identity token to `<baseUrl>/v1/oauth/token` and the access token it gets back
+ *                          to every request, so `baseUrl` must be `https://api.anthropic.com` (plain `http`
+ *                          only to a loopback host, for tests). [[AnthropicConfig.fromValues]]
  *                          checks this, and `AnthropicClient` refuses a config built any other way that
  *                          breaks it.
  */
@@ -62,11 +63,21 @@ object AnthropicConfig {
     }
 
   /**
+   * The hosts a config with `workloadIdentity` may target. Anthropic documents its federation token
+   * endpoint only at `https://api.anthropic.com/v1/oauth/token`
+   * ([[https://platform.claude.com/docs/en/manage-claude/wif-reference WIF reference]]), and the SDK
+   * knows no other host. A gateway or proxy `baseUrl` stays available with an `apiKey`; with workload
+   * identity it would receive both the identity token and the Anthropic access token minted from it.
+   */
+  private[llm4s] val WorkloadIdentityHosts: Set[String] = Set("api.anthropic.com")
+
+  /**
    * The rules every [[AnthropicConfig]] must meet, whichever way it was built: [[fromValues]] applies
    * them, and `AnthropicClient` applies them again to a config built with the constructor or `copy`.
    * With `workloadIdentity` set, `apiKey` must be empty (a config authenticates one way) and
-   * `baseUrl` must be `https` - or plain `http` to a loopback host - since the SDK posts the identity
-   * token to `<baseUrl>/v1/oauth/token`.
+   * `baseUrl` must be `https` to one of [[WorkloadIdentityHosts]] - or a loopback host, for tests -
+   * since the SDK posts the identity token to `<baseUrl>/v1/oauth/token` and sends the access token
+   * it gets back with every request.
    */
   private[llm4s] def validate(config: AnthropicConfig): Result[AnthropicConfig] =
     config.workloadIdentity match
@@ -81,10 +92,7 @@ object AnthropicConfig {
               List("apiKey", "workloadIdentity")
             )
           )
-          _ <- TokenExchange
-            .requireSecureUrl(config.baseUrl, "baseUrl")
-            .left
-            .map(e => ConfigurationError(s"Anthropic ${e.message}", List("baseUrl")))
+          _ <- TokenExchange.requireTrustedHost(config.baseUrl, "baseUrl", "Anthropic", WorkloadIdentityHosts)
         yield config
 
   /**
@@ -93,8 +101,8 @@ object AnthropicConfig {
    *
    * @param modelName Model identifier, e.g. `"claude-sonnet-4-5-latest"`.
    * @param apiKey    Anthropic API key; must be non-empty.
-   * @param baseUrl   API base URL; must be non-empty, and `https` (or `http` to a loopback host) when
-   *                  `workloadIdentity` is set.
+   * @param baseUrl   API base URL; must be non-empty, and `https://api.anthropic.com` (or `http` to a loopback
+   *                  host) when `workloadIdentity` is set.
    * @param workloadIdentity workload identity federation; `apiKey` must then be empty.
    * @return `Left(ConfigurationError)` for a blank field or a config [[validate]] refuses.
    */

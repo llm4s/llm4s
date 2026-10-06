@@ -222,7 +222,9 @@ databricks-main {
 ```
 
 The optional `audience` key sets the RFC 8693 `audience` parameter, for a token endpoint that needs one.
-`tokenUrl` must be `https` (plain `http` only for a loopback host). The token is cached for the
+`tokenUrl` and `baseUrl` must be `https` (plain `http` only for a loopback host). The exchanged
+token is sent as the bearer of every request to `baseUrl`, a host you choose, so no host is
+allow-listed: make sure `tokenUrl` and `baseUrl` belong to the same trusted service. The token is cached for the
 reply's `expires_in`; a reply without one is taken to live until the access token's `exp` claim if
 it is a JWT, and otherwise for 5 minutes.
 
@@ -258,8 +260,11 @@ anthropic-wif {
 ```
 
 A `${?VAR}` that is unset leaves its key out, and a missing required key is reported when the
-section is loaded. For Anthropic, `baseUrl` must be `https` (plain `http` only for a loopback host),
-since the SDK posts the identity token to `<baseUrl>/v1/oauth/token`.
+section is loaded. With `auth`, `baseUrl` must be the vendor's own API host over `https`, because the
+exchanged token is a vendor credential sent with every request (plain `http` is accepted only for a
+loopback host, for tests): for OpenAI `api.openai.com` or a data-residency host (`us.`, `eu.` or
+`ae.api.openai.com`), for Anthropic `api.anthropic.com`, where the SDK also posts the identity token
+(`<baseUrl>/v1/oauth/token`). A proxy or gateway `baseUrl` needs an `apiKey` instead.
 
 Request each SVID for the audience its relying party expects (`jwt_audience` in `spiffe-helper`).
 Other providers reject an `auth` block. The `prod` config-policy preset's `ownApiKey` rule accepts
