@@ -39,10 +39,11 @@ import scala.util.matching.Regex
  * the pattern was given as a `String` and was refused or did not compile. That last failure replaces any custom
  * message, so a bad pattern shows up on the first validation rather than as a startup error.
  *
- * One failure is not caught: the JDK regex engine recurses as it matches some patterns, such as `(a|aa)*b`,
- * and on long enough text it can throw `StackOverflowError` before reaching the character-access budget. The
- * safety manager does not catch that error, so `validate` propagates it instead of returning a `Left`. The
- * `String` factories' pre-screen refuses some of these shapes (including that one), but not all of them.
+ * The JDK regex engine recurses as it matches some patterns, such as `(a|aa)*b`, and on long enough text it can
+ * overflow the stack before reaching the character-access budget. The safety manager catches that
+ * `StackOverflowError` and aborts the match, so `validate` returns a `Regex security error` `Left` for it too
+ * rather than throwing. The `String` factories' pre-screen refuses some of these shapes (including that one),
+ * but not all of them.
  *
  * Prefer the `String` factories (`RegexValidator("...")` and `RegexValidator("...", errorMessage)`) for
  * patterns that are not fixed in code: they are the only ones that compile through
@@ -113,8 +114,7 @@ class RegexValidator(
    * @param value the text to check
    * @return `Right(value)` unchanged when the pattern is found, otherwise `Left` with a
    *         [[org.llm4s.error.ValidationError]] for the field `value`; see the class documentation for the
-   *         detail of each failure, and for the `StackOverflowError` that can escape on a deeply recursive
-   *         match
+   *         detail of each failure, including a match aborted because it recursed too deeply
    */
   def validate(value: String): Result[String] =
     fallbackError match {
