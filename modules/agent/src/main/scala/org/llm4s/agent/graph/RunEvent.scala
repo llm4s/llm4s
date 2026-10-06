@@ -116,8 +116,19 @@ enum StreamEvent:
   /** A committed durable event, in ascending `seq` order. */
   case Durable(record: EventRecord)
 
-  /** Live-only progress from [[RunContext.progress]]: never persisted, never replayed, no `seq`. */
-  case Live(threadId: String, runId: String, taskId: String, nodeId: String, payload: ujson.Value)
+  /**
+   * Live-only progress from [[RunContext.progress]]: never persisted, never replayed, no `seq`.
+   * `name` and `version` identify the payload, as for [[RunEvent.Custom]].
+   */
+  case Live(
+    threadId: String,
+    runId: String,
+    taskId: String,
+    nodeId: String,
+    name: String,
+    version: Int,
+    payload: ujson.Value
+  )
 
   /** `dropped` live events were discarded at this point because the subscriber's queue was full. */
   case LiveGap(dropped: Int)

@@ -33,7 +33,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
       val worker = b.node[String]("worker", writes = Set(results)) { (item, _, context) =>
         calls.computeIfAbsent(item, _ => new AtomicInteger()).incrementAndGet()
         onWorker(item)
-        context.progress(ujson.Str(s"working on $item"))
+        context.progress("test.progress", 1, ujson.Str(s"working on $item"))
         context.emit("worked", 1, ujson.Obj("item" -> item))
         if failOnce.remove(item) then NodeResult.Fail(ValidationError("worker", s"$item failed"))
         else continue(Command.empty.update(results, item.toUpperCase))

@@ -162,9 +162,9 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       .subscribe(thread, capacity = 4) { event =>
         collector.listener(event)
         event match {
-          case StreamEvent.Live(_, _, _, _, payload) if payload("kind").str == "burst" =>
+          case StreamEvent.Live(_, _, _, _, _, _, payload) if payload("kind").str == "burst" =>
             if blocked.compareAndSet(false, true) then burstDone.await(10, TimeUnit.SECONDS): Unit
-          case StreamEvent.Live(_, _, _, _, payload) =>
+          case StreamEvent.Live(_, _, _, _, _, _, payload) =>
             lastTick.set(payload("i").num.toInt)
             tickSignal.put(payload("i").num.toInt)
           case _: StreamEvent.LiveGap => sawGap.set(true)
@@ -177,14 +177,14 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     // the burst overflows while the listener is blocked; ticks then flush the gap and drain the
     // queue, so the node's commit finds room and nothing is disconnected
     val graph = chain(1) { (_, context) =>
-      (1 to 50).foreach(i => context.progress(ujson.Obj("kind" -> "burst", "i" -> i)))
+      (1 to 50).foreach(i => context.progress("test.progress", 1, ujson.Obj("kind" -> "burst", "i" -> i)))
       burstDone.countDown()
       val deadline = System.nanoTime() + 5_000_000_000L
       @scala.annotation.tailrec
       def tick(sent: Int): Int =
         if (sawGap.get && lastTick.get == sent - 1) || System.nanoTime() > deadline then sent
         else {
-          context.progress(ujson.Obj("kind" -> "tick", "i" -> sent))
+          context.progress("test.progress", 1, ujson.Obj("kind" -> "tick", "i" -> sent))
           tickSignal.poll(20, TimeUnit.MILLISECONDS): Unit
           tick(sent + 1)
         }
@@ -205,7 +205,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     (burst.size + ticks + gaps.sum) shouldBe (50 + ticksSent.get)
     // the gap marker precedes the next accepted event
     received.indexWhere(_.isInstanceOf[StreamEvent.LiveGap]) should be > received.indexWhere {
-      case StreamEvent.Live(_, _, _, _, p) => p("kind").str == "burst"; case _ => false
+      case StreamEvent.Live(_, _, _, _, _, _, p) => p("kind").str == "burst"; case _ => false
     }
   }
 
@@ -230,7 +230,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     // are dropped, and the task's commit then needs two slots (gap and event) where one is free
     val graph = chain(1) { (_, context) =>
       entered.await(10, TimeUnit.SECONDS): Unit
-      (1 to 3).foreach(i => context.progress(ujson.Obj("i" -> i)))
+      (1 to 3).foreach(i => context.progress("test.progress", 1, ujson.Obj("i" -> i)))
     }
     runtime.start(thread, graph, "go").awaited.value.completed
     release.countDown()
@@ -242,8 +242,8 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       case other                  => fail(s"expected RunStarted, got $other")
     }
     received(1) match {
-      case StreamEvent.Live(_, _, _, _, payload) => payload("i").num.toInt shouldBe 1
-      case other                                 => fail(s"expected the first live event, got $other")
+      case StreamEvent.Live(_, _, _, _, _, _, payload) => payload("i").num.toInt shouldBe 1
+      case other                                       => fail(s"expected the first live event, got $other")
     }
     received(2) shouldBe StreamEvent.LiveGap(2) // 1 delivered + 2 reported = 3 sent
     received(3) shouldBe StreamEvent.Disconnected(1L, DisconnectReason.Lagging)
@@ -274,7 +274,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     // as above: the subscriber lags with two dropped live events still to report
     val graph = chain(1) { (_, context) =>
       entered.await(10, TimeUnit.SECONDS): Unit
-      (1 to 3).foreach(i => context.progress(ujson.Obj("i" -> i)))
+      (1 to 3).foreach(i => context.progress("test.progress", 1, ujson.Obj("i" -> i)))
     }
     runtime.start(thread, graph, "go").awaited.value.completed
     release.countDown()
@@ -311,7 +311,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       val payload = ujson.Obj("i" -> 0)
       (1 to 3).foreach { i =>
         payload("i") = i
-        context.progress(payload)
+        context.progress("test.progress", 1, payload)
         context.emit("e", 1, payload)
       }
       payload("i") = 99
@@ -320,7 +320,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     release.countDown()
 
     val received = collector.untilRunEnds()
-    received.collect { case StreamEvent.Live(_, _, _, _, p) => p("i").num.toInt } shouldBe Vector(1, 2, 3)
+    received.collect { case StreamEvent.Live(_, _, _, _, _, _, p) => p("i").num.toInt } shouldBe Vector(1, 2, 3)
     received.collect { case StreamEvent.Durable(r) => r.event }.collect { case RunEvent.Custom(_, _, p) =>
       p("i").num.toInt
     } shouldBe Vector(1, 2, 3)

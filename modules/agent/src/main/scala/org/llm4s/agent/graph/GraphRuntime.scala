@@ -862,8 +862,16 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
           buffered += draft(Some(checkpointId), Some(task), RunEvent.Custom(name, version, snapshot))
         }
       def discardCustom(): Unit = withLock(lock)(buffered.clear())
-      def progress(payload: ujson.Value): Unit =
+      def progress(name: String, version: Int, payload: ujson.Value): Unit =
         hub.live(
           threadId,
-          StreamEvent.Live(threadId.value, runId.value, task.id.value, task.node.value, ujson.copy(payload))
+          StreamEvent.Live(
+            threadId.value,
+            runId.value,
+            task.id.value,
+            task.node.value,
+            name,
+            version,
+            ujson.copy(payload)
+          )
         )
