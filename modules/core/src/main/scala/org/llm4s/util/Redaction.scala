@@ -50,6 +50,27 @@ private[llm4s] object Redaction {
     }
 
   /**
+   * A URL fit for a `toString` or a log line: scheme, host, port and path are kept; userinfo
+   * (`user:password@`), the query and the fragment, which may carry credentials or a signature, are
+   * replaced by `***`. A value that does not parse as an absolute URL is `***` altogether.
+   */
+  def url(value: String): String =
+    scala.util
+      .Try(new java.net.URI(value.trim))
+      .toOption
+      .filter(uri => uri.getScheme != null && uri.getRawAuthority != null)
+      .map { uri =>
+        val userInfo = Option(uri.getRawUserInfo).fold("")(_ => "***@")
+        val host     = Option(uri.getHost).getOrElse("***")
+        val port     = if uri.getPort >= 0 then s":${uri.getPort}" else ""
+        val path     = Option(uri.getRawPath).getOrElse("")
+        val query    = Option(uri.getRawQuery).fold("")(_ => "?***")
+        val fragment = Option(uri.getRawFragment).fold("")(_ => "#***")
+        s"${uri.getScheme}://$userInfo$host$port$path$query$fragment"
+      }
+      .getOrElse("***")
+
+  /**
    * Truncates a string for safe logging to prevent PII leaks and log flooding.
    *
    * @param body The string to potentially truncate

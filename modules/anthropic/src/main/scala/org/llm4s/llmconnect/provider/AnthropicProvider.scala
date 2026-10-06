@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ AnthropicConfigKeys, AnthropicModelLister, ProviderModelLister }
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.auth.IdentitySource
+import org.llm4s.llmconnect.auth.{ IdentitySource, TokenExchange }
 import org.llm4s.llmconnect.config.{ AnthropicConfig, AnthropicWorkloadIdentity, ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -52,7 +52,16 @@ object AnthropicProvider extends ProviderDescriptor:
       apiKey <-
         if (workloadIdentity.isDefined) Right("") else ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      config  <- AnthropicConfig.fromValues(section.model.asString, apiKey, baseUrl, workloadIdentity)
+      // The SDK posts the identity token to `<baseUrl>/v1/oauth/token`, so the base URL gets the same
+      // https rule as an exchange's tokenUrl.
+      _ <-
+        if (workloadIdentity.isEmpty) Right(())
+        else
+          TokenExchange
+            .requireSecureUrl(baseUrl, "baseUrl")
+            .left
+            .map(e => ConfigurationError(s"llm4s.providers.$providerName.baseUrl: ${e.message}", List("baseUrl")))
+      config <- AnthropicConfig.fromValues(section.model.asString, apiKey, baseUrl, workloadIdentity)
     yield config
 
   private def workloadIdentityOf(

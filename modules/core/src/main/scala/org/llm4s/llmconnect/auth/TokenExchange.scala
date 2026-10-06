@@ -9,7 +9,8 @@ import org.llm4s.util.Redaction
 
 import java.net.{ URI, URLEncoder }
 import java.nio.charset.StandardCharsets
-import java.time.Clock
+import java.time.{ Clock, Instant }
+import java.util.Base64
 import java.util.Locale
 import scala.concurrent.duration.*
 import scala.util.Try
@@ -18,15 +19,42 @@ import scala.util.Try
  * An RFC 8693 token exchange: present `identityToken` at `tokenUrl`, get back a short-lived
  * bearer token. Databricks workload identity federation is one such endpoint
  * (`https://<workspace>/oidc/v1/token`, `scope = all-apis`, `clientId` = the service principal).
+ *
+ * `toString` shows `tokenUrl` without its userinfo or query, which may carry credentials, and
+ * redacts `clientId`.
  */
 @Experimental
-final case class TokenExchangeConfig(
+final case class TokenExchangeConfig private (
   identityToken: IdentitySource,
   tokenUrl: String,
-  clientId: Option[String] = None,
-  scope: Option[String] = None,
-  audience: Option[String] = None
-)
+  clientId: Option[String],
+  scope: Option[String],
+  audience: Option[String]
+):
+  def withIdentityToken(identityToken: IdentitySource): TokenExchangeConfig = copy(identityToken = identityToken)
+  def withTokenUrl(tokenUrl: String): TokenExchangeConfig                   = copy(tokenUrl = tokenUrl)
+  def withClientId(clientId: String): TokenExchangeConfig                   = copy(clientId = Some(clientId))
+  def withClientId(clientId: Option[String]): TokenExchangeConfig           = copy(clientId = clientId)
+  def withScope(scope: String): TokenExchangeConfig                         = copy(scope = Some(scope))
+  def withScope(scope: Option[String]): TokenExchangeConfig                 = copy(scope = scope)
+  def withAudience(audience: String): TokenExchangeConfig                   = copy(audience = Some(audience))
+  def withAudience(audience: Option[String]): TokenExchangeConfig           = copy(audience = audience)
+
+  override def toString: String =
+    s"TokenExchangeConfig($identityToken, tokenUrl=${Redaction.url(tokenUrl)}, " +
+      s"clientId=${Redaction.secretOpt(clientId)}, scope=$scope, audience=$audience)"
+
+object TokenExchangeConfig:
+
+  /** Creates a [[TokenExchangeConfig]]. Named arguments are the supported way to construct one. */
+  def apply(
+    identityToken: IdentitySource,
+    tokenUrl: String,
+    clientId: Option[String] = None,
+    scope: Option[String] = None,
+    audience: Option[String] = None
+  ): TokenExchangeConfig =
+    new TokenExchangeConfig(identityToken, tokenUrl, clientId, scope, audience)
 
 /** The RFC 8693 token exchange and its caching provider. */
 @Experimental
@@ -43,6 +71,13 @@ object TokenExchange:
    */
   val MaxLifetime: FiniteDuration = 24.hours
 
+  /**
+   * The lifetime assumed for a token whose reply has no `expires_in` (RFC 6749 makes it optional) and
+   * which is not a JWT carrying an `exp` claim: short, so a token that in fact lives less is not used
+   * for long after it has expired - and a 401 refreshes it in any case.
+   */
+  val DefaultLifetime: FiniteDuration = 5.minutes
+
   private val Provider     = "token-exchange"
   private val Ipv4Loopback = """127(?:\.\d{1,3}){3}""".r
 
@@ -50,12 +85,12 @@ object TokenExchange:
    * Whether `url` may receive the identity token: `https`, or `http` only when the URL's real host - the
    * one after any `userinfo@`, so `http://localhost@evil.example/` is `evil.example` - is a loopback
    * literal (`localhost`, `127.x.y.z`, `[::1]`; names are not resolved). The refusal does not echo the URL,
-   * which may carry credentials.
+   * which may carry credentials; it names `key`, the setting the URL came from.
    */
-  private[llm4s] def requireSecureUrl(url: String): Result[Unit] =
+  private[llm4s] def requireSecureUrl(url: String, key: String = "tokenUrl"): Result[Unit] =
     val refusal = Left(
       ConfigurationError(
-        "tokenUrl must be an https URL (plain http is accepted only for a loopback host such as localhost or " +
+        s"$key must be an https URL (plain http is accepted only for a loopback host such as localhost or " +
           "127.0.0.1), because the request carries the identity token"
       )
     )
@@ -109,32 +144,57 @@ object TokenExchange:
 
   private def encode(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8)
 
+  /**
+   * The reply's token and expiry. `expires_in` is optional: without it the expiry is the access token's
+   * own `exp` claim when the token is a JWT, and otherwise [[DefaultLifetime]] from now.
+   */
   private def parse(response: HttpResponse, jwt: String, clock: Clock): Result[AccessToken] =
     // Some identity providers quote the rejected assertion back; it must not reach a log line.
     val safeBody = Redaction.truncateForLog(response.body.replace(jwt, "***"), 512)
     response.statusCode match
       case status if status >= 200 && status < 300 =>
-        Try(ujson.read(response.body)).toOption
-          .flatMap(_.objOpt)
-          .flatMap { obj =>
-            for
-              access <- obj.get("access_token").flatMap(_.strOpt).map(_.trim).filter(_.nonEmpty)
-              expiry <- obj.get("expires_in").flatMap(v => v.numOpt.orElse(v.strOpt.flatMap(_.trim.toDoubleOption)))
-            yield access -> expiry
-          }
-          .toRight(AuthenticationError(Provider, "token endpoint reply has no access_token or expires_in"))
-          .flatMap { case (access, expiry) =>
-            // A non-finite or negative lifetime is the endpoint's bug, not a token to cache; a huge one is clamped.
-            Either.cond(
-              !expiry.isNaN && !expiry.isInfinite && expiry >= 0,
-              AccessToken(access, clock.instant().plusSeconds(math.min(expiry.toLong, MaxLifetime.toSeconds))),
-              AuthenticationError(
-                Provider,
-                "token endpoint reply has an invalid expires_in (not a finite, non-negative number)"
-              )
-            )
+        val obj = Try(ujson.read(response.body)).toOption.flatMap(_.objOpt)
+        obj
+          .flatMap(_.get("access_token").flatMap(_.strOpt).map(_.trim).filter(_.nonEmpty))
+          .toRight(AuthenticationError(Provider, "token endpoint reply has no access_token"))
+          .flatMap { access =>
+            val now = clock.instant()
+            obj.flatMap(_.get("expires_in")) match
+              case Some(value) =>
+                value.numOpt.orElse(value.strOpt.flatMap(_.trim.toDoubleOption)) match
+                  // A non-finite or negative lifetime is the endpoint's bug, not a token to cache; a huge one is clamped.
+                  case Some(expiry) if !expiry.isNaN && !expiry.isInfinite && expiry >= 0 =>
+                    Right(AccessToken(access, now.plusSeconds(math.min(expiry.toLong, MaxLifetime.toSeconds))))
+                  case _ =>
+                    Left(
+                      AuthenticationError(
+                        Provider,
+                        "token endpoint reply has an invalid expires_in (not a finite, non-negative number)"
+                      )
+                    )
+              case None =>
+                val expiresAt = jwtExpiry(access) match
+                  case Some(exp) =>
+                    val latest = now.plusSeconds(MaxLifetime.toSeconds)
+                    if exp.isAfter(latest) then latest else exp
+                  case None => now.plusSeconds(DefaultLifetime.toSeconds)
+                Right(AccessToken(access, expiresAt))
           }
       case status @ (400 | 401 | 403) =>
         Left(AuthenticationError(Provider, s"token endpoint rejected the identity token (HTTP $status): $safeBody"))
       case status =>
         HttpErrorMapper.mapHttpError(status, safeBody, Provider, response.headers)
+
+  /** The `exp` claim of `token`, if it is a JWT with a numeric one; the signature is not checked. */
+  private def jwtExpiry(token: String): Option[Instant] =
+    token.split('.') match
+      case Array(_, payload, _) =>
+        Try(new String(Base64.getUrlDecoder.decode(payload), StandardCharsets.UTF_8)).toOption
+          .flatMap(json => Try(ujson.read(json)).toOption)
+          .flatMap(_.objOpt)
+          .flatMap(_.get("exp"))
+          .flatMap(_.numOpt)
+          // Bounded well inside Instant's range; the caller clamps to MaxLifetime anyway.
+          .filter(exp => !exp.isNaN && !exp.isInfinite && exp > 0)
+          .map(exp => Instant.ofEpochSecond(math.min(exp, 1e12).toLong))
+      case _ => None

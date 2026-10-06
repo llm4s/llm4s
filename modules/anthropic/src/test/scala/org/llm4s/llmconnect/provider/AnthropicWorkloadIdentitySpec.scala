@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.testkit.{ FakeTokenExchangeServer, ProviderModuleChecks, ProviderTestConfig, TestJwt }
@@ -74,6 +75,35 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       val body   = section("https://api.anthropic.com", "eyJ.x.y", "identityToken")
       val result = ProviderTestConfig.loadProvider("main", s"llm4s.providers.main {\n$body\n}")
       result.left.value.message should include("identityTokenFile")
+    }
+
+    "refuse a plain-http baseUrl, since the SDK posts the identity token there" in {
+      val body   = section("http://api.example", "/s")
+      val result = ProviderTestConfig.loadProvider("main", s"llm4s.providers.main {\n$body\n}")
+      result.left.value shouldBe a[ConfigurationError]
+      result.left.value.message should (include("llm4s.providers.main.baseUrl").and(include("https")))
+    }
+
+    "accept an https baseUrl, and plain http only to a loopback host" in {
+      for url <- Seq("https://api.anthropic.com", "http://127.0.0.1:9", "http://localhost:9") do
+        val body = section(url, "/s")
+        ProviderTestConfig.loadProvider("main", s"llm4s.providers.main {\n$body\n}").isRight shouldBe true
+    }
+
+    "keep the federation ids out of toString" in {
+      val body   = section("https://api.anthropic.com", "/s")
+      val config = ProviderTestConfig.loadProvider("main", s"llm4s.providers.main {\n$body\n}").value
+      config.toString should include("workloadIdentity=Some(AnthropicWorkloadIdentity(")
+      for id <- Seq("fdrl_1", "org_1", "wrkspc_1") do (config.toString should not).include(id)
+    }
+
+    "refuse to list models, naming the reason, rather than fail for a missing apiKey" in {
+      val error = org.llm4s.config.AnthropicModelLister
+        .listModels(sectionOf(section("https://api.anthropic.com", "/s")), org.llm4s.http.Llm4sHttpClient.create())
+        .left
+        .value
+      error shouldBe a[ConfigurationError]
+      error.message should include("model listing is not supported with workload identity auth for anthropic")
     }
 
     "reject a missing federationRuleId" in {

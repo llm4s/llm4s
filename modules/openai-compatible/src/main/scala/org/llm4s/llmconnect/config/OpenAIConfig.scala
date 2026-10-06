@@ -67,7 +67,7 @@ case class OpenAIConfig(
   override def toString: String =
     s"OpenAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, organization=$organization, baseUrl=$baseUrl, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, providerId=${providerId.asString}, " +
-      s"workloadIdentity=${workloadIdentity.map(_ => "set").getOrElse("none")})"
+      s"workloadIdentity=$workloadIdentity)"
 
 object OpenAIConfig {
   private val standardReserve = 4096

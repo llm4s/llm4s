@@ -32,7 +32,7 @@ case class AnthropicConfig(
   override def withModel(model: String): AnthropicConfig = copy(model = model)
   override def toString: String =
     s"AnthropicConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion, workloadIdentity=${workloadIdentity.map(_ => "set").getOrElse("none")})"
+      s"reserveCompletion=$reserveCompletion, workloadIdentity=$workloadIdentity)"
 
 object AnthropicConfig {
 

@@ -89,7 +89,7 @@ private[llm4s] object NamedProviderSectionValidator:
               )
             else
               val withAuth =
-                auth.fold(normalized)((a, resolved) => normalized.withAuth(a.copy(extras = resolved.values)))
+                auth.fold(normalized)((a, resolved) => normalized.withAuth(a.withExtras(resolved.values)))
               Right((withAuth.withExtras(extras.values), extras.warnings ++ auth.toSeq.flatMap(_._2.warnings)))
 
   /**
@@ -291,6 +291,16 @@ private[llm4s] object NamedProviderConfigValidator:
         normalized.auth.isEmpty || normalized.apiKey.isEmpty,
         (),
         ConfigurationError(s"$sectionPath sets both apiKey and auth; a section authenticates one way - remove one")
+      )
+      // The exchanged token is the request's bearer; a configured Authorization header would replace it
+      // or be sent beside it, depending on the client, so the section is refused rather than guessed at.
+      _ <- Either.cond(
+        normalized.auth.isEmpty || !normalized.headers.keys.exists(_.equalsIgnoreCase("Authorization")),
+        (),
+        ConfigurationError(
+          s"$sectionPath sets both auth and an Authorization header; with auth the request's Authorization is the " +
+            s"exchanged token - remove the header from $sectionPath.headers"
+        )
       )
       descriptor <- registry.resolve(normalized.provider, Some(s"$sectionPath.provider"))
       // `normalized.provider` is already canonical - an alias such as `google` has become

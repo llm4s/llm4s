@@ -3,7 +3,9 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.config.OpenAICompatibleModelLister
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.AuthenticationError
-import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient }
+import org.llm4s.llmconnect.auth.{ IdentitySource, TokenExchangeConfig }
+import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -173,6 +175,49 @@ class OpenAICompatibleWorkloadIdentitySpec
       Files.writeString(file, second)
       c.complete(conversation, CompletionOptions()).isRight shouldBe true
       fake.exchanges.map(_("subject_token")) shouldBe Seq(first, second)
+    }
+
+    "exchange through the client's own HTTP client, and close it with the client" in {
+      given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+      val http = MockHttpClient(
+        Seq(
+          HttpResponse(200, """{"access_token":"dbx-1","expires_in":3600}"""),
+          HttpResponse(200, """{"id":"x","created":1,"model":"m","choices":[{"message":{"content":"hi"}}]}""")
+        )
+      )
+      val config = OpenAICompatibleConfig(
+        model = "m",
+        baseUrl = "https://ws.example/serving-endpoints",
+        tokenExchange = Some(
+          TokenExchangeConfig(IdentitySource.Literal("eyJ.svid.sig"), "https://ws.example/oidc/v1/token")
+        )
+      )
+      val c = new OpenAICompatibleClient(OpenAICompatibleClient.settings(config), OpenAICompatibleDialect.Standard) {
+        override protected[provider] val httpClient: Llm4sHttpClient = http
+      }
+      c.complete(conversation, CompletionOptions()).isRight shouldBe true
+      http.posts.map(_._1) shouldBe Seq(
+        "https://ws.example/oidc/v1/token",
+        "https://ws.example/serving-endpoints/chat/completions"
+      )
+      http.posts(1)._2("Authorization") shouldBe "Bearer dbx-1"
+      http.closed shouldBe false
+      c.close()
+      http.closed shouldBe true
+    }
+
+    "show the exchange's token URL without userinfo or query in the settings and config" in {
+      val config = OpenAICompatibleConfig(
+        model = "m",
+        baseUrl = "https://ws.example/serving-endpoints",
+        tokenExchange = Some(
+          TokenExchangeConfig(IdentitySource.Literal("eyJ.svid.sig"), "https://u:pw@ws.example/t?sig=s3cr3t")
+            .withClientId("sp-secret")
+        )
+      )
+      for shown <- Seq(config.toString, OpenAICompatibleClient.settings(config).toString) do
+        shown should include("https://***@ws.example/t?***")
+        for secret <- Seq("pw", "s3cr3t", "sp-secret", "eyJ.svid.sig") do (shown should not).include(secret)
     }
 
     "list models with an exchanged token" in FakeTokenExchangeServer.withServer { fake =>

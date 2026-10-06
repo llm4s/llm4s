@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import com.openai.auth.SubjectTokenType
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.llmconnect.auth.IdentitySource
 import org.llm4s.llmconnect.config.{ OpenAIConfig, OpenAIWorkloadIdentity }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
@@ -13,6 +14,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.nio.file.{ Files, Path }
+import java.util.concurrent.CompletionException
+import scala.util.Try
 
 class OpenAIWorkloadIdentitySpec
     extends AnyWordSpec
@@ -45,7 +48,8 @@ class OpenAIWorkloadIdentitySpec
         "sa_1",
         Some("c_1")
       )
-      openai.toString should include("workloadIdentity=set")
+      openai.toString should include("workloadIdentity=Some(OpenAIWorkloadIdentity(")
+      for id <- Seq("idp_1", "sa_1", "c_1") do (openai.toString should not).include(id)
     }
 
     "build a client" in {
@@ -83,7 +87,38 @@ class OpenAIWorkloadIdentitySpec
       val body  = section.replace("/var/run/svid", missing.toString.replace('\\', '/'))
       val c     = assertBuildsClient(OpenAIProvider, sectionOf(body))
       val error = c.complete(Conversation(Seq(UserMessage("hi"))), CompletionOptions()).left.value
+      error shouldBe an[AuthenticationError]
       error.message should include("workload-identity")
+    }
+
+    "keep a missing identity token an AuthenticationError through the SDK's async path and its wrapping" in {
+      val missing = Files.createTempFile("svid", ".jwt")
+      Files.delete(missing)
+      val provider = OpenAIClientTransport
+        .sdkWorkloadIdentity(OpenAIWorkloadIdentity(IdentitySource.File(missing), "i", "s"))
+        .provider()
+      val failure = Try(provider.getTokenAsync(null, null).join()).failed.get
+      failure shouldBe a[CompletionException]
+      OpenAIClient.mapError(new IllegalStateException("token refresh failed", failure), "openai") shouldBe
+        an[AuthenticationError]
+    }
+
+    "read the identity token for the async path off the common pool" in {
+      val file = Files.createTempFile("svid", ".jwt")
+      Files.writeString(file, "eyJ.svid.sig")
+      val provider = OpenAIClientTransport
+        .sdkWorkloadIdentity(OpenAIWorkloadIdentity(IdentitySource.File(file), "i", "s"))
+        .provider()
+      provider.getTokenAsync(null, null).join() shouldBe "eyJ.svid.sig"
+    }
+
+    "refuse to list models, naming the reason, rather than fail for a missing apiKey" in {
+      val error = org.llm4s.config.OpenAIModelLister
+        .listModels(sectionOf(section), org.llm4s.http.Llm4sHttpClient.create())
+        .left
+        .value
+      error shouldBe a[ConfigurationError]
+      error.message should include("model listing is not supported with workload identity auth for openai")
     }
 
     "reject a missing serviceAccountId" in {

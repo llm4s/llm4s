@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.auth
 
 import org.llm4s.annotation.Experimental
-import org.llm4s.error.LLMError
+import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.types.Result
 
 import java.time.{ Clock, Duration as JDuration, Instant }
@@ -52,15 +52,21 @@ final class CachingAccessTokenProvider(
   // for its whole duration, which can starve the very I/O the holder waits on.
   private val lock = new ReentrantLock()
 
-  private def locked[A](body: => A): A =
-    lock.lock()
-    Using.resource((() => lock.unlock()): AutoCloseable)(_ => body)
+  // Interruptible: a caller cancelled while it waits behind another caller's fetch returns at once
+  // with `CancelledError` and its interrupt flag set again, as llm4s cancellation expects.
+  private def locked[A](onInterrupt: => A)(body: => A): A =
+    CancelledError.catchInterrupt(lock.lockInterruptibly()) match
+      case Left(_) =>
+        Thread.currentThread().interrupt()
+        onInterrupt
+      case Right(()) =>
+        Using.resource((() => lock.unlock()): AutoCloseable)(_ => body)
 
   def token(): Result[String] =
     fresh() match
       case Some(value) => Right(value)
       case None =>
-        locked {
+        locked[Result[String]](Left(CancelledError(CachingAccessTokenProvider.Operation))) {
           fresh() match
             case Some(value) => Right(value)
             case None =>
@@ -78,8 +84,9 @@ final class CachingAccessTokenProvider(
                       Left(error)
         }
 
+  /** Interrupted while waiting for the lock, it returns without dropping anything, the flag set again. */
   def invalidate(rejected: String): Unit =
-    locked {
+    locked(()) {
       if cached.exists(_.token.value == rejected) then
         cached = None
         failed = None
@@ -102,6 +109,9 @@ final class CachingAccessTokenProvider(
 
 object CachingAccessTokenProvider:
   val DefaultRefreshMargin: FiniteDuration = 60.seconds
+
+  /** The operation a [[CancelledError]] names when a caller is interrupted waiting for a token. */
+  val Operation: String = "workload-identity.token"
 
   /** How long a failed fetch is shared with the callers that arrive meanwhile. */
   private[auth] val FailureTtl: FiniteDuration = 5.seconds

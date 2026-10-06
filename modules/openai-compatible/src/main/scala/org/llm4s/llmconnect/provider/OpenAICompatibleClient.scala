@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
-import org.llm4s.llmconnect.auth.{ AccessTokenProvider, TokenExchange }
+import org.llm4s.llmconnect.auth.{ AccessTokenProvider, TokenExchange, TokenExchangeConfig }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
@@ -223,11 +223,21 @@ class OpenAICompatibleClient(
   /** The timeout `streamComplete` sends with its request. See [[requestTimeout]]. */
   protected[provider] def streamTimeout: FiniteDuration = OpenAICompatibleClient.StreamTimeout
 
+  /**
+   * Where a dynamic credential's tokens come from. An [[OpenAICompatibleClient.Credential.Exchange]]
+   * exchanges through this client's own [[httpClient]] - lazily, so a spec's substitute is the one
+   * used - which `releaseResources` closes with everything else.
+   */
+  private lazy val tokenProvider: Option[AccessTokenProvider] = settings.credential match
+    case OpenAICompatibleClient.Credential.Dynamic(provider) => Some(provider)
+    case OpenAICompatibleClient.Credential.Exchange(config)  => Some(TokenExchange.provider(config, httpClient))
+    case _                                                   => None
+
   /** The current bearer value, if this client sends one. */
   private def bearer(): Result[Option[String]] = settings.credential match
-    case OpenAICompatibleClient.Credential.Anonymous         => Right(None)
-    case OpenAICompatibleClient.Credential.Static(key)       => Right(Some(key))
-    case OpenAICompatibleClient.Credential.Dynamic(provider) => provider.token().map(Some(_))
+    case OpenAICompatibleClient.Credential.Anonymous   => Right(None)
+    case OpenAICompatibleClient.Credential.Static(key) => Right(Some(key))
+    case _ => tokenProvider.fold[Result[Option[String]]](Right(None))(_.token().map(Some(_)))
 
   /**
    * The headers every request carries, for bearer value `token`. A header the dialect repeats is
@@ -247,9 +257,8 @@ class OpenAICompatibleClient(
    */
   private def withAuthRetry[A](send: Map[String, String] => Result[A]): Result[A] =
     bearer().flatMap { token =>
-      (send(requestHeaders(token)), settings.credential, token) match
-        case (Left(e: AuthenticationError), OpenAICompatibleClient.Credential.Dynamic(provider), Some(rejected))
-            if e.code.contains("401") =>
+      (send(requestHeaders(token)), tokenProvider, token) match
+        case (Left(e: AuthenticationError), Some(provider), Some(rejected)) if e.code.contains("401") =>
           provider.invalidate(rejected)
           bearer().flatMap(fresh => send(requestHeaders(fresh)))
         case (result, _, _) => result
@@ -487,13 +496,24 @@ object OpenAICompatibleClient {
     /** `Authorization: Bearer <key>`. */
     case Static(key: String)
 
-    /** `Authorization: Bearer <token>`, the token fetched per request and refreshed once on a 401. */
+    /**
+     * `Authorization: Bearer <token>`, the token fetched per request from `provider` and refreshed once
+     * on a 401. The caller owns `provider`.
+     */
     case Dynamic(provider: AccessTokenProvider)
 
+    /**
+     * `Authorization: Bearer <token>`, the token obtained by the RFC 8693 exchange `config` describes,
+     * cached until shortly before it expires and refreshed once on a 401. The exchange goes through the
+     * client's own HTTP client, closed with the client.
+     */
+    case Exchange(config: TokenExchangeConfig)
+
     override def toString: String = this match
-      case Anonymous  => "Anonymous"
-      case Static(_)  => "Static(***)"
-      case Dynamic(_) => "Dynamic"
+      case Anonymous        => "Anonymous"
+      case Static(_)        => "Static(***)"
+      case Dynamic(_)       => "Dynamic"
+      case Exchange(config) => s"Exchange($config)"
   }
 
   /**
@@ -521,23 +541,15 @@ object OpenAICompatibleClient {
         s"credential=$credential, contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
   }
 
-  /**
-   * The settings the generic `openai-compatible` provider derives from its config.
-   *
-   * @param exchangeClient the HTTP client for the token exchange of a config with workload-identity auth;
-   *                       created only then.
-   */
-  def settings(
-    config: OpenAICompatibleConfig,
-    exchangeClient: => Llm4sHttpClient = Llm4sHttpClient.create()
-  ): Settings =
+  /** The settings the generic `openai-compatible` provider derives from its config. */
+  def settings(config: OpenAICompatibleConfig): Settings =
     Settings(
       providerName = OpenAICompatibleConfig.ProviderIdName,
       displayName = "OpenAI-compatible",
       model = config.model,
       baseUrl = config.baseUrl,
       credential = config.tokenExchange match {
-        case Some(exchange) => Credential.Dynamic(TokenExchange.provider(exchange, exchangeClient))
+        case Some(exchange) => Credential.Exchange(exchange)
         case None           => config.apiKey.fold(Credential.Anonymous)(Credential.Static(_))
       },
       contextWindow = config.contextWindow,

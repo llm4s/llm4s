@@ -107,11 +107,10 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
       error.asInstanceOf[ServiceError].httpStatus shouldBe 503
     }
 
-    "fail on a malformed body or missing fields" in {
+    "fail on a malformed body or a missing access_token" in {
       for body <- Seq(
           "not json",
           """{"expires_in":60}""",
-          """{"access_token":"a"}""",
           """{"access_token":"","expires_in":1}"""
         )
       do
@@ -127,7 +126,7 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
 
     "fail without calling the endpoint when the identity token is missing" in {
       val http = MockHttpClient(Seq(ok))
-      val cfg  = config().copy(identityToken = IdentitySource.File(java.nio.file.Path.of("/no/such/svid")))
+      val cfg  = config().withIdentityToken(IdentitySource.File(java.nio.file.Path.of("/no/such/svid")))
       TokenExchange.rfc8693(cfg, http, clock)().left.value shouldBe an[AuthenticationError]
       http.postCallCount shouldBe 0
     }
@@ -135,12 +134,58 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
     "keep a literal identity token out of TokenExchangeConfig.toString" in {
       (config().toString should not).include(jwt)
     }
+
+    "take the expiry from the access token's exp claim when expires_in is absent and the token is a JWT" in {
+      val exp     = now.plusSeconds(900).getEpochSecond
+      val payload = java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(s"""{"exp":$exp}""".getBytes)
+      val access  = s"eyJhbGciOiJSUzI1NiJ9.$payload.sig"
+      val http    = MockHttpClient(Seq(HttpResponse(200, s"""{"access_token":"$access"}""")))
+      TokenExchange.rfc8693(config(), http, clock)().value shouldBe AccessToken(access, now.plusSeconds(900))
+    }
+
+    "clamp a JWT exp claim to the documented maximum" in {
+      val payload = java.util.Base64.getUrlEncoder.withoutPadding.encodeToString("""{"exp":1e300}""".getBytes)
+      val http    = MockHttpClient(Seq(HttpResponse(200, s"""{"access_token":"h.$payload.s"}""")))
+      TokenExchange.rfc8693(config(), http, clock)().value.expiresAt shouldBe
+        now.plusSeconds(TokenExchange.MaxLifetime.toSeconds)
+    }
+
+    "assume the default lifetime when expires_in is absent and the token is opaque" in {
+      for access <- Seq("opaque-token", "a.not-base64!.c", "a.e30.c") do
+        val http = MockHttpClient(Seq(HttpResponse(200, s"""{"access_token":"$access"}""")))
+        TokenExchange.rfc8693(config(), http, clock)().value.expiresAt shouldBe
+          now.plusSeconds(TokenExchange.DefaultLifetime.toSeconds)
+    }
+
+    "keep the token URL's userinfo and query, and the client id, out of TokenExchangeConfig.toString" in {
+      val cfg = TokenExchangeConfig(
+        IdentitySource.Literal(jwt),
+        "https://user:hunter2@ws.example:8443/oidc/v1/token?sig=s3cr3t#frag",
+        clientId = Some("sp-uuid-secret"),
+        scope = Some("all-apis")
+      )
+      val shown = cfg.toString
+      shown should include("https://***@ws.example:8443/oidc/v1/token?***#***")
+      shown should include("scope=Some(all-apis)")
+      for secret <- Seq("hunter2", "user:", "s3cr3t", "frag", "sp-uuid-secret") do (shown should not).include(secret)
+    }
+
+    "build a config with the with* setters" in {
+      val cfg = config()
+        .withTokenUrl("https://other.example/t")
+        .withClientId("c")
+        .withScope("s")
+        .withAudience(Some("a"))
+      (cfg.tokenUrl, cfg.clientId, cfg.scope, cfg.audience) shouldBe
+        ("https://other.example/t", Some("c"), Some("s"), Some("a"))
+      cfg.withClientId(None).clientId shouldBe None
+    }
   }
 
   "TokenExchange's token URL" should {
     def post(url: String) =
       val http = MockHttpClient(Seq(ok))
-      val cfg  = config().copy(tokenUrl = url)
+      val cfg  = config().withTokenUrl(url)
       (TokenExchange.rfc8693(cfg, http, clock)(), http.postCallCount)
 
     "be https, or http only for a loopback host" in {

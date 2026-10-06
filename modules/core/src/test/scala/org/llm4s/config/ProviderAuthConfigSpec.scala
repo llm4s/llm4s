@@ -114,6 +114,23 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
       error.message should (include("apiKey").and(include("auth")))
     }
 
+    "reject an Authorization header beside auth, in any case, since the exchanged token is the bearer" in {
+      for header <- Seq("Authorization", "authorization", "AUTHORIZATION") do
+        val error = load(
+          section(
+            s"""headers { "$header" = "Bearer static" }, auth { identityTokenFile = "/s", tokenUrl = "https://t" }"""
+          )
+        ).left.value
+        error shouldBe a[ConfigurationError]
+        error.message should (include("Authorization").and(include("llm4s.providers.main.headers")))
+    }
+
+    "accept other headers beside auth" in {
+      load(
+        section("""headers { "X-Trace" = "1" }, auth { identityTokenFile = "/s", tokenUrl = "https://t" }""")
+      ).value.headers shouldBe Map("X-Trace" -> "1")
+    }
+
     "reject neither or both identity-token keys" in {
       load(section("""auth { tokenUrl = "https://t" }""")).left.value.message should include("identityTokenFile")
       load(
@@ -239,6 +256,15 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
       ProvidersConfigLoader.loadSections(ConfigSource.string(hocon)).value.apiKeySources shouldBe
         Map(ProviderName("main") -> ApiKeySource.WorkloadIdentity("llm4s.providers.main.auth"))
     }
+    "not report WorkloadIdentity for a provider that rejects auth" in {
+      val hocon =
+        """llm4s.providers.main { provider = fixturechat, model = m, auth { identityTokenFile = "/s" } }"""
+      ProvidersConfigLoader
+        .loadSections(ConfigSource.string(hocon))
+        .value
+        .apiKeySources(ProviderName("main")) shouldBe a[ApiKeySource.Credentials]
+    }
+
     "keep reporting the shared credential for a section with neither key" in {
       ProvidersConfigLoader
         .loadSections(ConfigSource.string("llm4s.providers.main { provider = authfixture, model = m }"))

@@ -197,8 +197,11 @@ config-policy `prod` preset flags any section that does not (see
 A section can authenticate with a workload identity token - typically a SPIFFE JWT-SVID that
 [`spiffe-helper`](https://github.com/spiffe/spiffe-helper) keeps fresh in a file - instead of an
 API key. Put an `auth` block in the section, with `identityTokenFile` (re-read on every exchange,
-so rotation is picked up) and the keys the provider needs. A section sets `apiKey` or `auth`,
-never both; with `auth`, the shared `llm4s.credentials.<id>.apiKey` is not used.
+so rotation is picked up) and the keys the provider needs. A relative `identityTokenFile` is
+resolved against the process's working directory when the configuration is loaded, so prefer an
+absolute path. A section sets `apiKey` or `auth`, never both, and a section with `auth` may not set
+an `Authorization` header either: the exchanged token is the request's bearer. With `auth`, the
+shared `llm4s.credentials.<id>.apiKey` is not used.
 
 **Databricks model serving** (the generic `openai-compatible` provider; the SVID is exchanged at
 the workspace's RFC 8693 endpoint, the token cached until shortly before it expires, and refreshed
@@ -219,6 +222,9 @@ databricks-main {
 ```
 
 The optional `audience` key sets the RFC 8693 `audience` parameter, for a token endpoint that needs one.
+`tokenUrl` must be `https` (plain `http` only for a loopback host). The token is cached for the
+reply's `expires_in`; a reply without one is taken to live until the access token's `exp` claim if
+it is a JWT, and otherwise for 5 minutes.
 
 **OpenAI** (the OpenAI SDK's workload identity federation):
 
@@ -228,8 +234,8 @@ openai-wif {
   model    = "gpt-4o-mini"
   auth {
     identityTokenFile  = "/var/run/secrets/spiffe/openai"
-    identityProviderId = ${OPENAI_IDENTITY_PROVIDER_ID}
-    serviceAccountId   = ${OPENAI_SERVICE_ACCOUNT_ID}
+    identityProviderId = ${?OPENAI_IDENTITY_PROVIDER_ID}
+    serviceAccountId   = ${?OPENAI_SERVICE_ACCOUNT_ID}
   }
 }
 ```
@@ -243,17 +249,26 @@ anthropic-wif {
   model    = "claude-sonnet-4-5"
   auth {
     identityTokenFile = "/var/run/secrets/spiffe/anthropic"
-    federationRuleId  = ${ANTHROPIC_FEDERATION_RULE_ID}
-    organizationId    = ${ANTHROPIC_ORGANIZATION_ID}
+    federationRuleId  = ${?ANTHROPIC_FEDERATION_RULE_ID}
+    organizationId    = ${?ANTHROPIC_ORGANIZATION_ID}
     serviceAccountId  = ${?ANTHROPIC_SERVICE_ACCOUNT_ID}
     workspaceId       = ${?ANTHROPIC_WORKSPACE_ID}
   }
 }
 ```
 
+A `${?VAR}` that is unset leaves its key out, and a missing required key is reported when the
+section is loaded. For Anthropic, `baseUrl` must be `https` (plain `http` only for a loopback host),
+since the SDK posts the identity token to `<baseUrl>/v1/oauth/token`.
+
 Request each SVID for the audience its relying party expects (`jwt_audience` in `spiffe-helper`).
 Other providers reject an `auth` block. The `prod` config-policy preset's `ownApiKey` rule accepts
 a section that authenticates this way.
+
+Model listing works for an `openai-compatible` section with `auth` (it exchanges once). For
+`openai` and `anthropic` sections with `auth` it is not supported - their SDKs perform the exchange
+only inside a client - and the lister returns a `ConfigurationError` saying so; list models from a
+section with an `apiKey`.
 
 ### Section keys
 

@@ -116,23 +116,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expiry and refreshes and retries once on 401; `openai` (`identityProviderId`,
   `serviceAccountId`, `clientId`) and `anthropic` (`federationRuleId`, `organizationId`,
   `serviceAccountId`, `workspaceId`) use their SDKs' workload identity federation. New core types
-  in `org.llm4s.llmconnect.auth`; `ProviderConfigSpec.authExtras` declares a provider's auth keys;
+  in `org.llm4s.llmconnect.auth` (`AuthConfig` and `TokenExchangeConfig`, like the new
+  `OpenAIWorkloadIdentity` and `AnthropicWorkloadIdentity`, are built with `apply` and `with*`
+  setters, with no public `copy`); `ProviderConfigSpec.authExtras` declares a provider's auth keys;
   `NamedProviderConfig.auth`, `OpenAIConfig.workloadIdentity` and `AnthropicConfig.workloadIdentity`
-  are new defaulted fields; `ApiKeySource` gained `WorkloadIdentity`.
+  are new defaulted fields; `ApiKeySource` gained `WorkloadIdentity`, reported only for a provider
+  that accepts `auth`. A section with `auth` may not also set `apiKey` or an `Authorization`
+  header. Model listing is not supported for `openai` and `anthropic` sections that use `auth`, and
+  says so. `llm4s-provider-testkit` gains `FakeTokenExchangeServer` and `TestJwt`. (#1354)
   **Migration:** `OpenAICompatibleClient.Settings.apiKey: Option[String]` became
-  `credential: OpenAICompatibleClient.Credential` (`Anonymous`, `Static(key)`, `Dynamic(provider)`);
-  `OpenAICompatibleClient.settings` gained an optional second parameter. `llm4s-provider-testkit`
-  gains `FakeTokenExchangeServer` and `TestJwt`. (#1354)
-
-  **Hardening of the token exchange:** `tokenUrl` must be `https` (plain `http` only for a loopback host
-  - `localhost`, `127.x.y.z`, `[::1]` - judged on the URL's real host, so `http://localhost@evil.example/` is
-  refused), because the request carries the identity token; refused at configuration time and again before
-  any request. `expires_in` that is not a finite, non-negative number is an `AuthenticationError` instead of an
-  `ArithmeticException`, and a huge one is clamped to `TokenExchange.MaxLifetime` (24 hours). A failed token
-  fetch is shared for 5 seconds, so N callers during an outage wait for one attempt, not N in turn. Only a 401
-  triggers the refresh-and-retry; a 403 (valid token, missing permission) does not. To tell them apart
-  `HttpErrorMapper` now sets `AuthenticationError.code` to the HTTP status (`"401"`/`"403"`) for the 401 and 403 it
-  maps, for every provider; an `identityTokenFile` that is not a valid path is a `ConfigurationError`.
+  `credential: OpenAICompatibleClient.Credential` (`Anonymous`, `Static(key)`, `Dynamic(provider)`,
+  `Exchange(config)`). An `Exchange` credential exchanges through the client's own HTTP client, which
+  `close()` releases.
+  **The token exchange:** `tokenUrl`, and Anthropic's `baseUrl` when the section uses `auth`, must
+  be `https`; plain `http` is accepted only for a loopback host (`localhost`, `127.x.y.z` or
+  `[::1]`, judged on the URL's real host, so `http://localhost@evil.example/` is refused), because
+  the request carries the identity token. `expires_in` is optional: without it the token's lifetime
+  is the access token's `exp` claim when it is a JWT, and otherwise `TokenExchange.DefaultLifetime`
+  (5 minutes). One that is not a finite, non-negative number is an `AuthenticationError`, and a huge
+  one is clamped to `TokenExchange.MaxLifetime` (24 hours). A failed token fetch is shared for 5
+  seconds, so N callers during an outage wait for one attempt, not N in turn, and a caller
+  interrupted while it waits gets a `CancelledError` with its interrupt flag set. Only a 401
+  triggers the refresh-and-retry; a 403 (valid token, missing permission) does not. To tell them
+  apart `HttpErrorMapper` now sets `AuthenticationError.code` to the HTTP status (`"401"` or
+  `"403"`), for every provider. An `identityTokenFile` that is not a valid path is a
+  `ConfigurationError`; with the `openai` SDK, a missing or empty token file is an
+  `AuthenticationError`, as with the other providers.
 - **`@Stable` and `@Experimental`: the tier of a public type, in the code** ([#1281](https://github.com/llm4s/llm4s/issues/1281),
   `org.llm4s.annotation` in `llm4s-core`): Java annotations with runtime retention, so an IDE, a tool or a
   Java caller can read them. Every top-level public type of `llm4s-core`, `llm4s-openai`,

@@ -130,6 +130,44 @@ class CachingAccessTokenProviderSpec extends AnyWordSpec with Matchers:
       provider.token() shouldBe Right("t2")
     }
 
+    "return CancelledError, with the interrupt flag set again, to a caller interrupted while it waits for the lock" in {
+      val clock   = MutableClock(start)
+      val entered = new java.util.concurrent.CountDownLatch(1)
+      val release = new java.util.concurrent.CountDownLatch(1)
+      val fetch = () => {
+        entered.countDown()
+        release.await()
+        Right(AccessToken("t1", clock.instant().plusSeconds(600)))
+      }
+      val provider = CachingAccessTokenProvider(fetch, 1.minute, clock)
+      val holder   = Thread.ofVirtual().start(() => provider.token(): Unit)
+      entered.await()
+      val outcome = new java.util.concurrent.atomic.AtomicReference[(Result[String], Boolean)]()
+      val waiter =
+        Thread.ofVirtual().start(() => outcome.set(provider.token() -> Thread.currentThread().isInterrupted))
+      // Wait until the waiter is parked on the lock, then cancel it.
+      while waiter.getState != Thread.State.WAITING do Thread.onSpinWait()
+      waiter.interrupt()
+      waiter.join(5000)
+      val (result, interrupted) = outcome.get
+      result.left.toOption.get shouldBe an[org.llm4s.error.CancelledError]
+      interrupted shouldBe true
+      release.countDown()
+      holder.join(5000)
+      provider.token() shouldBe Right("t1")
+    }
+
+    "leave the cache alone, with the interrupt flag set, when invalidate is interrupted" in {
+      val clock    = MutableClock(start)
+      val issuer   = Issuer(clock, 10.minutes)
+      val provider = CachingAccessTokenProvider(() => issuer.fetch(), 1.minute, clock)
+      provider.token() shouldBe Right("t1")
+      Thread.currentThread().interrupt()
+      provider.invalidate("t1")
+      Thread.interrupted() shouldBe true
+      provider.token() shouldBe Right("t1")
+    }
+
     "redact the token value in AccessToken.toString" in {
       (AccessToken("secret", start).toString should not).include("secret")
     }

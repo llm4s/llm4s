@@ -43,7 +43,7 @@ import org.llm4s.types.Result
 import org.slf4j.{ Logger, LoggerFactory }
 
 import java.time.Instant
-import java.util.concurrent.CompletableFuture
+import java.util.concurrent.{ CompletableFuture, Executor }
 import scala.annotation.nowarn
 import scala.jdk.CollectionConverters._
 import scala.jdk.OptionConverters._
@@ -693,7 +693,10 @@ object OpenAIClient {
    * carrying its `Retry-After`, and so on; an I/O failure is mapped by its cause, so a timeout
    * stays a `NetworkError`.
    */
-  private[provider] def mapError(e: Throwable, provider: String): LLMError = e match {
+  private[provider] def mapError(e: Throwable, provider: String): LLMError =
+    OpenAIClientTransport.identityTokenFailure(e).getOrElse(mapSdkError(e, provider))
+
+  private def mapSdkError(e: Throwable, provider: String): LLMError = e match {
     case service: OpenAIServiceException =>
       HttpErrorMapper
         .mapHttpError(
@@ -824,18 +827,37 @@ private[provider] object OpenAIClientTransport {
     sdk(customize(builder).build())
   }
 
+  /** Carries a failure to read the identity token through the SDK, which only understands exceptions. */
+  final private class IdentityTokenException(val error: LLMError)
+      extends RuntimeException(error.message, null, false, false)
+
+  /** Starts each task on a new virtual thread; nothing to shut down. */
+  private val IdentityTokenExecutor: Executor =
+    (task: Runnable) => Thread.ofVirtual().name("llm4s-openai-identity-token").start(task): Unit
+
+  /** The identity-token failure somewhere in `e`'s cause chain, if any; a cause cycle is walked once. */
+  private[provider] def identityTokenFailure(e: Throwable): Option[LLMError] = {
+    val seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap[Throwable, java.lang.Boolean]())
+    Iterator
+      .iterate(e)(_.getCause)
+      .takeWhile(c => c != null && seen.add(c))
+      .collectFirst { case failure: IdentityTokenException => failure.error }
+  }
+
   /** The SDK's workload identity for `wi`: a JWT subject token read from `wi.identityToken` on each exchange. */
   private[provider] def sdkWorkloadIdentity(wi: OpenAIWorkloadIdentity): WorkloadIdentity = {
     val source = IdentityTokenSource.from(wi.identityToken)
     val subject = new SubjectTokenProvider {
       override def tokenType(): SubjectTokenType = SubjectTokenType.JWT
 
-      // The SDK's callback contract is exceptions; `mapError` turns this back into a Result.
+      // The SDK's callback contract is exceptions. The error rides inside one, whatever the SDK wraps it
+      // in, and `mapError` takes it back out, so a missing token file stays an AuthenticationError.
       override def getToken(httpClient: SdkHttpClient, jsonMapper: JsonMapper): String =
-        source.fetch().fold(error => throw new IllegalStateException(error.message), identity)
+        source.fetch().fold(error => throw new IdentityTokenException(error), identity)
 
+      // The read is blocking file I/O: it runs on a virtual thread, not on the common pool.
       override def getTokenAsync(httpClient: SdkHttpClient, jsonMapper: JsonMapper): CompletableFuture[String] =
-        CompletableFuture.supplyAsync(() => getToken(httpClient, jsonMapper))
+        CompletableFuture.supplyAsync(() => getToken(httpClient, jsonMapper), IdentityTokenExecutor)
     }
     val builder = WorkloadIdentity
       .builder()
