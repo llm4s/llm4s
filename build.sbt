@@ -284,6 +284,9 @@ lazy val llm4s = (project in file("."))
     relocationKnowledgegraphNeo4j
   )
   .settings(
+    // `sbt "dumpBuildModel <file>"`: the build's projects, keys, commands and aliases as JSON, read by
+    // scripts/check-doc-support.sh. See project/BuildModel.scala.
+    commands += BuildModel.dumpCommand,
     publish / skip                      := true,
     mimaFailOnNoPrevious                := false,
     publishedArtifactsCheck / aggregate := false,

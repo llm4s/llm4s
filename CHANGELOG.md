@@ -281,11 +281,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
 - **CI verifies the documented support matrix** ([#967](https://github.com/llm4s/llm4s/issues/967)):
   `scripts/check-doc-support.sh`, in the `quick-checks` job, fails when the docs say something the build does not
-  do. It compares the Scala version in the docs with `scala3`, the JDK in the docs with the JDKs `ci.yml` runs,
-  the modules in CLAUDE.md's repository-structure block with the directories on disk and the projects in
-  `build.sbt` (in both directions), and every `sbt` command quoted in the docs with the build's aliases, tasks and
-  projects and with sbt's built-ins. `scripts/test-check-doc-support.sh` breaks each claim in a scratch copy and
-  checks the failure. Three stale claims it found are fixed: `sbt dependencyCheck` (no such task) in the review
+  do. The build's side comes from sbt itself: a new `dumpBuildModel <file>` command (`project/BuildModel.scala`)
+  writes the loaded build as JSON - projects, base directories, aggregates, configurations and every defined key,
+  commands, aliases with their bodies, Scala versions and resolved scalac/javac options. The script compares the
+  Scala version in the docs with the projects' `scalaVersion`, the JDK in the docs with the JDKs `ci.yml` runs and
+  the build's release target, the modules in CLAUDE.md's repository-structure block with the directories on disk
+  and the projects' base directories (in both directions), and replays every `sbt` command quoted in the docs (and
+  every alias body) against the model the way sbt runs it - `project X` switches persist, keys resolve through
+  configuration, `ThisBuild` and `Global` delegation or aggregation, and a plugin's configuration exists only
+  where the plugin is enabled. `scripts/test-check-doc-support.sh` runs each kind of claim against a fixture
+  model and Markdown fixtures, with no sbt. Three stale claims it found are fixed: `sbt dependencyCheck` (no such task) in the review
   guidelines, `sbt run "Explain ..."` in the g8 guide (sbt reads the quoted text as a second command; it is now
   `sbt "run Explain ..."`), and `modules/gradle-demo`, which CLAUDE.md did not name.
 - **Cancellation by interrupt for graph runs and providers** (Experimental, `org.llm4s.agent.graph`,

@@ -3,49 +3,84 @@
 #
 # The Scala 2.13 thread (#874, #888, #1095) started because CLAUDE.md and the docs claimed cross-building,
 # `sbt +test` over several versions and a `modules/crossTest/` directory, and the build had none of them.
-# #1134 corrected the prose; this keeps it corrected. It checks the handful of documented facts that can
-# be compared with the build, not the prose around them:
+# #1134 corrected the prose; this keeps it corrected.
 #
-#   1. Scala  - every concrete Scala version in the docs (`Scala 3.x.y`, `Scala 3.x`, `Scala 3`, and
-#               `Scala 2.13` just the same) agrees with `scala3` in project/Dependencies.scala as far as it
-#               goes, and build.sbt's scalaVersion is that value. So do `scalaVersion := "..."` and the
-#               `scala3-library_3` pins in snippets, and `_<binary>` artifact suffixes. Naming another
-#               version is fine only to say it is not supported: in the same clause a negation before it
-#               (`no Scala 2.13 artifact`, `do not ... Scala 2.13`) or a deferral or denial after it
-#               (`Scala 2.13 support is deferred`, `... is not supported`). The build cross-builds nothing,
-#               so `crossScalaVersions` and `sbt +task` are claims too.
+# The build's side of every comparison comes from sbt itself, never from reading build.sbt's text:
+# `sbt "dumpBuildModel <file>"` (project/BuildModel.scala) writes the loaded build as JSON - every project
+# with its base directory, aggregates, configurations and defined keys (configuration- and task-scoped
+# ones included, so `Docker` exists only where DockerPlugin is enabled), the `ThisBuild` and `Global`
+# keys, the keys whose `aggregate` is false, the commands sbt and its plugins define, each alias with its
+# body, each project's Scala versions, and its resolved scalacOptions and javacOptions.
+#
+#   1. Scala  - every project has one `scalaVersion`, and every concrete Scala version in the docs
+#               (`Scala 3.x.y`, `Scala 3.x`, `Scala 3`, and `Scala 2.13` just the same) agrees with it as
+#               far as it goes. So do `scalaVersion := "..."` and `scala3-library_3` pins in snippets, and
+#               `_<binary>` artifact suffixes. Naming another version is fine only to say it is not
+#               supported: in the same clause a negation before it (`no Scala 2.13 artifact`) or a deferral
+#               or denial after it (`Scala 2.13 support is deferred`, `... is not supported`). Unless a
+#               project sets other `crossScalaVersions`, `crossScalaVersions` and `sbt +task` are claims too.
 #   2. JDK    - every `JDK N` (also `Java N`, `Java SE N`, `Java 1.N`, `JRE N`, `OpenJDK N`, `Temurin N`,
 #               `Corretto N`, `Zulu N`) is a JDK .github/workflows/ci.yml runs, and so is each JDK of a list
-#               or range (`JDK 21 and 25`, `JDK 21-25`). A floor (`JDK N+`, `JDK N or newer`, `at least
-#               JDK N`, `JDK >= N`) or a range's start must be the minimum runtime: the oldest JDK CI runs,
-#               which a release target in the build (`-release`, `--release`, `-java-output-version`,
-#               `-target`), if any, must equal. A ceiling (`JDK N or older`) is the floor itself or wrong.
-#   3. Module - every module in CLAUDE.md's repository-structure block exists on disk, and every module
-#               build.sbt defines is named there (itself or a parent directory).
-#   4. sbt    - every `sbt ...` command quoted in the docs is a build alias, a task the build both declares
-#               and sets (a `taskKey` with no `:=` is not a task), an sbt built-in, a command of a plugin
-#               project/plugins.sbt loads, or such a task scoped to a project the build defines
-#               (`core/test`). A task build.sbt sets only inside some projects' definitions is valid in
-#               those projects and in the projects that aggregate them - scoped, or unscoped from the root
-#               (`core/publishedArtifactsCheck` is not: the root alone sets it). `project X` must name a
-#               project, and each alias's literal body must itself be valid. A backslash-continued command
-#               is read as one line, a command after `&&`, `||` or `|` is read too, and one the shell
-#               cannot parse fails.
+#               or range. The floor is the JVM release target the build compiles for (`-release N`,
+#               `-release:N`, `--release N`, `--release=N`, `-java-output-version N`, `-target ...` in the
+#               resolved scalacOptions or javacOptions), else the oldest JDK CI runs; a target must also be
+#               a JDK CI runs. A floor (`JDK N+`, `JDK N or newer`, `at least JDK N`, `JDK >= N`) or a
+#               range's start must be that floor, and a ceiling (`JDK N or older`) is the floor or wrong.
+#   3. Module - every module in CLAUDE.md's repository-structure block exists on disk, and every project
+#               base directory under modules/ is named there (itself or a parent directory).
+#   4. sbt    - every `sbt ...` command quoted in the docs, and every alias body, is replayed the way sbt
+#               runs it: commands in order from the root project, `project X` switching the project the
+#               commands after it run in. Each command must be an alias, an sbt or plugin command, or a key
+#               that resolves - through sbt's delegation to the configurations a configuration extends,
+#               `ThisBuild` and `Global` - in the project it is scoped to (or the current one), or, when
+#               that project aggregates others and the key's `aggregate` is not false, in one of them. A
+#               configuration must be one the project has. A backslash-continued command is read as one
+#               line, a command after `&&`, `||` or `|` is read too, and one the shell cannot parse fails.
 #
-# Commented-out code in build.sbt, project/*.scala and project/plugins.sbt does not count as build.
+# Usage: scripts/check-doc-support.sh [--model FILE] [REPO_ROOT]
+#   --model FILE   a model written by `sbt "dumpBuildModel FILE"` (also $DOC_SUPPORT_MODEL). Without one the
+#                  script runs sbt in REPO_ROOT to write it, which needs a JDK and sbt (about 20 s).
+#   REPO_ROOT      defaults to this script's repository.
 #
-# Usage: scripts/check-doc-support.sh [REPO_ROOT]    (the root defaults to this script's repository)
-# Release notes, migration guides and design documents name old versions and commands on purpose and
-# are not checked. Elsewhere, a line is exempt from checks 1, 2 and 4 when it says it is history
-# (`previously`, `formerly`, `no longer`, `dropped`, `until`, `legacy`, `older`, `used to`, `upgrading from`)
-# or carries the marker `doc-support: ignore` (in an HTML comment in prose, or `# doc-support: ignore` in a
-# code block). Exit code 0 = the matrix is true. Non-zero = file:line and the claim, one per line.
+# Release notes, migration guides and design documents name old versions and commands on purpose and are
+# not checked. Elsewhere, a line is exempt from checks 1, 2 and 4 when it says it describes the past
+# (`previously`, `formerly`, `no longer`, `dropped`, `used to`, `upgrading from`, `legacy`, `was`, `were`,
+# `prior to`, `before v1.2`, a dated entry such as `2025-06-01`), or carries the marker
+# `doc-support: ignore` (in an HTML comment in prose, or `# doc-support: ignore` in a code block). A JDK
+# ceiling (`JDK N or older`) states what is supported now and is checked even on such a line; only the
+# marker exempts it. Exit code 0 = the matrix is true. Non-zero = file:line and the claim, one per line.
 set -euo pipefail
 
-REPO_ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+MODEL="${DOC_SUPPORT_MODEL:-}"
+REPO_ROOT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --model) MODEL="${2:?--model needs a file}"; shift 2 ;;
+    --model=*) MODEL="${1#--model=}"; shift ;;
+    -h|--help) sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d'; exit 0 ;;
+    *) REPO_ROOT="$1"; shift ;;
+  esac
+done
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+if [ -n "$MODEL" ]; then
+  MODEL="$(cd "$(dirname "$MODEL")" && pwd)/$(basename "$MODEL")"
+fi
 cd "$REPO_ROOT"
 
-python3 - <<'PYEOF'
+if [ -z "$MODEL" ]; then
+  MODEL="$REPO_ROOT/target/build-model.json"
+  mkdir -p "$REPO_ROOT/target"
+  echo "Writing the build model with sbt (pass --model FILE to reuse one)..." >&2
+  if ! sbt_out="$(sbt -batch "dumpBuildModel $MODEL" 2>&1)"; then
+    echo "$sbt_out" >&2
+    echo "sbt could not write the build model; see above." >&2
+    exit 2
+  fi
+fi
+[ -f "$MODEL" ] || { echo "No build model at $MODEL" >&2; exit 2; }
+
+python3 - "$MODEL" <<'PYEOF'
+import json
 import pathlib
 import re
 import shlex
@@ -57,43 +92,14 @@ SKIP_FILES = {"docs/reference/migration.md", "docs/reference/release.md", "CHANG
 # build.sbt projects that exist only to forward an old coordinate; they are not modules to document.
 UNDOCUMENTED_MODULE_PREFIXES = ("modules/relocations/",)
 
-# What `sbt <word>` may be without the build defining it: sbt itself, valid in any project.
-SBT_BUILTINS = {
-    "clean", "compile", "test", "testOnly", "testQuick", "run", "runMain", "console", "consoleQuick",
-    "package", "publish", "publishLocal", "publishM2", "doc", "update", "reload",
-    "projects", "project", "tasks", "settings", "show", "inspect", "set", "new", "exit", "help",
-    "version", "name", "scalaVersion", "evicted", "dependencyTree",
-}
-SCOPE_WORDS = {"ThisBuild", "Global", "Test", "Compile", "IntegrationTest", "Runtime"}
-
-# Commands and configurations a plugin adds, keyed by the plugin's artifact: they are accepted only while
-# project/plugins.sbt declares that plugin, so removing a plugin makes the docs that still quote it fail.
-# `addDependencyTreePlugin` is sbt's own switch for the full dependency-graph plugin.
-PLUGIN_COMMANDS = {
-    "sbt-scalafmt": {"scalafmt", "scalafmtAll", "scalafmtCheck", "scalafmtCheckAll", "scalafmtSbt",
-                     "scalafmtSbtCheck", "scalafmtOnly"},
-    "sbt-scalafix": {"scalafix", "scalafixAll"},
-    "sbt-scoverage": {"coverage", "coverageOff", "coverageReport", "coverageAggregate"},
-    "sbt-dependency-updates": {"dependencyUpdates"},
-    "sbt-mima-plugin": {"mimaReportBinaryIssues"},
-    "sbt-native-packager": {"stage"},
-    "sbt-pgp": {"publishSigned"},
-    "sbt-ci-release": {"ci-release", "sonatypeBundleRelease"},
-    "sbt-assembly": {"assembly"},
-    "sbt-license-report": {"dumpLicenseReport"},
-    "addDependencyTreePlugin": {"dependencyBrowseTree", "dependencyBrowseGraph", "dependencyDot"},
-}
-PLUGIN_CONFIGS = {
-    "sbt-native-packager": {"Docker", "Universal"},
-    "sbt-jmh": {"Jmh"},
-}
-
 errors = []
-sbt_unknown = []
 
 IGNORE_MARKER = "doc-support: ignore"
+# Words that say a sentence is about the past, so it may name an old version. Deliberately specific:
+# a comparative such as `older` or `earlier` is how a support ceiling is phrased, not a sign of history.
 HISTORICAL = re.compile(
-    r"\b(previously|formerly|no longer|dropped|until|legacy|older|used to|upgrading from)\b", re.I)
+    r"\b(?:previously|formerly|no longer|dropped|used to|upgrading from|legacy|was|were|prior to"
+    r"|before\s+v?\d+\.\d+|(?:19|20)\d\d-\d\d(?:-\d\d)?)\b", re.I)
 
 
 def exempt(line_text):
@@ -116,32 +122,6 @@ def read(rel):
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 
-def strip_comments(src):
-    """Scala/sbt source with `//` and `/* */` comments blanked (newlines kept), string literals left
-    alone: a commented-out alias, task, project or plugin is not part of the build."""
-    out, i, n = [], 0, len(src)
-    while i < n:
-        if src.startswith('"""', i):
-            j = src.find('"""', i + 3)
-            j = n if j < 0 else j + 3
-            out.append(src[i:j]); i = j
-        elif src[i] == '"':
-            j = i + 1
-            while j < n and src[j] not in '"\n':
-                j += 2 if src[j] == "\\" else 1
-            out.append(src[i:j + 1]); i = j + 1
-        elif src.startswith("//", i):
-            j = src.find("\n", i)
-            i = n if j < 0 else j
-        elif src.startswith("/*", i):
-            j = src.find("*/", i + 2)
-            j = n if j < 0 else j + 2
-            out.append("\n" * src.count("\n", i, j)); i = j
-        else:
-            out.append(src[i]); i += 1
-    return "".join(out)
-
-
 def line_of(text, index):
     return text.count("\n", 0, index) + 1
 
@@ -161,24 +141,81 @@ def doc_files():
 FILES = doc_files()
 TEXTS = {p: p.read_text(encoding="utf-8") for p in FILES}
 
-# ---------------------------------------------------------------- the build's side of the facts
-deps = strip_comments(read("project/Dependencies.scala"))
-m = re.search(r'val\s+scala3\s*=\s*"([^"]+)"', deps)
-if not m:
-    fail("project/Dependencies.scala", 1, "no `val scala3 = \"x.y.z\"`; cannot establish the Scala version")
+# ---------------------------------------------------------------- the build, as sbt loaded it
+MODEL_PATH = sys.argv[1]
+try:
+    model = json.loads(pathlib.Path(MODEL_PATH).read_text(encoding="utf-8"))
+except (OSError, ValueError) as e:
+    print(f"Cannot read the build model {MODEL_PATH}: {e}", file=sys.stderr)
+    sys.exit(2)
+MODEL_NAME = "the build model"
+
+
+class Project:
+    def __init__(self, raw):
+        self.id = raw["id"]
+        self.base = raw["base"]
+        self.aggregate = list(raw.get("aggregate", []))
+        self.config_names = {c["name"] for c in raw.get("configurations", [])}
+        self.config_by_id = {c["id"]: c["name"] for c in raw.get("configurations", [])}
+        self.extends = {c["name"]: list(c.get("extends", [])) for c in raw.get("configurations", [])}
+        self.keys = {}                       # key -> {(config name, task axis)}
+        for config, task, key in raw.get("keys", []):
+            self.keys.setdefault(key, set()).add((config, task))
+        self.no_aggregate = set(raw.get("noAggregate", []))
+        self.scala = raw.get("scalaVersion", "")
+        self.cross = list(raw.get("crossScalaVersions", []))
+        self.options = [(f"{kind}/{config}", opts)
+                        for kind in ("scalacOptions", "javacOptions")
+                        for config, opts in sorted(raw.get(kind, {}).items())]
+
+    def config_name(self, ident):
+        """The configuration `ident` names here: an identifier (`Test`, slash syntax) or, in the old
+        `config:key` syntax, a name, matched without regard to case as sbt does. None if it has none."""
+        if ident in self.config_by_id:
+            return self.config_by_id[ident]
+        return next((n for n in self.config_names if n.lower() == ident.lower()), None)
+
+    def config_closure(self, name):
+        """`name` and every configuration it extends: the configurations sbt delegates it to."""
+        seen, todo = set(), [name]
+        while todo:
+            cur = todo.pop()
+            if cur not in seen:
+                seen.add(cur)
+                todo.extend(self.extends.get(cur, ()))
+        return seen
+
+
+PROJECTS = {raw["id"]: Project(raw) for raw in model["projects"]}
+ROOT = model["root"]
+SHARED_KEYS = {}                             # ThisBuild and Global: every project delegates to them
+for config, task, key in model.get("buildKeys", []) + model.get("globalKeys", []):
+    SHARED_KEYS.setdefault(key, set()).add((config, task))
+COMMANDS = set(model.get("commands", []))
+ALIASES = {a["name"]: a["body"] for a in model.get("aliases", [])}
+ALL_KEYS = set(SHARED_KEYS).union(*(p.keys for p in PROJECTS.values()))
+ALL_CONFIG_IDS = set().union(*(p.config_by_id for p in PROJECTS.values()))
+ALL_CONFIG_NAMES = set().union(*(p.config_names for p in PROJECTS.values()))
+SCOPE_AXES = {"ThisBuild", "Global", "Zero"}
+
+# ---------------------------------------------------------------- Scala, from the model
+scala_versions = sorted({p.scala for p in PROJECTS.values() if p.scala})
+if not scala_versions:
+    fail(MODEL_NAME, 1, "no project has a scalaVersion; cannot establish the Scala version")
+    SCALA = None
+elif len(scala_versions) > 1:
+    by_version = {v: sorted(p.id for p in PROJECTS.values() if p.scala == v) for v in scala_versions}
+    fail(MODEL_NAME, 1, "projects build with different Scala versions, which docs stating one cannot match: "
+         + "; ".join(f"{v} ({', '.join(ids[:4])}{', ...' if len(ids) > 4 else ''})" for v, ids in by_version.items()))
     SCALA = None
 else:
-    SCALA = m.group(1)
-build = strip_comments(read("build.sbt"))
-scala_sources = [strip_comments(pathlib.Path(q).read_text(encoding="utf-8"))
-                 for q in sorted(pathlib.Path("project").glob("*.scala"))]
-if SCALA and not re.search(r"scalaVersion\s*:=\s*scala3\b", build):
-    fail("build.sbt", 1, "scalaVersion is not `scala3`, so the documented Scala version is not the build's")
-CROSS_BUILDS = any(re.search(r"\bcrossScalaVersions\s*(?::=|\+=|\+\+=)", s) for s in [build] + scala_sources)
+    SCALA = scala_versions[0]
+CROSS_BUILDS = any(set(p.cross) - {p.scala} for p in PROJECTS.values())
 
 ci = read(".github/workflows/ci.yml")
 ci_jdks = set()
-for jm in re.finditer(r"^[^#\n]*java-version:\s*(\S+)", ci, re.M):
+for jm in re.finditer(r"^[^#\n]*java-version:\s*([^#\n]*?)\s*(?:#.*)?$", ci, re.M):
     value = jm.group(1).strip("'\"")
     if value.isdigit():
         ci_jdks.add(int(value))
@@ -188,17 +225,42 @@ for jm in re.finditer(r"^[^#\n]*java-version:\s*(\S+)", ci, re.M):
 if not ci_jdks:
     fail(".github/workflows/ci.yml", 1, "no java-version found; cannot establish the JDK CI runs")
 
-# The minimum supported runtime is the oldest JDK CI runs. A release target compiled into the class files
-# is a second statement of it, and must agree: a target CI never runs is a floor nothing tests.
-JDK_FLOOR = min(ci_jdks) if ci_jdks else None
-RELEASE_RE = re.compile(
-    r'"(?:-release|--release|-java-output-version|-target)"\s*,\s*"(?:jvm-)?(?:1\.)?(\d+)"'
-    r'|"(?:-release|-target|-java-output-version):(?:jvm-)?(?:1\.)?(\d+)"')
-release_targets = {int(a or b) for s in [build] + scala_sources for a, b in RELEASE_RE.findall(s)}
-for target in sorted(release_targets):
-    if JDK_FLOOR is not None and target != JDK_FLOOR:
-        fail("build.sbt", 1, f"compiles for JDK {target}, but the oldest JDK CI runs is {JDK_FLOOR}: "
-                             f"the supported floor must be one CI exercises")
+# The JVM release target, from the options sbt resolved for each project: `-release 17`, `-release:17`,
+# `--release 17`, `--release=17`, `-java-output-version 17`, `-target 17`, `-target:jvm-1.8`, `-Xtarget:8`.
+RELEASE_FLAGS = {"-release", "--release", "-java-output-version", "--java-output-version",
+                 "-target", "--target", "-Xtarget", "-Xunchecked-java-output-version"}
+
+
+def release_targets(opts):
+    out, i = [], 0
+    while i < len(opts):
+        opt, value = opts[i], None
+        if opt in RELEASE_FLAGS and i + 1 < len(opts):
+            value = opts[i + 1]
+            i += 1
+        else:
+            flag, sep, rest = opt.partition("=") if "=" in opt else opt.partition(":")
+            if sep and flag in RELEASE_FLAGS:
+                value = rest
+        i += 1
+        if value is not None:
+            mm = re.fullmatch(r"(?:jvm-)?(?:1\.)?(\d+)", value.strip())
+            if mm:
+                out.append(int(mm.group(1)))
+    return out
+
+
+targets = {}                                  # target -> [where]
+for p in PROJECTS.values():
+    for where, opts in p.options:
+        for t in release_targets(opts):
+            targets.setdefault(t, []).append(f"{p.id} {where}")
+for t, where in sorted(targets.items()):
+    if ci_jdks and t != min(ci_jdks):
+        fail(MODEL_NAME, 1, f"compiles for JDK {t} ({', '.join(where[:3])}{', ...' if len(where) > 3 else ''}), "
+                            f"but the oldest JDK CI runs is {min(ci_jdks)}: the supported floor must be one CI exercises")
+JDK_FLOOR = min(targets) if targets else (min(ci_jdks) if ci_jdks else None)
+FLOOR_SOURCE = "the build's release target" if targets else "the oldest JDK CI runs"
 
 # ---------------------------------------------------------------- 1. Scala
 # A version other than the build's may be named only to say it is not supported, in the same clause:
@@ -294,7 +356,7 @@ JDK_RE = re.compile(
     rf"(?:\s*(?:-|–|\bto\b|\bthrough\b)\s*(?P<hi>{_JV}))?"
     rf"(?P<more>(?:\s*(?:,|/|\band\b|\bor\b)\s*(?:JDK\s*)?{_JV}(?!\s*(?:-|–)\s*\d))*)"
     r"(?P<floor>\+|\s+(?:or|and)\s+(?:newer|later|above|higher|greater|up|beyond)|\s+(?:minimum|or\s+any\s+later))?"
-    r"(?P<ceil>\s+(?:or|and)\s+(?:older|earlier|below|lower))?")
+    r"(?P<ceil>\s+(?:or|and)\s+(?:older|earlier|below|lower)|\s*(?:<=|≤))?")
 
 
 def jdk_number(token):
@@ -307,21 +369,25 @@ for p in FILES:
     text = TEXTS[p]
     rel = p.as_posix()
     for jm in JDK_RE.finditer(text):
-        if not ci_jdks or exempt(line_text_at(text, jm.start())):
+        line_text = line_text_at(text, jm.start())
+        if not ci_jdks or IGNORE_MARKER in line_text:
             continue
         line = line_of(text, jm.start())
         n = jdk_number(jm.group("n"))
+        # A ceiling says what runs today, whatever else the line says: checked before the history exemption.
+        if jm.group("ceil"):
+            if n != JDK_FLOOR:
+                fail(rel, line, f"supports JDK {n} or older, but the floor ({FLOOR_SOURCE}) is JDK {JDK_FLOOR}")
+            continue
+        if HISTORICAL.search(line_text):
+            continue
         listed = [jdk_number(x) for x in re.findall(_JV, jm.group("more") or "")]
         hi = jdk_number(jm.group("hi")) if jm.group("hi") else None
         is_floor = bool(jm.group("pre") or jm.group("ge") or jm.group("floor"))
-        if jm.group("ceil"):
-            if n != JDK_FLOOR:
-                fail(rel, line, f"supports JDK {n} or older, but the oldest JDK CI runs is {JDK_FLOOR}")
-            continue
         if is_floor or hi is not None:
             if n != JDK_FLOOR:
                 fail(rel, line, f"gives JDK {n} as the minimum, but the minimum supported runtime "
-                                f"(the oldest JDK CI runs) is JDK {JDK_FLOOR}")
+                                f"({FLOOR_SOURCE}) is JDK {JDK_FLOOR}")
             if is_floor and n > max(ci_jdks):
                 fail(rel, line, f"requires JDK {n} or newer, but CI only runs JDK {runs}")
         elif n not in ci_jdks:
@@ -364,101 +430,17 @@ def has_content(path):
 
 
 doc_paths = {path for path, _ in documented}
-build_modules = sorted({mm.replace("//", "/") for mm in re.findall(r'file\("(modules/[^"]+)"\)', build)})
-for mod in build_modules:
-    if mod.startswith(UNDOCUMENTED_MODULE_PREFIXES) or not has_content(mod):
-        continue                         # relocation stubs and the aggregate `docs` project have no module to name
-    covered = any(mod == d or mod.startswith(d + "/") for d in doc_paths)
-    if not covered:
-        fail("build.sbt", 1, f"defines {mod}, which CLAUDE.md's repository-structure block does not name")
+for proj in sorted(PROJECTS.values(), key=lambda q: q.base):
+    mod = proj.base
+    if not mod.startswith("modules/") or mod.startswith(UNDOCUMENTED_MODULE_PREFIXES) or not has_content(mod):
+        continue                         # the root, relocation stubs and the aggregate `docs` project
+    if not any(mod == d or mod.startswith(d + "/") for d in doc_paths):
+        fail(MODEL_NAME, 1, f"project `{proj.id}` is {mod}, which CLAUDE.md's repository-structure block does not name")
 
-# ---------------------------------------------------------------- 4. sbt commands
-STRING_LIT = r'(?:"""(.*?)"""|"((?:[^"\\\n]|\\.)*)")'
-alias_defs = [(am.group(1), am.group(2) if am.group(2) is not None else am.group(3))
-              for am in re.finditer(r'addCommandAlias\(\s*"([^"]+)"\s*,\s*(?:' + STRING_LIT + r'\s*\))?', build, re.S)]
-aliases = {name for name, _ in alias_defs}
-declared = set()
-for src in [build] + scala_sources:
-    declared.update(re.findall(r"(\w+)\s*(?::\s*[\w\[\]]+\s*)?=\s*(?:taskKey|settingKey|inputKey)\b", src))
-projects = set(re.findall(r"lazy val (\w+)\s*=\s*\(?\s*project\b", build))
-
-
-def assignments(key, src):
-    """Where `src` gives `key` a value: `key := ...`, `Scope / key += ...`. `key / aggregate := false` sets
-    `aggregate`, not `key`, so it does not count: the key must be the last segment before the operator."""
-    return list(re.finditer(r"(ThisBuild\s*/\s*)?\b" + re.escape(key)
-                            + r"\s*(?::=|\+=|\+\+=|~=)", src))
-
-
-# A declared key nothing assigns is not a task: sbt reports it as an undefined reference.
-keys = {key for key in declared if any(assignments(key, src) for src in [build] + scala_sources)}
-unassigned = declared - keys
-
-# The plugins project/plugins.sbt loads (commented-out lines do not count), and what they add.
-plugins_sbt = strip_comments(read("project/plugins.sbt"))
-loaded_plugins = set(re.findall(r'addSbtPlugin\(\s*"[^"]+"\s*%+\s*"([^"]+)"', plugins_sbt))
-if re.search(r"\baddDependencyTreePlugin\b", plugins_sbt):
-    loaded_plugins.add("addDependencyTreePlugin")
-plugin_commands = set().union(*(PLUGIN_COMMANDS.get(pl, set()) for pl in loaded_plugins))
-scope_words = SCOPE_WORDS.union(*(PLUGIN_CONFIGS.get(pl, set()) for pl in loaded_plugins))
-unloaded_plugin_of = {c: pl for pl, cs in PLUGIN_COMMANDS.items() if pl not in loaded_plugins for c in cs}
-unloaded_plugin_of.update({c: pl for pl, cs in PLUGIN_CONFIGS.items() if pl not in loaded_plugins for c in cs})
-
-
-def project_blocks(src):
-    """{project: (start, end)} - a project's definition runs from its `lazy val` to the next line that
-    starts in column 0 with anything but `.` or `)` (the next definition or alias; comments are gone)."""
-    out = {}
-    for mm in re.finditer(r"^lazy val (\w+)\s*=\s*\(?\s*project\b", src, re.M):
-        nm = re.compile(r"^[^\s.)]", re.M).search(src, src.index("\n", mm.start()) + 1)
-        out[mm.group(1)] = (mm.start(), nm.start() if nm else len(src))
-    return out
-
-
-blocks = project_blocks(build)
-root_project = next((mm.group(1) for mm in re.finditer(r'lazy val (\w+)\s*=\s*\(?\s*project\s+in\s+file\("\."\)', build)), None)
-
-# Which projects aggregate which: `sbt task` from the root, or `sbt p/task`, also runs in p's aggregates.
-aggregates = {}
-for name, (b, e) in blocks.items():
-    agg = set()
-    for am in re.finditer(r"\.aggregate\(([^)]*)\)", build[b:e], re.S):
-        agg.update(w for w in re.findall(r"\b(\w+)\b", am.group(1)) if w in projects)
-    aggregates[name] = agg
-
-
-def reaches(project):
-    """`project` and every project it aggregates, transitively."""
-    seen, todo = set(), [project]
-    while todo:
-        cur = todo.pop()
-        if cur not in seen:
-            seen.add(cur)
-            todo.extend(aggregates.get(cur, ()))
-    return seen
-
-
-# Which projects a build-defined key is set in. A key set inside one or more project definitions, and
-# nowhere else, exists only there: `core/publishedArtifactsCheck` is not a task when only the root sets it.
-# A key set anywhere else - shared settings, `ThisBuild /`, a helper in project/*.scala - is taken to be
-# available everywhere; static parsing cannot follow it further.
-key_projects = {}
-for key in keys:
-    owners = set()
-    unrestricted = any(assignments(key, src) for src in scala_sources)
-    for am in assignments(key, build):
-        owner = next((name for name, (b, e) in blocks.items() if b <= am.start() < e), None)
-        if owner is None or am.group(1):
-            unrestricted = True
-        else:
-            owners.add(owner)
-    if owners and not unrestricted:
-        key_projects[key] = owners
-
-
+# ---------------------------------------------------------------- 4. sbt commands, replayed
 def split_commands(argument_string):
-    """The sbt commands quoted after `sbt`, each a list of words: flags are dropped, `;` separates
-    commands. None when the shell could not parse the line (unbalanced quotes): pasting it is an error."""
+    """The sbt commands quoted after `sbt`, each a list of words: flags are dropped, each argument is a
+    command and `;` separates commands within one. None when the shell cannot parse the line."""
     try:
         tokens = shlex.split(argument_string)
     except ValueError:
@@ -470,100 +452,154 @@ def split_commands(argument_string):
         if token == "new" or token.startswith("new "):
             commands.append(["new"])     # `sbt new <template>`: what follows is the template, not a command
             break
-        for command in token.split(";"):
-            words = re.sub(r"\s*/\s*", "/", command).split()     # `core / Test / compile` is one key
-            if words:
-                commands.append(words)
+        commands.extend(body_commands(token))
     return commands
 
 
-def known_task(word):
-    return word in keys or word in SBT_BUILTINS or word in plugin_commands
+def body_commands(body):
+    """`a; b c` as [[a], [b, c]]; `core / Test / compile` is one word."""
+    out = []
+    for command in body.split(";"):
+        words = command.split()
+        if words and words[0] not in {"set", "eval"}:
+            words = re.sub(r"\s*/\s*", "/", command).split()
+        if words:
+            out.append(words)
+    return out
 
 
-def unknown(path, line, head, word, what):
-    sbt_unknown.append(word)
-    if word in unloaded_plugin_of:
-        fail(path, line, f"`sbt {head}`: `{word}` comes from {unloaded_plugin_of[word]}, "
-                         f"which project/plugins.sbt does not load")
-    elif word in unassigned:
-        fail(path, line, f"`sbt {head}`: `{word}` is declared in the build but never set (`{word} := ...`), "
-                         f"so it is not a task")
-    else:
-        fail(path, line, f"`sbt {head}`: `{word}` is not {what}")
+def reached(start, key):
+    """The projects a key run in `start` runs in: `start`, and what it aggregates, transitively, except
+    beneath a project where that key's `aggregate` is false."""
+    seen, todo = [], [start]
+    while todo:
+        cur = todo.pop(0)
+        if cur in seen or cur not in PROJECTS:
+            continue
+        seen.append(cur)
+        if key not in PROJECTS[cur].no_aggregate:
+            todo.extend(PROJECTS[cur].aggregate)
+    return seen
 
 
-def check_config(path, line, head, config):
-    """A `config:task` prefix (the old slash-free syntax) is matched without regard to case."""
-    if config.lower() in {w.lower() for w in scope_words}:
-        return True
-    canonical = {w.lower(): w for w in unloaded_plugin_of}.get(config.lower(), config)
-    unknown(path, line, head, canonical, "a configuration the build or its plugins define")
+def defined_in(proj, config, task, key):
+    """Whether `key` resolves in project `proj` (config: a configuration name or None for any; task: a
+    task axis or None), delegating as sbt does: to the configurations `config` extends, then to no
+    configuration; from the task axis to none; from the project to ThisBuild and Global."""
+    configs = None if config is None else proj.config_closure(config) | {""}
+    tasks = {"", task} if task else {""}
+    for c, t in proj.keys.get(key, set()) | SHARED_KEYS.get(key, set()):
+        if (configs is None or c in configs) and t in tasks:
+            return True
     return False
 
 
-def check_where_set(path, line, head, word, scope):
-    """A task set only in some projects runs where they are reached: in them, or through aggregation."""
-    if word not in key_projects or scope is None:
-        return
-    if not key_projects[word] & reaches(scope):
-        where = ", ".join(sorted(key_projects[word]))
-        if scope == root_project:
-            fail(path, line, f"`sbt {head}`: `{word}` is set only in project {where}, "
-                             f"which the root `{scope}` does not aggregate")
-        else:
-            fail(path, line, f"`sbt {head}`: `{word}` is set only in project {where}, not in `{scope}`")
+def where_defined(key):
+    return sorted(p.id for p in PROJECTS.values() if key in p.keys)
 
 
-def check_head(path, line, words):
-    head = " ".join(words)
-    first = words[0]
-    if first.startswith("++"):
-        version = first[2:] or (words[1] if len(words) > 1 else "")
-        if SCALA and version and version[0].isdigit() and version.rstrip("!") != SCALA:
-            fail(path, line, f"`sbt {head}` switches to Scala {version.rstrip('!')}, but the build is Scala {SCALA}")
-        return
-    if first.startswith("+") and not CROSS_BUILDS:
-        fail(path, line, f"`sbt {head}` cross-builds, but the build sets no crossScalaVersions")
-    word = first.lstrip("+~")          # `+test` cross-build and `~test` triggered execution
-    if word == "" or word[0].isdigit() or re.fullmatch(r"[^\w]+", word):
-        return
-    if word == "project" and len(words) > 1 and words[1] not in projects and not words[1].startswith("{"):
-        fail(path, line, f"`sbt {head}` names project `{words[1]}`, which build.sbt does not define")
-        return
-    if re.fullmatch(r"[\w.-]+:[\w-]+", word):   # config:task such as docker:publishLocal
-        config, word = word.split(":", 1)
-        if not check_config(path, line, head, config):
-            return
-    if "/" in word:
-        # project/task, Config/task, project/Config/task: the scope must exist and so must the task.
-        segments = word.split("/")
-        scope, middle, word = segments[0], segments[1:-1], segments[-1]
-        if re.fullmatch(r"[\w.-]+:[\w-]+", word):   # project/config:task such as workspaceRunner/docker:publishLocal
-            config, word = word.split(":", 1)
-            if not check_config(path, line, head, config):
-                return
-        if scope not in projects and scope not in scope_words:
-            if scope in unloaded_plugin_of:
-                unknown(path, line, head, scope, "")
-            else:
-                fail(path, line, f"`sbt {head}` names project `{scope}`, which build.sbt does not define")
-            return
-        for axis in middle:
-            if axis not in scope_words and not known_task(axis):
-                unknown(path, line, head, axis, "a configuration or task the build knows")
-                return
-        if not known_task(word):
-            unknown(path, line, head, word, "a task the build defines, a loaded plugin's, nor an sbt built-in")
-            return
-        check_where_set(path, line, head, word, scope if scope in projects else root_project)
-        return
-    if word in aliases:
-        return
-    if known_task(word):
-        check_where_set(path, line, head, word, root_project)
-        return
-    unknown(path, line, head, word, "an alias or task the build defines, a loaded plugin's, nor an sbt built-in")
+def parse_key(word, current):
+    """`[project/][Config/][task/]key` or the old `[project/][config:][task::]key`, as
+    (project, config ident or None, task or None, key, project named explicitly), or an error string."""
+    explicit = False
+    project = current
+    segments = word.split("/")
+    if len(segments) > 1 and (segments[0] in PROJECTS or segments[0] in SCOPE_AXES):
+        project, segments, explicit = segments[0], segments[1:], True
+    elif len(segments) > 1 and segments[0] not in ALL_CONFIG_IDS and segments[0] not in ALL_KEYS:
+        return f"names project `{segments[0]}`, which the build does not define"
+    rest = "/".join(segments)
+    config = task = None
+    if "::" in rest:
+        task, rest = rest.rsplit("::", 1)
+    if re.fullmatch(r"[\w.-]+:[\w./:-]+", rest) and "/" not in rest.split(":", 1)[0]:
+        config, rest = rest.split(":", 1)
+    segments = rest.split("/")
+    if len(segments) > 1 and config is None and (segments[0] in ALL_CONFIG_IDS or segments[0] not in ALL_KEYS):
+        config, segments = segments[0], segments[1:]
+    if len(segments) > 2:
+        return "has more scope axes than sbt's project/Config/task/key"
+    if len(segments) == 2:
+        task, segments = segments[0], segments[1:]
+    return project, config, task, segments[0], explicit
+
+
+def check_key(word, current):
+    """None if `word` runs from `current`; otherwise why not."""
+    parsed = parse_key(word, current)
+    if isinstance(parsed, str):
+        return parsed
+    project, config, task, key, explicit = parsed
+    if key not in ALL_KEYS:
+        return f"`{key}` is not an alias, a command, nor a task or setting the build defines"
+    if task is not None and task not in ALL_KEYS:
+        return f"`{task}` is not a task or setting the build defines"
+    if project in SCOPE_AXES:
+        configs_ok = config is None or config in ALL_CONFIG_IDS or config.lower() in {n.lower() for n in ALL_CONFIG_NAMES}
+        tasks = {"", task} if task else {""}
+        if configs_ok and any(t in tasks for _, t in SHARED_KEYS.get(key, set())):
+            return None
+        return f"`{key}` is not defined in {project}"
+    targets = reached(project, key)
+    has_config = [q for q in targets if config is None or PROJECTS[q].config_name(config) is not None]
+    if not has_config:
+        owners = sorted(q.id for q in PROJECTS.values() if q.config_name(config) is not None)
+        return (f"configuration `{config}` is not defined in `{project}`"
+                + (f" or what it aggregates" if len(targets) > 1 else "")
+                + (f" (only in {', '.join(owners[:6])}{', ...' if len(owners) > 6 else ''})" if owners
+                   else ", nor in any project the build defines"))
+    for q in has_config:
+        proj = PROJECTS[q]
+        if defined_in(proj, None if config is None else proj.config_name(config), task, key):
+            return None
+    scope = "/".join(x for x in (config, task, key) if x)
+    owners = where_defined(key)
+    where = f"; it is defined in {', '.join(owners[:6])}{', ...' if len(owners) > 6 else ''}" if owners else ""
+    if not explicit and len(targets) > 1:
+        return f"`{scope}` is not defined in the current project `{project}` nor any project it aggregates{where}"
+    if not explicit:
+        return f"`{scope}` is not defined in the current project `{project}`{where}"
+    return f"`{scope}` is not defined in `{project}`" + (" or what it aggregates" if len(targets) > 1 else "") + where
+
+
+def replay(path, line, commands, shown):
+    """Run `commands` through the model as sbt would, from the root project."""
+    current = ROOT
+    for words in commands:
+        head = " ".join(words)
+        first = words[0]
+        if first.startswith("++"):
+            version = first[2:] or (words[1] if len(words) > 1 else "")
+            if SCALA and version and version[0].isdigit() and version.rstrip("!") != SCALA:
+                fail(path, line, f"{shown}: `{head}` switches to Scala {version.rstrip('!')}, "
+                                 f"but the build is Scala {SCALA}")
+            continue
+        if first.startswith("+"):
+            if not CROSS_BUILDS:
+                fail(path, line, f"{shown}: `{head}` cross-builds, but no project sets other crossScalaVersions")
+            words = ([first[1:]] if first[1:] else []) + words[1:]
+        while words and words[0] in {"~", "show"}:      # triggered execution and `show` prefix a key
+            words = words[1:]
+        if words and words[0].startswith("~"):
+            words = [words[0][1:]] + words[1:]
+        if not words or not words[0] or re.fullmatch(r"[^\w{]+", words[0]):
+            continue
+        first = words[0]
+        if first == "project":
+            if len(words) > 1:
+                target = words[1]
+                if target in PROJECTS:
+                    current = target
+                elif target == "/":
+                    current = ROOT
+                elif not target.startswith("{") and target not in {"..", "-"}:
+                    fail(path, line, f"{shown}: `{head}` names project `{target}`, which the build does not define")
+            continue
+        if first in ALIASES or first in COMMANDS:
+            continue
+        problem = check_key(first, current)
+        if problem:
+            fail(path, line, f"{shown}: {problem}")
 
 
 def check_invocation(path, line, argument_string):
@@ -571,19 +607,13 @@ def check_invocation(path, line, argument_string):
     if commands is None:
         fail(path, line, f"`sbt {argument_string}` cannot be parsed by the shell (unbalanced quotes?)")
         return
-    for words in commands:
-        check_head(path, line, words)
+    replay(path, line, commands, f"`sbt {argument_string}`")
 
 
-# An alias is a command line too: each command of a literal body must be valid, so an alias whose task
-# was removed fails here even when no document quotes it. A body computed in Scala is not followed.
-for name, body in alias_defs:
-    if body is None:
-        continue
-    for command in body.split(";"):
-        words = command.split()
-        if words and words[0] != "set":
-            check_head("build.sbt", 1, words)
+# An alias is a command line too: each command of its body (as sbt holds it, whatever Scala computed it)
+# must run from the root, so an alias whose task was removed fails even when no document quotes it.
+for name, body in sorted(ALIASES.items()):
+    replay(MODEL_NAME, 1, body_commands(body), f"alias `{name}` (`{body.strip()}`)")
 
 
 def shell_segments(line):
@@ -636,7 +666,7 @@ for p in FILES:
     for fm in FENCE.finditer(text):
         body_line = line_of(text, fm.start(1))
         for offset, raw in logical_lines(fm.group(1)):
-            if raw.lstrip().startswith("#") or IGNORE_MARKER in raw or HISTORICAL.search(raw):
+            if raw.lstrip().startswith("#") or exempt(raw):
                 continue
             for segment in shell_segments(re.sub(r"\s+#.*$", "", raw)):
                 sm = SBT_CALL.match(segment)
@@ -656,14 +686,13 @@ if errors:
     print("The documented support matrix does not match the build:", file=sys.stderr)
     for e in errors:
         print("  " + e, file=sys.stderr)
-    print(f"{len(errors)} stale claim(s). Fix the docs, or the build if the docs are right.", file=sys.stderr)
-    if sbt_unknown:
-        print("For an `sbt` command that is real but unknown to this script, add it to SBT_BUILTINS (an sbt "
-              "built-in) or to PLUGIN_COMMANDS under its plugin's artifact (a plugin task) in "
-              "scripts/check-doc-support.sh; for a command in a "
-              "document that describes the past, mark the line `doc-support: ignore`.", file=sys.stderr)
+    print(f"{len(errors)} stale claim(s). Fix the docs, or the build if the docs are right. The build's side "
+          f"comes from `sbt \"dumpBuildModel <file>\"`; a model older than the build is regenerated by running "
+          f"this script without --model. For a document that describes the past, mark the line "
+          f"`doc-support: ignore`.", file=sys.stderr)
     sys.exit(1)
+key_count = len(ALL_KEYS)
 print(f"Support matrix verified: Scala {SCALA}, JDK {', '.join(str(j) for j in sorted(ci_jdks))} "
-      f"(floor {JDK_FLOOR}), {len(doc_paths)} documented modules, {len(aliases)} aliases, {len(keys)} tasks and "
-      f"{len(loaded_plugins)} plugins known.")
+      f"(floor {JDK_FLOOR}, {FLOOR_SOURCE}), {len(doc_paths)} documented modules, {len(PROJECTS)} projects, "
+      f"{len(ALIASES)} aliases, {len(COMMANDS)} commands and {key_count} keys known.")
 PYEOF
