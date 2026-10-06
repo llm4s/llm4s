@@ -63,6 +63,28 @@ class RerankAndFusionRobustnessSpec extends AnyFlatSpec with Matchers with Eithe
     r.map(_.score) shouldBe Seq(0.5, 0.5)
   }
 
+  private class ScriptedReranker(results: RerankResult*) extends Reranker {
+    def rerank(request: RerankRequest): Result[RerankResponse] = Right(RerankResponse(results))
+  }
+
+  it should "fail, not return an empty success, when the reranker names only missing candidates" in {
+    val r = searcher().searchWithReranking(Array(1f, 0f), "text", reranker = Some(new FixedReranker(7, -1)))
+    r.left.value shouldBe a[org.llm4s.error.ProcessingError]
+    r.left.value.message should include("no usable result")
+  }
+
+  it should "keep an empty reranker response as an empty success" in {
+    searcher().searchWithReranking(Array(1f, 0f), "text", reranker = Some(new FixedReranker())).value shouldBe empty
+  }
+
+  it should "use a candidate once when the reranker names it twice, keeping the first score" in {
+    val reranker = new ScriptedReranker(RerankResult(1, 0.9, ""), RerankResult(1, 0.1, ""), RerankResult(0, 0.5, ""))
+    val r        = searcher().searchWithReranking(Array(1f, 0f), "text", reranker = Some(reranker)).value
+    r should have size 2
+    r.map(_.score) shouldBe Seq(0.9, 0.5)
+    r.map(_.id).distinct should have size 2
+  }
+
   "WeightedScore fusion" should "not score the weakest genuine hit like a miss" in {
     val vs = VectorStoreFactory.inMemory().value
     val ki = KeywordIndex.inMemory().value
@@ -78,33 +100,28 @@ class RerankAndFusionRobustnessSpec extends AnyFlatSpec with Matchers with Eithe
     r.head.score shouldBe 1.0 +- 1e-9
   }
 
-  "FusionStrategy.weightedScore" should "return Left for bad weights and Right for good ones" in {
-    FusionStrategy.weightedScore(-1, 1).left.value shouldBe a[ValidationError]
-    FusionStrategy.weightedScore(0, 0).isLeft shouldBe true
-    FusionStrategy.weightedScore(Double.NaN, 1).isLeft shouldBe true
-    FusionStrategy.weightedScore(Double.PositiveInfinity, 1).isLeft shouldBe true
-    FusionStrategy.weightedScore(1, Double.NegativeInfinity).isLeft shouldBe true
+  // #1318 item 5, decided: a `WeightedScore` or `ChunkingConfig` built from literals throws on an invalid value,
+  // as every `require`-guarded case class here does. There is no `Result` twin, because `RAGConfig.withWeightedScore`
+  // and `withChunking` are chainable builders that return a `RAGConfig` and a `Left` cannot be chained.
+  "FusionStrategy.WeightedScore" should "reject weights that would break the ranking" in {
+    an[IllegalArgumentException] should be thrownBy FusionStrategy.WeightedScore(-1, 1)
+    an[IllegalArgumentException] should be thrownBy FusionStrategy.WeightedScore(0, 0)
+    an[IllegalArgumentException] should be thrownBy FusionStrategy.WeightedScore(Double.NaN, 1)
     an[IllegalArgumentException] should be thrownBy FusionStrategy.WeightedScore(Double.PositiveInfinity, 1)
+    an[IllegalArgumentException] should be thrownBy FusionStrategy.WeightedScore(1, Double.NegativeInfinity)
     // Each finite, but the sum overflows - and fusion divides by it.
-    FusionStrategy.weightedScore(Double.MaxValue, Double.MaxValue).isLeft shouldBe true
     an[IllegalArgumentException] should be thrownBy FusionStrategy.WeightedScore(Double.MaxValue, Double.MaxValue)
-    FusionStrategy.weightedScore(0.7, 0.3).value shouldBe FusionStrategy.WeightedScore(0.7, 0.3)
+    FusionStrategy.WeightedScore(0.7, 0.3) shouldBe FusionStrategy.WeightedScore(0.7, 0.3)
   }
 
-  "ChunkingConfig.validated" should "list every violation as a Left" in {
-    val e = ChunkingConfig.validated(targetSize = 0, maxSize = -1, overlap = 5, minChunkSize = -2).left.value
-    e shouldBe a[ValidationError]
-    e.asInstanceOf[ValidationError].violations should have size 4
-  }
-
-  it should "accept a valid configuration" in {
-    ChunkingConfig.validated(targetSize = 100, maxSize = 150, overlap = 10, minChunkSize = 5).value shouldBe
-      ChunkingConfig(100, 150, 10, 5)
+  "ChunkingConfig" should "reject an overlap that is not smaller than the chunk size" in {
+    an[IllegalArgumentException] should be thrownBy ChunkingConfig(targetSize = 100, maxSize = 150, overlap = 100)
+    ChunkingConfig(targetSize = 100, maxSize = 150, overlap = 99).overlap shouldBe 99
   }
 
   "ChunkingUtils.chunkTextValidated" should "return Left instead of throwing" in {
-    ChunkingUtils.chunkTextValidated("abc", 0, 0).isLeft shouldBe true
-    ChunkingUtils.chunkTextValidated("abc", 3, 3).isLeft shouldBe true
+    ChunkingUtils.chunkTextValidated("abc", 0, 0).left.value shouldBe a[ValidationError]
+    ChunkingUtils.chunkTextValidated("abc", 3, 3).left.value shouldBe a[ValidationError]
     ChunkingUtils.chunkTextValidated("abcdef", 3, 0).value shouldBe Seq("abc", "def")
   }
 }

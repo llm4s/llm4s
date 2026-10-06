@@ -80,6 +80,11 @@ final case class DocumentChunk(
 /**
  * Configuration for document chunking.
  *
+ * An invalid combination (a non-positive size, a `maxSize` below `targetSize`, an `overlap` that is negative or not
+ * smaller than `targetSize`) is a programming error: the constructor throws `IllegalArgumentException`, as
+ * `RAGConfig.withChunking` is a chainable builder and cannot return a `Left`. Code that chunks with sizes from
+ * user input should call `ChunkingUtils.chunkTextValidated`, which reports them as a `Left` (#1318, item 4).
+ *
  * @param targetSize Target chunk size in characters (soft limit)
  * @param maxSize Maximum chunk size (hard limit, will force split)
  * @param overlap Characters to overlap between chunks
@@ -102,31 +107,6 @@ final case class ChunkingConfig(
 }
 
 object ChunkingConfig {
-
-  /**
-   * Build a configuration from values that did not come from source code - a config file, a request,
-   * a user setting. The constructor rejects an invalid combination by throwing
-   * `IllegalArgumentException`, which is right for a literal and wrong for input; this returns the
-   * reasons as a `Left` instead, all of them at once.
-   */
-  def validated(
-    targetSize: Int = 800,
-    maxSize: Int = 1200,
-    overlap: Int = 150,
-    minChunkSize: Int = 100,
-    preserveCodeBlocks: Boolean = true,
-    preserveHeadings: Boolean = true
-  ): org.llm4s.types.Result[ChunkingConfig] = {
-    val violations = List(
-      Option.when(targetSize <= 0)("targetSize must be positive"),
-      Option.when(maxSize < targetSize)("maxSize must be >= targetSize"),
-      Option.when(overlap < 0 || overlap >= targetSize)("overlap must be >= 0 and < targetSize"),
-      Option.when(minChunkSize < 0)("minChunkSize must be non-negative")
-    ).flatten
-    if (violations.isEmpty)
-      Right(ChunkingConfig(targetSize, maxSize, overlap, minChunkSize, preserveCodeBlocks, preserveHeadings))
-    else Left(org.llm4s.error.ValidationError("chunking", violations))
-  }
 
   /** Default configuration: 800 char target, 150 overlap */
   val default: ChunkingConfig = ChunkingConfig()

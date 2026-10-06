@@ -116,6 +116,10 @@ final class RAG private (
   /**
    * Ingest raw text content.
    *
+   * Ingesting an id that is already indexed replaces what is indexed under it. Replacing one document is not
+   * atomic across the two stores, so concurrent re-ingests of the SAME document id are not supported: serialise
+   * them in the caller. Different documents may be ingested concurrently.
+   *
    * @param content The text content to ingest
    * @param documentId Unique identifier for this document
    * @param metadata Additional metadata
@@ -500,6 +504,11 @@ final class RAG private (
 
   /**
    * Delete a specific document and its chunks.
+   *
+   * Limitation: a document's chunks are named `<docId>-chunk-<n>` and the stores delete by prefix, so deleting
+   * `a` also deletes the chunks of a document whose id itself looks like `a-chunk-<n>` (for example `a-chunk-1`,
+   * whose chunks are `a-chunk-1-chunk-0`, ...). Avoid document ids of that shape. Re-ingesting a document is not
+   * affected: it replaces chunks by their exact ids.
    *
    * @param docId Document ID to delete
    * @return Unit on success

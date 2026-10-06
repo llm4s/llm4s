@@ -54,6 +54,12 @@ object FusionStrategy {
    * Normalizes scores from each source to [0, 1] and combines with weights.
    * Score = vectorWeight * normalizedVectorScore + keywordWeight * normalizedKeywordScore
    *
+   * Invalid weights are a programming error, like any `require`-guarded value here: the constructor throws
+   * `IllegalArgumentException` for a NaN, infinite, negative or all-zero pair, or one whose sum overflows (an
+   * infinite weight scores `Inf`, or `NaN` where a channel scored 0, and breaks the ranking). There is no `Result`
+   * twin: `RAGConfig.withWeightedScore` is a chainable builder that returns a `RAGConfig`, and a `Left` cannot be
+   * chained. Validate weights that come from user input before building the strategy (#1318, item 5).
+   *
    * @param vectorWeight Weight for vector similarity (default: 0.5)
    * @param keywordWeight Weight for keyword matching (default: 0.5)
    */
@@ -68,21 +74,6 @@ object FusionStrategy {
     require(vectorWeight + keywordWeight > 0, "At least one weight must be positive")
     require((vectorWeight + keywordWeight).isFinite, "The weights' sum must be finite")
   }
-
-  /**
-   * A [[WeightedScore]] from weights that did not come from source code. The constructor throws
-   * `IllegalArgumentException` on a NaN, infinite, negative or all-zero pair, or one whose sum overflows; this returns it as a `Left`.
-   * An infinite weight would score `Inf`, or `NaN` where a channel scored 0, and break the ranking.
-   */
-  def weightedScore(vectorWeight: Double, keywordWeight: Double): Result[WeightedScore] =
-    if (!vectorWeight.isFinite || !keywordWeight.isFinite || vectorWeight < 0 || keywordWeight < 0)
-      Left(org.llm4s.error.ValidationError("weights", "Weights must be finite and non-negative"))
-    else if (vectorWeight + keywordWeight <= 0)
-      Left(org.llm4s.error.ValidationError("weights", "At least one weight must be positive"))
-    else if (!(vectorWeight + keywordWeight).isFinite)
-      // Fusion divides by the sum: an infinite one scores NaN.
-      Left(org.llm4s.error.ValidationError("weights", "The weights' sum must be finite"))
-    else Right(WeightedScore(vectorWeight, keywordWeight))
 
   /**
    * Vector-only search (no keyword fusion).
@@ -528,10 +519,15 @@ private[vectorstore] object RerankMapping {
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
   /**
-   * Map a reranker's results back onto the candidates it was given. A result naming no candidate is
-   * dropped and logged at WARN: one bad index from the reranker must not cost the caller every other
-   * result, or an exception. (`AsyncHybridSearcher` always behaved this way; the synchronous searcher
-   * used to throw `IndexOutOfBoundsException`, #1318.)
+   * Map a reranker's results back onto the candidates it was given.
+   *
+   *  - A result naming no candidate is dropped and logged at WARN: one bad index from the reranker must not
+   *    cost the caller every other result, or an exception. (`AsyncHybridSearcher` always behaved this way; the
+   *    synchronous searcher used to throw `IndexOutOfBoundsException`, #1318.)
+   *  - A candidate named more than once is returned once, with the score of its first occurrence.
+   *  - A response that is not empty but names no candidate at all is a failure, not "no results": the reranker
+   *    did not do its job, and an empty success would hide that from the caller. An empty response stays an
+   *    empty success.
    */
   def applyRerank(
     candidates: Seq[HybridSearchResult],
@@ -543,6 +539,14 @@ private[vectorstore] object RerankMapping {
         s"Reranker returned ${invalid.size} result(s) with an index outside 0 until ${candidates.size}: " +
           invalid.map(_.index).mkString(", ")
       )
-    Right(valid.map(rr => candidates(rr.index).copy(score = rr.score)))
+    if (valid.isEmpty && invalid.nonEmpty)
+      Left(
+        org.llm4s.error.ProcessingError(
+          "rerank",
+          s"The reranker returned ${invalid.size} result(s) but no usable result: every index is outside " +
+            s"0 until ${candidates.size}"
+        )
+      )
+    else Right(valid.distinctBy(_.index).map(rr => candidates(rr.index).copy(score = rr.score)))
   }
 }

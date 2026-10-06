@@ -1598,11 +1598,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   other documents' chunks; they are matched literally now. On SQLite it is also case-sensitive (`GLOB`): SQLite's
   `LIKE` folds ASCII case, so deleting or re-ingesting `Doc-A` removed `doc-a`'s chunks too. A reranker returning an out-of-range index made
   `HybridSearcher` throw `IndexOutOfBoundsException`; that result is now dropped with a WARN, as
-  `AsyncHybridSearcher` always did. `WeightedScore` fusion no longer scores a channel's weakest genuine hit `0`, the
-  score of a miss: it maps to `0.1`, the best to `1`, so weighted scores shift. New `Result`-returning
-  `ChunkingConfig.validated`, `ChunkingUtils.chunkTextValidated` and `FusionStrategy.weightedScore` for values
-  that come from input; the constructors keep throwing on an invalid literal. `WeightedScore` weights, and their
-  sum, must be finite as well as non-negative: an infinite weight or sum scored `Inf` or `NaN`. `documentCount` / `chunkCount` count each
+  `AsyncHybridSearcher` always did. A candidate the reranker names twice is returned once, with its first score, and
+  a non-empty reranker response that names no candidate at all is now a `Left(ProcessingError)` in both searchers
+  instead of an empty success (an empty response stays an empty success). `WeightedScore` fusion no longer scores a channel's weakest genuine hit `0`, the
+  score of a miss: it maps to `0.1`, the best to `1`, so weighted scores shift. New
+  `ChunkingUtils.chunkTextValidated` returns a `Left(ValidationError)` for a non-positive size or an overlap that is
+  not smaller than it, and `FileEmbedder.encodeFromPath` uses it, so an unusable text-chunking configuration is a
+  `Left` instead of an `IllegalArgumentException`. The `ChunkingConfig` and `WeightedScore` constructors keep
+  throwing on an invalid value (decided, #1318 items 4-5): `RAGConfig.withChunking` and `withWeightedScore` are
+  chainable builders that return a `RAGConfig`, which a `Left` cannot be, so validate such values from user input
+  first. `WeightedScore` weights, and their sum, must be finite as well as non-negative: an infinite weight or sum
+  scored `Inf` or `NaN`. The Postgres stores' prefix delete now writes its escape character as `E'\\'`, which does
+  not depend on the server's `standard_conforming_strings` setting. Known limitation: `RAG.deleteDocument("a")` also
+  removes the chunks of a document whose id looks like `a-chunk-<n>`; avoid ids of that shape. `documentCount` / `chunkCount` count each
   document once with its current chunks: a re-ingest replaces its count, one re-ingested empty or deleted (by
   `deleteDocument` or a sync) no longer counts, and an ingest that produced no chunks never did.
 - **The docs taught a configuration route that no longer exists.** Since

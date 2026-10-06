@@ -5,7 +5,7 @@ package org.llm4s.vectorstore
  *
  * `%` and `_` are wildcards in a `LIKE` pattern, and record ids are caller-supplied, so a prefix
  * such as `a_b-chunk-` used as `prefix + "%"` also matched `axb-chunk-3` (#1318). Pair every pattern
- * from [[prefix]] with `ESCAPE '\\'`.
+ * from [[prefix]] with [[EscapeClause]].
  *
  * SQLite needs [[globPrefix]] instead: its `LIKE` folds ASCII case unless `case_sensitive_like` is
  * on, so even an escaped `Doc-A-chunk-` would match - and delete - `doc-a-chunk-0`. `GLOB` is
@@ -13,8 +13,13 @@ package org.llm4s.vectorstore
  */
 private[vectorstore] object SqlLikePattern {
 
-  /** The `ESCAPE` clause that goes with [[prefix]]. */
-  val EscapeClause: String = "ESCAPE '\\'"
+  /**
+   * The `ESCAPE` clause that goes with [[prefix]]: one backslash, as an `E''` literal. A plain `'\'` is one
+   * backslash only while Postgres's `standard_conforming_strings` is on; with it off the backslash escapes the
+   * closing quote and the statement fails. An `E''` literal always processes escapes, so `E'\\'` means the same
+   * under either setting. (Only the Postgres stores use it; SQLite matches with [[globPrefix]].)
+   */
+  val EscapeClause: String = "ESCAPE E'\\\\'"
 
   /** A `LIKE` pattern matching every string that starts with `prefix`, whatever characters it contains. */
   def prefix(prefix: String): String =

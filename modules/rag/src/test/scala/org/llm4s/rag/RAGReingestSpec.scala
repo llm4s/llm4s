@@ -345,4 +345,20 @@ class RAGReingestSpec extends AnyFlatSpec with Matchers {
 
     indexedIds(rag).map(_.takeWhile(_ != '-')) shouldBe Set("abc", "ab]")
   }
+
+  // Chunks are named "<docId>-chunk-<n>" and the stores can only delete by prefix, so deleting "a" removes
+  // every id that starts with "a-chunk-": including the chunks of a document that is itself called "a-chunk-1".
+  // Fixing it needs an exact-id delete (or a per-document chunk-id listing) in the store API; until then this
+  // pending test records the gap and starts failing, forcing its promotion, the day it is fixed.
+  it should "not delete another document whose id looks like one of its chunks (known limitation)" in {
+    pendingUntilFixed {
+      val rag = build()
+      rag.ingestText(oneChunk, "a").fold(e => fail(e.message), identity)
+      rag.ingestText(oneChunk, "a-chunk-1").fold(e => fail(e.message), identity)
+
+      rag.deleteDocument("a").fold(e => fail(e.message), identity)
+
+      indexedIds(rag) should contain("a-chunk-1-chunk-0")
+    }
+  }
 }

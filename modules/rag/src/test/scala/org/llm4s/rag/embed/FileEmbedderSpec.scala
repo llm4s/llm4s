@@ -65,6 +65,32 @@ class FileEmbedderSpec extends AnyFunSuite with Matchers {
     }
   }
 
+  test("encodeFromPath should return Left, not throw, when the chunking overlap is not smaller than the size") {
+    withTempFile(".txt", "word " * 200) { file =>
+      val config = FileEmbeddingConfig(
+        textModel = testTextModel,
+        localModels = testLocalModels,
+        chunking = TextChunkingConfig(enabled = true, size = 100, overlap = 100)
+      )
+
+      val result = FileEmbedder.encodeFromPath(file.toPath, mockClient, config)
+
+      result.left.toOption.map(_.message).getOrElse("") should include("verlap")
+    }
+  }
+
+  test("encodeFromPath should return Left, not throw, when the chunking size is not positive") {
+    withTempFile(".txt", "word " * 200) { file =>
+      val config = FileEmbeddingConfig(
+        textModel = testTextModel,
+        localModels = testLocalModels,
+        chunking = TextChunkingConfig(enabled = true, size = 0, overlap = 0)
+      )
+
+      FileEmbedder.encodeFromPath(file.toPath, mockClient, config).isLeft shouldBe true
+    }
+  }
+
   test("encodeFromPath should chunk text when chunking is enabled") {
     val longText = "word " * 500
     withTempFile(".txt", longText) { file =>
