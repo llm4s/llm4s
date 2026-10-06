@@ -12,8 +12,8 @@ import org.llm4s.annotation.Stable
  * Use pattern matching or [[LLMError.isRecoverable]] to check recoverability:
  * {{{
  * error match {
- *   case _: RecoverableError => // Apply retry logic
- *   case _: NonRecoverableError => // Report failure to user
+ *   case _: RecoverableError    => // Apply retry logic
+ *   case _                      => // Report failure to user: a NonRecoverableError, or an error with no marker
  * }
  * }}}
  *

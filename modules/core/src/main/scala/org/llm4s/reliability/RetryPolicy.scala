@@ -56,8 +56,8 @@ object RetryPolicy {
 
   /**
    * The one rule for automatic retry; see [[RetryPolicy.isRetryable]]. It is `LLMError.isRecoverable` with two
-   * documented exceptions, and total: an error that is neither a `RecoverableError` nor a `NonRecoverableError`
-   * (a subtype from outside the library) is not retried.
+   * documented exceptions, and total like it: an error that is neither a `RecoverableError` nor a
+   * `NonRecoverableError` is not retried.
    */
   private[llm4s] def isTransient(error: LLMError): Boolean = error match {
     case s: ServiceError          => isRetryableStatus(s.httpStatus)

@@ -2,6 +2,7 @@ package org.llm4s.runner
 
 import java.util.regex.{ Matcher, Pattern, PatternSyntaxException }
 import scala.util.Try
+import scala.util.control.NonFatal
 
 /**
  * Workspace-runner local regex safety helper for user-supplied patterns.
@@ -121,11 +122,19 @@ object WorkspaceRegexSafetyManager {
   private def boundedMatcher(pattern: Pattern, input: String, maxSteps: Long): Matcher =
     pattern.matcher(new StepBoundedCharSequence(input, maxSteps))
 
+  // Mirrors `RegexSafetyManager.guardMatch`: a recursive pattern such as `(a|aa)*b` can overflow the stack on
+  // long input before the step budget trips, and `Try` does not catch that fatal error. The stack has unwound
+  // by the time the handler runs, so it is safe to continue; every other fatal error still propagates.
+  // scalafix:off DisableSyntax.NoKeywordCatch
   private def guard[A](op: => A): Either[String, A] =
-    Try(op).toEither.left.map {
-      case _: RegexComplexityException => "Regex operation aborted: exceeded complexity budget (possible ReDoS)"
-      case e                           => s"Regex operation failed: ${e.getMessage}"
+    try Right(op)
+    catch {
+      case _: RegexComplexityException => Left("Regex operation aborted: exceeded complexity budget (possible ReDoS)")
+      case _: StackOverflowError =>
+        Left("Regex operation aborted: pattern recursed too deeply for the input (stack overflow)")
+      case NonFatal(e) => Left(s"Regex operation failed: ${e.getMessage}")
     }
+  // scalafix:on DisableSyntax.NoKeywordCatch
 
   private def hasOverlappingAlternationWithQuantifier(pattern: String): Boolean = {
     val quantifiedAlt = "\\(([^)]*\\|[^)]*)\\)([+*])".r

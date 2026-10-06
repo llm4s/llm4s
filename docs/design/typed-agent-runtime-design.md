@@ -768,7 +768,10 @@ Contract decisions:
   `ImageServiceError(message, status)` and `case ImageServiceError(message, status)`, picked by
   `ImageServiceError.isTransientStatus`. *Rejected:* marking every `ImageServiceError` recoverable, as core's own
   `ServiceError` is - a `400` or `403` would be retried to the same answer; and a default case in
-  `LLMError.isRecoverable` - a silent default would hide the next error type that forgets to say.
+  `LLMError.isRecoverable` - a silent default would hide the next error type that forgets to say. (Superseded by
+  [#1380](https://github.com/llm4s/llm4s/issues/1380): `isRecoverable` is now total and answers `false` for an
+  unmarked error, as `RetryPolicy.isTransient` already did, because several library families could not take a
+  marker per type and made it throw. The image errors keep their markers, which still decide the answer.)
 - **MCP.** The error channel was a `String` (`Either[String, _]` on the transports, `MCPClient.initialize` and
   `getTools`), which cannot carry a cancellation. These return `Result`, and every existing message is kept byte for
   byte as `SimpleError(message)`. The HTTP transports pass the HTTP client's `CancelledError` through; the stdio

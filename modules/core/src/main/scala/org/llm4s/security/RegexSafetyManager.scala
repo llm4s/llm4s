@@ -4,6 +4,7 @@ import org.llm4s.annotation.Stable
 
 import java.util.regex.{ Matcher, Pattern, PatternSyntaxException }
 import scala.util.Try
+import scala.util.control.NonFatal
 
 /**
  * Safety wrapper for user-supplied regex compilation and matching.
@@ -99,11 +100,20 @@ object RegexSafetyManager {
   private def boundedMatcher(pattern: Pattern, input: String, maxSteps: Long): Matcher =
     pattern.matcher(new StepBoundedCharSequence(input, maxSteps))
 
+  // The JDK engine recurses for some shapes, such as `(a|aa)*b`, and can overflow the stack on long input
+  // before the step budget trips. `Try` does not catch that fatal error, so it is caught here: by the time
+  // the handler runs the matcher's frames have unwound, so continuing on this thread is safe. Every other
+  // fatal error (out of memory, `InterruptedException`, linkage errors) still propagates.
+  // scalafix:off DisableSyntax.NoKeywordCatch
   private def guardMatch(matchOp: => Boolean): Either[String, Boolean] =
-    Try(matchOp).toEither.left.map {
-      case _: RegexComplexityException => "Regex matching aborted: exceeded complexity budget (possible ReDoS)"
-      case e                           => s"Regex matching failed: ${e.getMessage}"
+    try Right(matchOp)
+    catch {
+      case _: RegexComplexityException => Left("Regex matching aborted: exceeded complexity budget (possible ReDoS)")
+      case _: StackOverflowError =>
+        Left("Regex matching aborted: pattern recursed too deeply for the input (stack overflow)")
+      case NonFatal(e) => Left(s"Regex matching failed: ${e.getMessage}")
     }
+  // scalafix:on DisableSyntax.NoKeywordCatch
 
   private def hasOverlappingAlternationWithQuantifier(pattern: String): Boolean = {
     val quantifiedAlt = "\\(([^)]*\\|[^)]*)\\)([+*])".r

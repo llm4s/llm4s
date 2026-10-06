@@ -21,8 +21,8 @@ import scala.concurrent.duration.FiniteDuration
  * Use pattern matching or [[LLMError.isRecoverable]] to check recoverability:
  * {{{
  * error match {
- *   case _: RecoverableError => // Apply retry logic
- *   case _: NonRecoverableError => // Report failure
+ *   case _: RecoverableError    => // Apply retry logic
+ *   case _                      => // Report failure: a NonRecoverableError, or an error with no marker
  * }
  * }}}
  *

@@ -6,9 +6,9 @@ import org.scalatest.matchers.should.Matchers
 
 /**
  * An `ImageGenerationError` is an `LLMError`, and `LLMError.isRecoverable` (with `recoverableErrors`,
- * `nonRecoverableErrors` and every retry policy built on them) matches only [[RecoverableError]] and
- * [[NonRecoverableError]]: an error with neither marker throws a `MatchError` there. So every case must say
- * whether trying again can help.
+ * `nonRecoverableErrors` and every retry policy built on them) is `true` only for a [[RecoverableError]]: an error
+ * with neither marker is reported as not recoverable. So every case says which it is, with a marker, and a
+ * transient one is not silently left out of retries.
  */
 class ImageGenerationErrorRecoverabilitySpec extends AnyFlatSpec with Matchers {
 
@@ -33,7 +33,7 @@ class ImageGenerationErrorRecoverabilitySpec extends AnyFlatSpec with Matchers {
     ImageUnknownError(new RuntimeException("something else"))
   )
 
-  "LLMError.isRecoverable" should "answer for every ImageGenerationError, and not throw a MatchError" in {
+  "LLMError.isRecoverable" should "answer for every ImageGenerationError as its marker says" in {
     everyCase.foreach(error => withClue(error.toString)(LLMError.isRecoverable(error) shouldBe retryable(error)))
   }
 
