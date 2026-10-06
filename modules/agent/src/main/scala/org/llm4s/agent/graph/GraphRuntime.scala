@@ -137,7 +137,7 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
     else hub.subscribe(threadId, afterSeq, capacity, listener)
 
   /** How many subscriptions to `threadId` are in the event hub's live set; for tests. */
-  private[graph] def liveSubscriptions(threadId: ThreadId): Int = hub.liveCount(threadId)
+  private[llm4s] def liveSubscriptions(threadId: ThreadId): Int = hub.liveCount(threadId)
 
   /** Starts a run on `threadId` with `input`; see the class description. */
   def start[I, O](

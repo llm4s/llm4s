@@ -141,31 +141,63 @@ final class Agent private[agent] (
   def stream(threadId: ThreadId, query: String, config: RunConfig = RunConfig(), history: Seq[Message] = Nil)(
     listener: StreamEvent => Unit
   ): Result[AgentRun] =
-    startWith(threadId, query, config, history, Some(listener))
+    streamEnding(threadId, query, config, history, NoEnd)(listener)
 
   /** [[startResume]] with `listener` subscribed first; see [[stream]]. */
   def streamResume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig = RunConfig())(
     listener: StreamEvent => Unit
   ): Result[AgentRun] =
-    val (observer, scope) = observed(config, listener)
-    runtime.resume(threadId, loop.graph, answers, config, observer = Some(observer)).map(agentRun(_, Some(scope)))
+    streamResumeEnding(threadId, answers, config, NoEnd)(listener)
 
   /** [[startRecover]] with `listener` subscribed first; see [[stream]]. */
   def streamRecover(threadId: ThreadId, config: RunConfig = RunConfig())(
     listener: StreamEvent => Unit
   ): Result[AgentRun] =
-    val (observer, scope) = observed(config, listener)
+    streamRecoverEnding(threadId, config, NoEnd)(listener)
+
+  /**
+   * [[stream]], calling `onEnd` once when the subscription ends - after the terminal event or a
+   * `Disconnected` has been passed to `listener`, or, for a turn that ends without a terminal event,
+   * once the subscription has delivered what it had. For bridges (the fs2 and ZIO streams) that must
+   * end without a terminal event too. Not called for a refused start.
+   */
+  private[llm4s] def streamEnding(
+    threadId: ThreadId,
+    query: String,
+    config: RunConfig,
+    history: Seq[Message],
+    onEnd: () => Unit
+  )(listener: StreamEvent => Unit): Result[AgentRun] =
+    startWith(threadId, query, config, history, Some((listener, onEnd)))
+
+  /** [[streamResume]] with `onEnd`; see [[streamEnding]]. */
+  private[llm4s] def streamResumeEnding(
+    threadId: ThreadId,
+    answers: Map[InterruptId, ujson.Value],
+    config: RunConfig,
+    onEnd: () => Unit
+  )(listener: StreamEvent => Unit): Result[AgentRun] =
+    val (observer, scope) = observed(config, listener, onEnd)
+    runtime.resume(threadId, loop.graph, answers, config, observer = Some(observer)).map(agentRun(_, Some(scope)))
+
+  /** [[streamRecover]] with `onEnd`; see [[streamEnding]]. */
+  private[llm4s] def streamRecoverEnding(threadId: ThreadId, config: RunConfig, onEnd: () => Unit)(
+    listener: StreamEvent => Unit
+  ): Result[AgentRun] =
+    val (observer, scope) = observed(config, listener, onEnd)
     runtime.recover(threadId, loop.graph, config, observer = Some(observer)).map(agentRun(_, Some(scope)))
+
+  private val NoEnd: () => Unit = () => ()
 
   private def startWith(
     threadId: ThreadId,
     query: String,
     config: RunConfig,
     history: Seq[Message],
-    listener: Option[StreamEvent => Unit]
+    listener: Option[(StreamEvent => Unit, () => Unit)]
   ): Result[AgentRun] =
     val input    = AgentInput(query, history.toVector)
-    val watching = listener.map(observed(config, _))
+    val watching = listener.map((l, onEnd) => observed(config, l, onEnd))
     val observer = watching.map(_._1)
     val started =
       // refused before any thread is claimed: stored, a blank query would fail every model call after it
@@ -184,9 +216,9 @@ final class Agent private[agent] (
         )
     started.map(agentRun(_, watching.map(_._2)))
 
-  /** An observer whose listener is `listener` scoped to the run `config` starts. */
-  private def observed(config: RunConfig, listener: StreamEvent => Unit): (Observer, RunScope) =
-    val scope = RunScope(config.runId, listener)
+  /** An observer whose listener is `listener` scoped to the run `config` starts, calling `onEnd` at the scope's end. */
+  private def observed(config: RunConfig, listener: StreamEvent => Unit, onEnd: () => Unit): (Observer, RunScope) =
+    val scope = RunScope(config.runId, listener, onEnd)
     (Observer(Agent.StreamCapacity, scope), scope)
 
   /** History must be a valid conversation without system messages; checked before any thread is claimed. */

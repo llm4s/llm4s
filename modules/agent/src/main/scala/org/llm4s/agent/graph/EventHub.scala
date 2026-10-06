@@ -8,7 +8,7 @@ import scala.annotation.tailrec
 import scala.util.{ Failure, Success, Try, Using }
 
 /** Runs `body` holding `lock`, releasing it on every exit, an `InterruptedException` included. */
-private[graph] def withLock[A](lock: ReentrantLock)(body: => A): A =
+private[agent] def withLock[A](lock: ReentrantLock)(body: => A): A =
   lock.lock()
   Using.resource(new AutoCloseable { def close(): Unit = lock.unlock() })(_ => body)
 
