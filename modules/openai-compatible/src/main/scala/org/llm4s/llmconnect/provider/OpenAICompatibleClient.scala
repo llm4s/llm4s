@@ -226,15 +226,30 @@ class OpenAICompatibleClient(
 
   /**
    * The messages of `conversation` that go into a request: all of them, except an assistant
-   * turn with neither text nor tool calls when the dialect does not send those
-   * ([[OpenAICompatibleDialect.sendEmptyAssistantTurns]]). Both the request body and the
-   * empty-conversation check use this, so they cannot disagree.
+   * turn with no text, no tool calls and no thinking the dialect encodes, when the dialect does
+   * not send empty turns ([[OpenAICompatibleDialect.sendEmptyAssistantTurns]]). Both the request
+   * body and the empty-conversation check use this, so they cannot disagree.
+   *
+   * A thinking-only turn - a generation that hit its token limit while still reasoning - is not
+   * empty for a dialect that encodes thinking: Mistral asks for the full assistant message,
+   * thinking chunks included, to be replayed, and its thinking chunk is `content`. For a dialect
+   * that drops thinking ([[OpenAICompatibleDialect.encodeThinking]] adds nothing) the turn is
+   * still empty and still left out.
    */
   private def sendableMessages(conversation: Conversation): Seq[Message] =
     conversation.messages.filterNot {
       case am: AssistantMessage =>
-        am.contentOpt.forall(_.isEmpty) && am.toolCalls.isEmpty && !dialect.sendEmptyAssistantTurns
+        !dialect.sendEmptyAssistantTurns && am.contentOpt.forall(_.isEmpty) && am.toolCalls.isEmpty &&
+        !encodesThinking(am)
       case _ => false
+    }
+
+  /** Whether the dialect adds anything to an assistant message for `am`'s thinking text. */
+  private def encodesThinking(am: AssistantMessage): Boolean =
+    am.thinkingText.exists { thinking =>
+      val probe = ujson.Obj("role" -> "assistant")
+      dialect.encodeThinking(probe, thinking)
+      probe.value.keySet != Set("role")
     }
 
   /**

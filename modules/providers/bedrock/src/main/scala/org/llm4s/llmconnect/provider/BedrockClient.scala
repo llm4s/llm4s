@@ -447,6 +447,8 @@ class BedrockClient(
           )
         }
         val blocks = reasoningBlocks ++ textBlocks ++ toolBlocks
+        // a reasoning-only turn (one cut off mid-thought) is left out: Converse's Claude models
+        // reject an assistant message whose final block is reasoning, as Anthropic's API does
         Option.when(textBlocks.nonEmpty || toolBlocks.nonEmpty)(
           BedrockMessage.builder().role(ConversationRole.ASSISTANT).content(blocks.asJava).build()
         )

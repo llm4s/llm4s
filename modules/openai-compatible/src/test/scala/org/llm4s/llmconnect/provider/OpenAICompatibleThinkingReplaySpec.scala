@@ -30,6 +30,11 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
     )
   )
 
+  /** A turn that hit its token limit while still reasoning: thinking, no text, no tool calls. */
+  private val thinkingOnly = Conversation(
+    Seq(UserMessage("Prove it."), AssistantMessage(None, Seq.empty).withThinking("First, consider"))
+  )
+
   /** The encoded assistant turn of [[history]]. */
   private def assistantTurn(dialect: OpenAICompatibleDialect): ujson.Value =
     client(dialect).createRequestBody(history, CompletionOptions())("messages")(1)
@@ -83,6 +88,23 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
     )("messages")(1)
     MistralDialect.decodeContent(turn("content")) shouldBe Some("Hello.")
     MistralDialect.thinking(turn) shouldBe Some("Greet them.")
+  }
+
+  it should "keep a thinking-only turn, which it would leave out if it were empty, as a lone thinking chunk" in {
+    val messages = client(MistralDialect).createRequestBody(thinkingOnly, CompletionOptions())("messages").arr
+    messages.map(_("role").str) shouldBe Seq("user", "assistant")
+    messages(1)("content") shouldBe ujson.Arr(
+      ujson.Obj("type" -> "thinking", "thinking" -> ujson.Arr(ujson.Obj("type" -> "text", "text" -> "First, consider")))
+    )
+    messages(1).obj.keySet shouldBe Set("role", "content")
+  }
+
+  "a dialect that drops thinking and sends no empty turns" should "still leave a thinking-only turn out" in {
+    val noEmptyTurns = new OpenAICompatibleDialect {
+      override val sendEmptyAssistantTurns: Boolean = false
+    }
+    val messages = client(noEmptyTurns).createRequestBody(thinkingOnly, CompletionOptions())("messages").arr
+    messages.map(_("role").str) shouldBe Seq("user")
   }
 
   "every dialect" should "put the thinking it reads on the returned message, not only on the completion" in {

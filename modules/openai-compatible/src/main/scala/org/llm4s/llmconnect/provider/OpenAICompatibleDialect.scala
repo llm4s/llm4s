@@ -65,6 +65,7 @@ trait OpenAICompatibleDialect:
    * `true` - it goes out as `{"role": "assistant"}` (with `content` if
    * [[alwaysSendAssistantContent]]). A provider that rejects a message carrying neither
    * `content` nor `tool_calls`, as Mistral does, answers `false` and the turn is left out.
+   * A turn with thinking that [[encodeThinking]] encodes is not empty, and is sent either way.
    */
   def sendEmptyAssistantTurns: Boolean = true
 
