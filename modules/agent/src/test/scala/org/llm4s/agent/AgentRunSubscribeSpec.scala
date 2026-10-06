@@ -419,6 +419,30 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     c.all shouldBe Vector(record("r1", 1, RunEvent.RunStarted(None, None)))
   }
 
+  it should "complete its end, cancelling its subscription, when onEnd throws at the barrier" in {
+    val scope = RunScope(RunId("r1"), _ => (), () => throw new IllegalStateException("onEnd failed"))
+    val sub   = CountingSubscription()
+    scope.attach(sub)
+    an[IllegalStateException] should be thrownBy scope.runEnded(RunId("r1"))
+    scope.isEnded shouldBe true
+    sub.cancels.get shouldBe 1
+    // completed: an off-thread wait or cancel returns at once rather than blocking forever
+    scope.awaitEnd(Duration.Zero) shouldBe Right(true)
+    val cancelling = Thread.ofVirtual().start(() => scope.cancel())
+    cancelling.join(java.time.Duration.ofSeconds(2)) shouldBe true
+  }
+
+  it should "complete its end when onEnd throws on the caller's cancel, rethrowing to the caller" in {
+    val scope = RunScope(RunId("r1"), _ => (), () => throw new IllegalStateException("onEnd failed"))
+    val sub   = CountingSubscription()
+    scope.attach(sub)
+    an[IllegalStateException] should be thrownBy scope.cancel()
+    scope.isEnded shouldBe true
+    sub.cancels.get shouldBe 1
+    scope.awaitEnd(Duration.Zero) shouldBe Right(true)
+    scope.cancel() // already ended: returns at once
+  }
+
   it should "ignore another run's barrier" in {
     val ends  = new java.util.concurrent.atomic.AtomicInteger(0)
     val scope = RunScope(RunId("r2"), _ => (), () => ends.incrementAndGet(): Unit)

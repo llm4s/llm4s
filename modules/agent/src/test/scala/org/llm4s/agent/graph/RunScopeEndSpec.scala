@@ -118,6 +118,8 @@ class RunScopeEndSpec extends AnyFlatSpec with Matchers with Eventually:
         eventually(run.status shouldBe RunStatus.Failed)
         val (result, took) = timed(run.await())
         result.isLeft shouldBe true
+        // the stream's scope has ended by the time await returns: its subscription has left the live set
+        runtime.liveSubscriptions(threadId) shouldBe 0
         took should be < OldQuiet / 2
       }
 

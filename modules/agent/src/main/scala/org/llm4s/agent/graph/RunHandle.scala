@@ -92,9 +92,10 @@ final private[graph] class StopSignal:
  * a caller that has seen the result can start the next run at once.
  *
  * Every subscription made for the run - its `observation`, and each [[subscribe]] - is given the
- * run's end-of-run barrier ([[Dispatched.endOfRun]]) once `result` is set: at once for a
- * subscription made after that, otherwise by the run thread as it sets the result. Each run's
- * events were all handed to the hub before its result is set, so the barrier follows them.
+ * run's end-of-run barrier ([[Dispatched.endOfRun]]) once the run has handed its last event to the
+ * hub: by the run thread as it exits, before it releases the thread claim - so no event of a later
+ * run on the thread can be queued ahead of the barrier - or at once for a subscription made after
+ * that. The result is set just after.
  */
 final private[graph] class DefaultRunHandle[O](
   val threadId: ThreadId,
@@ -108,11 +109,17 @@ final private[graph] class DefaultRunHandle[O](
   private val result                      = new CompletableFuture[RunResult[O]]()
   @volatile private var runThread: Thread = null
 
+  /**
+   * Completed by the run thread as it exits, before it releases the thread claim: every event of
+   * the run has been handed to the hub, and none of a later run on the thread can have been.
+   */
+  private val handedOver = new CompletableFuture[Unit]()
+
   observation.foreach(endsWithRun)
 
-  /** Gives `subscription` this run's end-of-run barrier once the result is set. */
+  /** Gives `subscription` this run's end-of-run barrier once the run has handed over its last event. */
   private def endsWithRun(subscription: Dispatched): Unit =
-    result.whenComplete((_, _) => subscription.endOfRun(runId)): Unit
+    handedOver.whenComplete((_, _) => subscription.endOfRun(runId)): Unit
 
   def status: RunStatus =
     if !result.isDone then RunStatus.Running
@@ -190,12 +197,14 @@ final private[graph] class DefaultRunHandle[O](
   /**
    * The run thread's body. `crashed` must not throw (see [[DefaultRunHandle.guarded]]). `result` is
    * completed on every exit: by `close`, after `release`, even if `release` throws or something
-   * escapes [[DefaultRunHandle.guarded]] (a `ControlThrowable`).
+   * escapes [[DefaultRunHandle.guarded]] (a `ControlThrowable`). Before `release`, `close` gives the
+   * run's subscriptions their end-of-run barriers, so the thread cannot yet be claimed by a later run.
    */
   private def run(body: () => RunResult[O], crashed: Throwable => RunResult[O], release: () => Unit): Unit =
     var outcome: Option[RunResult[O]] = None
     Using.resource(new AutoCloseable {
       def close(): Unit =
+        DefaultRunHandle.guarded(handedOver.complete(())): Unit
         DefaultRunHandle.guarded(release()): Unit
         result.complete(outcome.getOrElse(crashed(new IllegalStateException("run thread ended abnormally")))): Unit
     })(_ => outcome = Some(DefaultRunHandle.guarded(body()).fold(crashed, identity)))

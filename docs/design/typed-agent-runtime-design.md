@@ -935,8 +935,9 @@ Decisions:
   is run-scoped (this run's `Durable`, `Live`, `LiveGap`, and a `Disconnected` only for `Lagging`,
   `ListenerFailed` or `ReplayFailed`), ending after the terminal event. A run that commits no
   terminal event (a crash, or a failed terminal commit) ends its run-scoped listeners at a
-  deterministic barrier ([#1378](https://github.com/llm4s/llm4s/issues/1378)): once the run's result
-  is set - after every event of it was handed to the hub - the run's handle gives each subscription
+  deterministic barrier ([#1378](https://github.com/llm4s/llm4s/issues/1378)): as the run thread
+  exits - after every event of the run was handed to the hub, and before it releases the thread
+  claim, so no later run's event can precede the barrier - the run's handle gives each subscription
   made for the run (its observer's, each `subscribe`) an end-of-run marker, queued behind everything
   already queued, or, for a subscription still replaying, behind everything its switch to live
   catches up. The dispatcher never passes the marker to the listener as an event: it calls the

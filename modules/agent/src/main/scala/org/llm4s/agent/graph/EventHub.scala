@@ -28,7 +28,8 @@ private[graph] trait Dispatched extends Subscription:
   /**
    * Queues run `runId`'s end-of-run barrier behind everything queued so far, or - while the
    * subscription is still replaying - behind everything its switch to live catches up. Called once
-   * the run's result is set, so after every event of the run was handed to the hub. A no-op unless
+   * the run has handed its last event to the hub, before it releases the thread claim - so no event of
+   * a later run on the thread is queued ahead of it. A no-op unless
    * the listener is a [[RunListener]], and once the subscription is cancelled or lagging: a lagging
    * subscription ends with its `Disconnected` instead, so a scope never ends as if it had seen
    * everything when it has not.
@@ -41,11 +42,12 @@ private[graph] trait Dispatched extends Subscription:
  * commit path hands events to every queue and returns without waiting on a listener.
  *
  * A run-scoped subscription ([[RunListener]]) also gets its run's end-of-run barrier
- * ([[Dispatched.endOfRun]]) once the run's result is set: a marker queued behind the run's last
+ * ([[Dispatched.endOfRun]]) once the run has handed over its last event, just before it releases the
+ * thread and sets its result: a marker queued behind the run's last
  * event that is never passed to the listener as an event. Reaching it, the dispatcher calls
  * [[RunListener.runEnded]], which ends a scope whose run committed no terminal event. The barrier
- * may take one slot beyond `capacity` (two with a pending gap): it is never dropped, and never
- * makes a subscriber lag.
+ * may take one slot beyond `capacity` (two with a pending gap), so it never makes a subscriber
+ * lag; a subscriber already lagging gets none and ends with its `Disconnected`.
  *
  * Durable events reach each subscriber in ascending `seq`, at most once, and only after the commit
  * that numbered them. A durable event that does not fit disconnects the subscriber as lagging once

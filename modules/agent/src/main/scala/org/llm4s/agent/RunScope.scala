@@ -17,8 +17,8 @@ import scala.util.Try
  *  - a `Disconnected` (the listener fell behind or threw, or - for a subscription that replays -
  *    reading the thread's log failed: `ReplayFailed`), after passing it on;
  *  - the run's end-of-run barrier ([[runEnded]]), which the subscription's dispatcher reaches once
- *    it has delivered everything of the run: the run's result is set only after every event of it
- *    was queued, and the barrier is queued behind them then - or, for a subscription still
+ *    it has delivered everything of the run: the run thread queues it as it exits, after handing
+ *    over its last event and before releasing the thread to a later run, so it follows them all - or, for a subscription still
  *    replaying, behind everything its switch to live catches up. It ends a run that committed no
  *    terminal event (a crash, or a failed terminal commit) as soon as its last event is delivered;
  *    after a terminal event or a `Disconnected` the scope has already ended and it does nothing;
@@ -105,28 +105,42 @@ final private[agent] class RunScope(runId: RunId, listener: StreamEvent => Unit,
         .catchInterrupt(Try(finished.get(math.max(0L, timeout.toMillis), TimeUnit.MILLISECONDS)))
         .map(_ => finished.isDone)
 
-  /** Ends from the listener's thread: `onEnd`, then the cancel, which from there returns at once. */
+  /**
+   * Ends from the listener's thread: `onEnd`, then the cancel, which from there returns at once. The
+   * end completes even if `onEnd` throws; the throw is then rethrown, as a listener's is.
+   */
   private def end(): Unit =
     if ending.compareAndSet(false, true) then
-      onEnd()
+      val ran = RunScope.attempt(onEnd())
       ended.set(true)
       subscription.get.foreach(_.cancel())
-      finished.complete(()): Unit
+      finished.complete(())
+      RunScope.rethrow(ran)
 
   /**
    * Ends - unless an end has begun - cancelling first, so no listener call follows, then calling
-   * `onEnd`: the end of [[cancel]]. Whether this call ended the scope.
+   * `onEnd`: the end of [[cancel]]. Whether this call ended the scope. The end completes even if
+   * `onEnd` throws; the throw is then rethrown to the canceller.
    */
   private def endCancelling(): Boolean =
     val won = ending.compareAndSet(false, true)
     if won then
       subscription.get.foreach(_.cancel())
-      onEnd()
+      val ran = RunScope.attempt(onEnd())
       ended.set(true)
-      finished.complete(()): Unit
+      finished.complete(())
+      RunScope.rethrow(ran)
     won
 
 private[agent] object RunScope:
+
+  /** Runs `body`, keeping a non-fatal throw or an interrupt to rethrow once the end has completed. */
+  private def attempt(body: => Unit): Either[InterruptedException, Try[Unit]] =
+    org.llm4s.error.CancelledError.catchInterrupt(Try(body))
+
+  /** Rethrows what [[attempt]] kept: a throw as it was; an interrupt as the thread's flag, set again. */
+  private def rethrow(ran: Either[InterruptedException, Try[Unit]]): Unit =
+    ran.fold(_ => Thread.currentThread().interrupt(), _.get)
 
   /** Whether `event` is the last durable event of its run. */
   def terminal(event: RunEvent): Boolean = event match

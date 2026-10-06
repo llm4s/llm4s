@@ -122,7 +122,7 @@ and ends after the run's terminal event (`RunCompleted`, `RunSuspended`, `RunFai
 `RunCancelled`, `RunTimedOut`), or after a `Disconnected` (`Lagging`, `ListenerFailed`, or - for
 `subscribe`, which replays - `ReplayFailed`). A run that crashes without a terminal event (or whose
 terminal commit fails) ends its stream as soon as the listener has returned from the run's last
-event: once the run's result is set, a marker is queued behind its last event, and reaching it ends
+event: as the run ends, a marker is queued behind its last event, and reaching it ends
 the subscription - also for a `subscribe` made after the run ended, once its replay is done. There
 is no fixed delay. Either way, `await` waits for the listener as described above.
 
