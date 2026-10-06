@@ -576,13 +576,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   private (contentOpt, toolCalls, thinking)` with a companion `apply` (named arguments, defaults as before, plus the
   `apply(content)` / `apply(content, toolCalls)` overloads) and `withContent`, `withToolCalls`, `withThinking`;
   `.copy` is private, so replace `msg.copy(contentOpt = Some(t))` with `msg.withContent(t)`. A positional pattern
-  takes three fields: `case AssistantMessage(content, toolCalls, thinking)`. `Completion` loses its `thinking`
+  takes four fields: `case AssistantMessage(content, toolCalls, thinking, thinkingBinding)`. `Completion` loses its `thinking`
   constructor parameter and `withThinking`: `Completion.thinking` is now `message.thinkingText`, so set it with
   `completion.withMessage(completion.message.withThinking(...))`, or build the message with it.
   Signed or redacted thinking is *sealed*: Anthropic and Bedrock accept it only beside the exact content and tool
   calls it came with, so `withContent` / `withToolCalls` given a changed value drop redacted blocks and signatures
-  (keeping the reasoning text). Context compression, an `afterAgent` answer rewrite and a tool-call edit therefore
-  never send a modified signed turn; `hasSealedThinking` reports the state. Token estimates
+  (keeping the reasoning text). Sealed thinking is also valid only after the history it was produced after
+  (Anthropic checks the system prompt, tools and every earlier message; Bedrock's signature is a hash of the
+  conversation), so the Anthropic and Bedrock clients bind it to a fingerprint of the request
+  (`AssistantMessage.thinkingBinding`) and, at send time, replay it only while the conversation before it still has
+  that fingerprint. Pruning, compression, summarisation, an edit or an inserted message anywhere earlier therefore
+  unseals every later turn, whoever made the change; `hasSealedThinking` reports the state. Token estimates
   (`ConversationTokenCounter`, the agent's default pruning counter) now count thinking, which providers resend.
 - **`llm4s-anthropic`: tool calls and results as content blocks** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
   an assistant turn's tool calls go to Anthropic as `tool_use` blocks after its text, and each `ToolMessage` as a

@@ -64,7 +64,10 @@ import scala.util.{ Try, Using }
  *    and redacted thinking go back first in its turn, unchanged and in
  *    order, as extended thinking with tool use requires. Unsigned thinking
  *    (from another provider) is left out, since Anthropic rejects a thinking
- *    block without a signature.
+ *    block without a signature. Returned sealed thinking is bound to the
+ *    request, and replayed only while the conversation before it is unchanged
+ *    (Anthropic rejects a block whose earlier history, system prompt or tools
+ *    changed); otherwise it goes unsealed (see `ThinkingReplay`).
  *
  *  - **Schema sanitisation**: OpenAI-specific fields (`strict`,
  *    `additionalProperties`) are stripped from tool schemas before sending,
@@ -166,7 +169,10 @@ class AnthropicClient(
           case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
           case e                                                     => e.toLLMError
         }
-        val result       = attempt.map(convertFromAnthropicResponse)
+        // sealed thinking is bound to the request it answers, so it is replayed only while that holds
+        val result = attempt
+          .map(convertFromAnthropicResponse)
+          .map(c => c.withMessage(ThinkingReplay.bind(c.message, transformed.messages, transformed.options)))
         val responseBody = attempt.toOption.map(serializeResponseBody)
         recordingExchange(startedAt, requestBody)(result)(responseBody)
       }
@@ -413,7 +419,9 @@ curl https://api.anthropic.com/v1/messages \
             val message =
               if (thinkingBlocks.isEmpty) c.message
               else c.message.withThinking(thinkingBlocks.values.map(_.toBlock).toSeq)
-            c.withModel(config.model).withMessage(message).withEstimatedCost(cost)
+            c.withModel(config.model)
+              .withMessage(ThinkingReplay.bind(message, transformed.messages, transformed.options))
+              .withEstimatedCost(cost)
           }
         )
 
@@ -454,7 +462,10 @@ curl https://api.anthropic.com/v1/messages \
     // a tool_use goes out only with its tool_result, in the user turn straight after it, and a
     // tool_result only right after its tool_use: Anthropic rejects either without the other, and a
     // result that a user message or a later turn separates from its call
-    val pairing = ToolResultPairing.of(conversation.messages)
+    // sealed thinking goes back only while the history before it is the one it was produced after;
+    // any other is unsealed here (see ThinkingReplay)
+    val messages = ThinkingReplay.replayable(conversation.messages, options)
+    val pairing  = ToolResultPairing.of(messages)
 
     // a run of tool messages becomes one user turn: the paired results first, as Anthropic requires,
     // then any unpaired ones as text
@@ -471,7 +482,7 @@ curl https://api.anthropic.com/v1/messages \
       }
 
     // Process messages in order
-    conversation.messages.zipWithIndex.foreach {
+    messages.zipWithIndex.foreach {
       case (SystemMessage(content), _) =>
         paramsBuilder.system(appendJsonInstruction(content, options))
         hasSystemMessage = true

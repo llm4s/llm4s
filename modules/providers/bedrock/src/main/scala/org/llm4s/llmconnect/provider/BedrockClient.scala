@@ -154,7 +154,9 @@ class BedrockClient(
         val outcome = Try(sdkClient.converse(request)).toEither.left.map(mapException)
         outcome
           .map { response =>
-            val completion = parseConverseResponse(response)
+            // sealed thinking is bound to the request it answers, so it is replayed only while that holds
+            val parsed     = parseConverseResponse(response)
+            val completion = parsed.withMessage(ThinkingReplay.bind(parsed.message, conv.messages, opts))
             recordExchange(startedAt, requestJson, Some(serializeResponseForLogging(response)), Right(completion))
             completion
           }
@@ -174,6 +176,7 @@ class BedrockClient(
       val raw         = new StringBuilder()
       buildConverseStreamRequest(conv, opts)
         .flatMap(request => runStream(request, onChunk, raw))
+        .map(c => c.withMessage(ThinkingReplay.bind(c.message, conv.messages, opts)))
         .tapRight(c => recordExchange(startedAt, requestJson, Some(raw.result()), Right(c)))
         .tapLeft(e => recordExchange(startedAt, requestJson, Option.when(raw.nonEmpty)(raw.result()), Left(e)))
     }
@@ -341,9 +344,15 @@ class BedrockClient(
 
   // ---- request building ----
 
-  private def partitionMessages(conversation: Conversation): Result[(Seq[String], Seq[BedrockMessage])] = {
+  private def partitionMessages(
+    conversation: Conversation,
+    options: CompletionOptions
+  ): Result[(Seq[String], Seq[BedrockMessage])] = {
     val systemTexts = conversation.messages.collect { case SystemMessage(content) => content }
-    val messages = mergeAdjacentRoles(convertMessages(conversation.messages.filterNot(_.isInstanceOf[SystemMessage])))
+    // sealed thinking goes back only while the history before it is the one it was produced after;
+    // any other is unsealed here, before the system messages are lifted out (see ThinkingReplay)
+    val replayable = ThinkingReplay.replayable(conversation.messages, options)
+    val messages   = mergeAdjacentRoles(convertMessages(replayable.filterNot(_.isInstanceOf[SystemMessage])))
     if (messages.isEmpty)
       Left(
         ValidationError(
@@ -369,7 +378,7 @@ class BedrockClient(
     )
 
   private def buildConverseRequest(conversation: Conversation, options: CompletionOptions): Result[ConverseRequest] =
-    partitionMessages(conversation).map { (systemTexts, messages) =>
+    partitionMessages(conversation, options).map { (systemTexts, messages) =>
       val builder = ConverseRequest.builder().modelId(config.model).messages(messages.asJava)
       if (systemTexts.nonEmpty) builder.system(systemTexts.map(SystemContentBlock.fromText).asJava)
       builder.inferenceConfig(inferenceConfig(options))
@@ -381,7 +390,7 @@ class BedrockClient(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[ConverseStreamRequest] =
-    partitionMessages(conversation).map { (systemTexts, messages) =>
+    partitionMessages(conversation, options).map { (systemTexts, messages) =>
       val builder = ConverseStreamRequest.builder().modelId(config.model).messages(messages.asJava)
       if (systemTexts.nonEmpty) builder.system(systemTexts.map(SystemContentBlock.fromText).asJava)
       builder.inferenceConfig(inferenceConfig(options))

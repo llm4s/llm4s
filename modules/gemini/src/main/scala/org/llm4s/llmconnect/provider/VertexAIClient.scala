@@ -210,7 +210,7 @@ class VertexAIClient(
       case UserMessage(content) =>
         contents += ujson.Obj("role" -> "user", "parts" -> ujson.Arr(ujson.Obj("text" -> content)))
 
-      case AssistantMessage(contentOpt, toolCalls, _) => // the format has no field for earlier thinking
+      case AssistantMessage(contentOpt, toolCalls, _, _) => // the format has no field for earlier thinking
         if (toolCalls.nonEmpty) {
           val parts = scala.collection.mutable.ArrayBuffer[ujson.Value]()
           contentOpt.foreach(c => parts += ujson.Obj("text" -> c))

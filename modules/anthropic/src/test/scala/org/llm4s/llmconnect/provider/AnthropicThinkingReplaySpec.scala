@@ -38,11 +38,17 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
     Seq(ThinkingBlock.Text("Weather and time.", Some("sig-pair")), ThinkingBlock.Redacted("opaque-pair"))
   private val timeCall = ToolCall("toolu_2", "get_time", ujson.Obj("zone" -> "CET"))
 
-  private def requestBody(messages: Message*): ujson.Value = {
+  private def requestBody(messages: Message*): ujson.Value = requestBodyWith(CompletionOptions())(messages*)
+
+  private def requestBodyWith(options: CompletionOptions)(messages: Message*): ujson.Value = {
     val builder = MessageCreateParams.builder().model(testConfig.model).maxTokens(4096)
-    new AnthropicClient(testConfig).addMessagesToParams(Conversation(messages), builder, CompletionOptions())
+    new AnthropicClient(testConfig).addMessagesToParams(Conversation(messages), builder, options)
     ujson.read(ObjectMappers.jsonMapper().writeValueAsString(builder.build()._body()))
   }
+
+  /** `message` as the client returns it in answer to `history`: its sealed thinking bound to it. */
+  private def answering(history: Message*)(message: AssistantMessage): AssistantMessage =
+    ThinkingReplay.bind(message, history, CompletionOptions())
 
   /** A fake `/v1/messages`, answering each request with the next response and recording its body. */
   private def withServer(responses: (String, String)*)(test: (String, () => List[ujson.Value]) => Any): Unit = {
@@ -172,8 +178,10 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "send a signed block whose text was withheld" in {
-    val omitted = AssistantMessage(None, Seq(call)).withThinking(Seq(ThinkingBlock.Text("", Some("sig-omitted"))))
-    val turn    = requestBody(UserMessage("hi"), omitted, ToolMessage("sunny", call.id))("messages")(1)("content")
+    val omitted = answering(UserMessage("hi"))(
+      AssistantMessage(None, Seq(call)).withThinking(Seq(ThinkingBlock.Text("", Some("sig-omitted"))))
+    )
+    val turn = requestBody(UserMessage("hi"), omitted, ToolMessage("sunny", call.id))("messages")(1)("content")
     turn(0)("type").str shouldBe "thinking"
     turn(0)("signature").str shouldBe "sig-omitted"
   }
@@ -247,7 +255,10 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "keep a signed turn's thinking when every call is paired" in {
-    val turnMsg = AssistantMessage(None, Seq(call, timeCall)).withThinking(sealedThinking)
+    val turnMsg =
+      answering(UserMessage("Weather and time?"))(
+        AssistantMessage(None, Seq(call, timeCall)).withThinking(sealedThinking)
+      )
     val body = requestBody(
       UserMessage("Weather and time?"),
       turnMsg,
@@ -258,5 +269,120 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
     turn.map(_("type").str) shouldBe Seq("thinking", "redacted_thinking", "tool_use", "tool_use")
     turn(0)("signature").str shouldBe "sig-pair"
     turn(1)("data").str shouldBe "opaque-pair"
+  }
+
+  // Anthropic validates a thinking block against everything sent before it (system prompt, tools,
+  // earlier messages); Bedrock's signature is a hash of the conversation. A change anywhere earlier
+  // must unseal the turn, whoever made it (ContextPruning, a compressor, an edit).
+  "sealed thinking" should "go back while the history before it is the one it answered" in {
+    val ask  = UserMessage("Weather?")
+    val turn = answering(ask)(AssistantMessage(None, Seq(call)).withThinking(sealedThinking))
+    val body = requestBody(ask, turn, ToolMessage("sunny", call.id))
+    body("messages")(1)("content").arr.map(_("type").str) shouldBe Seq("thinking", "redacted_thinking", "tool_use")
+  }
+
+  it should "not go back after an earlier part of the history was pruned" in {
+    val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather?"))
+    val turn    = answering(history*)(AssistantMessage(None, Seq(call)).withThinking(sealedThinking))
+    // the pruned request keeps the signed turn and its result, but not what came before
+    val body = requestBody(UserMessage("Weather?"), turn, ToolMessage("sunny", call.id))
+    body("messages")(1)("content").arr.map(_("type").str) shouldBe Seq("tool_use")
+    (body.render() should not).include("sig-pair")
+    (body.render() should not).include("opaque-pair")
+  }
+
+  it should "not go back after an earlier message was edited" in {
+    val turn = answering(UserMessage("Weather?"))(AssistantMessage(None, Seq(call)).withThinking(sealedThinking))
+    val body = requestBody(UserMessage("Weather in Paris?"), turn, ToolMessage("sunny", call.id))
+    (body.render() should not).include("sig-pair")
+  }
+
+  it should "not go back after the system prompt changed" in {
+    val turn = answering(SystemMessage("Be brief."), UserMessage("Weather?"))(
+      AssistantMessage(None, Seq(call)).withThinking(sealedThinking)
+    )
+    val kept = requestBody(SystemMessage("Be brief."), UserMessage("Weather?"), turn, ToolMessage("sunny", call.id))
+    kept.render() should include("sig-pair")
+    val changed = requestBody(SystemMessage("Be terse."), UserMessage("Weather?"), turn, ToolMessage("sunny", call.id))
+    (changed.render() should not).include("sig-pair")
+  }
+
+  it should "not go back after the tools changed" in {
+    val tool = org.llm4s.toolapi
+      .ToolBuilder[Map[String, Any], String](
+        "get_weather",
+        "Weather for a city",
+        org.llm4s.toolapi.Schema
+          .`object`[Map[String, Any]]("args")
+          .withProperty(org.llm4s.toolapi.Schema.property("city", org.llm4s.toolapi.Schema.string("City")))
+      )
+      .withHandler(_ => Right("sunny"))
+      .buildSafe()
+      .toOption
+      .get
+    val turn = answering(UserMessage("Weather?"))(AssistantMessage(None, Seq(call)).withThinking(sealedThinking))
+    val body = requestBodyWith(CompletionOptions().withTools(Seq(tool)))(
+      UserMessage("Weather?"),
+      turn,
+      ToolMessage("sunny", call.id)
+    )
+    (body.render() should not).include("sig-pair")
+  }
+
+  it should "not go back when no client bound it" in {
+    val handBuilt = AssistantMessage(None, Seq(call)).withThinking(sealedThinking)
+    val body      = requestBody(UserMessage("Weather?"), handBuilt, ToolMessage("sunny", call.id))
+    (body.render() should not).include("sig-pair")
+  }
+
+  it should "go back on earlier completed turns whose history is unchanged, and stop at the first change" in {
+    val ask1  = UserMessage("Weather?")
+    val turn1 = answering(ask1)(AssistantMessage(None, Seq(call)).withThinking(sealedThinking))
+    val res1  = ToolMessage("sunny", call.id)
+    val done1 = AssistantMessage("Sunny.")
+    val ask2  = UserMessage("And the time?")
+    val turn2 = answering(ask1, turn1, res1, done1, ask2)(
+      AssistantMessage(None, Seq(timeCall)).withThinking(Seq(ThinkingBlock.Text("Time.", Some("sig-2"))))
+    )
+    val res2 = ToolMessage("noon", timeCall.id)
+    val full = requestBody(ask1, turn1, res1, done1, ask2, turn2, res2)
+    full.render() should include("sig-pair")
+    full.render() should include("sig-2")
+    // a compressor rewrote the first answer: the turn before it keeps its thinking, the turn after loses it
+    val rewritten = requestBody(ask1, turn1, res1, AssistantMessage("[summary] Sunny."), ask2, turn2, res2)
+    rewritten.render() should include("sig-pair")
+    (rewritten.render() should not).include("sig-2")
+  }
+
+  "the client" should "bind returned sealed thinking, so a pruned follow-up request does not send it" in {
+    withServer(thinkingToolUseReply, finalReply, finalReply) { (baseUrl, seen) =>
+      val client  = new AnthropicClient(testConfig.copy(baseUrl = baseUrl))
+      val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather in Paris?"))
+      val first   = client.complete(Conversation(history), CompletionOptions()).toOption.get
+      first.message.thinkingBinding shouldBe defined
+      val answer = ToolMessage("sunny", "toolu_1")
+      client.complete(Conversation(history :+ first.message :+ answer), CompletionOptions()).isRight shouldBe true
+      client
+        .complete(Conversation(history.drop(2) :+ first.message :+ answer), CompletionOptions())
+        .isRight shouldBe true
+
+      seen()(1).render() should include("sig-1")
+      (seen()(2).render() should not).include("sig-1")
+      (seen()(2).render() should not).include("opaque-1")
+    }
+  }
+
+  "a streamed response" should "bind its sealed thinking to the request" in {
+    withServer(streamedThinkingReply) { (baseUrl, _) =>
+      val ask = UserMessage("Weather in Paris?")
+      val completion = new AnthropicClient(testConfig.copy(baseUrl = baseUrl))
+        .streamComplete(Conversation(Seq(ask)), CompletionOptions(), _ => ())
+        .toOption
+        .get
+      val body = requestBody(ask, completion.message, ToolMessage("sunny", "toolu_1"))
+      body.render() should include("sig-streamed")
+      (requestBody(UserMessage("Other"), completion.message, ToolMessage("sunny", "toolu_1")).render() should not)
+        .include("sig-streamed")
+    }
   }
 }

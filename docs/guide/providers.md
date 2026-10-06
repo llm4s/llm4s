@@ -1509,14 +1509,37 @@ Both clients send a call only when its result is in the run of tool messages str
 those APIs require; a result anywhere else (after a user message, say) goes as
 `[Tool result for <id>]: ...` text, and its call is left out.
 
-Signed and redacted thinking is *sealed*: it is valid only beside the exact content and tool calls
-it came with. So `withContent` and `withToolCalls`, given a changed value, drop redacted blocks and
-signatures and keep the reasoning text (`hasSealedThinking` reports which state a message is in).
-Context compression, an agent's `afterAgent` answer rewrite and a tool-call edit all go through
-those setters, so none of them sends Anthropic or Bedrock a modified signed turn - and so do those
-clients when they leave out an unpaired call: a signed turn sent with fewer calls than it was returned
-with goes without its signed and redacted blocks. Thinking also
-counts toward token estimates (`ConversationTokenCounter`), since most providers resend it.
+Signed and redacted thinking is *sealed*: it is valid only in the conversation it was produced in.
+[Anthropic](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking) validates a
+thinking block against everything sent before it - the top-level system prompt, the tools and every
+earlier message - and rejects it (400) once any of those changes; a block must also come back
+unchanged, beside the content and tool calls it came with. Bedrock documents its reasoning signature
+as a hash of all the messages in the conversation. llm4s enforces both halves with two rules
+(`hasSealedThinking` reports which state a message is in):
+
+- **The message itself.** `withContent` and `withToolCalls`, given a changed value, *unseal* the
+  thinking: they drop redacted blocks and signatures and keep the reasoning text. An agent's
+  `afterAgent` answer rewrite and a tool-call edit go through those setters, and so do the
+  Anthropic and Bedrock clients when they leave out an unpaired call.
+- **Everything before it.** When Anthropic or Bedrock returns sealed thinking, the client records a
+  fingerprint of the request on the message (`AssistantMessage.thinkingBinding`): the system
+  messages, the tools, the response format and every earlier message, as sent. When the message is
+  sent again, the client replays its sealed thinking only if the conversation before it still has
+  that fingerprint, and sends it unsealed otherwise. The check runs at the point of sending, so it
+  covers every rewrite of the history - `ContextPruning` and the agent's context-window middleware,
+  `TokenWindow` trimming, the context compressors (`DeterministicCompressor`, `LLMCompressor`,
+  `HistoryCompressor`, `ToolOutputCompressor`, `ContextManager`), a handoff's view of the thread,
+  memory or RAG context inserted before existing turns, a changed system prompt or tool set, or a
+  hand edit - without any of them having to know about thinking.
+
+Earlier turns whose history is unchanged keep their sealed thinking: Anthropic recommends passing
+all thinking blocks back, keeps them in context on newer models, and accepts any unbroken run of the
+original blocks. A change unseals every turn after it and none before it, so the replayed blocks never
+have a gap. Unsealed thinking keeps its text, which Anthropic and Bedrock leave out and other
+providers still receive. Sealed thinking with no binding - built by hand with `withThinking` - is
+not replayed. To keep signed thinking, append to the conversation and leave what is already there as
+it is. Thinking also counts toward token estimates (`ConversationTokenCounter`), since most providers
+resend it.
 
 ```scala
 for {

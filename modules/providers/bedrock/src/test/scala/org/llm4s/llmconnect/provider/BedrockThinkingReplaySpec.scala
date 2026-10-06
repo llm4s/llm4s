@@ -124,6 +124,10 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
 
   private def weather = ToolCall("tc-1", "get_weather", ujson.Obj("city" -> "Paris"))
 
+  /** `message` as the client returns it in answer to `history`: its sealed thinking bound to it. */
+  private def answering(history: Message*)(message: AssistantMessage): AssistantMessage =
+    ThinkingReplay.bind(message, history, CompletionOptions())
+
   "tool results" should {
     "not pair with a call that a user message separates them from: the call is left out, the result sent as text" in {
       val messages = sentMessages(
@@ -176,9 +180,10 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
     }
 
     "keep its signed and redacted reasoning when every call is paired" in {
+      val ask = UserMessage("Weather and time?")
       val messages = sentMessages(
-        UserMessage("Weather and time?"),
-        AssistantMessage(None, Seq(weather, time)).withThinking(sealedThinking),
+        ask,
+        answering(ask)(AssistantMessage(None, Seq(weather, time)).withThinking(sealedThinking)),
         ToolMessage("sunny", "tc-1"),
         ToolMessage("noon", "tc-2")
       )
@@ -218,6 +223,67 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
         )
         c.thinking shouldBe Some("think more")
         c.content shouldBe "answer"
+      }
+    }
+  }
+
+  // Bedrock documents the reasoning signature as a hash of all the messages in the conversation, and
+  // Anthropic validates a block against everything before it: a change anywhere earlier unseals it
+  "sealed reasoning" should {
+    val sealedThinking = Seq(ThinkingBlock.Text("Weather.", Some("sig-h")), ThinkingBlock.Redacted(redacted))
+
+    "not go back after an earlier part of the history was pruned" in {
+      val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather?"))
+      val turn    = answering(history*)(AssistantMessage(None, Seq(weather)).withThinking(sealedThinking))
+
+      val full = sentMessages((history :+ turn :+ ToolMessage("sunny", "tc-1"))*)
+      full.map(_.render()).mkString should include("sig-h")
+
+      // ContextPruning dropped the oldest exchange but kept the signed turn
+      val pruned   = sentMessages(UserMessage("Weather?"), turn, ToolMessage("sunny", "tc-1"))
+      val rendered = pruned.map(_.render()).mkString
+      (rendered should not).include("reasoningContent")
+      pruned(1)("content").arr.map(_.obj.keySet.head) shouldBe Seq("toolUse")
+    }
+
+    "not go back after the system prompt changed" in {
+      val turn = answering(SystemMessage("Be brief."), UserMessage("Weather?"))(
+        AssistantMessage(None, Seq(weather)).withThinking(sealedThinking)
+      )
+      val rendered =
+        sentMessages(SystemMessage("Be terse."), UserMessage("Weather?"), turn, ToolMessage("sunny", "tc-1"))
+          .map(_.render())
+          .mkString
+      (rendered should not).include("sig-h")
+    }
+
+    "not go back when no client bound it" in {
+      val handBuilt = AssistantMessage(None, Seq(weather)).withThinking(sealedThinking)
+      val rendered =
+        sentMessages(UserMessage("Weather?"), handBuilt, ToolMessage("sunny", "tc-1")).map(_.render()).mkString
+      (rendered should not).include("sig-h")
+    }
+
+    "be bound by the client that receives it, so a pruned follow-up does not send it" in {
+      val seen = new ConcurrentLinkedQueue[ujson.Value]()
+      withServer("/") { ex =>
+        seen.add(ujson.read(new String(ex.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)))
+        sendJsonResponse(ex, 200, if (seen.size == 1) reasoningReply else converseResponse("Sunny."))
+      } { url =>
+        val client  = new BedrockClient(config(url))
+        val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather?"))
+        val first   = client.complete(Conversation(history), CompletionOptions()).toOption.value
+        first.message.thinkingBinding shouldBe defined
+        val answer = ToolMessage("sunny", "tc-1")
+        client.complete(Conversation(history :+ first.message :+ answer), CompletionOptions()).isRight shouldBe true
+        client.complete(Conversation(history.drop(2) :+ first.message :+ answer), CompletionOptions()).isRight shouldBe
+          true
+        client.close()
+
+        val requests = seen.asScala.toList
+        requests(1).render() should include("sig-1")
+        (requests(2).render() should not).include("sig-1")
+        (requests(2).render() should not).include(redacted)
       }
     }
   }
