@@ -2,12 +2,12 @@ package org.llm4s.error
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.{ Completion, Conversation }
+import org.llm4s.llmconnect.model.{ Completion, Conversation, EmbeddingError }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.MockLLMClients.{ FailingMock, SimpleMock }
 import org.llm4s.Result
 import org.llm4s.types.{ OptionOps, Result, TryOps }
-import org.scalatest.EitherValues
+import org.scalatest.{ EitherValues, Suite }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -19,9 +19,12 @@ import scala.util.Try
  *
  * If a snippet here stops compiling or its assertion fails, the guide is teaching something that
  * no longer works: change the guide and this spec together. Each `snippet` method below is the
- * code of one block in the guide; the assertions pin what the surrounding prose claims.
+ * code of one block in the guide; the assertions pin what the surrounding prose claims. Section 1 only
+ * shows definitions, and section 10's snippet is the class [[ResultSpec]] below, run as a nested suite.
  */
 class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
+
+  override def nestedSuites: IndexedSeq[Suite] = Vector(new ResultSpec)
 
   // ---- 2. The basic pattern
 
@@ -49,10 +52,20 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
     result match {
       case Right(text)             => s"ok: $text"
       case Left(e: RateLimitError) => s"wait ${e.retryDelay.getOrElse(RateLimitError.DefaultRetryDelay)}, then retry"
-      case Left(e: AuthenticationError)         => s"fix the credentials for ${e.provider}"
-      case Left(e) if LLMError.isRecoverable(e) => s"transient, may succeed on retry: ${e.message}"
-      case Left(e)                              => s"permanent, do not retry: ${e.message}"
+      case Left(e: AuthenticationError) => s"fix the credentials for ${e.provider}"
+      case Left(e: RecoverableError)    => s"transient, may succeed on retry: ${e.message}"
+      case Left(e)                      => s"not retried (permanent, or not marked either way): ${e.message}"
     }
+
+  // ---- 9. Recovering from failures: `client` and `conversation` are "built as in section 3"
+
+  private val client = new SimpleMock("recovered")
+
+  private def recovering() = ErrorRecovery.recoverWithBackoff(
+    () => client.complete(conversation),
+    maxAttempts = 3,
+    baseDelay = 1.second
+  )
 
   // ---- 6. Converting to exceptions
 
@@ -101,14 +114,28 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
       describe(Left(RateLimitError("openai"))) shouldBe "wait 30 seconds, then retry"
       describe(Left(AuthenticationError("openai", "bad key"))) shouldBe "fix the credentials for openai"
       describe(Left(NetworkError("down", None, "https://x"))) should startWith("transient")
-      describe(Left(ValidationError("model", "must not be empty"))) should startWith("permanent")
+      describe(Left(ValidationError("model", "must not be empty"))) should startWith("not retried")
     }
 
     "need a catch-all, because LLMError is an open trait (not sealed), and a custom error mixes in a marker" in {
       final case class VendorError(message: String)      extends LLMError with NonRecoverableError
       final case class FlakyVendorError(message: String) extends LLMError with RecoverableError
-      describe(Left(VendorError("custom"))) shouldBe "permanent, do not retry: custom"
+      describe(Left(VendorError("custom"))) shouldBe
+        "not retried (permanent, or not marked either way): custom"
       describe(Left(FlakyVendorError("blip"))) shouldBe "transient, may succeed on retry: blip"
+    }
+
+    "route an error with no marker to the catch-all instead of throwing, which isRecoverable cannot promise" in {
+      // The guide lists the library errors that carry neither marker. If one of these gains a marker,
+      // update the guide's table of errors defined by other modules together with this assertion.
+      val embedding = EmbeddingError(Some("500"), "provider failed", "openai")
+      (embedding: LLMError) should not be a[RecoverableError]
+      (embedding: LLMError) should not be a[NonRecoverableError]
+      describe(Left(embedding)) shouldBe "not retried (permanent, or not marked either way): provider failed"
+
+      final case class UnmarkedError(message: String) extends LLMError
+      describe(Left(UnmarkedError("no marker"))) shouldBe
+        "not retried (permanent, or not marked either way): no marker"
     }
   }
 
@@ -149,6 +176,12 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
       RateLimitError("p", 7.seconds).retryDelay shouldBe Some(7.seconds)
       RateLimitError("p").retryDelay shouldBe Some(RateLimitError.DefaultRetryDelay)
       RateLimitError.DefaultRetryDelay shouldBe 30.seconds
+    }
+  }
+
+  "recovering from failures" should {
+    "run the guide's recoverWithBackoff call as written, with a client and a conversation" in {
+      recovering().map(_.content) shouldBe Right("recovered")
     }
   }
 
@@ -249,8 +282,11 @@ class ErrorHandlingGuideSpec extends AnyWordSpec with Matchers with EitherValues
       reached shouldBe false
     }
   }
+}
 
-  "testing code that returns Result" should {
+/** Section 10's snippet, as the guide shows it; [[ErrorHandlingGuideSpec]] runs it as a nested suite. */
+private class ResultSpec extends AnyWordSpec with Matchers with EitherValues {
+  "a Result" should {
     "unwrap with EitherValues, and check the error type" in {
       val ok: Result[String]     = Right("expected")
       val failed: Result[String] = Left(ValidationError("model", "empty"))

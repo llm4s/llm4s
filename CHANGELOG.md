@@ -281,9 +281,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
 - **Error handling guide** ([#960](https://github.com/llm4s/llm4s/issues/960)):
   `docs/guide/error-handling.md` teaches `Result[A]` and `LLMError` in practice: the basic pattern,
-  for-comprehensions, a table of every error type with whether it is recoverable and when it is raised,
-  matching specific errors, converting to and from exceptions, combining results, retry and circuit
-  breaking, and testing. Its snippets are compiled and run by `ErrorHandlingGuideSpec`. The Basic Usage
+  for-comprehensions, a table of the error types in `org.llm4s.error` with whether each is recoverable and
+  when it is raised, the errors other modules define that carry no recoverability marker (on which
+  `LLMError.isRecoverable` throws a `MatchError`, so the guide matches on `RecoverableError`), matching
+  specific errors, converting to and from exceptions, combining results, retry and circuit breaking, and
+  testing. Its snippets after the first section are compiled and run by `ErrorHandlingGuideSpec`. The Basic Usage
   guide listed error types that do not exist (`ProviderConnectionError`, `InvalidApiKeyError`, ...) and
   called `LLMError` sealed; it now shows the real ones and links to the guide.
 - **Cancellation by interrupt for graph runs and providers** (Experimental, `org.llm4s.agent.graph`,

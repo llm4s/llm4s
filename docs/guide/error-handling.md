@@ -23,9 +23,10 @@ LLM4S does not throw exceptions for failures it expects: a missing API key, a ra
 and a rejected request all come back as values. If you know Java or Python, this replaces
 `try`/`catch` with something the compiler checks. This page shows how to use it day to day.
 
-Every snippet below is compiled and run by
+Every snippet after section 1 (which only shows definitions) is compiled and run by
 [`ErrorHandlingGuideSpec`](https://github.com/llm4s/llm4s/blob/main/modules/core/src/test/scala/org/llm4s/error/ErrorHandlingGuideSpec.scala),
-so it matches the current API. If you change one, change the other.
+so the names and calls in it match the current API, and each snippet shows the imports it needs. If you
+change one, change the other.
 
 ## 1. What is `Result[A]`?
 
@@ -93,13 +94,14 @@ making the call are four steps that can each fail, and you handle them once, at 
 
 ## 4. Error types and when each is raised
 
-All errors extend `LLMError` and carry a `message`, an optional `code`, and a `context` map. Each
-type is also marked as one of two kinds:
+Every error is an `LLMError`, carrying a `message`, an optional `code` and a `context` map. The types in
+`org.llm4s.error` are each also marked as one of two kinds:
 
 - **Recoverable** (`RecoverableError`): the same call may succeed if tried again.
 - **Non-recoverable** (`NonRecoverableError`): trying again will not help; something has to change.
 
-`LLMError.isRecoverable(error)` tells you which.
+`LLMError.isRecoverable(error)` tells you which, for an error that carries a marker. Some errors from
+other modules carry neither; see [errors defined by other modules](#errors-defined-by-other-modules).
 
 | Error | Recoverable | Raised when |
 |---|---|---|
@@ -120,12 +122,33 @@ type is also marked as one of two kinds:
 | `ContextError`, `TokenizerError` | no | A conversation does not fit the context window, or the tokenizer fails. |
 | `SimpleError`, `UnknownError` | no | A bare message, or an unexpected exception that was wrapped. |
 
-All of them live in `org.llm4s.error`. The table is the current set; the `org.llm4s.error`
-package is the source of truth.
+The table lists the types in `org.llm4s.error`, the package that is the source of truth for this core
+set. Other modules define errors of their own, below.
 
 **`ServiceError` and its status.** The marker says a `ServiceError` is recoverable, but a 404 is not
 going to fix itself. When it matters, look at `httpStatus`: `error.isRecoverableStatus` (from
 `ServiceError.ServiceErrorOps`) is true for 5xx, 429 and 408.
+
+### Errors defined by other modules
+
+Some modules add their own `LLMError` subtypes. These carry **neither** marker, so
+`LLMError.isRecoverable` throws a `MatchError` on them today:
+
+| Module | Package | Errors |
+|---|---|---|
+| `llm4s-core` | `org.llm4s.llmconnect.model` | `EmbeddingError`, the error type of the embeddings API (`EmbeddingClient.embed` returns a `Result`) |
+| `llm4s-agent` | `org.llm4s.agent.orchestration` | `OrchestrationError`: `PlanValidationError`, `NodeExecutionError` (it has its own `recoverable` flag), `PlanExecutionError`, `TypeMismatchError`, `AgentTimeoutError` |
+| `llm4s-rag` | `org.llm4s.rag.evaluation` | `EvaluationError` |
+| `llm4s-speech` | `org.llm4s.speech.tts`, `.stt`, `.io` | `TTSError`, `STTError` (it has its own `retryable` flag), `WavFileGenerator.WavError`, `AudioIO.AudioIOError` |
+
+These are marked, so `isRecoverable` works on them: `GraphError` in `llm4s-agent`
+(`org.llm4s.agent.graph`; every case is non-recoverable except `DeadlineExceeded`) and the image errors in
+`llm4s-image` (`org.llm4s.imagegeneration`). The image module reuses the names `AuthenticationError`,
+`RateLimitError`, `ValidationError` and `UnknownError`, so import those by package instead of
+with a wildcard next to `org.llm4s.error._`.
+
+`isRecoverable` should be made total in a later change. Until then, match on the marker trait, as the next
+section does, which is safe for every error.
 
 ## 5. Handling specific error types
 
@@ -136,16 +159,14 @@ a catch-all:
 import org.llm4s.error._
 import org.llm4s.types.Result
 
-import scala.concurrent.duration._
-
 def describe(result: Result[String]): String =
   result match {
     case Right(text) => s"ok: $text"
     case Left(e: RateLimitError) =>
       s"wait ${e.retryDelay.getOrElse(RateLimitError.DefaultRetryDelay)}, then retry"
-    case Left(e: AuthenticationError)         => s"fix the credentials for ${e.provider}"
-    case Left(e) if LLMError.isRecoverable(e) => s"transient, may succeed on retry: ${e.message}"
-    case Left(e)                              => s"permanent, do not retry: ${e.message}"
+    case Left(e: AuthenticationError) => s"fix the credentials for ${e.provider}"
+    case Left(e: RecoverableError)    => s"transient, may succeed on retry: ${e.message}"
+    case Left(e)                      => s"not retried (permanent, or not marked either way): ${e.message}"
   }
 ```
 
@@ -157,9 +178,12 @@ Two things to know:
   with a `case Left(e)`.
 - **A custom error must say what kind it is.** If you define your own error type, mix in
   `RecoverableError` or `NonRecoverableError` as well as `LLMError`.
-  `LLMError.isRecoverable` throws a `MatchError` for a type that is neither.
+  `LLMError.isRecoverable` throws a `MatchError` for a type that is neither, as it does for the library
+  errors listed above. Matching on `RecoverableError`, as `describe` does, never throws.
 
 ```scala
+import org.llm4s.error.{ LLMError, NonRecoverableError }
+
 final case class VendorError(message: String) extends LLMError with NonRecoverableError
 ```
 
@@ -170,6 +194,8 @@ configuration, an API you do not control. Convert at the edge, in one place, and
 details:
 
 ```scala
+import org.llm4s.types.Result
+
 def orThrow[A](result: Result[A]): A =
   result.fold(error => throw new RuntimeException(error.formatted), identity)
 ```
@@ -190,6 +216,7 @@ the boundary so the rest of your code only sees `Result`:
 
 ```scala
 import org.llm4s.Result
+import org.llm4s.error.NotFoundError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.types.{ OptionOps, TryOps }
 
@@ -209,6 +236,8 @@ fatal), so let an interrupt propagate or map it yourself with `toLLMError`.
 To make an error yourself, use the type's smart constructor:
 
 ```scala
+import org.llm4s.error.{ ConfigurationError, NotFoundError, ValidationError }
+
 ValidationError("model", "must not be empty")
 ConfigurationError("no provider configured", List("llm4s.providers.provider"))
 NotFoundError("no such key", "model")
@@ -239,7 +268,8 @@ parseAll(List("1", "x", "y")) // Left(...), the first failure
 ## 9. Recovering from failures
 
 A recoverable error is worth a retry. `ErrorRecovery.recoverWithBackoff` retries an operation with
-exponential backoff:
+exponential backoff. Here `client` is any `LLMClient` and `conversation` a `Conversation`, built as in
+[section 3](#3-chaining-with-for-comprehensions):
 
 ```scala
 import org.llm4s.error.ErrorRecovery
@@ -273,17 +303,25 @@ Check the `Right` and the `Left` the same way you would any value. With ScalaTes
 if it is the other one:
 
 ```scala
+import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
 
-val ok: Result[String]     = Right("expected")
-val failed: Result[String] = Left(ValidationError("model", "empty"))
+class ResultSpec extends AnyWordSpec with Matchers with EitherValues {
+  "a Result" should {
+    "unwrap with EitherValues, and check the error type" in {
+      val ok: Result[String]     = Right("expected")
+      val failed: Result[String] = Left(ValidationError("model", "empty"))
 
-ok.value shouldBe "expected"
-ok.map(_.toUpperCase) shouldBe Right("EXPECTED")
-failed.left.value shouldBe a[ValidationError]
-failed.left.value.message should include("empty")
+      ok.value shouldBe "expected"
+      ok.map(_.toUpperCase) shouldBe Right("EXPECTED")
+      failed.left.value shouldBe a[ValidationError]
+      failed.left.value.message should include("empty")
+    }
+  }
+}
 ```
 
 To test code that calls an LLM without a network, give it a client that returns what you choose.
@@ -294,7 +332,8 @@ See the [Testing Guide](../getting-started/testing-guide.md).
 - Return `Result` from your own functions; do not throw.
 - Convert exceptions to errors where they enter your code, and errors to exceptions only where a
   framework forces you to, in one place.
-- Match on specific types first, then `LLMError.isRecoverable`, then a catch-all.
+- Match on specific types first, then on `RecoverableError`, then a catch-all. Call
+  `LLMError.isRecoverable` only on an error you know carries a marker.
 - Retry only what is recoverable, with a limit and a delay; never retry a `CancelledError`.
 - Log `error.formatted`, show `error.message`, and never put an API key in either.
 
