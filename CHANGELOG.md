@@ -21,9 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#1220](https://github.com/llm4s/llm4s/issues/1220)): `ConfigPolicy.withRequiredBaseUrlPattern(env, provider, pattern)` and
   `withMaxContextWindow(env, provider, max)` take precedence over the environment-wide value. Model and base-URL patterns now
   must match the **whole** value (previously a substring match, so `openai/gpt-4o` also allowed `gpt-4o-mini` and a lookalike
-  host passed a URL pin); a pattern that relied on a prefix needs a trailing `.*`. The `prod` preset caps each provider at its
-  current models' window (anthropic 200000, gemini 1048576, deepseek 131072, openai/azure 128000), so allowed models are no
-  longer rejected for their native window; `dev` caps at 1048576.
+  host passed a URL pin). **Migration:** a pattern that relied on a prefix needs a suffix: end a base-URL pin with `/.*`, never a
+  bare `.*` (`https://api\.openai\.com.*` still accepts `https://api.openai.com.evil.example/v1`,
+  `https://api.openai.com:x@evil.example/` and `https://api.openai.com./v1`; `https://api\.openai\.com/.*` rejects all three), and
+  note that the `prod` preset's model patterns are now exact, so `openai/gpt-4o` no longer allows dated snapshots such as
+  `gpt-4o-2024-08-06` (write `openai/gpt-4o(-.*)?`). The `prod` preset caps each provider at its current models' window
+  (anthropic 200000, gemini 1048576, deepseek 131072, openai/azure 128000) and keeps an environment-wide fallback of 1048576 for a
+  provider with no entry of its own (one opted in with `withAllowedProviders`), so allowed models are not rejected for their
+  native window and no provider is uncapped; `dev` caps at 1048576. Provider names in a policy are canonicalised like provider ids
+  (`Locale.ROOT`, aliases such as `google` folded onto `gemini`), and a per-provider cap or pin naming no registered or allowed
+  provider is an `unknownProvider` violation instead of being silently ignored. A per-provider pin replaces the environment-wide
+  one for that provider, so a loose provider pin weakens a strict global one.
 - **`llm4s-spring-boot-starter`: Spring Boot auto-configuration** (Beta, `modules/spring-boot-starter`,
   [#936](https://github.com/llm4s/llm4s/issues/936)): built on `llm4s-java-api`. Properties under `llm4s.*` (`provider`, `model`, `apiKey`,
   `baseUrl`, `organization`, `contextWindow`, `reserveCompletion`) produce a `JLlmClient` and an

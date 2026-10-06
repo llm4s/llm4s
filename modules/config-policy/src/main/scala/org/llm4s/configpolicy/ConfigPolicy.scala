@@ -3,18 +3,33 @@ package org.llm4s.configpolicy
 import org.llm4s.config.ApiKeySource
 import org.llm4s.config.ProvidersConfigModel.ProviderName
 import org.llm4s.llmconnect.config._
+import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 import scala.util.{ Failure, Success, Try }
 import scala.util.matching.Regex
 
 /**
  * Patterns (`allowedModelPatterns`, `requiredBaseUrlPattern*`) must match the '''whole''' value: `openai/gpt-4o`
- * allows `openai/gpt-4o` and not `openai/gpt-4o-mini`, and a base-URL pin cannot be satisfied by a
- * lookalike such as `https://api.openai.com.evil.example`. Use `.*` where a prefix is meant.
+ * allows `openai/gpt-4o` and not `openai/gpt-4o-mini` or the dated snapshot `openai/gpt-4o-2024-08-06` (write
+ * `openai/gpt-4o(-.*)?` for those), and a base-URL pin cannot be satisfied by a lookalike such as
+ * `https://api.openai.com.evil.example`.
+ *
+ * '''End a prefix pin with `/.*`, never a bare `.*`.''' The pin `https://api\.openai\.com.*` accepts
+ * `https://api.openai.com.evil.example/v1`, `https://api.openai.com:x@evil.example/` and
+ * `https://api.openai.com./v1`; `https://api\.openai\.com/.*` rejects all three.
+ *
+ * Provider names (in `withAllowedProviders` and the per-provider caps and pins) are canonicalised the way
+ * provider ids are: trimmed, lower-cased with `Locale.ROOT`, and an alias such as `google` folded onto the
+ * provider that owns it (`gemini`). A per-provider key that names no registered provider and is not in
+ * `allowedProviders` is reported as an `unknownProvider` violation rather than ignored, since a typo
+ * there would otherwise leave the provider uncapped or unpinned.
  *
  * @param maxContextWindowByProvider per-provider caps, which take precedence over the environment-wide cap
- * @param requiredBaseUrlPatternByProvider per-provider base-URL pins, which take precedence over the
- *                            environment-wide pin: one endpoint list per provider rather than one for all
+ * @param requiredBaseUrlPatternByProvider per-provider base-URL pins, which '''replace''' the
+ *                            environment-wide pin for that provider (they do not add to it, so a loose
+ *                            provider pin weakens a strict global one): one endpoint list per provider
+ *                            rather than one for all
  * @param ownApiKeyRequiredIn environments in which every named chat section whose provider needs
  *                            a key must set its own `apiKey`, rather than inherit its vendor's
  *                            shared `llm4s.credentials.<providerId>.apiKey`. A section meant for
@@ -31,7 +46,7 @@ final case class ConfigPolicy(
   requiredBaseUrlPatternByProvider: Map[(CatalogEnvironment, String), String] = Map.empty
 ) {
   def withAllowedProviders(values: String*): ConfigPolicy =
-    copy(allowedProviders = values.map(_.toLowerCase).toSet)
+    copy(allowedProviders = values.map(canonical).toSet)
 
   def withAllowedModelPatterns(values: String*): ConfigPolicy =
     copy(allowedModelPatterns = values.toList)
@@ -40,11 +55,11 @@ final case class ConfigPolicy(
     copy(maxContextWindowByEnv = maxContextWindowByEnv + (environment -> max))
 
   def withMaxContextWindow(environment: CatalogEnvironment, provider: String, max: Int): ConfigPolicy =
-    copy(maxContextWindowByProvider = maxContextWindowByProvider + ((environment, provider.toLowerCase) -> max))
+    copy(maxContextWindowByProvider = maxContextWindowByProvider + ((environment, canonical(provider)) -> max))
 
   def withRequiredBaseUrlPattern(environment: CatalogEnvironment, provider: String, pattern: String): ConfigPolicy =
     copy(requiredBaseUrlPatternByProvider =
-      requiredBaseUrlPatternByProvider + ((environment, provider.toLowerCase) -> pattern)
+      requiredBaseUrlPatternByProvider + ((environment, canonical(provider)) -> pattern)
     )
 
   def withRequiredBaseUrlPattern(environment: CatalogEnvironment, pattern: String): ConfigPolicy =
@@ -53,6 +68,9 @@ final case class ConfigPolicy(
   /** Requires, in `environment`, that every chat section set its own `apiKey`; see [[ownApiKeyRequiredIn]]. */
   def withOwnApiKeyRequired(environment: CatalogEnvironment): ConfigPolicy =
     copy(ownApiKeyRequiredIn = ownApiKeyRequiredIn + environment)
+
+  /** Trimmed and lower-cased with `Locale.ROOT`: a Turkish default locale must not turn `OpenAI` into `openaı`. */
+  private def canonical(provider: String): String = ProviderId(provider).asString
 }
 
 object ConfigPolicy {
@@ -86,6 +104,10 @@ object ConfigPolicy {
         "gemini/gemini-2\\..*",
         "deepseek/deepseek-chat"
       )
+      // Environment-wide fallback for a provider with no entry below (one added with `withAllowedProviders`,
+      // such as the generic `openai-compatible`): the largest window a mainstream hosted model offers today.
+      // The few models above it (Llama 4 Scout, 10M) must be allowed with an explicit per-provider cap.
+      .withMaxContextWindow(CatalogEnvironment.Prod, 1048576)
       // Caps follow each provider's current models (Gemini 1M, Claude 200k, DeepSeek 131k, GPT-4o 128k),
       // so an allowed model is not rejected for its own native window.
       .withMaxContextWindow(CatalogEnvironment.Prod, "openai", 128000)
@@ -136,12 +158,47 @@ object ConfigPolicyEngine {
 
   def baseUrlOrEndpoint(config: ProviderConfig): Option[String] = config.endpointUrl
 
-  def check(config: ProviderConfig, policy: ConfigPolicy, environment: CatalogEnvironment): List[PolicyViolation] = {
+  /**
+   * @param registry resolves provider aliases and says which providers exist; the classpath's by default
+   */
+  def check(
+    config: ProviderConfig,
+    policy: ConfigPolicy,
+    environment: CatalogEnvironment,
+    registry: ProviderRegistry = ProviderRegistry.default
+  ): List[PolicyViolation] = {
     val provider = providerName(config)
     val fullSpec = providerModel(config)
 
+    def canonical(name: String): String = registry.canonicalId(name).asString
+
+    val allowed = policy.allowedProviders.map(canonical)
+    val capsHere =
+      policy.maxContextWindowByProvider.collect {
+        case ((env, name), max) if env == environment =>
+          canonical(name) -> max
+      }
+    val pinsHere =
+      policy.requiredBaseUrlPatternByProvider.collect {
+        case ((env, name), pin) if env == environment =>
+          canonical(name) -> pin
+      }
+
+    // A key naming nothing never matches any config, so a typo would leave its provider uncapped or
+    // unpinned without a word: report it instead.
+    val unknownKeyViolations =
+      (capsHere.keys.map(_ -> "cap") ++ pinsHere.keys.map(_ -> "base-URL pin")).toList.distinct.sorted
+        .filterNot { case (name, _) => registry.find(ProviderId(name)).isDefined || allowed.contains(name) }
+        .map { case (name, what) =>
+          PolicyViolation(
+            "unknownProvider",
+            s"Policy sets a $what for provider '$name', which no registered provider claims and which is not " +
+              "in allowedProviders: a mistyped provider would be left unchecked"
+          )
+        }
+
     val providerViolations =
-      if (policy.allowedProviders.nonEmpty && !policy.allowedProviders(provider)) {
+      if (policy.allowedProviders.nonEmpty && !allowed(provider)) {
         List(PolicyViolation("allowedProviders", s"Provider '$provider' is not allowed"))
       } else Nil
 
@@ -162,16 +219,16 @@ object ConfigPolicyEngine {
         }
 
     val maxContextViolations =
-      policy.maxContextWindowByProvider
-        .get((environment, provider))
+      capsHere
+        .get(provider)
         .orElse(policy.maxContextWindowByEnv.get(environment))
         .filter(max => config.contextWindow > max)
         .map(max => PolicyViolation("maxContextWindow", s"contextWindow ${config.contextWindow} exceeds $max"))
         .toList
 
     val baseUrlViolations =
-      policy.requiredBaseUrlPatternByProvider
-        .get((environment, provider))
+      pinsHere
+        .get(provider)
         .orElse(policy.requiredBaseUrlPatternByEnv.get(environment))
         .toList
         .flatMap { rawPattern =>
@@ -189,7 +246,7 @@ object ConfigPolicyEngine {
           }
         }
 
-    providerViolations ++ modelViolations ++ maxContextViolations ++ baseUrlViolations
+    unknownKeyViolations ++ providerViolations ++ modelViolations ++ maxContextViolations ++ baseUrlViolations
   }
 
   /**
