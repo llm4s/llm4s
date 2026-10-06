@@ -752,7 +752,7 @@ Contract decisions:
   callers would have to special-case a second cancellation type, and no retry layer would recognise it; and retiring
   the hierarchy for core's errors, a larger break that this slice does not need.
   **Every case also says whether a retry can help**, because an `LLMError` must: `LLMError.isRecoverable` (and
-  `recoverableErrors`, `nonRecoverableErrors`, `RetryPolicy.recoverableOnly`) match only `RecoverableError` and
+  `recoverableErrors`, `nonRecoverableErrors`, and the graph's former `RetryPolicy.recoverableOnly`, now `transientOnly`) match only `RecoverableError` and
   `NonRecoverableError` and threw a `MatchError` on an image error, which before this slice could not reach them.
   `RateLimitError` is recoverable, and so is a `ServiceError` whose status is transient (`0` - no answer at all, as in
   a failed health check - `408`, `429`, any `5xx`); a rejected credential, request or prompt, `InsufficientResources`,

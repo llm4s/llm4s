@@ -87,10 +87,15 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
 
   private def isRetryableStatus(status: Int): Boolean = status >= 500 || status == 429 || status == 408
 
+  /**
+   * Every factory of `RetryPolicy` that builds a policy retrying by rule, as it is built with no predicate of its
+   * own. `noRetry` is the other factory: it retries nothing, and has its own test below.
+   */
   private val policies: Seq[(String, RetryPolicy)] = Seq(
     "exponentialBackoff" -> RetryPolicy.exponentialBackoff(),
     "fixedDelay"         -> RetryPolicy.fixedDelay(3, 1.millis),
-    "linearBackoff"      -> RetryPolicy.linearBackoff(3, 1.millis)
+    "linearBackoff"      -> RetryPolicy.linearBackoff(3, 1.millis),
+    "custom"             -> RetryPolicy.custom(3, (_, _) => 1.millis)
   )
 
   private class AlwaysFailing(error: LLMError) extends LLMClient {
@@ -128,6 +133,38 @@ class RetryContractSpec extends AnyFlatSpec with Matchers {
       row            <- rows
       if policy.isRetryable(row.error)
     } withClue(s"$name / ${row.label}")(LLMError.isRecoverable(row.error) shouldBe true)
+  }
+
+  "RetryPolicy.noRetry" should "retry no error at all" in {
+    rows.foreach(row => withClue(row.label)(RetryPolicy.noRetry.isRetryable(row.error) shouldBe false))
+  }
+
+  "The factories of RetryPolicy" should "all be covered by this contract" in {
+    // A factory added without a row here would carry its own idea of "retry this error" unchecked: fail the build.
+    val factories = RetryPolicy.getClass.getDeclaredMethods.toList
+      .filter(m => Modifier.isPublic(m.getModifiers) && classOf[RetryPolicy].isAssignableFrom(m.getReturnType))
+      .map(_.getName)
+      .toSet
+
+    factories shouldBe (policies.map(_._1).toSet + "noRetry")
+  }
+
+  "A policy built with a custom delay and no predicate" should "retry what the default policies retry" in {
+    val custom = RetryPolicy.custom(3, (_, _) => 1.millis)
+    rows.foreach(row =>
+      withClue(row.label)(
+        custom.isRetryable(row.error) shouldBe RetryPolicy.exponentialBackoff().isRetryable(row.error)
+      )
+    )
+  }
+
+  "The HTTP status rule" should "be the same for ServiceError's own check and the retry rule, for every status" in {
+    (0 to 699).foreach { status =>
+      withClue(s"status $status") {
+        ServiceError(status, "p", "m").isRecoverableStatus shouldBe RetryPolicy.isRetryableStatus(status)
+        RetryPolicy.isTransient(ServiceError(status, "p", "m")) shouldBe RetryPolicy.isRetryableStatus(status)
+      }
+    }
   }
 
   "LLMClientRetry" should "retry exactly the errors the default policy retries" in {

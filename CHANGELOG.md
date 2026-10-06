@@ -1482,7 +1482,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RetryContractSpec` pins it for every concrete `LLMError`, failing when a new error type has no row.
   **Behaviour changes:** the default policy now retries `ExecutionError`, `SystemError` and an `APIError` with no
   status or a retryable one (no LLM client produces these today, so `ReliableClient` is unaffected in practice);
-  `LLMClientRetry` no longer retries a 4xx `APIError` or an `OptimisticLockFailure`; and the agent graph's default
+  `RetryPolicy.custom` with no predicate of its own now uses the same rule (it retried only rate-limit, timeout,
+  network and 5xx/408/429 `ServiceError` errors, so a policy that customised only the delay missed `ExecutionError`,
+  `SystemError` and `APIError`); `LLMClientRetry` no longer retries a 4xx `APIError` or an `OptimisticLockFailure`; and the agent graph's default
   node retry no longer retries a 4xx `ServiceError` or an `OptimisticLockFailure`. `RetryPolicy.recoverableOnly`
   (graph) is renamed `RetryPolicy.transientOnly`, as it is no longer `isRecoverable`.
 - **Install snippets follow the latest release** ([#1281](https://github.com/llm4s/llm4s/issues/1281)): the

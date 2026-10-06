@@ -117,17 +117,14 @@ object RetryPolicy {
 
   /**
    * Custom retry policy.
+   *
+   * `retryableFn` defaults to the library's one retry rule, [[RetryPolicy.isRetryable]], so a policy that only
+   * customises the delay retries exactly what the other factories' policies retry.
    */
   def custom(
     attempts: Int,
     delayFn: (Int, LLMError) => FiniteDuration,
-    retryableFn: LLMError => Boolean = {
-      case _: RateLimitError => true
-      case _: TimeoutError   => true
-      case se: ServiceError  => se.httpStatus >= 500 || se.httpStatus == 429 || se.httpStatus == 408
-      case _: NetworkError   => true
-      case _                 => false
-    }
+    retryableFn: LLMError => Boolean = isTransient
   ): RetryPolicy = new CustomRetryPolicy(attempts, delayFn, retryableFn)
 }
 

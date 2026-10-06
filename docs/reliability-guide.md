@@ -351,7 +351,9 @@ Non-retryable errors (fail immediately):
 and an `OptimisticLockFailure`). `RetryPolicy.isRetryable`, `LLMClientRetry` and an agent graph node's default
 retry all use it, so they cannot disagree about an error. `isRecoverable` means the error may succeed if tried
 again, perhaps after the caller does something; automatic retry is the part where repeating the identical request is
-enough.
+enough. `RetryPolicy.custom(attempts, delayFn)` uses the same rule unless you pass your own `retryableFn`, and
+`ServiceError.isRecoverableStatus` is the same status check, so a policy that customises only the delay retries
+exactly what the other policies retry.
 
 ## Best Practices
 
