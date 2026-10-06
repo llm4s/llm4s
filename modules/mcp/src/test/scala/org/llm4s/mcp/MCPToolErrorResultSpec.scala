@@ -105,8 +105,8 @@ class MCPToolErrorResultSpec extends AnyFlatSpec with Matchers {
     execute(ujson.Obj("content" -> content("fine"), "isError" -> 1)) shouldBe Right(ujson.Str("fine"))
   }
 
-  it should "still parse JSON text and report empty content as a result when isError is false" in {
-    execute(ujson.Obj("content" -> content("""{"a":1}"""), "isError" -> false)) shouldBe Right(ujson.Obj("a" -> 1))
+  it should "keep JSON-looking text as text and report empty content as a result when isError is false" in {
+    execute(ujson.Obj("content" -> content("""{"a":1}"""), "isError" -> false)) shouldBe Right(ujson.Str("""{"a":1}"""))
     execute(ujson.Obj("content" -> ujson.Arr(), "isError" -> false)) shouldBe
       Right(ujson.Obj("result" -> "No content returned"))
   }

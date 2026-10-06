@@ -18,7 +18,7 @@ import org.llm4s.llmconnect.LLMClient
  * {{{
  * val context = "Paris is the capital of France. It has a population of 2.1 million."
  * val guardrail = LLMFactualityGuardrail(client, context, threshold = 0.8)
- * agent.run(query, tools, outputGuardrails = Seq(guardrail))
+ * Agent.builder("assistant", client).withMiddleware(new GuardrailMiddleware(Nil, Seq(guardrail))).build()
  * }}}
  */
 class LLMFactualityGuardrail(

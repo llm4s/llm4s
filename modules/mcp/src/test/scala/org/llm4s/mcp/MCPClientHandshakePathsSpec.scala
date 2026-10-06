@@ -98,6 +98,6 @@ class MCPClientHandshakePathsSpec extends AnyFlatSpec with Matchers {
       )
     )
 
-    client.getTools() shouldBe Right(Seq.empty)
+    client.getTools().isLeft shouldBe true
   }
 }

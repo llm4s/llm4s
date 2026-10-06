@@ -1,12 +1,59 @@
 # Migration Guide
 
+## Stage 1 migration: agent runtime
+
+Not in a release yet ([#1328](https://github.com/llm4s/llm4s/issues/1328)); do not cut 0.5.0 between #1328 and #1329. `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime-design.md` §4.13. The migration slices that follow (#1329, events and tracing; #1330, orchestration) extend this note.
+
+```scala
+// before
+val agent = new Agent(client)
+val state = agent.run("query", tools, inputGuardrails = in, outputGuardrails = out, maxSteps = Some(10))
+
+// after
+val result = for {
+  agent  <- Agent.builder("assistant", client)
+              .withTools(tools)
+              .withMiddleware(new GuardrailMiddleware(in, out))
+              .withMaxSteps(10)
+              .build()
+  result <- agent.run("query")
+} yield result
+```
+
+- **`new Agent(client).run(q, tools, ...)` is `Agent.builder(id, client)...build()` then `run(q)`.** `tools`, `systemMessage`, `completionOptions`, `maxSteps` and `handoffs` move to `withTools` (a `ToolRegistry`, `MCPToolRegistry` included, or a `ToolSet`), `withSystemPrompt`, `withCompletionOptions`, `withMaxSteps` and `withHandoffs`. `build()` returns `Result[Agent]` and refuses clashing tool names, an invalid or duplicate handoff id, and `maxSteps < 1`. `run` has the overloads `run(query, config)`, `run(threadId, query)`, `run(threadId, query, config)` and `run(threadId, query, config, history)`; `config` is a `RunConfig` (budgets, deadline).
+- **Per-run guardrails are middleware.** `inputGuardrails`/`outputGuardrails` arguments become `.withMiddleware(new GuardrailMiddleware(input, output))` on the builder. A block is no longer an error: the run returns `Right` with `AgentStatus.Blocked(guardrail, reason)` and the thread stays usable (its checkpoint is `Failed`, which `recover` has nothing to continue and the next `run` accepts). An input block stores nothing of that turn's query (a new thread still keeps its imported `history`); an output block removes the whole turn - query, tool calls and results, answer, and any handoff made in it - so `result.messages` is the history from before the turn; `usage` keeps the turn's model calls. Another middleware's `beforeAgent`/`afterAgent` `Left` ends the run the same way but is returned as that `Left`, and a blank query - given, or produced by a `beforeAgent` - is a `ValidationError` with nothing stored. A guardrail that transforms (`PIIMasker`) now applies its transformation. Guardrails - and any run-boundary middleware (`beforeAgent`, `afterAgent`) - on the root agent guard the whole handoff family: they apply to every turn's query and final answer, whichever agent is active, outside the active agent's own. Give them to the root only; model and tool wrappers stay per agent.
+- **`continueConversation(state, ...)` is `continueConversation(result, ...)`.** It reads only `result.threadId`; `run(threadId, query)` is the same call by thread. A turn on a `Suspended` result is refused, not layered on parked work.
+- **Threads are kept until forgotten.** An `AgentState` was garbage once dropped; a thread lives in the agent's runtime, and one-shot `run` threads stay in the runtime until `forget`. Call `agent.forget(threadId)` (or `GraphRuntime.deleteThread(threadId, config)`) for a conversation you will not continue. `Checkpointer` implementations gain `deleteThread(threadId)`.
+- **`runMultiTurn` with `contextWindowConfig` is `runMultiTurn(first, followUps, config)` on an agent built with `new ContextWindowMiddleware(config)`.** Pruning trims what is sent to the model and never what the thread stores; the current turn (latest user message onward) is never pruned - the strategy, `Custom` included, runs only on the history before it, with the budget the turn leaves - the request always starts with a user message (so it may exceed the budget), and the system prompt is outside the budget. `runMultiTurn` stops at the first status that is not `Completed`.
+- **`AgentState` fields move to `AgentResult`.**
+
+  | `AgentState` | Now |
+  |---|---|
+  | `conversation` | `result.messages` (the thread's full history, never a system prompt) |
+  | `status` | `result.status` (below) |
+  | `logs` | removed; use `withTracing` and the `graph.*` events |
+  | `usageSummary` | `result.usage` (accumulated over the thread) |
+  | `tools`, `systemMessage`, `completionOptions`, `availableHandoffs`, `initialQuery` | the builder; `activeAgent` is on the result |
+
+- **`AgentStatus` cases are replaced.** `Complete` is `Completed(answer)`; `Failed(error)` is `Left(GraphError...)` (provider errors as `GraphError.NodeFailed(cause)`; the thread stays recoverable with `recover`); `InProgress` and `WaitingForTools` are not exposed; `HandoffRequested` is gone, because a handoff runs inside the same run. New: `Blocked(guardrail, reason)`, `StepLimitReached` and `Suspended(approvals, questions)`, continued with `resume(threadId, answers)` and `result.approve`/`reject`/`edit`/`reply`.
+- **`AgentContext` is removed.** `tracing` becomes `Agent.builder(...).withTracing(tracing)`, which emits the runtime's `graph.*` custom events for each run; `debug` and `traceLogPath` are gone. `TraceEvent.AgentStateUpdated` is no longer emitted (the type stays in core until #1329 moves its consumers).
+- **`Handoff(agent)` is `Handoff(id, builder)`, and `transferSystemMessage` is removed.** The target is an `AgentBuilder`, not a built agent, and its id must equal the handoff id: `Handoff.to("physics", physicsBuilder, "reason")`. A target that must hand back to an agent already in the graph is named by id, `Handoff.toId("triage", "reason")`, so cycles compile. Each agent sends its own system prompt, which is never stored. A self-handoff is refused at build, and a handoff mixed with other tool calls in one message is refused at run time with an error result for every call. `preserveContext = false` (a parameter of `Handoff.to`, `Handoff.of` and `Handoff.toId`) sends the target the last user message before the transfer, then the transfer onwards.
+- **`runStep`, `initializeSafe`, `runWithStrategy` and `ToolExecutionStrategy` (on the agent) are removed.** `agent.start(threadId, query)` returns an `AgentRun` (`threadId`, `runId`, `status`, `await()`, `cancel()`) at once; `run` is `start` then `await`; `startRecover` and `startResume` are the same for `recover` and `resume`. The parallel tool calls of one message are bounded by `RunBudgets.maxConcurrency`. `ToolExecutionStrategy` stays in core as a `ToolRegistry` feature; only the agent's use of it is gone. Step-by-step driving returns as a subscription in #1329.
+- **`runWithEvents`, `continueConversationWithEvents`, `runCollectingEvents`, `AgentEvent` and `AgentStreamingExecutor` are removed.** Their replacement is #1329; until then there is no agent-level event stream (`start` has no `subscribe`). For model tokens use `LLMClient.streamComplete`.
+- **Session files: `AgentState.saveToFile`/`loadFromFile` become saved messages plus `history`.** Save `result.messages` (a `Vector[Message]` has a `ReadWriter`) from a completed run, and later `agent.run(newThreadId, query, RunConfig(), history = saved)` on a thread that does not exist. `history` is refused on an existing thread, with a system message in it (prompts belong to the agents), or if it ends mid tool call. `ConversationPersistenceExample` shows it. Old session JSON files are not read.
+- **`AgentIO` and `AgentZ` wrap the new `Agent`.** `LLMClientIO.agent(id)(configure)` and `LLMClientZ.agent(id)(configure)` take a function over the `AgentBuilder` (tools now belong to the agent); `run`, `continueConversation`, `recover` and `resume` take a `RunConfig` and return the `AgentResult`. Cancelling the fiber cancels the run. A thrown exception arrives as `GraphError.NodeFailed` carrying the original.
+- **`CodeWorker`.** `executeTask` loses `traceLogPath` and returns `Result[AgentResult]`; `WorkspaceSettings.traceLogPath` and `WORKSPACE_TRACE_LOG` are removed. `AssistantAgent` builds its agent once and keeps a thread id; `SessionState` holds the thread id and the last result, and its `consoleConfig` parameter is gone.
+- **Graph loop API.** `ToolLoop.build(id, version, root, agents: Vector[LoopAgent])` builds a family of agents (the earlier `ToolLoop.build(id, version, model, tools, middleware)` is gone; `LoopAgent(id, model, tools)` with `withSystemPrompt`, `withMaxSteps`, `withMiddleware` and `withHandoffs` replaces its arguments), and `ModelStep.next` returns a `Completion`, so a `wrapModelCall` middleware's `next` returns `Result[Completion]`.
+- **Errors.** Provider, tool and middleware failures are `Left(GraphError...)`; the error content a tool failure gives the model is `{"error": ...}`. A guardrail block, the step limit and a suspension are `Right`.
+- **Deleted samples.** `StreamingAgentExample`, `StreamingWithToolsExample`, `EventCollectionExample` and `AsyncToolAgentExample` are deleted (event streaming returns in #1329); the other agent samples use the builder.
+
 ## Agent middleware
 
 Not in a release yet ([#1279](https://github.com/llm4s/llm4s/issues/1279)). The graph tool loop
 takes a stack of `AgentMiddleware` in place of a `ToolCallPolicy`: one ordered extension point with
 `beforeAgent`, `afterAgent`, `wrapModelCall` and `wrapToolCall` hooks, for approval, guardrails,
 logging, retry and rate limits. The graph runtime is Experimental, so these are source breaks with
-no shims. Design: `docs/design/typed-agent-runtime-design.md` §4.8.
+no shims. Design: `docs/design/typed-agent-runtime-design.md` §4.8. (The `ToolLoop.build` signature shown below was generalised by #1328: see [Stage 1 migration](#stage-1-migration-agent-runtime).)
 
 - **`ToolCallPolicy` and `PolicyDecision` are removed, and `ToolLoop.build` loses `policy`.** It
   takes `middleware: Seq[AgentMiddleware] = Nil` instead. A policy becomes an `AgentMiddleware`
@@ -59,6 +106,9 @@ runs `AgentTool`s, whose arguments are validated against their schema (rendered 
 optional fields may be omitted) before any middleware or the tool runs, and legacy handoffs take an explicit id. The graph runtime is
 Experimental, so these are source breaks with no shims. Design:
 `docs/design/typed-agent-runtime-design.md` §4.7.
+
+(Since #1328, `Handoff` targets are builders and `ToolLoop.build` takes a family of `LoopAgent`s: see
+[Stage 1 migration](#stage-1-migration-agent-runtime).)
 
 - **`LoopTool` is `AgentTool[A]`.** A tool now has an `AgentToolSpec[A]` - name, description and
   a core `SchemaDefinition[A]`, with a `ReadWriter[A]` for the arguments - and receives them

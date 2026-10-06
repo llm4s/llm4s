@@ -192,7 +192,7 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       body should include("Tool not found")
     }
 
-    it("should return TOOL_EXECUTION_ERROR when a tool returns Left (failure)") {
+    it("should return an isError result when a tool returns Left (failure)") {
       val sessionId = initializeSession(port)
       val conn      = openConn(port, "/mcp", "POST")
       conn.setDoOutput(true)
@@ -205,7 +205,8 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       )
       conn.getResponseCode shouldBe 200
       val body = scala.io.Source.fromInputStream(conn.getInputStream).mkString
-      body should include("Tool failed")
+      body should include("\"isError\":true")
+      body should include("intentional tool failure")
     }
 
     it("should render non-String tool result via other.render()") {

@@ -3,7 +3,7 @@ package org.llm4s.zio
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
-import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.{ AgentBuilder, AgentStatus }
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.*
@@ -15,7 +15,7 @@ import zio.test.*
 /**
  * Tool calls with invalid arguments, driven through `AgentZ`.
  *
- * `Agent` (the legacy loop the wrapper delegates to) validates a call's arguments in the tool itself and
+ * `Agent` validates a call's arguments in the tool itself and
  * reports a failure to the model as a structured tool result; it does not fail the run. The wrapper
  * must neither swallow that result nor hang on it, and a run that never recovers must end at the step limit.
  */
@@ -74,7 +74,8 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
 
   private def toolResults(c: Conversation): Seq[ToolMessage] = c.messages.collect { case m: ToolMessage => m }
 
-  private def z(client: LLMClient) = AgentZ(new Agent(client))
+  private def z(client: LLMClient)(configure: AgentBuilder => AgentBuilder = _.withTools(tools)) =
+    AgentZ(Fixtures.agentOf(client)(configure))
 
   private def invalidThenText(args: ujson.Value)(i: Int): Completion =
     if (i == 0) callWith(i, args) else text("recovered")
@@ -84,66 +85,64 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
       test("run hands a missing required argument back to the model as a structured error tool result") {
         executed.set(0)
         val client = new Recording(invalidThenText(ujson.Obj()))
-        z(client).run("q", tools).map { state =>
+        z(client)().run("q").map { state =>
           val seen = toolResults(client.conversations.get(1))
           val json = ujson.read(seen.head.content)
           assertTrue(client.calls.get() == 2) &&
-          assertTrue(state.status == AgentStatus.Complete) &&
+          assertTrue(state.status == AgentStatus.Completed("recovered")) &&
           assertTrue(executed.get() == 0) &&
           assertTrue(seen.map(_.toolCallId) == Seq("call-0")) &&
-          assertTrue(json("isError").bool) &&
-          assertTrue(json("errorType").str == "handler_error") &&
-          assertTrue(json("toolName").str == "echo") &&
-          assertTrue(json("message").str.contains("v"))
+          assertTrue(json("error").str.contains("v"))
         }
       },
       test("run hands an argument of the wrong type back to the model and never runs the tool") {
         executed.set(0)
         val client = new Recording(invalidThenText(ujson.Obj("v" -> 42)))
-        z(client).run("q", tools).map { state =>
-          assertTrue(state.status == AgentStatus.Complete) &&
+        z(client)().run("q").map { state =>
+          assertTrue(state.status == AgentStatus.Completed("recovered")) &&
           assertTrue(executed.get() == 0) &&
-          assertTrue(
-            ujson.read(toolResults(client.conversations.get(1)).head.content)("errorType").str == "handler_error"
-          )
+          assertTrue(ujson.read(toolResults(client.conversations.get(1)).head.content)("error").str.contains("v"))
         }
       },
       test("run executes the tool normally for a valid call (control)") {
         executed.set(0)
         val client = new Recording(invalidThenText(ujson.Obj("v" -> "ok")))
-        z(client).run("q", tools).map { state =>
-          assertTrue(state.status == AgentStatus.Complete) &&
+        z(client)().run("q").map { state =>
+          assertTrue(state.status == AgentStatus.Completed("recovered")) &&
           assertTrue(executed.get() == 1) &&
-          assertTrue(!ujson.read(toolResults(client.conversations.get(1)).head.content).obj.contains("isError"))
+          assertTrue(!ujson.read(toolResults(client.conversations.get(1)).head.content).obj.contains("error"))
         }
       },
       test("run ends at the step limit, not hang, when the model never fixes its arguments") {
         executed.set(0)
         val client = new Recording(i => if (i < 40) callWith(i, ujson.Obj()) else text("late"))
-        z(client).run("q", tools, maxSteps = Some(4)).map { state =>
+        z(client)(_.withTools(tools).withMaxSteps(2)).run("q").map { state =>
           assertTrue(client.calls.get() == 2) &&
-          assertTrue(state.status == AgentStatus.Failed("Maximum step limit reached")) &&
+          assertTrue(state.status == AgentStatus.StepLimitReached) &&
           assertTrue(executed.get() == 0)
         }
       },
       test("continueConversation hands an invalid tool call back to the model too") {
         executed.set(0)
-        val client = new Recording(invalidThenText(ujson.Obj()))
+        val client = new Recording(i => if (i == 0) text("first") else invalidThenText(ujson.Obj())(i - 1))
+        val agent  = z(client)()
         for {
-          first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
-          next  <- z(client).continueConversation(first.copy(tools = tools), "q2")
-        } yield assertTrue(next.status == AgentStatus.Complete) &&
-          assertTrue(client.calls.get() == 2) &&
+          first <- agent.run("q1")
+          next  <- agent.continueConversation(first, "q2")
+        } yield assertTrue(next.status == AgentStatus.Completed("recovered")) &&
+          assertTrue(client.calls.get() == 3) &&
           assertTrue(executed.get() == 0) &&
-          assertTrue(
-            ujson.read(toolResults(client.conversations.get(1)).head.content)("errorType").str == "handler_error"
-          )
+          assertTrue(ujson.read(toolResults(client.conversations.get(2)).head.content)("error").str.contains("v"))
       },
       test("continueConversation still fails a provider error after an invalid call in the error channel") {
+        val n = new AtomicInteger(0)
         val client = new LLMClient {
-          val n = new AtomicInteger(0)
           def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
-            if (n.getAndIncrement() == 0) Right(callWith(0, ujson.Obj())) else Left(SimpleError("provider down"))
+            n.getAndIncrement() match {
+              case 0 => Right(text("first"))
+              case 1 => Right(callWith(1, ujson.Obj()))
+              case _ => Left(SimpleError("provider down"))
+            }
           def streamComplete(
             c: Conversation,
             o: CompletionOptions,
@@ -152,10 +151,11 @@ object AgentZToolValidationSpec extends ZIOSpecDefault {
           def getContextWindow(): Int     = 1
           def getReserveCompletion(): Int = 1
         }
+        val agent = z(client)()
         for {
-          first <- z(new Recording(_ => text("first"))).run("q1", ToolRegistry.empty)
-          err   <- z(client).continueConversation(first.copy(tools = tools), "q2").flip
-        } yield assertTrue(err == SimpleError("provider down"))
+          first <- agent.run("q1")
+          err   <- agent.continueConversation(first, "q2").flip
+        } yield assertTrue(Fixtures.causeOf(err) == SimpleError("provider down"))
       }
     ) @@ TestAspect.sequential
 }

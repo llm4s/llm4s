@@ -16,21 +16,19 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
  *   - llm4s.workspace.dir        | WORKSPACE_DIR
  *   - llm4s.workspace.image      | WORKSPACE_IMAGE
  *   - llm4s.workspace.port       | WORKSPACE_PORT
- *   - llm4s.workspace.traceLogPath | WORKSPACE_TRACE_LOG
  */
 object WorkspaceConfigSupport {
 
   final private case class WorkspaceSection(
     dir: Option[String],
     image: Option[String],
-    port: Option[Int],
-    traceLogPath: Option[String]
+    port: Option[Int]
   )
 
   final private case class WorkspaceRoot(workspace: Option[WorkspaceSection])
 
   implicit private val workspaceSectionReader: PureConfigReader[WorkspaceSection] =
-    PureConfigReader.forProduct4("dir", "image", "port", "traceLogPath")(WorkspaceSection.apply)
+    PureConfigReader.forProduct3("dir", "image", "port")(WorkspaceSection.apply)
 
   implicit private val workspaceRootReader: PureConfigReader[WorkspaceRoot] =
     PureConfigReader.forProduct1("workspace")(WorkspaceRoot.apply)
@@ -82,7 +80,7 @@ object WorkspaceConfigSupport {
   }
 
   private def buildSettings(root: WorkspaceRoot): Result[WorkspaceSettings] = {
-    val section = root.workspace.getOrElse(WorkspaceSection(None, None, None, None))
+    val section = root.workspace.getOrElse(WorkspaceSection(None, None, None))
 
     val home       = System.getProperty("user.home")
     val defaultDir = s"$home/code-workspace"
@@ -92,11 +90,6 @@ object WorkspaceConfigSupport {
 
     val port = section.port.getOrElse(WorkspaceSettings.DefaultPort)
 
-    val defaultTrace = s"$dir/log/codegen-trace.md"
-    val trace = section.traceLogPath
-      .filter(_.trim.nonEmpty)
-      .getOrElse(defaultTrace)
-
-    Right(WorkspaceSettings(dir, image, port, trace))
+    Right(WorkspaceSettings(dir, image, port))
   }
 }

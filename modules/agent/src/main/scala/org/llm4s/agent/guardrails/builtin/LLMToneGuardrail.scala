@@ -21,7 +21,7 @@ import org.llm4s.llmconnect.LLMClient
  *   Set("professional", "friendly"),
  *   threshold = 0.8
  * )
- * agent.run(query, tools, outputGuardrails = Seq(guardrail))
+ * Agent.builder("assistant", client).withMiddleware(new GuardrailMiddleware(Nil, Seq(guardrail))).build()
  * }}}
  */
 class LLMToneGuardrail(

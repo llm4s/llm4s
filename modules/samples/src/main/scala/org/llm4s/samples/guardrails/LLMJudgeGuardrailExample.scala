@@ -1,11 +1,12 @@
 package org.llm4s.samples.guardrails
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentResult, AgentStatus }
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.LLMGuardrail
 import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.samples.util.AgentResults
 import org.slf4j.LoggerFactory
 
 /**
@@ -32,6 +33,19 @@ import org.slf4j.LoggerFactory
 object LLMJudgeGuardrailExample extends App {
   private val logger = LoggerFactory.getLogger(getClass)
 
+  // An output guardrail that fails ends the run as AgentStatus.Blocked, not a Left.
+  private def guarded(
+    client: org.llm4s.llmconnect.LLMClient,
+    id: String,
+    guardrails: Seq[org.llm4s.agent.guardrails.OutputGuardrail],
+    query: String
+  ): org.llm4s.types.Result[AgentResult] =
+    Agent
+      .builder(id, client)
+      .withMiddleware(GuardrailMiddleware(Seq.empty, guardrails))
+      .build()
+      .flatMap(_.run(query))
+
   logger.info("=== LLM-as-Judge Guardrail Example ===")
 
   val result = for {
@@ -39,8 +53,6 @@ object LLMJudgeGuardrailExample extends App {
     registryService <- Llm4sConfig.modelRegistryService()
     given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerCfg)
-    agent = new Agent(client)
-
     // === Example 1: Professional Tone Validation ===
     _ = logger.info("1. Testing Professional Tone Guardrail")
     _ = logger.info("-" * 40)
@@ -48,10 +60,11 @@ object LLMJudgeGuardrailExample extends App {
     // LLM evaluates if the response maintains a professional tone
     toneGuardrail = LLMToneGuardrail.professional(client, threshold = 0.7)
 
-    state1 <- agent.run(
-      query = "Write a brief professional email response declining a meeting invitation.",
-      tools = ToolRegistry.empty,
-      outputGuardrails = Seq(toneGuardrail)
+    state1 <- guarded(
+      client,
+      "llm-judge-state1",
+      Seq(toneGuardrail),
+      "Write a brief professional email response declining a meeting invitation."
     )
 
     _ = printResult(state1, "Professional Tone Check")
@@ -62,11 +75,7 @@ object LLMJudgeGuardrailExample extends App {
 
     safetyGuardrail = LLMSafetyGuardrail(client, threshold = 0.8)
 
-    state2 <- agent.run(
-      query = "Explain how to make a simple paper airplane.",
-      tools = ToolRegistry.empty,
-      outputGuardrails = Seq(safetyGuardrail)
-    )
+    state2 <- guarded(client, "llm-judge-state2", Seq(safetyGuardrail), "Explain how to make a simple paper airplane.")
 
     _ = printResult(state2, "Safety Check")
 
@@ -77,11 +86,7 @@ object LLMJudgeGuardrailExample extends App {
     originalQuery    = "What are the benefits of functional programming?"
     qualityGuardrail = LLMQualityGuardrail(client, originalQuery, threshold = 0.7)
 
-    state3 <- agent.run(
-      query = originalQuery,
-      tools = ToolRegistry.empty,
-      outputGuardrails = Seq(qualityGuardrail)
-    )
+    state3 <- guarded(client, "llm-judge-state3", Seq(qualityGuardrail), originalQuery)
 
     _ = printResult(state3, "Quality Check")
 
@@ -97,10 +102,11 @@ object LLMJudgeGuardrailExample extends App {
       guardrailName = "ActionableAdviceGuardrail"
     )
 
-    state4 <- agent.run(
-      query = "Give me tips for learning a new programming language.",
-      tools = ToolRegistry.empty,
-      outputGuardrails = Seq(customGuardrail)
+    state4 <- guarded(
+      client,
+      "llm-judge-state4",
+      Seq(customGuardrail),
+      "Give me tips for learning a new programming language."
     )
 
     _ = printResult(state4, "Custom Criteria Check")
@@ -115,11 +121,7 @@ object LLMJudgeGuardrailExample extends App {
       safetyGuardrail                        // Slow: Then check safety with LLM
     )
 
-    state5 <- agent.run(
-      query = "Describe the water cycle in nature.",
-      tools = ToolRegistry.empty,
-      outputGuardrails = combinedGuardrails
-    )
+    state5 <- guarded(client, "llm-judge-state5", combinedGuardrails, "Describe the water cycle in nature.")
 
     _ = printResult(state5, "Combined Guardrails Check")
 
@@ -135,9 +137,14 @@ object LLMJudgeGuardrailExample extends App {
       logger.error("  {}", error.formatted)
   }
 
-  def printResult(state: org.llm4s.agent.AgentState, checkName: String): Unit = {
-    val response = state.conversation.messages.last.content
-    val preview  = if (response.length > 200) response.take(200) + "..." else response
+  def printResult(state: AgentResult, checkName: String): Unit =
+    state.status match {
+      case AgentStatus.Completed(answer) => printPassed(answer, checkName)
+      case other => logger.warn("✗ {} did not pass: {}", checkName, AgentResults.describe(other))
+    }
+
+  private def printPassed(response: String, checkName: String): Unit = {
+    val preview = if (response.length > 200) response.take(200) + "..." else response
 
     logger.info("✓ {} PASSED", checkName)
     logger.info("Response preview: {}", preview)

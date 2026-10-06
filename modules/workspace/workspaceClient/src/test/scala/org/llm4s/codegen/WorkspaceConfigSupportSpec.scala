@@ -16,7 +16,6 @@ class WorkspaceConfigSupportSpec extends AnyWordSpec with Matchers {
       ws.workspaceDir shouldBe defaultDir
       ws.imageName shouldBe WorkspaceSettings.DefaultImage
       ws.hostPort shouldBe WorkspaceSettings.DefaultPort
-      ws.traceLogPath shouldBe s"$defaultDir/log/codegen-trace.md"
     }
   }
 }

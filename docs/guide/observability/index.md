@@ -218,10 +218,14 @@ val store  = InMemoryTraceStore()
 // apply returns Result[TraceCollectorTracing]; InMemoryTraceStore never fails
 val tracer = TraceCollectorTracing(store).getOrElse(sys.error("tracing init failed"))
 
-// pass tracer to any agent run
-agent.run("query", tools, tracing = tracer)
+// give the tracer to the agent: every run it makes is traced
+val result = for {
+  agent  <- Agent.builder("assistant", client).withTools(tools).withTracing(tracer).build()
+  result <- agent.run("query")
+} yield result
 
-// retrieve all spans for this run
+// retrieve all spans; an agent's runs are recorded as `graph.*` custom events,
+// spans named `custom:graph.run_started`, `custom:graph.task_completed`, ...
 val spans = store.getSpans(tracer.traceId)
 ```
 
@@ -302,21 +306,26 @@ class AgentBehaviourSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
 
   override def afterEach(): Unit = store.clear()
 
-  "agent" should "call the calculator tool exactly once" in {
-    agent.run("what is 6 * 7?", tools, tracing = tracer)
+  // built once per spec, with a scripted client and the tracer
+  def agent = Agent.builder("assistant", client).withTools(tools).withTracing(tracer).build()
+    .getOrElse(fail("agent build failed"))
 
-    val toolSpans = store.getSpans(tracer.traceId)
-      .filter(_.kind == SpanKind.ToolCall)
-
-    toolSpans should have size 1
-    toolSpans.head.attributes("tool_name").asString shouldBe Some("calculator")
+  /** One span per graph task the agent's `call-tool` node completed: one per tool call. */
+  def toolCalls = store.getSpans(tracer.traceId).filter { s =>
+    s.name == "custom:graph.task_completed" &&
+    s.attributes.get("nodeId").flatMap(_.asString).exists(_.endsWith("/call-tool"))
   }
 
-  "agent" should "record no errors on a valid query" in {
-    agent.run("hello", tools, tracing = tracer)
+  "agent" should "call a tool exactly once" in {
+    agent.run("what is 6 * 7?") shouldBe a[Right[_, _]]
 
-    store.getSpans(tracer.traceId)
-      .filter(_.status.isInstanceOf[SpanStatus.Error]) shouldBe empty
+    toolCalls should have size 1
+  }
+
+  "agent" should "record no failed task on a valid query" in {
+    agent.run("hello") shouldBe a[Right[_, _]]
+
+    store.getSpans(tracer.traceId).map(_.name) should not contain "custom:graph.task_failed"
   }
 }
 ```
@@ -333,10 +342,11 @@ val collector = TraceCollectorTracing(store).getOrElse(sys.error("tracing init f
 val langfuse  = LangfuseTracing.from(LangfuseConfigLoader.default().getOrElse(sys.error("bad langfuse config")))
 
 val tracer = TracingComposer.combine(collector, langfuse)
-agent.run("query", tools, tracing = tracer)
+val agent  = Agent.builder("assistant", client).withTools(tools).withTracing(tracer).build()
+agent.flatMap(_.run("query"))
 
 // local span queries still work
-val cacheSpans = store.getSpans(collector.traceId).filter(_.kind == SpanKind.Cache)
+val graphSpans = store.getSpans(collector.traceId).filter(_.name.startsWith("custom:graph."))
 ```
 
 ### Span JSON Round-Trip
@@ -588,23 +598,19 @@ tracing.traceCost(
 Use context budget methods to prevent runaway costs:
 
 ```scala
-import org.llm4s.agent.{AgentState, ContextWindowConfig}
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.agent.{Agent, ContextWindowConfig}
+import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 import org.llm4s.types.HeadroomPercent
 
 // Get available tokens considering model limits and safety margin
 val budget = client.getContextBudget(HeadroomPercent.Standard)
 val config = ContextWindowConfig(maxTokens = Some(budget))
 
-// AgentState.pruneConversation uses a default token counter (words * 1.3)
+// ContextWindowMiddleware uses a default token counter (words * 1.3)
 // or accepts a custom tokenCounter function for more accurate estimation
-// Build agent state with conversation + tool registry
-val state = AgentState(conversation, ToolRegistry.empty)
-val prunedState =
-  AgentState.pruneConversation(
-    state,
-    config
-  )
+val agent = Agent.builder("assistant", client)
+  .withMiddleware(new ContextWindowMiddleware(config))
+  .build()
 ```
 
 ---

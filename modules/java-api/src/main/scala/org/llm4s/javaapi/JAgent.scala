@@ -1,35 +1,45 @@
 package org.llm4s.javaapi
 
-import org.llm4s.agent.{ Agent, AgentState }
+import org.llm4s.agent.{ Agent, AgentResult }
 import org.llm4s.core.safety.Safety
 import org.llm4s.error.ValidationError
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.types.Result
 
 /**
  * Java-friendly wrapper around [[Agent]].
  *
- * Exposes a simplified `run(query)` entry point that returns
- * [[LlmResult]]`[`[[AgentState]]`]` so Java callers do not need to deal with
- * Scala's `Either` or `Result` types directly.
+ * Exposes `run(query)` and `continueConversation(previous, query)`, returning
+ * [[LlmResult]]`[`[[AgentResult]]`]` so Java callers do not need to deal with
+ * Scala's `Either` or `Result` types directly. A conversation is a thread of the
+ * agent's in-memory runtime, kept until [[forget]] removes it.
  *
  * Obtain instances via [[Llm4s.createAgent]].
  *
  * {{{
  * JAgent agent = Llm4s.createAgent(client);
- * LlmResult<AgentState> result = agent.run("Summarise the news today");
- * result.ifSuccess(state -> System.out.println(state.conversation()))
+ * LlmResult<AgentResult> result = agent.run("Summarise the news today");
+ * result.ifSuccess(r -> System.out.println(r.answer()))
  *       .ifFailure(e -> System.err.println(e.getMessage()));
  * }}}
  */
-final class JAgent private[javaapi] (private val underlying: Agent) {
+final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
 
-  /** Runs the agent with an empty tool registry. A `null` query yields a failed result. */
-  def run(query: String): LlmResult[AgentState] =
-    run(query, ToolRegistry.empty)
-
-  /** Runs the agent with an explicit [[ToolRegistry]]. */
-  def run(query: String, tools: ToolRegistry): LlmResult[AgentState] =
+  /** Runs `query` as the first turn of a new conversation. A `null` query yields a failed result. */
+  def run(query: String): LlmResult[AgentResult] =
     if (query == null) LlmResult.failure(ValidationError.required("query"))
-    else if (tools == null) LlmResult.failure(ValidationError.required("tools"))
-    else LlmResult.from(Safety.safely(underlying.run(query, tools)).flatMap(identity))
+    else call(_.run(query))
+
+  /** Runs `query` as the next turn of `previous`'s conversation. A `null` argument yields a failed result. */
+  def continueConversation(previous: AgentResult, query: String): LlmResult[AgentResult] =
+    if (previous == null) LlmResult.failure(ValidationError.required("previous"))
+    else if (query == null) LlmResult.failure(ValidationError.required("query"))
+    else call(_.continueConversation(previous, query))
+
+  /** Removes `previous`'s conversation from the agent's runtime. A `null` argument yields a failed result. */
+  def forget(previous: AgentResult): LlmResult[Void] =
+    if (previous == null) LlmResult.failure(ValidationError.required("previous"))
+    else call(_.forget(previous.threadId).map(_ => null))
+
+  private def call[A](body: Agent => Result[A]): LlmResult[A] =
+    LlmResult.from(underlying.flatMap(agent => Safety.safely(body(agent)).flatMap(identity)))
 }

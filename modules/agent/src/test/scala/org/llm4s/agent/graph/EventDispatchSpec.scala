@@ -66,6 +66,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       underlying.eventsAfter(threadId, afterSeq, limit)
     }
     def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
     def awaitSwitch(): Unit                                = switching.await(5, TimeUnit.SECONDS) shouldBe true
   }
 
@@ -387,6 +388,7 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       def latest(threadId: ThreadId)                 = store.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = Left(error)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = store.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                   = store.deleteThread(threadId)
     }
     val runtime   = GraphRuntime(failing)
     val collector = Collector()

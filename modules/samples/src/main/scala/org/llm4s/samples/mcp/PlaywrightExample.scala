@@ -1,12 +1,11 @@
 package org.llm4s.samples.mcp
 
 import cats.implicits._
-import org.llm4s.agent.{ Agent, AgentState }
+import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
-import org.llm4s.llmconnect.model.MessageRole.Assistant
-import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
 import org.llm4s.mcp._
+import org.llm4s.samples.util.AgentResults
 import org.llm4s.toolapi.ToolFunction
 import org.slf4j.LoggerFactory
 
@@ -116,8 +115,6 @@ object PlaywrightExample {
 
   // Run multiple browser automation queries to test different capabilities
   private def runBrowserAutomationQueries(client: org.llm4s.llmconnect.LLMClient, registry: MCPToolRegistry): Unit = {
-    val agent = new Agent(client)
-
     // Define browser automation test queries
     // These are designed to test common web automation tasks with Playwright MCP
     val queries = Seq(
@@ -129,56 +126,44 @@ object PlaywrightExample {
 
     // Execute each query with full tracing
     queries.zipWithIndex.foreach { case (query, index) =>
-      val queryNum  = index + 1
-      val traceFile = s"playwright-agent-query-$queryNum.md"
+      val queryNum = index + 1
 
       logger.info("=" * 60)
       logger.info("🎯 Query {}: {}", queryNum, query)
-      logger.info("📝 Trace: {}", traceFile)
       logger.info("=" * 60)
 
       // Run the agent with comprehensive error handling
       logger.info("🤖 Starting agent execution...")
 
-      val systemPrompt = Some(
-        """You are a browser automation assistant using Playwright. 
+      val systemPrompt =
+        """You are a browser automation assistant using Playwright.
         |Your task is to help users navigate websites and extract information.
         |Always be specific about what you find on the page and provide clear, detailed responses.
         |If you encounter any issues, explain what happened and suggest alternatives.""".stripMargin
-      )
 
-      // Create custom initial state with the browser automation system prompt
-      val initialMessages = Seq(
-        SystemMessage(systemPrompt.getOrElse("You are a helpful assistant with access to tools.")),
-        UserMessage(query)
-      )
-      val initialState = AgentState(
-        conversation = Conversation(initialMessages),
-        tools = registry,
-        initialQuery = Some(query)
-      )
+      val run = Agent
+        .builder("playwright-agent", client)
+        .withTools(registry)
+        .withSystemPrompt(systemPrompt)
+        .withMaxSteps(15)
+        .build()
+        .flatMap(_.run(query))
 
-      // Use the agent's runUntilCompletion method directly with our custom state
-      runAgentWithCustomPrompt(agent, initialState, Some(15), Some(traceFile)) match {
+      run match {
         case Right(finalState) =>
-          logger.info("✅ Query {} completed: {}", queryNum, finalState.status)
-
-          // Show final answer
-          finalState.conversation.messages
-            .findLast(_.role == Assistant)
-            .fold {
-              logger.warn("❌ No final answer found")
-            } { msg =>
+          finalState.status match {
+            case AgentStatus.Completed(answer) =>
+              logger.info("✅ Query {} completed", queryNum)
               logger.info("💬 Final Answer:")
-              logger.info(msg.content)
-            }
+              logger.info(answer)
+            case other =>
+              logger.warn("❌ Query {} ended without an answer: {}", queryNum, AgentResults.describe(other))
+          }
 
           // Show execution summary
           logger.info("📊 Summary:")
           logger.info("   Status: {}", finalState.status)
-          logger.info("   Steps: {}", finalState.logs.size)
-          logger.info("   Messages: {}", finalState.conversation.messages.size)
-          logger.info("   For detailed tool usage, see trace file: {}", traceFile)
+          logger.info("   Messages: {}", finalState.messages.size)
 
         case Left(err) =>
           logger.error("❌ Query {} failed: {}", queryNum, err)
@@ -200,50 +185,6 @@ object PlaywrightExample {
       }
     }
 
-  }
-
-  // Helper method to run agent with custom initial state
-  private def runAgentWithCustomPrompt(
-    agent: Agent,
-    initialState: AgentState,
-    maxSteps: Option[Int],
-    traceLogPath: Option[String]
-  ) = {
-    import org.llm4s.types.Result
-
-    import scala.annotation.tailrec
-
-    // Write initial state if tracing is enabled
-    traceLogPath.foreach(path => agent.writeTraceLog(initialState, path))
-
-    @tailrec
-    def runUntilCompletion(state: AgentState, stepsRemaining: Option[Int] = maxSteps): Result[AgentState] =
-      (state.status, stepsRemaining) match {
-        case (s, Some(0))
-            if s == org.llm4s.agent.AgentStatus.InProgress || s == org.llm4s.agent.AgentStatus.WaitingForTools =>
-          val updatedState = state
-            .log("[system] Step limit reached")
-            .withStatus(org.llm4s.agent.AgentStatus.Failed("Maximum step limit reached"))
-          traceLogPath.foreach(path => agent.writeTraceLog(updatedState, path))
-          Right(updatedState)
-
-        case (org.llm4s.agent.AgentStatus.InProgress | org.llm4s.agent.AgentStatus.WaitingForTools, _) =>
-          agent.runStep(state) match {
-            case Right(newState) =>
-              traceLogPath.foreach(path => agent.writeTraceLog(newState, path))
-              runUntilCompletion(newState, stepsRemaining.map(_ - 1))
-            case Left(error) =>
-              val failedState = state.withStatus(org.llm4s.agent.AgentStatus.Failed(error.toString))
-              traceLogPath.foreach(path => agent.writeTraceLog(failedState, path))
-              Left(error)
-          }
-
-        case (org.llm4s.agent.AgentStatus.Complete, _) | (org.llm4s.agent.AgentStatus.Failed(_), _) |
-            (org.llm4s.agent.AgentStatus.HandoffRequested(_, _), _) =>
-          Right(state)
-      }
-
-    runUntilCompletion(initialState)
   }
 
 }

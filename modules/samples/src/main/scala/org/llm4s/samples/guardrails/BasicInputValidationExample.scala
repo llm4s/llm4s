@@ -1,10 +1,11 @@
 package org.llm4s.samples.guardrails
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.samples.util.AgentResults
 import org.slf4j.LoggerFactory
 
 /**
@@ -28,8 +29,6 @@ object BasicInputValidationExample extends App {
     registryService <- Llm4sConfig.modelRegistryService()
     given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerCfg)
-    agent = new Agent(client)
-
     // Define input guardrails
     inputGuardrails = Seq(
       new LengthCheck(min = 1, max = 10000),
@@ -37,18 +36,23 @@ object BasicInputValidationExample extends App {
     )
 
     // Run agent with input validation
-    state <- agent.run(
-      query = "What is Scala and why is it useful for functional programming?",
-      tools = new ToolRegistry(Seq.empty),
-      inputGuardrails = inputGuardrails
-    )
+    agent <- Agent
+      .builder("basic-input-validation", client)
+      .withMiddleware(GuardrailMiddleware(inputGuardrails, Seq.empty))
+      .build()
+    state <- agent.run("What is Scala and why is it useful for functional programming?")
   } yield state
 
   result match {
     case Right(state) =>
-      logger.info("✓ Input validation passed!")
-      logger.info("Agent response:")
-      state.conversation.messages.last.content.split("\n").foreach(line => logger.info("  {}", line))
+      state.status match {
+        case AgentStatus.Completed(answer) =>
+          logger.info("✓ Input validation passed!")
+          logger.info("Agent response:")
+          answer.split("\n").foreach(line => logger.info("  {}", line))
+        case other =>
+          logger.warn("✗ Run did not complete: {}", AgentResults.describe(other))
+      }
 
     case Left(error) =>
       logger.error("✗ Validation or execution failed:")

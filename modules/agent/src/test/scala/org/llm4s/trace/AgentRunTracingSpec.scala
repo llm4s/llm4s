@@ -1,6 +1,8 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentState, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentResult }
+import org.llm4s.agent.graph.ThreadId
+import org.llm4s.error.{ NetworkError, UnknownError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
@@ -9,134 +11,58 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ macroRW, ReadWriter }
 
-import java.io.ByteArrayOutputStream
+import java.util.concurrent.{ ConcurrentLinkedQueue, CopyOnWriteArrayList }
+import scala.jdk.CollectionConverters._
 
 /**
- * How the agent runtime reaches the tracing contract: `AgentState#toTraceEvent`, and what a whole
- * agent run prints through `ConsoleTracing`.
- *
- * These cases were in core's `ConsoleTracingSpec` and `NoOpTracingSpec`. They need `AgentState`
- * and `Agent`, which moved to `llm4s-agent` (#1242); the core specs now build
- * `TraceEvent.AgentStateUpdated` directly, as the contract sees it.
+ * How an agent run reaches the tracing contract: `withTracing` traces each run's durable events as
+ * `graph.*` custom events, complete by the time the run returns, and only that run's. The agent
+ * produces no other trace event; core's tracing specs build the agent-state event directly.
  */
 class AgentRunTracingSpec extends AnyFlatSpec with Matchers {
 
-  private val toolCall = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
-
-  /** An agent state with every kind of message in it, as an agent run leaves it. */
-  private val agentState = AgentState(
-    conversation = Conversation(
-      Seq(
-        SystemMessage("You are a calculator."),
-        UserMessage("What is 1 + 2?"),
-        AssistantMessage(None, Seq(toolCall)),
-        ToolMessage("""{"result":3}""", "call-1"),
-        AssistantMessage("3")
-      )
-    ),
-    tools = ToolRegistry.empty,
-    initialQuery = Some("What is 1 + 2?"),
-    status = AgentStatus.Complete,
-    logs = Vector("[tool] calculator", "[assistant] 3")
-  )
-
-  "AgentState#toTraceEvent" should "carry the status, the message and log counts, and the messages" in {
-    val event = agentState.toTraceEvent
-
-    event.status shouldBe "Complete"
-    event.messageCount shouldBe 5
-    event.logCount shouldBe 2
-    event.messages shouldBe agentState.conversation.messages
-  }
-
-  "NoOpTracing" should "trace agent state as an ordinary event, whatever the state holds" in {
-    val tracing = new NoOpTracing()
-    val empty   = AgentState(Conversation(Seq.empty), ToolRegistry.empty)
-    val failed  = agentState.copy(status = AgentStatus.Failed("tool crashed"))
-
-    tracing.traceEvent(agentState.toTraceEvent) shouldBe Right(())
-    tracing.traceEvent(empty.toTraceEvent) shouldBe Right(())
-    tracing.traceEvent(failed.toTraceEvent) shouldBe Right(())
-  }
-
-  /** Runs `body` with Scala's stdout captured, and returns what it printed without ANSI colours. */
-  private def printed(body: => Unit): String = {
-    val out = new ByteArrayOutputStream()
-    Console.withOut(out)(body)
-    out.toString.replaceAll("\u001b\\[[0-9;]*m", "")
-  }
-
-  "ConsoleTracing" should "show the status and counts of the AgentStateUpdated built by AgentState#toTraceEvent" in {
-    val state = AgentState(
-      conversation = Conversation(Seq(UserMessage("hi"), AssistantMessage("hello"), UserMessage("bye"))),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.Failed("tool crashed"),
-      logs = Vector("one", "two")
-    )
-
-    val output = printed(new ConsoleTracing().traceEvent(state.toTraceEvent))
-
-    output should include("--- AGENT STATE UPDATED ---")
-    output should include("Status: Failed(tool crashed)")
-    output should include("Messages: 3")
-    output should include("Logs: 2")
-  }
-
-  it should "print an agent run with a tool call in the order it happened" in {
-    val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
-    val client = new SequencedClient(
-      Seq(
-        Completion("turn-1", 0L, "", "test-model", AssistantMessage("", Seq(toolCall)), List(toolCall), usage1),
-        Completion("turn-2", 0L, "Echoed.", "test-model", AssistantMessage("Echoed."), usage = usage2)
-      )
-    )
-
-    var result: Result[AgentState] = Right(AgentState(Conversation(Seq.empty), ToolRegistry.empty))
-    val output = printed {
-      result = echoTool.flatMap { tool =>
-        new Agent(client)
-          .run("Echo hello", new ToolRegistry(Seq(tool)), context = AgentContext(tracing = Some(new ConsoleTracing())))
-      }
+  /** Records every event; with `failing`, reports each as a failure, which must not fail the run. */
+  final private class Recording(failing: Boolean = false) extends Tracing {
+    private val events = new ConcurrentLinkedQueue[TraceEvent]()
+    def traceEvent(event: TraceEvent): Result[Unit] = {
+      events.add(event)
+      if (failing) Left(UnknownError("tracing down", new RuntimeException("x"))) else Right(())
     }
+    def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
+    def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
+    def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
+    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
 
-    result.map(_.status) shouldBe Right(AgentStatus.Complete)
-
-    val firstCompletion  = output.indexOf("ID: turn-1")
-    val tool             = output.indexOf("Tool: echo")
-    val secondCompletion = output.indexOf("ID: turn-2")
-    val lastState        = output.lastIndexOf("--- AGENT STATE UPDATED ---")
-
-    Seq(firstCompletion, tool, secondCompletion, lastState).foreach(_ should be >= 0)
-    firstCompletion should be < tool       // the model asks for the tool...
-    tool should be < secondCompletion      // ...the tool runs before the model is called again...
-    secondCompletion should be < lastState // ...and the run ends with its final state.
-    output should include("""Input: {"message":"hello"}""")
-    output should include("Prompt Tokens: 20")
-    output.substring(lastState) should include("Status: Complete")
+    def all: Vector[TraceEvent]                = events.asScala.toVector
+    def custom: Vector[TraceEvent.CustomEvent] = all.collect { case c: TraceEvent.CustomEvent => c }
+    def names: Vector[String]                  = custom.map(_.name)
   }
 
-  private def usage1 = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
-  private def usage2 = Some(TokenUsage(promptTokens = 30, completionTokens = 5, totalTokens = 35))
-
-  /** Returns each completion in turn, then the last one again. */
-  private class SequencedClient(completions: Seq[Completion]) extends LLMClient {
-    private var calls = 0
-
+  /** Answers call N with `responses(N)`. */
+  final private class Scripted(responses: Result[Completion]*) extends LLMClient {
+    private val sent = new CopyOnWriteArrayList[Conversation]()
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
-      val completion = completions(calls.min(completions.size - 1))
-      calls += 1
-      Right(completion)
+      val index = sent.size
+      sent.add(conversation)
+      responses(index)
     }
-
     override def streamComplete(
       conversation: Conversation,
       options: CompletionOptions,
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = complete(conversation, options)
-
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 1024
   }
+
+  private def answer(text: String): Completion =
+    Completion("answer", 0L, text, "test-model", AssistantMessage(text), usage = usage)
+
+  private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
+  private def toolCallCompletion: Completion =
+    Completion("turn-1", 0L, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall), usage)
+
+  private def usage = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
 
   private case class EchoResult(echo: String)
   private object EchoResult {
@@ -147,5 +73,88 @@ class AgentRunTracingSpec extends AnyFlatSpec with Matchers {
     "echo",
     "Echoes the supplied message back",
     Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
-  ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe()
+  ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe().fold(e => fail(e.formatted), identity)
+
+  private def traced(client: LLMClient, tracing: Tracing): Agent =
+    Agent
+      .builder("assistant", client)
+      .withTools(new ToolRegistry(Seq(echoTool)))
+      .withTracing(tracing)
+      .build()
+      .fold(e => fail(e.message), identity)
+
+  private def ok(result: Result[AgentResult]): AgentResult = result.fold(e => fail(e.message), identity)
+
+  "An agent with tracing" should "trace the whole run as graph events, complete when the run returns" in {
+    val tracing = new Recording()
+    val result  = ok(traced(new Scripted(Right(answer("hello"))), tracing).run("hi"))
+
+    val names = tracing.names
+    names.head shouldBe "graph.run_started"
+    names.last shouldBe "graph.run_completed"
+    names should contain("graph.task_completed")
+    names should contain("graph.checkpoint_committed")
+    tracing.custom.map(_.data("runId").str).toSet shouldBe Set(result.runId.value)
+    tracing.custom.map(_.data("threadId").str).toSet shouldBe Set(result.threadId.value)
+    tracing.custom.map(_.data("seq").num) shouldBe sorted
+  }
+
+  it should "trace a tool call's task between the model calls around it" in {
+    val tracing = new Recording()
+    ok(traced(new Scripted(Right(toolCallCompletion), Right(answer("Echoed."))), tracing).run("Echo hello"))
+
+    val completedNodes = tracing.custom
+      .filter(_.name == "graph.task_completed")
+      .map(_.data("nodeId").str)
+    completedNodes shouldBe Vector(
+      "input",
+      "assistant/model",
+      "assistant/call-tool",
+      "assistant/collect",
+      "assistant/model",
+      "assistant/finish"
+    )
+  }
+
+  it should "trace each run on a thread once: a later run's events are its own" in {
+    val tracing = new Recording()
+    val agent   = traced(new Scripted(Right(answer("one")), Right(answer("two"))), tracing)
+    val thread  = ThreadId("traced-thread")
+
+    val first  = ok(agent.run(thread, "first"))
+    val before = tracing.custom.size
+    val second = ok(agent.run(thread, "second"))
+
+    val later = tracing.custom.drop(before)
+    later.map(_.data("runId").str).toSet shouldBe Set(second.runId.value)
+    later.head.name shouldBe "graph.run_started"
+    later.last.name shouldBe "graph.run_completed"
+    tracing.custom.count(_.data("runId").str == first.runId.value) shouldBe before
+  }
+
+  it should "trace a failed run's failure" in {
+    val tracing = new Recording()
+    val result  = traced(new Scripted(Left(NetworkError("down", None, "mock://llm"))), tracing).run("hi")
+
+    result.isLeft shouldBe true
+    tracing.names should contain("graph.task_failed")
+    tracing.names.last shouldBe "graph.run_failed"
+  }
+
+  it should "complete the run when the tracer itself fails" in {
+    val tracing = new Recording(failing = true)
+    val result  = ok(traced(new Scripted(Right(answer("fine"))), tracing).run("hi"))
+
+    result.answer shouldBe Some("fine")
+    tracing.names.last shouldBe "graph.run_completed"
+  }
+
+  it should "trace nothing but graph custom events" in {
+    val tracing = new Recording()
+    ok(traced(new Scripted(Right(answer("hello"))), tracing).run("hi"))
+
+    tracing.custom.size should be > 0
+    tracing.all.filterNot(_.isInstanceOf[TraceEvent.CustomEvent]) shouldBe empty
+    tracing.names.foreach(_ should startWith("graph."))
+  }
 }
