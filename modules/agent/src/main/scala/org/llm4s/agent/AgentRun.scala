@@ -36,6 +36,20 @@ final class AgentRun private[agent] (
   def cancel(): Unit = handle.cancel()
 
   /**
+   * Subscribes `listener` to this turn's events: its durable events replayed from the turn's start,
+   * then live; its live events from now on (a live event sent before this call is missed - use
+   * [[Agent.stream]] to receive every one). Run-scoped: nothing of another run on the thread is
+   * delivered, and the subscription ends itself after the turn's terminal event. A `Disconnected`
+   * reaches the listener only if it fell behind (`Lagging`) or threw.
+   */
+  def subscribe(capacity: Int = Agent.StreamCapacity)(listener: StreamEvent => Unit): Result[Subscription] =
+    val scope = RunScope(runId, listener)
+    handle.subscribe(capacity)(scope).map { s =>
+      scope.attach(s)
+      s
+    }
+
+  /**
    * Blocks until the turn ends, then returns its result - `Suspended` included - or the error it
    * failed with; the outcome is retained, so every call made once the turn has ended returns the
    * same value. A call whose awaiting thread is interrupted before then returns
@@ -104,14 +118,19 @@ private[agent] object AgentRun:
   /** How long `await` waits, after the run ends, for its tracing subscription to deliver the run's last event. */
   private val TracingDrain: FiniteDuration = 5.seconds
 
-  /** `handle` as an agent run, traced to `tracing` when given. */
+  /**
+   * `handle` as an agent run, traced to `tracing` when given. `scope`, when given, is the listener
+   * of the observer the run was admitted with, and ends the handle's observation after the run.
+   */
   def apply(
     handle: RunHandle[TurnOutput],
     loop: ToolLoop,
     root: AgentId,
     runtime: GraphRuntime,
-    tracing: Option[Tracing]
+    tracing: Option[Tracing],
+    scope: Option[RunScope]
   ): AgentRun =
+    scope.foreach(s => handle.observation.foreach(s.attach))
     new AgentRun(handle, loop, root, runtime, tracing.map(TracedRun(handle, _)))
 
   /**
@@ -130,7 +149,7 @@ private[agent] object AgentRun:
       .subscribe() {
         case event @ StreamEvent.Durable(record) if record.runId == handle.runId.value =>
           trace(event)
-          if ends(record.event) then finish()
+          if RunScope.terminal(record.event) then finish()
         case StreamEvent.Durable(_) => ()
         case event @ StreamEvent.Disconnected(_, _) =>
           trace(event)
@@ -159,8 +178,3 @@ private[agent] object AgentRun:
             )
           case Right(_) => ()
         subscription.get.foreach(_.cancel())
-
-  private def ends(event: RunEvent): Boolean = event match
-    case _: RunEvent.RunSuspended | _: RunEvent.RunFailed                     => true
-    case RunEvent.RunCompleted | RunEvent.RunCancelled | RunEvent.RunTimedOut => true
-    case _                                                                    => false

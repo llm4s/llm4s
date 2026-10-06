@@ -82,24 +82,20 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     }
 
   /**
-   * Runs `body` against `builder`'s agent on a new thread, collecting the thread's events until
-   * `runs` runs have sent their terminal durable event. Task 5 replaces this with `agent.stream`.
+   * Runs `body` against `builder`'s agent on a new thread, `body` streaming each of `runs` runs to the
+   * listener it is given, and collects their events until each has sent its terminal durable event.
    */
-  private def collecting[A](builder: AgentBuilder, runs: Int)(body: (Agent, ThreadId) => A): (A, Gathered) =
-    val runtime  = GraphRuntime.inMemory()
-    val agent    = builder.withRuntime(runtime).build().fold(e => fail(e.message), identity)
-    val threadId = ThreadId(java.util.UUID.randomUUID().toString)
-    val c        = Gathered(runs)
-    val sub      = runtime.subscribe(threadId)(c.listener).fold(e => fail(e.message), identity)
-    // the dispatcher joins the live set after its (empty) replay
-    Thread.sleep(200)
-    val result = body(agent, threadId)
+  private def collecting[A](builder: AgentBuilder, runs: Int)(
+    body: (Agent, ThreadId, StreamEvent => Unit) => A
+  ): (A, Gathered) =
+    val agent  = builder.build().fold(e => fail(e.message), identity)
+    val c      = Gathered(runs)
+    val result = body(agent, ThreadId(java.util.UUID.randomUUID().toString), c.listener)
     c.ended.await(5, TimeUnit.SECONDS) shouldBe true
-    sub.cancel()
     (result, c)
 
   private def collect(builder: AgentBuilder, query: String): (Result[AgentResult], Gathered) =
-    collecting(builder, 1)((agent, threadId) => agent.run(threadId, query))
+    collecting(builder, 1)((agent, threadId, listener) => agent.stream(threadId, query)(listener).flatMap(_.await()))
 
   private def ok[A](result: Result[A]): A = result.fold(e => fail(e.message), identity)
 
@@ -168,12 +164,12 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
   it should "report NeedsApproval, then Rejected after a reject" in {
     val builder = agentWith(Scripted(Right(toolCallCompletion), Right(answer("fine"))), echoTool)
       .withMiddleware(ApprovalMiddleware.unlessReadOnly)
-    val ((first, second), c) = collecting(builder, 2) { (agent, threadId) =>
-      val first = ok(agent.run(threadId, "go"))
+    val ((first, second), c) = collecting(builder, 2) { (agent, threadId, listener) =>
+      val first = ok(agent.stream(threadId, "go")(listener).flatMap(_.await()))
       val id = first.status match
         case AgentStatus.Suspended(approvals, _) => approvals.head._1
         case other                               => fail(s"expected a suspension, got $other")
-      val second = ok(agent.resume(threadId, Map(first.reject(id, "no thanks"))))
+      val second = ok(agent.streamResume(threadId, Map(first.reject(id, "no thanks")))(listener).flatMap(_.await()))
       (first, second)
     }
     second.answer shouldBe Some("fine")
@@ -196,12 +192,12 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
   it should "report an approved call as Succeeded after NeedsApproval" in {
     val builder = agentWith(Scripted(Right(toolCallCompletion), Right(answer("fine"))), echoTool)
       .withMiddleware(ApprovalMiddleware.unlessReadOnly)
-    val ((first, second), c) = collecting(builder, 2) { (agent, threadId) =>
-      val first = ok(agent.run(threadId, "go"))
+    val ((first, second), c) = collecting(builder, 2) { (agent, threadId, listener) =>
+      val first = ok(agent.stream(threadId, "go")(listener).flatMap(_.await()))
       val id = first.status match
         case AgentStatus.Suspended(approvals, _) => approvals.head._1
         case other                               => fail(s"expected a suspension, got $other")
-      (first, ok(agent.resume(threadId, Map(first.approve(id)))))
+      (first, ok(agent.streamResume(threadId, Map(first.approve(id)))(listener).flatMap(_.await())))
     }
     second.answer shouldBe Some("fine")
     c.of(first.runId).collect { case AgentEvents.ToolExecuted(t) => t.outcome } shouldBe

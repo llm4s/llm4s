@@ -97,7 +97,7 @@ final class Agent private[agent] (
 
   /** [[recover]], returning at once with the running turn - to cancel it, or to await its result. */
   def startRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentRun] =
-    runtime.recover(threadId, loop.graph, config).map(agentRun)
+    runtime.recover(threadId, loop.graph, config).map(agentRun(_, None))
 
   /**
    * Answers some of `threadId`'s pending approvals and questions - built with
@@ -117,7 +117,7 @@ final class Agent private[agent] (
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig()
   ): Result[AgentRun] =
-    runtime.resume(threadId, loop.graph, answers, config).map(agentRun)
+    runtime.resume(threadId, loop.graph, answers, config).map(agentRun(_, None))
 
   /**
    * Starts a turn on `threadId` as [[run]] does, returning at once with the running turn - to
@@ -129,11 +129,46 @@ final class Agent private[agent] (
     config: RunConfig = RunConfig(),
     history: Seq[Message] = Nil
   ): Result[AgentRun] =
-    val input = AgentInput(query, history.toVector)
+    startWith(threadId, query, config, history, None)
+
+  /**
+   * [[start]], with `listener` subscribed before the turn begins, so it receives every event of the
+   * turn - live text deltas included - until the turn's terminal event. A refused start (a blank
+   * query, a busy thread, ...) is `Left`, and the listener hears nothing.
+   */
+  def stream(threadId: ThreadId, query: String, config: RunConfig = RunConfig(), history: Seq[Message] = Nil)(
+    listener: StreamEvent => Unit
+  ): Result[AgentRun] =
+    startWith(threadId, query, config, history, Some(listener))
+
+  /** [[startResume]] with `listener` subscribed first; see [[stream]]. */
+  def streamResume(threadId: ThreadId, answers: Map[InterruptId, ujson.Value], config: RunConfig = RunConfig())(
+    listener: StreamEvent => Unit
+  ): Result[AgentRun] =
+    val (observer, scope) = observed(config, listener)
+    runtime.resume(threadId, loop.graph, answers, config, observer = Some(observer)).map(agentRun(_, Some(scope)))
+
+  /** [[startRecover]] with `listener` subscribed first; see [[stream]]. */
+  def streamRecover(threadId: ThreadId, config: RunConfig = RunConfig())(
+    listener: StreamEvent => Unit
+  ): Result[AgentRun] =
+    val (observer, scope) = observed(config, listener)
+    runtime.recover(threadId, loop.graph, config, observer = Some(observer)).map(agentRun(_, Some(scope)))
+
+  private def startWith(
+    threadId: ThreadId,
+    query: String,
+    config: RunConfig,
+    history: Seq[Message],
+    listener: Option[StreamEvent => Unit]
+  ): Result[AgentRun] =
+    val input    = AgentInput(query, history.toVector)
+    val watching = listener.map(observed(config, _))
+    val observer = watching.map(_._1)
     val started =
       // refused before any thread is claimed: stored, a blank query would fail every model call after it
       if query.trim.isEmpty then Left(ValidationError("query", "the query is blank"))
-      else if history.isEmpty then runtime.start(threadId, loop.graph, input, config)
+      else if history.isEmpty then runtime.start(threadId, loop.graph, input, config, observer = observer)
       else
         importable(history).flatMap(_ =>
           runtime.startNew(
@@ -141,10 +176,16 @@ final class Agent private[agent] (
             loop.graph,
             input,
             config,
-            ValidationError("history", "history is imported only into a new thread")
+            ValidationError("history", "history is imported only into a new thread"),
+            observer
           )
         )
-    started.map(agentRun)
+    started.map(agentRun(_, watching.map(_._2)))
+
+  /** An observer whose listener is `listener` scoped to the run `config` starts. */
+  private def observed(config: RunConfig, listener: StreamEvent => Unit): (Observer, RunScope) =
+    val scope = RunScope(config.runId, listener)
+    (Observer(Agent.StreamCapacity, scope), scope)
 
   /** History must be a valid conversation without system messages; checked before any thread is claimed. */
   private def importable(history: Seq[Message]): Result[Unit] =
@@ -152,12 +193,16 @@ final class Agent private[agent] (
       Left(ValidationError("history", "system messages are not imported; prompts belong to agents"))
     else Message.validateConversation(history.toList)
 
-  private def agentRun(handle: RunHandle[TurnOutput]): AgentRun = AgentRun(handle, loop, id, runtime, tracing)
+  private def agentRun(handle: RunHandle[TurnOutput], scope: Option[RunScope]): AgentRun =
+    AgentRun(handle, loop, id, runtime, tracing, scope)
 
 object Agent:
 
   /** Model calls per turn when [[AgentBuilder.withMaxSteps]] is not set. */
   val DefaultMaxSteps: Int = 50
+
+  /** Queue size of a `stream*` or `subscribe` subscription. */
+  val StreamCapacity: Int = 1024
 
   /** A builder for an agent with id `id` (`[a-zA-Z0-9_-]{1,52}`, checked by `build()`) calling `client`. */
   def builder(id: String, client: LLMClient): AgentBuilder = AgentBuilder(id, client)

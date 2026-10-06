@@ -65,21 +65,12 @@ class AgentStreamingSpec extends AnyFlatSpec with Matchers:
         case _ => ()
     def all: Vector[StreamEvent] = events.asScala.toVector
 
-  /**
-   * Runs `query` on a new thread of `builder`'s agent, collecting the thread's events until the run's
-   * terminal durable event. Task 5 replaces this with `agent.stream`.
-   */
+  /** Streams `query` on a new thread of `builder`'s agent, collecting the run's events until its terminal one. */
   private def streamed(builder: AgentBuilder, query: String): (Result[AgentResult], Seen) =
-    val runtime  = GraphRuntime.inMemory()
-    val agent    = builder.withRuntime(runtime).build().fold(e => fail(e.message), identity)
-    val threadId = ThreadId(java.util.UUID.randomUUID().toString)
-    val c        = Seen()
-    val sub      = runtime.subscribe(threadId)(c.listener).fold(e => fail(e.message), identity)
-    // the dispatcher joins the live set after its (empty) replay
-    Thread.sleep(200)
-    val result = agent.run(threadId, query)
+    val agent  = builder.build().fold(e => fail(e.message), identity)
+    val c      = Seen()
+    val result = agent.stream(ThreadId(java.util.UUID.randomUUID().toString), query)(c.listener).flatMap(_.await())
     c.ended.await(5, TimeUnit.SECONDS) shouldBe true
-    sub.cancel()
     (result, c)
 
   "A streaming agent" should "send the answer's text as TextDelta events, in order" in {

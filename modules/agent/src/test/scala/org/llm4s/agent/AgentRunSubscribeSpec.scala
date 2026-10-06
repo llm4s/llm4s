@@ -1,0 +1,234 @@
+package org.llm4s.agent
+
+import org.llm4s.agent.graph.*
+import org.llm4s.agent.graph.middleware.ApprovalMiddleware
+import org.llm4s.error.NetworkError
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.*
+import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
+import org.llm4s.types.Result
+import org.scalatest.concurrent.Eventually
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{ Millis, Seconds, Span }
+import upickle.default.{ macroRW, ReadWriter }
+
+import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
+import java.util.concurrent.atomic.AtomicBoolean
+import scala.jdk.CollectionConverters.*
+
+/** Run-scoped event delivery: `Agent.stream*` and a late `AgentRun.subscribe`. */
+class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
+
+  implicit override val patienceConfig: PatienceConfig =
+    PatienceConfig(timeout = Span(5, Seconds), interval = Span(20, Millis))
+
+  /** Answers call N with `responses(N)`, after `gate` opens. */
+  final private class Scripted(gate: CountDownLatch, responses: Result[Completion]*) extends LLMClient:
+    private val sent = new CopyOnWriteArrayList[Conversation]()
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+      gate.await(5, TimeUnit.SECONDS)
+      val index = sent.size
+      sent.add(conversation)
+      responses(index)
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = complete(conversation, options)
+    override def getContextWindow(): Int     = 4096
+    override def getReserveCompletion(): Int = 1024
+
+  private def open: CountDownLatch = new CountDownLatch(0)
+
+  final private class Received:
+    private val events        = new CopyOnWriteArrayList[StreamEvent]()
+    private val terminal      = new AtomicBoolean(false)
+    def terminalSeen: Boolean = terminal.get
+    val listener: StreamEvent => Unit = e =>
+      events.add(e)
+      e match
+        case StreamEvent.Durable(record) =>
+          record.event match
+            case RunEvent.RunCompleted | RunEvent.RunFailed(_) | RunEvent.RunSuspended(_) | RunEvent.RunCancelled |
+                RunEvent.RunTimedOut =>
+              terminal.set(true)
+            case _ => ()
+        case _ => ()
+    def all: Vector[StreamEvent] = events.asScala.toVector
+
+  private def answer(text: String): Completion = Completion("answer", 0L, text, "test-model", AssistantMessage(text))
+
+  private val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
+  private def calling: Completion =
+    Completion("turn-1", 0L, "", "test-model", AssistantMessage(None, Seq(toolCall)), List(toolCall))
+
+  private case class EchoResult(echo: String)
+  private object EchoResult:
+    given ReadWriter[EchoResult] = macroRW
+
+  private def echoTool = ToolBuilder[Map[String, Any], EchoResult](
+    "echo",
+    "Echoes the supplied message back",
+    Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
+  ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe().fold(e => fail(e.formatted), identity)
+
+  private def ok[A](result: Result[A]): A = result.fold(e => fail(e.message), identity)
+
+  private def agentOf(client: LLMClient): Agent = ok(Agent.builder("assistant", client).build())
+
+  private def durableRuns(c: Received): Vector[String] = c.all.collect { case StreamEvent.Durable(r) => r.runId }
+
+  private def lastIsTerminal(c: Received, expected: RunEvent): Unit =
+    c.all.last match
+      case StreamEvent.Durable(r) => r.event shouldBe expected
+      case other                  => fail(s"last event was $other")
+
+  "agent.stream" should "deliver the run's events, ending with its terminal event" in {
+    val agent = agentOf(Scripted(open, Right(answer("hi"))))
+    val c     = Received()
+    val run   = ok(agent.stream(ThreadId("s1"), "hello")(c.listener))
+    run.await().isRight shouldBe true
+    eventually(c.terminalSeen shouldBe true)
+    durableRuns(c).distinct shouldBe Vector(run.runId.value)
+    c.all.collectFirst { case StreamEvent.Durable(r) => r.event } shouldBe Some(RunEvent.RunStarted(None, None))
+    lastIsTerminal(c, RunEvent.RunCompleted)
+  }
+
+  it should "deliver nothing of a later run on the same thread" in {
+    val agent = agentOf(Scripted(open, Right(answer("one")), Right(answer("two"))))
+    val c     = Received()
+    val first = ok(agent.stream(ThreadId("s2"), "one")(c.listener).flatMap(_.await()))
+    eventually(c.terminalSeen shouldBe true)
+    val second = ok(agent.run(ThreadId("s2"), "two"))
+    second.answer shouldBe Some("two")
+    Thread.sleep(200)
+    durableRuns(c).toSet shouldBe Set(first.runId.value)
+    lastIsTerminal(c, RunEvent.RunCompleted)
+  }
+
+  "AgentRun.subscribe" should "replay a late subscriber's durable events from the run's start" in {
+    val gate  = new CountDownLatch(1)
+    val agent = agentOf(Scripted(gate, Right(answer("hi"))))
+    val run   = ok(agent.start(ThreadId("s3"), "hello"))
+    val c     = Received()
+    run.subscribe()(c.listener).isRight shouldBe true
+    gate.countDown()
+    ok(run.await())
+    eventually(c.terminalSeen shouldBe true)
+    c.all.collectFirst { case StreamEvent.Durable(r) => r.event } shouldBe Some(RunEvent.RunStarted(None, None))
+    val seqs = c.all.collect { case StreamEvent.Durable(r) => r.seq }
+    seqs shouldBe sorted
+    seqs.distinct shouldBe seqs
+    durableRuns(c).distinct shouldBe Vector(run.runId.value)
+    lastIsTerminal(c, RunEvent.RunCompleted)
+  }
+
+  it should "replay the whole run to a subscriber that arrives after the run ended" in {
+    val agent = agentOf(Scripted(open, Right(answer("hi")), Right(answer("later"))))
+    val run   = ok(agent.start(ThreadId("s3b"), "hello"))
+    ok(run.await())
+    ok(agent.run(ThreadId("s3b"), "later")).answer shouldBe Some("later") // a later run on the thread
+    val c = Received()
+    run.subscribe()(c.listener).isRight shouldBe true
+    eventually(c.terminalSeen shouldBe true)
+    Thread.sleep(100)
+    durableRuns(c).distinct shouldBe Vector(run.runId.value)
+    lastIsTerminal(c, RunEvent.RunCompleted)
+  }
+
+  "agent.streamResume" should "deliver the resumed run's events" in {
+    val agent = ok(
+      Agent
+        .builder("assistant", Scripted(open, Right(calling), Right(answer("fine"))))
+        .withTools(new ToolRegistry(Seq(echoTool)))
+        .withMiddleware(ApprovalMiddleware.unlessReadOnly)
+        .build()
+    )
+    val first = ok(agent.run(ThreadId("s4"), "go"))
+    val id = first.status match
+      case AgentStatus.Suspended(approvals, _) => approvals.head._1
+      case other                               => fail(s"expected a suspension, got $other")
+    val c       = Received()
+    val resumed = ok(agent.streamResume(ThreadId("s4"), Map(first.approve(id)))(c.listener))
+    ok(resumed.await()).answer shouldBe Some("fine")
+    eventually(c.terminalSeen shouldBe true)
+    durableRuns(c).distinct shouldBe Vector(resumed.runId.value)
+    c.all.collectFirst { case StreamEvent.Durable(r) => r.event } should matchPattern {
+      case Some(RunEvent.RunResumed(_, _, _)) =>
+    }
+    lastIsTerminal(c, RunEvent.RunCompleted)
+  }
+
+  "agent.streamRecover" should "deliver the recovered run's events" in {
+    val agent = agentOf(Scripted(open, Left(NetworkError("down", None, "test")), Right(answer("back"))))
+    agent.run(ThreadId("s5"), "hello").isLeft shouldBe true
+    val c         = Received()
+    val recovered = ok(agent.streamRecover(ThreadId("s5"))(c.listener))
+    ok(recovered.await()).answer shouldBe Some("back")
+    eventually(c.terminalSeen shouldBe true)
+    durableRuns(c).distinct shouldBe Vector(recovered.runId.value)
+    c.all.collectFirst { case StreamEvent.Durable(r) => r.event } should matchPattern {
+      case Some(RunEvent.RunRecovered(_, _, _)) =>
+    }
+    lastIsTerminal(c, RunEvent.RunCompleted)
+  }
+
+  "agent.stream" should "refuse a blank query without subscribing" in {
+    val agent = agentOf(Scripted(open, Right(answer("hi"))))
+    val c     = Received()
+    agent.stream(ThreadId("s6"), "  ")(c.listener).isLeft shouldBe true
+    Thread.sleep(100)
+    c.all shouldBe empty
+  }
+
+  it should "refuse a busy thread without calling the listener" in {
+    val gate  = new CountDownLatch(1)
+    val agent = agentOf(Scripted(gate, Right(answer("hi"))))
+    val run   = ok(agent.start(ThreadId("s7"), "hello"))
+    val c     = Received()
+    agent.stream(ThreadId("s7"), "again")(c.listener) should matchPattern { case Left(_: GraphError.ThreadBusy) => }
+    gate.countDown()
+    ok(run.await())
+    Thread.sleep(200)
+    c.all shouldBe empty
+  }
+
+  final private class CountingSubscription extends Subscription:
+    val cancels                 = new java.util.concurrent.atomic.AtomicInteger(0)
+    override def cancel(): Unit = cancels.incrementAndGet(): Unit
+
+  private def record(run: String, seq: Long, event: RunEvent): StreamEvent =
+    StreamEvent.Durable(EventRecord("t", seq, run, None, None, None, java.time.Instant.EPOCH, event))
+
+  "RunScope" should "cancel its subscription on the run's terminal event, once, and then pass on nothing" in {
+    val c     = Received()
+    val ends  = new java.util.concurrent.atomic.AtomicInteger(0)
+    val scope = RunScope(RunId("r1"), c.listener, () => ends.incrementAndGet(): Unit)
+    val sub   = CountingSubscription()
+    scope.attach(sub)
+    scope(record("r0", 1, RunEvent.RunCompleted))
+    scope(record("r1", 2, RunEvent.RunStarted(None, None)))
+    scope(StreamEvent.Live("t", "r0", "x", "n", "other.run", 1, ujson.Null))
+    scope(StreamEvent.Live("t", "r1", "x", "n", "this.run", 1, ujson.Null))
+    scope(StreamEvent.LiveGap(2))
+    sub.cancels.get shouldBe 0
+    scope(record("r1", 3, RunEvent.RunCompleted))
+    scope(record("r2", 4, RunEvent.RunStarted(None, None)))
+    scope(StreamEvent.LiveGap(1))
+    sub.cancels.get shouldBe 1
+    ends.get shouldBe 1
+    c.all.map {
+      case StreamEvent.Durable(r)                => r.seq.toString
+      case StreamEvent.Live(_, _, _, _, n, _, _) => n
+      case other                                 => other.toString
+    } shouldBe Vector("2", "this.run", "LiveGap(2)", "3")
+  }
+
+  it should "cancel a subscription attached after the run's terminal event" in {
+    val scope = RunScope(RunId("r1"), _ => ())
+    scope(record("r1", 1, RunEvent.RunCompleted))
+    val sub = CountingSubscription()
+    scope.attach(sub)
+    sub.cancels.get shouldBe 1
+  }
