@@ -14,8 +14,11 @@
 #   3. Module - every module in CLAUDE.md's repository-structure block exists on disk, and every module
 #               build.sbt defines is named there (itself or a parent directory).
 #   4. sbt    - every `sbt ...` command quoted in the docs is a build alias, a task the build defines,
-#               an sbt built-in, or such a task scoped to a project the build defines (`core/test`). A
-#               backslash-continued command is read as one line; one the shell cannot parse fails.
+#               an sbt built-in, a command of a plugin project/plugins.sbt loads, or such a task scoped
+#               to a project the build defines (`core/test`). A task build.sbt sets only inside some
+#               projects' definitions is valid only scoped to those (`core/publishedArtifactsCheck` is
+#               not: the root alone sets it). A backslash-continued command is read as one line; one
+#               the shell cannot parse fails.
 #
 # Usage: scripts/check-doc-support.sh [REPO_ROOT]    (the root defaults to this script's repository)
 # Release notes, migration guides and design documents name old versions and commands on purpose and
@@ -40,17 +43,36 @@ SKIP_FILES = {"docs/reference/migration.md", "docs/reference/release.md", "CHANG
 # build.sbt projects that exist only to forward an old coordinate; they are not modules to document.
 UNDOCUMENTED_MODULE_PREFIXES = ("modules/relocations/",)
 
-# What `sbt <word>` may be without the build defining it: sbt itself and the plugins the build loads.
+# What `sbt <word>` may be without the build defining it: sbt itself, valid in any project.
 SBT_BUILTINS = {
     "clean", "compile", "test", "testOnly", "testQuick", "run", "runMain", "console", "consoleQuick",
-    "package", "publish", "publishLocal", "publishM2", "publishSigned", "doc", "update", "reload",
+    "package", "publish", "publishLocal", "publishM2", "doc", "update", "reload",
     "projects", "project", "tasks", "settings", "show", "inspect", "set", "new", "exit", "help",
-    "scalafmt", "scalafmtAll", "scalafmtCheck", "scalafmtCheckAll", "scalafmtSbt", "scalafmtSbtCheck",
-    "scalafix", "scalafixAll", "coverage", "coverageOff", "coverageReport", "coverageAggregate",
-    "dependencyTree", "dependencyUpdates", "dependencyBrowseTree", "mimaReportBinaryIssues",
-    "version", "name", "scalaVersion", "stage", "assembly", "evicted", "dumpLicenseReport", "ci-release", "sonatypeBundleRelease",
+    "version", "name", "scalaVersion", "evicted", "dependencyTree",
 }
-SCOPE_WORDS = {"ThisBuild", "Global", "Test", "Compile", "Docker", "IntegrationTest", "Runtime", "Jmh"}
+SCOPE_WORDS = {"ThisBuild", "Global", "Test", "Compile", "IntegrationTest", "Runtime"}
+
+# Commands and configurations a plugin adds, keyed by the plugin's artifact: they are accepted only while
+# project/plugins.sbt declares that plugin, so removing a plugin makes the docs that still quote it fail.
+# `addDependencyTreePlugin` is sbt's own switch for the full dependency-graph plugin.
+PLUGIN_COMMANDS = {
+    "sbt-scalafmt": {"scalafmt", "scalafmtAll", "scalafmtCheck", "scalafmtCheckAll", "scalafmtSbt",
+                     "scalafmtSbtCheck", "scalafmtOnly"},
+    "sbt-scalafix": {"scalafix", "scalafixAll"},
+    "sbt-scoverage": {"coverage", "coverageOff", "coverageReport", "coverageAggregate"},
+    "sbt-dependency-updates": {"dependencyUpdates"},
+    "sbt-mima-plugin": {"mimaReportBinaryIssues"},
+    "sbt-native-packager": {"stage"},
+    "sbt-pgp": {"publishSigned"},
+    "sbt-ci-release": {"ci-release", "sonatypeBundleRelease"},
+    "sbt-assembly": {"assembly"},
+    "sbt-license-report": {"dumpLicenseReport"},
+    "addDependencyTreePlugin": {"dependencyBrowseTree", "dependencyBrowseGraph", "dependencyDot"},
+}
+PLUGIN_CONFIGS = {
+    "sbt-native-packager": {"Docker", "Universal"},
+    "sbt-jmh": {"Jmh"},
+}
 
 errors = []
 sbt_unknown = []
@@ -207,9 +229,49 @@ for mod in build_modules:
 # ---------------------------------------------------------------- 4. sbt commands
 aliases = set(re.findall(r'addCommandAlias\(\s*"([^"]+)"', build))
 keys = set()
-for src in [build] + [pathlib.Path(q).read_text(encoding="utf-8") for q in sorted(pathlib.Path("project").glob("*.scala"))]:
+scala_sources = [pathlib.Path(q).read_text(encoding="utf-8") for q in sorted(pathlib.Path("project").glob("*.scala"))]
+for src in [build] + scala_sources:
     keys.update(re.findall(r"(\w+)\s*(?::\s*[\w\[\]]+\s*)?=\s*(?:taskKey|settingKey|inputKey)\b", src))
 projects = set(re.findall(r"lazy val (\w+)\s*=\s*\(?\s*project\b", build))
+
+# The plugins project/plugins.sbt loads (commented-out lines do not count), and what they add.
+plugins_sbt = "\n".join(re.sub(r"//.*$", "", ln) for ln in read("project/plugins.sbt").splitlines())
+loaded_plugins = set(re.findall(r'addSbtPlugin\(\s*"[^"]+"\s*%+\s*"([^"]+)"', plugins_sbt))
+if re.search(r"\baddDependencyTreePlugin\b", plugins_sbt):
+    loaded_plugins.add("addDependencyTreePlugin")
+plugin_commands = set().union(*(PLUGIN_COMMANDS.get(pl, set()) for pl in loaded_plugins))
+scope_words = SCOPE_WORDS.union(*(PLUGIN_CONFIGS.get(pl, set()) for pl in loaded_plugins))
+unloaded_plugin_of = {c: pl for pl, cs in PLUGIN_COMMANDS.items() if pl not in loaded_plugins for c in cs}
+unloaded_plugin_of.update({c: pl for pl, cs in PLUGIN_CONFIGS.items() if pl not in loaded_plugins for c in cs})
+
+
+def project_blocks(src):
+    """{project: (start, end)} - a project's definition runs from its `lazy val` to the next line that
+    starts in column 0 with anything but `.` or `)` (the next definition, alias or comment)."""
+    out = {}
+    for mm in re.finditer(r"^lazy val (\w+)\s*=\s*\(?\s*project\b", src, re.M):
+        nm = re.compile(r"^[^\s.)]", re.M).search(src, src.index("\n", mm.start()) + 1)
+        out[mm.group(1)] = (mm.start(), nm.start() if nm else len(src))
+    return out
+
+
+# Which projects a build-defined key is set in. A key set inside one or more project definitions, and
+# nowhere else, exists only there: `core/publishedArtifactsCheck` is not a task when only the root sets it.
+# A key set anywhere else - shared settings, `ThisBuild /`, a helper in project/*.scala - or never set in
+# build.sbt is taken to be available everywhere; static parsing cannot follow it further.
+blocks = project_blocks(build)
+key_projects = {}
+for key in keys:
+    owners = set()
+    unrestricted = any(re.search(r"\b" + key + r"\s*:=", src) for src in scala_sources)
+    for am in re.finditer(r"(ThisBuild\s*/\s*)?\b" + key + r"\s*(?:/\s*\w+\s*)?(?::=|\+=|\+\+=)", build):
+        owner = next((name for name, (b, e) in blocks.items() if b <= am.start() < e), None)
+        if owner is None or am.group(1):
+            unrestricted = True
+        else:
+            owners.add(owner)
+    if owners and not unrestricted:
+        key_projects[key] = owners
 
 
 def command_heads(argument_string):
@@ -233,34 +295,64 @@ def command_heads(argument_string):
     return heads
 
 
+def known_task(word):
+    return word in keys or word in SBT_BUILTINS or word in plugin_commands
+
+
+def unknown(path, line, head, word, what):
+    sbt_unknown.append(word)
+    if word in unloaded_plugin_of:
+        fail(path, line, f"`sbt {head}`: `{word}` comes from {unloaded_plugin_of[word]}, "
+                         f"which project/plugins.sbt does not load")
+    else:
+        fail(path, line, f"`sbt {head}`: `{word}` is not {what}")
+
+
+def check_config(path, line, head, config):
+    """A `config:task` prefix (the old slash-free syntax) is matched without regard to case."""
+    if config.lower() in {w.lower() for w in scope_words}:
+        return True
+    canonical = {w.lower(): w for w in unloaded_plugin_of}.get(config.lower(), config)
+    unknown(path, line, head, canonical, "a configuration the build or its plugins define")
+    return False
+
+
 def check_head(path, line, head):
     word = head.lstrip("+~")          # `+test`, `++3.7.1` cross-build and `~test` triggered execution
     if word == "" or word[0].isdigit() or re.fullmatch(r"[^\w]+", word):
         return
     if re.fullmatch(r"[\w.-]+:[\w-]+", word):   # config:task such as docker:publishLocal
-        word = word.split(":", 1)[1]
+        config, word = word.split(":", 1)
+        if not check_config(path, line, head, config):
+            return
     if "/" in word:
         # project/task, Config/task, project/Config/task: the scope must exist and so must the task.
         segments = word.split("/")
         scope, middle, word = segments[0], segments[1:-1], segments[-1]
         if re.fullmatch(r"[\w.-]+:[\w-]+", word):   # project/config:task such as workspaceRunner/docker:publishLocal
-            word = word.split(":", 1)[1]
-        if scope not in projects and scope not in SCOPE_WORDS:
-            fail(path, line, f"`sbt {head}` names project `{scope}`, which build.sbt does not define")
+            config, word = word.split(":", 1)
+            if not check_config(path, line, head, config):
+                return
+        if scope not in projects and scope not in scope_words:
+            if scope in unloaded_plugin_of:
+                unknown(path, line, head, scope, "")
+            else:
+                fail(path, line, f"`sbt {head}` names project `{scope}`, which build.sbt does not define")
             return
         for axis in middle:
-            if axis not in SCOPE_WORDS and axis not in keys and axis not in SBT_BUILTINS:
-                fail(path, line, f"`sbt {head}`: `{axis}` is not a configuration or task the build knows")
+            if axis not in scope_words and not known_task(axis):
+                unknown(path, line, head, axis, "a configuration or task the build knows")
                 return
-        if word in keys or word in SBT_BUILTINS:
+        if not known_task(word):
+            unknown(path, line, head, word, "a task the build defines, a loaded plugin's, nor an sbt built-in")
             return
-        sbt_unknown.append(word)
-        fail(path, line, f"`sbt {head}`: `{word}` is not a task the build defines, nor an sbt built-in")
+        if scope in projects and word in key_projects and scope not in key_projects[word]:
+            where = ", ".join(sorted(key_projects[word]))
+            fail(path, line, f"`sbt {head}`: `{word}` is set only in project {where}, not in `{scope}`")
         return
-    if word in aliases or word in keys or word in SBT_BUILTINS:
+    if word in aliases or known_task(word):
         return
-    sbt_unknown.append(word)
-    fail(path, line, f"`sbt {head}`: `{word}` is not an alias or task the build defines, nor an sbt built-in")
+    unknown(path, line, head, word, "an alias or task the build defines, a loaded plugin's, nor an sbt built-in")
 
 
 def check_invocation(path, line, argument_string):
@@ -314,10 +406,12 @@ if errors:
         print("  " + e, file=sys.stderr)
     print(f"{len(errors)} stale claim(s). Fix the docs, or the build if the docs are right.", file=sys.stderr)
     if sbt_unknown:
-        print("For an `sbt` command that is real but unknown to this script (an sbt built-in or a plugin task "
-              "the build loads), add it to SBT_BUILTINS in scripts/check-doc-support.sh; for a command in a "
+        print("For an `sbt` command that is real but unknown to this script, add it to SBT_BUILTINS (an sbt "
+              "built-in) or to PLUGIN_COMMANDS under its plugin's artifact (a plugin task) in "
+              "scripts/check-doc-support.sh; for a command in a "
               "document that describes the past, mark the line `doc-support: ignore`.", file=sys.stderr)
     sys.exit(1)
 print(f"Support matrix verified: Scala {SCALA}, JDK {', '.join(str(j) for j in sorted(ci_jdks))}, "
-      f"{len(doc_paths)} documented modules, {len(aliases)} aliases and {len(keys)} tasks known.")
+      f"{len(doc_paths)} documented modules, {len(aliases)} aliases, {len(keys)} tasks and "
+      f"{len(loaded_plugins)} plugins known.")
 PYEOF

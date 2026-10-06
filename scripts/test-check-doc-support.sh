@@ -33,7 +33,7 @@ fresh_copy() {
   mkdir -p "$dir/.github/workflows" "$dir/project"
   cp -R "$REPO_ROOT/docs" "$dir/docs"
   cp "$REPO_ROOT/CLAUDE.md" "$REPO_ROOT/README.md" "$REPO_ROOT/build.sbt" "$dir/"
-  cp "$REPO_ROOT"/project/*.scala "$dir/project/"
+  cp "$REPO_ROOT"/project/*.scala "$REPO_ROOT/project/plugins.sbt" "$dir/project/"
   cp "$REPO_ROOT/.github/workflows/ci.yml" "$dir/.github/workflows/"
   (cd "$REPO_ROOT" && find modules -maxdepth 3 -type d -not -path '*/src*' -not -path '*/target*' -not -path '*/node_modules*') |
     while read -r d; do mkdir -p "$dir/$d"; done
@@ -230,6 +230,38 @@ expect_fail "an inline command the shell cannot parse" "$d" "cannot be parsed"
 d="$(fresh_copy cmd-ignore)"
 printf '\n```bash\nsbt crossTestAll   # doc-support: ignore\n```\n' >> "$d/CLAUDE.md"
 expect_pass "an opted-out sbt line" "$d"
+
+echo "== sbt tasks in the project that sets them"
+d="$(fresh_copy cmd-root-task-in-module)"
+printf '\n```bash\nsbt core/publishedArtifactsCheck\n```\n' >> "$d/CLAUDE.md"
+expect_fail "a root-only task scoped to another project" "$d" "publishedArtifactsCheck\` is set only in project llm4s"
+
+d="$(fresh_copy cmd-module-task-elsewhere)"
+printf '\nRun `sbt "core/itTierCheck"` to check it.\n' >> "$d/README.md"
+expect_fail "a task one module sets, scoped to another" "$d" "itTierCheck\` is set only in project it"
+
+d="$(fresh_copy cmd-task-where-set)"
+printf '\n```bash\nsbt publishedArtifactsCheck it/itTierCheck llm4s/stabilityTierCheck core/test\n```\n' >> "$d/CLAUDE.md"
+expect_pass "tasks run where the build sets them, built-ins anywhere" "$d"
+
+echo "== sbt commands that come from plugins"
+d="$(fresh_copy plugin-removed)"
+mutate "$d/project/plugins.sbt" 'addSbtPlugin("org.jmotor.sbt" % "sbt-dependency-updates"' '// addSbtPlugin("org.jmotor.sbt" % "sbt-dependency-updates"'
+printf '\n```bash\nsbt dependencyUpdates\n```\n' >> "$d/CLAUDE.md"
+expect_fail "a plugin command whose plugin was removed" "$d" "comes from sbt-dependency-updates, which project/plugins.sbt does not load"
+
+d="$(fresh_copy plugin-config-removed)"
+mutate "$d/project/plugins.sbt" 'addSbtPlugin("com.github.sbt" % "sbt-native-packager"' '// addSbtPlugin("com.github.sbt" % "sbt-native-packager"'
+printf '\n```bash\nsbt workspaceRunner/docker:publishLocal\n```\n' >> "$d/CLAUDE.md"
+expect_fail "a plugin configuration whose plugin was removed" "$d" "comes from sbt-native-packager"
+
+d="$(fresh_copy plugin-never-loaded)"
+printf '\n```bash\nsbt assembly\n```\n' >> "$d/CLAUDE.md"
+expect_fail "a plugin command the build never loaded" "$d" "comes from sbt-assembly"
+
+d="$(fresh_copy plugin-loaded)"
+printf '\n```bash\nsbt dependencyUpdates scalafmtCheckAll workspaceRunner/docker:publishLocal "benchmarks/Jmh/run"\n```\n' >> "$d/CLAUDE.md"
+expect_pass "commands of loaded plugins" "$d"
 
 d="$(fresh_copy cmd-alias-removed)"
 # An alias the docs quote: the first build.sbt alias that CLAUDE.md or README.md tells the reader to run.
