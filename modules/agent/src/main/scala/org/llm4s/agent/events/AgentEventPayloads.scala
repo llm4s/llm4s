@@ -51,7 +51,11 @@ enum ToolExecutionOutcome derives ReadWriter:
   /** The tool suspended with a question. */
   case Asked
 
-/** One tool call's outcome; `duration` is the middleware chain's, zero for a call refused before it. */
+/**
+ * One tool call's outcome; `duration` is the middleware chain's, zero for a call refused before it.
+ * `tool` is the called tool's name when the agent has that tool, else `"<unknown>"`
+ * (`ToolLoop.UnknownTool`): a name the model invented is not stored.
+ */
 final case class ToolExecuted(
   agent: String,
   toolCallId: String,

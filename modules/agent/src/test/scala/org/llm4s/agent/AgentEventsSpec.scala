@@ -135,7 +135,40 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     c.all.collect { case AgentEvents.ToolCallResult(r) => r.toolCallId -> r.isError } shouldBe Vector("call-9" -> true)
     val executed = c.durable.collect { case AgentEvents.ToolExecuted(t) => t }
     executed.map(t => (t.tool, t.toolCallId, t.outcome, t.duration)) shouldBe
-      Vector(("nope", "call-9", ToolExecutionOutcome.Errored, scala.concurrent.duration.Duration.Zero))
+      Vector(("<unknown>", "call-9", ToolExecutionOutcome.Errored, scala.concurrent.duration.Duration.Zero))
+  }
+
+  it should "keep a model-invented tool name out of the durable log" in {
+    val marker   = "INVENTED-7731"
+    val unknown  = ToolCall("call-9", s"tool_$marker", ujson.Obj())
+    val (_, c)   = collect(agentWith(Scripted(Right(calling(unknown)), Right(answer("sorry"))), echoTool), "go")
+    val executed = c.durable.collect { case e @ AgentEvents.ToolExecuted(_) => e }
+    executed should have size 1
+    executed.foreach { case StreamEvent.Durable(r) => (upickle.default.write(r.event) should not).include(marker) }
+    // the live result may name the call: it is never stored
+    c.all.collect { case AgentEvents.ToolCallResult(r) => r.content }.mkString should include(marker)
+  }
+
+  it should "report each non-handoff call of a mixed handoff batch as Errored" in {
+    val target  = Agent.builder("physics", Scripted(Right(answer("E=mc^2"))))
+    val handoff = ToolCall("call-h", "handoff_to_physics", ujson.Obj())
+    val mixed = Completion(
+      "turn-1",
+      0L,
+      "",
+      "test-model",
+      AssistantMessage(None, Seq(handoff, toolCall)),
+      List(handoff, toolCall),
+      usage
+    )
+    val builder = agentWith(Scripted(Right(mixed), Right(answer("one at a time"))), echoTool)
+      .withHandoffs(Handoff.to("physics", target, "physics"))
+    val (result, c) = collect(builder, "go")
+    result.map(_.answer) shouldBe Right(Some("one at a time"))
+    c.all.collect { case AgentEvents.ToolCallStarted(s) => s } shouldBe empty // nothing ran
+    c.all.collect { case AgentEvents.ToolCallResult(r) => r.toolCallId -> r.isError } shouldBe Vector("call-1" -> true)
+    c.durable.collect { case AgentEvents.ToolExecuted(t) => (t.tool, t.toolCallId, t.outcome, t.duration) } shouldBe
+      Vector(("echo", "call-1", ToolExecutionOutcome.Errored, scala.concurrent.duration.Duration.Zero))
   }
 
   it should "report invalid arguments as Errored with no ToolCallStarted" in {

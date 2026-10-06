@@ -206,6 +206,9 @@ final class ToolLoop private (
 
 object ToolLoop:
 
+  /** The tool a durable `ToolExecuted` names for a call to a tool the agent does not have. */
+  val UnknownTool: String = "<unknown>"
+
   /** A pending question, decoded as the asking tool's question type `Q`. */
   def question[Q: ReadWriter](request: ToolQuestionRequest): Result[Q] =
     Try(upickle.default.read[Q](request.question)).toResult
@@ -538,6 +541,7 @@ object ToolLoop:
               case _ =>
                 // a handoff with other calls, or several: nothing runs, every call gets the rule as its error
                 val error = ujson.Obj("error" -> HandoffTools.MixedBatch).render()
+                calls.filterNot(c => handoffs.contains(c.name)).foreach(pipeline.refusedInBatch(_, error, context))
                 calls
                   .foldLeft(appended)((command, c) => command.update(messages, toolMessage(c, error)))
                   .goto(nodes.model)
@@ -731,9 +735,9 @@ object ToolLoop:
       NodeResult.Fail(error)
 
     /**
-     * Records the call's result, sending it live as `ToolCallResult` and its outcome durably as
-     * `ToolExecuted`. Every result the loop records passes through here, bar a `Success`, which keeps
-     * the tool's update (see [[outcome]]).
+     * Records the call's result, announcing it with [[announce]]. Every result the loop records
+     * passes through here, bar a `Success`, which keeps the tool's update (see [[outcome]]); the
+     * errors a mixed handoff batch gives its calls are announced by [[refusedInBatch]].
      */
     private def record(
       task: ToolTask,
@@ -743,23 +747,46 @@ object ToolLoop:
       outcome: ToolExecutionOutcome,
       duration: FiniteDuration
     ): NodeResult =
-      AgentEvents.ToolCallResult.progress(context, events.ToolCallResult(task.call.id, content, isError))
-      executed(task, context, outcome, duration)
+      announce(task.call, content, isError, context, outcome, duration)
       NodeResult.Continue(
         Command.empty.update(results, ToolResult(task.assistantMessageId, task.call.id, content, isError))
       )
 
-    /** The call's outcome, content-free: committed with the task, so stored once per committed call. */
-    private def executed(
-      task: ToolTask,
+    /**
+     * Sends a call's result live as `ToolCallResult` - with the call's own name and content - and its
+     * outcome durably as `ToolExecuted`.
+     */
+    private def announce(
+      call: ToolCall,
+      content: String,
+      isError: Boolean,
       context: RunContext,
       outcome: ToolExecutionOutcome,
       duration: FiniteDuration
     ): Unit =
-      AgentEvents.ToolExecuted.emit(
-        context,
-        events.ToolExecuted(agent.value, task.call.id, task.call.name, duration, outcome)
-      )
+      AgentEvents.ToolCallResult.progress(context, events.ToolCallResult(call.id, content, isError))
+      executed(call, context, outcome, duration)
+
+    /**
+     * A call of a mixed handoff batch, which runs nothing and gives every call `error` as its result:
+     * announced as an `Errored` call of zero duration, as an unknown tool is.
+     */
+    def refusedInBatch(call: ToolCall, error: String, context: RunContext): Unit =
+      announce(call, error, isError = true, context, ToolExecutionOutcome.Errored, Duration.Zero)
+
+    /**
+     * The call's outcome, content-free: committed with the task, so stored once per committed call.
+     * The tool is named only when the agent has it - a name the model invented is content, and is
+     * recorded as [[ToolLoop.UnknownTool]].
+     */
+    private def executed(
+      call: ToolCall,
+      context: RunContext,
+      outcome: ToolExecutionOutcome,
+      duration: FiniteDuration
+    ): Unit =
+      val tool = if tools.get(call.name).isDefined then call.name else ToolLoop.UnknownTool
+      AgentEvents.ToolExecuted.emit(context, events.ToolExecuted(agent.value, call.id, tool, duration, outcome))
 
     /** Announces the call live, runs the middleware chain around `innermost`, and times it. */
     private def timed(
@@ -954,7 +981,7 @@ object ToolLoop:
           if undeclared.isEmpty then
             val result = rendered(content)
             AgentEvents.ToolCallResult.progress(context, events.ToolCallResult(call.id, result, isError = false))
-            executed(task, context, ToolExecutionOutcome.Succeeded, took)
+            executed(task.call, context, ToolExecutionOutcome.Succeeded, took)
             NodeResult.Continue(
               Command(update, Nil)
                 .update(results, ToolResult(task.assistantMessageId, call.id, result, isError = false))
@@ -979,7 +1006,7 @@ object ToolLoop:
           else if approved then errored(s"$asker asked for approval again: $reason")
           else
             // a suspending task commits its events with its pending write
-            executed(task, context, ToolExecutionOutcome.NeedsApproval, took)
+            executed(task.call, context, ToolExecutionOutcome.NeedsApproval, took)
             suspend(task, call, reason, source)
         case ToolOutcome.Ask(question) =>
           (tool.spec.question, askRefs.get(name)) match
@@ -987,7 +1014,7 @@ object ToolLoop:
               // a question of another type than the declared one fails to encode: a tool bug, like an undeclared one
               Try(upickle.default.writeJs(question.asInstanceOf[q])(using declared.questionCodec)).toResult match
                 case Right(json) =>
-                  executed(task, context, ToolExecutionOutcome.Asked, took)
+                  executed(task.call, context, ToolExecutionOutcome.Asked, took)
                   NodeResult.Suspend(
                     StateUpdate.empty,
                     ToolQuestionRequest(task.assistantMessageId, call, json, approved),
