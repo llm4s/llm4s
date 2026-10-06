@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.metrics.{ MetricsCollector, Outcome, ErrorKind }
 import org.llm4s.trace.{ Tracing, TraceEvent }
 
@@ -44,7 +45,7 @@ class InstrumentedImageGenerationClient(
   override def generateImage(
     prompt: String,
     options: ImageGenerationOptions
-  ): Either[ImageGenerationError, GeneratedImage] = {
+  ): Either[LLMError, GeneratedImage] = {
     val (result, duration) = timed(delegate.generateImage(prompt, options))
     recordMetricsAndTrace("generate", result.map(Seq(_)), Some(options.size), options.quality, duration)
     result
@@ -54,7 +55,7 @@ class InstrumentedImageGenerationClient(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Either[LLMError, Seq[GeneratedImage]] = {
     val (result, duration) = timed(delegate.generateImages(prompt, count, options))
     recordMetricsAndTrace("generate", result, Some(options.size), options.quality, duration)
     result
@@ -65,7 +66,7 @@ class InstrumentedImageGenerationClient(
     prompt: String,
     maskPath: Option[Path],
     options: ImageEditOptions
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Either[LLMError, Seq[GeneratedImage]] = {
     val (result, duration) = timed(delegate.editImage(imagePath, prompt, maskPath, options))
     recordMetricsAndTrace("edit", result, options.size, None, duration)
     result
@@ -74,7 +75,7 @@ class InstrumentedImageGenerationClient(
   override def generateImageAsync(
     prompt: String,
     options: ImageGenerationOptions
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, GeneratedImage]] =
     timedAsync(delegate.generateImageAsync(prompt, options)).map { case (result, duration) =>
       recordMetricsAndTrace("generate", result.map(Seq(_)), Some(options.size), options.quality, duration)
       result
@@ -84,7 +85,7 @@ class InstrumentedImageGenerationClient(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
     timedAsync(delegate.generateImagesAsync(prompt, count, options)).map { case (result, duration) =>
       recordMetricsAndTrace("generate", result, Some(options.size), options.quality, duration)
       result
@@ -95,13 +96,13 @@ class InstrumentedImageGenerationClient(
     prompt: String,
     maskPath: Option[Path],
     options: ImageEditOptions
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
     timedAsync(delegate.editImageAsync(imagePath, prompt, maskPath, options)).map { case (result, duration) =>
       recordMetricsAndTrace("edit", result, options.size, None, duration)
       result
     }
 
-  override def health(): Either[ImageGenerationError, ServiceStatus] =
+  override def health(): Either[LLMError, ServiceStatus] =
     delegate.health()
 
   /** Runs `operation`, pairing its result with the elapsed wall time. */
@@ -117,7 +118,8 @@ class InstrumentedImageGenerationClient(
     operation.map(result => (result, Duration.fromNanos(System.nanoTime() - startNanos)))
   }
 
-  private def errorKindFromImageError(err: ImageGenerationError): ErrorKind = err match {
+  private def errorKindFromImageError(err: LLMError): ErrorKind = err match {
+    case _: CancelledError             => ErrorKind.Cancelled
     case _: AuthenticationError        => ErrorKind.Authentication
     case _: RateLimitError             => ErrorKind.RateLimit
     case _: ServiceError               => ErrorKind.ServiceError
@@ -126,11 +128,12 @@ class InstrumentedImageGenerationClient(
     case _: InsufficientResourcesError => ErrorKind.ServiceError
     case _: UnsupportedOperation       => ErrorKind.Validation
     case _: UnknownError               => ErrorKind.Unknown
+    case other                         => ErrorKind.fromLLMError(other)
   }
 
   private def recordMetricsAndTrace(
     operation: String,
-    result: Either[ImageGenerationError, Seq[GeneratedImage]],
+    result: Either[LLMError, Seq[GeneratedImage]],
     size: Option[ImageSize],
     quality: Option[String],
     duration: FiniteDuration

@@ -299,8 +299,8 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
       result.left.map { error =>
-        error should include("HTTP error 400")
-        error should include("Bad Request")
+        error.message should include("HTTP error 400")
+        error.message should include("Bad Request")
       }
     }
 
@@ -313,7 +313,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(error => error should include("HTTP error 401"))
+      result.left.map(error => error.message should include("HTTP error 401"))
     }
 
     "handle HTTP 403 Forbidden error" in {
@@ -325,7 +325,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(error => error should include("HTTP error 403"))
+      result.left.map(error => error.message should include("HTTP error 403"))
     }
 
     "handle HTTP 404 with active session as session expiration" in {
@@ -357,7 +357,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("session expired"))
+      result.left.map(_.message should include("session expired"))
     }
 
     "handle HTTP 405 Method Not Allowed error" in {
@@ -370,8 +370,8 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
       result.left.map { error =>
-        error should include("Server does not support Streamable HTTP transport")
-        error should include("405")
+        error.message should include("Server does not support Streamable HTTP transport")
+        error.message should include("405")
       }
     }
 
@@ -385,8 +385,8 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
       result.left.map { error =>
-        error should include("HTTP error 500")
-        error should include("Internal Server Error")
+        error.message should include("HTTP error 500")
+        error.message should include("Internal Server Error")
       }
     }
 
@@ -399,7 +399,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(error => error should include("HTTP error 503"))
+      result.left.map(error => error.message should include("HTTP error 503"))
     }
 
     "handle JSON-RPC error responses" in {
@@ -413,8 +413,8 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("-32600"))
-      result.left.map(_ should include("Invalid Request"))
+      result.left.map(_.message should include("-32600"))
+      result.left.map(_.message should include("Invalid Request"))
     }
 
     "handle malformed JSON in response" in {
@@ -426,7 +426,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("Transport error"))
+      result.left.map(_.message should include("Transport error"))
     }
 
     "handle network exceptions" in {
@@ -440,7 +440,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("Transport error"))
+      result.left.map(_.message should include("Transport error"))
     }
 
     "handle connection failures" in {
@@ -454,7 +454,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("Transport error"))
+      result.left.map(_.message should include("Transport error"))
     }
   }
 
@@ -634,7 +634,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
       val result = transport.sendRequest(request)
       result.isLeft shouldBe true
-      result.left.map(_ should include("No valid JSON-RPC response"))
+      result.left.map(_.message should include("No valid JSON-RPC response"))
     }
   }
 
@@ -751,7 +751,7 @@ class StreamableHTTPTransportImplSpec extends AnyWordSpec with Matchers with Moc
 
       val result = transport.sendNotification(notification)
       result.isLeft shouldBe true
-      result.left.map(_ should include("500"))
+      result.left.map(_.message should include("500"))
     }
   }
 

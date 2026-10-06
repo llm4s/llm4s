@@ -52,7 +52,7 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
     val numRequests   = 10
     val startLatch    = new CountDownLatch(1)
     val completeLatch = new CountDownLatch(numRequests)
-    val results       = new java.util.concurrent.ConcurrentHashMap[String, Either[String, JsonRpcResponse]]()
+    val results       = new java.util.concurrent.ConcurrentHashMap[String, org.llm4s.types.Result[JsonRpcResponse]]()
 
     // Launch concurrent request threads
     (1 to numRequests).foreach { i =>
@@ -181,7 +181,7 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
     val numRequests   = 15
     val startLatch    = new CountDownLatch(1)
     val completeLatch = new CountDownLatch(numRequests)
-    val results       = new java.util.concurrent.ConcurrentHashMap[String, Either[String, JsonRpcResponse]]()
+    val results       = new java.util.concurrent.ConcurrentHashMap[String, org.llm4s.types.Result[JsonRpcResponse]]()
 
     // Launch requests in waves - some concurrent, some sequential
     (1 to numRequests).foreach { i =>

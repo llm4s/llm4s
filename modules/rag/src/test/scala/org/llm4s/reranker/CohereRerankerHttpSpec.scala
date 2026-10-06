@@ -1,7 +1,9 @@
 package org.llm4s.reranker
 
 import com.sun.net.httpserver.HttpExchange
-import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
+import org.llm4s.error.CancelledError
+import org.llm4s.testkit.LocalProviderTestServer.{ holdOpen, sendJsonResponse, withServer }
+import org.llm4s.testkit.ProviderModuleChecks
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -83,6 +85,13 @@ class CohereRerankerHttpSpec extends AnyFlatSpec with Matchers {
     Thread.currentThread().interrupt()
     val result = reranker.rerank(request)
     Thread.interrupted() shouldBe true
-    result.isLeft shouldBe true
+    result.left.toOption.get shouldBe a[CancelledError]
+  }
+
+  it should "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
+    withServer("/v1/rerank")(holdOpen) { baseUrl =>
+      val reranker = CohereReranker(apiKey = "k", baseUrl = baseUrl)
+      ProviderModuleChecks.assertCallCancelsWhenInterrupted("rerank")(reranker.rerank(request))
+    }
   }
 }

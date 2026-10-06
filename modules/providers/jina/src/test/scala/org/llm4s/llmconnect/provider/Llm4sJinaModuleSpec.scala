@@ -2,8 +2,9 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.JinaConfigKeys
 import org.llm4s.llmconnect.config.ModelDimensionRegistry
+import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.testkit.{ ProviderModuleChecks, ProviderTestConfig }
+import org.llm4s.testkit.{ LocalProviderTestServer, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -74,5 +75,15 @@ class Llm4sJinaModuleSpec extends AnyWordSpec with Matchers with ProviderModuleC
       given ProviderRegistry = ProviderRegistry.default
       ModelDimensionRegistry.getDimension("jina", "jina-embeddings-v3") shouldBe Right(1024)
       JinaEmbeddingProvider.modelDimensions.values.foreach(_ should be > 0)
+    }
+  }
+
+  "the jina embedding provider" should {
+
+    "return CancelledError, with the interrupt flag set, when its thread is interrupted mid-request" in {
+      LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { baseUrl =>
+        val config = EmbeddingProviderConfig(baseUrl = baseUrl, model = "jina-embeddings-v3", apiKey = "test-key")
+        assertEmbeddingCancelsWhenInterrupted(assertBuildsEmbeddingProvider(JinaEmbeddingProvider, config))
+      }
     }
   }

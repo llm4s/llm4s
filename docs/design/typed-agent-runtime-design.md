@@ -466,7 +466,7 @@ Testkit decisions:
 
 Limits (owners in §4.9):
 
-- Embedding, reranker, MCP, image and speech clients are not yet brought under the cancellation contract. Some of them flatten every error into their own type.
+- Embedding, reranker, MCP, image and speech clients follow the contract since §4.12.
 - On a platform thread, cancelling an SDK client call is not prompt.
 - Cancellation, the concurrency limit and deadlines have no public API until `RunHandle`, `RunConfig` and `RunBudgets`, which §4.6 added.
 - `CancellationToken` remains for `PlanRunner` until it is rebuilt.
@@ -646,9 +646,9 @@ Source breaks, with no shims (the CHANGELOG lists the same):
 Limits (owners in §4.9):
 
 - Only tool-call approval suspends; model wrappers and guardrails cannot ask typed questions.
-- `ToolHints` are not yet read from MCP tool annotations by `llm4s-mcp`.
+- `llm4s-mcp` reads `ToolHints` from MCP tool annotations since §4.12.
 - The legacy `Agent` still runs guardrails through `GuardrailApplicator`; Stage 1 moves it onto `ToolLoop` and `GuardrailMiddleware`.
-- A guardrail `Block` - any `beforeAgent`/`afterAgent` `Left` - fails the run and leaves the checkpoint `Running`. `start` on the thread then returns `IncompleteRun`, and `recover` replays the same input or answer through the same guardrail, which refuses it again, so the thread cannot continue. An output `Block` also leaves the unguarded assistant answer committed, in thread state and in `RunResult.Failed`'s state.
+- A guardrail `Block` - any `beforeAgent`/`afterAgent` `Left` - fails the run and leaves the checkpoint `Running`. `start` on the thread then returns `IncompleteRun`, and `recover` replays the same input or answer through the same guardrail, which refuses it again, so the thread cannot continue. An output `Block` also leaves the unguarded assistant answer committed, in thread state and in `RunResult.Failed`'s state. Decided: a `Block` becomes a terminal failure that leaves the thread usable (§9, "Guardrail Block outcome"); Stage 1 implements it.
 
 ### 4.9 Stage 0 carry-forward
 
@@ -657,18 +657,16 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 | Item | Left by | Owner |
 |---|---|---|
 | Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only) | #1279 | Stage 1, if the agent loop needs it |
-| `ToolHints` read from MCP tool annotations in `llm4s-mcp` | #1279 | Stage 1 |
-| A guardrail Block (any run-boundary `Left`) leaves the thread `Running` with no way forward, and an output Block leaves the blocked answer in state; decide a terminal outcome (refusal, or guarding before commit) before `Agent.run` builds on it | #1279 | Stage 1 |
+| A guardrail Block (any run-boundary `Left`) leaves the thread `Running` with no way forward, and an output Block leaves the blocked answer in state. Decided (§9, "Guardrail Block outcome"): a terminal failure - a finished-but-failed checkpoint status that `start` accepts, with the blocked turn (its input, any tool calls and results, and the answer) removed from history - built before `Agent.run` builds on the loop | #1279 | Stage 1 |
 | Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6 | #1279 | Stage 3 |
 | `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool`; `ModelStep` streaming through live progress; `PlanRunner` rebuilt or removed; `AgentEvent` replaced | #1269 | Stage 1 |
 | Delete `CancellationToken` with the `PlanRunner` rebuild | #1270 | Stage 1 |
-| Embedding, reranker, MCP, image and speech clients under the `CancelledError` contract (today: chat clients and core only) | #1270 | Stage 1 |
 | Prompt cancellation of SDK client calls on platform threads (today: prompt on virtual threads, where the runtime runs tasks) | #1270 | - |
 | Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
 | Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit and in `RunPosition` (today: the optimistic parent check, and `ThreadBusy` for a run still executing in the same runtime) | #1268, #1269, #1277 | Stage 2 |
 | Cancelling a run cancels the child runs it started | #1277 | Stage 3 |
 | Store-level change notification (or polling), so a subscription sees live commits made by another `GraphRuntime` or process sharing the checkpointer (today: live delivery only for commits through the subscribing runtime; others by resubscribing and replaying) | #1277 | Stage 2 |
-| Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction) | #1268 | Stage 2 |
+| Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction). History and fork must never keep or expose a snapshot whose turn a later guardrail `Block` removed (§9, "Guardrail Block outcome"), or the tool loop must guard the answer before its first commit | #1268 | Stage 2 |
 | Static `interruptBefore`/`interruptAfter` breakpoints | #1269 | Stage 2 |
 | Known limits, not planned: a `Subscription` dropped without `cancel()` keeps a parked virtual thread; `cancel()` blocks while a listener ignores its interrupt; the hub lock is runtime-wide; `RunContext` has no dependency accessor (by decision) | #1277 | - |
 | Known limit, not planned: tools reach the provider as core `ToolFunction`s (`ToolSet.toolFunctions`), stand-ins for agent tools, because core's clients take no other form | #1278 | - |
@@ -681,6 +679,8 @@ Closed by [#1278](https://github.com/llm4s/llm4s/issues/1278) (§4.7): `AgentToo
 Closed by [#1279](https://github.com/llm4s/llm4s/issues/1279) (§4.8): `AgentMiddleware` with ordered wrap hooks replacing `ToolCallPolicy`, approval as middleware, guardrails as middleware (left by #1269 and #1278); and policy metadata on `AgentToolSpec` as MCP-style `ToolHints` (left by #1278).
 
 Closed by [#1327](https://github.com/llm4s/llm4s/issues/1327) (§4.11): per-node retry and cache policy (left by #1268), Mermaid export (left by #1267), and `ToolContext`, `GraphError.ToolFailed`, `ModelRequest` and `ToolCallRequest` in the growth-prone type pattern with typed IDs (left by #1278).
+
+Closed by [#1331](https://github.com/llm4s/llm4s/issues/1331) (§4.12): embedding, reranker, MCP, image and speech clients under the `CancelledError` contract (left by #1270), and `ToolHints` read from MCP tool annotations in `llm4s-mcp` (left by #1279).
 
 ### 4.10 Durable workflow API
 
@@ -707,6 +707,124 @@ Source breaks (pre-1.0, no shims): the four types lose their public constructor,
 
 Limits: `ToolLoop` sets no policy on its nodes, so the tool loop is unchanged; the agent-loop cutover ([#1328](https://github.com/llm4s/llm4s/issues/1328)) decides whether a tool call or a model step retries. The retry condition looks at the node's error, not at provider hints such as `Retry-After`, which the provider clients already honour inside the call (§4.4).
 
+### 4.12 Stage 1 slice 5: cancellation for non-chat clients and ToolHints from MCP annotations ([#1331](https://github.com/llm4s/llm4s/issues/1331))
+
+§4.4 made `CancelledError` the result of an interrupted call for core and every chat client and left the rest of the
+network clients flattening an interrupt into an error type of their own. This slice brings the rest under the same
+rule, and reads `ToolHints` from the annotations an MCP server attaches to its tools. The checks are
+`ProviderModuleChecks.assertCallCancelsWhenInterrupted` and `assertEmbeddingCancelsWhenInterrupted` (new in
+`llm4s-provider-testkit`: run on a virtual thread against a server that never answers, interrupt, and require
+`Left(CancelledError)` promptly with the interrupt flag still set), and the specs named below.
+
+Contract decisions:
+
+- **A cancellation passes through; it is not mapped.** Where a client turned an `Llm4sHttpClient` failure into its
+  own error (`EmbeddingError`, `RerankError`, `UnknownError`, `SimpleError`), a `CancelledError` is now returned as it
+  is, and the public call is wrapped in `CancelledError.attempt`, which also turns any failure that ends with the
+  thread interrupted into a cancellation. *Rejected:* a `cancelled` flag on each client's error type - a caller would
+  need one check per client, and the retry layers recognise only `CancelledError`.
+- **Embeddings** (Voyage, Jina, Ollama, OpenAI, Cohere): `embed` is declared `Result[EmbeddingResponse]`, which is what
+  `EmbeddingProvider` already promised; the concrete providers had narrowed it to `Either[EmbeddingError, _]`, which
+  could not carry the cancellation. Ollama sends one request per text and now stops at the first failure, so a
+  cancelled batch does not go on to send the rest. `llm4s-cohere` (#1348) landed after this slice was cut and
+  follows the same rule: its module spec runs `assertEmbeddingCancelsWhenInterrupted`, so the rule holds for every
+  embedding provider on `main`.
+- **Rerankers.** `CohereReranker` as above. `LLMReranker` gives a batch the model fails on neutral scores so that one
+  bad answer does not lose the ranking; a cancellation is not a bad answer, and used to be swallowed the same way, so
+  a cancelled rerank went on through the remaining batches and returned `Right`. It now ends the call at once with
+  the `CancelledError`, and an ordinary failure keeps its neutral scores.
+- **Speech.** The five cloud clients already returned the HTTP client's `CancelledError` untouched, and
+  `CloudSpeechCancellationSpec` pins that. Whisper and Tacotron2 run a command-line program with `scala.sys.process`'s
+  `!` and `!!`, which do not honour interruption: the interrupted wait throws `InterruptedException`, which `Try` does
+  not catch, so it escaped a `Result`-returning method and left the program running. `CommandRuns` runs the program,
+  destroys it on interrupt, sets the flag again and reports the interrupt, which the engine returns as
+  `CancelledError`; every other outcome is what `!` and `!!` gave. *Rejected:* catching around `!!` - it cannot
+  reach the process to destroy it.
+- **Image processing.** The OpenAI and Anthropic vision clients turned an HTTP failure into a `RuntimeException` and
+  then into a generic `apiCallFailed`; they return the HTTP client's `CancelledError` as it is, and every other message
+  is unchanged. `GeminiVisionClient` already did.
+- **Image generation** *(a call for Rory)*. The clients returned `Either[ImageGenerationError, _]`, a hierarchy of
+  their own that is not an `LLMError`, so a `CancelledError` could not be returned at all. `ImageGenerationError` now
+  extends `LLMError`, the client methods return `Either[LLMError, _]`, and every place a provider turns a `Throwable`
+  into an error goes through one classifier, `ImageErrors.fromThrowable`. `ServiceError(message, code: Int)` clashed
+  with `LLMError.code: Option[String]`: the field is `statusCode`, and `code` is derived from it. The instrumented
+  client records a cancelled call as `ErrorKind.Cancelled`. *Rejected:* an `ImageGenerationError.Cancelled` case -
+  callers would have to special-case a second cancellation type, and no retry layer would recognise it; and retiring
+  the hierarchy for core's errors, a larger break that this slice does not need.
+  **Every case also says whether a retry can help**, because an `LLMError` must: `LLMError.isRecoverable` (and
+  `recoverableErrors`, `nonRecoverableErrors`, `RetryPolicy.recoverableOnly`) match only `RecoverableError` and
+  `NonRecoverableError` and threw a `MatchError` on an image error, which before this slice could not reach them.
+  `RateLimitError` is recoverable, and so is a `ServiceError` whose status is transient (`0` - no answer at all, as in
+  a failed health check - `408`, `429`, any `5xx`); a rejected credential, request or prompt, `InsufficientResources`,
+  an unsupported operation and an `UnknownError` are not (an unknown failure is not retried blindly). A status is a
+  value and a marker trait is a type, so `ServiceError` is a sealed type with two cases behind the same
+  `ServiceError(message, status)` and `case ServiceError(message, status)`, picked by `ServiceError.isTransientStatus`.
+  *Rejected:* marking every `ServiceError` recoverable, as core's own `ServiceError` is - a `400` or `403` would be
+  retried to the same answer; and a default case in `LLMError.isRecoverable` - it is frozen core API, and a silent
+  default would hide the next error type that forgets to say.
+- **MCP.** The error channel was a `String` (`Either[String, _]` on the transports, `MCPClient.initialize` and
+  `getTools`), which cannot carry a cancellation. These return `Result`, and every existing message is kept byte for
+  byte as `SimpleError(message)`. The HTTP transports pass the HTTP client's `CancelledError` through; the stdio
+  transport returns it for an interrupt while awaiting a response, and for one during startup, when it also stops the
+  half-started server (the process was recorded but no reader thread had started, so the next request would have found
+  a live process that never answers). `MCPClientImpl.getTools` still swallows failures into an empty list, as
+  documented, but not a cancellation. `MCPToolRegistry` applies to MCP tools the rule `ToolRegistry` applies to local
+  ones - a call that ends while its thread is interrupted is cancelled, whatever it returned - and a cancelled
+  discovery is not "no such tool", drops no client and caches nothing. A tool handler keeps core's frozen
+  `Either[String, _]` shape: the interrupt flag the transport leaves set is how the registry knows. *Rejected:* a
+  dedicated `MCPError` type (`SimpleError` carries the message and nothing more is needed); changing
+  `ToolFunction.handler`'s error type (frozen core API).
+
+`ToolHints` from MCP annotations *(a call for Rory)*:
+
+- `MCPToolAnnotations` models what a server sends (`title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`,
+  `openWorldHint`; every one optional) and is read leniently - a missing object, an unknown key or a hint of the wrong
+  type is ignored, since annotations are advisory and must not fail a tool list. `toToolHints` fills a missing hint
+  with the specification's conservative default, which are `ToolHints.default`'s. `MCPClientImpl` records the hints
+  of every tool it lists (`MCPClient.getToolHints`, empty by default so implementors are unaffected) and
+  `MCPToolRegistry.toolHints(name)` answers by name, with none for a tool a local tool shadows. A listing that
+  fails, whatever the reason short of a cancellation, and `close()` clear the recorded hints: `getTools` turns a
+  failure into `Right(Seq.empty)`, which the registry takes for a refresh that worked, so a tool the server no longer
+  advertises would otherwise keep answering with its old hints.
+- **A server's annotations are untrusted unless the caller says otherwise** *(a call for Rory)*. The MCP
+  specification requires a client to treat annotations from an untrusted server as untrusted, and
+  `ApprovalMiddleware.unlessReadOnly` skips approval for a tool whose hints say read-only. Hints that came straight
+  from the server would let a server mark `delete_everything` read-only and have it run unapproved by an application
+  that followed the documented path, `AgentTool.fromToolFunction(tool, registry.toolHints(name).getOrElse(ToolHints.default))`.
+  `MCPServerConfig` therefore has `trustAnnotations: Boolean = false` (a new field with a default, and a parameter of
+  the `stdio`, `streamableHTTP` and `sse` factories). For a server that is not trusted `MCPClient.getToolHints` is
+  empty and `MCPToolRegistry.toolHints` is `None`, so `ToolHints.default` - approval required - applies; only a server
+  the caller has chosen to trust, because they operate or have reviewed it, can relax approval. The check is made once,
+  in the client, so every way to read the hints is safe by default. *Rejected:* enforcing it only in the registry - a
+  caller of `MCPClient.getToolHints` directly would still see untrusted hints; trusting by default and documenting the
+  risk - the first malicious server wins; a per-tool or per-hint trust setting - configuration the specification does
+  not ask for and nobody would keep up to date; and not mapping `readOnlyHint` at all - it loses the legitimate case,
+  a server the application itself runs.
+- **`ToolHints` moves from `llm4s-agent` to `llm4s-core`** (`org.llm4s.toolapi.ToolHints`, `@Experimental` like the tool
+  contract it belongs to). `llm4s-mcp` cannot depend on `llm4s-agent` without pulling the agent runtime, Ox and fansi
+  into every MCP client, and a frozen module cannot depend on `llm4s-mcp`, so core is the one module both see.
+  *Rejected:* hints on `ToolFunction` (growing a frozen type); and keeping `ToolHints` in the agent and exposing only
+  the raw annotations from `llm4s-mcp`, which leaves the conversion to every application. `AgentTool.fromToolFunction(
+  tool, hints)` attaches hints to the adapted tool.
+
+Source breaks, with no shims (the CHANGELOG lists the same):
+
+- `ToolHints` is `org.llm4s.toolapi.ToolHints`.
+- `llm4s-image`: `ImageGenerationError` is an `LLMError`; `ServiceError`'s second field is `statusCode`; the generation
+  clients return `Either[LLMError, _]`, so a match on their result needs a case for other errors.
+- `llm4s-mcp`: `MCPTransportImpl.sendRequest`, `sendNotification`, `MCPClient.initialize` and `getTools` return
+  `Result`; read the old string as `error.message`. `MCPServerConfig` gains `trustAnnotations` (default `false`);
+  source-compatible for construction, but a pattern match on the case class needs the fourth field.
+- The concrete embedding providers' `embed` returns `Result[EmbeddingResponse]`.
+
+Limits:
+
+- Vosk recognises in-process, through JNA, and an interrupt does not stop it mid-recognition.
+- `MCPServer` (the server half) is not changed; it does not advertise annotations.
+- Only logback was exercised for the logs these paths write.
+- On a platform thread an interrupt is not prompt for a client on a blocking socket (§4.4); the specs run on virtual
+  threads, as the runtime does.
+
 ### 4.13 Stage 1 slice 2: the agent loop on the graph runtime ([#1328](https://github.com/llm4s/llm4s/issues/1328))
 
 Slice 2 of [#1326](https://github.com/llm4s/llm4s/issues/1326): the graph runtime becomes the only agent loop. It is large, so it lands in the order below, each step compiling and passing on its own. **Step 1 is implemented by the PR that adds this section. Steps 2 to 6 are proposals that need review before the destructive part (deleting `AgentState` and migrating every caller) is written.**
@@ -715,7 +833,7 @@ Slice 2 of [#1326](https://github.com/llm4s/llm4s/issues/1326): the graph runtim
 
 - A run-boundary guardrail `Left` (any `beforeAgent` or `afterAgent` failure other than a cancellation) fails the run with the guardrail's error, so callers still get the error the legacy `Agent` returned. What changes is that the failure is a *finished* outcome, not an interrupted run.
 - `NodeResult.Block(error, update)` is the node's way to say so. The superstep commits `update` together with every sibling's result, and the run's closing checkpoint gets the new status `CheckpointStatus.Failed`, with a `RunFailed` event; the caller receives `RunResult.Failed(state, error)`. The status is terminal: `start` accepts a `Failed` thread exactly like a `Completed` one (it restores the committed state and applies the new input), `recover` refuses it (`NothingToRecover`), and `resume` refuses it (`NotSuspended`).
-- `MessageUpdate.RemoveTurn(id)` removes the stored message `id` and every message after it. `RemoveThrough` drops history *up to* a message; a turn's writes are the user input, the assistant messages, the tool calls and results, and the answer, all of which come after the turn's user message. An *input* Block happens before the loop stores anything, so it commits no update. An *output* Block commits `RemoveTurn` of the turn's user message: no blocked content is stored, and the next `start` continues from the history before the turn.
+- `MessageUpdate.RemoveTurn(id)` removes the stored message `id` and every message after it. `RemoveThrough` drops history *up to* a message; a turn's writes are the user input, the assistant messages, the tool calls and results, and the answer, all of which come after the turn's user message. An *input* Block happens before the loop stores anything, so it commits no update. An *output* Block commits `RemoveTurn` of the turn's user message: the closing checkpoint holds no blocked content, and the next `start` continues from the history before the turn. The answer was committed once, by the model step's superstep, before `finish` guarded it. That snapshot is the latest checkpoint only until the closing commit, so a crash in between leaves it there until `recover` blocks again. Stage 2 history and fork must not keep it (§4.9).
 - Not changed: a cancellation or deadline, a tool or model-wrapper failure (`ToolFailed`, `MiddlewareFailed`) and a checkpoint-store failure still leave the checkpoint `Running`, so `recover` continues them. Only the run boundaries block.
 - A blocked task records no pending write, because its error cannot be replayed from data; if the process dies between the guardrail's decision and the closing commit, `recover` runs the guardrail again, which is the behaviour of any other task that had not completed.
 - `Checkpoint.CurrentFormat` becomes 4, with an identity migration from 3: a build that predates the status refuses format 4 rather than misreading `Failed`.
@@ -870,6 +988,7 @@ The migration note should give direct replacements for existing state/event/Plan
 | Workspace dependency direction | **Adjusted.** Define `SandboxBackend` in `llm4s-agent`; implement it in `workspaceClient`, which already depends on agent. Do not add an agent-to-workspace dependency. |
 | Thread position, multi-turn, and partial approvals | **Accepted.** Put thread/checkpoint/task/node IDs in `RunContext`; apply new input to an existing completed thread's latest checkpoint; reject `start` with pending interrupts; permit incremental resume answers. |
 | Guardrails and state-update tracing | **Accepted.** Preserve guardrails as lifecycle middleware and migrate `TraceEvent.AgentStateUpdated` consumers to graph state/update events in the single migration note. |
+| Guardrail Block outcome | **Decided: a Block is a terminal failure.** A guardrail `Block` - any `beforeAgent`/`afterAgent` `Left` - still fails the run, so the caller gets the guardrail's error as the legacy `Agent` returns `Left`. The failure is a finished outcome, not an interrupted run: the checkpoint gets a terminal failed status, which `start` accepts like `Completed` (and `recover` refuses, as there is nothing to resume), and an output `Block` removes the blocked turn from history - its input, any tool calls and results, and the answer - so the thread's state keeps no blocked content, as the legacy `Agent`, which kept no thread, left none. The answer is still committed once before it is guarded: the model step's superstep stores it, and `afterAgent` runs in the next one. Until that next commit, a process that dies leaves the answer in the latest checkpoint, and `recover` then blocks and removes it. The store keeps only the latest checkpoint (§4.3), so the next commit overwrites that snapshot, and events carry no message content. Checkpoint history and fork (Stage 2, §4.9) must therefore never keep or expose a snapshot whose turn a later `Block` removed, or the loop must guard the answer before its first commit. The thread stays usable: the next `start` continues from the history before the blocked turn. Rejected: a refusal answer that completes the run (callers would have to inspect a typed result instead of an error; a behaviour change for guardrail users), and guarding output before it is stored (on its own it leaves the thread stuck, and `recover` would ask the model again). Needs a terminal failed checkpoint status and a node able to remove the turn's earlier writes in the same run (`MessageUpdate` has no such operation today: `RemoveThrough` drops the history up to a message, not after it); owned by Stage 1 (§4.9). |
 | Checkpoint fencing and stream delivery | **Accepted.** Fence task writes as well as snapshots with the run claim; serialize/version events and deliver them in sequence on an ordered dispatcher. |
 | Explicit joins and partial resume | **Accepted.** Static joins wait for declared arrivals; dynamic joins record expected fan-out task IDs. The tool-call batch feeds a barrier, so an approved branch cannot advance the model while other calls are unresolved. Quiescence with parked continuations reports `Suspended`; an impossible join fails explicitly. |
 | Tool-result ownership | **Accepted.** `AgentTool` returns content/effects/outcomes. The runtime creates the correlated provider-valid result message for success, failure, rejection, denial, and unknown tools, and the join enforces one result per call. Edited approvals replace the originating assistant message before execution. |

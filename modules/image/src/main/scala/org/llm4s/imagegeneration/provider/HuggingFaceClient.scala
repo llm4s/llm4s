@@ -8,6 +8,7 @@ import java.util.Base64
 import scala.util.Try
 import scala.concurrent.duration.*
 import scala.concurrent.{ Future, ExecutionContext, blocking }
+import org.llm4s.error.LLMError
 
 /**
  * HuggingFace Inference API client for image generation.
@@ -46,7 +47,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
   override def generateImage(
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, GeneratedImage] =
+  ): Either[LLMError, GeneratedImage] =
     generateImages(prompt, 1, options).map(_.head)
 
   /**
@@ -55,7 +56,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
    * @param prompt The input string representing the prompt to validate.
    * @return Either an `ImageGenerationError` if the validation fails, or the original valid prompt as a `String`.
    */
-  def validatePrompt(prompt: String): Either[ImageGenerationError, String] =
+  def validatePrompt(prompt: String): Either[LLMError, String] =
     Either.cond(prompt.trim.nonEmpty, prompt, ValidationError("Prompt cannot be empty"))
 
   /**
@@ -66,7 +67,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
    * @return Either an `ImageGenerationError` if the count is out of range,
    *         or the valid count as an `Int` if the validation succeeds.
    */
-  def validateCount(count: Int): Either[ImageGenerationError, Int] =
+  def validateCount(count: Int): Either[LLMError, Int] =
     Either.cond(count > 0 && count <= 4, count, ValidationError("Count must be between 1 and 4 for HuggingFace"))
 
   /**
@@ -81,9 +82,11 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
    * @return Either an `ImageGenerationError` in case of a failure or
    *         the resulting Base64-encoded string on success.
    */
-  def convertToBase64(imageBytes: Array[Byte]): Either[ImageGenerationError, String] = Try {
+  def convertToBase64(imageBytes: Array[Byte]): Either[LLMError, String] = Try {
     Base64.getEncoder.encodeToString(imageBytes)
-  }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
+  }.toEither.left.map(exception =>
+    ImageErrors.fromThrowable(exception, "huggingface-image.request")(ex => ServiceError(ex.getMessage, 500))
+  )
 
   /**
    * Generates multiple images based on the given text prompt using predefined options and base64-encoded image data.
@@ -103,7 +106,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions(),
     base64Data: String
-  ): Either[ImageGenerationError, IndexedSeq[GeneratedImage]] = Try {
+  ): Either[LLMError, IndexedSeq[GeneratedImage]] = Try {
     logger.debug("Generating {} image(s) with HuggingFace: '{}'", count, prompt)
 
     val images = (1 to count).map { i =>
@@ -118,7 +121,9 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     }
     (1 to count).foreach(i => logger.debug("Generated image: {}", i))
     images
-  }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
+  }.toEither.left.map(exception =>
+    ImageErrors.fromThrowable(exception, "huggingface-image.request")(ex => ServiceError(ex.getMessage, 500))
+  )
 
   /**
    * Generate multiple images from a text prompt using HuggingFace Inference API.
@@ -135,9 +140,9 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Either[LLMError, Seq[GeneratedImage]] = {
 
-    val result: Either[ImageGenerationError, IndexedSeq[GeneratedImage]] = for {
+    val result: Either[LLMError, IndexedSeq[GeneratedImage]] = for {
       prompt     <- validatePrompt(prompt)
       count      <- validateCount(count)
       payload    <- buildPayload(prompt, options)
@@ -161,48 +166,48 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     prompt: String,
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+  ): Either[LLMError, Seq[GeneratedImage]] =
     Left(UnsupportedOperation("Image editing is not yet supported for HuggingFace provider"))
 
   override def generateImageAsync(
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, GeneratedImage]] =
     Future {
       blocking {
         generateImage(prompt, options)
       }
-    }.recover { case ex => Left(UnknownError(ex)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "huggingface-image.request")(UnknownError.apply)) }
 
   override def generateImagesAsync(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
     Future {
       blocking {
         generateImages(prompt, count, options)
       }
-    }.recover { case ex => Left(UnknownError(ex)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "huggingface-image.request")(UnknownError.apply)) }
 
   override def editImageAsync(
     imagePath: Path,
     prompt: String,
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
     Future {
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }.recover { case ex => Left(UnknownError(ex)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "huggingface-image.request")(UnknownError.apply)) }
 
   /**
    * Check the health status of the HuggingFace Inference API.
    *
    * @return Either an error or the current service status
    */
-  override def health(): Either[ImageGenerationError, ServiceStatus] = {
+  override def health(): Either[LLMError, ServiceStatus] = {
     val testUrl = s"https://api-inference.huggingface.co/models/${config.model}"
     val headers = Map(
       "Authorization" -> s"Bearer ${config.apiKey}",
@@ -213,7 +218,11 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       .get(testUrl, headers, 10.seconds)
       .toEither
       .left
-      .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))
+      .map(e =>
+        ImageErrors.fromThrowable(e, "huggingface-image.health")(ex =>
+          ServiceError(s"Health check failed: ${ex.getMessage}", 0)
+        )
+      )
       .map { response =>
         if (response.statusCode == 200)
           ServiceStatus(HealthStatus.Healthy, "HuggingFace Inference API is responding")
@@ -240,12 +249,14 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
    * @return Either an `ImageGenerationError` if payload creation fails,
    *         or the JSON string representing the payload.
    */
-  def buildPayload(prompt: String, options: ImageGenerationOptions): Either[ImageGenerationError, String] = Try {
+  def buildPayload(prompt: String, options: ImageGenerationOptions): Either[LLMError, String] = Try {
     val payload = HuggingClientPayload(prompt, options)
     val jsonStr = createJsonPayload(payload)
     logger.debug("Payload: {} - Json: {}", payload, jsonStr)
     jsonStr
-  }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
+  }.toEither.left.map(exception =>
+    ImageErrors.fromThrowable(exception, "huggingface-image.request")(ex => ServiceError(ex.getMessage, 500))
+  )
 
   /**
    * Makes an HTTP POST request to the HuggingFace Inference API and returns the raw response bytes.
@@ -257,7 +268,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
    * @param payload The JSON payload to send with the HTTP request.
    * @return Either an ImageGenerationError if the request fails, or the raw image bytes on success.
    */
-  def makeHttpRequest(payload: String): Either[ImageGenerationError, Array[Byte]] = {
+  def makeHttpRequest(payload: String): Either[LLMError, Array[Byte]] = {
     val url = s"https://api-inference.huggingface.co/models/${config.model}"
     val headers = Map(
       "Authorization" -> s"Bearer ${config.apiKey}",
@@ -268,7 +279,9 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       .postRaw(url, headers, payload, config.timeout)
       .toEither
       .left
-      .map(exception => ServiceError(exception.getMessage, 500))
+      .map(exception =>
+        ImageErrors.fromThrowable(exception, "huggingface-image.request")(ex => ServiceError(ex.getMessage, 500))
+      )
       .flatMap { response =>
         response.statusCode match {
           case 200 => Right(response.body)

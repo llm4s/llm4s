@@ -402,7 +402,8 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
 
     authError.message shouldBe "Invalid API key"
     serviceError.message shouldBe "Server error"
-    serviceError.code shouldBe 500
+    serviceError.statusCode shouldBe 500
+    serviceError.code shouldBe Some("500")
     validationError.message shouldBe "Invalid prompt"
     unknownError.message shouldBe "Something went wrong"
   }

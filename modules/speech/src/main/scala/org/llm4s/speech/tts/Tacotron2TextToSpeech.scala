@@ -1,14 +1,13 @@
 package org.llm4s.speech.tts
 
-import org.llm4s.error.ProcessingError
+import org.llm4s.error.{ CancelledError, ProcessingError }
+import org.llm4s.speech.util.CommandRuns
 import org.llm4s.types.Result
 import org.llm4s.speech.GeneratedAudio
 import org.llm4s.speech.io.WavFileGenerator
 import cats.implicits._
 
 import scala.sys.process._
-import scala.util.Try
-import org.llm4s.types.TryOps
 
 /**
  * Tacotron2 integration via CLI or local server. This is a thin adapter;
@@ -34,7 +33,14 @@ final class Tacotron2TextToSpeech(
 
       args = baseCommand ++ optFlags.combineAll
 
-      _ <- Try(args.!).toResult.left.map(_ => ProcessingError.audioValidation("Tacotron2 CLI execution failed"))
+      _ <- CommandRuns
+        .exitCode(args)
+        .left
+        .map {
+          // An interrupt stops the program and is a cancellation, not a failed run (design section 4.4).
+          case interrupted: InterruptedException => CancelledError("tacotron2.synthesize", Some(interrupted))
+          case _                                 => ProcessingError.audioValidation("Tacotron2 CLI execution failed")
+        }
 
       audio <- WavFileGenerator.readWavFile(tmpOut)
 

@@ -1,5 +1,6 @@
 package org.llm4s.reranker
 
+import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
 import org.llm4s.types.{ Result, TryOps }
@@ -55,49 +56,57 @@ Example response for 3 documents: [0.95, 0.3, 0.72]
 
 Do not include any explanation or text outside the JSON array."""
 
-  override def rerank(request: RerankRequest): Result[RerankResponse] = {
+  override def rerank(request: RerankRequest): Result[RerankResponse] =
     if (request.documents.isEmpty) {
-      return Right(RerankResponse(results = Seq.empty))
-    }
+      Right(RerankResponse(results = Seq.empty))
+    } else {
+      CancelledError.attempt("llm.rerank") {
+        scoreAll(request).map { allScores =>
+          // Build results with scores
+          val results = allScores
+            .map { case (idx, score) =>
+              RerankResult(
+                index = idx,
+                score = score,
+                document = if (request.returnDocuments) request.documents(idx) else ""
+              )
+            }
+            .sortBy(-_.score)
 
-    // Score documents in batches
-    val allScores = request.documents
-      .grouped(batchSize)
-      .zipWithIndex
-      .flatMap { case (batch, batchIdx) =>
-        scoreBatch(request.query, batch, batchIdx * batchSize) match {
-          case Right(scores) => scores
-          case Left(_)       =>
-            // On error, assign neutral scores
-            batch.indices.map(i => (batchIdx * batchSize + i, 0.5))
+          // Apply topK filter
+          val finalResults = request.topK match {
+            case Some(k) => results.take(k)
+            case None    => results
+          }
+
+          RerankResponse(
+            results = finalResults,
+            metadata = Map("provider" -> "llm", "batch_size" -> batchSize.toString)
+          )
         }
       }
-      .toSeq
-
-    // Build results with scores
-    val results = allScores
-      .map { case (idx, score) =>
-        RerankResult(
-          index = idx,
-          score = score,
-          document = if (request.returnDocuments) request.documents(idx) else ""
-        )
-      }
-      .sortBy(-_.score)
-
-    // Apply topK filter
-    val finalResults = request.topK match {
-      case Some(k) => results.take(k)
-      case None    => results
     }
 
-    Right(
-      RerankResponse(
-        results = finalResults,
-        metadata = Map("provider" -> "llm", "batch_size" -> batchSize.toString)
-      )
-    )
-  }
+  /**
+   * Scores the documents in batches. A batch the model fails on gets neutral scores, so one bad
+   * answer does not lose the ranking - but a cancellation is not a bad answer: it ends the call at
+   * once and is returned as it is, with no further batch sent (design section 4.4).
+   */
+  private def scoreAll(request: RerankRequest): Result[Seq[(Int, Double)]] =
+    request.documents
+      .grouped(batchSize)
+      .zipWithIndex
+      .foldLeft[Result[Vector[(Int, Double)]]](Right(Vector.empty)) { case (done, (batch, batchIdx)) =>
+        done.flatMap { scored =>
+          scoreBatch(request.query, batch, batchIdx * batchSize) match {
+            case Right(scores)                   => Right(scored ++ scores)
+            case Left(cancelled: CancelledError) => Left(cancelled)
+            case Left(_)                         =>
+              // On error, assign neutral scores
+              Right(scored ++ batch.indices.map(i => (batchIdx * batchSize + i, 0.5)))
+          }
+        }
+      }
 
   /**
    * Score a batch of documents using LLM.

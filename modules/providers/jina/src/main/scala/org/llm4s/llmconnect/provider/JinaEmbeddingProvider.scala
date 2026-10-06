@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.JinaConfigKeys
+import org.llm4s.error.CancelledError
 import org.llm4s.http.{ HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
@@ -142,13 +143,13 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
     new EmbeddingProvider {
       private val logger = LoggerFactory.getLogger(getClass)
 
-      override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] =
-        taskFor(request.model.name, task).flatMap(sent => send(request, sent))
+      override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
+        CancelledError.attempt("jina.embed")(taskFor(request.model.name, task).flatMap(sent => send(request, sent)))
 
       private def send(
         request: EmbeddingRequest,
         sentTask: Option[JinaTask]
-      ): Either[EmbeddingError, EmbeddingResponse] = {
+      ): Result[EmbeddingResponse] = {
         val model = request.model.name
         val input = request.input
         val payload = Obj(
@@ -167,9 +168,12 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
           "Content-Type"  -> "application/json"
         )
 
-        val respEither: Either[EmbeddingError, Llm4sHttpResponse] =
-          httpClient.post(url, headers, payload.render(), timeout = 120.seconds).left.map { err =>
-            EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "jina")
+        // A cancellation is not a failed request: it passes through (design section 4.4).
+        val respEither: Result[Llm4sHttpResponse] =
+          httpClient.post(url, headers, payload.render(), timeout = 120.seconds).left.map {
+            case cancelled: CancelledError => cancelled
+            case err =>
+              EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "jina")
           }
 
         respEither.flatMap { response =>

@@ -2,7 +2,7 @@ package org.llm4s.agent.graph.tool
 
 import org.llm4s.agent.graph._
 import org.llm4s.error.ValidationError
-import org.llm4s.toolapi.{ Schema, SchemaDefinition, ToolBuilder, ToolFunction }
+import org.llm4s.toolapi.{ Schema, SchemaDefinition, ToolBuilder, ToolFunction, ToolHints }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -168,6 +168,17 @@ class AgentToolContractSpec extends AnyFlatSpec with Matchers with EitherValues 
   it should "be the default for a tool adapted from a ToolFunction" in {
     val function = ToolFunction[Map[String, Any], String]("f", "d", Schema.`object`("o"), _ => Right("x"))
     AgentTool.fromToolFunction(function).spec.hints shouldBe ToolHints.default
+  }
+
+  it should "be the hints given for a tool adapted from a ToolFunction with them (an MCP tool's annotations)" in {
+    val function = ToolFunction[Map[String, Any], String]("f", "d", Schema.`object`("o"), _ => Right("x"))
+    val hints    = ToolHints(readOnly = true, openWorld = false)
+
+    val tool = AgentTool.fromToolFunction(function, hints)
+
+    tool.spec.hints shouldBe hints
+    tool.spec.name shouldBe "f" // the rest of the adaptation is unchanged
+    ToolSet.of(tool).map(_.toolFunctions) shouldBe Right(Seq(function))
   }
 
   it should "change only the field a setter names" in {

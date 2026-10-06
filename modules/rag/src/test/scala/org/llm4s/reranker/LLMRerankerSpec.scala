@@ -1,5 +1,6 @@
 package org.llm4s.reranker
 
+import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -309,6 +310,48 @@ class LLMRerankerSpec extends AnyFlatSpec with Matchers {
     val userContent = messages(1).asInstanceOf[UserMessage].content
     userContent should include("What is the meaning of life?")
     userContent should include("The answer is 42")
+  }
+
+  /** Answers the first `ok` calls with `[0.9]`-style scores, then fails with `failure`; counts its calls. */
+  class FailingAfterLLMClient(ok: Int, failure: org.llm4s.error.LLMError) extends LLMClient {
+    var calls = 0
+
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+      calls += 1
+      if (calls <= ok) Right(mockCompletion("[0.9]")) else Left(failure)
+    }
+
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = complete(conversation, options)
+
+    override def getContextWindow(): Int = 4096
+
+    override def getReserveCompletion(): Int = 1024
+  }
+
+  private def threeBatchRequest = RerankRequest(query = "q", documents = Seq("a", "b", "c"))
+
+  "LLMReranker" should "return a cancellation as it is and send no further batch" in {
+    val client   = new FailingAfterLLMClient(ok = 1, failure = CancelledError("test.complete"))
+    val reranker = new LLMReranker(client, batchSize = 1)
+
+    val result = reranker.rerank(threeBatchRequest)
+
+    result.left.toOption.get shouldBe a[CancelledError]
+    client.calls shouldBe 2 // the first batch answered, the second was cancelled, the third never sent
+  }
+
+  it should "still give a batch that fails for another reason neutral scores" in {
+    val client   = new FailingAfterLLMClient(ok = 1, failure = RerankError(Some("500"), "boom", "mock"))
+    val reranker = new LLMReranker(client, batchSize = 1)
+
+    val result = reranker.rerank(threeBatchRequest)
+
+    result.map(_.results.map(r => r.index -> r.score).toMap) shouldBe Right(Map(0 -> 0.9, 1 -> 0.5, 2 -> 0.5))
+    client.calls shouldBe 3 // an ordinary failure does not stop the later batches
   }
 
   "RerankerFactory" should "create LLM reranker" in {
