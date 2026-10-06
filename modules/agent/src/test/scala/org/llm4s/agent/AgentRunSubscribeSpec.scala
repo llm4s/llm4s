@@ -271,3 +271,16 @@ class AgentRunSubscribeSpec extends AnyFlatSpec with Matchers with Eventually:
     scope.closeWhenQuiet(50.millis) // already ended: returns at once, ends nothing again
     order.asScala.toVector shouldBe Vector("cancel", "onEnd")
   }
+
+  it should "count its quiet period from the close, not from an earlier idle spell" in {
+    val c     = Received()
+    val scope = RunScope(RunId("r1"), c.listener)
+    scope.attach(new Subscription { def cancel(): Unit = () })
+    Thread.sleep(150) // idle since construction for longer than the quiet period below
+    val closing = Thread.ofVirtual().start(() => scope.closeWhenQuiet(100.millis))
+    Thread.sleep(30) // the run's last queued event, delivered just after the close began
+    scope(record("r1", 1, RunEvent.RunStarted(None, None)))
+    closing.join()
+    scope.isEnded shouldBe true
+    c.all shouldBe Vector(record("r1", 1, RunEvent.RunStarted(None, None)))
+  }

@@ -11,7 +11,6 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{ Millis, Seconds, Span }
 
 import java.util.concurrent.CopyOnWriteArrayList
-import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 
 /**
@@ -79,10 +78,10 @@ class RunScopeEndSpec extends AnyFlatSpec with Matchers with Eventually:
           events.asScala.collectFirst { case StreamEvent.Durable(r) => r.event } shouldBe
             Some(RunEvent.RunStarted(None, None))
         )
-        // a late subscription joins the live set only after its replay, so 0 means something only
-        // once it has had time to join: past the scope's quiet period it is cancelled, not yet to join
-        Thread.sleep((org.llm4s.agent.RunScope.Quiet + 500.millis).toMillis)
-        runtime.liveSubscriptions(threadId) shouldBe 0
+        // a late subscription joins the live set only after its replay, and is cancelled no sooner than
+        // the scope's quiet period after that: seen joined first, so that 0 means cancelled
+        eventually(runtime.liveSubscriptions(threadId) shouldBe 1)
+        eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
       }
 
   "agent.stream" should "leave the live set after the run's terminal event" in {

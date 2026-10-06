@@ -76,16 +76,20 @@ final private[agent] class RunScope(runId: RunId, listener: StreamEvent => Unit,
       finished.complete(()): Unit
 
   /**
-   * Blocks until the scope ends, or until no listener call has been in progress for `quiet`, and in
+   * Blocks until the scope ends, or until no listener call has been in progress for `quiet` -
+   * counted from this call at the earliest - and in
    * the second case ends it: cancels the subscription first - so no listener call follows - then
    * calls `onEnd`. For a run that has ended without a terminal event: every event of it was queued
    * to the subscription before the run's result was set, so a subscription idle for `quiet` after
    * that has nothing left of the run to deliver. Called off the listener's thread.
    */
   def closeWhenQuiet(quiet: FiniteDuration): Unit =
-    var done = false
+    // the quiet clock starts no earlier than this call - after the run's result is set, so after every
+    // event of it was queued - or a scope idle since before then would end before taking them
+    val since = System.nanoTime()
+    var done  = false
     while !done do
-      val idleFor = (System.nanoTime() - lastActivity).nanos
+      val idleFor = (System.nanoTime() - math.max(lastActivity, since)).nanos
       if finished.isDone then done = true
       else if calls.get == 0 && idleFor >= quiet then
         if ending.compareAndSet(false, true) then
