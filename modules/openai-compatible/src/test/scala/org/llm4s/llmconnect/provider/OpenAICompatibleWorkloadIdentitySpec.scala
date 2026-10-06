@@ -229,6 +229,110 @@ class OpenAICompatibleWorkloadIdentitySpec
     }
   }
 
+  // Every entry point that can exchange the identity token or send the access token, given a section or config
+  // whose `baseUrl` (or `tokenUrl`) would carry a token in plain text. Each must refuse before any request.
+  "a workload-identity section whose baseUrl is plain http to a non-loopback host" should {
+    // Reaches the fake, but plain http to a host the rules do not accept as loopback: had a request gone out,
+    // the fake would have recorded it.
+    def insecureBaseUrl(fake: FakeTokenExchangeServer) = s"${fake.refusedBaseUrl}/serving-endpoints"
+
+    def insecureBlock(fake: FakeTokenExchangeServer): String =
+      authBlock(fake, freshSvid).replace(s"${fake.baseUrl}/serving-endpoints", insecureBaseUrl(fake))
+
+    def insecureConfig(fake: FakeTokenExchangeServer): OpenAICompatibleConfig =
+      OpenAICompatibleConfig(
+        model = "m",
+        baseUrl = insecureBaseUrl(fake),
+        tokenExchange = Some(
+          TokenExchangeConfig(
+            IdentitySource.File(freshSvid),
+            s"${fake.baseUrl}${FakeTokenExchangeServer.TokenPath}"
+          )
+        )
+      )
+
+    "load as a section, since section validation does not judge the baseUrl" in FakeTokenExchangeServer.withServer {
+      fake => sectionOf(insecureBlock(fake)).baseUrl.map(_.asUrl) shouldBe Some(insecureBaseUrl(fake))
+    }
+
+    "be refused by the model lister before the token exchange" in FakeTokenExchangeServer.withServer { fake =>
+      val error = OpenAICompatibleModelLister.listModels(sectionOf(insecureBlock(fake)), Llm4sHttpClient.create())
+      error.left.value shouldBe a[ConfigurationError]
+      error.left.value.message should (include("baseUrl").and(include("exchanged token")))
+      fake.exchanges shouldBe empty
+      fake.apiAuthorizations shouldBe empty
+    }
+
+    "be refused by the model lister with a plain-http tokenUrl, before the exchange" in FakeTokenExchangeServer
+      .withServer { fake =>
+        val section = sectionOf(
+          authBlock(fake, freshSvid)
+            .replace(
+              s"${fake.baseUrl}${FakeTokenExchangeServer.TokenPath}",
+              s"${fake.refusedBaseUrl}${FakeTokenExchangeServer.TokenPath}"
+            )
+        )
+        OpenAICompatibleModelLister.listModels(section, Llm4sHttpClient.create()).left.value shouldBe
+          a[ConfigurationError]
+        fake.exchanges shouldBe empty
+        fake.apiAuthorizations shouldBe empty
+      }
+
+    "be refused when building the chat client from the section (buildConfig, as LLMConnect and the testkit do)" in
+      FakeTokenExchangeServer.withServer { fake =>
+        val error = ProviderModuleChecks.buildClient(OpenAICompatibleProvider, sectionOf(insecureBlock(fake)))
+        error.left.value.message should include("llm4s.providers.provider-testkit.baseUrl")
+        fake.exchanges shouldBe empty
+      }
+
+    "be refused by LLMConnect.getClient for a config built by hand" in FakeTokenExchangeServer.withServer { fake =>
+      given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+      org.llm4s.llmconnect.LLMConnect.getClient(insecureConfig(fake)).left.value shouldBe a[ConfigurationError]
+      fake.exchanges shouldBe empty
+    }
+
+    "be refused by the OpenAICompatibleClient constructor for hand-built settings, Exchange or Dynamic" in
+      FakeTokenExchangeServer.withServer { fake =>
+        given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+        val fetched                                = new AtomicInteger(0)
+        val dynamic = new AccessTokenProvider:
+          def token(): Result[String]            = { fetched.incrementAndGet(); Right("t") }
+          def invalidate(rejected: String): Unit = ()
+        val exchange = OpenAICompatibleClient.settings(insecureConfig(fake).withBaseUrl("https://ws.example/v1"))
+        val credentials = Seq(
+          exchange.credential,
+          OpenAICompatibleClient.Credential.Dynamic(dynamic)
+        )
+        for credential <- credentials do
+          val error = intercept[IllegalArgumentException](
+            new OpenAICompatibleClient(
+              exchange.copy(baseUrl = insecureBaseUrl(fake), credential = credential),
+              OpenAICompatibleDialect.standard(Nil)
+            )
+          )
+          error.getMessage should include("baseUrl")
+        // An exchange to a plain-http token endpoint is refused the same way.
+        val insecureTokenUrl = OpenAICompatibleClient.Credential.Exchange(
+          TokenExchangeConfig(
+            IdentitySource.File(freshSvid),
+            s"${fake.refusedBaseUrl}${FakeTokenExchangeServer.TokenPath}"
+          )
+        )
+        an[IllegalArgumentException] should be thrownBy
+          new OpenAICompatibleClient(
+            exchange.copy(credential = insecureTokenUrl),
+            OpenAICompatibleDialect.standard(Nil)
+          )
+        fetched.get shouldBe 0
+        fake.exchanges shouldBe empty
+        // A static key is the caller's own, as before: a plain-http base URL is still accepted with one.
+        new OpenAICompatibleClient(
+          exchange.copy(baseUrl = insecureBaseUrl(fake), credential = OpenAICompatibleClient.Credential.Static("k")),
+          OpenAICompatibleDialect.standard(Nil)
+        ).close()
+      }
+  }
+
   "an exchanging OpenAICompatibleConfig built without a named section" should {
     given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 

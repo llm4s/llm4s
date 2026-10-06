@@ -7,7 +7,7 @@ import org.llm4s.llmconnect.auth.IdentitySource
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, OpenAIWorkloadIdentity }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.testkit.{ ProviderModuleChecks, ProviderTestConfig }
+import org.llm4s.testkit.{ FakeTokenExchangeServer, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.Result
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.matchers.should.Matchers
@@ -120,6 +120,44 @@ class OpenAIWorkloadIdentitySpec
       error shouldBe a[ConfigurationError]
       error.message should include("model listing is not supported with workload identity auth for openai")
     }
+
+    // `refusedBaseUrl` reaches the fake, whose OpenAI-format chat endpoint records every Authorization it is
+    // sent, so a refusal that came after any API call would show there. (The SDK exchanges the identity token
+    // with OpenAI's own token endpoint, not the baseUrl; the baseUrl receives the exchanged token.)
+    "be refused on every entry point, before any request, for a baseUrl that is not an OpenAI API host" in
+      FakeTokenExchangeServer.withServer { fake =>
+        given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+        val baseUrl                                = s"${fake.refusedBaseUrl}/v1"
+        val body                                   = s"$section\nbaseUrl = \"$baseUrl\""
+        val named                                  = sectionOf(body)
+        // Chat from a section: buildConfig, as Llm4sConfig.provider, LLMConnect and the testkit use.
+        ProviderModuleChecks.buildClient(OpenAIProvider, named).left.value shouldBe a[ConfigurationError]
+        ProviderTestConfig.loadProvider("main", s"llm4s.providers.main {\n$body\n}").left.value shouldBe
+          a[ConfigurationError]
+        // Chat from a config built by hand: the companion apply, LLMConnect and the constructor.
+        val byHand = OpenAIConfig(
+          "",
+          "gpt-4o-mini",
+          None,
+          baseUrl,
+          128000,
+          4096,
+          workloadIdentity = Some(OpenAIWorkloadIdentity(IdentitySource.Literal("eyJ.svid.sig"), "idp_1", "sa_1"))
+        )
+        OpenAIClient(byHand).left.value shouldBe a[ConfigurationError]
+        org.llm4s.llmconnect.LLMConnect.getClient(byHand).left.value shouldBe a[ConfigurationError]
+        an[IllegalArgumentException] should be thrownBy new OpenAIClient(
+          byHand,
+          org.llm4s.metrics.MetricsCollector.noop
+        )
+        // Model listing refuses workload identity outright.
+        org.llm4s.config.OpenAIModelLister
+          .listModels(named, org.llm4s.http.Llm4sHttpClient.create())
+          .left
+          .value shouldBe a[ConfigurationError]
+        fake.exchanges shouldBe empty
+        fake.apiAuthorizations shouldBe empty
+      }
 
     "reject a missing serviceAccountId" in {
       sectionResult(section.replace("serviceAccountId = \"sa_1\", ", "")).isLeft shouldBe true

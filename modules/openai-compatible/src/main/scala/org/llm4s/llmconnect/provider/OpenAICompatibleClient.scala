@@ -63,6 +63,14 @@ class OpenAICompatibleClient(
   if (OpenAICompatibleClient.overridesDynamicBearer(settings.credential, dialect.headers))
     throw new IllegalArgumentException(OpenAICompatibleClient.AuthorizationHeaderRefusal)
 
+  // A refreshed bearer is an exchanged or federated token: it goes only to an `https` base URL (plain `http`
+  // only to a loopback host), and an exchange only to an `https` token endpoint - the rules
+  // `OpenAICompatibleConfig.validate` applies to the generic provider's config, applied here to settings built
+  // by hand, so no token is fetched or sent before they hold.
+  OpenAICompatibleClient
+    .insecureDynamicCredential(settings)
+    .foreach(message => throw new IllegalArgumentException(message))
+
   // Scoped to the provider package so specs can substitute one
   protected[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
   private val logger                                  = org.slf4j.LoggerFactory.getLogger(getClass)
@@ -460,6 +468,21 @@ object OpenAICompatibleClient {
     credential match
       case Credential.Dynamic(_) | Credential.Exchange(_) => headers.exists(_._1.equalsIgnoreCase("Authorization"))
       case _                                              => false
+
+  /**
+   * Why `settings` may not carry its credential, if it may not: a [[Credential.Dynamic]] or
+   * [[Credential.Exchange]] credential needs a secure `baseUrl`, and an exchange a secure `tokenUrl`
+   * ([[org.llm4s.llmconnect.auth.TokenExchange]]'s rule: `https`, or plain `http` to a loopback host).
+   */
+  private[provider] def insecureDynamicCredential(settings: Settings): Option[String] = {
+    val baseUrl = TokenExchange.requireSecureUrl(settings.baseUrl, "baseUrl", "the exchanged token")
+    val checks = settings.credential match {
+      case Credential.Dynamic(_)       => List(baseUrl)
+      case Credential.Exchange(config) => List(TokenExchange.requireSecureUrl(config.tokenUrl), baseUrl)
+      case _                           => Nil
+    }
+    checks.collectFirst { case Left(error) => error.message }
+  }
 
   /** `headers` with each repeated name (matched case-insensitively) sent once, its values comma-joined in order. */
   private[provider] def combineRepeated(headers: Seq[(String, String)]): Seq[(String, String)] =

@@ -34,6 +34,13 @@ class FakeTokenExchangeServerSpec extends AnyWordSpec with Matchers:
       fake.issuedTokens shouldBe Seq("t1", "t2")
     }
 
+    "be reachable under refusedBaseUrl, so a refusal test that sees no request is not vacuous" in
+      FakeTokenExchangeServer.withServer { fake =>
+        fake.refusedBaseUrl should startWith("http://[::ffff:127.0.0.1]:")
+        post(fake.refusedBaseUrl + FakeTokenExchangeServer.TokenPath, form).statusCode shouldBe 200
+        fake.exchanges.size shouldBe 1
+      }
+
     "accept only the latest token on the chat endpoint" in FakeTokenExchangeServer.withServer { fake =>
       post(fake.baseUrl + FakeTokenExchangeServer.TokenPath, form)
       post(

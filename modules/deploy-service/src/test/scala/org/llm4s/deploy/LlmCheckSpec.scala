@@ -105,4 +105,34 @@ class LlmCheckSpec extends AnyFlatSpec with Matchers {
   it should "pass a normal outcome through" in {
     LlmCheck.guarded(() => Ready("p")) shouldBe Ready("p")
   }
+
+  // The check `LlmCheck.default` runs - the default section through `Llm4sConfig`, the client through
+  // `LLMConnect` - for a workload-identity section whose baseUrl the provider refuses. `refusedBaseUrl` reaches
+  // the fake token server, so an exchange or request made before the refusal would show in its records.
+  "LlmCheck on a workload-identity section" should "be unconfigured, without exchanging, for a baseUrl the rules refuse" in
+    org.llm4s.testkit.FakeTokenExchangeServer.withServer { fake =>
+      given org.llm4s.llmconnect.spi.ProviderRegistry = org.llm4s.llmconnect.spi.ProviderRegistry.default
+      val hocon =
+        s"""llm4s.providers {
+           |  provider = "main"
+           |  main {
+           |    provider = "openai-compatible"
+           |    model    = "m"
+           |    baseUrl  = "${fake.refusedBaseUrl}/serving-endpoints"
+           |    auth { identityToken = "eyJ.svid.sig", tokenUrl = "${fake.baseUrl}/oidc/v1/token" }
+           |  }
+           |}""".stripMargin
+      val check = new LlmCheck(
+        () => Llm4sConfig.providerFrom(pureconfig.ConfigSource.string(hocon)),
+        config =>
+          Llm4sConfig.modelRegistryService().flatMap { registry =>
+            given org.llm4s.model.ModelRegistryService = registry
+            org.llm4s.llmconnect.LLMConnect.getClient(config)
+          }
+      )
+
+      check.run() shouldBe Unconfigured("ConfigurationError")
+      fake.exchanges shouldBe empty
+      fake.apiAuthorizations shouldBe empty
+    }
 }

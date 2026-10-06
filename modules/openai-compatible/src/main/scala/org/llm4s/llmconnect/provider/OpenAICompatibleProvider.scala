@@ -189,6 +189,22 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver
   ): Result[ProviderConfig] =
+    validatedConfig(providerName, section)(baseUrl =>
+      registryWindow(providerName, section.model.asString, baseUrl, section.extra(RegistryProviderKey))
+    )
+
+  /**
+   * The validated [[OpenAICompatibleConfig]] a section describes - through
+   * [[org.llm4s.llmconnect.config.OpenAICompatibleConfig.fromValues]], so every rule of
+   * `OpenAICompatibleConfig.validate` holds. Chat ([[buildConfig]]) and [[OpenAICompatibleModelLister]] both
+   * build their config here, so neither can reach the network with a config the other would refuse; in
+   * particular no token is exchanged, or sent, for a section whose `baseUrl` or `auth.tokenUrl` is not
+   * `https`. `registryWindow` gives the model registry's context window for the resolved base URL, used when
+   * the section sets no `contextWindow`.
+   */
+  private[llm4s] def validatedConfig(providerName: String, section: NamedProviderConfig)(
+    registryWindow: String => Option[Int]
+  ): Result[OpenAICompatibleConfig] =
     for
       baseUrl           <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
       streamUsage       <- parseStreamUsage(providerName, section.extra(StreamUsageKey))
@@ -200,9 +216,7 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
           model = section.model.asString,
           baseUrl = baseUrl,
           apiKey = section.apiKey.map(_.asKey),
-          contextWindow = contextWindow.orElse(
-            registryWindow(providerName, section.model.asString, baseUrl, section.extra(RegistryProviderKey))
-          ),
+          contextWindow = contextWindow.orElse(registryWindow(baseUrl)),
           reserveCompletion = reserveCompletion,
           headers = section.headers,
           streamUsage = streamUsage,
@@ -212,16 +226,15 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
         .map(ProviderConfig.inSection(providerName, Map("tokenExchange.tokenUrl" -> s"auth.$TokenUrlKey")))
     yield config
 
-  /** The exchange a section's `auth` block describes, if it has one. */
-  private[llm4s] def tokenExchangeOf(
+  /** The exchange a section's `auth` block describes, if it has one; unvalidated - see [[validatedConfig]]. */
+  private def tokenExchangeOf(
     providerName: String,
     section: NamedProviderConfig
   ): Result[Option[TokenExchangeConfig]] =
     section.auth match
       case None       => Right(None)
       case Some(auth) =>
-        // The https rule on `tokenUrl` is `OpenAICompatibleConfig.validate`'s, applied by `fromValues`, and the
-        // exchange's own for the model lister.
+        // The https rule on `tokenUrl` is `OpenAICompatibleConfig.validate`'s, applied by `fromValues`.
         ProviderDescriptor
           .requireAuthExtra(providerName, auth, TokenUrlKey)
           .map(tokenUrl =>

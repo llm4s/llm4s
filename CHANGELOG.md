@@ -133,7 +133,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   any case and a non-https `tokenUrl`; an `AnthropicConfig.workloadIdentity` refuses a non-https
   `baseUrl`; and an `OpenAIConfig.workloadIdentity` is refused unless the config belongs to `openai`, since
   a Requesty or OpenRouter config would send the OpenAI token to that provider. An `OpenAICompatibleClient`
-  whose credential is `Dynamic` or `Exchange` refuses a dialect that sets `Authorization`.
+  whose credential is `Dynamic` or `Exchange` refuses a dialect that sets `Authorization`, and a `baseUrl`
+  (or, for `Exchange`, a `tokenUrl`) that is not `https` or loopback `http`. The `openai-compatible` model
+  lister builds its config through the same path as chat (`OpenAICompatibleProvider.buildConfig`), so
+  `Llm4sConfig.listModels` refuses what chat refuses before it exchanges anything.
   **Migration:** `OpenAICompatibleConfig` follows the growth-prone data-type pattern: its constructor
   and `copy` are private; build it with the companion `apply` (defaults unchanged) and adjust it with
   `withBaseUrl`, `withApiKey`, `withContextWindow`, `withReserveCompletion`, `withHeaders`, `withHeader`,

@@ -20,6 +20,15 @@ final class FakeTokenExchangeServer private (server: HttpServer, executor: Execu
 
   val baseUrl: String = s"http://localhost:${server.getAddress.getPort}"
 
+  /**
+   * This server under a URL that llm4s's workload-identity rules refuse - plain `http` to a host that is
+   * not one of the loopback literals they accept (`localhost`, `127.x.y.z`, `[::1]`) - but that still
+   * reaches it: the IPv4-mapped IPv6 form of `127.0.0.1`, which the JVM connects to over IPv4. Configure a
+   * `baseUrl` or `tokenUrl` with it to prove a refusal happens before any request: a request that went out
+   * would show in [[exchanges]] or [[apiAuthorizations]].
+   */
+  val refusedBaseUrl: String = s"http://[::ffff:127.0.0.1]:${server.getAddress.getPort}"
+
   private val lock           = new Object
   private val exchangeLog    = mutable.Buffer.empty[Map[String, String]]
   private val authorizations = mutable.Buffer.empty[String]

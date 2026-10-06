@@ -72,6 +72,40 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       fake.issuedTokens.size should be >= 2
     }
 
+    // `refusedBaseUrl` reaches the fake, where the SDK would post the jwt-bearer grant, so a refusal that came
+    // after any request would show in its records.
+    "be refused on every entry point, before the SDK posts the grant, for a baseUrl the rules refuse" in
+      FakeTokenExchangeServer.withServer { fake =>
+        given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+        val file = svidFile(TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com"))
+        val body = section(fake.refusedBaseUrl, file.toString)
+        // Section validation leaves the baseUrl to the provider, so the section itself loads.
+        val named = sectionOf(body)
+        // Chat from a section: buildConfig, as Llm4sConfig.provider, LLMConnect and the testkit use.
+        ProviderModuleChecks.buildClient(AnthropicProvider, named).left.value shouldBe a[ConfigurationError]
+        ProviderTestConfig.loadProvider("main", s"llm4s.providers.main {\n$body\n}").left.value shouldBe
+          a[ConfigurationError]
+        // Chat from a config built by hand: the companion apply, LLMConnect and the constructor.
+        val byHand = AnthropicConfig(
+          "",
+          "claude-test",
+          fake.refusedBaseUrl,
+          200000,
+          4096,
+          Some(AnthropicWorkloadIdentity(file, "fdrl_1", "org_1"))
+        )
+        AnthropicClient(byHand).left.value shouldBe a[ConfigurationError]
+        org.llm4s.llmconnect.LLMConnect.getClient(byHand).left.value shouldBe a[ConfigurationError]
+        an[IllegalArgumentException] should be thrownBy new AnthropicClient(byHand)
+        // Model listing refuses workload identity outright.
+        org.llm4s.config.AnthropicModelLister
+          .listModels(named, org.llm4s.http.Llm4sHttpClient.create())
+          .left
+          .value shouldBe a[ConfigurationError]
+        fake.exchanges shouldBe empty
+        fake.apiAuthorizations shouldBe empty
+      }
+
     "reject a literal identityToken, since the SDK reads only a file" in {
       val body   = section("https://api.anthropic.com", "eyJ.x.y", "identityToken")
       val result = ProviderTestConfig.loadProvider("main", s"llm4s.providers.main {\n$body\n}")
