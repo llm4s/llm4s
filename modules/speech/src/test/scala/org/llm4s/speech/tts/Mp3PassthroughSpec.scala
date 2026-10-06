@@ -9,7 +9,8 @@ import org.llm4s.speech.tts.provider.{ AzureTTSClient, ElevenLabsTTSClient, Open
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.nio.file.Files
+import java.nio.file.{ Files, Path }
+import scala.util.Using
 
 /** Opt-in MP3 output: the exact format parameter per client, bytes untouched, and PCM helpers refusing it. */
 class Mp3PassthroughSpec extends AnyFlatSpec with Matchers {
@@ -84,11 +85,8 @@ class Mp3PassthroughSpec extends AnyFlatSpec with Matchers {
       AudioIO.saveWav(mp3Audio, dir.resolve("b.wav")).left.toOption.get shouldBe a[ValidationError]
       AudioIO.saveRawPcm16(mp3Audio, dir.resolve("c.pcm")).left.toOption.get shouldBe a[ValidationError]
       AudioPreprocessing.standardizeForSTT(mp3Audio, 16000).left.toOption.get shouldBe a[ValidationError]
-      Files.list(dir).count() shouldBe 0
-    } finally {
-      Files.list(dir).forEach(p => Files.deleteIfExists(p))
-      Files.deleteIfExists(dir)
-    }
+      entryCount(dir) shouldBe 0
+    } finally deleteDir(dir)
   }
 
   "An MP3 AudioMeta" should "not claim a sample width, so PCM code that is handed it anyway refuses it" in {
@@ -100,11 +98,8 @@ class Mp3PassthroughSpec extends AnyFlatSpec with Matchers {
       val relabelled = mp3Audio.copy(format = AudioFormat.WavPcm16)
       val error      = WavFileGenerator.saveAsWav(relabelled, dir.resolve("a.wav")).left.toOption.get
       error.message should include("Bit depth")
-      Files.list(dir).count() shouldBe 0
-    } finally {
-      Files.list(dir).forEach(p => Files.deleteIfExists(p))
-      Files.deleteIfExists(dir)
-    }
+      entryCount(dir) shouldBe 0
+    } finally deleteDir(dir)
   }
 
   "AudioIO.saveMp3" should "write the bytes as they are, and refuse PCM" in {
@@ -124,5 +119,13 @@ class Mp3PassthroughSpec extends AnyFlatSpec with Matchers {
     mp3Audio.isPcm shouldBe false
     mp3Audio.copy(format = AudioFormat.RawPcm16).isPcm shouldBe true
     mp3Audio.copy(format = AudioFormat.WavPcm16).requirePcm("x").isRight shouldBe true
+  }
+
+  // Files.list holds a directory handle until its stream is closed, which on Windows blocks deleting the directory.
+  private def entryCount(dir: Path): Long = Using.resource(Files.list(dir))(_.count())
+
+  private def deleteDir(dir: Path): Unit = {
+    Using.resource(Files.list(dir))(_.forEach(p => Files.deleteIfExists(p)))
+    Files.deleteIfExists(dir)
   }
 }
