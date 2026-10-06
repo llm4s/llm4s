@@ -103,40 +103,54 @@ Every error is an `LLMError`, carrying a `message`, an optional `code` and a `co
 `LLMError.isRecoverable(error)` tells you which, for an error that carries a marker. Some errors from
 other modules carry neither; see [errors defined by other modules](#errors-defined-by-other-modules).
 
-| Error | Recoverable | Raised when |
+| Error | Recoverable | Where the library raises it |
 |---|---|---|
-| `AuthenticationError` | no | The provider rejects the credentials (HTTP 401 or 403). |
-| `ConfigurationError` | no | Configuration is missing or invalid: no provider section, no API key, an unknown model. |
-| `ValidationError` | no | A request fails validation before or at the provider (HTTP 400 becomes a `ValidationError` on field `request`). |
-| `InvalidInputError` | no | An input value is rejected, with the `field`, the `value` and the `reason`. |
-| `RateLimitError` | yes | The provider answers HTTP 429, or `ReliableClient`'s own limiter throttles the call. It carries `retryAfter` when the provider says how long to wait. |
-| `ServiceError` | yes | Any other non-2xx status from a provider, or a call rejected by an open circuit breaker (503). It carries `httpStatus`; see the note below. |
-| `NetworkError` | yes | A connection fails, a host is unknown, or I/O breaks. |
-| `TimeoutError` | yes | A connect, request or socket timeout elapses in llm4s's own HTTP client, or a `ReliableClient` deadline passes. A client built on a vendor SDK (OpenAI, Anthropic) reports its timeouts as a `NetworkError`. |
-| `APIError` | yes | An image-processing (vision) provider call fails, with a message and, optionally, a status code. |
-| `ExecutionError` | yes | A tool or MCP call fails, an orchestration step fails, or `recoverWithBackoff` runs out of attempts ([section 9](#9-recovering-from-failures)). |
-| `SystemError` | yes | Not raised by llm4s itself; for your own code, when something unexpected goes wrong that may be transient. |
-| `OptimisticLockFailure` | yes | Two writers modify the same memory record; re-read it and try again. |
+| `AuthenticationError` | no | A provider rejects the credentials: HTTP 401 or 403, Anthropic's `UnauthorizedException`, Bedrock's access-denied or missing-credentials exceptions, Gemini's invalid-key 400. Also when Vertex AI or watsonx cannot obtain a token, and from `DefaultErrorMapper` for an exception whose message mentions 401. |
+| `ConfigurationError` | no | Configuration is missing or invalid: no provider section, no API key, a provider id that no module on the classpath registers, an embedding model with no known dimensions, or a block a config loader cannot read (providers, embeddings, tracing, metrics, tools, RAG, speech). |
+| `ValidationError` | no | A request or value is rejected: an invalid message or conversation, a model the model registry does not know, a guardrail rejecting input or output (the built-in guardrails reject with one), HTTP 400 (on field `request`), Anthropic's or Bedrock's invalid-request exceptions, or a response body that cannot be parsed. |
+| `InvalidInputError` | no | Only `llm4s-image`'s image processing (`LocalImageProcessor`, saving an image): an unreadable path, a bad resize or crop, a path traversal. It carries the `field`, the `value` and the `reason`. |
+| `RateLimitError` | yes | A provider's rate limit: HTTP 429, or Anthropic's or Bedrock's throttling exception. Also `ReliableClient`'s own limiter, and `DefaultErrorMapper` for an exception whose message mentions 429. It carries `retryAfter` when the provider says how long to wait. |
+| `ServiceError` | yes | Any other non-2xx status from a provider (through `HttpErrorMapper` or `Llm4sHttpClient`, and from Bedrock and watsonx), or a call rejected by an open circuit breaker (`ReliableClient` or `ErrorRecovery.CircuitBreaker`, status 503). It carries `httpStatus`; see the note below. |
+| `NetworkError` | yes | A connection fails, a host is unknown or I/O breaks, in llm4s's HTTP client or the Bedrock client; `DefaultErrorMapper`, which the OpenAI and Anthropic clients use for I/O failures, gives one for a socket timeout or a refused connection. Also a URL refused by the SSRF check, and a failed `llm4s-rag` URL, web-crawl or S3 load, including a non-2xx answer to `UrlLoader`. |
+| `TimeoutError` | yes | A connect, request or socket timeout elapses in llm4s's own HTTP client, or a `ReliableClient` deadline passes. The vendor-SDK clients map timeouts themselves: OpenAI and Bedrock report a `NetworkError`, and Anthropic maps its exceptions through `DefaultErrorMapper`. |
+| `APIError` | yes | Only `llm4s-image`'s vision clients (OpenAI, Anthropic, Gemini), through `LLMError.apiCallFailed`, when the vision API call fails or returns no text; it carries the provider and, optionally, a status code. Image generation has its own errors (see below). |
+| `ExecutionError` | yes | Only `ErrorRecovery.recoverWithBackoff`, when it runs out of attempts ([section 9](#9-recovering-from-failures)). Tool, MCP and orchestration failures are other types; see the note below. |
+| `SystemError` | yes | Not raised by the library; available for your own code, for an unexpected failure that may be transient. |
+| `OptimisticLockFailure` | yes | Only `llm4s-memory-postgres`'s `PostgresMemoryStore`, when another writer updated the same memory record first; re-read it and try again. |
 | `CancelledError` | no | The thread was interrupted. Interruption is how llm4s cancels work, and a cancelled call is never retried. |
-| `ProcessingError` | no | A storage, parsing or processing step fails: a vector, keyword or memory store operation, document extraction, a knowledge-graph query, image processing. |
-| `NotFoundError` | no | A required key or resource does not exist. |
-| `ContextError`, `TokenizerError` | no | Context management fails (a token budget is exceeded, or compression or summarisation fails), or no tokenizer is available. |
-| `SimpleError`, `UnknownError` | no | A bare message, or an unexpected exception that was wrapped. |
+| `ProcessingError` | no | A storage, parsing or processing step fails: a vector-store, keyword-index or memory-store operation, RAG document loading, extraction or permissions, knowledge-graph storage, extraction or queries, speech audio processing, image encoding or saving. |
+| `NotFoundError` | no | A memory store (in-memory, SQLite, Postgres) is asked to update a memory it does not hold, or `VectorStoreFactory` is given an unknown backend name. |
+| `ContextError` | no | Context compression fails: `LLMCompressor`'s LLM call fails, or `ToolOutputCompressor` cannot store an artifact or parse JSON content. |
+| `TokenizerError` | no | `ConversationTokenCounter` has no tokenizer for the requested id. |
+| `SimpleError` | no | The MCP client and its transports (`llm4s-mcp`): connection, session, JSON-RPC and server-process failures. |
+| `UnknownError` | no | An unexpected exception, wrapped: the fallback of `DefaultErrorMapper` (and so of `toResult` and `toLLMError`), an unexpected failure in llm4s's HTTP client, or a tracing backend that fails to start or to export. |
 
 The table lists the `LLMError` types in `org.llm4s.error`, the package that is the source of truth for this core
 set. Other modules define errors of their own, below.
+
+**Same name, different type.** A failed tool call is not an `org.llm4s.error.ExecutionError`.
+`ToolRegistry.execute`, and the MCP tool registry, return a `ToolCallError` (`org.llm4s.toolapi`), whose
+case for a tool that threw is `ToolCallError.ExecutionError`. `ToolCallError` is not an `LLMError`, and the
+agent hands it back to the model as the tool's result instead of failing the run. Orchestration fails with
+`OrchestrationError.NodeExecutionError` or `PlanExecutionError`, and a graph's tool loop with
+`GraphError.ToolFailed`; both are described below.
 
 **`ServiceError` and its status.** The marker says a `ServiceError` is recoverable, but a 404 is not
 going to fix itself. When it matters, look at `httpStatus`: `error.isRecoverableStatus` (from
 `ServiceError.ServiceErrorOps`) is true for 5xx, 429 and 408. `recoverWithBackoff` and
 `ReliableClient` retry a `ServiceError` only when it is.
 
-**Which status becomes which error.** The table describes the clients that map HTTP responses through
-`HttpErrorMapper`, among them OpenAI, Azure, Requesty, Gemini, Vertex AI, Ollama and the
-OpenAI-compatible providers. The Anthropic client maps its SDK's exceptions instead: unauthorized (401)
-to `AuthenticationError`, rate limited to `RateLimitError` (with no `retryAfter`), invalid data to
-`ValidationError`, and anything else, including other HTTP statuses, through `DefaultErrorMapper`
-([section 7](#7-turning-exceptions-into-errors)), usually to an `UnknownError`.
+**Which status becomes which error.** The status mapping in the table is `HttpErrorMapper`'s: 401 and
+403 to `AuthenticationError`, 429 to `RateLimitError`, 400 to `ValidationError`, any other non-2xx to
+`ServiceError`. The OpenAI, Azure, Requesty, Gemini, Vertex AI, Ollama, watsonx and OpenAI-compatible
+clients use it; Gemini first turns a 400 that reports an invalid API key into an `AuthenticationError`.
+The Anthropic client maps its SDK's exceptions instead: unauthorized (401) to `AuthenticationError`, rate
+limited to `RateLimitError` (with no `retryAfter`), invalid data to a `ValidationError` on field `input`,
+and anything else, including other HTTP statuses, through `DefaultErrorMapper`
+([section 7](#7-turning-exceptions-into-errors)), usually to an `UnknownError`. The Bedrock client maps the
+AWS SDK's exceptions: throttling or an exceeded quota to `RateLimitError`, an invalid request to
+`ValidationError`, access denied, a 401 or 403, or missing credentials to `AuthenticationError`, any other
+service status to `ServiceError`, and any other client failure to `NetworkError`.
 
 ### Errors defined by other modules
 
@@ -145,16 +159,18 @@ Some modules add their own `LLMError` subtypes. These carry **neither** marker, 
 
 | Module | Package | Errors |
 |---|---|---|
-| `llm4s-core` | `org.llm4s.llmconnect.model` | `EmbeddingError`, the error type of the embeddings API (`EmbeddingClient.embed` returns a `Result`) |
-| `llm4s-agent` | `org.llm4s.agent.orchestration` | `OrchestrationError`: `PlanValidationError`, `NodeExecutionError` (it has its own `recoverable` flag), `PlanExecutionError`, `TypeMismatchError`, `AgentTimeoutError` |
-| `llm4s-rag` | `org.llm4s.rag.evaluation`, `org.llm4s.reranker` | `EvaluationError`, `RerankError` (the error type of `Reranker.rerank`) |
-| `llm4s-speech` | `org.llm4s.speech.tts`, `.stt`, `.io` | `TTSError`, `STTError` (it has its own `retryable` flag), `WavFileGenerator.WavError`, `AudioIO.AudioIOError` |
+| `llm4s-core` | `org.llm4s.llmconnect.model` | `EmbeddingError`: how `EmbeddingClient.embed` and the embedding providers (OpenAI, Ollama, Voyage, Cohere, Jina) report a failure other than cancellation, except that the Cohere provider reports a 429 as a `RateLimitError` |
+| `llm4s-agent` | `org.llm4s.agent.orchestration` | `OrchestrationError`: `PlanValidationError`, `PlanExecutionError` and `TypeMismatchError` from `PlanRunner`; `NodeExecutionError` from `PlanRunner` and `TypedAgent` (it has its own `recoverable` flag); `AgentTimeoutError` from `Policies.withTimeout` |
+| `llm4s-rag` | `org.llm4s.rag.evaluation`, `org.llm4s.reranker` | `EvaluationError` from RAGAS evaluation and the RAG benchmark tools; `RerankError` from the Cohere and LLM rerankers (`Reranker.rerank`) |
+| `llm4s-speech` | `org.llm4s.speech.tts`, `.stt`, `.io` | `TTSError` from the text-to-speech clients; `STTError` from the speech-to-text clients (it has its own `retryable` flag); `WavFileGenerator.WavError` and `AudioIO.AudioIOError` from generating and saving audio files |
 
 These are marked, so `isRecoverable` works on them: `GraphError` in `llm4s-agent`
-(`org.llm4s.agent.graph`; every case is non-recoverable except `DeadlineExceeded`) and the image errors in
-`llm4s-image` (`org.llm4s.imagegeneration`). The image module reuses the names `AuthenticationError`,
-`RateLimitError`, `ValidationError` and `UnknownError`, so import those by package instead of
-with a wildcard next to `org.llm4s.error._`.
+(`org.llm4s.agent.graph`, from the graph runtime; every case is non-recoverable except `DeadlineExceeded`)
+and `ImageGenerationError` in `llm4s-image` (`org.llm4s.imagegeneration`, from the image-generation
+clients; a `ServiceError` there is recoverable only for a transient status). The image module reuses the
+names `AuthenticationError`, `RateLimitError`, `ServiceError`, `ValidationError` and `UnknownError`, so
+import those by package instead of with a wildcard next to `org.llm4s.error._`. Its vision clients
+(`org.llm4s.imageprocessing`) return the core errors in the table above.
 
 `isRecoverable` should be made total in a later change. Until then, match on the marker trait, as the next
 section does, which is safe for every error.
