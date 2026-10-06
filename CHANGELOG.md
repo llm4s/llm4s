@@ -316,15 +316,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/check-doc-support.sh`, in the `quick-checks` job, fails when the docs say something the build does not
   do. The build's side comes from sbt itself: a new `dumpBuildModel <file>` command (`project/BuildModel.scala`)
   writes the loaded build as JSON - projects, base directories, aggregates, configurations and every defined key,
-  commands, aliases with their bodies, Scala versions and resolved scalac/javac options. The script compares the
-  Scala version in the docs with the projects' `scalaVersion`, the JDK in the docs with the JDKs `ci.yml` runs and
-  the build's release target, the modules in CLAUDE.md's repository-structure block with the directories on disk
-  and the projects' base directories (in both directions), and replays every `sbt` command quoted in the docs (and
-  every alias body) against the model the way sbt runs it - `project X` switches persist, keys resolve through
-  configuration, `ThisBuild` and `Global` delegation or aggregation, and a plugin's configuration exists only
-  where the plugin is enabled. `scripts/test-check-doc-support.sh` runs each kind of claim against a fixture
-  model and Markdown fixtures, with no sbt. Three stale claims it found are fixed: `sbt dependencyCheck` (no such task) in the review
-  guidelines, `sbt run "Explain ..."` in the g8 guide (sbt reads the quoted text as a second command; it is now
+  commands, aliases with their bodies and Scala versions. The script checks that `Scala N` in the docs agrees with
+  the build's `scalaVersion` (a version named only to say it is unsupported or deferred is allowed), that no doc
+  claims cross-building the build does not do, that every `JDK N` is one `ci.yml` runs and a documented floor
+  (`JDK N+`, `JDK N or newer`, `requires JDK N`) is the oldest of them, that the modules in CLAUDE.md's
+  repository-structure block and the projects' base directories match in both directions, and it replays every
+  `sbt` command quoted in the docs (and every alias body) against the model - `project X` switches persist and
+  keys resolve through configuration, `ThisBuild`/`Global` delegation and aggregation. Prose is matched with
+  simple patterns; the script header lists what is deliberately not checked (version lists, ranges and
+  ceilings, sbt behind wrappers or in YAML block scalars, `set`/`eval` expressions). A line can opt out with
+  `doc-support: ignore`. `scripts/test-check-doc-support.sh` runs each check against a fixture model, with no
+  sbt. Three stale claims it found are fixed: `sbt dependencyCheck` (no such task) in the review guidelines,
+  `sbt run "Explain ..."` in the g8 guide (sbt reads the quoted text as a second command; it is now
   `sbt "run Explain ..."`), and `modules/gradle-demo`, which CLAUDE.md did not name.
 - **Error handling guide** ([#960](https://github.com/llm4s/llm4s/issues/960)):
   `docs/guide/error-handling.md` teaches `Result[A]` and `LLMError` in practice: the basic pattern,

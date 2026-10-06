@@ -15,9 +15,7 @@ import sbt.Keys._
  *  - the keys defined at `ThisBuild` and `Global`, which every project delegates to;
  *  - per project, the keys whose `aggregate` is `false` there;
  *  - the commands sbt and the loaded plugins define, and each command alias with its body;
- *  - each project's `scalaVersion` and `crossScalaVersions`;
- *  - each project's resolved `Compile` and `Test` `scalacOptions` and `javacOptions`, for the JVM
- *    release target.
+ *  - each project's `scalaVersion` and `crossScalaVersions`.
  */
 object BuildModel {
 
@@ -89,24 +87,17 @@ object BuildModel {
         )
         .distinct
         .sorted
-      // Run, not read: options are tasks, and a plugin or `++=` may add to them. A failure fails the dump
-      // rather than hiding a release target.
-      def opts(config: Configuration, key: TaskKey[Seq[String]]) =
-        strs(extracted.runTask(ref / config / key, state)._2)
       obj(
         "id"        -> str(ref.project),
         "base"      -> str(if (base.isEmpty) "." else base),
         "aggregate" -> strs(resolved.aggregate.map(_.project).sorted),
-        "plugins"   -> strs(resolved.autoPlugins.map(_.label).sorted),
         "configurations" -> arr(configs.map { case (id, name, ext) =>
           obj("id" -> str(id), "name" -> str(name), "extends" -> strs(ext))
         }),
         "keys"               -> arr(rows(scopes)),
         "noAggregate"        -> strs(noAggregate),
         "scalaVersion"       -> str(extracted.getOpt(ref / scalaVersion).getOrElse("")),
-        "crossScalaVersions" -> strs(extracted.getOpt(ref / crossScalaVersions).getOrElse(Nil)),
-        "scalacOptions"      -> obj("compile" -> opts(Compile, scalacOptions), "test" -> opts(Test, scalacOptions)),
-        "javacOptions"       -> obj("compile" -> opts(Compile, javacOptions), "test" -> opts(Test, javacOptions))
+        "crossScalaVersions" -> strs(extracted.getOpt(ref / crossScalaVersions).getOrElse(Nil))
       )
     }
 

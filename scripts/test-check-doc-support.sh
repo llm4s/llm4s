@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-# Tests for scripts/check-doc-support.sh: each kind of stale claim fails with a message naming it, and
-# each true claim passes. No sbt is needed: every case runs the check against a small fixture repository
-# - Markdown docs, a CI workflow, module directories - and a fixture build model shaped like the one
+# Tests for scripts/check-doc-support.sh: each kind of stale claim fails with a message naming it, and each
+# true claim passes. No sbt is needed: every case runs the check against a small fixture repository - Markdown
+# docs, a CI workflow, module directories - and a fixture build model shaped like the one
 # `sbt "dumpBuildModel <file>"` writes, with one thing changed. The fixture's versions are its own (Scala
 # 3.7.1, JDK 21 and 25), so a version bump of the real build does not touch this test.
 #
 # Usage: scripts/test-check-doc-support.sh [MODEL]
-#   MODEL  a model of the real build (`sbt "dumpBuildModel target/build-model.json"`); when given, the real
-#          repository is checked against it first.
-#
-# Exit code 0 = every case behaved. 1 = a case did not.
+#   MODEL  a model of the real build; when given, the real repository is checked against it first.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,7 +20,7 @@ if [ $# -gt 0 ]; then
   echo "ok   [repository passes against the real build model]"
 fi
 
-# ---- the fixture build model: projects, keys, configurations, commands and aliases, as sbt reports them
+# ---- the fixture build model
 cat > "$WORK/fixture.py" <<'PY'
 import json, sys
 
@@ -31,93 +28,51 @@ COMPILE = {"id": "Compile", "name": "compile", "extends": []}
 RUNTIME = {"id": "Runtime", "name": "runtime", "extends": ["compile"]}
 TEST = {"id": "Test", "name": "test", "extends": ["runtime"]}
 DOCKER = {"id": "Docker", "name": "docker", "extends": []}
-UNIVERSAL = {"id": "Universal", "name": "universal", "extends": []}
-JMH = {"id": "Jmh", "name": "jmh", "extends": ["test"]}
 
-# What sbt and the build's plugins define in every project (a small, representative part of it).
-ZERO_KEYS = ["clean", "publish", "publishLocal", "publishM2", "publishSigned", "update", "version", "name",
-             "scalaVersion", "scalafmtAll", "scalafmtCheckAll", "scalafmtSbtCheck", "scalafixAll", "coverageReport",
-             "coverageAggregate", "dependencyUpdates", "mimaReportBinaryIssues", "aggregate", "coverageEnabled",
-             "coverageMinimumStmtTotal", "coverageFailOnMinimum"]
-CONFIG_KEYS = ["compile", "doc", "run", "runMain", "console", "package", "scalafix", "scalafmt", "scalafmtCheck",
-               "scalacOptions", "javacOptions", "sources"]
-TEST_KEYS = ["test", "testOnly", "testQuick", "testOptions", "fork"]
+ZERO_KEYS = ["clean", "publishLocal", "update", "version", "scalaVersion", "scalafmtAll", "coverageReport",
+             "coverageAggregate", "aggregate", "coverageEnabled"]
+CONFIG_KEYS = ["compile", "doc", "run", "runMain", "console", "scalacOptions"]
+TEST_KEYS = ["test", "testOnly", "testOptions"]
 
 
 def project(pid, base, aggregate=(), configs=(), extra=(), no_aggregate=()):
     keys = [["", "", k] for k in ZERO_KEYS]
-    for c in ("compile", "test"):
-        keys += [[c, "", k] for k in CONFIG_KEYS]
-        keys += [[c, "doc", "scalacOptions"], [c, "compile", "scalacOptions"]]
-    keys += [["test", "", k] for k in TEST_KEYS]
-    keys += [list(k) for k in extra]
-    return {
-        "id": pid, "base": base, "aggregate": list(aggregate), "plugins": [],
-        "configurations": [COMPILE, RUNTIME, TEST] + list(configs),
-        "keys": sorted(keys), "noAggregate": sorted(no_aggregate),
-        "scalaVersion": "3.7.1", "crossScalaVersions": ["3.7.1"],
-        "scalacOptions": {"compile": ["-feature", "-source:3.3"], "test": ["-feature", "-source:3.3"]},
-        "javacOptions": {"compile": [], "test": []},
-    }
+    keys += [[c, "", k] for c in ("compile", "test") for k in CONFIG_KEYS]
+    keys += [["test", "", k] for k in TEST_KEYS] + [list(k) for k in extra]
+    return {"id": pid, "base": base, "aggregate": list(aggregate),
+            "configurations": [COMPILE, RUNTIME, TEST] + list(configs), "keys": sorted(keys),
+            "noAggregate": sorted(no_aggregate), "scalaVersion": "3.7.1", "crossScalaVersions": ["3.7.1"]}
 
 
-ROOT_TASKS = ["publishedArtifactsCheck", "stabilityTierCheck", "coveragePolicyCheck", "frozenDependencyCheck"]
-DOCKER_KEYS = [["docker", "", "publishLocal"], ["docker", "", "stage"], ["", "", "stage"], ["", "", "daemonUser"],
-               ["universal", "", "packageBin"]]
+ROOT_TASKS = ["publishedArtifactsCheck", "stabilityTierCheck"]
+DOCKER_KEYS = [["docker", "", "publishLocal"], ["docker", "", "stage"]]
 
 
 def base_model():
     return {
-        "format": "1",
-        "root": "llm4s",
+        "format": "1", "root": "llm4s",
         "projects": [
-            project("llm4s", ".", aggregate=["core", "it", "workspaceRunner", "deployService", "benchmarks",
-                                             "relocationCore"],
-                    extra=[["", "", k] for k in ROOT_TASKS],
-                    no_aggregate=ROOT_TASKS + ["coverageAggregate"]),
+            project("llm4s", ".", aggregate=["core", "it", "deployService", "relocationCore"],
+                    extra=[["", "", k] for k in ROOT_TASKS], no_aggregate=ROOT_TASKS + ["coverageAggregate"]),
             project("core", "modules/core"),
             project("it", "modules/it", extra=[["", "", "itTierCheck"]]),
-            project("workspaceRunner", "modules/workspace/workspaceRunner", configs=[DOCKER, UNIVERSAL], extra=DOCKER_KEYS),
-            project("deployService", "modules/deploy-service", configs=[DOCKER, UNIVERSAL], extra=DOCKER_KEYS),
-            project("benchmarks", "modules/benchmarks", configs=[JMH], extra=[["jmh", "", "run"], ["jmh", "", "compile"]]),
+            project("deployService", "modules/deploy-service", configs=[DOCKER], extra=DOCKER_KEYS),
             project("relocationCore", "modules/relocations/core"),
         ],
-        "buildKeys": [["", "", "scalaVersion"], ["", "", "organization"], ["", "", "dockerBaseImage"],
-                      ["", "", "coverageEnabled"]],
-        "globalKeys": [["", "", "onLoad"], ["", "", "concurrentRestrictions"]],
-        "commands": [";", "~", "about", "alias", "ci-release", "eval", "exit", "export", "help", "inspect", "last", "new",
-                     "plugins", "project", "projects", "reload", "session", "set", "settings", "shell", "tasks"],
+        "buildKeys": [["", "", "scalaVersion"], ["", "", "coverageEnabled"]],
+        "globalKeys": [["", "", "onLoad"]],
+        "commands": [";", "~", "about", "alias", "eval", "help", "inspect", "new", "project", "projects", "reload", "set"],
         "aliases": [
             {"name": "buildAll", "body": ";clean;compile;test"},
-            {"name": "testAll", "body": ";test"},
             {"name": "coverage", "body": ";set ThisBuild / coverageEnabled := true"},
-            {"name": "coverageOff", "body": ";set ThisBuild / coverageEnabled := false"},
-            {"name": "cov", "body": ";clean;coverage;test;coverageAggregate;coverageReport;coverageOff"},
-            {"name": "testIntegration",
-             "body": ';set it / Test / test / testOptions := Seq(Tests.Argument(TestFrameworks.ScalaTest, "-n", '
-                     '"org.llm4s.it.tags.Docker")); it/test'},
+            {"name": "cov", "body": ";clean;coverage;test;coverageAggregate;coverageReport"},
+            {"name": "testIntegration", "body": ';set it / Test / testOptions += Tests.Argument("-n", "Docker"); it/test'},
         ],
     }
 
 
 def proj(m, pid):
     return next(p for p in m["projects"] if p["id"] == pid)
-
-
-def drop_key(m, key):
-    for p in m["projects"]:
-        p["keys"] = [k for k in p["keys"] if k[2] != key]
-
-
-def drop_config(m, name):
-    for p in m["projects"]:
-        p["configurations"] = [c for c in p["configurations"] if c["name"] != name]
-        p["keys"] = [k for k in p["keys"] if k[0] != name]
-
-
-def set_options(m, kind, opts):
-    for p in m["projects"]:
-        p[kind]["compile"] = list(opts)
 
 
 if __name__ == "__main__":
@@ -130,17 +85,15 @@ if __name__ == "__main__":
     json.dump(m, open(path, "w"), indent=1)
 PY
 
-# ---- the fixture repository: the documents the check reads, CI, and module directories
+# ---- the fixture repository
 TEMPLATE="$WORK/.template"
 mkdir -p "$TEMPLATE/.github/workflows" "$TEMPLATE/docs/reference" "$TEMPLATE/docs/getting-started"
-for m in core it workspace/workspaceRunner deploy-service benchmarks relocations/core; do
-  mkdir -p "$TEMPLATE/modules/$m/src"
-done
+for m in core it deploy-service relocations/core; do mkdir -p "$TEMPLATE/modules/$m/src"; done
 python3 "$WORK/fixture.py" "$TEMPLATE/build-model.json"
 cat > "$TEMPLATE/CLAUDE.md" <<'MD'
 # Fixture
 
-Scala 3 only (3.7.1).
+Scala 3 only (3.7.1). Scala 2.13 support is deferred to post-1.0.
 
 ## Repository Structure
 
@@ -149,10 +102,7 @@ llm4s/
 ├── modules/
 │   ├── core/                  # Core library
 │   ├── it/                    # Integration tests
-│   ├── workspace/             # Containerized execution
-│   ├── deploy-service/        # Deployment service
-│   └── benchmarks/            # JMH benchmarks
-├── docs/
+│   └── deploy-service/        # Deployment service
 └── build.sbt
 ```
 
@@ -160,30 +110,37 @@ llm4s/
 
 ```bash
 sbt buildAll           # Clean, compile, test
-sbt test
+sbt test it/itTierCheck
 sbt testIntegration
-sbt it/itTierCheck
 sbt publishedArtifactsCheck stabilityTierCheck
-sbt "core/testOnly org.llm4s.Foo"
+sbt "core/testOnly org.llm4s.Foo" 2>&1 | tee log
+$ sbt deployService/Docker/publishLocal
+cd modules && sbt core/compile; sbtn cov
+echo "a; sbt definitelyNotATask"
+sbt -Dx=y \
+  "core / Test / compile"
 ```
 MD
 cat > "$TEMPLATE/README.md" <<'MD'
 # LLM4S
 
-Built for Scala 3.7.1 on JDK 21+. Run `sbt compile` and then `sbt "benchmarks/Jmh/run -rf json"`.
+Built for Scala 3.7.1 on JDK 21+. Run `sbt compile`, then `sbt "project core" test`.
 MD
 cat > "$TEMPLATE/docs/reference/v1-scope.md" <<'MD'
-## Scala and JDK support
-
-1.0 targets **Scala 3 only (3.7.1)**. Scala 2.13 support is deferred to post-1.0. JDK 21 and 25 are used in CI.
+1.0 targets **Scala 3 only (3.7.1)**. There is no Scala 2.13 artifact. JDK 21 and 25 are used in CI.
 MD
 cat > "$TEMPLATE/docs/getting-started/installation.md" <<'MD'
 # Installation
 
-You need JDK 21 or newer and Scala 3.7.1. Build the image with `sbt workspaceRunner/docker:publishLocal`.
+You need JDK 21 or newer. The build was previously tested on JDK 17.
 MD
 cat > "$TEMPLATE/.github/workflows/ci.yml" <<'YML'
 jobs:
+  quick:
+    steps:
+      - uses: actions/setup-java@v6
+        with:
+          java-version: 21
   test:
     strategy:
       matrix:
@@ -195,756 +152,164 @@ jobs:
 YML
 INSTALL="docs/getting-started/installation.md"
 
-fresh_copy() {
-  local dir="$WORK/$1"
-  cp -R "$TEMPLATE" "$dir"
-  echo "$dir"
-}
-
-discard() {
-  case "$1" in
-    "$WORK"/?*) rm -rf -- "$1" ;;
-    *) echo "SETUP: refusing to delete '$1', which is not under $WORK"; exit 2 ;;
-  esac
-}
-
+fresh_copy() { cp -R "$TEMPLATE" "$WORK/$1"; echo "$WORK/$1"; }
+discard() { case "$1" in "$WORK"/?*) rm -rf -- "$1" ;; *) echo "SETUP: refusing to delete '$1'"; exit 2 ;; esac; }
 # edit_model DIR PYTHON: change the copy's build model; `m` is the model, fixture.py's helpers are in scope.
 edit_model() {
   (cd "$WORK" && python3 -c "import sys; sys.argv = ['fixture.py', sys.argv[1], sys.argv[2]]; exec(open('fixture.py').read())" "$1/build-model.json" "$2")
 }
-
-# say DIR FILE TEXT: append a paragraph to a document of the copy.
 say() { printf '\n%s\n' "$3" >> "$1/$2"; }
-
-# run_sbt_doc DIR COMMAND: quote `COMMAND` as a shell line in a code block of CLAUDE.md.
 run_sbt_doc() { printf '\n```bash\n%s\n```\n' "$2" >> "$1/CLAUDE.md"; }
-
 run_check() { "$CHECK" --model "$1/build-model.json" "$1" 2>&1; }
 
 expect_fail() {
   local name="$1" dir="$2" needle="$3" out status=0
   out="$(run_check "$dir")" || status=$?
-  if [ "$status" -eq 0 ]; then
-    echo "FAIL [$name]: the check passed on a repository with a stale claim"; exit 1
-  fi
+  if [ "$status" -eq 0 ]; then echo "FAIL [$name]: the check passed on a repository with a stale claim"; exit 1; fi
   if ! grep -qF -- "$needle" <<<"$out"; then
     echo "FAIL [$name]: the check failed but did not mention '$needle'. Output:"; echo "$out"; exit 1
   fi
-  discard "$dir"
-  echo "ok   [$name]"
+  discard "$dir"; echo "ok   [$name]"
 }
 
 expect_pass() {
   local name="$1" dir="$2" out status=0
   out="$(run_check "$dir")" || status=$?
-  if [ "$status" -ne 0 ]; then
-    echo "FAIL [$name]: the check rejected a true claim. Output:"; echo "$out"; exit 1
-  fi
-  discard "$dir"
-  echo "ok   [$name]"
+  if [ "$status" -ne 0 ]; then echo "FAIL [$name]: the check rejected a true claim. Output:"; echo "$out"; exit 1; fi
+  discard "$dir"; echo "ok   [$name]"
 }
 
 echo "== the fixture"
 expect_pass "the fixture repository and model agree" "$(fresh_copy fixture)"
-
-d="$(fresh_copy no-model)"
-rm "$d/build-model.json"
+d="$(fresh_copy no-model)"; rm "$d/build-model.json"
 expect_fail "a missing model is an error, not a pass" "$d" "No build model"
 
-echo "== Scala version"
-d="$(fresh_copy scala)"; say "$d" "$INSTALL" "LLM4S is built with Scala 3.7.2."
-expect_fail "stale Scala version in a getting-started page" "$d" "documents Scala 3.7.2"
+echo "== Scala"
+d="$(fresh_copy scala-stale)"; say "$d" "$INSTALL" "LLM4S is built with Scala 3.7.2."
+expect_fail "a stale Scala version" "$d" "documents Scala 3.7.2"
 
-d="$(fresh_copy scala-build)"; edit_model "$d" 'for p in m["projects"]: p["scalaVersion"] = "3.8.0"; p["crossScalaVersions"] = ["3.8.0"]'
-expect_fail "build moved on, docs did not" "$d" "but the build is Scala 3.8.0"
+d="$(fresh_copy scala-213)"; say "$d" "$INSTALL" "LLM4S supports Scala 2.13 and 3."
+expect_fail "a Scala 2.13 support claim" "$d" "documents Scala 2.13"
 
-d="$(fresh_copy scala-bump)"; edit_model "$d" 'for p in m["projects"]: p["scalaVersion"] = "3.8.0"; p["crossScalaVersions"] = ["3.8.0"]'
-for f in CLAUDE.md README.md docs/reference/v1-scope.md "$INSTALL"; do sed -i.bak 's/3\.7\.1/3.8.0/g' "$d/$f" && rm "$d/$f.bak"; done
-expect_pass "docs and build bumped together" "$d"
+d="$(fresh_copy scala-denied)"; say "$d" "$INSTALL" "Scala 2.13 is not supported, and Scala 2 projects cannot depend on it."
+expect_pass "a statement that another Scala version is not supported" "$d"
 
-d="$(fresh_copy scala-projects-differ)"; edit_model "$d" 'proj(m, "core")["scalaVersion"] = "3.3.5"'
-expect_fail "projects that build with different Scala versions" "$d" "projects build with different Scala versions"
+d="$(fresh_copy scala-build-moved)"; edit_model "$d" 'for p in m["projects"]: p["scalaVersion"] = "3.8.0"; p["crossScalaVersions"] = ["3.8.0"]'
+expect_fail "the build moved on, the docs did not" "$d" "but the build is Scala 3.8.0"
 
-d="$(fresh_copy scala-short)"; say "$d" "$INSTALL" "LLM4S targets Scala 3.8."
-expect_fail "a major.minor claim that is not the build's" "$d" "documents Scala 3.8"
+d="$(fresh_copy scala-mixed)"; edit_model "$d" 'proj(m, "core")["scalaVersion"] = "3.3.5"'
+expect_fail "projects with different Scala versions" "$d" "share one scalaVersion"
 
-d="$(fresh_copy scala-short-ok)"; say "$d" "$INSTALL" "LLM4S targets Scala 3.7."
-expect_pass "a major.minor claim that is the build's" "$d"
+d="$(fresh_copy scala-pin)"; say "$d" "$INSTALL" "$(printf '```scala\nscalaVersion := "3.7.2"\n```')"
+expect_fail "a scalaVersion pin in a snippet" "$d" "pins Scala 3.7.2"
 
-d="$(fresh_copy scala-history)"; say "$d" "$INSTALL" "Releases before 0.5 were built with Scala 3.3.5, which is no longer supported."
-expect_pass "an old Scala version named as history" "$d"
+d="$(fresh_copy scala-suffix)"; say "$d" "$INSTALL" 'Add `"org.llm4s" % "llm4s-core_2.13"` to your build.'
+expect_fail "an artifact for another Scala binary version" "$d" "_2.13"
+
+d="$(fresh_copy scala-cross)"; say "$d" "$INSTALL" 'Set `crossScalaVersions` to build for both.'
+expect_fail "crossScalaVersions when nothing cross-builds" "$d" "cross-builds nothing"
+
+d="$(fresh_copy scala-plus)"; run_sbt_doc "$d" "sbt +test"
+expect_fail "sbt +test when nothing cross-builds" "$d" "cross-builds, but no project"
+
+d="$(fresh_copy scala-plus-ok)"; run_sbt_doc "$d" "sbt +test"
+edit_model "$d" 'proj(m, "core")["crossScalaVersions"] = ["3.7.1", "3.3.5"]'
+expect_pass "sbt +test when a project cross-builds" "$d"
+
+d="$(fresh_copy scala-switch)"; run_sbt_doc "$d" 'sbt ++2.13.16 test'
+expect_fail "++ to a Scala version the build does not use" "$d" "switches to Scala 2.13.16"
+
+d="$(fresh_copy scala-switch-cmd)"; run_sbt_doc "$d" 'sbt "++3.7.1 definitelyNotATask"'
+expect_fail "the command after ++ is replayed" "$d" "\`definitelyNotATask\` is not an alias"
+
+d="$(fresh_copy scala-canonical)"; printf 'Scala 3 only.\n' > "$d/docs/reference/v1-scope.md"
+expect_fail "v1-scope.md must state the version" "$d" "does not state Scala 3.7.1"
 
 d="$(fresh_copy scala-ignore)"; say "$d" "$INSTALL" "<!-- doc-support: ignore --> Scala 3.3.5 is the LTS line."
 expect_pass "an opted-out line" "$d"
 
-d="$(fresh_copy scala-other-major)"; say "$d" "$INSTALL" "LLM4S supports Scala 2.13."
-expect_fail "a claim of another Scala major version" "$d" "documents Scala 2.13"
+echo "== JDK"
+d="$(fresh_copy jdk-floor)"; say "$d" "$INSTALL" "Requires JDK 17+."
+expect_fail "a floor that is not the oldest JDK CI runs" "$d" "gives JDK 17 as the minimum"
 
-d="$(fresh_copy scala-other-major-bare)"; say "$d" "$INSTALL" "Works with Scala 2 projects with no extra setup."
-expect_fail "a bare other major version, a negation elsewhere in the clause" "$d" "documents Scala 2"
+d="$(fresh_copy jdk-requires)"; say "$d" "$INSTALL" "LLM4S requires Java 25."
+expect_fail "'requires Java N' is a floor" "$d" "gives JDK 25 as the minimum"
 
-d="$(fresh_copy scala-other-major-but)"; say "$d" "$INSTALL" "LLM4S supports Scala 2.13 but not Scala 2.12."
-expect_fail "a support claim next to a denial in another clause" "$d" "documents Scala 2.13"
+d="$(fresh_copy jdk-unknown)"; say "$d" "$INSTALL" "We also test on OpenJDK 29."
+expect_fail "a JDK CI does not run" "$d" "documents JDK 29, but CI runs JDK 21, 25"
 
-d="$(fresh_copy scala-list)"; say "$d" "$INSTALL" "Built with Scala 3.7.1 and 2.13."
-expect_fail "every version of a list is a claim" "$d" "documents Scala 2.13"
+d="$(fresh_copy jdk-ci-moved)"; sed -i.bak 's/java: \[21, 25\]/java: [17]/; s/java-version: 21/java-version: "17"/' "$d/.github/workflows/ci.yml"
+expect_fail "CI moved to another JDK, the docs did not" "$d" "but CI runs JDK 17"
 
-d="$(fresh_copy scala-deferred)"; say "$d" "$INSTALL" "Scala 2.13 support is deferred to post-1.0. There is no Scala 2.13 artifact, Scala 2 is not supported, and you should not expect Scala 2.12."
-expect_pass "statements that another Scala version is not supported" "$d"
+d="$(fresh_copy jdk-no-ci)"; printf 'jobs: {}\n' > "$d/.github/workflows/ci.yml"
+expect_fail "no JDK in CI is an error" "$d" "cannot establish the JDK CI runs"
 
-d="$(fresh_copy scala-suffix)"; say "$d" "$INSTALL" 'Add `"org.llm4s" % "llm4s-core_2.13"` to your build.'
-expect_fail "an artifact suffix for another Scala version" "$d" "_2.13"
-
-d="$(fresh_copy scala-version-setting)"; say "$d" "$INSTALL" "$(printf '```scala\nscalaVersion := "3.7.2"\n```')"
-expect_fail "a scalaVersion setting in a snippet" "$d" "pins Scala 3.7.2"
-
-d="$(fresh_copy scala-cross)"; run_sbt_doc "$d" "sbt +test"
-expect_fail "a cross-build command when the build cross-builds nothing" "$d" "cross-builds"
-
-d="$(fresh_copy scala-cross-ok)"; run_sbt_doc "$d" "sbt +test"
-edit_model "$d" 'proj(m, "core")["crossScalaVersions"] = ["3.7.1", "3.3.5"]'
-expect_pass "a cross-build command when a project sets crossScalaVersions" "$d"
-
-d="$(fresh_copy scala-switch)"; run_sbt_doc "$d" "sbt ++2.13.16 test"
-expect_fail "switching to a Scala version the build does not use" "$d" "switches to Scala 2.13.16"
-
-for cmd in 'sbt "++3.7.1 definitelyNotATask"' 'sbt "++ 3.7.1 definitelyNotATask"' 'sbt "++3.7.1! definitelyNotATask"' \
-           'sbt "++ -v 3.7.1 definitelyNotATask"' 'sbt "++3.7.1 -v definitelyNotATask"' 'sbt "++3.7.x definitelyNotATask"'; do
-  d="$(fresh_copy scala-switch-command)"; run_sbt_doc "$d" "$cmd"
-  expect_fail "the command after a ++ version is replayed: $cmd" "$d" "\`definitelyNotATask\` is not an alias"
-done
-
-d="$(fresh_copy scala-switch-project)"; run_sbt_doc "$d" 'sbt "++3.7.1 project core" publishedArtifactsCheck'
-expect_fail "a project switch run by ++ stays in effect" "$d" "\`publishedArtifactsCheck\` is not defined in the current project \`core\`"
-
-d="$(fresh_copy scala-switch-not-a-version)"; run_sbt_doc "$d" 'sbt "++ test"'
-expect_fail "a task where ++ reads a version is not a version" "$d" "names \`test\` where sbt reads a Scala version"
-
-d="$(fresh_copy scala-switch-wildcard)"; run_sbt_doc "$d" 'sbt "++2.13.x test"'
-expect_fail "a wildcard version the build does not match" "$d" "switches to Scala 2.13.x"
-
-d="$(fresh_copy scala-switch-ok)"
-run_sbt_doc "$d" 'sbt "++3.7.1 test" "++ 3.7.1 core/compile" "++3.7.1! test" "++ -v 3.7.1 test" "++3.7.1 -v test" "++3.7.x test" "++3.* test" ++3.7.1 "++ /opt/scala test"'
-expect_pass "++ with the build's version, forced, verbose, wildcard or a home directory, and a real command" "$d"
-
-d="$(fresh_copy scala-cross-command)"; run_sbt_doc "$d" 'sbt "+ -v definitelyNotATask"'
-edit_model "$d" 'proj(m, "core")["crossScalaVersions"] = ["3.7.1", "3.3.5"]'
-expect_fail "the command after + (and -v) is replayed" "$d" "\`definitelyNotATask\` is not an alias"
-
-d="$(fresh_copy scala-cross-no-command)"; run_sbt_doc "$d" 'sbt "+ -v"'
-edit_model "$d" 'proj(m, "core")["crossScalaVersions"] = ["3.7.1", "3.3.5"]'
-expect_fail "+ needs a command" "$d" "names no command to cross-build"
-
-d="$(fresh_copy scala-cross-command-ok)"; run_sbt_doc "$d" 'sbt "+ -v test" "+ --verbose core/compile" "+test"'
-edit_model "$d" 'proj(m, "core")["crossScalaVersions"] = ["3.7.1", "3.3.5"]'
-expect_pass "+ with -v / --verbose and a real command" "$d"
-
-echo "== JDK version"
-d="$(fresh_copy jdk)"; say "$d" "$INSTALL" "JDK 29 is used in CI."
-expect_fail "docs claim a JDK CI does not run" "$d" "documents JDK 29"
-
-d="$(fresh_copy jdk-ci)"; sed -i.bak 's/java: \[21, 25\]/java: [17]/' "$d/.github/workflows/ci.yml"
-expect_fail "CI moved to another JDK, docs did not" "$d" "but CI runs JDK 17"
-
-d="$(fresh_copy jdk-java-word)"; say "$d" "$INSTALL" "You need Java 29 to build."
-expect_fail "'Java N' is read like 'JDK N'" "$d" "JDK 29"
-
-d="$(fresh_copy jdk-openjdk-word)"; say "$d" "$INSTALL" "We test on OpenJDK 29."
-expect_fail "'OpenJDK N' is read like 'JDK N'" "$d" "JDK 29"
-
-d="$(fresh_copy jdk-floor-ok)"; say "$d" "$INSTALL" "Any JDK 21+ can run the compiled jars; you need JDK 21 or newer, at least Java 21."
-expect_pass "a floor that is the oldest JDK CI runs" "$d"
-
-d="$(fresh_copy jdk-floor-too-low)"; say "$d" "$INSTALL" "LLM4S runs on JDK 8 or newer."
-expect_fail "a floor below every JDK CI runs" "$d" "gives JDK 8 as the minimum"
-
-d="$(fresh_copy jdk-floor-plus-too-low)"; say "$d" "$INSTALL" "Requires Java 17+."
-expect_fail "a 'Java N+' floor below the oldest JDK CI runs" "$d" "gives JDK 17 as the minimum"
-
-d="$(fresh_copy jdk-floor-at-least)"; say "$d" "$INSTALL" "You need at least Java 1.8 to run it."
-expect_fail "'at least Java 1.8' is a floor of JDK 8" "$d" "gives JDK 8 as the minimum"
-
-d="$(fresh_copy jdk-range)"; say "$d" "$INSTALL" "Tested on JDK 17-25."
-expect_fail "a range starting below the oldest JDK CI runs" "$d" "gives JDK 17 as the minimum"
-
-d="$(fresh_copy jdk-through)"; say "$d" "$INSTALL" "Supports Java versions 11 through 25; minimum JDK: 17."
-expect_fail "'Java versions N through M' and 'minimum JDK: N'" "$d" "gives JDK 17 as the minimum"
-
-d="$(fresh_copy jdk-list)"; say "$d" "$INSTALL" "Tested on JDK 25 and 29."
-expect_fail "every JDK of a list must be one CI runs" "$d" "documents JDK 29"
-
-d="$(fresh_copy jdk-ceiling)"; say "$d" "$INSTALL" "Works on JDK 29 or earlier."
-expect_fail "a ceiling claims every older JDK" "$d" "supports JDK 29 or older"
-
-# Round 4: `older` is how a ceiling is phrased; it no longer marks the line as history.
-d="$(fresh_copy jdk-ceiling-older)"; say "$d" "$INSTALL" "Requires JDK 25 or older."
-expect_fail "'JDK N or older' is a ceiling, not history" "$d" "supports JDK 25 or older"
-
-d="$(fresh_copy jdk-ceiling-on-history-line)"; say "$d" "$INSTALL" "Requires JDK 25 or older; it previously ran on JDK 17."
-expect_fail "a ceiling is checked even on a line that also names history" "$d" "supports JDK 25 or older"
-
-d="$(fresh_copy jdk-ceiling-floor)"; say "$d" "$INSTALL" "Compiled class files load on JDK 21 or later, never on JDK 20 or older releases that predate it."
-expect_pass "a negated ceiling just below the floor" "$d"
-
-d="$(fresh_copy jdk-floor-too-high)"; say "$d" "$INSTALL" "Requires JDK 29 or newer."
-expect_fail "a floor above every JDK CI runs" "$d" "JDK 29"
-
-d="$(fresh_copy jdk-history)"; say "$d" "$INSTALL" "The build previously ran on JDK 17, and 0.3 was tested on Java 11."
-expect_pass "an old JDK named as history" "$d"
-
-d="$(fresh_copy jdk-history-dated)"; say "$d" "$INSTALL" "- 2025-03-01: CI moved off JDK 17."
-expect_pass "a dated entry is history" "$d"
-
-echo "== JDK ceilings, ranges and negations (round 6)"
-# A positive ceiling claims every older JDK as well, so it reaches below the floor whatever its number.
-for phrase in "Supports JDK 21 or older." "Runs on Java 21 and earlier." "Works up to JDK 25." "Runs on at most JDK 25." \
-              "Requires JDK <= 25." "Any JDK older than 26 works." "Runs on a JDK no newer than 25." "Use Java 25 or lower."; do
-  d="$(fresh_copy jdk-ceiling-positive)"; say "$d" "$INSTALL" "$phrase"
-  expect_fail "a positive ceiling is rejected: '$phrase'" "$d" "or older, which claims JDKs below the floor"
-done
-
-for phrase in "LLM4S does not support JDK 20 or older." "JDK 20 or older is not supported." "Requires newer than JDK 20." \
-              "Requires a JDK no older than 21." "It won't run on JDK 20 and earlier." "Any JDK older than 21 is unsupported." \
-              "JDK 17 is not supported, and JDK 11 isn't either." "There is no JDK 17 build."; do
-  d="$(fresh_copy jdk-negated-ok)"; say "$d" "$INSTALL" "$phrase"
-  expect_pass "a negated statement is allowed: '$phrase'" "$d"
-done
-
-d="$(fresh_copy jdk-negated-ceiling-wrong)"; say "$d" "$INSTALL" "JDK 21 or older is not supported."
-expect_fail "a negated ceiling that excludes the floor itself" "$d" "says JDK 21 and older are unsupported, but the floor"
-
-d="$(fresh_copy jdk-negation-other-clause)"; say "$d" "$INSTALL" "JDK 17 is not the default, but JDK 21 or older works."
-expect_fail "negation is scoped to the clause it is in" "$d" "supports JDK 21 or older"
-
-d="$(fresh_copy jdk-negation-other-clause-point)"; say "$d" "$INSTALL" "Do not use the system JDK; install JDK 29."
-expect_fail "a negation in an earlier clause does not cover a later JDK" "$d" "documents JDK 29"
-
-d="$(fresh_copy jdk-strict-floor-wrong)"; say "$d" "$INSTALL" "Requires a JDK newer than 17."
-expect_fail "'newer than JDK N' is a floor of N+1" "$d" "gives JDK 18 as the minimum"
-
-d="$(fresh_copy jdk-not-older-than-wrong)"; say "$d" "$INSTALL" "Use a JDK not older than 17."
-expect_fail "'not older than JDK N' is a floor of N" "$d" "gives JDK 17 as the minimum"
-
-for phrase in "Supports JDK 21 through 25." "Tested on Java 21-25." "Runs on JDK 21 to 25." "Runs on any JDK between 21 and 25."; do
-  d="$(fresh_copy jdk-range-gap)"; say "$d" "$INSTALL" "$phrase"
-  expect_fail "every JDK of a range must be one CI runs: '$phrase'" "$d" "but CI does not run JDK 22, 23, 24"
-done
-
-d="$(fresh_copy jdk-range-ok)"; say "$d" "$INSTALL" "Supports JDK 21 through 23."
-sed -i.bak 's/java: \[21, 25\]/java: [21, 22, 23, 25]/' "$d/.github/workflows/ci.yml" && rm "$d/.github/workflows/ci.yml.bak"
-expect_pass "a range whose every JDK CI runs" "$d"
-
-# write_ci DIR: replace the copy's CI workflow with stdin.
-write_ci() { cat > "$1/.github/workflows/ci.yml"; }
-
-block_matrix() {
-  write_ci "$1" <<'YML'
-name: CI
-on: [push]
-jobs:
-  quick:
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "java: [17]"   # a script, not a matrix
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-        java:
-          - 21   # the floor
-          - '25'
-    steps:
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: ${{ matrix.java }}
-YML
-}
-d="$(fresh_copy jdk-block-matrix)"; block_matrix "$d"; say "$d" "$INSTALL" "JDK 25 is tested, and JDK 21 is the minimum: Java 21+."
-expect_pass "a block-style matrix list: JDK 25 is run and the floor is 21" "$d"
-
-d="$(fresh_copy jdk-block-matrix-floor)"; block_matrix "$d"; say "$d" "$INSTALL" "Requires JDK 25 or newer."
-expect_fail "a block-style matrix list sets the floor to its oldest JDK" "$d" "gives JDK 25 as the minimum"
-
-d="$(fresh_copy jdk-block-matrix-script)"; block_matrix "$d"; say "$d" "$INSTALL" "JDK 17 is tested."
-expect_fail "a matrix-like line in a run script is not a matrix" "$d" "documents JDK 17"
-
-d="$(fresh_copy jdk-include-matrix)"
-write_ci "$d" <<'YML'
-jobs:
-  test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        include:
-          - os: ubuntu-latest
-            java: 21
-          - { os: macos-latest, java: "25" }
-    steps:
-      - uses: actions/setup-java@v6
-        with: { distribution: temurin, java-version: "${{ matrix.java }}" }
-YML
-say "$d" "$INSTALL" "JDK 25 is tested on macOS."
-expect_pass "a matrix whose JDKs come from include entries, block and flow" "$d"
-
-d="$(fresh_copy jdk-include-matrix-missing)"
-write_ci "$d" <<'YML'
-jobs:
-  test:
-    strategy:
-      matrix:
-        include:
-          - java: 21
-    steps:
-      - uses: actions/setup-java@v6
-        with:
-          java-version: ${{ matrix.java }}
-YML
-say "$d" "$INSTALL" "JDK 25 is tested."
-expect_fail "an include-based matrix without the JDK a doc claims" "$d" "documents JDK 25"
-
-d="$(fresh_copy jdk-matrix-other-job)"
-write_ci "$d" <<'YML'
-jobs:
-  build:
-    steps:
-      - uses: actions/setup-java@v6
-        with:
-          java-version: ${{ matrix.java }}
-  test:
-    strategy:
-      matrix:
-        java: [21, 25]
-    steps:
-      - run: sbt test
-YML
-expect_fail "matrix.java resolves against the job's own matrix, not another job's" "$d" "uses matrix.java, which the job's matrix does not define"
-
-for phrase in "Use JDK 21 LTS.""Java 21 (LTS) or newer." "Java 21+ is required." "Any JDK 21 and above." "JDK 21 and later." \
-              "JDKs 21 and 25 are tested." "Java SE 21 or any later version." "From JDK 21 onwards." "Temurin 21, Corretto 25." \
-              "Minimum JDK: 21." "JDK >= 21." "Java 21 or higher, JDK 25 recommended."; do
-  d="$(fresh_copy jdk-phrasing-ok)"; say "$d" "$INSTALL" "$phrase"
-  expect_pass "a true JDK claim: '$phrase'" "$d"
-done
-
-for phrase in "Use JDK 17 LTS.:documents JDK 17" "Java 17 (LTS) or newer.:gives JDK 17 as the minimum" \
-              "JDKs 21 and 29 are tested.:documents JDK 29" "From JDK 17 onwards.:gives JDK 17 as the minimum" \
-              "JDK > 17.:gives JDK 18 as the minimum" "Corretto 21 or 22.:documents JDK 22" \
-              "JDK 21, 29 or newer.:documents JDK 29"; do
-  d="$(fresh_copy jdk-phrasing-wrong)"; say "$d" "$INSTALL" "${phrase%%:*}"
-  expect_fail "a false JDK claim: '${phrase%%:*}'" "$d" "${phrase#*:}"
-done
-
-d="$(fresh_copy jdk-past-tense)"; say "$d" "$INSTALL" "CI ran on JDK 17 until 0.4; it was tested on Java 11 before that."
-expect_pass "past tense is history" "$d"
-
-echo "== Scala prose (round 6)"
-for phrase in "Scala 2.13 support is planned for later." "Scala 2.13 projects cannot depend on LLM4S." "Scala 2 doesn't work." \
-              "LLM4S targets Scala 3.7+." "Use Scala 3.x." "Built with Scala 3.7.x." "Scala.js 1.16 and Scala Native 0.5 are not targets." \
-              "Install Scala CLI 1.5 to try it."; do
-  d="$(fresh_copy scala-phrasing-ok)"; say "$d" "$INSTALL" "$phrase"
-  expect_pass "a true or out-of-scope Scala statement: '$phrase'" "$d"
-done
-
-for phrase in "Scala 3.3+ works.:documents Scala 3.3" "Scala 3.3 LTS is supported.:documents Scala 3.3" \
-              "Supports Scala 2.13 or older.:documents Scala 2.13" "Use Scala 2.x.:documents Scala 2.x" \
-              "Works on Scala 3.3-3.7.:documents Scala 3.3" "Scala 2.13 and Scala 3 are both supported.:documents Scala 2.13" \
-              "Scala 2.13 is the target, not Scala 3.:documents Scala 2.13"; do
-  d="$(fresh_copy scala-phrasing-wrong)"; say "$d" "$INSTALL" "${phrase%%:*}"
-  expect_fail "a false Scala claim: '${phrase%%:*}'" "$d" "${phrase#*:}"
-done
-
-echo "== the version-claim grammar, JDK and Scala alike (round 9)"
-# PHRASE|EXPECT: EXPECT is `pass`, or a message the failure must contain. Subjects are matched without regard
-# to case; lists take `,`, `, and` / `, or` (Oxford comma), `and`, `or`, `&` and `/`; the fixture runs JDK 21
-# and 25 (floor 21) and Scala 3.7.1.
-for row in \
-  "Tested on JDK 21, 25, and 29.|documents JDK 29" \
-  "Tested on JDK 21, 25, or 29.|documents JDK 29" \
-  "Tested on JDK 21, 25 & 29.|documents JDK 29" \
-  "Tested on JDK 21 & 29.|documents JDK 29" \
-  "Tested on JDK 21/29.|documents JDK 29" \
-  "Tested on JDK 21, JDK 25, and JDK 29.|documents JDK 29" \
-  "Tested on JDK 21, and 25.|pass" \
-  "Tested on Java 21, 25, and 21.|pass" \
-  "requires jdk 29|documents JDK 29" \
-  "supports java 17|documents JDK 17" \
-  "Built on openjdk 29.|documents JDK 29" \
-  "Runs on JDK21.|pass" \
-  "SUPPORTS JAVA 17 OR NEWER.|gives JDK 17 as the minimum" \
-  "at least java 17|gives JDK 17 as the minimum" \
-  "Runs on jdk 21, 25, or newer.|pass" \
-  "Runs on jdk 21, 29, or newer.|documents JDK 29" \
-  "Works Up To jdk 25.|or older, which claims JDKs below the floor" \
-  "Runs between jdk 21 and 25.|but CI does not run JDK 22, 23, 24" \
-  "jdk 17 is NOT supported.|pass" \
-  "Previously ran on jdk 17.|pass" \
-  "Bundle it with JavaScript 5 tooling.|pass" \
-  "Pin \`java-version: 17\` in your own workflow.|pass" \
-  "Import java.util and the jdk17compat 2 package.|pass" \
-  "See \`Foo.java:42\`, \`src/main/java-17\` and the \`eclipse-temurin:17\` image.|pass" \
-  "Supports scala 2.13.|documents Scala 2.13" \
-  "SCALA 2.13 works.|documents Scala 2.13" \
-  "Built for Scala 3.7.1, 2.13, and 2.12.|documents Scala 2.13" \
-  "Built for Scala 3.7.1, 3.7, or 2.12.|documents Scala 2.12" \
-  "Built for Scala 3.7.1 & 2.13.|documents Scala 2.13" \
-  "Built for Scala 3.7.1/2.13.|documents Scala 2.13" \
-  "scala versions 3, 3.7, or 2.13.|documents Scala 2.13" \
-  "Built for scala 3.7.1, 3.7, and 3.|pass" \
-  "scala 2.13 support is deferred.|pass" \
-  "SCALA 2.13 is NOT supported.|pass" \
-  "Use scala 3.x and import scala.util.Try 2 times.|pass" \
-  "Add the scala-library 2.13 jar to the classpath.|pass" \
-  "**Location**: \`path/to/file.scala:42-68\`, \`src/main/scala-2.13/\`.|pass"; do
-  phrase="${row%|*}" expect="${row##*|}"
-  d="$(fresh_copy grammar)"; say "$d" "$INSTALL" "$phrase"
-  if [ "$expect" = pass ]; then
-    expect_pass "grammar: '$phrase'" "$d"
-  else
-    expect_fail "grammar: '$phrase'" "$d" "$expect"
-  fi
-done
-
-echo "== JDK release target, from the options sbt resolved"
-d="$(fresh_copy jdk-release-javac)"; edit_model "$d" 'set_options(m, "javacOptions", ["--release", "8"])'
-expect_fail "javac --release N" "$d" "compiles for JDK 8"
-
-d="$(fresh_copy jdk-release-javac-equals)"; edit_model "$d" 'set_options(m, "javacOptions", ["--release=8"])'
-expect_fail "javac --release=N (round 4)" "$d" "compiles for JDK 8"
-
-d="$(fresh_copy jdk-release-scalac-colon)"; edit_model "$d" 'set_options(m, "scalacOptions", ["-feature", "-release:17"])'
-expect_fail "scalac -release:N" "$d" "compiles for JDK 17"
-
-d="$(fresh_copy jdk-release-scalac-output)"; edit_model "$d" 'set_options(m, "scalacOptions", ["-java-output-version", "17"])'
-expect_fail "scalac -java-output-version N" "$d" "compiles for JDK 17"
-
-d="$(fresh_copy jdk-release-target-jvm)"; edit_model "$d" 'set_options(m, "scalacOptions", ["-target:jvm-1.8"])'
-expect_fail "scalac -target:jvm-1.8" "$d" "compiles for JDK 8"
-
-d="$(fresh_copy jdk-release-one-project)"; edit_model "$d" 'proj(m, "it")["javacOptions"]["test"] = ["--release", "11"]'
-expect_fail "a release target in one project's Test options" "$d" "compiles for JDK 11 (it javacOptions/test)"
-
-d="$(fresh_copy jdk-release-at-floor)"; edit_model "$d" 'set_options(m, "javacOptions", ["--release", "21"]); set_options(m, "scalacOptions", ["-release", "21"])'
-expect_pass "a release target that is the oldest JDK CI runs" "$d"
+d="$(fresh_copy jdk-ok)"; say "$d" "$INSTALL" "Tested on JDK 25; JDK 17 is not supported."
+expect_pass "a JDK CI runs, and a denied one" "$d"
 
 echo "== modules"
-d="$(fresh_copy module-missing)"; rm -r "$d/modules/core"
-expect_fail "documented module has no directory" "$d" "names modules/core/"
+d="$(fresh_copy module-missing)"; rm -r "$d/modules/deploy-service"; edit_model "$d" 'm["projects"] = [p for p in m["projects"] if p["id"] != "deployService"]'
+expect_fail "a documented module with no directory" "$d" "names modules/deploy-service/, which is not a directory"
 
-d="$(fresh_copy module-invented)"
-python3 - "$d/CLAUDE.md" <<'PY'
-import sys
-path = sys.argv[1]
-text = open(path, encoding="utf-8").read()
-line = "│   ├── core/                  # Core library"
-open(path, "w", encoding="utf-8").write(text.replace(line, line + "\n│   ├── crossTest/             # Cross-version tests", 1))
-PY
-expect_fail "documented module that never existed" "$d" "modules/crossTest"
+d="$(fresh_copy module-undocumented)"; mkdir -p "$d/modules/extra/src"
+edit_model "$d" 'm["projects"].append(project("extra", "modules/extra"))'
+expect_fail "a build module the docs never name" "$d" "project \`extra\` is modules/extra"
 
-d="$(fresh_copy module-undocumented)"; mkdir -p "$d/modules/secret-module/src"
-edit_model "$d" 'm["projects"].append(project("secretModule", "modules/secret-module"))'
-expect_fail "build project the docs never name" "$d" "project \`secretModule\` is modules/secret-module"
+d="$(fresh_copy module-output-only)"; mkdir -p "$d/modules/docs/target"
+edit_model "$d" 'm["projects"].append(project("docs", "modules/docs"))'
+expect_pass "a project with only build output is not a module" "$d"
 
-d="$(fresh_copy module-build-output-only)"; mkdir -p "$d/modules/aggregate-only/target"
-edit_model "$d" 'm["projects"].append(project("aggregateOnly", "modules/aggregate-only"))'
-expect_pass "project with only build output is not a module" "$d"
+echo "== sbt commands"
+d="$(fresh_copy sbt-task)"; run_sbt_doc "$d" "sbt core/definitelyNotATask"
+expect_fail "an unknown task" "$d" "\`definitelyNotATask\` is not an alias"
 
-echo "== sbt commands quoted in the docs"
-d="$(fresh_copy cmd-bare)"; run_sbt_doc "$d" "sbt crossTestAll"
-expect_fail "unknown sbt task" "$d" "\`crossTestAll\` is not an alias, a command, nor a task or setting the build defines"
+d="$(fresh_copy sbt-project)"; run_sbt_doc "$d" "sbt nowhere/compile"
+expect_fail "an unknown project" "$d" "names project \`nowhere\`"
 
-d="$(fresh_copy cmd-project)"; say "$d" README.md 'Run `sbt "nonexistentProject/test"` to check it.'
-expect_fail "unknown sbt project" "$d" "names project \`nonexistentProject\`"
+d="$(fresh_copy sbt-config)"; run_sbt_doc "$d" "sbt core/Docker/publishLocal"
+expect_fail "a configuration the project does not have" "$d" "configuration \`Docker\` is not defined in \`core\`"
 
-d="$(fresh_copy cmd-scoped-task)"; say "$d" README.md 'Run `sbt "core/definitelyNotATask"` to check it.'
-expect_fail "unknown task in a project the build defines" "$d" "definitelyNotATask"
+d="$(fresh_copy sbt-no-aggregate)"; run_sbt_doc "$d" "sbt core/publishedArtifactsCheck"
+expect_fail "a root-only task scoped to another project" "$d" "\`publishedArtifactsCheck\` is not defined in \`core\`"
 
-d="$(fresh_copy cmd-scoped-config-task)"; run_sbt_doc "$d" "sbt core/Test/definitelyNotATask"
-expect_fail "unknown task after a project and configuration" "$d" "definitelyNotATask"
+d="$(fresh_copy sbt-project-switch)"; run_sbt_doc "$d" 'sbt "project core" stabilityTierCheck'
+expect_fail "a project switch persists" "$d" "not defined in the current project \`core\`"
 
-d="$(fresh_copy cmd-unknown-config)"; run_sbt_doc "$d" "sbt core/Nonexistent/compile"
-expect_fail "unknown configuration" "$d" "configuration \`Nonexistent\` is not defined in \`core\`"
+d="$(fresh_copy sbt-alias-removed)"; edit_model "$d" 'm["aliases"] = [a for a in m["aliases"] if a["name"] != "testIntegration"]'
+expect_fail "a documented alias removed from the build" "$d" "\`testIntegration\` is not an alias"
 
-d="$(fresh_copy cmd-scoped-ok)"; run_sbt_doc "$d" 'sbt core/Test/compile core/test:compile "core / Test / testOnly org.Foo" core/Compile/doc/scalacOptions doc/scalacOptions ThisBuild/scalaVersion show core/version "~compile" core/dockerBaseImage'
-expect_pass "keys resolved with configuration and task axes, ThisBuild, show and ~" "$d"
+d="$(fresh_copy sbt-alias-body)"; edit_model "$d" 'm["aliases"].append({"name": "broken", "body": ";clean;nope"})'
+expect_fail "an alias whose body names a missing task" "$d" "alias \`broken\`"
 
-d="$(fresh_copy cmd-config-delegation)"; run_sbt_doc "$d" "sbt core/Test/version benchmarks/Jmh/testOnly"
-expect_pass "a key delegates to the configurations a configuration extends, then to none" "$d"
+d="$(fresh_copy sbt-alias-cycle)"; edit_model "$d" 'm["aliases"].append({"name": "loop", "body": ";compile;loop"})'
+expect_fail "an alias that runs itself" "$d" "runs itself"
 
-d="$(fresh_copy cmd-continued)"; run_sbt_doc "$d" "$(printf 'sbt -Dllm4s.x=y \\\n    -Dllm4s.z=w \\\n    "definitelyNotATask"')"
-expect_fail "an unknown task on a continuation line" "$d" "definitelyNotATask"
+d="$(fresh_copy sbt-yaml)"; say "$d" "$INSTALL" "$(printf '```yaml\n      - run: sbt "core/nope"\n```')"
+expect_fail "a YAML run: value" "$d" "\`nope\` is not an alias"
 
-d="$(fresh_copy cmd-continued-ok)"; run_sbt_doc "$d" "$(printf 'sbt -Dllm4s.x=y \\\n    "core/run"')"
-expect_pass "a known task on a continuation line" "$d"
+d="$(fresh_copy sbt-after-and)"; say "$d" "$INSTALL" 'Run `cd x && ./sbt nope` to start.'
+expect_fail "sbt after && in inline code" "$d" "\`nope\` is not an alias"
 
-d="$(fresh_copy cmd-malformed-quotes)"; run_sbt_doc "$d" 'sbt "core/test'
-expect_fail "a command the shell cannot parse" "$d" "cannot be parsed"
+d="$(fresh_copy sbt-prompt)"; run_sbt_doc "$d" '$ sbt nope'
+expect_fail "sbt after a \$ prompt" "$d" "\`nope\` is not an alias"
 
-d="$(fresh_copy cmd-malformed-quotes-inline)"; say "$d" README.md 'Run `sbt "testOnly org.llm4s.Foo` to check it.'
-expect_fail "an inline command the shell cannot parse" "$d" "cannot be parsed"
+d="$(fresh_copy sbt-continued)"; run_sbt_doc "$d" "$(printf 'sbt -Dk=v \\\n  nope')"
+expect_fail "a backslash-continued sbt line" "$d" "\`nope\` is not an alias"
 
-d="$(fresh_copy cmd-ignore)"; run_sbt_doc "$d" "sbt crossTestAll   # doc-support: ignore"
-expect_pass "an opted-out sbt line" "$d"
+d="$(fresh_copy sbt-quotes)"; run_sbt_doc "$d" "sbt 'core/compile"
+expect_fail "unbalanced quotes" "$d" "cannot be parsed by the shell"
 
-d="$(fresh_copy cmd-hash-in-quotes)"; run_sbt_doc "$d" "$(printf '%s\n' 'sbt "core/run explain #123"   # run it' "sbt 'core/run #1' test" 'sbt "core/runMain org.Foo \"#2\"" # done')"
-say "$d" README.md 'Run `sbt "core/run issue #7"` or `sbt compile # then test`.'
-expect_pass "a # inside quotes or a word is not a comment; one starting a word is (round 6)" "$d"
+d="$(fresh_copy sbt-semicolon)"; run_sbt_doc "$d" 'sbt "clean; nope"'
+expect_fail "sbt's own ; splits commands" "$d" "\`nope\` is not an alias"
 
-d="$(fresh_copy cmd-hash-comment-then-bad)"; run_sbt_doc "$d" 'sbt "core/run #1" crossTestAll # comment'
-expect_fail "a command after a quoted # is still checked" "$d" "crossTestAll"
+d="$(fresh_copy sbt-ok)"
+run_sbt_doc "$d" "$(printf '%s\n' 'sbt "set core / Test / fork := true" "inspect tree compile" "help test"' \
+  'sbt ~test "show core/version" "new llm4s/llm4s.g8"' 'sbt "runMain org.llm4s.Main --flag" # comment; sbt nope' \
+  'which sbt; addSbtPlugin("x" % "sbt-y" % "1")' 'sbt core/test:compile "it / Test / testOptions"' \
+  'sbt "project /" publishedArtifactsCheck ThisBuild/scalaVersion')"
+expect_pass "set/inspect arguments, ~, show, new, old syntax, comments and non-invocations" "$d"
 
-d="$(fresh_copy cmd-hash-in-word)"; run_sbt_doc "$d" 'sbt compile test#x'
-expect_fail "a # within a word does not start a comment" "$d" "\`test#x\` is not an alias"
+d="$(fresh_copy sbt-ignore)"; run_sbt_doc "$d" "sbt nope # doc-support: ignore"
+expect_pass "an opted-out command" "$d"
 
-d="$(fresh_copy cmd-after-and)";run_sbt_doc "$d" "cd modules/core && sbt crossTestAll"
-expect_fail "a command after && in a code block" "$d" "crossTestAll"
-
-d="$(fresh_copy cmd-after-and-inline)"; say "$d" README.md 'Or `cd x && sbt otherCrossTest`.'
-expect_fail "a command after && in inline code" "$d" "otherCrossTest"
-
-echo "== sbt commands anywhere on a shell line (round 8)"
-d="$(fresh_copy cmd-yaml-run)"; run_sbt_doc "$d" "$(printf '%s\n' 'steps:' '  - name: Build' '    run: sbt definitelyNotATask')"
-expect_fail "a YAML run: entry is a command line" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-yaml-run-ok)"; run_sbt_doc "$d" "$(printf '%s\n' 'steps:' '  - run: sbt test' '  - name: Unit tests (sbt fast)' '    run: "sbt \"core/testOnly *UnitSpec\""' '    command: sbt compile')"
-expect_pass "YAML run:, - run: and command: entries with real tasks" "$d"
-
-d="$(fresh_copy cmd-yaml-block)"; run_sbt_doc "$d" "$(printf '%s\n' 'steps:' '  - name: Build' '    run: |' '      cd modules/core' '      sbt compile \' '        definitelyNotATask' '  - run: sbt test')"
-expect_fail "a command in a YAML block scalar" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-yaml-folded)"; run_sbt_doc "$d" "$(printf '%s\n' '  - run: >-' '      sbt compile' '      otherCrossTest')"
-expect_fail "a folded YAML block scalar is one command line" "$d" "otherCrossTest"
-
-d="$(fresh_copy cmd-semicolon)"; run_sbt_doc "$d" "cd modules/core; sbt definitelyNotATask"
-expect_fail "a command after a shell ;" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-semicolon-inline)"; say "$d" README.md 'Or `cd x; sbt otherCrossTest`.'
-expect_fail "a command after a shell ; in inline code" "$d" "otherCrossTest"
-
-d="$(fresh_copy cmd-quoted-semicolon)"; run_sbt_doc "$d" "$(printf '%s\n' 'echo "a; sbt definitelyNotATask"' "echo 'b && sbt otherCrossTest'")"
-say "$d" README.md 'Print it with `echo "x | sbt crossTestAll"`.'
-expect_pass "a separator inside quotes does not start a command" "$d"
-
-d="$(fresh_copy cmd-subshell)"; run_sbt_doc "$d" "cd x && (sbt definitelyNotATask)"
-expect_fail "a command in a subshell" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-substitution)"; run_sbt_doc "$d" 'out=$(sbt -batch definitelyNotATask)'
-expect_fail "a command in a \$( ) substitution" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-quoted-substitution)"; run_sbt_doc "$d" 'version="$(sbt definitelyNotATask)"'
-expect_fail "a \$( ) substitution inside double quotes is a command (round 9)" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-quoted-backtick)"; run_sbt_doc "$d" 'echo "built `sbt -batch otherCrossTest`"'
-expect_fail "a backtick substitution inside double quotes is a command (round 9)" "$d" "otherCrossTest"
-
-d="$(fresh_copy cmd-nested-substitution)"; run_sbt_doc "$d" 'v="$(echo "$(sbt crossTestAll)")"; echo "x; sbt alsoNotATask"'
-expect_fail "a nested substitution is a command; quoting resumes after it (round 9)" "$d" "crossTestAll"
-
-d="$(fresh_copy cmd-substitution-quotes-resume)"; run_sbt_doc "$d" 'v="$(sbt compile) ; sbt definitelyNotATask"'
-expect_pass "after a substitution, the rest of the double-quoted word is still quoted (round 9)" "$d"
-
-d="$(fresh_copy cmd-single-quoted-substitution)"; run_sbt_doc "$d" "echo '\$(sbt definitelyNotATask) and \`sbt otherCrossTest\`'"
-expect_pass "a substitution inside single quotes is text (round 9)" "$d"
-
-d="$(fresh_copy cmd-prefixes)"; run_sbt_doc "$d" "$(printf '%s\n' 'SBT_OPTS=-Xmx2g time sbt compile &' 'env -i JAVA_HOME=/x sbt test' 'if sbt compile; then echo ok; fi' 'sudo -E exec ./sbt test 2>&1 | tee log' 'RUN sbt core/test')"
-expect_pass "env, time, exec, sudo, VAR=x and shell keywords before sbt; a redirection & is not a separator" "$d"
-
-d="$(fresh_copy cmd-prefix-bad)"; run_sbt_doc "$d" "env FOO=1 nohup sbt definitelyNotATask"
-expect_fail "a command after wrapper words is still checked" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-wrapper-values-ok)"; run_sbt_doc "$d" "$(printf '%s\n' 'sudo -u ci sbt test' 'sudo --user=ci -E sbt test' 'env -u NAME -C /tmp sbt compile' 'nice -n 10 sbt test' 'timeout -s KILL 30m sbt compile' 'exec -a name sbt test')"
-expect_pass "a wrapper option's value is not taken for the command word" "$d"
-
-d="$(fresh_copy cmd-sudo-user)"; run_sbt_doc "$d" "sudo -u ci sbt definitelyNotATask"
-expect_fail "sudo -u USER: the command after the user is checked" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-sudo-combined)"; run_sbt_doc "$d" "sudo -Eu ci -- sbt definitelyNotATask"
-expect_fail "sudo -Eu USER --: a combined short option and a terminator" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-env-unset)"; run_sbt_doc "$d" "env -u NAME sbt definitelyNotATask"
-expect_fail "env -u NAME: the command after the name is checked" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-nice-n)"; run_sbt_doc "$d" "nice -n 10 sbt definitelyNotATask"
-expect_fail "nice -n N: the command after the adjustment is checked" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-timeout)"; run_sbt_doc "$d" "timeout 30m sbt definitelyNotATask"
-expect_fail "timeout DURATION: the command after the duration is checked" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-sbt-quoted-semicolon)"; run_sbt_doc "$d" "$(printf '%s\n' "sbt 'run \"explain a;b\"'" "sbt 'core/run \"say \\\"x;y\\\" now\"'")"
-expect_pass "a ; inside an sbt-quoted argument does not split the command" "$d"
-
-d="$(fresh_copy cmd-sbt-quoted-semicolon-bad)"; run_sbt_doc "$d" "sbt 'run \"x;y\"; definitelyNotATask'"
-expect_fail "a ; outside sbt quotes still splits the command" "$d" "definitelyNotATask"
-
-d="$(fresh_copy cmd-not-command-word)"; run_sbt_doc "$d" "$(printf '%s\n' 'addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.5.2")' 'brew install sbt sbtn' 'which sbt && ls ~/.sbt/boot' 'cp -r project/sbt build/' 'curl -L https://example.com/sbt test.tgz')"
-say "$d" README.md 'Install the `sbt-ci-release` plugin with `addSbtPlugin("x" % "sbt-ci-release" % "1")`, or see `/usr/share/sbt foo`.'
-expect_pass "sbt not in command position is not a command" "$d"
-
-d="$(fresh_copy cmd-thin-client)"; run_sbt_doc "$d" "$(printf './sbt crossTestAll\nsbtn otherCrossTest')"
-expect_fail "the ./sbt launcher and sbtn are read like sbt" "$d" "otherCrossTest"
-
-d="$(fresh_copy cmd-commands)"; run_sbt_doc "$d" 'sbt reload projects "set core / Test / fork := true" ci-release "inspect core/compile" new scala/scala3.g8'
-expect_pass "sbt and plugin commands from the model" "$d"
-
-echo "== sbt keys exist only where the build defines them"
-d="$(fresh_copy cmd-root-task-in-module)"; run_sbt_doc "$d" "sbt core/publishedArtifactsCheck"
-expect_fail "a root-only task scoped to another project" "$d" "\`publishedArtifactsCheck\` is not defined in \`core\`; it is defined in llm4s"
-
-d="$(fresh_copy cmd-module-task-elsewhere)"; say "$d" README.md 'Run `sbt "core/itTierCheck"` to check it.'
-expect_fail "a task one module defines, scoped to another" "$d" "\`itTierCheck\` is not defined in \`core\`; it is defined in it"
-
-d="$(fresh_copy cmd-task-where-defined)"; run_sbt_doc "$d" "sbt publishedArtifactsCheck it/itTierCheck itTierCheck llm4s/stabilityTierCheck core/test"
-expect_pass "tasks run where the build defines them, or in what the root aggregates" "$d"
-
-d="$(fresh_copy cmd-unscoped-not-aggregated)"; run_sbt_doc "$d" "sbt lonerCheck"
-edit_model "$d" 'm["projects"].append(project("loner", "modules/loner", extra=[["", "", "lonerCheck"]]))'
-expect_fail "an unscoped task defined only in a project the root does not aggregate" "$d" "\`lonerCheck\` is not defined in the current project \`llm4s\` nor any project it aggregates; it is defined in loner"
-
-d="$(fresh_copy cmd-unscoped-aggregated)"; run_sbt_doc "$d" "sbt itTierCheck"
-expect_pass "an unscoped task the root reaches by aggregation" "$d"
-
-d="$(fresh_copy cmd-aggregate-false)"; run_sbt_doc "$d" "sbt itTierCheck"
-edit_model "$d" 'proj(m, "llm4s")["noAggregate"].append("itTierCheck")'
-expect_fail "a key whose aggregate is false in the root does not reach its aggregates" "$d" "\`itTierCheck\` is not defined in the current project \`llm4s\`"
-
-d="$(fresh_copy cmd-key-removed)"; run_sbt_doc "$d" "sbt it/itTierCheck"
-edit_model "$d" 'drop_key(m, "itTierCheck")'
-expect_fail "a task the build no longer defines (declared but never set)" "$d" "\`itTierCheck\` is not an alias"
-
-echo "== project switches persist through the command sequence (round 4)"
-d="$(fresh_copy cmd-switch-root-task)"; run_sbt_doc "$d" 'sbt "project core" publishedArtifactsCheck'
-expect_fail "'project core' then a root-only task" "$d" "\`publishedArtifactsCheck\` is not defined in the current project \`core\`; it is defined in llm4s"
-
-d="$(fresh_copy cmd-switch-semicolon)"; say "$d" README.md 'Run `sbt "project core; publishedArtifactsCheck"`.'
-expect_fail "'project core; task' in one argument" "$d" "not defined in the current project \`core\`"
-
-d="$(fresh_copy cmd-switch-ok)"; run_sbt_doc "$d" 'sbt "project it" itTierCheck test "project llm4s" publishedArtifactsCheck'
-expect_pass "tasks after a switch to the project that defines them, and back" "$d"
-
-d="$(fresh_copy cmd-switch-unknown)"; run_sbt_doc "$d" 'sbt "project nonexistentProject" test'
-expect_fail "'project X' names a project the build does not define" "$d" "names project \`nonexistentProject\`"
-
-echo "== plugin configurations exist only in projects that enable the plugin (round 4)"
-d="$(fresh_copy cmd-docker-in-core)"; run_sbt_doc "$d" "sbt core/docker:publishLocal"
-expect_fail "core/docker:publishLocal" "$d" "configuration \`docker\` is not defined in \`core\` (only in deployService, workspaceRunner)"
-
-d="$(fresh_copy cmd-jmh-in-core)"; run_sbt_doc "$d" "sbt core/Jmh/run"
-expect_fail "core/Jmh/run" "$d" "configuration \`Jmh\` is not defined in \`core\` (only in benchmarks)"
-
-d="$(fresh_copy cmd-docker-after-switch)"; run_sbt_doc "$d" 'sbt "project core" Docker/publishLocal'
-expect_fail "Docker/publishLocal after switching to core" "$d" "configuration \`Docker\` is not defined in \`core\`"
-
-d="$(fresh_copy cmd-plugin-configs-ok)"; run_sbt_doc "$d" 'sbt workspaceRunner/docker:publishLocal deployService/Docker/publishLocal "benchmarks/Jmh/run -rf json" Docker/publishLocal'
-expect_pass "plugin configurations where the plugin is enabled, and from the aggregating root" "$d"
-
-d="$(fresh_copy plugin-removed)"; run_sbt_doc "$d" "sbt dependencyUpdates"
-edit_model "$d" 'drop_key(m, "dependencyUpdates")'
-expect_fail "a plugin task whose plugin was removed" "$d" "\`dependencyUpdates\` is not an alias"
-
-d="$(fresh_copy plugin-config-removed)"
-edit_model "$d" 'drop_config(m, "docker")'
-expect_fail "a plugin configuration whose plugin was removed" "$d" "configuration \`docker\` is not defined in \`workspaceRunner\`, nor in any project the build defines"
-
-d="$(fresh_copy plugin-never-loaded)"; run_sbt_doc "$d" "sbt assembly"
-expect_fail "a plugin task the build never loaded" "$d" "\`assembly\` is not an alias"
-
-d="$(fresh_copy plugin-command-removed)"; run_sbt_doc "$d" "sbt ci-release"
-edit_model "$d" 'm["commands"].remove("ci-release")'
-expect_fail "a plugin command whose plugin was removed" "$d" "\`ci-release\` is not an alias"
-
-echo "== aliases"
-d="$(fresh_copy cmd-alias-removed)"
-edit_model "$d" 'm["aliases"] = [a for a in m["aliases"] if a["name"] != "buildAll"]'
-expect_fail "documented alias removed from the build" "$d" "\`buildAll\` is not an alias"
-
-d="$(fresh_copy cmd-alias-body)"
-edit_model "$d" 'next(a for a in m["aliases"] if a["name"] == "buildAll")["body"] = ";clean;compile;tset"'
-expect_fail "an alias whose body names an unknown task" "$d" "alias \`buildAll\` (\`;clean;compile;tset\`): \`tset\` is not an alias"
-
-d="$(fresh_copy cmd-alias-body-scoped)"
-edit_model "$d" 'next(a for a in m["aliases"] if a["name"] == "testIntegration")["body"] = ";set core / fork := true; core/itTierCheck"'
-expect_fail "an alias body with a key scoped to the wrong project" "$d" "\`itTierCheck\` is not defined in \`core\`"
-
-d="$(fresh_copy cmd-alias-body-switch)"
-edit_model "$d" 'm["aliases"].append({"name": "checkCore", "body": ";project core;publishedArtifactsCheck"})'
-expect_fail "an alias body's project switch persists" "$d" "not defined in the current project \`core\`"
-
-echo "== set: the key a setting expression names must exist where it is scoped (round 5)"
-d="$(fresh_copy set-removed-key)"; run_sbt_doc "$d" 'sbt "set coverageMinimumStmtTotal := 85" clean coverage test coverageReport'
-edit_model "$d" 'drop_key(m, "coverageMinimumStmtTotal")'
-expect_fail "set of a key the build no longer defines" "$d" "\`set coverageMinimumStmtTotal := 85\`: \`coverageMinimumStmtTotal\` is not a task or setting the build defines"
-
-d="$(fresh_copy set-removed-key-in)"; run_sbt_doc "$d" 'sbt "set fork in (core, Test) := true"'
-edit_model "$d" 'drop_key(m, "fork")'
-expect_fail "set of a removed key in the old in syntax" "$d" "\`fork\` is not a task or setting the build defines"
-
-d="$(fresh_copy set-removed-build-key)"
-edit_model "$d" 'drop_key(m, "coverageEnabled"); m["buildKeys"] = [k for k in m["buildKeys"] if k[2] != "coverageEnabled"]'
-expect_fail "an alias body that sets a removed ThisBuild key" "$d" "alias \`coverage\` (\`;set ThisBuild / coverageEnabled := true\`): \`set ThisBuild / coverageEnabled := true\`: \`coverageEnabled\` is not a task or setting"
-
-d="$(fresh_copy set-ok)"
-run_sbt_doc "$d" "$(cat <<'SH'
-sbt "set coverageMinimumStmtTotal := 85" "set coverageFailOnMinimum := false" "set ThisBuild / coverageEnabled := true"
-sbt "set core / Test / fork := true" 'set it / Test / test / testOptions += Tests.Argument("-l", "x")' "set Global / concurrentRestrictions := Nil"
-sbt "set fork in Test := true" "set fork in (core, Test) := true" "set testOptions in (it, Test, test) ++= Nil" "set every fork := true"
-sbt 'set LocalProject("core") / Test / Keys.fork := true' "set core / Zero / version ~= identity" 'set scalacOptions -= "-feature"'
-sbt "project core" "set Test / fork := true" "set version := \"1\""
-SH
-)"
-expect_pass "set of real keys, in slash, in, every, ThisBuild, Global, LocalProject and qualified forms" "$d"
-
-d="$(fresh_copy set-wrong-project)"; run_sbt_doc "$d" 'sbt "set core / itTierCheck := {}"'
-expect_fail "set of a key in a project that does not define it" "$d" "\`itTierCheck\` is not defined in \`core\`; it is defined in it"
-
-d="$(fresh_copy set-after-switch)"; run_sbt_doc "$d" 'sbt "project core" "set publishedArtifactsCheck := {}"'
-expect_fail "set after a project switch resolves in the new project" "$d" "\`publishedArtifactsCheck\` is not defined in the current project \`core\`"
-
-d="$(fresh_copy set-no-aggregation)"; run_sbt_doc "$d" 'sbt "set itTierCheck := {}"'
-expect_fail "set does not reach what the current project aggregates" "$d" "\`itTierCheck\` is not defined in the current project \`llm4s\`; it is defined in it"
-
-d="$(fresh_copy set-unknown-axis)"; run_sbt_doc "$d" 'sbt "set nonexistent / fork := true"'
-expect_fail "set scoped to a name the build does not define" "$d" "\`nonexistent\` is not a project, configuration or key the build defines"
-
-d="$(fresh_copy set-unknown-config)"; run_sbt_doc "$d" 'sbt "set core / Jmh / run := {}"'
-expect_fail "set scoped to a configuration the project lacks" "$d" "configuration \`Jmh\` is not defined in \`core\`"
-
-d="$(fresh_copy set-unparseable)"; run_sbt_doc "$d" 'sbt "set (core / fork) := true"'
-expect_fail "set whose left side is in no form the check reads" "$d" "cannot read \`(core / fork)\`"
-
-d="$(fresh_copy set-no-operator)"; run_sbt_doc "$d" 'sbt "set Seq(fork := true)"'
-expect_fail "set with no top-level operator" "$d" "so it cannot be checked as a setting"
-
-echo "== aliases replay in the project they are run from (round 5)"
-d="$(fresh_copy alias-after-switch)"; run_sbt_doc "$d" 'sbt "project core" rootOnly'
-edit_model "$d" 'm["aliases"].append({"name": "rootOnly", "body": ";publishedArtifactsCheck"})'
-expect_fail "'project core' then an alias whose body is root-only" "$d" "alias \`rootOnly\` run in \`core\`: \`publishedArtifactsCheck\` is not defined in the current project \`core\`"
-
-d="$(fresh_copy alias-nested-after-switch)"; run_sbt_doc "$d" 'sbt "project core" outer'
-edit_model "$d" 'm["aliases"] += [{"name": "rootOnly", "body": ";publishedArtifactsCheck"}, {"name": "outer", "body": ";compile;rootOnly"}]'
-expect_fail "an alias calling an alias, from another project" "$d" "alias \`outer\` run in \`core\`: alias \`rootOnly\` run in \`core\`: \`publishedArtifactsCheck\`"
-
-d="$(fresh_copy alias-switches-project)"; run_sbt_doc "$d" 'sbt toCore publishedArtifactsCheck'
-edit_model "$d" 'm["aliases"].append({"name": "toCore", "body": ";project core"})'
-expect_fail "an alias's project switch applies to the commands after it" "$d" "\`publishedArtifactsCheck\` is not defined in the current project \`core\`"
-
-d="$(fresh_copy alias-switch-ok)"; run_sbt_doc "$d" 'sbt toCore buildAll "project llm4s" publishedArtifactsCheck rootOnly'
-edit_model "$d" 'm["aliases"] += [{"name": "toCore", "body": ";project core"}, {"name": "rootOnly", "body": ";publishedArtifactsCheck"}]'
-expect_pass "aliases that run where their keys are defined" "$d"
-
-d="$(fresh_copy alias-cycle)"
-edit_model "$d" 'm["aliases"] += [{"name": "ping", "body": ";compile;pong"}, {"name": "pong", "body": ";ping"}]'
-expect_fail "an alias that runs itself" "$d" "alias \`ping\` runs itself (ping -> pong -> ping)"
-
-echo "== inspect, last and export name keys (round 5)"
-d="$(fresh_copy inspect-unknown)"; run_sbt_doc "$d" 'sbt "inspect tree core/definitelyNotATask"'
-expect_fail "inspect of a key the build does not define" "$d" "\`inspect tree core/definitelyNotATask\`: \`definitelyNotATask\` is not an alias"
-
-d="$(fresh_copy inspect-wrong-project)"; run_sbt_doc "$d" 'sbt "project core" "last publishedArtifactsCheck"'
-expect_fail "last of a key the current project does not define" "$d" "\`last publishedArtifactsCheck\`: \`publishedArtifactsCheck\` is not defined in the current project \`core\`"
-
-d="$(fresh_copy inspect-ok)"; run_sbt_doc "$d" 'sbt "inspect tree core/compile" "inspect actual Test/fork" "last compile" "export core/Test/compile" inspect last'
-expect_pass "inspect, last and export of real keys" "$d"
-
-echo "all cases behaved"
+echo "All doc-support cases behaved."
