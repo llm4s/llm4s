@@ -96,7 +96,9 @@ class MCPErrorPathsSpec extends AnyFlatSpec with Matchers {
 
   it should "report a server process that dies while starting" in {
     assume(!isWindows, "bash is not available on Windows")
-    val transport = transportFor(Seq("bash", "-c", "echo 'broken server' >&2; exit 3"))
+    // No output before exiting: the start-up wait reads any output as "ready", so a line written just before the
+    // exit could let the process count as started and fail later, at the write, as a broken pipe.
+    val transport = transportFor(Seq("bash", "-c", "exit 3"))
     val message   = failure(transport.sendRequest(toolsRequest))
     message should startWith("Failed to start MCP server process")
     message should include("died during startup")
