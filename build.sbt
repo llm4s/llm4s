@@ -1146,6 +1146,14 @@ lazy val samples = (project in file("modules//samples"))
     // (org.llm4s.samples.*). Samples are compile-checked, not covered.
     coverageDisabled,
     libraryDependencies += Deps.termflow,
+    // Test-only: `JsonLibrariesGuideSpec` runs the recipes of docs/guide/json-libraries.md against the real libraries.
+    // Samples are unpublished, so none of these reaches a user's classpath or a frozen module.
+    libraryDependencies ++= Seq(
+      Deps.circeCore  % Test,
+      Deps.ujsonCirce % Test,
+      Deps.playJson   % Test,
+      Deps.zioJson    % Test
+    ),
     appLogging
   )
 
