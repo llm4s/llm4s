@@ -122,18 +122,19 @@ object ListDirectoryTool {
       Try(Paths.get(pathStr).toAbsolutePath.normalize()).toEither.left.map(e => s"Invalid path: ${e.getMessage}")
 
     pathResult.flatMap { path =>
+      // Without followSymlinks, a directory that is itself a symbolic link is refused, as read_file refuses a linked file.
+      val linkOptions = if (config.followSymlinks) Array.empty[LinkOption] else Array(LinkOption.NOFOLLOW_LINKS)
+
       // Security check
       if (!config.isPathAllowed(path)) {
         Left(s"Access denied: path '$pathStr' is not allowed")
-      } else if (!Files.exists(path)) {
+      } else if (!Files.exists(path, linkOptions: _*)) {
         Left(s"Directory not found: $pathStr")
-      } else if (!Files.isDirectory(path)) {
+      } else if (!Files.isDirectory(path, linkOptions: _*)) {
         Left(s"Not a directory: $pathStr")
       } else {
         Try {
           // List directory contents
-          val linkOptions = if (config.followSymlinks) Array.empty[LinkOption] else Array(LinkOption.NOFOLLOW_LINKS)
-
           val allEntries = Files
             .list(path)
             .iterator()
