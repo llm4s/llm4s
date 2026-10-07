@@ -450,6 +450,55 @@ val keywordOnly = searcher.search(embedding, "query", strategy = KeywordOnly)
 | VectorOnly | Semantic/conceptual queries |
 | KeywordOnly | Exact term matching, names, codes |
 
+#### How WeightedScore combines the two channels
+
+Vector similarity and BM25 scores live on different scales, so each channel is first rescaled on its own: its best
+hit becomes `1.0`, its weakest hit becomes `0.1`, and everything between is spread linearly. A chunk the channel did
+not return at all scores `0.0` for that channel. The final score is the weighted average of the two channel scores,
+so it lies in `[0, 1]`. If a channel returned a single hit, or all its hits tie, each of them scores `1.0`.
+
+The `0.1` floor is deliberate. With plain min-max the weakest hit would map to `0.0`, the same as a miss, so a
+relevant chunk that happened to rank last in one channel would contribute nothing from it.
+
+```scala
+import org.llm4s.vectorstore._
+
+// Only the vector channel counts (vector weight 1.0), and the keyword channel finds nothing.
+val hits = for {
+  store    <- VectorStoreFactory.inMemory()
+  keywords <- KeywordIndex.inMemory()
+  _        <- store.upsert(VectorRecord("strong", Array(1f, 0f), Some("strong")))
+  _        <- store.upsert(VectorRecord("weak", Array(0.6f, 0.8f), Some("weak")))
+  found <- HybridSearcher(store, keywords).search(
+    Array(1f, 0f),
+    "no keyword matches this",
+    topK = 5,
+    strategy = FusionStrategy.WeightedScore(vectorWeight = 1.0, keywordWeight = 0.0)
+  )
+} yield found.map(hit => hit.id -> hit.score)
+// Right(Seq("strong" -> 1.0, "weak" -> 0.1)): the weak hit is not 0.0
+```
+
+#### Invalid weights
+
+`WeightedScore` needs finite, non-negative weights that are not both zero and whose sum is finite. Anything else
+(`WeightedScore(0.0, 0.0)`, a negative, `NaN` or infinite weight) throws `IllegalArgumentException` from the
+constructor, as does `RAGConfig.withWeightedScore`, which builds one. That is deliberate: weights written in code are
+a programming error, like any `require`-guarded case class, and the chainable `RAGConfig` builders return a
+`RAGConfig`, so they cannot return a `Left`.
+
+If the weights come from user input, check them first so a bad value becomes a `Left` instead of an exception.
+Letting the constructor do the checking keeps the rules in one place:
+
+```scala
+import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.vectorstore.FusionStrategy
+import scala.util.Try
+
+def weightedScore(vector: Double, keyword: Double): Result[FusionStrategy] =
+  Try(FusionStrategy.WeightedScore(vector, keyword)).toResult
+```
+
 ### BM25 Keyword Index
 
 The `KeywordIndex` provides BM25-scored full-text search using SQLite FTS5:
@@ -801,6 +850,40 @@ chunks.foreach { chunk =>
   println(s"From: ${chunk.metadata.sourceFile.getOrElse("unknown")}")
   println(s"Content: ${chunk.content.take(50)}...")
 }
+```
+
+### Invalid Chunking Settings
+
+`ChunkingConfig` checks its values when you build it, so a chunker never receives a configuration it cannot handle:
+
+| Rule | Failing example |
+|------|-----------------|
+| `targetSize` is positive | `ChunkingConfig(targetSize = 0)` |
+| `maxSize >= targetSize` | `ChunkingConfig(targetSize = 800, maxSize = 400)` |
+| `0 <= overlap < targetSize` | `ChunkingConfig(targetSize = 800, overlap = 800)` |
+| `minChunkSize` is not negative | `ChunkingConfig(minChunkSize = -1)` |
+
+A value that breaks a rule throws `IllegalArgumentException` (the message names the rule, for example
+`overlap must be >= 0 and < targetSize`). `RAGConfig.withChunking(strategy, size, overlap)` builds a
+`ChunkingConfig`, so it throws too. Every configuration that *can* be built is safe: no chunker throws for it, and the
+largest overlap allowed (`targetSize - 1`) still moves each chunk one character forward.
+
+When the sizes come from user input, check them first. To get a `Left(ValidationError)` straight from the numbers, use
+`ChunkingUtils.chunkTextValidated`; to build a config, let the constructor decide:
+
+```scala
+import org.llm4s.chunking.ChunkingConfig
+import org.llm4s.llmconnect.utils.ChunkingUtils
+import org.llm4s.types.{ Result, TryOps }
+import scala.util.Try
+
+val text = "one two three four five six seven eight nine ten"
+
+// Left(ValidationError) with field "overlap" (or "size"), not an exception
+val chunks = ChunkingUtils.chunkTextValidated(text, size = 20, overlap = 20)
+
+def chunkingConfig(size: Int, overlap: Int): Result[ChunkingConfig] =
+  Try(ChunkingConfig(targetSize = size, maxSize = size * 3 / 2, overlap = overlap)).toResult
 ```
 
 ### Chunking Best Practices

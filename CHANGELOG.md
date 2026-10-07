@@ -171,6 +171,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Handoff.of(id, agent, reason)` for a `Result`), and `handoffId` is `handoff_to_<id>` rather
   than `handoff_to_agent_<hash>`. Design: `docs/design/typed-agent-runtime-design.md` §4.7, with
   the Stage 0 carry-forward in §4.8.
+- **RAG chunking and fusion: what is validated, and how weighted scores are combined**
+  ([#1318](https://github.com/llm4s/llm4s/issues/1318), items 4 to 6; no behaviour change, the code shipped in
+  #1358): `docs/guide/vector-store.md` now states that an invalid `ChunkingConfig` or `WeightedScore` throws
+  `IllegalArgumentException` (decided, because the `RAGConfig` builders cannot return a `Left`), how to turn user
+  input into a `Left` (`ChunkingUtils.chunkTextValidated`, or `Try(...)` through `toResult`), that every
+  configuration that can be built is safe for every chunker, and that `WeightedScore` rescales each channel so its
+  weakest hit scores `0.1`, not the `0.0` of a miss. The snippets are compiled and run by `RagValidationGuideSpec`.
+  New property tests pin the guarantees: `ScoreNormalisationSpec` (the floor and the best hit, nothing scores like a
+  miss, the channel's order is kept, scale and offset do not matter) and `ChunkersAcceptValidConfigsSpec` (no
+  chunker throws for any valid config, and chunk indices run from 0 without gaps, which re-ingest relies on).
 - **Compatibility and Deprecation Policy** ([docs/reference/compatibility-policy.md](docs/reference/compatibility-policy.md),
   [#1281](https://github.com/llm4s/llm4s/issues/1281)): one page for what you can rely on when you upgrade, by
   tier; how versions are read (`early-semver`, 0.5.0 as the MiMa baseline); what the promise covers (public
