@@ -8,9 +8,12 @@ import org.llm4s.util.Redaction
 /**
  * Configuration for the Anthropic Claude API.
  *
- * Prefer [[AnthropicConfig.fromValues]] over the primary constructor; it
- * resolves `contextWindow` and `reserveCompletion` automatically from the
- * model name.
+ * Prefer [[AnthropicConfig.fromValues]], which validates the values and
+ * resolves `contextWindow` and `reserveCompletion` from the bundled model
+ * catalogue. The constructor is private: build one with the companion `apply`
+ * and adjust it with the `with*` setters. Java and Kotlin, which cannot see
+ * Scala default arguments, use `AnthropicConfig.apply(apiKey, model)` and the
+ * setters, so adding a field never breaks them.
  *
  * @param apiKey        Anthropic API key; redacted in `toString`.
  * @param model         Model identifier, e.g. `"claude-sonnet-4-5-latest"`.
@@ -19,7 +22,7 @@ import org.llm4s.util.Redaction
  * @param reserveCompletion Tokens held back from prompt history for the completion.
  */
 @Stable
-case class AnthropicConfig(
+final case class AnthropicConfig private (
   apiKey: String,
   model: String,
   baseUrl: String,
@@ -29,6 +32,11 @@ case class AnthropicConfig(
   override val providerId: ProviderId                    = ProviderId("anthropic")
   override def endpointUrl: Option[String]               = Some(baseUrl)
   override def withModel(model: String): AnthropicConfig = copy(model = model)
+
+  def withApiKey(apiKey: String): AnthropicConfig                    = copy(apiKey = apiKey)
+  def withBaseUrl(baseUrl: String): AnthropicConfig                  = copy(baseUrl = baseUrl)
+  def withContextWindow(contextWindow: Int): AnthropicConfig         = copy(contextWindow = contextWindow)
+  def withReserveCompletion(reserveCompletion: Int): AnthropicConfig = copy(reserveCompletion = reserveCompletion)
   override def toString: String =
     s"AnthropicConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
@@ -44,6 +52,28 @@ object AnthropicConfig {
   val DEFAULT_BASE_URL: String = "https://api.anthropic.com"
 
   private val standardReserve = 4096
+
+  /** Builds a config without validating it; [[fromValues]] validates. */
+  def apply(
+    apiKey: String,
+    model: String,
+    baseUrl: String,
+    contextWindow: Int,
+    reserveCompletion: Int
+  ): AnthropicConfig =
+    new AnthropicConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion)
+
+  /**
+   * The API key and model, every other field at its default: the entry point for Java and Kotlin,
+   * which do not see Scala default arguments. The base URL is [[DEFAULT_BASE_URL]], and
+   * `contextWindow` and `reserveCompletion` come from the model name alone (200k for current
+   * Claude models); set them, and the rest, with the `with*` setters, or use [[fromValues]] to
+   * consult the bundled model catalogue.
+   */
+  def apply(apiKey: String, model: String): AnthropicConfig = {
+    val (cw, rc) = anthropicFallback(model)
+    apply(apiKey, model, DEFAULT_BASE_URL, cw, rc)
+  }
 
   private def anthropicFallback(modelName: String): (Int, Int) =
     modelName match {

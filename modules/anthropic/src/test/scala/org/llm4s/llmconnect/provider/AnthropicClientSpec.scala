@@ -99,7 +99,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
           exchanges += exchange
       }
       val client = new AnthropicClient(
-        testConfig.copy(baseUrl = baseUrl),
+        testConfig.withBaseUrl(baseUrl),
         exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
 
@@ -130,7 +130,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
           exchanges += exchange
       }
       val client = new AnthropicClient(
-        testConfig.copy(baseUrl = baseUrl),
+        testConfig.withBaseUrl(baseUrl),
         exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
 
@@ -150,7 +150,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
     }
     // Nothing is listening on this port, so the SDK call fails before any bytes are read.
     val client = new AnthropicClient(
-      testConfig.copy(baseUrl = "http://localhost:1"),
+      testConfig.withBaseUrl("http://localhost:1"),
       exchangeLogging = ProviderExchangeLogging.Enabled(sink)
     )
 
@@ -196,7 +196,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
           exchanges += exchange
       }
       val client = new AnthropicClient(
-        testConfig.copy(baseUrl = baseUrl),
+        testConfig.withBaseUrl(baseUrl),
         exchangeLogging = ProviderExchangeLogging.Enabled(sink)
       )
       val chunks = ListBuffer.empty[String]
@@ -247,7 +247,7 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
       os.write(bytes)
       os.close()
     } { baseUrl =>
-      val client = new AnthropicClient(testConfig.copy(baseUrl = baseUrl))
+      val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
       val result = client.complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())
 
       result.isRight shouldBe true
