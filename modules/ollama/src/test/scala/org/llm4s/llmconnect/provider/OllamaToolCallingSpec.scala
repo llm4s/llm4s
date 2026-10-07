@@ -66,6 +66,20 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
 
   "the request body" should {
 
+    "send an assistant message's thinking text as its `thinking`, and none when it has none" in {
+      val thought = AssistantMessage("Paris is sunny.").withThinking(
+        Seq(
+          ThinkingBlock.Text("Recall ", Some("sig")),
+          ThinkingBlock.Redacted("x"),
+          ThinkingBlock.Text("the forecast.")
+        )
+      )
+      val messages =
+        requestBody(Conversation(Seq(UserMessage("hi"), thought, AssistantMessage("plain"))))("messages").arr
+      messages(1)("thinking").str shouldBe "Recall the forecast."
+      messages(2).obj.contains("thinking") shouldBe false
+    }
+
     "carry no `tools` field when the options hold no tools" in {
       requestBody(Conversation(Seq(UserMessage("hi")))).obj.contains("tools") shouldBe false
     }
@@ -239,7 +253,29 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
         val completion = ask(client).toOption.get
 
         completion.thinking shouldBe Some("The user wants Paris weather; call the tool.")
+        completion.message.thinkingText shouldBe Some("The user wants Paris weather; call the tool.")
         completion.toolCalls.map(_.name) shouldBe List("get_weather")
+      }
+    }
+
+    "send the tool-call turn's thinking back with its content and tool calls in the follow-up request (#1381)" in {
+      val message = ujson.Obj(
+        "role"       -> "assistant",
+        "content"    -> "",
+        "thinking"   -> "The user wants Paris weather; call the tool.",
+        "tool_calls" -> ujson.Arr(call("get_weather", ujson.Obj("location" -> "Paris")))
+      )
+      withOllama(rawReply(message), reply("Sunny.")) { (client, seen) =>
+        val first  = ask(client).toOption.get
+        val callId = first.toolCalls.head.id
+        val followUp =
+          Conversation(Seq(UserMessage("What is the weather in Paris?"), first.message, ToolMessage("sunny", callId)))
+        client.complete(followUp, CompletionOptions().withTools(Seq(weatherTool))) shouldBe a[Right[_, _]]
+
+        val replayed = seen()(1)("messages").arr(1)
+        replayed("role").str shouldBe "assistant"
+        replayed("thinking").str shouldBe "The user wants Paris weather; call the tool."
+        replayed("tool_calls").arr.map(_("function")("name").str) shouldBe Seq("get_weather")
       }
     }
 
@@ -495,6 +531,7 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
 
         chunks.flatMap(_.thinkingDelta) shouldBe List("The user wants ", "Paris weather.")
         completion.thinking shouldBe Some("The user wants Paris weather.")
+        completion.message.thinking shouldBe Seq(ThinkingBlock.Text("The user wants Paris weather."))
         completion.toolCalls.map(_.name) shouldBe List("get_weather")
         chunks.last.finishReason shouldBe Some("tool_calls")
       }

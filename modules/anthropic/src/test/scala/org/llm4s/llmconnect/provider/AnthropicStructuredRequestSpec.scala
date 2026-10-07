@@ -46,9 +46,16 @@ class AnthropicStructuredRequestSpec extends AnyFlatSpec with Matchers {
   private def messages(b: ujson.Value): Seq[(String, String)] =
     b("messages").arr.toSeq.map { m =>
       val text = m("content") match {
-        case ujson.Str(s)   => s
-        case arr: ujson.Arr => arr.arr.map(_("text").str).mkString
-        case other          => fail(s"unexpected content: $other")
+        case ujson.Str(s) => s
+        case arr: ujson.Arr =>
+          arr.arr.map { block =>
+            block("type").str match {
+              case "tool_use"    => s"tool_use:${block("name").str}"
+              case "tool_result" => s"tool_result:${block("tool_use_id").str}:${block("content").str}"
+              case _             => block("text").str
+            }
+          }.mkString
+        case other => fail(s"unexpected content: $other")
       }
       m("role").str -> text
     }
@@ -117,7 +124,8 @@ class AnthropicStructuredRequestSpec extends AnyFlatSpec with Matchers {
     messages(b) shouldBe Seq(
       "user"      -> "q1",
       "assistant" -> "a1",
-      "user"      -> "[Tool result for call_1]: result-text",
+      "assistant" -> "tool_use:lookup",
+      "user"      -> "tool_result:call_1:result-text",
       "user"      -> "q2"
     )
   }
