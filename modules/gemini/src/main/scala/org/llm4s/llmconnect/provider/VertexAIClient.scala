@@ -60,6 +60,12 @@ class VertexAIClient(
 
   private val logger = LoggerFactory.getLogger(getClass)
 
+  /** How long a non-streaming call may take: the section's `timeouts.request`, else VertexAIClient.DefaultRequestTimeout. */
+  protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(VertexAIClient.DefaultRequestTimeout)
+
+  /** How long a streamed call may take: the section's `timeouts.stream`, else VertexAIClient.DefaultStreamTimeout. */
+  protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(VertexAIClient.DefaultStreamTimeout)
+
   private val authProvider = new VertexAIAuthProvider(config.credentialFilePath, httpClient)
 
   protected def clientDescription: String = s"Vertex AI client for model ${config.model}"
@@ -96,7 +102,7 @@ class VertexAIClient(
         for {
           token <- authProvider.getAccessToken()
           headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
-          attempt <- httpClient.post(url, headers, requestText, timeout = 120.seconds) match {
+          attempt <- httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
             case Left(error) =>
               recordExchange(startedAt, requestText, None, Left(error))
               Left(error)
@@ -137,7 +143,7 @@ class VertexAIClient(
         for {
           token <- authProvider.getAccessToken()
           headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
-          result <- httpClient.postStream(url, headers, requestText, timeout = 10.minutes) match {
+          result <- httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
             case Left(error) =>
               recordExchange(startedAt, requestText, None, Left(error))
               Left(error)
@@ -173,7 +179,7 @@ class VertexAIClient(
                   }
                 }
               }.toEither.left
-                .map(HttpFailures.streamReadError(_, url, 10.minutes))
+                .map(HttpFailures.streamReadError(_, url, streamTimeout))
                 .flatMap(_ =>
                   accumulator.toCompletion.map { c =>
                     val cost       = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
@@ -401,6 +407,12 @@ class VertexAIClient(
 }
 
 object VertexAIClient {
+
+  /** The timeout of a non-streaming call when the section sets no `timeouts.request`: two minutes. */
+  val DefaultRequestTimeout: FiniteDuration = 120.seconds
+
+  /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
+  val DefaultStreamTimeout: FiniteDuration = 10.minutes
   import org.llm4s.types.TryOps
 
   def apply(config: VertexAIConfig)(using ModelRegistryService): Result[VertexAIClient] =

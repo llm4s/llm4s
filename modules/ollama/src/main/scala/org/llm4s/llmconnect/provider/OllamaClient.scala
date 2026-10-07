@@ -67,7 +67,8 @@ import scala.util.{ Try, Using }
  * == Timeouts ==
  *
  * Non-streaming requests time out after 120 seconds; streaming requests
- * after 600 seconds.
+ * after 600 seconds. A section's `timeouts { request = ..., stream = ... }` block overrides
+ * either ([[OllamaConfig.timeouts]]).
  *
  * @param config  Ollama configuration containing the model name and base URL.
  * @param metrics Receives per-call latency and token-usage events.
@@ -86,6 +87,12 @@ class OllamaClient(
   protected def providerName: String      = "ollama"
   protected def modelName: String         = config.model
 
+  /** How long a non-streaming call may take: the section's `timeouts.request`, else [[OllamaClient.DefaultRequestTimeout]]. */
+  protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(OllamaClient.DefaultRequestTimeout)
+
+  /** How long a streamed call may take: the section's `timeouts.stream`, else [[OllamaClient.DefaultStreamTimeout]]. */
+  protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(OllamaClient.DefaultStreamTimeout)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -99,7 +106,7 @@ class OllamaClient(
     val url         = s"${config.baseUrl}/api/chat"
     val headers     = Map("Content-Type" -> "application/json")
     val startedAt   = Instant.now()
-    httpClient.post(url, headers, requestText, timeout = 120.seconds) match {
+    httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
       case Left(error) =>
         recordingExchange(startedAt, requestText, "")(Left(error))
       case Right(response) =>
@@ -180,7 +187,7 @@ class OllamaClient(
     val startedAt   = Instant.now()
     val rawResponse = new StringBuilder
 
-    httpClient.postStream(url, headers, requestText, timeout = 10.minutes) match {
+    httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
       case Left(error) =>
         recordingExchange(startedAt, requestText, "")(Left(error))
       case Right(response) if response.statusCode != 200 =>
@@ -254,7 +261,7 @@ class OllamaClient(
                   }
                 }
             }
-        }.toEither.left.map(HttpFailures.streamReadError(_, url, 10.minutes))
+        }.toEither.left.map(HttpFailures.streamReadError(_, url, streamTimeout))
 
         val result = processResult
           .flatMap(_ => failure.fold(accumulator.toCompletion)(Left(_)))
@@ -365,6 +372,13 @@ class OllamaClient(
 }
 
 object OllamaClient {
+
+  /** The timeout of a non-streaming call when the section sets no `timeouts.request`: two minutes. */
+  val DefaultRequestTimeout: FiniteDuration = 120.seconds
+
+  /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
+  val DefaultStreamTimeout: FiniteDuration = 10.minutes
+
   import org.llm4s.types.TryOps
 
   private val logger = LoggerFactory.getLogger(getClass)

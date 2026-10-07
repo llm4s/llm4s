@@ -6,7 +6,7 @@ import com.openai.azure.credential.AzureApiKeyCredential
 import com.openai.azure.{ AzureOpenAIServiceVersion, AzureUrlPathMode }
 import com.openai.client.okhttp.OpenAIOkHttpClient
 import com.openai.client.{ OpenAIClient => SdkClient }
-import com.openai.core.{ JsonField, ObjectMappers }
+import com.openai.core.{ JsonField, ObjectMappers, RequestOptions }
 import com.openai.core.http.StreamResponse
 import com.openai.errors.{ OpenAIIoException, OpenAIServiceException }
 import com.openai.models.chat.completions.{
@@ -28,7 +28,7 @@ import org.llm4s.error.LLMError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
@@ -787,16 +787,36 @@ object OpenAIClient {
 
 private[provider] object OpenAIClientTransport {
 
-  /** A transport over an `openai-java` client, closing it with the transport. */
-  def sdk(client: SdkClient): OpenAIClientTransport =
+  /**
+   * The SDK options carrying `timeout`, or none when the section sets no value, in which case the
+   * SDK's own default applies, as before the `timeouts` block existed.
+   *
+   * The timeout goes on each call rather than on the SDK client, because the client's timeout is one
+   * value for every call and covers a streamed response in full: a short `request` timeout set there
+   * would also cut every stream, and `request` and `stream` are separate settings.
+   */
+  private[provider] def requestOptions(timeout: Option[scala.concurrent.duration.FiniteDuration]): Option[RequestOptions] =
+    timeout.map(t => RequestOptions.builder().timeout(java.time.Duration.ofNanos(t.toNanos)).build())
+
+  /**
+   * A transport over an `openai-java` client, closing it with the transport.
+   *
+   * @param timeouts the section's `timeouts`: `request` bounds a completion, `stream` a streamed one
+   */
+  def sdk(client: SdkClient, timeouts: ProviderTimeouts = ProviderTimeouts.default): OpenAIClientTransport =
     new OpenAIClientTransport {
+      private val requestOpts = requestOptions(timeouts.request)
+      private val streamOpts  = requestOptions(timeouts.stream)
+
       override def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion =
-        client.chat().completions().create(params)
+        requestOpts.fold(client.chat().completions().create(params))(o => client.chat().completions().create(params, o))
 
       override def createChatCompletionStream(
         params: ChatCompletionCreateParams
       ): StreamResponse[ChatCompletionChunk] =
-        client.chat().completions().createStreaming(params)
+        streamOpts.fold(client.chat().completions().createStreaming(params))(o =>
+          client.chat().completions().createStreaming(params, o)
+        )
 
       override def close(): Unit = client.close()
     }
@@ -812,7 +832,8 @@ private[provider] object OpenAIClientTransport {
         .apiKey(config.apiKey)
         .baseUrl(config.baseUrl)
         .organization(config.organization.orNull)
-        .build()
+        .build(),
+      config.timeouts
     )
 
   /**
@@ -837,7 +858,7 @@ private[provider] object OpenAIClientTransport {
       .azureUrlPathMode(pathMode)
     if (pathMode == AzureUrlPathMode.LEGACY || config.apiVersion != AzureConfig.DEFAULT_API_VERSION)
       builder.azureServiceVersion(azureServiceVersion(config.apiVersion))
-    sdk(builder.build())
+    sdk(builder.build(), config.timeouts)
   }
 
   private[provider] def azureUrlPathMode(endpoint: String): AzureUrlPathMode =

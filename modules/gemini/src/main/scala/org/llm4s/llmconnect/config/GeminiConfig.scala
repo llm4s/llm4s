@@ -23,11 +23,13 @@ case class GeminiConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
   override val providerId: ProviderId                 = ProviderId("gemini")
   override def endpointUrl: Option[String]            = Some(baseUrl)
   override def withModel(model: String): GeminiConfig = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig = copy(timeouts = timeouts)
   override def toString: String =
     s"GeminiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"

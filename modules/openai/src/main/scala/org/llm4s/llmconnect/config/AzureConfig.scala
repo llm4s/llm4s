@@ -32,11 +32,13 @@ case class AzureConfig(
   model: String,
   apiVersion: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
   override val providerId: ProviderId                = ProviderId("azure")
   override def endpointUrl: Option[String]           = Some(endpoint)
   override def withModel(model: String): AzureConfig = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): AzureConfig = copy(timeouts = timeouts)
   override def toString: String =
     s"AzureConfig(endpoint=$endpoint, apiKey=${Redaction.secret(apiKey)}, model=$model, apiVersion=$apiVersion, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"

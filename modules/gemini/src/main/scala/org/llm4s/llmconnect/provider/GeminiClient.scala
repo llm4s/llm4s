@@ -74,6 +74,12 @@ class GeminiClient(
 
   private val logger = LoggerFactory.getLogger(getClass)
 
+  /** How long a non-streaming call may take: the section's `timeouts.request`, else GeminiClient.DefaultRequestTimeout. */
+  protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(GeminiClient.DefaultRequestTimeout)
+
+  /** How long a streamed call may take: the section's `timeouts.stream`, else GeminiClient.DefaultStreamTimeout. */
+  protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(GeminiClient.DefaultStreamTimeout)
+
   protected def clientDescription: String = s"Gemini client for model ${config.model}"
   protected def providerName: String      = "gemini"
   protected def modelName: String         = config.model
@@ -103,7 +109,7 @@ class GeminiClient(
 
         val headers = Map("Content-Type" -> "application/json")
 
-        httpClient.post(url, headers, requestText, timeout = 120.seconds) match {
+        httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
           case Left(error) =>
             recordingExchange(startedAt, requestText)(Left(error))(None)
           case Right(response) =>
@@ -143,7 +149,7 @@ class GeminiClient(
 
         val headers = Map("Content-Type" -> "application/json")
 
-        httpClient.postStream(url, headers, requestText, timeout = 10.minutes) match {
+        httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
           case Left(error) =>
             recordingExchange(startedAt, requestText)(Left(error))(None)
           case Right(response) if response.statusCode < 200 || response.statusCode >= 300 =>
@@ -181,7 +187,7 @@ class GeminiClient(
                   }
                 }
             }.toEither.left
-              .map(HttpFailures.streamReadError(_, url, 10.minutes))
+              .map(HttpFailures.streamReadError(_, url, streamTimeout))
               .flatMap(_ =>
                 accumulator.toCompletion.map { c =>
                   val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
@@ -541,6 +547,12 @@ class GeminiClient(
 }
 
 object GeminiClient {
+
+  /** The timeout of a non-streaming call when the section sets no `timeouts.request`: two minutes. */
+  val DefaultRequestTimeout: FiniteDuration = 120.seconds
+
+  /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
+  val DefaultStreamTimeout: FiniteDuration = 10.minutes
   import org.llm4s.types.TryOps
 
   def apply(config: GeminiConfig)(using ModelRegistryService): Result[GeminiClient] =

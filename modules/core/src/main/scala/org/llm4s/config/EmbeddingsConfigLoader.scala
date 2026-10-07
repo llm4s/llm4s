@@ -1,7 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, LocalEmbeddingModels }
+import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, LocalEmbeddingModels, ProviderTimeouts }
 import org.llm4s.llmconnect.spi.{
   EmbeddingConfigSpec,
   EmbeddingProviderDescriptor,
@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.spi.{
   ProviderRegistry
 }
 import org.llm4s.types.Result
+import pureconfig.error.ConvertFailure
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 
 /**
@@ -46,7 +47,18 @@ private[config] object EmbeddingsConfigLoader {
 
   /** The uniform `llm4s.embeddings.<id>` shape, read for whichever provider was selected. */
   implicit private val providerSectionReader: PureConfigReader[EmbeddingProviderSection] =
-    PureConfigReader.forProduct3("apiKey", "baseUrl", "model")(EmbeddingProviderSection.apply)
+    PureConfigReader.fromCursor { cursor =>
+      for
+        objCursor <- cursor.asObjectCursor
+        fields <- PureConfigReader
+          .forProduct3("apiKey", "baseUrl", "model")(
+            (apiKey: Option[String], baseUrl: Option[String], model: Option[String]) =>
+              EmbeddingProviderSection(apiKey, baseUrl, model)
+          )
+          .from(objCursor)
+        timeouts <- ProviderTimeoutsReader.read(objCursor)
+      yield fields.copy(timeouts = timeouts.getOrElse(ProviderTimeouts.default))
+    }
 
   // ---- Public API used by Llm4sConfig ----
 
@@ -128,9 +140,10 @@ private[config] object EmbeddingsConfigLoader {
       section  <- readSection(source, descriptor)
       resolved <- resolveApiKey(section, descriptor, source)
       config   <- descriptor.buildConfig(section.copy(apiKey = resolved.map(_.value)), selected.modelOverride)
+      // The timeouts block is read once, for every provider, as a chat section's is.
     } yield {
       resolved.foreach(SharedCredentials.logSource(EmbeddingConfigSpec.sectionPath(descriptor.id), _))
-      id -> config
+      id -> config.copy(timeouts = section.timeouts)
     }
   }
 
@@ -176,8 +189,19 @@ private[config] object EmbeddingsConfigLoader {
     if (!at.value().isRight) Right(EmbeddingProviderSection())
     else
       at.load[EmbeddingProviderSection].left.map { failures =>
-        val msg = failures.toList.map(_.description).mkString("; ")
+        // The path says which key a failure is about, which its description alone ("Cannot convert
+        // 'soon' to ...FiniteDuration") does not.
+        val msg = failures.toList
+          .map {
+            case failure: ConvertFailure if failure.path.nonEmpty => s"${failure.path}: ${failure.description}"
+            case failure                                          => failure.description
+          }
+          .mkString("; ")
         ConfigurationError(s"Failed to load $path via PureConfig: $msg")
+      }.flatMap { section =>
+        ProviderTimeouts
+          .validatedAt(s"$path.timeouts", section.timeouts.request, section.timeouts.stream)
+          .map(_ => section)
       }
   }
 

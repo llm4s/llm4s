@@ -46,7 +46,8 @@ final case class OpenAIConfig private (
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  explicitProviderId: Option[ProviderId]
+  explicitProviderId: Option[ProviderId],
+  override val timeouts: ProviderTimeouts
 ) extends ProviderConfig:
   /**
    * The provider this config belongs to: [[explicitProviderId]] when set, otherwise `openai`,
@@ -67,6 +68,7 @@ final case class OpenAIConfig private (
 
   override def endpointUrl: Option[String]            = Some(baseUrl)
   override def withModel(model: String): OpenAIConfig = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): OpenAIConfig = copy(timeouts = timeouts)
 
   def withApiKey(apiKey: String): OpenAIConfig                     = copy(apiKey = apiKey)
   def withOrganization(organization: String): OpenAIConfig         = copy(organization = Some(organization))
@@ -100,7 +102,7 @@ object OpenAIConfig {
     reserveCompletion: Int,
     explicitProviderId: Option[ProviderId] = None
   ): OpenAIConfig =
-    new OpenAIConfig(apiKey, model, organization, baseUrl, contextWindow, reserveCompletion, explicitProviderId)
+    new OpenAIConfig(apiKey, model, organization, baseUrl, contextWindow, reserveCompletion, explicitProviderId, ProviderTimeouts.default)
 
   /**
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,

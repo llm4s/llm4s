@@ -25,11 +25,13 @@ case class DeepSeekConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
   override val providerId: ProviderId                   = ProviderId("deepseek")
   override def endpointUrl: Option[String]              = Some(baseUrl)
   override def withModel(model: String): DeepSeekConfig = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): DeepSeekConfig = copy(timeouts = timeouts)
   override def toString: String =
     s"DeepSeekConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"

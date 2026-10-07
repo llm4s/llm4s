@@ -43,11 +43,13 @@ final case class OpenAICompatibleConfig(
   contextWindow: Int = OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW,
   reserveCompletion: Int = OpenAICompatibleConfig.DEFAULT_RESERVE_COMPLETION,
   headers: Map[String, String] = Map.empty,
-  streamUsage: Boolean = true
+  streamUsage: Boolean = true,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
   override def providerId: ProviderId                           = ProviderId(OpenAICompatibleConfig.ProviderIdName)
   override def endpointUrl: Option[String]                      = Some(baseUrl)
   override def withModel(model: String): OpenAICompatibleConfig = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): OpenAICompatibleConfig = copy(timeouts = timeouts)
   override def toString: String =
     s"OpenAICompatibleConfig(model=$model, baseUrl=$baseUrl, apiKey=${Redaction.secretOpt(apiKey)}, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, " +

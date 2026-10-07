@@ -27,11 +27,13 @@ final case class AnthropicConfig private (
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  override val timeouts: ProviderTimeouts
 ) extends ProviderConfig:
   override val providerId: ProviderId                    = ProviderId("anthropic")
   override def endpointUrl: Option[String]               = Some(baseUrl)
   override def withModel(model: String): AnthropicConfig = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig = copy(timeouts = timeouts)
 
   def withApiKey(apiKey: String): AnthropicConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): AnthropicConfig                  = copy(baseUrl = baseUrl)
@@ -61,7 +63,7 @@ object AnthropicConfig {
     contextWindow: Int,
     reserveCompletion: Int
   ): AnthropicConfig =
-    new AnthropicConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion)
+    new AnthropicConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion, ProviderTimeouts.default)
 
   /**
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,

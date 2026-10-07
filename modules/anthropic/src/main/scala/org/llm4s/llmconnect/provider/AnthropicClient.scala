@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
-import com.anthropic.core.{ JsonObject, ObjectMappers }
+import com.anthropic.core.{ JsonObject, ObjectMappers, RequestOptions }
 import com.anthropic.models.messages.{
   Message,
   MessageCreateParams,
@@ -91,6 +91,14 @@ class AnthropicClient(
     .baseUrl(config.baseUrl)
     .build()
 
+  // The timeout goes on each call, not on the SDK client: the client's timeout is one value for every
+  // call and covers a streamed response in full, so a short `request` there would cut every stream.
+  // With no value in the section the SDK's own default applies, as before the `timeouts` block existed.
+  private val requestOptions: Option[RequestOptions] =
+    config.timeouts.request.map(t => RequestOptions.builder().timeout(java.time.Duration.ofNanos(t.toNanos)).build())
+  private val streamOptions: Option[RequestOptions] =
+    config.timeouts.stream.map(t => RequestOptions.builder().timeout(java.time.Duration.ofNanos(t.toNanos)).build())
+
   protected def clientDescription: String = s"Anthropic client for model ${config.model}"
   protected def providerName: String      = "anthropic"
   protected def modelName: String         = config.model
@@ -146,7 +154,7 @@ class AnthropicClient(
 
         val messageService = client.messages()
         // Make API call
-        val attempt = Try(messageService.create(messageParams)).toEither.left.map {
+        val attempt = Try(requestOptions.fold(messageService.create(messageParams))(messageService.create(messageParams, _))).toEither.left.map {
           case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
           case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
           case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
@@ -236,7 +244,11 @@ curl https://api.anthropic.com/v1/messages \
         // Process the stream
         val attempt = Try {
           val messageService = client.messages()
-          Using.resource(messageService.createStreaming(messageParams)) { streamResponse =>
+          Using.resource(
+            streamOptions.fold(messageService.createStreaming(messageParams))(
+              messageService.createStreaming(messageParams, _)
+            )
+          ) { streamResponse =>
             import scala.jdk.StreamConverters._
             val stream: Iterator[RawMessageStreamEvent] = streamResponse.stream().toScala(Iterator)
             stream.foreach { event =>

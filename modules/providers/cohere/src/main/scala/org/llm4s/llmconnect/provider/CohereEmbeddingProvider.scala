@@ -213,7 +213,7 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
 
         // A cancellation is not a failed request: it passes through (design section 4.4).
         val respEither: Result[Llm4sHttpResponse] =
-          httpClient.post(url, headers, payload.render(), timeout = 120.seconds).left.map {
+          httpClient.post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(120.seconds)).left.map {
             case cancelled: CancelledError => cancelled
             case err =>
               EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "cohere")

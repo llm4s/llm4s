@@ -72,6 +72,16 @@ trait ProviderConfig {
    * [[ProviderTimeouts.requestOr]] / [[ProviderTimeouts.streamOr]].
    */
   def timeouts: ProviderTimeouts = ProviderTimeouts.default
+
+  /**
+   * The same config with the given timeouts.
+   *
+   * The loader calls this on every config a descriptor builds, passing the section's `timeouts`
+   * block, so a descriptor does not read the block itself. The default returns `this`: a config that
+   * does not carry timeouts, such as one supplied by another module, ignores them. A config that does
+   * overrides this with its own return type.
+   */
+  def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig = this
 }
 
 object ProviderConfig {

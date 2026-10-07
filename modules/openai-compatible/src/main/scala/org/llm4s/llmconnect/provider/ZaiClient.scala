@@ -42,7 +42,8 @@ class ZaiClient(
         baseUrl = config.baseUrl,
         apiKey = Some(config.apiKey),
         contextWindow = config.contextWindow,
-        reserveCompletion = config.reserveCompletion
+        reserveCompletion = config.reserveCompletion,
+        timeouts = config.timeouts
       ),
       ZaiDialect,
       metrics,

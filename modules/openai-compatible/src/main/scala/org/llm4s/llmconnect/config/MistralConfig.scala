@@ -27,11 +27,13 @@ case class MistralConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
   override val providerId: ProviderId                  = ProviderId("mistral")
   override def endpointUrl: Option[String]             = Some(baseUrl)
   override def withModel(model: String): MistralConfig = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig = copy(timeouts = timeouts)
   override def toString: String =
     s"MistralConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"

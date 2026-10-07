@@ -34,11 +34,13 @@ case class CohereConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
   override val providerId: ProviderId                 = ProviderId("cohere")
   override def endpointUrl: Option[String]            = Some(baseUrl)
   override def withModel(model: String): CohereConfig = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): CohereConfig = copy(timeouts = timeouts)
   override def toString: String =
     s"CohereConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"

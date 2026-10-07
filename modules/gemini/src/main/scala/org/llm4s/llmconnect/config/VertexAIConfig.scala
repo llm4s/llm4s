@@ -27,10 +27,12 @@ case class VertexAIConfig(
   model: String,
   credentialFilePath: Option[String],
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
   override val providerId: ProviderId                   = ProviderId("vertexai")
   override def withModel(model: String): VertexAIConfig = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): VertexAIConfig = copy(timeouts = timeouts)
 
   /** Base URL derived from the location, e.g. `"https://us-central1-aiplatform.googleapis.com/v1"`. */
   def computedBaseUrl: String = s"https://$location-aiplatform.googleapis.com/v1"
