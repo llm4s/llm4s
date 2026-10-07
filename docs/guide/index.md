@@ -57,6 +57,10 @@ Comprehensive guides for LLM4S features.
 - **[cats-effect](cats-effect)** - `LLMClientIO` and `AgentIO` for cats-effect `IO` and fs2 streaming
 - **[ZIO](zio)** - `LLMClientZ` and `AgentZ` for ZIO 2 and ZIO Streams
 
+### Java
+
+- **[Java Threading and Cancellation](java-threading-and-cancellation)** - Which thread a call blocks, sharing one client, virtual threads, interrupts and timeouts for `llm4s-java-api`
+
 ### Observability
 
 - **[Monitoring](observability/)** - Production monitoring for LLM4S applications
