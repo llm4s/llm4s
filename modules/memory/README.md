@@ -55,6 +55,9 @@ environment. Stores and managers are built in code, at the application edge:
   (cleanup on, threshold at 90% of the cap).
 - `MemoryManagerConfig(autoRecordMessages = true, autoExtractEntities = false, defaultImportance = 0.5,
   contextTokenBudget = 2000, consolidationEnabled = false, consolidationConfig)` for the manager.
+  Only `defaultImportance` is read by the managers today; `autoRecordMessages`, `autoExtractEntities`,
+  `contextTokenBudget` and `consolidationEnabled` are declared but have no effect yet
+  ([#1579](https://github.com/llm4s/llm4s/issues/1579)).
 - An embedding provider for the semantic stores. `LLMEmbeddingService(client, modelConfig)` wraps any
   llm4s embedding client, so the provider, its model and its API key are configured through the
   provider module you use (`llm4s.embeddings.<id>` and `llm4s.credentials.<id>.apiKey`), not here.
@@ -69,7 +72,7 @@ val context = for {
   m2      <- m1.recordKnowledge("Scala 3 has opaque types", "docs")
   context <- m2.getRelevantContext("Scala")
 } yield context
-// Right("# Retrieved Context\n- Scala 3 has opaque types\n- Prefers Scala over Java")
+// Right("# Retrieved Context\n## Relevant Knowledge\n- Scala 3 has opaque types\n\n## User Preferences\n- Prefers Scala over Java")
 ```
 
 `SimpleMemoryManager.empty` keeps everything in an `InMemoryStore`. The in-memory store searches by
