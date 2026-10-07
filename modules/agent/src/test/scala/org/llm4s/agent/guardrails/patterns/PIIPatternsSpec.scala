@@ -119,9 +119,9 @@ class PIIPatternsSpec extends AnyFlatSpec with Matchers {
     PIIType.CreditCard.findAll("941111111111111119") shouldBe empty
   }
 
-  // Known limitation: Amex uses 15-digit format (4-6-5), regex expects 16-digit (4-4-4-4)
-  it should "not match Amex 15-digit format (known limitation)" in {
-    PIIType.CreditCard.findAll("3782 822463 10005") shouldBe empty
+  // Amex uses a 15-digit format (4-6-5); the 16-digit layout (4-4-4-4) is matched separately
+  it should "detect the Amex 15-digit format" in {
+    PIIType.CreditCard.findAll("3782 822463 10005") should have size 1
   }
 
   // ==========================================================================
