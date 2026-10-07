@@ -112,6 +112,9 @@ class AnthropicClient(
   protected def providerName: String      = "anthropic"
   protected def modelName: String         = config.model
 
+  // sealed thinking is replayed only to the provider and model id it was produced by (see ReplayOrigin)
+  private val replayOrigin = ReplayOrigin(providerName, config.model)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -172,7 +175,9 @@ class AnthropicClient(
         // sealed thinking is bound to the request it answers, so it is replayed only while that holds
         val result = attempt
           .map(convertFromAnthropicResponse)
-          .map(c => c.withMessage(ThinkingReplay.bind(c.message, transformed.messages, transformed.options)))
+          .map(c =>
+            c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, transformed.messages, transformed.options))
+          )
         val responseBody = attempt.toOption.map(serializeResponseBody)
         recordingExchange(startedAt, requestBody)(result)(responseBody)
       }
@@ -420,7 +425,7 @@ curl https://api.anthropic.com/v1/messages \
               if (thinkingBlocks.isEmpty) c.message
               else c.message.withThinking(thinkingBlocks.values.map(_.toBlock).toSeq)
             c.withModel(config.model)
-              .withMessage(ThinkingReplay.bind(message, transformed.messages, transformed.options))
+              .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
               .withEstimatedCost(cost)
           }
         )
@@ -464,7 +469,7 @@ curl https://api.anthropic.com/v1/messages \
     // result that a user message or a later turn separates from its call
     // sealed thinking goes back only while the history before it is the one it was produced after;
     // any other is unsealed here (see ThinkingReplay)
-    val messages = ThinkingReplay.replayable(conversation.messages, options)
+    val messages = ThinkingReplay.replayable(replayOrigin, conversation.messages, options)
     val pairing  = ToolResultPairing.of(messages)
 
     // a run of tool messages becomes one user turn: the paired results first, as Anthropic requires,

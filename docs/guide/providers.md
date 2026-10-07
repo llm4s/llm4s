@@ -1541,6 +1541,15 @@ as a hash of all the messages in the conversation. llm4s enforces both halves wi
   `HistoryCompressor`, `ToolOutputCompressor`, `ContextManager`), a handoff's view of the thread,
   memory or RAG context inserted before existing turns, a changed system prompt or tool set, or a
   hand edit - without any of them having to know about thinking.
+- **Who produced it.** The fingerprint also covers the provider id and model that produced the
+  thinking, and the client checks it against the provider and model it is about to call. A
+  signature or reasoning item belongs to its producer, so a conversation produced by one client
+  and continued with another - Bedrock then Anthropic, or one OpenRouter model then another - is
+  sent unsealed, never with a foreign signature. Anthropic and Bedrock bind to the model id they
+  were configured with (they may report an alias's resolved snapshot); OpenAI-compatible clients
+  bind to the model the response reports, so a turn a router such as `openrouter/auto` served with
+  another model is not replayed. The endpoint is not part of it: a proxy or regional endpoint in
+  front of the same provider changes nothing the provider checks.
 
 Earlier turns whose history is unchanged keep their sealed thinking: Anthropic recommends passing
 all thinking blocks back, keeps them in context on newer models, and accepts any unbroken run of the

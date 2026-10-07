@@ -19,15 +19,21 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
   private val sealedThinking =
     Seq(ThinkingBlock.Text("Weather.", Some("sig-1")), ThinkingBlock.Redacted("opaque-1"))
 
+  private val origin = ReplayOrigin("anthropic", "claude-sonnet-4-5")
+
   private def answering(history: Message*)(message: AssistantMessage): AssistantMessage =
-    ThinkingReplay.bind(message, history, options)
+    ThinkingReplay.bind(origin, message, history, options)
 
   private def signedTurn(history: Message*): AssistantMessage =
     answering(history*)(AssistantMessage(None, Seq(call)).withThinking(sealedThinking))
 
   /** The sealed state of each assistant message once `messages` are made replayable. */
-  private def sealedStates(messages: Seq[Message], opts: CompletionOptions = options): Seq[Boolean] =
-    ThinkingReplay.replayable(messages, opts).collect { case am: AssistantMessage => am.hasSealedThinking }
+  private def sealedStates(
+    messages: Seq[Message],
+    opts: CompletionOptions = options,
+    to: ReplayOrigin = origin
+  ): Seq[Boolean] =
+    ThinkingReplay.replayable(to, messages, opts).collect { case am: AssistantMessage => am.hasSealedThinking }
 
   "bind" should "bind sealed thinking only" in {
     signedTurn(UserMessage("hi")).thinkingBinding shouldBe defined
@@ -38,18 +44,60 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
     val ask  = UserMessage("Weather?")
     val turn = signedTurn(ask)
     val conv = Seq(ask, turn, ToolMessage("sunny", "tc-1"), AssistantMessage("Sunny."), UserMessage("Thanks"))
-    ThinkingReplay.replayable(conv, options) shouldBe conv
+    ThinkingReplay.replayable(origin, conv, options) shouldBe conv
   }
 
   it should "unseal a turn whose earlier history was pruned" in {
-    val history  = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather?"))
-    val turn     = signedTurn(history*)
-    val sent     = ThinkingReplay.replayable(Seq(UserMessage("Weather?"), turn, ToolMessage("sunny", "tc-1")), options)
+    val history = Seq(UserMessage("Hello"), AssistantMessage("Hi."), UserMessage("Weather?"))
+    val turn    = signedTurn(history*)
+    val sent =
+      ThinkingReplay.replayable(origin, Seq(UserMessage("Weather?"), turn, ToolMessage("sunny", "tc-1")), options)
     val unsealed = sent(1).asInstanceOf[AssistantMessage]
     unsealed.hasSealedThinking shouldBe false
     unsealed.thinkingBinding shouldBe None
     unsealed.thinking shouldBe Seq(ThinkingBlock.Text("Weather."))
     unsealed.toolCalls shouldBe Seq(call)
+  }
+
+  it should "keep a turn sent back to the provider and model that produced it" in {
+    val turn = signedTurn(UserMessage("Weather?"))
+    sealedStates(Seq(UserMessage("Weather?"), turn), to = ReplayOrigin("anthropic", "claude-sonnet-4-5")) shouldBe
+      Seq(true)
+  }
+
+  it should "unseal a turn sent to another provider, the history and options unchanged" in {
+    // Anthropic must not be sent a Bedrock signature, nor Bedrock an Anthropic one
+    val ask     = UserMessage("Weather?")
+    val turn    = signedTurn(ask)
+    val bedrock = ReplayOrigin("bedrock", "claude-sonnet-4-5")
+    sealedStates(Seq(ask, turn), to = bedrock) shouldBe Seq(false)
+    val fromBedrock = ThinkingReplay.bind(bedrock, turn, Seq(ask), options)
+    fromBedrock.thinkingBinding should not be turn.thinkingBinding
+    sealedStates(Seq(ask, fromBedrock)) shouldBe Seq(false)
+  }
+
+  it should "unseal a turn sent to another model of the same provider" in {
+    val turn = signedTurn(UserMessage("Weather?"))
+    sealedStates(Seq(UserMessage("Weather?"), turn), to = ReplayOrigin("anthropic", "claude-opus-4-1")) shouldBe
+      Seq(false)
+  }
+
+  it should "after a model switch, replay each turn only to the model that produced it" in {
+    val ask1  = UserMessage("Weather?")
+    val turn1 = signedTurn(ask1)
+    val res1  = ToolMessage("sunny", "tc-1")
+    val ask2  = UserMessage("Again?")
+    val other = ReplayOrigin("anthropic", "claude-opus-4-1")
+    // the second turn came from the other model, which was sent the first unsealed
+    val turn2 = ThinkingReplay.bind(
+      other,
+      AssistantMessage(None, Seq(call)).withThinking(sealedThinking),
+      Seq(ask1, turn1, res1, ask2),
+      options
+    )
+    sealedStates(Seq(ask1, turn1, res1, ask2, turn2), to = other) shouldBe Seq(false, true)
+    // back on the first model: its own turn keeps, the other model's goes
+    sealedStates(Seq(ask1, turn1, res1, ask2, turn2)) shouldBe Seq(true, false)
   }
 
   it should "unseal a turn after an earlier message was edited, or one was inserted before it" in {

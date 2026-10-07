@@ -143,6 +143,9 @@ class BedrockClient(
   protected def providerName: String      = "bedrock"
   protected def modelName: String         = config.model
 
+  // sealed thinking is replayed only to the provider and model id it was produced by (see ReplayOrigin)
+  private val replayOrigin = ReplayOrigin(providerName, config.model)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -156,7 +159,7 @@ class BedrockClient(
           .map { response =>
             // sealed thinking is bound to the request it answers, so it is replayed only while that holds
             val parsed     = parseConverseResponse(response)
-            val completion = parsed.withMessage(ThinkingReplay.bind(parsed.message, conv.messages, opts))
+            val completion = parsed.withMessage(ThinkingReplay.bind(replayOrigin, parsed.message, conv.messages, opts))
             recordExchange(startedAt, requestJson, Some(serializeResponseForLogging(response)), Right(completion))
             completion
           }
@@ -176,7 +179,7 @@ class BedrockClient(
       val raw         = new StringBuilder()
       buildConverseStreamRequest(conv, opts)
         .flatMap(request => runStream(request, onChunk, raw))
-        .map(c => c.withMessage(ThinkingReplay.bind(c.message, conv.messages, opts)))
+        .map(c => c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, conv.messages, opts)))
         .tapRight(c => recordExchange(startedAt, requestJson, Some(raw.result()), Right(c)))
         .tapLeft(e => recordExchange(startedAt, requestJson, Option.when(raw.nonEmpty)(raw.result()), Left(e)))
     }
@@ -351,7 +354,7 @@ class BedrockClient(
     val systemTexts = conversation.messages.collect { case SystemMessage(content) => content }
     // sealed thinking goes back only while the history before it is the one it was produced after;
     // any other is unsealed here, before the system messages are lifted out (see ThinkingReplay)
-    val replayable = ThinkingReplay.replayable(conversation.messages, options)
+    val replayable = ThinkingReplay.replayable(replayOrigin, conversation.messages, options)
     val messages   = mergeAdjacentRoles(convertMessages(replayable.filterNot(_.isInstanceOf[SystemMessage])))
     if (messages.isEmpty)
       Left(

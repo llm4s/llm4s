@@ -126,7 +126,7 @@ class BedrockThinkingReplaySpec extends AnyWordSpec with Matchers {
 
   /** `message` as the client returns it in answer to `history`: its sealed thinking bound to it. */
   private def answering(history: Message*)(message: AssistantMessage): AssistantMessage =
-    ThinkingReplay.bind(message, history, CompletionOptions())
+    ThinkingReplay.bind(ReplayOrigin("bedrock", Model), message, history, CompletionOptions())
 
   "tool results" should {
     "not pair with a call that a user message separates them from: the call is left out, the result sent as text" in {

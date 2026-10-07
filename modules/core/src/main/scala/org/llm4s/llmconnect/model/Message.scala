@@ -328,10 +328,12 @@ object SystemMessage {
  *    current one, '''unseal''' the thinking: they drop redacted and opaque blocks, the signatures
  *    of text blocks and the binding, keeping the reasoning text.
  *  - '''Everything before it.''' The client that receives sealed thinking records, in
- *    `thinkingBinding`, a fingerprint of the request it answered: the system messages, the tools,
- *    the response format and every earlier message. When the message is sent again, the client
- *    replays its sealed thinking only if the conversation before it still has that fingerprint, and
- *    sends it unsealed otherwise. So pruning, compression, summarisation, an edit or an insertion
+ *    `thinkingBinding`, a fingerprint of the request it answered and of who answered it: the
+ *    provider and model, the system messages, the tools, the response format and every earlier
+ *    message. When the message is sent again, the client replays its sealed thinking only if it is
+ *    calling that provider and model and the conversation before it still has that fingerprint, and
+ *    sends it unsealed otherwise - so a signature is never sent to a provider or model that did not
+ *    produce it. So pruning, compression, summarisation, an edit or an insertion
  *    anywhere earlier in the history - by any code, through any API - unseals every later turn,
  *    without the code that made the change having to know about thinking.
  *

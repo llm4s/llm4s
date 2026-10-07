@@ -127,8 +127,9 @@ class AgentThinkingSpec extends AnyFlatSpec with Matchers {
   // knowledge of thinking.
   "ContextPruning" should "leave a retained signed turn to be sent unsealed once it pruned the history before it" in {
     val history = Seq(UserMessage("A" * 400), AssistantMessage("B" * 400), UserMessage("Weather?"))
+    val origin  = org.llm4s.llmconnect.provider.ReplayOrigin("anthropic", "claude-sonnet-4-5")
     val turn = org.llm4s.llmconnect.provider.ThinkingReplay
-      .bind(AssistantMessage(None, Seq(call), thinking), history, CompletionOptions())
+      .bind(origin, AssistantMessage(None, Seq(call), thinking), history, CompletionOptions())
     val conversation = history ++ Seq(turn, ToolMessage("sunny", call.id))
     val pruned       = ContextPruning.prune(conversation, ContextWindowConfig(maxMessages = Some(3)), _ => 1)
     pruned should contain(turn)
@@ -136,7 +137,7 @@ class AgentThinkingSpec extends AnyFlatSpec with Matchers {
 
     def sealedTurns(messages: Seq[Message]) =
       org.llm4s.llmconnect.provider.ThinkingReplay
-        .replayable(messages, CompletionOptions())
+        .replayable(origin, messages, CompletionOptions())
         .collect { case am: AssistantMessage if am.toolCalls.nonEmpty => am.hasSealedThinking }
     sealedTurns(conversation) shouldBe Seq(true)
     sealedTurns(pruned) shouldBe Seq(false)

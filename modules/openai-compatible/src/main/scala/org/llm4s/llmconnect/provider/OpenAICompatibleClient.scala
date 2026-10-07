@@ -65,6 +65,10 @@ class OpenAICompatibleClient(
   protected def providerName: String      = settings.providerName
   protected def modelName: String         = settings.model
 
+  // sealed thinking is replayed only to the provider and model that produced it (see ReplayOrigin);
+  // this is the origin a request is about to be sent to
+  private val replayOrigin = ReplayOrigin(settings.providerName, settings.model)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -143,6 +147,7 @@ class OpenAICompatibleClient(
     val sseParser   = SSEParser.createStreamingParser()
     val reader      = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))
     var usage       = Option.empty[TokenUsage]
+    var servedModel = Option.empty[String]
     Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
       rawStream.append(line).append('\n')
       sseParser.addChunk(line + "\n")
@@ -154,6 +159,8 @@ class OpenAICompatibleClient(
             // own with no choices. A later report replaces an earlier one; one without both
             // counts is ignored rather than failing the stream.
             streamedUsage(json).foreach(u => usage = Some(u))
+            // the model that served the request, which a router may choose (see bindThinking)
+            json.obj.get("model").flatMap(_.strOpt).filter(_.nonEmpty).foreach(m => servedModel = Some(m))
             details ++= streamedThinkingDetails(json)
             parseStreamingEvent(json, toolCalls).foreach { (chunk, rawArguments) =>
               // The accumulator concatenates argument fragments, so it gets each fragment
@@ -176,7 +183,7 @@ class OpenAICompatibleClient(
       val message =
         if (opaqueThinking.isEmpty) c.message else c.message.withThinking(c.message.thinking ++ opaqueThinking)
       c.withMessage(message)
-        .withModel(settings.model)
+        .withModel(servedModel.getOrElse(settings.model))
         .withToolCalls(c.message.toolCalls.toList)
         .withUsage(finalUsage)
         .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
@@ -197,10 +204,19 @@ class OpenAICompatibleClient(
    * `completion` with any sealed thinking on its message bound to the request it answered, so that
    * it is replayed only while that request is unchanged (see [[ThinkingReplay]]). A completion with
    * no sealed thinking is returned as it is.
+   *
+   * The origin is the model the response reports, not the one requested: a router (OpenRouter's
+   * `openrouter/auto`, model fallbacks) may serve a request with another model, whose reasoning
+   * items belong to it. A turn whose serving model is not the configured one is then unsealed
+   * before the next request, rather than replayed to a model that did not produce it.
    */
   private def bindThinking(completion: Completion, conversation: Conversation, options: CompletionOptions): Completion =
     if (!completion.message.hasSealedThinking) completion
-    else completion.withMessage(ThinkingReplay.bind(completion.message, conversation.messages, options))
+    else {
+      val served =
+        ReplayOrigin(settings.providerName, Option(completion.model).filter(_.nonEmpty).getOrElse(settings.model))
+      completion.withMessage(ThinkingReplay.bind(served, completion.message, conversation.messages, options))
+    }
 
   private def renderRequest(conversation: Conversation, options: CompletionOptions, stream: Boolean): Result[String] =
     // An empty `messages` array is rejected by every chat-completions endpoint; saying so here
@@ -265,7 +281,7 @@ class OpenAICompatibleClient(
    * still empty and still left out.
    */
   private def sendableMessages(conversation: Conversation, options: CompletionOptions): Seq[Message] =
-    ThinkingReplay.replayable(conversation.messages, options).filterNot {
+    ThinkingReplay.replayable(replayOrigin, conversation.messages, options).filterNot {
       case am: AssistantMessage =>
         !dialect.sendEmptyAssistantTurns && am.contentOpt.forall(_.isEmpty) && am.toolCalls.isEmpty &&
         !encodesThinking(am)

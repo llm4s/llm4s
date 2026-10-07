@@ -589,7 +589,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (Anthropic checks the system prompt, tools and every earlier message; Bedrock's signature is a hash of the
   conversation), so the Anthropic, Bedrock and OpenAI-compatible clients bind it to a fingerprint of the request
   (`AssistantMessage.thinkingBinding`) and, at send time, replay it only while the conversation before it still has
-  that fingerprint. Pruning, compression, summarisation, an edit or an inserted message anywhere earlier therefore
+  that fingerprint, sent to the provider and model that produced it - the fingerprint covers the provider id and
+  model (the configured one for Anthropic and Bedrock, the one the response reports for OpenAI-compatible clients,
+  so a router's choice counts), so a conversation continued with another client or model is sent unsealed rather
+  than with a foreign signature. Pruning, compression, summarisation, an edit or an inserted message anywhere earlier therefore
   unseals every later turn, whoever made the change; `hasSealedThinking` reports the state. Token estimates
   (`ConversationTokenCounter`, the agent's default pruning counter) now count thinking, which providers resend.
 - **`llm4s-anthropic`: tool calls and results as content blocks** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):

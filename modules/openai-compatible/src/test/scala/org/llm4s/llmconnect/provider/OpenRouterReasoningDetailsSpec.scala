@@ -26,6 +26,9 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
       dialect
     )
 
+  // the origin `client` binds to and replays for: its provider id and configured model
+  private val origin = ReplayOrigin(OpenAICompatibleConfig.ProviderIdName, "anthropic/claude-sonnet")
+
   private val details = ujson.read(
     """[
       |{"type":"reasoning.summary","summary":"Weighed the request","id":"rs-1","format":"anthropic-claude-v1","index":0},
@@ -129,6 +132,36 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
       assistantTurn(seen()(1)).obj.keySet should not contain "reasoning_details"
     }
 
+  it should "drop them when the turn was served by another model than the one now called, the history unchanged" in {
+    // a router (openrouter/auto, model fallbacks) answered with a model other than the configured one
+    val routed = toolCallReply.replace("\"anthropic/claude-sonnet\"", "\"openai/o3\"")
+    withReplies(routed, finalReply) { (baseUrl, seen) =>
+      val c     = client(baseUrl)
+      val first = c.complete(Conversation(history), CompletionOptions()).value
+      first.model shouldBe "openai/o3"
+      first.message.hasSealedThinking shouldBe true
+      c.complete(Conversation(history :+ first.message :+ answer), CompletionOptions()).isRight shouldBe true
+
+      val turn = assistantTurn(seen()(1))
+      turn.obj.keySet should not contain "reasoning_details"
+      turn("reasoning").str shouldBe "The user wants Paris weather."
+    }
+  }
+
+  it should "drop them when the conversation moves to another model" in
+    withReplies(toolCallReply) { (baseUrl, _) =>
+      val first = client(baseUrl).complete(Conversation(history), CompletionOptions()).value
+      val otherModel = new OpenAICompatibleClient(
+        OpenAICompatibleClient.settings(OpenAICompatibleConfig(model = "google/gemini-2.5-pro", baseUrl = baseUrl)),
+        OpenRouterDialect
+      )
+      val turn = assistantTurn(
+        otherModel.createRequestBody(Conversation(history :+ first.message :+ answer), CompletionOptions())
+      )
+      turn.obj.keySet should not contain "reasoning_details"
+      turn("reasoning").str shouldBe "The user wants Paris weather."
+    }
+
   "a streamed response" should "join each item's fragments by index and send the joined items back" in {
     def event(delta: ujson.Value, finish: ujson.Value = ujson.Null): String =
       "data: " + ujson
@@ -201,6 +234,16 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
       turn("reasoning_details") shouldBe ujson.Arr(joinedText, encrypted)
       turn("reasoning").str shouldBe "Paris weather."
     }
+
+    // the same stream served by a routed model: its items are not replayed to the configured one
+    withReplies(sse.replace("\"anthropic/claude-sonnet\"", "\"openai/o3\"")) { (baseUrl, _) =>
+      val c        = client(baseUrl)
+      val streamed = c.streamComplete(Conversation(history), CompletionOptions(), _ => ()).value
+      streamed.model shouldBe "openai/o3"
+      val turn =
+        assistantTurn(c.createRequestBody(Conversation(history :+ streamed.message :+ answer), CompletionOptions()))
+      turn.obj.keySet should not contain "reasoning_details"
+    }
   }
 
   "decodeThinkingDetails" should "start a new item for a fragment with no index or of a different type" in {
@@ -221,7 +264,7 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
 
   /** The assistant turn as `dialect` encodes `message` after `history`, bound as its client would. */
   private def encoded(dialect: OpenAICompatibleDialect, message: AssistantMessage): ujson.Value = {
-    val bound = ThinkingReplay.bind(message, history, CompletionOptions())
+    val bound = ThinkingReplay.bind(origin, message, history, CompletionOptions())
     assistantTurn(
       client("http://localhost:1/v1", dialect)
         .createRequestBody(Conversation(history :+ bound :+ answer), CompletionOptions())
@@ -247,7 +290,7 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
   it should "drop them once a system message moved, since it sends system messages inline where they sit" in {
     val system = SystemMessage("Answer in French.")
     val asked  = Seq(system, UserMessage("Weather in Paris?"))
-    val bound  = ThinkingReplay.bind(withDetails, asked, CompletionOptions())
+    val bound  = ThinkingReplay.bind(origin, withDetails, asked, CompletionOptions())
     def turnAfter(prefix: Seq[Message]): ujson.Value =
       assistantTurn(
         client("http://localhost:1/v1")

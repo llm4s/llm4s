@@ -48,7 +48,7 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
 
   /** `message` as the client returns it in answer to `history`: its sealed thinking bound to it. */
   private def answering(history: Message*)(message: AssistantMessage): AssistantMessage =
-    ThinkingReplay.bind(message, history, CompletionOptions())
+    ThinkingReplay.bind(ReplayOrigin("anthropic", testConfig.model), message, history, CompletionOptions())
 
   /** A fake `/v1/messages`, answering each request with the next response and recording its body. */
   private def withServer(responses: (String, String)*)(test: (String, () => List[ujson.Value]) => Any): Unit = {
@@ -341,6 +341,21 @@ class AnthropicThinkingReplaySpec extends AnyFlatSpec with Matchers {
       ToolMessage("sunny", call.id)
     )
     (body.render() should not).include("sig-pair")
+  }
+
+  it should "not go back when another provider or model produced it, the history unchanged" in {
+    val ask    = UserMessage("Weather?")
+    val signed = AssistantMessage(None, Seq(call)).withThinking(sealedThinking)
+    // a Bedrock signature, or one from another Claude model, is not this client's to replay
+    val fromBedrock =
+      ThinkingReplay.bind(ReplayOrigin("bedrock", testConfig.model), signed, Seq(ask), CompletionOptions())
+    val fromOther =
+      ThinkingReplay.bind(ReplayOrigin("anthropic", "claude-opus-4-1"), signed, Seq(ask), CompletionOptions())
+    Seq(fromBedrock, fromOther).foreach { turn =>
+      val body = requestBody(ask, turn, ToolMessage("sunny", call.id))
+      body("messages")(1)("content").arr.map(_("type").str) shouldBe Seq("tool_use")
+      (body.render() should not).include("sig-pair")
+    }
   }
 
   it should "not go back when no client bound it" in {
