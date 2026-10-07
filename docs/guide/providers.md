@@ -422,13 +422,15 @@ unchanged.
 
 ## IBM watsonx.ai
 
-> **Beta, built on deprecated endpoints.** `llm4s-watsonx` uses the watsonx.ai "Infer text" and
-> "Infer text event stream" endpoints (`/ml/v1/text/generation` and `/generation_stream`), which IBM
-> deprecated in its [February 2026 release notes](https://www.ibm.com/docs/en/software-hub/5.3.x?topic=new-watsonxai)
-> and will remove in the future; IBM points to the chat API. The module has never been run against
-> the live service (there is no watsonx account to test with), it is Beta and its API is not frozen,
-> and tools are unsupported because of this API. Migration to the chat API is tracked in
-> [#1314](https://github.com/llm4s/llm4s/issues/1314).
+> **Beta, never run against the live service.** `llm4s-watsonx` calls the watsonx.ai chat API
+> (`/ml/v1/text/chat` and `/ml/v1/text/chat_stream`), which replaces the "Infer text" endpoints IBM
+> [deprecated in February 2026](https://www.ibm.com/docs/en/software-hub/5.3.x?topic=new-watsonxai).
+> There is no watsonx account to test with, so the request and response shapes are the ones IBM's public
+> pages report plus a few marked as assumed in `WatsonXClient`'s Scaladoc (the name of the token-limit
+> field, the encoding of tool-call arguments, the finish reasons, the stream's usage chunk). The module is
+> Beta and its API is not frozen. Verifying it against the real service, with an `@Cloud` smoke suite, is
+> still open in [#1314](https://github.com/llm4s/llm4s/issues/1314); until then, treat tool calling and
+> streaming as unconfirmed.
 
 IBM's enterprise AI platform, serving Granite, Llama and Mistral models. It lives in its own module,
 `llm4s-watsonx`; adding the dependency registers the `watsonx` provider.
@@ -447,26 +449,25 @@ llm4s.providers.watsonx-main {
 ```
 
 `WATSONX_API_KEY` supplies the IBM Cloud API key, which the client exchanges for an IAM bearer token
-and refreshes before it expires. The text-generation API takes one prompt string, so the
-conversation is flattened with `[SYSTEM]:`/`[USER]:`/`[ASSISTANT]:` prefixes.
+and refreshes before it expires. The conversation goes as structured `messages` with roles
+(`system`, `user`, `assistant`, `tool`), so user content is data and cannot forge a turn.
 
 Behaviour to know about:
 
-- **Tools are rejected.** text-generation has no tool calling, so `complete` and `streamComplete`
-  return a `Left(ValidationError("tools", ...))` when `CompletionOptions.tools` is non-empty, before
-  any HTTP call.
+- **Tools.** `CompletionOptions.tools` are sent as `tools` with `tool_choice_option: "auto"`, a reply's
+  `tool_calls` (whole, or streamed as `delta` pieces) become `ToolCall`s, and a tool result goes back as a
+  `tool` message with its `tool_call_id`. Streamed calls are reported once, whole, after the last delta.
+  Whether a model supports tools depends on the model; a model that does not is answered by the service,
+  and that error is returned as the HTTP status maps it. A call the service sends without an `id` is
+  given a generated one.
 - **Ignored options.** `presencePenalty`, `frequencyPenalty`, `responseFormat`, `reasoning` and
-  `budgetTokens` have no equivalent and are dropped without error. Only `temperature`, `maxTokens`
-  and `topP` (when not 1.0) are sent.
-- **Forgeable markers.** Content is not escaped, so user content can contain `[SYSTEM]:` or
-  `[USER]:` lines that look like real turns to the model. Do not rely on the system prompt as a
-  security boundary against untrusted input. Requests send `stop_sequences` for `\n[USER]:`,
-  `\n[SYSTEM]:` and `\n[TOOL_RESULT:`, so a model cannot write the following turn itself.
-- **Abnormal stream endings.** A stream that ends without a terminal event, or whose `stop_reason`
-  is `error`, `cancelled` or `time_limit`, returns `Left(ServiceError)` naming the reason, not the
-  partial text (chunks already passed to `onChunk` were delivered). `eos_token`, `stop_sequence`,
-  `max_tokens`, `token_limit` and unknown reasons are normal stops. `complete` applies the same
-  rule to `results[0].stop_reason`.
+  `budgetTokens` are dropped without error; the chat API documents some of them, and this client does
+  not expose them yet. `temperature` is always sent, `maxTokens` (as `max_tokens`) and `topP` (when not
+  1.0) when set.
+- **Abnormal endings.** A stream that ends without a `finish_reason`, or whose `finish_reason` is
+  `error`, `cancelled` or `time_limit`, returns `Left(ServiceError)` naming the reason, not the
+  partial text (chunks already passed to `onChunk` were delivered). `stop`, `length`, `tool_calls`
+  and unknown reasons are normal stops. `complete` applies the same rule to `choices[0].finish_reason`.
 - **URLs and ids.** `baseUrl` and `iamUrl` must be `https` (plain `http` only for `localhost`,
   `127.0.0.1` and `::1`), because the IAM request carries the API key. The API key is trimmed. Set
   `projectId` or `spaceId`, not both.
