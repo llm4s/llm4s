@@ -347,7 +347,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (OpenAI, Azure, Requesty, the OpenAI-compatible providers, Cohere, Gemini, Vertex AI and Ollama send it;
   Anthropic only instructs the model; watsonx and Bedrock send nothing). The code it shows is mirrored in, and run by,
   `StructuredOutputGuideSpec`. The Scaladoc of `completeStructured` now states the all-fields-required behaviour
-  and the error contract; no code changed.
+  and the error contract (a reply is deserialised, not validated against the schema), and no longer claims every
+  OpenAI-compatible server enforces the schema; no code changed.
 - **Cancellation by interrupt for graph runs and providers** (Experimental, `org.llm4s.agent.graph`,
   [#1270](https://github.com/llm4s/llm4s/issues/1270)): each superstep runs in a bounded Ox scope on
   virtual threads (Ox is a new implementation dependency of `llm4s-agent`). Interrupting the thread

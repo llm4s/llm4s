@@ -53,14 +53,20 @@ trait LLMClient extends AutoCloseable {
   /**
    * Sends the conversation and parses the response into a typed value using the provided schema.
    *
-   * Sets `ResponseFormat.JsonSchema` on the options so providers that support native structured
-   * output (OpenAI, Gemini, and the OpenAI-compatible providers, including Cohere, and Ollama
-   * through its `format` field) enforce the schema at generation time. Anthropic falls back to a
-   * best-effort system-prompt instruction, which is not schema-enforced. Clients that do not read
-   * `responseFormat` (watsonx, Bedrock) send no schema at all. Because models may wrap
+   * Sets `ResponseFormat.JsonSchema` on the options. OpenAI, Azure OpenAI, Requesty and Gemini
+   * enforce the schema at generation time, as does Ollama 0.5 or later through its `format` field.
+   * The OpenAI-compatible providers (including Cohere) send it as `response_format`, but whether it
+   * is enforced is up to the server: one that ignores the field returns unconstrained text.
+   * Anthropic falls back to a best-effort system-prompt instruction, which is not schema-enforced.
+   * Clients that do not read `responseFormat` (watsonx, Bedrock) send no schema at all. Because models may wrap
    * JSON in markdown code fences or surround it with prose, the response is normalised
    * (fence stripped, first balanced `{...}` or `[...]` extracted) before being deserialised with
    * uPickle into the expected type `A`.
+   *
+   * The reply is '''not''' validated against the schema: it is only deserialised. A constraint the
+   * reader does not check - an enum, a numeric or string bound, `additionalProperties = false` (extra
+   * keys are ignored) - can be violated by a reply that still returns `Right(A)`. Check such
+   * constraints on the result yourself.
    *
    * The schema is derived with `strict = true`, which lists '''every''' property as required,
    * including a property declared optional with `required = false`. Only `responseFormat` is
@@ -74,7 +80,7 @@ trait LLMClient extends AutoCloseable {
    * @param reader       implicit uPickle reader for deserialising the JSON into `A`
    * @tparam A target type; must have a corresponding `upickle.default.Reader[A]`
    * @return Right(A) on success. Left(ValidationError) with field `structured_output` when the
-   *         reply is not JSON, is JSON `null`, or does not match the schema; any other Left is
+   *         reply is not JSON, is JSON `null`, or cannot be deserialised as `A`; any other Left is
    *         the provider call's own error, returned unchanged
    */
   def completeStructured[A](

@@ -187,6 +187,12 @@ A reply that cannot become an `A` is a `ValidationError` whose `field` is `"stru
 | the JSON value `null` | `Response does not match expected schema: got JSON null` |
 | JSON of the wrong shape (an array for an object, a missing field, a wrong type) | `Response does not match expected schema` |
 
+The reply is deserialised, not validated against the schema. A missing field or a wrong type fails because
+the uPickle reader for `A` fails on it, but a constraint the reader does not check is not checked at all: an
+enum, a numeric or string bound, or `additionalProperties = false` (extra keys are ignored). A reply that
+breaks one of those still comes back as `Right(A)`, which matters most where the provider does not enforce
+the schema (section 8). Check such constraints on the result yourself.
+
 A failed provider call is a different error, returned unchanged (a `NetworkError`, `RateLimitError` and so on;
 see [Error Handling](error-handling.md)). Telling the two apart is a pattern match:
 

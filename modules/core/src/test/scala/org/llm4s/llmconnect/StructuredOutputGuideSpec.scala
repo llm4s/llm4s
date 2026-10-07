@@ -189,6 +189,12 @@ class StructuredOutputGuideSpec extends AnyWordSpec with Matchers with EitherVal
       array.message should include("does not match expected schema")
     }
 
+    "deserialise rather than validate: a reply with a key the schema forbids is still Right (section 7)" in {
+      invoiceSchema.toJsonSchema(strict = true)("additionalProperties").bool shouldBe false
+      val extra = """{"vendor":"Acme","amount":1.0,"currency":"GBP","note":"not in the schema"}"""
+      extractInvoice(new SimpleMock(extra), "x").value shouldBe Invoice("Acme", 1.0, "GBP")
+    }
+
     "not be reported when the provider call itself fails: that error comes back unchanged (section 7)" in {
       val error = extractInvoice(new FailingMock("connection refused"), "x").left.value
       error shouldBe a[NetworkError]
