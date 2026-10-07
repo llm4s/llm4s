@@ -1,0 +1,169 @@
+package org.llm4s.agent.guardrails
+
+import org.llm4s.agent.guardrails.builtin._
+import org.llm4s.error.ValidationError
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model._
+import org.llm4s.types.Result
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+
+/**
+ * How a judge's reply is read as a score (#1405).
+ *
+ * A reply is a score only when it holds exactly one plain decimal number from 0 to 1. Anything else is a
+ * parse failure and fails the guardrail: it is never clamped into range, because a clamped value reads as
+ * 1.0 for the common mistakes (a 0 to 100 answer, a fraction, a percentage) and approves the content.
+ */
+class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
+
+  final private class ReplyClient(reply: String) extends LLMClient {
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+      Right(
+        Completion(
+          id = "test-id",
+          created = 0L,
+          content = reply,
+          model = "test-model",
+          message = AssistantMessage(reply),
+          usage = None
+        )
+      )
+
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = complete(conversation, options)
+
+    override def getContextWindow(): Int     = 4096
+    override def getReserveCompletion(): Int = 1024
+  }
+
+  private def judge(reply: String, threshold: Double): Result[String] =
+    LLMGuardrail(
+      client = new ReplyClient(reply),
+      prompt = "Rate quality",
+      passThreshold = threshold,
+      guardrailName = "TestGuardrail"
+    ).validate("content")
+
+  private def show(reply: String): String =
+    "'" + reply.replace("\n", "\\n").replace("\t", "\\t") + "'"
+
+  // A threshold of 0.0 is the strongest check: every reply that was read as a score passes it, so a Left
+  // can only mean the reply was refused as unreadable.
+  private val rejected: Seq[String] = Seq(
+    // the issue's table
+    "85",
+    "85%",
+    "0.5%",
+    "8/10",
+    "0.5/1",
+    "1e-3",
+    "0,9",
+    // out of range
+    "1.5",
+    "100",
+    "2",
+    "1.0001",
+    "-0.2",
+    "-0.5",
+    // not a plain decimal
+    "NaN",
+    "Infinity",
+    "0.9/1",
+    "1/0",
+    "0.85.",
+    "5e-1",
+    "+0.5",
+    "0..5",
+    "٠.٩",
+    // more than one number, or digits inside a word
+    "0.5 or 0.6",
+    "0.7 out of 1",
+    "0.8-0.9",
+    "gpt4 rates this 0.9",
+    "Score:0.9",
+    // nothing to read
+    "",
+    "   ",
+    "I cannot provide a score for this."
+  )
+
+  private val accepted: Seq[(String, Double)] = Seq(
+    "0.9"                     -> 0.9,
+    "0.7"                     -> 0.7,
+    "  0.7  "                 -> 0.7,
+    "0.7\n"                   -> 0.7,
+    "Score: 0.7"              -> 0.7,
+    "**0.7**"                 -> 0.7,
+    "The score is 0.7"        -> 0.7,
+    "0.7, because it is fine" -> 0.7,
+    "```\n0.7\n```"           -> 0.7,
+    ".5"                      -> 0.5,
+    "0"                       -> 0.0,
+    "0.0"                     -> 0.0,
+    "1"                       -> 1.0,
+    "1.0"                     -> 1.0
+  )
+
+  behavior.of("LLMGuardrail score parsing")
+
+  rejected.foreach { reply =>
+    it should s"refuse the reply ${show(reply)} instead of reading a score from it" in {
+      val result = judge(reply, threshold = 0.0)
+
+      result.isLeft shouldBe true
+      result.swap.toOption.get match {
+        case error: ValidationError =>
+          error.field shouldBe "llm_response"
+          error.message should include("Could not parse LLM judge score")
+        case other => fail(s"expected a ValidationError, got $other")
+      }
+    }
+  }
+
+  accepted.foreach { case (reply, score) =>
+    it should s"read ${show(reply)} as exactly $score" in {
+      // Passes at a threshold equal to the score, and fails just above it: so the score is neither lower
+      // nor higher than read.
+      judge(reply, threshold = score) shouldBe Right("content")
+
+      if (score < 1.0) {
+        val above = judge(reply, threshold = score + 0.05)
+        above.isLeft shouldBe true
+        above.swap.toOption.get match {
+          case error: ValidationError => error.field shouldBe "output"
+          case other                  => fail(s"expected a ValidationError, got $other")
+        }
+      }
+    }
+  }
+
+  it should "refuse a scaled reply on every judge guardrail that shares the parser" in {
+    val client = new ReplyClient("85")
+
+    val results = Seq(
+      LLMSafetyGuardrail(client).validate("content"),
+      LLMToneGuardrail(client, Set("professional")).validate("content"),
+      LLMFactualityGuardrail(client, "Paris is the capital of France.", threshold = 0.0).validate("content"),
+      LLMQualityGuardrail(client, "What is the capital of France?", threshold = 0.0).validate("content")
+    )
+
+    results.foreach { result =>
+      result.isLeft shouldBe true
+      result.swap.toOption.get match {
+        case error: ValidationError => error.field shouldBe "llm_response"
+        case other                  => fail(s"expected a ValidationError, got $other")
+      }
+    }
+  }
+
+  it should "name the reply and what was expected when it refuses one" in {
+    val message = judge("85", threshold = 0.0).swap.toOption.get.message
+
+    message should include("'85'")
+    message should include("0 to 1")
+  }
+}

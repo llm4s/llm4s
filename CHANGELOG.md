@@ -1697,6 +1697,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly and returns a `Left` (`Regex matching aborted: pattern recursed too deeply for the input (stack
   overflow)`), which `RegexValidator` reports as a `Regex security error` `ValidationError`. Other fatal errors
   still propagate. The workspace runner's `WorkspaceRegexSafetyManager` has the same fix.
+- **`llm4s-agent`: a judge guardrail refuses a reply that is not one number from 0 to 1, instead of clamping it into a pass**
+  ([#1405](https://github.com/llm4s/llm4s/issues/1405)): `LLMGuardrail` (and so `LLMSafetyGuardrail`,
+  `LLMFactualityGuardrail`, `LLMQualityGuardrail` and `LLMToneGuardrail`) reduced the judge's reply to its digits
+  and dots and clamped the number into 0.0 to 1.0, so `85`, `85%`, `8/10`, `1e-3` and `0,9` all read as 1.0 and
+  passed any threshold up to 1.0, `0.7 out of 1` read as 0.71, and `-0.5` read as 0.5. A judge that answered on a
+  0 to 100 scale approved everything. A reply is now a score only when it holds exactly one plain decimal number
+  from 0 to 1 (`0.9`, `.5`, `1`, with whitespace, markdown emphasis, quotes or a code fence around it, and
+  `Score: 0.9` or `The score is 0.9` still read as 0.9); any other reply is a `ValidationError` on field
+  `llm_response`, which fails the guardrail like an unreadable reply always did. **Migration:** a judge that
+  passed because it answered on another scale now fails with `Could not parse LLM judge score`: make it answer
+  between 0 and 1, as the fixed system message already asks. A reply with a sign, a percentage, a fraction, an
+  exponent, a decimal comma, a trailing full stop, a label glued to the number (`Score:0.9`) or more than one
+  number is refused; before, these read as a score. The score-reading rules are documented on `LLMGuardrail`.
 - **Guardrail case folding no longer depends on the JVM default locale**: `ProfanityFilter`, `ToneValidator`
   and `PromptInjectionDetector` lower-cased text with the default locale, so under a Turkish locale `HI`,
   `INAPPROPRIATE` and `IGNORE PREVIOUS INSTRUCTIONS` folded to a dotless `ı` and went undetected. They (and the

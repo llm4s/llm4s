@@ -5,8 +5,6 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
-import scala.util.Try
-
 /**
  * Base trait for LLM-based guardrails (the LLM-as-Judge pattern).
  *
@@ -29,16 +27,23 @@ import scala.util.Try
  * provider `llmClient` talks to. A cheaper or separate model can serve as judge, which also avoids a model
  * grading its own answer.
  *
- * **Scoring:** the reply is reduced to its digits and decimal points and read as a number; the number is
- * clamped into 0.0 to 1.0, and the content passes when `score >= threshold` (a score equal to the threshold
- * passes). The parsing is lenient, so know its edges:
- *  - `0.9`, `Score: 0.9`, `**0.9**` and `The score is 0.9` all read as 0.9.
- *  - A leading minus is dropped: `-0.5` reads as 0.5.
- *  - A number outside the range is clamped, not rejected: `85`, `85%`, `8/10`, `1e-3` and `0,9` all read
- *    as 1.0, which passes any threshold up to 1.0. A judge that answers on a 0 to 100 scale therefore
- *    approves everything, so keep the prompt explicit about the scale.
- *  - A reply with no digits, a trailing full stop (`0.85.`), or more than one number (`0.5 or 0.6`) is a
- *    parse failure, not a score.
+ * **Scoring:** a reply is a score only when it holds exactly one plain decimal number from 0 to 1, and the content
+ * passes when `score >= threshold` (a score equal to the threshold passes). Any other reply is refused as
+ * unreadable and fails the guardrail; a number is never clamped into range, because a clamped value would read
+ * as 1.0 for the usual mistakes (a 0 to 100 answer, a fraction, a percentage) and approve the content. The
+ * rules, in full:
+ *  - Accepted: `0.9`, `.5`, `0`, `1`, `1.0`, with surrounding whitespace or a trailing newline, and with
+ *    markdown emphasis, quotes, brackets or a code fence around it (`**0.9**`, `"0.9"`, ` ```0.9``` `); a
+ *    trailing comma, semicolon or colon on the number is ignored. A label or sentence around one number is fine:
+ *    `Score: 0.9` and `The score is 0.9` read as 0.9.
+ *  - Refused, as unreadable: a number outside 0 to 1 (`85`, `100`, `1.5`, `-0.2`); a sign (`-0.5`, `+0.5`); a
+ *    percentage, fraction or exponent (`85%`, `8/10`, `1e-3`); a decimal comma (`0,9`); a trailing full stop
+ *    (`0.85.`); a label glued to the number (`Score:0.9`); digits inside a word (`gpt4`); and more than one
+ *    number anywhere in the reply (`0.5 or 0.6`, `0.7 out of 1`). A reply with no ASCII digit at all (`NaN`, an
+ *    empty reply, a refusal in words) is refused too.
+ *  - The judge is not asked to be lenient: the fixed system message asks for only a number between 0 and 1.
+ *    Before this rule the reply was reduced to its digits and dots and clamped, so `85`, `85%`, `8/10`, `1e-3`
+ *    and `0,9` all read as 1.0 and passed any threshold up to 1.0, and `0.7 out of 1` read as 0.71.
  *
  * **Failures** are always `Left`; an error never lets content through:
  *  - Below the threshold: a [[org.llm4s.error.ValidationError]] on field `output` whose message names this
@@ -84,8 +89,8 @@ trait LLMGuardrail extends OutputGuardrail {
   /**
    * The evaluation criteria in natural language. It is sent after `Evaluation criteria:` and before the content,
    * which goes between triple quotes. The fixed system message already asks for a bare number between 0 and 1;
-   * say in the criteria what 0 and 1 mean, because a reply on any other scale is clamped (see the scoring notes
-   * on the trait).
+   * say in the criteria what 0 and 1 mean, because a reply on any other scale is refused as unreadable and fails
+   * the guardrail (see the scoring notes on the trait).
    *
    * @example "Rate if this response is professional in tone. Return only a number between 0 and 1."
    */
@@ -134,8 +139,9 @@ trait LLMGuardrail extends OutputGuardrail {
    * Makes the judge call and reads its score; `validate` compares it with the threshold.
    *
    * @param content the text to judge, inserted verbatim between triple quotes after the criteria
-   * @return the score clamped into 0.0 to 1.0; a `ValidationError` on field `llm_response` when the reply holds no
-   *         single readable number; or the error of the failed `llmClient.complete` call
+   * @return the score, from 0.0 to 1.0; a `ValidationError` on field `llm_response` when the reply is not exactly one
+   *         plain decimal number from 0 to 1 (see the scoring notes on the trait); or the error of the failed
+   *         `llmClient.complete` call
    */
   protected def evaluateWithLLM(content: String): Result[Double] = {
     val systemPrompt =
@@ -168,31 +174,53 @@ Score (0-1):"""
   }
 
   /**
-   * Reads a score from the reply: every character other than a digit or `.` is dropped, the rest is read as a
-   * number and clamped into 0.0 to 1.0. A reply with nothing left, or with something that is not one number
-   * (`0.85.`, `0.5 or 0.6`), is an error.
+   * Reads a score from the reply, or fails: see the scoring notes on the trait for the rules. An unreadable reply
+   * fails with a `ValidationError` on field `llm_response` that quotes the reply and says what was expected.
    */
-  private def parseScore(response: String): Result[Double] = {
-    val cleaned = response.trim.replaceAll("[^0-9.]", "")
-
-    Try(cleaned.toDouble).toOption match {
-      case Some(score) if score >= 0.0 && score <= 1.0 =>
-        Right(score)
-      case Some(score) =>
-        // Clamp to valid range
-        Right(Math.max(0.0, Math.min(1.0, score)))
-      case None =>
-        Left(
-          ValidationError.invalid(
-            "llm_response",
-            s"Could not parse LLM judge score from response: '$response'"
-          )
+  private def parseScore(response: String): Result[Double] =
+    LLMGuardrail
+      .readScore(response)
+      .toRight(
+        ValidationError.invalid(
+          "llm_response",
+          s"Could not parse LLM judge score from response: '$response'. Expected a single number from 0 to 1."
         )
-    }
-  }
+      )
 }
 
 object LLMGuardrail {
+
+  /** One plain decimal: digits with an optional fraction, or a fraction alone. No sign, exponent, comma or percent. */
+  private val PlainDecimal = java.util.regex.Pattern.compile("""^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$""")
+
+  /** Markdown emphasis, quotes, brackets and code-fence backticks that may wrap a number. */
+  private val Wrapping = "*_`\"'()[]{}"
+
+  /** Punctuation that may follow a number when it ends a clause. A full stop is deliberately not here. */
+  private val ClauseEnd = ",;:"
+
+  private def hasDigit(token: String): Boolean = token.exists(c => c >= '0' && c <= '9')
+
+  private def isIn(chars: String, c: Char): Boolean = chars.indexOf(c.toInt) >= 0
+
+  private def trimWrapping(token: String): String =
+    token.dropWhile(isIn(Wrapping, _)).reverse.dropWhile(c => isIn(Wrapping, c) || isIn(ClauseEnd, c)).reverse
+
+  /**
+   * The score a judge's reply holds, or `None` when the reply is not exactly one plain decimal number from 0 to 1.
+   *
+   * Every whitespace-separated word with an ASCII digit in it counts as a number: there must be exactly one, and
+   * once its wrapping and trailing clause punctuation are trimmed it must be a plain decimal within 0 to 1. A value
+   * outside the range is refused, never clamped.
+   */
+  private[guardrails] def readScore(reply: String): Option[Double] =
+    reply.split("\\s+").toList.filter(hasDigit) match {
+      case word :: Nil =>
+        val number = trimWrapping(word)
+        if (PlainDecimal.matcher(number).matches()) number.toDoubleOption.filter(score => score >= 0.0 && score <= 1.0)
+        else None
+      case _ => None
+    }
 
   /**
    * Builds a judge guardrail from a prompt, without defining a class.

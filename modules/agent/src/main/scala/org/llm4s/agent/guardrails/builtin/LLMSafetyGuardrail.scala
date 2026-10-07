@@ -18,8 +18,9 @@ import org.llm4s.llmconnect.LLMClient
  *
  * **Cost and side:** every validation makes one extra LLM call, so it does not suit latency-sensitive paths, and
  * the content is sent to the provider of `llmClient`. It is an output guardrail only: it judges the agent's
- * final answer. The scoring rules, their edges (a reply of `85` reads as 1.0 and passes) and the other limits are
- * described on [[org.llm4s.agent.guardrails.LLMGuardrail]].
+ * final answer. The scoring rules (the judge must answer with one number from 0 to 1: a reply on any other scale,
+ * such as `85` or `8/10`, is refused as unreadable and fails the guardrail) and the other limits are described on
+ * [[org.llm4s.agent.guardrails.LLMGuardrail]].
  *
  * **Failure:** `Left` with a [[org.llm4s.error.ValidationError]] on field `output`, for example
  * `LLM judge score (0.60) below threshold (0.80) for LLMSafetyGuardrail`. It does not say which criterion failed.
