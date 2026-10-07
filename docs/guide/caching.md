@@ -86,18 +86,20 @@ The default key is the SHA-256 of the text and the model name joined with a colo
 - The key holds the model *name* only. It does not include the embedding dimension or the provider, so one cache shared by clients that use the same model name for different things would mix their vectors.
 - The text and the model name are joined with `:` before hashing, so the pair is not uniquely encoded: the text `a:b` with model `c` and the text `a` with model `b:c` give the same key.
 
-If either matters to you, pass your own key function as the third argument. This one adds a tenant to every key:
+If either matters to you, pass your own key function as the third argument. This one adds a tenant to every key, and encodes the parts so that they cannot run into each other. Do not build it by adding the tenant to the model name and calling `CacheKeyGenerator.sha256`: the colon join would let the text `a` under tenant `b:c` and the text `a:b` under tenant `c` share a key, and so a vector.
 
 ```scala
-import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
-import org.llm4s.llmconnect.caching.CacheKeyGenerator
+import org.llm4s.llmconnect.caching.{ CacheKeyGenerator, CachedEmbeddingClient, InMemoryEmbeddingCache }
+import org.llm4s.llmconnect.config.EmbeddingModelConfig
+import org.llm4s.llmconnect.model.EmbeddingRequest
 
-// Keys are built from the text and the model name. A custom key function can add what else matters,
-// here a tenant, so two tenants never share a cached vector.
-val tenant = "tenant-a"
+// Every part is prefixed with its length, so no tenant, model or text, colons included, can make two
+// different triples give the same key.
+def tenantKey(tenant: String)(text: String, model: String): String =
+  CacheKeyGenerator.sha256(Seq(tenant, model, text).map(part => s"${part.length}:$part").mkString, "")
+
 val cache  = new InMemoryEmbeddingCache[Seq[Double]]()
-val cached =
-  new CachedEmbeddingClient(base, cache, (text, model) => CacheKeyGenerator.sha256(text, s"$tenant/$model"))
+val cached = new CachedEmbeddingClient(base, cache, tenantKey("tenant-a"))
 
 cached.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("text-embedding-3-small", 1536)))
 ```
@@ -107,9 +109,13 @@ cached.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("text-embedding
 `EmbeddingCache[A]` is a small trait: `get`, `put`, `stats`, and an optional `clear`. Implement it to keep vectors somewhere else (a shared map, Redis, a database). Expiry and eviction are then your backend's job:
 
 ```scala
+import org.llm4s.llmconnect.caching.{ CacheStats, EmbeddingCache }
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+
 /** A backend of your own: any store that can get and put a vector by key. */
 class MapEmbeddingCache extends EmbeddingCache[Seq[Double]] {
-  private val store  = new java.util.concurrent.ConcurrentHashMap[String, Seq[Double]]()
+  private val store  = new ConcurrentHashMap[String, Seq[Double]]()
   private val hits   = new AtomicInteger(0)
   private val misses = new AtomicInteger(0)
 
@@ -213,6 +219,9 @@ Do not use `1.0` to mean "exact match". Similarity is computed in floating point
 - Use the `clock` constructor parameter to control time in tests. It is only consulted for the TTL:
 
 ```scala
+import org.llm4s.llmconnect.caching.CachingLLMClient
+import org.llm4s.llmconnect.config.EmbeddingModelConfig
+
 // The clock only decides whether an entry is still within its TTL. Tests pass a fixed, movable one.
 new CachingLLMClient(
   baseClient,
@@ -250,6 +259,11 @@ The completion cache reports each decision to the `Tracing` you give it. A hit s
 A `Tracing` that records them, and a way to print one:
 
 ```scala
+import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
+import org.llm4s.trace.{ TraceEvent, Tracing }
+import org.llm4s.types.Result
+import scala.collection.mutable.ListBuffer
+
 def collectingTracing(): (Tracing, () => List[TraceEvent]) = {
   val events = ListBuffer.empty[TraceEvent]
   val tracing = new Tracing {

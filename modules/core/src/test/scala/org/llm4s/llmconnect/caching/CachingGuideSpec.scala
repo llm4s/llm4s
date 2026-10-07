@@ -2,10 +2,13 @@ package org.llm4s.llmconnect.caching
 
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
+import org.llm4s.llmconnect.caching.guide.CachingGuideSnippets
+import org.llm4s.llmconnect.caching.guide.CachingGuideSnippets.Observing.{ collectingTracing, describe }
+import org.llm4s.llmconnect.caching.guide.CachingGuideSnippets.OwnStorage.MapEmbeddingCache
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.trace.{ TraceEvent, Tracing }
+import org.llm4s.trace.TraceEvent
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
@@ -19,132 +22,14 @@ import scala.concurrent.duration._
 /**
  * The snippets of `docs/guide/caching.md`, compiled and run as written against stand-in clients (no network).
  *
- * If a snippet here stops compiling or an assertion fails, the guide is teaching something that no longer
- * works: change the guide and this spec together. Each `snippet` method is the code of one block in the
- * guide, and the assertions pin what the surrounding prose claims. The stand-ins at the bottom replace the
+ * If a snippet stops compiling or an assertion fails, the guide is teaching something that no longer works:
+ * change the guide and this spec together. The blocks themselves are in [[guide.CachingGuideSnippets]], each
+ * with only the imports the guide shows for it; the assertions here pin what the surrounding prose claims. The stand-ins at the bottom replace the
  * real provider clients, which the guide's snippets receive as `baseClient` and `embeddingClient`.
  */
 class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
-
-  // ---- 3. Caching embeddings
-
-  private def embeddingCacheSnippet(base: EmbeddingClient): CacheStats = {
-    import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
-    import org.llm4s.llmconnect.config.EmbeddingModelConfig
-    import org.llm4s.llmconnect.model.EmbeddingRequest
-    import scala.concurrent.duration._
-
-    val cache  = new InMemoryEmbeddingCache[Seq[Double]](maxSize = 10000, ttl = Some(1.hour))
-    val cached = new CachedEmbeddingClient(base, cache)
-    val model  = EmbeddingModelConfig("text-embedding-3-small", 1536)
-
-    cached.embed(EmbeddingRequest(Seq("hello", "world"), model)) // two misses, sent as one batched call
-    cached.embed(EmbeddingRequest(Seq("hello", "again"), model)) // "hello" is served from the cache
-    cached.cacheStats
-  }
-
-  private def customKeySnippet(base: EmbeddingClient): Result[EmbeddingResponse] = {
-    import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
-    import org.llm4s.llmconnect.caching.CacheKeyGenerator
-
-    // Keys are built from the text and the model name. A custom key function can add what else matters,
-    // here a tenant, so two tenants never share a cached vector.
-    val tenant = "tenant-a"
-    val cache  = new InMemoryEmbeddingCache[Seq[Double]]()
-    val cached =
-      new CachedEmbeddingClient(base, cache, (text, model) => CacheKeyGenerator.sha256(text, s"$tenant/$model"))
-
-    cached.embed(EmbeddingRequest(Seq("hello"), EmbeddingModelConfig("text-embedding-3-small", 1536)))
-  }
-
-  /** A backend of your own: any store that can get and put a vector by key. */
-  private class MapEmbeddingCache extends EmbeddingCache[Seq[Double]] {
-    private val store  = new java.util.concurrent.ConcurrentHashMap[String, Seq[Double]]()
-    private val hits   = new AtomicInteger(0)
-    private val misses = new AtomicInteger(0)
-
-    def get(key: String): Option[Seq[Double]] = {
-      val found = Option(store.get(key))
-      if (found.isDefined) hits.incrementAndGet() else misses.incrementAndGet()
-      found
-    }
-    def put(key: String, embedding: Seq[Double]): Unit = { store.put(key, embedding); () }
-    override def clear(): Unit                         = store.clear()
-    def stats(): CacheStats = {
-      val (h, m) = (hits.get().toLong, misses.get().toLong)
-      CacheStats(store.size(), h, m, h + m, if (h + m == 0) 0.0 else 100.0 * h / (h + m))
-    }
-  }
-
-  // ---- 4. Caching completions
-
-  private def configSnippet(): Result[CacheConfig] = {
-    import org.llm4s.llmconnect.caching.CacheConfig
-    import scala.concurrent.duration._
-
-    CacheConfig.create(
-      similarityThreshold = 0.95, // cosine similarity, 0.0 to 1.0
-      ttl = 5.minutes,            // an older entry is ignored
-      maxSize = 100               // least recently used entry is evicted beyond this
-    )
-  }
-
-  private def semanticCacheSnippet(
-    baseClient: LLMClient,
-    embeddingClient: EmbeddingClient,
-    tracing: Tracing,
-    cacheConfig: CacheConfig
-  ): CachingLLMClient = {
-    import org.llm4s.llmconnect.caching.CachingLLMClient
-    import org.llm4s.llmconnect.config.EmbeddingModelConfig
-
-    new CachingLLMClient(
-      baseClient = baseClient,
-      embeddingClient = embeddingClient,
-      embeddingModel = EmbeddingModelConfig("text-embedding-3-small", 1536),
-      config = cacheConfig,
-      tracing = tracing
-    )
-  }
-
-  private def ttlClockSnippet(
-    baseClient: LLMClient,
-    embeddingClient: EmbeddingClient,
-    tracing: Tracing,
-    cacheConfig: CacheConfig,
-    clock: Clock
-  ): CachingLLMClient =
-    // The clock only decides whether an entry is still within its TTL. Tests pass a fixed, movable one.
-    new CachingLLMClient(
-      baseClient,
-      embeddingClient,
-      EmbeddingModelConfig("text-embedding-3-small", 1536),
-      cacheConfig,
-      tracing,
-      clock
-    )
-
-  // ---- 5. Observing the cache
-
-  private def collectingTracing(): (Tracing, () => List[TraceEvent]) = {
-    val events = ListBuffer.empty[TraceEvent]
-    val tracing = new Tracing {
-      override def traceEvent(event: TraceEvent): Result[Unit] = { events.synchronized(events += event); Right(()) }
-      override def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
-      override def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
-      override def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
-      override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
-    }
-    (tracing, () => events.synchronized(events.toList))
-  }
-
-  private def describe(event: TraceEvent): String = event match {
-    case TraceEvent.CacheHit(similarity, threshold, _) => f"hit, similarity $similarity%.3f >= $threshold%.3f"
-    case TraceEvent.CacheMiss(reason, _)               => s"miss: ${reason.value}"
-    case other                                         => other.eventType
-  }
 
   // ----------------------------------------------------------------------------------------------------
 
@@ -158,7 +43,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
   "the embedding cache (section 3)" should {
     "serve repeated texts from the cache and batch the misses into one call" in {
       val base  = new FakeEmbeddingClient
-      val stats = embeddingCacheSnippet(base)
+      val stats = CachingGuideSnippets.embeddingCache(base)
 
       base.calls.get shouldBe 2 // one call for [hello, world], one for [again]
       base.requests.map(_.input) shouldBe List(Seq("hello", "world"), Seq("again"))
@@ -170,9 +55,21 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
     }
 
     "key on whatever the custom key function says" in {
-      val base = new FakeEmbeddingClient
-      customKeySnippet(base).value.embeddings should have size 1
+      val base    = new FakeEmbeddingClient
+      val snippet = new CachingGuideSnippets.TenantKey(base)
       base.calls.get shouldBe 1
+      snippet.cached.cacheStats.size shouldBe 1
+    }
+
+    "keep tenants apart even when a tenant or a text contains a colon" in {
+      val snippet = new CachingGuideSnippets.TenantKey(new FakeEmbeddingClient)
+      import snippet.tenantKey
+      // The default key joins with ':', so these two pairs collide, which is why the guide length-prefixes.
+      CacheKeyGenerator.sha256("a:b", "c") shouldBe CacheKeyGenerator.sha256("a", "b:c")
+      tenantKey("b:c")("a", "m") should not be tenantKey("c")("a:b", "m")
+      tenantKey("t")("a:b", "c") should not be tenantKey("t")("a", "b:c")
+      tenantKey("t")("x", "m") shouldBe tenantKey("t")("x", "m")
+      tenantKey("t")("x", "m") should not be tenantKey("u")("x", "m")
     }
 
     "expire an entry strictly after its TTL, counting the expired read as a miss" in {
@@ -245,7 +142,7 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
 
   "CacheConfig (section 4)" should {
     "build from its three fields" in {
-      val config = configSnippet().value
+      val config = CachingGuideSnippets.config().value
       config.similarityThreshold shouldBe 0.95
       config.ttl shouldBe 5.minutes
       config.maxSize shouldBe 100
@@ -273,13 +170,14 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       val llm             = new FakeLLMClient
       val (tracing, seen) = collectingTracing()
       val clock           = new MovableClock
-      val client          = ttlClockSnippet(llm, embedder, tracing, cacheConfig(threshold), clock)
+      val client          = CachingGuideSnippets.ttlClock(llm, embedder, tracing, cacheConfig(threshold), clock)
       (client, llm, embedder, seen, clock)
     }
 
     "build with the constructor the sample uses" in {
       val (tracing, _) = collectingTracing()
-      val client       = semanticCacheSnippet(new FakeLLMClient, new FakeEmbeddingClient, tracing, cacheConfig(0.9))
+      val client =
+        CachingGuideSnippets.semanticCache(new FakeLLMClient, new FakeEmbeddingClient, tracing, cacheConfig(0.9))
       client.complete(conversation("hello")).value.content shouldBe "answer 1"
     }
 
@@ -396,7 +294,8 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       )
       val llm          = new FakeLLMClient
       val (tracing, _) = collectingTracing()
-      val client       = ttlClockSnippet(llm, embedder, tracing, cacheConfig(0.9, maxSize = 2), new MovableClock)
+      val client =
+        CachingGuideSnippets.ttlClock(llm, embedder, tracing, cacheConfig(0.9, maxSize = 2), new MovableClock)
 
       client.complete(conversation("one"))
       client.complete(conversation("two"))
