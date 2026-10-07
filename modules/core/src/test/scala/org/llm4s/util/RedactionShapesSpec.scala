@@ -1,0 +1,325 @@
+package org.llm4s.util
+
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+
+import java.util.Locale
+import scala.util.Try
+
+/**
+ * The shapes in which a credential reaches a log, beyond the plain `"api_key": "value"` that `RedactionSpec`
+ * covers: JSON inside a string, a value with an escaped quote, a number, `key=value` outside a URL, header-style
+ * lines, compound key names and single quotes. Each shape is paired with the keys that must be left alone, because
+ * `max_tokens` and its relatives appear in every provider exchange.
+ */
+class RedactionShapesSpec extends AnyFlatSpec with Matchers {
+
+  private val R = Redaction.RedactionPlaceholder
+
+  // A value that no pattern in SecretPatterns recognises, so only the key can make it a secret.
+  private val secretText = "hunter2value"
+
+  // ---------------------------------------------------------------------------------------------
+  // JSON inside a string: a prompt or a response body carries the credential with escaped quotes
+  // ---------------------------------------------------------------------------------------------
+
+  "Redaction.redact" should "redact a field of JSON that sits inside a string" in {
+    val input = """{"content": "config: {\"api_key\": \"hunter2value\"}"}"""
+    Redaction.redact(input) shouldBe s"""{"content": "config: {\\"api_key\\": \\"$R\\"}"}"""
+  }
+
+  it should "redact every credential of an embedded document and keep the rest" in {
+    val input = """{"content": "{\"user\": \"ann\", \"password\": \"p1\", \"client_secret\": \"s2\", \"n\": \"x\"}"}"""
+    val out   = Redaction.redact(input)
+    out should include(s"""\\"password\\": \\"$R\\"""")
+    out should include(s"""\\"client_secret\\": \\"$R\\"""")
+    out should include("""\"user\": \"ann\"""")
+    out should include("""\"n\": \"x\"""")
+    (out should not).include("p1")
+    (out should not).include("s2")
+  }
+
+  it should "leave embedded JSON without a sensitive key unchanged" in {
+    val input = """{"content": "{\"city\": \"Oslo\", \"max_tokens\": \"100\"}"}"""
+    Redaction.redact(input) shouldBe input
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // A value that contains an escaped quote
+  // ---------------------------------------------------------------------------------------------
+
+  it should "redact the whole of a value that contains an escaped quote" in {
+    val input = """{"password": "ab\"cd12345", "user": "ann"}"""
+    val out   = Redaction.redact(input)
+    out shouldBe s"""{"password": "$R", "user": "ann"}"""
+    (out should not).include("cd12345")
+  }
+
+  it should "redact a value that ends with an escaped backslash" in {
+    val input = """{"password": "tail\\", "user": "ann"}"""
+    Redaction.redact(input) shouldBe s"""{"password": "$R", "user": "ann"}"""
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Numbers
+  // ---------------------------------------------------------------------------------------------
+
+  it should "redact a number when the key names a credential, and keep the JSON valid" in {
+    val out = Redaction.redact("""{"password": 12345678, "user": "ann"}""")
+    (out should not).include("12345678")
+    val parsed = ujson.read(out)
+    parsed("password").str shouldBe R
+    parsed("user").str shouldBe "ann"
+  }
+
+  it should "redact a decimal and a negative number under a sensitive key" in {
+    val out = Redaction.redact("""{"secret": -12.5, "pin_token": 7}""")
+    (out should not).include("12.5")
+    ujson.read(out)("secret").str shouldBe R
+  }
+
+  it should "leave a number under a key that is not a credential" in {
+    val input = """{"max_tokens": 100, "temperature": 0.7, "count": 12}"""
+    Redaction.redact(input) shouldBe input
+  }
+
+  it should "leave true, false and null alone, since they are not secrets" in {
+    val input = """{"token": true, "password": false, "secret": null}"""
+    Redaction.redact(input) shouldBe input
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // key=value outside a URL query string
+  // ---------------------------------------------------------------------------------------------
+
+  it should "redact key=value pairs in a log line" in {
+    Redaction.redact("login password=hunter2value ok") shouldBe s"login password=$R ok"
+    Redaction.redact("token=hunter2value next") shouldBe s"token=$R next"
+    Redaction.redact("api_key=hunter2value") shouldBe s"api_key=$R"
+  }
+
+  it should "redact the last segment of a dotted property name" in {
+    Redaction.redact("spring.datasource.password=hunter2value") shouldBe s"spring.datasource.password=$R"
+    Redaction.redact(
+      "app.llm.api_key=hunter2value\napp.llm.model=gpt"
+    ) shouldBe s"app.llm.api_key=$R\napp.llm.model=gpt"
+  }
+
+  it should "stop a key=value value at an ampersand, a comma, a semicolon or a quote" in {
+    Redaction.redact("a=1&password=hunter2value&b=2") shouldBe s"a=1&password=$R&b=2"
+    Redaction.redact("password=hunter2value, user=ann") shouldBe s"password=$R, user=ann"
+    Redaction.redact("password=hunter2value; user=ann") shouldBe s"password=$R; user=ann"
+    Redaction.redact("""env "PASSWORD=hunter2value" run""") shouldBe s"""env "PASSWORD=$R" run"""
+  }
+
+  it should "leave key=value pairs whose key is not a credential" in {
+    val input = "max_tokens=100 temperature=0.2 user=ann"
+    Redaction.redact(input) shouldBe input
+  }
+
+  it should "not treat the tail of a longer word as a key" in {
+    // `monkey` ends in `key`, `tokens` is not `token`: neither is a credential.
+    val input = "monkey=banana tokens=5 passwordless=yes"
+    Redaction.redact(input) shouldBe input
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Header-style lines
+  // ---------------------------------------------------------------------------------------------
+
+  it should "redact a header-style line at the start of a line" in {
+    Redaction.redact("x-api-key: hunter2value\nother: 1") shouldBe s"x-api-key: $R\nother: 1"
+    Redaction.redact("secret: hunter2value") shouldBe s"secret: $R"
+    Redaction.redact(
+      "Accept: json\nX-Auth-Token: hunter2value\nHost: a"
+    ) shouldBe s"Accept: json\nX-Auth-Token: $R\nHost: a"
+  }
+
+  it should "leave a header-style line whose key is not a credential" in {
+    val input = "content-type: application/json\nx-request-id: 42"
+    Redaction.redact(input) shouldBe input
+  }
+
+  it should "not redact the middle of a sentence that mentions a credential word" in {
+    val input = "Reset your password: the link expires. Your token: is valid for an hour."
+    Redaction.redact(input) shouldBe input
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Key names: compounds, casing, hyphens, single quotes
+  // ---------------------------------------------------------------------------------------------
+
+  it should "redact a JSON key that is a compound name, whatever its spelling" in {
+    val keys = Seq(
+      "clientSecret",
+      "client_secret",
+      "x-api-key",
+      "X-API-KEY",
+      "refresh_token",
+      "refreshToken",
+      "id_token",
+      "access-token",
+      "db_password",
+      "dbPassword",
+      "private_key",
+      "session_token"
+    )
+    keys.foreach { key =>
+      withClue(s"key $key: ") {
+        Redaction.redact(s"""{"$key": "$secretText"}""") shouldBe s"""{"$key": "$R"}"""
+      }
+    }
+  }
+
+  it should "leave JSON keys that merely contain a credential word" in {
+    val keys = Seq(
+      "max_tokens",
+      "prompt_tokens",
+      "completion_tokens",
+      "total_tokens",
+      "tokens",
+      "token_count",
+      "token_type",
+      "next_page_token",
+      "cache_key",
+      "idempotency_key",
+      "monkey",
+      "keyboard",
+      "passwordless",
+      "password_hint",
+      "secretary"
+    )
+    keys.foreach { key =>
+      withClue(s"key $key: ") {
+        val input = s"""{"$key": "$secretText"}"""
+        Redaction.redact(input) shouldBe input
+      }
+    }
+  }
+
+  it should "redact single-quoted JSON" in {
+    Redaction.redact("{'api_key': 'hunter2value', 'user': 'ann'}") shouldBe s"{'api_key': '$R', 'user': 'ann'}"
+  }
+
+  it should "redact a key written in a different case" in {
+    Redaction.redact(s"""{"API_KEY": "$secretText", "Password": "$secretText"}""") shouldBe
+      s"""{"API_KEY": "$R", "Password": "$R"}"""
+  }
+
+  it should "not depend on the default locale to recognise a key" in {
+    // Under a Turkish default locale "API_KEY".toLowerCase gives "apı_key", which names no credential.
+    // No finally (scalafix NoKeywordFinally): Try runs the body, then the locale is restored.
+    val previous = Locale.getDefault
+    val outcome = Try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      Redaction.redact(s"""{"API_KEY": "$secretText"}""") shouldBe s"""{"API_KEY": "$R"}"""
+      Redaction.redact(s"API_KEY=$secretText") shouldBe s"API_KEY=$R"
+      Redaction.redact(
+        s"https://x.test/v1?API_KEY=$secretText&user=ann"
+      ) shouldBe s"https://x.test/v1?API_KEY=$R&user=ann"
+    }
+    Locale.setDefault(previous)
+    outcome.get
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // The placeholder and the replacement text
+  // ---------------------------------------------------------------------------------------------
+
+  it should "use the placeholder it is given, whatever characters it holds" in {
+    // A replacement string treats `$` and `\` specially: the placeholder and the matched text must not.
+    val placeholder = "<$1\\redacted>"
+    Redaction.redact("""{"password": "a$1b\\c"}""", placeholder) shouldBe s"""{"password": "$placeholder"}"""
+    Redaction.redact("password=hunter2value", placeholder) shouldBe s"password=$placeholder"
+    Redaction.redact("""{\"password\": \"hunter2value\"}""", placeholder) shouldBe
+      s"""{\\"password\\": \\"$placeholder\\"}"""
+  }
+
+  it should "keep a value that contains $ or backslashes out of the output" in {
+    val out = Redaction.redact("""{"token": "$2a$10$abcdef\\ghi"}""")
+    (out should not).include("abcdef")
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Idempotence, and what is left alone
+  // ---------------------------------------------------------------------------------------------
+
+  it should "give the same result when applied twice" in {
+    val inputs = Seq(
+      """{"content": "{\"api_key\": \"a\", \"n\": 1}", "password": 12345, "x": "y"}""",
+      "password=hunter2value&user=ann",
+      "x-api-key: hunter2value\nok: 1",
+      """{"password": "ab\"cd"}""",
+      "{'secret': 's'}",
+      """{"api_key": "[REDACTED]"}""",
+      "plain text with no secret in it"
+    )
+    inputs.foreach { input =>
+      withClue(s"input $input: ") {
+        val once = Redaction.redact(input)
+        Redaction.redact(once) shouldBe once
+      }
+    }
+  }
+
+  it should "leave an empty value and an already redacted value as they are" in {
+    Redaction.redact("""{"password": ""}""") shouldBe """{"password": ""}"""
+    Redaction.redact(s"""{"password": "$R"}""") shouldBe s"""{"password": "$R"}"""
+    Redaction.redact(s"password=$R") shouldBe s"password=$R"
+  }
+
+  it should "leave text that has no credential in it unchanged" in {
+    val input = """{"model": "gpt-4o", "messages": [{"role": "user", "content": "Hello"}], "max_tokens": 100}"""
+    Redaction.redact(input) shouldBe input
+  }
+
+  it should "leave prose and URL paths that mention a credential word" in {
+    val input = "Reset your password by clicking the link; the token expires soon. See https://x.test/secret/abc?foo=1"
+    Redaction.redact(input) shouldBe input
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // A whole provider exchange
+  // ---------------------------------------------------------------------------------------------
+
+  "Redaction.redactForLogging" should "redact a request body that quotes a credential in a prompt, and keep its numbers" in {
+    val body =
+      """{"model": "gpt-4o", "max_tokens": 256, "messages": [{"role": "user", "content": "my config is {\"password\": \"hunter2value\", \"region\": \"eu\"}"}]}"""
+    val out = Redaction.redactForLogging(body, maxLength = 0)
+    (out should not).include("hunter2value")
+    out should include(""""max_tokens": 256""")
+    out should include("""\"region\": \"eu\"""")
+    ujson.read(out)("model").str shouldBe "gpt-4o"
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Linear time
+  // ---------------------------------------------------------------------------------------------
+
+  "Redaction.redact" should "finish on a large input of word characters, which a long token or a base64 body contains" in {
+    // The patterns are built from bounded pieces and disjoint alternatives, so the work is linear. The bound is far
+    // above the expected time: a pattern that backtracked would not finish at all.
+    val megabyte = 1024 * 1024
+    val inputs = Seq(
+      "a" * megabyte,
+      "api_key" * (megabyte / 7),
+      "password=" * (megabyte / 9),
+      """"password": """" * (megabyte / 13),
+      "\"" + ("\\\"" * (megabyte / 2))
+    )
+    inputs.foreach { input =>
+      val started = System.nanoTime()
+      val out     = Redaction.redact(input)
+      val seconds = (System.nanoTime() - started) / 1e9
+      withClue(s"input of ${input.length} characters starting ${input.take(12)}: ") {
+        out should not be null
+        seconds should be < 60.0
+      }
+    }
+  }
+
+  it should "leave a large input without a credential unchanged" in {
+    val input = "lorem ipsum dolor sit amet, " * 40000
+    Redaction.redact(input) shouldBe input
+  }
+}

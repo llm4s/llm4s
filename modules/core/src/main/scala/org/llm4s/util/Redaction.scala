@@ -1,5 +1,7 @@
 package org.llm4s.util
 
+import java.util.Locale
+
 import scala.annotation.unused
 import scala.util.matching.Regex
 
@@ -13,7 +15,8 @@ import scala.util.matching.Regex
  *  - API keys (OpenAI, Anthropic, Google, Voyage, Langfuse)
  *  - Bearer tokens and Authorization headers
  *  - URL query parameters with sensitive keys
- *  - Sensitive JSON fields (api_key, password, token, etc.)
+ *  - Sensitive fields, whatever the shape: JSON (also inside a string, single-quoted, or with a number value),
+ *    `key=value` pairs and `x-api-key: value` header lines (api_key, password, token, client_secret, etc.)
  *
  * @example
  * {{{
@@ -88,30 +91,66 @@ private[llm4s] object Redaction {
   private val QueryParamPattern: Regex = """([?&])([^=]+)=([^&\s]*)""".r
 
   /**
-   * Sensitive JSON key names to redact.
+   * Names that mark a key as holding a credential, compared after lower-casing and dropping `_` and `-`, so `api_key`,
+   * `apiKey` and `x-api-key` are all `apikey`.
+   *
+   * A key is sensitive when it is one of these words or ends with one of the suffixes, which covers compound names such
+   * as `client_secret`, `refresh_token` and `db_password`. The match is on the whole normalised key, never on a
+   * substring: `max_tokens`, `prompt_tokens`, `token_count` and `next_page_token` are not credentials and appear in
+   * every provider exchange, so redacting them would destroy the logs.
    */
-  private val SensitiveJsonKeys: Set[String] = Set(
-    "api_key",
-    "apiKey",
+  private val SensitiveKeyWords: Set[String] = Set("token", "authorization", "credential", "credentials")
+
+  private val SensitiveKeySuffixes: Seq[String] = Seq(
     "apikey",
-    "api-key",
     "secret",
-    "secretKey",
-    "secret_key",
+    "secretkey",
     "password",
     "passwd",
-    "token",
-    "accessToken",
-    "access_token",
-    "authorization",
-    "credential",
-    "credentials",
-    "privateKey",
-    "private_key"
+    "privatekey",
+    "accesstoken",
+    "refreshtoken",
+    "idtoken",
+    "authtoken",
+    "sessiontoken",
+    "bearertoken"
   )
 
-  private def jsonKeyPattern(key: String): Regex =
-    s"""(?i)("${Regex.quote(key)}"\\s*:\\s*")([^"]+)(")""".r
+  private def isSensitiveKey(key: String): Boolean = {
+    val normalised = key.toLowerCase(Locale.ROOT).filter(_.isLetterOrDigit)
+    SensitiveKeyWords.contains(normalised) || SensitiveKeySuffixes.exists(normalised.endsWith)
+  }
+
+  // A key is a letter followed by at most 63 letters, digits, `_` or `-`. The bound keeps matching linear on long
+  // runs of word characters, which a model reply or a base64 body can contain.
+  private val Key: String = """[A-Za-z][A-Za-z0-9_-]{0,63}"""
+
+  // Each pattern captures: 1 = text up to the value, 2 = the key, 3 = the value, and where present 4 = the closing
+  // delimiter. They are tried one after the other, so a value is redacted by the first shape that fits it.
+
+  /** `"key": "value"`, where the value may contain escaped quotes. */
+  private val JsonStringField: Regex =
+    s"""("($Key)"\\s*:\\s*")((?:[^"\\\\]|\\\\.)*)(")""".r
+
+  /** `\"key\": \"value\"`: the same JSON inside a string, as a prompt or a response body carries it. */
+  private val EscapedJsonStringField: Regex =
+    s"""(\\\\"($Key)\\\\"\\s*:\\s*\\\\")((?:[^"\\\\]|\\\\(?!"))*)(\\\\")""".r
+
+  /** `'key': 'value'`. */
+  private val SingleQuotedField: Regex =
+    s"""('($Key)'\\s*:\\s*')((?:[^'\\\\]|\\\\.)*)(')""".r
+
+  /** `"key": 12345`: a number is a credential too when the key says so (a numeric PIN or passcode). */
+  private val JsonNumberField: Regex =
+    s"""("($Key)"\\s*:\\s*)(-?\\d+(?:\\.\\d+)?)(?![\\w.-])""".r
+
+  /** `key=value` outside a URL query string: form bodies, log lines, shell-style settings, `a.b.password=...`. */
+  private val EqualsPair: Regex =
+    s"""((?<![A-Za-z0-9_-])($Key)=)([^\\s&"',;<>]+)""".r
+
+  /** A header-style line, `x-api-key: value`, at the start of a line. */
+  private val HeaderLine: Regex =
+    s"""(?m)(^($Key):[ \\t]*)(\\S[^\\r\\n]*)""".r
 
   /**
    * Redact sensitive information from a string.
@@ -202,7 +241,7 @@ private[llm4s] object Redaction {
         val separator = m.group(1)
         val key       = m.group(2)
 
-        if (SensitiveQueryParams.exists(s => key.toLowerCase.contains(s.toLowerCase))) {
+        if (SensitiveQueryParams.exists(s => key.toLowerCase(Locale.ROOT).contains(s.toLowerCase(Locale.ROOT)))) {
           s"$separator$key=$placeholder"
         } else {
           m.matched
@@ -210,11 +249,42 @@ private[llm4s] object Redaction {
       }
     )
 
-  private def redactJsonFields(input: String, placeholder: String): String =
-    SensitiveJsonKeys.foldLeft(input) { (acc, key) =>
-      val pattern = jsonKeyPattern(key)
-      pattern.replaceAllIn(acc, m => s"${m.group(1)}$placeholder${m.group(3)}")
+  private def redactJsonFields(input: String, placeholder: String): String = {
+    // Quoted shapes first, then the bare ones, so that a value is never matched by a looser pattern first.
+    val quoted = Seq(EscapedJsonStringField, JsonStringField, SingleQuotedField).foldLeft(input) { (acc, pattern) =>
+      redactPairs(pattern, acc, placeholder, closing = true)
     }
+    // A number becomes a string, so that the redacted JSON still parses.
+    val numbers = redactPairs(JsonNumberField, quoted, placeholder, closing = false, wrap = "\"")
+    Seq(EqualsPair, HeaderLine).foldLeft(numbers) { (acc, pattern) =>
+      redactPairs(pattern, acc, placeholder, closing = false)
+    }
+  }
+
+  /**
+   * Replaces the value of every match whose key is sensitive. An empty value, or one that is already the placeholder,
+   * is left as it is, so redacting twice gives the same result as redacting once.
+   */
+  private def redactPairs(
+    pattern: Regex,
+    input: String,
+    placeholder: String,
+    closing: Boolean,
+    wrap: String = ""
+  ): String =
+    pattern.replaceAllIn(
+      input,
+      m => {
+        val value = m.group(3)
+        val text =
+          if (isSensitiveKey(m.group(2)) && value.nonEmpty && value != placeholder) {
+            m.group(1) + wrap + placeholder + wrap + (if (closing) m.group(4) else "")
+          } else {
+            m.matched
+          }
+        Regex.quoteReplacement(text)
+      }
+    )
 
   private def redactApiKeys(input: String, placeholder: String): String =
     // Delegate to the canonical patterns in SecretPatterns so there is a

@@ -2104,6 +2104,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read is treated as accepted with a warning, so tracing does not fail on an unexpected shape
   (found in review of [#1239](https://github.com/llm4s/llm4s/pull/1239)).
 
+- **`llm4s-core`: redaction covers credentials in more shapes** ([#1518](https://github.com/llm4s/llm4s/issues/1518)):
+  the redaction behind `ProviderExchangeSink` and the logged request and response bodies replaced a credential only in
+  `"key": "value"` JSON with a short list of exact key names, in URL query strings, in `Authorization` headers and in
+  strings shaped like a provider key. It now also redacts the same JSON when it sits inside a prompt or response
+  string (`\"api_key\": \"...\"`), single-quoted JSON, a number under a credential key (written back as a string, so
+  the JSON still parses), `key=value` pairs and `key: value` header lines outside a query string (including dotted
+  property names such as `spring.datasource.password=...`), and compound key names such as `client_secret`,
+  `x-api-key`, `refresh_token` and `db_password`. A value that contains an escaped quote used to be cut at the quote,
+  leaving the rest of the credential in the log; it is now redacted whole. A key is matched as a whole name, never as a
+  substring, so `max_tokens`, `prompt_tokens`, `token_count` and `next_page_token` are not redacted. Key names are now
+  lower-cased with `Locale.ROOT`, so a Turkish default locale no longer stops `API_KEY` from being recognised. Redaction
+  is still pattern-based and best effort: it does not detect a secret that is not under a key, and JSON escaped twice
+  is not recognised.
 - **`AudioPreprocessing.resamplePcm16` could hang, and its output length was wrong**
   ([#1308](https://github.com/llm4s/llm4s/issues/1308)): a target rate of `-8000`, or a source rate of `-1`, sent
   Java Sound's converter into a loop that never ended (a test JVM spun at 100% CPU for twenty minutes), a target
