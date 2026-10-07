@@ -54,8 +54,10 @@ replacing its execution model and its tier is an open question in
 [#1281](https://github.com/llm4s/llm4s/issues/1281). Add it to `stabilityTierModules` in `build.sbt`
 when that is settled.
 
-A type annotated `@Experimental` inside a frozen module needs a `ProblemFilters.exclude` entry that says
-why when the baseline is set (see [The Baseline](#the-baseline)); the annotation is what tells you which.
+MiMa skips a type annotated `@Experimental` inside a frozen module: `mimaFrozen` in `build.sbt` adds
+`mimaExcludeAnnotations += "org.llm4s.annotation.Experimental"`, so such a type needs no `ProblemFilters.exclude`
+entry (a `@Stable` type is still checked). `scripts/mima-dry-run.sh` proves both on every run; see
+[Release readiness](release#release-readiness-a-mima-dry-run).
 
 ---
 
@@ -78,9 +80,10 @@ Every other module is Beta or Experimental, or is not published (`llm4s-samples`
 `llm4s-workspace-*`, `llm4s-it`, `llm4s-docs`, `llm4s-benchmarks`), and is not checked. That includes
 `org.llm4s.speech.*` (`llm4s-speech`), `org.llm4s.runner.*` (`llm4s-workspace-runner`) and
 `org.llm4s.samples.*` (`llm4s-samples`, `llm4s-workspace-samples`): none ships in a frozen module, so
-no filter is needed for them. Anything a frozen module contains that 1.0 Scope marks Beta or Experimental needs a
-`ProblemFilters.exclude` entry that says why; there are none yet because no baseline is set (see
-[The Baseline](#the-baseline)).
+no filter is needed for them. A top-level type that 1.0 Scope marks Beta or Experimental is `@Experimental`, which MiMa skips (see
+[Tiers in the Code](#tiers-in-the-code)); anything else a frozen module contains that 1.0 Scope marks Beta or
+Experimental needs a `ProblemFilters.exclude` entry that says why. There are none yet because no baseline is
+set (see [The Baseline](#the-baseline)).
 
 If you find yourself importing from a Beta or Experimental package, please open an issue: it likely
 means the stable API is missing something.
@@ -170,4 +173,5 @@ This reports binary incompatibilities between the current code and the baseline 
 baseline set, each module logs `mimaPreviousArtifacts not set` (or `is empty`) and the task succeeds.
 With a baseline set, success means the frozen API is compatible, and failure lists each problem with
 the `ProblemFilters.exclude` line that would silence it. To check one module, run
-`sbt agent/mimaReportBinaryIssues`.
+`sbt agent/mimaReportBinaryIssues`. Before 0.5.0 exists, `scripts/mima-dry-run.sh` checks that this wiring
+works (see [Release readiness](release#release-readiness-a-mima-dry-run)).

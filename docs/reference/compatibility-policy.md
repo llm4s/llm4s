@@ -68,7 +68,8 @@ For a Frozen module:
 What it does **not** cover:
 
 - Beta and Experimental modules, and anything in a Frozen module that [1.0 Scope](v1-scope) marks Beta or
-  Experimental. Such a type inside a Frozen module gets a documented MiMa filter when the baseline is set.
+  Experimental. Such a type inside a Frozen module is `@Experimental`, which MiMa skips (`mimaExcludeAnnotations`);
+  anything else gets a documented MiMa filter when the baseline is set.
 - Anything `private` or `private[llm4s]`. The latter is internal, may change in any release, and cannot be
   reached from your package; do not declare your code in `org.llm4s` to get around that.
 - `llm4s-provider-testkit` (Beta), the samples, the workspace runner, `modules/it` and the benchmarks.

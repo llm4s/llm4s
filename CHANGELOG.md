@@ -298,6 +298,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers, a stream that ends without a terminal event or with `error`, `cancelled` or `time_limit`
   is a `Left(ServiceError)`, `baseUrl` and `iamUrl` must be `https` (except localhost), the API key
   is trimmed, and setting both `projectId` and `spaceId` is a configuration error.
+- **A MiMa dry run, and MiMa skips `@Experimental` types** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
+  `scripts/mima-dry-run.sh` shows, before 0.5.0 exists, that setting `mimaBaselineVersion` will work. In a scratch
+  clone of `HEAD` it publishes the build at a throwaway version to a temporary Maven repository (nothing reaches
+  `~/.ivy2`, `~/.m2` or Central), checks for each frozen module that `mimaPreviousArtifacts` names the published
+  artifact, that MiMa resolved `llm4s-<name>_3` and found no problems, then runs a negative control (a baseline
+  with an extra `@Stable` and an extra `@Experimental` class that the code lacks: MiMa must fail on the first and
+  ignore the second). It is a manual release-readiness script (about three minutes), tested offline by
+  `scripts/test-mima-dry-run.sh`. `mimaFrozen` now adds `mimaExcludeAnnotations += "org.llm4s.annotation.Experimental"`,
+  so an `@Experimental` type inside a frozen module is outside the freeze without a hand-written
+  `ProblemFilters.exclude` (a `@Stable` type is still checked; no effect while the baseline is `None`). See
+  [Release readiness](docs/reference/release.md#release-readiness-a-mima-dry-run).
 - **Run API and event dispatch for graph runs** (Experimental, `org.llm4s.agent.graph`,
   [#1277](https://github.com/llm4s/llm4s/issues/1277)): `GraphRuntime.start`/`recover`/`resume`
   admit a run on the caller's thread and return `Result[RunHandle[O]]` once the thread is claimed;
