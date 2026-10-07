@@ -33,6 +33,76 @@ annotations because ScalaTest only honours a whole-suite tag in that form.
 `sbt "it/testOnly org.llm4s.vectorstore.PgVectorStoreSpec"` still runs a single suite
 whatever tier it is in - the tier filter applies to `test`, not to `testOnly`.
 
+## The `@Cloud` capability contract
+
+The OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter and Cohere smoke specs share one contract
+(`ProviderSmokeContract`, issue #1212), so every provider is held to the same capabilities and a
+maintainer can see at a glance what each one supports. The checks are in `SmokeChecks`.
+
+| Capability | What it checks |
+|---|---|
+| system message | a model told to answer with one word, whatever it is asked, does (covers Cohere's `developer` role and the system handling of Anthropic and Gemini) |
+| multi-turn history | an assistant turn in the history reaches the model, which answers from it |
+| tool call | the model calls a trivial tool, the call carries an id and arguments that fit the tool, the result goes back as a `ToolMessage`, and the final answer carries it |
+| streamed tool call | the same, streamed: the arguments reassemble into JSON that fits the tool, and no tool-call chunk arrives without its call's id |
+| structured output | a JSON-schema `responseFormat` (`completeStructured`) gives JSON that parses, matches the schema and has the values asked for |
+| usage | reported on `complete`: positive, with a total not below prompt + completion |
+| streamed usage | the same on a streamed completion |
+| reasoning | on a reasoning model, the answer is not empty and the provider reports thinking: as text where it returns text, as a token count where it only counts |
+
+Each check asserts structure and invariants, never a model's wording, and uses tiny prompts and a few tens of
+tokens. The tool-call checks make two requests; the reasoning check runs on a reasoning model with a cap of
+1024 to 2048 tokens. The caps bound the cost: a few thousand tokens per provider at most, for the whole contract.
+
+**Reading the matrix.** The end of each spec prints that provider's row, and the JVM prints all rows together on
+exit. This output is illustrative, not from a real run:
+
+```
+provider   system message  multi-turn history  tool call  streamed tool call  structured output  usage    streamed usage  reasoning
+OpenAI     held            held                held       held                held               held     held            held
+Gemini     held            held                held       held                FAILED             held     held            n/a
+
+Notes:
+  FAILED  Gemini / structured output: [structured output] the response did not parse as the schema: ...
+  n/a     Gemini / reasoning: this spec has no reasoning-capable model configured ...
+```
+
+- `held`: the check ran and the provider did what the capability requires.
+- `FAILED`: it ran and did not. The message starts with the capability in brackets and says what differed.
+- `n/a`: the spec declares the capability does not apply, with the reason. It shows as a cancelled test.
+  A capability is never skipped silently.
+- `skipped`: the provider's key is not set. Under `LLM4S_IT_STRICT=true` this fails instead, as everywhere in the tier.
+
+**Running it.** `sbt testSmoke` runs every `@Cloud` suite, contract included. To run only the contract for one
+provider, select its tests by name, which leaves out the suite's other tests (several of them call the provider
+with an invalid key to check the authentication error):
+
+```
+OPENAI_API_KEY=... sbt 'it/testOnly org.llm4s.llmconnect.smoke.OpenAISmokeSpec -- -z "capability contract"'
+```
+
+**The contract is proven without a provider.** `SmokeContractOfflineSpec` (`@Local`, so part of `sbt test`) runs
+the real checks through real clients (`DeepSeekClient`, `OpenRouterClient`, `CohereClient` and `OpenAIClient`)
+against a local fake server. Every capability holds for a well-behaved server, and for each way a server can
+misbehave (ignoring the system message, forgetting earlier turns, ignoring the tool result, cutting tool-call
+arguments off, streaming prose where a tool call belongs, omitting usage, ignoring `response_format`, answering
+with the wrong shape or the wrong values, sending no reasoning) exactly the broken capabilities fail, each
+naming itself, and the rest still hold. Stub clients cover shapes the real clients prevent, such as a streamed
+tool-call chunk without an id.
+
+**What this does not prove.** No live provider has run these checks. The expectations are derived from each
+provider's documented behaviour and from the client code, and a first run with real keys may show one is wrong. So
+read a failure in this order: the capability's message; whether the model constant in the spec is still served (a
+retired model fails every capability with a not-found error: `GeminiSmokeSpec` and `AnthropicSmokeSpec` default to
+older models, see #1309); and whether the client really mishandles the case. `completeStructured` sends a
+`json_schema` response format to every OpenAI-compatible provider, so a provider that accepts only `json_object`
+fails *structured output*: that is a client finding, not a test bug.
+
+**Adding a provider** (#1213) means mixing the contract into its spec: mix in `ProviderSmokeContract`, define
+`providerLabel`, `apiKeyEnvVar`, `contractKey` and `contractClient(key)`, override `notApplicable` for what does
+not apply (and `reasoningSetup` if a reasoning model exists), and call `registerCapabilityContract()` after the
+spec's own tests.
+
 ## Running the containerised tier
 
 ```bash
