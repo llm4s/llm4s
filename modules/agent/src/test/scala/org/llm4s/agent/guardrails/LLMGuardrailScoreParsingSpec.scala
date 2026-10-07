@@ -72,6 +72,11 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     "0.9 percentile",
     "1 \uFF05",
     "1 \u2030",
+    "1 \u2031",
+    "1 \uFE6A",
+    "1 \u066A",
+    "1 \u0609",
+    "1 \u060A",
     // a per-mille scale named in words
     "1 per mille",
     "1 permille",
@@ -84,6 +89,8 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     "100",
     "2",
     "1.0001",
+    "1.0000000000000001",
+    "1.00000000000000000000000000001",
     "-0.2",
     "-0.5",
     // not a plain decimal
@@ -138,6 +145,14 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
           error.message should include("Could not parse LLM judge score")
         case other => fail(s"expected a ValidationError, got $other")
       }
+    }
+  }
+
+  it should "not round a value just below 1 up to a perfect score" in {
+    judge("0.99999999999999999", threshold = 0.99) shouldBe Right("content")
+    judge("0.99999999999999999", threshold = 1.0).swap.toOption.get match {
+      case error: ValidationError => error.field shouldBe "output"
+      case other                  => fail(s"expected a ValidationError, got $other")
     }
   }
 

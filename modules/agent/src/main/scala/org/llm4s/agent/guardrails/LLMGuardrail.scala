@@ -202,8 +202,11 @@ object LLMGuardrail {
 
   private def hasDigit(token: String): Boolean = token.exists(c => c >= '0' && c <= '9')
 
-  /** Percent and per-mille signs, ASCII and fullwidth, that rescale a number wherever they stand in the reply. */
-  private val PercentSigns = "%\u2030\uFF05\uFE6A"
+  /**
+   * Percent, per-mille and per-ten-thousand signs that rescale a number wherever they stand in the reply: ASCII,
+   * fullwidth and small forms, and the Arabic signs (U+066A, U+0609, U+060A).
+   */
+  private val PercentSigns = "%\u2030\u2031\uFF05\uFE6A\u066A\u0609\u060A"
 
   /** Words that, after `per`, name a rescaling: `per cent`, `per mille`, `per mil`, `per hundred`, `per thousand`. */
   private val PerScales = Seq("cent", "mil", "hundred", "thousand")
@@ -231,7 +234,8 @@ object LLMGuardrail {
    *
    * Every whitespace-separated word with an ASCII digit in it counts as a number: there must be exactly one, and
    * once its wrapping and trailing clause punctuation are trimmed it must be a plain decimal within 0 to 1. A value
-   * outside the range is refused, never clamped. A reply that names a percentage anywhere (`1 %`, `1 percent`) is
+   * outside the range is refused, never clamped, and the range is checked before the decimal is rounded to a
+   * `Double`. A reply that names a percentage anywhere (`1 %`, `1 percent`) is
    * refused too, as is one that names a per-mille scale (`1 per mille`), because the marker need not
    * touch the number.
    */
@@ -239,9 +243,20 @@ object LLMGuardrail {
     reply.split("\\s+").toList.filter(hasDigit) match {
       case word :: Nil if !namesPercentage(reply) =>
         val number = trimWrapping(word)
-        if (PlainDecimal.matcher(number).matches()) number.toDoubleOption.filter(score => score >= 0.0 && score <= 1.0)
-        else None
+        if (PlainDecimal.matcher(number).matches()) inUnitRange(BigDecimal(number)) else None
       case _ => None
+    }
+
+  /**
+   * The decimal as a score, range-checked at full precision before it becomes a `Double`, so `1.0000000000000001`
+   * is refused rather than rounded to 1.0. A value just below 1 that a `Double` would round up to 1.0
+   * (`0.99999999999999999`) reads as the largest `Double` below 1, never as a perfect score.
+   */
+  private def inUnitRange(decimal: BigDecimal): Option[Double] =
+    if (decimal < 0 || decimal > 1) None
+    else {
+      val score = decimal.toDouble
+      Some(if (score == 1.0 && decimal < 1) Math.nextDown(1.0) else score)
     }
 
   /**
