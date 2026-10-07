@@ -61,7 +61,8 @@ class VertexAIClient(
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** How long a non-streaming call may take: the section's `timeouts.request`, else VertexAIClient.DefaultRequestTimeout. */
-  protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(VertexAIClient.DefaultRequestTimeout)
+  protected[provider] def requestTimeout: FiniteDuration =
+    config.timeouts.requestOr(VertexAIClient.DefaultRequestTimeout)
 
   /** How long a streamed call may take: the section's `timeouts.stream`, else VertexAIClient.DefaultStreamTimeout. */
   protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(VertexAIClient.DefaultStreamTimeout)

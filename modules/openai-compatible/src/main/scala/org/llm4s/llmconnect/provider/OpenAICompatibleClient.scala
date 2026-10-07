@@ -417,13 +417,16 @@ object OpenAICompatibleClient {
 
   /**
    * The timeout on `complete`'s request: two minutes, what the old `MistralClient` and
-   * `CohereClient` used, and what `OllamaClient`, `GeminiClient` and `VertexAIClient` use. A
-   * single internal default for now; configurable timeouts are
-   * [[https://github.com/llm4s/llm4s/issues/712 #712]].
+   * `CohereClient` used, and what `OllamaClient`, `GeminiClient` and `VertexAIClient` use. This is
+   * the default: a section's `timeouts.request` replaces it
+   * ([[https://github.com/llm4s/llm4s/issues/712 #712]]).
    */
   val RequestTimeout: FiniteDuration = 2.minutes
 
-  /** The timeout on `streamComplete`'s request: five minutes, as in the clients this one replaced. */
+  /**
+   * The timeout on `streamComplete`'s request: five minutes, as in the clients this one replaced. A
+   * section's `timeouts.stream` replaces it.
+   */
   val StreamTimeout: FiniteDuration = 5.minutes
 
   /**

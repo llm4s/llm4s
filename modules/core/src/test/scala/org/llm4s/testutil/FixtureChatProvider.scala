@@ -69,9 +69,9 @@ final case class FixtureChatConfig(
   reserveCompletion: Int = 1024,
   override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
-  override val providerId: ProviderId                      = FixtureChatProvider.id
-  override def endpointUrl: Option[String]                 = Some(baseUrl)
-  override def withModel(model: String): FixtureChatConfig = copy(model = model)
+  override val providerId: ProviderId                                      = FixtureChatProvider.id
+  override def endpointUrl: Option[String]                                 = Some(baseUrl)
+  override def withModel(model: String): FixtureChatConfig                 = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): FixtureChatConfig = copy(timeouts = timeouts)
 
 object FixtureChatConfig:

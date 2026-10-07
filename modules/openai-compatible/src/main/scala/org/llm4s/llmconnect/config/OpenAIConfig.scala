@@ -37,6 +37,8 @@ import org.llm4s.util.Redaction
  * @param explicitProviderId the provider this config belongs to, when a descriptor says so:
  *                      `requesty` for Requesty and `openrouter` for OpenRouter. `None` - what a
  *                      config built by hand gets - infers it from `baseUrl`; see [[providerId]].
+ * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
+ *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
 @Stable
 final case class OpenAIConfig private (
@@ -66,8 +68,8 @@ final case class OpenAIConfig private (
       if baseUrl.contains("openrouter.ai") then ProviderId("openrouter") else ProviderId("openai")
     )
 
-  override def endpointUrl: Option[String]            = Some(baseUrl)
-  override def withModel(model: String): OpenAIConfig = copy(model = model)
+  override def endpointUrl: Option[String]                            = Some(baseUrl)
+  override def withModel(model: String): OpenAIConfig                 = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): OpenAIConfig = copy(timeouts = timeouts)
 
   def withApiKey(apiKey: String): OpenAIConfig                     = copy(apiKey = apiKey)
@@ -102,7 +104,16 @@ object OpenAIConfig {
     reserveCompletion: Int,
     explicitProviderId: Option[ProviderId] = None
   ): OpenAIConfig =
-    new OpenAIConfig(apiKey, model, organization, baseUrl, contextWindow, reserveCompletion, explicitProviderId, ProviderTimeouts.default)
+    new OpenAIConfig(
+      apiKey,
+      model,
+      organization,
+      baseUrl,
+      contextWindow,
+      reserveCompletion,
+      explicitProviderId,
+      ProviderTimeouts.default
+    )
 
   /**
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,

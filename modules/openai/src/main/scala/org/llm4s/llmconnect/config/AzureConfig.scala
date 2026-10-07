@@ -24,6 +24,8 @@ import org.llm4s.util.Redaction
  * @param apiVersion    Azure OpenAI API version string, e.g. `"2025-01-01-preview"`.
  * @param contextWindow Model's total token capacity (prompt + completion combined).
  * @param reserveCompletion Tokens held back from prompt history for the completion.
+ * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
+ *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
 @Stable
 case class AzureConfig(
@@ -35,9 +37,9 @@ case class AzureConfig(
   reserveCompletion: Int,
   override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
-  override val providerId: ProviderId                = ProviderId("azure")
-  override def endpointUrl: Option[String]           = Some(endpoint)
-  override def withModel(model: String): AzureConfig = copy(model = model)
+  override val providerId: ProviderId                                = ProviderId("azure")
+  override def endpointUrl: Option[String]                           = Some(endpoint)
+  override def withModel(model: String): AzureConfig                 = copy(model = model)
   override def withTimeouts(timeouts: ProviderTimeouts): AzureConfig = copy(timeouts = timeouts)
   override def toString: String =
     s"AzureConfig(endpoint=$endpoint, apiKey=${Redaction.secret(apiKey)}, model=$model, apiVersion=$apiVersion, " +

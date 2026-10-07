@@ -34,6 +34,8 @@ import org.llm4s.util.Redaction
  *                          OpenAI (vLLM, Ollama's `/v1`) stream no usage without it; turn it
  *                          off for an endpoint that rejects the field. A named section sets it
  *                          with the `streamUsage` key.
+ * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
+ *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
 @Stable
 final case class OpenAICompatibleConfig(

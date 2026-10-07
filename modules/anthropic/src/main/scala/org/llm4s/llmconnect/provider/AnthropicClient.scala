@@ -154,7 +154,9 @@ class AnthropicClient(
 
         val messageService = client.messages()
         // Make API call
-        val attempt = Try(requestOptions.fold(messageService.create(messageParams))(messageService.create(messageParams, _))).toEither.left.map {
+        val attempt = Try(
+          requestOptions.fold(messageService.create(messageParams))(messageService.create(messageParams, _))
+        ).toEither.left.map {
           case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
           case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
           case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)

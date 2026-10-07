@@ -795,7 +795,9 @@ private[provider] object OpenAIClientTransport {
    * value for every call and covers a streamed response in full: a short `request` timeout set there
    * would also cut every stream, and `request` and `stream` are separate settings.
    */
-  private[provider] def requestOptions(timeout: Option[scala.concurrent.duration.FiniteDuration]): Option[RequestOptions] =
+  private[provider] def requestOptions(
+    timeout: Option[scala.concurrent.duration.FiniteDuration]
+  ): Option[RequestOptions] =
     timeout.map(t => RequestOptions.builder().timeout(java.time.Duration.ofNanos(t.toNanos)).build())
 
   /**

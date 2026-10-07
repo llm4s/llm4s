@@ -119,6 +119,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   annotations changes no behaviour and no binary signature. **`llm4s-agent` is not covered yet**: its tier
   waits on the typed graph runtime ([#1266](https://github.com/llm4s/llm4s/issues/1266)). See
   [docs/reference/api-stability.md](docs/reference/api-stability.md#tiers-in-the-code).
+- **Provider HTTP timeouts are configurable** ([#712](https://github.com/llm4s/llm4s/issues/712)): a
+  provider section, and an embedding section, takes an optional `timeouts` block,
+  `timeouts { request = 3m, stream = 15m }`, each value a duration. A value left out keeps that client's own
+  default, so **a section without the block behaves exactly as before**. Values must be positive and finite
+  and are refused at load, naming the key (`llm4s.providers.<name>.timeouts.request`); a misspelt key inside
+  the block is refused too. Every chat client reads it - the OpenAI-compatible family (DeepSeek, Z.ai,
+  OpenRouter, Mistral, Cohere and the generic provider), Gemini, Vertex AI, Ollama, and OpenAI, Azure,
+  Requesty and Anthropic on their SDKs - and so do the OpenAI, Ollama, Voyage, Jina and Cohere embedding
+  providers. The HTTP-based clients bound the wait for the response to begin; the SDK-based clients bound the
+  whole call, per call, so a short `request` does not cut a stream. New public types in `llm4s-core`:
+  `ProviderTimeouts` (a `FiniteDuration` each for `request` and `stream`, `None` meaning the client's
+  default), `NamedProviderConfig.timeouts`, `EmbeddingProviderConfig.timeouts` and
+  `EmbeddingProviderSection.timeouts`; `ProviderConfig` gains `timeouts` and `withTimeouts`, both with
+  defaults, so a provider supplied by another module compiles unchanged and ignores the block until it
+  overrides them (`docs/guide/writing-a-provider.md`). `timeouts` joins `ProviderConfigSpec.BuiltinKeys`, so
+  a provider can no longer declare an extra of that name. The provider configs (`DeepSeekConfig`,
+  `ZaiConfig`, `MistralConfig`, `CohereConfig`, `OpenAICompatibleConfig`, `OpenAIConfig`, `AzureConfig`,
+  `AnthropicConfig`, `GeminiConfig`, `VertexAIConfig`, `OllamaConfig`) gain a trailing `timeouts` field and a
+  `withTimeouts` setter; code that constructs them or calls `apply` is unchanged, a pattern match on one needs
+  the extra field. The OpenAI and Anthropic SDKs retry a timed-out call twice by default, which llm4s does
+  not change. Model listing and the Vertex AI token request keep their fixed 10-second timeouts.
 - **Agent tool contract for graph runs** (Experimental, `org.llm4s.agent.graph.tool`,
   [#1278](https://github.com/llm4s/llm4s/issues/1278)): `AgentTool[A]` and `AgentToolSpec[A]`
   replace the prototype `LoopTool`. A tool's arguments are typed by a core `SchemaDefinition[A]`

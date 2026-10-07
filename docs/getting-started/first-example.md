@@ -526,10 +526,19 @@ results.foreach {
 
 ### 4. Set Appropriate Timeouts
 
-Request timeouts are not configurable yet: each client uses an internal default (two minutes
-for a completion and five for a stream in the OpenAI-compatible clients). Configurable timeouts
-are tracked in [#712](https://github.com/llm4s/llm4s/issues/712). Until then, prefer streaming
-for long-form generation (above).
+Each client has a default request and stream timeout (two minutes for a completion, five or ten for a
+stream), and a provider section can change them:
+
+```hocon
+llm4s.providers.my-openai {
+  provider = "openai"
+  model    = "gpt-4o"
+  timeouts { request = 3m, stream = 15m }
+}
+```
+
+See [Timeouts](configuration#timeouts) for the keys, the defaults per provider and what each timeout
+bounds. For long-form generation, prefer streaming (above).
 
 ### 5. Use Cheaper Models for Development
 
