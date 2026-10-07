@@ -22,8 +22,12 @@ import org.llm4s.util.Redaction
  * that module for it ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  * Its package is unchanged from when it was in `llm4s-core`.
  *
- * Prefer [[OpenAIConfig.fromValues]] over the primary constructor; it resolves
- * `contextWindow` and `reserveCompletion` from the model name automatically.
+ * Prefer [[OpenAIConfig.fromValues]], which validates the values and resolves
+ * `contextWindow` and `reserveCompletion` from the bundled model catalogue.
+ * The constructor is private: build one with the companion `apply` and adjust
+ * it with the `with*` setters. Java and Kotlin, which cannot see Scala default
+ * arguments, use `OpenAIConfig.apply(apiKey, model)` and the setters, so adding
+ * a field never breaks them.
  *
  * @param apiKey        OpenAI API key; redacted in `toString`.
  * @param model         Model identifier, e.g. `"gpt-4o"`.
@@ -37,15 +41,15 @@ import org.llm4s.util.Redaction
  *                      config built by hand gets - infers it from `baseUrl`; see [[providerId]].
  */
 @Stable
-case class OpenAIConfig(
+final case class OpenAIConfig private (
   apiKey: String,
   model: String,
   organization: Option[String],
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  explicitProviderId: Option[ProviderId] = None,
-  workloadIdentity: Option[OpenAIWorkloadIdentity] = None
+  explicitProviderId: Option[ProviderId],
+  workloadIdentity: Option[OpenAIWorkloadIdentity]
 ) extends ProviderConfig:
   /**
    * The provider this config belongs to: [[explicitProviderId]] when set, otherwise `openai`,
@@ -66,6 +70,20 @@ case class OpenAIConfig(
 
   override def endpointUrl: Option[String]            = Some(baseUrl)
   override def withModel(model: String): OpenAIConfig = copy(model = model)
+
+  def withApiKey(apiKey: String): OpenAIConfig                     = copy(apiKey = apiKey)
+  def withOrganization(organization: String): OpenAIConfig         = copy(organization = Some(organization))
+  def withOrganization(organization: Option[String]): OpenAIConfig = copy(organization = organization)
+  def withBaseUrl(baseUrl: String): OpenAIConfig                   = copy(baseUrl = baseUrl)
+  def withContextWindow(contextWindow: Int): OpenAIConfig          = copy(contextWindow = contextWindow)
+  def withReserveCompletion(reserveCompletion: Int): OpenAIConfig  = copy(reserveCompletion = reserveCompletion)
+  def withExplicitProviderId(providerId: ProviderId): OpenAIConfig = copy(explicitProviderId = Some(providerId))
+  def withExplicitProviderId(providerId: Option[ProviderId]): OpenAIConfig =
+    copy(explicitProviderId = providerId)
+  def withWorkloadIdentity(workloadIdentity: OpenAIWorkloadIdentity): OpenAIConfig =
+    copy(workloadIdentity = Some(workloadIdentity))
+  def withWorkloadIdentity(workloadIdentity: Option[OpenAIWorkloadIdentity]): OpenAIConfig =
+    copy(workloadIdentity = workloadIdentity)
   override def toString: String =
     s"OpenAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, organization=$organization, baseUrl=$baseUrl, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, providerId=${providerId.asString}, " +
@@ -73,6 +91,48 @@ case class OpenAIConfig(
 
 object OpenAIConfig {
   private val standardReserve = 4096
+
+  /** The OpenAI API base URL, used by the short `apply(apiKey, model)`. */
+  val DEFAULT_BASE_URL: String = "https://api.openai.com/v1"
+
+  /**
+   * Builds a config without validating it; [[fromValues]] validates, and `OpenAIClient` applies
+   * [[validate]] to whatever it is given. `explicitProviderId` defaults to `None`, which infers
+   * the provider from `baseUrl`; `workloadIdentity` defaults to `None`, which authenticates with
+   * `apiKey`.
+   */
+  def apply(
+    apiKey: String,
+    model: String,
+    organization: Option[String],
+    baseUrl: String,
+    contextWindow: Int,
+    reserveCompletion: Int,
+    explicitProviderId: Option[ProviderId] = None,
+    workloadIdentity: Option[OpenAIWorkloadIdentity] = None
+  ): OpenAIConfig =
+    new OpenAIConfig(
+      apiKey,
+      model,
+      organization,
+      baseUrl,
+      contextWindow,
+      reserveCompletion,
+      explicitProviderId,
+      workloadIdentity
+    )
+
+  /**
+   * The API key and model, every other field at its default: the entry point for Java and Kotlin,
+   * which do not see Scala default arguments. The base URL is [[DEFAULT_BASE_URL]], there is no
+   * organisation, and `contextWindow` and `reserveCompletion` come from the model name alone
+   * (`gpt-4o` is 128k, an unknown model 8192); set them, and the rest, with the `with*` setters,
+   * or use [[fromValues]] to consult the bundled model catalogue.
+   */
+  def apply(apiKey: String, model: String): OpenAIConfig = {
+    val (cw, rc) = openAIFallback(model)
+    apply(apiKey, model, None, DEFAULT_BASE_URL, cw, rc)
+  }
 
   /**
    * The provider-specific key naming the OpenAI organisation ID, `organization`.
@@ -107,7 +167,7 @@ object OpenAIConfig {
 
   /**
    * The rules every [[OpenAIConfig]] must meet, whichever way it was built: [[fromValues]] applies
-   * them, and `OpenAIClient` applies them again to a config built with the constructor or `copy`.
+   * them, and `OpenAIClient` applies them again to a config built with `apply` or changed with a `with*` setter.
    * Without `workloadIdentity`, `apiKey` must not be blank: it is the only credential, and a blank one
    * would be sent as an empty bearer. With `workloadIdentity` set, it must meet its own rules (no blank
    * identity token, `identityProviderId`, `serviceAccountId` or `clientId`), `apiKey` must be empty (a config authenticates one way), the

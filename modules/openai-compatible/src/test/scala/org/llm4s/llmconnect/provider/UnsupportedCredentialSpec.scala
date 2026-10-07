@@ -85,7 +85,7 @@ class UnsupportedCredentialSpec extends AnyWordSpec with Matchers with EitherVal
     }
 
     "refuse workloadIdentity even with an OpenRouter base URL and a key" in {
-      val both = openRouterConfig("sk-or").copy(workloadIdentity = Some(identity))
+      val both = openRouterConfig("sk-or").withWorkloadIdentity(Some(identity))
       configurationError(OpenRouterClient(both)).message should include("workloadIdentity")
       intercept[IllegalArgumentException](new OpenRouterClient(both))
     }

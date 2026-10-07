@@ -120,13 +120,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OpenAIWorkloadIdentity` and `AnthropicWorkloadIdentity`, are built with `apply` and `with*`
   setters, with no public `copy`); `ProviderConfigSpec.authExtras` declares a provider's auth keys;
   `NamedProviderConfig.auth`, `OpenAIConfig.workloadIdentity` and `AnthropicConfig.workloadIdentity`
-  are new defaulted fields; `ApiKeySource` gained `WorkloadIdentity`, reported only for a provider
+  are new fields, `None` by default in the companion `apply` (`OpenAIConfig` and `AnthropicConfig`
+  follow the growth-prone pattern, #1388) and set with `withWorkloadIdentity`, which takes the value or
+  an `Option`; `ApiKeySource` gained `WorkloadIdentity`, reported only for a provider
   that accepts `auth`. A section with `auth` may not also set `apiKey` or an `Authorization`
   header. Model listing is not supported for `openai` and `anthropic` sections that use `auth`, and
   says so. `llm4s-provider-testkit` gains `FakeTokenExchangeServer` and `TestJwt`. (#1354)
   **The rules hold on every construction path:** `AnthropicConfig.fromValues`, `OpenAIConfig.fromValues`
   and `OpenAICompatibleConfig.fromValues` apply them, and the named-section path goes through those
-  factories rather than its own copy; a config built with the constructor, `copy` or (for `OpenAICompatibleConfig`) `apply` and the `with*` setters is refused by its client
+  factories rather than its own copy; a config built with `apply` (including the short `apply(apiKey, model)` Java and Kotlin use) and the `with*` setters that breaks them is refused by its client
   (`AnthropicClient`, `OpenAIClient`, `OpenRouterClient`, `OpenAICompatibleClient`: `apply` returns a
   `ConfigurationError`, the constructor throws `IllegalArgumentException`). With workload identity a config
   may not also set `apiKey`; an `OpenAICompatibleConfig.tokenExchange` refuses an `Authorization` header in
@@ -623,6 +625,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **`OpenAIConfig`, `AnthropicConfig` and `OllamaConfig` use the growth-prone data type pattern**
+  ([#1388](https://github.com/llm4s/llm4s/issues/1388), `llm4s-openai-compatible`, `llm4s-anthropic`,
+  `llm4s-ollama`): Scala default arguments are invisible to Java and Kotlin, so a field added to one of these
+  plain case classes broke every Java or Kotlin caller that built it, as `tokenExchange` did to
+  `OpenAICompatibleConfig` in #1357. Each is now `final case class X private (...)` with a private `copy`, a
+  companion `apply` with the full field list (unchanged, so Scala calls - positional or named - still compile), a
+  short `apply` for Java and Kotlin (`OpenAIConfig.apply(apiKey, model)`, `AnthropicConfig.apply(apiKey, model)`,
+  `OllamaConfig.apply(model, baseUrl)`) that takes the base URL default (`OpenAIConfig.DEFAULT_BASE_URL` is new)
+  and a context window and completion reserve from the model name, and a `with*` setter per field;
+  `OpenAIConfig.withOrganization` and `withExplicitProviderId` take the value or an `Option`. `fromValues` is
+  unchanged and still the way to get the bundled model catalogue's context window. **Migration:** replace
+  `config.copy(baseUrl = url)` with `config.withBaseUrl(url)` (likewise `withApiKey`, `withModel`,
+  `withOrganization`, `withContextWindow`, `withReserveCompletion`, `withExplicitProviderId`); `new OpenAIConfig(...)`
+  becomes `OpenAIConfig(...)`; Java and Kotlin call the companion's `apply` - `OpenAIConfig.apply(key, "gpt-4o")
+  .withOrganization("org-1")` - instead of the constructor. Pattern matching (`case OpenAIConfig(...)`) is unchanged.
 - **`LLMError.isRecoverable` is total** ([#1380](https://github.com/llm4s/llm4s/issues/1380), `llm4s-core`,
   `llm4s-agent`, `llm4s-speech`): it matched only `RecoverableError` and `NonRecoverableError` and threw a
   `MatchError` on any other `LLMError` (`EmbeddingError`, `RerankError`, `EvaluationError`, the orchestration and

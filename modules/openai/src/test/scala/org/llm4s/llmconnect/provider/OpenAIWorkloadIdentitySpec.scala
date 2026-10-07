@@ -305,14 +305,14 @@ class OpenAIWorkloadIdentitySpec
       OpenAIConfig.fromValues("gpt-4o-mini", "sk-x", None, "http://proxy.example/v1").isRight shouldBe true
     }
 
-    "be refused by OpenAIClient and OpenRouterClient when built with the constructor or copy" in {
+    "be refused by OpenAIClient and OpenRouterClient when built with apply or changed with a with* setter" in {
       val valid = fromValues().value
       val bad = Seq(
-        valid.copy(apiKey = "sk-x"),
-        valid.copy(explicitProviderId = Some(org.llm4s.types.ProviderModelTypes.ProviderId("requesty"))),
-        valid.copy(baseUrl = "https://openrouter.ai/api/v1"),
-        valid.copy(baseUrl = "https://attacker.example/v1"),
-        valid.copy(baseUrl = "http://api.openai.com/v1")
+        valid.withApiKey("sk-x"),
+        valid.withExplicitProviderId(Some(org.llm4s.types.ProviderModelTypes.ProviderId("requesty"))),
+        valid.withBaseUrl("https://openrouter.ai/api/v1"),
+        valid.withBaseUrl("https://attacker.example/v1"),
+        valid.withBaseUrl("http://api.openai.com/v1")
       )
       for config <- bad do
         OpenAIClient(config).left.value shouldBe a[ConfigurationError]
@@ -320,7 +320,7 @@ class OpenAIWorkloadIdentitySpec
           config,
           org.llm4s.metrics.MetricsCollector.noop
         )
-      OpenRouterClient(valid.copy(baseUrl = "https://openrouter.ai/api/v1")).left.value shouldBe a[ConfigurationError]
+      OpenRouterClient(valid.withBaseUrl("https://openrouter.ai/api/v1")).left.value shouldBe a[ConfigurationError]
       OpenAIClient(valid).value.close()
     }
 
@@ -347,20 +347,20 @@ class OpenAIWorkloadIdentitySpec
           error shouldBe a[ConfigurationError]
           error.asInstanceOf[ConfigurationError].missingKeys shouldBe List(field)
           error.message should include(field)
-          OpenAIClient(fromValues().value.copy(workloadIdentity = Some(blank))).left.value shouldBe a[
+          OpenAIClient(fromValues().value.withWorkloadIdentity(Some(blank))).left.value shouldBe a[
             ConfigurationError
           ]
         }
     }
 
     "leave OpenAIClient refusing a blank apiKey once the identity is removed, rather than send an empty bearer" in {
-      val keyless = fromValues().value.copy(workloadIdentity = None)
+      val keyless = fromValues().value.withWorkloadIdentity(None)
       Seq("", "   ").foreach { key =>
-        val error = OpenAIClient(keyless.copy(apiKey = key)).left.value
+        val error = OpenAIClient(keyless.withApiKey(key)).left.value
         error shouldBe a[ConfigurationError]
         error.message should include("apiKey")
         an[IllegalArgumentException] should be thrownBy new OpenAIClient(
-          keyless.copy(apiKey = key),
+          keyless.withApiKey(key),
           org.llm4s.metrics.MetricsCollector.noop
         )
       }

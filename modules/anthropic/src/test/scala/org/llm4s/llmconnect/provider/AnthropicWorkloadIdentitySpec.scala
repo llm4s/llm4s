@@ -203,12 +203,12 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       AnthropicConfig.fromValues("claude-test", "sk-ant", "http://api.example").isRight shouldBe true
     }
 
-    "be refused by AnthropicClient when built with the constructor or copy" in {
+    "be refused by AnthropicClient when built with apply or changed with a with* setter" in {
       val valid = fromValues("https://api.anthropic.com").value
       val bad = Seq(
-        valid.copy(baseUrl = "http://api.example"),
-        valid.copy(baseUrl = "https://gateway.example"),
-        valid.copy(apiKey = "sk-ant"),
+        valid.withBaseUrl("http://api.example"),
+        valid.withBaseUrl("https://gateway.example"),
+        valid.withApiKey("sk-ant"),
         AnthropicConfig("", "claude-test", "http://localhost@api.example", 200000, 4096, Some(identity))
       )
       for config <- bad do
@@ -231,19 +231,19 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
           error shouldBe a[ConfigurationError]
           error.asInstanceOf[ConfigurationError].missingKeys shouldBe List(field)
           error.message should include(field)
-          val built = fromValues("https://api.anthropic.com").value.copy(workloadIdentity = Some(blank))
+          val built = fromValues("https://api.anthropic.com").value.withWorkloadIdentity(Some(blank))
           AnthropicClient(built).left.value shouldBe a[ConfigurationError]
           an[IllegalArgumentException] should be thrownBy new AnthropicClient(built)
         }
     }
 
     "leave AnthropicClient refusing a blank apiKey once the identity is removed, rather than send no credential" in {
-      val keyless = fromValues("https://api.anthropic.com").value.copy(workloadIdentity = None)
+      val keyless = fromValues("https://api.anthropic.com").value.withWorkloadIdentity(None)
       for key <- Seq("", "  ") do
-        val error = AnthropicClient(keyless.copy(apiKey = key)).left.value
+        val error = AnthropicClient(keyless.withApiKey(key)).left.value
         error shouldBe a[ConfigurationError]
         error.message should include("apiKey")
-        an[IllegalArgumentException] should be thrownBy new AnthropicClient(keyless.copy(apiKey = key))
+        an[IllegalArgumentException] should be thrownBy new AnthropicClient(keyless.withApiKey(key))
     }
   }
 
@@ -282,7 +282,7 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     }
 
     "redact an API key echoed by a failure when no workload identity is configured" in {
-      val keyed = config.copy(apiKey = "opaque-anthropic-key-1", workloadIdentity = None)
+      val keyed = config.withApiKey("opaque-anthropic-key-1").withWorkloadIdentity(None)
       val error = AnthropicClient.mapError(
         new IllegalStateException("rejected key opaque-anthropic-key-1"),
         AnthropicClient.credentialSecrets(keyed)

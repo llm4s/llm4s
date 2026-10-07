@@ -861,7 +861,7 @@ private[provider] object OpenAIClientTransport {
     config: OpenAIConfig,
     customize: OpenAIOkHttpClient.Builder => OpenAIOkHttpClient.Builder = identity
   ): OpenAIClientTransport = {
-    // A config built with the constructor or `copy` skipped `fromValues`: `OpenAIClient.apply` refuses it as a
+    // A config built with `apply` or a `with*` setter skipped `fromValues`: `OpenAIClient.apply` refuses it as a
     // ConfigurationError, and every constructor here, so an exchanged OpenAI token never goes to another provider.
     OpenAIConfig.validate(config).left.foreach(error => throw new IllegalArgumentException(error.message))
     val builder = OpenAIOkHttpClient

@@ -26,7 +26,7 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
   "ProviderConfig.providerId" should {
     "name each provider in its canonical spelling" in {
       openai.providerId shouldBe ProviderId("openai")
-      openai.copy(baseUrl = "https://openrouter.ai/api/v1").providerId shouldBe ProviderId("openrouter")
+      openai.withBaseUrl("https://openrouter.ai/api/v1").providerId shouldBe ProviderId("openrouter")
       zai.providerId shouldBe ProviderId("zai")
       deepseek.providerId shouldBe ProviderId("deepseek")
       mistral.providerId shouldBe ProviderId("mistral")

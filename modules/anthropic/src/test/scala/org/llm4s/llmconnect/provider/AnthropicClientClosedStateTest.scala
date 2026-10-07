@@ -81,7 +81,7 @@ class AnthropicClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.copy(model = "claude-opus-4-5")
+    val config = createTestConfig.withModel("claude-opus-4-5")
     val client = new AnthropicClient(config)
 
     client.close()

@@ -95,7 +95,7 @@ class AnthropicClient(
   /** The configured credentials, which an error built from a remote reply must not repeat. */
   private val credentialSecrets: Seq[String] = AnthropicClient.credentialSecrets(config)
 
-  // A config built with the constructor or `copy` skipped `fromValues`: `apply` refuses it as a
+  // A config built with `apply` or a `with*` setter skipped `fromValues`: `apply` refuses it as a
   // ConfigurationError, and the constructor here, so a plain-http baseUrl never receives the identity token.
   AnthropicConfig.validate(config).left.foreach(error => throw new IllegalArgumentException(error.message))
 

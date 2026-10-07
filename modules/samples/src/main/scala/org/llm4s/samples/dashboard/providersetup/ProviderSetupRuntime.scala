@@ -373,12 +373,11 @@ private[providersetup] object ProviderSetupRuntime:
   ): ProviderConfig =
     (provider: @unchecked) match
       case cfg: OpenAIConfig =>
-        cfg.copy(
-          model = input.flatMap(_.model).getOrElse(cfg.model),
-          apiKey = input.flatMap(_.apiKey).getOrElse(cfg.apiKey),
-          organization = input.flatMap(_.organization).orElse(cfg.organization),
-          baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
-        )
+        cfg
+          .withModel(input.flatMap(_.model).getOrElse(cfg.model))
+          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withOrganization(input.flatMap(_.organization).orElse(cfg.organization))
+          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: AzureConfig =>
         cfg.copy(
           model = input.flatMap(_.model).getOrElse(cfg.model),
@@ -387,16 +386,14 @@ private[providersetup] object ProviderSetupRuntime:
           apiVersion = input.flatMap(_.apiVersion).getOrElse(cfg.apiVersion)
         )
       case cfg: AnthropicConfig =>
-        cfg.copy(
-          model = input.flatMap(_.model).getOrElse(cfg.model),
-          apiKey = input.flatMap(_.apiKey).getOrElse(cfg.apiKey),
-          baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
-        )
+        cfg
+          .withModel(input.flatMap(_.model).getOrElse(cfg.model))
+          .withApiKey(input.flatMap(_.apiKey).getOrElse(cfg.apiKey))
+          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: OllamaConfig =>
-        cfg.copy(
-          model = input.flatMap(_.model).getOrElse(cfg.model),
-          baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
-        )
+        cfg
+          .withModel(input.flatMap(_.model).getOrElse(cfg.model))
+          .withBaseUrl(input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl))
       case cfg: GeminiConfig =>
         cfg.copy(
           model = input.flatMap(_.model).getOrElse(cfg.model),
