@@ -1711,6 +1711,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#1296](https://github.com/llm4s/llm4s/issues/1296)): it checked the requested path with a link-following
   `Files.isDirectory`, so a directory symbolic link inside an allowed path listed the directory it pointed to.
   Without `followSymlinks` it now refuses the link with `Not a directory`, as `read_file` refuses a linked file.
+- **`llm4s-agent-tools`: `http_request` reads at most `maxResponseSize` bytes**
+  ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `HTTPTool` read the whole body into a string and only then
+  cut it to `maxResponseSize` characters, so a large or endless response could exhaust memory before `truncated`
+  was set. It now reads at most `maxResponseSize` bytes from the stream and stops; the limit counts bytes, as
+  documented, not decoded characters.
 - **`llm4s-agent`: a burst of live events no longer disconnects a subscriber as `Lagging`**
   ([#1387](https://github.com/llm4s/llm4s/issues/1387)): a subscription's queue held durable and live
   events against one `capacity`, so a model streaming faster than the dispatcher thread was scheduled filled

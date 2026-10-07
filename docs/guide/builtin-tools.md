@@ -229,7 +229,7 @@ The default blocklist includes `/var`, which on macOS is where the system tempor
 | `blockInternalIPs` | `true` |
 | `followRedirects` | `false` |
 | `timeout` | 30 seconds |
-| `maxResponseSize` | 10 MB: a longer body is cut and `truncated` is `true` |
+| `maxResponseSize` | 10 MB: at most this many bytes of the body are read; the rest is never read, and `truncated` is `true` |
 
 `HttpConfig.restricted(Seq("api.example.com"))` allows only those domains. `HttpConfig.withWriteMethods()` adds
 `POST`, `PUT`, `DELETE` and the rest, and `HttpConfig.unsafe` also turns the address checks off: use that only in a
@@ -265,9 +265,12 @@ What the controls do, and where they stop:
 
 - **HTTP** refuses methods outside `allowedMethods`, a scheme other than `http` and `https`, any domain outside
   `allowedDomains`, `localhost`, loopback, the cloud metadata addresses, and private ranges such as `10.x`, `172.16.x`
-  and `192.168.x`, all before sending a request. Redirects are not followed unless you turn that on. The request still
-  goes out from your network, so do not give it to a model that handles untrusted text next to credentials the
-  server can reach.
+  and `192.168.x`, all before sending a request. Redirects are not followed unless you turn that on. The address
+  check resolves the host name, and the connection then resolves it again, so a domain whose DNS answer changes in
+  between (DNS rebinding) can pass the check with a public address and connect to a private one. The request still
+  goes out from your network, so do not give it to a model that handles untrusted text next to credentials or
+  internal services the server can reach; where that matters, also block private ranges at the network level, for
+  example with an egress proxy or firewall.
 - **Files**: `allowedPaths` and `blockedPaths` are checks on the normalised path text, and `followSymlinks = false`
   does not make a symbolic link harmless: a link inside an allowed directory is not a security boundary. Treat the
   settings as a filter, not a sandbox. Allow one directory made for the agent, keep links out of it, and when the

@@ -17,7 +17,8 @@ import scala.concurrent.duration.*
  * @param allowedDomains Optional list of allowed domains. If None, all domains are allowed.
  * @param blockedDomains List of domains that are always blocked.
  * @param blockInternalIPs Whether to block requests to internal/private IP ranges (default: true).
- * @param maxResponseSize Maximum response size in bytes.
+ * @param maxResponseSize Maximum number of response body bytes read; the rest is never read, and the
+ *                        result's `truncated` is `true`.
  * @param timeout Request timeout, applied to both connect and read.
  * @param followRedirects Whether to follow HTTP redirects.  Defaults to `false`; when
  *                        `true` each redirect hop is re-validated against the SSRF filter
