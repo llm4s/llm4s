@@ -159,13 +159,12 @@ import org.llm4s.llmconnect.model._
 class ConversationExample(client: LLMClient) {
   def run(): Unit = {
     val result = client.complete(
-      messages = List(
+      Conversation(Seq(
         SystemMessage("You are a helpful programming tutor."),
         UserMessage("What is Scala?"),
         AssistantMessage("Scala is a high-level programming language..."),
         UserMessage("How does it compare to Java?")
-      ),
-      model = None
+      ))
     )
 
     result.fold(
@@ -194,7 +193,7 @@ Now let's give the LLM access to a tool:
 
 ```scala
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
+import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.agent.Agent
 
 class ToolExample(client: LLMClient) {
@@ -203,14 +202,17 @@ class ToolExample(client: LLMClient) {
     s"The weather in $location is sunny and 72°F"
   }
 
-  def run(): Unit = {
-    val weatherTool = ToolFunction(
-      name = "get_weather",
-      description = "Get current weather for a location",
-      function = getWeather _
-    )
+  private val weatherSchema = Schema
+    .`object`[Map[String, Any]]("Weather query parameters")
+    .withProperty(Schema.property("location", Schema.string("The city to look up")))
 
+  def run(): Unit = {
     val result = for {
+      weatherTool <- ToolBuilder[Map[String, Any], String](
+                       "get_weather",
+                       "Get current weather for a location",
+                       weatherSchema
+                     ).withHandler(extractor => extractor.getString("location").map(getWeather)).buildSafe()
       agent <- Agent.builder("weather-agent", client)
         .withTools(new ToolRegistry(Seq(weatherTool)))
         .build()
@@ -243,10 +245,9 @@ import org.llm4s.llmconnect.model._
 class StreamingExample(client: LLMClient) {
   def run(): Unit = {
     val result = client.streamComplete(
-      conversation = Conversation(Seq(UserMessage("Write a short poem about Scala")))
-    ) { chunk =>
-      chunk.content.foreach(print)  // Print each token as it arrives
-    }
+      Conversation(Seq(UserMessage("Write a short poem about Scala"))),
+      onChunk = chunk => chunk.content.foreach(print)  // Print each token as it arrives
+    )
 
     result.fold(
       error => println(s"Error: $error"),
@@ -265,18 +266,22 @@ Output appears token-by-token in real-time, like ChatGPT!
 ### Basic Error Handling
 
 ```scala
+import org.llm4s.error.{ AuthenticationError, NetworkError, ValidationError }
+import org.llm4s.llmconnect.model._
+
 // Assuming client is injected
-val result = client.complete(messages, None)
+val result = client.complete(Conversation(Seq(UserMessage("Hello"))))
 result match {
   case Right(completion) =>
     // Success
+    println(completion.content)
   case Left(error) =>
     // Handle different error types
     error match {
-      case NetworkError(msg) => println(s"Network issue: $msg")
-      case AuthenticationError(msg) => println(s"Auth failed: $msg")
-      case ValidationError(msg) => println(s"Invalid input: $msg")
-      case _ => println(s"Error: $error")
+      case e: NetworkError        => println(s"Network issue: ${e.message}")
+      case e: AuthenticationError => println(s"Auth failed: ${e.message}")
+      case e: ValidationError     => println(s"Invalid input: ${e.message}")
+      case _                      => println(s"Error: $error")
     }
 }
 ```
@@ -304,12 +309,11 @@ val uppercased: Result[String] = content.map(_.toUpperCase)
 ### Using Different Models
 
 ```scala
-import org.llm4s.types.ModelName
+import org.llm4s.config.Llm4sConfig
 
-val response = client.complete(
-  messages = List(UserMessage("Hello")),
-  model = Some(ModelName("gpt-4-turbo"))  // Override configured model
-)
+// The model belongs to the provider section, so to use another model load the section that names it,
+// for example one with provider = "openai" and model = "gpt-4-turbo"
+val gpt4Turbo = Llm4sConfig.provider("openai-gpt4-turbo")
 ```
 
 ### Provider-Specific Settings
@@ -338,7 +342,7 @@ Here's a complete example combining everything we've learned:
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{LLMClient, LLMConnect}
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
+import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.llm4s.agent.Agent
 
 class ComprehensiveAgent(client: LLMClient) {
@@ -347,17 +351,20 @@ class ComprehensiveAgent(client: LLMClient) {
     s"Result: ${expression} = 42"
   }
 
+  private val calcSchema = Schema
+    .`object`[Map[String, Any]]("Calculator parameters")
+    .withProperty(Schema.property("expression", Schema.string("The expression to evaluate")))
+
   def run(): Unit = {
     println("🚀 Starting LLM4S Example...")
 
-    val calcTool = ToolFunction(
-      name = "calculate",
-      description = "Evaluate a mathematical expression",
-      function = calculate _
-    )
-
     // Tools belong to the agent, so give them to the builder
     val result = for {
+      calcTool <- ToolBuilder[Map[String, Any], String](
+                    "calculate",
+                    "Evaluate a mathematical expression",
+                    calcSchema
+                  ).withHandler(extractor => extractor.getString("expression").map(calculate)).buildSafe()
       agent <- Agent.builder("calc-agent", client)
         .withTools(new ToolRegistry(Seq(calcTool)))
         .build()
@@ -430,10 +437,9 @@ val result = for {
 ```scala
 // Assuming client is injected
 val completion = client.streamComplete(
-  Conversation(Seq(UserMessage("Your question here")))
-) { chunk =>
-  chunk.content.foreach(print)
-}
+  Conversation(Seq(UserMessage("Your question here"))),
+  onChunk = chunk => chunk.content.foreach(print)
+)
 ```
 
 ---
@@ -456,6 +462,8 @@ Don't create a new client for every request:
 (1 to 10).foreach { i =>
   for {
     providerConfig <- Llm4sConfig.defaultProvider()
+    registry       <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
     badClient <- LLMConnect.getClient(providerConfig)  // Don't do this!
     response <- badClient.complete(
       Conversation(Seq(UserMessage(s"Q$i")))
@@ -473,10 +481,9 @@ import org.llm4s.llmconnect.model._
 
 // Assuming client is injected
 val streamResult = client.streamComplete(
-  Conversation(Seq(UserMessage("Write a long essay about Scala")))
-) { chunk =>
-  chunk.content.foreach(print)  // Prints as tokens arrive
-}
+  Conversation(Seq(UserMessage("Write a long essay about Scala"))),
+  onChunk = chunk => chunk.content.foreach(print)  // Prints as tokens arrive
+)
 
 streamResult match {
   case Right(completion) => println(s"\nCompleted with ${completion.usage.map(_.totalTokens).getOrElse(0)} tokens")
@@ -561,13 +568,15 @@ Only the section being loaded is validated, so `OPENAI_API_KEY` need not be set 
 When generating embeddings for RAG:
 
 ```scala
+import org.llm4s.llmconnect.model.EmbeddingRequest
+
 // ✅ Good: Batch processing
-val documents = List("doc1", "doc2", ... "doc1000")
+val documents: List[String] = loadDocuments()  // say, a thousand documents
 val batchSize = 100
 
 val allEmbeddings = documents.grouped(batchSize).flatMap { batch =>
-  embedder.embed(batch) match {
-    case Right(embeddings) => embeddings
+  embedder.embed(EmbeddingRequest(batch, embeddingModel)) match {
+    case Right(response) => response.embeddings
     case Left(error) =>
       println(s"Batch failed: $error")
       List.empty
@@ -576,7 +585,7 @@ val allEmbeddings = documents.grouped(batchSize).flatMap { batch =>
 
 // ❌ Bad: One at a time (slow, expensive)
 val embeddings = documents.map { doc =>
-  embedder.embed(List(doc))
+  embedder.embed(EmbeddingRequest(List(doc), embeddingModel))
 }
 ```
 
@@ -585,7 +594,7 @@ val embeddings = documents.map { doc =>
 Track costs in production:
 
 ```scala
-val response = client.complete(Conversation(messages))
+val response = client.complete(Conversation(Seq(UserMessage("Hello"))))
 
 response match {
   case Right(completion) =>

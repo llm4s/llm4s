@@ -1121,6 +1121,10 @@ lazy val deployService = (project in file("modules/deploy-service"))
   )
   .settings(DeployServiceDocker.settings)
 
+lazy val docSnippetsReport = taskKey[Unit](
+  "List every Scala block of the documentation pages that are compile-checked, with its hash and whether it is skipped"
+)
+
 lazy val samples = (project in file("modules//samples"))
   .dependsOn(
     core,
@@ -1165,7 +1169,26 @@ lazy val samples = (project in file("modules//samples"))
       Deps.playJson   % Test,
       Deps.zioJson    % Test
     ),
-    appLogging
+    appLogging,
+    // The Scala blocks of the getting-started pages are compiled as test sources, so a snippet that no longer
+    // compiles fails `sbt test` (#1477). The generator and its rules are in project/DocSnippets.scala; the blocks
+    // that are deliberately not compiled are listed in src/test/docs-snippets/skip.txt.
+    Test / sourceGenerators += Def.task {
+      DocSnippets.generate(
+        (ThisBuild / baseDirectory).value / "docs",
+        baseDirectory.value / "src" / "test" / "docs-snippets" / "skip.txt",
+        (Test / sourceManaged).value / "docsnippets",
+        streams.value.log
+      )
+    }.taskValue,
+    // Warnings (unused imports and values, in a snippet written to be read) are not errors in generated sources.
+    Test / scalacOptions += "-Wconf:src=.*docsnippets.*:s",
+    docSnippetsReport := println(
+      DocSnippets.report(
+        (ThisBuild / baseDirectory).value / "docs",
+        baseDirectory.value / "src" / "test" / "docs-snippets" / "skip.txt"
+      )
+    )
   )
 
 lazy val configPolicy = (project in file("modules/config-policy"))
