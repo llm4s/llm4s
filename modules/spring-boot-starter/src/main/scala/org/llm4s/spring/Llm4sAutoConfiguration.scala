@@ -22,7 +22,7 @@ object Llm4sExecutors {
    * A bounded pool of daemon threads named `llm4s-async-N`: at most `maxThreads` workers (idle
    * ones time out, so an idle application holds none) and `queueCapacity` queued calls; beyond that
    * `submit` is rejected and `completeAsync` fails its future instead of growing without bound.
-   * Bounded rather than virtual threads so the module keeps working on JDK 17.
+   * Bounded rather than virtual threads.
    */
   def create(p: AsyncProperties): ExecutorService = {
     require(p.maxThreads >= 1, s"llm4s.async.max-threads must be >= 1, got ${p.maxThreads}")

@@ -21,7 +21,7 @@ LLM4S has broad, working framework functionality today: multi-provider clients (
 | **Artifacts** | `org.llm4s:llm4s-*`. The pre-0.4.0 coordinates (`org.llm4s:core`, …) stop at 0.3.4; see the [migration guide](migration#artifact-coordinate-rename-v040) |
 | **Stability** | Pre-1.0, API stabilizing; each package's tier is on [1.0 Scope](v1-scope) |
 | **Scala support** | Scala 3.7.1 only. Scala 2.13 is deferred to after 1.0 ([#874](https://github.com/llm4s/llm4s/issues/874)) |
-| **Java support** | JDK 21 recommended and used in CI |
+| **Java support** | JDK 21 is required (and the only JDK CI runs); see [1.0 Scope](v1-scope#scala-and-jdk-support) |
 | **Target** | v1.0 production-ready stable modules |
 | **Timeline** | 2026 H2 stabilization phases; the v1.0 date is intentionally not fixed |
 | **Mentorship** | LFX Mentorship 2026 · European Summer of Code 2026 · GSoC 2026 |

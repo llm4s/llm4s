@@ -123,7 +123,7 @@ The [migration guide](migration) records each such removal.
 ## Supported platforms
 
 1.0 targets **Scala 3 only (3.7.1)**; Scala 2.13 support is deferred to after 1.0 and, if it happens,
-will target the frozen spine rather than the full tree. CI runs JDK 21.
+will target the frozen spine rather than the full tree. The minimum JDK is 21 and CI runs only JDK 21; see [Scala and JDK support](v1-scope#scala-and-jdk-support).
 
 Both are part of what you build against: an older Scala 3 compiler cannot read the TASTy of a library
 built with a newer one, and a newer JDK's class files do not load on an older JVM. So the Scala 3 minor

@@ -12,7 +12,8 @@ repositories {
 }
 
 // Pin JVM target to 17 so the build is compatible with JDK 17+ regardless of the
-// installed JDK version (Kotlin 2.x doesn't yet support JDK 25+ as a target).
+// installed JDK version (Kotlin 2.x doesn't yet support JDK 25+ as a target). This is only the bytecode
+// level of the Kotlin classes: running the module still needs JDK 21 through llm4s-java-api (#1493).
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile>().configureEach {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)

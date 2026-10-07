@@ -121,6 +121,16 @@ Notes:
 
 See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind the Scala-3-only decision.
 
+**JDK.** Every artifact built from `main` needs **JDK 21 or newer**, and CI runs only JDK 21. JDK 17 is not supported. Whether some artifacts will get a lower floor before 1.0 is an open decision ([#1493](https://github.com/llm4s/llm4s/issues/1493)); until it is made, this table is what the code needs today.
+
+| Artifacts | Minimum JDK | Tested on | Why |
+|---|---|---|---|
+| `llm4s-agent`, and the modules that depend on it: `llm4s-java-api`, `llm4s-kotlin-api`, `llm4s-spring-boot-starter`, `llm4s-effect`, `llm4s-zio` | 21 | 21 | `llm4s-agent` depends on Ox, whose jars are compiled for JDK 21 (class-file version 65), and it starts virtual threads (`Thread.ofVirtual`) |
+| `llm4s-core` and every module that depends on it | 21 | 21 | `ToolRegistry` starts a virtual thread (`Thread.ofVirtual`), a JDK 21 API, so `llm4s-core` does not compile against an older JDK |
+| `llm4s-provider-testkit` | 21 | 21 | its main sources use virtual threads |
+
+The class files llm4s itself emits have class-file version 52, which is far older than JDK 21, so the bytecode level alone does not tell you which JDK you need: the requirement comes from the APIs and the dependencies above.
+
 ## Programme status
 
 For current progress against this target structure, see the tracking issue [#1126](https://github.com/llm4s/llm4s/issues/1126) and its slice sub-issues.

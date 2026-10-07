@@ -11,7 +11,7 @@ sample shows both ways to read one.
 | [`application.conf`](src/main/resources/application.conf) | the provider, as a named section |
 | [`build.gradle.kts`](build.gradle.kts) | the one dependency: `org.llm4s:llm4s-java-api_3` |
 
-It needs a JDK (17 or newer) and [Gradle](https://gradle.org/install/) 8 or newer. No Gradle wrapper is
+It needs JDK 21 or newer and [Gradle](https://gradle.org/install/) 8 or newer. No Gradle wrapper is
 committed (a wrapper jar is a binary); run `gradle wrapper` once if you want one.
 
 ## Run it
