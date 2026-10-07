@@ -122,61 +122,66 @@ object ListDirectoryTool {
       Try(Paths.get(pathStr).toAbsolutePath.normalize()).toEither.left.map(e => s"Invalid path: ${e.getMessage}")
 
     pathResult.flatMap { path =>
-      // Security check
-      if (!config.isPathAllowed(path)) {
-        Left(s"Access denied: path '$pathStr' is not allowed")
-      } else if (!Files.exists(path)) {
-        Left(s"Directory not found: $pathStr")
-      } else if (!Files.isDirectory(path)) {
-        Left(s"Not a directory: $pathStr")
-      } else {
-        Try {
-          // List directory contents
-          val linkOptions = if (config.followSymlinks) Array.empty[LinkOption] else Array(LinkOption.NOFOLLOW_LINKS)
+      // Security check: the policy judges the real location, and the directory is listed from that resolved path
+      config.resolve(path) match {
+        case None =>
+          Left(s"Access denied: path '$pathStr' is not allowed")
+        case Some(real) =>
+          if (!Files.exists(real)) {
+            Left(s"Directory not found: $pathStr")
+          } else if (!Files.isDirectory(real)) {
+            Left(s"Not a directory: $pathStr")
+          } else {
+            Try {
+              // List directory contents
+              val allEntries = Files
+                .list(real)
+                .iterator()
+                .asScala
+                .toSeq
+                .filter(p => includeHidden || !p.getFileName.toString.startsWith("."))
+                .sortBy(_.getFileName.toString)
 
-          val allEntries = Files
-            .list(path)
-            .iterator()
-            .asScala
-            .toSeq
-            .filter(p => includeHidden || !p.getFileName.toString.startsWith("."))
-            .sortBy(_.getFileName.toString)
+              val truncated      = allEntries.size > maxEntries
+              val limitedEntries = allEntries.take(maxEntries)
 
-          val truncated      = allEntries.size > maxEntries
-          val limitedEntries = allEntries.take(maxEntries)
+              var fileCount = 0
+              var dirCount  = 0
 
-          var fileCount = 0
-          var dirCount  = 0
+              val entries = limitedEntries.map { entryPath =>
+                // An entry that is a link out of the allowed area is described as the link, never followed
+                val linkOptions =
+                  if (config.followSymlinks && config.resolve(entryPath).isDefined) Array.empty[LinkOption]
+                  else Array(LinkOption.NOFOLLOW_LINKS)
+                val attrs = Files.readAttributes(entryPath, classOf[BasicFileAttributes], linkOptions: _*)
 
-          val entries = limitedEntries.map { entryPath =>
-            val attrs = Files.readAttributes(entryPath, classOf[BasicFileAttributes], linkOptions: _*)
+                val isDir     = attrs.isDirectory
+                val isFile    = attrs.isRegularFile
+                val isSymlink = attrs.isSymbolicLink
 
-            val isDir     = attrs.isDirectory
-            val isFile    = attrs.isRegularFile
-            val isSymlink = attrs.isSymbolicLink
+                if (isDir) dirCount += 1
+                if (isFile) fileCount += 1
 
-            if (isDir) dirCount += 1
-            if (isFile) fileCount += 1
+                FileEntry(
+                  name = entryPath.getFileName.toString,
+                  path = path.resolve(entryPath.getFileName).toString,
+                  isDirectory = isDir,
+                  isFile = isFile,
+                  isSymlink = isSymlink,
+                  size = if (isFile) attrs.size() else 0L,
+                  lastModified = attrs.lastModifiedTime().toMillis
+                )
+              }
 
-            FileEntry(
-              name = entryPath.getFileName.toString,
-              path = entryPath.toString,
-              isDirectory = isDir,
-              isFile = isFile,
-              isSymlink = isSymlink,
-              size = if (isFile) attrs.size() else 0L,
-              lastModified = attrs.lastModifiedTime().toMillis
-            )
+              ListDirectoryResult(
+                path = path.toString,
+                entries = entries,
+                totalFiles = fileCount,
+                totalDirectories = dirCount,
+                truncated = truncated
+              )
+            }.toEither.left.map(e => s"Failed to list directory: ${e.getMessage}")
           }
-
-          ListDirectoryResult(
-            path = path.toString,
-            entries = entries,
-            totalFiles = fileCount,
-            totalDirectories = dirCount,
-            truncated = truncated
-          )
-        }.toEither.left.map(e => s"Failed to list directory: ${e.getMessage}")
       }
     }
   }

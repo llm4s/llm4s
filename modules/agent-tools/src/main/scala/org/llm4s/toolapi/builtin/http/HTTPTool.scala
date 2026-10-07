@@ -128,6 +128,19 @@ object HTTPTool {
    */
   val toolSafe: Result[ToolFunction[Map[String, Any], HTTPResult]] = createSafe()
 
+  /**
+   * Read a response body without ever holding more than `maxChars + 1` characters.
+   *
+   * A body that is longer than the cap is cut at the cap and reported as truncated, as before; what changed is that
+   * reading stops once the character after the cap has been seen, instead of reading the whole body first.
+   * The cap counts characters of the decoded text (as `maxResponseSize` always has), not bytes.
+   */
+  private[http] def readBounded(chars: Iterator[Char], maxChars: Long): (String, Boolean) = {
+    val limit = math.max(0L, math.min(maxChars, Int.MaxValue.toLong - 1L)).toInt
+    val head  = chars.take(limit + 1).mkString
+    if (head.length > limit) (head.take(limit), true) else (head, false)
+  }
+
   /** Headers that must be stripped when a redirect crosses to a different host. */
   private val SensitiveHeaders: Set[String] =
     Set("authorization", "cookie", "proxy-authorization")
@@ -304,14 +317,12 @@ object HTTPTool {
         connection.getInputStream
       }
 
+      // Read at most maxResponseSize + 1 characters: a body over the cap is cut off, never read in full
       val (responseBody, truncated) = using(inputStream) { is =>
         using(Source.fromInputStream(is, "UTF-8")) { source =>
-          val fullBody = source.mkString
-          if (fullBody.length > config.maxResponseSize) {
-            (fullBody.take(config.maxResponseSize.toInt), true)
-          } else {
-            (fullBody, false)
-          }
+          val bounded = readBounded(source, config.maxResponseSize)
+          if (bounded._2) connection.disconnect()
+          bounded
         }
       }
 

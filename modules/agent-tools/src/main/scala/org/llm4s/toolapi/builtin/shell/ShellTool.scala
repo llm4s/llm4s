@@ -1,12 +1,15 @@
 package org.llm4s.toolapi.builtin.shell
 
 import org.llm4s.toolapi._
+import org.llm4s.toolapi.builtin.filesystem.FileConfig
 import org.llm4s.types.Result
 import org.llm4s.util.DurationRounding
 import upickle.default._
 
 import java.io.File
+import java.nio.file.{ Path, Paths }
 import java.util.concurrent.TimeUnit
+import scala.annotation.tailrec
 import scala.concurrent.duration.{ DurationLong, FiniteDuration }
 import scala.util.Try
 
@@ -51,10 +54,20 @@ object ShellResult {
  * survive tokenization as literal argument bytes and are handed to the
  * allowlisted program, which generally treats them as harmless input.
  *
+ * == Environment and files ==
+ *
+ * A command receives a scrubbed environment (see [[ShellConfig]]): only the variables named in
+ * `inheritedEnvironment`, plus `environment`. The files a command names are not checked unless
+ * [[ShellConfig.pathPolicy]] is set; then every file-like argument must pass the same containment rule as the
+ * file tools. `file -C`, `-m` and `-f` (which write a file or read a list of files) and `wc --files0-from` are
+ * refused whatever the policy.
+ *
  * == Features ==
  *
  *   - Command allowlist for security
  *   - Configurable working directory
+ *   - Optional path policy for file arguments
+ *   - Scrubbed environment
  *   - Timeout support
  *   - Output size limits
  *
@@ -115,9 +128,96 @@ object ShellTool {
           Left("Command cannot be empty")
         case Some(baseCommand) if !config.isCommandAllowed(baseCommand) =>
           Left(s"Command '$baseCommand' is not allowed. Allowed: ${config.allowedCommands.mkString(", ")}")
-        case Some(_) =>
-          runProcess(tokens, command, config)
+        case Some(baseCommand) =>
+          refusal(baseCommand.trim, tokens.drop(1), config) match {
+            case Some(reason) => Left(reason)
+            case None         => runProcess(tokens, command, config)
+          }
       }
+    }
+
+  /** Commands whose arguments are not file names, so the path policy does not look at them. */
+  private val NoFileArguments = Set("echo", "pwd", "date", "whoami", "which")
+
+  /** Flags that make an otherwise read-only command write a file or read a list of files, by command. */
+  private val DeniedShortFlags = Map("file" -> Set('C', 'm', 'f'))
+  private val DeniedLongFlags = Map(
+    "file" -> Set("--compile", "--magic-file", "--files-from"),
+    "wc"   -> Set("--files0-from")
+  )
+
+  /** Why the command may not run, or `None`. */
+  private def refusal(command: String, args: Seq[String], config: ShellConfig): Option[String] =
+    deniedFlag(command, args)
+      .map(flag => s"Flag '$flag' is not allowed for '$command'")
+      .orElse(config.pathPolicy.flatMap(policy => pathRefusal(command, args, config, policy)))
+
+  private def flagsOf(args: Seq[String]): Seq[String] =
+    args.takeWhile(_ != "--").filter(arg => arg.startsWith("-") && arg.length > 1)
+
+  private def deniedFlag(command: String, args: Seq[String]): Option[String] = {
+    val shortDenied = DeniedShortFlags.getOrElse(command, Set.empty[Char])
+    val longDenied  = DeniedLongFlags.getOrElse(command, Set.empty[String])
+    flagsOf(args).find { flag =>
+      if (flag.startsWith("--")) longDenied.exists(denied => flag == denied || flag.startsWith(denied + "="))
+      else flag.drop(1).exists(shortDenied.contains)
+    }
+  }
+
+  /**
+   * Hold the file-like arguments of a command to the path policy: the working directory and every argument that is
+   * not a flag must be allowed, and a flag that carries a path, or makes `ls` follow links, is refused.
+   */
+  private def pathRefusal(
+    command: String,
+    args: Seq[String],
+    config: ShellConfig,
+    policy: FileConfig
+  ): Option[String] =
+    if (NoFileArguments.contains(command)) None
+    else {
+      val base = Try(config.workingDirectory.fold(Paths.get(""))(Paths.get(_)).toAbsolutePath.normalize()).toOption
+      base match {
+        case None =>
+          Some("Invalid working directory")
+        case Some(dir) if !policy.isPathAllowed(dir) =>
+          Some("The working directory is outside the allowed paths")
+        case Some(dir) =>
+          argumentRefusal(command, args.toList, flagsEnded = false, dir, policy)
+      }
+    }
+
+  @tailrec
+  private def argumentRefusal(
+    command: String,
+    args: List[String],
+    flagsEnded: Boolean,
+    base: Path,
+    policy: FileConfig
+  ): Option[String] =
+    args match {
+      case Nil                         => None
+      case "--" :: rest if !flagsEnded => argumentRefusal(command, rest, flagsEnded = true, base, policy)
+      case arg :: rest =>
+        val isFlag  = !flagsEnded && arg.startsWith("-") && arg.length > 1
+        val refused = if (isFlag) flagRefusal(command, arg) else pathArgumentRefusal(arg, base, policy)
+        if (refused.isDefined) refused else argumentRefusal(command, rest, flagsEnded, base, policy)
+    }
+
+  private def flagRefusal(command: String, flag: String): Option[String] =
+    if (flag.contains("/") || flag.contains("\\"))
+      Some(s"Flag '$flag' carries a path, which the path policy cannot check")
+    else if (command == "ls" && flag.startsWith("--dereference"))
+      Some(s"Flag '$flag' follows links, which the path policy does not allow")
+    else if (command == "ls" && !flag.startsWith("--") && flag.drop(1).exists(c => c == 'L' || c == 'H'))
+      Some(s"Flag '$flag' follows links, which the path policy does not allow")
+    else None
+
+  private def pathArgumentRefusal(arg: String, base: Path, policy: FileConfig): Option[String] =
+    Try(base.resolve(arg)).toOption match {
+      case None                                      => Some(s"Invalid path argument '$arg'")
+      case Some(path) if !policy.isPathAllowed(path) => Some(s"Argument '$arg' is outside the allowed paths")
+      case Some(_)                                   => None
     }
 
   private def runProcess(
@@ -134,8 +234,13 @@ object ShellTool {
       // Set working directory if configured
       config.workingDirectory.foreach(dir => processBuilder.directory(new File(dir)))
 
-      // Add environment variables
+      // The command gets only the inherited variables that were named, then the configured ones
       val environment = processBuilder.environment()
+      config.inheritedEnvironment.foreach { names =>
+        val kept = names.flatMap(name => Option(environment.get(name)).map(name -> _))
+        environment.clear()
+        kept.foreach { case (k, v) => environment.put(k, v) }
+      }
       config.environment.foreach { case (k, v) => environment.put(k, v) }
 
       val process = processBuilder.start()
