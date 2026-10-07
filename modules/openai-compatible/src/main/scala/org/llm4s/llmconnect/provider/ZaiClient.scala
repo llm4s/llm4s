@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.ZaiConfig
-import org.llm4s.llmconnect.model.ThinkingBlock
+import org.llm4s.llmconnect.model.{ CompletionOptions, ThinkingBlock }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -71,7 +71,9 @@ object ZaiClient {
  * an array of text parts, and a reply's `content` - in a completion or a
  * streamed delta - may come back either as a string or as such an array. A GLM thinking
  * model's reasoning is its `reasoning_content`, read as thinking and sent back unchanged on the
- * assistant turn, as Z.ai's thinking-mode guide asks (preserved thinking, and tool calls).
+ * assistant turn, as Z.ai's thinking-mode guide asks (preserved thinking, and tool calls). A
+ * request that replays it also sets `thinking.clear_thinking` to `false`: the standard endpoint
+ * otherwise drops earlier turns' `reasoning_content` (see [[addReasoning]]).
  */
 private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
   override val headers: Seq[(String, String)] = Seq("User-Agent" -> "llm4s-coding-assistant/1.0")
@@ -95,3 +97,26 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
 
   override def encodeThinking(message: ujson.Obj, thinking: Seq[ThinkingBlock]): Unit =
     ThinkingBlock.text(thinking).foreach(text => message("reasoning_content") = text)
+
+  /**
+   * Sets `thinking.clear_thinking` to `false` when an assistant turn in `body` carries
+   * `reasoning_content`, keeping any other field of an existing `thinking` object. Preserved
+   * thinking is disabled by default on Z.ai's standard endpoint (`clear_thinking` defaults to
+   * `true`, removing earlier turns' `reasoning_content`) and enabled on the Coding Plan endpoint;
+   * `false` is correct on both. `thinking.type` is left unset, so whether the model thinks stays
+   * its default. A request replaying no reasoning gets no `thinking` field.
+   */
+  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): Unit =
+    if (replaysReasoning(body)) {
+      val thinking = body.value.get("thinking").flatMap(_.objOpt).fold(ujson.Obj())(ujson.Obj.from(_))
+      thinking("clear_thinking") = false
+      body("thinking") = thinking
+    }
+
+  private def replaysReasoning(body: ujson.Obj): Boolean =
+    body.value
+      .get("messages")
+      .flatMap(_.arrOpt)
+      .exists(_.exists { m =>
+        m.objOpt.exists(o => o.get("role").flatMap(_.strOpt).contains("assistant") && o.contains("reasoning_content"))
+      })

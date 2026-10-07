@@ -56,6 +56,25 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
     assistantTurn(ZaiDialect)("reasoning_content").str shouldBe "The user wants Paris weather."
   }
 
+  it should "set `thinking.clear_thinking` to false when it replays reasoning, which the standard endpoint otherwise clears" in {
+    val body = client(ZaiDialect).createRequestBody(history, CompletionOptions())
+    body("thinking") shouldBe ujson.Obj("clear_thinking" -> false)
+  }
+
+  it should "send no `thinking` field when no turn replays reasoning" in {
+    val plain = Conversation(Seq(UserMessage("hi"), AssistantMessage("Hello."), UserMessage("again")))
+    client(ZaiDialect).createRequestBody(plain, CompletionOptions()).obj.keySet should not contain "thinking"
+  }
+
+  it should "keep an existing `thinking` object's fields when it sets `clear_thinking`" in {
+    val body = ujson.Obj(
+      "messages" -> ujson.Arr(ujson.Obj("role" -> "assistant", "reasoning_content" -> "Check.")),
+      "thinking" -> ujson.Obj("type" -> "enabled", "clear_thinking" -> true)
+    )
+    ZaiDialect.addReasoning(body, "glm-4.7", CompletionOptions())
+    body("thinking") shouldBe ujson.Obj("type" -> "enabled", "clear_thinking" -> false)
+  }
+
   it should "read `reasoning_content` onto the returned message" in {
     val completion = client(ZaiDialect).parseCompletion(
       ujson.read(

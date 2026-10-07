@@ -1735,6 +1735,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-openai-compatible`: Z.ai keeps replayed reasoning** ([#1384](https://github.com/llm4s/llm4s/pull/1384)):
+  a request that sends an earlier turn's `reasoning_content` back now also sets `"thinking": {"clear_thinking": false}`,
+  merged into any existing `thinking` object. Z.ai's standard endpoint has preserved thinking off by default
+  (`clear_thinking` defaults to `true`) and drops replayed reasoning without it; `thinking.type` is left unset.
 - **`llm4s-agent`: a burst of live events no longer disconnects a subscriber as `Lagging`**
   ([#1387](https://github.com/llm4s/llm4s/issues/1387)): a subscription's queue held durable and live
   events against one `capacity`, so a model streaming faster than the dispatcher thread was scheduled filled
