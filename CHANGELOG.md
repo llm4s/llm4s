@@ -223,6 +223,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of always sending the document type. `EmbeddingRequest` becomes a growth-prone type (private
   constructor and `copy`, `with*` setters, `apply` with defaults): construct it with `EmbeddingRequest(...)`
   and change it with `withInput`, `withModel` or `withPurpose`.
+- **`llm4s-bom`: one version for every llm4s artifact** ([#1462](https://github.com/llm4s/llm4s/issues/1462)):
+  `org.llm4s:llm4s-bom` (`modules/bom`) is a POM-only bill of materials whose `dependencyManagement` pins every
+  published `llm4s-*` artifact (`llm4s-core_3`, `llm4s-openai_3`, ...) to the release version, so a Maven or
+  Gradle build that uses several modules states the version once: import it (`<scope>import</scope>`) or use
+  `platform("org.llm4s:llm4s-bom:<version>")`, and declare the modules without versions. The BOM has no Scala
+  suffix and contains no code. It is generated from the same project list as `sbt listPublishedArtifacts`
+  (`project/Bom.scala`), never listed by hand, and `sbt bomCheck` fails when the generated POM disagrees with
+  what the build publishes; `listPublishedArtifacts` prints it as a `bom` line, and `scripts/verify-release.sh`
+  checks that its POM is on Maven Central with a `<dependencyManagement>`. It is aggregated by the root project,
+  so `sbt ci-release` publishes it. No frozen module's API changes. Install guide: "Align versions with the BOM".
 - **`llm4s-jina`: Jina AI embedding provider** (`modules/providers/jina`,
   [#1028](https://github.com/llm4s/llm4s/issues/1028), rebuilt from #1060 as an
   `EmbeddingProviderDescriptor`, so `llm4s-core` is untouched). `EMBEDDING_MODEL=jina/jina-embeddings-v3`

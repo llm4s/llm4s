@@ -191,10 +191,15 @@ Global / excludeLintKeys += coveragePolicy
 lazy val publishedArtifactsCheck = taskKey[Unit](
   "Fail the build if a published llm4s-* artifact is not named in v1-scope.md and installation.md"
 )
-// What a release must put on Maven Central, one `artifact <id>` or `stub <id>` per line, for
+// What a release must put on Maven Central, one `artifact <id>`, `bom <id>` or `stub <id>` per line, for
 // scripts/verify-release.sh. Run it with `sbt -error listPublishedArtifacts`.
 lazy val listPublishedArtifacts = taskKey[Unit](
-  "Print the Maven coordinates a release must publish: artifact lines, then relocation stub lines"
+  "Print the Maven coordinates a release must publish: artifact lines, then the BOM, then relocation stub lines"
+)
+// The BOM (`org.llm4s:llm4s-bom`) lists every published artifact. It is generated from the same project list
+// as `listPublishedArtifacts`; this check fails when the generated POM disagrees. See project/Bom.scala.
+lazy val bomCheck = taskKey[Unit](
+  "Fail the build if the generated llm4s-bom does not list exactly the artifacts the build publishes"
 )
 
 // ---- coverage policy check ----
@@ -278,6 +283,9 @@ lazy val llm4s = (project in file("."))
     // outside the aggregate entirely, so its suites could stop compiling unnoticed. Only the
     // `@Local` tier actually runs under `sbt test`; see `it / Test / testOptions` below.
     it,
+    // The BOM must be aggregated here for the same reason as the stubs below: `sbt ci-release`
+    // publishes the root aggregate, so a BOM outside it would simply never be published.
+    bom,
     // Relocation stubs must be aggregated here: `sbt ci-release` publishes the root
     // aggregate, so a stub outside it would simply never be published.
     relocationCore,
@@ -302,7 +310,20 @@ lazy val llm4s = (project in file("."))
       val projects      = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
       val (real, stubs) = PublishedArtifacts.coordinates(projects, (ThisBuild / scalaBinaryVersion).value)
       real.foreach(a => println(s"artifact $a"))
+      PublishedArtifacts.boms(projects).foreach(a => println(s"bom $a"))
       stubs.foreach(a => println(s"stub $a"))
+    },
+    bomCheck / aggregate := false,
+    bomCheck := {
+      val projects = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
+      val pom      = (bom / makePom).value
+      PublishedArtifacts.checkBom(
+        projects,
+        (ThisBuild / scalaBinaryVersion).value,
+        pom,
+        (bom / version).value,
+        streams.value.log
+      )
     },
     // Root is an aggregator with no sources of its own. `coverageAggregate` runs here, and
     // the per-module floors are enforced by each module's own `coverageReport`, so the
@@ -1592,6 +1613,24 @@ lazy val gradleDemo = (project in file("modules/gradle-demo"))
 //
 // `workspacerunner`, `samples` and the other unpublished modules have `publish / skip` and
 // no Central history, so they need no stub.
+
+// The bill of materials: a POM that pins every published artifact to one version. Generated, not listed by
+// hand: see project/Bom.scala. Its dependencyManagement block is written when the POM is made, because the
+// list comes from tasks (`publish / skip` of every project) that `pomPostProcess` cannot read.
+lazy val bom = (project in file("modules/bom"))
+  .settings(Bom.settings)
+  .settings(
+    mimaFailOnNoPrevious := false,
+    makePom := {
+      val pom      = makePom.value
+      val projects = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
+      Bom.writeManagedDependencies(
+        pom,
+        PublishedArtifacts.managed(projects, (ThisBuild / scalaBinaryVersion).value),
+        version.value
+      )
+    }
+  )
 
 lazy val relocationCore = (project in file("modules/relocations/core"))
   .settings(Relocation.settings("core", "llm4s-core_3"), mimaFailOnNoPrevious := false)

@@ -120,6 +120,11 @@ jobs:
       - name: Check every published artifact is documented
         run: sbt publishedArtifactsCheck
 
+      # Fails when the generated llm4s-bom does not list exactly the artifacts the build publishes
+      # (project/Bom.scala). A release cannot be amended, so a BOM that omits a module stays that way.
+      - name: Check the BOM lists every published artifact
+        run: sbt bomCheck
+
       - name: Compile
         run: sbt compile
 
