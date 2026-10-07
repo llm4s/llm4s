@@ -17,3 +17,6 @@ addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.12.1")
 
 // JMH performance benchmarks
 addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.4.7")
+
+// CycloneDX software bill of materials: `sbt publishedBoms`, attached to each GitHub release (docs/reference/sbom.md)
+addSbtPlugin("com.github.sbt" % "sbt-sbom" % "0.6.0")

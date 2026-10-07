@@ -106,6 +106,53 @@ jobs:
               $PRERELEASE
           fi
 
+  # A CycloneDX SBOM per published module, attached to the GitHub Release (docs/reference/sbom.md).
+  #
+  # It runs after the Release exists and nothing depends on it, so a failure here turns the run red but cannot
+  # touch what is already irreversible (Maven Central, the Release), the docs deploy or the container image.
+  # `--clobber` makes a re-run replace the assets instead of failing on them.
+  sbom:
+    needs: github-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # Needed for sbt-dynver: the BOMs are named and versioned from the tag
+
+      - name: Setup JVM
+        uses: actions/setup-java@v6
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "sbt"
+
+      - name: Setup sbt
+        uses: sbt/setup-sbt@v1
+
+      - name: Generate and check the SBOMs
+        run: |
+          sbt -batch publishedBoms
+          sbt -batch -error listPublishedArtifacts | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
+          scripts/check-sbom.sh target/boms target/published-artifacts.txt
+          # A BOM named for a snapshot would be attached to the wrong release: sbt-dynver derives the version from
+          # the tag, so every file must carry exactly the tag's version.
+          VERSION="${GITHUB_REF_NAME#v}"
+          WRONG="$(ls target/boms | grep -vF -- "-${VERSION}.bom.json" || true)"
+          if [ -n "$WRONG" ]; then
+            echo "These BOMs are not named for ${VERSION}:"
+            echo "$WRONG"
+            exit 1
+          fi
+
+      - name: Attach the SBOMs to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" target/boms/*.bom.json --clobber
+
   # Deploy the docs once the release is published and visible. Deliberately independent
   # of the container image below: a registry failure must not leave llm4s.org advertising
   # the previous version when the release itself succeeded.

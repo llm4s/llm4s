@@ -1,0 +1,84 @@
+name: Dependency scan
+
+# Scans the dependencies of every published module for known vulnerabilities (docs/reference/sbom.md).
+#
+# GitHub's own dependency graph cannot do this for llm4s: it does not read sbt builds (the repository's graph
+# lists Ruby gems and GitHub Actions, no Maven package), so `dependency-review-action` would never see a Scala
+# dependency change. Instead the build writes a CycloneDX BOM per module (`sbt publishedBoms`) and OSV-Scanner
+# matches the Maven coordinates in them against the OSV database.
+#
+# REPORT ONLY for now: the scan step is `continue-on-error`, so findings show in the log and the job summary
+# without failing the run. To make the scan block, delete `continue-on-error: true` from the scan step
+# (OSV-Scanner then fails the job when it finds a vulnerability).
+
+on:
+  pull_request:
+    paths:
+      - "project/Dependencies.scala"
+      - "project/plugins.sbt"
+      - "build.sbt"
+      - ".github/workflows/dependency-scan.yml"
+  schedule:
+    - cron: "17 5 * * 1"  # Mondays 05:17 UTC: new advisories appear without any change here
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  osv-scanner:
+    name: OSV-Scanner
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: "temurin"
+          java-version: 21
+          cache: "sbt"
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Generate the SBOMs
+        run: sbt -batch publishedBoms
+
+      # OSV-Scanner recognises a CycloneDX file by its name (`bom.json` or `*.cdx.json`), and the plugin's
+      # default is `*.bom.json`, so the scan reads copies under the recognised name. The release keeps `*.bom.json`.
+      - name: Stage the SBOMs under the names OSV-Scanner recognises
+        run: |
+          mkdir -p target/osv
+          for f in target/boms/*.bom.json; do
+            cp "$f" "target/osv/$(basename "${f%.bom.json}").cdx.json"
+          done
+          ls target/osv | wc -l
+
+      # Pinned release, checked against the SHA-256 that the project publishes in osv-scanner_SHA256SUMS
+      # (and that GitHub reports for the asset). Bump both together.
+      - name: Install OSV-Scanner v2.6.0
+        run: |
+          curl -sSfL -o osv-scanner "https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_linux_amd64"
+          echo "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108  osv-scanner" | sha256sum -c -
+          chmod +x osv-scanner
+
+      - name: Scan the SBOMs (report only)
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          ./osv-scanner scan source -r target/osv 2>&1 | tee target/osv-report.txt
+
+      - name: Summarise the scan
+        if: always()
+        run: |
+          {
+            echo "### OSV-Scanner report (report only)"
+            echo
+            echo '```'
+            tail -n 120 target/osv-report.txt 2>/dev/null || echo "no report was written"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
