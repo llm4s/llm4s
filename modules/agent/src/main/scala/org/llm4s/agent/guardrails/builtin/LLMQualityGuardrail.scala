@@ -4,19 +4,46 @@ import org.llm4s.agent.guardrails.LLMGuardrail
 import org.llm4s.llmconnect.LLMClient
 
 /**
- * LLM-based response quality validation guardrail.
+ * An LLM-as-Judge guardrail that rates the overall quality of a response to a given query.
  *
- * Uses an LLM to evaluate the overall quality of a response including
- * helpfulness, completeness, clarity, and relevance.
+ * **What it evaluates:** the judge is shown the original query and asked to rate the response on five points:
+ * relevance (does it address the query), helpfulness, completeness, clarity, and apparent accuracy. It is told that
+ * 1.0 means an excellent, comprehensive response, 0.5 an adequate but incomplete one, and 0.0 an irrelevant or
+ * unhelpful one. "Accuracy" here is the judge's impression: nothing is checked against a source (use
+ * [[LLMFactualityGuardrail]] for that).
  *
- * @param llmClient The LLM client to use for evaluation
- * @param originalQuery The original user query (for relevance checking)
- * @param threshold Minimum score to pass (default: 0.7)
+ * **When to use it:** for a subjective check that the answer is on topic and useful. For size limits use
+ * `LengthCheck`, and for a required format use `RegexValidator` or `JSONValidator`: they are free, instant and
+ * repeatable.
+ *
+ * **Cost and side:** every validation makes one extra LLM call, and the response goes to the provider of
+ * `llmClient`. It is an output guardrail only. The scoring rules and the other limits are described on
+ * [[org.llm4s.agent.guardrails.LLMGuardrail]].
+ *
+ * **One query per instance:** `originalQuery` is fixed when the guardrail is built, and it is placed in the prompt
+ * inside double quotes without escaping. A guardrail built once for an agent judges every later answer against that
+ * same query, so build a new one per query when answers should be judged against the question that produced them.
+ * Its `description` embeds the first 50 characters of the query followed by `...`.
+ *
+ * **Failure:** `Left` with a [[org.llm4s.error.ValidationError]] on field `output`, for example
+ * `LLM judge score (0.55) below threshold (0.70) for LLMQualityGuardrail`. It does not say which of the five points
+ * fell short. An unreadable reply or a failing `llmClient` is a `Left` too, never a pass.
+ *
+ * @param llmClient the client that makes the judge call; it can be the agent's own or a separate model
+ * @param originalQuery the query the response is judged against
+ * @param threshold the lowest score that passes (a score equal to it passes); default 0.7
  *
  * @example
  * {{{
+ * import org.llm4s.agent.Agent
+ * import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+ * import org.llm4s.agent.guardrails.builtin.LLMQualityGuardrail
+ *
  * val guardrail = LLMQualityGuardrail(client, "What is Scala?")
- * Agent.builder("assistant", client).withMiddleware(new GuardrailMiddleware(Nil, Seq(guardrail))).build()
+ * val agent = Agent
+ *   .builder("assistant", client)
+ *   .withMiddleware(new GuardrailMiddleware(Nil, Seq(guardrail)))
+ *   .build()
  * }}}
  */
 class LLMQualityGuardrail(
@@ -51,7 +78,11 @@ class LLMQualityGuardrail(
 object LLMQualityGuardrail {
 
   /**
-   * Create an LLM quality guardrail.
+   * Builds a quality guardrail for a query.
+   *
+   * @param client the client that makes the judge call
+   * @param originalQuery the query the response is judged against
+   * @param threshold the lowest score that passes (default 0.7)
    */
   def apply(
     client: LLMClient,
@@ -61,7 +92,10 @@ object LLMQualityGuardrail {
     new LLMQualityGuardrail(client, originalQuery, threshold)
 
   /**
-   * Create a high-quality response guardrail (higher threshold).
+   * Builds a quality guardrail with a threshold of 0.85.
+   *
+   * @param client the client that makes the judge call
+   * @param originalQuery the query the response is judged against
    */
   def highQuality(client: LLMClient, originalQuery: String): LLMQualityGuardrail =
     new LLMQualityGuardrail(client, originalQuery, threshold = 0.85)

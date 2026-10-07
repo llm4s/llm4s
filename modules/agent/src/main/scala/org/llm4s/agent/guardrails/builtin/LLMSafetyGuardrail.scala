@@ -4,27 +4,44 @@ import org.llm4s.agent.guardrails.LLMGuardrail
 import org.llm4s.llmconnect.LLMClient
 
 /**
- * LLM-based content safety validation guardrail.
+ * An LLM-as-Judge guardrail that rates whether content is safe and appropriate for general audiences.
  *
- * Uses an LLM to evaluate whether content is safe, appropriate,
- * and non-harmful. This provides more nuanced safety checking than
- * keyword-based filters.
+ * **What it evaluates:** the judge is asked to rate the content against five criteria: harmful or dangerous
+ * content, inappropriate or offensive language, misinformation or misleading claims, privacy violations, and
+ * promotion of illegal activity. It is told that 1.0 means completely safe, 0.5 means minor concerns but nothing
+ * harmful, and 0.0 means clearly harmful, dangerous or inappropriate. `customCriteria`, when given, is appended
+ * to that prompt under `Additional criteria:`.
  *
- * Safety categories evaluated:
- * - Harmful or dangerous content
- * - Inappropriate or offensive language
- * - Misinformation or misleading claims
- * - Privacy violations
- * - Illegal activity promotion
+ * **When to use it:** when whether something is acceptable depends on context. For a fixed word list use
+ * `ProfanityFilter`, and for personal-data patterns use `PIIDetector`: they are free, instant and repeatable,
+ * where this guardrail is none of those.
  *
- * @param llmClient The LLM client to use for evaluation
- * @param threshold Minimum score to pass (default: 0.8 - higher for safety)
- * @param customCriteria Optional additional safety criteria to check
+ * **Cost and side:** every validation makes one extra LLM call, so it does not suit latency-sensitive paths, and
+ * the content is sent to the provider of `llmClient`. It is an output guardrail only: it judges the agent's
+ * final answer. The scoring rules, their edges (a reply of `85` reads as 1.0 and passes) and the other limits are
+ * described on [[org.llm4s.agent.guardrails.LLMGuardrail]].
+ *
+ * **Failure:** `Left` with a [[org.llm4s.error.ValidationError]] on field `output`, for example
+ * `LLM judge score (0.60) below threshold (0.80) for LLMSafetyGuardrail`. It does not say which criterion failed.
+ * An unreadable reply or a failing `llmClient` is a `Left` too, never a pass.
+ *
+ * @param llmClient the client that makes the judge call; it can be the agent's own or a separate model
+ * @param threshold the lowest score that passes (a score equal to it passes); the default 0.8 is higher than the
+ *                  base default of 0.7, as the original comment put it, "higher for safety"
+ * @param customCriteria extra criteria appended to the prompt verbatim under `Additional criteria:`; `None` keeps
+ *                       the five built-in criteria only
  *
  * @example
  * {{{
+ * import org.llm4s.agent.Agent
+ * import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+ * import org.llm4s.agent.guardrails.builtin.LLMSafetyGuardrail
+ *
  * val guardrail = LLMSafetyGuardrail(client)
- * Agent.builder("assistant", client).withMiddleware(new GuardrailMiddleware(Nil, Seq(guardrail))).build()
+ * val agent = Agent
+ *   .builder("assistant", client)
+ *   .withMiddleware(new GuardrailMiddleware(Nil, Seq(guardrail)))
+ *   .build()
  * }}}
  */
 class LLMSafetyGuardrail(
@@ -64,19 +81,28 @@ class LLMSafetyGuardrail(
 object LLMSafetyGuardrail {
 
   /**
-   * Create a standard LLM safety guardrail.
+   * Builds a safety guardrail with the five built-in criteria.
+   *
+   * @param client the client that makes the judge call
+   * @param threshold the lowest score that passes (default 0.8)
    */
   def apply(client: LLMClient, threshold: Double = 0.8): LLMSafetyGuardrail =
     new LLMSafetyGuardrail(client, threshold)
 
   /**
-   * Create a strict safety guardrail (higher threshold).
+   * Builds a safety guardrail with a threshold of 0.95, which passes only content the judge rates as safe.
+   *
+   * @param client the client that makes the judge call
    */
   def strict(client: LLMClient): LLMSafetyGuardrail =
     new LLMSafetyGuardrail(client, threshold = 0.95)
 
   /**
-   * Create a safety guardrail with custom additional criteria.
+   * Builds a safety guardrail whose prompt carries extra criteria after the five built-in ones.
+   *
+   * @param client the client that makes the judge call
+   * @param customCriteria the extra criteria, appended verbatim under `Additional criteria:`
+   * @param threshold the lowest score that passes (default 0.8)
    */
   def withCustomCriteria(
     client: LLMClient,
@@ -86,7 +112,10 @@ object LLMSafetyGuardrail {
     new LLMSafetyGuardrail(client, threshold, Some(customCriteria))
 
   /**
-   * Create a child-safe content guardrail.
+   * Builds a guardrail for child audiences: a threshold of 0.95 and three extra criteria, numbered 6 to 8, for
+   * age-inappropriate themes, scary or disturbing content, and complex adult topics.
+   *
+   * @param client the client that makes the judge call
    */
   def childSafe(client: LLMClient): LLMSafetyGuardrail =
     new LLMSafetyGuardrail(
