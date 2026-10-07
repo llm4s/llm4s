@@ -32,6 +32,7 @@ object FrozenDependencies {
     Ban("org.xerial", "SQLite driver; belongs to llm4s-memory"),
     Ban("com.zaxxer", "connection pool; belongs to the Postgres modules"),
     Ban("io.prometheus", "metrics backend; belongs to llm4s-observability-prometheus"),
+    Ban("io.micrometer", "metrics facade; belongs to llm4s-observability-micrometer"),
     Ban("io.opentelemetry", "tracing backend; belongs to llm4s-observability-otel"),
     Ban("org.java-websocket", "WebSocket transport; belongs to llm4s-mcp"),
     Ban("org.neo4j", "graph database driver; belongs to llm4s-knowledgegraph-neo4j"),

@@ -67,6 +67,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `trace` — Langfuse (`LangfuseTracing`, its batch sender and `TracingBackend`), `TraceCollectorTracing`, `trace/model`, `trace/store`; `metrics` — `CostTracker` — **carved** | `llm4s-observability` | Beta |
 | `trace` — OpenTelemetry (`OpenTelemetryTracing`, `OpenTelemetryConfig`) — **carved** | `llm4s-observability-otel` (`modules/trace-opentelemetry`) | Beta |
 | `metrics` — Prometheus (`PrometheusMetrics`, `PrometheusEndpoint`, `MetricsConfigLoader`) — **carved** | `llm4s-observability-prometheus` | Beta |
+| `metrics` — Micrometer (`MicrometerMetrics`), a `MetricsCollector` over a `MeterRegistry` — **new** | `llm4s-observability-micrometer` | Beta |
 | `llmconnect/provider` — OpenAI, Azure and Requesty (the providers sharing `OpenAIClient`) — **carved** | `llm4s-openai` | Frozen at 1.0 |
 | `llmconnect/provider` — OpenRouter, DeepSeek, Z.ai and the generic `openai-compatible` provider, on one SDK-free `OpenAICompatibleClient` — **carved** | `llm4s-openai-compatible` | Frozen at 1.0 |
 | `llmconnect/provider` — Anthropic — **carved** | `llm4s-anthropic` | Frozen at 1.0 |
