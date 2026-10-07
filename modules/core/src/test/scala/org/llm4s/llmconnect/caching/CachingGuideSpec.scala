@@ -65,16 +65,34 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       stats.misses shouldBe 2
     }
 
-    "give the key function the model name for a document and name#query for a query" in {
-      val scopes = ListBuffer.empty[String]
+    "give the key function the text, the model name and the purpose" in {
+      val seen = ListBuffer.empty[(String, String, InputPurpose)]
       val cached = new CachedEmbeddingClient(
         new FakeEmbeddingClient,
         new InMemoryEmbeddingCache[Seq[Double]](),
-        (text, scope) => { scopes += scope; CacheKeyGenerator.sha256(text, scope) }
+        (text, model, purpose) => {
+          seen += ((text, model, purpose)); CacheKeyGenerator.embeddingKey(text, model, purpose)
+        }
       )
       cached.embed(EmbeddingRequest(Seq("x"), ModelA))
       cached.embed(EmbeddingRequest(Seq("x"), ModelA, InputPurpose.Query))
-      scopes.toList shouldBe List("test-embedding", "test-embedding#query")
+      seen.toList shouldBe List(
+        ("x", "test-embedding", InputPurpose.Document),
+        ("x", "test-embedding", InputPurpose.Query)
+      )
+    }
+
+    "keep a query for model m apart from a document for a model named m#query" in {
+      val base   = new FakeEmbeddingClient
+      val cached = new CachedEmbeddingClient(base, new InMemoryEmbeddingCache[Seq[Double]]())
+      cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig("m", 3), InputPurpose.Query))
+      cached.embed(EmbeddingRequest(Seq("x"), EmbeddingModelConfig("m#query", 3)))
+      base.calls.get shouldBe 2
+    }
+
+    "not let a colon in the text or the model name make two keys collide" in {
+      CacheKeyGenerator.embeddingKey("a:b", "c", InputPurpose.Document) should not be
+        CacheKeyGenerator.embeddingKey("a", "b:c", InputPurpose.Document)
     }
 
     "key on whatever the custom key function says" in {
@@ -87,12 +105,12 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
     "keep tenants apart even when a tenant or a text contains a colon" in {
       val snippet = new CachingGuideSnippets.TenantKey(new FakeEmbeddingClient)
       import snippet.tenantKey
-      // The default key joins with ':', so these two pairs collide, which is why the guide length-prefixes.
-      CacheKeyGenerator.sha256("a:b", "c") shouldBe CacheKeyGenerator.sha256("a", "b:c")
-      tenantKey("b:c")("a", "m") should not be tenantKey("c")("a:b", "m")
-      tenantKey("t")("a:b", "c") should not be tenantKey("t")("a", "b:c")
-      tenantKey("t")("x", "m") shouldBe tenantKey("t")("x", "m")
-      tenantKey("t")("x", "m") should not be tenantKey("u")("x", "m")
+      val doc = InputPurpose.Document
+      tenantKey("b:c")("a", "m", doc) should not be tenantKey("c")("a:b", "m", doc)
+      tenantKey("t")("a:b", "c", doc) should not be tenantKey("t")("a", "b:c", doc)
+      tenantKey("t")("x", "m", doc) shouldBe tenantKey("t")("x", "m", doc)
+      tenantKey("t")("x", "m", doc) should not be tenantKey("u")("x", "m", doc)
+      tenantKey("t")("x", "m", doc) should not be tenantKey("t")("x", "m", InputPurpose.Query)
     }
 
     "expire an entry strictly after its TTL, counting the expired read as a miss" in {

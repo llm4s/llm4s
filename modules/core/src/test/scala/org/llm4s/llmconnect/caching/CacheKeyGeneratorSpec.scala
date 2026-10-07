@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.llmconnect.model.InputPurpose
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -27,5 +28,30 @@ class CacheKeyGeneratorSpec extends AnyFlatSpec with Matchers {
     val key = CacheKeyGenerator.sha256("你好世界", "model-v1")
     key.length should be(64)
     (key should fullyMatch).regex("[0-9a-f]{64}".r)
+  }
+
+  it should "encode its parts unambiguously, whatever characters they contain" in {
+    CacheKeyGenerator.sha256("a:b", "c") should not be CacheKeyGenerator.sha256("a", "b:c")
+    CacheKeyGenerator.sha256("ab", "c") should not be CacheKeyGenerator.sha256("a", "bc")
+    CacheKeyGenerator.sha256("1:a", "") should not be CacheKeyGenerator.sha256("a")
+    CacheKeyGenerator.sha256("a", "b", "c") should not be CacheKeyGenerator.sha256("a", "bc")
+    CacheKeyGenerator.sha256("x#query", "m") should not be CacheKeyGenerator.sha256("x", "m#query")
+  }
+
+  "CacheKeyGenerator.embeddingKey" should "differ by purpose" in {
+    CacheKeyGenerator.embeddingKey("t", "m", InputPurpose.Query) should not be
+      CacheKeyGenerator.embeddingKey("t", "m", InputPurpose.Document)
+  }
+
+  it should "not let a model name stand in for a purpose" in {
+    CacheKeyGenerator.embeddingKey("t", "m", InputPurpose.Query) should not be
+      CacheKeyGenerator.embeddingKey("t", "m#query", InputPurpose.Document)
+    CacheKeyGenerator.embeddingKey("t", "m", InputPurpose.Query) should not be
+      CacheKeyGenerator.embeddingKey("t", "mquery", InputPurpose.Document)
+  }
+
+  it should "not let a text and a model name trade characters" in {
+    CacheKeyGenerator.embeddingKey("a:b", "c", InputPurpose.Document) should not be
+      CacheKeyGenerator.embeddingKey("a", "b:c", InputPurpose.Document)
   }
 }

@@ -45,12 +45,11 @@ object CachingGuideSnippets {
   class TenantKey(base: org.llm4s.llmconnect.EmbeddingClient) {
     import org.llm4s.llmconnect.caching.{ CacheKeyGenerator, CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig
-    import org.llm4s.llmconnect.model.EmbeddingRequest
+    import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
 
-    // Every part is prefixed with its length, so no tenant, model or text, colons included, can make two
-    // different triples give the same key.
-    def tenantKey(tenant: String)(text: String, model: String): String =
-      CacheKeyGenerator.sha256(Seq(tenant, model, text).map(part => s"${part.length}:$part").mkString, "")
+    // The tenant is one more part of the key; sha256 keeps every part apart from the others.
+    def tenantKey(tenant: String)(text: String, model: String, purpose: InputPurpose): String =
+      CacheKeyGenerator.sha256(tenant, model, purpose.toString, text)
 
     val cache  = new InMemoryEmbeddingCache[Seq[Double]]()
     val cached = new CachedEmbeddingClient(base, cache, tenantKey("tenant-a"))
