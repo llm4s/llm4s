@@ -119,8 +119,9 @@ class HttpBoundedReadSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
 
     result.truncated shouldBe true
     result.body.length shouldBe 1024
-    // The whole body is 64 MiB. Socket buffers hold a few MiB; reading it all would make this 64 MiB.
-    bytesWritten.get() should be < (32L * 1024 * 1024)
+    // The whole body is 64 MiB. Socket buffers hold a few MiB and a platform may take a while to notice a closed
+    // connection; reading the body in full would make this exactly 64 MiB.
+    bytesWritten.get() should be < (48L * 1024 * 1024)
   }
 
   it should "return a body under the cap whole" in {

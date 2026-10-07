@@ -42,11 +42,18 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
   private def info(config: FileConfig, path: Path): Either[String, FileInfoResult] =
     FileInfoTool.createSafe(config).fold(e => fail(e.formatted), identity).handler(params(path))
 
-  private def write(config: WriteConfig, path: Path, text: String): Either[String, WriteFileResult] =
+  private def write(
+    config: WriteConfig,
+    path: Path,
+    text: String,
+    append: Boolean = false
+  ): Either[String, WriteFileResult] =
     WriteFileTool
       .createSafe(config)
       .fold(e => fail(e.formatted), identity)
-      .handler(SafeParameterExtractor(ujson.Obj("path" -> path.toString, "content" -> text)))
+      .handler(
+        SafeParameterExtractor(ujson.Obj("path" -> path.toString, "content" -> text, "append" -> append))
+      )
 
   private def params(path: Path): SafeParameterExtractor =
     SafeParameterExtractor(ujson.Obj("path" -> path.toString))
@@ -225,6 +232,42 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
     outLink.isSymlink shouldBe true
     outLink.size shouldBe 0L
     entries.find(_.name == "ok.txt").map(_.size) shouldBe Some(2L)
+  }
+
+  it should "create the missing directories of an allowed target, below the allowed directory" in {
+    val t = newRoot()
+    Files.createDirectories(t.resolve("data"))
+    val config = WriteConfig(allowedPaths = Seq(t.resolve("data").toString))
+
+    write(config, t.resolve("data/new/deeper/f.txt"), "made").map(_.created) shouldBe Right(true)
+    Files.readString(t.resolve("data/new/deeper/f.txt")) shouldBe "made"
+  }
+
+  it should "not create missing directories when the configuration says not to" in {
+    val t = newRoot()
+    Files.createDirectories(t.resolve("data"))
+    val config = WriteConfig(allowedPaths = Seq(t.resolve("data").toString), createDirectories = false)
+
+    write(config, t.resolve("data/new/f.txt"), "x").isLeft shouldBe true
+    Files.exists(t.resolve("data/new")) shouldBe false
+  }
+
+  it should "append to an existing file inside the allowed directory" in {
+    val t = newRoot()
+    file(t.resolve("data/log.txt"), "one;")
+    val config = WriteConfig(allowedPaths = Seq(t.resolve("data").toString))
+
+    write(config, t.resolve("data/log.txt"), "two", append = true).map(_.appended) shouldBe Right(true)
+    Files.readString(t.resolve("data/log.txt")) shouldBe "one;two"
+  }
+
+  it should "refuse to overwrite an existing file unless overwriting is allowed" in {
+    val t = newRoot()
+    file(t.resolve("data/keep.txt"), "original")
+
+    write(WriteConfig(allowedPaths = Seq(t.resolve("data").toString)), t.resolve("data/keep.txt"), "new").left.toOption
+      .getOrElse(fail("expected a refusal")) should include("already exists")
+    Files.readString(t.resolve("data/keep.txt")) shouldBe "original"
   }
 
   it should "report the path it was given, not the resolved one" in {
