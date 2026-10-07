@@ -2,7 +2,7 @@
 layout: page
 title: Caching
 parent: User Guide
-nav_order: 6
+nav_order: 7
 ---
 
 # Caching Responses and Embeddings
