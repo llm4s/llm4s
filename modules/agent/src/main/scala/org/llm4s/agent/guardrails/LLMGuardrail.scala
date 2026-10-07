@@ -27,21 +27,24 @@ import org.llm4s.types.Result
  * provider `llmClient` talks to. A cheaper or separate model can serve as judge, which also avoids a model
  * grading its own answer.
  *
- * **Scoring:** a reply is a score only when it holds exactly one plain decimal number from 0 to 1, and the content
- * passes when `score >= threshold` (a score equal to the threshold passes). Any other reply is refused as
- * unreadable and fails the guardrail; a number is never clamped into range, because a clamped value would read
- * as 1.0 for the usual mistakes (a 0 to 100 answer, a fraction, a percentage) and approve the content. The
- * rules, in full:
- *  - Accepted: `0.9`, `.5`, `0`, `1`, `1.0`, with surrounding whitespace or a trailing newline, and with
- *    markdown emphasis, quotes, brackets or a code fence around it (`**0.9**`, `"0.9"`, ` ```0.9``` `); a
- *    trailing comma, semicolon or colon on the number is ignored. A label or sentence around one number is fine:
- *    `Score: 0.9` and `The score is 0.9` read as 0.9.
- *  - Refused, as unreadable: a number outside 0 to 1 (`85`, `100`, `1.5`, `-0.2`); a sign (`-0.5`, `+0.5`); a
- *    percentage, fraction or exponent (`85%`, `8/10`, `1e-3`), and any reply that names a percentage even apart
- *    from the number (`1 %`, `1 percent`, `1 per cent`); a decimal comma (`0,9`); a trailing full stop
- *    (`0.85.`); a label glued to the number (`Score:0.9`); digits inside a word (`gpt4`); and more than one
- *    number anywhere in the reply (`0.5 or 0.6`, `0.7 out of 1`). A reply with no ASCII digit at all (`NaN`, an
- *    empty reply, a refusal in words) is refused too.
+ * **Scoring:** a reply is a score only when the whole reply is one plain decimal number from 0 to 1, optionally
+ * labelled `Score:`, and the content passes when the score reaches `threshold` (a score equal to the threshold
+ * passes). Any other reply is refused as unreadable and fails the guardrail; a number is never clamped into
+ * range, because a clamped value would read as 1.0 for the usual mistakes (a 0 to 100 answer, a fraction, a
+ * percentage) and approve the content. The rules, in full:
+ *  - Accepted: `0.9`, `.5`, `0`, `1`, `1.0`, with surrounding whitespace or a trailing newline, with markdown
+ *    emphasis, quotes, brackets or a code fence around it (`**0.9**`, `"0.9"`, ` ```0.9``` `), and with a
+ *    `Score:` label in any case before it (`Score: 0.9`, `score:0.9`, `**Score:** 0.9`).
+ *  - Refused, as unreadable: everything else. That includes a number outside 0 to 1 (`85`, `1.5`); a sign,
+ *    glued or apart (`-0.5`, `- 1`, `negative 1`, `+0.5`); a percentage, fraction, exponent or any scale, as a
+ *    sign or in words (`85%`, `1 %`, `1 percent`, `1 per ten thousand`, `100 bps`, `8/10`, `0.7 out of 1`,
+ *    `1e-3`); a decimal comma (`0,9`); a trailing full stop (`0.85.`); any other label or sentence
+ *    (`Rating: 0.9`, `The score is 0.9`, `0.9, because ...`); more than one number; and a reply with no number.
+ *    The grammar lists what is accepted rather than what is refused, so a scale or sign written in a form no one
+ *    anticipated is refused too.
+ *  - The score is compared at the precision the judge wrote it, and the threshold as the decimal it is written
+ *    as: `1.0000000000000001` is out of range, and `0.79999999999999999` does not reach a threshold of 0.8, though
+ *    both would round to the bound as a `Double`.
  *  - The judge is not asked to be lenient: the fixed system message asks for only a number between 0 and 1.
  *    Before this rule the reply was reduced to its digits and dots and clamped, so `85`, `85%`, `8/10`, `1e-3`
  *    and `0,9` all read as 1.0 and passed any threshold up to 1.0, and `0.7 out of 1` read as 0.71.
@@ -124,7 +127,7 @@ trait LLMGuardrail extends OutputGuardrail {
    */
   override def validate(value: String): Result[String] =
     evaluateWithLLM(value).flatMap { score =>
-      if (score >= threshold) {
+      if (LLMGuardrail.reaches(score, threshold)) {
         Right(value)
       } else {
         Left(
@@ -140,11 +143,11 @@ trait LLMGuardrail extends OutputGuardrail {
    * Makes the judge call and reads its score; `validate` compares it with the threshold.
    *
    * @param content the text to judge, inserted verbatim between triple quotes after the criteria
-   * @return the score, from 0.0 to 1.0; a `ValidationError` on field `llm_response` when the reply is not exactly one
-   *         plain decimal number from 0 to 1 (see the scoring notes on the trait); or the error of the failed
-   *         `llmClient.complete` call
+   * @return the score, from 0 to 1, as the exact decimal the judge wrote; a `ValidationError` on field
+   *         `llm_response` when the reply is not one plain decimal number from 0 to 1 (see the scoring notes on the
+   *         trait); or the error of the failed `llmClient.complete` call
    */
-  protected def evaluateWithLLM(content: String): Result[Double] = {
+  protected def evaluateWithLLM(content: String): Result[BigDecimal] = {
     val systemPrompt =
       """You are an evaluation assistant. Your task is to rate content based on specific criteria.
         |You MUST respond with ONLY a single number between 0 and 1 (e.g., 0.85).
@@ -178,7 +181,7 @@ Score (0-1):"""
    * Reads a score from the reply, or fails: see the scoring notes on the trait for the rules. An unreadable reply
    * fails with a `ValidationError` on field `llm_response` that quotes the reply and says what was expected.
    */
-  private def parseScore(response: String): Result[Double] =
+  private def parseScore(response: String): Result[BigDecimal] =
     LLMGuardrail
       .readScore(response)
       .toRight(
@@ -191,73 +194,42 @@ Score (0-1):"""
 
 object LLMGuardrail {
 
-  /** One plain decimal: digits with an optional fraction, or a fraction alone. No sign, exponent, comma or percent. */
-  private val PlainDecimal = java.util.regex.Pattern.compile("""^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$""")
-
-  /** Markdown emphasis, quotes, brackets and code-fence backticks that may wrap a number. */
-  private val Wrapping = "*_`\"'()[]{}"
-
-  /** Punctuation that may follow a number when it ends a clause. A full stop is deliberately not here. */
-  private val ClauseEnd = ",;:"
-
-  private def hasDigit(token: String): Boolean = token.exists(c => c >= '0' && c <= '9')
-
   /**
-   * Percent, per-mille and per-ten-thousand signs that rescale a number wherever they stand in the reply: ASCII,
-   * fullwidth and small forms, and the Arabic signs (U+066A, U+0609, U+060A).
-   */
-  private val PercentSigns = "%\u2030\u2031\uFF05\uFE6A\u066A\u0609\u060A"
-
-  /** Words that, after `per`, name a rescaling: `per cent`, `per mille`, `per mil`, `per hundred`, `per thousand`. */
-  private val PerScales = Seq("cent", "mil", "hundred", "thousand")
-
-  /**
-   * Whether the reply names a percentage or per-mille scale anywhere, even apart from the number: a percent or
-   * per-mille sign (`1 %`, `1 ‰`) or a word such as `percent`, `percentage`, `percentile`, `pct`, `permille`,
-   * `per cent`, `per mille` or `per thousand` (`1 percent`, `1 per mille`). A number standing next to one of these
-   * is on another scale, so the reply is refused rather than read as that number.
-   */
-  private def namesPercentage(reply: String): Boolean =
-    reply.exists(isIn(PercentSigns, _)) || {
-      val words = reply.toLowerCase(java.util.Locale.ROOT).split("[^a-z]+").toList.filter(_.nonEmpty)
-      words.exists(w => w.startsWith("percent") || w.startsWith("permil") || w == "pct") ||
-      words.zip(words.drop(1)).exists { case (a, b) => a == "per" && PerScales.exists(b.startsWith) }
-    }
-
-  private def isIn(chars: String, c: Char): Boolean = chars.indexOf(c.toInt) >= 0
-
-  private def trimWrapping(token: String): String =
-    token.dropWhile(isIn(Wrapping, _)).reverse.dropWhile(c => isIn(Wrapping, c) || isIn(ClauseEnd, c)).reverse
-
-  /**
-   * The score a judge's reply holds, or `None` when the reply is not exactly one plain decimal number from 0 to 1.
+   * The whole grammar of a score reply, matched against the entire reply, case-insensitively:
+   *  - optional leading whitespace and wrapping (markdown emphasis, quotes, brackets, code-fence backticks);
+   *  - an optional label `score:`, itself optionally wrapped (`**Score:** 0.9`);
+   *  - one plain decimal: digits with an optional fraction, or a fraction alone; no sign, exponent, comma or
+   *    percent;
+   *  - optional trailing wrapping and whitespace.
    *
-   * Every whitespace-separated word with an ASCII digit in it counts as a number: there must be exactly one, and
-   * once its wrapping and trailing clause punctuation are trimmed it must be a plain decimal within 0 to 1. A value
-   * outside the range is refused, never clamped, and the range is checked before the decimal is rounded to a
-   * `Double`. A reply that names a percentage anywhere (`1 %`, `1 percent`) is
-   * refused too, as is one that names a per-mille scale (`1 per mille`), because the marker need not
-   * touch the number.
+   * Nothing else may appear, so a sign, unit, scale, denominator or explanation anywhere in the reply, however it
+   * is written, makes the reply unreadable rather than leaving a bare number behind to be read. The grammar lists
+   * what is accepted, not what is refused: there is no list of scale words or signs to keep complete.
    */
-  private[guardrails] def readScore(reply: String): Option[Double] =
-    reply.split("\\s+").toList.filter(hasDigit) match {
-      case word :: Nil if !namesPercentage(reply) =>
-        val number = trimWrapping(word)
-        if (PlainDecimal.matcher(number).matches()) inUnitRange(BigDecimal(number)) else None
-      case _ => None
-    }
+  private val ScoreReply = java.util.regex.Pattern.compile(
+    """(?i)\A[\s*_`"'(\[{]*(?:score\s*:[\s*_`"'(\[{]*)?([0-9]+(?:\.[0-9]+)?|\.[0-9]+)[\s*_`"')\]}]*\z"""
+  )
 
   /**
-   * The decimal as a score, range-checked at full precision before it becomes a `Double`, so `1.0000000000000001`
-   * is refused rather than rounded to 1.0. A value just below 1 that a `Double` would round up to 1.0
-   * (`0.99999999999999999`) reads as the largest `Double` below 1, never as a perfect score.
+   * The score a judge's reply holds, or `None` when the reply is not one plain decimal number from 0 to 1 (see the
+   * scoring notes on the trait). The value stays a decimal at full precision, so neither the range check here nor
+   * the threshold comparison in `validate` sees a rounded `Double`: `1.0000000000000001` is out of range, and
+   * `0.79999999999999999` is below a threshold of 0.8.
    */
-  private def inUnitRange(decimal: BigDecimal): Option[Double] =
-    if (decimal < 0 || decimal > 1) None
-    else {
-      val score = decimal.toDouble
-      Some(if (score == 1.0 && decimal < 1) Math.nextDown(1.0) else score)
-    }
+  private[guardrails] def readScore(reply: String): Option[BigDecimal] = {
+    val matcher = ScoreReply.matcher(reply)
+    if (matcher.matches()) Some(BigDecimal(matcher.group(1))).filter(d => d >= 0 && d <= 1) else None
+  }
+
+  /**
+   * Whether `score` reaches `threshold`. The threshold is read as the decimal it is written as (`0.8`, not the
+   * nearest binary fraction), so a reply of exactly `0.8` passes it. A NaN threshold passes nothing; an infinite
+   * one passes every score (negative) or none (positive).
+   */
+  private[guardrails] def reaches(score: BigDecimal, threshold: Double): Boolean =
+    if (threshold.isNaN) false
+    else if (threshold.isInfinite) threshold < 0
+    else score >= BigDecimal.decimal(threshold)
 
   /**
    * Builds a judge guardrail from a prompt, without defining a class.

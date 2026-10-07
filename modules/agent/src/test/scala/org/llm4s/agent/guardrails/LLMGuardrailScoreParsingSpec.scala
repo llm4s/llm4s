@@ -84,6 +84,14 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     "1 per mil",
     "1 per thousand",
     "1 per hundred",
+    // a scale named in words the parser has no list for: anything but the number and a score label is refused
+    "1 per ten thousand",
+    "1 basis point",
+    "100 basis points",
+    "100 bps",
+    "1 bp",
+    "1 out of 10",
+    "1 on a scale of 0 to 100",
     // out of range
     "1.5",
     "100",
@@ -93,6 +101,14 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     "1.00000000000000000000000000001",
     "-0.2",
     "-0.5",
+    // a sign apart from the number
+    "- 1",
+    "- 0.9",
+    "−1",
+    "− 1",
+    "negative 1",
+    "minus 1",
+    "-\n1",
     // not a plain decimal
     "NaN",
     "Infinity",
@@ -108,7 +124,14 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     "0.7 out of 1",
     "0.8-0.9",
     "gpt4 rates this 0.9",
-    "Score:0.9",
+    // prose around the number: the reply must be the number, optionally labelled `Score:`
+    "The score is 0.7",
+    "0.7, because it is fine",
+    "I would say 0.7",
+    "0.7 (high)",
+    "Score: 0.7 overall",
+    "Rating: 0.7",
+    "```text\n0.7\n```",
     // nothing to read
     "",
     "   ",
@@ -116,20 +139,24 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
   )
 
   private val accepted: Seq[(String, Double)] = Seq(
-    "0.9"                     -> 0.9,
-    "0.7"                     -> 0.7,
-    "  0.7  "                 -> 0.7,
-    "0.7\n"                   -> 0.7,
-    "Score: 0.7"              -> 0.7,
-    "**0.7**"                 -> 0.7,
-    "The score is 0.7"        -> 0.7,
-    "0.7, because it is fine" -> 0.7,
-    "```\n0.7\n```"           -> 0.7,
-    ".5"                      -> 0.5,
-    "0"                       -> 0.0,
-    "0.0"                     -> 0.0,
-    "1"                       -> 1.0,
-    "1.0"                     -> 1.0
+    "0.9"            -> 0.9,
+    "0.7"            -> 0.7,
+    "  0.7  "        -> 0.7,
+    "0.7\n"          -> 0.7,
+    "Score: 0.7"     -> 0.7,
+    "score: 0.7"     -> 0.7,
+    "Score:0.7"      -> 0.7,
+    "**Score:** 0.7" -> 0.7,
+    "**0.7**"        -> 0.7,
+    "`0.7`"          -> 0.7,
+    "\"0.7\""        -> 0.7,
+    "(0.7)"          -> 0.7,
+    "```\n0.7\n```"  -> 0.7,
+    ".5"             -> 0.5,
+    "0"              -> 0.0,
+    "0.0"            -> 0.0,
+    "1"              -> 1.0,
+    "1.0"            -> 1.0
   )
 
   behavior.of("LLMGuardrail score parsing")
@@ -154,6 +181,23 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
       case error: ValidationError => error.field shouldBe "output"
       case other                  => fail(s"expected a ValidationError, got $other")
     }
+  }
+
+  it should "compare a decimal with the threshold before rounding it to a Double" in {
+    // 0.79999999999999999 and 0.8 are the same Double, but only one of them reaches a threshold of 0.8.
+    judge("0.79999999999999999", threshold = 0.8).swap.toOption.get match {
+      case error: ValidationError => error.field shouldBe "output"
+      case other                  => fail(s"expected a ValidationError, got $other")
+    }
+    judge("0.8", threshold = 0.8) shouldBe Right("content")
+    judge("0.80000000000000001", threshold = 0.8) shouldBe Right("content")
+    judge("0.69999999999999999", threshold = 0.7).isLeft shouldBe true
+  }
+
+  it should "pass nothing at a NaN threshold and everything readable at a negative infinite one" in {
+    judge("1", threshold = Double.NaN).isLeft shouldBe true
+    judge("0", threshold = Double.NegativeInfinity) shouldBe Right("content")
+    judge("1", threshold = Double.PositiveInfinity).isLeft shouldBe true
   }
 
   accepted.foreach { case (reply, score) =>
