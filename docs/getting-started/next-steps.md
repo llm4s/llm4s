@@ -49,8 +49,8 @@ Choose your path based on what you want to build:
 **Start here:**
 1. [Agent Framework Guide](/examples/#agent-examples)
 2. [Single-Step Agent Example](/examples/#single-step)
-3. [Multi-Turn Conversations](/guide/multi-turn)
-4. [Tool Calling Guide](/guide/tool-calling)
+3. [Multi-Turn Conversations](/guide/agents/#multi-turn-conversations)
+4. [Tools in the Agents Guide](/guide/agents/#agent-with-tools)
 
 **Example project ideas:**
 - Customer support chatbot
@@ -71,10 +71,10 @@ Choose your path based on what you want to build:
 - Tool error handling
 
 **Start here:**
-1. [Tool Calling Guide](/guide/tool-calling)
-2. [Weather Tool Example](/examples/tools#weather)
-3. [MCP Integration](/guide/mcp)
-4. [Multi-Tool Example](/examples/tools#multi-tool)
+1. [Built-in Tools Guide](/guide/builtin-tools)
+2. [Weather Tool Example](/examples/#weather)
+3. [MCP Tool Example](/examples/#mcp-tool)
+4. [Multi-Tool Example](/examples/#multi-tool)
 
 **Example project ideas:**
 - Database query assistant
@@ -95,9 +95,9 @@ Choose your path based on what you want to build:
 - Streaming responses
 
 **Start here:**
-1. [Multi-Turn Conversations](/guide/multi-turn)
-2. [Context Management](/guide/context-management)
-3. [Streaming Guide](/guide/streaming)
+1. [Multi-Turn Conversations](/guide/agents/#multi-turn-conversations)
+2. [Context Window Pruning](/guide/context-window-pruning)
+3. [Streaming Events Guide](/guide/agents/streaming)
 4. [Long Conversation Example](/examples/#long-conversation)
 
 **Example project ideas:**
@@ -119,10 +119,10 @@ Choose your path based on what you want to build:
 - Retrieval-augmented generation
 
 **Start here:**
-1. [Embeddings Guide](/guide/embeddings)
-2. [RAG Patterns](/advanced/rag-patterns)
-3. [Embedding Example](/examples/embeddings)
-4. [Vector Search](/guide/embeddings#vector-search)
+1. [Vector Store Guide](/guide/vector-store)
+2. [RAG for Enterprise](/guide/patterns/rag-enterprise)
+3. [Embedding Example](/examples/#embedding-example)
+4. [Vector Search](/guide/vector-store#search)
 
 **Example project ideas:**
 - Documentation Q&A system
@@ -143,10 +143,10 @@ Choose your path based on what you want to build:
 - Security best practices
 
 **Start here:**
-1. [Production Readiness](/advanced/production)
+1. [Production Monitoring](/guide/patterns/production-monitoring)
 2. [Observability Guide](../guide/observability)
-3. [Error Handling](/advanced/error-handling)
-4. [Security Guide](/advanced/security)
+3. [Error Handling](/guide/error-handling)
+4. [Security Guide](/guide/patterns/security-best-practices)
 
 **Example project ideas:**
 - Scalable API service
@@ -181,7 +181,7 @@ val tool = ToolFunction(
 )
 ```
 
-[Learn more →](/guide/tool-calling)
+[Learn more →](/guide/builtin-tools)
 
 ---
 
@@ -192,7 +192,7 @@ Functional conversation management without mutation.
 val result2 = agent.continueConversation(result1, "Next question")
 ```
 
-[Learn more →](/guide/multi-turn)
+[Learn more →](/guide/agents/#multi-turn-conversations)
 
 ---
 
@@ -206,7 +206,7 @@ val config = ContextWindowConfig(
 )
 ```
 
-[Learn more →](/guide/context-management)
+[Learn more →](/guide/context-window-pruning)
 
 ---
 
@@ -218,7 +218,7 @@ val stream = client.completeStreaming(messages, None)
 stream.foreach(chunk => print(chunk.content))
 ```
 
-[Learn more →](/guide/streaming)
+[Learn more →](/guide/agents/streaming)
 
 ---
 
@@ -242,7 +242,7 @@ val embeddings = embeddingsClient.embed(documents)
 val results = search(query, embeddings)
 ```
 
-[Learn more →](/guide/embeddings)
+[Learn more →](/guide/vector-store)
 
 ---
 
@@ -253,7 +253,7 @@ Connect to external Model Context Protocol servers.
 val mcpTools = MCPClient.loadTools("mcp-server-name")
 ```
 
-[Learn more →](/guide/mcp)
+[Learn more →](/examples/#mcp-examples)
 
 ---
 
@@ -262,13 +262,13 @@ val mcpTools = MCPClient.loadTools("mcp-server-name")
 Browse **69 working examples** organized by category:
 
 ### Basic Examples (9)
-- [Basic LLM Calling](/examples/basic#basic-llm-calling)
-- [Streaming Responses](/examples/basic#streaming)
-- [Multi-Provider Setup](/examples/basic#multi-provider)
-- [Ollama (Local Models)](/examples/basic#ollama)
-- [Tracing Integration](/examples/basic#tracing)
+- [Basic LLM Calling](/examples/#basic-llm-calling)
+- [Streaming Responses](/examples/#streaming)
+- [Multi-Provider Setup](/guide/basic-usage#multi-provider-pattern)
+- [Ollama (Local Models)](/examples/#ollama)
+- [Tracing Integration](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/basic/BasicLLMCallingWithTrace.scala)
 
-[View all basic examples →](/examples/basic)
+[View all basic examples →](/examples/#basic-examples)
 
 ### Agent Examples (6)
 - [Single-Step Agent](/examples/#single-step)
@@ -276,32 +276,31 @@ Browse **69 working examples** organized by category:
 - [Multi-Turn Conversations](/examples/#multi-turn)
 - [Long Conversations](/examples/#long-conversation)
 - [Conversation Persistence](/examples/#persistence)
-- [MCP Agent](/examples/#mcp-agent)
+- [MCP Agent](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/MCPAgentExample.scala)
 
 [View all agent examples →](/examples/#agent-examples)
 
 ### Tool Examples (5)
-- [Weather Tool](/examples/tools#weather)
-- [LLM with Tools](/examples/tools#llm-weather)
-- [Multi-Tool Agent](/examples/tools#multi-tool)
-- [Error Handling](/examples/tools#error-handling)
-- [MCP Tools](/examples/tools#mcp)
+- [Weather Tool](/examples/#weather)
+- [Multi-Tool Agent](/examples/#multi-tool)
+- [Tool Error Messages](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/toolapi/ErrorMessageDemonstration.scala)
+- [MCP Tools](/examples/#mcp-tool)
 
-[View all tool examples →](/examples/tools)
+[View all tool examples →](/examples/#tool-examples)
 
 ### Context Management Examples (8)
-- [Context Pipeline](/examples/context#pipeline)
-- [Token Windows](/examples/context#token-window)
-- [History Digest](/examples/context#digest)
-- [Compression](/examples/context#compression)
-- [Tool Externalization](/examples/context#externalization)
+- [Context Pipeline](/examples/#context-pipeline)
+- [Token Windows](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/context/tokens/TokenWindowExample.scala)
+- [History Digest](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/context/HistoryDigestExample.scala)
+- [Compression](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/context/DeterministicCompressionExample.scala)
+- [Tool Externalization](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/context/ToolExternalizationExample.scala)
 
-[View all context examples →](/examples/context)
+[View all context examples →](/examples/#context-management)
 
 ### More Examples
-- [Embeddings](/examples/embeddings) (5 examples)
-- [MCP Integration](/examples/mcp) (3 examples)
-- [Streaming](/examples/streaming) (2 examples)
+- [Embeddings](/examples/#embeddings) (5 examples)
+- [MCP Integration](/examples/#mcp-examples) (3 examples)
+- [Streaming](/examples/#streaming-examples) (2 examples)
 
 [Browse all 46 examples →](/examples/)
 
@@ -475,23 +474,23 @@ val result = for {
 ### Week 1: Fundamentals
 1. ✅ Complete Getting Started (you are here!)
 2. Read [Basic Usage Guide](../guide/basic-usage)
-3. Try [Basic Examples](/examples/basic)
+3. Try [Basic Examples](/examples/#basic-examples)
 4. Experiment with different providers
 
 ### Week 2: Agents & Tools
 1. Read [Agent Framework](/examples/#agent-examples)
 2. Build a simple agent with one tool
-3. Try [Tool Examples](/examples/tools)
+3. Try [Tool Examples](/examples/#tool-examples)
 4. Add multiple tools
 
 ### Week 3: Advanced Patterns
-1. Implement [Multi-Turn Conversations](/guide/multi-turn)
-2. Add [Context Management](/guide/context-management)
+1. Implement [Multi-Turn Conversations](/guide/agents/#multi-turn-conversations)
+2. Add [Context Window Pruning](/guide/context-window-pruning)
 3. Set up [Observability](../guide/observability)
 4. Try [Long Conversation Example](/examples/#long-conversation)
 
 ### Week 4: Production
-1. Read [Production Guide](/advanced/production)
+1. Read [Production Monitoring](/guide/patterns/production-monitoring)
 2. Implement error handling
 3. Add monitoring and tracing
 4. Deploy your first production agent
@@ -502,14 +501,14 @@ val result = for {
 
 ### Documentation
 - [User Guide](../guide/basic-usage) - Feature guides
-- [API Reference](/api/llm-client) - API docs
-- [Advanced Topics](/advanced/production) - Production topics
+- [API Reference](/api/) - API docs
+- [Advanced Topics](/advanced/) - Production topics
 
 ### Examples
 - [All Examples](/examples/) - Browse 46 examples
-- [Basic](/examples/basic) - Getting started
+- [Basic](/examples/#basic-examples) - Getting started
 - [Agents](/examples/#agent-examples) - Agent patterns
-- [Tools](/examples/tools) - Tool integration
+- [Tools](/examples/#tool-examples) - Tool integration
 
 ### Reference
 - [Configuration](/getting-started/configuration) - Setup guide
@@ -554,17 +553,17 @@ Pick your learning path and start building:
 
   <div class="grid-item">
     <h3>🛠️ Add Tools</h3>
-    <a href="/guide/tool-calling">Tool Calling →</a>
+    <a href="/guide/builtin-tools">Tools →</a>
   </div>
 
   <div class="grid-item">
     <h3>💬 Chat Apps</h3>
-    <a href="/guide/multi-turn">Multi-Turn →</a>
+    <a href="/guide/agents/#multi-turn-conversations">Multi-Turn →</a>
   </div>
 
   <div class="grid-item">
     <h3>🔍 RAG Systems</h3>
-    <a href="/guide/embeddings">Embeddings →</a>
+    <a href="/guide/vector-store">Vector Store →</a>
   </div>
 </div>
 
