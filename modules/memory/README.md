@@ -76,8 +76,11 @@ val context = for {
 ```
 
 `SimpleMemoryManager.empty` keeps everything in an `InMemoryStore`. The in-memory store searches by
-keyword, so the query has to share a word with a memory: asking "What does the user prefer?" would
-have returned an empty context here, because none of its words appear in the stored text.
+keyword: it splits the query on whitespace and returns a memory whose text contains one of the resulting
+terms as a substring. Asking "What does the user prefer?" would have returned an empty context here,
+because its terms are `what`, `does`, `the`, `user` and `prefer?`, and the question mark stays attached to
+the last one, so `prefer?` is not found in "Prefers Scala over Java" (see
+[#1594](https://github.com/llm4s/llm4s/issues/1594)).
 
 ### Remembering across restarts
 
