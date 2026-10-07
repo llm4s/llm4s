@@ -98,6 +98,21 @@ class StructuredOutputGuideSpec extends AnyWordSpec with Matchers with EitherVal
       schema("properties")("amount")("type").str shouldBe "number"
     }
 
+    "not report a schema field the case class lacks, nor a case class field with a default (section 2)" in {
+      // The schema has "note", which the case class lacks; the case class has "currency", with a default,
+      // which the schema lacks. Neither mismatch is reported.
+      val reply = """{"vendor":"Acme","amount":1.0,"note":"dropped"}"""
+      val result = new SimpleMock(reply).completeStructured[InvoiceWithDefault](
+        Conversation(Seq(UserMessage("x"))),
+        Schema
+          .`object`[InvoiceWithDefault]("An invoice")
+          .withRequiredField("vendor", Schema.string("Vendor"))
+          .withRequiredField("amount", Schema.number("Amount"))
+          .withRequiredField("note", Schema.string("A note"))
+      )
+      result.value shouldBe InvoiceWithDefault("Acme", 1.0, "GBP")
+    }
+
     "return the typed value for a reply that is JSON matching the schema (section 1)" in {
       extractInvoice(new SimpleMock(invoiceJson), "Acme invoice").value shouldBe
         Invoice("Acme Supplies Ltd", 1250.0, "GBP")
@@ -224,6 +239,9 @@ object StructuredOutputGuideSpec {
 
   final case class Invoice(vendor: String, amount: Double, currency: String)
   object Invoice { implicit val rw: ReadWriter[Invoice] = macroRW }
+
+  final case class InvoiceWithDefault(vendor: String, amount: Double, currency: String = "GBP")
+  object InvoiceWithDefault { implicit val rw: ReadWriter[InvoiceWithDefault] = macroRW }
 
   val invoiceSchema =
     Schema

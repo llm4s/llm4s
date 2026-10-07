@@ -72,8 +72,11 @@ Two things describe `A`, and they have to agree:
 - **A uPickle reader**, an implicit `upickle.default.Reader[A]` (a `ReadWriter` from `macroRW` is the usual way).
   It is what turns the reply into `A`.
 
-Nothing checks that the two match. A schema that names a field the case class lacks, or the other way round,
-is only found when a reply fails to parse (section 7).
+Nothing checks that the two match, and some mismatches are never reported. A field the case class has but
+the schema lacks fails to parse when the reply omits it (section 7), unless the field has a default, which
+the reader fills in silently. A field the schema has but the case class lacks is worse: the provider returns
+it, the reader ignores it as an extra key, and the result is `Right(A)` with that value dropped. Keep the
+schema and the case class in step by hand, and test the pair on a sample reply.
 
 The schema is a closed object: `additionalProperties` is `false` unless you pass `true` to `ObjectSchema`.
 
