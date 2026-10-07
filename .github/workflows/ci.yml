@@ -241,6 +241,7 @@ jobs:
           voyage/test voyage/coverageReport
           bedrock/test bedrock/coverageReport
           jina/test jina/coverageReport
+          jev/test jev/coverageReport
           cohere/test cohere/coverageReport
           watsonx/test watsonx/coverageReport
           providerTestkit/test providerTestkit/coverageReport
@@ -422,6 +423,12 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/jina/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: jina
+      - name: Upload jev coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/jev/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: jev
       - name: Upload cohere coverage to Codecov
         uses: codecov/codecov-action@v7
         with:

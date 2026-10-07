@@ -50,6 +50,7 @@ Comprehensive guides for LLM4S features.
 
 - **[Image Generation](image-generation)** - Generate images with DALL-E and other providers
 - **[Speech](speech)** - Speech-to-text (STT) and text-to-speech (TTS)
+- **[Jev decision model](jev)** - Ask TypeSafe's Jev typed questions (Noul, Choice, Score) and get typed answers: a decision client, not a chat model
 
 ### Effect Systems
 

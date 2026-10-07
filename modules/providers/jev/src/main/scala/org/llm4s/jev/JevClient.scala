@@ -1,0 +1,127 @@
+package org.llm4s.jev
+
+import org.llm4s.error.ProcessingError
+import org.llm4s.http.{ HttpHeaders, Llm4sHttpClient }
+import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
+import pureconfig.ConfigSource
+
+/**
+ * A client for TypeSafe's Jev decision model (https://docs.typesafe.ai/api.md).
+ *
+ * Jev is not a chat model. It takes a `state` and named, typed [[JevQuestion]]s and answers each with a typed
+ * [[JevAnswer]]: the probability of a yes, the selected option with a distribution, a score along ordered levels.
+ * So this client is not an `LLMClient` and returns no `Completion`; it has no streaming and no conversation.
+ *
+ * {{{
+ * val decision = for
+ *   client   <- JevClient.fromConfig()
+ *   response <- client.evaluate(JevRequest("Charged twice; please refund", Map("urgent" -> JevQuestion.noul("Is this urgent?"))))
+ *   urgent   <- response.noul("urgent")
+ * yield urgent.probability
+ * }}}
+ *
+ * `evaluate` is blocking and returns every failure as a [[org.llm4s.types.Result]]: an invalid request is a
+ * `ValidationError` before anything is sent, a rejected key an `AuthenticationError`, a rate limit a `RateLimitError`
+ * carrying the delay the server asked for, an outage a `ServiceError`, a transport failure a `NetworkError` or
+ * `TimeoutError`, a response that does not match the API a `ProcessingError`, and an interrupt a `CancelledError`.
+ * Transient failures are retried as the config's [[JevRetryPolicy]] says. The API key is never printed, logged or
+ * put into an error.
+ *
+ * '''No idempotency key.''' TypeSafe's documentation describes no idempotency key or other de-duplication
+ * mechanism, so this client does not invent one: each attempt of a retried request is a new, billable call. A
+ * header the caller attaches with [[JevRequest#withHeader]] is sent unchanged on every attempt.
+ *
+ * The client is thread-safe. [[close]] releases the HTTP connections it owns.
+ */
+final class JevClient private (
+  config: JevConfig,
+  http: Llm4sHttpClient,
+  ownsHttp: Boolean,
+  retry: JevRetry
+) extends AutoCloseable {
+
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  /**
+   * Asks `request`'s questions about its state.
+   *
+   * @return the answers, or the error described on [[JevClient]]
+   */
+  def evaluate(request: JevRequest): Result[JevResponse] =
+    for {
+      _ <- request.validate
+      body    = ujson.write(request.toJson(config.model))
+      headers = requestHeaders(request)
+      _ = logger.debug(
+        "Jev evaluate: {} question(s), model {}",
+        request.questions.size,
+        request.model.getOrElse(config.model)
+      )
+      response <- retry.run(() => attempt(headers, body, request))
+    } yield response
+
+  private def requestHeaders(request: JevRequest): Map[String, String] =
+    config.headers ++ request.headers ++ Map(
+      "Authorization" -> s"Bearer ${config.apiKey}",
+      "Content-Type"  -> "application/json",
+      "Accept"        -> "application/json"
+    )
+
+  /** One HTTP attempt: sent, classified by status, parsed. */
+  private def attempt(headers: Map[String, String], body: String, request: JevRequest): Result[JevResponse] =
+    http.post(config.evaluateUrl, headers, body, config.timeout).flatMap { response =>
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        if (response.body.length > JevClient.MaxResponseChars)
+          Left(
+            ProcessingError("jev-response", s"Jev's response is larger than ${JevClient.MaxResponseChars} characters")
+          )
+        else
+          JevResponse
+            .parse(response.body, HttpHeaders.first(response.headers, JevClient.RequestIdHeader))
+            .flatMap(checkAnswers(_, request))
+      } else Left(JevErrors.fromResponse(response, config.apiKey))
+    }
+
+  /** Every question was answered: a response that skips one is not the API's. */
+  private def checkAnswers(response: JevResponse, request: JevRequest): Result[JevResponse] = {
+    val missing = request.questions.keySet.diff(response.answers.keySet)
+    if (missing.isEmpty) Right(response)
+    else
+      Left(
+        ProcessingError(
+          "jev-response",
+          s"Jev's response has no answer for question(s): ${missing.toSeq.sorted.mkString(", ")}"
+        )
+      )
+  }
+
+  /** Releases the HTTP connections this client owns; a client built over an HTTP client you passed leaves it open. */
+  override def close(): Unit = if (ownsHttp) http.close()
+}
+
+object JevClient {
+
+  /** The response header carrying the API's request id. */
+  private[jev] val RequestIdHeader: String = "x-typesafe-request-id"
+
+  /**
+   * The longest response body accepted. Answers are small (a few numbers per question), so this is generous; a body
+   * beyond it is refused before it is parsed. The shared HTTP client has already read the body by then.
+   */
+  private[jev] val MaxResponseChars: Int = 16 * 1024 * 1024
+
+  /** A client for `config`, which is validated first. */
+  def apply(config: JevConfig): Result[JevClient] =
+    config.validate.map(valid => new JevClient(valid, Llm4sHttpClient.create(), true, new JevRetry(valid.retry)))
+
+  /** A client for the config [[JevConfigLoader]] reads from `source`. */
+  def fromConfig(source: ConfigSource): Result[JevClient] = JevConfigLoader.load(source).flatMap(apply)
+
+  /** A client for the config [[JevConfigLoader]] reads from the current environment. */
+  def fromConfig(): Result[JevClient] = JevConfigLoader.default().flatMap(apply)
+
+  /** For tests: a client over `http` with the clock, sleep and random source of `retry`. */
+  private[jev] def withHttp(config: JevConfig, http: Llm4sHttpClient, retry: JevRetry): Result[JevClient] =
+    config.validate.map(valid => new JevClient(valid, http, false, retry))
+}

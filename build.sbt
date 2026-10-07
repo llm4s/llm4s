@@ -249,6 +249,7 @@ lazy val llm4s = (project in file("."))
     voyage,
     bedrock,
     jina,
+    jev,
     cohere,
     watsonx,
     providerTestkit,
@@ -895,6 +896,30 @@ lazy val jina = (project in file("modules/providers/jina"))
     )
   )
 
+// Jev (TypeSafe's System One decision model, #1265): a typed decision client, not a chat or embedding
+// provider. It has no `ProviderDescriptor`, implements neither `LLMClient` nor `EmbeddingProvider`, and
+// returns no `Completion`: Jev takes a state and typed questions (Noul, Choice, Score) and answers each
+// with a probability, a selection or a score. Beta, like the other community modules. No dependency
+// beyond core.
+
+lazy val jev = (project in file("modules/providers/jev"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-jev",
+    commonSettings,
+    // Measured 98.09% statement coverage (`sbt coverage jev/test jev/coverageReport`). Floor is the
+    // measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // Cohere embeddings: an embedding provider only, as an `EmbeddingProviderDescriptor` with a typed
 // `CohereInputType` setting. Cohere's native `/v2/embed` is not OpenAI-compatible (`texts`,
 // `input_type`, `embedding_types`, vectors keyed by type), so it is a module of its own and not a
@@ -1125,6 +1150,7 @@ lazy val samples = (project in file("modules//samples"))
     voyage,
     bedrock,
     jina,
+    jev,
     cohere,
     watsonx,
     knowledgegraphNeo4j,
@@ -1371,6 +1397,7 @@ lazy val it = (project in file("modules/it"))
     voyage,
     bedrock,
     jina,
+    jev,
     cohere,
     watsonx,
     knowledgegraphNeo4j,
@@ -1449,6 +1476,7 @@ lazy val docs = (project in file("modules/docs"))
     voyage,
     bedrock,
     jina,
+    jev,
     cohere,
     watsonx,
     providerTestkit,
@@ -1491,6 +1519,7 @@ lazy val docs = (project in file("modules/docs"))
         (voyage / Compile / sources).value ++
         (bedrock / Compile / sources).value ++
         (jina / Compile / sources).value ++
+        (jev / Compile / sources).value ++
         (cohere / Compile / sources).value ++
         (watsonx / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
