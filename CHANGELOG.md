@@ -1769,6 +1769,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   admitted `/srv/agent-data-secret`, and `developmentSafe(workingDirectory)` could read and write a sibling
   directory whose name began with the working directory's. Both now use `Path.startsWith` on normalised absolute
   paths; blocked paths are matched the same way (`/var` no longer blocks `/variable`).
+- **`llm4s-knowledgegraph`: `GraphJsonParser` returns a `Left` for a reply that is not a JSON object**
+  ([#1527](https://github.com/llm4s/llm4s/issues/1527)): the parser read `json.obj` outside the `Try` that guards the
+  parse, so a model reply whose top-level value was an array, a string, a number, `true`, `false` or `null` threw
+  `ujson.Value$InvalidData` out of `KnowledgeGraphGenerator` and `SchemaGuidedExtractor` instead of failing with a
+  `ProcessingError`. Such a reply is now a `ProcessingError` under the caller's error code. The message for a document
+  that lacks `nodes` or `edges` now reads "JSON must be an object containing 'nodes' and 'edges' fields"
+  (it named the fields without saying the document must be an object).
 - **`llm4s-agent-tools`: `list_directory` honours `followSymlinks = false`**
   ([#1296](https://github.com/llm4s/llm4s/issues/1296)): it checked the requested path with a link-following
   `Files.isDirectory`, so a directory symbolic link inside an allowed path listed the directory it pointed to.

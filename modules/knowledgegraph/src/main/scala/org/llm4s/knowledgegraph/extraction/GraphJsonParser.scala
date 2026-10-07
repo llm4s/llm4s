@@ -46,9 +46,11 @@ private[extraction] object GraphJsonParser {
     }
 
     parsedJsonResult.flatMap { json =>
-      // Ensure the JSON contains required top-level fields
-      if (!json.obj.contains("nodes") || !json.obj.contains("edges")) {
-        Left(ProcessingError(errorCode, "JSON must contain 'nodes' and 'edges' fields"))
+      // Ensure the JSON is an object with the required top-level fields. A model can answer with
+      // any JSON value, and `json.obj` throws for all but an object, which the parse's `Try` does
+      // not cover, so read it as an `Option`.
+      if (!json.objOpt.exists(fields => fields.contains("nodes") && fields.contains("edges"))) {
+        Left(ProcessingError(errorCode, "JSON must be an object containing 'nodes' and 'edges' fields"))
       } else {
         // Guard the field extraction/construction so we return a ProcessingError
         // instead of throwing exceptions for malformed or missing fields.

@@ -235,13 +235,47 @@ class GraphJsonParserSpec extends AnyFunSuite with Matchers {
   // A top-level value that is not an object
   // ---------------------------------------------------------------------------
 
-  // `json.obj` is read outside the parser's `Try`, so these throw instead of returning a `Left`.
-  // `pendingUntilFixed` records that: each test starts failing the day the parser returns a
-  // `Left`, which is the cue to promote it to a plain `test`.
-  List("array" -> "[]", "string" -> "\"nodes\"", "number" -> "42", "null" -> "null").foreach { case (name, input) =>
-    test(s"a top-level $name is a ProcessingError") {
-      pendingUntilFixed {
-        processingError(input).operation shouldBe ErrorCode
+  // A model can answer with any JSON value. Only an object can hold a graph, so every other
+  // top-level value is a `ProcessingError` under the caller's error code, never an exception.
+  List(
+    "array"            -> "[]",
+    "array of objects" -> """[{"nodes": [], "edges": []}]""",
+    "string"           -> "\"nodes\"",
+    "number"           -> "42",
+    "null"             -> "null",
+    "true"             -> "true",
+    "false"            -> "false",
+    "fenced array"     -> "```json\n[]\n```",
+    "fenced string"    -> "```\n\"edges\"\n```"
+  ).foreach { case (name, input) =>
+    test(s"a top-level $name is a ProcessingError that names the required fields") {
+      val error = processingError(input)
+
+      error.operation shouldBe ErrorCode
+      error.message should include("nodes")
+      error.message should include("edges")
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // JSON null where the parser expects a value
+  // ---------------------------------------------------------------------------
+
+  test("JSON null for nodes, edges, a node, an edge, an id or properties fails extraction") {
+    val inputs = List(
+      "nodes null"      -> """{"nodes": null, "edges": []}""",
+      "edges null"      -> """{"nodes": [], "edges": null}""",
+      "node null"       -> """{"nodes": [null], "edges": []}""",
+      "edge null"       -> """{"nodes": [], "edges": [null]}""",
+      "id null"         -> """{"nodes": [{"id": null, "label": "X"}], "edges": []}""",
+      "properties null" -> """{"nodes": [{"id": "a", "label": "X", "properties": null}], "edges": []}"""
+    )
+
+    inputs.foreach { case (name, input) =>
+      withClue(name) {
+        val error = processingError(input)
+        error.operation shouldBe ErrorCode
+        error.message should include("Failed to extract graph structure")
       }
     }
   }
