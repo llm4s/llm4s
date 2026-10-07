@@ -270,6 +270,19 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       seen().map(describe) shouldBe List("miss: low_similarity", "miss: ttl_expired")
     }
 
+    "keep an entry exactly the TTL old, and expire it a nanosecond later" in {
+      val (client, llm, _, seen, clock) = fixture()
+      val start                         = clock.now
+      client.complete(conversation("hello"))
+      clock.now = start.plusSeconds(1.hour.toSeconds)
+      client.complete(conversation("hello"))
+      llm.calls.get shouldBe 1
+      clock.now = start.plusSeconds(1.hour.toSeconds).plusNanos(1)
+      client.complete(conversation("hello"))
+      llm.calls.get shouldBe 2
+      seen().map(describe).last shouldBe "miss: ttl_expired"
+    }
+
     "bypass the cache for streaming, and not fill it" in {
       val (client, llm, _, seen, _) = fixture()
       client.streamComplete(conversation("hello"), CompletionOptions(), _ => ()).isRight shouldBe true

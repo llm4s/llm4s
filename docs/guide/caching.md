@@ -26,7 +26,7 @@ Both caches live in `llm4s-core`, package `org.llm4s.llmconnect.caching`. Both k
 | | Embedding cache | Completion (semantic) cache |
 |---|---|---|
 | Class | `CachedEmbeddingClient` with an `EmbeddingCache`, by default `InMemoryEmbeddingCache` | `CachingLLMClient`, which wraps any `LLMClient` |
-| A hit needs | the same text, the same model name and the same `InputPurpose` (document or query) | an embedding at least `similarityThreshold` similar, the same `CompletionOptions`, and an entry younger than the TTL |
+| A hit needs | the same text, the same model name and the same `InputPurpose` (document or query) | an embedding at least `similarityThreshold` similar, the same `CompletionOptions`, and an entry no older than the TTL |
 | Configured with | `InMemoryEmbeddingCache(maxSize = 10000, ttl = None)` | `CacheConfig.create(similarityThreshold, ttl, maxSize = 1000)` |
 | Eviction | least recently used, plus the optional TTL | least recently used, plus the TTL |
 | Seeing what happened | `cacheStats` | `TraceEvent.CacheHit` and `TraceEvent.CacheMiss` sent to your `Tracing` |
@@ -96,7 +96,7 @@ The wrapper:
 
 ### What the key contains
 
-The key function is given the text and a *model scope*: the model name for a document, and the model name followed by `#query` for a query. Some providers (Voyage, Jina and Cohere among them) embed a query and a document with the same text differently, so the purpose has to be part of the key, and a key function of your own receives it in the scope too. Keeping the plain model name for documents means vectors cached before the purpose existed are still found.
+The key function is given the text and a *model scope*: the model name for a document, and the model name followed by `#query` for a query. Some providers (Voyage, Jina and Cohere among them) embed a query and a document with the same text differently, so the purpose has to be part of the key, and a key function of your own receives it in the scope too. Keeping the plain model name for documents means vectors cached before the purpose existed are still found. The suffix is not escaped, so documents for a model literally named `m#query` share a scope with queries for model `m`; if a cache is ever shared by two such models, give it a key function that keeps the purpose apart.
 
 The default key is the SHA-256 of the text and that scope joined with a colon, as 64 hex characters. Two things follow from that:
 
@@ -231,7 +231,7 @@ Do not use `1.0` to mean "exact match". Similarity is computed in floating point
 
 ### TTL, size and memory
 
-- An entry older than `ttl` is skipped, but it is **not removed**. It stays in memory until the least-recently-used rule evicts it, so `maxSize`, not `ttl`, is what bounds memory.
+- An entry older than `ttl` is skipped (one exactly `ttl` old is still used, as in the embedding cache), but it is **not removed**. It stays in memory until the least-recently-used rule evicts it, so `maxSize`, not `ttl`, is what bounds memory.
 - The lookup compares the new embedding with every stored entry, so its cost grows with `maxSize`. Keep it modest.
 - Use the `clock` constructor parameter to control time in tests. It is only consulted for the TTL:
 
