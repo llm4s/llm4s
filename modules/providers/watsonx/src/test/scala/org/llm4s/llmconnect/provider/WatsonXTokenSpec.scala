@@ -21,7 +21,7 @@ class WatsonXTokenSpec extends AnyFunSuite with Matchers:
   private def iamCount(http: StubHttp): Int = http.iamRequests.size
 
   private def okStub(iamBody: HttpResponse = iamToken()): StubHttp =
-    routed(_ => Right(iamBody), _ => Right(generation))
+    routed(_ => Right(iamBody), _ => Right(chatReply))
 
   test("token refresh boundary: reused strictly more than 300s before expiry, exchanged again at 300s and inside") {
     val table = Seq(
@@ -81,7 +81,7 @@ class WatsonXTokenSpec extends AnyFunSuite with Matchers:
     val calls = new AtomicInteger(0)
     val http = routed(
       _ => if calls.getAndIncrement() == 0 then Right(HttpResponse(503, "busy")) else Right(iamToken()),
-      _ => Right(generation)
+      _ => Right(chatReply)
     )
     val c = new WatsonXClient(config, httpClient = http)
     c.complete(hi, CompletionOptions()).left.toOption.exists(_.isInstanceOf[AuthenticationError]) shouldBe true
@@ -96,7 +96,7 @@ class WatsonXTokenSpec extends AnyFunSuite with Matchers:
       _ =>
         if calls.getAndIncrement() == 0 then Left(NetworkError("down", None, "https://iam.example.com"))
         else Right(iamToken()),
-      _ => Right(generation)
+      _ => Right(chatReply)
     )
     val c = new WatsonXClient(config, httpClient = http)
     c.bearerToken().isLeft shouldBe true
@@ -107,7 +107,7 @@ class WatsonXTokenSpec extends AnyFunSuite with Matchers:
     val calls = new AtomicInteger(0)
     val http = routed(
       _ => if calls.getAndIncrement() == 0 then Right(iamToken()) else Right(HttpResponse(500, "boom")),
-      _ => Right(generation)
+      _ => Right(chatReply)
     )
     var now = 0L
     val c   = new WatsonXClient(config, httpClient = http, nowSeconds = () => now)
