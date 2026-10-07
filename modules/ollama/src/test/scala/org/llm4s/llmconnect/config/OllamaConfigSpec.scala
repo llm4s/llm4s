@@ -116,6 +116,21 @@ class OllamaConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
   test("OllamaConfig.withModel changes only the model") {
     val renamed = described.withModel("some-other-model")
-    renamed shouldBe described.copy(model = "some-other-model")
+    renamed shouldBe OllamaConfig("some-other-model", "http://localhost:11434", 8192, 4096)
+  }
+
+  // ---- growth-prone construction (#1388) ----
+
+  test("OllamaConfig(model, baseUrl) takes the context window from the model name") {
+    OllamaConfig("llama3", "http://localhost:11434") shouldBe described
+    OllamaConfig("codellama", "http://localhost:11434").contextWindow shouldBe 16384
+  }
+
+  test("OllamaConfig's setters each change one field") {
+    val adjusted = described
+      .withBaseUrl("http://ollama:11434")
+      .withContextWindow(32768)
+      .withReserveCompletion(2048)
+    adjusted shouldBe OllamaConfig("llama3", "http://ollama:11434", 32768, 2048)
   }
 }

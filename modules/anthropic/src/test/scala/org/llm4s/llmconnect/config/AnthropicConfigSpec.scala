@@ -139,4 +139,23 @@ class AnthropicConfigSpec extends AnyFunSuite with Matchers with EitherValues {
     renamed.reserveCompletion shouldBe anthropic.reserveCompletion
     renamed.asInstanceOf[AnthropicConfig].apiKey shouldBe anthropic.apiKey
   }
+
+  // ---- growth-prone construction (#1388) ----
+
+  test("AnthropicConfig(apiKey, model) defaults the base URL and takes the context window from the model name") {
+    val config = AnthropicConfig("k", "claude-sonnet-4-5")
+
+    config shouldBe AnthropicConfig("k", "claude-sonnet-4-5", AnthropicConfig.DEFAULT_BASE_URL, 200000, 4096)
+    AnthropicConfig("k", "claude-instant-1").contextWindow shouldBe 100000
+  }
+
+  test("AnthropicConfig's setters each change one field") {
+    val adjusted = anthropic
+      .withApiKey("k2")
+      .withBaseUrl("https://proxy.example.com")
+      .withContextWindow(100000)
+      .withReserveCompletion(2048)
+
+    adjusted shouldBe AnthropicConfig("k2", "claude-sonnet-4-5", "https://proxy.example.com", 100000, 2048)
+  }
 }

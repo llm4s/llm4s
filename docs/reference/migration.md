@@ -231,6 +231,22 @@ shims. Design: `docs/design/typed-agent-runtime-design.md` §4.6.
   `RunStarted` is now a case class, and it, `RunRecovered` and `RunResumed` gain `tenantId` and
   `principal`; events in the old encoding still read.
 
+## Provider configs: build with `apply`, change with `with*`
+
+Not in a release yet ([#1388](https://github.com/llm4s/llm4s/issues/1388)). `OpenAIConfig`,
+`AnthropicConfig` and `OllamaConfig` follow the growth-prone pattern (pass 5 below), so a new field
+no longer breaks Java and Kotlin callers. The constructor and `copy` are private:
+
+- **Scala**: `OpenAIConfig(...)` with the full field list, positional or named, still compiles.
+  Replace `config.copy(baseUrl = url)` with `config.withBaseUrl(url)`; each field has a setter
+  (`withApiKey`, `withModel`, `withOrganization`, `withContextWindow`, ...), and `OpenAIConfig`'s
+  `Option` fields take the value or an `Option`.
+- **Java and Kotlin**: call the companion's short `apply` and chain setters instead of the
+  constructor - `OpenAIConfig.apply(apiKey, "gpt-4o").withOrganization("org-1")`,
+  `AnthropicConfig.apply(apiKey, model)`, `OllamaConfig.apply(model, baseUrl)`. It takes the default
+  base URL and a context window from the model name; `fromValues` still consults the bundled model
+  catalogue.
+
 ## Image generation errors are `LLMError`s
 
 Not in a release yet ([#1331](https://github.com/llm4s/llm4s/issues/1331)). `llm4s-image`'s

@@ -80,7 +80,7 @@ class OllamaClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = createTestConfig.copy(model = "mistral")
+    val config = createTestConfig.withModel("mistral")
     val client = new OllamaClient(config)
 
     client.close()
