@@ -343,7 +343,7 @@ class OpenAIClient private[provider] (
   }
 
   /**
-   * The tool-call deltas in one streamed chunk, each paired with its raw argument fragment.
+   * The tool-call deltas in one streamed chunk.
    *
    * A streamed tool call is split across deltas: the first carries its `id`, `name` and the
    * start of its arguments; each continuation carries only its `index` and the next fragment,
@@ -351,11 +351,16 @@ class OpenAIClient private[provider] (
    * [[OpenAICompatibleClient.StreamToolCalls]], so every chunk names its call. (On the Azure
    * SDK they were keyed by `id`, which a continuation does not carry, and their arguments were
    * lost.)
+   *
+   * Each call's arguments are its fragment verbatim, as a string (an empty fragment is the
+   * empty-object sentinel), for the accumulator and `onChunk` alike: fragments are concatenated
+   * to rebuild the arguments, and one that is itself valid JSON, such as `":"` or `"Paris"`,
+   * would lose its quotes if parsed.
    */
   private def streamingToolCalls(
     delta: ChatCompletionChunk.Choice.Delta,
     state: StreamToolCalls
-  ): Seq[(ToolCall, String)] =
+  ): Seq[ToolCall] =
     known(delta._toolCalls()).map(_.asScala.toSeq).getOrElse(Seq.empty).zipWithIndex.map { (call, position) =>
       val function = known(call._function())
       val raw      = function.flatMap(f => known(f._arguments())).getOrElse("")
@@ -364,37 +369,30 @@ class OpenAIClient private[provider] (
         id = known(call._id()).filter(_.nonEmpty),
         name = function.flatMap(f => known(f._name())).filter(_.nonEmpty)
       )
-      (ToolCall(id, name, StreamingToolArgumentParser.parse(raw)), raw)
+      ToolCall(id, name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
     }
 
   /**
    * Emits streaming chunks for content and tool calls: one per tool call, the first also
-   * carrying the text and finish reason.
-   *
-   * The accumulator gets each argument fragment verbatim, because it concatenates them; the
-   * parsed form handed to `onChunk` cannot be concatenated safely (a fragment that is itself
-   * valid JSON, such as `"Paris"`, parses to the bare string and would lose its quotes).
+   * carrying the text and finish reason. The accumulator and `onChunk` get the same chunks.
    */
   private def emitStreamingChunks(
     chunkId: String,
     contentOpt: Option[String],
-    toolCalls: Seq[(ToolCall, String)],
+    toolCalls: Seq[ToolCall],
     finishReason: Option[String],
     accumulator: StreamingAccumulator,
     onChunk: StreamedChunk => Unit
   ): Unit = {
-    def emit(chunk: StreamedChunk, raw: String): Unit = {
-      accumulator.addChunk(chunk.withToolCall(chunk.toolCall.map(_.copy(arguments = ujson.Str(raw)))))
+    def emit(chunk: StreamedChunk): Unit = {
+      accumulator.addChunk(chunk)
       onChunk(chunk)
     }
 
-    emit(
-      StreamedChunk(id = chunkId, content = contentOpt, toolCall = toolCalls.headOption.map(_._1), finishReason),
-      toolCalls.headOption.fold("")(_._2)
-    )
-    toolCalls.drop(1).foreach { (tc, raw) =>
-      emit(StreamedChunk(id = chunkId, content = None, toolCall = Some(tc), finishReason = None), raw)
-    }
+    emit(StreamedChunk(id = chunkId, content = contentOpt, toolCall = toolCalls.headOption, finishReason))
+    toolCalls
+      .drop(1)
+      .foreach(tc => emit(StreamedChunk(id = chunkId, content = None, toolCall = Some(tc), finishReason = None)))
   }
 
   /**

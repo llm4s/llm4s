@@ -292,6 +292,22 @@ class SmokeContractOfflineSpec
     SmokeChecks.run(Capability.StreamedToolCalling, client) shouldBe Outcome.Held
   }
 
+  it should "fail a streamed tool call whose chunks do not reassemble, even when the completion is right" in {
+    // A client that builds the right completion but hands `onChunk` fragments a consumer cannot put back together
+    // (here, `":"` parsed to the bare string `:`).
+    val client = stub(onStream = (_, _, onChunk) => {
+      Seq[ujson.Value](ujson.Str("{\"topic"), ujson.Str(":"), ujson.Str("\"vault\"}")).foreach { fragment =>
+        onChunk(
+          StreamedChunk(id = "s", content = None, toolCall = Some(ToolCall("call_1", "get_secret_code", fragment)))
+        )
+      }
+      Right(completion("", List(ToolCall("call_1", "get_secret_code", vaultCall))))
+    })
+    failedMessage(SmokeChecks.run(Capability.StreamedToolCalling, client)).value should (
+      startWith("[streamed tool call]").and(include("reassembled from the streamed chunks"))
+    )
+  }
+
   it should "fail a tool call that names the wrong tool, has an empty id, or has arguments that do not fit" in {
     def toolClient(call: ToolCall): LLMClient = stub(onComplete = (_, _) => Right(completion("", List(call))))
     failedMessage(

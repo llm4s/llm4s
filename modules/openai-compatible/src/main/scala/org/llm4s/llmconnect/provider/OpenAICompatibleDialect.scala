@@ -125,8 +125,8 @@ trait OpenAICompatibleDialect:
    *
    * Standard: [[OpenAICompatibleDialect.lenientToolCalls]], which fills in
    * missing fields and turns unparseable arguments into `{}`. Streamed tool
-   * calls always go through `StreamingToolArgumentParser`, which keeps
-   * unparseable arguments as a raw string.
+   * calls do not come here: their argument fragments are passed on verbatim
+   * and reassembled by the stream's accumulator.
    */
   def parseToolCalls(toolCalls: ujson.Value): Seq[ToolCall] = OpenAICompatibleDialect.lenientToolCalls(toolCalls)
 

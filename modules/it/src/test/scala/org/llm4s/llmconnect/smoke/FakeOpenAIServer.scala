@@ -158,8 +158,11 @@ final class FakeOpenAIServer(initial: FakeBehaviour = FakeBehaviour()) extends A
     if (behaviour.toolArgumentsValid) """{"topic":"vault"}""" else """{"topic":"""
 
   private def streamedToolCall(name: String, behaviour: FakeBehaviour): Seq[ujson.Value] = {
-    val arguments = toolArguments(behaviour)
-    val pieces    = arguments.grouped(4).toSeq
+    // Split where OpenAI splits, so that some pieces (`":"`) are valid JSON on their own and would lose their
+    // quotes if a client parsed each piece before handing it on.
+    val pieces =
+      if (behaviour.toolArgumentsValid) Seq("{\"", "topic", "\":\"", "vault", "\"}")
+      else toolArguments(behaviour).grouped(4).toSeq
     val first = chunkJson(
       ujson.Obj(
         "role" -> "assistant",

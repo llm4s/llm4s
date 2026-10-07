@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.smoke
 
 import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.llmconnect.model.{
   AssistantMessage,
   Completion,
@@ -258,7 +259,10 @@ object SmokeChecks {
   /**
    * A streamed tool call: the arguments arrive split across deltas and must reassemble into JSON that fits the
    * tool, with every tool-call chunk carrying its call's id (a chunk with none is dropped by the accumulator).
-   * Whether a provider splits the arguments at all is its choice; this checks the result of reassembling them.
+   * Whether a provider splits the arguments at all is its choice; this checks the result of reassembling them,
+   * both in the returned completion and from the chunks `onChunk` received - reassembled by a fresh
+   * `StreamingAccumulator`, as a consumer of the callback would - so a client that builds a correct completion
+   * but hands the callback unusable fragments fails too.
    */
   def streamedToolCalling(client: LLMClient): Outcome =
     outcome(
@@ -281,8 +285,20 @@ object SmokeChecks {
           (),
           s"${idless.size} streamed tool-call chunk(s) arrived without their call's id and would be dropped"
         )
+        reassembled <- fromChunks(chunks.toSeq)
+        _ <- calledTool(tool, reassembled).left.map(detail => s"reassembled from the streamed chunks, $detail")
       } yield ()
     )
+
+  /** The completion a consumer of `onChunk` would rebuild from `chunks`. */
+  private def fromChunks(chunks: Seq[StreamedChunk]): Either[String, Completion] = {
+    val accumulator = StreamingAccumulator.create()
+    chunks.foreach(accumulator.addChunk)
+    accumulator.toCompletion
+      .map(c => c.withToolCalls(c.message.toolCalls.toList))
+      .left
+      .map(e => s"the streamed chunks did not reassemble: ${e.message}")
+  }
 
   /** A JSON-schema `responseFormat` yields JSON that parses and matches the schema, with the values asked for. */
   def structuredOutput(client: LLMClient): Outcome = {
