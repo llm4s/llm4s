@@ -341,6 +341,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case is still a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`;
   new `GraphError` and `RunEvent` cases break exhaustive matches. Design:
   `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
+- **CI re-runs a step that failed on a transient download error, and nothing else**:
+  `scripts/retry-on-transient-network.sh` wraps the `Check formatting` step (`scalafmt` fetches scalafmt-core at
+  run time) and the MiMa step. It re-runs the command at most twice (`RETRY_MAX`, capped at 5; waits of 15 s and
+  30 s, `RETRY_BACKOFF_SECONDS`, capped at 120 s), and only when an `[error]` line carries a network marker
+  (`failed to download [`, `Connection reset`, `Read timed out`, `UnknownHostException`, ...). A formatting error,
+  a failing test, a compile error, a missing dependency or a marker on any other line is never retried, and the
+  last attempt's own exit status is the step's, so the wrapper cannot turn a failure into a pass. Over three days
+  (300 runs) 2 of 267 `Quick Checks` runs failed this way, both with a warm 450 MB sbt cache restored, plus one MiMa
+  run; each needed a manual re-run. `scripts/test-retry-on-transient-network.sh`, run in `quick-checks`, covers the
+  retry bounds and every case that must not be retried against a fake command, with no network.
 - **CI verifies the documented support matrix** ([#967](https://github.com/llm4s/llm4s/issues/967)):
   `scripts/check-doc-support.sh`, in the `quick-checks` job, fails when the docs say something the build does not
   do. The build's side comes from sbt itself: a new `dumpBuildModel <file>` command (`project/BuildModel.scala`)
