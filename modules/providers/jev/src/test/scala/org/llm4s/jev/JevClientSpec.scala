@@ -328,6 +328,18 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
     }
   }
 
+  it should "cap each attempt's timeout at what is left of the retry budget" in {
+    LocalProviderTestServer.withServer("/")(LocalProviderTestServer.holdOpen) { url =>
+      // a 30 s per-attempt timeout, but only 400 ms of budget: the retry budget bounds the call, not the timeout
+      val policy = JevRetryPolicy.default.withBudget(400.millis).withBackoffInitial(Duration.Zero)
+      val rig    = new Rig(url, policy, _.withTimeout(30.seconds))
+
+      val started = System.nanoTime()
+      rig.client.evaluate(request).left.value shouldBe a[TimeoutError]
+      FiniteDuration(System.nanoTime() - started, NANOSECONDS) should be < 5.seconds
+    }
+  }
+
   it should "end with a CancelledError, promptly, when the calling thread is interrupted" in {
     val arrived = new CountDownLatch(1)
     LocalProviderTestServer.withServer("/") { exchange =>

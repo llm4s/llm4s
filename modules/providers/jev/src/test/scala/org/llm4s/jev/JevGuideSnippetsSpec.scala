@@ -90,7 +90,9 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "load a client from configuration" in {
-    val client = JevClient.fromConfig(pureconfig.ConfigSource.string("llm4s.jev.apiKey = tsk-..."))
+    val client = org.llm4s.config.JevConfigLoader
+      .load(pureconfig.ConfigSource.string("llm4s.jev.apiKey = tsk-..."))
+      .flatMap(JevClient(_))
 
     client.isRight shouldBe true
   }

@@ -26,7 +26,7 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
 
     /** Runs an operation that returns `outcomes` in turn, the last one repeating. */
     def run(outcomes: Result[String]*): Result[String] =
-      retry.run { () =>
+      retry.run { _ =>
         val outcome = outcomes(math.min(calls, outcomes.size - 1))
         calls += 1
         outcome
@@ -154,7 +154,7 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
   it should "count the time an attempt itself took against the budget" in {
     def callsWhenEachAttemptTakes(took: FiniteDuration): Int = {
       val h = new Harness(JevRetryPolicy.default.withBudget(5.seconds).withMaxRetries(1))
-      h.retry.run { () =>
+      h.retry.run { _ =>
         h.calls += 1; h.now += took.toNanos; unavailable
       }
       h.calls
@@ -162,6 +162,33 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
 
     callsWhenEachAttemptTakes(1.second) shouldBe 2    // 1 s spent plus the 0.5 s wait fits in 5 s
     callsWhenEachAttemptTakes(4800.millis) shouldBe 1 // 4.8 s spent plus the 0.5 s wait does not
+  }
+
+  it should "hand each attempt what is left of the budget, so a retry cannot overrun it" in {
+    val h      = new Harness(JevRetryPolicy.default) // 30 s budget, 0.5 s first wait
+    val handed = ArrayBuffer.empty[FiniteDuration]
+
+    h.retry.run { left =>
+      handed += left; h.calls += 1; h.now += 20.seconds.toNanos; unavailable
+    }
+
+    // the first attempt gets the whole budget; it took 20 s, then 0.5 s was waited: 9.5 s is left for the second,
+    // which also takes "20 s", leaving nothing for the 1 s wait before a third
+    handed.toSeq shouldBe Seq(30.seconds, 9500.millis)
+    h.calls shouldBe 2
+  }
+
+  it should "not start an attempt when the wait itself used up the budget" in {
+    val policy = JevRetryPolicy.default.withBudget(10.seconds)
+    var now    = 0L
+    var calls  = 0
+    // a wait that overruns (an OS that slept longer than asked) leaves nothing for the next attempt
+    val retry = new JevRetry(policy, nanoTime = () => now, sleep = _ => now += 11.seconds.toNanos, random = () => 0.0)
+
+    retry.run { _ =>
+      calls += 1; unavailable
+    } shouldBe unavailable
+    calls shouldBe 1
   }
 
   // ---- what is retried: LLM4S's one rule ----
@@ -220,7 +247,7 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
   it should "turn an interrupt thrown by the operation into a CancelledError" in {
     val h = new Harness(JevRetryPolicy.default)
 
-    val outcome = h.retry.run[String](() => throw new InterruptedException("stop"))
+    val outcome = h.retry.run[String](_ => throw new InterruptedException("stop"))
 
     outcome.left.toOption.get shouldBe a[CancelledError]
     h.slept shouldBe empty
@@ -236,7 +263,7 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
     )
     var calls = 0
 
-    val outcome = retry.run { () =>
+    val outcome = retry.run { _ =>
       calls += 1; unavailable
     }
 

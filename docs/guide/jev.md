@@ -32,10 +32,15 @@ It brings no dependency beyond `llm4s-core`, and is a Beta module under `modules
 Set your TypeSafe API key in `TYPESAFE_API_KEY`, the variable TypeSafe's own SDKs read. Nothing else is needed:
 
 ```scala
-val client = JevClient.fromConfig() // Result[JevClient]: Left(ConfigurationError) when no key is set
+import org.llm4s.config.JevConfigLoader
+
+// Result[JevClient]: Left(ConfigurationError) when no key is set
+val client = JevConfigLoader.default().flatMap(JevClient(_))
 ```
 
-`JevConfigLoader` reads the `llm4s.jev` block of your `application.conf`. Every setting has a default:
+`JevConfigLoader` (in `org.llm4s.config`, like LLM4S's other loaders) reads the `llm4s.jev` block of your
+`application.conf` at the application edge; `JevClient` itself reads no configuration and takes only the `JevConfig` it is
+given. Every setting has a default:
 
 ```hocon
 llm4s.jev {

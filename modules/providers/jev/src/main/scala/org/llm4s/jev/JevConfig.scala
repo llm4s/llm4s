@@ -10,7 +10,7 @@ import scala.util.Try
 /**
  * What [[JevClient]] needs to call TypeSafe's API.
  *
- * Load it from configuration with [[JevConfigLoader]], which reads the `llm4s.jev` block and the API key from
+ * Load it from configuration with [[org.llm4s.config.JevConfigLoader]], which reads the `llm4s.jev` block and the API key from
  * `TYPESAFE_API_KEY`, or build one in code:
  *
  * {{{
@@ -26,7 +26,8 @@ import scala.util.Try
  * @param model   the model a request uses unless it names one: `jev-latest`, or a versioned id such as `jev-1.13.0`
  *                to pin the answers
  * @param timeout how long each HTTP attempt may take. The API documents no figure: 30 s is this client's choice,
- *                matching the retry budget of TypeSafe's SDKs.
+ *                matching the retry budget of TypeSafe's SDKs. An attempt never waits past what is left of the retry
+ *                budget, so the budget bounds the whole call.
  * @param retry   how a transient failure is retried
  * @param headers extra HTTP headers for every request (a request can add its own); the client sets the credentials,
  *                content type and `Accept` header itself and refuses to have them replaced

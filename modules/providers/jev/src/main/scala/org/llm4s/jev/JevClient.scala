@@ -4,7 +4,8 @@ import org.llm4s.error.ProcessingError
 import org.llm4s.http.{ HttpHeaders, Llm4sHttpClient }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
-import pureconfig.ConfigSource
+
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * A client for TypeSafe's Jev decision model (https://docs.typesafe.ai/api.md).
@@ -15,7 +16,8 @@ import pureconfig.ConfigSource
  *
  * {{{
  * val decision = for
- *   client   <- JevClient.fromConfig()
+ *   config   <- JevConfigLoader.default()
+ *   client   <- JevClient(config)
  *   response <- client.evaluate(JevRequest("Charged twice; please refund", Map("urgent" -> JevQuestion.noul("Is this urgent?"))))
  *   urgent   <- response.noul("urgent")
  * yield urgent.probability
@@ -58,7 +60,7 @@ final class JevClient private (
         request.questions.size,
         request.model.getOrElse(config.model)
       )
-      response <- retry.run(() => attempt(headers, body, request))
+      response <- retry.run(left => attempt(headers, body, request, config.timeout.min(left)))
     } yield response
 
   private def requestHeaders(request: JevRequest): Map[String, String] =
@@ -68,9 +70,17 @@ final class JevClient private (
       "Accept"        -> "application/json"
     )
 
-  /** One HTTP attempt: sent, classified by status, parsed. */
-  private def attempt(headers: Map[String, String], body: String, request: JevRequest): Result[JevResponse] =
-    http.post(config.evaluateUrl, headers, body, config.timeout).flatMap { response =>
+  /**
+   * One HTTP attempt: sent, classified by status, parsed. `timeout` is the configured per-attempt timeout capped at
+   * what is left of the retry budget, so a retry cannot run the call past the budget.
+   */
+  private def attempt(
+    headers: Map[String, String],
+    body: String,
+    request: JevRequest,
+    timeout: FiniteDuration
+  ): Result[JevResponse] =
+    http.post(config.evaluateUrl, headers, body, timeout).flatMap { response =>
       if (response.statusCode >= 200 && response.statusCode < 300) {
         if (response.body.length > JevClient.MaxResponseChars)
           Left(
@@ -111,15 +121,12 @@ object JevClient {
    */
   private[jev] val MaxResponseChars: Int = 16 * 1024 * 1024
 
-  /** A client for `config`, which is validated first. */
+  /**
+   * A client for `config`, which is validated first. The client reads no configuration itself: load `config` at the
+   * application edge with [[org.llm4s.config.JevConfigLoader]], or build it in code.
+   */
   def apply(config: JevConfig): Result[JevClient] =
     config.validate.map(valid => new JevClient(valid, Llm4sHttpClient.create(), true, new JevRetry(valid.retry)))
-
-  /** A client for the config [[JevConfigLoader]] reads from `source`. */
-  def fromConfig(source: ConfigSource): Result[JevClient] = JevConfigLoader.load(source).flatMap(apply)
-
-  /** A client for the config [[JevConfigLoader]] reads from the current environment. */
-  def fromConfig(): Result[JevClient] = JevConfigLoader.default().flatMap(apply)
 
   /** For tests: a client over `http` with the clock, sleep and random source of `retry`. */
   private[jev] def withHttp(config: JevConfig, http: Llm4sHttpClient, retry: JevRetry): Result[JevClient] =

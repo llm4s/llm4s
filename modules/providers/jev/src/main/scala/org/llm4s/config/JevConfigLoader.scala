@@ -1,8 +1,8 @@
 // scalafix:off DisableSyntax.NoPureConfigDefault
-package org.llm4s.jev
+package org.llm4s.config
 
-import org.llm4s.config.SharedCredentials
 import org.llm4s.error.ConfigurationError
+import org.llm4s.jev.{ JevConfig, JevRetryPolicy }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
@@ -10,7 +10,10 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 import scala.concurrent.duration.FiniteDuration
 
 /**
- * Loads the `llm4s.jev` block into a [[JevConfig]].
+ * Loads the `llm4s.jev` block into a [[org.llm4s.jev.JevConfig]].
+ *
+ * It lives in `org.llm4s.config`, the one package that reads configuration; `org.llm4s.jev.JevClient` takes the
+ * typed config it returns and reads nothing itself.
  *
  * `llm4s-jev`'s `reference.conf` binds `TYPESAFE_BASE_URL` to `baseUrl` and `TYPESAFE_DEFAULT_MODEL` to `model`
  * (the variables TypeSafe's own SDKs read), and `TYPESAFE_API_KEY` to `llm4s.credentials.jev.apiKey`. The key is
@@ -67,7 +70,7 @@ object JevConfigLoader {
    * Reads `llm4s.jev` from `source` and checks the result.
    *
    * @return the config, or a [[org.llm4s.error.ConfigurationError]] for an unreadable block, a key set in neither
-   *         place, or a setting [[JevConfig#validate]] refuses
+   *         place, or a setting [[org.llm4s.jev.JevConfig#validate]] refuses
    */
   def load(source: ConfigSource): Result[JevConfig] = {
     val at = source.at(Section)

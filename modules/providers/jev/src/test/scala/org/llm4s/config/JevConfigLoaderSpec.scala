@@ -1,6 +1,7 @@
-package org.llm4s.jev
+package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.jev.{ JevClient, JevConfig, JevRetryPolicy }
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -131,8 +132,8 @@ class JevConfigLoaderSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "build a client from the same source, and fail like the loader without a key" in {
-    JevClient.fromConfig(ConfigSource.string("llm4s.credentials.jev.apiKey = tsk")).isRight shouldBe true
-    JevClient.fromConfig(ConfigSource.string("llm4s.jev.model = m")).left.value shouldBe a[ConfigurationError]
+    load("llm4s.credentials.jev.apiKey = tsk").flatMap(JevClient(_)).isRight shouldBe true
+    load("llm4s.jev.model = m").flatMap(JevClient(_)).left.value shouldBe a[ConfigurationError]
   }
 
   it should "never put the key in an error about another setting" in {

@@ -1,5 +1,6 @@
 package org.llm4s.samples.jev
 
+import org.llm4s.config.JevConfigLoader
 import org.llm4s.jev.{ JevClient, JevQuestion, JevRequest, JevResponse }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -92,7 +93,8 @@ object JevTicketTriageExample {
 
   def main(args: Array[String]): Unit = {
     val outcome = for {
-      client <- JevClient.fromConfig()
+      config <- JevConfigLoader.default()
+      client <- JevClient(config)
       results <- {
         val all = Tickets.map(ticket => JevTicketTriage.triage(client, ticket).map(ticket -> _))
         client.close()

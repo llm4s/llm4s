@@ -20,8 +20,8 @@ import scala.concurrent.duration.*
  * @param backoffInitial the first delay, doubled for each further retry
  * @param backoffMax     the longest computed delay
  * @param jitter         the fraction of each computed delay that is randomly taken off, from 0 to 1
- * @param budget         the longest a call may take, attempts and delays together: no retry is started whose delay
- *                       would reach what is left of it
+ * @param budget         the longest a call may take, attempts and delays together: each attempt's HTTP timeout is
+ *                       capped at what is left of it, and no retry is started whose delay would reach what is left
  */
 final case class JevRetryPolicy private (
   maxRetries: Int,

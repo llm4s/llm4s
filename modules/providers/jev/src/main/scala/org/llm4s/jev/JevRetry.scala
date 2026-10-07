@@ -13,9 +13,9 @@ import scala.concurrent.duration.*
  *
  * Whether a failure is retried is [[org.llm4s.reliability.RetryPolicy.isTransient]], LLM4S's one rule. The wait
  * before a retry is the delay the server asked for when it asked for one (the error's `retryAfter`), else the
- * policy's exponential backoff with jitter. The whole call is bounded by the policy's budget: when the wait would
- * reach what is left of it, the last error is returned instead. The last error is returned as it is, so its type
- * says why the call failed.
+ * policy's exponential backoff with jitter. The whole call is bounded by the policy's budget: each attempt is handed
+ * what is left of it, so it can cap its own timeout there, and when the wait before a retry would reach what is left,
+ * the last error is returned instead. The last error is returned as it is, so its type says why the call failed.
  *
  * The clock, the sleep and the random source are parameters so a test runs it without waiting.
  *
@@ -45,12 +45,20 @@ final private[jev] class JevRetry(
     case _                     => None
   }
 
-  /** Runs `operation`, retrying a transient failure as the policy allows. */
-  def run[A](operation: () => Result[A]): Result[A] = {
+  /**
+   * Runs `operation`, retrying a transient failure as the policy allows.
+   *
+   * @param operation one attempt, given the time left in the budget when it starts (always positive). An attempt
+   *                  that may block, such as an HTTP call, must not wait longer than that, or the call overruns the
+   *                  budget.
+   */
+  def run[A](operation: FiniteDuration => Result[A]): Result[A] = {
     val start = nanoTime()
 
-    @tailrec def attempt(number: Int): Result[A] =
-      CancelledError.attempt("jev")(operation()) match {
+    def remaining(): FiniteDuration = policy.budget - FiniteDuration(nanoTime() - start, NANOSECONDS)
+
+    @tailrec def attempt(number: Int, left: FiniteDuration): Result[A] =
+      CancelledError.attempt("jev")(operation(left)) match {
         case success @ Right(_) => success
         case failure @ Left(error) =>
           if (number > policy.maxRetries || !RetryPolicy.isTransient(error)) failure
@@ -63,7 +71,13 @@ final private[jev] class JevRetry(
             } else {
               logger.debug("Jev attempt {} failed with {}; retrying in {}", number, error.getClass.getSimpleName, delay)
               CancelledError.catchInterrupt(sleep(delay)) match {
-                case Right(()) => attempt(number + 1)
+                case Right(()) =>
+                  val left = remaining()
+                  if (left > Duration.Zero) attempt(number + 1, left)
+                  else {
+                    logger.debug("Jev call out of retry budget after {} attempt(s)", number)
+                    failure
+                  }
                 case Left(interrupted) =>
                   Thread.currentThread().interrupt()
                   Left(CancelledError("jev", Some(interrupted)))
@@ -72,6 +86,6 @@ final private[jev] class JevRetry(
           }
       }
 
-    attempt(1)
+    attempt(1, policy.budget)
   }
 }
