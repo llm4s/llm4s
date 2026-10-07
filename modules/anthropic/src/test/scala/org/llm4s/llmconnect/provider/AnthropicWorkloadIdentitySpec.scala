@@ -245,6 +245,24 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         error.message should include("apiKey")
         an[IllegalArgumentException] should be thrownBy new AnthropicClient(keyless.withApiKey(key))
     }
+
+    "apply the same rules to the Java and Kotlin path: the short apply and withWorkloadIdentity" in {
+      // the short apply with a blank key and no identity would authenticate as nobody
+      for key <- Seq("", "  ") do
+        AnthropicClient(AnthropicConfig(key, "claude-test")).left.value.message should include("apiKey")
+      // the short apply's default base URL is api.anthropic.com, so a keyless config with an identity is valid
+      val federated = AnthropicConfig("", "claude-test").withWorkloadIdentity(identity)
+      AnthropicConfig.validate(federated) shouldBe Right(federated)
+      val bad = Seq(
+        AnthropicConfig("sk-ant", "claude-test").withWorkloadIdentity(identity),
+        AnthropicConfig("sk-ant", "claude-test").withWorkloadIdentity(Some(identity)),
+        federated.withApiKey("sk-ant"),
+        federated.withBaseUrl("https://gateway.example"),
+        federated.withWorkloadIdentity(identity.withOrganizationId("")),
+        federated.withWorkloadIdentity(None)
+      )
+      for config <- bad do AnthropicClient(config).left.value shouldBe a[ConfigurationError]
+    }
   }
 
   "AnthropicClient.mapError" should {

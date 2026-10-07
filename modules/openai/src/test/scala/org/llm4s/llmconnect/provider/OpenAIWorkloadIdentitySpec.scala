@@ -365,4 +365,26 @@ class OpenAIWorkloadIdentitySpec
         )
       }
     }
+
+    "apply the same rules to the Java and Kotlin path: the short apply and withWorkloadIdentity" in {
+      // the short apply with a blank key and no identity would send an empty bearer
+      Seq("", "  ").foreach { key =>
+        OpenAIClient(OpenAIConfig(key, "gpt-4o-mini")).left.value.message should include("apiKey")
+      }
+      // the short apply's default base URL is an OpenAI host, so a keyless config with an identity is valid
+      val federated = OpenAIConfig("", "gpt-4o-mini").withWorkloadIdentity(identity)
+      OpenAIConfig.validate(federated) shouldBe Right(federated)
+      OpenAIClient(federated).value.close()
+      val bad = Seq(
+        OpenAIConfig("sk-x", "gpt-4o-mini").withWorkloadIdentity(identity),
+        OpenAIConfig("sk-x", "gpt-4o-mini").withWorkloadIdentity(Some(identity)),
+        federated.withApiKey("sk-x"),
+        federated.withBaseUrl("https://proxy.example/v1"),
+        federated.withExplicitProviderId(org.llm4s.types.ProviderModelTypes.ProviderId("requesty")),
+        federated.withExplicitProviderId(Some(org.llm4s.types.ProviderModelTypes.ProviderId("openrouter"))),
+        federated.withWorkloadIdentity(identity.withServiceAccountId(" ")),
+        federated.withWorkloadIdentity(None)
+      )
+      for config <- bad do OpenAIClient(config).left.value shouldBe a[ConfigurationError]
+    }
   }
