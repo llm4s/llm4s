@@ -1740,7 +1740,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm_response`, which fails the guardrail like an unreadable reply always did. **Migration:** a judge that
   passed because it answered on another scale now fails with `Could not parse LLM judge score`: make it answer
   between 0 and 1, as the fixed system message already asks. A reply with a sign, a percentage (also one named apart from the
-  number, `1 %` or `1 percent`), a fraction, an exponent, a decimal comma, a trailing full stop, a label glued to the number (`Score:0.9`) or more than one
+  number, `1 %` or `1 percent`), a per-mille scale (`1 ‰`, `1 per mille`, `1 permille`, a fraction, an exponent, a decimal comma, a trailing full stop, a label glued to the number (`Score:0.9`) or more than one
   number is refused; before, these read as a score. The score-reading rules are documented on `LLMGuardrail`.
 - **`SafeParameterExtractor`: integer parameters reject fractions and overflow, and `validateRequired` checks
   types** ([#964](https://github.com/llm4s/llm4s/issues/964)): `getInt`, `getIntEnhanced` and `getOptionalInt`

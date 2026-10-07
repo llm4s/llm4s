@@ -205,16 +205,20 @@ object LLMGuardrail {
   /** Percent and per-mille signs, ASCII and fullwidth, that rescale a number wherever they stand in the reply. */
   private val PercentSigns = "%\u2030\uFF05\uFE6A"
 
+  /** Words that, after `per`, name a rescaling: `per cent`, `per mille`, `per mil`, `per hundred`, `per thousand`. */
+  private val PerScales = Seq("cent", "mil", "hundred", "thousand")
+
   /**
-   * Whether the reply names a percentage anywhere, even apart from the number: a percent sign (`1 %`) or a word
-   * such as `percent`, `percentage`, `percentile`, `pct` or `per cent` (`1 percent`). A number standing next to
-   * one of these is on a 0 to 100 scale, so the reply is refused rather than read as that number.
+   * Whether the reply names a percentage or per-mille scale anywhere, even apart from the number: a percent or
+   * per-mille sign (`1 %`, `1 ‰`) or a word such as `percent`, `percentage`, `percentile`, `pct`, `permille`,
+   * `per cent`, `per mille` or `per thousand` (`1 percent`, `1 per mille`). A number standing next to one of these
+   * is on another scale, so the reply is refused rather than read as that number.
    */
   private def namesPercentage(reply: String): Boolean =
     reply.exists(isIn(PercentSigns, _)) || {
       val words = reply.toLowerCase(java.util.Locale.ROOT).split("[^a-z]+").toList.filter(_.nonEmpty)
-      words.exists(w => w.startsWith("percent") || w == "pct") ||
-      words.zip(words.drop(1)).exists { case (a, b) => a == "per" && b.startsWith("cent") }
+      words.exists(w => w.startsWith("percent") || w.startsWith("permil") || w == "pct") ||
+      words.zip(words.drop(1)).exists { case (a, b) => a == "per" && PerScales.exists(b.startsWith) }
     }
 
   private def isIn(chars: String, c: Char): Boolean = chars.indexOf(c.toInt) >= 0
@@ -228,7 +232,8 @@ object LLMGuardrail {
    * Every whitespace-separated word with an ASCII digit in it counts as a number: there must be exactly one, and
    * once its wrapping and trailing clause punctuation are trimmed it must be a plain decimal within 0 to 1. A value
    * outside the range is refused, never clamped. A reply that names a percentage anywhere (`1 %`, `1 percent`) is
-   * refused too, because the marker need not touch the number.
+   * refused too, as is one that names a per-mille scale (`1 per mille`), because the marker need not
+   * touch the number.
    */
   private[guardrails] def readScore(reply: String): Option[Double] =
     reply.split("\\s+").toList.filter(hasDigit) match {

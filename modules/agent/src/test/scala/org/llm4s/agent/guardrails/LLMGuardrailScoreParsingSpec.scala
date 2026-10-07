@@ -72,6 +72,13 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     "0.9 percentile",
     "1 \uFF05",
     "1 \u2030",
+    // a per-mille scale named in words
+    "1 per mille",
+    "1 permille",
+    "1 Per Mille",
+    "1 per mil",
+    "1 per thousand",
+    "1 per hundred",
     // out of range
     "1.5",
     "100",
