@@ -19,7 +19,7 @@ import scala.util.Try
  * The Jina AI embedding task: which LoRA adapter `jina-embeddings-v3` applies to the input.
  *
  * Jina embeds queries and documents differently, so the right task depends on what the caller
- * is embedding. A request says so with its [[InputPurpose]], and the provider maps it onto
+ * is embedding. A request says so with its [[org.llm4s.llmconnect.model.InputPurpose]], and the provider maps it onto
  * [[RetrievalQuery]] or [[RetrievalPassage]] by itself. A task the purpose cannot express
  * ([[TextMatching]], [[Classification]], [[Separation]]) is a typed setting of the provider, not
  * part of the model name: pass it to [[JinaEmbeddingProvider.fromConfig]], where it takes
@@ -44,10 +44,10 @@ enum JinaTask(val wireName: String):
   case Separation extends JinaTask("separation")
 
 object JinaTask:
-  /** The task for a document, [[InputPurpose.Document]]: what a provider built without an explicit task sends. */
+  /** The task for a document, [[org.llm4s.llmconnect.model.InputPurpose.Document]]: what a provider built without an explicit task sends. */
   val default: JinaTask = RetrievalPassage
 
-  /** The task a request's [[InputPurpose]] stands for: [[RetrievalPassage]] for a document, [[RetrievalQuery]] for a query. */
+  /** The task a request's [[org.llm4s.llmconnect.model.InputPurpose]] stands for: [[RetrievalPassage]] for a document, [[RetrievalQuery]] for a query. */
   def forPurpose(purpose: InputPurpose): JinaTask = purpose match
     case InputPurpose.Document => RetrievalPassage
     case InputPurpose.Query    => RetrievalQuery
@@ -58,7 +58,7 @@ object JinaTask:
  * Generates text embeddings by posting batched input to Jina's `<baseUrl>/embeddings`
  * endpoint (the default base URL is `https://api.jina.ai/v1`), with a [[JinaTask]] as the `task`
  * field: the one the provider was built with if there is one, otherwise the one the request's
- * [[InputPurpose]] stands for ([[JinaTask.forPurpose]]). All texts go in one HTTP call.
+ * [[org.llm4s.llmconnect.model.InputPurpose]] stands for ([[JinaTask.forPurpose]]). All texts go in one HTTP call.
  *
  * Requires a valid Jina AI API key (`JINA_API_KEY`) in the provider configuration.
  *
@@ -91,13 +91,13 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
   /** Builds the provider for the SPI: the task follows each request's purpose; see [[fromConfig]] to fix the task. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
 
-  /** Creates an [[EmbeddingProvider]] backed by Jina AI whose `task` follows each request's [[InputPurpose]]. */
+  /** Creates an [[EmbeddingProvider]] backed by Jina AI whose `task` follows each request's [[org.llm4s.llmconnect.model.InputPurpose]]. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
     create(cfg, None, Llm4sHttpClient.create())
 
   /**
    * Creates an [[EmbeddingProvider]] backed by Jina AI that sends `task` with every request, whatever the
-   * request's [[InputPurpose]]. An explicit task wins over the purpose: it is a deliberate choice, and it can be
+   * request's [[org.llm4s.llmconnect.model.InputPurpose]]. An explicit task wins over the purpose: it is a deliberate choice, and it can be
    * one the purpose cannot express, such as [[JinaTask.TextMatching]].
    */
   def fromConfig(cfg: EmbeddingProviderConfig, task: JinaTask): EmbeddingProvider =

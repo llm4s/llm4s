@@ -62,7 +62,7 @@ final class LLMEmbeddingService private (
   override def embed(text: String): Result[Array[Float]] =
     embedBatch(Seq(text)).map(_.head)
 
-  /** Embeds the query with [[InputPurpose.Query]], which the providers that embed queries differently honour. */
+  /** Embeds the query with [[org.llm4s.llmconnect.model.InputPurpose.Query]], which the providers that embed queries differently honour. */
   override def embedQuery(text: String): Result[Array[Float]] =
     embedAs(Seq(text), InputPurpose.Query).map(_.head)
 
