@@ -52,9 +52,8 @@ private[llm4s] object ThinkingReplay {
    * and to `request`, the conversation it answers, as it was sent: the fingerprint is taken over
    * `replayable(origin, request, options)`, the form the client sent.
    *
-   * `origin` is the model that served the turn: the model the response reports where the provider
-   * may serve a different one from the one asked for (a router such as OpenRouter), else the model
-   * the client asked for. See [[ReplayOrigin]].
+   * `origin` is the client's configured provider and model, the same origin [[replayable]] is
+   * given when the next request is sent - never the model a response reports. See [[ReplayOrigin]].
    */
   def bind(
     origin: ReplayOrigin,
@@ -133,13 +132,13 @@ private[llm4s] object ThinkingReplay {
  * checks the signature or reads the opaque data. Anthropic and Bedrock both serve Claude, but each
  * is its own authority here, so a conversation moved between them unseals.
  *
- * `model` is the model id: the one the client asks for when it calls, and when it binds the one that
- * served the turn - the model the response reports, for a provider that may route a request to a
- * model other than the one named (OpenRouter's `openrouter/auto`, model fallbacks), else the one the
- * client asked for. A turn served by a model other than the one about to be called is unsealed,
- * which costs only the replay. Anthropic and Bedrock bind on the model id they were asked for: they
- * may report an alias's resolved snapshot, and binding on that would unseal every turn of an alias
- * user's tool loop, which Anthropic rejects when thinking is on.
+ * `model` is the configured model id: the one the client asks for, both when it binds a turn and
+ * when it checks one before sending - never the model a response reports. Anthropic and Bedrock may
+ * report an alias's resolved snapshot, and a router (OpenRouter's `openrouter/auto`, model
+ * fallbacks) the model it chose for that request; binding on either would unseal every turn of a
+ * tool loop, which Anthropic rejects when thinking is on and OpenRouter answers without the
+ * reasoning it requires. The provider that resolved the alias or chose the route is the one the
+ * replay goes back to. Changing the configured model unseals every earlier turn.
  *
  * The endpoint is deliberately not part of the origin: a proxy, gateway or regional endpoint in
  * front of the same provider forwards to the same signing authority, and moving between them

@@ -590,8 +590,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conversation), so the Anthropic, Bedrock and OpenAI-compatible clients bind it to a fingerprint of the request
   (`AssistantMessage.thinkingBinding`) and, at send time, replay it only while the conversation before it still has
   that fingerprint, sent to the provider and model that produced it - the fingerprint covers the provider id and
-  model (the configured one for Anthropic and Bedrock, the one the response reports for OpenAI-compatible clients,
-  so a router's choice counts), so a conversation continued with another client or model is sent unsealed rather
+  model each client is configured with (never the model a response reports, so an alias's snapshot or the model
+  `openrouter/auto` or a fallback chose keeps the replay OpenRouter requires on tool-call continuations), so a conversation continued with another client or model is sent unsealed rather
   than with a foreign signature. Pruning, compression, summarisation, an edit or an inserted message anywhere earlier therefore
   unseals every later turn, whoever made the change; `hasSealedThinking` reports the state. Token estimates
   (`ConversationTokenCounter`, the agent's default pruning counter) now count thinking, which providers resend.

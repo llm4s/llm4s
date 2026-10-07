@@ -20,9 +20,13 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
-  private def client(baseUrl: String, dialect: OpenAICompatibleDialect = OpenRouterDialect) =
+  private def client(
+    baseUrl: String,
+    dialect: OpenAICompatibleDialect = OpenRouterDialect,
+    model: String = "anthropic/claude-sonnet"
+  ) =
     new OpenAICompatibleClient(
-      OpenAICompatibleClient.settings(OpenAICompatibleConfig(model = "anthropic/claude-sonnet", baseUrl = baseUrl)),
+      OpenAICompatibleClient.settings(OpenAICompatibleConfig(model = model, baseUrl = baseUrl)),
       dialect
     )
 
@@ -132,17 +136,32 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
       assistantTurn(seen()(1)).obj.keySet should not contain "reasoning_details"
     }
 
-  it should "drop them when the turn was served by another model than the one now called, the history unchanged" in {
-    // a router (openrouter/auto, model fallbacks) answered with a model other than the configured one
+  it should "keep them when a router served the turn with a concrete model, the configured model unchanged" in {
+    // openrouter/auto (or a model fallback) reports the concrete model it chose in `model`; the
+    // turn belongs to the configured model, which the next request is sent to again
     val routed = toolCallReply.replace("\"anthropic/claude-sonnet\"", "\"openai/o3\"")
     withReplies(routed, finalReply) { (baseUrl, seen) =>
-      val c     = client(baseUrl)
+      val c     = client(baseUrl, model = "openrouter/auto")
       val first = c.complete(Conversation(history), CompletionOptions()).value
       first.model shouldBe "openai/o3"
       first.message.hasSealedThinking shouldBe true
       c.complete(Conversation(history :+ first.message :+ answer), CompletionOptions()).isRight shouldBe true
 
       val turn = assistantTurn(seen()(1))
+      turn("reasoning_details") shouldBe details
+      turn("reasoning").str shouldBe "The user wants Paris weather."
+    }
+  }
+
+  it should "drop a routed turn's reasoning_details once the configured model changes" in {
+    val routed = toolCallReply.replace("\"anthropic/claude-sonnet\"", "\"openai/o3\"")
+    withReplies(routed) { (baseUrl, _) =>
+      val first = client(baseUrl, model = "openrouter/auto").complete(Conversation(history), CompletionOptions()).value
+      // even the model the router chose, once configured directly, is another origin
+      val turn = assistantTurn(
+        client(baseUrl, model = "openai/o3")
+          .createRequestBody(Conversation(history :+ first.message :+ answer), CompletionOptions())
+      )
       turn.obj.keySet should not contain "reasoning_details"
       turn("reasoning").str shouldBe "The user wants Paris weather."
     }
@@ -235,14 +254,20 @@ class OpenRouterReasoningDetailsSpec extends AnyFlatSpec with Matchers with Eith
       turn("reasoning").str shouldBe "Paris weather."
     }
 
-    // the same stream served by a routed model: its items are not replayed to the configured one
+    // the same stream from openrouter/auto, served by a concrete model: the served model is
+    // reported, and the items are replayed while the configured model is unchanged
     withReplies(sse.replace("\"anthropic/claude-sonnet\"", "\"openai/o3\"")) { (baseUrl, _) =>
-      val c        = client(baseUrl)
+      val c        = client(baseUrl, model = "openrouter/auto")
       val streamed = c.streamComplete(Conversation(history), CompletionOptions(), _ => ()).value
       streamed.model shouldBe "openai/o3"
       val turn =
         assistantTurn(c.createRequestBody(Conversation(history :+ streamed.message :+ answer), CompletionOptions()))
-      turn.obj.keySet should not contain "reasoning_details"
+      turn("reasoning_details").arr should have size 2
+      val moved = assistantTurn(
+        client(baseUrl, model = "openai/o3")
+          .createRequestBody(Conversation(history :+ streamed.message :+ answer), CompletionOptions())
+      )
+      moved.obj.keySet should not contain "reasoning_details"
     }
   }
 

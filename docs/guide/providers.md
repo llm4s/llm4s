@@ -1545,10 +1545,14 @@ as a hash of all the messages in the conversation. llm4s enforces both halves wi
   thinking, and the client checks it against the provider and model it is about to call. A
   signature or reasoning item belongs to its producer, so a conversation produced by one client
   and continued with another - Bedrock then Anthropic, or one OpenRouter model then another - is
-  sent unsealed, never with a foreign signature. Anthropic and Bedrock bind to the model id they
-  were configured with (they may report an alias's resolved snapshot); OpenAI-compatible clients
-  bind to the model the response reports, so a turn a router such as `openrouter/auto` served with
-  another model is not replayed. The endpoint is not part of it: a proxy or regional endpoint in
+  sent unsealed, never with a foreign signature. Every client binds to the provider and model it is
+  configured with, never the model a response reports: Anthropic and Bedrock may report an alias's
+  resolved snapshot, and a router such as `openrouter/auto` (or OpenRouter's model fallbacks)
+  reports the model it chose for that request. The provider that resolved the alias or chose the
+  route is the one the thinking goes back to, and OpenRouter
+  [requires](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#preserving-reasoning-blocks)
+  the complete `reasoning_details` sequence on a tool-call continuation, so routed turns keep it.
+  Changing the configured model unseals every earlier turn. The endpoint is not part of it: a proxy or regional endpoint in
   front of the same provider changes nothing the provider checks.
 
 Earlier turns whose history is unchanged keep their sealed thinking: Anthropic recommends passing

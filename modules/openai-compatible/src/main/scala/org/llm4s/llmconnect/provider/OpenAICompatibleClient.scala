@@ -159,7 +159,7 @@ class OpenAICompatibleClient(
             // own with no choices. A later report replaces an earlier one; one without both
             // counts is ignored rather than failing the stream.
             streamedUsage(json).foreach(u => usage = Some(u))
-            // the model that served the request, which a router may choose (see bindThinking)
+            // the model that served the request, which a router may choose; reported as `Completion.model`
             json.obj.get("model").flatMap(_.strOpt).filter(_.nonEmpty).foreach(m => servedModel = Some(m))
             details ++= streamedThinkingDetails(json)
             parseStreamingEvent(json, toolCalls).foreach { (chunk, rawArguments) =>
@@ -205,18 +205,16 @@ class OpenAICompatibleClient(
    * it is replayed only while that request is unchanged (see [[ThinkingReplay]]). A completion with
    * no sealed thinking is returned as it is.
    *
-   * The origin is the model the response reports, not the one requested: a router (OpenRouter's
-   * `openrouter/auto`, model fallbacks) may serve a request with another model, whose reasoning
-   * items belong to it. A turn whose serving model is not the configured one is then unsealed
-   * before the next request, rather than replayed to a model that did not produce it.
+   * The origin is the configured model, the one the next request is checked against, not the model
+   * the response reports: a router (OpenRouter's `openrouter/auto`, model fallbacks) chooses the
+   * serving model per request and reports it in `completion.model`, and OpenRouter requires the
+   * complete `reasoning_details` sequence on a tool-call continuation, so binding to the served
+   * model would unseal every routed turn and drop that sequence. Changing the configured model
+   * still unseals every earlier turn.
    */
   private def bindThinking(completion: Completion, conversation: Conversation, options: CompletionOptions): Completion =
     if (!completion.message.hasSealedThinking) completion
-    else {
-      val served =
-        ReplayOrigin(settings.providerName, Option(completion.model).filter(_.nonEmpty).getOrElse(settings.model))
-      completion.withMessage(ThinkingReplay.bind(served, completion.message, conversation.messages, options))
-    }
+    else completion.withMessage(ThinkingReplay.bind(replayOrigin, completion.message, conversation.messages, options))
 
   private def renderRequest(conversation: Conversation, options: CompletionOptions, stream: Boolean): Result[String] =
     // An empty `messages` array is rejected by every chat-completions endpoint; saying so here
