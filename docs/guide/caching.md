@@ -26,7 +26,7 @@ Both caches live in `llm4s-core`, package `org.llm4s.llmconnect.caching`. Both k
 | | Embedding cache | Completion (semantic) cache |
 |---|---|---|
 | Class | `CachedEmbeddingClient` with an `EmbeddingCache`, by default `InMemoryEmbeddingCache` | `CachingLLMClient`, which wraps any `LLMClient` |
-| A hit needs | the same text and the same model name | an embedding at least `similarityThreshold` similar, the same `CompletionOptions`, and an entry younger than the TTL |
+| A hit needs | the same text, the same model name and the same `InputPurpose` (document or query) | an embedding at least `similarityThreshold` similar, the same `CompletionOptions`, and an entry younger than the TTL |
 | Configured with | `InMemoryEmbeddingCache(maxSize = 10000, ttl = None)` | `CacheConfig.create(similarityThreshold, ttl, maxSize = 1000)` |
 | Eviction | least recently used, plus the optional TTL | least recently used, plus the TTL |
 | Seeing what happened | `cacheStats` | `TraceEvent.CacheHit` and `TraceEvent.CacheMiss` sent to your `Tracing` |
@@ -35,7 +35,7 @@ There is no configuration-file key for either cache. You construct them in code,
 
 ## 2. Choosing between them
 
-**The embedding cache is exact, so it is safe.** The same text embedded with the same model gives the same vector, so a cached vector is as good as a fresh one. Use it whenever you embed the same texts more than once: re-indexing documents, repeated queries in a RAG service, evaluation runs.
+**The embedding cache is exact, so it is safe.** The same text embedded with the same model for the same purpose gives the same vector, so a cached vector is as good as a fresh one. Use it whenever you embed the same texts more than once: re-indexing documents, repeated queries in a RAG service, evaluation runs.
 
 **The completion cache is approximate, so it can be wrong.** It answers a new question with the stored answer to an earlier, *similar* one. That saves a model call, but:
 
@@ -62,7 +62,22 @@ cached.embed(EmbeddingRequest(Seq("hello", "again"), model)) // "hello" is serve
 cached.cacheStats
 ```
 
-Here `base` is the `EmbeddingClient` you would use without a cache. The wrapper:
+Here `base` is the `EmbeddingClient` you would use without a cache. A request without a purpose embeds documents (`InputPurpose.Document`), which is what indexing wants. To cache repeated search queries, say so on the request, so that the query is embedded as one and cached apart from a document with the same text:
+
+```scala
+import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
+import org.llm4s.llmconnect.config.EmbeddingModelConfig
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
+
+val queries = new CachedEmbeddingClient(base, new InMemoryEmbeddingCache[Seq[Double]]())
+val model   = EmbeddingModelConfig("text-embedding-3-small", 1536)
+
+queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a miss
+queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a hit
+queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model))                     // a miss: a document
+```
+
+The wrapper:
 
 - looks every input text up first, and sends only the texts it does not have to the base client, in **one** batched request, then returns the vectors in the original input order;
 - sends a text that is repeated inside one request once;
@@ -81,7 +96,9 @@ Here `base` is the `EmbeddingClient` you would use without a cache. The wrapper:
 
 ### What the key contains
 
-The default key is the SHA-256 of the text and the model name joined with a colon, as 64 hex characters. Two things follow from that:
+The key function is given the text and a *model scope*: the model name for a document, and the model name followed by `#query` for a query. Some providers (Voyage, Jina and Cohere among them) embed a query and a document with the same text differently, so the purpose has to be part of the key, and a key function of your own receives it in the scope too. Keeping the plain model name for documents means vectors cached before the purpose existed are still found.
+
+The default key is the SHA-256 of the text and that scope joined with a colon, as 64 hex characters. Two things follow from that:
 
 - The key holds the model *name* only. It does not include the embedding dimension or the provider, so one cache shared by clients that use the same model name for different things would mix their vectors.
 - The text and the model name are joined with `:` before hashing, so the pair is not uniquely encoded: the text `a:b` with model `c` and the text `a` with model `b:c` give the same key.
@@ -156,7 +173,7 @@ CacheConfig.create(
 
 | Field | Type | Meaning |
 |---|---|---|
-| `similarityThreshold` | `Double`, 0.0 to 1.0 inclusive | the minimum cosine similarity between the new prompt's embedding and a stored one for a hit |
+| `similarityThreshold` | `Double`, 0.0 to 1.0 inclusive (`NaN` is rejected) | the minimum cosine similarity between the new prompt's embedding and a stored one for a hit |
 | `ttl` | `FiniteDuration`, positive | an entry older than this is ignored |
 | `maxSize` | `Int`, positive, default `1000` | the number of entries kept; beyond it the least recently used is evicted |
 

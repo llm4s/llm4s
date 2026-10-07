@@ -28,6 +28,20 @@ object CachingGuideSnippets {
     cached.cacheStats
   }
 
+  def queryCache(base: org.llm4s.llmconnect.EmbeddingClient): org.llm4s.llmconnect.caching.CacheStats = {
+    import org.llm4s.llmconnect.caching.{ CachedEmbeddingClient, InMemoryEmbeddingCache }
+    import org.llm4s.llmconnect.config.EmbeddingModelConfig
+    import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
+
+    val queries = new CachedEmbeddingClient(base, new InMemoryEmbeddingCache[Seq[Double]]())
+    val model   = EmbeddingModelConfig("text-embedding-3-small", 1536)
+
+    queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a miss
+    queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model, InputPurpose.Query)) // a hit
+    queries.embed(EmbeddingRequest(Seq("what is llm4s?"), model))                     // a miss: a document
+    queries.cacheStats
+  }
+
   class TenantKey(base: org.llm4s.llmconnect.EmbeddingClient) {
     import org.llm4s.llmconnect.caching.{ CacheKeyGenerator, CachedEmbeddingClient, InMemoryEmbeddingCache }
     import org.llm4s.llmconnect.config.EmbeddingModelConfig

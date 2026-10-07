@@ -54,6 +54,29 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       stats.hitRatePercent shouldBe 25.0
     }
 
+    "cache a query apart from a document with the same text" in {
+      val base  = new FakeEmbeddingClient
+      val stats = CachingGuideSnippets.queryCache(base)
+
+      base.calls.get shouldBe 2
+      base.requests.map(_.purpose) shouldBe List(InputPurpose.Query, InputPurpose.Document)
+      stats.size shouldBe 2
+      stats.hits shouldBe 1
+      stats.misses shouldBe 2
+    }
+
+    "give the key function the model name for a document and name#query for a query" in {
+      val scopes = ListBuffer.empty[String]
+      val cached = new CachedEmbeddingClient(
+        new FakeEmbeddingClient,
+        new InMemoryEmbeddingCache[Seq[Double]](),
+        (text, scope) => { scopes += scope; CacheKeyGenerator.sha256(text, scope) }
+      )
+      cached.embed(EmbeddingRequest(Seq("x"), ModelA))
+      cached.embed(EmbeddingRequest(Seq("x"), ModelA, InputPurpose.Query))
+      scopes.toList shouldBe List("test-embedding", "test-embedding#query")
+    }
+
     "key on whatever the custom key function says" in {
       val base    = new FakeEmbeddingClient
       val snippet = new CachingGuideSnippets.TenantKey(base)
@@ -157,6 +180,14 @@ class CachingGuideSpec extends AnyWordSpec with Matchers with EitherValues {
       message should include("similarityThreshold must be between 0.0 and 1.0")
       message should include("ttl must be positive")
       message should include("maxSize must be positive")
+    }
+
+    "reject a NaN or infinite similarityThreshold" in {
+      CacheConfig.create(Double.NaN, 1.second).left.value.message should include(
+        "similarityThreshold must be between 0.0 and 1.0"
+      )
+      CacheConfig.create(Double.PositiveInfinity, 1.second).isLeft shouldBe true
+      CacheConfig.create(Double.NegativeInfinity, 1.second).isLeft shouldBe true
     }
 
     "accept the boundaries 0.0 and 1.0" in {
