@@ -491,13 +491,14 @@ object PostgresMemoryStore {
     def jdbcUrl: String = s"jdbc:postgresql://$host:$port/$database"
   }
 
-  /** Rolls `conn` back unless the transaction committed, then puts it back in autocommit mode. */
+  /** Rolls `conn` back unless the transaction committed, then puts it back in autocommit mode if it can. */
   final private class RollbackUnlessCommitted(conn: Connection) extends AutoCloseable {
     var committed = false
-    override def close(): Unit = {
-      if (!committed) Try(conn.rollback())
-      conn.setAutoCommit(true)
-    }
+    // Autocommit goes back on only once the transaction has ended: turning it on after a failed rollback would make
+    // pgjdbc commit whatever the transaction holds. Left off, HikariCP rolls the connection back and resets it when
+    // it returns to the pool. After a commit, a failure here must not turn stored rows into a Left.
+    override def close(): Unit =
+      if (committed || Try(conn.rollback()).isSuccess) Try(conn.setAutoCommit(true)): Unit
   }
 
   def apply(

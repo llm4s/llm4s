@@ -171,6 +171,110 @@ class MemoryStoreBatchSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
       ) shouldBe 4L
     }
   }
+
+  private def rowsSeenByAnotherConnection(): Long =
+    Using.resource(connect(dbPath))(other =>
+      Using.resource(other.createStatement())(st =>
+        Using.resource(st.executeQuery("SELECT COUNT(*) FROM memories")) { rs =>
+          rs.next(); rs.getLong(1)
+        }
+      )
+    )
+
+  it should "write nothing when its COMMIT fails, and recover once the reader is gone" in {
+    val shortTimeout: String => Connection = path => {
+      val c = connect(path)
+      Using.resource(c.createStatement())(_.execute("PRAGMA busy_timeout = 100"))
+      c
+    }
+    val store = right(SQLiteMemoryStore.open(dbPath, MemoryStoreConfig.default, shortTimeout))
+    Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
+      Using.resource(connect(dbPath)) { reader =>
+        // A read transaction holds a SHARED lock (rollback-journal mode): the store's BEGIN IMMEDIATE still gets the
+        // RESERVED lock and writes, but its COMMIT cannot get EXCLUSIVE and fails with SQLITE_BUSY.
+        Using.resource(reader.createStatement()) { st =>
+          st.execute("BEGIN")
+          Using.resource(st.executeQuery("SELECT COUNT(*) FROM memories"))(rs => rs.next())
+        }
+        store.storeAll(memories(3)).isLeft shouldBe true
+        Using.resource(reader.createStatement())(_.execute("COMMIT"))
+      }
+
+      rowsSeenByAnotherConnection() shouldBe 0L
+      right(store.count()) shouldBe 0L
+      right(store.storeAll(memories(3)))
+      rowsSeenByAnotherConnection() shouldBe 3L
+    }
+  }
+
+  // ===== VectorMemoryStore embeds in bounded batches, and replaces a memory atomically =====
+
+  /** Embeds like the mock, but rejects a batch of more than `limit` texts, as a provider's input limit would. */
+  final private class LimitedBatches(limit: Int) extends EmbeddingService {
+    private val real                                    = MockEmbeddingService(8)
+    val batchSizes                                      = scala.collection.mutable.ArrayBuffer.empty[Int]
+    override val dimensions: Int                        = real.dimensions
+    override def embed(t: String): Result[Array[Float]] = real.embed(t)
+    override def embedBatch(texts: Seq[String]): Result[Seq[Array[Float]]] = {
+      batchSizes += texts.size
+      if (texts.size > limit) Left(ProcessingError("embed", s"${texts.size} inputs exceed the limit of $limit"))
+      else real.embedBatch(texts)
+    }
+  }
+
+  private def withVector[A](service: EmbeddingService)(test: VectorMemoryStore => A): A = {
+    val store = right(VectorMemoryStore.open(dbPath, service, MemoryStoreConfig.default, connect))
+    Using.resource(new AutoCloseable { override def close(): Unit = store.close() })(_ => test(store))
+  }
+
+  "VectorMemoryStore.storeAll" should "embed a large batch in chunks the embedding service accepts" in {
+    val service = new LimitedBatches(VectorMemoryStore.EmbeddingBatchSize)
+    withVector(service) { store =>
+      right(store.storeAll(memories(200)))
+      right(store.count()) shouldBe 200L
+      service.batchSizes.toList shouldBe List(64, 64, 64, 8)
+    }
+  }
+
+  it should "store nothing when an embedding call throws" in {
+    val throwing = new EmbeddingService {
+      override val dimensions: Int                        = 8
+      override def embed(t: String): Result[Array[Float]] = throw new IllegalStateException("embedder crashed")
+      override def embedBatch(texts: Seq[String]): Result[Seq[Array[Float]]] =
+        throw new IllegalStateException("embedder crashed")
+    }
+    withVector(throwing) { store =>
+      val result = store.storeAll(memories(3))
+      result.isLeft shouldBe true
+      result.left.toOption.get.message should include("embedder crashed")
+      right(store.count()) shouldBe 0L
+    }
+  }
+
+  "VectorMemoryStore.update" should "leave the memory as it was when re-embedding its new content fails" in {
+    withVector(failingOn("rewritten")) { store =>
+      val original = memories(1).head
+      right(store.store(original))
+
+      store.update(original.id, _.copy(content = "rewritten")).isLeft shouldBe true
+
+      right(store.get(original.id)).map(_.content) shouldBe Some(original.content)
+      right(store.search("number", 10)).map(_.memory.id.value) shouldBe Seq("m1")
+    }
+  }
+
+  it should "replace the memory, its embedding and its full-text entry when it succeeds" in {
+    withVector(MockEmbeddingService(8)) { store =>
+      val original = memories(1).head
+      right(store.store(original))
+
+      right(store.update(original.id, _.copy(content = "rewritten text")))
+
+      right(store.count()) shouldBe 1L
+      right(store.get(original.id)).map(_.content) shouldBe Some("rewritten text")
+      right(store.search("rewritten", 10)).map(_.memory.id.value) shouldBe Seq("m1")
+    }
+  }
 }
 
 object MemoryStoreBatchSpec {

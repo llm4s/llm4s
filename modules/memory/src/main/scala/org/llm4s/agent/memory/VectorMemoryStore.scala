@@ -101,28 +101,12 @@ final class VectorMemoryStore private (
   override def store(memory: Memory): Result[MemoryStore] = storeAll(Seq(memory))
 
   /**
-   * Store `memories` in one transaction: every missing embedding is computed first, in one `embedBatch` call, then
-   * all of them are written or, if the embedding or any write fails, none is. The commit - and the file sync behind it - is paid once for the batch,
-   * not once per row.
+   * Store `memories` in one transaction: every missing embedding is computed first, in `embedBatch` calls of at most
+   * [[VectorMemoryStore.EmbeddingBatchSize]] texts, then all of them are written or, if any embedding call or any
+   * write fails, none is. The commit - and the file sync behind it - is paid once for the batch, not once per row.
    */
   override def storeAll(memories: Seq[Memory]): Result[MemoryStore] = {
-    val missing = memories.filter(_.embedding.isEmpty)
-    val withEmbeddings: Result[Seq[Memory]] =
-      if (missing.isEmpty) Right(memories)
-      else
-        embeddingService.embedBatch(missing.map(_.content)).flatMap { embeddings =>
-          if (embeddings.size != missing.size)
-            Left(
-              ProcessingError(
-                "vector-store",
-                s"Embedding service returned ${embeddings.size} embeddings for ${missing.size} memories"
-              )
-            )
-          else {
-            val next = embeddings.iterator
-            Right(memories.map(m => if (m.embedding.isEmpty) m.withEmbedding(next.next()) else m))
-          }
-        }
+    val withEmbeddings = embedMissing(memories)
 
     withEmbeddings.flatMap { ms =>
       Try {
@@ -134,6 +118,36 @@ final class VectorMemoryStore private (
           s"Failed to store ${if (ms.size == 1) "memory" else "memories"}: ${e.getMessage}"
         )
       )
+    }
+  }
+
+  /**
+   * `memories` with every missing embedding filled in, asking the service for at most `EmbeddingBatchSize` texts at a
+   * time - one request for a whole large batch could exceed a provider's input limit. Fails if any call fails,
+   * throws, or answers with the wrong number of embeddings.
+   */
+  private def embedMissing(memories: Seq[Memory]): Result[Seq[Memory]] = {
+    val texts = memories.filter(_.embedding.isEmpty).map(_.content)
+    val embedded =
+      texts.grouped(EmbeddingBatchSize).foldLeft[Result[Vector[Array[Float]]]](Right(Vector.empty)) { (acc, chunk) =>
+        acc.flatMap { done =>
+          Try(embeddingService.embedBatch(chunk))
+            .fold(e => Left(ProcessingError("vector-store", s"Embedding failed: ${e.getMessage}")), identity)
+            .flatMap { embeddings =>
+              if (embeddings.size == chunk.size) Right(done ++ embeddings)
+              else
+                Left(
+                  ProcessingError(
+                    "vector-store",
+                    s"Embedding service returned ${embeddings.size} embeddings for ${chunk.size} texts"
+                  )
+                )
+            }
+        }
+      }
+    embedded.map { embeddings =>
+      val next = embeddings.iterator
+      memories.map(m => if (m.embedding.isEmpty) m.withEmbedding(next.next()) else m)
     }
   }
 
@@ -358,7 +372,9 @@ final class VectorMemoryStore private (
             updated.copy(embedding = None) // Will be re-embedded on store
           else
             updated
-        delete(id).flatMap(_ => store(memoryToStore))
+        // The same id is replaced in one transaction, after any re-embedding: a failure leaves the memory as it was.
+        if (memoryToStore.id == id) store(memoryToStore)
+        else delete(id).flatMap(_ => store(memoryToStore))
       case None =>
         Left(ProcessingError("vector-store", s"Memory not found: ${id.value}"))
     }
@@ -592,6 +608,9 @@ object VectorMemoryStore {
   private val logger = LoggerFactory.getLogger(getClass)
 
   private val BusyTimeoutMillis = 30000
+
+  /** The most texts `storeAll` sends to the embedding service in one `embedBatch` call. */
+  val EmbeddingBatchSize: Int = 64
 
   /**
    * Create a vector memory store with file-based SQLite storage.

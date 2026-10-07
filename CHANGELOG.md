@@ -1697,8 +1697,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PostgresMemoryStore`, a batch that failed part way left the memories ahead of the failure stored while the call
   returned `Left`. All three now write the batch in one transaction, and a failed batch stores **nothing**; the
   trait documents `storeAll` as all or nothing (its default is, for an immutable store such as `InMemoryStore`).
-  `VectorMemoryStore` computes the missing embeddings first, in one `embedBatch` call, so an embedding failure
-  also stores nothing. In the SQLite stores `store`, `deleteMatching` and opening the store are one transaction
+  `VectorMemoryStore` computes the missing embeddings first, in `embedBatch` calls of at most 64 texts
+  (`VectorMemoryStore.EmbeddingBatchSize`, so a large batch stays within a provider's input limit), so an
+  embedding failure also stores nothing; and its `update` of a memory, keeping its id, now replaces it in one
+  transaction after re-embedding, where it deleted the memory first and lost it if re-embedding failed. In the
+  SQLite stores `store`, `deleteMatching` and opening the store are one transaction
   each too, so a memory's row and its full-text entry are written together. Their transactions are explicit
   `BEGIN IMMEDIATE` ... `COMMIT`, so **a write takes the database's write lock when it begins** and waits up to
   the connection's busy timeout (30 s for `VectorMemoryStore`, sqlite-jdbc's 3 s default for
