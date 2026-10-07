@@ -188,6 +188,18 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
       }
     )
 
+    // /large → 200, a chunked 1 MiB body of 'x'; the client may stop reading early
+    server.createContext(
+      "/large",
+      { (ex: HttpExchange) =>
+        val chunk = Array.fill[Byte](8192)('x'.toByte)
+        ex.sendResponseHeaders(200, 0)
+        scala.util.Try((1 to 128).foreach(_ => ex.getResponseBody.write(chunk)))
+        scala.util.Try(ex.close())
+        ()
+      }
+    )
+
     server.setExecutor(null)
     server.start()
   }
@@ -445,6 +457,21 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     // Same host redirect: Authorization should be preserved
     responseBody should include(""""auth":"Bearer secret"""")
     responseBody should include(""""custom":"keep-me"""")
+  }
+
+  // ── Response size limit ───────────────────────────────────────────────────
+
+  "HTTPTool maxResponseSize" should "read no more than maxResponseSize bytes and mark the result truncated" in {
+    val result = invoke(testConfig().copy(maxResponseSize = 1000L), s"http://127.0.0.1:$port/large")
+    result.isRight shouldBe true
+    val r = result.toOption.get
+    r.body.length shouldBe 1000
+    r.truncated shouldBe true
+  }
+
+  it should "not mark a body at exactly the limit as truncated" in {
+    val result = invoke(testConfig().copy(maxResponseSize = 11L), s"http://127.0.0.1:$port/ok")
+    result.map(r => (r.body, r.truncated)) shouldBe Right(("hello world", false))
   }
 
   // ── withRedirectsEnabled convenience method ────────────────────────────────
