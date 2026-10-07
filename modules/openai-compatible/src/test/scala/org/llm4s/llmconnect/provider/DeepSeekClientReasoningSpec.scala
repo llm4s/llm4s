@@ -1,7 +1,14 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.config.DeepSeekConfig
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ReasoningEffort, StreamedChunk, UserMessage }
+import org.llm4s.llmconnect.model.{
+  CompletionOptions,
+  Conversation,
+  ReasoningEffort,
+  StreamedChunk,
+  ThinkingBlock,
+  UserMessage
+}
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer._
 import org.scalatest.EitherValues
@@ -45,6 +52,7 @@ class DeepSeekClientReasoningSpec extends AnyFlatSpec with Matchers with EitherV
       val completion = new DeepSeekClient(localConfig(baseUrl)).complete(conversation, CompletionOptions()).value
       completion.content shouldBe "Because."
       completion.thinking shouldBe Some("Let me think.")
+      completion.message.thinking shouldBe Seq(ThinkingBlock.Text("Let me think."))
       completion.usage.flatMap(_.thinkingTokens) shouldBe Some(12)
     }
 
@@ -78,6 +86,7 @@ class DeepSeekClientReasoningSpec extends AnyFlatSpec with Matchers with EitherV
 
       chunks.flatMap(_.thinkingDelta) shouldBe Seq("Let me ", "think.")
       completion.thinking shouldBe Some("Let me think.")
+      completion.message.thinking shouldBe Seq(ThinkingBlock.Text("Let me think."))
       completion.content shouldBe "Because."
     }
 }

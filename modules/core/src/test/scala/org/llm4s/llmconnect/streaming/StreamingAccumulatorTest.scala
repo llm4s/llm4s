@@ -230,6 +230,14 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     comp.thinking shouldBe Some("Let me calculate...")
     comp.content shouldBe "The answer is 42."
     comp.hasThinking shouldBe true
+    // on the message, so it stays in the conversation history (#1381)
+    comp.message.thinking shouldBe Seq(ThinkingBlock.Text("Let me calculate..."))
+  }
+
+  test("a stream without thinking leaves the message's thinking empty") {
+    val accumulator = StreamingAccumulator.create()
+    accumulator.addChunk(StreamedChunk("msg-1", Some("Hi"), None, Some("stop"), None))
+    accumulator.toCompletion.map(_.message.thinking) shouldBe Right(Seq.empty)
   }
 
   test("should add thinking delta directly") {
