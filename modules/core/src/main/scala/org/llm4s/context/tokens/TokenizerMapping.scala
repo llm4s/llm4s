@@ -30,8 +30,13 @@ import org.slf4j.LoggerFactory
  * The mapper accepts various model name formats:
  *  - Plain: `gpt-4o`, `claude-3-sonnet`
  *  - Provider-prefixed: `openai/gpt-4o`, `anthropic/claude-3-sonnet`
- *  - Azure: `azure/my-gpt4o-deployment`
+ *  - Azure: `azure/my-gpt-4o-deployment`
  *  - Ollama: `ollama/llama2`
+ *
+ * An Azure deployment is matched on the OpenAI model name its text contains, spelled as OpenAI
+ * spells it (`gpt-4o`, `gpt-4`, `gpt-3.5`, `gpt-3`, `o1-`): `azure/my-gpt-4o-deployment` selects
+ * `o200k_base`, while `azure/my-gpt4o-deployment` and any other name that does not contain such
+ * text selects `cl100k_base`. Every Azure deployment is reported as exact.
  *
  * ==Accuracy Considerations==
  *
@@ -59,9 +64,10 @@ object TokenizerMapping {
       case name if isOpenAIGPT3_5(name) => TokenizerId.CL100K_BASE
       case name if isOpenAIGPT3(name)   => TokenizerId.R50K_BASE
       case name if isAnthropic(name)    => TokenizerId.CL100K_BASE
-      case name if isAzureOpenAI(name)  => getAzureTokenizerId(name)
-      case name if isOllama(name)       => TokenizerId.CL100K_BASE
-      case _                            => getDefaultTokenizerId(modelName)
+      // A deployment name containing an OpenAI model name was already mapped by the guards above
+      case name if isAzureOpenAI(name) => TokenizerId.CL100K_BASE
+      case name if isOllama(name)      => TokenizerId.CL100K_BASE
+      case _                           => getDefaultTokenizerId(modelName)
     }
 
     logger.debug(s"Mapped model '$modelName' to tokenizer '$tokenizerId'")
@@ -89,15 +95,6 @@ object TokenizerMapping {
   private def isOllama(modelName: String): Boolean =
     modelName.startsWith("ollama/")
 
-  private def getAzureTokenizerId(modelName: String): TokenizerId = {
-    // Azure uses same tokenizers as OpenAI, extract model from deployment name
-    val deploymentModel = modelName.toLowerCase
-    if (deploymentModel.contains("gpt-4o")) TokenizerId.O200K_BASE
-    else if (deploymentModel.contains("gpt-4")) TokenizerId.CL100K_BASE
-    else if (deploymentModel.contains("gpt-3")) TokenizerId.CL100K_BASE
-    else TokenizerId.CL100K_BASE // Default for Azure
-  }
-
   private def getDefaultTokenizerId(modelName: String): TokenizerId = {
     logger.warn(s"Unknown model '$modelName', using cl100k_base as fallback")
     TokenizerId.CL100K_BASE
@@ -115,7 +112,7 @@ object TokenizerMapping {
    */
   def getAccuracyInfo(modelName: String): TokenizerAccuracy =
     modelName.toLowerCase match {
-      case name if isOpenAIGPT4o(name) || isOpenAIGPT4(name) || isOpenAIGPT3_5(name) =>
+      case name if isOpenAIGPT4o(name) || isOpenAIGPT4(name) || isOpenAIGPT3_5(name) || isOpenAIGPT3(name) =>
         TokenizerAccuracy.Exact("Native OpenAI tokenizer")
 
       case name if isAzureOpenAI(name) =>

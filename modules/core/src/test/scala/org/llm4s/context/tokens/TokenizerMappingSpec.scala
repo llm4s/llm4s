@@ -118,6 +118,34 @@ class TokenizerMappingSpec extends AnyFlatSpec with Matchers {
     expectTokenizer(TokenizerId.CL100K_BASE)("azure/my-deployment", "azure/")
   }
 
+  it should "map every example in the class documentation to the tokenizer it implies" in {
+    expectTokenizer(TokenizerId.O200K_BASE)("gpt-4o", "openai/gpt-4o", "azure/my-gpt-4o-deployment")
+    expectTokenizer(TokenizerId.CL100K_BASE)("claude-3-sonnet", "anthropic/claude-3-sonnet", "ollama/llama2")
+  }
+
+  it should "match an azure deployment only on the hyphenated OpenAI spelling of the model, as documented" in {
+    // `gpt4o` has no hyphen, so the o200k guard does not see it; the class documentation says so
+    expectTokenizer(TokenizerId.CL100K_BASE)("azure/my-gpt4o-deployment", "azure/gpt4-prod", "azure/GPT4O")
+    expectExact("azure/my-gpt4o-deployment")
+  }
+
+  it should "give an azure deployment the tokenizer of the first family its name matches" in {
+    // A name that fits several families takes the first guard that matches, in the order of the
+    // `case` list: the OpenAI families, then Claude, then the azure/ prefix, then ollama
+    val expected = Seq(
+      "azure/o1-mini"              -> TokenizerId.O200K_BASE,
+      "azure/gpt-3-x"              -> TokenizerId.R50K_BASE,
+      "azure/legacy-gpt-3"         -> TokenizerId.R50K_BASE,
+      "azure/gpt-3.5-x"            -> TokenizerId.CL100K_BASE,
+      "azure/my-gpt-4o-deployment" -> TokenizerId.O200K_BASE,
+      "azure/ollama/x"             -> TokenizerId.CL100K_BASE,
+      "azure/"                     -> TokenizerId.CL100K_BASE
+    )
+    expected.foreach { case (model, tokenizer) =>
+      withClue(s"tokenizer for '$model': ")(TokenizerMapping.getTokenizerId(model) shouldBe tokenizer)
+    }
+  }
+
   // ============ getAccuracyInfo ============
 
   "TokenizerMapping.getAccuracyInfo" should "report OpenAI gpt-4o, gpt-4 and gpt-3.5 models as exact" in {
@@ -149,19 +177,30 @@ class TokenizerMappingSpec extends AnyFlatSpec with Matchers {
     expectUnknown("mistral-large", "totally-made-up-model", "", "   ")
   }
 
-  it should "report a legacy gpt-3 model as exact, as the class documentation's table says" in
-    // The table lists `gpt-3 (legacy)` as Exact, but `getAccuracyInfo` leaves `gpt-3` out of its
-    // OpenAI guard, so it is currently Unknown. This starts failing the day that is fixed.
-    pendingUntilFixed {
-      expectExact("gpt-3", "gpt-3-davinci")
+  it should "report legacy gpt-3 models as exact, as the class documentation's table says" in {
+    // Table row: `gpt-3 (legacy) | r50k_base | Exact`
+    Seq("gpt-3", "gpt-3-davinci", "openai/gpt-3", "GPT-3-DAVINCI").foreach { model =>
+      withClue(s"model '$model': ") {
+        TokenizerMapping.getTokenizerId(model) shouldBe TokenizerId.R50K_BASE
+        expectExact(model)
+      }
     }
+  }
 
   // ============ isExactMapping ============
 
   "TokenizerMapping.isExactMapping" should "be true for OpenAI and azure models" in {
-    Seq("gpt-4o", "o1-mini", "gpt-4-turbo", "gpt-3.5-turbo", "openai/gpt-4o", "azure/my-deployment").foreach { model =>
-      withClue(s"model '$model': ")(TokenizerMapping.isExactMapping(model) shouldBe true)
-    }
+    Seq(
+      "gpt-4o",
+      "o1-mini",
+      "gpt-4-turbo",
+      "gpt-3.5-turbo",
+      "gpt-3",
+      "gpt-3-davinci",
+      "openai/gpt-4o",
+      "azure/my-deployment"
+    )
+      .foreach(model => withClue(s"model '$model': ")(TokenizerMapping.isExactMapping(model) shouldBe true))
   }
 
   it should "be false for Claude, ollama and unknown models" in {

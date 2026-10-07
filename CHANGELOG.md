@@ -1944,6 +1944,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ïgnöre` and `ig<U+200B>nore` are now all detected. Look-alike letters from other scripts are not mapped.
   `ProfanityFilter` normalises its word list the same way (in case-sensitive mode too, without the case fold),
   and a non-breaking or other compatibility space now separates tokens there and in `ToneValidator`.
+- **`TokenizerMapping`: legacy `gpt-3` models are reported as exact, and its Azure documentation matches the code**
+  ([#1557](https://github.com/llm4s/llm4s/issues/1557), [#1558](https://github.com/llm4s/llm4s/issues/1558)): the
+  class documentation lists `gpt-3 (legacy)` as `r50k_base`, accuracy Exact, but `getAccuracyInfo` left it out of its
+  OpenAI guard, so `gpt-3` and `gpt-3-davinci` were reported `Unknown` and `isExactMapping` returned `false` for them.
+  Both now agree with the table (the tokenizer, `r50k_base`, is unchanged). The class documentation's Azure example,
+  `azure/my-gpt4o-deployment`, never selected `o200k_base`: a deployment name is matched on the hyphenated OpenAI
+  spelling (`gpt-4o`), so the example is now `azure/my-gpt-4o-deployment` and the documentation says how the
+  matching works. `getAzureTokenizerId` is gone: its `gpt-4o`, `gpt-4` and `gpt-3` branches could not be reached, because
+  the guards above it already take every name that contains those texts, so no tokenizer choice changes.
 - **RAG deletes only the chunks of the document you name** (https://github.com/llm4s/llm4s/issues/1000): `RAG.deleteDocumentChunks` deleted
   by a bare prefix, so deleting or re-syncing `doc-1` also deleted every chunk of `doc-10` and
   `doc-1-appendix`. It now matches the `<docId>-chunk-` prefix. Also, `FusionStrategy.WeightedScore(0, 0)`
