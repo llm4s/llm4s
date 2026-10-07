@@ -1,6 +1,6 @@
 package org.llm4s.jev
 
-import org.llm4s.error.ProcessingError
+import org.llm4s.error.{ LLMError, ProcessingError }
 import org.llm4s.http.{ HttpHeaders, Llm4sHttpClient }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -90,6 +90,8 @@ final class JevClient private (
           JevResponse
             .parse(response.body, HttpHeaders.first(response.headers, JevClient.RequestIdHeader))
             .flatMap(checkAnswers(_, request))
+            .left
+            .map(redacted)
       } else Left(JevErrors.fromResponse(response, config.apiKey))
     }
 
@@ -117,6 +119,22 @@ final class JevClient private (
         }
   }
 
+  /**
+   * `error` with the API key masked. A 2xx response's errors quote values the server chose (an answer's type, a
+   * choice, a question id), so a server that echoed the key into one would otherwise carry it into the error.
+   */
+  private def redacted(error: LLMError): LLMError = error match {
+    case processing: ProcessingError if config.apiKey.nonEmpty && processing.message.contains(config.apiKey) =>
+      ProcessingError(
+        processing.operation,
+        processing.message
+          .stripPrefix(s"Processing failed during ${processing.operation}: ")
+          .replace(config.apiKey, "***"),
+        processing.cause
+      )
+    case other => other
+  }
+
   /** Why `answer` cannot be the answer to `question`, if it cannot. */
   private def mismatch(question: JevQuestion, answer: JevAnswer): Option[String] = (question, answer) match {
     case (_: JevQuestion.Noul, _: NoulAnswer) => None
@@ -127,10 +145,20 @@ final class JevClient private (
         probabilities.keys.toSeq.sorted
           .find(option => !asked.contains(option))
           .map(option => s"it gives a probability for '$option', which is not one of the options asked")
+          .orElse(
+            asked.toSeq.sorted
+              .find(option => !probabilities.contains(option))
+              .map(option => s"it gives no probability for '$option', one of the options asked")
+          )
     case (JevQuestion.Score(_, levels), ScoreAnswer(_, answered, _)) =>
       answered
         .find(_.index >= levels.size)
         .map(level => s"it has level ${level.index}, but the question has ${levels.size} levels")
+        .orElse(
+          levels.indices
+            .find(index => !answered.exists(_.index == index))
+            .map(index => s"it has no level $index, one of the ${levels.size} levels asked")
+        )
     case (_, _) =>
       val expected = question match {
         case _: JevQuestion.Noul   => "noul"

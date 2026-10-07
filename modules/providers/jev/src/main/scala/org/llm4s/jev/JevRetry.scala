@@ -63,9 +63,10 @@ final private[jev] class JevRetry(
         case failure @ Left(error) =>
           if (number > policy.maxRetries || !RetryPolicy.isTransient(error)) failure
           else {
-            val delay   = serverHint(error).getOrElse(backoff(number))
-            val elapsed = FiniteDuration(nanoTime() - start, NANOSECONDS)
-            if (elapsed + delay >= policy.budget) {
+            val delay = serverHint(error).getOrElse(backoff(number))
+            // compared with what is left rather than added to what has passed: a server's delay can be close to the
+            // largest FiniteDuration, and the sum would overflow
+            if (delay >= remaining()) {
               logger.debug("Jev call out of retry budget after {} attempt(s)", number)
               failure
             } else {

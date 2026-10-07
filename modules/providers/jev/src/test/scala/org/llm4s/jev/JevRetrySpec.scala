@@ -164,6 +164,18 @@ class JevRetrySpec extends AnyFlatSpec with Matchers {
     callsWhenEachAttemptTakes(4800.millis) shouldBe 1 // 4.8 s spent plus the 0.5 s wait does not
   }
 
+  it should "return the error, not throw, when a server asks for a delay near the largest duration" in {
+    val huge = Left(RateLimitError("jev", FiniteDuration(9223372036854L, MILLISECONDS)))
+    val h    = new Harness(JevRetryPolicy.default)
+    val outcome = h.retry.run { _ =>
+      h.calls += 1; h.now += 1.millisecond.toNanos; huge
+    }
+
+    outcome shouldBe huge
+    h.calls shouldBe 1
+    h.slept shouldBe empty
+  }
+
   it should "hand each attempt what is left of the budget, so a retry cannot overrun it" in {
     val h      = new Harness(JevRetryPolicy.default) // 30 s budget, 0.5 s first wait
     val handed = ArrayBuffer.empty[FiniteDuration]

@@ -191,6 +191,40 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
     }
   }
 
+  it should "refuse a Choice answer that leaves an offered option out of its distribution" in {
+    serve(ok(Examples.Choice)) { (url, _) =>
+      val fourOptions = JevQuestion.choiceOf("Which?", "billing", "technical", "sales", "refunds")
+      val error       = new Rig(url).client.evaluate(JevRequest("s", Map("department" -> fourOptions))).left.value
+
+      error shouldBe a[ProcessingError]
+      error.message should include("no probability for 'refunds'")
+    }
+  }
+
+  it should "refuse a Score answer that leaves a level the question asked out" in {
+    serve(ok(Examples.Score)) { (url, _) =>
+      val fourLevels = JevQuestion.score("How?", "Calm", "Frustrated", "Very angry", "Furious")
+      val error      = new Rig(url).client.evaluate(JevRequest("s", Map("frustration" -> fourLevels))).left.value
+
+      error shouldBe a[ProcessingError]
+      error.message should include("no level 3")
+    }
+  }
+
+  it should "mask the API key when a 200's error quotes a value the server chose" in {
+    val echoed =
+      s"""{"model":"jev-1.13.0","answers":{"is_urgent":{"type":"$secret","noul":0.95}},"usage":{"input_tokens":1,"output_tokens":1}}"""
+    serve(ok(echoed)) { (url, _) =>
+      val error = new Rig(url).client.evaluate(request).left.value
+
+      error shouldBe a[ProcessingError]
+      error.message should include("unsupported answer type '***'")
+      (error.message should not).include(secret)
+      (error.formatted should not).include(secret)
+      (error.toString should not).include(secret)
+    }
+  }
+
   it should "refuse a Score answer with a level the question did not describe" in {
     serve(ok(Examples.Score)) { (url, _) =>
       def ask(levels: String*) =
