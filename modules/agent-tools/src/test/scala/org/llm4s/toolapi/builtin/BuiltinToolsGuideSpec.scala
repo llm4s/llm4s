@@ -264,6 +264,27 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
     readLink(follow = true).value("content").str shouldBe "linked"
   }
 
+  it should "not list a directory that is a symbolic link unless followSymlinks is set" in {
+    assume(!isWindows, "creating symbolic links needs a privilege on Windows")
+    val dir     = tempDir()
+    val outside = tempDir()
+    Files.writeString(outside.resolve("secret.txt"), "secret")
+    val link = Files.createSymbolicLink(dir.resolve("link"), outside)
+    def listLink(follow: Boolean) =
+      call(
+        BuiltinTools
+          .customSafe(fileConfig =
+            Some(FileConfig(allowedPaths = Some(Seq(dir.toString)), blockedPaths = Seq.empty, followSymlinks = follow))
+          )
+          .value,
+        "list_directory",
+        ujson.Obj("path" -> link.toString)
+      )
+
+    listLink(follow = false).left.value.getMessage should include("Not a directory")
+    listLink(follow = true).value("entries").arr.map(_("name").str) should contain("secret.txt")
+  }
+
   "WriteConfig" should "write inside allowedPaths, refuse outside, and refuse to overwrite by default" in {
     val allowed = tempDir()
     val other   = tempDir()

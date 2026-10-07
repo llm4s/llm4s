@@ -208,9 +208,9 @@ val tools = BuiltinTools.customSafe(
 
 A path is inside an allowed or blocked path when it is that path or below it, compared by path component after
 `..` is resolved: `/srv/agent-data` covers `/srv/agent-data/notes.txt` but not `/srv/agent-data-secret`. Symbolic
-links are not resolved for the comparison, and `followSymlinks = false` only stops a read tool opening a path that is
-itself a link, not one that passes through a linked directory: keep links that point elsewhere out of the directories
-you allow.
+links are not resolved for the comparison, and `followSymlinks = false` only stops `read_file` and `list_directory`
+opening a path that is itself a link, not one that passes through a linked directory: keep links that point elsewhere
+out of the directories you allow.
 
 `developmentSafe(workingDirectory, fileAllowedPaths)` reads only inside `workingDirectory` when you give one, and
 anywhere outside the blocklist when you do not. It writes inside `fileAllowedPaths` (default `/tmp`) and the working
@@ -276,7 +276,9 @@ What the controls do, and where they stop:
   `$VAR` reach the program as ordinary text and are not interpreted, and only the first word is checked against
   `allowedCommands`. That stops a command from chaining into another one. It does not limit what an allowed
   program does:
-  - `readOnly()` programs do not write, but `cat`, `head` and `tail` can read any file the process can read. **The
+  - `readOnly()` is an allowlist of program names, not read-only execution. Its programs only read in ordinary use,
+    but their options are passed through unchecked: `date -s` sets the clock when the process is allowed to, and
+    `file -C` writes a compiled magic file. `cat`, `head` and `tail` can read any file the process can read. **The
     file settings above do not apply to the shell.**
   - `development()` is not a sandbox: `sbt`, `make`, `npm`, `git`, `find` and `env` can run arbitrary programs, so a
     model given it can do anything the process can.
