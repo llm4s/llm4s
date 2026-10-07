@@ -106,7 +106,11 @@ object LLMFactualityGuardrail {
     new LLMFactualityGuardrail(client, referenceContext, threshold = 0.9)
 
   /**
-   * Builds a factuality guardrail with a threshold of 0.5, which tolerates claims the context does not cover.
+   * Builds a factuality guardrail with a threshold of 0.5.
+   *
+   * The lower threshold is the only difference from `apply`; it does not guarantee that claims the context does
+   * not cover pass. The rubric scores 0.5 only for content that mixes supported and unverifiable claims, so content
+   * none of whose claims the context supports may still score below 0.5 and fail (see the class documentation).
    *
    * @param client the client that makes the judge call
    * @param referenceContext the text the content is checked against
