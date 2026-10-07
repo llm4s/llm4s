@@ -212,14 +212,14 @@ object CompressionRule {
   private def compressRedundantPhrases(message: Message): Message =
     message match {
       case msg: UserMessage      => msg.copy(content = cleanupRedundancy(msg.content))
-      case msg: AssistantMessage => msg.copy(contentOpt = Some(cleanupRedundancy(msg.content)))
+      case msg: AssistantMessage => msg.withContent(cleanupRedundancy(msg.content))
       case other                 => other
     }
 
   private def compressRepetitiveText(message: Message): Message =
     message match {
       case msg: UserMessage      => msg.copy(content = reduceRepetition(msg.content))
-      case msg: AssistantMessage => msg.copy(contentOpt = Some(reduceRepetition(msg.content)))
+      case msg: AssistantMessage => msg.withContent(reduceRepetition(msg.content))
       case other                 => other
     }
 
@@ -247,7 +247,7 @@ object CompressionRule {
     if (estimatedTokens <= maxTokens || estimatedTokens < minTokens * 2) message
     else {
       val summarized = summarizeContent(content, maxTokens)
-      message.copy(contentOpt = Some(summarized))
+      message.withContent(summarized)
     }
   }
 
@@ -286,7 +286,7 @@ object CompressionRule {
       case msg: AssistantMessage if isPreciseContent(msg.content) => msg
       case msg: AssistantMessage if isTranscriptLike(msg.content) =>
         val cleaned = cleanFillerWords(msg.content, fillerWords)
-        msg.copy(contentOpt = Some(cleaned))
+        msg.withContent(cleaned)
       case other => other
     }
   }
@@ -379,7 +379,7 @@ object CompressionRule {
 
       examples.head match {
         case _: UserMessage        => UserMessage(consolidatedContent)
-        case msg: AssistantMessage => msg.copy(contentOpt = Some(consolidatedContent))
+        case msg: AssistantMessage => msg.withContent(consolidatedContent)
         case tool: ToolMessage     => tool.copy(content = consolidatedContent)
         case _                     => UserMessage(consolidatedContent)
       }

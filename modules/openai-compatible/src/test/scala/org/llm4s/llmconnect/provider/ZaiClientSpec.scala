@@ -650,8 +650,7 @@ class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends
         toolCalls = toolCalls.toList
       ),
       toolCalls = toolCalls.toList,
-      usage = usage,
-      thinking = None
+      usage = usage
     )
   }
 

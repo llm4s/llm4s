@@ -588,7 +588,7 @@ object ToolLoop:
               )
             case Right(changed) if changed == assistant.content => NodeResult.Continue(completed)
             case Right(changed) =>
-              val replaced = StoredMessage(answerId, assistant.copy(contentOpt = Some(changed)))
+              val replaced = StoredMessage(answerId, assistant.withContent(changed))
               NodeResult.Continue(completed.update(messages, MessageUpdate.Replace(answerId, replaced)))
         outcome.fold(NodeResult.Fail(_), identity)
     }
