@@ -6,6 +6,7 @@ import upickle.default._
 
 import java.time._
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import scala.util.Try
 
 /**
@@ -53,6 +54,28 @@ object DateTimeResult {
  */
 object DateTimeTool {
 
+  private enum Format {
+    case Iso, Human
+  }
+
+  /**
+   * The `human` format. The locale is fixed, not the host's default, so the same call reads the same on every host: a
+   * model sees English month and weekday names and an `AM`/`PM` marker whatever `-Duser.language` the JVM runs with.
+   */
+  private val HumanFormatter: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy 'at' h:mm:ss a z", Locale.US)
+
+  private val SupportedFormats: Seq[String] = Seq("iso", "human")
+
+  /** Case-insensitive, like the parameter always was; anything else is an error rather than a silent ISO fallback. */
+  private def parseFormat(value: String): Either[String, Format] =
+    value.toLowerCase(Locale.ROOT) match {
+      case "iso"   => Right(Format.Iso)
+      case "human" => Right(Format.Human)
+      case _ =>
+        Left(s"Unsupported format '$value': supported formats are ${SupportedFormats.map(f => s"'$f'").mkString(", ")}")
+    }
+
   private val schema = Schema
     .`object`[Map[String, Any]]("Date/time query parameters")
     .withProperty(
@@ -61,7 +84,8 @@ object DateTimeTool {
         Schema
           .string(
             "Timezone identifier (e.g., 'UTC', 'America/New_York', 'Europe/London', 'Asia/Tokyo'). Defaults to UTC."
-          )
+          ),
+        required = false
       )
     )
     .withProperty(
@@ -69,7 +93,8 @@ object DateTimeTool {
         "format",
         Schema
           .string("Output format: 'iso' for ISO-8601, 'human' for human-readable. Defaults to 'iso'.")
-          .withEnum(Seq("iso", "human"))
+          .withEnum(SupportedFormats),
+        required = false
       )
     )
 
@@ -83,37 +108,37 @@ object DateTimeTool {
         "Returns the datetime in ISO-8601 format, Unix timestamp, and broken down components.",
       schema = schema
     ).withHandler { extractor =>
-      val timezone = extractor.getString("timezone").fold(_ => "UTC", identity)
-      val format   = extractor.getString("format").fold(_ => "iso", identity)
+      for {
+        timezoneParam <- extractor.getOptionalString("timezone").left.map(_.getMessage)
+        formatParam   <- extractor.getOptionalString("format").left.map(_.getMessage)
+        timezone = timezoneParam.getOrElse("UTC")
+        format <- parseFormat(formatParam.getOrElse("iso"))
+        result <- Try {
+          val zoneId = ZoneId.of(timezone)
+          val now    = ZonedDateTime.now(zoneId)
 
-      Try {
-        val zoneId = ZoneId.of(timezone)
-        val now    = ZonedDateTime.now(zoneId)
+          val formattedDateTime = format match {
+            case Format.Human => now.format(HumanFormatter)
+            case Format.Iso   => now.format(DateTimeFormatter.ISO_ZONED_DATE_TIME)
+          }
 
-        val formattedDateTime = format.toLowerCase match {
-          case "human" =>
-            val formatter = DateTimeFormatter.ofPattern("EEEE, MMMM d, yyyy 'at' h:mm:ss a z")
-            now.format(formatter)
-          case _ =>
-            now.format(DateTimeFormatter.ISO_ZONED_DATE_TIME)
-        }
-
-        DateTimeResult(
-          datetime = formattedDateTime,
-          timezone = timezone,
-          timestamp = now.toInstant.toEpochMilli,
-          iso8601 = now.format(DateTimeFormatter.ISO_ZONED_DATE_TIME),
-          components = DateTimeComponents(
-            year = now.getYear,
-            month = now.getMonthValue,
-            day = now.getDayOfMonth,
-            hour = now.getHour,
-            minute = now.getMinute,
-            second = now.getSecond,
-            dayOfWeek = now.getDayOfWeek.toString
+          DateTimeResult(
+            datetime = formattedDateTime,
+            timezone = timezone,
+            timestamp = now.toInstant.toEpochMilli,
+            iso8601 = now.format(DateTimeFormatter.ISO_ZONED_DATE_TIME),
+            components = DateTimeComponents(
+              year = now.getYear,
+              month = now.getMonthValue,
+              day = now.getDayOfMonth,
+              hour = now.getHour,
+              minute = now.getMinute,
+              second = now.getSecond,
+              dayOfWeek = now.getDayOfWeek.toString
+            )
           )
-        )
-      }.toEither.left.map(e => s"Invalid timezone '$timezone': ${e.getMessage}")
+        }.toEither.left.map(e => s"Invalid timezone '$timezone': ${e.getMessage}")
+      } yield result
     }.buildSafe()
 
   /**
