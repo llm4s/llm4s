@@ -140,10 +140,12 @@ final class StreamingAccumulator private () {
   def toCompletion(created: Long): Result[Completion] = {
     val finalToolCalls = currentToolCalls
 
+    // the streamed thinking is unsigned text; a client whose provider signs its thinking blocks
+    // replaces it on the message with the blocks it tracked
     val message = AssistantMessage(
       contentOpt = if (contentBuilder.isEmpty) None else Some(contentBuilder.toString),
       toolCalls = finalToolCalls
-    )
+    ).withThinking(thinkingBuilder.toString)
 
     val thinkingTokensOpt = if (thinkingTokens > 0) Some(thinkingTokens) else None
     val usage = if (promptTokens > 0 || completionTokens > 0 || thinkingTokens > 0) {
@@ -152,8 +154,6 @@ final class StreamingAccumulator private () {
       )
     } else None
 
-    val thinking = currentThinking
-
     Right(
       Completion(
         id = messageId.getOrElse(""),
@@ -161,8 +161,7 @@ final class StreamingAccumulator private () {
         content = contentBuilder.toString(),
         model = "unknown",
         message = message,
-        usage = usage,
-        thinking = thinking
+        usage = usage
       )
     )
   }
