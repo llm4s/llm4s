@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ AnthropicConfigKeys, AnthropicModelLister, ProviderModelLister }
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.auth.IdentitySource
+import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
 import org.llm4s.llmconnect.config.{ AnthropicConfig, AnthropicWorkloadIdentity, ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -22,6 +22,12 @@ object AnthropicProvider extends ProviderDescriptor:
   val OrganizationIdKey: String   = "organizationId"
   val ServiceAccountIdKey: String = "serviceAccountId"
   val WorkspaceIdKey: String      = "workspaceId"
+
+  /** Each `workloadIdentity` field a config refusal names, as the `auth` key the section spells it with. */
+  private val AuthSectionKeys: Map[String, String] =
+    (Seq(FederationRuleIdKey, OrganizationIdKey, ServiceAccountIdKey, WorkspaceIdKey) ++ AuthConfig.ReservedKeys)
+      .map(key => s"${AnthropicWorkloadIdentity.FieldPrefix}$key" -> s"auth.$key")
+      .toMap
 
   /**
    * The key falls back to `llm4s.credentials.anthropic.apiKey`, bound to `ANTHROPIC_API_KEY`; a section with an
@@ -56,7 +62,7 @@ object AnthropicProvider extends ProviderDescriptor:
       config <- AnthropicConfig
         .fromValues(section.model.asString, apiKey, baseUrl, workloadIdentity)
         .left
-        .map(ProviderConfig.inSection(providerName))
+        .map(ProviderConfig.inSection(providerName, AuthSectionKeys))
     yield config
 
   private def workloadIdentityOf(

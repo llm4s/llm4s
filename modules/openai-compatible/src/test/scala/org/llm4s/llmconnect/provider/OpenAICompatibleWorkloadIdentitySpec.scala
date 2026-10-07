@@ -90,6 +90,45 @@ class OpenAICompatibleWorkloadIdentitySpec
     }
   }
 
+  "an openai-compatible section with a blank auth key" should {
+    "be refused, naming the auth key, for a blank tokenUrl" in {
+      val error = ProviderTestConfig
+        .loadProvider(
+          "main",
+          """llm4s.providers.main {
+            |  provider = "openai-compatible"
+            |  model    = "m"
+            |  baseUrl  = "https://api.example/v1"
+            |  auth { identityTokenFile = "/var/run/svid", tokenUrl = " " }
+            |}""".stripMargin
+        )
+        .left
+        .value
+      error.message should include("auth.tokenUrl")
+    }
+
+    "treat a blank optional key as absent rather than post it empty" in FakeTokenExchangeServer.withServer { fake =>
+      val c = assertBuildsClient(
+        OpenAICompatibleProvider,
+        sectionOf(authBlock(fake, freshSvid).replace("clientId = \"sp-uuid\"", "clientId = \" \""))
+      )
+      c.complete(conversation, CompletionOptions()).isRight shouldBe true
+      fake.exchanges.head.keySet should not contain "client_id"
+    }
+
+    "be refused by buildConfig, naming the auth key, for a code-built section whose auth key is blank" in {
+      val section = sectionOf(
+        """provider = "openai-compatible"
+          |model    = "m"
+          |baseUrl  = "https://api.example/v1"
+          |auth { identityTokenFile = "/var/run/svid", tokenUrl = "https://t.example/token" }""".stripMargin
+      )
+      val blanked = section.withAuth(section.auth.map(_.withExtras(Map("tokenUrl" -> " "))))
+      val error   = ProviderModuleChecks.buildClient(OpenAICompatibleProvider, blanked).left.value
+      error.message should include("auth.tokenUrl")
+    }
+  }
+
   "an openai-compatible section with auth" should {
     "exchange the SVID and send the access token on complete and stream" in FakeTokenExchangeServer.withServer { fake =>
       val jwt = TestJwt.es256("spiffe://llm4s.test/app", "databricks")
@@ -144,6 +183,16 @@ class OpenAICompatibleWorkloadIdentitySpec
         fake.rejectNextApiCalls(2)
         c.complete(conversation, CompletionOptions()).left.value shouldBe an[AuthenticationError]
         fake.apiAuthorizations.size shouldBe 2
+      }
+
+    "not reuse the retry's token on the next call when the retry was rejected too" in FakeTokenExchangeServer
+      .withServer { fake =>
+        val c = client(fake, freshSvid)
+        fake.rejectNextApiCalls(2)
+        c.complete(conversation, CompletionOptions()).left.value shouldBe an[AuthenticationError]
+        c.complete(conversation, CompletionOptions()).isRight shouldBe true
+        fake.apiAuthorizations shouldBe Seq("Bearer t1", "Bearer t2", "Bearer t3")
+        fake.issuedTokens shouldBe Seq("t1", "t2", "t3")
       }
 
     "surface a rejected exchange as AuthenticationError without calling the API" in FakeTokenExchangeServer
@@ -381,6 +430,24 @@ class OpenAICompatibleWorkloadIdentitySpec
       error.message should (include("baseUrl").and(include("exchanged token")))
       fromValues(baseUrl = "http://localhost@evil.example/v1").isLeft shouldBe true
       fromValues(baseUrl = "http://127.0.0.1:9/v1").isRight shouldBe true
+    }
+
+    "be refused by fromValues, the client and the with* setters for a blank token, tokenUrl or optional field" in {
+      val blanks = Seq(
+        "tokenExchange.identityToken"     -> exchange.withIdentityToken(IdentitySource.Literal(" ")),
+        "tokenExchange.identityTokenFile" -> exchange.withIdentityToken(IdentitySource.File(Path.of(""))),
+        "tokenExchange.tokenUrl"          -> exchange.withTokenUrl(""),
+        "tokenExchange.clientId"          -> exchange.withClientId(" "),
+        "tokenExchange.scope"             -> exchange.withScope(""),
+        "tokenExchange.audience"          -> exchange.withAudience(" ")
+      )
+      for (field, blank) <- blanks do
+        withClue(field) {
+          val error = fromValues(tokenExchange = blank).left.value
+          error shouldBe a[ConfigurationError]
+          error.asInstanceOf[ConfigurationError].missingKeys shouldBe List(field)
+          OpenAICompatibleClient(fromValues().value.withTokenExchange(blank)).left.value shouldBe a[ConfigurationError]
+        }
     }
 
     "accept any https baseUrl, since the endpoint is the user's choice" in {

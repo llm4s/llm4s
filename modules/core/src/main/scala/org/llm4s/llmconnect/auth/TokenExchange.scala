@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.auth
 import org.llm4s.annotation.Experimental
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.provider.HttpErrorMapper
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -55,6 +56,29 @@ object TokenExchangeConfig:
     audience: Option[String] = None
   ): TokenExchangeConfig =
     new TokenExchangeConfig(identityToken, tokenUrl, clientId, scope, audience)
+
+  /**
+   * The rules every [[TokenExchangeConfig]] must meet, whichever way it was built: the identity token
+   * (a literal, or a file's path) and `tokenUrl` must not be blank, `clientId`, `scope` and `audience`
+   * must not be blank when set - a blank one would be posted as an empty form field - and `tokenUrl`
+   * must be `https`, or plain `http` to a loopback host ([[TokenExchange.requireSecureUrl]]). Every
+   * exchange applies them, as do the configs that carry one. A refusal is a `ConfigurationError`
+   * naming the one field at fault (`tokenUrl`, `clientId`, `identityTokenFile`, ...), which a caller
+   * nesting this config renames to its own key.
+   */
+  private[llm4s] def validate(config: TokenExchangeConfig): Result[TokenExchangeConfig] =
+    val label = "token exchange"
+    for
+      _ <- ProviderConfig.nonEmptyIdentity(label, "", config.identityToken)
+      _ <- ProviderConfig.nonEmpty(label, "tokenUrl", config.tokenUrl)
+      _ <- ProviderConfig.nonEmptyIfSet(label, "clientId", config.clientId)
+      _ <- ProviderConfig.nonEmptyIfSet(label, "scope", config.scope)
+      _ <- ProviderConfig.nonEmptyIfSet(label, "audience", config.audience)
+      _ <- TokenExchange
+        .requireSecureUrl(config.tokenUrl)
+        .left
+        .map(e => ConfigurationError(e.message, List("tokenUrl")))
+    yield config
 
 /** The RFC 8693 token exchange and its caching provider. */
 @Experimental
@@ -155,7 +179,7 @@ object TokenExchange:
     val subject = IdentityTokenSource.from(config.identityToken)
     () =>
       for
-        _   <- requireSecureUrl(config.tokenUrl)
+        _   <- TokenExchangeConfig.validate(config)
         jwt <- subject.fetch()
         response <- httpClient.post(
           config.tokenUrl,

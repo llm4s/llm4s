@@ -163,6 +163,13 @@ class OpenAIWorkloadIdentitySpec
       sectionResult(section.replace("serviceAccountId = \"sa_1\", ", "")).isLeft shouldBe true
     }
 
+    "reject a blank identityProviderId or serviceAccountId, naming the auth key" in {
+      for key <- Seq("identityProviderId", "serviceAccountId") do
+        val blanked = section.replaceAll(s"""$key = "[^"]*"""", s"""$key = " """")
+        blanked should not be section
+        sectionResult(blanked).left.value.message should include(s"auth.$key")
+    }
+
     "reject neither apiKey nor auth as before" in {
       sectionResult(
         """provider = "openai"
@@ -287,6 +294,29 @@ class OpenAIWorkloadIdentitySpec
       val valid = fromValues().value
       OpenRouterClient(valid).left.value.message should include("workloadIdentity")
       an[IllegalArgumentException] should be thrownBy new OpenRouterClient(valid)
+    }
+
+    "be refused by fromValues, OpenAIClient and the with* setters for a blank required id, token or clientId" in {
+      val blanks = Seq(
+        "workloadIdentity.identityProviderId" -> identity.withIdentityProviderId(" "),
+        "workloadIdentity.serviceAccountId"   -> identity.withServiceAccountId(""),
+        "workloadIdentity.clientId"           -> identity.withClientId(" "),
+        "workloadIdentity.identityToken"      -> identity.withIdentityToken(IdentitySource.Literal("")),
+        "workloadIdentity.identityTokenFile"  -> identity.withIdentityToken(IdentitySource.File(Path.of("")))
+      )
+      for (field, blank) <- blanks do
+        withClue(field) {
+          val error = OpenAIConfig
+            .fromValues("gpt-4o-mini", "", None, OpenAIProvider.DEFAULT_BASE_URL, None, Some(blank))
+            .left
+            .value
+          error shouldBe a[ConfigurationError]
+          error.asInstanceOf[ConfigurationError].missingKeys shouldBe List(field)
+          error.message should include(field)
+          OpenAIClient(fromValues().value.copy(workloadIdentity = Some(blank))).left.value shouldBe a[
+            ConfigurationError
+          ]
+        }
     }
 
     "leave OpenAIClient refusing a blank apiKey once the identity is removed, rather than send an empty bearer" in {

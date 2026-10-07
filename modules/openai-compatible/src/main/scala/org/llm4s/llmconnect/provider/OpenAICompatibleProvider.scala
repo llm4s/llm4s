@@ -5,7 +5,7 @@ import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAICompatibleConfigKeys, OpenAICompatibleModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.auth.TokenExchangeConfig
+import org.llm4s.llmconnect.auth.{ AuthConfig, TokenExchangeConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
@@ -101,6 +101,12 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
   val ClientIdKey: String = "clientId"
   val ScopeKey: String    = "scope"
   val AudienceKey: String = "audience"
+
+  /** Each `tokenExchange` field a config refusal names, as the `auth` key the section spells it with. */
+  private val AuthSectionKeys: Map[String, String] =
+    (Seq(TokenUrlKey, ClientIdKey, ScopeKey, AudienceKey) ++ AuthConfig.ReservedKeys)
+      .map(key => s"${OpenAICompatibleConfig.TokenExchangePrefix}$key" -> s"auth.$key")
+      .toMap
 
   /**
    * The key naming the model registry provider (`groq`, `together_ai`, `fireworks_ai`, `xai`, `perplexity`,
@@ -223,7 +229,7 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
           tokenExchange = tokenExchange
         )
         .left
-        .map(ProviderConfig.inSection(providerName, Map("tokenExchange.tokenUrl" -> s"auth.$TokenUrlKey")))
+        .map(ProviderConfig.inSection(providerName, AuthSectionKeys))
     yield config
 
   /** The exchange a section's `auth` block describes, if it has one; unvalidated - see [[validatedConfig]]. */

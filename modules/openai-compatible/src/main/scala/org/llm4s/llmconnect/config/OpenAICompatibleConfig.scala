@@ -88,6 +88,9 @@ object OpenAICompatibleConfig {
   /** The provider id, as written in `provider = "openai-compatible"`. */
   val ProviderIdName: String = "openai-compatible"
 
+  /** How a [[validate]] refusal names a `tokenExchange` field: `tokenExchange.<field>`. */
+  private[llm4s] val TokenExchangePrefix: String = "tokenExchange."
+
   /**
    * Context window used when config sets none: 8192 tokens, small enough that
    * any current chat model accepts it.
@@ -138,8 +141,10 @@ object OpenAICompatibleConfig {
    *  - `headers` must have no `Authorization` entry, in any case: the exchanged token is the
    *    request's bearer, and a configured header would replace it - so a 401 would retry with the
    *    same stale header rather than a fresh token;
-   *  - `tokenExchange.tokenUrl` must be `https`, or plain `http` to a loopback host, since the
-   *    exchange carries the identity token;
+   *  - `tokenExchange` must meet `TokenExchangeConfig`'s own rules: no blank identity token,
+   *    `tokenUrl`, `clientId`, `scope` or `audience`, and a `tokenUrl` that is `https`, or plain
+   *    `http` to a loopback host, since the exchange carries the identity token. A refusal names
+   *    the field as `tokenExchange.<field>`;
    *  - `baseUrl` must be `https`, or plain `http` to a loopback host, since every request carries the
    *    exchanged token as its bearer.
    *
@@ -170,10 +175,14 @@ object OpenAICompatibleConfig {
               List("headers")
             )
           )
-          _ <- TokenExchange
-            .requireSecureUrl(exchange.tokenUrl)
+          _ <- TokenExchangeConfig
+            .validate(exchange)
             .left
-            .map(e => ConfigurationError(e.message, List("tokenExchange.tokenUrl")))
+            .map {
+              case ConfigurationError(message, List(field)) =>
+                ConfigurationError(message, List(s"$TokenExchangePrefix$field"))
+              case other => other
+            }
           _ <- TokenExchange
             .requireSecureUrl(config.baseUrl, "baseUrl", "the exchanged token")
             .left

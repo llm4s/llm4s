@@ -239,6 +239,21 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
       error shouldBe a[ConfigurationError]
       error.message should (include("auth.clientId").and(include("llm4s.providers.p.auth.clientId")))
     }
+    "report a key built blank in code as missing, naming it" in {
+      val blank = AuthConfig(IdentitySource.Literal("t"), Map("tokenUrl" -> "  "))
+      ProviderDescriptor.requireAuthExtra("p", blank, "tokenUrl").left.value.message should include(
+        "llm4s.providers.p.auth.tokenUrl"
+      )
+    }
+  }
+
+  "AuthConfig" should {
+    "trim its extras and drop blank ones, through apply and withExtras" in {
+      val auth = AuthConfig(IdentitySource.Literal("t"), Map("tokenUrl" -> " https://t ", "clientId" -> ""))
+      auth.extras shouldBe Map("tokenUrl" -> "https://t")
+      auth.withExtras(Map("scope" -> " ", "audience" -> "a")).extras shouldBe Map("audience" -> "a")
+      auth.extra("clientId") shouldBe None
+    }
   }
 
   "NamedProviderConfig.withAuth" should {

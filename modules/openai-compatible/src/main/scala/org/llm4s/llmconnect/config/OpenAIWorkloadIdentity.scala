@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.auth.IdentitySource
+import org.llm4s.types.Result
 import org.llm4s.util.Redaction
 
 /**
@@ -42,3 +43,21 @@ object OpenAIWorkloadIdentity:
     clientId: Option[String] = None
   ): OpenAIWorkloadIdentity =
     new OpenAIWorkloadIdentity(identityToken, identityProviderId, serviceAccountId, clientId)
+
+  /** How a [[validate]] refusal names a field: `workloadIdentity.<field>`, as `OpenAIConfig` holds it. */
+  private[llm4s] val FieldPrefix: String = "workloadIdentity."
+
+  /**
+   * The rules every [[OpenAIWorkloadIdentity]] must meet, whichever way it was built: the identity
+   * token (a literal, or a file's path), `identityProviderId` and `serviceAccountId` must not be
+   * blank, nor `clientId` when set. `OpenAIConfig.validate` applies them, so `OpenAIConfig.fromValues`,
+   * the named section and `OpenAIClient` all do. A refusal is a `ConfigurationError` naming the field
+   * as `workloadIdentity.<field>`.
+   */
+  private[llm4s] def validate(identity: OpenAIWorkloadIdentity): Result[OpenAIWorkloadIdentity] =
+    for
+      _ <- ProviderConfig.nonEmptyIdentity("OpenAI", FieldPrefix, identity.identityToken)
+      _ <- ProviderConfig.nonEmpty("OpenAI", s"${FieldPrefix}identityProviderId", identity.identityProviderId)
+      _ <- ProviderConfig.nonEmpty("OpenAI", s"${FieldPrefix}serviceAccountId", identity.serviceAccountId)
+      _ <- ProviderConfig.nonEmptyIfSet("OpenAI", s"${FieldPrefix}clientId", identity.clientId)
+    yield identity

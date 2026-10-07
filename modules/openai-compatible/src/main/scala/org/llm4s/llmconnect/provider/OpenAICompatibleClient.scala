@@ -273,16 +273,26 @@ class OpenAICompatibleClient(
    * Sends with the current token; when the credential is dynamic and the reply is a 401, reports the
    * token rejected, fetches a fresh one and sends exactly once more. A 403 is not retried: the token
    * was accepted and it is the permission that is missing, which a new token does not change. A
-   * failure to obtain a token is returned as is, never retried here.
+   * failure to obtain a token is returned as is, never retried here. A retry that is rejected too
+   * reports its token rejected as well before returning the 401, so the next call fetches afresh
+   * rather than resending a token the server has already refused.
    */
-  private def withAuthRetry[A](send: Map[String, String] => Result[A]): Result[A] =
-    bearer().flatMap { token =>
-      (send(requestHeaders(token)), tokenProvider, token) match
-        case (Left(e: AuthenticationError), Some(provider), Some(rejected)) if e.code.contains("401") =>
-          provider.invalidate(rejected)
-          bearer().flatMap(fresh => send(requestHeaders(fresh)))
-        case (result, _, _) => result
+  private def withAuthRetry[A](send: Map[String, String] => Result[A]): Result[A] = {
+    def attempt(token: Option[String]): Result[A] = {
+      val result = send(requestHeaders(token))
+      (result, token) match
+        case (Left(e: AuthenticationError), Some(rejected)) if e.code.contains("401") =>
+          tokenProvider.foreach(_.invalidate(rejected))
+        case _ => ()
+      result
     }
+    bearer().flatMap { token =>
+      attempt(token) match
+        case Left(e: AuthenticationError) if e.code.contains("401") && tokenProvider.isDefined && token.isDefined =>
+          bearer().flatMap(attempt)
+        case result => result
+    }
+  }
 
   /**
    * The messages of `conversation` that go into a request: all of them, except an assistant
@@ -477,14 +487,15 @@ object OpenAICompatibleClient {
 
   /**
    * Why `settings` may not carry its credential, if it may not: a [[Credential.Dynamic]] or
-   * [[Credential.Exchange]] credential needs a secure `baseUrl`, and an exchange a secure `tokenUrl`
-   * ([[org.llm4s.llmconnect.auth.TokenExchange]]'s rule: `https`, or plain `http` to a loopback host).
+   * [[Credential.Exchange]] credential needs a secure `baseUrl`, and an exchange a config
+   * `TokenExchangeConfig.validate` accepts: a secure `tokenUrl` (`https`, or plain `http` to a loopback
+   * host) and no blank identity token, `tokenUrl`, `clientId`, `scope` or `audience`.
    */
   private[provider] def insecureDynamicCredential(settings: Settings): Option[String] = {
     val baseUrl = TokenExchange.requireSecureUrl(settings.baseUrl, "baseUrl", "the exchanged token")
     val checks = settings.credential match {
       case Credential.Dynamic(_)       => List(baseUrl)
-      case Credential.Exchange(config) => List(TokenExchange.requireSecureUrl(config.tokenUrl), baseUrl)
+      case Credential.Exchange(config) => List(TokenExchangeConfig.validate(config).map(_ => ()), baseUrl)
       case _                           => Nil
     }
     checks.collectFirst { case Left(error) => error.message }

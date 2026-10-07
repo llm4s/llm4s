@@ -131,6 +131,26 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
       http.postCallCount shouldBe 0
     }
 
+    "refuse a blank identity token, tokenUrl, clientId, scope or audience without calling the endpoint" in {
+      val blanks = Seq(
+        "identityToken"     -> config().withIdentityToken(IdentitySource.Literal("  ")),
+        "identityTokenFile" -> config().withIdentityToken(IdentitySource.File(java.nio.file.Path.of(""))),
+        "tokenUrl"          -> config().withTokenUrl(" "),
+        "clientId"          -> config(clientId = Some("")),
+        "scope"             -> config(scope = Some(" ")),
+        "audience"          -> config(audience = Some(""))
+      )
+      for (field, cfg) <- blanks do
+        val http  = MockHttpClient(Seq(ok))
+        val error = TokenExchange.rfc8693(cfg, http, clock)().left.value
+        error shouldBe a[ConfigurationError]
+        error.asInstanceOf[ConfigurationError].missingKeys shouldBe List(field)
+        error.message should include(field)
+        http.postCallCount shouldBe 0
+        TokenExchangeConfig.validate(cfg).isLeft shouldBe true
+      TokenExchangeConfig.validate(config(Some("c"), Some("s"), Some("a"))).isRight shouldBe true
+    }
+
     "keep a literal identity token out of TokenExchangeConfig.toString" in {
       (config().toString should not).include(jwt)
     }

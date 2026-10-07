@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenAIConfigKeys, OpenAIModelLister, ProviderModelLister }
+import org.llm4s.llmconnect.auth.AuthConfig
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, OpenAIWorkloadIdentity, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -27,6 +28,12 @@ object OpenAIProvider extends ProviderDescriptor:
   val IdentityProviderIdKey: String = "identityProviderId"
   val ServiceAccountIdKey: String   = "serviceAccountId"
   val ClientIdKey: String           = "clientId"
+
+  /** Each `workloadIdentity` field a config refusal names, as the `auth` key the section spells it with. */
+  private val AuthSectionKeys: Map[String, String] =
+    (Seq(IdentityProviderIdKey, ServiceAccountIdKey, ClientIdKey) ++ AuthConfig.ReservedKeys)
+      .map(key => s"${OpenAIWorkloadIdentity.FieldPrefix}$key" -> s"auth.$key")
+      .toMap
 
   /**
    * The key falls back to `llm4s.credentials.openai.apiKey`, bound to `OPENAI_API_KEY`; a section with an
@@ -63,7 +70,7 @@ object OpenAIProvider extends ProviderDescriptor:
           workloadIdentity = workloadIdentity
         )
         .left
-        .map(ProviderConfig.inSection(providerName))
+        .map(ProviderConfig.inSection(providerName, AuthSectionKeys))
     yield config
 
   private def workloadIdentityOf(

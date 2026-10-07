@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ ConfigurationError, LLMError }
+import org.llm4s.llmconnect.auth.IdentitySource
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -82,6 +83,26 @@ object ProviderConfig {
       (),
       ConfigurationError(s"$provider $field must be non-empty", List(field))
     )
+
+  /** [[nonEmpty]] for an optional value: absent is fine, but a value that is set must not be blank. */
+  private[llm4s] def nonEmptyIfSet(provider: String, field: String, value: Option[String]): Result[Unit] =
+    value.fold[Result[Unit]](Right(()))(nonEmpty(provider, field, _))
+
+  /**
+   * [[nonEmpty]] for a workload identity's token source: a literal token must not be blank, nor a
+   * file's path. The field reported is `<prefix>identityToken` or `<prefix>identityTokenFile`, the
+   * `auth` key each comes from.
+   */
+  private[llm4s] def nonEmptyIdentity(
+    provider: String,
+    prefix: String,
+    source: IdentitySource
+  ): Result[Unit] =
+    source match
+      case IdentitySource.File(path) =>
+        nonEmpty(provider, s"${prefix}identityTokenFile", path.toString)
+      case IdentitySource.Literal(token) =>
+        nonEmpty(provider, s"${prefix}identityToken", token)
 
   /**
    * Roots a `fromValues` refusal at the named section it was built from, so the section path

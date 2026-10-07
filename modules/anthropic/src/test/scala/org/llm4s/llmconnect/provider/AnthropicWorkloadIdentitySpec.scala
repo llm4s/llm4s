@@ -141,6 +141,14 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       error.message should include("model listing is not supported with workload identity auth for anthropic")
     }
 
+    "reject a blank federationRuleId or organizationId, naming the auth key" in {
+      val valid = section("https://api.anthropic.com", "/s")
+      for (key, value) <- Seq("federationRuleId" -> "fdrl_1", "organizationId" -> "org_1") do
+        val blanked = valid.replace(s"""$key = "$value"""", s"""$key = " """")
+        blanked should not be valid
+        sectionResult(blanked).left.value.message should include(s"auth.$key")
+    }
+
     "reject a missing federationRuleId" in {
       sectionResult(
         section("https://api.anthropic.com", "/s").replace("federationRuleId = \"fdrl_1\", ", "")
@@ -207,6 +215,26 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         AnthropicClient(config).left.value shouldBe a[ConfigurationError]
         an[IllegalArgumentException] should be thrownBy new AnthropicClient(config)
       AnthropicClient(valid).value.close()
+    }
+
+    "be refused by fromValues, AnthropicClient and the with* setters for a blank required id or optional id" in {
+      val blanks = Seq(
+        "workloadIdentity.federationRuleId"  -> identity.withFederationRuleId(" "),
+        "workloadIdentity.organizationId"    -> identity.withOrganizationId(""),
+        "workloadIdentity.serviceAccountId"  -> identity.withServiceAccountId(" "),
+        "workloadIdentity.workspaceId"       -> identity.withWorkspaceId(""),
+        "workloadIdentity.identityTokenFile" -> identity.withIdentityTokenFile(Path.of(""))
+      )
+      for (field, blank) <- blanks do
+        withClue(field) {
+          val error = AnthropicConfig.fromValues("claude-test", "", "https://api.anthropic.com", Some(blank)).left.value
+          error shouldBe a[ConfigurationError]
+          error.asInstanceOf[ConfigurationError].missingKeys shouldBe List(field)
+          error.message should include(field)
+          val built = fromValues("https://api.anthropic.com").value.copy(workloadIdentity = Some(blank))
+          AnthropicClient(built).left.value shouldBe a[ConfigurationError]
+          an[IllegalArgumentException] should be thrownBy new AnthropicClient(built)
+        }
     }
 
     "leave AnthropicClient refusing a blank apiKey once the identity is removed, rather than send no credential" in {
