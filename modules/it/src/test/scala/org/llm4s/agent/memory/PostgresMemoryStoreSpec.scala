@@ -211,4 +211,23 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
       )
     storeFailing.close()
   }
+
+  private def batch(n: Int): Seq[Memory] =
+    (1 to n).map(i => Memory(MemoryId(s"batch-$i"), s"batch note $i", MemoryType.Knowledge))
+
+  it should "store a batch with storeAll" in skipIfDisabled {
+    store.storeAll(batch(5)).isRight shouldBe true
+    store.count(MemoryFilter.All) shouldBe Right(5L)
+  }
+
+  it should "store nothing from a batch whose write fails part way through, and keep working" in skipIfDisabled {
+    // content is NOT NULL, so the third row fails after two have been written in the same transaction.
+    val bad = batch(5).updated(2, batch(5)(2).copy(content = null))
+
+    store.storeAll(bad).isLeft shouldBe true
+    store.count(MemoryFilter.All) shouldBe Right(0L)
+
+    store.storeAll(batch(3)).isRight shouldBe true
+    store.count(MemoryFilter.All) shouldBe Right(3L)
+  }
 }

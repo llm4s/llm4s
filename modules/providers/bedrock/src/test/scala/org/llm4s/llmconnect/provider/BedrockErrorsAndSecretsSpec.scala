@@ -7,19 +7,23 @@ import org.llm4s.llmconnect.provider.BedrockTestSupport.*
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
+import com.sun.net.httpserver.HttpServer
+import org.scalatest.BeforeAndAfterAll
 import org.scalatest.OptionValues.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
+import java.net.InetSocketAddress
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable.ListBuffer
+import scala.util.Using
 
 /**
  * Every Bedrock exception the Converse API documents, mapped through the real SDK parser, on both
  * the synchronous and the streaming path; plus credential handling and what must never appear in
  * errors, logs or `toString`.
  */
-class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers {
+class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
@@ -30,17 +34,46 @@ class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers {
   private val withSecrets = (url: String) =>
     config(url).copy(credentials = Some(BedrockCredentials("AKIDEXAMPLE", secretKey, Some(sessionTok))))
 
-  private def failWith(status: Int, errorType: String, stream: Boolean): LLMError = {
-    val out = new AtomicReference[Option[LLMError]](None)
-    withServer("/")(sendJsonResponse(_, status, errorBody(errorType, "boom"))) { url =>
-      val client = new BedrockClient(config(url))
-      val result =
-        if (stream) client.streamComplete(conv, CompletionOptions(), _ => ())
-        else client.complete(conv, CompletionOptions())
-      client.close()
-      out.set(result.left.toOption)
+  // One server and one client for every error-mapping case: the server answers with whatever
+  // `nextError` holds. A client per case cost ~2 s each, because closing a client that has streamed
+  // shuts its Netty event loop down gracefully, and that waits out a quiet period.
+  private val nextError = new AtomicReference[(Int, String)]((500, "InternalServerException"))
+  @volatile private var server: Option[HttpServer]          = None
+  @volatile private var sharedClient: Option[BedrockClient] = None
+
+  override def beforeAll(): Unit = {
+    val s = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
+    s.createContext(
+      "/",
+      exchange => {
+        val (status, errorType) = nextError.get
+        sendJsonResponse(exchange, status, errorBody(errorType, "boom"))
+      }
+    )
+    s.start()
+    server = Some(s)
+  }
+
+  override def afterAll(): Unit =
+    Using.resource(new AutoCloseable { override def close(): Unit = server.foreach(_.stop(0)) })(_ =>
+      sharedClient.foreach(_.close())
+    )
+
+  private def client: BedrockClient = synchronized {
+    sharedClient.getOrElse {
+      val port = server.getOrElse(fail("server not started")).getAddress.getPort
+      val c    = new BedrockClient(config(s"http://127.0.0.1:$port"))
+      sharedClient = Some(c)
+      c
     }
-    out.get.value
+  }
+
+  private def failWith(status: Int, errorType: String, stream: Boolean): LLMError = {
+    nextError.set((status, errorType))
+    val result =
+      if (stream) client.streamComplete(conv, CompletionOptions(), _ => ())
+      else client.complete(conv, CompletionOptions())
+    result.left.toOption.value
   }
 
   "the AWS exception table" should {
@@ -132,19 +165,25 @@ class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers {
       val sink = new ProviderExchangeSink {
         override def record(exchange: ProviderExchange): Unit = exchanges += exchange
       }
-      val errors = ListBuffer.empty[LLMError]
-      Seq(
-        (403, "AccessDeniedException"),
-        (400, "ValidationException"),
-        (429, "ThrottlingException"),
-        (500, "InternalServerException")
-      ).foreach { case (status, errorType) =>
-        withServer("/")(sendJsonResponse(_, status, errorBody(errorType, "denied"))) { url =>
-          val client = new BedrockClient(withSecrets(url), exchangeLogging = ProviderExchangeLogging.Enabled(sink))
+      val errors  = ListBuffer.empty[LLMError]
+      val current = new AtomicReference[(Int, String)]((500, "InternalServerException"))
+      withServer("/") { ex =>
+        val (status, errorType) = current.get
+        sendJsonResponse(ex, status, errorBody(errorType, "denied"))
+      } { url =>
+        // One client for all four errors: closing a client that has streamed costs ~2 s.
+        val client = new BedrockClient(withSecrets(url), exchangeLogging = ProviderExchangeLogging.Enabled(sink))
+        Seq(
+          (403, "AccessDeniedException"),
+          (400, "ValidationException"),
+          (429, "ThrottlingException"),
+          (500, "InternalServerException")
+        ).foreach { error =>
+          current.set(error)
           client.complete(conv, CompletionOptions()).left.foreach(errors += _)
           client.streamComplete(conv, CompletionOptions(), _ => ()).left.foreach(errors += _)
-          client.close()
         }
+        client.close()
       }
       errors.size shouldBe 8
       errors.foreach { e =>
