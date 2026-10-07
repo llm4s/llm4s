@@ -178,6 +178,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rules for changing a Frozen API without breaking it; and how an API is deprecated (`@deprecated` with the
   replacement and the release, a CHANGELOG entry) and removed (never within a major version). It collects
   what `1.0 Scope`, `API Stability`, the provider guide and `CLAUDE.md` already said, and links to each.
+- **Gemini and Vertex AI keep and replay thought signatures** ([#1389](https://github.com/llm4s/llm4s/issues/1389)):
+  a thinking Gemini model attaches an opaque `thoughtSignature` to a part of its turn (the `functionCall`
+  part when it calls a function, sometimes the last text part) and expects it back on the same part; Gemini 3
+  models answer HTTP 400 when a required signature is missing, so thinking context used to be lost, or the
+  request failed, across tool calls. Each signature is now kept on `AssistantMessage.thinking` as a sealed
+  `ThinkingBlock.Opaque("gemini" | "vertexai", ...)`, bound and replayed through the same binding as
+  Anthropic's and OpenRouter's thinking: it goes back only to the provider and model that produced it, while
+  the conversation before it is unchanged. A function call's signature is sent on that call's part (on the
+  first call only, for parallel calls, as Gemini returns it); a text part's signature is sent with the text
+  split where it sat. The Gemini API and Vertex AI are separate signing authorities, so a conversation moved
+  from one to the other keeps its text and drops the signatures. The sources, the Anthropic-to-Bedrock failover
+  finding (left sealed per provider, with the reasons) and the remaining limits are in
+  [Thinking in conversation history](docs/guide/providers.md#thinking-in-conversation-history).
+  Behaviour changes in the same clients:
+  - a stream chunk holding several function calls now yields all of them (only the first was kept);
+  - a streamed `Completion` carries its tool calls on `Completion.toolCalls`, as OpenAI's and Ollama's do (they
+    were on the message only);
+  - a thought-summary part (`"thought": true`) is thinking text and no longer part of the answer;
+  - a `functionCall` without `args` is accepted.
 - **Ollama honours `responseFormat`** ([#932](https://github.com/llm4s/llm4s/issues/932)):
   `OllamaClient` now sends the `/api/chat` `format` field for streaming and non-streaming requests,
   so `completeStructured` is constrained natively. `ResponseFormat.Json` sends `"format": "json"`

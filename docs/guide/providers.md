@@ -1498,7 +1498,8 @@ tool calls do, and each client sends it back where its provider takes it:
 | DeepSeek, Z.ai | `reasoning_content` | `reasoning_content` |
 | OpenRouter | `reasoning` / `thinking`, and `reasoning_details` | `reasoning`, and `reasoning_details` unchanged (same items, order and fields) |
 | Mistral (Magistral) | thinking chunks in `content` | a thinking chunk before the text chunk |
-| OpenAI, Azure, Gemini, Vertex AI, Cohere, generic `openai-compatible` | - | not sent: the API has no field for it |
+| Gemini API, Vertex AI | a `thoughtSignature` on a part: the `functionCall` part, or the last text part (and thought summaries, `thought: true`, as text) | the signature, on the same part ([below](#gemini-and-vertex-ai-thought-signatures)) |
+| OpenAI, Azure, Cohere, generic `openai-compatible` | - | not sent: the API has no field for it |
 
 Anthropic and Bedrock require the signed blocks back when a thinking model's turn ends in tool
 calls, and reject a thinking block without a signature, so unsigned thinking - from another
@@ -1516,6 +1517,34 @@ when a conversation continues after tool calls. Each item is kept, with every fi
 `ThinkingBlock.Opaque("openrouter", json)` block after the reasoning text - streamed items are
 joined by `index` first - and only the OpenRouter client sends them back; every other client ignores
 opaque blocks that are not its own.
+
+### Gemini and Vertex AI thought signatures
+
+A thinking Gemini model attaches an opaque, base64 `thoughtSignature` to a part of its turn and expects it
+back on the same part. Google's
+[Vertex AI guide](https://cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures) states the rules
+these clients follow:
+
+- A response with `functionCall` parts needs its signature back: Gemini 3 models answer HTTP 400 when a
+  required signature is missing. With parallel calls only the first `functionCall` part carries one; across
+  sequential steps each step's first call does. The part goes back "exactly as it was returned".
+- A response without function calls may carry a signature on its last part (streaming can deliver it on a part
+  with empty text). Sending it back is recommended, and leaving it out is not an error.
+- A part with a signature is never merged with one without.
+
+Each signature is kept as a sealed `ThinkingBlock.Opaque` block of the client's provider id (`gemini` or
+`vertexai`) and replayed through the same binding as the other sealed thinking, so it goes back only to the
+provider and model that produced it while the conversation before it is unchanged. A function call's
+signature is stored against the tool call's id and sent on that call's `functionCall` part; a text part's
+signature records its character offset in the message content, and the content is split there when the turn is
+sent, so a signed part is never merged with an unsigned one (if the content no longer fits, the text
+signature is left out). Parts are rebuilt as text first, then function calls, as these clients have always
+sent them.
+
+Google's documentation does not say whether a signature from the Gemini API validates on Vertex AI, so the two
+clients are separate signing authorities: a conversation moved from one to the other keeps its text and
+drops the signatures, never sending a foreign one. A signature on an image part, or on a thought-summary
+part, is not kept, since these clients neither request nor send those parts.
 
 Signed, redacted and opaque thinking is *sealed*: it is valid only in the conversation it was produced in.
 [Anthropic](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking) validates a
@@ -1554,6 +1583,35 @@ as a hash of all the messages in the conversation. llm4s enforces both halves wi
   the complete `reasoning_details` sequence on a tool-call continuation, so routed turns keep it.
   Changing the configured model unseals every earlier turn. The endpoint is not part of it: a proxy or regional endpoint in
   front of the same provider changes nothing the provider checks.
+
+### Moving between Anthropic and Bedrock
+
+A conversation that moves between the Anthropic API and Bedrock (a failover, say) has its signed thinking
+unsealed: the text is kept, the signatures and redacted blocks are dropped, and nothing is rejected. Anthropic
+[documents](https://platform.claude.com/docs/en/build-with-claude/thinking#thinking-encryption) that signature
+values are compatible across platforms (the Claude API, Amazon Bedrock and Google Cloud), but that is only one
+of the conditions for a replayed block to be accepted. The API also checks the model that produced it
+(each model reads its own thinking blocks and those of a fixed set of other models) and that everything sent
+before it is unchanged, and rejects the request with a 400 or drops the block when either fails. The two
+clients name the same model differently (`claude-sonnet-4-5-20250929` against
+`anthropic.claude-sonnet-4-5-20250929-v1:0`) and serialise the system prompt and tools through different
+APIs, so this library cannot show that the prefix a block was signed over is the prefix the other platform
+sees. Losing the reasoning context on a failover is safe; a rejected request is not, so each remains its own
+signing authority. Treating them as one would need a mapping between the two model ids and a live check that
+a signature survives the move.
+
+### Limits that remain
+
+- **OpenRouter routers and fallbacks.** OpenRouter's documentation says dynamic routers (`openrouter/auto`,
+  `openrouter/free`) omit the reasoning field, so there is nothing to replay for them, and that the
+  `reasoning_details` sequence must match the original output with nothing rearranged or modified. It does
+  not say what happens to the details when a fallback sends the request to a different model, so they are
+  sent back unchanged, as its documentation asks.
+- **Editing a tool call on a turn that is still in progress** (a human-in-the-loop edit) unseals that turn's
+  thinking, because the signature covers the tool call. Anthropic's manual extended thinking requires the
+  final assistant turn of a thinking-enabled request to begin with a thinking block, so such a request can be
+  rejected; adaptive thinking drops that requirement. Gemini 3 answers 400 for a missing function-call
+  signature in the current turn.
 
 Earlier turns whose history is unchanged keep their sealed thinking: Anthropic recommends passing
 all thinking blocks back, keeps them in context on newer models, and accepts any unbroken run of the

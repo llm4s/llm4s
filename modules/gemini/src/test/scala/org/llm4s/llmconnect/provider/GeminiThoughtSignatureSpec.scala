@@ -491,6 +491,21 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
     )
   }
 
+  it should "send a function call's signature but not the thought summary text kept beside it" in {
+    val call = ToolCall(id = "call-1", name = "f", arguments = ujson.Obj())
+    val message = AssistantMessage(
+      toolCalls = Seq(call),
+      thinking = Seq(
+        ThinkingBlock.Text("The model's own reasoning summary."),
+        ThinkingBlock.Opaque("gemini", ujson.Obj("call" -> "call-1", "sig" -> "S").render())
+      )
+    )
+
+    GeminiThoughtSignatures.parts("gemini", message) shouldBe Seq(
+      ujson.Obj("functionCall" -> ujson.Obj("name" -> "f", "args" -> ujson.Obj()), "thoughtSignature" -> "S")
+    )
+  }
+
   it should "not attach a signature to a call it does not belong to" in {
     val call = ToolCall(id = "real-id", name = "f", arguments = ujson.Obj())
     val message = AssistantMessage(
