@@ -200,8 +200,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`retrieval.passage` / `retrieval.query`) and Cohere as `input_type` (`search_document` / `search_query`);
   OpenAI and Ollama ignore it. An explicit `JinaTask` or `CohereInputType` passed to `fromConfig` still wins
   over the purpose. `RAG` and `RAGPipeline` embed the question they answer as a query and what they index as
-  documents, and `CachedEmbeddingClient` keeps a query and a document with the same text in separate cache
-  entries (document keys are unchanged). **Behaviour changes:** Voyage now sends `input_type` (`document` by
+  documents, the memory stores embed the text they search with as a query (`EmbeddingService.embedQuery`,
+  which delegates to `embed` by default, so existing implementations are unaffected), and `CachedEmbeddingClient`
+  keeps a query and a document with the same text in separate cache entries (document keys are unchanged). **Behaviour changes:** Voyage now sends `input_type` (`document` by
   default; it sent none before), so re-index for the best retrieval quality - older document vectors still
   work; and a Jina or Cohere provider built without an explicit task now follows each request's purpose
   instead of always sending the document type. `EmbeddingRequest` becomes a growth-prone type (private
