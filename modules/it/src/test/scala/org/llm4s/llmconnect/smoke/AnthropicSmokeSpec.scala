@@ -3,9 +3,11 @@ package org.llm4s.llmconnect.smoke
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver }
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ReasoningEffort, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.AnthropicClient
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.it.Tier
@@ -21,17 +23,20 @@ import org.llm4s.it.tags.Cloud
  * Requires: `ANTHROPIC_API_KEY` environment variable.
  */
 @Cloud
-class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
+class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with ProviderSmokeContract {
 
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
   private val apiKey: Option[String] = Option(System.getenv("ANTHROPIC_API_KEY")).filter(_.nonEmpty)
 
-  private def config(key: String): AnthropicConfig =
+  /** A Claude model that supports extended thinking, for the contract's reasoning check. */
+  private val ThinkingModel = "claude-haiku-4-5-20251001"
+
+  private def config(key: String, model: String = "claude-3-haiku-20240307"): AnthropicConfig =
     AnthropicConfig
       .fromValues(
-        modelName = "claude-3-haiku-20240307",
+        modelName = model,
         apiKey = key,
         baseUrl = "https://api.anthropic.com"
       )
@@ -77,4 +82,24 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
     result.isLeft shouldBe true
     result.swap.toOption.get shouldBe an[AuthenticationError]
   }
+
+  // ---- the shared capability contract (issue #1212): see ProviderSmokeContract ----
+
+  override protected def providerLabel: String                          = "Anthropic"
+  override protected def apiKeyEnvVar: String                           = "ANTHROPIC_API_KEY"
+  override protected def contractKey: Option[String]                    = apiKey
+  override protected def contractClient(key: String): Result[LLMClient] = AnthropicClient(config(key))
+  // Extended thinking needs a model that supports it, which the cheap default model above does not. The thinking
+  // budget is clamped to at least 1024 tokens and below max_tokens, so max_tokens leaves room for the answer.
+  override protected def reasoningSetup: Option[String => Result[ReasoningSetup]] = Some { key =>
+    AnthropicClient(config(key, ThinkingModel)).map { client =>
+      ReasoningSetup(
+        client,
+        CompletionOptions(maxTokens = Some(2048)).withReasoning(ReasoningEffort.Low),
+        expectsThinkingText = true
+      )
+    }
+  }
+
+  registerCapabilityContract()
 }
