@@ -687,6 +687,8 @@ Want to be part of developing this and interact with other developers? Join our 
 
 Please review our [Code of Conduct](https://github.com/llm4s/llm4s/blob/main/CODE_OF_CONDUCT.md) to understand our community guidelines and expectations.
 
+ **Help and adopters:** see [SUPPORT.md](SUPPORT.md) for where to ask what, and add your organisation to [ADOPTERS.md](ADOPTERS.md) if you use LLM4S.
+
  **LLM4S Discord:** https://lnkd.in/eb4ZFdtG
 
 ## Google Summer of Code (GSoC)

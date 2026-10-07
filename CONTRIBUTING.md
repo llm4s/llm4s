@@ -97,6 +97,7 @@ and [API keys](docs/getting-started/configuration.md#api-keys).
 - **Discord:** [Join the community](https://discord.gg/4uvTPn6qww)
 - **Issues:** [Open an issue](https://github.com/llm4s/llm4s/issues) for bugs, questions, or feature requests
 - **Dev Hour:** We host a contributor dev hour on Discord every Tuesday at 17:00 UTC.
+- **Support guide:** [SUPPORT.md](SUPPORT.md) lists where to ask questions, report bugs and report vulnerabilities.
 
 ## Pull Request Workflow
 
