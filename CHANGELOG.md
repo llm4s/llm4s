@@ -1697,6 +1697,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly and returns a `Left` (`Regex matching aborted: pattern recursed too deeply for the input (stack
   overflow)`), which `RegexValidator` reports as a `Regex security error` `ValidationError`. Other fatal errors
   still propagate. The workspace runner's `WorkspaceRegexSafetyManager` has the same fix.
+- **`SafeParameterExtractor`: integer parameters reject fractions and overflow, and `validateRequired` checks
+  types** ([#964](https://github.com/llm4s/llm4s/issues/964)): `getInt`, `getIntEnhanced` and `getOptionalInt`
+  were `_.numOpt.map(_.toInt)`, so a tool argument of `3.14` returned `3` and `9223372036854775807` returned `-1`,
+  silently. An integer parameter now accepts only a JSON number with no fractional part that fits in an `Int`
+  (`3`, `3.0`, `1e2` and `-0.0` are accepted); a fraction, NaN, an infinity or an out-of-range value is a
+  `TypeMismatch` (`expected integer, got number`), so a model that sends one gets an error it can correct.
+  `validateRequired` passed `_ => Some(())` as its extractor, so it checked presence but never the declared type
+  although its Scaladoc promised it; it now checks `string`, `integer`, `number`, `boolean`, `array` and `object`
+  with the same rules as the typed getters and reports a wrong-typed value as a `TypeMismatch` beside the missing
+  ones. A type name it does not know is still checked for presence only. **Migration:** a tool that read an
+  integer with `getInt` and received a fractional or oversized number used to run with a truncated or wrapped
+  value; it now gets a `Left`. The built-in tools that read an integer with `.fold(_ => default, identity)` or
+  `.toOption` (`UUIDTool`'s `count`, `ListDirectoryTool`'s `max_entries`, `ReadFileTool`'s `max_lines`, the
+  workspace and knowledge-graph tools) fall back to their default for such a value instead of using the truncated
+  one. No public signature changed.
 - **Guardrail case folding no longer depends on the JVM default locale**: `ProfanityFilter`, `ToneValidator`
   and `PromptInjectionDetector` lower-cased text with the default locale, so under a Turkish locale `HI`,
   `INAPPROPRIATE` and `IGNORE PREVIOUS INSTRUCTIONS` folded to a dotless `ı` and went undetected. They (and the
