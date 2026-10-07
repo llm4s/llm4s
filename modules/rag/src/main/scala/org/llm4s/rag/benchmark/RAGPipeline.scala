@@ -155,7 +155,7 @@ final class RAGPipeline private (
     val k                            = topK.getOrElse(config.topK)
 
     // Get query embedding
-    val request = EmbeddingRequest(input = Seq(query), model = embeddingModelConfig)
+    val request = EmbeddingRequest(input = Seq(query), model = embeddingModelConfig, purpose = InputPurpose.Query)
 
     val result = for {
       response <- tracedEmbeddingClient.withOperation("query").embed(request)

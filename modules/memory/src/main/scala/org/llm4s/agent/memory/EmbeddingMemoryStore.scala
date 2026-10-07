@@ -45,7 +45,7 @@ final class EmbeddingMemoryStore private (
     val hasEmbeddings = inner.all.exists(m => filter.matches(m) && m.isEmbedded)
 
     if (hasEmbeddings) {
-      embeddingService.embed(query) match {
+      embeddingService.embedQuery(query) match {
         case Right(queryEmbedding) =>
           inner.search(query, queryEmbedding, topK, filter)
         case Left(_) =>
