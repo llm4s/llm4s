@@ -245,4 +245,34 @@ class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
 
     long should be > short
   }
+
+  // ============ Thinking ============
+
+  "ConversationTokenCounter" should "count an assistant message's thinking text, which providers send back" in {
+    val counter = ContextTestFixtures.createSimpleCounter()
+    val plain   = AssistantMessage("Done.")
+    // 4 characters per token with the simple tokenizer
+    counter.countMessage(plain.withThinking("x" * 4000)) shouldBe counter.countMessage(plain) + 1000
+    counter.countMessage(
+      plain.withThinking(Seq(ThinkingBlock.Text("x" * 400, Some("sig")), ThinkingBlock.Text("y" * 400)))
+    ) shouldBe counter.countMessage(plain) + 200
+  }
+
+  it should "estimate redacted thinking from its size" in {
+    val counter = ContextTestFixtures.createSimpleCounter()
+    val plain   = AssistantMessage("Done.")
+    counter.countMessage(plain.withThinking(Seq(ThinkingBlock.Redacted("z" * 401)))) shouldBe
+      counter.countMessage(plain) + 101
+  }
+
+  it should "let thinking count toward the conversation, so TokenWindow trims a reasoning-heavy turn" in {
+    val counter  = ContextTestFixtures.createSimpleCounter()
+    val thinking = AssistantMessage("Ok.").withThinking("r" * 40000)
+    val convo    = Conversation(Seq(UserMessage("Q1"), thinking, UserMessage("Q2")))
+    counter.countConversation(convo) should be > 10000
+    TokenWindow.fitsInBudget(convo, counter, 1000) shouldBe false
+    val window = TokenWindow.trimToBudget(convo, counter, 1000)
+    window.map(_.wasTrimmed) shouldBe Right(true)
+    window.map(_.conversation.messages.contains(thinking)) shouldBe Right(false)
+  }
 }

@@ -74,7 +74,10 @@ object ShellConfig {
    * are configured to allow; use [[readOnlyWithin]] to hold their arguments to a path policy. The command's
    * environment is scrubbed (see [[ShellConfig]]).
    *
-   * Every program on this list only reads. `env` is deliberately absent: with arguments it runs the
+   * The programs on this list are ones whose ordinary use only reads, but this is an allowlist of program
+   * names, not read-only execution: most options pass through unchecked, so `date -s` sets the clock when
+   * the process may. The options that write a file or read a list of files are refused (`file -C`, `-m`, `-f`
+   * and `wc --files0-from`). `env` is deliberately absent: with arguments it runs the
    * program that follows it (`env sh -c ...`), so allowing it allows every program, and without them
    * it prints the process environment, which is where API keys live. The allowlist checks the program
    * a command starts with, not the programs that program starts - keep that in mind before adding a

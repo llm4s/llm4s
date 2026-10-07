@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Thinking stays in the conversation and goes back to the provider** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
+  `AssistantMessage` carries the model's reasoning as `thinking: Seq[ThinkingBlock]` - `ThinkingBlock.Text(text,
+  signature)`, `ThinkingBlock.Redacted(data)` or `ThinkingBlock.Opaque(provider, data)` (provider-specific replay
+  data only that provider's client sends back), `@Stable` - with `withThinking(blocks)` /
+  `withThinking(text)`, `thinkingText` and `hasThinking`; its codec writes `thinking` only when present and reads
+  JSON without it as none, so stored conversations and agent checkpoints still load. Clients put the thinking on the
+  message they return, streamed or not: Anthropic and Bedrock as blocks with their signatures and redacted thinking,
+  Ollama, DeepSeek, Z.ai (newly read from `reasoning_content`), OpenRouter and Mistral as text, and OpenRouter's
+  `reasoning_details` (whole or streamed, joined by `index`) as one opaque block per item. They send it back
+  where the provider takes it: Anthropic and Bedrock replay signed and redacted blocks first in the assistant turn
+  (unsigned thinking is left out), Ollama as `thinking`, DeepSeek and Z.ai as `reasoning_content`, OpenRouter as
+  `reasoning` plus its `reasoning_details` unchanged, Mistral as a thinking chunk; new `OpenAICompatibleDialect` hooks
+  decide - `encodeThinking` (given the turn's blocks), `thinkingDetails` and `decodeThinkingDetails` - and drop it by
+  default. The agent's tool loop stores the completion's message unchanged, so a run sends a tool-call turn's
+  thinking in the call after the tool results, and later turns read it back from the checkpoint.
 - **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
   `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
   service's MP3 and return its bytes untouched. PCM stays the default. `AudioFormat.Mp3` is a new case
@@ -343,6 +358,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sbt. Three stale claims it found are fixed: `sbt dependencyCheck` (no such task) in the review guidelines,
   `sbt run "Explain ..."` in the g8 guide (sbt reads the quoted text as a second command; it is now
   `sbt "run Explain ..."`), and `modules/gradle-demo`, which CLAUDE.md did not name.
+- **Built-in tools guide** ([#1296](https://github.com/llm4s/llm4s/issues/1296)):
+  `docs/guide/builtin-tools.md` lists every built-in tool with its parameters and result, the bundles that hold
+  them (`coreSafe`, `withHttpSafe()`, `withFilesSafe()`, `developmentSafe()`, `customSafe(...)`), how to register
+  them with a `ToolRegistry` and an `Agent`, how to configure the search tools, and what each tool can do, with
+  the defaults of `FileConfig`, `WriteConfig`, `HttpConfig` and `ShellConfig`. The bundle tables, parameter table,
+  defaults and safety statements are asserted against the real code by `BuiltinToolsGuideSpec`, and the agent
+  snippet is run by `BuiltinToolsGuideAgentSpec`. The Agents guide described `BuiltinTools.core`, `safe()`,
+  `withFiles()` and `development()`, which were removed in favour of the `Safe` variants, and tools that do not
+  exist (`WebSearchTool`, `FileReadTool`); it now shows the real names and links to the guide.
 - **Error handling guide** ([#960](https://github.com/llm4s/llm4s/issues/960)):
   `docs/guide/error-handling.md` teaches `Result[A]` and `LLMError` in practice: the basic pattern,
   for-comprehensions, a table of the error types in `org.llm4s.error` with whether each is recoverable and
@@ -573,6 +597,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **`AssistantMessage` is a growth-prone data type; `Completion.thinking` comes from the message**
+  ([#1381](https://github.com/llm4s/llm4s/issues/1381)): `AssistantMessage` is `final case class AssistantMessage
+  private (contentOpt, toolCalls, thinking)` with a companion `apply` (named arguments, defaults as before, plus the
+  `apply(content)` / `apply(content, toolCalls)` overloads) and `withContent`, `withToolCalls`, `withThinking`;
+  `.copy` is private, so replace `msg.copy(contentOpt = Some(t))` with `msg.withContent(t)`. A positional pattern
+  takes four fields: `case AssistantMessage(content, toolCalls, thinking, thinkingBinding)`. `Completion` loses its `thinking`
+  constructor parameter and `withThinking`: `Completion.thinking` is now `message.thinkingText`, so set it with
+  `completion.withMessage(completion.message.withThinking(...))`, or build the message with it.
+  Signed, redacted or opaque thinking is *sealed*: Anthropic, Bedrock and OpenRouter accept it only beside the exact
+  content and tool calls it came with, so `withContent` / `withToolCalls` given a changed value drop redacted and
+  opaque blocks and signatures
+  (keeping the reasoning text). Sealed thinking is also valid only after the history it was produced after
+  (Anthropic checks the system prompt, tools and every earlier message; Bedrock's signature is a hash of the
+  conversation), so the Anthropic, Bedrock and OpenAI-compatible clients bind it to a fingerprint of the request
+  (`AssistantMessage.thinkingBinding`) and, at send time, replay it only while the conversation before it still has
+  that fingerprint, sent to the provider and model that produced it - the fingerprint covers the provider id and
+  model each client is configured with (never the model a response reports, so an alias's snapshot or the model
+  `openrouter/auto` or a fallback chose keeps the replay OpenRouter requires on tool-call continuations), so a conversation continued with another client or model is sent unsealed rather
+  than with a foreign signature. Pruning, compression, summarisation, an edit or an inserted message anywhere earlier therefore
+  unseals every later turn, whoever made the change; `hasSealedThinking` reports the state. Token estimates
+  (`ConversationTokenCounter`, the agent's default pruning counter) now count thinking, which providers resend.
+- **`llm4s-anthropic`: tool calls and results as content blocks** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
+  an assistant turn's tool calls go to Anthropic as `tool_use` blocks after its text, and each `ToolMessage` as a
+  `tool_result` block, consecutive results in one user turn. Before, a tool-call turn was dropped and its results
+  sent as `[Tool result for <id>]: ...` user text, which left nowhere to replay the turn's signed thinking. A call
+  is sent only when its result is in the run of tool messages straight after it; otherwise the call is left out and
+  the result goes as prefixed user text, after the turn's `tool_result` blocks. `llm4s-bedrock` pairs calls and
+  results by the same rule (it sent every call and result before, which Converse rejects when they do not pair).
 - **`OpenAIConfig`, `AnthropicConfig` and `OllamaConfig` use the growth-prone data type pattern**
   ([#1388](https://github.com/llm4s/llm4s/issues/1388), `llm4s-openai-compatible`, `llm4s-anthropic`,
   `llm4s-ollama`): Scala default arguments are invisible to Java and Kotlin, so a field added to one of these
@@ -1692,6 +1744,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-agent-tools`: file tools confined by path component, not string prefix**
+  ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `FileConfig.isPathAllowed` and
+  `WriteConfig.isPathAllowed` compared paths with `String.startsWith`, so an allowed `/srv/agent-data` also
+  admitted `/srv/agent-data-secret`, and `developmentSafe(workingDirectory)` could read and write a sibling
+  directory whose name began with the working directory's. Both now use `Path.startsWith` on normalised absolute
+  paths; blocked paths are matched the same way (`/var` no longer blocks `/variable`).
+- **`llm4s-agent-tools`: `list_directory` honours `followSymlinks = false`**
+  ([#1296](https://github.com/llm4s/llm4s/issues/1296)): it checked the requested path with a link-following
+  `Files.isDirectory`, so a directory symbolic link inside an allowed path listed the directory it pointed to.
+  Without `followSymlinks` it now refuses the link with `Not a directory`, as `read_file` refuses a linked file.
+- **`llm4s-agent-tools`: `http_request` reads at most `maxResponseSize` bytes**
+  ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `HTTPTool` read the whole body into a string and only then
+  cut it to `maxResponseSize` characters, so a large or endless response could exhaust memory before `truncated`
+  was set. It now reads at most `maxResponseSize` bytes from the stream and stops; the limit counts bytes, as
+  documented, not decoded characters.
 - **`llm4s-agent`: a burst of live events no longer disconnects a subscriber as `Lagging`**
   ([#1387](https://github.com/llm4s/llm4s/issues/1387)): a subscription's queue held durable and live
   events against one `capacity`, so a model streaming faster than the dispatcher thread was scheduled filled

@@ -6,14 +6,16 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.io.{ ByteArrayInputStream, InputStream }
 import java.net.InetSocketAddress
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicLong
 import scala.annotation.tailrec
 import scala.concurrent.duration.*
 import scala.util.Try
 
 /**
- * The HTTP tool cuts a response off at `maxResponseSize` instead of reading the whole body first (issue #1408,
+ * The HTTP tool cuts a response off at `maxResponseSize` bytes instead of reading the whole body first (issue #1408,
  * finding F4). The end-to-end test uses an in-process server on loopback that streams far more than the cap and
  * counts how much of it was written before the client went away.
  */
@@ -27,9 +29,13 @@ class HttpBoundedReadSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
 
   // ---- the helper, on its own
 
-  /** What the tool did before: read everything, then cut. */
-  private def formerly(body: String, cap: Long): (String, Boolean) =
-    if (body.length > cap) (body.take(cap.toInt), true) else (body, false)
+  private def stream(body: String): InputStream = new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8))
+
+  /** What the tool did before, with the cap counted in bytes: read everything, then cut. */
+  private def formerly(body: String, cap: Long): (String, Boolean) = {
+    val bytes = body.getBytes(StandardCharsets.UTF_8)
+    if (bytes.length > cap) (new String(bytes.take(cap.toInt), StandardCharsets.UTF_8), true) else (body, false)
+  }
 
   "readBounded" should "give the same result as reading everything and then cutting, for any body and cap" in {
     val bodies = Seq("", "a", "abc", "héllo wörld", "😀😀😀", "x" * 1000)
@@ -37,18 +43,27 @@ class HttpBoundedReadSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
       body <- bodies
       cap  <- Seq(0L, 1L, 2L, 3L, 5L, 999L, 1000L, 1001L, 100000L)
     } withClue(s"body of ${body.length} chars, cap $cap: ")(
-      HTTPTool.readBounded(body.iterator, cap) shouldBe formerly(body, cap)
+      HTTPTool.readBounded(stream(body), cap) shouldBe formerly(body, cap)
     )
   }
 
-  it should "report a body of exactly the cap as whole and one more character as cut" in {
-    HTTPTool.readBounded("abcde".iterator, 5L) shouldBe (("abcde", false))
-    HTTPTool.readBounded("abcdef".iterator, 5L) shouldBe (("abcde", true))
+  it should "report a body of exactly the cap as whole and one more byte as cut" in {
+    HTTPTool.readBounded(stream("abcde"), 5L) shouldBe (("abcde", false))
+    HTTPTool.readBounded(stream("abcdef"), 5L) shouldBe (("abcde", true))
   }
 
-  it should "never take more than the cap plus one character from the source" in {
-    val taken  = new AtomicLong(0)
-    val source = Iterator.continually { taken.incrementAndGet(); 'a' }
+  it should "decode a cut inside a multi-byte character as the replacement character, and say it was cut" in {
+    // "é" is two bytes: a cap of 1 splits it
+    val (body, truncated) = HTTPTool.readBounded(stream("é"), 1L)
+    truncated shouldBe true
+    body shouldBe "\uFFFD"
+  }
+
+  it should "never take more than the cap plus one byte from the source" in {
+    val taken = new AtomicLong(0)
+    val source = new InputStream {
+      override def read(): Int = { taken.incrementAndGet(); 'a'.toInt }
+    }
 
     val (body, truncated) = HTTPTool.readBounded(source, 100L)
 
@@ -58,8 +73,8 @@ class HttpBoundedReadSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   }
 
   it should "treat a negative cap as zero, and a huge cap as no cut for a short body" in {
-    HTTPTool.readBounded("abc".iterator, -5L) shouldBe (("", true))
-    HTTPTool.readBounded("abc".iterator, Long.MaxValue) shouldBe (("abc", false))
+    HTTPTool.readBounded(stream("abc"), -5L) shouldBe (("", true))
+    HTTPTool.readBounded(stream("abc"), Long.MaxValue) shouldBe (("abc", false))
   }
 
   // ---- end to end

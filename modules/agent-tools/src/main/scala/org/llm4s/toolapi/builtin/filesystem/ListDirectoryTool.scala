@@ -127,9 +127,13 @@ object ListDirectoryTool {
         case None =>
           Left(s"Access denied: path '$pathStr' is not allowed")
         case Some(real) =>
-          if (!Files.exists(real)) {
+          // Without followSymlinks, a directory that is itself a symbolic link is refused, as read_file refuses a
+          // linked file. The policy above has already judged where the path really is; this is the final-component rule.
+          val directoryLinkOptions =
+            if (config.followSymlinks) Array.empty[LinkOption] else Array(LinkOption.NOFOLLOW_LINKS)
+          if (!Files.exists(path, directoryLinkOptions: _*)) {
             Left(s"Directory not found: $pathStr")
-          } else if (!Files.isDirectory(real)) {
+          } else if (!Files.isDirectory(path, directoryLinkOptions: _*)) {
             Left(s"Not a directory: $pathStr")
           } else {
             Try {

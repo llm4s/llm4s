@@ -6,9 +6,9 @@ import org.llm4s.types.Result
 import org.llm4s.util.DurationRounding
 import upickle.default._
 
+import java.io.InputStream
 import java.net.{ HttpURLConnection, URI }
 import java.nio.charset.StandardCharsets
-import scala.io.Source
 import scala.concurrent.duration.{ DurationLong, FiniteDuration }
 import scala.util.Try
 
@@ -129,16 +129,18 @@ object HTTPTool {
   val toolSafe: Result[ToolFunction[Map[String, Any], HTTPResult]] = createSafe()
 
   /**
-   * Read a response body without ever holding more than `maxChars + 1` characters.
+   * Read a response body without ever holding more than `maxBytes + 1` bytes.
    *
-   * A body that is longer than the cap is cut at the cap and reported as truncated, as before; what changed is that
-   * reading stops once the character after the cap has been seen, instead of reading the whole body first.
-   * The cap counts characters of the decoded text (as `maxResponseSize` always has), not bytes.
+   * A body that is longer than the cap is cut at the cap and reported as truncated; reading stops once the byte
+   * after the cap has been seen, instead of reading the whole body first. The cap counts bytes (so an endless
+   * response never has to fit in memory); a cut that falls inside a multi-byte character decodes it as U+FFFD.
    */
-  private[http] def readBounded(chars: Iterator[Char], maxChars: Long): (String, Boolean) = {
-    val limit = math.max(0L, math.min(maxChars, Int.MaxValue.toLong - 1L)).toInt
-    val head  = chars.take(limit + 1).mkString
-    if (head.length > limit) (head.take(limit), true) else (head, false)
+  private[http] def readBounded(in: InputStream, maxBytes: Long): (String, Boolean) = {
+    val limit    = math.min(math.max(maxBytes, 0L), (Int.MaxValue - 9).toLong).toInt
+    val bytes    = in.readNBytes(limit + 1)
+    val isLonger = bytes.length > limit
+    val kept     = if (isLonger) java.util.Arrays.copyOf(bytes, limit) else bytes
+    (new String(kept, StandardCharsets.UTF_8), isLonger)
   }
 
   /** Headers that must be stripped when a redirect crosses to a different host. */
@@ -317,13 +319,13 @@ object HTTPTool {
         connection.getInputStream
       }
 
-      // Read at most maxResponseSize + 1 characters: a body over the cap is cut off, never read in full
+      // Read at most maxResponseSize bytes (plus one, to detect a longer body) so that an oversized or endless
+      // response never has to fit in memory, then decode. A cut that falls inside a multi-byte character decodes it
+      // as U+FFFD. A body over the cap also drops the connection, so the server is not left sending the rest.
       val (responseBody, truncated) = using(inputStream) { is =>
-        using(Source.fromInputStream(is, "UTF-8")) { source =>
-          val bounded = readBounded(source, config.maxResponseSize)
-          if (bounded._2) connection.disconnect()
-          bounded
-        }
+        val bounded = readBounded(is, config.maxResponseSize)
+        if (bounded._2) connection.disconnect()
+        bounded
       }
 
       connection.disconnect()
