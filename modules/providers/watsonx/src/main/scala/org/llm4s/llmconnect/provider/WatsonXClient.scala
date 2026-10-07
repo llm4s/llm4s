@@ -23,12 +23,23 @@ import scala.util.{ Try, Using }
 /**
  * [[LLMClient]] for IBM watsonx.ai chat (`POST /ml/v1/text/chat` and `/ml/v1/text/chat_stream`).
  *
- * '''Beta - never run against the live service.''' There is no watsonx account behind this project, so the
- * request and response shapes are those IBM's public pages and SDK documentation report, plus the ones
- * marked ''ASSUMED'' below, which follow the OpenAI chat convention the chat API resembles and are
- * unconfirmed (see https://github.com/llm4s/llm4s/issues/1314). The module's API is not frozen. It replaces
- * the text-generation endpoints (`/ml/v1/text/generation` and `/generation_stream`), which IBM's February
- * 2026 release notes deprecate.
+ * '''Beta - never run against the live service.''' There is no watsonx account behind this project, so nothing
+ * here has been checked against the real service (see https://github.com/llm4s/llm4s/issues/1314). The request
+ * and response shapes are those IBM's public pages report, cross-checked against IBM's own open-source client
+ * code (see ''Evidence'' below). The module's API is not frozen. It replaces the text-generation endpoints
+ * (`/ml/v1/text/generation` and `/generation_stream`), which IBM's February 2026 release notes deprecate
+ * without giving a removal date.
+ *
+ * == Evidence ==
+ *
+ * A detail is ''SDK-evidenced'' when IBM's own code shows it. That proves IBM's client sends it, which is strong
+ * evidence the service accepts it, but it is not a live check. The sources, pinned:
+ *  - `NODE`: https://github.com/IBM/watsonx-ai-node-sdk at 47a4a0c (2026-08-05), IBM's Node.js SDK;
+ *  - `LCIBM`: https://github.com/langchain-ai/langchain-ibm at 6c32b1d (2026-10-05), IBM's LangChain integration,
+ *    `libs/ibm/langchain_ibm/chat_models.py`.
+ *
+ * The `@Cloud` suite `WatsonXAssumptionProbeSpec` (modules/it) re-checks each of these against a real account and
+ * prints which held.
  *
  * == Authentication ==
  *
@@ -41,7 +52,8 @@ import scala.util.{ Try, Using }
  * content is data and cannot forge a turn: there is no prompt string with role markers, and no stop
  * sequences standing in for them. The model goes in `model_id`, the project or space in `project_id` or
  * `space_id`, and the API version in the `version` query parameter (`WatsonXConfig.apiVersion`).
- * `temperature` is always sent, `max_tokens` (ASSUMED name) when set, and `top_p` when not 1.0.
+ * `temperature` is always sent, `max_tokens` when set (SDK-evidenced: NODE types/vml_v1.ts:790-797, a deprecated
+ * alias of `max_completion_tokens`), and `top_p` when not 1.0.
  *
  * == Tools ==
  *
@@ -49,9 +61,10 @@ import scala.util.{ Try, Using }
  * parameters}`; the OpenAI `strict` flag is dropped) with `tool_choice_option: "auto"`. Tool calls in a reply
  * (`message.tool_calls`, whole, or streamed as `delta.tool_calls` pieces merged by `index`) become
  * `ToolCall`s. An assistant turn's calls go back as `tool_calls`, and a [[ToolMessage]] as a `tool` message
- * with its `tool_call_id`. `arguments` is a JSON string on the wire (ASSUMED) and a JSON object in a
- * `ToolCall`. A call without an `id` gets a generated one (ASSUMED: IBM sends ids). Whether the model calls
- * tools, or supports them at all, depends on the model.
+ * with its `tool_call_id`. `arguments` is a JSON string on the wire (SDK-evidenced: NODE types/messages.ts:19-24)
+ * and a JSON object in a `ToolCall`. A call without an `id` gets a generated one, defensively: the SDK's type makes
+ * `id` required (NODE types/messages.ts:29-30), and a stream sends it on a call's first piece only (LCIBM
+ * chat_models.py:324). Whether the model calls tools, or supports them at all, depends on the model.
  *
  * == Unsupported options ==
  *
@@ -65,8 +78,7 @@ import scala.util.{ Try, Using }
  * is in [[WatsonXClient.ErrorFinishReasons]], is a `Left(ServiceError)` naming the reason; text received
  * so far is not returned as a success. Every other reason (`stop`, `length`, `tool_calls`, unknown values) is
  * a normal stop. `complete` applies the same rule to `choices[0].finish_reason` (a missing one is fine). The
- * usage arrives in a final chunk that may have no choices (a secondary source says so: IBM's own pages do not
- * confirm it). Streamed tool calls are reported once, whole, after the last delta, never as fragments.
+ * usage arrives in a final chunk that may have no choices (SDK-evidenced: LCIBM chat_models.py:379-383). Streamed tool calls are reported once, whole, after the last delta, never as fragments.
  *
  * @param config          model, credentials, project or space and endpoints.
  * @param metrics         receives per-call latency and token-usage events.
@@ -332,11 +344,16 @@ class WatsonXClient(
       case Some(space) => body("space_id") = space
       case None        => body("project_id") = config.projectId
     }
-    // ASSUMED: the chat body names the limit `max_tokens` (OpenAI style), not text generation's `max_new_tokens`.
+    // SDK-evidenced: the chat body names the limit `max_tokens`, not text generation's `max_new_tokens`; it is
+    // deprecated in favour of `max_completion_tokens`, which a later change may adopt (NODE vml_v1.ts:2812-2813,
+    // types/vml_v1.ts:790-803; LCIBM chat_models.py:953-959).
     options.maxTokens.foreach(max => body("max_tokens") = max)
     if (options.topP != 1.0) body("top_p") = options.topP
     if (options.tools.nonEmpty) {
       body("tools") = ujson.Arr.from(options.tools.map(tool => encodeTool(tool.toOpenAITool(strict = false))))
+      // SDK-evidenced: IBM's LangChain integration sends "auto" by default (LCIBM chat_models.py:1764). The Node
+      // SDK's own doc comment says `auto` is not yet supported (NODE types/vml_v1.ts:751-761); that integration
+      // contradicts it, so the probe suite checks this against a real account.
       body("tool_choice_option") = "auto"
     }
     body
@@ -351,7 +368,8 @@ class WatsonXClient(
         if (am.content.isEmpty && am.toolCalls.isEmpty) None
         else {
           val message = ujson.Obj("role" -> "assistant")
-          // ASSUMED: `content` may be left out when the turn is only tool calls.
+          // SDK-evidenced: `content` is optional when `tool_calls` is given (NODE types/messages.ts:58-59); IBM's
+          // LangChain integration sends null instead (LCIBM chat_models.py:258-259).
           if (am.content.nonEmpty) message("content") = am.content
           if (am.toolCalls.nonEmpty)
             message("tool_calls") = ujson.Arr.from(am.toolCalls.map { call =>
@@ -432,8 +450,10 @@ object WatsonXClient {
 
   /**
    * The `finish_reason` values that mean a generation did not finish: `error`, `cancelled` and
-   * `time_limit`. ASSUMED: IBM's chat reference could not be read, so these are the abnormal values the
-   * text-generation API documented, kept for the chat API. Compared after [[normalizeFinishReason]], so any
+   * `time_limit`. The chat API's values are `stop`, `length`, `tool_calls`, `time_limit`, `cancelled`, `error`, and
+   * null while a response is incomplete (SDK-evidenced: NODE types/vml_v1.ts:3319-3330, 3362-3369). Calling the
+   * last three failures is this client's policy: the SDK notes that on `time_limit` the text generated so far is
+   * returned, which this client does not report as a success. Compared after [[normalizeFinishReason]], so any
    * case matches. Anything else is a normal stop: `stop`, `length`, `tool_calls` and any value IBM adds later.
    */
   val ErrorFinishReasons: Set[String] = Set("error", "cancelled", "time_limit")
@@ -453,14 +473,18 @@ object WatsonXClient {
   private def malformed(detail: String): org.llm4s.error.LLMError =
     ProcessingError("watsonx-tool-calls", s"malformed tool call: $detail")
 
-  /** An OpenAI-format tool definition as watsonx takes it: no `strict`, which the chat API does not document. */
+  /**
+   * An OpenAI-format tool definition as watsonx takes it: no `strict`. The SDK's tool function type has only
+   * `name`, `description` and `parameters` (NODE types/vml_v1.ts:3202-3218); IBM's LangChain integration passes
+   * `strict` through only when a caller sets it (LCIBM chat_models.py:1718-1723).
+   */
   private[provider] def encodeTool(tool: ujson.Value): ujson.Value = {
     val function = ujson.Obj.from(tool("function").obj.filterNot(_._1 == "strict"))
     ujson.Obj("type" -> "function", "function" -> function)
   }
 
   /**
-   * The `arguments` of a call as the chat API takes them: a JSON string (ASSUMED). An object is rendered; a string
+   * The `arguments` of a call as the chat API takes them: a JSON string (SDK-evidenced: NODE types/messages.ts:19-24). An object is rendered; a string
    * that parses to an object is sent as it is; anything else is sent as `{}` rather than as text that is not JSON.
    */
   private[provider] def requestArguments(arguments: ujson.Value): String = arguments match {

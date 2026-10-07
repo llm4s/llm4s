@@ -585,8 +585,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message with its `tool_call_id`. The IAM token exchange, the `Result` error mapping, redaction and
   cancellation are unchanged, and so is the configuration (`WatsonXConfig`, the `llm4s.providers.<name>` keys,
   `apiVersion`). **Not verified against the real service**: there is no watsonx account behind the project, so
-  the wire shapes are those IBM's public pages report plus a few marked as assumed in `WatsonXClient`'s Scaladoc;
-  the module stays Beta and #1314 stays open for a live `@Cloud` verification. **Migration:** a `stop_reason`
+  the wire shapes are those IBM's public pages report, cross-checked against IBM's own open-source clients (the
+  pinned sources are in `WatsonXClient`'s Scaladoc); the `@Cloud` probe suite `WatsonXAssumptionProbeSpec`
+  re-checks them against a real account. The module stays Beta and #1314 stays open until it has been run. **Migration:** a `stop_reason`
   of the old API is now a `finish_reason` (`stop`, `length`, `tool_calls`; `error`, `cancelled` and `time_limit`
   are still failures); `WatsonXClient.StopSequences` is gone and `WatsonXClient.ErrorStopReasons` is
   `WatsonXClient.ErrorFinishReasons`; a model without tool support is answered by the service, not rejected

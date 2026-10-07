@@ -425,12 +425,15 @@ unchanged.
 > **Beta, never run against the live service.** `llm4s-watsonx` calls the watsonx.ai chat API
 > (`/ml/v1/text/chat` and `/ml/v1/text/chat_stream`), which replaces the "Infer text" endpoints IBM
 > [deprecated in February 2026](https://www.ibm.com/docs/en/software-hub/5.3.x?topic=new-watsonxai).
-> There is no watsonx account to test with, so the request and response shapes are the ones IBM's public
-> pages report plus a few marked as assumed in `WatsonXClient`'s Scaladoc (the name of the token-limit
-> field, the encoding of tool-call arguments, the finish reasons, the stream's usage chunk). The module is
-> Beta and its API is not frozen. Verifying it against the real service, with an `@Cloud` smoke suite, is
-> still open in [#1314](https://github.com/llm4s/llm4s/issues/1314); until then, treat tool calling and
-> streaming as unconfirmed.
+> There is no watsonx account to test with, so nothing here has been checked against the real service. The
+> request and response shapes are the ones IBM's public pages report, cross-checked against IBM's own
+> open-source clients (the Node.js SDK and IBM's LangChain integration; the pinned sources are listed in
+> `WatsonXClient`'s Scaladoc): the token-limit field, the encoding of tool-call arguments, the finish reasons
+> and the stream's usage chunk are all shown there. That proves IBM's clients send them, not that the
+> service accepts them today. The module is Beta and its API is not frozen. The `@Cloud` suite
+> `WatsonXAssumptionProbeSpec` (modules/it) checks each of those details against a real account and prints
+> which held; running it is still open in [#1314](https://github.com/llm4s/llm4s/issues/1314). Until it has
+> been run, treat tool calling and streaming as unconfirmed.
 
 IBM's enterprise AI platform, serving Granite, Llama and Mistral models. It lives in its own module,
 `llm4s-watsonx`; adding the dependency registers the `watsonx` provider.
