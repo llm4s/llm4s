@@ -94,7 +94,7 @@ class AgentKtStreamTest {
             Completion.apply(
                 "id", 0L, text, "m", AssistantMessage.apply(text),
                 scala.jdk.javaapi.CollectionConverters.asScala(listOf<ToolCall>()).toList(),
-                Option.empty(), Option.empty(), Option.empty(),
+                Option.empty(), Option.empty(),
             ),
         )
 
@@ -140,7 +140,7 @@ class AgentKtStreamTest {
                         Completion.apply(
                             "id", 0L, "recovered", "m", AssistantMessage.apply("recovered"),
                             scala.jdk.javaapi.CollectionConverters.asScala(listOf<ToolCall>()).toList(),
-                            Option.empty(), Option.empty(), Option.empty(),
+                            Option.empty(), Option.empty(),
                         ),
                     )
                 }
