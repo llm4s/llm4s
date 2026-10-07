@@ -146,8 +146,10 @@ def deterministic(client: LLMClient, text: String): Result[Invoice] =
   )
 ```
 
-Temperature, token limit and the rest reach the provider as given. A `responseFormat` you set yourself is
-overwritten by the schema's, so `completeStructured` is not a way to request plain JSON mode; call `complete`
+Temperature, token limit and the rest are passed to `complete` as given. The provider client may still
+adjust them for the model, as it does for any `complete` call: OpenAI reasoning models, for example, omit
+sampling parameters, and an option the model does not support can be dropped. A `responseFormat` you set
+yourself is overwritten by the schema's, so `completeStructured` is not a way to request plain JSON mode; call `complete`
 with `ResponseFormat.Json` for that.
 
 ## 6. Choosing the schema name or strictness

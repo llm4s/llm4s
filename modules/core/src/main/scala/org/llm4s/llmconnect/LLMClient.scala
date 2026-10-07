@@ -70,7 +70,9 @@ trait LLMClient extends AutoCloseable {
    *
    * The schema is derived with `strict = true`, which lists '''every''' property as required,
    * including a property declared optional with `required = false`. Only `responseFormat` is
-   * overridden: every other option you pass is forwarded unchanged. `name` and `strict` on the
+   * overridden: every other option you pass is forwarded unchanged to `complete`, where the
+   * provider client may adjust or drop options the model does not support, as for any other
+   * `complete` call. `name` and `strict` on the
    * format are left at their defaults (`"response"` and `true`); call `complete` with your own
    * `ResponseFormat.JsonSchema` to set them.
    *
