@@ -19,6 +19,10 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   // A value that no pattern in SecretPatterns recognises, so only the key can make it a secret.
   private val secretText = "hunter2value"
 
+  // Sizes for the large-value tests at the end of the file. Declared here, before the first test is registered.
+  private val SmallStackBytes = 256L * 1024
+  private val MegaChars       = 1000000
+
   // ---------------------------------------------------------------------------------------------
   // JSON inside a string: a prompt or a response body carries the credential with escaped quotes
   // ---------------------------------------------------------------------------------------------
@@ -293,33 +297,78 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---------------------------------------------------------------------------------------------
-  // Linear time
+  // Large values: neither the stack nor the time may grow with the length of a value
   // ---------------------------------------------------------------------------------------------
 
-  "Redaction.redact" should "finish on a large input of word characters, which a long token or a base64 body contains" in {
-    // The patterns are built from bounded pieces and disjoint alternatives, so the work is linear. The bound is far
-    // above the expected time: a pattern that backtracked would not finish at all.
-    val megabyte = 1024 * 1024
-    val inputs = Seq(
-      "a" * megabyte,
-      "api_key" * (megabyte / 7),
-      "password=" * (megabyte / 9),
-      """"password": """" * (megabyte / 13),
-      "\"" + ("\\\"" * (megabyte / 2))
-    )
-    inputs.foreach { input =>
-      val started = System.nanoTime()
-      val out     = Redaction.redact(input)
-      val seconds = (System.nanoTime() - started) / 1e9
-      withClue(s"input of ${input.length} characters starting ${input.take(12)}: ") {
-        out should not be null
-        seconds should be < 60.0
-      }
-    }
+  // java.util.regex recurses once per iteration of a repeated group, so a pattern like `(?:[^"\\]|\\.)*` overflows the
+  // stack on a string value of a few hundred characters on a small stack. A payload of a megabyte (a prompt, a file's
+  // contents) must redact on a thread with a deliberately small stack, so that a regression fails on any machine and
+  // does not depend on the default stack size of the runner.
+  private def onSmallStack(input: String): String = {
+    @volatile var result: Option[String]     = None
+    @volatile var failure: Option[Throwable] = None
+    val thread =
+      new Thread(null, () => result = Some(Redaction.redact(input)), "redaction-small-stack", SmallStackBytes)
+    thread.setUncaughtExceptionHandler((_, e) => failure = Some(e))
+    thread.start()
+    thread.join(120000L)
+    withClue("the redaction did not finish within two minutes: ")(thread.isAlive shouldBe false)
+    withClue(s"redaction failed on a thread with a ${SmallStackBytes / 1024} KB stack: ")(failure shouldBe None)
+    result.getOrElse(fail("redaction produced no result"))
   }
 
-  it should "leave a large input without a credential unchanged" in {
-    val input = "lorem ipsum dolor sit amet, " * 40000
-    Redaction.redact(input) shouldBe input
+  "Redaction.redact" should "redact a megabyte-long JSON string value under a credential key" in {
+    onSmallStack("{\"password\": \"" + ("a" * MegaChars) + "\", \"user\": \"ann\"}") shouldBe
+      s"""{"password": "$R", "user": "ann"}"""
+  }
+
+  it should "redact a megabyte-long value that is all escape sequences" in {
+    onSmallStack("{\"password\": \"" + ("\\n" * (MegaChars / 2)) + "\"}") shouldBe s"""{"password": "$R"}"""
+  }
+
+  it should "redact a megabyte-long single-quoted value" in {
+    onSmallStack("{'password': '" + ("a" * MegaChars) + "'}") shouldBe s"{'password': '$R'}"
+  }
+
+  it should "redact a megabyte-long value of JSON that sits inside a string" in {
+    onSmallStack("{\"c\": \"{\\\"password\\\": \\\"" + ("a" * MegaChars) + "\\\"}\"}") shouldBe
+      s"""{"c": "{\\"password\\": \\"$R\\"}"}"""
+  }
+
+  it should "leave a megabyte-long string value under a key that is not a credential" in {
+    val input = "{\"city\": \"" + ("a" * MegaChars) + "\"}"
+    onSmallStack(input) shouldBe input
+  }
+
+  it should "leave a megabyte-long value that is never closed" in {
+    val input = "{\"password\": \"" + ("a" * MegaChars)
+    onSmallStack(input) shouldBe input
+  }
+
+  it should "redact every one of many credential fields in a large document" in {
+    val field = "\"password\": \"hunter2value\", "
+    val out   = onSmallStack("{" + (field * 50000) + "\"end\": 1}")
+    (out should not).include("hunter2value")
+    out should startWith(s"""{"password": "$R", "password": "$R", """)
+    out should endWith(""""end": 1}""")
+  }
+
+  it should "redact a megabyte-long key=value value" in {
+    onSmallStack("password=" + ("a" * MegaChars)) shouldBe s"password=$R"
+  }
+
+  it should "redact a megabyte-long header-style value, and one behind a megabyte of spaces" in {
+    onSmallStack("x-api-key: " + ("a" * MegaChars)) shouldBe s"x-api-key: $R"
+    onSmallStack("x-api-key:" + (" " * MegaChars) + "v") shouldBe s"x-api-key:" + (" " * MegaChars) + R
+  }
+
+  it should "redact a megabyte-long number" in {
+    onSmallStack("{\"password\": " + ("1" * MegaChars) + "}") shouldBe s"""{"password": "$R"}"""
+  }
+
+  it should "leave a megabyte of word characters, of spaces and of newlines unchanged" in {
+    Seq("x" * MegaChars, " " * MegaChars, "a\n" * (MegaChars / 2), "api_key" * (MegaChars / 7)).foreach { input =>
+      withClue(s"input starting ${input.take(8)}: ")(onSmallStack(input) shouldBe input)
+    }
   }
 }
