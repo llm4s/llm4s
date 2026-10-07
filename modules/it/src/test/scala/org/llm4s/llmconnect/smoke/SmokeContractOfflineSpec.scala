@@ -321,7 +321,13 @@ class SmokeContractOfflineSpec
     ).value should include("empty id")
     failedMessage(
       SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("call_1", "get_secret_code", ujson.Obj("nope" -> 1))))
+    ).value should include("does not declare nope")
+    failedMessage(
+      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("call_1", "get_secret_code", ujson.Obj())))
     ).value should include("do not fit the tool's schema")
+    failedMessage(
+      SmokeChecks.run(Capability.ToolCalling, toolClient(ToolCall("call_1", "get_secret_code", ujson.Arr())))
+    ).value should include("not a JSON object")
     failedMessage(
       SmokeChecks.run(Capability.ToolCalling, stub(onComplete = (_, _) => Right(completion("I will not use it"))))
     ).value should include("did not call the tool")

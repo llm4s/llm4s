@@ -218,14 +218,14 @@ object SmokeChecks {
       call <- completion.toolCalls.headOption.toRight(
         s"the model did not call the tool; it said ${snippet(completion.content)}"
       )
-      _ <- Either.cond(call.name == tool.name, (), s"it called '${call.name}' instead of '${tool.name}'")
-      _ <- Either.cond(call.id.nonEmpty, (), "the tool call has an empty id, so its result cannot be sent back")
+      _      <- Either.cond(call.name == tool.name, (), s"it called '${call.name}' instead of '${tool.name}'")
+      _      <- Either.cond(call.id.nonEmpty, (), "the tool call has an empty id, so its result cannot be sent back")
       fields <- call.arguments.objOpt.toRight(s"the call's arguments are not a JSON object: ${call.arguments}")
       undeclared = fields.keySet.diff(ToolProperties)
       _ <- Either.cond(
         undeclared.isEmpty,
         (),
-        s"the call's arguments carry properties the tool's schema does not allow (${undeclared.mkString(", ")}): ${call.arguments}"
+        s"the call's arguments do not fit the tool's schema, which does not declare ${undeclared.mkString(", ")}: ${call.arguments}"
       )
       value <- tool
         .execute(call.arguments)
