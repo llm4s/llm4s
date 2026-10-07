@@ -15,6 +15,8 @@ Comprehensive guides for LLM4S features.
 
 - **[Basic Usage](basic-usage)** - Get started with LLM calls, client creation, and error handling
 - **[Providers](providers)** - Overview of supported providers and how to configure them
+- **[Java](java)** - Call a model from Java with `llm4s-java-api`: a client, a conversation and failures you can read without Scala
+- **[Spring Boot](spring-boot)** - `llm4s-spring-boot-starter`: properties, an `LLM4STemplate` bean, asynchronous calls and a health indicator
 - **[Error Handling](error-handling)** - Work with `Result[A]` and `LLMError`: pattern matching, for-comprehensions, every error type, recovery and testing
 - **[Writing a Provider](writing-a-provider)** - Publish your own provider module against the `llm4s-core` SPI
 

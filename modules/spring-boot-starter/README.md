@@ -3,7 +3,8 @@
 Spring Boot auto-configuration for llm4s (`org.llm4s:llm4s-spring-boot-starter_3`, built on `llm4s-java-api`).
 
 ```properties
-llm4s.provider=openai          # openai | anthropic | ollama
+# openai | anthropic | ollama
+llm4s.provider=openai
 llm4s.model=gpt-4o
 llm4s.api-key=${OPENAI_API_KEY}
 ```
