@@ -501,6 +501,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OpenAIConfigKeys.AZURE_API_KEY` is now `AZURE_OPENAI_API_KEY`; the chat and embeddings
   missing-key messages changed. See the
   [migration note](docs/reference/migration.md#vendor-credentials-a-shared-api-key-per-provider).
+- **Upgrading from 0.4.1 to 0.5.0** ([#1281](https://github.com/llm4s/llm4s/issues/1281)): one page,
+  [docs/migrations/0-4-1-to-0-5-0.md](docs/migrations/0-4-1-to-0-5-0.md), for everything a project has to change,
+  grouped by what it uses: the dependencies to add (which provider module carries which provider id), the
+  configuration changes, the agent runtime rewrite, tracing, RAG, memory and the other carved modules, and the
+  error and type changes. `UpgradeGuideSpec` in `llm4s-samples` checks its provider table, its core-only error,
+  explicit registration, the agent snippet and tracing discovery against the code.
 - **`openai-compatible` takes its context window from the model registry** ([#1217](https://github.com/llm4s/llm4s/issues/1217)):
   without a `contextWindow`, the generic provider used 8192 and never asked the registry, though the registry
   holds the window of most of the popular compatible hosts' models (`groq/`, `together_ai/`, `fireworks_ai/`,
