@@ -240,8 +240,7 @@ class SmokeContractOfflineSpec
   private def completion(
     content: String,
     toolCalls: List[ToolCall] = Nil,
-    usage: Option[TokenUsage] = None,
-    thinking: Option[String] = None
+    usage: Option[TokenUsage] = None
   ): Completion =
     Completion(
       id = "stub",
@@ -250,8 +249,7 @@ class SmokeContractOfflineSpec
       model = "stub",
       message = AssistantMessage(contentOpt = Some(content), toolCalls = toolCalls),
       toolCalls = toolCalls,
-      usage = usage,
-      thinking = thinking
+      usage = usage
     )
 
   private def stub(
