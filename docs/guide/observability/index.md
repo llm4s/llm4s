@@ -485,6 +485,175 @@ tracing.traceRAGOperation(
 
 ---
 
+## Metrics
+
+Tracing records what happened inside one request. Metrics count what happens across all of them: requests, tokens, cost, errors and latency, per provider and model. They are cheap enough to alert on, and they answer "is a provider failing right now?" faster than a trace search.
+
+The contract is `MetricsCollector` in `llm4s-core` (`@Stable`): `observeRequest`, `addTokens` and `recordCost`, plus calls for retries, circuit-breaker transitions, errors and image generation. Every chat client calls the collector it was built with, and collectors are expected not to throw. The default is `MetricsCollector.noop`, so metrics cost nothing until you pass one in. `llm4s-observability-prometheus` provides the implementation, `PrometheusMetrics`, and the HTTP endpoint that serves it, `PrometheusEndpoint`.
+
+### Add the module
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-observability-prometheus" % llm4sVersion
+```
+
+On `0.4.1` and earlier this code ships inside `llm4s-core`; the [migration note](../../reference/migration.md#slice-6-llm4s-observability-prometheus---prometheus-leaves-core) has the details. Package names are unchanged.
+
+### Turn it on from configuration
+
+Metrics are off unless asked for, because turning them on starts an HTTP server. To turn them on:
+
+```hocon
+llm4s {
+  metrics {
+    enabled = true
+    prometheus {
+      enabled = true
+      port    = 9090
+    }
+  }
+}
+```
+
+The module's `reference.conf` ships `enabled = false`, `prometheus.enabled = true` and `port = 9090`, so setting only `enabled = true` is enough: the Prometheus backend is used on port `9090`. `MetricsConfigLoader.default()` reads the block and returns `Result[(MetricsCollector, Option[PrometheusEndpoint])]`:
+
+| `llm4s.metrics` | Collector | Endpoint |
+|---|---|---|
+| `enabled = false` (the default) | `MetricsCollector.noop` | none, no server is started |
+| `enabled = true`, `prometheus.enabled = false` | `MetricsCollector.noop` | none |
+| `enabled = true` | `PrometheusMetrics` | started on `prometheus.port`; `Left(ConfigurationError)` if the port is taken |
+
+Pass the collector to the client when you build it:
+
+```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.metrics.PrometheusMetrics
+import io.prometheus.metrics.model.registry.PrometheusRegistry
+
+val metrics = new PrometheusMetrics(new PrometheusRegistry())
+
+val client = for {
+  providerConfig  <- Llm4sConfig.defaultProvider()
+  registryService <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registryService
+  client <- LLMConnect.getClient(providerConfig, metrics)
+} yield client
+```
+
+`LlmClientOptions(metrics = ...)` is the same thing through the options overload of `LLMConnect.getClient`. The endpoint that `MetricsConfigLoader` starts stays up until you call `PrometheusEndpoint.stop()`, which is safe to call twice.
+
+### Or build the pieces yourself
+
+If you already own a `PrometheusRegistry`, create the collector on it and start the endpoint on the same registry:
+
+```scala
+import io.prometheus.metrics.model.registry.PrometheusRegistry
+import org.llm4s.metrics.{ PrometheusEndpoint, PrometheusMetrics }
+
+val registry = new PrometheusRegistry()
+val metrics  = new PrometheusMetrics(registry)
+
+PrometheusEndpoint.start(9090, registry) // Result[PrometheusEndpoint]; the series are served at /metrics
+```
+
+### What a call records
+
+- **Every call**, successful or not, records one request with its latency and its outcome. A failure is classified into an error kind (`rate_limit`, `timeout`, `authentication`, `network`, `validation`, `service_error`, `execution_error`, `cancelled` or `unknown`) from the error the client returned.
+- **Tokens and cost are recorded only on success**, and only when the completion carries them: tokens when the provider reported usage, cost when the client attached an estimated cost. A call with neither adds nothing to those series.
+- **A streamed call is recorded once, when the stream has finished**, with the total latency, not as it goes.
+- **Embedding, reranking and RAG calls are not recorded.** Image generation is, through `InstrumentedImageGenerationClient`, which wraps an image client.
+
+### The series
+
+| Series | Type | Labels |
+|---|---|---|
+| `llm4s_requests_total` | counter | `provider`, `model`, `status` (`success` or `error_<kind>`) |
+| `llm4s_tokens_total` | counter | `provider`, `model`, `type` (`input` or `output`) |
+| `llm4s_cost_usd_total` | counter | `provider`, `model` |
+| `llm4s_errors_total` | counter | `provider`, `error_type` |
+| `llm4s_request_duration_seconds` | histogram | `provider`, `model`; buckets 0.1, 0.5, 1, 2, 5, 10, 30, 60 and 120 seconds |
+| `llm4s_image_generations_total` | counter | `provider`, `model`, `operation`, `status` |
+| `llm4s_images_generated_total` | counter | `provider`, `model` |
+| `llm4s_image_generation_duration_seconds` | histogram | `provider`, `model`, `operation` |
+| `llm4s_image_generation_cost_usd_total` | counter | `provider`, `model` |
+| `llm4s_image_generation_errors_total` | counter | `provider`, `model`, `operation`, `error_type` |
+
+After one successful call and one rate-limited call to `gpt-4o`, the chat series on `/metrics` look like this (comment lines left out; the second call took 90 seconds):
+
+```text
+llm4s_cost_usd_total{model="gpt-4o",provider="openai"} 0.0021
+llm4s_errors_total{error_type="rate_limit",provider="openai"} 1.0
+llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="0.1"} 0
+llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="0.5"} 0
+llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="1.0"} 0
+llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="2.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="5.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="10.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="30.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="60.0"} 1
+llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="120.0"} 2
+llm4s_request_duration_seconds_bucket{model="gpt-4o",provider="openai",le="+Inf"} 2
+llm4s_request_duration_seconds_count{model="gpt-4o",provider="openai"} 2
+llm4s_request_duration_seconds_sum{model="gpt-4o",provider="openai"} 91.5
+llm4s_requests_total{model="gpt-4o",provider="openai",status="error_rate_limit"} 1.0
+llm4s_requests_total{model="gpt-4o",provider="openai",status="success"} 1.0
+llm4s_tokens_total{model="gpt-4o",provider="openai",type="input"} 120.0
+llm4s_tokens_total{model="gpt-4o",provider="openai",type="output"} 30.0
+```
+
+### Scrape it and alert on it
+
+Point Prometheus at the endpoint:
+
+```yaml
+scrape_configs:
+  - job_name: 'llm4s'
+    static_configs:
+      - targets: ['localhost:9090']
+```
+
+Queries to start from (standard PromQL over the series above):
+
+```promql
+# Requests per second, by provider
+sum by (provider) (rate(llm4s_requests_total[5m]))
+
+# Share of requests that failed
+sum(rate(llm4s_requests_total{status!="success"}[5m])) / sum(rate(llm4s_requests_total[5m]))
+
+# 95th percentile latency, by provider
+histogram_quantile(0.95, sum by (le, provider) (rate(llm4s_request_duration_seconds_bucket[5m])))
+
+# Rate-limit errors per second
+sum(rate(llm4s_errors_total{error_type="rate_limit"}[5m]))
+
+# Estimated spend over the last hour, by model
+sum by (model) (increase(llm4s_cost_usd_total[1h]))
+```
+
+### Send metrics to more than one place
+
+`MetricsCollector.compose` returns a collector that forwards every call to each collector it is given, so Prometheus can run next to `CostTracker` (in `llm4s-observability`) or a collector of your own. A collector that throws does not stop the others:
+
+```scala
+import org.llm4s.metrics.MetricsCollector
+
+val both = MetricsCollector.compose(metrics, myCollector)
+// LLMConnect.getClient(providerConfig, both)
+```
+
+### Limits
+
+- **Retries, circuit-breaker transitions and `ReliableClient`'s error events do not reach Prometheus.** `ReliableClient` takes its own `collector` argument and reports those three kinds of event to it, but `PrometheusMetrics` does not implement them, so no series for them exists. Only errors that end a call are counted, through the request outcome.
+- **The latency buckets are fixed** (0.1 to 120 seconds); there is no way to configure them.
+- **Counters live in the process.** A restart starts them from zero, which is what `rate()` and `increase()` expect.
+- **The endpoint has no authentication and no TLS**: llm4s starts it with only a port and a registry. Keep it off the public network and let your network policy decide who can scrape it.
+- **Labels are provider and model.** The number of series grows with the number of distinct models you call, not with traffic.
+
+---
+
 ## Health Checks
 
 ### Startup Validation
@@ -652,6 +821,12 @@ Before deploying, verify monitoring coverage:
 - [ ] Tracing credentials configured and tested
 - [ ] Traces visible in dashboard (test with sample request)
 
+### Metrics
+
+- [ ] `llm4s.metrics.enabled = true`, and Prometheus scrapes the `/metrics` endpoint
+- [ ] The endpoint is reachable only from your monitoring network
+- [ ] Error-ratio and latency alerts use `llm4s_requests_total` and `llm4s_request_duration_seconds`
+
 ### Logging
 
 - [ ] Structured JSON logging enabled
@@ -677,7 +852,7 @@ Before deploying, verify monitoring coverage:
 
 Current monitoring limitations in LLM4S:
 
-- **Prometheus metrics cover LLM and image-generation calls, not traces** - `PrometheusMetrics` (`llm4s-observability-prometheus`) records requests, tokens, cost, errors and latency through `MetricsCollector`; for span-level data, read `InMemoryTraceStore` and push to your Prometheus client, or implement a custom `TraceStore` that writes directly to a metrics registry
+- **Prometheus metrics cover LLM and image-generation calls, not traces** (see [Metrics](#metrics)) - `PrometheusMetrics` (`llm4s-observability-prometheus`) records requests, tokens, cost, errors and latency through `MetricsCollector`; for span-level data, read `InMemoryTraceStore` and push to your Prometheus client, or implement a custom `TraceStore` that writes directly to a metrics registry
 - **No automatic cost aggregation** - Langfuse provides this via its dashboard; for in-process aggregation, sum `cost_usd` attributes from `SpanKind.Rag` and `SpanKind.LlmCall` spans in `InMemoryTraceStore`
 - **No real-time streaming metrics** - Streaming completions are traced on completion, not in-flight
 - **Guardrail metrics require custom tracing** - Add `traceEvent` calls in guardrail implementations; the resulting spans are then queryable via `InMemoryTraceStore`

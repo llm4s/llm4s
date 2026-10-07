@@ -234,6 +234,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request ([#1218](https://github.com/llm4s/llm4s/issues/1218)). Add the dependency
   `"org.llm4s" %% "llm4s-jina"`; nothing else changes. HTTP 401 and 429 map to `EmbeddingError`
   with codes `"401"` and `"429"`.
+- **Metrics section in the monitoring guide** ([#700](https://github.com/llm4s/llm4s/issues/700)):
+  `docs/guide/observability/index.md` now covers `MetricsCollector` and `llm4s-observability-prometheus`: the
+  `llm4s.metrics` block and what `MetricsConfigLoader` returns for each setting, wiring a collector into a
+  client, what a call records (the request always; tokens and cost only on success; a stream once, at its end),
+  the ten Prometheus series with their labels and a sample scrape, scrape and PromQL examples, `compose`, and
+  the limits (retry, circuit-breaker and `ReliableClient` error events are not exported; fixed latency buckets;
+  an endpoint with no authentication). `ObservabilityMetricsGuideSpec` runs the configuration block and the
+  recording rules and compares the sample scrape, line for line, with what a real `/metrics` endpoint serves.
+  The guide's other two pages named in #700, Basic Usage and Providers, and its tracing, Langfuse and
+  OpenTelemetry sections were already complete.
 - **`llm4s-cohere`: Cohere embedding provider** (`modules/providers/cohere`, rebuilt from #1068 as an
   `EmbeddingProviderDescriptor`, so `llm4s-core` is untouched). `EMBEDDING_MODEL=cohere/embed-english-v3.0`
   with `COHERE_API_KEY` (bound to `llm4s.credentials.cohere.apiKey`, the key `llm4s-openai-compatible`
