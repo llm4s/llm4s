@@ -71,7 +71,7 @@ What it does **not** cover:
   Experimental. Such a type inside a Frozen module gets a documented MiMa filter when the baseline is set.
 - Anything `private` or `private[llm4s]`. The latter is internal, may change in any release, and cannot be
   reached from your package; do not declare your code in `org.llm4s` to get around that.
-- `llm4s-provider-testkit` (Beta), the samples, the workspace runner, `modules/it` and the benchmarks.
+- `llm4s-provider-testkit` and `llm4s-testkit` (both Beta), the samples, the workspace runner, `modules/it` and the benchmarks.
 - Bug fixes. A fix that changes behaviour to match what the documentation or the types already promised is
   not a compatibility break; it is listed under *Fixed* in the CHANGELOG.
 

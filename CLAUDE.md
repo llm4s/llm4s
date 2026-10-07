@@ -104,6 +104,7 @@ llm4s/
 │   │   ├── cohere/            # Cohere embedding provider, native /v2/embed (typed CohereInputType)
 │   │   └── watsonx/           # IBM watsonx.ai chat provider (Beta; IBM has deprecated the endpoints it uses)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
+│   ├── testkit/               # llm4s-testkit: scriptable fake LLMClient for users' own tests (published)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
 │   ├── agent/                 # Agent runtime: Agent, guardrails, handoffs, orchestration, streaming; assistant (published)

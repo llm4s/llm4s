@@ -341,6 +341,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case is still a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`;
   new `GraphError` and `RunEvent` cases break exhaustive matches. Design:
   `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
+- **`llm4s-testkit`: a scriptable fake `LLMClient` for the tests of code that uses llm4s**
+  ([#1475](https://github.com/llm4s/llm4s/issues/1475)): a new Beta module that depends on `llm4s-core` only and registers no
+  provider. `ScriptedLLMClient.sequence` answers call N with reply N, `respondingTo` chooses the reply from the conversation,
+  and `always` repeats one; a `Reply` is a text answer, one or more tool calls, or a failure with any `LLMError`. Every request
+  is recorded (`calls`, `callCount`, `RecordedCall.lastUserText`), `streamComplete` replays the reply as chunks, a call past
+  the end of the script returns a `ValidationError` naming the call and the last message, and the client is thread-safe.
+  Until now the fakes lived in `llm4s-core`'s test sources, which are not published, and the Testing Guide taught users to
+  hand-write eight mocks. See [Testing with the Testkit](docs/guide/testing-with-the-testkit.md).
 - **CI verifies the documented support matrix** ([#967](https://github.com/llm4s/llm4s/issues/967)):
   `scripts/check-doc-support.sh`, in the `quick-checks` job, fails when the docs say something the build does not
   do. The build's side comes from sbt itself: a new `dumpBuildModel <file>` command (`project/BuildModel.scala`)
