@@ -1690,6 +1690,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   item's slot and delivered as a `LiveGap` just before it, so a subscription queues at most `2 * capacity`
   events and gap markers - `capacity` durable, `capacity` live - plus one end-of-run barrier per run that
   ended while they were queued, however dropped live events and durable commits interleave.
+- **`MemoryStore.storeAll` is all or nothing, and the SQL stores write a batch in one transaction**: `storeAll`
+  was the trait's default, a loop of `store` calls. In `SQLiteMemoryStore` and `VectorMemoryStore` each `store` ran
+  three statements (the row, then the full-text entry's delete and insert) under autocommit, so a batch of n
+  memories paid 3n commits - and 3n file syncs, about a second for fifteen rows on Windows. In those two stores and
+  `PostgresMemoryStore`, a batch that failed part way left the memories ahead of the failure stored while the call
+  returned `Left`. All three now write the batch in one transaction, and a failed batch stores **nothing**; the
+  trait documents `storeAll` as all or nothing (its default is, for an immutable store such as `InMemoryStore`).
+  `VectorMemoryStore` computes the missing embeddings first, in `embedBatch` calls of at most 64 texts
+  (`VectorMemoryStore.EmbeddingBatchSize`, so a large batch stays within a provider's input limit), so an
+  embedding failure also stores nothing; and its `update` of a memory, keeping its id, now replaces it in one
+  transaction after re-embedding, where it deleted the memory first and lost it if re-embedding failed. In the
+  SQLite stores `store`, `deleteMatching` and opening the store are one transaction
+  each too, so a memory's row and its full-text entry are written together. Their transactions are explicit
+  `BEGIN IMMEDIATE` ... `COMMIT`, so **a write takes the database's write lock when it begins** and waits up to
+  the connection's busy timeout (30 s for `VectorMemoryStore`, sqlite-jdbc's 3 s default for
+  `SQLiteMemoryStore`) for a writer on another connection to the same file, failing with `Left` after that and
+  leaving the store usable. `VectorMemoryStore`'s Scaladoc now states its thread safety: one instance is not
+  safe for concurrent use; separate instances may share a file.
 - **`RegexSafetyManager` returns an error instead of letting `StackOverflowError` escape** (#1379): the JDK
   regex engine recurses for patterns such as `(a|aa)*b` and overflowed the stack on long input before the
   character-access budget tripped; `scala.util.Try` does not catch that fatal error, so it escaped

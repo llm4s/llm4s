@@ -55,44 +55,75 @@ final class PostgresMemoryStore private[memory] (
 
   override def store(memory: Memory): Result[MemoryStore] =
     Try {
-      withConnection { conn =>
-        val sql = s"""
-          INSERT INTO $tableName
-            (id, content, memory_type, metadata, created_at, importance, embedding)
-          VALUES (?, ?, ?, ?::jsonb, ?, ?, ?::vector)
-          ON CONFLICT (id) DO UPDATE SET
-            content = EXCLUDED.content,
-            memory_type = EXCLUDED.memory_type,
-            metadata = EXCLUDED.metadata,
-            created_at = EXCLUDED.created_at,
-            importance = EXCLUDED.importance,
-            embedding = EXCLUDED.embedding
-        """
-
-        Using.resource(conn.prepareStatement(sql)) { stmt =>
-          stmt.setString(1, memory.id.value)
-          stmt.setString(2, memory.content)
-          stmt.setString(3, memory.memoryType.name)
-          stmt.setString(4, PostgresMemoryStore.metadataToJson(memory.metadata))
-          stmt.setTimestamp(5, Timestamp.from(memory.timestamp))
-
-          memory.importance match {
-            case Some(v) => stmt.setDouble(6, v)
-            case None    => stmt.setNull(6, java.sql.Types.DOUBLE)
-          }
-
-          memory.embedding match {
-            case Some(vec) => stmt.setString(7, PostgresVectorHelpers.embeddingToString(vec))
-            case None      => stmt.setNull(7, java.sql.Types.OTHER, "vector")
-          }
-
-          stmt.executeUpdate()
-        }
-      }
+      withConnection(conn => writeAll(conn, Seq(memory)))
       this
     }.toEither.left.map(e =>
       ProcessingError("postgres-memory-store", s"Failed to store memory: ${e.getMessage}", cause = Some(e))
     )
+
+  /**
+   * Store `memories` in one transaction, on one pooled connection: all of them are stored or, if any write fails,
+   * none is.
+   */
+  override def storeAll(memories: Seq[Memory]): Result[MemoryStore] =
+    Try {
+      if (memories.nonEmpty) withConnection(conn => inTransaction(conn)(writeAll(conn, memories)))
+      this
+    }.toEither.left.map(e =>
+      ProcessingError("postgres-memory-store", s"Failed to store memories: ${e.getMessage}", cause = Some(e))
+    )
+
+  /** Upsert each memory, in order, with one prepared statement. */
+  private def writeAll(conn: Connection, memories: Seq[Memory]): Unit = {
+    val sql = s"""
+      INSERT INTO $tableName
+        (id, content, memory_type, metadata, created_at, importance, embedding)
+      VALUES (?, ?, ?, ?::jsonb, ?, ?, ?::vector)
+      ON CONFLICT (id) DO UPDATE SET
+        content = EXCLUDED.content,
+        memory_type = EXCLUDED.memory_type,
+        metadata = EXCLUDED.metadata,
+        created_at = EXCLUDED.created_at,
+        importance = EXCLUDED.importance,
+        embedding = EXCLUDED.embedding
+    """
+
+    Using.resource(conn.prepareStatement(sql)) { stmt =>
+      memories.foreach { memory =>
+        stmt.setString(1, memory.id.value)
+        stmt.setString(2, memory.content)
+        stmt.setString(3, memory.memoryType.name)
+        stmt.setString(4, PostgresMemoryStore.metadataToJson(memory.metadata))
+        stmt.setTimestamp(5, Timestamp.from(memory.timestamp))
+
+        memory.importance match {
+          case Some(v) => stmt.setDouble(6, v)
+          case None    => stmt.setNull(6, java.sql.Types.DOUBLE)
+        }
+
+        memory.embedding match {
+          case Some(vec) => stmt.setString(7, PostgresVectorHelpers.embeddingToString(vec))
+          case None      => stmt.setNull(7, java.sql.Types.OTHER, "vector")
+        }
+
+        stmt.executeUpdate()
+      }
+    }
+  }
+
+  /**
+   * Run `body` in one transaction on `conn`: committed if it returns, rolled back if anything (fatal errors included)
+   * escapes first. Autocommit is restored either way, before the pool takes the connection back.
+   */
+  private def inTransaction[A](conn: Connection)(body: => A): A = {
+    conn.setAutoCommit(false)
+    Using.resource(new PostgresMemoryStore.RollbackUnlessCommitted(conn)) { guard =>
+      val result = body
+      conn.commit()
+      guard.committed = true
+      result
+    }
+  }
 
   override def get(id: MemoryId): Result[Option[Memory]] =
     Try {
@@ -458,6 +489,16 @@ object PostgresMemoryStore {
       s"Invalid table name '$tableName': must match pattern [a-zA-Z_][a-zA-Z0-9_]{0,62}"
     )
     def jdbcUrl: String = s"jdbc:postgresql://$host:$port/$database"
+  }
+
+  /** Rolls `conn` back unless the transaction committed, then puts it back in autocommit mode if it can. */
+  final private class RollbackUnlessCommitted(conn: Connection) extends AutoCloseable {
+    var committed = false
+    // Autocommit goes back on only once the transaction has ended: turning it on after a failed rollback would make
+    // pgjdbc commit whatever the transaction holds. Left off, HikariCP rolls the connection back and resets it when
+    // it returns to the pool. After a commit, a failure here must not turn stored rows into a Left.
+    override def close(): Unit =
+      if (committed || Try(conn.rollback()).isSuccess) Try(conn.setAutoCommit(true)): Unit
   }
 
   def apply(
