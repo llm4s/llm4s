@@ -56,7 +56,7 @@ refreshed at each LLM4S release.
 | Java baseline | Built and tested on JDK 21 only; whether it runs on older JDKs is being measured ([#1493](https://github.com/llm4s/llm4s/issues/1493)) | Its Spring Boot integration page states a minimum Java version, quoted in the note below the table [L8] | not verified | not verified | not verified |
 | Maturity | Pre-1.0: latest release v0.4.1; stability tiers (Frozen, Beta, Experimental) in the [v1 scope](../reference/v1-scope) | not verified | not verified | Its Spring Boot, Ktor and planner agents are marked beta [K1] | not verified |
 
-Note on the *Java baseline* row: LangChain4j's Spring Boot integration page says "Java 17 is required" [L8]. This is a statement about that project, quoted as fetched. <!-- doc-support: ignore -->
+Note on the *Java baseline* row: LangChain4j's Spring Boot integration page says "LangChain4j Spring Boot integration requires Java 17" [L8]. This is a statement about that project, quoted as fetched on 2026-10-08. <!-- doc-support: ignore -->
 
 ## What LLM4S has not got yet
 
