@@ -368,6 +368,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sbt. Three stale claims it found are fixed: `sbt dependencyCheck` (no such task) in the review guidelines,
   `sbt run "Explain ..."` in the g8 guide (sbt reads the quoted text as a second command; it is now
   `sbt "run Explain ..."`), and `modules/gradle-demo`, which CLAUDE.md did not name.
+- **CI keeps the documented stability tiers in step with the build** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
+  `scripts/check-tier-drift.sh`, in the `quick-checks` job and with no sbt, fails when the tiers the docs state
+  disagree with the code. `publishedArtifactsCheck` only needed a published artifact to be *mentioned* in
+  `docs/reference/v1-scope.md`; nothing read the tier a page gave, nothing noticed a page naming a module the
+  build no longer has, and the frozen set (the `mimaFrozen` call sites in `build.sbt`) was repeated by hand in
+  `stabilityTierModules`, in `frozenDependencyCheck`'s module list, in 1.0 Scope's Package Map, in the
+  compatibility policy and in two places in the API stability page. The script compares all of them: a frozen
+  module needs a Package Map row marked *Frozen at 1.0* and a module that is not frozen must have none, every
+  `llm4s-*` the Package Map names is a project in the build, every published artifact has a row in the table, and
+  the module lists agree with the frozen set (`stabilityTierModules` is the frozen set minus the module the
+  comment above `stabilityTierCheck` exempts). A page it cannot read fails the check instead of passing it, and a
+  Package Map row can opt out with `tier-drift: ignore`. It found no drift: the four files agree today.
+  `scripts/test-check-tier-drift.sh` mutates copies of the real files, one kind of drift at a time.
 - **Built-in tools guide** ([#1296](https://github.com/llm4s/llm4s/issues/1296)):
   `docs/guide/builtin-tools.md` lists every built-in tool with its parameters and result, the bundles that hold
   them (`coreSafe`, `withHttpSafe()`, `withFilesSafe()`, `developmentSafe()`, `customSafe(...)`), how to register
