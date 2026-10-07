@@ -237,7 +237,8 @@ taken from its code:
 
 | Provider | What is sent | Enforced? |
 |---|---|---|
-| OpenAI, Azure OpenAI, Requesty | `response_format` of type `json_schema`, with your `name` and `strict` | Yes: the provider constrains generation to the schema |
+| OpenAI, Azure OpenAI | `response_format` of type `json_schema`, with your `name` and `strict` | Yes: the provider constrains generation to the schema |
+| Requesty | The same OpenAI `json_schema` shape, with your `name` and `strict` | Depends on the routed model: Requesty is a multi-provider router, so enforcement is up to the backend model or fallback it selects |
 | openai-compatible: generic, DeepSeek, Z.ai, OpenRouter, Mistral | The same OpenAI `json_schema` shape, with your `name` and `strict` | The server decides: a server that ignores `response_format` returns unconstrained text |
 | Cohere (through its OpenAI-compatibility API) | `response_format` of type `json_object` carrying the `schema`; `name` and `strict` are not sent | Cohere's own mechanism |
 | Gemini, Vertex AI | `responseMimeType: application/json` and `responseSchema` set to the schema | Yes, by Gemini |

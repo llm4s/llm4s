@@ -53,10 +53,11 @@ trait LLMClient extends AutoCloseable {
   /**
    * Sends the conversation and parses the response into a typed value using the provided schema.
    *
-   * Sets `ResponseFormat.JsonSchema` on the options. OpenAI, Azure OpenAI, Requesty and Gemini
-   * enforce the schema at generation time, as does Ollama 0.5 or later through its `format` field.
-   * The OpenAI-compatible providers (including Cohere) send it as `response_format`, but whether it
-   * is enforced is up to the server: one that ignores the field returns unconstrained text.
+   * Sets `ResponseFormat.JsonSchema` on the options. OpenAI, Azure OpenAI and Gemini enforce the
+   * schema at generation time, as does Ollama 0.5 or later through its `format` field. Requesty and
+   * the OpenAI-compatible providers (including Cohere) send it as `response_format`, but whether it
+   * is enforced is up to the server - for Requesty, a router, the backend model it routes to: one
+   * that ignores the field returns unconstrained text.
    * Anthropic falls back to a best-effort system-prompt instruction, which is not schema-enforced.
    * Clients that do not read `responseFormat` (watsonx, Bedrock) send no schema at all. Because models may wrap
    * JSON in markdown code fences or surround it with prose, the response is normalised
