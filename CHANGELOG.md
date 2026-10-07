@@ -1815,6 +1815,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly and returns a `Left` (`Regex matching aborted: pattern recursed too deeply for the input (stack
   overflow)`), which `RegexValidator` reports as a `Regex security error` `ValidationError`. Other fatal errors
   still propagate. The workspace runner's `WorkspaceRegexSafetyManager` has the same fix.
+- **`llm4s-agent-tools`: `json_tool` refuses what it used to mishandle**
+  ([#1508](https://github.com/llm4s/llm4s/issues/1508), [#1509](https://github.com/llm4s/llm4s/issues/1509),
+  [#1510](https://github.com/llm4s/llm4s/issues/1510)): a `query` path with an array index too large for an `Int`
+  (`a[99999999999]`) threw a `NumberFormatException` out of the handler and out of `execute`; it is now an error naming
+  the index. A path the parser could not read to the end was cut short and the value reached so far was returned as a
+  success (`a..b`, `a[x]`, `a[-1]` all returned `a`); it is now an error naming the text it stopped at. A document
+  nested more than 512 levels deep (arrays and objects together) made `parse` and `format` raise a
+  `StackOverflowError`, which `Try` does not catch; every operation, `validate` included, now refuses such a document
+  with an error before reading or writing it. A path that used to succeed only because its tail was ignored, such as
+  `items.[0]`, is now an error: write `items[0]`.
 - **`SafeParameterExtractor`: integer parameters reject fractions and overflow, and `validateRequired` checks
   types** ([#964](https://github.com/llm4s/llm4s/issues/964)): `getInt`, `getIntEnhanced` and `getOptionalInt`
   were `_.numOpt.map(_.toInt)`, so a tool argument of `3.14` returned `3` and `9223372036854775807` returned `-1`,

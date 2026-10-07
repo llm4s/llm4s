@@ -12,9 +12,9 @@ import scala.util.Try
  * Dedicated tests for [[JSONTool]]: every operation it advertises (`parse`, `format`, `query`, `validate`) has a
  * success and a failure case, plus the parameter checks, the path syntax and nested, empty and top-level inputs.
  *
- * Expected values are written out as literals; none is computed from the code under test. The three
- * `pendingUntilFixed` tests record behaviour the tool does not have yet (see their comments): each starts failing,
- * and so must be promoted to a normal test, the day the tool is fixed.
+ * Expected values are written out as literals; none is computed from the code under test. The last sections cover
+ * what the tool refuses: array indexes too large for an `Int`, query paths it cannot read to the end, and documents
+ * nested more than 512 levels deep.
  */
 class JSONToolSpec extends AnyFlatSpec with Matchers {
 
@@ -38,6 +38,33 @@ class JSONToolSpec extends AnyFlatSpec with Matchers {
 
   private def failure(result: Either[String, JSONResult]): String =
     result.fold(identity, r => fail(s"Expected Left but got Right: $r"))
+
+  private def arrays(depth: Int): String  = "[" * depth + "]" * depth
+  private def objects(depth: Int): String = "{\"a\":" * depth + "1" + "}" * depth
+
+  /**
+   * Run one operation on a thread with a fixed 1 MB stack, so that whether a deep document overflows the stack does
+   * not depend on the test runner's stack size. An Error (a StackOverflowError is one, and `Try` does not catch it)
+   * is read from the thread's uncaught-exception handler instead of aborting the suite.
+   */
+  private def onSmallStack(
+    operation: String,
+    json: String,
+    path: Option[String] = None
+  ): (Option[Either[String, JSONResult]], Option[Throwable]) = {
+    val outcome = new AtomicReference[Either[String, JSONResult]](null)
+    val thrown  = new AtomicReference[Throwable](null)
+    val thread = new Thread(
+      null,
+      () => outcome.set(run(operation, json, path)),
+      "json-tool-small-stack",
+      1024L * 1024L
+    )
+    thread.setUncaughtExceptionHandler((_, e) => thrown.set(e))
+    thread.start()
+    thread.join(30000)
+    (Option(outcome.get()), Option(thrown.get()))
+  }
 
   // ---- the advertised operations
 
@@ -302,52 +329,129 @@ class JSONToolSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  // ---- behaviour the tool does not have yet
+  // ---- array indexes
 
-  // `parsePathParts` converts an array index with `String#toInt` outside any `Try`, so an index that does not fit in
-  // an Int throws a NumberFormatException out of the handler (and out of `execute`) instead of returning a `Left`.
-  it should "return an error result for an array index too large for an Int" in {
-    pendingUntilFixed {
-      val outcome = Try(run("query", """{"a":[1]}""", Some("a[99999999999]")))
-      outcome.isSuccess shouldBe true
-      outcome.get.isLeft shouldBe true
-    }
-  }
-
-  // A path the parser cannot read to the end is cut short and the value reached so far is returned as a success:
-  // `a..b`, `a[x]` and `a[-1]` all return the value of `a`. A caller asking for something else is told it succeeded.
-  it should "not silently shorten a path it cannot parse completely" in {
-    pendingUntilFixed {
-      Seq("a..b", "a[x]", "a[-1]").foreach { path =>
-        withClue(s"path $path: ") {
-          run("query", """{"a":[1]}""", Some(path)).isLeft shouldBe true
-        }
+  it should "return an error result, not an exception, for an array index too large for an Int" in {
+    Seq("99999999999", "2147483648").foreach { index =>
+      val outcome = Try(run("query", """{"a":[1]}""", Some(s"a[$index]")))
+      withClue(s"index $index: ") {
+        outcome.isSuccess shouldBe true
+        failure(outcome.get) should include(index)
       }
     }
   }
 
-  // `parse` and `format` pretty-print with `ujson.write(parsed, indent = 2)` outside the `Try` that guards the read.
-  // The writer recurses once per nesting level, so a deeply nested document (a few thousand levels on a 1 MB stack;
-  // `validate`, which does not write, copes with far more) raises a StackOverflowError, an Error that `Try` does not
-  // catch, instead of returning a result. The call runs on its own thread with a fixed stack so the outcome does not
-  // depend on the test runner's stack size, and the error is read from the thread's uncaught-exception handler.
-  it should "not let a deeply nested document escape as an Error" in {
-    pendingUntilFixed {
-      val deep   = "[" * 20000 + "]" * 20000
-      val thrown = new AtomicReference[Throwable](null)
-      val thread = new Thread(
-        null,
-        () => {
-          run("format", deep)
-          ()
-        },
-        "json-tool-deep-nesting",
-        1024L * 1024L
-      )
-      thread.setUncaughtExceptionHandler((_, e) => thrown.set(e))
-      thread.start()
-      thread.join(30000)
-      thrown.get() shouldBe null
+  it should "treat the largest Int as a legal index that is simply out of bounds" in {
+    val outcome = Try(run("query", """{"a":[1]}""", Some("a[2147483647]")))
+    outcome.isSuccess shouldBe true
+    val message = failure(outcome.get)
+    message should include("2147483647")
+    (message should not).include("too large")
+  }
+
+  it should "still read an index with leading zeros as the number it spells" in {
+    ok(run("query", "[10,20]", Some("[01]"))).result shouldBe ujson.Num(20)
+  }
+
+  // ---- paths that cannot be read to the end
+
+  it should "not silently shorten a path it cannot parse completely, and name the text it stopped at" in {
+    val shapes = Seq(
+      "a..b"  -> "..b",
+      "a[x]"  -> "[x]",
+      "a[-1]" -> "[-1]",
+      "a[]"   -> "[]",
+      "a[1"   -> "[1",
+      "a]"    -> "]",
+      "a."    -> "'.'",
+      "a.[0]" -> ".[0]",
+      "."     -> "'.'",
+      ".."    -> ".."
+    )
+    shapes.foreach { case (path, stoppedAt) =>
+      val outcome = Try(run("query", """{"a":[1]}""", Some(path)))
+      withClue(s"path $path: ") {
+        outcome.isSuccess shouldBe true
+        failure(outcome.get) should include(stoppedAt)
+      }
     }
+  }
+
+  it should "report an unreadable path even when the part before it would not be found" in {
+    failure(run("query", """{"a":1}""", Some("missing..b"))) should include("..b")
+  }
+
+  it should "report an unreadable path even for a document that is not an array or object" in {
+    failure(run("query", "7", Some("a[x]"))) should include("[x]")
+  }
+
+  it should "read a key that contains a newline after a dot" in {
+    ok(run("query", "{\"a\":{\"b\\nc\":1}}", Some("a.b\nc"))).result shouldBe ujson.Num(1)
+  }
+
+  // ---- nesting limit
+
+  it should "accept a document nested exactly 512 levels deep in every operation" in {
+    val doc = arrays(512)
+    ok(run("parse", doc)).success shouldBe true
+    ok(run("format", doc)).success shouldBe true
+    ok(run("query", doc, Some(""))).success shouldBe true
+    ok(run("validate", doc)).formatted shouldBe "Valid JSON"
+  }
+
+  it should "refuse a document nested 513 levels deep in every operation" in {
+    val doc = arrays(513)
+    Seq(
+      "parse"    -> run("parse", doc),
+      "format"   -> run("format", doc),
+      "query"    -> run("query", doc, Some("")),
+      "validate" -> run("validate", doc)
+    ).foreach { case (operation, outcome) =>
+      withClue(s"$operation: ") {
+        failure(outcome) should include("512")
+      }
+    }
+  }
+
+  it should "count arrays and objects together towards the limit" in {
+    val atLimit   = "[" * 256 + "{\"a\":" * 256 + "1" + "}" * 256 + "]" * 256
+    val overLimit = "[" * 257 + "{\"a\":" * 256 + "1" + "}" * 256 + "]" * 257
+    ok(run("parse", atLimit)).success shouldBe true
+    failure(run("parse", overLimit)) should include("512")
+  }
+
+  it should "apply the limit to a document nested in objects as well as arrays" in {
+    ok(run("format", objects(512))).success shouldBe true
+    failure(run("format", objects(513))) should include("512")
+  }
+
+  it should "not count brackets inside string values towards the limit" in {
+    val inString = "[\"" + "[" * 1000 + "\"]"
+    ok(run("parse", inString)).result shouldBe ujson.Arr("[" * 1000)
+    val escapedQuote = "[\"a\\\"" + "[" * 1000 + "\"]"
+    ok(run("validate", escapedQuote)).formatted shouldBe "Valid JSON"
+  }
+
+  it should "end a string at a quote that follows an escaped backslash" in {
+    // The text is ["x\\",[[[...]]]]: the string is `x\\`, so the brackets after it are real structure.
+    val doc = "[\"x\\\\\"," + arrays(600) + "]"
+    failure(run("parse", doc)) should include("512")
+  }
+
+  it should "refuse a very deeply nested document without an Error, in every operation" in {
+    val doc = arrays(20000)
+    Seq("parse", "format", "query", "validate").foreach { operation =>
+      val (outcome, thrown) = onSmallStack(operation, doc, Some(""))
+      withClue(s"$operation: ") {
+        thrown shouldBe None
+        outcome.map(_.isLeft) shouldBe Some(true)
+      }
+    }
+  }
+
+  it should "refuse a document with a million levels without reading it" in {
+    val (outcome, thrown) = onSmallStack("parse", "[" * 1000000)
+    thrown shouldBe None
+    outcome.map(_.isLeft) shouldBe Some(true)
   }
 }
