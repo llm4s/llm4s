@@ -162,7 +162,7 @@ def describe(error: LLMError): String = error match {
 | 429 | `RateLimitError`, carrying the delay the server asked for |
 | 408, 5xx including `529 Overloaded`, and any other status | `ServiceError` |
 | No connection, or no answer within `timeout` | `NetworkError`, `TimeoutError` |
-| A 200 whose body is not the documented shape, or that leaves a question unanswered | `ProcessingError` |
+| A 200 whose body is not the documented shape, that leaves a question unanswered, or that answers one with another type, an option not offered or a level not described | `ProcessingError` |
 | The calling thread is interrupted | `CancelledError`, with the interrupt flag kept |
 
 TypeSafe does not document the JSON shape of an error body, so the text in the error is a best effort (a `message`, an
@@ -187,7 +187,8 @@ val request = JevRequest("...", Map("urgent" -> JevQuestion.noul("Is it?")))
 ```
 
 Headers a client sets itself (`Authorization`, `Content-Type`, `Accept`, ...) cannot be replaced, and a header name or value
-with a line break is refused.
+with a line break is refused. Header names are case-insensitive: a request header replaces a configured one of the same name
+in any case, and a map naming one header twice (`X-Trace` and `x-trace`) is refused.
 
 ## Limits and what is not verified
 

@@ -9,7 +9,13 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 
 /** What the fake Jev server saw of one request. Header names are lower-cased. */
-final case class Seen(method: String, path: String, headers: Map[String, String], body: String)
+final case class Seen(
+  method: String,
+  path: String,
+  headers: Map[String, String],
+  body: String,
+  rawHeaders: Map[String, Seq[String]] = Map.empty
+)
 
 /** What the fake Jev server answers. */
 final case class Reply(status: Int, body: String, headers: Map[String, String] = Map.empty)
@@ -38,8 +44,9 @@ object FakeJev {
     val counter = new AtomicInteger(0)
     LocalProviderTestServer.withServer("/") { exchange =>
       val body    = new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)
-      val headers = exchange.getRequestHeaders.asScala.map { case (k, v) => k.toLowerCase -> v.get(0) }.toMap
-      seen.add(Seen(exchange.getRequestMethod, exchange.getRequestURI.getPath, headers, body)): Unit
+      val raw     = exchange.getRequestHeaders.asScala.map { case (k, v) => k.toLowerCase -> v.asScala.toSeq }.toMap
+      val headers = raw.view.mapValues(_.head).toMap
+      seen.add(Seen(exchange.getRequestMethod, exchange.getRequestURI.getPath, headers, body, raw)): Unit
       val reply = replies(math.min(counter.getAndIncrement(), replies.size - 1))
       send(exchange, reply)
     }(baseUrl => test(baseUrl, () => seen.asScala.toSeq): Unit)

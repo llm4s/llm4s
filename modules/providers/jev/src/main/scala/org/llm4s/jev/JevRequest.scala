@@ -22,7 +22,8 @@ import org.llm4s.types.Result
  * @param state     what to evaluate: a string, or a JSON object or array for structured data
  * @param questions the questions, by the id their answers come back under
  * @param model     the model to use, or `None` for the client's configured model (`jev-latest` by default)
- * @param headers   extra HTTP headers for this request, sent unchanged on every retry of it. The client sets the
+ * @param headers   extra HTTP headers for this request, sent unchanged on every retry of it; one replaces a
+ *                  configured header of the same name, whatever its case. The client sets the
  *                  credentials, content type and `Accept` header itself and refuses to have them replaced.
  */
 final case class JevRequest private (
@@ -51,8 +52,9 @@ final case class JevRequest private (
   /** Uses `model` for this request; `None` uses the client's configured model. */
   def withModel(model: Option[String]): JevRequest = copy(model = model)
 
-  /** Adds one extra HTTP header, replacing one of the same name. */
-  def withHeader(name: String, value: String): JevRequest = copy(headers = headers.updated(name, value))
+  /** Adds one extra HTTP header, replacing one of the same name in any case (header names are case-insensitive). */
+  def withHeader(name: String, value: String): JevRequest =
+    copy(headers = JevHeaders.merge(headers, Map(name -> value)))
 
   /** Replaces the extra HTTP headers. */
   def withHeaders(headers: Map[String, String]): JevRequest = copy(headers = headers)

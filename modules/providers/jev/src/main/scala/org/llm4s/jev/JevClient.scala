@@ -64,7 +64,7 @@ final class JevClient private (
     } yield response
 
   private def requestHeaders(request: JevRequest): Map[String, String] =
-    config.headers ++ request.headers ++ Map(
+    JevHeaders.merge(config.headers, request.headers) ++ Map(
       "Authorization" -> s"Bearer ${config.apiKey}",
       "Content-Type"  -> "application/json",
       "Accept"        -> "application/json"
@@ -93,17 +93,51 @@ final class JevClient private (
       } else Left(JevErrors.fromResponse(response, config.apiKey))
     }
 
-  /** Every question was answered: a response that skips one is not the API's. */
+  /**
+   * Every question was answered, each with an answer of its own type within what it asked: a Choice among the
+   * options requested, a Score among the levels requested. A response that breaks this is not the API's.
+   */
   private def checkAnswers(response: JevResponse, request: JevRequest): Result[JevResponse] = {
     val missing = request.questions.keySet.diff(response.answers.keySet)
-    if (missing.isEmpty) Right(response)
-    else
+    if (missing.nonEmpty)
       Left(
         ProcessingError(
           "jev-response",
           s"Jev's response has no answer for question(s): ${missing.toSeq.sorted.mkString(", ")}"
         )
       )
+    else
+      request.questions.toSeq
+        .sortBy(_._1)
+        .iterator
+        .flatMap { case (id, question) => mismatch(question, response.answers(id)).map(id -> _) }
+        .nextOption()
+        .fold[Result[JevResponse]](Right(response)) { case (id, problem) =>
+          Left(ProcessingError("jev-response", s"Jev's answer to question $id does not match the question: $problem"))
+        }
+  }
+
+  /** Why `answer` cannot be the answer to `question`, if it cannot. */
+  private def mismatch(question: JevQuestion, answer: JevAnswer): Option[String] = (question, answer) match {
+    case (_: JevQuestion.Noul, _: NoulAnswer) => None
+    case (JevQuestion.Choice(_, options), ChoiceAnswer(choice, probabilities, _)) =>
+      val asked = options.map(_._1).toSet
+      if (!asked.contains(choice)) Some(s"'$choice' is not one of the options asked")
+      else
+        probabilities.keys.toSeq.sorted
+          .find(option => !asked.contains(option))
+          .map(option => s"it gives a probability for '$option', which is not one of the options asked")
+    case (JevQuestion.Score(_, levels), ScoreAnswer(_, answered, _)) =>
+      answered
+        .find(_.index >= levels.size)
+        .map(level => s"it has level ${level.index}, but the question has ${levels.size} levels")
+    case (_, _) =>
+      val expected = question match {
+        case _: JevQuestion.Noul   => "noul"
+        case _: JevQuestion.Choice => "choice"
+        case _: JevQuestion.Score  => "score"
+      }
+      Some(s"expected a $expected answer")
   }
 
   /** Releases the HTTP connections this client owns; a client built over an HTTP client you passed leaves it open. */

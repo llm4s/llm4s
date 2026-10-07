@@ -171,6 +171,13 @@ class JevRequestSpec extends AnyFlatSpec with Matchers with EitherValues {
     request.validate shouldBe Right(())
   }
 
+  it should "treat header names as case-insensitive, replacing one whatever its case and refusing both cases" in {
+    JevRequest("s", Map("a" -> noul)).withHeader("X-Trace", "1").withHeader("x-trace", "2").headers shouldBe
+      Map("x-trace" -> "2")
+    refused(JevRequest("s", Map("a" -> noul)).withHeaders(Map("X-Trace" -> "1", "x-trace" -> "2"))).message should
+      include("same header")
+  }
+
   it should "refuse a header whose name or value could inject another header" in {
     def headers(h: Map[String, String]) = JevRequest("s", Map("a" -> noul)).withHeaders(h)
 

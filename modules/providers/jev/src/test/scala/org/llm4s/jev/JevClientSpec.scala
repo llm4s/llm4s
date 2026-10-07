@@ -117,6 +117,15 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
     }
   }
 
+  it should "let a request's header replace a configured one whatever its case" in {
+    serve(ok()) { (url, seen) =>
+      val rig = new Rig(url, tweak = _.withHeaders(Map("X-Trace" -> "config")))
+      rig.client.evaluate(request.withHeader("x-trace", "request")).isRight shouldBe true
+
+      seen().head.rawHeaders("x-trace") shouldBe Seq("request")
+    }
+  }
+
   it should "refuse an invalid request before anything is sent" in {
     serve(ok()) { (url, seen) =>
       val bad = JevRequest("s", Map("q" -> JevQuestion.Score(ujson.Str("q"), Seq(ujson.Str("only one")))))
@@ -157,6 +166,40 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
 
       message shouldBe a[ProcessingError]
       message.message should include("other")
+    }
+  }
+
+  it should "refuse an answer of another type than its question asked, naming the question" in {
+    serve(ok(Examples.Noul)) { (url, _) =>
+      val asChoice = JevRequest("s", Map("is_urgent" -> JevQuestion.choiceOf("Which?", "yes", "no")))
+      val error    = new Rig(url).client.evaluate(asChoice).left.value
+
+      error shouldBe a[ProcessingError]
+      error.message should include("is_urgent")
+      error.message should include("expected a choice answer")
+    }
+  }
+
+  it should "refuse a Choice answer naming an option that was not offered" in {
+    serve(ok(Examples.Choice)) { (url, _) =>
+      def ask(options: String*) =
+        new Rig(url).client.evaluate(JevRequest("s", Map("department" -> JevQuestion.choiceOf("Which?", options*))))
+
+      ask("billing", "technical", "sales").isRight shouldBe true
+      ask("technical", "sales").left.value.message should include("'billing' is not one of the options asked")
+      ask("billing", "technical").left.value.message should include("'sales'")
+    }
+  }
+
+  it should "refuse a Score answer with a level the question did not describe" in {
+    serve(ok(Examples.Score)) { (url, _) =>
+      def ask(levels: String*) =
+        new Rig(url).client.evaluate(JevRequest("s", Map("frustration" -> JevQuestion.score("How?", levels*))))
+
+      ask("Calm", "Frustrated", "Very angry").isRight shouldBe true
+      val error = ask("Calm", "Frustrated").left.value
+      error shouldBe a[ProcessingError]
+      error.message should include("level 2")
     }
   }
 

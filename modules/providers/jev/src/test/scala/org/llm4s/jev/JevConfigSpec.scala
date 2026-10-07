@@ -138,6 +138,10 @@ class JevConfigSpec extends AnyFlatSpec with Matchers with EitherValues {
     refused(JevConfig(secret, headers = Map("Authorization" -> "Bearer x"))) should include("cannot be overridden")
   }
 
+  it should "refuse two default headers whose names differ only in case" in {
+    refused(JevConfig(secret, headers = Map("X-Trace" -> "a", "x-trace" -> "b"))) should include("same header")
+  }
+
   "A retry policy" should "default to TypeSafe's SDK values" in {
     JevRetryPolicy.default shouldBe JevRetryPolicy(2, 500.millis, 5.seconds, 0.25, 30.seconds)
     JevRetryPolicy.none.maxRetries shouldBe 0

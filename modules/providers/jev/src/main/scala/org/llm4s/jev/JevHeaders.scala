@@ -10,7 +10,8 @@ import java.util.Locale
  *
  * A header name or value that carries a line break would let its author inject headers, and a header the client
  * sets itself (credentials, content type and length, framing) must not be overridden by a caller. Both are
- * refused before anything is sent.
+ * refused before anything is sent. HTTP header names are case-insensitive, so two names that differ only in case
+ * are one header: a map holding both is refused, and [[merge]] lets an override replace a header whatever its case.
  */
 private[jev] object JevHeaders {
 
@@ -26,16 +27,31 @@ private[jev] object JevHeaders {
   private def isFieldValue(value: String): Boolean =
     value.forall(c => c == '\t' || (c >= ' ' && c != '\u007f' && c <= '~'))
 
+  private def key(name: String): String = name.toLowerCase(Locale.ROOT)
+
   /** Checks `headers`; `field` names where they came from in the error. */
   def validate(field: String, headers: Map[String, String]): Result[Unit] =
+    headers.keys.groupBy(key).collectFirst { case (_, names) if names.size > 1 => names.toSeq.sorted } match {
+      case Some(names) =>
+        Left(ValidationError(field, s"${names.mkString(" and ")} are the same header; give it once"))
+      case None => validateEach(field, headers)
+    }
+
+  private def validateEach(field: String, headers: Map[String, String]): Result[Unit] =
     headers
       .collectFirst {
         case (name, _) if !isToken(name) =>
           ValidationError(field, "a header name must be a non-empty token (letters, digits and !#$%&'*+-.^_`|~)")
-        case (name, _) if Reserved.contains(name.toLowerCase(Locale.ROOT)) =>
+        case (name, _) if Reserved.contains(key(name)) =>
           ValidationError(field, s"the client sets the $name header itself; it cannot be overridden")
         case (name, value) if !isFieldValue(value) =>
           ValidationError(field, s"the value of header $name must be printable ASCII without line breaks")
       }
       .fold[Result[Unit]](Right(()))(Left(_))
+
+  /** `base` with `overrides` on top: an override replaces a base header of the same name in any case. */
+  def merge(base: Map[String, String], overrides: Map[String, String]): Map[String, String] = {
+    val replaced = overrides.keySet.map(key)
+    base.filterNot { case (name, _) => replaced.contains(key(name)) } ++ overrides
+  }
 }
