@@ -63,8 +63,9 @@ import org.llm4s.types.Result
  * the same content can score differently between calls (the default temperature of 0.0 reduces this but does
  * not remove it). The content is inserted into the prompt as is, without escaping, so text inside it that
  * addresses the judge can sway the score: treat the result as a probabilistic filter, not a security
- * boundary. `threshold` is not validated: above 1.0, or NaN, nothing passes, and at 0.0 or below everything
- * that parses passes.
+ * boundary. `threshold` must be between 0.0 and 1.0: any other value, or NaN, makes `validate` fail before the
+ * judge is called (see `threshold`). A threshold of 0.0 is accepted and passes every reply that parses as a
+ * score.
  *
  * @note The default `completionOptions` cap the judge's reply at 10 tokens. Override them if your judge model
  *       needs more room than a bare number.
@@ -98,9 +99,12 @@ trait LLMGuardrail extends OutputGuardrail {
   def evaluationPrompt: String
 
   /**
-   * The lowest score that passes (a score equal to it passes). The default is 0.7. The value is not validated: above
-   * 1.0 or NaN nothing passes, and at 0.0 or below every reply that parses passes. It is not a probability or a
-   * confidence: it is a cut-off on whatever number the judge returns.
+   * The lowest score that passes (a score equal to it passes). The default is 0.7. It must be between 0.0 and 1.0,
+   * both included: `validate` returns a [[org.llm4s.error.ValidationError]] on field `threshold`, without calling the
+   * judge, for a value outside that range (including infinities) or NaN. It is checked when `validate` runs, not
+   * when the guardrail is built, so the constructors and factories keep their signatures. A threshold of 0.0 passes
+   * every reply that parses as a score. It is not a probability or a confidence: it is a cut-off on whatever number
+   * the judge returns.
    */
   def threshold: Double = 0.7
 
@@ -119,20 +123,30 @@ trait LLMGuardrail extends OutputGuardrail {
    *
    * @param value the text to judge, typically the agent's final answer
    * @return `Right(value)` unchanged when the score reaches the threshold; otherwise `Left`: a
-   *         [[org.llm4s.error.ValidationError]] on field `output` when the score is too low, a `ValidationError` on
-   *         field `llm_response` when the reply has no readable score, or the client's own error when the call fails
+   *         [[org.llm4s.error.ValidationError]] on field `threshold` when the threshold is not between 0.0 and 1.0
+   *         (no judge call is made), on field `output` when the score is too low, on field `llm_response` when the
+   *         reply has no readable score, or the client's own error when the call fails
    */
   override def validate(value: String): Result[String] =
-    evaluateWithLLM(value).flatMap { score =>
-      if (score >= threshold) {
-        Right(value)
-      } else {
-        Left(
-          ValidationError.invalid(
-            "output",
-            s"LLM judge score (${"%.2f".format(score)}) below threshold (${"%.2f".format(threshold)}) for $name"
-          )
+    if (threshold.isNaN || threshold < 0.0 || threshold > 1.0) {
+      Left(
+        ValidationError.invalid(
+          "threshold",
+          s"LLM judge threshold must be between 0.0 and 1.0, got $threshold for $name"
         )
+      )
+    } else {
+      evaluateWithLLM(value).flatMap { score =>
+        if (score >= threshold) {
+          Right(value)
+        } else {
+          Left(
+            ValidationError.invalid(
+              "output",
+              s"LLM judge score (${"%.2f".format(score)}) below threshold (${"%.2f".format(threshold)}) for $name"
+            )
+          )
+        }
       }
     }
 
@@ -264,7 +278,8 @@ object LLMGuardrail {
    *
    * @param client the client that makes the judge call
    * @param prompt the evaluation criteria, as for `evaluationPrompt`
-   * @param passThreshold the lowest score that passes (default 0.7); not validated
+   * @param passThreshold the lowest score that passes (default 0.7); it must be between 0.0 and 1.0, or `validate`
+   *                      fails with a `ValidationError` on field `threshold` before calling the judge
    * @param guardrailName the name shown in failure messages (default `CustomLLMGuardrail`)
    * @param guardrailDescription the description; when absent it is `LLM-based validation: <prompt> (threshold: <t>)`
    * @return a guardrail that uses the default completion options

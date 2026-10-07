@@ -1785,6 +1785,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   between 0 and 1, as the fixed system message already asks. A reply with a sign, a percentage (also one named apart from the
   number, `1 %` or `1 percent`), a per-mille scale (`1 ‰`, `1 per mille`, `1 permille`; the Arabic percent and per-mille signs too), a value above 1 by less than a `Double` can hold (`1.0000000000000001`), a fraction, an exponent, a decimal comma, a trailing full stop, a label glued to the number (`Score:0.9`) or more than one
   number is refused; before, these read as a score. The score-reading rules are documented on `LLMGuardrail`.
+- **`llm4s-agent`: a judge guardrail with a threshold outside 0.0 to 1.0 fails with a clear error, instead of silently
+  blocking everything or passing everything** ([#1520](https://github.com/llm4s/llm4s/issues/1520)): the threshold of
+  `LLMGuardrail` (and so of `LLMSafetyGuardrail`, `LLMFactualityGuardrail`, `LLMQualityGuardrail`,
+  `LLMToneGuardrail` and `LLMGuardrail(...)`) was not validated: above 1.0, or NaN, nothing could pass, and below
+  0.0 everything that parsed passed. `validate` now returns a `ValidationError` on field `threshold` for a value
+  below 0.0, above 1.0 (an infinity too) or NaN, **before** calling the judge, so no call is spent on a guardrail
+  that cannot work. 0.0 and 1.0 are accepted. The check runs when `validate` runs, not when the guardrail is built,
+  so no constructor or factory signature changed. **Migration:** a guardrail whose threshold was out of range, and
+  so was blocking everything or approving everything, now fails every `validate` with that error: correct the
+  threshold.
 - **`SafeParameterExtractor`: integer parameters reject fractions and overflow, and `validateRequired` checks
   types** ([#964](https://github.com/llm4s/llm4s/issues/964)): `getInt`, `getIntEnhanced` and `getOptionalInt`
   were `_.numOpt.map(_.toInt)`, so a tool argument of `3.14` returned `3` and `9223372036854775807` returned `-1`,

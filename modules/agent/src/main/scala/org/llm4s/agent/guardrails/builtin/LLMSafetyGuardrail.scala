@@ -27,7 +27,7 @@ import org.llm4s.llmconnect.LLMClient
  * An unreadable reply or a failing `llmClient` is a `Left` too, never a pass.
  *
  * @param llmClient the client that makes the judge call; it can be the agent's own or a separate model
- * @param threshold the lowest score that passes (a score equal to it passes); the default 0.8 is higher than the
+ * @param threshold the lowest score that passes (a score equal to it passes), between 0.0 and 1.0 or `validate` fails; the default 0.8 is higher than the
  *                  base default of 0.7, as the original comment put it, "higher for safety"
  * @param customCriteria extra criteria appended to the prompt verbatim under `Additional criteria:`; `None` keeps
  *                       the five built-in criteria only
