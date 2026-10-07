@@ -287,6 +287,11 @@ val store = new VectorMemoryStore(embeddingService)
 val manager = SimpleMemoryManager(store = store)
 ```
 
+The store embeds what it keeps as a *document* and the text you search with as a *query*
+(`EmbeddingService.embedQuery`). Models that embed the two differently (Voyage, Cohere, Jina) are
+then searched correctly. `embedQuery` delegates to `embed` unless a service overrides it, so a
+custom `EmbeddingService` written before it existed keeps working unchanged.
+
 ---
 
 ## Memory with Agents

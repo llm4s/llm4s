@@ -68,6 +68,15 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     "voyage-context-3" -> 1024
   )
 
+  /**
+   * The `input_type` Voyage is sent for a request's purpose. Voyage's models are trained to embed a query and a
+   * document differently, and prepend a different prompt for each, so the request says which it is.
+   */
+  private[provider] def inputTypeFor(purpose: InputPurpose): String = purpose match {
+    case InputPurpose.Document => "document"
+    case InputPurpose.Query    => "query"
+  }
+
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
 
@@ -87,8 +96,9 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
           val model = request.model.name
           val input = request.input
           val payload = Obj(
-            "input" -> Arr.from(input),
-            "model" -> model
+            "input"      -> Arr.from(input),
+            "model"      -> model,
+            "input_type" -> inputTypeFor(request.purpose)
           )
 
           val url = s"${cfg.baseUrl.stripSuffix("/")}/embeddings"

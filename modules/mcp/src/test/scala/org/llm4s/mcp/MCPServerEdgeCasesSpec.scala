@@ -366,14 +366,12 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
     val msgUrl = new AtomicReference[String]("")
     val exec   = Executors.newSingleThreadExecutor()
 
-    val sseConn = mkConn("/mcp/sse", "GET")
-    sseConn.setRequestProperty("Accept", "text/event-stream")
-    sseConn.setReadTimeout(10000)
+    val sseStream = SseTestStream.open(port, "/mcp/sse")
 
     exec.submit(new Runnable {
       override def run(): Unit =
         try {
-          val reader = new BufferedReader(new InputStreamReader(sseConn.getInputStream, "UTF-8"))
+          val reader = new BufferedReader(new InputStreamReader(sseStream.body, "UTF-8"))
           val sb     = new StringBuilder
           var line   = reader.readLine()
           while (line != null) {
@@ -401,7 +399,7 @@ class MCPServerEdgeCasesSpec extends AnyFunSpec with Matchers with BeforeAndAfte
       latch.await(5, TimeUnit.SECONDS) shouldBe true
       body(msgUrl.get(), events)
     } finally {
-      sseConn.disconnect()
+      sseStream.close()
       exec.shutdown()
       exec.awaitTermination(2, TimeUnit.SECONDS)
     }
