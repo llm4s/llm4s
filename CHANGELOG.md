@@ -452,6 +452,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variable to `llm4s.credentials.<id>.apiKey` (`ProviderModuleChecks`); config loading from a
   HOCON string with an injected environment (`ProviderTestConfig`, `CredentialsRoundTrip`); and a
   local stub HTTP server (`LocalProviderTestServer`). Every in-repo provider module uses it.
+- **The cookbook: five runnable recipes, executed in CI** ([#1476](https://github.com/llm4s/llm4s/issues/1476)):
+  `sbt "samples/runMain org.llm4s.samples.cookbook.ToolCallingRecipe"` (and `StructuredOutputRecipe`,
+  `GuardrailsRecipe`, `DocumentQaRecipe`, `MemoryRecipe`) runs a complete example with no API key, against a
+  `ScriptedClient` that stands in for the model; `--live` runs the same code against the provider chosen by the
+  configuration. Each recipe has a spec that runs it against the script and checks what it did (the tool ran, a
+  request was refused before the model was called, only the best passage reached the prompt), and `CookbookDocsSpec`
+  fails when `docs/examples/cookbook.md` lists different recipes or embeds code that is not the code in the source
+  files. This is five of the eight recipes the issue asks for.
 - **`CostTrackingExample`: cost tracking end to end** ([#516](https://github.com/llm4s/llm4s/issues/516),
   reworked from #898 by @gudiwadasruthi): `sbt "samples/runMain org.llm4s.samples.metrics.CostTrackingExample"`
   shows what a call costs per request (`Completion.estimatedCost`), per agent run (`AgentState.usageSummary`
