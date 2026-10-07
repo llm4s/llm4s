@@ -253,6 +253,8 @@ each provider module's `reference.conf` has an example section. See the
 and [running the samples](docs/getting-started/configuration.md#running-the-samples) for the
 samples' own bindings.
 
+No build tool yet? The [Scala CLI quick start](docs/getting-started/scala-cli.md) makes a first call from a single file.
+
 ### Running the Examples
 
 ```bash

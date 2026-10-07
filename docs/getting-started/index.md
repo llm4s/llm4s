@@ -17,6 +17,7 @@ This section will guide you through:
 4. **[Next Steps](next-steps)** - Choose your learning path
 5. **[Ollama Quick Start](ollama-quickstart)** - Local LLM development (no API keys needed)
 6. **[Gradle Integration](gradle)** - Use LLM4S from a Gradle (Java or Kotlin) build
+7. **[Scala CLI Quick Start](scala-cli)** - A first LLM call from a single file, with no sbt project
 
 ## Quick Start
 
