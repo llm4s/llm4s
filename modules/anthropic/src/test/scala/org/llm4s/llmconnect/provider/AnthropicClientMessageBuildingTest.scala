@@ -12,8 +12,9 @@ import org.scalatest.matchers.should.Matchers
  * Tests for the two internal protocol-adaptation methods in AnthropicClient:
  *
  *  - `addMessagesToParams` — converts llm4s message types to the Anthropic API wire
- *    format; handles default system prompt injection, ToolMessage prefixing, and
- *    the rule that AssistantMessages carrying pending tool calls must be skipped.
+ *    format; handles default system prompt injection, tool calls and their results
+ *    as `tool_use` / `tool_result` blocks, and thinking blocks sent back with their
+ *    signatures.
  *
  *  - `clampBudgetTokens` — enforces the Anthropic API constraint that the
  *    extended-thinking budget must satisfy `1024 ≤ budget < maxTokens`.
@@ -99,14 +100,14 @@ class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
     json should include("assistant")
   }
 
-  it should "skip an AssistantMessage that carries pending tool calls" in {
+  it should "leave out a tool call no ToolMessage answers, keeping the turn's text" in {
     val toolCall = ToolCall("call-1", "get_weather", ujson.Obj("city" -> "London"))
-    // Use a distinctive marker to verify it does NOT appear in the output
     val json = buildParamsJson(
       UserMessage("What is the weather?"),
       AssistantMessage(Some("TOOL_CALL_MARKER"), Seq(toolCall))
     )
-    (json should not).include("TOOL_CALL_MARKER")
+    json should include("TOOL_CALL_MARKER")
+    (json should not).include("tool_use")
   }
 
   it should "convert a ToolMessage to a user turn with the [Tool result for …] prefix" in {
@@ -145,15 +146,24 @@ class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
     val json = buildParamsJson(
       SystemMessage("You are a weather assistant."),
       UserMessage("What's the weather in London?"),
-      AssistantMessage(None, Seq(toolCall)),                   // must be skipped
-      ToolMessage("15C and cloudy", "call-1"),                 // forwarded as user turn
+      AssistantMessage(None, Seq(toolCall)),                   // a tool_use block
+      ToolMessage("15C and cloudy", "call-1"),                 // its tool_result block
       AssistantMessage(Some("The weather is 15C."), Seq.empty) // forwarded as assistant turn
     )
     // Custom system message used, default not injected
     json should include("You are a weather assistant.")
     (json should not).include("You are Claude, a helpful AI assistant.")
-    // Tool result forwarded with prefix
-    json should include("[Tool result for call-1]: 15C and cloudy")
+    val messages = ujson.read(json)("messages").arr
+    messages.map(_("role").str) shouldBe Seq("user", "assistant", "user", "assistant")
+    val toolUse = messages(1)("content")(0)
+    toolUse("type").str shouldBe "tool_use"
+    toolUse("id").str shouldBe "call-1"
+    toolUse("name").str shouldBe "get_weather"
+    toolUse("input") shouldBe ujson.Obj("city" -> "London")
+    val toolResult = messages(2)("content")(0)
+    toolResult("type").str shouldBe "tool_result"
+    toolResult("tool_use_id").str shouldBe "call-1"
+    toolResult("content").str shouldBe "15C and cloudy"
     // Final text-only assistant message forwarded
     json should include("The weather is 15C.")
   }

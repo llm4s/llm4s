@@ -236,8 +236,8 @@ final class VectorMemoryStore private (
   }
 
   override def search(query: String, topK: Int, filter: MemoryFilter): Result[Seq[ScoredMemory]] =
-    // Generate query embedding
-    embeddingService.embed(query).flatMap { queryEmbedding =>
+    // Generate query embedding: as a query, which some models embed differently from a document
+    embeddingService.embedQuery(query).flatMap { queryEmbedding =>
       Try {
         // Memories matching the filter that have embeddings; topK applies to those the filter accepts
         val candidates = queryMemories(filter, None).flatMap(m => m.embedding.filter(_.nonEmpty).map(e => (m, e)))
