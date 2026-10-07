@@ -151,10 +151,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overrides them (`docs/guide/writing-a-provider.md`). `timeouts` joins `ProviderConfigSpec.BuiltinKeys`, so
   a provider can no longer declare an extra of that name. The provider configs (`DeepSeekConfig`,
   `ZaiConfig`, `MistralConfig`, `CohereConfig`, `OpenAICompatibleConfig`, `OpenAIConfig`, `AzureConfig`,
-  `AnthropicConfig`, `GeminiConfig`, `VertexAIConfig`, `OllamaConfig`, `BedrockConfig`, `WatsonXConfig`) gain a
-  trailing `timeouts` field and a
-  `withTimeouts` setter; code that constructs them or calls `apply` is unchanged, a pattern match on one needs
-  the extra field. The OpenAI and Anthropic SDKs retry a timed-out call twice by default, which llm4s does
+  `AnthropicConfig`, `GeminiConfig`, `VertexAIConfig`, `OllamaConfig`, `BedrockConfig`, `WatsonXConfig`) and
+  `EmbeddingProviderConfig` gain a trailing `timeouts` field and a `withTimeouts` setter. **Migration:** Scala
+  source that constructs them or calls `apply` compiles unchanged (the field defaults to
+  `ProviderTimeouts.default`), but the constructor's arity changed, so code compiled against the old one must
+  be recompiled; Java and Kotlin callers, which cannot use Scala defaults, pass the default timeouts as the last
+  argument - `ProviderTimeouts.default()` from Kotlin, `ProviderTimeouts.apply(Option.empty(), Option.empty())`
+  from Java, where `default` is a keyword; a
+  pattern match on one needs the extra field. No overload keeps the old arity: nothing is frozen before 1.0
+  (see `docs/migrations/0x-to-1x.md`). The OpenAI and Anthropic SDKs retry a timed-out call twice by default, which llm4s does
   not change. Model listing, the Vertex AI token request and the watsonx IAM exchange keep their fixed
   timeouts. Bedrock applies `request` as the AWS SDK's API-call timeout and `stream` as a deadline on the
   whole `ConverseStream` call; an expiry there is a `TimeoutError`.
