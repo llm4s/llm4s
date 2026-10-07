@@ -17,6 +17,10 @@ import scala.util.{ Try, Using }
  * Thread Safety: This implementation is NOT thread-safe. For concurrent
  * access, use connection pooling or synchronization.
  *
+ * Writes: `store` and `storeAll` are each one transaction - a batch is stored whole or not at all - and so are
+ * `deleteMatching` and opening the store. A write takes the database's write lock when it begins, waiting up to the
+ * connection's busy timeout (sqlite-jdbc's default, 3 seconds) for a writer on another connection to the same file.
+ *
  * @param dbPath Path to SQLite database file (use ":memory:" for in-memory)
  * @param config Store configuration
  */
@@ -31,20 +35,43 @@ final class SQLiteMemoryStore private (
 
   override def store(memory: Memory): Result[MemoryStore] =
     Try {
-      val sql =
-        """INSERT INTO memories (id, content, memory_type, timestamp, importance, conversation_id, entity_id, source, metadata_json, embedding_blob)
-          |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          |ON CONFLICT(id) DO UPDATE SET
-          |  content = excluded.content,
-          |  memory_type = excluded.memory_type,
-          |  importance = excluded.importance,
-          |  conversation_id = excluded.conversation_id,
-          |  entity_id = excluded.entity_id,
-          |  source = excluded.source,
-          |  metadata_json = excluded.metadata_json,
-          |  embedding_blob = excluded.embedding_blob""".stripMargin
+      inTransaction(writeAll(Seq(memory)))
+      this
+    }.toEither.left.map(e => ProcessingError("sqlite-store", s"Failed to store memory: ${e.getMessage}"))
 
-      Using.resource(connection.prepareStatement(sql)) { stmt =>
+  /**
+   * Store `memories` in one transaction: all of them are stored or, if any fails, none is. The commit - and the
+   * file sync behind it - is paid once for the batch, not once per row.
+   */
+  override def storeAll(memories: Seq[Memory]): Result[MemoryStore] =
+    Try {
+      if (memories.nonEmpty) inTransaction(writeAll(memories))
+      this
+    }.toEither.left.map(e => ProcessingError("sqlite-store", s"Failed to store memories: ${e.getMessage}"))
+
+  /**
+   * Upsert each memory and replace its full-text entry, in order, reusing three prepared statements. The caller
+   * supplies the transaction.
+   */
+  private def writeAll(memories: Seq[Memory]): Unit = {
+    val sql =
+      """INSERT INTO memories (id, content, memory_type, timestamp, importance, conversation_id, entity_id, source, metadata_json, embedding_blob)
+        |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        |ON CONFLICT(id) DO UPDATE SET
+        |  content = excluded.content,
+        |  memory_type = excluded.memory_type,
+        |  importance = excluded.importance,
+        |  conversation_id = excluded.conversation_id,
+        |  entity_id = excluded.entity_id,
+        |  source = excluded.source,
+        |  metadata_json = excluded.metadata_json,
+        |  embedding_blob = excluded.embedding_blob""".stripMargin
+
+    Using.Manager { use =>
+      val stmt      = use(connection.prepareStatement(sql))
+      val ftsDelete = use(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?"))
+      val ftsInsert = use(connection.prepareStatement("INSERT INTO memories_fts (id, content) VALUES (?, ?)"))
+      memories.foreach { memory =>
         stmt.setString(1, memory.id.value)
         stmt.setString(2, memory.content)
         stmt.setString(3, memoryTypeToString(memory.memoryType))
@@ -72,13 +99,16 @@ final class SQLiteMemoryStore private (
           case None      => stmt.setNull(10, java.sql.Types.BLOB)
         }
         stmt.executeUpdate()
+
+        // Replace the full-text entry
+        ftsDelete.setString(1, memory.id.value)
+        ftsDelete.executeUpdate()
+        ftsInsert.setString(1, memory.id.value)
+        ftsInsert.setString(2, memory.content)
+        ftsInsert.executeUpdate()
       }
-
-      // Update FTS index
-      updateFtsIndex(memory)
-
-      this
-    }.toEither.left.map(e => ProcessingError("sqlite-store", s"Failed to store memory: ${e.getMessage}"))
+    }.get
+  }
 
   override def get(id: MemoryId): Result[Option[Memory]] =
     Try {
@@ -246,22 +276,8 @@ final class SQLiteMemoryStore private (
     }
   }
 
-  /**
-   * Run `body` as one transaction: commit if it returns, roll back if it throws, and always restore autocommit,
-   * even if the commit or the rollback fails.
-   */
-  private def inTransaction[A](body: => A): A = {
-    val wasAutoCommit = connection.getAutoCommit
-    connection.setAutoCommit(false)
-    val outcome = Try {
-      val result = body
-      connection.commit()
-      result
-    }
-    if (outcome.isFailure) Try(connection.rollback())
-    Try(connection.setAutoCommit(wasAutoCommit))
-    outcome.get
-  }
+  /** Run `body` as one write transaction: committed if it returns, rolled back otherwise. */
+  private def inTransaction[A](body: => A): A = SqliteTransaction.immediate(connection)(body)
 
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
     for {
@@ -315,22 +331,6 @@ final class SQLiteMemoryStore private (
     if (!connection.isClosed) {
       connection.close()
     }
-
-  private def updateFtsIndex(memory: Memory): Unit = {
-    // Delete existing entry
-    Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { stmt =>
-      stmt.setString(1, memory.id.value)
-      stmt.executeUpdate()
-    }
-    // Insert new entry
-    Using.resource(
-      connection.prepareStatement("INSERT INTO memories_fts (id, content) VALUES (?, ?)")
-    ) { stmt =>
-      stmt.setString(1, memory.id.value)
-      stmt.setString(2, memory.content)
-      stmt.executeUpdate()
-    }
-  }
 
   private def narrowing(filter: MemoryFilter): FilterSupport.Narrowing =
     FilterSupport.narrow(filter)(leafSql)
@@ -513,7 +513,10 @@ object SQLiteMemoryStore {
       s"INSERT OR IGNORE INTO schema_version (version) VALUES ($SchemaVersion)"
     )
 
-    Using.resource(connection.createStatement())(stmt => statements.foreach(stmt.executeUpdate))
+    // One transaction, so opening a store commits (and syncs the file) once rather than once per statement.
+    SqliteTransaction.immediate(connection) {
+      Using.resource(connection.createStatement())(stmt => statements.foreach(stmt.executeUpdate))
+    }
   }
 
   private def memoryTypeToString(mt: MemoryType): String = mt match {
