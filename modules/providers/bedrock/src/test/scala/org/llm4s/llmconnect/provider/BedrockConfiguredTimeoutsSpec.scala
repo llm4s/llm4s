@@ -70,6 +70,14 @@ final class BedrockConfiguredTimeoutsSpec extends AnyFlatSpec with Matchers {
     } finally default.close()
   }
 
+  it should "accept a sub-millisecond request timeout rather than truncating it to zero" in {
+    // The SDK rejects a zero apiCallTimeout, so 500us must reach it as nanoseconds, not as 0ms.
+    val client =
+      new BedrockClient(config("http://localhost:1").withTimeouts(ProviderTimeouts(Some(500.micros), None)))
+    try client.requestTimeout shouldBe Some(500.micros)
+    finally client.close()
+  }
+
   // ---- the value reaches the wire ----
 
   "A configured request timeout" should "end a Converse call to a server that never answers" in {

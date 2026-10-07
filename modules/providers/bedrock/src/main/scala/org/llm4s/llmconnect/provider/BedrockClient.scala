@@ -29,8 +29,8 @@ import software.amazon.awssdk.auth.credentials.{
   ProfileCredentialsProvider,
   StaticCredentialsProvider
 }
-import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration
 import software.amazon.awssdk.core.SdkBytes
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration
 import software.amazon.awssdk.core.document.Document
 import software.amazon.awssdk.core.exception.ApiCallTimeoutException
 import software.amazon.awssdk.http.Protocol
@@ -130,7 +130,7 @@ class BedrockClient(
     // Without a configured request timeout the SDK keeps its own defaults.
     requestTimeout.foreach { timeout =>
       builder.overrideConfiguration(
-        ClientOverrideConfiguration.builder().apiCallTimeout(java.time.Duration.ofMillis(timeout.toMillis)).build()
+        ClientOverrideConfiguration.builder().apiCallTimeout(java.time.Duration.ofNanos(timeout.toNanos)).build()
       )
     }
     builder.build()
