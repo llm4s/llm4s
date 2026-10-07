@@ -618,6 +618,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than with a foreign signature. Pruning, compression, summarisation, an edit or an inserted message anywhere earlier therefore
   unseals every later turn, whoever made the change; `hasSealedThinking` reports the state. Token estimates
   (`ConversationTokenCounter`, the agent's default pruning counter) now count thinking, which providers resend.
+- **Every published module's POM carries a one-sentence description, and the POM URLs are normalised**
+  ([#1455](https://github.com/llm4s/llm4s/issues/1455)): each `llm4s-*` artifact used to publish its own name as its
+  `<description>` (`llm4s-core` described as "llm4s-core"); the descriptions now live in one table,
+  `project/PomDescriptions.scala`, and `sbt publishedArtifactsCheck` fails for a published module without its own
+  distinct description. The POM `<url>` is `https://llm4s.org` (it was the GitHub organization page), and `<scm>` is
+  `https://github.com/llm4s/llm4s` with an `https` connection string (the URL had a trailing slash and the connection
+  was an SSH form). The organization URL and every `<dependencies>` block are unchanged. Maven Central search and IDEs
+  show the descriptions; Scaladex ranks by the GitHub description and topics, which a maintainer sets in the
+  repository settings.
 - **`llm4s-anthropic`: tool calls and results as content blocks** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
   an assistant turn's tool calls go to Anthropic as `tool_use` blocks after its text, and each `ToolMessage` as a
   `tool_result` block, consecutive results in one user turn. Before, a tool-call turn was dropped and its results
