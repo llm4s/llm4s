@@ -631,14 +631,19 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    val metrics        = new TestMetricsCollector()
-    val reliableClient = new ReliableClient(mockClient, "test-provider", config, Some(metrics))
+    // A rate limit without a retryAfter hint waits RateLimitError.DefaultRetryDelay (30 s); record the
+    // waits rather than sleeping through them.
+    val waits   = scala.collection.mutable.ArrayBuffer.empty[FiniteDuration]
+    val metrics = new TestMetricsCollector()
+    val reliableClient =
+      new ReliableClient(mockClient, "test-provider", config, Some(metrics), sleep = delay => waits += delay)
 
     val result = reliableClient.complete(testConversation)
 
     result shouldBe Left(localRejection)
     mockClient.callCount.get() shouldBe 3
     metrics.recordedErrors shouldBe empty
+    waits.toList shouldBe List(RateLimitError.DefaultRetryDelay, RateLimitError.DefaultRetryDelay)
   }
 
   test("ReliableClient still records a genuine upstream RateLimitError once, on the terminal attempt") {
@@ -654,14 +659,17 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    val metrics        = new TestMetricsCollector()
-    val reliableClient = new ReliableClient(mockClient, "anthropic", config, Some(metrics))
+    val waits   = scala.collection.mutable.ArrayBuffer.empty[FiniteDuration]
+    val metrics = new TestMetricsCollector()
+    val reliableClient =
+      new ReliableClient(mockClient, "anthropic", config, Some(metrics), sleep = delay => waits += delay)
 
     val result = reliableClient.complete(testConversation)
 
     result shouldBe Left(upstreamRejection)
     mockClient.callCount.get() shouldBe 2
     metrics.recordedErrors.toList shouldBe List(ErrorKind.RateLimit)
+    waits.toList shouldBe List(RateLimitError.DefaultRetryDelay)
   }
 
   test("ReliableClient.resetCircuitBreaker resets state correctly") {

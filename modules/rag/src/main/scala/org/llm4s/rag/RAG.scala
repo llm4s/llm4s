@@ -1308,7 +1308,8 @@ final class RAG private (
   }
 
   private def embedQuery(query: String): Result[Array[Float]] = {
-    val request = EmbeddingRequest(Seq(query), embeddingModelConfig)
+    // A query, not a document: models that embed the two differently need to be told which this is.
+    val request = EmbeddingRequest(Seq(query), embeddingModelConfig, InputPurpose.Query)
     tracedEmbeddingClient
       .embed(request)
       .flatMap(

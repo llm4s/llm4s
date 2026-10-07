@@ -23,7 +23,12 @@ trait MemoryStore {
   def store(memory: Memory): Result[MemoryStore]
 
   /**
-   * Store multiple memories in a batch.
+   * Store multiple memories in a batch, all or nothing: on `Left`, none of `memories` has been stored (a memory that
+   * was already there is left as it was). A memory whose id appears twice is stored as its last occurrence.
+   *
+   * This default stores into an immutable copy, so it is atomic for a store whose `store` returns a new store and
+   * leaves the original untouched (as [[InMemoryStore]] does). A store that writes in place must override it; the
+   * SQLite, vector and Postgres stores write the batch in one transaction.
    *
    * @param memories The memories to store
    * @return A new MemoryStore containing the added memories,
