@@ -108,9 +108,9 @@ client.complete(conversation).catchAll { err =>
 ## Environment variables
 
 The variables llm4s reads, such as `OPENAI_API_KEY`, are listed in
-[Environment variables llm4s reads](../getting-started/configuration.md#environment-variables-llm4s-reads).
+[Environment variables llm4s reads](../getting-started/configuration#environment-variables-llm4s-reads).
 The provider and model are chosen by a named section in `application.conf`; see
-[Named provider sections](../getting-started/configuration.md#named-provider-sections).
+[Named provider sections](../getting-started/configuration#named-provider-sections).
 
 ### Differences from `Agent`
 
