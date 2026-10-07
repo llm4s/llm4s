@@ -60,6 +60,26 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
     config.isPathAllowed(Paths.get("/home/user/file.txt")) shouldBe false
   }
 
+  it should "not treat a sibling sharing a name prefix as inside an allowed path" in {
+    assume(!isWindows, "Unix paths not available on Windows")
+    val config = WriteConfig(allowedPaths = Seq("/srv/agent-data"))
+
+    config.isPathAllowed(Paths.get("/srv/agent-data")) shouldBe true
+    config.isPathAllowed(Paths.get("/srv/agent-data/out.txt")) shouldBe true
+    config.isPathAllowed(Paths.get("/srv/agent-data-secret/out.txt")) shouldBe false
+    config.isPathAllowed(Paths.get("/srv/agent-data/../agent-data-secret/out.txt")) shouldBe false
+  }
+
+  "FileConfig" should "not treat a sibling sharing a name prefix as inside an allowed path" in {
+    assume(!isWindows, "Unix paths not available on Windows")
+    val config = FileConfig(allowedPaths = Some(Seq("/srv/agent-data/")), blockedPaths = Seq("/srv/agent-data/private"))
+
+    config.isPathAllowed(Paths.get("/srv/agent-data/notes.txt")) shouldBe true
+    config.isPathAllowed(Paths.get("/srv/agent-data-secret/key.pem")) shouldBe false
+    config.isPathAllowed(Paths.get("/srv/agent-data/private/key.pem")) shouldBe false
+    config.isPathAllowed(Paths.get("/srv/agent-data/private-ok/notes.txt")) shouldBe true
+  }
+
   "ReadFileTool" should "read existing files" in {
     val tempFile = testDir.resolve("read-test.txt")
     Files.writeString(tempFile, "Hello, World!")

@@ -358,6 +358,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sbt. Three stale claims it found are fixed: `sbt dependencyCheck` (no such task) in the review guidelines,
   `sbt run "Explain ..."` in the g8 guide (sbt reads the quoted text as a second command; it is now
   `sbt "run Explain ..."`), and `modules/gradle-demo`, which CLAUDE.md did not name.
+- **Built-in tools guide** ([#1296](https://github.com/llm4s/llm4s/issues/1296)):
+  `docs/guide/builtin-tools.md` lists every built-in tool with its parameters and result, the bundles that hold
+  them (`coreSafe`, `withHttpSafe()`, `withFilesSafe()`, `developmentSafe()`, `customSafe(...)`), how to register
+  them with a `ToolRegistry` and an `Agent`, how to configure the search tools, and what each tool can do, with
+  the defaults of `FileConfig`, `WriteConfig`, `HttpConfig` and `ShellConfig`. The bundle tables, parameter table,
+  defaults and safety statements are asserted against the real code by `BuiltinToolsGuideSpec`, and the agent
+  snippet is run by `BuiltinToolsGuideAgentSpec`. The Agents guide described `BuiltinTools.core`, `safe()`,
+  `withFiles()` and `development()`, which were removed in favour of the `Safe` variants, and tools that do not
+  exist (`WebSearchTool`, `FileReadTool`); it now shows the real names and links to the guide.
 - **Error handling guide** ([#960](https://github.com/llm4s/llm4s/issues/960)):
   `docs/guide/error-handling.md` teaches `Result[A]` and `LLMError` in practice: the basic pattern,
   for-comprehensions, a table of the error types in `org.llm4s.error` with whether each is recoverable and
@@ -1746,6 +1755,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-agent-tools`: file tools confined by path component, not string prefix**
+  ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `FileConfig.isPathAllowed` and
+  `WriteConfig.isPathAllowed` compared paths with `String.startsWith`, so an allowed `/srv/agent-data` also
+  admitted `/srv/agent-data-secret`, and `developmentSafe(workingDirectory)` could read and write a sibling
+  directory whose name began with the working directory's. Both now use `Path.startsWith` on normalised absolute
+  paths; blocked paths are matched the same way (`/var` no longer blocks `/variable`).
+- **`llm4s-agent-tools`: `list_directory` honours `followSymlinks = false`**
+  ([#1296](https://github.com/llm4s/llm4s/issues/1296)): it checked the requested path with a link-following
+  `Files.isDirectory`, so a directory symbolic link inside an allowed path listed the directory it pointed to.
+  Without `followSymlinks` it now refuses the link with `Not a directory`, as `read_file` refuses a linked file.
+- **`llm4s-agent-tools`: `http_request` reads at most `maxResponseSize` bytes**
+  ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `HTTPTool` read the whole body into a string and only then
+  cut it to `maxResponseSize` characters, so a large or endless response could exhaust memory before `truncated`
+  was set. It now reads at most `maxResponseSize` bytes from the stream and stops; the limit counts bytes, as
+  documented, not decoded characters.
 - **`llm4s-agent`: a burst of live events no longer disconnects a subscriber as `Lagging`**
   ([#1387](https://github.com/llm4s/llm4s/issues/1387)): a subscription's queue held durable and live
   events against one `capacity`, so a model streaming faster than the dispatcher thread was scheduled filled
