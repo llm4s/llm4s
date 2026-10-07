@@ -162,12 +162,13 @@ def describe(error: LLMError): String = error match {
 | 429 | `RateLimitError`, carrying the delay the server asked for |
 | 408, 5xx including `529 Overloaded`, and any other status | `ServiceError` |
 | No connection, or no answer within `timeout` | `NetworkError`, `TimeoutError` |
-| A 200 whose body is not the documented shape, that leaves a question unanswered, or that answers one with another type, an option not offered or a level not described, or that leaves out an option or level that was asked | `ProcessingError` |
+| A 200 whose body is not the documented shape, that leaves a question unanswered or answers one that was not asked, or that answers one with another type, an option not offered or a level not described, or that leaves out an option or level that was asked | `ProcessingError` |
 | The calling thread is interrupted | `CancelledError`, with the interrupt flag kept |
 
 TypeSafe does not document the JSON shape of an error body, so the text in the error is a best effort (a `message`, an
 `error.message`, ...), truncated, and never the whole body. If a server echoes your API key in an error body, the key is
-removed before anything is read from it, and an error about a 200 that quotes the key masks it as `***`.
+removed before anything is read from it (as written or JSON-escaped, `\/` and `\uXXXX` included), and an error about
+a 200 that quotes the key masks it as `***`.
 
 ## Retries, and what is not de-duplicated
 

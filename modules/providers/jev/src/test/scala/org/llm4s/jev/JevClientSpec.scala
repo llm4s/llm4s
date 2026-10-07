@@ -169,6 +169,18 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
     }
   }
 
+  it should "refuse a response that answers a question that was not asked, naming it" in {
+    val extra =
+      """{"model":"jev-1.13.0","answers":{"is_urgent":{"type":"noul","noul":0.95},""" +
+        """"unasked":{"type":"noul","noul":0.1}},"usage":{"input_tokens":1,"output_tokens":1}}"""
+    serve(ok(extra)) { (url, _) =>
+      val error = new Rig(url).client.evaluate(request).left.value
+
+      error shouldBe a[ProcessingError]
+      error.message should include("question(s) that were not asked: unasked")
+    }
+  }
+
   it should "refuse an answer of another type than its question asked, naming the question" in {
     serve(ok(Examples.Noul)) { (url, _) =>
       val asChoice = JevRequest("s", Map("is_urgent" -> JevQuestion.choiceOf("Which?", "yes", "no")))
@@ -453,6 +465,29 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
           (error.message should not).include(secret)
           (error.formatted should not).include(secret)
           (error.toString should not).include(secret)
+        }
+      }
+    }
+  }
+
+  it should "keep the key out of an error when the server echoes it JSON-escaped" in {
+    // A key may hold characters JSON escapes; the server may also escape '/' or any character as \\uXXXX.
+    val key     = "tsk/live\"quote\\back"
+    val unicode = key.map(c => f"\\u${c.toInt}%04x").mkString
+    Seq(
+      s"""{"message":"bad key ${ujson.write(ujson.Str(key)).drop(1).dropRight(1)}"}""",
+      s"""{"message":"bad key ${ujson.write(ujson.Str(key)).drop(1).dropRight(1).replace("/", "\\/")}"}""",
+      s"""{"error":{"message":"bad key $unicode"}}"""
+    ).foreach { body =>
+      serve(Reply(401, body)) { (url, _) =>
+        val error = new Rig(url, tweak = _.withApiKey(key)).client.evaluate(request).left.value
+
+        withClue(s"$body ") {
+          error shouldBe an[AuthenticationError]
+          error.message should include("***")
+          (error.message should not).include(key)
+          (error.formatted should not).include(key)
+          (error.toString should not).include(key)
         }
       }
     }

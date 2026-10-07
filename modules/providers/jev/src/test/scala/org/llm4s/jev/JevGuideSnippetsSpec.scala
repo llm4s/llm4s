@@ -18,6 +18,9 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
   private val twoAnswers =
     """{"model":"jev-1.13.0","answers":{"department":{"type":"choice","choice":"billing","probabilities":{"billing":0.88,"technical":0.12,"sales":0.0},"confidence":0.81},"urgent":{"type":"noul","noul":0.95},"frustration":{"type":"score","score":1.05,"legend":{"0":"Calm","1":"Frustrated","2":"Very angry"},"probabilities":{"0":0.0,"1":0.95,"2":0.05},"confidence":0.92}},"usage":{"input_tokens":318,"output_tokens":34}}"""
 
+  private val urgentOnly =
+    """{"model":"jev-1.13.0","answers":{"urgent":{"type":"noul","noul":0.95}},"usage":{"input_tokens":296,"output_tokens":20}}"""
+
   "The guide's snippets" should "build a config in code" in {
     val config = JevConfig(apiKey = "tsk-...")
       .withModel("jev-1.13.0") // pin the answers; the default is the alias jev-latest
@@ -79,7 +82,7 @@ class JevGuideSnippetsSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "attach a header to a request" in {
-    serve(ok(twoAnswers)) { (url, seen) =>
+    serve(ok(urgentOnly)) { (url, seen) =>
       val client = JevClient(JevConfig("tsk-...", baseUrl = url)).value
       val request = JevRequest("s", Map("urgent" -> JevQuestion.noul("Is it?")))
         .withHeader("X-Correlation-Id", "order-4711")

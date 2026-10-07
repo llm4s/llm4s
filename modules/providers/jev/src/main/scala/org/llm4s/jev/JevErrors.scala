@@ -5,6 +5,7 @@ import org.llm4s.http.{ HttpHeaders, HttpResponse }
 import org.llm4s.llmconnect.provider.HttpErrorMapper
 
 import scala.concurrent.duration.*
+import scala.util.Try
 
 /**
  * Turns a failed Jev HTTP response into an [[org.llm4s.error.LLMError]].
@@ -21,7 +22,8 @@ import scala.concurrent.duration.*
  *
  * The documentation does not give the shape of the error body, so the text in the error is the mapper's best
  * effort (a `message`, an `error.message`, ...), truncated, and never the whole body. The API key is removed from
- * the body before anything is read from it, so a server that echoed the key cannot put it in an error.
+ * the body before anything is read from it, raw or JSON-escaped, so a server that echoed the key cannot put it in
+ * an error.
  */
 private[jev] object JevErrors {
 
@@ -39,9 +41,30 @@ private[jev] object JevErrors {
       .filter(_ <= MaxDelayMillis)
       .map(FiniteDuration(_, MILLISECONDS))
 
+  /**
+   * `body` with every occurrence of `apiKey` replaced by `***`. A JSON body is decoded first and every string in it
+   * (keys and values) redacted, then re-encoded, so the key is caught however the server escaped it (`\/`, `\"`,
+   * `\uXXXX`): the mapper decodes those escapes, so redacting only the raw text would let the decoded key through.
+   * Any other body is redacted as text.
+   */
+  private[jev] def redactBody(body: String, apiKey: String): String =
+    if (apiKey.isEmpty) body
+    else
+      Try(ujson.read(body)).toOption
+        .map(json => ujson.write(redactJson(json, apiKey)))
+        .getOrElse(body.replace(apiKey, "***"))
+
+  private def redactJson(json: ujson.Value, apiKey: String): ujson.Value = json match {
+    case ujson.Str(s)     => ujson.Str(s.replace(apiKey, "***"))
+    case ujson.Arr(items) => ujson.Arr.from(items.map(redactJson(_, apiKey)))
+    case ujson.Obj(fields) =>
+      ujson.Obj.from(fields.map { case (k, v) => k.replace(apiKey, "***") -> redactJson(v, apiKey) })
+    case other => other
+  }
+
   /** The error for `response`, which has a non-2xx status. */
   def fromResponse(response: HttpResponse, apiKey: String): LLMError = {
-    val body = if (apiKey.nonEmpty) response.body.replace(apiKey, "***") else response.body
+    val body = redactBody(response.body, apiKey)
     // The mapper handles 400 as a validation error; Jev's 422 is the same thing.
     val status = if (response.statusCode == 422) 400 else response.statusCode
     val mapped: LLMError =

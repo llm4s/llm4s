@@ -96,16 +96,24 @@ final class JevClient private (
     }
 
   /**
-   * Every question was answered, each with an answer of its own type within what it asked: a Choice among the
+   * Every question was answered, and no other, each with an answer of its own type within what it asked: a Choice among the
    * options requested, a Score among the levels requested. A response that breaks this is not the API's.
    */
   private def checkAnswers(response: JevResponse, request: JevRequest): Result[JevResponse] = {
     val missing = request.questions.keySet.diff(response.answers.keySet)
+    val unasked = response.answers.keySet.diff(request.questions.keySet)
     if (missing.nonEmpty)
       Left(
         ProcessingError(
           "jev-response",
           s"Jev's response has no answer for question(s): ${missing.toSeq.sorted.mkString(", ")}"
+        )
+      )
+    else if (unasked.nonEmpty)
+      Left(
+        ProcessingError(
+          "jev-response",
+          s"Jev's response answers question(s) that were not asked: ${unasked.toSeq.sorted.mkString(", ")}"
         )
       )
     else
@@ -150,6 +158,8 @@ final class JevClient private (
               .find(option => !probabilities.contains(option))
               .map(option => s"it gives no probability for '$option', one of the options asked")
           )
+    // The API reference gives "every option" (Choice) and "each level" (Score) a probability, and its examples list
+    // zero-probability entries ("sales": 0.0, "0": 0.0) rather than omitting them, so a gap is not the API's.
     case (JevQuestion.Score(_, levels), ScoreAnswer(_, answered, _)) =>
       answered
         .find(_.index >= levels.size)
