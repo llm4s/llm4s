@@ -17,6 +17,7 @@ Comprehensive guides for LLM4S features.
 - **[Providers](providers)** - Overview of supported providers and how to configure them
 - **[Error Handling](error-handling)** - Work with `Result[A]` and `LLMError`: pattern matching, for-comprehensions, every error type, recovery and testing
 - **[Writing a Provider](writing-a-provider)** - Publish your own provider module against the `llm4s-core` SPI
+- **[Caching](caching)** - Cache embeddings (exact) and model responses (semantic): configuration, keys, TTL, eviction and what the cache reports
 
 ### Agent Framework
 

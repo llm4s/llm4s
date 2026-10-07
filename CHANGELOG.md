@@ -338,6 +338,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   testing. Its snippets after the first section are compiled and run by `ErrorHandlingGuideSpec`. The Basic Usage
   guide listed error types that do not exist (`ProviderConnectionError`, `InvalidApiKeyError`, ...) and
   called `LLMError` sealed; it now shows the real ones and links to the guide.
+- **Caching guide** ([#1297](https://github.com/llm4s/llm4s/issues/1297)): `docs/guide/caching.md` explains the embedding
+  cache (`CachedEmbeddingClient`, `InMemoryEmbeddingCache`, custom keys and backends) and the semantic completion cache
+  (`CachingLLMClient`, `CacheConfig`): what a hit needs, what the key and the prompt contain, TTL, eviction, the cases
+  that bypass the cache, what it reports through tracing, and its limits. Its snippets are compiled and run by
+  `CachingGuideSpec`.
 - **Cancellation by interrupt for graph runs and providers** (Experimental, `org.llm4s.agent.graph`,
   [#1270](https://github.com/llm4s/llm4s/issues/1270)): each superstep runs in a bounded Ox scope on
   virtual threads (Ox is a new implementation dependency of `llm4s-agent`). Interrupting the thread
