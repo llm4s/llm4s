@@ -157,7 +157,7 @@ final class PostgresMemoryStore private[memory] (
   ): Result[Seq[ScoredMemory]] =
     embeddingService match {
       case Some(service) =>
-        service.embed(query).flatMap { queryVector =>
+        service.embedQuery(query).flatMap { queryVector =>
           if (queryVector.isEmpty) {
             Left(ProcessingError("postgres-memory-store", "Generated embedding vector is empty"))
           } else {

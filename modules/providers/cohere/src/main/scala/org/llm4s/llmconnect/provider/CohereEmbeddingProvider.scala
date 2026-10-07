@@ -179,8 +179,8 @@ object CohereEmbeddingProvider extends EmbeddingProviderDescriptor {
         CancelledError.attempt("cohere.embed")(embedBatches(request))
 
       private def embedBatches(request: EmbeddingRequest): Result[EmbeddingResponse] = {
-        val model = request.model.name
-        val input = request.input
+        val model     = request.model.name
+        val input     = request.input
         val inputType = explicitInputType.getOrElse(CohereInputType.forPurpose(request.purpose))
         val metadata = Map(
           "provider"   -> "cohere",

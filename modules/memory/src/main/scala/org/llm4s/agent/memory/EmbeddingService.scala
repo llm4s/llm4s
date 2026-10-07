@@ -2,7 +2,7 @@ package org.llm4s.agent.memory
 
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ProviderConfig }
-import org.llm4s.llmconnect.model.EmbeddingRequest
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
 import org.llm4s.types.Result
 
 /**
@@ -20,6 +20,19 @@ trait EmbeddingService {
    * @return Embedding vector or error
    */
   def embed(text: String): Result[Array[Float]]
+
+  /**
+   * Generate an embedding for a search query, to be compared with the embeddings of the memories.
+   *
+   * Some embedding models embed a query and a document differently, and a query is only matched
+   * correctly if it is embedded as one. A memory store calls this, not [[embed]], for the text it
+   * searches with. The default delegates to [[embed]], so a service whose model embeds both alike
+   * (and every existing implementation) does not need to override it.
+   *
+   * @param text The query to embed
+   * @return Embedding vector or error
+   */
+  def embedQuery(text: String): Result[Array[Float]] = embed(text)
 
   /**
    * Generate embeddings for multiple texts in a batch.
@@ -49,11 +62,18 @@ final class LLMEmbeddingService private (
   override def embed(text: String): Result[Array[Float]] =
     embedBatch(Seq(text)).map(_.head)
 
+  /** Embeds the query with [[InputPurpose.Query]], which the providers that embed queries differently honour. */
+  override def embedQuery(text: String): Result[Array[Float]] =
+    embedAs(Seq(text), InputPurpose.Query).map(_.head)
+
   override def embedBatch(texts: Seq[String]): Result[Seq[Array[Float]]] =
+    embedAs(texts, InputPurpose.Document)
+
+  private def embedAs(texts: Seq[String], purpose: InputPurpose): Result[Seq[Array[Float]]] =
     if (texts.isEmpty) {
       Right(Seq.empty)
     } else {
-      val request = EmbeddingRequest(texts, modelConfig)
+      val request = EmbeddingRequest(texts, modelConfig, purpose)
       client.embed(request).map(response => response.embeddings.map(_.map(_.toFloat).toArray))
     }
 

@@ -165,7 +165,11 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
       private val logger = LoggerFactory.getLogger(getClass)
 
       override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
-        CancelledError.attempt("jina.embed")(taskFor(request.model.name, explicitTask.getOrElse(JinaTask.forPurpose(request.purpose))).flatMap(sent => send(request, sent)))
+        CancelledError.attempt("jina.embed")(
+          taskFor(request.model.name, explicitTask.getOrElse(JinaTask.forPurpose(request.purpose))).flatMap(sent =>
+            send(request, sent)
+          )
+        )
 
       private def send(
         request: EmbeddingRequest,
