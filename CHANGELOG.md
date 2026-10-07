@@ -194,6 +194,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a system message is a `ValidationError`, which Converse cannot accept. Add the dependency
   `"org.llm4s" %% "llm4s-bedrock"`, which brings the AWS SDK v2 `bedrockruntime` artifact
   (Apache-2.0, the SDK release train `llm4s-rag` already uses for S3); nothing else changes.
+- **Embedding requests say whether the input is a query or a document** ([#1218](https://github.com/llm4s/llm4s/issues/1218)):
+  `EmbeddingRequest` has a `purpose`, `InputPurpose.Document` (the default, so existing callers are
+  unchanged) or `InputPurpose.Query`. Voyage sends it as `input_type`, Jina as `task`
+  (`retrieval.passage` / `retrieval.query`) and Cohere as `input_type` (`search_document` / `search_query`);
+  OpenAI and Ollama ignore it. An explicit `JinaTask` or `CohereInputType` passed to `fromConfig` still wins
+  over the purpose. `RAG` and `RAGPipeline` embed the question they answer as a query and what they index as
+  documents, and `CachedEmbeddingClient` keeps a query and a document with the same text in separate cache
+  entries (document keys are unchanged). **Behaviour changes:** Voyage now sends `input_type` (`document` by
+  default; it sent none before), so re-index for the best retrieval quality - older document vectors still
+  work; and a Jina or Cohere provider built without an explicit task now follows each request's purpose
+  instead of always sending the document type. `EmbeddingRequest` becomes a growth-prone type (private
+  constructor and `copy`, `with*` setters, `apply` with defaults): construct it with `EmbeddingRequest(...)`
+  and change it with `withInput`, `withModel` or `withPurpose`.
 - **`llm4s-jina`: Jina AI embedding provider** (`modules/providers/jina`,
   [#1028](https://github.com/llm4s/llm4s/issues/1028), rebuilt from #1060 as an
   `EmbeddingProviderDescriptor`, so `llm4s-core` is untouched). `EMBEDDING_MODEL=jina/jina-embeddings-v3`
