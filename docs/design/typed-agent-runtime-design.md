@@ -903,7 +903,7 @@ Source breaks, with no shims (the CHANGELOG lists the same): `AgentState`, `Agen
 Limits (owners in §4.9):
 
 - Agent-level event subscription, model token streaming and `AgentEvent`'s replacement: closed by #1329 (§4.14).
-- `PlanRunner`, `DAG`, `TypedAgent` and `CancellationToken` are #1330.
+- `PlanRunner`, `DAG`, `TypedAgent` and `CancellationToken` are #1330 (analysis and options in §4.15).
 - `ToolLoop` sets no retry or cache policy (#1327) on its nodes: a failed model step or tool call is continued by `recover`. Durable checkpointers are Stage 2.
 
 ### 4.14 Stage 1 slice 3: events and tracing ([#1329](https://github.com/llm4s/llm4s/issues/1329))
@@ -992,6 +992,73 @@ Limits:
 - Live events are not replayed, and a late `AgentRun.subscribe` misses earlier ones.
 - An approved or edited tool call yields two `agent.tool_executed` events for one call id across runs.
 - `agent.guardrail_blocked` is a guardrail's block only; other middleware refusals emit no agent event.
+
+### 4.15 Stage 1 slice 4: orchestration ([#1330](https://github.com/llm4s/llm4s/issues/1330)), analysis before the decision
+
+Not implemented. This section records what exists on `main` (at `28285dbb`), who uses it, and the options, so
+the "rebuilt or removed" choice of §4.9 can be made on facts. It decides nothing.
+
+**What exists** (`modules/agent/src/main/scala/org/llm4s/agent/orchestration`, seven files, 1,373 lines,
+with ten test files of 2,223 lines):
+
+| File | Lines | Role | `Map[String, Any]` |
+|---|---|---|---|
+| `PlanRunner` | 333 | Runs a `Plan` on `Future`s, in batches of independent nodes | 12 uses, one `asInstanceOf` |
+| `DAG` (`Node`, `Edge`, `Plan`, builder) | 215 | The plan model: validation, topological order, parallel batches | none |
+| `TypedAgent[I, O]` | 144 | A `Future`-returning function with an id and a name | none |
+| `Policies` | 291 | `withRetry`, `withTimeout`, `withFallback`, `withPolicies` wrappers over `TypedAgent` | none |
+| `OrchestrationError` | 182 | Five error cases, `extends LLMError` | none |
+| `MDCContext` | 113 | Logging-context propagation across `Future`s | none |
+| `CancellationToken` | 95 | A flag with callbacks and a `whenCancelled` future | none |
+
+Only `PlanRunner` has the property the issue gives as the reason to remove: its node outputs travel as
+`Map[String, Any]`. The plan model and the agent type are typed, but are only meaningful with `PlanRunner`.
+
+**Who uses it.** Nothing outside the package. A `git grep` on `main` for each of `PlanRunner`, `DAG`,
+`TypedAgent`, `Policies`, `MDCContext`, `OrchestrationError` and `CancellationToken` finds no reference in the
+main or test sources of any other module: not in the rest of `llm4s-agent`, `llm4s-java-api`, the Kotlin API,
+`llm4s-effect`, `llm4s-zio`, the samples, the integration suites, the workspace or MCP modules. Only prose
+mentions them: this document, the roadmap and gap-analysis documents, `docs/reference/migration.md`, the error
+tables of `docs/guide/error-handling.md`, the CHANGELOG and `CLAUDE.md`.
+
+**Why the token cannot be deleted on its own.** Its only production consumer is `PlanRunner`, which checks
+`isCancelled` between batches and races `whenCancelled` against each node's future. `RunHandle.cancel`
+interrupts the virtual threads of a `GraphRuntime` run, and `PlanRunner` does not run on the graph runtime, so
+it has no `RunHandle`. Deleting the token while keeping `PlanRunner` would remove its only way to be
+cancelled and replace it with nothing. §4.9 ties the two together ("Delete `CancellationToken` with the
+`PlanRunner` rebuild"), and that holds: the token goes when `PlanRunner` is rebuilt on the runtime or removed.
+
+**What the defects in [#1317](https://github.com/llm4s/llm4s/issues/1317) look like today.** A scratch test (not
+committed) on `28285dbb` reproduced two of the four. The other two, `TypeMismatchError` being dead and MDC
+being set on the calling thread, were not tested.
+
+- *Fan-in.* A join node with two upstream outputs (`10` and `100`) received only `100`; the other output never
+  reached it.
+- *Sibling cancellation.* After one branch failed, a slow sibling (600 ms) still ran to completion, and
+  finished before the plan's failure was returned.
+
+Both follow from the erased design (outputs keyed by node id in an untyped map, no barrier with a merge, no
+interruption). A rebuild on typed joins and the runtime's cancellation fixes them by construction. Fixing them
+in place is wasted work if the package is removed.
+
+**Options**
+
+| Option | What it means | Effort | Consequences |
+|---|---|---|---|
+| A. Remove | Delete the seven files and their tests, with a migration note. | Small: deletions only, and nothing depends on the package. | No `Future`-based plan executor and no `Policies` wrappers. Fan-out and fan-in come from the runtime (§4.2), retry from the per-node policy (§4.11). #1317 becomes obsolete. No shims before 1.0. |
+| B. Rebuild | Compile a `Plan` to a typed graph: a join becomes a typed barrier with an explicit merge function; cancellation is `RunHandle.cancel`; `Policies` become node retry and timeout. | Large. | Keeps the capability and fixes #1317 by construction. Open design questions: the merge function's shape, whether `TypedAgent` becomes an `AgentTool` or a node, and how `OrchestrationError` maps onto `GraphError`. |
+| C. Defer | Ship 0.5.0 with the package outside the baseline (the open question of #1281). | None now. | Leaves the four defects and the token in place, and puts a decision on the freeze. |
+
+**Recommendation.** Option A, if the runtime's typed joins already cover the multi-agent cases wanted for 1.0
+(a small sample of a fan-out and fan-in on `GraphRuntime` would show it): the package has no users in the
+repository, its defects come from the erased design, and a rebuild would rewrite a feature nothing calls. Choose
+B only if the plan-building API is wanted as a product feature. Choose C only if the 0.5.0 date forces it.
+
+**Questions for the maintainer**
+
+1. A, B or C?
+2. Under A, are `Policies` and `OrchestrationError` removed with the rest, or does either survive?
+3. Is #1317 closed as obsolete once A or B lands?
 
 ## 5. Harness capabilities
 
