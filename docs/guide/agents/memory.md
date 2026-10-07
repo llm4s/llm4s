@@ -95,11 +95,14 @@ the manager you get back. This prints:
 - Prefers Scala over Java
 ```
 
-The in-memory store searches by **keyword**: a memory is returned when it shares a word with the
-query. "Prefers Scala over Java" shares "Scala" with the query, so it is returned; the Anthropic
-fact shares no word with it, so it is not. A question such as "What does the user prefer?" would
-have returned nothing here, because none of its words appear in the stored text. To retrieve by
-meaning, use a vector store (see [Vector Store](#vector-store)).
+The in-memory store searches by **keyword**: it splits the query on whitespace and returns a memory
+whose text contains one of the resulting terms as a substring. "Prefers Scala over Java" contains the
+term "scala" from the query, so it is returned; the Anthropic fact contains none of the terms, so it is
+not. A question such as "What does the user prefer?" would have returned nothing here, because its terms
+are `what`, `does`, `the`, `user` and `prefer?`, and the question mark stays attached to the last one, so
+`prefer?` is not found in "Prefers Scala over Java" (see
+[#1594](https://github.com/llm4s/llm4s/issues/1594)). To retrieve by meaning, use a vector store (see
+[Vector Store](#vector-store)).
 
 ---
 
