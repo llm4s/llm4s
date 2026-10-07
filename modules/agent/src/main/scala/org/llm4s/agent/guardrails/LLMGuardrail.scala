@@ -40,8 +40,10 @@ import scala.util.Try
  *  - A number outside the range is clamped, not rejected: `85`, `85%`, `8/10`, `1e-3` and `0,9` all read
  *    as 1.0, which passes any threshold up to 1.0. A judge that answers on a 0 to 100 scale therefore
  *    approves everything, so keep the prompt explicit about the scale.
- *  - A reply with no digits, a trailing full stop (`0.85.`), or more than one number (`0.5 or 0.6`) is a
- *    parse failure, not a score.
+ *  - Several numbers are not rejected as such: their digits run together. `0 or 1` reads as `01`, which is
+ *    1.0, and `0.5 or 1` as `0.51`, so such a reply can pass. Only when the remainder is not a valid number -
+ *    no digits, a trailing full stop (`0.85.`), or two decimal points (`0.5 or 0.6` becomes `0.50.6`) - is
+ *    the reply a parse failure rather than a score.
  *
  * **Failures** are always `Left`; an error never lets content through:
  *  - Below the threshold: a [[org.llm4s.error.ValidationError]] on field `output` whose message names this
@@ -172,8 +174,8 @@ Score (0-1):"""
 
   /**
    * Reads a score from the reply: every character other than a digit or `.` is dropped, the rest is read as a
-   * number and clamped into 0.0 to 1.0. A reply with nothing left, or with something that is not one number
-   * (`0.85.`, `0.5 or 0.6`), is an error.
+   * number and clamped into 0.0 to 1.0. Several numbers run together (`0 or 1` reads as `01`). A reply whose
+   * remainder is empty or not a valid number (`0.85.`, `0.5 or 0.6`) is an error.
    */
   private def parseScore(response: String): Result[Double] = {
     val cleaned = response.trim.replaceAll("[^0-9.]", "")
