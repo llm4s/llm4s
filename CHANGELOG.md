@@ -1981,6 +1981,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or format outside those bounds used to get a wrong "success" or a generic `ProcessingError` and now gets a
   `ValidationError`; the output is shorter by the converter's padding, and the source's last fraction of a
   millisecond (at most 0.3 ms) is no longer in it.
+- **The docs deploy is no longer rejected on a release tag** ([#1152](https://github.com/llm4s/llm4s/issues/1152)):
+  `release.yml` called `pages.yml` as a reusable workflow, which runs on the caller's ref, the release tag, and the
+  `github-pages` environment allows deployments only from `main`, so the deploy was rejected before it started
+  ("Tag "v0.4.1" is not allowed to deploy to github-pages") and the release run ended red after a successful
+  publish. The release's `docs` job now dispatches `pages.yml` on `main` with the tag as a new `ref` input
+  (`scripts/dispatch-docs-deploy.sh`), so the run, and the deploy, are on `main`, while the build still checks out
+  the tag, so the version and the install snippets are the release's. The job waits for that run and fails when the
+  deploy fails, keeping the order #1147 built (docs only after the artifacts are on Maven Central and the GitHub
+  Release exists). No repository setting is needed; an environment rule for `v*` tags remains an equally valid
+  alternative. `pages.yml` is no longer callable with `workflow_call`, and a manual run takes an optional release
+  tag. A pushed docs change on `main` deploys exactly as before. Not yet exercised by a real release: the next one
+  is its first run (see `docs/reference/release.md` for a way to check it sooner).
+
 - **`RAG.refresh` emptied the index when its loader failed, and `RAG.sync` deleted documents it
   could not read** (follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236)).
   `refresh` and `refreshAsync` cleared the index before reading the loader, so a listing
