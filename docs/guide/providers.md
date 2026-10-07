@@ -1575,6 +1575,51 @@ for {
 
 ---
 
+## Citations and grounding sources
+
+A model that searches the web by itself reports the sources behind its answer. llm4s returns them on
+`Completion.citations`, a `List[Citation]` that is empty for every completion that has none:
+
+```scala
+import org.llm4s.llmconnect.model.Completion
+
+def sources(completion: Completion): List[String] =
+  completion.citations.map(c => s"${c.title.getOrElse(c.url)} <${c.url}>")
+```
+
+A `Citation` has a `url`, always, and these fields, each `None` when the provider did not send it:
+
+| Field | Meaning |
+|---|---|
+| `title` | the source's title |
+| `citedText` | a passage of the source that came with the citation (OpenRouter's `content`); it describes the source, not the answer |
+| `startIndex`, `endIndex` | the span of the answer the source supports, as the provider reports it: positions in `Completion.content` |
+
+Take the two indices as the provider's span and check its convention before cutting `content` with them:
+OpenAI documents `end_index` only as "the index of the last character", so whether it is inclusive is
+the provider's call. `hasSpan` says whether both are present.
+
+| Provider | Citations |
+|---|---|
+| OpenAI (search models for Chat Completions), Azure, Requesty | Read from the message's `url_citation` annotations (`url`, `title`, `start_index`, `end_index`). Search models return them with no request option; Azure and Requesty return them only if the deployment does. |
+| OpenRouter (`:online` models, or the web plugin) | The same annotations, plus `content` as `citedText`. |
+| DeepSeek, Z.ai, Mistral, Cohere, a generic `openai-compatible` endpoint | Read if the reply carries standard `url_citation` annotations; none of them is documented to. |
+| Anthropic, Gemini, Vertex AI, Ollama, Bedrock, watsonx | Empty. Anthropic's citations come from document inputs and its web search tool, and Gemini's `groundingMetadata` from its Google Search tool; llm4s cannot yet request either, so no response can carry them. |
+
+Things to know:
+
+- **Streaming.** A completion assembled from streamed chunks has no citations: neither OpenAI nor
+  OpenRouter documents where a stream carries them, so streamed chunks are not read. (A model that does not
+  stream natively is answered with one ordinary call, and that completion keeps its citations.)
+- **A citation never fails a reply.** One without a `url` is dropped, a field of the wrong type is read as
+  absent, and the answer is returned either way. The OpenAI client treats an `annotations` list the SDK
+  cannot parse at all as no citations; the OpenAI-compatible client keeps the entries it can read.
+- **Not read:** Perplexity's top-level `citations` list (its provider is tracked in #1026).
+- The shapes come from the OpenAI Java SDK's `url_citation` types and OpenRouter's documentation. No live
+  provider was called while writing this.
+
+---
+
 ## API Key Management
 
 ### Security Best Practices

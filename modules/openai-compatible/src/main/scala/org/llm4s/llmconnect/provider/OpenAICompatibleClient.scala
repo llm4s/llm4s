@@ -371,9 +371,44 @@ class OpenAICompatibleClient(
       message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList, thinking = thinking),
       toolCalls = toolCalls.toList,
       usage = usage,
-      estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u))
+      estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u)),
+      citations = parseCitations(message)
     )
   }
+
+  /**
+   * The sources a reply cites: the `url_citation` entries of the message's `annotations`, in the
+   * order sent, in the shape OpenAI documents for its search models and OpenRouter for `:online`
+   * models, `{"type":"url_citation","url_citation":{"url","title","content","start_index","end_index"}}`.
+   *
+   * Lenient on purpose: a citation never fails a completion whose answer arrived. An entry of another
+   * type, or without a non-empty `url`, is dropped (one is never made up), and a field of the wrong
+   * type, or an index that is not a whole number of at least zero, is read as absent. Streamed events
+   * are not read: neither provider documents where a stream carries them (#1216).
+   */
+  protected[provider] def parseCitations(message: ujson.Value): List[Citation] =
+    message.objOpt
+      .flatMap(_.get("annotations"))
+      .flatMap(_.arrOpt)
+      .map(_.toList.flatMap(parseCitation))
+      .getOrElse(List.empty)
+
+  private def parseCitation(annotation: ujson.Value): Option[Citation] =
+    for {
+      entry <- annotation.objOpt
+      if entry.get("type").flatMap(_.strOpt).contains("url_citation")
+      cited <- entry.get("url_citation").flatMap(_.objOpt)
+      url   <- cited.get("url").flatMap(_.strOpt).filter(_.nonEmpty)
+    } yield Citation(
+      url = url,
+      title = cited.get("title").flatMap(_.strOpt),
+      citedText = cited.get("content").flatMap(_.strOpt),
+      startIndex = citationIndex(cited, "start_index"),
+      endIndex = citationIndex(cited, "end_index")
+    )
+
+  private def citationIndex(cited: collection.Map[String, ujson.Value], key: String): Option[Int] =
+    cited.get(key).flatMap(_.numOpt).filter(n => n.isWhole && n >= 0 && n <= Int.MaxValue).map(_.toInt)
 
   /** Token usage from a `usage` object, or from the first element of a `usage` array. */
   private def parseUsage(usage: ujson.Value): Option[TokenUsage] =

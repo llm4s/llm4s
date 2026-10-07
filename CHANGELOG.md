@@ -264,6 +264,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules (`llm4s-workspace-client`, `llm4s-workspace-shared`) are **Experimental** in 1.0 Scope, and the
   installation guide has lines for `llm4s-knowledgegraph-neo4j`, `llm4s-provider-testkit` and
   `llm4s-workspace-shared`.
+- **`Completion.citations`: the sources a model cited** ([#1216](https://github.com/llm4s/llm4s/issues/1216)):
+  a new `Citation(url, title, citedText, startIndex, endIndex)` (`@Stable`, growth-prone like `Completion`: private
+  constructor, `apply` with defaults, `with*` setters) and `Completion.citations: List[Citation]` with
+  `withCitations` and `hasCitations`. Models that search the web by themselves report `url_citation` annotations
+  on the message, and the OpenAI client (so Azure and Requesty too, for a deployment that returns them) and the
+  shared OpenAI-compatible client (OpenRouter's `:online` models, which also return the source passage as
+  `citedText`) now read them, in order. A reply without annotations gives an empty list, and a citation without a
+  `url` is dropped rather than made up. Source compatible: `citations` is the last parameter of
+  `Completion.apply` and defaults to empty, so existing callers compile unchanged (`.copy` stays private; use
+  `withCitations`). Not read, and listed on the issue: streamed chunks (neither provider documents where a stream
+  carries them), Anthropic's citations and Gemini's `groundingMetadata` (llm4s cannot yet request documents, web
+  search or grounding, so no response can carry them), and Perplexity's top-level `citations` (#1026).
 - **Cloud speech providers** (`llm4s-speech`, [#1010](https://github.com/llm4s/llm4s/issues/1010)):
   `OpenAITTSClient`, `ElevenLabsTTSClient`, `AzureTTSClient` (text-to-speech) and `OpenAISTTClient`,
   `AzureSTTClient` (speech-to-text), selected through `SpeechProviderSelector.tts()` / `.stt()` by a

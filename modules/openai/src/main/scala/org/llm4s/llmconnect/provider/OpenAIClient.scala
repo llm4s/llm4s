@@ -580,9 +580,36 @@ class OpenAIClient private[provider] (
       message = assistantMessage,
       toolCalls = toolCalls.toList,
       usage = usage,
-      estimatedCost = cost
+      estimatedCost = cost,
+      citations = message.map(extractCitations).getOrElse(List.empty)
     )
   }
+
+  /**
+   * The sources the model cited: the `url_citation` annotations of the message, in the order sent
+   * (OpenAI's `*-search-preview` models return them with no request option). Read as leniently as
+   * the rest of the response: an annotation without a non-empty `url` is dropped (one is never
+   * made up), and an index that is not at least zero and within `Int` is read as absent. If the
+   * SDK cannot parse the `annotations` list at all (an element that is not an annotation object),
+   * it reports the whole field as unknown and no citation is returned, but the answer is. OpenAI
+   * does not return a passage with a citation, so `citedText` stays unset.
+   * Streamed chunks are not read: the SDK's `Delta` has no annotations (#1216).
+   */
+  private def extractCitations(message: ChatCompletionMessage): List[Citation] =
+    known(message._annotations()).map(_.asScala.toList).getOrElse(List.empty).flatMap { annotation =>
+      for {
+        cited <- known(annotation._urlCitation())
+        url   <- known(cited._url()).filter(_.nonEmpty)
+      } yield Citation(
+        url = url,
+        title = known(cited._title()),
+        startIndex = known(cited._startIndex()).flatMap(citationIndex),
+        endIndex = known(cited._endIndex()).flatMap(citationIndex)
+      )
+    }
+
+  private def citationIndex(index: java.lang.Long): Option[Int] =
+    Option(index).map(_.longValue).filter(i => i >= 0 && i <= Int.MaxValue).map(_.toInt)
 
   private def toTokenUsage(u: CompletionUsage): TokenUsage = {
     val promptTokens     = known(u._promptTokens()).fold(0)(_.intValue)
