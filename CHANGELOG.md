@@ -1936,6 +1936,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `0.4.0-SNAPSHOT`, which nothing publishes (releases are cut from tags only, and the build names a snapshot
   `0.4.1+165-abc1234-SNAPSHOT`); it now says how to build and publish `main` locally. A new check,
   `scripts/check-doc-versions.sh`, runs in CI quick checks and fails on a literal pin.
+- **`CompositeGuardrail.any` stops at the first guardrail that passes, and the composite sample no longer casts**
+  ([#1315](https://github.com/llm4s/llm4s/issues/1315)): `any` documented "returns on first success" but mapped over every
+  guardrail first, so one that costs a call (an LLM judge) ran even after an earlier one had passed. It now stops at the
+  first pass, with the same result as before: the first passing guardrail's, or every failure together when none passes.
+  `CompositeGuardrailExample` cast composites with `asInstanceOf[InputGuardrail]` to hand them to `GuardrailMiddleware`,
+  which throws a `ClassCastException` (a `CompositeGuardrail` is a `Guardrail[String]`, not an `InputGuardrail`); it wraps
+  them now, and the guardrails guide shows the wrapper. The guide also states how a guardrail list runs (every guardrail,
+  even after a failure), what a block sends (one `agent.guardrail_blocked`, then `RunFailed`, never `RunCompleted`) and that
+  `maxSteps` counts the same through every entry point; `AgentRunSemanticsSpec` pins each. The other findings of the issue
+  described the loop the graph runtime replaced and no longer apply (`AgentFailed`, `runWithEvents` and `runCollectingEvents`
+  are gone; see the migration guide). No migration is needed.
 - **`ToneValidator` classified every multi-line text as Neutral**: it looked for its keywords with
   `lower.matches(".*\\b(...)\\b.*")`, and `.` does not match a line break, so a newline anywhere in the text
   made all four keyword checks fail, whatever the text said. `"Thank you for your inquiry.\nWe will respond

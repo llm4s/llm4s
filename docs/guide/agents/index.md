@@ -144,7 +144,7 @@ history, never a system prompt) and `usage`.
 
 ## Safety Defaults
 
-- **Agent step limit**: an agent makes at most `maxSteps` model calls per turn, `Agent.DefaultMaxSteps` (50) unless you call `withMaxSteps(n)`. The count is shared by every agent a turn hands off to; at the limit the result is `AgentStatus.StepLimitReached`.
+- **Agent step limit**: an agent makes at most `maxSteps` model calls per turn, `Agent.DefaultMaxSteps` (50) unless you call `withMaxSteps(n)`. The count is shared by every agent a turn hands off to; at the limit the result is `AgentStatus.StepLimitReached`. The limit means the same through `run`, `start`, `stream`, `continueConversation` and `runMultiTurn`: each turn gets its own `maxSteps` model calls.
 - **HTTPTool methods**: `HttpConfig()` defaults to `GET` and `HEAD` only. Use `HttpConfig.withWriteMethods()` or `HttpConfig().withAllMethods` to allow write methods.
 
 ---
