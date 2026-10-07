@@ -136,10 +136,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   overrides them (`docs/guide/writing-a-provider.md`). `timeouts` joins `ProviderConfigSpec.BuiltinKeys`, so
   a provider can no longer declare an extra of that name. The provider configs (`DeepSeekConfig`,
   `ZaiConfig`, `MistralConfig`, `CohereConfig`, `OpenAICompatibleConfig`, `OpenAIConfig`, `AzureConfig`,
-  `AnthropicConfig`, `GeminiConfig`, `VertexAIConfig`, `OllamaConfig`) gain a trailing `timeouts` field and a
+  `AnthropicConfig`, `GeminiConfig`, `VertexAIConfig`, `OllamaConfig`, `BedrockConfig`, `WatsonXConfig`) gain a
+  trailing `timeouts` field and a
   `withTimeouts` setter; code that constructs them or calls `apply` is unchanged, a pattern match on one needs
   the extra field. The OpenAI and Anthropic SDKs retry a timed-out call twice by default, which llm4s does
-  not change. Model listing and the Vertex AI token request keep their fixed 10-second timeouts.
+  not change. Model listing, the Vertex AI token request and the watsonx IAM exchange keep their fixed
+  timeouts. Bedrock applies `request` as the AWS SDK's API-call timeout and `stream` as a deadline on the
+  whole `ConverseStream` call; an expiry there is a `TimeoutError`.
 - **Agent tool contract for graph runs** (Experimental, `org.llm4s.agent.graph.tool`,
   [#1278](https://github.com/llm4s/llm4s/issues/1278)): `AgentTool[A]` and `AgentToolSpec[A]`
   replace the prototype `LoopTool`. A tool's arguments are typed by a core `SchemaDefinition[A]`

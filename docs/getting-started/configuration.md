@@ -245,12 +245,13 @@ The usual precedence applies: `-D` system properties, then `application.conf`, t
 | Provider | `request` default | `stream` default | What the timeout bounds |
 |---|---|---|---|
 | `openai-compatible`, `deepseek`, `zai`, `openrouter`, `mistral`, `cohere` (chat) | 2 minutes | 5 minutes | the wait for the response to begin |
-| `gemini`, `vertexai`, `ollama` (chat) | 2 minutes | 10 minutes | the wait for the response to begin |
+| `gemini`, `vertexai`, `ollama`, `watsonx` (chat) | 2 minutes | 10 minutes | the wait for the response to begin |
 | `openai`, `azure`, `requesty`, `anthropic` | the SDK's own default | the SDK's own default | the whole call, including a streamed body |
+| `bedrock` | the AWS SDK's own default | no limit | the whole call, including retries and a streamed body |
 | Embeddings: `openai`, `ollama` | 2 minutes | n/a | the wait for the response to begin |
 | Embeddings: `voyage`, `jina`, `cohere` | 2 minutes | n/a | the wait for the response to begin |
 
-Three things to know:
+Four things to know:
 
 - **The HTTP-based clients bound the wait for the response to begin**, not the time a stream may then
   run. A stream whose server has begun answering is not cut by `stream`.
@@ -258,8 +259,12 @@ Three things to know:
   call and retries a call that fails or times out **twice** by default (llm4s does not change that). A
   `request = 30s` there can therefore take up to three attempts and their backoff before the call
   fails. `request` and `stream` are independent: a short `request` does not cut a stream.
-- **Model listing and the Vertex AI token request keep their own fixed 10-second timeouts**, which the
-  block does not change.
+- **Bedrock uses the AWS SDK.** `request` becomes the SDK's API-call timeout, which covers its retries,
+  so a `request = 30s` call fails within 30 seconds; `stream` is a deadline on the whole `ConverseStream`
+  call, so unlike the HTTP-based clients it does cut a stream that is still running. Either expiry is a
+  `TimeoutError`.
+- **Model listing, the Vertex AI token request and the watsonx IAM token exchange keep their own fixed
+  timeouts**, which the block does not change.
 
 ### Examples for other providers
 

@@ -7,6 +7,7 @@ import org.llm4s.error.{
   NetworkError,
   RateLimitError,
   ServiceError,
+  TimeoutError,
   ValidationError
 }
 import org.llm4s.error.ThrowableOps.*
@@ -28,7 +29,9 @@ import software.amazon.awssdk.auth.credentials.{
   ProfileCredentialsProvider,
   StaticCredentialsProvider
 }
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration
 import software.amazon.awssdk.core.document.Document
+import software.amazon.awssdk.core.exception.ApiCallTimeoutException
 import software.amazon.awssdk.http.Protocol
 import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient
 import software.amazon.awssdk.core.exception.SdkClientException
@@ -60,7 +63,8 @@ import software.amazon.awssdk.services.bedrockruntime.model.{
 
 import java.net.URI
 import java.time.Instant
-import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.{ LinkedBlockingQueue, TimeUnit }
+import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
@@ -83,6 +87,12 @@ import scala.util.Try
  * callbacks run on SDK threads; they only enqueue events, and the calling thread drains the queue,
  * so `onChunk` runs on the caller's thread, in order, and interrupting the caller cancels the
  * request and returns `Left(CancelledError)`.
+ *
+ * == Timeouts ==
+ *
+ * The section's `timeouts.request` becomes the SDK client's API-call timeout for `Converse`; without it the
+ * AWS SDK keeps its defaults. `timeouts.stream` bounds a `ConverseStream` call from the request to the end
+ * of the stream; without it a stream has no limit. Either expiry is a `TimeoutError`.
  *
  * == Errors ==
  *
@@ -114,6 +124,12 @@ class BedrockClient(
       .region(Region.of(config.region))
       .credentialsProvider(credentialsProvider)
     config.endpointUrl.foreach(url => builder.endpointOverride(URI.create(url)))
+    // Without a configured request timeout the SDK keeps its own defaults.
+    requestTimeout.foreach { timeout =>
+      builder.overrideConfiguration(
+        ClientOverrideConfiguration.builder().apiCallTimeout(java.time.Duration.ofMillis(timeout.toMillis)).build()
+      )
+    }
     builder.build()
   }
 
@@ -139,6 +155,15 @@ class BedrockClient(
   protected def clientDescription: String = s"Bedrock client for model ${config.model}"
   protected def providerName: String      = "bedrock"
   protected def modelName: String         = config.model
+
+  /** How long a `Converse` call may take: the section's `timeouts.request`, else the AWS SDK's default. */
+  protected[provider] def requestTimeout: Option[FiniteDuration] = config.timeouts.request
+
+  /**
+   * How long a `ConverseStream` call may take, from the request to the end of the stream: the section's
+   * `timeouts.stream`, else no limit.
+   */
+  protected[provider] def streamTimeout: Option[FiniteDuration] = config.timeouts.stream
 
   override def complete(
     conversation: Conversation,
@@ -266,13 +291,32 @@ class BedrockClient(
 
     var stopped = false
 
+    // The stream timeout bounds the whole call, so it is a deadline rather than a per-event wait.
+    val deadline = streamTimeout.map(t => (t, System.nanoTime() + t.toNanos))
+
+    def next(): Option[StreamSignal] =
+      deadline match {
+        case None                => Some(queue.take())
+        case Some((_, deadline)) => Option(queue.poll(deadline - System.nanoTime(), TimeUnit.NANOSECONDS))
+      }
+
     def drain(): Result[Completion] =
-      CancelledError.catchInterrupt(queue.take()) match {
+      CancelledError.catchInterrupt(next()) match {
         case Left(interrupted) =>
           future.cancel(true)
           Thread.currentThread().interrupt()
           Left(CancelledError("bedrock.streamComplete", Some(interrupted)))
-        case Right(signal) =>
+        case Right(None) =>
+          future.cancel(true)
+          val timeout = deadline.fold(FiniteDuration(0, TimeUnit.SECONDS))(_._1)
+          Left(
+            TimeoutError(
+              s"Bedrock ConverseStream did not finish within ${timeout.toMillis}ms",
+              timeout,
+              "bedrock.streamComplete"
+            ).withContext("endpoint", endpointLabel)
+          )
+        case Right(Some(signal)) =>
           raw.append(signal.toString).append('\n')
           signal match {
             case StreamSignal.Text(text) =>
@@ -480,6 +524,9 @@ class BedrockClient(
       case _: ServiceQuotaExceededException => RateLimitError("bedrock")
       case e: ValidationException           => ValidationError("request", e.getMessage)
       case e: AccessDeniedException         => AuthenticationError("bedrock", e.getMessage)
+      case e: ApiCallTimeoutException =>
+        val timeout = requestTimeout.getOrElse(FiniteDuration(0, TimeUnit.SECONDS))
+        TimeoutError(e.getMessage, timeout, "bedrock.complete", Some(e)).withContext("endpoint", endpointLabel)
       case e: BedrockRuntimeException if e.statusCode() == 401 || e.statusCode() == 403 =>
         AuthenticationError("bedrock", e.getMessage)
       case e: BedrockRuntimeException => ServiceError(e.statusCode(), "bedrock", e.getMessage)
