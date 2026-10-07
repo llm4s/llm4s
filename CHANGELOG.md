@@ -1912,6 +1912,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ServiceError`, now also retries `NetworkError`, `ExecutionError`, `SystemError` and an `APIError` with no status or a
   retryable one, waiting `baseDelay` times the attempt number (the schedules of the three it already retried are
   unchanged); docs/guide/error-handling.md describes the rule.
+- **`ToolRegistry.executeAsync` and `executeAll` no longer park an execution-context thread while a retry waits out
+  its backoff (#1066).** The delay was a `Thread.sleep` inside `blocking`, so with many calls retrying at once a
+  fixed-size pool sat idle for the whole delay: six retrying calls with a 0.8 s backoff on a two-thread pool took
+  2.4 s, and now take about 0.8 s. The backoff is a scheduled delay (the JDK's shared daemon delay thread, no pool of
+  our own) and the next attempt is dispatched to the caller's `ExecutionContext` when it elapses; each attempt still
+  holds a pool thread for its own duration. The synchronous `execute` is unchanged: it waits on its caller's thread,
+  interruptibly, and an interruption ends the call as `Cancelled`. Which errors retry and how long each wait is are now
+  decided in one place for both paths. Reworked from #1197 by @ipsitsahoo, whose split between a synchronous and an
+  asynchronous retry path this keeps; the guide has a new "Tool Call Timeouts and Retries" section.
 - **MCP: text stays text, tool failures are `isError` results, `getTools` returns a `Left`** ([#1319](https://github.com/llm4s/llm4s/issues/1319)):
   the client no longer turns a text result that parses as JSON into a JSON value (a tool that returned
   `"24"` is not handed back as the number 24); an object result also travels as the `structuredContent` the
