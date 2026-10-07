@@ -206,8 +206,9 @@ LlmResult<AgentResult> result = started.get().await();   // or started.get().can
 `AgentStream.await()` returns once the listener has returned from its last call, with the same
 outcome. `cancel()` cancels the turn and returns once it has ended; the listener receives at most
 the event already being delivered, then `onError` with the cancellation - or `onComplete`, when the
-turn had already ended. A listener that throws from `onEvent` cancels the turn, and `onError`
-receives what it threw. `Llm4s.createAgent(client)` and `createAgent(client, tools)` build an agent
+turn had already ended; an interrupt of the thread calling `cancel()` does not cut that wait short,
+and is kept. A listener that throws from `onEvent` - or sets its own thread's interrupt flag -
+cancels the turn, and `onError` receives what it threw, or a `CancelledError`. `Llm4s.createAgent(client)` and `createAgent(client, tools)` build an agent
 that calls the model's `complete`, so its stream carries no text deltas; pass `streaming = true`
 for them. `Llm4s.wrapAgent(agent)` takes an agent built with `Agent.builder`, for middleware, a
 system prompt or a runtime. `streamResume` takes a `List<Answer>`, built with `Answer.approve(id)`,

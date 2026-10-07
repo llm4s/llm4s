@@ -19,7 +19,8 @@ import org.llm4s.agent.graph.StreamEvent
  * A listener slower than the stream never holds the turn up: live events (text deltas, tool
  * progress) that do not fit in the stream's buffer are dropped, and the listener receives one
  * `StreamEvent.LiveGap` with their count where they were dropped. Durable events are never dropped.
- * A listener that throws from [[onEvent]] cancels the turn, and [[onError]] receives what it threw.
+ * A listener that throws from [[onEvent]] cancels the turn, and [[onError]] receives what it threw; one
+ * that sets its own thread's interrupt flag cancels it too, at once, and receives a `CancelledError`.
  */
 trait AgentStreamListener {
 

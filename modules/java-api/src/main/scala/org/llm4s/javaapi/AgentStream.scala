@@ -33,13 +33,26 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
    * Cancels the turn and returns once it has ended; the thread is left for [[JAgent.streamRecover]].
    * The listener receives at most the event already being delivered, then
    * [[AgentStreamListener.onError]] with the cancellation - or `onComplete`, for a turn that had
-   * already ended. Safe to call more than once, from any thread, the listener's included.
+   * already ended. Safe to call more than once, from any thread, the listener's included. An
+   * interrupt does not cut the wait short: it is kept, and the thread's flag is set again on return.
    */
   def cancel(): Unit = {
     cancelled.set(true)
     run.cancel()
-    run.await(): Unit
+    val interrupted = awaitEnd(false)
     buffer.close()
+    if (interrupted) Thread.currentThread().interrupt()
+  }
+
+  /**
+   * Waits for the run's end, whatever interrupts the waiting thread: `run.await()` returns early, with
+   * the flag set, when interrupted, so the flag is cleared and the wait repeated. Returns whether the
+   * thread was interrupted, before or during the wait.
+   */
+  @tailrec private def awaitEnd(interrupted: Boolean): Boolean = {
+    val cleared = Thread.interrupted()
+    run.await(): Unit
+    if (Thread.currentThread().isInterrupted) awaitEnd(true) else interrupted || cleared
   }
 
   /**
@@ -90,7 +103,7 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
     val step = for {
       taken <- guarded(buffer.take()).flatten
       more <- taken.filterNot(_ => cancelled.get) match {
-        case Some(event) => guarded(listener.onEvent(event)).map(_ => true)
+        case Some(event) => guarded(listener.onEvent(event)).flatMap(_ => notInterrupted)
         case None        => Right(false)
       }
     } yield more
@@ -102,6 +115,13 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
         Left(error)
     }
   }
+
+  /**
+   * After a listener call: a listener that set its own thread's interrupt flag has cancelled the run,
+   * at once - not at a later blocking `take`, which never comes while events are queued. Clears the flag.
+   */
+  private def notInterrupted: Result[Boolean] =
+    if (Thread.interrupted()) Left(CancelledError("AgentStream.listener")) else Right(true)
 
   /** `body`, with a throwable - an `InterruptedException` included, clearing the flag - as `Left`. */
   private def guarded[A](body: => A): Result[A] =

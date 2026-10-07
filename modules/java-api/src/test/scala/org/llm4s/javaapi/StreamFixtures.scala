@@ -68,21 +68,28 @@ private[javaapi] object StreamFixtures {
   }
 
   /** A model whose first call sends one delta, then parks until interrupted; later calls answer "recovered". */
-  final class ParksOnce {
+  final class ParksOnce(deltas: Int, linger: CountDownLatch) {
     private val calls = new AtomicInteger(0)
+    val parked        = new CountDownLatch(1)
     val unparked      = new CountDownLatch(1)
     val client: LLMClient = new Scripted(
       onChunk =>
         if (calls.getAndIncrement() == 0) {
-          onChunk(chunk(0))
+          (0 until deltas).foreach(i => onChunk(chunk(i)))
+          parked.countDown()
           if (parkUntilInterrupted()) unparked.countDown()
+          // once interrupted, the call does not return until `linger` opens
+          Thread.interrupted(): Unit
+          linger.await(DeadlineSeconds, TimeUnit.SECONDS): Unit
           Left(org.llm4s.error.CancelledError("test"))
         } else Right(completion("recovered")),
       () => Right(completion("recovered"))
     )
   }
 
-  def parksOnce(): ParksOnce = new ParksOnce
+  /** A model whose first call sends `deltas` deltas, parks until interrupted, then returns once `linger` opens. */
+  def parksOnce(deltas: Int = 1, linger: CountDownLatch = new CountDownLatch(0)): ParksOnce =
+    new ParksOnce(deltas, linger)
 
   /** Spins (yielding) until `cond` holds; false only if the safety deadline passes. */
   def awaitCondition(cond: => Boolean): Boolean = {

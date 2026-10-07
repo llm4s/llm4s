@@ -315,6 +315,76 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     agent.streamRecover(threadId, Recorder()).get().await().get().answer shouldBe Some("recovered")
   }
 
+  it should "cancel the run at once when the listener interrupts itself with more events already queued" in {
+    val model    = parksOnce(deltas = 50)
+    val runtime  = GraphRuntime.inMemory()
+    val agent    = jAgentOf(model.client)(_.withRuntime(runtime).withStreaming())
+    val threadId = ThreadId("j23")
+    // the first event is held until the model has sent its deltas, then the listener interrupts itself
+    val recorder = Recorder { _ =>
+      model.parked.await(DeadlineSeconds, TimeUnit.SECONDS)
+      Thread.currentThread().interrupt()
+    }
+    val outcome = agent.stream(threadId, "hi", recorder).get().await()
+    outcome.getError().error shouldBe a[CancelledError]
+    recorder.events should have size 1
+    recorder.terminals.get shouldBe 1
+    recorder.failed.get.error shouldBe a[CancelledError]
+    model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
+    agent.streamRecover(threadId, Recorder()).get().await().get().answer shouldBe Some("recovered")
+  }
+
+  it should "cancel the run when the listener throws InterruptedException" in {
+    val model    = parksOnce()
+    val runtime  = GraphRuntime.inMemory()
+    val agent    = jAgentOf(model.client)(_.withRuntime(runtime).withStreaming())
+    val threadId = ThreadId("j24")
+    val recorder =
+      Recorder(e => if (AgentEvents.TextDelta.unapply(e).isDefined) throw new InterruptedException("listener"))
+    agent.stream(threadId, "hi", recorder).get().await().getError().error shouldBe a[CancelledError]
+    model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
+  }
+
+  "AgentStream.cancel" should "wait for the run's end on an interrupted thread, and keep the flag" in {
+    val model    = parksOnce()
+    val agent    = jAgentOf(model.client)(_.withStreaming())
+    val threadId = ThreadId("j25")
+    val stream   = agent.stream(threadId, "hi", Recorder()).get()
+    model.parked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    Thread.currentThread().interrupt()
+    stream.cancel()
+    Thread.interrupted() shouldBe true // still set, and cleared here
+    // the run has ended: its thread is free at once
+    agent.streamRecover(threadId, Recorder()).get().await().get().answer shouldBe Some("recovered")
+  }
+
+  it should "keep waiting for the run's end when interrupted while it waits" in {
+    val linger   = new CountDownLatch(1)
+    val model    = parksOnce(linger = linger)
+    val agent    = jAgentOf(model.client)(_.withStreaming())
+    val threadId = ThreadId("j26")
+    val stream   = agent.stream(threadId, "hi", Recorder()).get()
+    model.parked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    val flagKept  = new AtomicReference[java.lang.Boolean](null)
+    val recovered = new AtomicReference[Option[String]](None)
+    val canceller = new Thread(() => {
+      stream.cancel()
+      flagKept.set(Thread.interrupted())
+      recovered.set(agent.streamRecover(threadId, Recorder()).get().await().toOptional.map(_.answer).orElse(None))
+    })
+    canceller.start()
+    // the model has been interrupted, and lingers; the canceller waits for the run's end
+    model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    awaitCondition(canceller.getState == Thread.State.WAITING || canceller.getState == Thread.State.TIMED_WAITING)
+    canceller.interrupt()
+    linger.countDown()
+    canceller.join(DeadlineSeconds * 1000)
+    flagKept.get shouldBe java.lang.Boolean.TRUE
+    recovered.get shouldBe Some("recovered")
+  }
+
   it should "survive a terminal callback that throws" in {
     val listener = new AgentStreamListener {
       def onEvent(event: StreamEvent): Unit                        = ()
