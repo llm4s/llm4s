@@ -1663,6 +1663,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-agent`: a burst of live events no longer disconnects a subscriber as `Lagging`**
+  ([#1387](https://github.com/llm4s/llm4s/issues/1387)): a subscription's queue held durable and live
+  events against one `capacity`, so a model streaming faster than the dispatcher thread was scheduled filled
+  it with text deltas, and the next durable commit - which also needed a slot for the pending `LiveGap` - did
+  not fit. The subscriber was dropped (`Disconnected(lastSeq, Lagging)`) and `Agent.stream*`, `AgentZ.stream`
+  and `AgentIO.stream` failed the run with `the event subscription ended after seq n: Lagging`, though its
+  listener never blocks. `capacity` now bounds durable and live events separately: live events that do not
+  fit are still dropped and counted in a `LiveGap`, and only a subscriber `capacity` durable events behind
+  lags. A subscription may now queue up to twice `capacity` events.
 - **`RegexSafetyManager` returns an error instead of letting `StackOverflowError` escape** (#1379): the JDK
   regex engine recurses for patterns such as `(a|aa)*b` and overflowed the stack on long input before the
   character-access budget tripped; `scala.util.Try` does not catch that fatal error, so it escaped

@@ -50,11 +50,15 @@ private[graph] trait Dispatched extends Subscription:
  * lag; a subscriber already lagging gets none and ends with its `Disconnected`.
  *
  * Durable events reach each subscriber in ascending `seq`, at most once, and only after the commit
- * that numbered them. A durable event that does not fit disconnects the subscriber as lagging once
- * what is already queued has been delivered. A live event is accepted only while two slots are
- * free, so a [[StreamEvent.LiveGap]] counting the live events dropped before it always fits. A
- * lagging subscriber with dropped live events still pending gets that `LiveGap` after its queue
- * drains and just before `Disconnected(lastSeq, Lagging)`.
+ * that numbered them. The queue holds up to `capacity` durable events and, separately, up to
+ * `capacity` live events and gap markers, so live traffic - a burst of text deltas the dispatcher
+ * has not drained yet - never crowds out a durable event: only a subscriber more than `capacity`
+ * durable events behind lags. A durable event that does not fit disconnects the subscriber as
+ * lagging once what is already queued has been delivered. A live event is accepted only while two
+ * of its slots are free, so a [[StreamEvent.LiveGap]] counting the live events dropped before it
+ * always fits; a gap a durable event flushes may take a slot beyond that, at most one per durable
+ * event. A lagging subscriber with dropped live events still pending gets that `LiveGap` after its
+ * queue drains and just before `Disconnected(lastSeq, Lagging)`.
  */
 final private[graph] class EventHub(checkpointer: Checkpointer):
 
@@ -153,8 +157,11 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     private val idle: Condition = lock.newCondition()
 
     // guarded by `lock`; `lastQueuedSeq` is also advanced by replay, before the dispatcher joins
-    private val queue               = new java.util.ArrayDeque[StreamEvent | RunEnd]()
-    private var lastQueuedSeq       = afterSeq
+    private val queue         = new java.util.ArrayDeque[StreamEvent | RunEnd]()
+    private var lastQueuedSeq = afterSeq
+    // what `queue` holds, by kind: each has its own `capacity`, so live events never crowd out durable ones
+    private var durableQueued       = 0
+    private var liveQueued          = 0
     private var droppedLive         = 0
     private var lagging             = false
     @volatile private var cancelled = false
@@ -205,11 +212,11 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
 
     def offerDurable(record: EventRecord): Unit = withLock(lock) {
       if !cancelled && !lagging && record.seq > lastQueuedSeq then
-        val needed = if droppedLive > 0 then 2 else 1
-        if capacity - queue.size < needed then lagging = true
+        if durableQueued >= capacity then lagging = true
         else
           flushGap()
           queue.add(StreamEvent.Durable(record))
+          durableQueued += 1
           lastQueuedSeq = record.seq
         notEmpty.signal()
     }
@@ -217,9 +224,10 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     def offerLive(event: StreamEvent.Live): Unit = withLock(lock) {
       if !cancelled && !lagging then
         // the gap marker needs one slot and the event one
-        if capacity - queue.size >= 2 then
+        if capacity - liveQueued >= 2 then
           flushGap()
           queue.add(event)
+          liveQueued += 1
         else droppedLive += 1
         notEmpty.signal()
     }
@@ -227,6 +235,7 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     private def flushGap(): Unit =
       if droppedLive > 0 then
         queue.add(StreamEvent.LiveGap(droppedLive))
+        liveQueued += 1
         droppedLive = 0
 
     def endOfRun(runId: RunId): Unit =
@@ -327,7 +336,16 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
         CancelledError.catchInterrupt(withLock(lock) {
           awaitWork()
           if cancelled then Left(End.Cancelled)
-          else Option(queue.poll()).map(Some(_)).toRight(End.Disconnect(DisconnectReason.Lagging))
+          else
+            Option(queue.poll())
+              .map { item =>
+                item match
+                  case _: StreamEvent.Durable => durableQueued -= 1
+                  case _: RunEnd              => ()
+                  case _                      => liveQueued -= 1
+                Some(item)
+              }
+              .toRight(End.Disconnect(DisconnectReason.Lagging))
         }) match
           case Right(taken) => taken
           // only `cancel` interrupts this thread; anything else is ignored

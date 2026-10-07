@@ -128,11 +128,14 @@ is no fixed delay. Either way, `await` waits for the listener as described above
 
 ## Falling behind
 
-Each listener has a bounded buffer (1024 events for `stream*`). If it is full:
+Each listener has a bounded buffer (1024 events for `stream*`) for durable events and another of the
+same size for live ones, so a burst of live events never costs it a durable one:
 
-- Live events are dropped, and the listener gets `StreamEvent.LiveGap(n)` with the number lost, so
-  a UI can note that text is missing. The final answer is still in the `AgentResult`.
-- If the listener still cannot keep up, it is disconnected with
+- If the live buffer is full, live events are dropped, and the listener gets
+  `StreamEvent.LiveGap(n)` with the number lost, so a UI can note that text is missing. The final
+  answer is still in the `AgentResult`.
+- If the durable buffer is full - the listener is that many durable events behind - it is
+  disconnected with
   `StreamEvent.Disconnected(lastSeq, DisconnectReason.Lagging)`. Durable events are in the log, so
   you can resubscribe from where you were with `GraphRuntime.subscribe(threadId, afterSeq = lastSeq)`.
   That needs the agent's runtime: build the agent `withRuntime(runtime)` and subscribe on that
