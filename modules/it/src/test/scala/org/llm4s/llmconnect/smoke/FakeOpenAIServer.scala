@@ -25,7 +25,9 @@ import java.nio.charset.StandardCharsets
  * @param structuredMatchesSchema the JSON it answers with matches the schema; when false the field types are wrong
  * @param structuredHasRequestedValues the JSON it answers with carries the values the prompt asked for; when false
  *                                the shape is right but the values are not
- * @param reasoningContent        send a `reasoning_content` field, as DeepSeek's reasoner does
+ * @param structuredOnlyDeclared  the JSON it answers with has only the schema's properties; when false it adds one
+ * @param structuredBare          answer with the JSON document alone; when false it wraps it in prose
+ * @param reasoningContent       send a `reasoning_content` field, as DeepSeek's reasoner does
  */
 final case class FakeBehaviour(
   honourSystem: Boolean = true,
@@ -41,6 +43,8 @@ final case class FakeBehaviour(
   honourResponseFormat: Boolean = true,
   structuredMatchesSchema: Boolean = true,
   structuredHasRequestedValues: Boolean = true,
+  structuredOnlyDeclared: Boolean = true,
+  structuredBare: Boolean = true,
   reasoningContent: Boolean = true
 )
 
@@ -97,12 +101,16 @@ final class FakeOpenAIServer(initial: FakeBehaviour = FakeBehaviour()) extends A
       else "The capital of France is Paris."
     else if (last.contains("favourite number"))
       if (earlier.contains("7342")) "7342" else "I do not know your favourite number."
-    else if (last.contains("JSON object whose color"))
-      if (behaviour.honourResponseFormat && body.obj.contains("response_format"))
-        if (!behaviour.structuredMatchesSchema) """{"color":5,"count":"three"}"""
-        else if (behaviour.structuredHasRequestedValues) """{"color":"blue","count":3}"""
-        else """{"color":"red","count":9}"""
-      else "Sure: blue and three."
+    else if (last == SmokeChecks.StructuredPrompt)
+      // The prompt asks for no format: only `response_format` makes the answer JSON, as with a real model.
+      if (behaviour.honourResponseFormat && body.obj.contains("response_format")) {
+        val document =
+          if (!behaviour.structuredMatchesSchema) """{"color":5,"count":"three"}"""
+          else if (!behaviour.structuredOnlyDeclared) """{"color":"blue","count":3,"extra":true}"""
+          else if (behaviour.structuredHasRequestedValues) """{"color":"blue","count":3}"""
+          else """{"color":"red","count":9}"""
+        if (behaviour.structuredBare) document else s"Here you go: $document"
+      } else "The colour is blue and the count is 3."
     else "Hi"
   }
 

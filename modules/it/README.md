@@ -45,7 +45,7 @@ maintainer can see at a glance what each one supports. The checks are in `SmokeC
 | multi-turn history | an assistant turn in the history reaches the model, which answers from it |
 | tool call | the model calls a trivial tool, the call carries an id and arguments that fit the tool, the result goes back as a `ToolMessage`, and the final answer carries it |
 | streamed tool call | the same, streamed: the arguments reassemble into JSON that fits the tool, and no tool-call chunk arrives without its call's id |
-| structured output | a JSON-schema `responseFormat` (`completeStructured`) gives JSON that parses, matches the schema and has the values asked for |
+| structured output | a JSON-schema `responseFormat`, with a prompt that does not ask for JSON, gives a reply that is the JSON document itself (a code fence is tolerated, prose is not), with exactly the schema's properties, of its types, and the values asked for |
 | usage | reported on `complete`: positive, with a total not below prompt + completion |
 | streamed usage | the same on a streamed completion |
 | reasoning | on a reasoning model, the answer is not empty and the provider reports thinking: as text where it returns text, as a token count where it only counts |
@@ -63,7 +63,7 @@ OpenAI     held            held                held       held                he
 Gemini     held            held                held       held                FAILED             held     held            n/a
 
 Notes:
-  FAILED  Gemini / structured output: [structured output] the response did not parse as the schema: ...
+  FAILED  Gemini / structured output: [structured output] the reply is not a JSON document, so the response format was not honoured: ...
   n/a     Gemini / reasoning: this spec has no reasoning-capable model configured ...
 ```
 
@@ -94,7 +94,7 @@ tool-call chunk without an id.
 provider's documented behaviour and from the client code, and a first run with real keys may show one is wrong. So
 read a failure in this order: the capability's message; whether the model constant in the spec is still served (a
 retired model fails every capability with a not-found error: `GeminiSmokeSpec` and `AnthropicSmokeSpec` default to
-older models, see #1309); and whether the client really mishandles the case. `completeStructured` sends a
+older models, see #1309); and whether the client really mishandles the case. The structured-output check sends a
 `json_schema` response format to every OpenAI-compatible provider, so a provider that accepts only `json_object`
 fails *structured output*: that is a client finding, not a test bug.
 

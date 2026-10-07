@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.model.{
   Completion,
   CompletionOptions,
   Conversation,
+  ResponseFormat,
   StreamedChunk,
   TokenUsage,
   ToolCall
@@ -169,6 +170,16 @@ class SmokeContractOfflineSpec
     (
       "answers a schema request with JSON of the wrong types",
       FakeBehaviour(structuredMatchesSchema = false),
+      Set(Capability.StructuredOutput)
+    ),
+    (
+      "answers a schema request with a property the schema does not declare",
+      FakeBehaviour(structuredOnlyDeclared = false),
+      Set(Capability.StructuredOutput)
+    ),
+    (
+      "answers a schema request with the JSON wrapped in prose",
+      FakeBehaviour(structuredBare = false),
       Set(Capability.StructuredOutput)
     )
   )
@@ -331,6 +342,33 @@ class SmokeContractOfflineSpec
     failedMessage(
       SmokeChecks.run(Capability.ToolCalling, stub(onComplete = (_, _) => Right(completion("I will not use it"))))
     ).value should include("did not call the tool")
+  }
+
+  it should "leave the structured-output shape to the response format: the prompt does not ask for JSON" in {
+    (SmokeChecks.StructuredPrompt.toLowerCase should not).include("json")
+  }
+
+  it should "send the schema as the response format and judge the raw reply against it" in {
+    var sent: Option[ResponseFormat] = None
+    def structuredClient(reply: String): LLMClient = stub(onComplete = (_, options) => {
+      sent = options.responseFormat
+      Right(completion(reply))
+    })
+    def structured(reply: String): Outcome = SmokeChecks.run(Capability.StructuredOutput, structuredClient(reply))
+
+    structured("""{"color":"blue","count":3}""") shouldBe Outcome.Held
+    sent match {
+      case Some(ResponseFormat.JsonSchema(schema, _, _)) =>
+        schema("properties").obj.keySet shouldBe Set("color", "count")
+      case other => fail(s"the check sent $other, not the schema")
+    }
+    structured("```json\n{\"color\":\"blue\",\"count\":3}\n```") shouldBe Outcome.Held
+    failedMessage(structured("""{"color":"blue","count":3,"extra":true}""")).value should
+      include("does not declare extra")
+    failedMessage(structured("""{"color":"blue"}""")).value should include("requires count")
+    failedMessage(structured("""Sure: {"color":"blue","count":3}""")).value should include("not a JSON document")
+    failedMessage(structured("""[{"color":"blue","count":3}]""")).value should include("not an object")
+    failedMessage(structured("""{"color":"blue","count":"3"}""")).value should include("schema's types")
   }
 
   it should "judge usage by positivity and by total >= prompt + completion" in {

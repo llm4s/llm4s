@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.model.{
   Completion,
   CompletionOptions,
   Conversation,
+  ResponseFormat,
   StreamedChunk,
   SystemMessage,
   TokenUsage,
@@ -17,6 +18,7 @@ import org.llm4s.llmconnect.model.{
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
 
 import scala.collection.mutable.ListBuffer
+import scala.util.Try
 
 /**
  * What a provider's smoke spec can be asked to prove (issue #1212).
@@ -108,8 +110,11 @@ object SmokeChecks {
 
   private val FavouriteNumber = "7342"
 
-  private val StructuredPrompt =
-    "Answer with a JSON object whose color is \"blue\" and whose count is 3."
+  /**
+   * Asks for the values without prescribing a shape: the JSON must come from the response format alone, so a client
+   * that drops it gets prose back and fails.
+   */
+  val StructuredPrompt = "Report the colour blue and the count 3."
 
   private def small: CompletionOptions = CompletionOptions(temperature = 0.0, maxTokens = Some(24))
 
@@ -312,23 +317,76 @@ object SmokeChecks {
       .map(e => s"the streamed chunks did not reassemble: ${e.message}")
   }
 
-  /** A JSON-schema `responseFormat` yields JSON that parses and matches the schema, with the values asked for. */
+  /** One markdown code fence around a whole reply, which some providers add around a JSON answer. */
+  private val Fence = "(?s)```(?:json)?\\s*(.*?)\\s*```".r
+
+  private def unfenced(text: String): String = text.trim match {
+    case Fence(inner) => inner
+    case other        => other
+  }
+
+  /** Whether `value` has the JSON type `property` declares (the contract's schema uses `string` and `integer`). */
+  private def hasDeclaredType(property: ujson.Value, value: ujson.Value): Boolean =
+    (property.obj.get("type").flatMap(_.strOpt), value) match {
+      case (Some("string"), _: ujson.Str)   => true
+      case (Some("integer"), n: ujson.Num)  => n.num.isWhole
+      case (Some("number"), _: ujson.Num)   => true
+      case (Some("boolean"), _: ujson.Bool) => true
+      case _                                => false
+    }
+
+  /**
+   * A JSON-schema `responseFormat` yields JSON that matches the schema, with the values asked for.
+   *
+   * The prompt does not mention JSON, so only the response format can produce it. The reply must be the JSON
+   * document itself (one code fence around it is tolerated; prose around it is not), and the document is checked
+   * against the schema here rather than by `completeStructured`, which extracts JSON from prose and ignores
+   * undeclared fields: an object with exactly the properties the schema declares (it allows no others, by
+   * `additionalProperties`), of the declared types.
+   */
   def structuredOutput(client: LLMClient): Outcome = {
     val schema = Schema
       .`object`[Verdict]("A verdict")
       .withProperty(Schema.property("color", Schema.string("A colour name")))
       .withProperty(Schema.property("count", Schema.integer("A whole number")))
+    val jsonSchema = schema.toJsonSchema(strict = true)
+    val declared   = jsonSchema.obj.get("properties").flatMap(_.objOpt).map(_.keySet.toSet).getOrElse(Set.empty)
+    val options =
+      CompletionOptions(temperature = 0.0, maxTokens = Some(64))
+        .withResponseFormat(ResponseFormat.JsonSchema(jsonSchema))
     outcome(
       Capability.StructuredOutput,
       for {
-        verdict <- client
-          .completeStructured[Verdict](
-            Conversation(Seq(UserMessage(StructuredPrompt))),
-            schema,
-            CompletionOptions(temperature = 0.0, maxTokens = Some(64))
-          )
+        completion <- client
+          .complete(Conversation(Seq(UserMessage(StructuredPrompt))), options)
           .left
-          .map(e => s"the response did not parse as the schema: ${e.message}")
+          .map(e => s"the request carrying the response format failed: ${e.message}")
+        document <- Try(ujson.read(unfenced(completion.content))).toOption.toRight(
+          s"the reply is not a JSON document, so the response format was not honoured: ${snippet(completion.content)}"
+        )
+        fields <- document.objOpt.toRight(s"the reply is JSON but not an object: ${snippet(completion.content)}")
+        undeclared = fields.keySet.toSet.diff(declared)
+        missing    = declared.diff(fields.keySet.toSet)
+        _ <- Either.cond(
+          undeclared.isEmpty,
+          (),
+          s"the JSON does not fit the schema, which does not declare ${undeclared.toSeq.sorted
+              .mkString(", ")}: ${ujson.write(document)}"
+        )
+        _ <- Either.cond(
+          missing.isEmpty,
+          (),
+          s"the JSON does not fit the schema, which requires ${missing.toSeq.sorted.mkString(", ")}: ${ujson.write(document)}"
+        )
+        mistyped = declared.filterNot(name => hasDeclaredType(jsonSchema("properties")(name), fields(name)))
+        _ <- Either.cond(
+          mistyped.isEmpty,
+          (),
+          s"the JSON does not fit the schema's types for ${mistyped.toSeq.sorted.mkString(", ")}: ${ujson.write(document)}"
+        )
+        verdict <- Try(upickle.default.read[Verdict](document)).toOption.toRight(
+          s"the JSON does not fit the schema's types: ${ujson.write(document)}"
+        )
         _ <- Either.cond(
           verdict.color.equalsIgnoreCase("blue") && verdict.count == 3,
           (),
