@@ -43,6 +43,9 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
   /** What a snippet printed. System.out and System.err are process-wide, so the capture is serialised. */
   final private case class Printed(out: String, err: String)
 
+  /** What a stream received, with Windows line endings read as `\n`, since `println` writes the platform's separator. */
+  private def text(stream: ByteArrayOutputStream): String = stream.toString("UTF-8").replace("\r\n", "\n")
+
   private def captured(body: => Unit): Printed = JavaGuideSpec.synchronized {
     val out = new ByteArrayOutputStream
     val err = new ByteArrayOutputStream
@@ -53,7 +56,7 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
       def close(): Unit = { System.setOut(oldOut); System.setErr(oldErr) }
     }
     Using.resource(redirect)(_ => body)
-    Printed(out.toString("UTF-8"), err.toString("UTF-8"))
+    Printed(text(out), text(err))
   }
 
   /** A client that records every conversation it is sent and answers `answer`. */
@@ -88,8 +91,8 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
 
       // This module's test classpath resolves the default provider to core's canned fixture provider.
       status shouldBe 0
-      out.toString("UTF-8") shouldBe "fixture reply\n"
-      err.toString("UTF-8") shouldBe ""
+      text(out) shouldBe "fixture reply\n"
+      text(err) shouldBe ""
     }
   }
 

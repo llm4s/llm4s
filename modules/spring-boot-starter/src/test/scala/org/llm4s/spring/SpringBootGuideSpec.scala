@@ -112,7 +112,7 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
       def close(): Unit = System.setErr(old)
     }
     Using.resource(redirect)(_ => body)
-    err.toString("UTF-8")
+    err.toString("UTF-8").replace("\r\n", "\n") // `println` writes the platform's separator
   }
 
   private def tableRows(from: String, to: String): List[List[String]] = {
