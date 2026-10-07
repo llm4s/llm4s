@@ -2,12 +2,13 @@ package org.llm4s.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.config.ProvidersConfigModel.{ ApiKey, NamedProviderConfig, ProviderId }
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ ServiceError, ValidationError }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.http.HttpResponse.*
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.Redaction
 
 import scala.concurrent.duration.*
 import scala.util.Try
@@ -60,7 +61,17 @@ object ProviderModelListers:
           response <- httpClient
             .get(s"${baseUrl.asUrl}$modelsPath", headers = headers, timeout = 10.seconds)
             .mapServiceError(provider.asString, "Failed to discover models")
-          okResponse   <- response.ensureSuccess(provider.asString)
+          // The body of a rejection may echo the bearer (an exchanged access token, or the key) back.
+          okResponse <-
+            if response.statusCode >= 200 && response.statusCode < 300 then Right(response)
+            else
+              Left(
+                ServiceError(
+                  response.statusCode,
+                  provider.asString,
+                  Redaction.remoteBody(response.body, apiKey.map(_.asKey).toSeq)
+                )
+              )
           jsonResponse <- okResponse.toJson("responseBody")
           models       <- parseModels(jsonResponse.body, provider)
         yield models

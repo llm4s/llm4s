@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
-import org.llm4s.llmconnect.auth.{ AccessTokenProvider, TokenExchange, TokenExchangeConfig }
+import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentitySource, TokenExchange, TokenExchangeConfig }
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
@@ -103,7 +103,13 @@ class OpenAICompatibleClient(
             val result =
               if (response.statusCode >= 200 && response.statusCode < 300)
                 Try(parseCompletion(ujson.read(body))).toResult
-              else HttpErrorMapper.mapHttpError(response.statusCode, body, providerName, response.headers)
+              else
+                HttpErrorMapper.mapHttpError(
+                  response.statusCode,
+                  Redaction.scrubRemote(body, credentialSecrets(headers)),
+                  providerName,
+                  response.headers
+                )
             recordExchange(startedAt, requestText, Some(body), result)
             result
           }
@@ -126,7 +132,14 @@ class OpenAICompatibleClient(
           httpClient
             .postStream(endpoint, headers, requestText, streamTimeout)
             .flatMap(response =>
-              consumeStream(response.statusCode, response.body, rawStream, onChunk, response.headers)
+              consumeStream(
+                response.statusCode,
+                response.body,
+                rawStream,
+                onChunk,
+                response.headers,
+                credentialSecrets(headers)
+              )
             )
         recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), result)
         result
@@ -138,21 +151,23 @@ class OpenAICompatibleClient(
    * Turns a streaming response into a completion, closing `body` on every path: an error
    * status, a malformed event, an exception from `onChunk`, or success. (Two of the three
    * clients this replaced leaked the body on an error status.) Everything read is appended to
-   * `rawStream` for the exchange log.
+   * `rawStream` for the exchange log. An error body is scrubbed of `secrets`, the credentials the request
+   * carried, before it is mapped to an error.
    */
   protected[provider] def consumeStream(
     statusCode: Int,
     body: InputStream,
     rawStream: StringBuilder,
     onChunk: StreamedChunk => Unit,
-    headers: Map[String, Seq[String]] = Map.empty
+    headers: Map[String, Seq[String]] = Map.empty,
+    secrets: Seq[String] = Nil
   ): Result[Completion] =
     if (statusCode != 200) {
       val errorBody =
         Try(Using.resource(body)(in => new String(in.readAllBytes(), StandardCharsets.UTF_8)))
           .getOrElse("<error body unreadable>")
       rawStream.append(errorBody)
-      HttpErrorMapper.mapHttpError(statusCode, errorBody, providerName, headers)
+      HttpErrorMapper.mapHttpError(statusCode, Redaction.scrubRemote(errorBody, secrets), providerName, headers)
     } else
       // A failure while reading the open body is classified as a transport failure would be
       Try(Using.resource(body)(readStream(_, rawStream, onChunk))).toEither.left
@@ -268,6 +283,25 @@ class OpenAICompatibleClient(
     Map("Content-Type" -> "application/json") ++
       token.map(t => "Authorization" -> s"Bearer $t") ++
       OpenAICompatibleClient.combineRepeated(dialect.headers)
+
+  /**
+   * The credentials a request with `requestHeaders` carried, which an error body must not repeat: the
+   * bearer token sent, and for an exchange its client id and literal identity token.
+   */
+  private def credentialSecrets(requestHeaders: Map[String, String]): Seq[String] = {
+    val bearer = requestHeaders.collect {
+      case (name, value) if name.equalsIgnoreCase("Authorization") => value.stripPrefix("Bearer ").trim
+    }
+    val exchange = settings.credential match {
+      case OpenAICompatibleClient.Credential.Exchange(config) =>
+        config.clientId.toSeq ++ (config.identityToken match {
+          case IdentitySource.Literal(token) => Seq(token)
+          case IdentitySource.File(_)        => Nil
+        })
+      case _ => Nil
+    }
+    bearer.toSeq ++ exchange
+  }
 
   /**
    * Sends with the current token; when the credential is dynamic and the reply is a 401, reports the

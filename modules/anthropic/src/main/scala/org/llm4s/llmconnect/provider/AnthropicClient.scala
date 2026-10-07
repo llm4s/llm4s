@@ -28,7 +28,8 @@ import org.llm4s.llmconnect.streaming.*
 import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, RateLimitError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, UnknownError, ValidationError }
+import org.llm4s.util.Redaction
 import org.llm4s.error.ThrowableOps.*
 
 import java.time.Instant
@@ -90,6 +91,9 @@ class AnthropicClient(
 
   // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
+
+  /** The configured credentials, which an error built from a remote reply must not repeat. */
+  private val credentialSecrets: Seq[String] = AnthropicClient.credentialSecrets(config)
 
   // A config built with the constructor or `copy` skipped `fromValues`: `apply` refuses it as a
   // ConfigurationError, and the constructor here, so a plain-http baseUrl never receives the identity token.
@@ -173,12 +177,8 @@ class AnthropicClient(
 
         val messageService = client.messages()
         // Make API call
-        val attempt = Try(messageService.create(messageParams)).toEither.left.map {
-          case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
-          case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
-          case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
-          case e                                                     => e.toLLMError
-        }
+        val attempt = Try(messageService.create(messageParams)).toEither.left
+          .map(AnthropicClient.mapError(_, credentialSecrets))
         val result       = attempt.map(convertFromAnthropicResponse)
         val responseBody = attempt.toOption.map(serializeResponseBody)
         recordingExchange(startedAt, requestBody)(result)(responseBody)
@@ -388,12 +388,7 @@ curl https://api.anthropic.com/v1/messages \
             }
           }
         }.toEither.left
-          .map {
-            case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
-            case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
-            case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
-            case e                                                     => e.toLLMError
-          }
+          .map(AnthropicClient.mapError(_, credentialSecrets))
 
         // Return the accumulated completion
         val result = attempt.flatMap(_ =>
@@ -708,6 +703,36 @@ curl https://api.anthropic.com/v1/messages \
 }
 
 object AnthropicClient {
+
+  /**
+   * An SDK failure as an [[org.llm4s.error.LLMError]]. The SDK's exception messages carry the service's
+   * reply - or, with workload identity, the federation token endpoint's - which may repeat a credential:
+   * every message that becomes part of the error is scrubbed of `secrets` and of credential JSON fields,
+   * passed through the general redactor and truncated.
+   */
+  private[provider] def mapError(e: Throwable, secrets: Seq[String]): LLMError = {
+    def safe(message: String): String = Redaction.remoteBody(Option(message).getOrElse(""), secrets)
+    e match {
+      case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", safe(e.getMessage))
+      case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
+      case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", safe(e.getMessage))
+      case e =>
+        e.toLLMError match {
+          case unknown: UnknownError => UnknownError(safe(unknown.message), e)
+          case other                 => other
+        }
+    }
+  }
+
+  /**
+   * The configured values an error must not repeat: the API key, or with workload identity the ids
+   * `AnthropicWorkloadIdentity.toString` redacts.
+   */
+  private[provider] def credentialSecrets(config: AnthropicConfig): Seq[String] =
+    config.workloadIdentity match {
+      case None     => Seq(config.apiKey)
+      case Some(wi) => Seq(wi.federationRuleId, wi.organizationId) ++ wi.serviceAccountId ++ wi.workspaceId
+    }
   import org.llm4s.types.TryOps
 
   /**

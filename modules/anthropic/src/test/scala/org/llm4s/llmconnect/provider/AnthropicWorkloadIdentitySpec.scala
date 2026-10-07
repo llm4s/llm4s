@@ -246,3 +246,47 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         an[IllegalArgumentException] should be thrownBy new AnthropicClient(keyless.copy(apiKey = key))
     }
   }
+
+  "AnthropicClient.mapError" should {
+    val config = AnthropicConfig(
+      "",
+      "claude-test",
+      "https://api.anthropic.com",
+      200000,
+      4096,
+      Some(
+        AnthropicWorkloadIdentity(
+          Path.of("/var/run/svid.jwt"),
+          "fdrl_secret_1",
+          "org_secret_1",
+          serviceAccountId = Some("svac_secret_1"),
+          workspaceId = Some("wrkspc_secret_1")
+        )
+      )
+    )
+    val secrets = AnthropicClient.credentialSecrets(config)
+    val echoed  = Seq("fdrl_secret_1", "org_secret_1", "svac_secret_1", "wrkspc_secret_1", "opaque-access-tok-1")
+    val body =
+      """{"error":"federation rejected","federation_rule_id":"fdrl_secret_1","organization_id":"org_secret_1",""" +
+        """"service_account_id":"svac_secret_1","workspace_id":"wrkspc_secret_1","access_token":"opaque-access-tok-1"}"""
+
+    "redact the federation exchange's reply and the configured ids from any SDK failure" in {
+      val failures = Seq(
+        new com.anthropic.errors.AnthropicInvalidDataException(s"invalid token response: $body"),
+        new IllegalStateException(s"token exchange failed: $body")
+      )
+      for failure <- failures do
+        val error = AnthropicClient.mapError(failure, secrets)
+        error.message should include("federation rejected")
+        for secret <- echoed do (error.message should not).include(secret)
+    }
+
+    "redact an API key echoed by a failure when no workload identity is configured" in {
+      val keyed = config.copy(apiKey = "opaque-anthropic-key-1", workloadIdentity = None)
+      val error = AnthropicClient.mapError(
+        new IllegalStateException("rejected key opaque-anthropic-key-1"),
+        AnthropicClient.credentialSecrets(keyed)
+      )
+      (error.message should not).include("opaque-anthropic-key-1")
+    }
+  }

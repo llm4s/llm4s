@@ -1,6 +1,9 @@
 package org.llm4s.util
 
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import scala.annotation.unused
+import scala.util.Try
 import scala.util.matching.Regex
 
 /**
@@ -128,11 +131,25 @@ private[llm4s] object Redaction {
     "credential",
     "credentials",
     "privateKey",
-    "private_key"
+    "private_key",
+    // OAuth 2.0 / RFC 8693 token-endpoint fields
+    "refresh_token",
+    "refreshToken",
+    "id_token",
+    "idToken",
+    "client_secret",
+    "clientSecret",
+    "assertion",
+    "client_assertion",
+    "subject_token",
+    "actor_token"
   )
 
+  private val SensitiveJsonKeysLower: Set[String] = SensitiveJsonKeys.map(_.toLowerCase)
+
+  // The value may contain escaped quotes (`\"`), which must not end the match early and leave a tail behind.
   private def jsonKeyPattern(key: String): Regex =
-    s"""(?i)("${Regex.quote(key)}"\\s*:\\s*")([^"]+)(")""".r
+    s"""(?i)("${Regex.quote(key)}"\\s*:\\s*")((?:[^"\\\\]|\\\\.)+)(")""".r
 
   /**
    * Redact sensitive information from a string.
@@ -199,6 +216,75 @@ private[llm4s] object Redaction {
       case other     => redactForLogging(other.toString)
     }
 
+  /**
+   * A remote reply's body (or an exception message carrying one), fit to put in an `LLMError` or a log
+   * line. In order: every exact occurrence of each of `secrets` - the credentials the request carried,
+   * such as a subject token, client id or bearer - is replaced, as are its URL-encoded and JSON-escaped
+   * forms; so is the string value (of eight characters or more) of every sensitive JSON field
+   * (`access_token`, `refresh_token`, `id_token`, `client_secret`, `assertion`, `subject_token`, ...)
+   * anywhere in the body, wherever else it is repeated; then [[redact]] applies the general patterns (bearer tokens, JWTs, API keys,
+   * sensitive JSON fields and query parameters); and the result is truncated to `maxLength`. Blank
+   * secrets are ignored. Truncation comes last, so it never cuts a secret in two before it is matched.
+   */
+  def remoteBody(body: String, secrets: Iterable[String] = Nil, maxLength: Int = 512): String =
+    if (body == null || body.isEmpty) ""
+    else redactForLogging(scrubRemote(body, secrets), maxLength)
+
+  /**
+   * The exact-match half of [[remoteBody]], untruncated and without the general patterns: `secrets`, and
+   * the string values of sensitive JSON fields in `body`, scrubbed. For a body that is parsed afterwards,
+   * as `HttpErrorMapper` parses one, which then redacts and truncates the detail it extracts.
+   */
+  def scrubRemote(body: String, secrets: Iterable[String] = Nil): String =
+    if (body == null || body.isEmpty) body
+    else scrub(body, secrets ++ sensitiveJsonValues(body))
+
+  /**
+   * `input` with every exact occurrence of each non-blank value in `secrets`, and of its URL-encoded and
+   * JSON-escaped forms, replaced by `placeholder`. Longer values are replaced first, so a secret that
+   * contains another is not left half-masked.
+   */
+  def scrub(input: String, secrets: Iterable[String], placeholder: String = RedactionPlaceholder): String =
+    if (input == null || input.isEmpty) input
+    else {
+      val forms = secrets.iterator
+        .filter(_ != null)
+        .map(_.trim)
+        .filter(_.nonEmpty)
+        .flatMap(secret => Iterator(secret, URLEncoder.encode(secret, StandardCharsets.UTF_8), jsonEscaped(secret)))
+        .toSeq
+        .distinct
+        .sortBy(-_.length)
+      forms.foldLeft(input)((acc, secret) => acc.replace(secret, placeholder))
+    }
+
+  private def jsonEscaped(value: String): String = {
+    val rendered = ujson.Str(value).render()
+    rendered.substring(1, rendered.length - 1)
+  }
+
+  private val MinRepeatedSecretLength = 8
+
+  /** The string values of sensitive fields, at any depth, when `input` is JSON; otherwise none. */
+  private def sensitiveJsonValues(input: String): Seq[String] = {
+    def strings(value: ujson.Value): Seq[String] = value match {
+      case ujson.Str(s)   => Seq(s)
+      case ujson.Obj(obj) => obj.values.toSeq.flatMap(strings)
+      case ujson.Arr(arr) => arr.toSeq.flatMap(strings)
+      case _              => Nil
+    }
+    def sensitive(value: ujson.Value): Seq[String] = value match {
+      case ujson.Obj(obj) =>
+        obj.toSeq.flatMap { (key, v) =>
+          if (SensitiveJsonKeysLower.contains(key.toLowerCase)) strings(v) else sensitive(v)
+        }
+      case ujson.Arr(arr) => arr.toSeq.flatMap(sensitive)
+      case _              => Nil
+    }
+    // A very short value is left to the key pattern: replacing every occurrence of, say, "a" would garble the body.
+    Try(ujson.read(input)).toOption.fold(Seq.empty[String])(sensitive).filter(_.trim.length >= MinRepeatedSecretLength)
+  }
+
   // ============================================================
   // Private redaction helpers
   // ============================================================
@@ -206,14 +292,14 @@ private[llm4s] object Redaction {
   private def redactAuthHeaders(input: String, placeholder: String): String = {
     // Handle "Authorization": "..." in JSON
     val step1 = """(?i)("Authorization"\s*:\s*")([^"]+)(")""".r
-      .replaceAllIn(input, m => s"${m.group(1)}$placeholder${m.group(3)}")
+      .replaceAllIn(input, m => Regex.quoteReplacement(s"${m.group(1)}$placeholder${m.group(3)}"))
     // Handle Authorization: ... in headers
     val step2 = """(?i)(Authorization:\s*)([^\n\r]+)""".r
-      .replaceAllIn(step1, m => s"${m.group(1)}$placeholder")
+      .replaceAllIn(step1, m => Regex.quoteReplacement(s"${m.group(1)}$placeholder"))
     // Handle standalone Bearer tokens
-    val step3 = """(?i)\bBearer\s+([a-zA-Z0-9\-_\.]+)""".r.replaceAllIn(step2, placeholder)
+    val step3 = """(?i)\bBearer\s+([a-zA-Z0-9\-_\.]+)""".r.replaceAllIn(step2, Regex.quoteReplacement(placeholder))
     // Handle standalone Basic auth tokens
-    """(?i)\bBasic\s+([a-zA-Z0-9+/=]+)""".r.replaceAllIn(step3, placeholder)
+    """(?i)\bBasic\s+([a-zA-Z0-9+/=]+)""".r.replaceAllIn(step3, Regex.quoteReplacement(placeholder))
   }
 
   private def redactQueryParams(input: String, placeholder: String): String =
@@ -224,9 +310,9 @@ private[llm4s] object Redaction {
         val key       = m.group(2)
 
         if (SensitiveQueryParams.exists(s => key.toLowerCase.contains(s.toLowerCase))) {
-          s"$separator$key=$placeholder"
+          Regex.quoteReplacement(s"$separator$key=$placeholder")
         } else {
-          m.matched
+          Regex.quoteReplacement(m.matched)
         }
       }
     )
@@ -234,7 +320,7 @@ private[llm4s] object Redaction {
   private def redactJsonFields(input: String, placeholder: String): String =
     SensitiveJsonKeys.foldLeft(input) { (acc, key) =>
       val pattern = jsonKeyPattern(key)
-      pattern.replaceAllIn(acc, m => s"${m.group(1)}$placeholder${m.group(3)}")
+      pattern.replaceAllIn(acc, m => Regex.quoteReplacement(s"${m.group(1)}$placeholder${m.group(3)}"))
     }
 
   private def redactApiKeys(input: String, placeholder: String): String =

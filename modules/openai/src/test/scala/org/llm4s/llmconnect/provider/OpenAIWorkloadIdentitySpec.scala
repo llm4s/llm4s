@@ -103,6 +103,40 @@ class OpenAIWorkloadIdentitySpec
         an[AuthenticationError]
     }
 
+    "redact the token exchange's reply, and the configured ids, from an SDK error" in {
+      val config = OpenAIConfig(
+        apiKey = "",
+        model = "gpt-4o-mini",
+        organization = None,
+        baseUrl = "https://api.openai.com/v1",
+        contextWindow = 8192,
+        reserveCompletion = 1024,
+        workloadIdentity = Some(
+          OpenAIWorkloadIdentity(IdentitySource.Literal("opaque-svid-literal-7"), "idp_secret_1", "sa_secret_1")
+            .withClientId("client_secret_id_1")
+        )
+      )
+      val secrets = OpenAIClient.credentialSecrets(config)
+      val sdkMessages = Seq(
+        // What the SDK's exchange reports for a reply without an access token.
+        "Token exchange response missing 'access_token' field. Response: " +
+          """{"error":"bad","client_id":"client_secret_id_1","service_account_id":"sa_secret_1",""" +
+          """"identity_provider_id":"idp_secret_1","subject_token":"opaque-svid-literal-7",""" +
+          """"refresh_token":"opaque-refresh-token-1"}"""
+      )
+      for message <- sdkMessages do
+        val error = OpenAIClient.mapError(new com.openai.errors.OpenAIInvalidDataException(message), "openai", secrets)
+        error.message should include("Token exchange response")
+        for secret <- Seq(
+            "client_secret_id_1",
+            "sa_secret_1",
+            "idp_secret_1",
+            "opaque-svid-literal-7",
+            "opaque-refresh-token-1"
+          )
+        do (error.message should not).include(secret)
+    }
+
     "read the identity token for the async path off the common pool" in {
       val file = Files.createTempFile("svid", ".jwt")
       Files.writeString(file, "eyJ.svid.sig")

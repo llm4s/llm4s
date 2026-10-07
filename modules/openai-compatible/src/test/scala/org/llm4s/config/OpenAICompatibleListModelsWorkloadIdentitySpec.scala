@@ -49,6 +49,34 @@ class OpenAICompatibleListModelsWorkloadIdentitySpec extends AnyWordSpec with Ma
         fake.apiAuthorizations shouldBe empty
       }
 
+    "not repeat the exchanged access token, or a credential field, from a rejected listing's body" in {
+      val bearer = "opaque-listing-token-3"
+      val http = org.llm4s.http.MockHttpClient(
+        Seq(
+          org.llm4s.http.HttpResponse(200, s"""{"access_token":"$bearer","expires_in":3600}"""),
+          org.llm4s.http.HttpResponse(
+            401,
+            s"""{"message":"token $bearer is revoked","refresh_token":"opaque-refresh-token-9"}"""
+          )
+        )
+      )
+      val section = org.llm4s.testkit.ProviderTestConfig
+        .loadSection(
+          "main",
+          """llm4s.providers.main {
+            |  provider = "openai-compatible"
+            |  model    = "m"
+            |  baseUrl  = "https://ws.example/serving-endpoints"
+            |  auth { identityToken = "opaque-svid-literal-1", tokenUrl = "https://ws.example/oidc/v1/token" }
+            |}""".stripMargin
+        )
+        .fold(error => fail(error.message), identity)
+      val error = OpenAICompatibleModelLister.listModels(section, http).left.value
+      error.message should include("revoked")
+      for secret <- Seq(bearer, "opaque-refresh-token-9", "opaque-svid-literal-1") do
+        (error.message should not).include(secret)
+    }
+
     "exchange and list for a loopback baseUrl" in FakeTokenExchangeServer.withServer { fake =>
       val source = ReferenceConfig.withEnv(hocon(fake, s"${fake.baseUrl}/serving-endpoints"), Map.empty)
       Llm4sConfig.listModels("main", source, Llm4sHttpClient.create()).value.map(_.name.toString) shouldBe

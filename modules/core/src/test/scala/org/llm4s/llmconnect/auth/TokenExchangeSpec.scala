@@ -124,6 +124,40 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
       (error.message should not).include(jwt)
     }
 
+    "never echo the client id, an opaque subject token or a credential field in a 400/401/403 error" in {
+      // Opaque values, so it is the exact-match scrub that removes them, not the general JWT pattern.
+      val subject  = "opaque-subject-token-7f3a9c"
+      val clientId = "sp-client-4d2e81"
+      val cfg      = config(Some(clientId)).withIdentityToken(IdentitySource.Literal(subject))
+      for status <- Seq(400, 401, 403) do
+        val body =
+          s"""{"error":"invalid_client","error_description":"client $clientId rejected subject $subject",""" +
+            s""""access_token":"leaked-access-9b1c","refresh_token":"leaked-refresh-77aa",""" +
+            s""""echo":"grant_type=x&subject_token=${java.net.URLEncoder.encode(subject, StandardCharsets.UTF_8)}"}"""
+        val http    = MockHttpClient(Seq(HttpResponse(status, body)))
+        val message = TokenExchange.rfc8693(cfg, http, clock)().left.value.message
+        message should include(s"HTTP $status")
+        message should include("invalid_client")
+        for secret <- Seq(subject, clientId, "leaked-access-9b1c", "leaked-refresh-77aa") do
+          (message should not).include(secret)
+    }
+
+    "never echo a credential value repeated outside its field, or the client id, in a 5xx error" in {
+      val clientId = "sp-client-4d2e81"
+      val body     = s"""{"message":"token leaked-access-9b1c for $clientId","access_token":"leaked-access-9b1c"}"""
+      val http     = MockHttpClient(Seq(HttpResponse(503, body)))
+      val message  = TokenExchange.rfc8693(config(Some(clientId)), http, clock)().left.value.message
+      message should include("token")
+      for secret <- Seq(clientId, "leaked-access-9b1c") do (message should not).include(secret)
+    }
+
+    "truncate a long error body" in {
+      val http    = MockHttpClient(Seq(HttpResponse(400, "x" * 10000)))
+      val message = TokenExchange.rfc8693(config(), http, clock)().left.value.message
+      message.length should be < 1000
+      message should include("truncated")
+    }
+
     "fail without calling the endpoint when the identity token is missing" in {
       val http = MockHttpClient(Seq(ok))
       val cfg  = config().withIdentityToken(IdentitySource.File(java.nio.file.Path.of("/no/such/svid")))
