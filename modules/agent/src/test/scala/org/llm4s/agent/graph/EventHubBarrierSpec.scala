@@ -8,7 +8,10 @@ import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 
-/** The event hub's end-of-run barrier, at the dispatcher: lagging, and a barrier given during replay. */
+/**
+ * The event hub's end-of-run barrier, at the dispatcher: lagging, and a barrier given during replay;
+ * and the queue's bound when dropped live events and durable commits alternate.
+ */
 class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
 
   private val thread = ThreadId("t")
@@ -36,7 +39,8 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
       seen.add(event match
         case StreamEvent.Durable(r)              => r.seq.toString
         case StreamEvent.Disconnected(_, reason) => s"Disconnected($reason)"
-        case other                               => other.toString
+        case StreamEvent.LiveGap(n)              => s"gap:$n"
+        case _: StreamEvent.Live                 => "live"
       )
       onEvent(event)
     def runEnded(runId: RunId): Unit =
@@ -102,6 +106,47 @@ class EventHubBarrierSpec extends AnyFlatSpec with Matchers:
     listener.reached.await(5, TimeUnit.SECONDS) shouldBe true
     // a barrier queued at once, ignoring that the dispatcher has not joined, would precede 3
     listener.seen.asScala.toVector shouldBe Vector("1", "2", "3", "end:r1")
+    sub.cancel()
+    hub.liveCount(thread) shouldBe 0
+  }
+
+  "A held dispatcher" should "stay within twice its capacity when dropped live events and durable commits alternate" in {
+    val capacity = 4
+    val entered  = new CountDownLatch(1)
+    val proceed  = new CountDownLatch(1)
+    val listener = Recording {
+      case StreamEvent.Durable(r) if r.seq == 1 =>
+        entered.countDown()
+        proceed.await(5, TimeUnit.SECONDS): Unit
+      case _ => ()
+    }
+    def live(i: Int): StreamEvent.Live =
+      StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(i))
+    val hub = EventHub(InMemoryCheckpointer())
+    val sub = hub.observe(thread, capacity, listener).start(lastSeq = 0L)
+    hub.durable(thread, Vector(record(1)))
+    entered.await(5, TimeUnit.SECONDS) shouldBe true // the listener holds the first event
+
+    // fills the live slots: 3 accepted (one slot is kept for a gap marker), 7 dropped
+    (1 to 10).foreach(i => hub.live(thread, live(i)))
+    sub.queued shouldBe capacity - 1
+    // each commit follows a dropped live event, so each needs a gap before it; the live slots are full
+    (2 to capacity + 1).foreach { seq =>
+      hub.live(thread, live(100 + seq))
+      hub.durable(thread, Vector(record(seq.toLong)))
+      sub.queued should be <= 2 * capacity
+    }
+    sub.queued shouldBe 2 * capacity - 1 // 3 live events and 4 durable ones, each gap riding with its event
+    // two more dropped before the run ends: the barrier carries them, in its own slot
+    (1 to 2).foreach(i => hub.live(thread, live(200 + i)))
+    sub.endOfRun(run)
+    sub.queued shouldBe 2 * capacity
+
+    proceed.countDown()
+    listener.reached.await(5, TimeUnit.SECONDS) shouldBe true
+    // each gap is reported where it happened: before the commit, or the end, that followed the drops
+    listener.seen.asScala.toVector shouldBe
+      Vector("1", "live", "live", "live", "gap:8", "2", "gap:1", "3", "gap:1", "4", "gap:1", "5", "gap:2", "end:r1")
     sub.cancel()
     hub.liveCount(thread) shouldBe 0
   }
