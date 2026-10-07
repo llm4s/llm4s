@@ -8,7 +8,6 @@ import upickle.default._
 
 import java.net.{ HttpURLConnection, URI }
 import java.nio.charset.StandardCharsets
-import scala.io.Source
 import scala.concurrent.duration.{ DurationLong, FiniteDuration }
 import scala.util.Try
 
@@ -304,15 +303,15 @@ object HTTPTool {
         connection.getInputStream
       }
 
+      // Read at most maxResponseSize bytes (plus one, to detect a longer body) so that an
+      // oversized or endless response never has to fit in memory, then decode. A cut that
+      // falls inside a multi-byte character decodes it as U+FFFD.
+      val limit = math.min(math.max(config.maxResponseSize, 0L), (Int.MaxValue - 9).toLong).toInt
       val (responseBody, truncated) = using(inputStream) { is =>
-        using(Source.fromInputStream(is, "UTF-8")) { source =>
-          val fullBody = source.mkString
-          if (fullBody.length > config.maxResponseSize) {
-            (fullBody.take(config.maxResponseSize.toInt), true)
-          } else {
-            (fullBody, false)
-          }
-        }
+        val bytes    = is.readNBytes(limit + 1)
+        val isLonger = bytes.length > limit
+        val kept     = if (isLonger) java.util.Arrays.copyOf(bytes, limit) else bytes
+        (new String(kept, StandardCharsets.UTF_8), isLonger)
       }
 
       connection.disconnect()
