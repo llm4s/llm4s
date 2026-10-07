@@ -11,11 +11,19 @@ import scala.util.Using
  * Edge cases of [[CalculatorTool]] that `CoreToolsSpec` does not cover: the operations it skips (abs, min,
  * max, modulo), the error paths, how operation names and operands are read, and how results are rendered.
  *
- * Every expectation here was observed by running the tool, not assumed. A behaviour that looks wrong is
- * recorded with `pendingUntilFixed` instead of being pinned as correct (non-finite results returned as
- * values); it starts failing the day it is fixed, which forces the test to be promoted.
+ * Every expectation here was observed by running the tool, not assumed. A result that is not a finite number
+ * is an error (as division by zero is), and the formatted text does not depend on the JVM's default locale.
  */
 class CalculatorToolEdgeCasesSpec extends AnyFlatSpec with Matchers {
+
+  /** Locales whose number formatting differs from the root locale's: comma separator, non-ASCII digits. */
+  private val formatLocales: Seq[Locale] = Seq(
+    Locale.GERMANY,
+    Locale.FRANCE,
+    Locale.forLanguageTag("ar-SA"),
+    Locale.forLanguageTag("th-TH-u-nu-thai"),
+    Locale.forLanguageTag("hi-IN-u-nu-deva")
+  )
 
   private def tool = CalculatorTool.toolSafe.fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
 
@@ -246,20 +254,98 @@ class CalculatorToolEdgeCasesSpec extends AnyFlatSpec with Matchers {
     ok("multiply", -1.0, Some(0.0)).formatted shouldBe "0"
   }
 
-  // ---- behaviour that looks wrong: recorded, not pinned
+  // ---- formatting does not depend on the default locale
 
   "CalculatorTool formatting" should "not depend on the JVM's default locale" in {
-    withFormatLocale(Locale.GERMANY) {
-      ok("divide", 1.0, Some(2.0)).formatted shouldBe "0.5"
-      ok("divide", 1.0, Some(3.0)).formatted shouldBe "0.333333"
+    formatLocales.foreach { locale =>
+      withFormatLocale(locale) {
+        withClue(s"$locale: ") {
+          ok("divide", 1.0, Some(2.0)).formatted shouldBe "0.5"
+          ok("divide", 1.0, Some(3.0)).formatted shouldBe "0.333333"
+          ok("divide", -2.0, Some(3.0)).formatted shouldBe "-0.666667"
+          ok("sqrt", 2.0).formatted shouldBe "1.414214"
+          ok("add", 1234567.891, Some(0.0)).formatted shouldBe "1234567.891"
+          ok("add", 5.0, Some(3.0)).formatted shouldBe "8"
+        }
+      }
     }
   }
 
-  "CalculatorTool non-finite results" should "be reported as errors, as division by zero and sqrt of a negative are" in {
-    pendingUntilFixed {
-      calc("power", 10.0, Some(400.0)).isLeft shouldBe true
-      calc("power", -8.0, Some(1.0 / 3.0)).isLeft shouldBe true
-      calc("multiply", 1e200, Some(1e200)).isLeft shouldBe true
+  it should "keep dropping trailing zeros in every locale" in {
+    formatLocales.foreach { locale =>
+      withFormatLocale(locale) {
+        withClue(s"$locale: ") {
+          ok("divide", 1.0, Some(4.0)).formatted shouldBe "0.25"
+          ok("percentage", 12.5, Some(10.0)).formatted shouldBe "1.25"
+          ok("divide", 7.0, Some(2.0)).formatted shouldBe "3.5"
+        }
+      }
     }
+  }
+
+  it should "leave the numeric result and the expression untouched by the locale" in {
+    withFormatLocale(Locale.GERMANY) {
+      val r = ok("divide", 1.0, Some(2.0))
+      r.result shouldBe 0.5
+      r.expression shouldBe "1.0 / 2.0"
+    }
+  }
+
+  it should "render the smallest representable step and small negatives" in {
+    ok("multiply", 1e-6, Some(1.0)).formatted shouldBe "0.000001"
+    ok("multiply", -1e-6, Some(1.0)).formatted shouldBe "-0.000001"
+    ok("add", 123456789.123456, Some(0.0)).formatted shouldBe "123456789.123456"
+  }
+
+  // ---- results that are not finite numbers are errors
+
+  "CalculatorTool non-finite results" should "be reported as errors, as division by zero and sqrt of a negative are" in {
+    failure(calc("power", 10.0, Some(400.0))) should include("finite")
+    failure(calc("power", -8.0, Some(1.0 / 3.0))) should include("finite")
+    failure(calc("multiply", 1e200, Some(1e200))) should include("finite")
+  }
+
+  it should "cover overflow in every operation that can overflow" in {
+    val overflowing = Seq(
+      ("add", Double.MaxValue, Some(Double.MaxValue)),
+      ("subtract", -Double.MaxValue, Some(Double.MaxValue)),
+      ("multiply", 1e300, Some(1e300)),
+      ("divide", 1.0, Some(1e-320)),
+      ("power", 10.0, Some(309.0)),
+      ("percentage", Double.MaxValue, Some(200.0))
+    )
+    overflowing.foreach { case (operation, a, b) =>
+      withClue(s"$operation($a, $b): ")(failure(calc(operation, a, b)) should include("finite"))
+    }
+  }
+
+  it should "reject an undefined result" in {
+    failure(calc("power", -1.0, Some(0.5))) should include("finite")
+    failure(calc("power", -8.0, Some(1.0 / 3.0))) should include("finite")
+  }
+
+  it should "accept the largest finite results" in {
+    ok("add", Double.MaxValue, Some(0.0)).result shouldBe Double.MaxValue
+    ok("multiply", Double.MaxValue, Some(1.0)).result shouldBe Double.MaxValue
+    ok("subtract", -Double.MaxValue, Some(0.0)).result shouldBe -Double.MaxValue
+    ok("power", 10.0, Some(308.0)).result shouldBe 1e308
+    ok("percentage", 1e307, Some(100.0)).result shouldBe 1e307
+  }
+
+  it should "accept the smallest results without turning them into errors" in {
+    ok("divide", 1.0, Some(1e300)).result shouldBe 1e-300
+    ok("multiply", 1e-300, Some(1e-300)).result shouldBe 0.0
+    ok("power", 0.0, Some(0.0)).result shouldBe 1.0
+  }
+
+  it should "report overflow through the tool's entry point as an error, not as the text Infinity" in {
+    val reply = tool.execute(params("power", 10.0, Some(400.0)))
+    reply.isLeft shouldBe true
+    reply.left.map(_.getMessage).left.getOrElse("") should include("finite")
+  }
+
+  it should "still return the other errors unchanged" in {
+    failure(calc("divide", 1.0, Some(0.0))) should include("zero")
+    failure(calc("sqrt", -1.0)) should include("negative")
   }
 }

@@ -1764,6 +1764,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Calculator decimal output uses a stable locale, including on JVMs configured with comma decimal separators.
+- **`llm4s-agent-tools`: `CalculatorTool` rejects results that are not finite**
+  ([#1516](https://github.com/llm4s/llm4s/issues/1516)): an overflow (`10^400`, `1e200 * 1e200`) or an undefined
+  power (`(-8)^(1/3)`) was returned as a success whose text was `Infinity` or `NaN`, while division by zero and
+  the square root of a negative were errors. Any result that is infinite or not a number is now an error,
+  like those two, so a model is no longer handed `"Infinity"` as an answer; **a caller that relied on receiving
+  `Infinity` or `NaN` now gets a `Left`** (the tool description says so).
 - **`llm4s-agent-tools`: file tools confined by path component, not string prefix**
   ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `FileConfig.isPathAllowed` and
   `WriteConfig.isPathAllowed` compared paths with `String.startsWith`, so an allowed `/srv/agent-data` also
