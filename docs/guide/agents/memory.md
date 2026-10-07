@@ -354,7 +354,7 @@ custom `EmbeddingService` written before it existed keeps working unchanged.
 
 Put the relevant memory in the system prompt, run the agent, then record the turn. The memory half
 of this is runnable as is; `runAgent` stands for however you build and call your agent (see the
-[Agents guide](index.md)), taking the system prompt and returning the messages of the turn:
+[Agents guide](index)), taking the system prompt and returning the messages of the turn:
 
 ```scala
 import org.llm4s.agent.memory._
