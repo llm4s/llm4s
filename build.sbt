@@ -1528,7 +1528,9 @@ lazy val javaApi = (project in file("modules/java-api"))
   )
 
 lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
-  .dependsOn(javaApi)
+  // core's test classes carry the `fixturechat` provider and its services entry, and the provider testkit a
+  // local HTTP server: the specs for providers other than openai, anthropic and ollama use both (#1467).
+  .dependsOn(javaApi, core % "test->test", providerTestkit % Test)
   .settings(
     name := "llm4s-spring-boot-starter",
     commonSettings,

@@ -8,11 +8,73 @@ llm4s.model=gpt-4o
 llm4s.api-key=${OPENAI_API_KEY}
 ```
 
+Every other provider (Gemini, Azure OpenAI, Mistral, OpenRouter, a self-hosted OpenAI-compatible server, ...) is
+configured under `llm4s.providers`; see [Any provider](#any-provider).
+
 ```java
 @Autowired LLM4STemplate llm;
 String reply = llm.complete("Summarise this quarter's results.");
 CompletableFuture<String> later = llm.completeAsync("Translate to French.");
 ```
+
+## Any provider
+
+The flat `llm4s.provider`, `llm4s.model`, `llm4s.api-key` ... keys above are the starter's original, three-provider
+form and keep working unchanged. For everything else, set `llm4s.providers.*` properties. They mirror the
+`llm4s.providers` block of llm4s's own HOCON configuration, so any provider on the classpath works with no
+Spring-specific code, and so does any extra the provider declares:
+
+```properties
+llm4s.providers.provider=gemini-main            # the default section
+llm4s.providers.gemini-main.provider=gemini
+llm4s.providers.gemini-main.model=gemini-2.0-flash
+llm4s.providers.gemini-main.api-key=${GOOGLE_API_KEY}
+```
+
+```properties
+llm4s.providers.provider=azure-main
+llm4s.providers.azure-main.provider=azure
+llm4s.providers.azure-main.model=my-deployment
+llm4s.providers.azure-main.api-key=${AZURE_OPENAI_API_KEY}
+llm4s.providers.azure-main.endpoint=https://my-resource.openai.azure.com
+llm4s.providers.azure-main.api-version=2024-02-01
+```
+
+```properties
+llm4s.providers.provider=local
+llm4s.providers.local.provider=openai-compatible
+llm4s.providers.local.model=my-model
+llm4s.providers.local.base-url=http://localhost:8000/v1
+llm4s.providers.local.context-window=32000        # extras of the generic provider
+llm4s.providers.local.headers.X-Team-Id=team-7    # header names are kept as written
+```
+
+- **Names.** Within a section, `kebab-case` and `snake_case` names are read as the `camelCase` names of the HOCON block
+  (`api-key` is `apiKey`, `base-url` is `baseUrl`, `api-version` is `apiVersion`). The section name is kept as written.
+- **Providers on the classpath.** `llm4s-spring-boot-starter` brings `openai`, `azure`, `requesty`, `anthropic`, `ollama`,
+  `gemini` (alias `google`), `vertexai` (alias `vertex`) and the OpenAI-compatible family: `openai-compatible`,
+  `deepseek`, `zai`, `openrouter`, `mistral` and `cohere`. A provider module you add to the classpath is found the
+  same way, with no change to the starter. Each provider's own keys (`endpoint` for Azure, `project` and `location` for
+  Vertex AI, ...) are listed in its module's README.
+- **Keys.** A section with no `api-key` uses the vendor's shared key,
+  `llm4s.credentials.<provider>.api-key`, and llm4s's own conventional environment variable for the vendor
+  (`GOOGLE_API_KEY`, `MISTRAL_API_KEY`, ...) before failing with an error that names both. Set `api-key` in a section
+  that should use a second account.
+- **Several sections.** Define as many as you like; `llm4s.providers.provider` names the one the starter uses.
+  If it is not set, the flat `llm4s.provider` can name a section instead.
+- **Which form wins.** As soon as any `llm4s.providers.*` property is set, the block is used and the flat
+  `llm4s.model`, `llm4s.api-key`, `llm4s.base-url` ... are ignored. With none, the flat keys are read exactly as before.
+- **Context size.** In the block, the context window and the reserved completion size come from llm4s's model
+  registry; only the generic `openai-compatible` provider reads `context-window` and `reserve-completion` from the
+  section. The flat `llm4s.context-window` keeps working for the three flat providers.
+- **Values are plain text.** Spring resolves `${...}` placeholders as it does everywhere; the value is not read as HOCON
+  afterwards, so quotes, `$` and braces stay as written. Environment-variable names such as `LLM4S_PROVIDERS_...` are
+  not read: use properties, YAML or `@TestPropertySource`.
+- **Errors.** An unknown provider id fails startup with llm4s's own message, which names the registered providers and
+  the dependency to add. Only the default section is validated, so another section's mistake does not stop the
+  application.
+- **Health.** The Actuator indicator reports the provider and model the section resolves to, and keeps every key from
+  `llm4s.providers.*` and `llm4s.credentials.*` out of its messages.
 
 ## Beans
 
@@ -61,5 +123,5 @@ The probe is billed: keep the TTL generous.
 | `llm4s.health.probe-ttl` | `60s` | how long a probe result is reused |
 | `llm4s.health.probe-timeout` | `10s` | a slower probe is cancelled and reports DOWN |
 
-Other settings: `llm4s.base-url`, `llm4s.organization`, `llm4s.context-window`,
+Other flat settings: `llm4s.base-url`, `llm4s.organization`, `llm4s.context-window`,
 `llm4s.reserve-completion`. All keys are in `META-INF/additional-spring-configuration-metadata.json`.

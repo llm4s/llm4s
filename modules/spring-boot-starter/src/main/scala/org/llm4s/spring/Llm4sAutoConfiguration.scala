@@ -10,6 +10,7 @@ import org.springframework.boot.autoconfigure.condition.{
 }
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.{ Bean, Configuration }
+import org.springframework.core.env.ConfigurableEnvironment
 
 import java.util.concurrent.{ ExecutorService, LinkedBlockingQueue, ThreadFactory, ThreadPoolExecutor, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
@@ -55,9 +56,9 @@ class Llm4sAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  def llm4sClient(properties: Llm4sProperties): JLlmClient =
-    ProviderConfigParser
-      .parse(properties)
+  def llm4sClient(properties: Llm4sProperties, environment: ConfigurableEnvironment): JLlmClient =
+    ProviderSelection
+      .resolve(properties, environment)
       .map(config => Llm4s.createClient(config).get())
       .get()
 

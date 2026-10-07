@@ -9,6 +9,7 @@ import org.springframework.boot.autoconfigure.condition.{
   ConditionalOnMissingBean
 }
 import org.springframework.context.annotation.{ Bean, Configuration }
+import org.springframework.core.env.ConfigurableEnvironment
 
 import java.util.concurrent.ExecutorService
 
@@ -23,10 +24,11 @@ class LlmActuatorAutoConfiguration {
   def llmHealthIndicator(
     client: JLlmClient,
     properties: Llm4sProperties,
-    @Qualifier(Llm4sExecutors.BeanName) executor: ExecutorService
+    @Qualifier(Llm4sExecutors.BeanName) executor: ExecutorService,
+    environment: ConfigurableEnvironment
   ): LlmHealthIndicator = {
     require(properties.health.probeTimeout.toNanos > 0, "llm4s.health.probe-timeout must be positive")
     require(!properties.health.probeTtl.isNegative, "llm4s.health.probe-ttl must not be negative")
-    new LlmHealthIndicator(client, HealthSettings.from(properties), executor)
+    new LlmHealthIndicator(client, HealthSettings.from(properties, environment), executor)
   }
 }
