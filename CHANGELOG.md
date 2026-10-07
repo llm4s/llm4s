@@ -23,6 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decide - `encodeThinking` (given the turn's blocks), `thinkingDetails` and `decodeThinkingDetails` - and drop it by
   default. The agent's tool loop stores the completion's message unchanged, so a run sends a tool-call turn's
   thinking in the call after the tool results, and later turns read it back from the checkpoint.
+- **`llm4s-config-policy`: a setup checker, `DoctorCli`** ([#1481](https://github.com/llm4s/llm4s/issues/1481)):
+  `sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli [--config <file>] [--offline] [--live] [--timeout <s>] [--json]"`
+  checks the JDK (21 or newer), that the configuration can be read, that `llm4s.providers.provider` names a section,
+  that the section's provider is registered (and, if not, names the registered ones and says to add the dependency),
+  that its API key resolves (the config path it came from, never the value), that the section validates, and, for a
+  server on the loopback interface, that it answers and has the configured model. With `--live` it makes one small
+  request and maps an authentication, rate-limit, not-found, timeout or network error to its own advice. By default
+  nothing is sent to a hosted provider. Every step that fails prints a `fix:` line; the exit code is `0`, `1` (warnings
+  only) or `2`. Every API key in the configuration is hidden by value in the output, in addition to the shape-based
+  redaction. `Doctor.run` and `DoctorPorts` are the same check as a function with the JDK, model probe and live
+  request injectable. The module is not published and `Doctor` adds no public API to a published module. See
+  [Doctor](docs/reference/doctor.md).
 - **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
   `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
   service's MP3 and return its bytes untouched. PCM stays the default. `AudioFormat.Mp3` is a new case

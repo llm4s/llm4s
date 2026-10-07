@@ -8,6 +8,22 @@ This module provides a lightweight governance layer for LLM4S prompt/model confi
 - `ConfigPolicy` DSL with presets (`devSandbox`, `prodSafeDefaults`).
 - `ConfigPolicyEngine` for evaluating provider config against policies.
 - `CheckPolicies` CLI entrypoint for CI gating.
+- `Doctor` / `DoctorCli`: a setup checker that reports what is wrong with a configuration and how to fix it (see [Doctor](../../docs/reference/doctor.md)).
+
+## Doctor
+
+`DoctorCli` checks one whole setup instead of gating it against policies: the JDK, the configuration, the default
+provider, its module on the classpath, its API key (the config path it came from, never the value), its config, a
+local model server on the loopback interface, and with `--live` one small request.
+
+```bash
+sbt "configPolicy/runMain org.llm4s.configpolicy.DoctorCli --config path/to/application.conf"
+```
+
+Options are `--config <file>`, `--offline`, `--live`, `--timeout <seconds>` and `--json`. The exit code is `0` when
+everything passed, `1` for warnings only and `2` when a step failed. `Doctor.run(source, options, ports)` is the same
+check as a function, with the JDK version, the model probe and the live request passed in as `DoctorPorts` so a test
+can replace them. The full description is in [docs/reference/doctor.md](../../docs/reference/doctor.md).
 
 ## Presets and the `openai-compatible` provider
 
