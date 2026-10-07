@@ -28,7 +28,7 @@ class VoyageAIInputTypeSpec extends AnyFlatSpec with Matchers {
     sentBody(EmbeddingRequest(Seq("a", "b"), modelCfg, InputPurpose.Query))("input_type").str shouldBe "query"
   }
 
-  it should "send input_type document when the request does not say, as every request did before" in {
+  it should "send input_type document when the request does not say (Voyage received no input_type at all before purposes existed)" in {
     sentBody(EmbeddingRequest(Seq("a", "b"), modelCfg))("input_type").str shouldBe "document"
   }
 
