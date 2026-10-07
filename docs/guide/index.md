@@ -16,6 +16,7 @@ Comprehensive guides for LLM4S features.
 - **[Basic Usage](basic-usage)** - Get started with LLM calls, client creation, and error handling
 - **[Providers](providers)** - Overview of supported providers and how to configure them
 - **[Error Handling](error-handling)** - Work with `Result[A]` and `LLMError`: pattern matching, for-comprehensions, every error type, recovery and testing
+- **[Structured Output](structured-output)** - `completeStructured`: typed replies from a schema, which providers enforce it, and what a bad reply looks like
 - **[Writing a Provider](writing-a-provider)** - Publish your own provider module against the `llm4s-core` SPI
 
 ### Agent Framework

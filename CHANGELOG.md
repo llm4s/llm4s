@@ -338,6 +338,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   testing. Its snippets after the first section are compiled and run by `ErrorHandlingGuideSpec`. The Basic Usage
   guide listed error types that do not exist (`ProviderConnectionError`, `InvalidApiKeyError`, ...) and
   called `LLMError` sealed; it now shows the real ones and links to the guide.
+- **Structured output guide** ([#1310](https://github.com/llm4s/llm4s/issues/1310)):
+  `docs/guide/structured-output.md` explains `LLMClient.completeStructured[A]`: a minimal example, how the
+  reply is recovered from a fence or prose, that the schema is derived with `strict = true` and so lists every
+  property as required (including ones declared optional), that only `responseFormat` is overridden, how to
+  set the schema name or strictness by calling `complete` directly, the `ValidationError` on `structured_output`
+  for a reply that is not JSON, is `null` or does not match, and what each provider does with the schema
+  (OpenAI, Azure, Requesty, the OpenAI-compatible providers, Cohere, Gemini, Vertex AI and Ollama send it;
+  Anthropic only instructs the model; watsonx and Bedrock send nothing). The code it shows is mirrored in, and run by,
+  `StructuredOutputGuideSpec`. The Scaladoc of `completeStructured` now states the all-fields-required behaviour
+  and the error contract; no code changed.
 - **Cancellation by interrupt for graph runs and providers** (Experimental, `org.llm4s.agent.graph`,
   [#1270](https://github.com/llm4s/llm4s/issues/1270)): each superstep runs in a bounded Ox scope on
   virtual threads (Ox is a new implementation dependency of `llm4s-agent`). Interrupting the thread

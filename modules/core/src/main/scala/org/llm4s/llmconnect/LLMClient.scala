@@ -54,18 +54,28 @@ trait LLMClient extends AutoCloseable {
    * Sends the conversation and parses the response into a typed value using the provided schema.
    *
    * Sets `ResponseFormat.JsonSchema` on the options so providers that support native structured
-   * output (OpenAI, Gemini) enforce the schema at generation time. Anthropic falls back to a
-   * best-effort system-prompt instruction, which is not schema-enforced. Because models may wrap
+   * output (OpenAI, Gemini, and the OpenAI-compatible providers, including Cohere, and Ollama
+   * through its `format` field) enforce the schema at generation time. Anthropic falls back to a
+   * best-effort system-prompt instruction, which is not schema-enforced. Clients that do not read
+   * `responseFormat` (watsonx, Bedrock) send no schema at all. Because models may wrap
    * JSON in markdown code fences or surround it with prose, the response is normalised
    * (fence stripped, first balanced `{...}` or `[...]` extracted) before being deserialised with
    * uPickle into the expected type `A`.
+   *
+   * The schema is derived with `strict = true`, which lists '''every''' property as required,
+   * including a property declared optional with `required = false`. Only `responseFormat` is
+   * overridden: every other option you pass is forwarded unchanged. `name` and `strict` on the
+   * format are left at their defaults (`"response"` and `true`); call `complete` with your own
+   * `ResponseFormat.JsonSchema` to set them.
    *
    * @param conversation conversation history
    * @param schema       JSON-Schema description of the expected response object
    * @param options      additional completion options (default: CompletionOptions())
    * @param reader       implicit uPickle reader for deserialising the JSON into `A`
    * @tparam A target type; must have a corresponding `upickle.default.Reader[A]`
-   * @return Right(A) on success, or Left(LLMError) when the provider call fails or the JSON cannot be parsed
+   * @return Right(A) on success. Left(ValidationError) with field `structured_output` when the
+   *         reply is not JSON, is JSON `null`, or does not match the schema; any other Left is
+   *         the provider call's own error, returned unchanged
    */
   def completeStructured[A](
     conversation: Conversation,
