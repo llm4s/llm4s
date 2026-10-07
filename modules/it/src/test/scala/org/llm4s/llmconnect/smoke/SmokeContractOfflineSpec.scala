@@ -120,7 +120,17 @@ class SmokeContractOfflineSpec
 
   private val misbehaviours: Seq[(String, FakeBehaviour, Set[Capability])] = Seq(
     ("ignores the system message", FakeBehaviour(honourSystem = false), Set(Capability.SystemPrompt)),
+    (
+      "wraps the system message's one word in prose",
+      FakeBehaviour(systemReplyExact = false),
+      Set(Capability.SystemPrompt)
+    ),
     ("forgets the earlier turns", FakeBehaviour(keepHistory = false), Set(Capability.MultiTurn)),
+    (
+      "drops the assistant turns from the history",
+      FakeBehaviour(keepAssistantTurns = false),
+      Set(Capability.MultiTurn)
+    ),
     (
       "ignores the tool result it is sent back",
       FakeBehaviour(useToolResult = false),

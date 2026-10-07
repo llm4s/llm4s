@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.smoke
 
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 
-import java.net.{ InetAddress, InetSocketAddress }
+import java.net.{ Inet6Address, InetAddress, InetSocketAddress }
 import java.nio.charset.StandardCharsets
 
 /**
@@ -10,7 +10,10 @@ import java.nio.charset.StandardCharsets
  * one thing a real provider might get wrong, so that the contract's checks can be shown to fail for it.
  *
  * @param honourSystem            follow a `system` (or `developer`) message; when false it answers as if there was none
+ * @param systemReplyExact        when honouring the system message, reply with exactly the word it asks for; when
+ *                                false it wraps the word in prose
  * @param keepHistory             answer from earlier turns; when false it forgets everything but the last message
+ * @param keepAssistantTurns      read the assistant turns in the history; when false it reads only the other turns
  * @param useToolResult           answer from a tool message's content; when false it ignores the tool result
  * @param toolArgumentsValid      send tool-call arguments that are JSON; when false they are cut off mid-object
  * @param streamToolCalls         stream a tool call as a tool call; when false it streams prose instead
@@ -25,7 +28,9 @@ import java.nio.charset.StandardCharsets
  */
 final case class FakeBehaviour(
   honourSystem: Boolean = true,
+  systemReplyExact: Boolean = true,
   keepHistory: Boolean = true,
+  keepAssistantTurns: Boolean = true,
   useToolResult: Boolean = true,
   toolArgumentsValid: Boolean = true,
   streamToolCalls: Boolean = true,
@@ -56,7 +61,15 @@ final class FakeOpenAIServer(initial: FakeBehaviour = FakeBehaviour()) extends A
   server.start()
 
   /** The root a client's `baseUrl` should be set to. */
-  def baseUrl: String = s"http://127.0.0.1:${server.getAddress.getPort}"
+  def baseUrl: String = {
+    // The address actually bound: the loopback address may be IPv6 (`::1`), which a URL needs in brackets.
+    val address = server.getAddress
+    val host = address.getAddress match {
+      case v6: Inet6Address => s"[${v6.getHostAddress}]"
+      case other            => other.getHostAddress
+    }
+    s"http://$host:${address.getPort}"
+  }
 
   override def close(): Unit = server.stop(0)
 
@@ -70,13 +83,15 @@ final class FakeOpenAIServer(initial: FakeBehaviour = FakeBehaviour()) extends A
   private def reply(body: ujson.Value, behaviour: FakeBehaviour): String = {
     val messages = body("messages").arr.toSeq
     val last     = lastUserText(messages)
-    val earlier  = if (behaviour.keepHistory) messages.map(textOf).mkString(" ") else last
+    val history  = if (behaviour.keepAssistantTurns) messages else messages.filterNot(_("role").str == "assistant")
+    val earlier  = if (behaviour.keepHistory) history.map(textOf).mkString(" ") else last
     val system   = messages.filter(m => Set("system", "developer").contains(m("role").str)).map(textOf)
     if (messages.exists(_("role").str == "tool"))
       if (behaviour.useToolResult) s"The code is ${textOf(messages.reverse.find(_("role").str == "tool").get)}."
       else "I could not find the code."
     else if (last.contains("What is the capital of France"))
-      if (behaviour.honourSystem && system.exists(_.contains("PINEAPPLE"))) "PINEAPPLE"
+      if (behaviour.honourSystem && system.exists(_.contains("PINEAPPLE")))
+        if (behaviour.systemReplyExact) "PINEAPPLE" else "The answer is PINEAPPLE."
       else "The capital of France is Paris."
     else if (last.contains("favourite number"))
       if (earlier.contains("7342")) "7342" else "I do not know your favourite number."

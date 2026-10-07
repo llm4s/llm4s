@@ -136,7 +136,17 @@ object SmokeChecks {
       fail(capability, "no reasoning setup was supplied: call SmokeChecks.reasoning with one")
   }
 
-  /** The system message is honoured: a model told to answer with one word, whatever it is asked, does. */
+  /**
+   * A reply reduced to the word it is: trimmed, without wrapping quotes, backticks or emphasis, and without one
+   * trailing full stop. Case and any other words are kept, so `pineapple` or `The answer is PINEAPPLE` stay wrong.
+   */
+  private def bareWord(text: String): String = {
+    val wrapping                  = "\"'`*".toSet
+    def unwrap(s: String): String = s.trim.dropWhile(wrapping).reverse.dropWhile(wrapping).reverse.trim
+    unwrap(unwrap(text).stripSuffix("."))
+  }
+
+  /** The system message is honoured: a model told to answer with one word, whatever it is asked, does, exactly. */
   def systemPrompt(client: LLMClient): Outcome = {
     val conversation = Conversation(
       Seq(
@@ -149,20 +159,23 @@ object SmokeChecks {
       for {
         completion <- client.complete(conversation, small).left.map(e => s"the call failed: ${e.message}")
         _ <- Either.cond(
-          completion.content.toUpperCase.contains("PINEAPPLE"),
+          bareWord(completion.content) == "PINEAPPLE",
           (),
-          s"the reply ignored the system message (it should have been PINEAPPLE): ${snippet(completion.content)}"
+          s"the reply ignored the system message (it should have been PINEAPPLE alone): ${snippet(completion.content)}"
         )
       } yield ()
     )
   }
 
-  /** An assistant turn in the history reaches the model: it answers from what the earlier turns said. */
+  /**
+   * An assistant turn in the history reaches the model: it answers from what that turn said. The number is only in
+   * the assistant turn, so a client that sent the user turns and dropped the assistant's would fail.
+   */
   def multiTurn(client: LLMClient): Outcome = {
     val conversation = Conversation(
       Seq(
-        UserMessage(s"My favourite number is $FavouriteNumber."),
-        AssistantMessage(contentOpt = Some(s"Noted. Your favourite number is $FavouriteNumber.")),
+        UserMessage("Pick a four-digit favourite number for me and tell me what it is."),
+        AssistantMessage(contentOpt = Some(s"Your favourite number is $FavouriteNumber.")),
         UserMessage("What is my favourite number? Reply with the number only.")
       )
     )
@@ -173,7 +186,7 @@ object SmokeChecks {
         _ <- Either.cond(
           completion.content.contains(FavouriteNumber),
           (),
-          s"the reply did not use the earlier turns (it should contain $FavouriteNumber): ${snippet(completion.content)}"
+          s"the reply did not use the assistant turn (it should contain $FavouriteNumber): ${snippet(completion.content)}"
         )
       } yield ()
     )
