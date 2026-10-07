@@ -40,7 +40,7 @@ import scala.util.{ Try, Using }
  * The conversation is sent as structured `messages` with roles (`system`, `user`, `assistant`, `tool`), so
  * content is data and cannot forge a turn: there is no prompt string with role markers, and no stop
  * sequences standing in for them. The model goes in `model_id`, the project or space in `project_id` or
- * `space_id`, and the API version in the `version` query parameter ([[WatsonXConfig.apiVersion]]).
+ * `space_id`, and the API version in the `version` query parameter (`WatsonXConfig.apiVersion`).
  * `temperature` is always sent, `max_tokens` (ASSUMED name) when set, and `top_p` when not 1.0.
  *
  * == Tools ==
