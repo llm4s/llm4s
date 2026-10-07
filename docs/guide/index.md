@@ -62,6 +62,7 @@ Comprehensive guides for LLM4S features.
 - **[Monitoring](observability/)** - Production monitoring for LLM4S applications
   - **Tracing**: Langfuse and OpenTelemetry integration
   - **Logging**: Structured JSON logging with SLF4J/Logback
+  - **[Provider Exchange Logging](observability/provider-exchange-logging)**: Capture raw provider requests and responses for debugging
   - **Health Checks**: Startup validation and readiness probes
   - **Cost Monitoring**: Token usage tracking and budget awareness
 

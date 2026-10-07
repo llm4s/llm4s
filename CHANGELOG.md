@@ -401,6 +401,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejection, unknown tools and failures; policy- and tool-raised approvals both resuming at one
   approval node; and edited approvals amending the source assistant message. Design:
   `docs/design/typed-agent-runtime-design.md` §4.5, with the Stage 0 carry-forward in §4.8.
+- **A guide to provider exchange logging** ([#1298](https://github.com/llm4s/llm4s/issues/1298)):
+  `docs/guide/observability/provider-exchange-logging.md`, linked from the Monitoring page, describes the opt-in
+  capture of raw provider request and response bodies: the fields of `ProviderExchange`, which clients record,
+  turning it on from `llm4s.exchangeLogging` (read with `Llm4sConfig.exchangeLogging()` and passed in
+  `LlmClientOptions`; nothing does so automatically) or from code, the JSON Lines file, and writing a
+  `ProviderExchangeSink`, with a privacy warning. It states what the file sink redacts and that it truncates
+  bodies to 1000 characters, that a sink you write receives the bodies untouched, and the limitations found while
+  checking it: a throwing sink fails silently, `Cancelled` is never produced, `requestId` and `correlationId` are
+  never set, and `duration_ms` is written as a string. Its snippets and claims are compiled and run by
+  `ProviderExchangeLoggingGuideSpec` (`llm4s-openai-compatible`) and `ProviderExchangeLoggingGuideCoreSpec`
+  (`llm4s-core`). Monitoring becomes a section with children in the docs navigation.
 - **A staged-deployment template: dev, staging, prod** ([#846](https://github.com/llm4s/llm4s/issues/846),
   reworked from #857 by @Shivampal157): `modules/deploy-service` (unpublished) serves `GET /health` and
   `GET /llm-check` (a configuration check, not a connectivity check: `200` when a default provider is
