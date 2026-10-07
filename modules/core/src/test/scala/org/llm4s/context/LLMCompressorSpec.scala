@@ -29,8 +29,7 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
           model = "mock-model",
           message = AssistantMessage(compressed),
           toolCalls = Nil,
-          usage = Some(TokenUsage(10, 5, 15)),
-          thinking = None
+          usage = Some(TokenUsage(10, 5, 15))
         )
       )
     }
@@ -49,8 +48,7 @@ class LLMCompressorSpec extends AnyFlatSpec with Matchers {
           model = "mock-model",
           message = AssistantMessage("Compressed."),
           toolCalls = Nil,
-          usage = Some(TokenUsage(10, 5, 15)),
-          thinking = None
+          usage = Some(TokenUsage(10, 5, 15))
         )
       )
     }

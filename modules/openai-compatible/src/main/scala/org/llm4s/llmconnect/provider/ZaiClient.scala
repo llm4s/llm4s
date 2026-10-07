@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.ZaiConfig
+import org.llm4s.llmconnect.model.ThinkingBlock
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -68,7 +69,9 @@ object ZaiClient {
 /**
  * Z.ai's departures from the standard format: every message's text is sent as
  * an array of text parts, and a reply's `content` - in a completion or a
- * streamed delta - may come back either as a string or as such an array.
+ * streamed delta - may come back either as a string or as such an array. A GLM thinking
+ * model's reasoning is its `reasoning_content`, read as thinking and sent back unchanged on the
+ * assistant turn, as Z.ai's thinking-mode guide asks (preserved thinking, and tool calls).
  */
 private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
   override val headers: Seq[(String, String)] = Seq("User-Agent" -> "llm4s-coding-assistant/1.0")
@@ -86,3 +89,9 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
     content.strOpt.orElse(
       content.arrOpt.flatMap(_.headOption).flatMap(_.objOpt).flatMap(_.get("text")).flatMap(_.strOpt)
     )
+
+  override def thinking(obj: ujson.Value): Option[String] =
+    OpenAICompatibleDialect.firstString(obj, "reasoning_content").filter(_.nonEmpty)
+
+  override def encodeThinking(message: ujson.Obj, thinking: Seq[ThinkingBlock]): Unit =
+    ThinkingBlock.text(thinking).foreach(text => message("reasoning_content") = text)

@@ -59,6 +59,6 @@ object Messages:
           history(i).message match
             case assistant: AssistantMessage if assistant.toolCalls.exists(_.id == toolCallId) =>
               val edited = assistant.toolCalls.map(c => if c.id == toolCallId then c.copy(arguments = arguments) else c)
-              Right(history.updated(i, history(i).copy(message = assistant.copy(toolCalls = edited))))
+              Right(history.updated(i, history(i).copy(message = assistant.withToolCalls(edited))))
             case _ => Left(ValidationError("messages", s"message '$messageId' has no tool call '$toolCallId'"))
         }

@@ -20,6 +20,14 @@ import scala.util.{ Try, Using }
  * Embeddings are generated on-demand using the provided EmbeddingService
  * and stored alongside memories for efficient retrieval.
  *
+ * Writes: `store` and `storeAll` are each one transaction - a batch is stored whole or not at all - and so are
+ * `deleteMatching` and opening the store. A write takes the database's write lock when it begins, waiting up to 30
+ * seconds (the connection's busy timeout) for a writer in another instance or process on the same file.
+ *
+ * Thread safety: one instance holds one JDBC connection and is not safe for concurrent use; share it between
+ * threads only under your own synchronization. Separate instances, in one process or several, may write the same
+ * file concurrently: SQLite serialises their transactions.
+ *
  * @param dbPath Path to SQLite database file
  * @param embeddingService Service for generating embeddings
  * @param config Store configuration
@@ -37,8 +45,9 @@ final class VectorMemoryStore private (
   // Initialize schema on creation
   initializeSchema()
 
+  // One transaction, so opening a store commits (and syncs the file) once rather than once per statement.
   private def initializeSchema(): Unit =
-    Using.resource(connection.createStatement()) { stmt =>
+    inTransaction(Using.resource(connection.createStatement()) { stmt =>
       // Main memories table with embedding blob
       stmt.execute(
         """CREATE TABLE IF NOT EXISTS memories (
@@ -87,68 +96,106 @@ final class VectorMemoryStore private (
           stmt.execute(s"INSERT INTO schema_version (version, applied_at) VALUES (1, ${System.currentTimeMillis()})")
         }
       }
-    }
+    })
 
-  override def store(memory: Memory): Result[MemoryStore] = {
-    // Generate embedding if not present
-    val memoryWithEmbedding = memory.embedding match {
-      case Some(_) => Right(memory)
-      case None =>
-        embeddingService.embed(memory.content).map(embedding => memory.withEmbedding(embedding))
-    }
+  override def store(memory: Memory): Result[MemoryStore] = storeAll(Seq(memory))
 
-    memoryWithEmbedding.flatMap { m =>
+  /**
+   * Store `memories` in one transaction: every missing embedding is computed first, in `embedBatch` calls of at most
+   * [[VectorMemoryStore.EmbeddingBatchSize]] texts, then all of them are written or, if any embedding call or any
+   * write fails, none is. The commit - and the file sync behind it - is paid once for the batch, not once per row.
+   */
+  override def storeAll(memories: Seq[Memory]): Result[MemoryStore] = {
+    val withEmbeddings = embedMissing(memories)
+
+    withEmbeddings.flatMap { ms =>
       Try {
-        val sql =
-          """INSERT OR REPLACE INTO memories
-            |(id, content, memory_type, metadata, conversation_id, entity_id, source, timestamp, importance, embedding, embedding_dim)
-            |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""".stripMargin
-
-        Using.resource(connection.prepareStatement(sql)) { stmt =>
-          stmt.setString(1, m.id.value)
-          stmt.setString(2, m.content)
-          stmt.setString(3, m.memoryType.name)
-          stmt.setString(4, serializeMetadata(m.metadata))
-          stmt.setString(5, m.getMetadata("conversation_id").orNull)
-          stmt.setString(6, m.getMetadata("entity_id").orNull)
-          stmt.setString(7, m.getMetadata("source").orNull)
-          stmt.setLong(8, m.timestamp.toEpochMilli)
-          m.importance match {
-            case Some(imp) => stmt.setDouble(9, imp)
-            case None      => stmt.setNull(9, java.sql.Types.REAL)
-          }
-          m.embedding match {
-            case Some(emb) =>
-              stmt.setBytes(10, serializeEmbedding(emb))
-              stmt.setInt(11, emb.length)
-            case None =>
-              stmt.setNull(10, java.sql.Types.BLOB)
-              stmt.setNull(11, java.sql.Types.INTEGER)
-          }
-          stmt.executeUpdate()
-        }
-
-        // Update FTS index
-        updateFtsIndex(m)
-
+        if (ms.nonEmpty) inTransaction(writeAll(ms))
         this: MemoryStore
-      }.toEither.left.map(e => ProcessingError("vector-store", s"Failed to store memory: ${e.getMessage}"))
+      }.toEither.left.map(e =>
+        ProcessingError(
+          "vector-store",
+          s"Failed to store ${if (ms.size == 1) "memory" else "memories"}: ${e.getMessage}"
+        )
+      )
     }
   }
 
-  private def updateFtsIndex(memory: Memory): Unit = {
-    // Delete existing entry if any
-    Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { stmt =>
-      stmt.setString(1, memory.id.value)
-      stmt.executeUpdate()
+  /**
+   * `memories` with every missing embedding filled in, asking the service for at most `EmbeddingBatchSize` texts at a
+   * time - one request for a whole large batch could exceed a provider's input limit. Fails if any call fails,
+   * throws, or answers with the wrong number of embeddings.
+   */
+  private def embedMissing(memories: Seq[Memory]): Result[Seq[Memory]] = {
+    val texts = memories.filter(_.embedding.isEmpty).map(_.content)
+    val embedded =
+      texts.grouped(EmbeddingBatchSize).foldLeft[Result[Vector[Array[Float]]]](Right(Vector.empty)) { (acc, chunk) =>
+        acc.flatMap { done =>
+          Try(embeddingService.embedBatch(chunk))
+            .fold(e => Left(ProcessingError("vector-store", s"Embedding failed: ${e.getMessage}")), identity)
+            .flatMap { embeddings =>
+              if (embeddings.size == chunk.size) Right(done ++ embeddings)
+              else
+                Left(
+                  ProcessingError(
+                    "vector-store",
+                    s"Embedding service returned ${embeddings.size} embeddings for ${chunk.size} texts"
+                  )
+                )
+            }
+        }
+      }
+    embedded.map { embeddings =>
+      val next = embeddings.iterator
+      memories.map(m => if (m.embedding.isEmpty) m.withEmbedding(next.next()) else m)
     }
+  }
 
-    // Insert new entry
-    Using.resource(connection.prepareStatement("INSERT INTO memories_fts (id, content) VALUES (?, ?)")) { stmt =>
-      stmt.setString(1, memory.id.value)
-      stmt.setString(2, memory.content)
-      stmt.executeUpdate()
-    }
+  /**
+   * Write each memory and replace its full-text entry, in order, reusing three prepared statements. The caller
+   * supplies the transaction.
+   */
+  private def writeAll(memories: Seq[Memory]): Unit = {
+    val sql =
+      """INSERT OR REPLACE INTO memories
+        |(id, content, memory_type, metadata, conversation_id, entity_id, source, timestamp, importance, embedding, embedding_dim)
+        |VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""".stripMargin
+
+    Using.Manager { use =>
+      val stmt      = use(connection.prepareStatement(sql))
+      val ftsDelete = use(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?"))
+      val ftsInsert = use(connection.prepareStatement("INSERT INTO memories_fts (id, content) VALUES (?, ?)"))
+      memories.foreach { m =>
+        stmt.setString(1, m.id.value)
+        stmt.setString(2, m.content)
+        stmt.setString(3, m.memoryType.name)
+        stmt.setString(4, serializeMetadata(m.metadata))
+        stmt.setString(5, m.getMetadata("conversation_id").orNull)
+        stmt.setString(6, m.getMetadata("entity_id").orNull)
+        stmt.setString(7, m.getMetadata("source").orNull)
+        stmt.setLong(8, m.timestamp.toEpochMilli)
+        m.importance match {
+          case Some(imp) => stmt.setDouble(9, imp)
+          case None      => stmt.setNull(9, java.sql.Types.REAL)
+        }
+        m.embedding match {
+          case Some(emb) =>
+            stmt.setBytes(10, serializeEmbedding(emb))
+            stmt.setInt(11, emb.length)
+          case None =>
+            stmt.setNull(10, java.sql.Types.BLOB)
+            stmt.setNull(11, java.sql.Types.INTEGER)
+        }
+        stmt.executeUpdate()
+
+        // Replace the full-text entry
+        ftsDelete.setString(1, m.id.value)
+        ftsDelete.executeUpdate()
+        ftsInsert.setString(1, m.id.value)
+        ftsInsert.setString(2, m.content)
+        ftsInsert.executeUpdate()
+      }
+    }.get
   }
 
   override def get(id: MemoryId): Result[Option[Memory]] =
@@ -189,8 +236,8 @@ final class VectorMemoryStore private (
   }
 
   override def search(query: String, topK: Int, filter: MemoryFilter): Result[Seq[ScoredMemory]] =
-    // Generate query embedding
-    embeddingService.embed(query).flatMap { queryEmbedding =>
+    // Generate query embedding: as a query, which some models embed differently from a document
+    embeddingService.embedQuery(query).flatMap { queryEmbedding =>
       Try {
         // Memories matching the filter that have embeddings; topK applies to those the filter accepts
         val candidates = queryMemories(filter, None).flatMap(m => m.embedding.filter(_.nonEmpty).map(e => (m, e)))
@@ -312,22 +359,8 @@ final class VectorMemoryStore private (
     }
   }
 
-  /**
-   * Run `body` as one transaction: commit if it returns, roll back if it throws, and always restore autocommit,
-   * even if the commit or the rollback fails.
-   */
-  private def inTransaction[A](body: => A): A = {
-    val wasAutoCommit = connection.getAutoCommit
-    connection.setAutoCommit(false)
-    val outcome = Try {
-      val result = body
-      connection.commit()
-      result
-    }
-    if (outcome.isFailure) Try(connection.rollback())
-    Try(connection.setAutoCommit(wasAutoCommit))
-    outcome.get
-  }
+  /** Run `body` as one write transaction: committed if it returns, rolled back otherwise. */
+  private def inTransaction[A](body: => A): A = SqliteTransaction.immediate(connection)(body)
 
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
     get(id).flatMap {
@@ -339,7 +372,9 @@ final class VectorMemoryStore private (
             updated.copy(embedding = None) // Will be re-embedded on store
           else
             updated
-        delete(id).flatMap(_ => store(memoryToStore))
+        // The same id is replaced in one transaction, after any re-embedding: a failure leaves the memory as it was.
+        if (memoryToStore.id == id) store(memoryToStore)
+        else delete(id).flatMap(_ => store(memoryToStore))
       case None =>
         Left(ProcessingError("vector-store", s"Memory not found: ${id.value}"))
     }
@@ -573,6 +608,9 @@ object VectorMemoryStore {
   private val logger = LoggerFactory.getLogger(getClass)
 
   private val BusyTimeoutMillis = 30000
+
+  /** The most texts `storeAll` sends to the embedding service in one `embedBatch` call. */
+  val EmbeddingBatchSize: Int = 64
 
   /**
    * Create a vector memory store with file-based SQLite storage.

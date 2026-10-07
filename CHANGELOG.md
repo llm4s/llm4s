@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Thinking stays in the conversation and goes back to the provider** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
+  `AssistantMessage` carries the model's reasoning as `thinking: Seq[ThinkingBlock]` - `ThinkingBlock.Text(text,
+  signature)`, `ThinkingBlock.Redacted(data)` or `ThinkingBlock.Opaque(provider, data)` (provider-specific replay
+  data only that provider's client sends back), `@Stable` - with `withThinking(blocks)` /
+  `withThinking(text)`, `thinkingText` and `hasThinking`; its codec writes `thinking` only when present and reads
+  JSON without it as none, so stored conversations and agent checkpoints still load. Clients put the thinking on the
+  message they return, streamed or not: Anthropic and Bedrock as blocks with their signatures and redacted thinking,
+  Ollama, DeepSeek, Z.ai (newly read from `reasoning_content`), OpenRouter and Mistral as text, and OpenRouter's
+  `reasoning_details` (whole or streamed, joined by `index`) as one opaque block per item. They send it back
+  where the provider takes it: Anthropic and Bedrock replay signed and redacted blocks first in the assistant turn
+  (unsigned thinking is left out), Ollama as `thinking`, DeepSeek and Z.ai as `reasoning_content`, OpenRouter as
+  `reasoning` plus its `reasoning_details` unchanged, Mistral as a thinking chunk; new `OpenAICompatibleDialect` hooks
+  decide - `encodeThinking` (given the turn's blocks), `thinkingDetails` and `decodeThinkingDetails` - and drop it by
+  default. The agent's tool loop stores the completion's message unchanged, so a run sends a tool-call turn's
+  thinking in the call after the tool results, and later turns read it back from the checkpoint.
 - **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
   `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
   service's MP3 and return its bytes untouched. PCM stays the default. `AudioFormat.Mp3` is a new case
@@ -194,6 +209,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a system message is a `ValidationError`, which Converse cannot accept. Add the dependency
   `"org.llm4s" %% "llm4s-bedrock"`, which brings the AWS SDK v2 `bedrockruntime` artifact
   (Apache-2.0, the SDK release train `llm4s-rag` already uses for S3); nothing else changes.
+- **Embedding requests say whether the input is a query or a document** ([#1218](https://github.com/llm4s/llm4s/issues/1218)):
+  `EmbeddingRequest` has a `purpose`, `InputPurpose.Document` (the default, so existing callers are
+  unchanged) or `InputPurpose.Query`. Voyage sends it as `input_type`, Jina as `task`
+  (`retrieval.passage` / `retrieval.query`) and Cohere as `input_type` (`search_document` / `search_query`);
+  OpenAI and Ollama ignore it. An explicit `JinaTask` or `CohereInputType` passed to `fromConfig` still wins
+  over the purpose. `RAG` and `RAGPipeline` embed the question they answer as a query and what they index as
+  documents, the memory stores embed the text they search with as a query (`EmbeddingService.embedQuery`,
+  which delegates to `embed` by default, so existing implementations are unaffected), and `CachedEmbeddingClient`
+  keeps a query and a document with the same text in separate cache entries (document keys are unchanged). **Behaviour changes:** Voyage now sends `input_type` (`document` by
+  default; it sent none before), so re-index for the best retrieval quality - older document vectors still
+  work; and a Jina or Cohere provider built without an explicit task now follows each request's purpose
+  instead of always sending the document type. `EmbeddingRequest` becomes a growth-prone type (private
+  constructor and `copy`, `with*` setters, `apply` with defaults): construct it with `EmbeddingRequest(...)`
+  and change it with `withInput`, `withModel` or `withPurpose`.
 - **`llm4s-jina`: Jina AI embedding provider** (`modules/providers/jina`,
   [#1028](https://github.com/llm4s/llm4s/issues/1028), rebuilt from #1060 as an
   `EmbeddingProviderDescriptor`, so `llm4s-core` is untouched). `EMBEDDING_MODEL=jina/jina-embeddings-v3`
@@ -559,6 +588,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **`AssistantMessage` is a growth-prone data type; `Completion.thinking` comes from the message**
+  ([#1381](https://github.com/llm4s/llm4s/issues/1381)): `AssistantMessage` is `final case class AssistantMessage
+  private (contentOpt, toolCalls, thinking)` with a companion `apply` (named arguments, defaults as before, plus the
+  `apply(content)` / `apply(content, toolCalls)` overloads) and `withContent`, `withToolCalls`, `withThinking`;
+  `.copy` is private, so replace `msg.copy(contentOpt = Some(t))` with `msg.withContent(t)`. A positional pattern
+  takes four fields: `case AssistantMessage(content, toolCalls, thinking, thinkingBinding)`. `Completion` loses its `thinking`
+  constructor parameter and `withThinking`: `Completion.thinking` is now `message.thinkingText`, so set it with
+  `completion.withMessage(completion.message.withThinking(...))`, or build the message with it.
+  Signed, redacted or opaque thinking is *sealed*: Anthropic, Bedrock and OpenRouter accept it only beside the exact
+  content and tool calls it came with, so `withContent` / `withToolCalls` given a changed value drop redacted and
+  opaque blocks and signatures
+  (keeping the reasoning text). Sealed thinking is also valid only after the history it was produced after
+  (Anthropic checks the system prompt, tools and every earlier message; Bedrock's signature is a hash of the
+  conversation), so the Anthropic, Bedrock and OpenAI-compatible clients bind it to a fingerprint of the request
+  (`AssistantMessage.thinkingBinding`) and, at send time, replay it only while the conversation before it still has
+  that fingerprint, sent to the provider and model that produced it - the fingerprint covers the provider id and
+  model each client is configured with (never the model a response reports, so an alias's snapshot or the model
+  `openrouter/auto` or a fallback chose keeps the replay OpenRouter requires on tool-call continuations), so a conversation continued with another client or model is sent unsealed rather
+  than with a foreign signature. Pruning, compression, summarisation, an edit or an inserted message anywhere earlier therefore
+  unseals every later turn, whoever made the change; `hasSealedThinking` reports the state. Token estimates
+  (`ConversationTokenCounter`, the agent's default pruning counter) now count thinking, which providers resend.
+- **`llm4s-anthropic`: tool calls and results as content blocks** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
+  an assistant turn's tool calls go to Anthropic as `tool_use` blocks after its text, and each `ToolMessage` as a
+  `tool_result` block, consecutive results in one user turn. Before, a tool-call turn was dropped and its results
+  sent as `[Tool result for <id>]: ...` user text, which left nowhere to replay the turn's signed thinking. A call
+  is sent only when its result is in the run of tool messages straight after it; otherwise the call is left out and
+  the result goes as prefixed user text, after the turn's `tool_result` blocks. `llm4s-bedrock` pairs calls and
+  results by the same rule (it sent every call and result before, which Converse rejects when they do not pair).
 - **`OpenAIConfig`, `AnthropicConfig` and `OllamaConfig` use the growth-prone data type pattern**
   ([#1388](https://github.com/llm4s/llm4s/issues/1388), `llm4s-openai-compatible`, `llm4s-anthropic`,
   `llm4s-ollama`): Scala default arguments are invisible to Java and Kotlin, so a field added to one of these
@@ -1708,6 +1765,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   item's slot and delivered as a `LiveGap` just before it, so a subscription queues at most `2 * capacity`
   events and gap markers - `capacity` durable, `capacity` live - plus one end-of-run barrier per run that
   ended while they were queued, however dropped live events and durable commits interleave.
+- **`MemoryStore.storeAll` is all or nothing, and the SQL stores write a batch in one transaction**: `storeAll`
+  was the trait's default, a loop of `store` calls. In `SQLiteMemoryStore` and `VectorMemoryStore` each `store` ran
+  three statements (the row, then the full-text entry's delete and insert) under autocommit, so a batch of n
+  memories paid 3n commits - and 3n file syncs, about a second for fifteen rows on Windows. In those two stores and
+  `PostgresMemoryStore`, a batch that failed part way left the memories ahead of the failure stored while the call
+  returned `Left`. All three now write the batch in one transaction, and a failed batch stores **nothing**; the
+  trait documents `storeAll` as all or nothing (its default is, for an immutable store such as `InMemoryStore`).
+  `VectorMemoryStore` computes the missing embeddings first, in `embedBatch` calls of at most 64 texts
+  (`VectorMemoryStore.EmbeddingBatchSize`, so a large batch stays within a provider's input limit), so an
+  embedding failure also stores nothing; and its `update` of a memory, keeping its id, now replaces it in one
+  transaction after re-embedding, where it deleted the memory first and lost it if re-embedding failed. In the
+  SQLite stores `store`, `deleteMatching` and opening the store are one transaction
+  each too, so a memory's row and its full-text entry are written together. Their transactions are explicit
+  `BEGIN IMMEDIATE` ... `COMMIT`, so **a write takes the database's write lock when it begins** and waits up to
+  the connection's busy timeout (30 s for `VectorMemoryStore`, sqlite-jdbc's 3 s default for
+  `SQLiteMemoryStore`) for a writer on another connection to the same file, failing with `Left` after that and
+  leaving the store usable. `VectorMemoryStore`'s Scaladoc now states its thread safety: one instance is not
+  safe for concurrent use; separate instances may share a file.
 - **`RegexSafetyManager` returns an error instead of letting `StackOverflowError` escape** (#1379): the JDK
   regex engine recurses for patterns such as `(a|aa)*b` and overflowed the stack on long input before the
   character-access budget tripped; `scala.util.Try` does not catch that fatal error, so it escaped
@@ -1715,6 +1790,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly and returns a `Left` (`Regex matching aborted: pattern recursed too deeply for the input (stack
   overflow)`), which `RegexValidator` reports as a `Regex security error` `ValidationError`. Other fatal errors
   still propagate. The workspace runner's `WorkspaceRegexSafetyManager` has the same fix.
+- **`SafeParameterExtractor`: integer parameters reject fractions and overflow, and `validateRequired` checks
+  types** ([#964](https://github.com/llm4s/llm4s/issues/964)): `getInt`, `getIntEnhanced` and `getOptionalInt`
+  were `_.numOpt.map(_.toInt)`, so a tool argument of `3.14` returned `3` and `9223372036854775807` returned `-1`,
+  silently. An integer parameter now accepts only a JSON number with no fractional part that fits in an `Int`
+  (`3`, `3.0`, `1e2` and `-0.0` are accepted); a fraction, NaN, an infinity or an out-of-range value is a
+  `TypeMismatch` (`expected integer, got number`), so a model that sends one gets an error it can correct.
+  `validateRequired` passed `_ => Some(())` as its extractor, so it checked presence but never the declared type
+  although its Scaladoc promised it; it now checks `string`, `integer`, `number`, `boolean`, `array` and `object`
+  with the same rules as the typed getters and reports a wrong-typed value as a `TypeMismatch` beside the missing
+  ones. A type name it does not know is still checked for presence only. **Migration:** a tool that read an
+  integer with `getInt` and received a fractional or oversized number used to run with a truncated or wrapped
+  value; it now gets a `Left`. The built-in tools that read an integer with `.fold(_ => default, identity)` or
+  `.toOption` (`UUIDTool`'s `count`, `ListDirectoryTool`'s `max_entries`, `ReadFileTool`'s `max_lines`, the
+  workspace and knowledge-graph tools) fall back to their default for such a value instead of using the truncated
+  one. No public signature changed.
 - **Guardrail case folding no longer depends on the JVM default locale**: `ProfanityFilter`, `ToneValidator`
   and `PromptInjectionDetector` lower-cased text with the default locale, so under a Turkish locale `HI`,
   `INAPPROPRIATE` and `IGNORE PREVIOUS INSTRUCTIONS` folded to a dotless `ı` and went undetected. They (and the
