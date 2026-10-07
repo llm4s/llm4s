@@ -16,7 +16,7 @@ import org.llm4s.llmconnect.LLMClient
  * `ProfanityFilter`, and for personal-data patterns use `PIIDetector`: they are free, instant and repeatable,
  * where this guardrail is none of those.
  *
- * **Cost and side:** every validation makes one extra LLM call, so it does not suit latency-sensitive paths, and
+ * **Cost and side:** every validation makes one extra `llmClient.complete` call, so it does not suit latency-sensitive paths, and
  * the content is sent to the provider of `llmClient`. It is an output guardrail only: it judges the agent's
  * final answer. The scoring rules, their edges (a reply of `85` reads as 1.0 and passes) and the other limits are
  * described on [[org.llm4s.agent.guardrails.LLMGuardrail]].

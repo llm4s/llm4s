@@ -16,7 +16,7 @@ import org.llm4s.llmconnect.LLMClient
  * `LengthCheck`, and for a required format use `RegexValidator` or `JSONValidator`: they are free, instant and
  * repeatable.
  *
- * **Cost and side:** every validation makes one extra LLM call, and the response goes to the provider of
+ * **Cost and side:** every validation makes one extra `llmClient.complete` call, and the response goes to the provider of
  * `llmClient`. It is an output guardrail only. The scoring rules and the other limits are described on
  * [[org.llm4s.agent.guardrails.LLMGuardrail]].
  *

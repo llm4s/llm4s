@@ -16,7 +16,7 @@ import org.llm4s.llmconnect.LLMClient
  * detects them from keywords and sentence shapes without any LLM call and is free, instant and repeatable. This
  * guardrail judges meaning instead, at the cost of the points below.
  *
- * **Cost and side:** every validation makes one extra LLM call, and the content goes to the provider of
+ * **Cost and side:** every validation makes one extra `llmClient.complete` call, and the content goes to the provider of
  * `llmClient`. It is an output guardrail only. The scoring rules and the other limits are described on
  * [[org.llm4s.agent.guardrails.LLMGuardrail]].
  *

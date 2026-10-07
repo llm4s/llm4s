@@ -11,14 +11,16 @@ import org.llm4s.llmconnect.LLMClient
  * against it: 1.0 when all claims are supported by the context, 0.5 when some are supported and others cannot be
  * verified, 0.0 when claims directly contradict it. It is told to evaluate factual claims only and to ignore
  * stylistic differences. It checks the content against the text you supply, not against the world: by the
- * prompt's rubric a claim the context does not mention is one that "cannot be verified", which scores in the
- * middle, not one that is false.
+ * prompt's rubric a claim the context does not mention is one that "cannot be verified", not one that
+ * contradicts it. The rubric gives such claims the middle score only beside supported ones; for content none of
+ * whose claims the context supports it names no score, so the judge may rate it anywhere below 1.0, and a lenient
+ * threshold such as 0.5 does not reliably pass it.
  *
  * **When to use it:** to catch answers that drift from retrieved documents. No rule-based guardrail can compare
  * meaning with a source text. The RAG-specific guardrails in `org.llm4s.agent.guardrails.rag` are the alternative
  * to look at first for retrieval pipelines.
  *
- * **Cost and side:** every validation makes one extra LLM call whose prompt contains the whole of
+ * **Cost and side:** every validation makes one extra `llmClient.complete` call whose prompt contains the whole of
  * `referenceContext` as well as the content, so cost and latency grow with the context size, and both go to the
  * provider of `llmClient`. It is an output guardrail only. The scoring rules and the other limits are described on
  * [[org.llm4s.agent.guardrails.LLMGuardrail]].

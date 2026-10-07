@@ -24,8 +24,11 @@ import scala.util.Try
  *  - a fixed system message that asks for a bare number between 0 and 1;
  *  - a user message made of `evaluationPrompt` and the content between triple quotes.
  *
- * **Cost, latency and privacy:** every validation adds one LLM round trip and its token cost to the run, so
- * these guardrails do not belong on latency-sensitive paths. The content being judged is sent to whichever
+ * **Cost, latency and privacy:** every validation adds one `llmClient.complete` call to the run. With a plain
+ * provider client that is one round trip and its token cost; a wrapping client changes the count -
+ * `CachingLLMClient` can answer from its cache without a request, and `ReliableClient` can retry a failed
+ * request or reject the call with its circuit breaker open. Either way these guardrails do not belong on
+ * latency-sensitive paths. The content being judged is sent to whichever
  * provider `llmClient` talks to. A cheaper or separate model can serve as judge, which also avoids a model
  * grading its own answer.
  *
