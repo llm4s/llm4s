@@ -2112,7 +2112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the JSON still parses), `key=value` pairs and `key: value` header lines outside a query string (including dotted
   property names such as `spring.datasource.password=...`), and compound key names such as `client_secret`,
   `x-api-key`, `refresh_token` and `db_password`. A value that contains an escaped quote used to be cut at the quote,
-  leaving the rest of the credential in the log; it is now redacted whole. A key is matched as a whole name, never as a
+  leaving the rest of the credential in the log; it is now redacted whole, and so is a value cut off before its closing
+  quote, as a truncated payload leaves it. A key is matched as a whole name, never as a
   substring, so `max_tokens`, `prompt_tokens`, `token_count` and `next_page_token` are not redacted. Key names are now
   lower-cased with `Locale.ROOT`, so a Turkish default locale no longer stops `API_KEY` from being recognised. Redaction
   is still pattern-based and best effort: it does not detect a secret that is not under a key, and JSON escaped twice

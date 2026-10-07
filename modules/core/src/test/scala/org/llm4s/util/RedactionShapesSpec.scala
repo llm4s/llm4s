@@ -68,6 +68,19 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   // Numbers
   // ---------------------------------------------------------------------------------------------
 
+  it should "redact a value that is cut off before its closing quote, as a truncated payload is" in {
+    Redaction.redact("""{"user": "ann", "password": "hunter2va""") shouldBe s"""{"user": "ann", "password": "$R"""
+    Redaction.redact("""{'api_key': 'hunter2va""") shouldBe s"""{'api_key': '$R"""
+    Redaction.redact("""{"content": "{\"password\": \"hunter2va""") shouldBe s"""{"content": "{\\"password\\": \\"$R"""
+    Redaction.redact("""{"password": "tail\""") shouldBe s"""{"password": "$R"""
+  }
+
+  it should "end a value inside a string at the quote that ends the enclosing string" in {
+    // The embedded document is cut off by the end of the string that holds it: the value ends there.
+    Redaction.redact("""{"content": "{\"password\": \"hunter2va", "n": 1}""") shouldBe
+      s"""{"content": "{\\"password\\": \\"$R", "n": 1}"""
+  }
+
   it should "redact a number when the key names a credential, and keep the JSON valid" in {
     val out = Redaction.redact("""{"password": 12345678, "user": "ann"}""")
     (out should not).include("12345678")
@@ -340,9 +353,8 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     onSmallStack(input) shouldBe input
   }
 
-  it should "leave a megabyte-long value that is never closed" in {
-    val input = "{\"password\": \"" + ("a" * MegaChars)
-    onSmallStack(input) shouldBe input
+  it should "redact a megabyte-long value that is never closed, to the end of the input" in {
+    onSmallStack("{\"password\": \"" + ("a" * MegaChars)) shouldBe s"""{"password": "$R"""
   }
 
   it should "redact every one of many credential fields in a large document" in {

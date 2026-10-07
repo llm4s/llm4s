@@ -272,13 +272,15 @@ private[llm4s] object Redaction {
   }
 
   /**
-   * The index of the character that ends the value starting at `from`, or -1 if it is not closed. A loop, not a
-   * pattern, so the cost is linear and the stack does not grow with the length of the value.
+   * The index of the character that ends the value starting at `from`: the closing quote, or, for a string inside a
+   * string, the backslash of the closing `\"` or a bare quote (which ends the enclosing string). A value that is not
+   * closed runs to the end of the input, so a payload cut off in the middle of a credential still has it redacted. A
+   * loop, not a pattern, so the cost is linear and the stack does not grow with the length of the value.
    */
   @tailrec
   private def scanQuotedValue(input: String, from: Int, end: ValueEnd): Int =
     if (from >= input.length) {
-      -1
+      input.length
     } else {
       val c = input.charAt(from)
       end match {
@@ -286,24 +288,18 @@ private[llm4s] object Redaction {
           if (c == quote) from
           else scanQuotedValue(input, if (c == '\\') from + 2 else from + 1, end)
         case ValueEnd.EscapedQuote =>
-          if (c == '"') -1
-          else if (c == '\\' && from + 1 < input.length && input.charAt(from + 1) == '"') from
+          if (c == '"' || (c == '\\' && from + 1 < input.length && input.charAt(from + 1) == '"')) from
           else scanQuotedValue(input, from + 1, end)
       }
     }
 
   /**
    * Replaces the value of every `"key": "value"` whose key is sensitive. `start` matches up to the opening quote; the
-   * value runs to the end found by `scanQuotedValue`, and the closing quote is left in place. A value that is empty,
-   * already the placeholder, or not closed is left as it is.
+   * value runs to the end found by `scanQuotedValue`, and the closing quote is left in place. An empty value is left as it is.
    */
   private def redactQuoted(start: Regex, input: String, placeholder: String, end: ValueEnd): String = {
     val matcher = start.pattern.matcher(input)
     val out     = new java.lang.StringBuilder(input.length)
-    val closeLen = end match {
-      case ValueEnd.Quote(_)     => 1
-      case ValueEnd.EscapedQuote => 2
-    }
 
     @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
       if (searchFrom > input.length || !matcher.find(searchFrom)) {
@@ -311,18 +307,11 @@ private[llm4s] object Redaction {
       } else {
         val valueStart = matcher.end
         val valueEnd   = scanQuotedValue(input, valueStart, end)
-        if (valueEnd < 0) {
-          loop(valueStart, copiedTo)
+        if (isSensitiveKey(matcher.group(2)) && valueEnd > valueStart) {
+          out.append(input, copiedTo, valueStart).append(placeholder)
+          loop(valueEnd, valueEnd)
         } else {
-          val redact =
-            isSensitiveKey(matcher.group(2)) && valueEnd > valueStart &&
-              input.substring(valueStart, valueEnd) != placeholder
-          if (redact) {
-            out.append(input, copiedTo, valueStart).append(placeholder)
-            loop(valueEnd + closeLen, valueEnd)
-          } else {
-            loop(valueEnd + closeLen, copiedTo)
-          }
+          loop(valueEnd, copiedTo)
         }
       }
 
@@ -331,8 +320,8 @@ private[llm4s] object Redaction {
   }
 
   /**
-   * Replaces the value of every match whose key is sensitive. An empty value, or one that is already the placeholder,
-   * is left as it is, so redacting twice gives the same result as redacting once.
+   * Replaces the value of every match whose key is sensitive. Redacting a value that is already the
+   * placeholder gives the placeholder, so redacting twice gives the same result as redacting once.
    */
   private def redactPairs(
     pattern: Regex,
@@ -343,13 +332,9 @@ private[llm4s] object Redaction {
     pattern.replaceAllIn(
       input,
       m => {
-        val value = m.group(3)
         val text =
-          if (isSensitiveKey(m.group(2)) && value.nonEmpty && value != placeholder) {
-            m.group(1) + wrap + placeholder + wrap
-          } else {
-            m.matched
-          }
+          if (isSensitiveKey(m.group(2))) m.group(1) + wrap + placeholder + wrap
+          else m.matched
         Regex.quoteReplacement(text)
       }
     )
