@@ -11,11 +11,18 @@ import com.anthropic.config.{
 }
 import com.anthropic.core.{ JsonObject, ObjectMappers }
 import com.anthropic.models.messages.{
+  ContentBlockParam,
   Message,
   MessageCreateParams,
+  MessageParam,
   RawMessageStreamEvent,
+  RedactedThinkingBlockParam,
+  TextBlockParam,
+  ThinkingBlockParam,
   ThinkingConfigEnabled,
-  Tool
+  Tool,
+  ToolResultBlockParam,
+  ToolUseBlockParam
 }
 
 import scala.collection.mutable
@@ -53,15 +60,22 @@ import scala.util.{ Try, Using }
  *    assistant."` automatically. Supply an explicit `SystemMessage` to
  *    override this.
  *
- *  - **Tool results as user messages**: the Anthropic API does not accept
- *    native tool-result messages in the same turn structure as OpenAI.
- *    `ToolMessage` values are therefore forwarded as user messages with
- *    the prefix `"[Tool result for <toolCallId>]: "`.
+ *  - **Tool calls as content blocks**: an `AssistantMessage`'s tool calls
+ *    are sent as `tool_use` blocks after its text, and each `ToolMessage`
+ *    answering one as a `tool_result` block, consecutive results sharing
+ *    one user turn. A tool call with no `ToolMessage` in the conversation
+ *    is left out (Anthropic rejects an unanswered `tool_use`), and a
+ *    `ToolMessage` whose call is not in the conversation - after pruning,
+ *    say - is sent as user text prefixed `"[Tool result for <toolCallId>]: "`.
  *
- *  - **Assistant messages with tool calls are skipped**: when an
- *    `AssistantMessage` carries pending tool calls, it is not forwarded —
- *    Anthropic infers the assistant turn from the subsequent tool-result
- *    user messages.
+ *  - **Thinking replayed**: an `AssistantMessage`'s signed thinking blocks
+ *    and redacted thinking go back first in its turn, unchanged and in
+ *    order, as extended thinking with tool use requires. Unsigned thinking
+ *    (from another provider) is left out, since Anthropic rejects a thinking
+ *    block without a signature. Returned sealed thinking is bound to the
+ *    request, and replayed only while the conversation before it is unchanged
+ *    (Anthropic rejects a block whose earlier history, system prompt or tools
+ *    changed); otherwise it goes unsealed (see `ThinkingReplay`).
  *
  *  - **Schema sanitisation**: OpenAI-specific fields (`strict`,
  *    `additionalProperties`) are stripped from tool schemas before sending,
@@ -70,7 +84,10 @@ import scala.util.{ Try, Using }
  * == Extended thinking ==
  *
  * When `CompletionOptions.reasoning` is set, a `thinking` block is added
- * to the request. The token budget is clamped to `[1024, maxTokens - 1]`
+ * to the request. The response's `thinking` and `redacted_thinking` blocks -
+ * streamed or not - become the returned message's
+ * [[org.llm4s.llmconnect.model.AssistantMessage.thinking]], each thinking
+ * block with its `signature`, so that a later request can send them back. The token budget is clamped to `[1024, maxTokens - 1]`
  * to satisfy the Anthropic API constraint; the effective budget may
  * therefore differ from what was requested.
  *
@@ -126,6 +143,9 @@ class AnthropicClient(
   protected def providerName: String      = "anthropic"
   protected def modelName: String         = config.model
 
+  // sealed thinking is replayed only to the provider and model id it was produced by (see ReplayOrigin)
+  private val replayOrigin = ReplayOrigin(providerName, config.model)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -179,7 +199,12 @@ class AnthropicClient(
         // Make API call
         val attempt = Try(messageService.create(messageParams)).toEither.left
           .map(AnthropicClient.mapError(_, credentialSecrets))
-        val result       = attempt.map(convertFromAnthropicResponse)
+        // sealed thinking is bound to the request it answers, so it is replayed only while that holds
+        val result = attempt
+          .map(convertFromAnthropicResponse)
+          .map(c =>
+            c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, transformed.messages, transformed.options))
+          )
         val responseBody = attempt.toOption.map(serializeResponseBody)
         recordingExchange(startedAt, requestBody)(result)(responseBody)
       }
@@ -258,7 +283,9 @@ curl https://api.anthropic.com/v1/messages \
         val accumulator                      = StreamingAccumulator.create()
         var currentMessageId: Option[String] = None
         val blockIndexToToolId               = mutable.Map.empty[Long, String]
-        val rawStream                        = StringBuilder()
+        // thinking blocks by content-block index, so each keeps its own text and signature
+        val thinkingBlocks = mutable.TreeMap.empty[Long, AnthropicClient.StreamedThinking]
+        val rawStream      = StringBuilder()
 
         // Process the stream
         val attempt = Try {
@@ -306,6 +333,10 @@ curl https://api.anthropic.com/v1/messages \
                     val thinkingDelta = thinkingOpt.get()
                     val thinkingText  = thinkingDelta.thinking()
                     if (thinkingText != null && thinkingText.nonEmpty) {
+                      thinkingBlocks
+                        .getOrElseUpdate(contentDelta.index(), AnthropicClient.StreamedThinking())
+                        .text
+                        .append(thinkingText)
                       val chunk = StreamedChunk(
                         id = currentMessageId.getOrElse(""),
                         content = None,
@@ -316,6 +347,17 @@ curl https://api.anthropic.com/v1/messages \
                       accumulator.addChunk(chunk)
                       onChunk(chunk)
                     }
+                  }
+                }
+
+                // The signature closes a thinking block; it is needed to send the block back
+                Try(delta.signature()).foreach { signatureOpt =>
+                  if (signatureOpt != null && signatureOpt.isPresent) {
+                    val signature = signatureOpt.get().signature()
+                    if (signature != null && signature.nonEmpty)
+                      thinkingBlocks
+                        .getOrElseUpdate(contentDelta.index(), AnthropicClient.StreamedThinking())
+                        .signature = Some(signature)
                   }
                 }
 
@@ -342,6 +384,12 @@ curl https://api.anthropic.com/v1/messages \
               if (contentStartOpt != null && contentStartOpt.isPresent) {
                 val contentStart = contentStartOpt.get()
                 val block        = contentStart.contentBlock()
+                if (block.isThinking) {
+                  thinkingBlocks.getOrElseUpdate(contentStart.index(), AnthropicClient.StreamedThinking())
+                } else if (block.isRedactedThinking) {
+                  thinkingBlocks(contentStart.index()) =
+                    AnthropicClient.StreamedThinking(redacted = Some(block.asRedactedThinking().data()))
+                }
                 if (block.isToolUse) {
                   val toolUse = block.asToolUse()
                   blockIndexToToolId(contentStart.index()) = toolUse.id()
@@ -394,7 +442,13 @@ curl https://api.anthropic.com/v1/messages \
         val result = attempt.flatMap(_ =>
           accumulator.toCompletion.map { c =>
             val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.withModel(config.model).withEstimatedCost(cost)
+            // the accumulator knows only the thinking text; the blocks carry their signatures
+            val message =
+              if (thinkingBlocks.isEmpty) c.message
+              else c.message.withThinking(thinkingBlocks.values.map(_.toBlock).toSeq)
+            c.withModel(config.model)
+              .withMessage(ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options))
+              .withEstimatedCost(cost)
           }
         )
 
@@ -432,29 +486,71 @@ curl https://api.anthropic.com/v1/messages \
     // Track if we've seen a system message
     var hasSystemMessage = false
 
+    // a tool_use goes out only with its tool_result, in the user turn straight after it, and a
+    // tool_result only right after its tool_use: Anthropic rejects either without the other, and a
+    // result that a user message or a later turn separates from its call
+    // sealed thinking goes back only while the history before it is the one it was produced after;
+    // any other is unsealed here (see ThinkingReplay)
+    val messages = ThinkingReplay.replayable(replayOrigin, conversation.messages, options)
+    val pairing  = ToolResultPairing.of(messages)
+
+    // a run of tool messages becomes one user turn: the paired results first, as Anthropic requires,
+    // then any unpaired ones as text
+    val pendingResults = mutable.ListBuffer.empty[ContentBlockParam]
+    val pendingTexts   = mutable.ListBuffer.empty[ContentBlockParam]
+    def flushResults(): Unit =
+      if (pendingResults.nonEmpty || pendingTexts.nonEmpty) {
+        val blocks = (pendingResults ++ pendingTexts).toList
+        paramsBuilder.addMessage(
+          MessageParam.builder().role(MessageParam.Role.USER).contentOfBlockParams(blocks.asJava).build()
+        )
+        pendingResults.clear()
+        pendingTexts.clear()
+      }
+
     // Process messages in order
-    conversation.messages.foreach {
-      case SystemMessage(content) =>
+    messages.zipWithIndex.foreach {
+      case (SystemMessage(content), _) =>
         paramsBuilder.system(appendJsonInstruction(content, options))
         hasSystemMessage = true
 
-      case UserMessage(content) =>
+      case (UserMessage(content), _) =>
+        flushResults()
         paramsBuilder.addUserMessage(content)
 
-      case AssistantMessage(contentOpt, toolCalls) =>
-        // For AssistantMessages with tool calls, we skip sending them back to Anthropic
-        // The tool results will be sent as ToolMessages, which Anthropic converts to user messages
-        if (toolCalls.isEmpty) {
-          // Only send AssistantMessages without tool calls
-          paramsBuilder.addAssistantMessage(contentOpt.getOrElse(""))
+      case (original: AssistantMessage, index) =>
+        flushResults()
+        // only the paired calls; dropping one unseals the thinking, which then stays out
+        val am             = pairing.replayable(index, original)
+        val calls          = am.toolCalls
+        val text           = am.contentOpt.filter(_.nonEmpty)
+        val sealedThinking = AnthropicClient.thinkingBlockParams(am.thinking)
+        if (calls.isEmpty && text.isEmpty) {
+          // nothing to send: every tool call went unanswered, and thinking cannot stand alone
+        } else if (sealedThinking.isEmpty && calls.isEmpty) {
+          // a plain text turn; one whose every tool call went unanswered keeps only its text
+          text.foreach(t => paramsBuilder.addAssistantMessage(t))
+        } else {
+          val blocks = sealedThinking ++
+            text.map(t => ContentBlockParam.ofText(TextBlockParam.builder().text(t).build())).toList ++
+            calls.map(AnthropicClient.toolUseBlockParam)
+          paramsBuilder.addMessage(
+            MessageParam.builder().role(MessageParam.Role.ASSISTANT).contentOfBlockParams(blocks.asJava).build()
+          )
         }
-      // If there are tool calls, we don't send this message - Anthropic will infer it from the tool results
 
-      case ToolMessage(content, toolCallId) =>
-        // Anthropic API expects tool results to be sent in user messages
-        // We prefix the content to make it clear this is a tool result
-        paramsBuilder.addUserMessage(s"[Tool result for $toolCallId]: $content")
+      case (ToolMessage(content, toolCallId), index) if pairing.resultPaired(index) =>
+        pendingResults += ContentBlockParam.ofToolResult(
+          ToolResultBlockParam.builder().toolUseId(toolCallId).content(content).build()
+        )
+
+      case (ToolMessage(content, toolCallId), _) =>
+        // no tool_use it can answer here (pruned, or not straight before it), so it goes as text
+        pendingTexts += ContentBlockParam.ofText(
+          TextBlockParam.builder().text(s"[Tool result for $toolCallId]: $content").build()
+        )
     }
+    flushResults()
 
     // Add a default system message if none was provided; the JSON instruction is appended to it as
     // well so structured-output requests keep the instruction when the caller supplied no system prompt
@@ -545,15 +641,18 @@ curl https://api.anthropic.com/v1/messages \
       if (texts.nonEmpty) Some(texts.mkString) else None
     }
 
-    // Extract thinking content (for extended thinking responses)
-    val thinkingContent: Option[String] = {
-      val thinkingTexts = contentBlocks.filter(_.isThinking).map(_.asThinking().thinking())
-      if (thinkingTexts.nonEmpty) Some(thinkingTexts.mkString) else None
+    // Extended thinking: every thinking block with its signature, and redacted thinking, in order
+    val thinking: Seq[ThinkingBlock] = contentBlocks.flatMap { block =>
+      if (block.isThinking) {
+        val t = block.asThinking()
+        Some(ThinkingBlock.Text(t.thinking(), Try(t.signature()).toOption.filter(_.nonEmpty)))
+      } else if (block.isRedactedThinking) Some(ThinkingBlock.Redacted(block.asRedactedThinking().data()))
+      else None
     }
 
     // Extract tool calls if present
     val toolCalls = extractToolCalls(response)
-    val message   = AssistantMessage(contentOpt = textContent, toolCalls = toolCalls)
+    val message   = AssistantMessage(contentOpt = textContent, toolCalls = toolCalls, thinking = thinking)
 
     // Extract token usage, including thinking tokens if available
     val usage = response.usage()
@@ -588,7 +687,6 @@ curl https://api.anthropic.com/v1/messages \
       created = System.currentTimeMillis() / 1000, // Use current time as created timestamp
       message = message,
       usage = Some(tokenUsage),
-      thinking = thinkingContent,
       estimatedCost = cost
     )
   }
@@ -734,6 +832,39 @@ object AnthropicClient {
       case Some(wi) => Seq(wi.federationRuleId, wi.organizationId) ++ wi.serviceAccountId ++ wi.workspaceId
     }
   import org.llm4s.types.TryOps
+
+  /** A thinking or redacted-thinking block being assembled from a stream. */
+  final private[provider] case class StreamedThinking(
+    text: StringBuilder = new StringBuilder,
+    var signature: Option[String] = None,
+    redacted: Option[String] = None
+  ) {
+    def toBlock: ThinkingBlock =
+      redacted.fold[ThinkingBlock](ThinkingBlock.Text(text.toString, signature))(ThinkingBlock.Redacted(_))
+  }
+
+  /**
+   * The thinking blocks of an assistant turn that Anthropic takes back: signed thinking and
+   * redacted thinking, unchanged and in order. Unsigned thinking - from another provider, or
+   * written by hand - is left out, because Anthropic rejects a thinking block without its signature.
+   */
+  private[provider] def thinkingBlockParams(thinking: Seq[ThinkingBlock]): List[ContentBlockParam] =
+    thinking.toList.collect {
+      case ThinkingBlock.Text(text, Some(signature)) if signature.nonEmpty =>
+        ContentBlockParam.ofThinking(ThinkingBlockParam.builder().thinking(text).signature(signature).build())
+      case ThinkingBlock.Redacted(data) =>
+        ContentBlockParam.ofRedactedThinking(RedactedThinkingBlockParam.builder().data(data).build())
+    }
+
+  /** A tool call as a `tool_use` block. Arguments that are not a JSON object are sent as `{}`. */
+  private[provider] def toolUseBlockParam(call: ToolCall): ContentBlockParam = {
+    val arguments = call.arguments match {
+      case obj: ujson.Obj => obj
+      case _              => ujson.Obj()
+    }
+    val input = ObjectMappers.jsonMapper().readValue(arguments.render(), classOf[ToolUseBlockParam.Input])
+    ContentBlockParam.ofToolUse(ToolUseBlockParam.builder().id(call.id).name(call.name).input(input).build())
+  }
 
   /**
    * Whether an Anthropic model rejects the deprecated `temperature` sampling parameter.

@@ -611,7 +611,10 @@ llm4s {
 
 - **Chat:** `deepseek-chat` (best for general use)
 - **Reasoning:** `deepseek-reasoner` (extended thinking). Its chain of thought
-  (`reasoning_content`) is returned as `Completion.thinking`, and streamed as thinking deltas.
+  (`reasoning_content`) is returned on the message as `AssistantMessage.thinking` (and so
+  `Completion.thinking`), streamed as thinking deltas, and sent back as `reasoning_content` in later
+  requests, which DeepSeek's thinking mode requires once tools are involved
+  (see [Thinking in conversation history](#thinking-in-conversation-history)).
 
 ### Costs
 
@@ -654,7 +657,9 @@ Both sections are shown together for brevity. Only the section you load is valid
 its key - `OPENROUTER_API_KEY` or `ZAI_API_KEY` - needs to be set.
 
 OpenRouter maps `CompletionOptions.reasoning` onto the underlying model: a thinking budget for
-Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest.
+Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest. A GLM thinking
+model's `reasoning_content` on Z.ai, and a model's `reasoning` and `reasoning_details` on OpenRouter,
+are returned on the message and sent back (see [Thinking in conversation history](#thinking-in-conversation-history)).
 
 ---
 
@@ -1475,6 +1480,98 @@ Free! Just compute (CPU or GPU needed).
 - Works offline (no internet needed)
 - Use GPU for faster inference
 - Ideal for sensitive data (runs locally)
+
+---
+
+## Thinking in conversation history
+
+A model's reasoning is returned on the message it produced, as `AssistantMessage.thinking` - a
+sequence of `ThinkingBlock`s - and `Completion.thinking` is that message's thinking text. Because it
+lives on the message, it stays in the conversation (and in an agent's thread) like the content and
+tool calls do, and each client sends it back where its provider takes it:
+
+| Provider | Read from | Sent back as |
+|---|---|---|
+| Anthropic | `thinking` blocks (each with its `signature`) and `redacted_thinking` | the same blocks, unchanged and first in the assistant turn |
+| Bedrock (Converse) | `reasoningContent` (text with `signature`, or `redactedContent`) | the same blocks, unchanged and first in the assistant turn |
+| Ollama | `message.thinking` | `thinking` on the assistant message |
+| DeepSeek, Z.ai | `reasoning_content` | `reasoning_content` |
+| OpenRouter | `reasoning` / `thinking`, and `reasoning_details` | `reasoning`, and `reasoning_details` unchanged (same items, order and fields) |
+| Mistral (Magistral) | thinking chunks in `content` | a thinking chunk before the text chunk |
+| OpenAI, Azure, Gemini, Vertex AI, Cohere, generic `openai-compatible` | - | not sent: the API has no field for it |
+
+Anthropic and Bedrock require the signed blocks back when a thinking model's turn ends in tool
+calls, and reject a thinking block without a signature, so unsigned thinking - from another
+provider earlier in the conversation, or set by hand with `withThinking(text)` - is left out of
+their requests. The Anthropic client sends tool calls and their results as `tool_use` and
+`tool_result` blocks for the same reason: the thinking has to sit in the turn that made the calls.
+Both clients send a call only when its result is in the run of tool messages straight after it, as
+those APIs require; a result anywhere else (after a user message, say) goes as
+`[Tool result for <id>]: ...` text, and its call is left out.
+
+OpenRouter returns `reasoning_details` when the underlying model's reasoning is signed, summarised
+or encrypted (Claude, Gemini, OpenAI reasoning models), and
+[requires the whole sequence back unchanged](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#preserving-reasoning)
+when a conversation continues after tool calls. Each item is kept, with every field, as a
+`ThinkingBlock.Opaque("openrouter", json)` block after the reasoning text - streamed items are
+joined by `index` first - and only the OpenRouter client sends them back; every other client ignores
+opaque blocks that are not its own.
+
+Signed, redacted and opaque thinking is *sealed*: it is valid only in the conversation it was produced in.
+[Anthropic](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking) validates a
+thinking block against everything sent before it - the top-level system prompt, the tools and every
+earlier message - and rejects it (400) once any of those changes; a block must also come back
+unchanged, beside the content and tool calls it came with. Bedrock documents its reasoning signature
+as a hash of all the messages in the conversation. llm4s enforces both halves with two rules
+(`hasSealedThinking` reports which state a message is in):
+
+- **The message itself.** `withContent` and `withToolCalls`, given a changed value, *unseal* the
+  thinking: they drop redacted and opaque blocks and signatures and keep the reasoning text. An agent's
+  `afterAgent` answer rewrite and a tool-call edit go through those setters, and so do the
+  Anthropic and Bedrock clients when they leave out an unpaired call.
+- **Everything before it.** When Anthropic, Bedrock or OpenRouter returns sealed thinking, the client records a
+  fingerprint of the request on the message (`AssistantMessage.thinkingBinding`): every system
+  message, the tools, the response format and every earlier message in order, system messages in
+  their positions (OpenRouter sends them inline, so moving one changes what came before), as sent.
+  When the message is
+  sent again, the client replays its sealed thinking only if the conversation before it still has
+  that fingerprint, and sends it unsealed otherwise. The check runs at the point of sending, so it
+  covers every rewrite of the history - `ContextPruning` and the agent's context-window middleware,
+  `TokenWindow` trimming, the context compressors (`DeterministicCompressor`, `LLMCompressor`,
+  `HistoryCompressor`, `ToolOutputCompressor`, `ContextManager`), a handoff's view of the thread,
+  memory or RAG context inserted before existing turns, a changed system prompt or tool set, or a
+  hand edit - without any of them having to know about thinking.
+- **Who produced it.** The fingerprint also covers the provider id and model that produced the
+  thinking, and the client checks it against the provider and model it is about to call. A
+  signature or reasoning item belongs to its producer, so a conversation produced by one client
+  and continued with another - Bedrock then Anthropic, or one OpenRouter model then another - is
+  sent unsealed, never with a foreign signature. Every client binds to the provider and model it is
+  configured with, never the model a response reports: Anthropic and Bedrock may report an alias's
+  resolved snapshot, and a router such as `openrouter/auto` (or OpenRouter's model fallbacks)
+  reports the model it chose for that request. The provider that resolved the alias or chose the
+  route is the one the thinking goes back to, and OpenRouter
+  [requires](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#preserving-reasoning-blocks)
+  the complete `reasoning_details` sequence on a tool-call continuation, so routed turns keep it.
+  Changing the configured model unseals every earlier turn. The endpoint is not part of it: a proxy or regional endpoint in
+  front of the same provider changes nothing the provider checks.
+
+Earlier turns whose history is unchanged keep their sealed thinking: Anthropic recommends passing
+all thinking blocks back, keeps them in context on newer models, and accepts any unbroken run of the
+original blocks. A change unseals every turn after it and none before it, so the replayed blocks never
+have a gap. Unsealed thinking keeps its text, which Anthropic and Bedrock leave out and other
+providers still receive. Sealed thinking with no binding - built by hand with `withThinking` - is
+not replayed. To keep signed thinking, append to the conversation and leave what is already there as
+it is. Thinking also counts toward token estimates (`ConversationTokenCounter`), since most providers
+resend it.
+
+```scala
+for {
+  first <- client.complete(conversation, options)     // a tool-call turn, with thinking
+  results = runTools(first.message.toolCalls)          // your tool execution: Seq[ToolMessage]
+  next    = conversation.addMessage(first.message).addMessages(results) // keeps the thinking
+  answer <- client.complete(next, options)             // the provider gets it back
+} yield answer
+```
 
 ---
 

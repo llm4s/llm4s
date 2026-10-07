@@ -124,10 +124,10 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
    * again, which replays the log (store-level change notification is Stage 2). Returns at once: replay runs on the
    * subscription's dispatcher thread, the only thread `listener` is called on, and a failed replay
    * ends it with [[DisconnectReason.ReplayFailed]]. A listener that throws is disconnected
-   * ([[DisconnectReason.ListenerFailed]]). `capacity` must be at least two: a live event is queued
-   * only while two slots are free, one being reserved for the [[StreamEvent.LiveGap]] marker that
-   * precedes it, so with one slot no live event could ever be accepted and the next durable event,
-   * needing a slot for the pending gap too, would disconnect the subscriber.
+   * ([[DisconnectReason.ListenerFailed]]). `capacity` bounds durable and live events separately,
+   * so live events never crowd out durable ones, and must be at least two: a live event is queued
+   * only while two live slots are free, one being reserved for the [[StreamEvent.LiveGap]] marker
+   * that precedes it, so with one slot no live event could ever be accepted.
    */
   def subscribe(threadId: ThreadId, afterSeq: Long = 0L, capacity: Int = 1024)(
     listener: StreamEvent => Unit

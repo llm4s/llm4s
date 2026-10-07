@@ -543,7 +543,7 @@ class OpenAIClient private[provider] (
       case SystemMessage(content) =>
         ChatCompletionMessageParam.ofSystem(ChatCompletionSystemMessageParam.builder().content(content).build())
 
-      case AssistantMessage(content, toolCalls) =>
+      case AssistantMessage(content, toolCalls, _, _) => // chat completions has no field for earlier reasoning
         val msg = ChatCompletionAssistantMessageParam.builder().content(content.getOrElse(""))
         toolCalls.foreach { tc =>
           msg.addToolCall(

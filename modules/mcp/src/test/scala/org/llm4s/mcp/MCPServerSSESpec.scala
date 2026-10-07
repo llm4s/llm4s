@@ -243,15 +243,12 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
     val messageUrl    = new AtomicReference[String]("")
     val executor      = Executors.newSingleThreadExecutor()
 
-    val conn = openConnection(serverPort, "/mcp/sse", "GET")
-    conn.setRequestProperty("Accept", "text/event-stream")
-    conn.setConnectTimeout(3000)
-    conn.setReadTimeout(10000)
+    val stream = SseTestStream.open(serverPort, "/mcp/sse")
 
     executor.submit(new Runnable {
       override def run(): Unit =
         try {
-          val reader = new BufferedReader(new InputStreamReader(conn.getInputStream, "UTF-8"))
+          val reader = new BufferedReader(new InputStreamReader(stream.body, "UTF-8"))
           val sb     = new StringBuilder
 
           var line = reader.readLine()
@@ -281,7 +278,7 @@ class MCPServerSSESpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
       gotEndpoint shouldBe true
       body(messageUrl.get(), events)
     } finally {
-      conn.disconnect()
+      stream.close()
       executor.shutdown()
       executor.awaitTermination(2, TimeUnit.SECONDS)
     }

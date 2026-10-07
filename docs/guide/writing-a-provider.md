@@ -489,6 +489,13 @@ message, provider)` - but not a cancellation: an interrupted `Llm4sHttpClient` c
 mapping it into an `EmbeddingError` (as `left.map(err => EmbeddingError(...))` does) hides it. Pass it through, as the
 Voyage, Jina, Ollama and OpenAI providers do, and see [Cancellation](#cancellation).
 
+`request.purpose` is an `InputPurpose`, `Document` (the default) or `Query`: whether the texts are to be
+indexed or are a search query. If your vendor's API embeds the two differently, map it onto the vendor's own
+parameter in `embed` (Voyage and Cohere send `input_type`, Jina sends `task`), and let a typed setting of the
+provider, if it has one, win over it, because that is a deliberate choice and can say more than two values
+can. If your models embed both alike, ignore it and do not send a field for it. Test the exact wire field
+for both purposes against a local server, as `VoyageAIInputTypeSpec` does.
+
 ### Streaming: `SSEParser`, `StreamingAccumulator`, `StreamingToolArgumentParser`
 
 - `SSEParser.createStreamingParser()` returns an incremental parser: `addChunk(text)`, then drain

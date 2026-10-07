@@ -108,33 +108,49 @@ object AgentZStreamSpec extends ZIOSpecDefault {
         .map(e => assertTrue(e.toString.contains("store down")))
     },
     test("a slow consumer gets a LiveGap for the deltas it missed, and the run completes") {
-      // far more live text than the stream's buffer and the subscription's queue hold together
+      // Far more live text than the stream's buffer and the subscription's queue hold together, sent
+      // while the consumer is held on its first item until the run has committed RunCompleted - so
+      // by construction most deltas are dropped, whatever the scheduling. The run's few durable
+      // events must still all arrive: dropped live events never disconnect the subscription (#1387).
+      val deltas = 3000
       val client = new Fixtures.Scripted(
         onChunk => {
-          (0 until 3000).foreach(i => onChunk(Fixtures.chunk(i)))
+          (0 until deltas).foreach(i => onChunk(Fixtures.chunk(i)))
           Right(completion("done"))
         },
         () => Right(completion("done"))
       )
       val store = SignalsCompletion()
+      val held  = new AtomicInteger(0)
       val agent = Fixtures.agentOf(client)(_.withRuntime(GraphRuntime(store)).withStreaming())
       AgentZ(agent)
         .stream(ThreadId("z7"), "hi")
         .zipWithIndex
         // the consumer takes nothing more until the run has completed
         .tap { case (_, i) =>
-          ZIO.attemptBlocking(if (i == 0) store.completed.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS)).orDie
+          ZIO.attemptBlocking {
+            if (i == 0 && store.completed.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS))
+              held.incrementAndGet(): Unit
+          }.orDie
         }
         .map(_._1)
         .runCollect
         .timeoutFail(new RuntimeException("hung"))(60.seconds)
         .map { items =>
-          val gaps = items.toVector.collect { case AgentStreamItem.Event(StreamEvent.LiveGap(n)) => n }.sum
+          val events = items.toVector.collect { case AgentStreamItem.Event(e) => e }
+          val gaps   = events.collect { case StreamEvent.LiveGap(n) => n }.sum
+          val lives  = events.count(_.isInstanceOf[StreamEvent.Live])
           val doneOk = items.last match {
             case AgentStreamItem.Done(r) => r.answer == Some("done")
             case _                       => false
           }
-          assertTrue(gaps > 0, doneOk, durableEvents(items).last == RunEvent.RunCompleted)
+          assertTrue(
+            held.get == 1,
+            gaps > 0,
+            lives + gaps >= deltas, // every delta delivered or counted; ModelCallStarted is live too
+            doneOk,
+            durableEvents(items).last == RunEvent.RunCompleted
+          )
         }
     },
     test("stopping early cancels the run, releasing its subscription") {

@@ -301,7 +301,8 @@ object SystemMessage {
 }
 
 /**
- * A response from the LLM, optionally containing text, tool-call requests, or both.
+ * A response from the LLM, optionally containing text, tool-call requests, or both, and the
+ * reasoning the model produced before them.
  *
  * `content` always returns a non-null `String`; it returns `""` when the LLM
  * response contains only tool calls and no accompanying text (`contentOpt` is
@@ -312,19 +313,110 @@ object SystemMessage {
  *  - `contentOpt.exists(_.trim.nonEmpty)` — the LLM produced text.
  *  - `toolCalls.nonEmpty` — the LLM requested one or more tool invocations.
  *
+ * Thinking alone does not make a message well-formed.
+ *
+ * Construct one with the companion `apply` and change it with the `with*` setters.
+ *
+ * '''Sealed thinking.''' A signed [[ThinkingBlock.Text]], a [[ThinkingBlock.Redacted]] or a
+ * [[ThinkingBlock.Opaque]] block is valid only in the conversation the provider produced it in. Anthropic signs a thinking block over
+ * everything sent before it - the system prompt, the tools and every earlier message - and rejects
+ * it once any of those changes; Bedrock documents its reasoning signature as a hash of all the
+ * messages in the conversation. Both also reject a block sent beside content or tool calls other
+ * than the ones it came with. Two rules keep llm4s from sending a signed turn that no longer holds:
+ *
+ *  - '''Its own message.''' `withContent` and `withToolCalls`, given a value different from the
+ *    current one, '''unseal''' the thinking: they drop redacted and opaque blocks, the signatures
+ *    of text blocks and the binding, keeping the reasoning text.
+ *  - '''Everything before it.''' The client that receives sealed thinking records, in
+ *    `thinkingBinding`, a fingerprint of the request it answered and of who answered it: the
+ *    provider and model, the system messages, the tools, the response format and every earlier
+ *    message. When the message is sent again, the client replays its sealed thinking only if it is
+ *    calling that provider and model and the conversation before it still has that fingerprint, and
+ *    sends it unsealed otherwise - so a signature is never sent to a provider or model that did not
+ *    produce it. So pruning, compression, summarisation, an edit or an insertion
+ *    anywhere earlier in the history - by any code, through any API - unseals every later turn,
+ *    without the code that made the change having to know about thinking.
+ *
+ * Unsealed thinking keeps its text, which Anthropic and Bedrock leave out of the request and the
+ * other providers still receive. Earlier turns whose history is unchanged keep their sealed thinking,
+ * as Anthropic recommends: the blocks it accepts back are an unbroken run of the original sequence,
+ * and these rules never leave a gap, because unsealing one turn changes the history of every later
+ * one. To keep signed thinking, leave the message and everything before it as they are; to replace
+ * it deliberately, use `withThinking`.
+ *
  * @param contentOpt Text portion of the response; `None` when the model produced
  *                   only tool calls.
  * @param toolCalls  Tool invocations requested by the model; each carries an `id`
  *                   that must be matched by a subsequent [[ToolMessage]].
+ * @param thinking   The model's reasoning, as the provider returned it; empty when there was none
+ *                   or the provider does not report it. Clients put it here so that it stays in
+ *                   the conversation history, and send it back where their provider accepts it
+ *                   (see [[ThinkingBlock]]).
+ * @param thinkingBinding A fingerprint of the request the sealed thinking was produced for, set by
+ *                   the client that received it; `None` when the thinking is not sealed or was not
+ *                   bound. Opaque. Sealed thinking without a binding matching the conversation
+ *                   before the message is not replayed (see "Sealed thinking" above).
  */
 @Stable
-case class AssistantMessage(
-  contentOpt: Option[String] = None,
-  toolCalls: Seq[ToolCall] = Seq.empty
+final case class AssistantMessage private (
+  contentOpt: Option[String],
+  toolCalls: Seq[ToolCall],
+  thinking: Seq[ThinkingBlock],
+  thinkingBinding: Option[String]
 ) extends Message {
   val role: MessageRole = MessageRole.Assistant
 
   def content: String = contentOpt.getOrElse("")
+
+  /** Sets the content; a changed content unseals the thinking (see "Sealed thinking" above). */
+  def withContent(content: String): AssistantMessage = withContent(Some(content))
+
+  /** Sets the content; a changed content unseals the thinking (see "Sealed thinking" above). */
+  def withContent(content: Option[String]): AssistantMessage =
+    if (content == contentOpt) this else unsealed.copy(contentOpt = content)
+
+  /** Sets the tool calls; changed tool calls unseal the thinking (see "Sealed thinking" above). */
+  def withToolCalls(toolCalls: Seq[ToolCall]): AssistantMessage =
+    if (toolCalls == this.toolCalls) this else unsealed.copy(toolCalls = toolCalls)
+
+  /**
+   * Replaces the thinking, sealed or not, as given, and clears the binding: sealed thinking set here
+   * is not replayed until a client binds it (see "Sealed thinking" above).
+   */
+  def withThinking(thinking: Seq[ThinkingBlock]): AssistantMessage = copy(thinking = thinking, thinkingBinding = None)
+
+  /** Sets the thinking to `text` as one unsigned [[ThinkingBlock.Text]], or to none when it is empty. */
+  def withThinking(text: String): AssistantMessage =
+    copy(thinking = if (text.isEmpty) Seq.empty else Seq(ThinkingBlock.Text(text)), thinkingBinding = None)
+
+  /** Sets the binding of the sealed thinking; used by the clients that receive and replay it. */
+  private[llm4s] def withThinkingBinding(binding: Option[String]): AssistantMessage = copy(thinkingBinding = binding)
+
+  /**
+   * This message with its thinking unsealed: redacted and opaque blocks, signatures and the binding dropped,
+   * the reasoning text kept. Itself when the thinking is not sealed.
+   */
+  private[llm4s] def unsealed: AssistantMessage =
+    if (!hasSealedThinking && thinkingBinding.isEmpty) this
+    else copy(thinking = unsealedThinking, thinkingBinding = None)
+
+  /** The text of the thinking blocks, concatenated; `None` when there is none. */
+  def thinkingText: Option[String] = ThinkingBlock.text(thinking)
+
+  /** Whether the message carries any thinking, text or redacted. */
+  def hasThinking: Boolean = thinking.nonEmpty
+
+  /**
+   * Whether the thinking is sealed: it holds a signed text block or a redacted block, valid only with
+   * this exact content and these tool calls, after the history it was produced after (see "Sealed
+   * thinking" above).
+   */
+  def hasSealedThinking: Boolean = thinking.exists(ThinkingBlock.isSealed)
+
+  // the thinking with redacted and opaque blocks and signatures dropped, keeping the reasoning text
+  private def unsealedThinking: Seq[ThinkingBlock] =
+    if (!hasSealedThinking) thinking
+    else thinking.collect { case ThinkingBlock.Text(text, _) if text.nonEmpty => ThinkingBlock.Text(text) }
 
   override def toString: String = {
     val toolCallsStr = if (toolCalls.nonEmpty) {
@@ -338,28 +430,50 @@ case class AssistantMessage(
 
   override def validate: Result[Message] =
     if (content.trim.isEmpty && toolCalls.isEmpty) {
-      Left(
-        ValidationError(
-          "Assistant message must have either content or tool calls",
-          "content"
-        )
-      )
+      Left(ValidationError("Assistant message must have either content or tool calls", "content"))
+    } else if (
+      thinking.exists {
+        case ThinkingBlock.Text(text, signature)  => text.isEmpty && !signature.exists(_.nonEmpty)
+        case ThinkingBlock.Redacted(data)         => data.isEmpty
+        case ThinkingBlock.Opaque(provider, data) => provider.isEmpty || data.isEmpty
+      }
+    ) {
+      Left(ValidationError("thinking", "an assistant message's thinking block must not be empty"))
     } else {
       Right(this)
     }
 }
 
 object AssistantMessage {
-  // Manual ReadWriter for AssistantMessage due to macro issues with default parameters
+
+  /** Creates an [[AssistantMessage]]. Named arguments are the supported way to construct one. */
+  def apply(
+    contentOpt: Option[String] = None,
+    toolCalls: Seq[ToolCall] = Seq.empty,
+    thinking: Seq[ThinkingBlock] = Seq.empty
+  ): AssistantMessage =
+    new AssistantMessage(contentOpt, toolCalls, thinking, None)
+
+  def apply(content: String): AssistantMessage =
+    new AssistantMessage(Some(content), Seq.empty, Seq.empty, None)
+  def apply(content: String, toolCalls: Seq[ToolCall]): AssistantMessage =
+    new AssistantMessage(Some(content), toolCalls, Seq.empty, None)
+
+  // Manual ReadWriter: `thinking` and `thinkingBinding` are written only when present and read as
+  // empty when absent, so JSON written before they existed still reads
   implicit val rw: RW[AssistantMessage] = readwriter[ujson.Value].bimap[AssistantMessage](
-    msg =>
-      ujson.Obj(
+    msg => {
+      val obj = ujson.Obj(
         "contentOpt" -> (msg.contentOpt match {
           case None          => ujson.Null
           case Some(content) => ujson.Str(content)
         }),
         "toolCalls" -> ujson.read(write(msg.toolCalls))
-      ),
+      )
+      if (msg.thinking.nonEmpty) obj("thinking") = ujson.read(write(msg.thinking))
+      msg.thinkingBinding.foreach(b => obj("thinkingBinding") = b)
+      obj
+    },
     json => {
       val obj = json.obj
       val contentOpt = obj.get("contentOpt") match {
@@ -371,14 +485,14 @@ object AssistantMessage {
         case Some(toolCallsJson) => read[Seq[ToolCall]](toolCallsJson)
         case _                   => Seq.empty
       }
-      AssistantMessage(contentOpt, toolCalls)
+      val thinking = obj.get("thinking") match {
+        case Some(ujson.Null) | None => Seq.empty
+        case Some(thinkingJson)      => read[Seq[ThinkingBlock]](thinkingJson)
+      }
+      val binding = obj.get("thinkingBinding").flatMap(_.strOpt)
+      new AssistantMessage(contentOpt, toolCalls, thinking, binding)
     }
   )
-
-  def apply(content: String): AssistantMessage =
-    AssistantMessage(Some(content), Seq.empty)
-  def apply(content: String, toolCalls: Seq[ToolCall]): AssistantMessage =
-    AssistantMessage(Some(content), toolCalls)
 }
 
 /**

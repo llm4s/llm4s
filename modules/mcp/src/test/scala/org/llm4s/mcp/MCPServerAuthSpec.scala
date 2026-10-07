@@ -159,45 +159,39 @@ class MCPServerAuthSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll 
       val endpointUrl   = new AtomicReference[String]("")
       val executor      = Executors.newSingleThreadExecutor()
 
-      val conn =
-        URI.create(s"http://127.0.0.1:$srvPort/mcp/sse").toURL.openConnection().asInstanceOf[HttpURLConnection]
-      conn.setRequestMethod("GET")
-      conn.setRequestProperty("Accept", "text/event-stream")
-      conn.setRequestProperty("Authorization", s"Bearer $apiKey")
-      conn.setConnectTimeout(3000)
-      conn.setReadTimeout(5000)
-
-      executor.submit(new Runnable {
-        override def run(): Unit =
-          try {
-            val reader = new BufferedReader(new InputStreamReader(conn.getInputStream, "UTF-8"))
-            val sb     = new StringBuilder
-            var line   = reader.readLine()
-            while (line != null) {
-              if (line.isEmpty) {
-                val event = sb.toString()
-                if (event.startsWith("event: endpoint")) {
-                  val url =
-                    event.linesIterator.find(_.startsWith("data: ")).map(_.stripPrefix("data: ").trim).getOrElse("")
-                  endpointUrl.set(url)
-                  endpointLatch.countDown()
-                }
-                sb.clear()
-              } else {
-                if (sb.nonEmpty) sb.append("\n")
-                sb.append(line)
-              }
-              line = reader.readLine()
-            }
-          } catch { case _: Exception => () }
-      })
-
       try {
-        endpointLatch.await(5, TimeUnit.SECONDS) shouldBe true
-        endpointUrl.get() should include("127.0.0.1")
-        (endpointUrl.get() should not).include("0.0.0.0")
+        val stream = SseTestStream.open(srvPort, "/mcp/sse", Map("Authorization" -> s"Bearer $apiKey"))
+        try {
+          executor.submit(new Runnable {
+            override def run(): Unit =
+              try {
+                val reader = new BufferedReader(new InputStreamReader(stream.body, "UTF-8"))
+                val sb     = new StringBuilder
+                var line   = reader.readLine()
+                while (line != null) {
+                  if (line.isEmpty) {
+                    val event = sb.toString()
+                    if (event.startsWith("event: endpoint")) {
+                      val url =
+                        event.linesIterator.find(_.startsWith("data: ")).map(_.stripPrefix("data: ").trim).getOrElse("")
+                      endpointUrl.set(url)
+                      endpointLatch.countDown()
+                    }
+                    sb.clear()
+                  } else {
+                    if (sb.nonEmpty) sb.append("\n")
+                    sb.append(line)
+                  }
+                  line = reader.readLine()
+                }
+              } catch { case _: Exception => () }
+          })
+
+          endpointLatch.await(5, TimeUnit.SECONDS) shouldBe true
+          endpointUrl.get() should include("127.0.0.1")
+          (endpointUrl.get() should not).include("0.0.0.0")
+        } finally stream.close()
       } finally {
-        conn.disconnect()
         executor.shutdown()
         executor.awaitTermination(2, TimeUnit.SECONDS)
         srv.stop()

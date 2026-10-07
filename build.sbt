@@ -146,6 +146,9 @@ lazy val commonSettings = Seq(
   // Disable test Scaladoc generation during publish (not needed, saves memory in CI)
   Test / packageDoc / publishArtifact := false,
   Test / doc / sources                := Seq.empty,
+  // `-oD`: print each test's duration, so a slow test (or a platform that is slow at one thing,
+  // such as Windows refusing a loopback connection) shows up in the log, locally and in CI.
+  Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oD"),
   // Published modules log through `slf4j-api` only. Choosing a logging backend is the
   // application's decision: `logback-classic` and the `log4j-to-slf4j` bridge used to be compile
   // dependencies here, so every llm4s artifact put them on its users' classpath - a second

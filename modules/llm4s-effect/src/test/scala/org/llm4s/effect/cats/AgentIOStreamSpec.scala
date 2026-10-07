@@ -129,29 +129,41 @@ class AgentIOStreamSpec extends AnyFlatSpec with Matchers with Eventually {
   }
 
   it should "give a slow consumer a LiveGap for the deltas it missed, not cancel the run" in {
-    // far more live text than the stream's buffer and the subscription's queue hold together
+    // Far more live text than the stream's buffer and the subscription's queue hold together, sent
+    // while the consumer is held on its first item until the run has committed RunCompleted - so by
+    // construction most deltas are dropped, whatever the scheduling. The run's few durable events
+    // must still all arrive: dropped live events never disconnect the subscription (#1387).
+    val deltas = 3000
     val client = new Fixtures.Scripted(
       onChunk => {
-        (0 until 3000).foreach(i => onChunk(Fixtures.chunk(i)))
+        (0 until deltas).foreach(i => onChunk(Fixtures.chunk(i)))
         Right(completion("done"))
       },
       () => Right(completion("done"))
     )
     val store = SignalsCompletion()
+    val held  = new AtomicInteger(0)
     val agent = Fixtures.agentOf(client)(_.withRuntime(GraphRuntime(store)).withStreaming())
     val items = AgentIO[IO](agent)
       .stream(ThreadId("f7"), "hi")
       .zipWithIndex
       // the consumer takes nothing more until the run has completed
       .evalTap { case (_, i) =>
-        IO.blocking(if (i == 0) store.completed.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS))
+        IO.blocking {
+          if (i == 0 && store.completed.await(Fixtures.DeadlineSeconds, TimeUnit.SECONDS)) held.incrementAndGet(): Unit
+        }
       }
       .map(_._1)
       .compile
       .toVector
       .timeout(60.seconds)
       .unsafeRunSync()
-    items.collect { case AgentStreamItem.Event(StreamEvent.LiveGap(n)) => n }.sum should be > 0
+    held.get shouldBe 1
+    val events = items.collect { case AgentStreamItem.Event(e) => e }
+    val gaps   = events.collect { case StreamEvent.LiveGap(n) => n }.sum
+    gaps should be > 0
+    // every delta delivered or counted; ModelCallStarted is live too
+    (events.count(_.isInstanceOf[StreamEvent.Live]) + gaps) should be >= deltas
     items.last match {
       case AgentStreamItem.Done(r) => r.answer shouldBe Some("done")
       case other                   => fail(s"last item was $other")

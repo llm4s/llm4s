@@ -487,23 +487,32 @@ OLLAMA_EMBEDDING_BASE_URL=http://embeddings-host:11434   # llm4s-ollama
 - `voyage-3-large` - Higher quality
 - `voyage-code-2` - Code-optimized
 
+Voyage embeds queries and documents differently. Every request is sent with an `input_type` of `document`
+or `query`, taken from the request's `purpose` (see [Queries and documents](#queries-and-documents) below).
+Requests that do not say get `document`.
+
 **Jina AI:**
 - `jina-embeddings-v3` - Multilingual, 8192-token context (1024 dimensions)
 - `jina-embeddings-v4` - (2048 dimensions)
 
-Jina embeds queries and documents differently. The provider built from `EMBEDDING_MODEL` sends
-the `retrieval.passage` task; to embed queries, build it with the typed `JinaTask` setting:
-`JinaEmbeddingProvider.fromConfig(config, JinaTask.RetrievalQuery)`.
+Jina embeds queries and documents differently. The provider built from `EMBEDDING_MODEL` follows each
+request's `purpose` (see [Queries and documents](#queries-and-documents) below): a document is sent with the
+`retrieval.passage` task and a query with `retrieval.query`. To send one task whatever the request says, for
+example `text-matching`, build the provider with the typed `JinaTask` setting:
+`JinaEmbeddingProvider.fromConfig(config, JinaTask.TextMatching)`. An explicit task wins over the purpose.
 
 **Cohere:**
 - `embed-v4.0` - (1536 dimensions)
 - `embed-english-v3.0`, `embed-multilingual-v3.0` - (1024 dimensions)
 - `embed-english-light-v3.0`, `embed-multilingual-light-v3.0` - (384 dimensions)
 
-Cohere embeds queries and documents differently. The provider built from `EMBEDDING_MODEL` sends
-`input_type` `search_document`; to embed queries, build it with the typed `CohereInputType` setting:
-`CohereEmbeddingProvider.fromConfig(config, CohereInputType.SearchQuery)`. Texts are sent in
-requests of at most 96, Cohere's limit, and the vectors keep the model's default size.
+Cohere embeds queries and documents differently. The provider built from `EMBEDDING_MODEL` follows each
+request's `purpose` (see [Queries and documents](#queries-and-documents) below): a document is sent with
+`input_type` `search_document` and a query with `search_query`. To send one input type whatever the request
+says, for example `classification`, build the provider with the typed `CohereInputType` setting:
+`CohereEmbeddingProvider.fromConfig(config, CohereInputType.Classification)`. An explicit input type wins over
+the purpose. Texts are sent in requests of at most 96, Cohere's limit, and the vectors keep the model's default
+size.
 
 **Ollama (local):**
 - `nomic-embed-text` - General purpose (768 dimensions)
@@ -577,6 +586,40 @@ object RAGApplication extends App {
   )
 }
 ```
+
+### Queries and documents
+
+Several embedding models embed a search query differently from a document, so a query only finds what was
+indexed if the two were embedded on matching sides. An `EmbeddingRequest` says which it is with its `purpose`:
+
+```scala
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
+
+val indexing  = EmbeddingRequest(chunks, model)                            // a document: the default
+val searching = EmbeddingRequest(Seq(question), model, InputPurpose.Query) // a query
+```
+
+Each provider maps the purpose onto its own parameter:
+
+| Provider | `Document` | `Query` |
+|---|---|---|
+| Voyage | `input_type` `document` | `input_type` `query` |
+| Jina | `task` `retrieval.passage` | `task` `retrieval.query` |
+| Cohere | `input_type` `search_document` | `input_type` `search_query` |
+| OpenAI, Ollama | nothing sent: these models embed both alike | nothing sent |
+
+`RAG` and the benchmark `RAGPipeline` already do this: what they ingest is embedded as documents and the
+question they answer as a query. Code that does not say keeps embedding documents.
+
+- **An explicit setting wins.** A Jina task or a Cohere input type passed to the provider's `fromConfig` is
+  sent for every request, whatever its purpose, because it can be one the purpose cannot express
+  (`text-matching`, `classification`, `clustering`).
+- **Voyage now sends `input_type`.** Before, it sent none, which Voyage treats as a plain embedding. Documents
+  indexed before this change were embedded that way; they still work against queries, and re-indexing makes
+  the two sides match exactly.
+- **Caching keeps the two apart.** `CachedEmbeddingClient` keys a query by the model name plus `#query`, so a
+  query and a document with the same text never share an entry. A document keeps the plain model name, so
+  vectors cached before are still found.
 
 ### System Properties (Alternative)
 

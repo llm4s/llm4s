@@ -209,6 +209,43 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     }
   }
 
+  it should "never disconnect a subscriber for live events alone, however many it drops" in {
+    val store     = Watched()
+    val runtime   = GraphRuntime(store)
+    val collector = Collector()
+    val entered   = new CountDownLatch(1)
+    val release   = new CountDownLatch(1)
+    runtime
+      .subscribe(thread, capacity = 8) { event =>
+        collector.listener(event)
+        if entered.getCount > 0 then {
+          entered.countDown()
+          release.await(10, TimeUnit.SECONDS): Unit
+        }
+      }
+      .value
+    store.awaitSwitch()
+
+    // the listener holds RunStarted while the task floods the live slots; the run's later durable
+    // events then arrive behind the burst, with the listener still held, and must all be kept (#1387)
+    val graph = chain(1) { (_, context) =>
+      entered.await(10, TimeUnit.SECONDS): Unit
+      (1 to 50).foreach(i => context.progress("test.progress", 1, ujson.Obj("i" -> i)))
+    }
+    runtime.start(thread, graph, "go").awaited.value.completed
+    release.countDown()
+
+    val received = collector.untilRunEnds()
+    val total    = store.underlying.eventsAfter(thread, 0L, 1000).value.size.toLong
+    received.collect { case d: StreamEvent.Disconnected => d } shouldBe empty
+    durableSeqs(received) shouldBe (1L to total).toVector
+    val lives = received.count(_.isInstanceOf[StreamEvent.Live])
+    val gaps  = received.collect { case StreamEvent.LiveGap(n) => n }
+    lives shouldBe 7 // the live slots less the one kept for the gap
+    gaps.sum shouldBe 43
+    collector.quiet()
+  }
+
   it should "report a pending live gap before disconnecting a lagging subscriber" in {
     val store     = Watched()
     val runtime   = GraphRuntime(store)
@@ -226,27 +263,28 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
       .value
     store.awaitSwitch()
 
-    // the listener holds RunStarted, so the queue is empty: the first live event fits, the next two
-    // are dropped, and the task's commit then needs two slots (gap and event) where one is free
-    val graph = chain(1) { (_, context) =>
+    // the listener holds RunStarted: the first node's commits fill both durable slots, then the second
+    // node's first live event fits, the next two are dropped, and its task's commit does not fit
+    val graph = chain(2) { (i, context) =>
       entered.await(10, TimeUnit.SECONDS): Unit
-      (1 to 3).foreach(i => context.progress("test.progress", 1, ujson.Obj("i" -> i)))
+      if i == 1 then (1 to 3).foreach(n => context.progress("test.progress", 1, ujson.Obj("i" -> n)))
     }
     runtime.start(thread, graph, "go").awaited.value.completed
     release.countDown()
 
     val received = collector.untilRunEnds()
-    received.size shouldBe 4
+    durableSeqs(received) shouldBe Vector(1L, 2L, 3L)
     received(0) match {
       case StreamEvent.Durable(r) => r.event shouldBe a[RunEvent.RunStarted]
       case other                  => fail(s"expected RunStarted, got $other")
     }
-    received(1) match {
-      case StreamEvent.Live(_, _, _, _, _, _, payload) => payload("i").num.toInt shouldBe 1
-      case other                                       => fail(s"expected the first live event, got $other")
+    received.drop(3) match {
+      case Vector(StreamEvent.Live(_, _, _, _, _, _, payload), gap, disconnected) =>
+        payload("i").num.toInt shouldBe 1
+        gap shouldBe StreamEvent.LiveGap(2) // 1 delivered + 2 reported = 3 sent
+        disconnected shouldBe StreamEvent.Disconnected(3L, DisconnectReason.Lagging)
+      case other => fail(s"expected the first live event, a gap and the disconnect, got $other")
     }
-    received(2) shouldBe StreamEvent.LiveGap(2) // 1 delivered + 2 reported = 3 sent
-    received(3) shouldBe StreamEvent.Disconnected(1L, DisconnectReason.Lagging)
     collector.quiet()
   }
 
@@ -272,17 +310,17 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
     store.awaitSwitch()
 
     // as above: the subscriber lags with two dropped live events still to report
-    val graph = chain(1) { (_, context) =>
+    val graph = chain(2) { (i, context) =>
       entered.await(10, TimeUnit.SECONDS): Unit
-      (1 to 3).foreach(i => context.progress("test.progress", 1, ujson.Obj("i" -> i)))
+      if i == 1 then (1 to 3).foreach(n => context.progress("test.progress", 1, ujson.Obj("i" -> n)))
     }
     runtime.start(thread, graph, "go").awaited.value.completed
     release.countDown()
 
     val received = collector.untilRunEnds()
-    received.drop(2) shouldBe Vector(
+    received.drop(4) shouldBe Vector(
       StreamEvent.LiveGap(2),
-      StreamEvent.Disconnected(1L, DisconnectReason.ListenerFailed(boom))
+      StreamEvent.Disconnected(3L, DisconnectReason.ListenerFailed(boom))
     )
     collector.quiet()
   }

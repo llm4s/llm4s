@@ -36,6 +36,9 @@ private[graph] trait Dispatched extends Subscription:
    */
   def endOfRun(runId: RunId): Unit
 
+  /** How many items the subscription's queue holds; for tests. */
+  private[graph] def queued: Int
+
 /**
  * Delivers a runtime's events to subscribers. Each subscription has its own dispatcher: a bounded
  * queue drained in order by one virtual thread, the only thread its listener is called on. The
@@ -46,15 +49,22 @@ private[graph] trait Dispatched extends Subscription:
  * thread and sets its result: a marker queued behind the run's last
  * event that is never passed to the listener as an event. Reaching it, the dispatcher calls
  * [[RunListener.runEnded]], which ends a scope whose run committed no terminal event. The barrier
- * may take one slot beyond `capacity` (two with a pending gap), so it never makes a subscriber
- * lag; a subscriber already lagging gets none and ends with its `Disconnected`.
+ * takes one slot beyond `capacity`, so it never makes a subscriber lag; a subscriber already
+ * lagging gets none and ends with its `Disconnected`.
  *
  * Durable events reach each subscriber in ascending `seq`, at most once, and only after the commit
- * that numbered them. A durable event that does not fit disconnects the subscriber as lagging once
- * what is already queued has been delivered. A live event is accepted only while two slots are
- * free, so a [[StreamEvent.LiveGap]] counting the live events dropped before it always fits. A
- * lagging subscriber with dropped live events still pending gets that `LiveGap` after its queue
- * drains and just before `Disconnected(lastSeq, Lagging)`.
+ * that numbered them. The queue holds up to `capacity` durable events and, separately, up to
+ * `capacity` live events and gap markers, so live traffic - a burst of text deltas the dispatcher
+ * has not drained yet - never crowds out a durable event: only a subscriber more than `capacity`
+ * durable events behind lags. A durable event that does not fit disconnects the subscriber as
+ * lagging once what is already queued has been delivered. A live event is accepted only while two
+ * of its slots are free, so a [[StreamEvent.LiveGap]] counting the live events dropped before it
+ * always fits. Live events dropped before a durable event or a barrier ride in that item's own
+ * slot ([[AfterGap]]) and are delivered as a `LiveGap` just before it, so a gap is reported where
+ * it happened without taking a live slot. The queue therefore never holds more than `2 * capacity`
+ * events and gap markers, plus one barrier per run that ended while they were queued. A lagging
+ * subscriber with dropped live events still pending gets that `LiveGap` after its queue drains and
+ * just before `Disconnected(lastSeq, Lagging)`.
  */
 final private[graph] class EventHub(checkpointer: Checkpointer):
 
@@ -133,6 +143,16 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
   final private case class RunEnd(runId: RunId)
 
   /**
+   * A durable event or barrier queued after `dropped` live events were discarded: delivered as
+   * `LiveGap(dropped)`, then `item`. It takes `item`'s slot alone, so reporting a gap where it
+   * happened never needs a live slot - however often dropped live events and durable commits
+   * alternate while the dispatcher is held, the queue stays within its bounds.
+   */
+  final private case class AfterGap(dropped: Int, item: StreamEvent.Durable | RunEnd)
+
+  private type Queued = StreamEvent | RunEnd | AfterGap
+
+  /**
    * One subscriber. It replays the log directly to the listener, then, under `hubLock`, reads what
    * was committed since and joins the live set - commits hand events over under the same lock, so
    * none lands between the last read and joining, and the `seq` check drops any already read.
@@ -153,8 +173,12 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     private val idle: Condition = lock.newCondition()
 
     // guarded by `lock`; `lastQueuedSeq` is also advanced by replay, before the dispatcher joins
-    private val queue               = new java.util.ArrayDeque[StreamEvent | RunEnd]()
-    private var lastQueuedSeq       = afterSeq
+    private val queue         = new java.util.ArrayDeque[Queued]()
+    private var lastQueuedSeq = afterSeq
+    // what `queue` holds, by kind: each has its own `capacity`, so live events never crowd out durable
+    // ones; a durable event's `AfterGap` counts as durable, a barrier as neither
+    private var durableQueued       = 0
+    private var liveQueued          = 0
     private var droppedLive         = 0
     private var lagging             = false
     @volatile private var cancelled = false
@@ -205,11 +229,10 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
 
     def offerDurable(record: EventRecord): Unit = withLock(lock) {
       if !cancelled && !lagging && record.seq > lastQueuedSeq then
-        val needed = if droppedLive > 0 then 2 else 1
-        if capacity - queue.size < needed then lagging = true
+        if durableQueued >= capacity then lagging = true
         else
-          flushGap()
-          queue.add(StreamEvent.Durable(record))
+          queue.add(afterPendingGap(StreamEvent.Durable(record)))
+          durableQueued += 1
           lastQueuedSeq = record.seq
         notEmpty.signal()
     }
@@ -217,17 +240,30 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     def offerLive(event: StreamEvent.Live): Unit = withLock(lock) {
       if !cancelled && !lagging then
         // the gap marker needs one slot and the event one
-        if capacity - queue.size >= 2 then
+        if capacity - liveQueued >= 2 then
           flushGap()
           queue.add(event)
+          liveQueued += 1
         else droppedLive += 1
         notEmpty.signal()
     }
 
+    /** Queues the pending gap as a marker of its own, in a live slot; `offerLive` has made room. */
     private def flushGap(): Unit =
       if droppedLive > 0 then
         queue.add(StreamEvent.LiveGap(droppedLive))
+        liveQueued += 1
         droppedLive = 0
+
+    /** `item`, carrying the pending gap if there is one, so the gap takes no slot of its own. */
+    private def afterPendingGap(item: StreamEvent.Durable | RunEnd): Queued =
+      if droppedLive == 0 then item
+      else
+        val gapped = AfterGap(droppedLive, item)
+        droppedLive = 0
+        gapped
+
+    def queued: Int = withLock(lock)(queue.size)
 
     def endOfRun(runId: RunId): Unit =
       listener match
@@ -238,14 +274,13 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
         case _ => ()
 
     /**
-     * Queues `runId`'s barrier, holding `lock`, unless cancelled or lagging; a pending gap goes
-     * first, so the listener learns of live events of the run dropped before it. Exempt from
+     * Queues `runId`'s barrier, holding `lock`, unless cancelled or lagging; it carries a pending
+     * gap, so the listener learns of live events of the run dropped before it. Exempt from
      * `capacity`.
      */
     private def queueEnd(runId: RunId): Unit =
       if !cancelled && !lagging then
-        flushGap()
-        queue.add(RunEnd(runId))
+        queue.add(afterPendingGap(RunEnd(runId)))
         notEmpty.signal()
 
     private def run(): Unit =
@@ -264,7 +299,7 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
 
     /**
      * A lagging subscriber can end with live events dropped since its last gap marker - the durable
-     * event that did not fit needed a slot for that marker too. They are reported as a
+     * event that did not fit would have carried them. They are reported as a
      * [[StreamEvent.LiveGap]] just before `Disconnected`, so the count is never lost. Returns the
      * reason the final `Disconnected` carries: `reason`, or [[DisconnectReason.ListenerFailed]] if
      * the listener throws on that gap, as on any other event; `None` - no `Disconnected` - if the
@@ -323,11 +358,21 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
 
     /** Takes queued events in order; ends when cancelled, or when lagging and drained. */
     @tailrec private def drain(): End =
-      val next: Either[End, Option[StreamEvent | RunEnd]] =
+      val next: Either[End, Option[Queued]] =
         CancelledError.catchInterrupt(withLock(lock) {
           awaitWork()
           if cancelled then Left(End.Cancelled)
-          else Option(queue.poll()).map(Some(_)).toRight(End.Disconnect(DisconnectReason.Lagging))
+          else
+            Option(queue.poll())
+              .map { item =>
+                item match
+                  case _: StreamEvent.Durable              => durableQueued -= 1
+                  case AfterGap(_, _: StreamEvent.Durable) => durableQueued -= 1
+                  case _: RunEnd | AfterGap(_, _: RunEnd)  => ()
+                  case _                                   => liveQueued -= 1
+                Some(item)
+              }
+              .toRight(End.Disconnect(DisconnectReason.Lagging))
         }) match
           case Right(taken) => taken
           // only `cancel` interrupts this thread; anything else is ignored
@@ -337,11 +382,17 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
         case Right(None) => drain()
         case Right(Some(item)) =>
           val delivered = item match
-            case RunEnd(runId)      => reachEnd(runId)
-            case event: StreamEvent => deliver(event)
+            case AfterGap(dropped, rest) => deliver(StreamEvent.LiveGap(dropped)).flatMap(_ => deliverItem(rest))
+            case RunEnd(runId)           => reachEnd(runId)
+            case event: StreamEvent      => deliver(event)
           delivered match
             case Right(_)   => drain()
             case Left(stop) => stop
+
+    private def deliverItem(item: StreamEvent.Durable | RunEnd): Either[End, Unit] =
+      item match
+        case RunEnd(runId)              => reachEnd(runId)
+        case event: StreamEvent.Durable => deliver(event)
 
     /** At `runId`'s barrier: tells a [[RunListener]], as a listener call, that its run has ended. */
     private def reachEnd(runId: RunId): Either[End, Unit] =
