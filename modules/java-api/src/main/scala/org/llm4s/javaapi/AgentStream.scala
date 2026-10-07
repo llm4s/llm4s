@@ -88,6 +88,9 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
     }) { _ =>
       val result = events()
       outcome.set(Some(result))
+      // a listener that interrupted itself and then threw left the flag set (cancel() keeps it): clear it,
+      // so the terminal callback is not interrupted. This is the stream's own thread; nothing else reads it.
+      Thread.interrupted(): Unit
       val terminal = Safety.safely(result.fold(e => listener.onError(new LlmException(e)), listener.onComplete))
       terminal.left.foreach(e =>
         AgentStream.logger.warn(s"An agent stream listener's terminal callback failed: ${e.message}")

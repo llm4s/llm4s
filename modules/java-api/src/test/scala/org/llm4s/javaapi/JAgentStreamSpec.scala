@@ -335,6 +335,32 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     agent.streamRecover(threadId, Recorder()).get().await().get().answer shouldBe Some("recovered")
   }
 
+  it should "call onError with the flag clear when the listener interrupted itself and then threw" in {
+    val model    = parksOnce()
+    val runtime  = GraphRuntime.inMemory()
+    val agent    = jAgentOf(model.client)(_.withRuntime(runtime).withStreaming())
+    val threadId = ThreadId("j27")
+    val errors   = new AtomicInteger(0)
+    val flagSeen = new AtomicReference[java.lang.Boolean](null)
+    val listener = new AgentStreamListener {
+      def onEvent(event: StreamEvent): Unit =
+        if (AgentEvents.TextDelta.unapply(event).isDefined) {
+          Thread.currentThread().interrupt()
+          throw new IllegalStateException("listener broke")
+        }
+      override def onError(error: LlmException): Unit = {
+        errors.incrementAndGet()
+        flagSeen.set(Thread.currentThread().isInterrupted)
+      }
+    }
+    // with the flag set when it threw, the error is classified as a cancellation
+    agent.stream(threadId, "hi", listener).get().await().isFailure shouldBe true
+    errors.get shouldBe 1
+    flagSeen.get shouldBe java.lang.Boolean.FALSE
+    model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
+  }
+
   it should "cancel the run when the listener throws InterruptedException" in {
     val model    = parksOnce()
     val runtime  = GraphRuntime.inMemory()
