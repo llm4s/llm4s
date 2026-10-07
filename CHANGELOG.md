@@ -23,6 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decide - `encodeThinking` (given the turn's blocks), `thinkingDetails` and `decodeThinkingDetails` - and drop it by
   default. The agent's tool loop stores the completion's message unchanged, so a run sends a tool-call turn's
   thinking in the call after the tool results, and later turns read it back from the checkpoint.
+- **`llm4s-schema-derivation`: the JSON schema of `completeStructured`, derived from a case class** ([#1472](https://github.com/llm4s/llm4s/issues/1472)):
+  a new module (`@Experimental`, not part of the 1.0 frozen surface; depends on `llm4s-core` only, adds no dependency)
+  with `SchemaOf[A]` and `case class Invoice(...) derives SchemaOf`, built on Scala 3 `Mirror`, and
+  `client.completeStructuredOf[Invoice](conversation)`, which builds the same `ObjectSchema` and calls the same
+  `completeStructured`. It describes what uPickle's derived `ReadWriter` reads and writes (field names including
+  `@upickle.implicits.key`, `Option` as the value or `null`, an enum as its case name, `BigDecimal` and `BigInt` as
+  strings) and the tests check that round trip in both directions. `@description("...")` sets a field's or type's
+  description. Supported: scalars, `Option`, `List`/`Seq`/`Vector`/`Set`, nested and generic case classes, enums and
+  sealed hierarchies of singletons. Refused at compile time with a message naming the type: `Map`, recursive types and
+  sealed hierarchies with fields, because core's schema model cannot express map values, `$ref` or `oneOf`. Guide:
+  [Derived Schemas](docs/guide/derived-schemas.md).
 - **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
   `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
   service's MP3 and return its bytes untouched. PCM stays the default. `AudioFormat.Mp3` is a new case

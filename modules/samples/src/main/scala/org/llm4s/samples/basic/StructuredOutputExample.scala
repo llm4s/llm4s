@@ -3,11 +3,12 @@ package org.llm4s.samples.basic
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
-import org.llm4s.toolapi.Schema
-import upickle.default.{ macroRW, ReadWriter }
+import org.llm4s.schema.*
+import upickle.default.ReadWriter
 
 /**
- * Demonstrates native structured output via [[org.llm4s.llmconnect.LLMClient.completeStructured]].
+ * Demonstrates native structured output via [[org.llm4s.llmconnect.LLMClient.completeStructured]], with the
+ * schema derived from the `Invoice` case class by [[org.llm4s.schema.SchemaOf]] instead of written by hand.
  *
  * The provider is asked to respond with JSON that conforms to the `Invoice` schema.
  * OpenAI and Gemini enforce the schema at generation time; Anthropic falls back to
@@ -20,15 +21,15 @@ import upickle.default.{ macroRW, ReadWriter }
  */
 object StructuredOutputExample extends App {
 
-  case class Invoice(vendor: String, amount: Double, currency: String, description: String)
-  object Invoice { implicit val rw: ReadWriter[Invoice] = macroRW }
-
-  val invoiceSchema = Schema
-    .`object`[Invoice]("An invoice extracted from text")
-    .withRequiredField("vendor", Schema.string("Name of the vendor or supplier"))
-    .withRequiredField("amount", Schema.number("Total invoice amount as a decimal number"))
-    .withRequiredField("currency", Schema.string("ISO 4217 currency code, e.g. USD, EUR, GBP"))
-    .withRequiredField("description", Schema.string("Brief description of goods or services"))
+  // The schema is derived from the case class (llm4s-schema-derivation), so the type is written once.
+  @description("An invoice extracted from text")
+  case class Invoice(
+    @description("Name of the vendor or supplier") vendor: String,
+    @description("Total invoice amount as a decimal number") amount: Double,
+    @description("ISO 4217 currency code, e.g. USD, EUR, GBP") currency: String,
+    @description("Brief description of goods or services") description: String
+  ) derives SchemaOf,
+        ReadWriter
 
   val conversation = Conversation(
     Seq(
@@ -48,7 +49,7 @@ object StructuredOutputExample extends App {
     registryService <- Llm4sConfig.modelRegistryService()
     given org.llm4s.model.ModelRegistryService = registryService
     client  <- LLMConnect.getClient(providerConfig)
-    invoice <- client.completeStructured[Invoice](conversation, invoiceSchema)
+    invoice <- client.completeStructuredOf[Invoice](conversation)
   } yield invoice
 
   result match {

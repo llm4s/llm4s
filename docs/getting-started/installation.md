@@ -599,6 +599,20 @@ libraryDependencies += "org.llm4s" %% "llm4s-knowledgegraph-neo4j" % llm4sVersio
 `Neo4jGraphStore`, a graph store for `llm4s-knowledgegraph` backed by Neo4j. It depends on `llm4s-core`
 and `llm4s-knowledgegraph` and brings the Neo4j driver.
 
+### Structured output from a case class
+
+{: .note }
+> Not yet published. `llm4s-schema-derivation` exists in the build as of
+> [#1472](https://github.com/llm4s/llm4s/issues/1472) but ships in a release after 0.4.1. It is experimental.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-schema-derivation" % llm4sVersion
+```
+
+`SchemaOf` and `client.completeStructuredOf[A]`: the JSON schema of `completeStructured`, derived from a case class
+with `derives`. It depends on `llm4s-core` only. See [Derived Schemas](../guide/derived-schemas).
+
 ### For provider authors (testing a provider module)
 
 {: .note }
