@@ -42,10 +42,11 @@ import scala.util.{ Try, Using }
  *
  * == Thinking ==
  *
- * A reply's `message.thinking` becomes [[Completion.thinking]]; streamed, each line's `thinking` is a
- * [[StreamedChunk.thinkingDelta]] and the accumulated text is the completion's `thinking`. It is not
- * sent back in later requests: [[AssistantMessage]] has no field to carry it, so a thinking model's
- * follow-up turn after a tool call omits its earlier reasoning.
+ * A reply's `message.thinking` becomes the returned message's [[AssistantMessage.thinking]] (and so
+ * [[Completion.thinking]]); streamed, each line's `thinking` is a [[StreamedChunk.thinkingDelta]] and
+ * the accumulated text is the message's thinking. An assistant message's thinking text is sent back
+ * as its `thinking`, as Ollama's tool-calling guide asks: a thinking model's follow-up request after
+ * a tool call carries its earlier reasoning with the content and tool calls (#1381).
  *
  * == Structured output ==
  *
@@ -290,6 +291,7 @@ class OllamaClient(
       case UserMessage(content)   => ujson.Obj("role" -> "user", "content" -> content)
       case am: AssistantMessage =>
         val message = ujson.Obj("role" -> "assistant", "content" -> am.content)
+        am.thinkingText.foreach(thinking => message("thinking") = thinking)
         if (am.toolCalls.nonEmpty)
           message("tool_calls") = ujson.Arr.from(am.toolCalls.zipWithIndex.map { case (tc, index) =>
             ujson.Obj(
@@ -351,10 +353,9 @@ class OllamaClient(
         toolCalls = calls.toList,
         usage = usage,
         model = config.model,
-        message =
-          if (calls.isEmpty) AssistantMessage(content)
-          else AssistantMessage(Some(content).filter(_.nonEmpty), calls),
-        thinking = OllamaClient.thinking(json.obj.get("message")),
+        message = (if (calls.isEmpty) AssistantMessage(content)
+                   else AssistantMessage(Some(content).filter(_.nonEmpty), calls))
+          .withThinking(OllamaClient.thinking(json.obj.get("message")).getOrElse("")),
         estimatedCost = cost
       )
     }

@@ -164,6 +164,38 @@ class DeterministicCompressorSpec extends AnyFlatSpec with Matchers {
     result.head.content.length should be <= longContent.length
   }
 
+  it should "unseal a signed response it truncates, so the provider never sees a modified signed turn" in {
+    val longContent = (1 to 100).map(i => s"Sentence number $i is about topic $i.").mkString(" ")
+    val signed = AssistantMessage(longContent).withThinking(
+      Seq(ThinkingBlock.Text("reasoning", Some("sig")), ThinkingBlock.Redacted("opaque"))
+    )
+
+    val result = CompressionRule.truncateVerboseResponses.apply(Seq(signed))
+
+    val truncated = result.collect { case a: AssistantMessage => a }.head
+    (truncated.content should not).be(longContent)
+    truncated.hasSealedThinking shouldBe false
+    truncated.thinking shouldBe Seq(ThinkingBlock.Text("reasoning"))
+  }
+
+  it should "leave a signed response it does not change untouched" in {
+    val signed = AssistantMessage("This is a short answer.").withThinking(
+      Seq(ThinkingBlock.Text("reasoning", Some("sig")), ThinkingBlock.Redacted("opaque"))
+    )
+    CompressionRule.truncateVerboseResponses.apply(Seq(signed)) shouldBe Seq(signed)
+    CompressionRule.removeRedundantPhrases.apply(Seq(signed)) shouldBe Seq(signed)
+  }
+
+  it should "unseal a signed response another rule rewrites" in {
+    val signed = AssistantMessage("Like I said, the answer is 42.").withThinking(
+      Seq(ThinkingBlock.Text("reasoning", Some("sig")), ThinkingBlock.Redacted("opaque"))
+    )
+    val result =
+      CompressionRule.removeRedundantPhrases.apply(Seq(signed)).collect { case a: AssistantMessage => a }.head
+    (result.content should not).include("Like I said")
+    result.hasSealedThinking shouldBe false
+  }
+
   it should "not truncate short responses" in {
     val shortContent = "This is a short answer."
     val messages     = Seq(AssistantMessage(shortContent))
