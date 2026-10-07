@@ -112,8 +112,10 @@ client.complete(conversation).handleErrorWith {
 
 ## Environment variables
 
-See [CLAUDE.md](../../CLAUDE.md) for the full list of supported environment
-variables (`LLM_MODEL`, `OPENAI_API_KEY`, etc.).
+The variables llm4s reads, such as `OPENAI_API_KEY`, are listed in
+[Environment variables llm4s reads](../getting-started/configuration.md#environment-variables-llm4s-reads).
+The provider and model are chosen by a named section in `application.conf`; see
+[Named provider sections](../getting-started/configuration.md#named-provider-sections).
 
 ### Differences from `Agent`
 

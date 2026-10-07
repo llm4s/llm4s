@@ -7,7 +7,7 @@ nav_order: 4
 
 # Scaling Strategies
 
-> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](https://github.com/llm4s/llm4s/tree/main/modules/samples).
 
 Production patterns for handling high throughput, reducing latency, and distributing load. This guide covers caching, rate limiting, batch processing, and distributed execution.
 
