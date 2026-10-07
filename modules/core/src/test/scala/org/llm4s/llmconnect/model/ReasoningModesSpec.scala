@@ -140,10 +140,11 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
     )
     withoutThinking.hasThinking shouldBe false
 
-    val withEmptyThinking = withoutThinking.withThinking(Some(""))
+    val withEmptyThinking = withoutThinking.withMessage(withoutThinking.message.withThinking(""))
     withEmptyThinking.hasThinking shouldBe false
 
-    val withThinking = withoutThinking.withThinking(Some("I need to think about this..."))
+    val withThinking =
+      withoutThinking.withMessage(withoutThinking.message.withThinking("I need to think about this..."))
     withThinking.hasThinking shouldBe true
   }
 
@@ -153,8 +154,7 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
       created = 0L,
       content = "The answer is 42.",
       model = "test",
-      message = AssistantMessage(Some("The answer is 42."), Seq.empty),
-      thinking = Some("Let me calculate this...")
+      message = AssistantMessage(Some("The answer is 42."), Seq.empty).withThinking("Let me calculate this...")
     )
 
     completion.fullContent should include("<thinking>")
