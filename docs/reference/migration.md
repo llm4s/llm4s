@@ -1,3 +1,10 @@
+---
+layout: page
+title: Migration Guide
+parent: Reference
+nav_order: 2
+---
+
 # Migration Guide
 
 ## Stage 1 migration: agent runtime
@@ -1298,7 +1305,7 @@ Two things to know:
 
 Variables that `reference.conf` files do bind - `TRACING_MODE`, `LANGFUSE_*`, `OTEL_SERVICE_NAME`,
 `OTEL_EXPORTER_OTLP_ENDPOINT`, `EMBEDDING_MODEL`, `VOYAGE_API_KEY` and others - still work; see
-[the variables llm4s reads](../getting-started/configuration.md#environment-variables-llm4s-reads).
+[the variables llm4s reads](../getting-started/configuration#environment-variables-llm4s-reads).
 Two tools read `LLM_MODEL` themselves: the chat-tui sample (`ChatTuiConfig`) and the config-policy
 env check (`EnvCheckPolicies`).
 
@@ -1572,7 +1579,7 @@ llm4s.providers {
 
 To support it, a named provider section may now carry `contextWindow`, `reserveCompletion` and a
 `headers` object, which `NamedProviderConfig` exposes. Providers other than `openai-compatible`
-ignore them. See [OpenAI-compatible endpoints](../guide/providers.md#openai-compatible-endpoints).
+ignore them. See [OpenAI-compatible endpoints](../guide/providers#openai-compatible-endpoints).
 
 ### Registration is the dependency
 

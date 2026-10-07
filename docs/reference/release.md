@@ -1,3 +1,10 @@
+---
+layout: page
+title: Release Process
+parent: Reference
+nav_order: 3
+---
+
 # Release Process
 
 ## Creating a New Release

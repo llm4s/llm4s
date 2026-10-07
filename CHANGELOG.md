@@ -1962,6 +1962,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read is treated as accepted with a warning, so tracing does not fail on an unexpected shape
   (found in review of [#1239](https://github.com/llm4s/llm4s/pull/1239)).
 
+- **Docs: the Reference section's Migration Guide, Release Process, Scalafix Rules and Test Coverage pages no longer
+  404** ([#444](https://github.com/llm4s/llm4s/issues/444)): `migration.md`, `release.md`, `scalafix.md` and
+  `test-coverage.md` (and `security.md`, `workspace-sandbox.md` and `benchmarks.md`) had no front matter, so Jekyll
+  served them as raw files and their links on llm4s.org returned 404. They now have a title, `parent: Reference` and a
+  `nav_order`, and are listed in the Reference index. `test-coverage.md` described a single 50% threshold that no
+  longer exists; it now describes the per-module `coverageFloor`, `coveragePolicyCheck` and the Codecov statuses.
+  Links inside the Reference pages that ended in `.md`, or pointed at repository-root files, now use the form the
+  site serves; the stray `review-guidelines.main.backup.md` page is gone. Links to the newly rendered pages from
+  `installation.md`, `providers.md` and `0x-to-1x.md` were changed from `.md` to the page URL in the same change, since
+  a `.md` URL is a 404 once its page is rendered.
 - **`AudioPreprocessing.resamplePcm16` could hang, and its output length was wrong**
   ([#1308](https://github.com/llm4s/llm4s/issues/1308)): a target rate of `-8000`, or a source rate of `-1`, sent
   Java Sound's converter into a loop that never ended (a test JVM spun at 100% CPU for twenty minutes), a target

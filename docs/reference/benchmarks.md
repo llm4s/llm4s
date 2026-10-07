@@ -1,3 +1,10 @@
+---
+layout: page
+title: Performance Benchmarks
+parent: Reference
+nav_order: 18
+---
+
 # Performance Benchmarks
 
 Baseline JMH benchmark results for llm4s critical hot paths.

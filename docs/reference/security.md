@@ -1,3 +1,10 @@
+---
+layout: page
+title: Security Reference
+parent: Reference
+nav_order: 16
+---
+
 # Security Reference
 
 This document covers the threat model, trust boundaries, known risks, and mitigations for LLM4S.
@@ -74,7 +81,7 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 - `HttpConfig.blockInternalIPs = true` by default; `NetworkSecurity.validateHostname()` resolves DNS and checks resolved IPs against private CIDR ranges (RFC 1918, RFC 5735, RFC 4193) and link-local ranges.
 - `HttpConfig.DefaultBlockedDomains` blocks `localhost`, `127.0.0.1`, `0.0.0.0`, `::1`, `metadata.google.internal`, `metadata.internal`, and `169.254.169.254` by hostname.
 - Redirects are NOT followed by default (`followRedirects = false`). When enabled, each redirect hop is individually re-validated against the SSRF filter.
-- Sensitive headers (`Authorization`, `Cookie`, `Proxy-Authorization`) are stripped on cross-origin redirect hops.
+- Sensitive headers (`Authorization`, `Cookie`, `Proxy-Authorization`) are stripped when a redirect first leaves the original host. A later hop can send them again ([#1408](https://github.com/llm4s/llm4s/issues/1408), finding F7), so do not rely on this when `followRedirects` is enabled.
 - Only `GET` and `HEAD` methods are allowed by default (read-only).
 
 **Residual risk:** DNS rebinding attacks (where a hostname resolves to a public IP during validation but a private IP at connection time) are not explicitly mitigated at the Java `HttpURLConnection` level.

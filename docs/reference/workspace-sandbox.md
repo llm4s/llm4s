@@ -1,3 +1,10 @@
+---
+layout: page
+title: Workspace Sandbox
+parent: Reference
+nav_order: 17
+---
+
 # Workspace Sandbox Configuration
 
 The LLM4S workspace subsystem provides powerful capabilities (read/write files, execute commands, search) that require explicit sandboxing and security configuration.
@@ -70,7 +77,7 @@ Run the containerized runner with locked sandbox:
 
 1. After `sbt workspaceRunner/docker:publishLocal`, get the image tag:
    ```bash
-   docker images llm4s/workspace-runner --format "{{.Tag}}"
+   {% raw %}docker images llm4s/workspace-runner --format "{{.Tag}}"{% endraw %}
    ```
    Use that tag (for example `0.3.2` or a dynver snapshot such as `0.3.2+abc123-SNAPSHOT`) in place of `TAG` below.
 
