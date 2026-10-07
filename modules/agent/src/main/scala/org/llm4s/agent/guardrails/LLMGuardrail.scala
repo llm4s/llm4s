@@ -26,10 +26,11 @@ import scala.util.Try
  *
  * **Cost, latency and privacy:** every validation adds one `llmClient.complete` call to the run. With a plain
  * provider client that is one round trip and its token cost; a wrapping client changes the count -
- * `CachingLLMClient` can answer from its cache without a request, and `ReliableClient` can retry a failed
- * request or reject the call with its circuit breaker open. Either way these guardrails do not belong on
- * latency-sensitive paths. The content being judged is sent to whichever
- * provider `llmClient` talks to. A cheaper or separate model can serve as judge, which also avoids a model
+ * `CachingLLMClient` first embeds the system and user messages (an embedding request that sends the judged
+ * content to its embedding provider, hit or miss) and on a cache hit skips only the completion request, and
+ * `ReliableClient` can retry a failed request or reject the call with its circuit breaker open. Either way
+ * these guardrails do not belong on latency-sensitive paths. The content being judged is sent to whichever
+ * provider `llmClient` talks to, including any embedding provider a caching wrapper uses. A cheaper or separate model can serve as judge, which also avoids a model
  * grading its own answer.
  *
  * **Scoring:** the reply is reduced to its digits and decimal points and read as a number; the number is
