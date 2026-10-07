@@ -26,6 +26,7 @@ Comprehensive guides for LLM4S features.
   - **[Memory System](agents/memory)** - Persistent context and knowledge across conversations
   - **[Handoffs](agents/handoffs)** - Agent-to-agent delegation for specialist routing
   - **[Streaming Events](agents/streaming)** - Real-time execution feedback for responsive UIs
+- **[Built-in Tools](builtin-tools)** - Calculator, date and time, UUID, JSON, files, HTTP, shell and web search tools, the bundles that hold them, and what each one can do
 
 ### RAG & Semantic Search
 
