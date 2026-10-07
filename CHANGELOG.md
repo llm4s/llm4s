@@ -1687,6 +1687,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-agent-tools`: file tools confined by path component, not string prefix**
+  ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `FileConfig.isPathAllowed` and
+  `WriteConfig.isPathAllowed` compared paths with `String.startsWith`, so an allowed `/srv/agent-data` also
+  admitted `/srv/agent-data-secret`, and `developmentSafe(workingDirectory)` could read and write a sibling
+  directory whose name began with the working directory's. Both now use `Path.startsWith` on normalised absolute
+  paths; blocked paths are matched the same way (`/var` no longer blocks `/variable`).
 - **`llm4s-agent`: a burst of live events no longer disconnects a subscriber as `Lagging`**
   ([#1387](https://github.com/llm4s/llm4s/issues/1387)): a subscription's queue held durable and live
   events against one `capacity`, so a model streaming faster than the dispatcher thread was scheduled filled

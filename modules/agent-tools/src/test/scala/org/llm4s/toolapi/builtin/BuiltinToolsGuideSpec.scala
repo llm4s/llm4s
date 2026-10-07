@@ -121,6 +121,39 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
     actual shouldBe expected
   }
 
+  it should "mark as required exactly the parameters a call fails without" in {
+    // The guide's table marks these required; every other parameter has a default. Each is supplied in turn, so the
+    // call is refused for the next one missing, before it reaches the file system, the network or a process.
+    val required = Seq(
+      "get_current_datetime" -> Seq.empty,
+      "calculator"           -> Seq("operation" -> ujson.Str("add"), "a" -> ujson.Num(1)),
+      "generate_uuid"        -> Seq.empty,
+      "json_tool"            -> Seq("operation" -> ujson.Str("parse"), "json" -> ujson.Str("{}")),
+      "http_request"         -> Seq("url" -> ujson.Str("https://example.com")),
+      "read_file"            -> Seq("path" -> ujson.Str("missing.txt")),
+      "list_directory"       -> Seq("path" -> ujson.Str("missing")),
+      "file_info"            -> Seq("path" -> ujson.Str("missing.txt")),
+      "write_file"           -> Seq("path" -> ujson.Str("missing.txt"), "content" -> ujson.Str("x")),
+      "shell_command"        -> Seq("command" -> ujson.Str("ls")),
+      "duckduckgo_search"    -> Seq("search_query" -> ujson.Str("scala")),
+      "brave_web_search"     -> Seq("search_query" -> ujson.Str("scala")),
+      "exa_search"           -> Seq("query" -> ujson.Str("scala"))
+    )
+    val tools = BuiltinTools.developmentSafe().value ++ searchTools
+    required.map(_._1).toSet shouldBe tools.map(_.name).toSet
+
+    for {
+      (tool, params) <- required
+      i              <- params.indices
+    } {
+      val supplied = ujson.Obj.from(params.take(i))
+      val failed   = call(tools, tool, supplied)
+      withClue(s"$tool without ${params(i)._1}: ") {
+        failed.left.value.getMessage should include(s"required parameter '${params(i)._1}'")
+      }
+    }
+  }
+
   // ---- registering the tools
 
   "The registration snippet" should "turn a bundle into a registry and run a tool" in {

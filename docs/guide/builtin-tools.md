@@ -108,24 +108,24 @@ to see why. The runnable version is
 
 ## 3. The tools
 
-The names are what the model sees, and the parameters are what it can send. Every parameter is optional unless the
-description says otherwise.
+The names are what the model sees, and the parameters are what it can send. A parameter in **bold** is required:
+a call without it comes back as a `Left` naming it. The others have defaults.
 
 | Tool | Bundle | Parameters | What it returns |
 |------|--------|------------|-----------------|
 | `get_current_datetime` | core | `timezone` (default UTC), `format` (`iso` or `human`) | `datetime`, `timezone`, `timestamp`, `iso8601`, `components` |
-| `calculator` | core | `operation` (`add`, `subtract`, `multiply`, `divide`, `power`, `sqrt`, `percentage`, `abs`, `min`, `max`, `modulo`), `a`, `b` | `expression`, `result`, `formatted` |
+| `calculator` | core | **`operation`** (`add`, `subtract`, `multiply`, `divide`, `power`, `sqrt`, `percentage`, `abs`, `min`, `max`, `modulo`), **`a`**, `b` (needed by the two-operand operations) | `expression`, `result`, `formatted` |
 | `generate_uuid` | core | `count` (1 to 10, default 1), `format` (`standard` or `compact`) | `uuids`: each with `uuid`, `version`, `variant` |
-| `json_tool` | core | `operation` (`parse`, `format`, `query`, `validate`), `json`, `path` | `success`, `result`, `formatted` |
-| `http_request` | http | `url`, `method`, `headers`, `body`, `content_type` | `statusCode`, `headers`, `body`, `contentType`, `truncated`, and more |
-| `read_file` | files | `path`, `max_lines`, `encoding` | `path`, `content`, `size`, `lines`, `truncated` |
-| `list_directory` | files | `path`, `max_entries` (at most 100), `include_hidden` | `entries`, `totalFiles`, `totalDirectories`, `truncated` |
-| `file_info` | files | `path` | `exists`, `size`, `sizeHuman`, timestamps, permissions, `isSymlink`, `extension` |
-| `write_file` | development | `path`, `content`, `append`, `encoding` | `path`, `bytesWritten`, `created`, `appended` |
-| `shell_command` | development | `command` | `exitCode`, `stdout`, `stderr`, `truncated`, `timedOut` |
-| `duckduckgo_search` | none | `search_query` | `abstract_`, `answer`, `relatedTopics`, and more |
-| `brave_web_search` | none | `search_query` | web results (`brave_image_search`, `brave_video_search` and `brave_news_search` exist too) |
-| `exa_search` | none | `query` | results with `title`, `url`, `text`, `highlights`, and more |
+| `json_tool` | core | **`operation`** (`parse`, `format`, `query`, `validate`), **`json`**, `path` (for `query`) | `success`, `result`, `formatted` |
+| `http_request` | http | **`url`**, `method`, `headers`, `body`, `content_type` | `statusCode`, `headers`, `body`, `contentType`, `truncated`, and more |
+| `read_file` | files | **`path`**, `max_lines`, `encoding` | `path`, `content`, `size`, `lines`, `truncated` |
+| `list_directory` | files | **`path`**, `max_entries` (at most 100), `include_hidden` | `entries`, `totalFiles`, `totalDirectories`, `truncated` |
+| `file_info` | files | **`path`** | `exists`, `size`, `sizeHuman`, timestamps, permissions, `isSymlink`, `extension` |
+| `write_file` | development | **`path`**, **`content`**, `append`, `encoding` | `path`, `bytesWritten`, `created`, `appended` |
+| `shell_command` | development | **`command`** | `exitCode`, `stdout`, `stderr`, `truncated`, `timedOut` |
+| `duckduckgo_search` | none | **`search_query`** | `abstract_`, `answer`, `relatedTopics`, and more |
+| `brave_web_search` | none | **`search_query`** | web results (`brave_image_search`, `brave_video_search` and `brave_news_search` exist too) |
+| `exa_search` | none | **`query`** | results with `title`, `url`, `text`, `highlights`, and more |
 
 `json_tool` queries use dot notation for objects and brackets for arrays: `data.users[0].name`.
 
@@ -205,6 +205,12 @@ val tools = BuiltinTools.customSafe(
   writeConfig = Some(WriteConfig(allowedPaths = Seq("/srv/agent-data/out")))
 )
 ```
+
+A path is inside an allowed or blocked path when it is that path or below it, compared by path component after
+`..` is resolved: `/srv/agent-data` covers `/srv/agent-data/notes.txt` but not `/srv/agent-data-secret`. Symbolic
+links are not resolved for the comparison, and `followSymlinks = false` only stops a read tool opening a path that is
+itself a link, not one that passes through a linked directory: keep links that point elsewhere out of the directories
+you allow.
 
 `developmentSafe(workingDirectory, fileAllowedPaths)` reads only inside `workingDirectory` when you give one, and
 anywhere outside the blocklist when you do not. It writes inside `fileAllowedPaths` (default `/tmp`) and the working
