@@ -7,7 +7,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.lang.reflect.{ InvocationHandler, InvocationTargetException, Method, Proxy }
 import java.nio.file.{ Files, Path }
-import java.sql.{ Connection, DriverManager }
+import java.sql.{ Connection, DriverManager, Statement }
 import java.util.Comparator
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.jdk.CollectionConverters._
@@ -140,11 +140,12 @@ class MemoryStoreSqlPlanSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     after shouldBe a[Right[_, _]]
 
     store.count() shouldBe Right(9L) // m10 to m20 are gone: eleven rows
-    recording.calls.count(_ == "commit") shouldBe 1
-    recording.calls.filter(_.startsWith("setAutoCommit")) shouldBe Seq("setAutoCommit(false)", "setAutoCommit(true)")
+    recording.calls.filter(Set("begin", "commit", "rollback")) shouldBe Seq("begin", "commit")
+    // An SQL transaction on a connection left in autocommit mode: nothing for a failed BEGIN to leave half set
+    recording.calls.filter(_.startsWith("setAutoCommit")) shouldBe empty
   }
 
-  it should "leave every row in place, in both tables, and autocommit restored when a delete fails midway" in {
+  it should "leave every row in place, in both tables, when a delete fails midway" in {
     val recording = new RecordingConnection(DriverManager.getConnection(s"jdbc:sqlite:$dbPath"))
     val store =
       SQLiteMemoryStore
@@ -169,8 +170,8 @@ class MemoryStoreSqlPlanSpec extends AnyFlatSpec with Matchers with BeforeAndAft
       store.count() shouldBe Right(5L)
       // The full-text index went with the transaction: nothing was deleted from it either
       store.search("row", 10).map(_.size) shouldBe Right(5)
-      recording.calls.count(_ == "rollback") shouldBe 1
-      recording.calls.filter(_.startsWith("setAutoCommit")).last shouldBe "setAutoCommit(true)"
+      recording.calls.filter(Set("begin", "commit", "rollback")) shouldBe Seq("begin", "rollback")
+      recording.calls.filter(_.startsWith("setAutoCommit")) shouldBe empty
     }
   }
 
@@ -409,7 +410,10 @@ class MemoryStoreSqlPlanSpec extends AnyFlatSpec with Matchers with BeforeAndAft
   }
 }
 
-/** A real connection that records the statements prepared on it, and its transaction calls. */
+/**
+ * A real connection that records the statements prepared on it, and its transactions: `commit` and `rollback` for
+ * the JDBC calls or the SQL statements, `begin` for a `BEGIN` statement.
+ */
 final private class RecordingConnection(real: Connection) {
   private val log  = new ConcurrentLinkedQueue[String]()
   private val prep = new ConcurrentLinkedQueue[String]()
@@ -434,10 +438,32 @@ final private class RecordingConnection(real: Connection) {
             case name @ ("commit" | "rollback" | "close") => log.add(name)
             case _                                        => ()
           }
-          try method.invoke(real, arguments: _*)
-          catch { case e: InvocationTargetException => throw e.getCause }
+          val result =
+            try method.invoke(real, arguments: _*)
+            catch { case e: InvocationTargetException => throw e.getCause }
+          if (method.getName == "createStatement") recordingTransactions(result.asInstanceOf[Statement]) else result
         }
       }
     )
     .asInstanceOf[Connection]
+
+  private def recordingTransactions(statement: Statement): Statement =
+    Proxy
+      .newProxyInstance(
+        getClass.getClassLoader,
+        Array(classOf[Statement]),
+        new InvocationHandler {
+          override def invoke(target: Any, method: Method, args: Array[AnyRef]): AnyRef = {
+            if (method.getName.startsWith("execute"))
+              Option(args).flatMap(_.headOption).collect { case sql: String => sql.trim.toUpperCase }.foreach { sql =>
+                if (sql.startsWith("BEGIN")) log.add("begin")
+                else if (sql.startsWith("COMMIT")) log.add("commit")
+                else if (sql.startsWith("ROLLBACK")) log.add("rollback")
+              }
+            try method.invoke(statement, Option(args).getOrElse(Array.empty[AnyRef]): _*)
+            catch { case e: InvocationTargetException => throw e.getCause }
+          }
+        }
+      )
+      .asInstanceOf[Statement]
 }

@@ -43,7 +43,7 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
     val batchRequest = EmbeddingRequest(Seq("text1", "text2"), testModel)
 
     // Expectation: Only "text2" is sent to the base client in a single batched call
-    val expectedMissReq = batchRequest.copy(input = Seq("text2"))
+    val expectedMissReq = batchRequest.withInput(Seq("text2"))
     (baseClient.embed _)
       .expects(expectedMissReq)
       .returning(Right(EmbeddingResponse(Seq(Seq(2.0)))))
@@ -94,7 +94,7 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
     val request = EmbeddingRequest(Seq("duplicate text", "unique text", "duplicate text"), testModel)
 
     // Expectation: Base client should only receive the deduplicated texts
-    val expectedUniqueReq  = request.copy(input = Seq("duplicate text", "unique text"))
+    val expectedUniqueReq  = request.withInput(Seq("duplicate text", "unique text"))
     val mockUniqueResponse = EmbeddingResponse(Seq(Seq(1.1, 1.1), Seq(2.2, 2.2)))
 
     (baseClient.embed _)

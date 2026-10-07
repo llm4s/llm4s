@@ -73,25 +73,39 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
     extractor("""{"n":true}""").getIntEnhanced("n") shouldBe Left(TypeMismatch("n", "integer", "boolean"))
   }
 
-  // KNOWN BUG, not fixed here: getInt, getIntEnhanced and getOptionalInt are `_.numOpt.map(_.toInt)`, so
-  // {"n": 3.14} returns Right(3) and {"n": 9223372036854775807} returns Right(-1), silently. A tool argument that is not an integer should be
-  // refused (a TypeMismatch is the natural error; any Left satisfies these tests, so a fix that picks another
-  // error still promotes them). When fixed these fail with "marked pendingUntilFixed but passed": remove the
-  // wrapper then.
-  it should "reject a fractional number instead of truncating it" in {
-    pendingUntilFixed {
-      extractor("""{"n":3.14}""").getIntEnhanced("n").isLeft shouldBe true
-      extractor("""{"n":3.14}""").getInt("n").isLeft shouldBe true
-      extractor("""{"n":3.14}""").getOptionalInt("n").isLeft shouldBe true
+  // An integer parameter accepts a JSON number that is a whole value inside the Int range (ujson numbers are
+  // Doubles, so `3.0` and `1e2` are integers); anything else is a TypeMismatch rather than a silent
+  // truncation or wrap-around.
+  private def notIntegers = Seq("3.14", "3.0000000001", "1e10", "2147483648", "-2147483649", "9223372036854775807")
+
+  it should "reject a fractional number or one outside the Int range, in every integer getter" in {
+    notIntegers.foreach { n =>
+      val json = s"""{"n":$n}"""
+      extractor(json).getIntEnhanced("n") shouldBe Left(TypeMismatch("n", "integer", "number"))
+      extractor(json).getInt("n").isLeft shouldBe true
+      extractor(json).getOptionalInt("n") shouldBe Left(TypeMismatch("n", "integer", "number"))
     }
   }
 
-  it should "reject a number outside the Int range instead of wrapping it" in {
-    pendingUntilFixed {
-      extractor("""{"n":9223372036854775807}""").getIntEnhanced("n").isLeft shouldBe true
-      extractor("""{"n":9223372036854775807}""").getInt("n").isLeft shouldBe true
-      extractor("""{"n":9223372036854775807}""").getOptionalInt("n").isLeft shouldBe true
+  it should "accept a whole number written with a fraction, an exponent or a minus zero" in {
+    Seq("3.0" -> 3, "1e2" -> 100, "-0.0" -> 0, "2147483647" -> Int.MaxValue, "-2147483648" -> Int.MinValue).foreach {
+      case (n, expected) =>
+        val json = s"""{"n":$n}"""
+        extractor(json).getIntEnhanced("n") shouldBe Right(expected)
+        extractor(json).getInt("n") shouldBe Right(expected)
+        extractor(json).getOptionalInt("n") shouldBe Right(Some(expected))
     }
+  }
+
+  it should "reject NaN and the infinities, which JSON text cannot carry but a ujson tree can" in {
+    Seq(Double.NaN, Double.PositiveInfinity, Double.NegativeInfinity).foreach { d =>
+      SafeParameterExtractor(ujson.Obj("n" -> ujson.Num(d))).getIntEnhanced("n") shouldBe
+        Left(TypeMismatch("n", "integer", "number"))
+    }
+  }
+
+  it should "leave doubles untouched" in {
+    extractor("""{"n":3.14}""").getDouble("n") shouldBe Right(3.14)
   }
 
   it should "report null and a missing key differently" in {
@@ -276,13 +290,51 @@ class SafeParameterExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
     extractor("""{"a":"x","c":3}""").validateRequired("a" -> "string", "c" -> "integer") shouldBe Right(())
   }
 
-  // KNOWN BUG, not fixed here: validateRequired passes `_ => Some(())` as the extractor, so it checks that a
-  // parameter is present and not null but never its type, although its Scaladoc promises "have the correct
-  // types". `validateRequired("age" -> "integer")` on {"age":"x"} returns Right(()). When it is fixed this test
-  // fails with "marked pendingUntilFixed but passed": remove the wrapper then.
   it should "report a required parameter of the wrong type, as its Scaladoc promises" in {
-    pendingUntilFixed {
-      extractor("""{"age":"x"}""").validateRequired("age" -> "integer").isLeft shouldBe true
-    }
+    extractor("""{"age":"x"}""").validateRequired("age" -> "integer") shouldBe
+      Left(List(TypeMismatch("age", "integer", "string")))
+  }
+
+  it should "check every declared type, and report wrong types beside missing ones in the order asked" in {
+    val json = """{"s":1,"i":2.5,"d":"x","b":"true","a":{},"o":[]}"""
+    val errors = extractor(json)
+      .validateRequired(
+        "s" -> "string",
+        "i" -> "integer",
+        "d" -> "number",
+        "b" -> "boolean",
+        "a" -> "array",
+        "o" -> "object",
+        "m" -> "string"
+      )
+      .left
+      .getOrElse(fail("expected Left"))
+
+    errors shouldBe List(
+      TypeMismatch("s", "string", "number"),
+      TypeMismatch("i", "integer", "number"),
+      TypeMismatch("d", "number", "string"),
+      TypeMismatch("b", "boolean", "string"),
+      TypeMismatch("a", "array", "object"),
+      TypeMismatch("o", "object", "array"),
+      MissingParameter("m", "string", List("a", "b", "d", "i", "o", "s"))
+    )
+  }
+
+  it should "accept a value of every declared type" in {
+    val json = """{"s":"x","i":3.0,"d":2.5,"b":false,"a":[],"o":{}}"""
+    extractor(json).validateRequired(
+      "s" -> "string",
+      "i" -> "integer",
+      "d" -> "number",
+      "b" -> "boolean",
+      "a" -> "array",
+      "o" -> "object"
+    ) shouldBe Right(())
+  }
+
+  it should "stay presence-only for a type name it does not know" in {
+    extractor("""{"x":"anything"}""").validateRequired("x" -> "uuid") shouldBe Right(())
+    extractor("""{}""").validateRequired("x" -> "uuid").isLeft shouldBe true
   }
 }
