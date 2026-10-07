@@ -298,14 +298,17 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
         )
         .value
 
-    for (follow <- Seq(false, true)) {
+    for (follow <- Seq(false, true))
       withClue(s"followSymlinks = $follow: ") {
         call(tools(follow), "list_directory", ujson.Obj("path" -> link.toString)).left.value.getMessage should
           include("Access denied")
-        call(tools(follow), "read_file", ujson.Obj("path" -> link.resolve("secret.txt").toString)).left.value.getMessage should
+        call(
+          tools(follow),
+          "read_file",
+          ujson.Obj("path" -> link.resolve("secret.txt").toString)
+        ).left.value.getMessage should
           include("Access denied")
       }
-    }
   }
 
   "WriteConfig" should "write inside allowedPaths, refuse outside, and refuse to overwrite by default" in {
