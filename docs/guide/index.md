@@ -17,6 +17,7 @@ Comprehensive guides for LLM4S features.
 - **[Providers](providers)** - Overview of supported providers and how to configure them
 - **[Error Handling](error-handling)** - Work with `Result[A]` and `LLMError`: pattern matching, for-comprehensions, every error type, recovery and testing
 - **[Writing a Provider](writing-a-provider)** - Publish your own provider module against the `llm4s-core` SPI
+- **[Comparing LLM4S](comparison)** - A sourced comparison with LangChain4j, Spring AI, Koog and Embabel, and a [migration guide](migrating-from-langchain4j)
 
 ### Agent Framework
 
