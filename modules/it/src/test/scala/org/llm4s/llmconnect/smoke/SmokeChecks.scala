@@ -193,6 +193,9 @@ object SmokeChecks {
     )
   }
 
+  /** The properties the contract's tool declares; its object schema allows no others (`additionalProperties`). */
+  private val ToolProperties = Set("topic")
+
   private def secretCodeTool: Either[String, ToolFunction[_, _]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Secret code parameters")
@@ -206,7 +209,9 @@ object SmokeChecks {
 
   /**
    * The model's tool call, checked against the tool: it called the tool, the call carries an id, and its arguments
-   * fit the tool's schema. Returns the call and what the tool returns for it.
+   * fit the tool's schema - an object with no property the tool does not declare (`ToolFunction.execute` does not
+   * validate the schema, and the handler would ignore an extra one), which the handler then accepts. Returns the
+   * call and what the tool returns for it.
    */
   private def calledTool(tool: ToolFunction[_, _], completion: Completion): Either[String, (ToolCall, String)] =
     for {
@@ -215,6 +220,13 @@ object SmokeChecks {
       )
       _ <- Either.cond(call.name == tool.name, (), s"it called '${call.name}' instead of '${tool.name}'")
       _ <- Either.cond(call.id.nonEmpty, (), "the tool call has an empty id, so its result cannot be sent back")
+      fields <- call.arguments.objOpt.toRight(s"the call's arguments are not a JSON object: ${call.arguments}")
+      undeclared = fields.keySet.diff(ToolProperties)
+      _ <- Either.cond(
+        undeclared.isEmpty,
+        (),
+        s"the call's arguments carry properties the tool's schema does not allow (${undeclared.mkString(", ")}): ${call.arguments}"
+      )
       value <- tool
         .execute(call.arguments)
         .left

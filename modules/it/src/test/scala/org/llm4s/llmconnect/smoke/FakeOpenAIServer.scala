@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets
  * @param keepAssistantTurns      read the assistant turns in the history; when false it reads only the other turns
  * @param useToolResult           answer from a tool message's content; when false it ignores the tool result
  * @param toolArgumentsValid      send tool-call arguments that are JSON; when false they are cut off mid-object
+ * @param toolArgumentsInSchema   send only the properties the tool declares; when false it adds an undeclared one
  * @param streamToolCalls         stream a tool call as a tool call; when false it streams prose instead
  * @param includeUsage            report token usage, also on streams
  * @param streamUsageNeedsOptIn   on a stream, report usage only to a request that asks with
@@ -33,6 +34,7 @@ final case class FakeBehaviour(
   keepAssistantTurns: Boolean = true,
   useToolResult: Boolean = true,
   toolArgumentsValid: Boolean = true,
+  toolArgumentsInSchema: Boolean = true,
   streamToolCalls: Boolean = true,
   includeUsage: Boolean = true,
   streamUsageNeedsOptIn: Boolean = false,
@@ -155,13 +157,15 @@ final class FakeOpenAIServer(initial: FakeBehaviour = FakeBehaviour()) extends A
     (events.map(event => s"data: ${ujson.write(event)}\n\n") :+ "data: [DONE]\n\n").mkString
 
   private def toolArguments(behaviour: FakeBehaviour): String =
-    if (behaviour.toolArgumentsValid) """{"topic":"vault"}""" else """{"topic":"""
+    if (!behaviour.toolArgumentsValid) """{"topic":"""
+    else if (!behaviour.toolArgumentsInSchema) """{"topic":"vault","extra":true}"""
+    else """{"topic":"vault"}"""
 
   private def streamedToolCall(name: String, behaviour: FakeBehaviour): Seq[ujson.Value] = {
     // Split where OpenAI splits, so that some pieces (`":"`) are valid JSON on their own and would lose their
     // quotes if a client parsed each piece before handing it on.
     val pieces =
-      if (behaviour.toolArgumentsValid) Seq("{\"", "topic", "\":\"", "vault", "\"}")
+      if (behaviour.toolArgumentsValid && behaviour.toolArgumentsInSchema) Seq("{\"", "topic", "\":\"", "vault", "\"}")
       else toolArguments(behaviour).grouped(4).toSeq
     val first = chunkJson(
       ujson.Obj(

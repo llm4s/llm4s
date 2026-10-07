@@ -142,6 +142,11 @@ class SmokeContractOfflineSpec
       Set(Capability.ToolCalling, Capability.StreamedToolCalling)
     ),
     (
+      "adds a property the tool does not declare to the tool-call arguments",
+      FakeBehaviour(toolArgumentsInSchema = false),
+      Set(Capability.ToolCalling, Capability.StreamedToolCalling)
+    ),
+    (
       "streams prose where a tool call belongs",
       FakeBehaviour(streamToolCalls = false),
       Set(Capability.StreamedToolCalling)
