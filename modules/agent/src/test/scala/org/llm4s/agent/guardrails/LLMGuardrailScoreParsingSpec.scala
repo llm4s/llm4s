@@ -62,6 +62,16 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     "0.5/1",
     "1e-3",
     "0,9",
+    // a percentage named apart from the number
+    "1 %",
+    "1 percent",
+    "1 Percent",
+    "1 per cent",
+    "1 pct",
+    "1 (percent)",
+    "0.9 percentile",
+    "1 \uFF05",
+    "1 \u2030",
     // out of range
     "1.5",
     "100",

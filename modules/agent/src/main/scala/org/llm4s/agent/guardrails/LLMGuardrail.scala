@@ -37,7 +37,8 @@ import org.llm4s.types.Result
  *    trailing comma, semicolon or colon on the number is ignored. A label or sentence around one number is fine:
  *    `Score: 0.9` and `The score is 0.9` read as 0.9.
  *  - Refused, as unreadable: a number outside 0 to 1 (`85`, `100`, `1.5`, `-0.2`); a sign (`-0.5`, `+0.5`); a
- *    percentage, fraction or exponent (`85%`, `8/10`, `1e-3`); a decimal comma (`0,9`); a trailing full stop
+ *    percentage, fraction or exponent (`85%`, `8/10`, `1e-3`), and any reply that names a percentage even apart
+ *    from the number (`1 %`, `1 percent`, `1 per cent`); a decimal comma (`0,9`); a trailing full stop
  *    (`0.85.`); a label glued to the number (`Score:0.9`); digits inside a word (`gpt4`); and more than one
  *    number anywhere in the reply (`0.5 or 0.6`, `0.7 out of 1`). A reply with no ASCII digit at all (`NaN`, an
  *    empty reply, a refusal in words) is refused too.
@@ -201,6 +202,21 @@ object LLMGuardrail {
 
   private def hasDigit(token: String): Boolean = token.exists(c => c >= '0' && c <= '9')
 
+  /** Percent and per-mille signs, ASCII and fullwidth, that rescale a number wherever they stand in the reply. */
+  private val PercentSigns = "%\u2030\uFF05\uFE6A"
+
+  /**
+   * Whether the reply names a percentage anywhere, even apart from the number: a percent sign (`1 %`) or a word
+   * such as `percent`, `percentage`, `percentile`, `pct` or `per cent` (`1 percent`). A number standing next to
+   * one of these is on a 0 to 100 scale, so the reply is refused rather than read as that number.
+   */
+  private def namesPercentage(reply: String): Boolean =
+    reply.exists(isIn(PercentSigns, _)) || {
+      val words = reply.toLowerCase(java.util.Locale.ROOT).split("[^a-z]+").toList.filter(_.nonEmpty)
+      words.exists(w => w.startsWith("percent") || w == "pct") ||
+      words.zip(words.drop(1)).exists { case (a, b) => a == "per" && b.startsWith("cent") }
+    }
+
   private def isIn(chars: String, c: Char): Boolean = chars.indexOf(c.toInt) >= 0
 
   private def trimWrapping(token: String): String =
@@ -211,11 +227,12 @@ object LLMGuardrail {
    *
    * Every whitespace-separated word with an ASCII digit in it counts as a number: there must be exactly one, and
    * once its wrapping and trailing clause punctuation are trimmed it must be a plain decimal within 0 to 1. A value
-   * outside the range is refused, never clamped.
+   * outside the range is refused, never clamped. A reply that names a percentage anywhere (`1 %`, `1 percent`) is
+   * refused too, because the marker need not touch the number.
    */
   private[guardrails] def readScore(reply: String): Option[Double] =
     reply.split("\\s+").toList.filter(hasDigit) match {
-      case word :: Nil =>
+      case word :: Nil if !namesPercentage(reply) =>
         val number = trimWrapping(word)
         if (PlainDecimal.matcher(number).matches()) number.toDoubleOption.filter(score => score >= 0.0 && score <= 1.0)
         else None
