@@ -89,7 +89,14 @@ private[llm4s] object Redaction {
     "secret_key"
   )
 
-  private val QueryParamPattern: Regex = """([?&])([^=]+)=([^&\s]*)""".r
+  /**
+   * `?key=` or `&key=`, the start of a parameter of a URL or a query string; the value after it is found by
+   * `queryValue`. The key is one run of the characters a query key can hold: no whitespace, quote, `?`, `&` or `=`.
+   * So a `?` of prose, a question in a chat message, cannot start a key that runs across quotes, braces and lines to
+   * a later `=` and take the text after that for a value (#1667). The run is possessive and cannot hold a `?` or `&`,
+   * so each character is read by at most one attempt.
+   */
+  private val QueryParamStart: Regex = """([?&])([^=&?\s"']++)=""".r
 
   /**
    * Names that mark a key as holding a credential, compared after lower-casing and dropping `_` and `-`, so `api_key`,
@@ -265,23 +272,87 @@ private[llm4s] object Redaction {
     """(?i)\bBasic\s+([a-zA-Z0-9+/=]+)""".r.replaceAllIn(step3, quoted)
   }
 
-  private def redactQueryParams(input: String, placeholder: String): String =
-    QueryParamPattern.replaceAllIn(
-      input,
-      m => {
-        val separator = m.group(1)
-        val key       = m.group(2)
+  /**
+   * Replaces the value of every query parameter whose key holds a sensitive name. The key and the text around the
+   * value are kept, and an empty value is left as it is: there is nothing to hide, and a placeholder written before a
+   * quote would keep the `key='...'` pass after this one from reading the value. Appended, not passed to
+   * `replaceAllIn`, so a `$` or `\` in the input or the placeholder is written as it is.
+   */
+  private def redactQueryParams(input: String, placeholder: String): String = {
+    val matcher = QueryParamStart.pattern.matcher(input)
+    val out     = new java.lang.StringBuilder(input.length)
 
-        // Quoted: the key and the value are the input's, and may hold `$` or `\`.
-        val text =
-          if (SensitiveQueryParams.exists(s => key.toLowerCase(Locale.ROOT).contains(s.toLowerCase(Locale.ROOT)))) {
-            s"$separator$key=$placeholder"
+    @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
+      if (searchFrom > input.length || !matcher.find(searchFrom)) {
+        copiedTo
+      } else {
+        val key = matcher.group(2).toLowerCase(Locale.ROOT)
+        if (SensitiveQueryParams.exists(key.contains)) {
+          val (valueStart, valueLength) = queryValue(input, matcher.end)
+          if (valueLength > 0) {
+            out.append(input, copiedTo, valueStart).append(placeholder)
+            loop(valueStart + valueLength, valueStart + valueLength)
           } else {
-            m.matched
+            loop(matcher.end, copiedTo)
           }
-        Regex.quoteReplacement(text)
+        } else {
+          // The value of a parameter that is kept is searched too: it may be a URL with a query of its own
+          // (`?next=/cb?token=...`). It is not scanned, so no character is read twice.
+          loop(matcher.end, copiedTo)
+        }
       }
-    )
+
+    val copiedTo = loop(0, 0)
+    out.append(input, copiedTo, input.length).toString
+  }
+
+  /**
+   * Where the query value that starts at `from` begins, and its length. A value ends where a query value does, at
+   * `&` or whitespace, or at the quote that ends the string the URL sits in, which is kept with the backslashes
+   * that escape it in JSON that sits inside a string. That quote is followed by `,`, a bracket, whitespace or the end
+   * of the input, never by a character a value is made of; a quote that is (`?key=ab'cd`, which RFC 3986 allows
+   * unencoded) is part of the value. A value written in quotes (`'abc'`, `"abc"`, or `\"abc\"` in JSON inside a
+   * string), as a query string in prose or code may have it, starts after its opening quote by the same rule, so the
+   * quote that ends the enclosing string, as in `"https://x.test/?token="}`, leaves the value empty. A loop that
+   * reads each character once.
+   */
+  private def queryValue(input: String, from: Int): (Int, Int) = {
+    def isQuote(i: Int): Boolean = i < input.length && (input.charAt(i) == '"' || input.charAt(i) == '\'')
+    def isUrlChar(i: Int): Boolean =
+      i < input.length && (input.charAt(i).isLetterOrDigit || "._~%+/-".indexOf(input.charAt(i).toInt) >= 0)
+    // The index after the run of backslashes at `i`, if any.
+    def afterSlashes(i: Int): Int = {
+      var j = i
+      while (j < input.length && input.charAt(j) == '\\') j += 1
+      j
+    }
+    val quoteAt = afterSlashes(from)
+    val start   = if (isQuote(quoteAt) && isUrlChar(quoteAt + 1)) quoteAt + 1 else from
+    var end     = start
+    var done    = false
+    while (!done && end < input.length) {
+      val c = input.charAt(end)
+      if (c == '\\') {
+        // A quote after backslashes ends the value as a bare quote does; other backslashes are the value's.
+        val next = afterSlashes(end)
+        if (!isQuote(next)) end = next
+        else if (isUrlChar(next + 1)) end = next + 1
+        else done = true
+      } else if (c == '"' || c == '\'') {
+        // A quote inside a token (`ab'cd`) is followed by more of it; the quote that ends a string is not.
+        if (isUrlChar(end + 1)) end += 1 else done = true
+      } else if (c == '&' || isRegexSpace(c)) {
+        done = true
+      } else {
+        end += 1
+      }
+    }
+    (start, end - start)
+  }
+
+  /** The characters `\s` matches, so that a value ends where the key of `QueryParamStart` would. */
+  private def isRegexSpace(c: Char): Boolean =
+    c == ' ' || c == '\t' || c == '\n' || c == '\u000B' || c == '\f' || c == '\r'
 
   private def redactJsonFields(input: String, placeholder: String, inputQuotes: Int): String = {
     // Arrays and objects first: the strings and numbers under a sensitive key are replaced in one pass, and what is
