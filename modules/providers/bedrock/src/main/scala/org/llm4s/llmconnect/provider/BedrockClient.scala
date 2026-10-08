@@ -5,6 +5,7 @@ import org.llm4s.error.{
   CancelledError,
   LLMError,
   NetworkError,
+  ProcessingError,
   RateLimitError,
   ServiceError,
   TimeoutError,
@@ -19,6 +20,7 @@ import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
+import org.llm4s.util.BoundedJson
 
 import software.amazon.awssdk.auth.credentials.{
   AwsBasicCredentials,
@@ -67,6 +69,7 @@ import software.amazon.awssdk.services.bedrockruntime.model.{
 import java.net.URI
 import java.time.Instant
 import java.util.concurrent.{ LinkedBlockingQueue, TimeUnit }
+import scala.annotation.tailrec
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
@@ -181,12 +184,14 @@ class BedrockClient(
       buildConverseRequest(conv, opts).flatMap { request =>
         val outcome = Try(sdkClient.converse(request)).toEither.left.map(mapException)
         outcome
-          .map { response =>
-            // sealed thinking is bound to the request it answers, so it is replayed only while that holds
-            val parsed     = parseConverseResponse(response)
-            val completion = parsed.withMessage(ThinkingReplay.bind(replayOrigin, parsed.message, conv.messages, opts))
-            recordExchange(startedAt, requestJson, Some(serializeResponseForLogging(response)), Right(completion))
-            completion
+          .flatMap { response =>
+            parseConverseResponse(response).map { parsed =>
+              // sealed thinking is bound to the request it answers, so it is replayed only while that holds
+              val completion =
+                parsed.withMessage(ThinkingReplay.bind(replayOrigin, parsed.message, conv.messages, opts))
+              recordExchange(startedAt, requestJson, Some(serializeResponseForLogging(response)), Right(completion))
+              completion
+            }
           }
           .tapLeft(err => recordExchange(startedAt, requestJson, None, Left(err)))
       }
@@ -541,7 +546,8 @@ class BedrockClient(
 
   // ---- response parsing ----
 
-  private def parseConverseResponse(response: ConverseResponse): Completion = {
+  /** A `Left` when a tool call's input is nested too deeply to handle (see [[BedrockClient.toolCallArguments]]). */
+  private def parseConverseResponse(response: ConverseResponse): Result[Completion] = {
     val blocks = response.output().message().content().asScala.toList
 
     val textContent = blocks
@@ -562,34 +568,45 @@ class BedrockClient(
           )
       }
 
-    val toolCalls = blocks
+    // the input is the model's own JSON: one nested too deeply is a malformed call, and the reply fails
+    val toolCalls: Result[List[ToolCall]] = blocks
       .filter(_.`type`() == ContentBlock.Type.TOOL_USE)
-      .map { block =>
-        val tu = block.toolUse()
-        ToolCall(id = tu.toolUseId(), name = tu.name(), arguments = documentToUjson(tu.input()))
+      .foldLeft[Result[List[ToolCall]]](Right(Nil)) { (acc, block) =>
+        acc.flatMap { calls =>
+          val tu = block.toolUse()
+          BedrockClient
+            .toolCallArguments(tu.input())
+            .map(arguments => calls :+ ToolCall(id = tu.toolUseId(), name = tu.name(), arguments = arguments))
+        }
       }
 
-    val message =
-      AssistantMessage(contentOpt = Option(textContent).filter(_.nonEmpty), toolCalls = toolCalls, thinking = thinking)
+    toolCalls.map { toolCalls =>
+      val message =
+        AssistantMessage(
+          contentOpt = Option(textContent).filter(_.nonEmpty),
+          toolCalls = toolCalls,
+          thinking = thinking
+        )
 
-    val usage = Option(response.usage()).map { u =>
-      TokenUsage(
-        promptTokens = u.inputTokens(),
-        completionTokens = u.outputTokens(),
-        totalTokens = u.totalTokens()
+      val usage = Option(response.usage()).map { u =>
+        TokenUsage(
+          promptTokens = u.inputTokens(),
+          completionTokens = u.outputTokens(),
+          totalTokens = u.totalTokens()
+        )
+      }
+
+      Completion(
+        id = java.util.UUID.randomUUID().toString,
+        created = System.currentTimeMillis() / 1000,
+        content = textContent,
+        model = config.model,
+        message = message,
+        toolCalls = toolCalls,
+        usage = usage,
+        estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model, u))
       )
     }
-
-    Completion(
-      id = java.util.UUID.randomUUID().toString,
-      created = System.currentTimeMillis() / 1000,
-      content = textContent,
-      model = config.model,
-      message = message,
-      toolCalls = toolCalls,
-      usage = usage,
-      estimatedCost = usage.flatMap(u => CostEstimator.estimate(config.model, u))
-    )
   }
 
   // ---- errors ----
@@ -730,6 +747,48 @@ object BedrockClient {
           case None          => DefaultCredentialsProvider.builder().build()
         }
     }
+
+  /**
+   * The arguments of a `toolUse` block, converted from the SDK's `Document`. The input is the model's
+   * own JSON. The SDK's bundled Jackson parser admits it up to about 1,000 levels of nesting, about
+   * twice the 512 the library handles (#1562), and `documentToUjson`, `ujsonToDocument` and every
+   * traversal of the value in between - the agent loop's rendering, the next turn's request body -
+   * recurse once per level; a `StackOverflowError` is not an `Exception`, so it escapes every `Result`.
+   * The depth is therefore measured first, iteratively, and an input over the limit is a malformed
+   * tool call - never converted, never sent back - as it is for Anthropic and Ollama (#1648). Within
+   * the limit the recursion is shallow enough for a 1 MB thread stack.
+   */
+  private[provider] def toolCallArguments(input: Document): Result[ujson.Value] =
+    if (exceedsDepth(input, BoundedJson.MaxDepth))
+      Left(
+        ProcessingError(
+          "bedrock-tool-calls",
+          s"malformed tool call: arguments are nested more than ${BoundedJson.MaxDepth} levels deep"
+        )
+      )
+    else Right(documentToUjson(input))
+
+  /**
+   * Whether `doc` nests lists and maps more than `maxDepth` levels deep (a scalar is 0 deep, `[1]` is
+   * 1). Walked with an explicit stack, not the recursive visitor, so a document of any depth can be
+   * measured, and the walk stops as soon as the limit is passed.
+   */
+  private[provider] def exceedsDepth(doc: Document, maxDepth: Int): Boolean = {
+    @tailrec
+    def walk(pending: List[(Document, Int)]): Boolean =
+      pending match {
+        case Nil => false
+        case (d, depth) :: rest =>
+          val container = d.isList || d.isMap
+          if (!container) walk(rest)
+          else if (depth + 1 > maxDepth) true
+          else {
+            val children = if (d.isList) d.asList().asScala.toList else d.asMap().values().asScala.toList
+            walk(children.map(child => (child, depth + 1)) ::: rest)
+          }
+      }
+    walk(List((doc, 0)))
+  }
 
   private[provider] def ujsonToDocument(value: ujson.Value): Document =
     value match {

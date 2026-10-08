@@ -1906,6 +1906,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-bedrock`: a `toolUse` input nested more than 512 levels deep is refused as a malformed tool
+  call, never converted or sent back** ([#1648](https://github.com/llm4s/llm4s/issues/1648)). #1630
+  ([#1562](https://github.com/llm4s/llm4s/issues/1562)) bounded every place model-written JSON is parsed
+  and #1644 ([#1643](https://github.com/llm4s/llm4s/issues/1643)) closed the window left for Anthropic
+  and Gemini, but a Converse response's `toolUse.input` arrives as an AWS SDK `Document`, provider-native
+  rather than text, and was left out. The SDK's bundled Jackson parser admits it up to 1,000 levels, about
+  twice the library's limit, and `BedrockClient` converted it with a recursive visitor and rendered it
+  back on the next turn with a recursive builder, so an input 513 to ~998 levels deep became a `ToolCall`
+  that overflowed the stack when it was traversed - a `StackOverflowError`, which is not an `Exception`
+  and escaped `complete`'s `Result`. The `Document`'s depth is now measured iteratively before it is
+  converted, and `complete` returns `ProcessingError("bedrock-tool-calls", "malformed tool call:
+  arguments are nested more than 512 levels deep")` for one over the limit, as the Anthropic and Ollama
+  clients do; an input at the limit is still accepted and sent back. The streaming path was already
+  bounded, since `ConverseStream` delivers arguments as text that `StreamingAccumulator` reads through
+  `BoundedJson`.
 - **`llm4s-provider-testkit` says it requires JDK 21** ([#1582](https://github.com/llm4s/llm4s/issues/1582)):
   its interruption checks run the call on a virtual thread and `LocalProviderTestServer` answers on
   `Executors.newVirtualThreadPerTaskExecutor`, both JDK 21 APIs, but nothing said so. The provider guide, the
