@@ -357,7 +357,20 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
     val parameters = tool.toOpenAITool(strict = false)("function")("parameters")
     parameters("required").arr shouldBe empty
     parameters("properties").obj.keySet shouldBe Set("timezone", "format")
-    parameters("properties")("format")("enum").arr.map(_.str) shouldBe Seq("iso", "human")
+    parameters("properties")("format")("enum").arr.toSeq shouldBe Seq(ujson.Str("iso"), ujson.Str("human"), ujson.Null)
+  }
+
+  it should "allow null defaults when strict schemas require both properties" in {
+    val parameters = tool.toOpenAITool(strict = true)("function")("parameters")
+    parameters("required").arr.map(_.str).toSet shouldBe Set("timezone", "format")
+    Seq("timezone", "format").foreach { name =>
+      parameters("properties")(name)("type").arr.map(_.str).toSet shouldBe Set("string", "null")
+    }
+    val json = tool
+      .execute(ujson.Obj("timezone" -> ujson.Null, "format" -> ujson.Null))
+      .fold(e => fail(s"Expected defaults: $e"), identity)
+    json("timezone").str shouldBe "UTC"
+    json("datetime").str shouldBe json("iso8601").str
   }
 
   "DateTimeTool executed without arguments" should "answer with the defaults, for null as for an empty object" in {

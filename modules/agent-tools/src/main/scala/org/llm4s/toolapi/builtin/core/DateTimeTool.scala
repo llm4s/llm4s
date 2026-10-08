@@ -81,19 +81,23 @@ object DateTimeTool {
     .withProperty(
       Schema.property(
         "timezone",
-        Schema
-          .string(
-            "Timezone identifier (e.g., 'UTC', 'America/New_York', 'Europe/London', 'Asia/Tokyo'). Defaults to UTC."
-          ),
+        Schema.nullable(
+          Schema
+            .string(
+              "Timezone identifier (e.g., 'UTC', 'America/New_York', 'Europe/London', 'Asia/Tokyo'). Defaults to UTC when omitted or null."
+            )
+        ),
         required = false
       )
     )
     .withProperty(
       Schema.property(
         "format",
-        Schema
-          .string("Output format: 'iso' for ISO-8601, 'human' for human-readable. Defaults to 'iso'.")
-          .withEnum(SupportedFormats),
+        Schema.nullable(
+          Schema
+            .string("Output format: 'iso' for ISO-8601, 'human' for human-readable. Defaults to 'iso'.")
+            .withEnum(SupportedFormats)
+        ),
         required = false
       )
     )

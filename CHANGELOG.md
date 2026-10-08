@@ -1744,6 +1744,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- Date/time tool schemas allow explicit null for optional timezone and format defaults, including strict schemas.
 - **`llm4s-agent-tools`: file tools confined by path component, not string prefix**
   ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `FileConfig.isPathAllowed` and
   `WriteConfig.isPathAllowed` compared paths with `String.startsWith`, so an allowed `/srv/agent-data` also
