@@ -84,7 +84,7 @@ The wrapper:
 - never caches a failure: an error from the base client is returned as it is, and the next call tries again;
 - is **not** an `EmbeddingClient`. It has the same `embed` method, but it cannot be passed where an `EmbeddingClient` is required, so call it directly.
 
-`cacheStats` returns `CacheStats(size, hits, misses, totalRequests, hitRatePercent)`. Every looked-up text counts, so the two calls above give 3 misses and 1 hit (25%), and a text repeated inside one request counts once per occurrence. `clearCache()` empties the cache and resets the statistics.
+`cacheStats` returns `CacheStats(size, hits, misses, totalRequests, hitRatePercent)`. Every looked-up text counts, so the two calls above give 3 misses and 1 hit (25%), and a text repeated inside one request counts once per occurrence. With the default `InMemoryEmbeddingCache`, `clearCache()` empties the cache and resets the statistics. With a custom `EmbeddingCache`, it delegates to that backend's `clear()` implementation; the trait default does nothing, and a backend may clear entries without resetting statistics.
 
 ### The in-memory cache
 
