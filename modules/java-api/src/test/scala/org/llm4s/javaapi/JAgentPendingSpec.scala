@@ -1,10 +1,10 @@
 package org.llm4s.javaapi
 
-import org.llm4s.agent.{ AgentResult, AgentStatus }
-import org.llm4s.agent.graph.{ GraphError, InterruptId, ThreadId }
+import java.util.Optional
+import org.llm4s.agent.AgentStatus
+import org.llm4s.agent.graph.{ GraphError, InterruptId }
 import org.llm4s.agent.graph.toolloop.{ ApprovalRequest, ApprovalSource, ToolQuestionRequest }
 import org.llm4s.error.{ CancelledError, NetworkError, ValidationError }
-import org.llm4s.llmconnect.model.ToolMessage
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -25,13 +25,13 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
 
   private def agentOver(client: Scripted): JAgent = SuspensionFixtures.agentOver(client, ran)
 
-  private def pendingOf(result: AgentResult): List[PendingInterrupt] = JAgent.pending(result).asScala.toList
+  private def pendingOf(result: JAgentResult): List[PendingInterrupt] = JAgent.pending(result).asScala.toList
 
   "JAgent.pending" should "list a suspended turn's approval as Java values, and resume completes it" in {
     ran.clear()
     val agent = agentOver(scripted(Right(calling(call("c1", "deploy", "prod"))), Right(completion("shipped"))))
     val first = agent.run("deploy").get()
-    first.status shouldBe a[AgentStatus.Suspended]
+    first.status.kind shouldBe AgentStatusKind.SUSPENDED
     val List(p) = pendingOf(first): @unchecked
     p.kind shouldBe InterruptKind.APPROVAL
     p.toolName shouldBe "deploy"
@@ -39,14 +39,11 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     p.reason() shouldBe java.util.Optional.of("deploying prod")
     p.questionJson() shouldBe java.util.Optional.empty()
     // the id is the turn's own
-    first.status match {
-      case AgentStatus.Suspended(approvals, _) => p.id shouldBe approvals.head._1.value
-      case other                               => fail(s"expected Suspended, got $other")
-    }
+    first.status.pending.asScala.toList shouldBe List(p)
     ran.asScala shouldBe empty
 
     val done = agent.resume(first.threadId, java.util.List.of(Answer.approve(p.id))).get()
-    done.answer shouldBe Some("shipped")
+    done.answer() shouldBe Optional.of("shipped")
     ran.asScala.toList shouldBe List("prod")
     JAgent.pending(done) shouldBe empty
   }
@@ -62,8 +59,10 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     p.reason() shouldBe java.util.Optional.empty()
 
     val done = agent.resume(first.threadId, java.util.List.of(Answer.reply(p.id, """{"ok":true}"""))).get()
-    done.answer shouldBe Some("confirmed")
-    done.messages.collect { case t: ToolMessage => t.content }.head should include("really go? true")
+    done.answer() shouldBe Optional.of("confirmed")
+    done.messages.asScala.collect { case t if t.role == JMessageRole.TOOL => t.content }.head should include(
+      "really go? true"
+    )
   }
 
   it should "list approvals before questions, and a partial resume leaves the rest pending" in {
@@ -82,16 +81,16 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
 
     // answer one approval only: the other approval and the question stay pending
     val partial = agent.resume(first.threadId, java.util.List.of(Answer.approve(pending.head.id))).get()
-    partial.status shouldBe a[AgentStatus.Suspended]
-    partial.answer shouldBe None
+    partial.status.kind shouldBe AgentStatusKind.SUSPENDED
+    partial.answer() shouldBe Optional.empty
     pendingOf(partial) shouldBe pending.tail
 
     val answers =
       java.util.List.of(Answer.reject(pending(1).id, "not today"), Answer.reply(pending(2).id, """{"ok":false}"""))
     val done = agent.resume(first.threadId, answers).get()
-    done.answer shouldBe Some("all done")
+    done.answer() shouldBe Optional.of("all done")
     ran.asScala.toList shouldBe List("one")
-    val results = done.messages.collect { case t: ToolMessage => t.content }
+    val results = done.messages.asScala.collect { case t if t.role == JMessageRole.TOOL => t.content }
     results.exists(_.contains("Rejected: not today")) shouldBe true
     results.exists(_.contains("really go? false")) shouldBe true
   }
@@ -148,13 +147,13 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     unknownId.isFailure shouldBe true
     unknownId.getError().error shouldBe a[GraphError]
     // still suspended, and the real answer still works
-    agent.resume(first.threadId, java.util.List.of(Answer.approve(id))).get().answer shouldBe Some("ok")
+    agent.resume(first.threadId, java.util.List.of(Answer.approve(id))).get().answer() shouldBe Optional.of("ok")
 
     val again = agent.resume(first.threadId, java.util.List.of(Answer.approve(id)))
     again.isFailure shouldBe true
     again.getError().error shouldBe a[GraphError]
 
-    val unknownThread = agent.resume(ThreadId("no-such-thread"), java.util.List.of(Answer.approve(id)))
+    val unknownThread = agent.resume("no-such-thread", java.util.List.of(Answer.approve(id)))
     unknownThread.isFailure shouldBe true
     unknownThread.getError().error shouldBe a[GraphError]
   }
@@ -162,7 +161,7 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
   it should "refuse null arguments and malformed answers before resuming anything" in {
     val agent = agentOver(scripted(Right(calling(call("c1", "deploy", "x"))), Right(completion("ok"))))
     val first = agent.run("go").get()
-    agent.resume(null.asInstanceOf[ThreadId], java.util.List.of()).getError().error shouldBe a[ValidationError]
+    agent.resume(null, java.util.List.of()).getError().error shouldBe a[ValidationError]
     agent.resume(first.threadId, null).getError().error shouldBe a[ValidationError]
     agent.resume(first.threadId, java.util.Arrays.asList(null)).getError().error shouldBe a[ValidationError]
     agent.resume(first.threadId, java.util.List.of()).getError().error shouldBe a[GraphError.InvalidResume]
@@ -171,13 +170,13 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
       include("not valid JSON")
     // nothing was resumed: the approval is still pending
     JAgent.pending(first).get(0).id shouldBe id
-    agent.resume(first.threadId, java.util.List.of(Answer.approve(id))).get().answer shouldBe Some("ok")
+    agent.resume(first.threadId, java.util.List.of(Answer.approve(id))).get().answer() shouldBe Optional.of("ok")
   }
 
   it should "fail every call of an agent that did not build" in {
     val broken = new JAgent(Left(ValidationError("agent", "broken")))
-    broken.resume(ThreadId("t"), java.util.List.of()).getError().getMessage should include("broken")
-    broken.recover(ThreadId("t")).getError().getMessage should include("broken")
+    broken.resume("t", java.util.List.of()).getError().getMessage should include("broken")
+    broken.recover("t").getError().getMessage should include("broken")
   }
 
   "JAgent.recover" should "continue a resumed turn that failed, re-running only what did not finish" in {
@@ -190,7 +189,7 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     ran.asScala.toList shouldBe List("prod")
 
     val recovered = agent.recover(first.threadId).get()
-    recovered.answer shouldBe Some("back")
+    recovered.answer() shouldBe Optional.of("back")
     ran.asScala.toList shouldBe List("prod") // the approved call is not run again
   }
 
@@ -199,26 +198,26 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     val agent = agentOver(scripted(Right(completion("hello")), Left(down), Right(completion("again"))))
     val first = agent.run("hi").get()
     agent.continueConversation(first, "more").isFailure shouldBe true
-    agent.recover(first.threadId).get().answer shouldBe Some("again")
+    agent.recover(first.threadId).get().answer() shouldBe Optional.of("again")
   }
 
   it should "continue a cancelled stream" in {
     val model    = parksOnce()
     val agent    = jAgentOf(model.client)(_.withStreaming())
-    val threadId = ThreadId("recover-cancelled")
+    val threadId = "recover-cancelled"
     val stream   = agent.stream(threadId, "hi", Recorder()).get()
     model.parked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
     stream.cancel()
     stream.await().isFailure shouldBe true
-    agent.recover(threadId).get().answer shouldBe Some("recovered")
+    agent.recover(threadId).get().answer() shouldBe Optional.of("recovered")
   }
 
   it should "fail for a thread with nothing to recover, and refuse a null thread id" in {
     val agent = agentOver(scripted(Right(completion("hi"))))
     val first = agent.run("hi").get()
     agent.recover(first.threadId).getError().error shouldBe a[GraphError]
-    agent.recover(ThreadId("no-such-thread")).isFailure shouldBe true
-    agent.recover(null.asInstanceOf[ThreadId]).getError().error shouldBe a[ValidationError]
+    agent.recover("no-such-thread").isFailure shouldBe true
+    agent.recover(null).getError().error shouldBe a[ValidationError]
   }
 
   "JAgent.resume and recover" should "return a CancelledError to an interrupted caller, leaving the turn going" in {

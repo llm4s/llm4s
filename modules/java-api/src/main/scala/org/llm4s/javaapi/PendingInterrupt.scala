@@ -8,11 +8,11 @@ import java.util.{ Objects, Optional }
 import scala.jdk.CollectionConverters.*
 
 /**
- * One approval or question a suspended agent turn waits for, as [[JAgent.pending]] lists them: every
- * field a `String` or a Java enum, JSON as text.
+ * One approval or question a suspended agent turn waits for, as a `SUSPENDED` [[JAgentStatus.pending]]
+ * (and its shortcut [[JAgent.pending]]) lists them: every field a `String` or a Java enum, JSON as text.
  *
  * {{{
- * for (PendingInterrupt p : JAgent.pending(result)) {
+ * for (PendingInterrupt p : result.status().pending()) {
  *     switch (p.kind()) {
  *         case APPROVAL -> answers.add(Answer.approve(p.id()));
  *         case QUESTION -> answers.add(Answer.reply(p.id(), "true"));

@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Each `PendingInterrupt` has `id()`, `kind()` (the Java enum `InterruptKind`, `APPROVAL` or `QUESTION`),
   `toolName()`, `argumentsJson()`, and `reason()` or `questionJson()` as an `Optional<String>`. No Scala
   or ujson type is involved. `JAgent.resume(threadId, List<Answer>)` and `JAgent.recover(threadId)` are
-  blocking versions of `streamResume` and `streamRecover`. They return `LlmResult<AgentResult>` and
+  blocking versions of `streamResume` and `streamRecover`. They return `LlmResult<JAgentResult>` (#1393) and
   handle an interrupt as `run` does. A partial resume returns `Suspended` again, with the unanswered
   items still pending. The Kotlin API adds `AgentKt.pending(result)` and the `suspend` functions
   `resume(threadId, answers)` and `recover(threadId)`. These run the turn as the streams do, so
@@ -768,6 +768,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Java and Kotlin agent results use Java types only** ([#1393](https://github.com/llm4s/llm4s/issues/1393),
+  BREAKING, `llm4s-java-api`, Kotlin API). Every agent turn the Java facade returns - `JAgent.run`,
+  `continueConversation`, `resume`, `recover`, `AgentStream.await()`, `AgentStreamListener.onComplete` - is now a
+  `JAgentResult`, not the Scala `org.llm4s.agent.AgentResult`. `answer()` is an `Optional<String>`; `threadId()`,
+  `runId()` and `activeAgent()` are `String`s; `messages()` is an unmodifiable `java.util.List<JMessage>` (`role()`,
+  the Java enum `JMessageRole`, `content()`, `toolCalls()` as `JToolCall`s with `argumentsJson()`, `toolCallId()`,
+  `thinking()`); `usage()` is a `JUsageSummary` with `long` counts, a `java.math.BigDecimal` cost and a sorted
+  `java.util.Map<String, JModelUsage>` per model. `status()` is a `JAgentStatus`: `kind()` is the Java enum
+  `AgentStatusKind` (`COMPLETED`, `BLOCKED`, `STEP_LIMIT_REACHED`, `SUSPENDED`) for a `switch` or a Kotlin `when`, with
+  `answer()`, `guardrail()` and `reason()` as `Optional<String>` and `pending()` the `java.util.List<PendingInterrupt>`
+  that `JAgent.pending` (#1392) returned - built by the same `PendingInterrupt` factory, so `JAgent.pending(result)`
+  is now a shortcut for `result.status().pending()`. `JAgent.continueConversation`, `forget` and `pending`, and the
+  Kotlin `AgentKt` functions and `AgentStreamItem.Done`, take or carry a `JAgentResult`. `JAgent`'s thread-id
+  parameters are declared `String` (they already were in bytecode, so Java and Kotlin callers see no change).
+  `JavaInteropSpec` now walks every type reachable from a value the facade hands a caller and fails on any
+  `scala.*` or `ujson.*` type; three types are named boundaries it does not enter: `LLMError` behind
+  `LlmException.error()` ([#1487](https://github.com/llm4s/llm4s/issues/1487)), the `Conversation` that
+  `ConversationBuilder.build()` hands back to `complete` ([#1488](https://github.com/llm4s/llm4s/issues/1488)), and
+  the listener's `StreamEvent`s, read with `StreamEvents.decode`. The client facade's results were already Java
+  types (`LlmResult<String>`, `JLlmClient`, `JAgent`, `AgentStream`). No shims (pre-0.5.0). **Migration:** replace
+  `import org.llm4s.agent.AgentResult` with `org.llm4s.javaapi.JAgentResult`; `r.answer().get()` on a
+  `scala.Option` becomes `r.answer().orElseThrow()` (or `orElse`), `Option.apply(x)` comparisons become
+  `Optional.of(x)`; `r.status() instanceof AgentStatus.Completed` (or `getClass().getSimpleName()`) becomes
+  `r.status().kind() == AgentStatusKind.COMPLETED`, and `Blocked`'s fields are `status().guardrail()` / `reason()`;
+  iterate `r.messages()` directly instead of converting a Scala `Vector`, and branch on `m.role()` instead of
+  `instanceof ToolMessage`; read `usage().inputTokens()` and friends as `long`s and `totalCost()` as a
+  `BigDecimal`. Scala code that needs the Scala `AgentResult` uses `Agent` directly, not the Java facade.
 - **Embedding cache keys are unambiguous; the completion cache refuses a NaN threshold and serves an entry exactly
   `ttl` old** ([#1297](https://github.com/llm4s/llm4s/issues/1297)). **Breaking:** `CacheKeyGenerator.sha256(parts*)`
   length-prefixes every part instead of joining text and model with `:` (under which the text `a:b` with model `c`

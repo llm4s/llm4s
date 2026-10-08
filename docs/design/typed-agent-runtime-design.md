@@ -978,8 +978,17 @@ Decisions:
   question as JSON text, in an `Optional`. `JAgent.resume` and `recover` block as `run` does.
   `AgentKt.resume` and `recover` are `suspend` functions over the `streamResume` and `streamRecover`
   flows, so cancelling the caller cancels the turn. `PendingInterrupt` is the view that the Java-friendly
-  `AgentResult` of [#1393](https://github.com/llm4s/llm4s/issues/1393) reuses: a `Suspended` status
-  carries the same list.
+  `JAgentResult` of [#1393](https://github.com/llm4s/llm4s/issues/1393) reuses: a `SUSPENDED`
+  `JAgentStatus` carries the same list, built by the same `PendingInterrupt.of`.
+- **The JVM facades return Java values (#1393).** `JAgent` and `AgentKt` turns, `AgentStream.await()` and
+  `onComplete` hand over a `JAgentResult` (in `llm4s-java-api`; `llm4s-agent` is unchanged): `String` ids,
+  `Optional<String> answer()`, an unmodifiable `java.util.List<JMessage>` (Java enum `JMessageRole`, tool calls
+  as `JToolCall` with JSON text), a `JUsageSummary` (`long`s, `BigDecimal`, a sorted per-model map), and a
+  `JAgentStatus` - a Java enum `kind()` (`AgentStatusKind`) plus per-case `Optional` accessors and `pending()`.
+  A kind enum with accessors, not a Java sealed hierarchy, matches `PendingInterrupt`/`InterruptKind` and keeps
+  `switch` and `when` working on JDK 17. Every type is a final class with a private constructor, so fields can be
+  added. `JavaInteropSpec` walks every type reachable from what the facade hands a caller and fails on
+  `scala.*`/`ujson.*`, stopping only at named boundaries (`LLMError`, #1487; `Conversation`, #1488; `StreamEvent`).
 - **Durable names are the agent's.** `ToolExecuted.tool` is `"<unknown>"` for a tool the agent does
   not have; each non-handoff call of a mixed handoff batch is reported as `Errored`. The live tool
   result is `ToolCallResult` (`agent.tool_call_result`), apart from the loop's `toolloop.ToolResult`.

@@ -4,13 +4,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-import org.llm4s.agent.AgentResult;
 import org.llm4s.agent.events.AgentEvents;
 import org.llm4s.agent.graph.StreamEvent;
 import org.llm4s.javaapi.AgentStream;
 import org.llm4s.javaapi.Answer;
 import org.llm4s.javaapi.ConversationBuilder;
 import org.llm4s.javaapi.JAgent;
+import org.llm4s.javaapi.JAgentResult;
+import org.llm4s.javaapi.JAgentStatus;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.LlmResult;
@@ -110,34 +111,42 @@ public final class HelloLLM4S {
         }
 
         // stream.cancel() would cancel the turn instead
-        LlmResult<AgentResult> result = started.get().await();
+        LlmResult<JAgentResult> result = started.get().await();
         if (result.isFailure()) {
             System.err.println("The turn failed: " + result.getError().getMessage());
             return false;
         }
         System.out.println();
-        System.out.println("(" + result.get().status().getClass().getSimpleName() + ")");
+        JAgentStatus status = result.get().status();
+        switch (status.kind()) {
+            case COMPLETED -> System.out.println("(completed, " + result.get().messages().size() + " messages, "
+                + result.get().usage().inputTokens() + " + " + result.get().usage().outputTokens() + " tokens)");
+            case BLOCKED -> System.out.println("(blocked by " + status.guardrail().orElse("?") + ": "
+                + status.reason().orElse("") + ")");
+            case STEP_LIMIT_REACHED -> System.out.println("(reached the step limit)");
+            case SUSPENDED -> System.out.println("(waiting for " + status.pending().size() + " answers)");
+        }
 
-        LlmResult<AgentResult> answered = approveWhatItWaitsFor(agent, result);
+        LlmResult<JAgentResult> answered = approveWhatItWaitsFor(agent, result);
         // the conversation stays in the agent's runtime until forgotten
         agent.forget(answered.isSuccess() ? answered.get() : result.get());
         return answered.isSuccess();
     }
 
     /**
-     * A turn whose tools need approval, or ask a question, ends {@code Suspended}: {@link JAgent#pending} lists
-     * what it waits for, as Strings and a Java enum, and {@code resume} answers it and continues, blocking like
+     * A turn whose tools need approval, or ask a question, ends {@code SUSPENDED}: its status's
+     * {@code pending()} lists what it waits for, as Strings and a Java enum, and {@code resume} answers it and continues, blocking like
      * {@code run}. This sample's agent has no tools, so its turns wait for nothing and the loop does not run; an
      * agent built with {@code Agent.builder}, approval middleware and tools, wrapped with {@code Llm4s.wrapAgent},
      * stops here until each call is answered. Approving every call is for the sample: a real caller would show
      * each one to a person, and {@code Answer.reject(id, reason)} or {@code Answer.edit(id, argumentsJson)} it.
      * Questions are reported and left pending: the turn is resumed with the approvals alone, and returned
-     * {@code Suspended} once only questions remain.
+     * {@code SUSPENDED} once only questions remain.
      */
-    private static LlmResult<AgentResult> approveWhatItWaitsFor(JAgent agent, LlmResult<AgentResult> turn) {
+    private static LlmResult<JAgentResult> approveWhatItWaitsFor(JAgent agent, LlmResult<JAgentResult> turn) {
         while (turn.isSuccess()) {
             List<Answer> answers = new ArrayList<>();
-            for (PendingInterrupt pending : JAgent.pending(turn.get())) {
+            for (PendingInterrupt pending : turn.get().status().pending()) {
                 switch (pending.kind()) {
                     case APPROVAL -> {
                         System.out.println("Approving " + pending.toolName() + " " + pending.argumentsJson()

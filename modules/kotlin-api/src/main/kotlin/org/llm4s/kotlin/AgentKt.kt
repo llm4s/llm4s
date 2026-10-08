@@ -10,12 +10,12 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
-import org.llm4s.agent.AgentResult
 import org.llm4s.agent.graph.StreamEvent
 import org.llm4s.javaapi.AgentStream
 import org.llm4s.javaapi.Answer
 import org.llm4s.javaapi.AgentStreamListener
 import org.llm4s.javaapi.JAgent
+import org.llm4s.javaapi.JAgentResult
 import org.llm4s.javaapi.LlmException
 import org.llm4s.javaapi.LlmResult
 import org.llm4s.javaapi.PendingInterrupt
@@ -27,7 +27,7 @@ sealed interface AgentStreamItem {
     data class Event(val event: StreamEvent) : AgentStreamItem
 
     /** The turn's result: the last item. */
-    data class Done(val result: AgentResult) : AgentStreamItem
+    data class Done(val result: JAgentResult) : AgentStreamItem
 }
 
 /**
@@ -42,8 +42,11 @@ sealed interface AgentStreamItem {
  * stays busy (a new turn on it is refused) until the turn finishes. To stop a turn, run it with
  * [stream] and cancel the collection.
  *
- * A turn whose tools need approval, or ask a question, ends `Suspended`: [pending] lists what it waits
- * for, and [resume] answers some or all of it and continues. A turn that failed or was cancelled
+ * Every turn returns a [JAgentResult], read with Java types only: `answer()` is an `Optional<String>`,
+ * `messages()` a `List`, and `status().kind()` an [org.llm4s.javaapi.AgentStatusKind] to `when` over.
+ *
+ * A turn whose tools need approval, or ask a question, ends `SUSPENDED`: `result.status().pending()` - or
+ * [pending] - lists what it waits for, and [resume] answers some or all of it and continues. A turn that failed or was cancelled
  * continues with [recover]. Unlike [run], cancelling the caller of [resume] or [recover] cancels the
  * turn itself, leaving the thread for [recover].
  *
@@ -63,9 +66,9 @@ class AgentKt internal constructor(private val underlying: JAgent) {
 
     /**
      * Suspends until the agent completes the given [query], the first turn of a new conversation, and
-     * returns the resulting [AgentResult]. Throws [LLMException] on failure.
+     * returns the resulting [JAgentResult]. Throws [LLMException] on failure.
      */
-    suspend fun run(query: String): AgentResult = runInterruptible(Dispatchers.IO) {
+    suspend fun run(query: String): JAgentResult = runInterruptible(Dispatchers.IO) {
         underlying.run(query).unwrap("Agent run failed")
     }
 
@@ -73,13 +76,13 @@ class AgentKt internal constructor(private val underlying: JAgent) {
      * Suspends until the agent completes [query] as the next turn of [previous]'s conversation. Throws
      * [LLMException] on failure.
      */
-    suspend fun continueConversation(previous: AgentResult, query: String): AgentResult =
+    suspend fun continueConversation(previous: JAgentResult, query: String): JAgentResult =
         runInterruptible(Dispatchers.IO) {
             underlying.continueConversation(previous, query).unwrap("Agent run failed")
         }
 
     /** Removes [previous]'s conversation from the agent's runtime. Throws [LLMException] on failure. */
-    suspend fun forget(previous: AgentResult): Unit = runInterruptible(Dispatchers.IO) {
+    suspend fun forget(previous: JAgentResult): Unit = runInterruptible(Dispatchers.IO) {
         underlying.forget(previous).unwrap("Agent forget failed")
         Unit
     }
@@ -94,17 +97,17 @@ class AgentKt internal constructor(private val underlying: JAgent) {
      * Cancelling the caller cancels the turn and returns once it has ended, leaving the thread for
      * [recover]. The turn runs as [streamResume] does, its events discarded.
      */
-    suspend fun resume(threadId: String, answers: List<Answer>): AgentResult = resultOf(streamResume(threadId, answers))
+    suspend fun resume(threadId: String, answers: List<Answer>): JAgentResult = resultOf(streamResume(threadId, answers))
 
     /**
      * Continues [threadId]'s failed or cancelled turn, re-running only the work that did not finish, and
      * suspends until it ends, returning its result. A thread with nothing to recover, or a failed turn,
      * throws [LLMException]. Cancelling the caller cancels the turn, as for [resume].
      */
-    suspend fun recover(threadId: String): AgentResult = resultOf(streamRecover(threadId))
+    suspend fun recover(threadId: String): JAgentResult = resultOf(streamRecover(threadId))
 
     /** The result of [turn]'s collection, its last item: the flow ends with [AgentStreamItem.Done] or throws. */
-    private suspend fun resultOf(turn: Flow<AgentStreamItem>): AgentResult = (turn.last() as AgentStreamItem.Done).result
+    private suspend fun resultOf(turn: Flow<AgentStreamItem>): JAgentResult = (turn.last() as AgentStreamItem.Done).result
 
     /**
      * Runs [query] as one turn on [threadId] - a new conversation, or the next turn of one - as a cold
@@ -146,7 +149,7 @@ class AgentKt internal constructor(private val underlying: JAgent) {
                 items.trySendBlocking(AgentStreamItem.Event(event))
             }
 
-            override fun onComplete(result: AgentResult) {
+            override fun onComplete(result: JAgentResult) {
                 items.trySendBlocking(AgentStreamItem.Done(result))
                 items.close()
             }
@@ -174,11 +177,11 @@ class AgentKt internal constructor(private val underlying: JAgent) {
 
     companion object {
         /**
-         * What [result]'s turn waits for: for a `Suspended` turn, its pending approvals, then its
+         * What [result]'s turn waits for: for a `SUSPENDED` turn, its pending approvals, then its
          * questions, as [PendingInterrupt]s - `id()`, `kind()`, `toolName()`, `argumentsJson()`,
-         * `reason()` and `questionJson()`; an empty list for any other turn. Answer them with [Answer] and
-         * continue with [resume] or [streamResume].
+         * `reason()` and `questionJson()`; an empty list for any other turn. A shortcut for
+         * `result.status().pending()`. Answer them with [Answer] and continue with [resume] or [streamResume].
          */
-        fun pending(result: AgentResult): List<PendingInterrupt> = JAgent.pending(result)
+        fun pending(result: JAgentResult): List<PendingInterrupt> = JAgent.pending(result)
     }
 }

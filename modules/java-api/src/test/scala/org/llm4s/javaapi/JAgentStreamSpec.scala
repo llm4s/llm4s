@@ -1,6 +1,7 @@
 package org.llm4s.javaapi
 
-import org.llm4s.agent.AgentStatus
+import java.util.Optional
+import org.llm4s.agent.AgentResult
 import org.llm4s.agent.events.AgentEvents
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
 import org.llm4s.agent.graph.{ GraphError, GraphRuntime, InterruptId, RunEvent, StreamEvent, ThreadId }
@@ -16,6 +17,7 @@ import upickle.default.{ macroRW, ReadWriter }
 import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
 import scala.jdk.CollectionConverters.*
+import scala.jdk.OptionConverters.*
 
 import StreamFixtures.*
 
@@ -47,9 +49,9 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
 
   "JAgent.stream" should "deliver the run's events, then its result, on one thread that is not the caller's" in {
     val recorder = Recorder()
-    val stream   = jAgentOf(answering("hello"))().stream(ThreadId("j1"), "hi", recorder).get()
+    val stream   = jAgentOf(answering("hello"))().stream("j1", "hi", recorder).get()
     val result   = stream.await().get()
-    result.answer shouldBe Some("hello")
+    result.answer() shouldBe Optional.of("hello")
     recorder.completed.get shouldBe result
     recorder.failed.get shouldBe null
     recorder.terminals.get shouldBe 1
@@ -63,7 +65,7 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     val down     = NetworkError("down", None, "http://x")
     val client   = new Scripted(_ => Left(down), () => Left(down))
     val recorder = Recorder()
-    val stream   = jAgentOf(client)().stream(ThreadId("j2"), "hi", recorder).get()
+    val stream   = jAgentOf(client)().stream("j2", "hi", recorder).get()
     val outcome  = stream.await()
     outcome.isFailure shouldBe true
     causeOf(outcome.getError().error) shouldBe a[NetworkError]
@@ -82,7 +84,7 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     )
     def deltas(agent: JAgent, threadId: String): Vector[String] = {
       val recorder = Recorder()
-      agent.stream(ThreadId(threadId), "hi", recorder).get().await().get().answer shouldBe Some("hello")
+      agent.stream(threadId, "hi", recorder).get().await().get().answer() shouldBe Optional.of("hello")
       recorder.events.flatMap(AgentEvents.TextDelta.unapply).map(_.text)
     }
     val jClient = new JLlmClient(client)
@@ -94,13 +96,13 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     val down     = NetworkError("down", None, "http://x")
     val failing  = jAgentOf(new Scripted(_ => Left(down), () => Left(down)))()
     val listener = new AgentStreamListener { def onEvent(event: StreamEvent): Unit = () }
-    failing.stream(ThreadId("j15"), "hi", listener).get().await().isFailure shouldBe true
-    jAgentOf(answering("ok"))().stream(ThreadId("j16"), "hi", listener).get().await().isSuccess shouldBe true
+    failing.stream("j15", "hi", listener).get().await().isFailure shouldBe true
+    jAgentOf(answering("ok"))().stream("j16", "hi", listener).get().await().isSuccess shouldBe true
   }
 
   it should "refuse a start at once, calling no listener method" in {
     val recorder = Recorder()
-    val started  = jAgentOf(answering("x"))().stream(ThreadId("j3"), "  ", recorder)
+    val started  = jAgentOf(answering("x"))().stream("j3", "  ", recorder)
     started.isFailure shouldBe true
     started.getError().error shouldBe a[ValidationError]
     recorder.events shouldBe empty
@@ -109,25 +111,25 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
 
   it should "refuse null arguments" in {
     val agent = jAgentOf(answering("x"))()
-    agent.stream(null.asInstanceOf[ThreadId], "q", Recorder()).isFailure shouldBe true
-    agent.stream(ThreadId("j"), null, Recorder()).isFailure shouldBe true
-    agent.stream(ThreadId("j"), "q", null).isFailure shouldBe true
-    agent.streamResume(null.asInstanceOf[ThreadId], java.util.List.of(), Recorder()).isFailure shouldBe true
-    agent.streamResume(ThreadId("j"), null, Recorder()).isFailure shouldBe true
-    agent.streamResume(ThreadId("j"), java.util.List.of(), null).isFailure shouldBe true
-    agent.streamRecover(null.asInstanceOf[ThreadId], Recorder()).isFailure shouldBe true
-    agent.streamRecover(ThreadId("j"), null).isFailure shouldBe true
+    agent.stream(null, "q", Recorder()).isFailure shouldBe true
+    agent.stream("j", null, Recorder()).isFailure shouldBe true
+    agent.stream("j", "q", null).isFailure shouldBe true
+    agent.streamResume(null, java.util.List.of(), Recorder()).isFailure shouldBe true
+    agent.streamResume("j", null, Recorder()).isFailure shouldBe true
+    agent.streamResume("j", java.util.List.of(), null).isFailure shouldBe true
+    agent.streamRecover(null, Recorder()).isFailure shouldBe true
+    agent.streamRecover("j", null).isFailure shouldBe true
   }
 
   it should "fail every stream of an agent that did not build" in {
     val broken = new JAgent(Left(ValidationError("agent", "broken")))
-    broken.stream(ThreadId("j"), "q", Recorder()).getError().getMessage should include("broken")
+    broken.stream("j", "q", Recorder()).getError().getMessage should include("broken")
   }
 
   it should "end, rather than hang, when the run ends without a terminal event" in {
     val agent    = jAgentOf(answering("hello"))(_.withRuntime(GraphRuntime(NoTerminal())))
     val recorder = Recorder()
-    val outcome  = agent.stream(ThreadId("j4"), "hi", recorder).get().await()
+    val outcome  = agent.stream("j4", "hi", recorder).get().await()
     outcome.getError().getMessage should include("store down")
     recorder.failed.get.getMessage should include("store down")
     recorder.terminals.get shouldBe 1
@@ -148,8 +150,8 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     // the listener takes nothing more until the run has completed
     val recorder =
       Recorder(_ => if (first.getAndIncrement() == 0) store.completed.await(DeadlineSeconds, TimeUnit.SECONDS): Unit)
-    val result = agent.stream(ThreadId("j7"), "hi", recorder).get().await().get()
-    result.answer shouldBe Some("done")
+    val result = agent.stream("j7", "hi", recorder).get().await().get()
+    result.answer() shouldBe Optional.of("done")
     recorder.gaps should be > 0
     recorder.durable.last shouldBe RunEvent.RunCompleted
     recorder.completed.get shouldBe result
@@ -172,7 +174,7 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     )
     val runtime  = GraphRuntime.inMemory()
     val agent    = jAgentOf(client)(_.withRuntime(runtime).withStreaming())
-    val threadId = ThreadId("j8")
+    val threadId = "j8"
     val recorder = Recorder()
     val stream   = agent.stream(threadId, "hi", recorder).get()
     parked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
@@ -182,8 +184,8 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     stream.await().isFailure shouldBe true
     recorder.terminals.get shouldBe 1
     recorder.failed.get should not be null
-    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
-    agent.streamRecover(threadId, Recorder()).get().await().get().answer shouldBe Some("recovered")
+    eventually(runtime.liveSubscriptions(ThreadId(threadId)) shouldBe 0)
+    agent.streamRecover(threadId, Recorder()).get().await().get().answer() shouldBe Optional.of("recovered")
   }
 
   it should "deliver no event once cancelled, even to a listener busy with an earlier one" in {
@@ -204,7 +206,7 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     )
     val runtime   = GraphRuntime.inMemory()
     val agent     = jAgentOf(client)(_.withRuntime(runtime).withStreaming())
-    val threadId  = ThreadId("j5")
+    val threadId  = "j5"
     val holding   = new CountDownLatch(1)
     val cancelled = new CountDownLatch(1)
     val recorder = Recorder { _ =>
@@ -222,8 +224,8 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     stream.await().isFailure shouldBe true
     recorder.events should have size 1
     recorder.terminals.get shouldBe 1
-    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
-    agent.streamRecover(threadId, Recorder()).get().await().get().answer shouldBe Some("recovered")
+    eventually(runtime.liveSubscriptions(ThreadId(threadId)) shouldBe 0)
+    agent.streamRecover(threadId, Recorder()).get().await().get().answer() shouldBe Optional.of("recovered")
   }
 
   it should "cancel the run when the listener throws, reporting what it threw" in {
@@ -240,7 +242,7 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     )
     val runtime  = GraphRuntime.inMemory()
     val agent    = jAgentOf(client)(_.withRuntime(runtime).withStreaming())
-    val threadId = ThreadId("j9")
+    val threadId = "j9"
     // throws on the text delta, once the model call is under way
     val recorder =
       Recorder(e => if (AgentEvents.TextDelta.unapply(e).isDefined) throw new IllegalStateException("listener broke"))
@@ -248,8 +250,8 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     outcome.getError().getMessage should include("listener broke")
     recorder.failed.get.getMessage should include("listener broke")
     unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
-    agent.streamRecover(threadId, Recorder()).get().await().get().answer shouldBe Some("recovered")
+    eventually(runtime.liveSubscriptions(ThreadId(threadId)) shouldBe 0)
+    agent.streamRecover(threadId, Recorder()).get().await().get().answer() shouldBe Optional.of("recovered")
   }
 
   it should "cancel the run when the listener interrupts its own thread" in {
@@ -266,22 +268,22 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     )
     val runtime  = GraphRuntime.inMemory()
     val agent    = jAgentOf(client)(_.withRuntime(runtime).withStreaming())
-    val threadId = ThreadId("j14")
+    val threadId = "j14"
     // interrupts itself on the text delta, once the model call is under way
     val recorder = Recorder(e => if (AgentEvents.TextDelta.unapply(e).isDefined) Thread.currentThread().interrupt())
     val outcome  = agent.stream(threadId, "hi", recorder).get().await()
     outcome.getError().error shouldBe a[CancelledError]
     recorder.failed.get.error shouldBe a[CancelledError]
     unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
-    agent.streamRecover(threadId, Recorder()).get().await().get().answer shouldBe Some("recovered")
+    eventually(runtime.liveSubscriptions(ThreadId(threadId)) shouldBe 0)
+    agent.streamRecover(threadId, Recorder()).get().await().get().answer() shouldBe Optional.of("recovered")
   }
 
   it should "accept a cancel from the listener itself: one onError, await returns, recover works" in {
     val model    = parksOnce()
     val runtime  = GraphRuntime.inMemory()
     val agent    = jAgentOf(model.client)(_.withRuntime(runtime).withStreaming())
-    val threadId = ThreadId("j19")
+    val threadId = "j19"
     val handle   = new AtomicReference[AgentStream](null)
     val ready    = new CountDownLatch(1)
     val recorder = Recorder { e =>
@@ -297,29 +299,29 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     recorder.terminals.get shouldBe 1
     recorder.failed.get should not be null
     model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
-    agent.streamRecover(threadId, Recorder()).get().await().get().answer shouldBe Some("recovered")
+    eventually(runtime.liveSubscriptions(ThreadId(threadId)) shouldBe 0)
+    agent.streamRecover(threadId, Recorder()).get().await().get().answer() shouldBe Optional.of("recovered")
   }
 
   it should "cancel the run when the listener throws a fatal error, failing await" in {
     val model    = parksOnce()
     val runtime  = GraphRuntime.inMemory()
     val agent    = jAgentOf(model.client)(_.withRuntime(runtime).withStreaming())
-    val threadId = ThreadId("j20")
+    val threadId = "j20"
     val recorder = Recorder(e => if (AgentEvents.TextDelta.unapply(e).isDefined) throw new LinkageError("fatal"))
     val outcome  = agent.stream(threadId, "hi", recorder).get().await()
     outcome.getError().getMessage should include("failed fatally")
     recorder.terminals.get shouldBe 0
     model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
-    agent.streamRecover(threadId, Recorder()).get().await().get().answer shouldBe Some("recovered")
+    eventually(runtime.liveSubscriptions(ThreadId(threadId)) shouldBe 0)
+    agent.streamRecover(threadId, Recorder()).get().await().get().answer() shouldBe Optional.of("recovered")
   }
 
   it should "cancel the run at once when the listener interrupts itself with more events already queued" in {
     val model    = parksOnce(deltas = 50)
     val runtime  = GraphRuntime.inMemory()
     val agent    = jAgentOf(model.client)(_.withRuntime(runtime).withStreaming())
-    val threadId = ThreadId("j23")
+    val threadId = "j23"
     // the first event is held until the model has sent its deltas, then the listener interrupts itself
     val recorder = Recorder { _ =>
       model.parked.await(DeadlineSeconds, TimeUnit.SECONDS)
@@ -331,15 +333,15 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     recorder.terminals.get shouldBe 1
     recorder.failed.get.error shouldBe a[CancelledError]
     model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
-    agent.streamRecover(threadId, Recorder()).get().await().get().answer shouldBe Some("recovered")
+    eventually(runtime.liveSubscriptions(ThreadId(threadId)) shouldBe 0)
+    agent.streamRecover(threadId, Recorder()).get().await().get().answer() shouldBe Optional.of("recovered")
   }
 
   it should "call onError with the flag clear when the listener interrupted itself and then threw" in {
     val model    = parksOnce()
     val runtime  = GraphRuntime.inMemory()
     val agent    = jAgentOf(model.client)(_.withRuntime(runtime).withStreaming())
-    val threadId = ThreadId("j27")
+    val threadId = "j27"
     val errors   = new AtomicInteger(0)
     val flagSeen = new AtomicReference[java.lang.Boolean](null)
     val listener = new AgentStreamListener {
@@ -358,39 +360,39 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     errors.get shouldBe 1
     flagSeen.get shouldBe java.lang.Boolean.FALSE
     model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
+    eventually(runtime.liveSubscriptions(ThreadId(threadId)) shouldBe 0)
   }
 
   it should "cancel the run when the listener throws InterruptedException" in {
     val model    = parksOnce()
     val runtime  = GraphRuntime.inMemory()
     val agent    = jAgentOf(model.client)(_.withRuntime(runtime).withStreaming())
-    val threadId = ThreadId("j24")
+    val threadId = "j24"
     val recorder =
       Recorder(e => if (AgentEvents.TextDelta.unapply(e).isDefined) throw new InterruptedException("listener"))
     agent.stream(threadId, "hi", recorder).get().await().getError().error shouldBe a[CancelledError]
     model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
-    eventually(runtime.liveSubscriptions(threadId) shouldBe 0)
+    eventually(runtime.liveSubscriptions(ThreadId(threadId)) shouldBe 0)
   }
 
   "AgentStream.cancel" should "wait for the run's end on an interrupted thread, and keep the flag" in {
     val model    = parksOnce()
     val agent    = jAgentOf(model.client)(_.withStreaming())
-    val threadId = ThreadId("j25")
+    val threadId = "j25"
     val stream   = agent.stream(threadId, "hi", Recorder()).get()
     model.parked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
     Thread.currentThread().interrupt()
     stream.cancel()
     Thread.interrupted() shouldBe true // still set, and cleared here
     // the run has ended: its thread is free at once
-    agent.streamRecover(threadId, Recorder()).get().await().get().answer shouldBe Some("recovered")
+    agent.streamRecover(threadId, Recorder()).get().await().get().answer() shouldBe Optional.of("recovered")
   }
 
   it should "keep waiting for the run's end when interrupted while it waits" in {
     val linger   = new CountDownLatch(1)
     val model    = parksOnce(linger = linger)
     val agent    = jAgentOf(model.client)(_.withStreaming())
-    val threadId = ThreadId("j26")
+    val threadId = "j26"
     val stream   = agent.stream(threadId, "hi", Recorder()).get()
     model.parked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
     val flagKept  = new AtomicReference[java.lang.Boolean](null)
@@ -398,7 +400,7 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     val canceller = new Thread(() => {
       stream.cancel()
       flagKept.set(Thread.interrupted())
-      recovered.set(agent.streamRecover(threadId, Recorder()).get().await().toOptional.map(_.answer).orElse(None))
+      recovered.set(agent.streamRecover(threadId, Recorder()).get().await().toOptional.flatMap(_.answer()).toScala)
     })
     canceller.start()
     // the model has been interrupted, and lingers; the canceller waits for the run's end
@@ -413,24 +415,24 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
 
   it should "survive a terminal callback that throws" in {
     val listener = new AgentStreamListener {
-      def onEvent(event: StreamEvent): Unit                        = ()
-      override def onComplete(result: org.llm4s.agent.AgentResult) = throw new IllegalStateException("late")
+      def onEvent(event: StreamEvent): Unit         = ()
+      override def onComplete(result: JAgentResult) = throw new IllegalStateException("late")
     }
-    jAgentOf(answering("ok"))().stream(ThreadId("j10"), "hi", listener).get().await().get().answer shouldBe Some("ok")
+    jAgentOf(answering("ok"))().stream("j10", "hi", listener).get().await().get().answer() shouldBe Optional.of("ok")
   }
 
   it should "refuse an await from the listener instead of waiting on itself" in {
-    val inner  = new AtomicReference[LlmResult[org.llm4s.agent.AgentResult]](null)
+    val inner  = new AtomicReference[LlmResult[JAgentResult]](null)
     val handle = new AtomicReference[AgentStream](null)
     val ready  = new CountDownLatch(1)
     val recorder = Recorder { _ =>
       ready.await(DeadlineSeconds, TimeUnit.SECONDS)
       if (inner.get == null) inner.set(handle.get.await())
     }
-    val stream = jAgentOf(answering("ok"))().stream(ThreadId("j11"), "hi", recorder).get()
+    val stream = jAgentOf(answering("ok"))().stream("j11", "hi", recorder).get()
     handle.set(stream)
     ready.countDown()
-    stream.await().get().answer shouldBe Some("ok")
+    stream.await().get().answer() shouldBe Optional.of("ok")
     inner.get.getError().error shouldBe a[ValidationError]
   }
 
@@ -443,17 +445,17 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
         Right(completion("late"))
       }
     )
-    val stream = jAgentOf(client)().stream(ThreadId("j12"), "hi", Recorder()).get()
+    val stream = jAgentOf(client)().stream("j12", "hi", Recorder()).get()
     Thread.currentThread().interrupt()
     val interrupted = stream.await()
     Thread.interrupted() shouldBe true // the flag is still set, and cleared here
     interrupted.getError().error shouldBe a[CancelledError]
     release.countDown()
-    stream.await().get().answer shouldBe Some("late")
+    stream.await().get().answer() shouldBe Optional.of("late")
   }
 
-  /** An agent whose first turn on `threadId` suspends on an approval: the agent, the turn's result and the approval's id. */
-  private def suspended(threadId: ThreadId): (JAgent, org.llm4s.agent.AgentResult, InterruptId) = {
+  /** An agent whose first turn on `threadId` suspends on an approval: the agent and the approval's id. */
+  private def suspended(threadId: String): (JAgent, InterruptId) = {
     val calls = new AtomicInteger(0)
     val client = new Scripted(
       _ => if (calls.getAndIncrement() == 0) Right(calling) else Right(completion("fine")),
@@ -463,34 +465,35 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
       _.withTools(new ToolRegistry(Seq(echoTool))).withMiddleware(ApprovalMiddleware.unlessReadOnly)
     )
     val first = agent.stream(threadId, "go", Recorder()).get().await().get()
-    val id = first.status match {
-      case AgentStatus.Suspended(approvals, _) => approvals.head._1
-      case other                               => fail(s"expected a suspension, got $other")
-    }
-    (agent, first, id)
+    first.status.kind shouldBe AgentStatusKind.SUSPENDED
+    (agent, InterruptId(first.status.pending.get(0).id))
   }
 
+  /** A Scala `AgentResult`, whose `approve` / `reject` / `edit` are how the agent itself encodes an answer. */
+  private lazy val scalaResult: AgentResult =
+    agentOf(answering("x"))().run("x").fold(e => fail(e.message), identity)
+
   "JAgent.streamResume" should "stream the resumed run to its result" in {
-    val threadId           = ThreadId("j13")
-    val (agent, first, id) = suspended(threadId)
-    Answer.approve(id.value).underlying shouldBe Right(first.approve(id))
+    val threadId    = "j13"
+    val (agent, id) = suspended(threadId)
+    Answer.approve(id.value).underlying shouldBe Right(scalaResult.approve(id))
     val recorder = Recorder()
     val resumed =
       agent.streamResume(threadId, java.util.List.of(Answer.approve(id.value)), recorder).get().await().get()
-    resumed.answer shouldBe Some("fine")
+    resumed.answer() shouldBe Optional.of("fine")
     recorder.durable.head should matchPattern { case RunEvent.RunResumed(_, _, _) => }
     recorder.durable.last shouldBe RunEvent.RunCompleted
   }
 
   it should "take a rejection and an edit, encoded as the agent's own answers are" in {
-    val threadId           = ThreadId("j17")
-    val (agent, first, id) = suspended(threadId)
-    Answer.reject(id.value, "no").underlying shouldBe Right(first.reject(id, "no"))
+    val threadId    = "j17"
+    val (agent, id) = suspended(threadId)
+    Answer.reject(id.value, "no").underlying shouldBe Right(scalaResult.reject(id, "no"))
     Answer.edit(id.value, """{"message":"edited"}""").underlying shouldBe
-      Right(first.edit(id, ujson.Obj("message" -> "edited")))
+      Right(scalaResult.edit(id, ujson.Obj("message" -> "edited")))
     // the last answer to an id counts
     val answers = java.util.List.of(Answer.approve(id.value), Answer.reject(id.value, "no"))
-    agent.streamResume(threadId, answers, Recorder()).get().await().get().answer shouldBe Some("fine")
+    agent.streamResume(threadId, answers, Recorder()).get().await().get().answer() shouldBe Optional.of("fine")
   }
 
   it should "encode a reply as its JSON" in {
@@ -503,7 +506,7 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     val agent    = jAgentOf(answering("x"))()
     val recorder = Recorder()
     def refused(answer: Answer): LlmException =
-      agent.streamResume(ThreadId("j18"), java.util.Arrays.asList(answer), recorder).getError()
+      agent.streamResume("j18", java.util.Arrays.asList(answer), recorder).getError()
     refused(null).error shouldBe a[ValidationError]
     refused(Answer.approve(null)).error shouldBe a[ValidationError]
     refused(Answer.reject("i", null)).error shouldBe a[ValidationError]
@@ -520,10 +523,10 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
       () => if (calls.getAndIncrement() == 0) Left(down) else Right(completion("back"))
     )
     val agent    = jAgentOf(client)()
-    val threadId = ThreadId("j6")
+    val threadId = "j6"
     agent.stream(threadId, "hi", Recorder()).get().await().isFailure shouldBe true
     val recorder = Recorder()
-    agent.streamRecover(threadId, recorder).get().await().get().answer shouldBe Some("back")
+    agent.streamRecover(threadId, recorder).get().await().get().answer() shouldBe Optional.of("back")
     recorder.durable.last shouldBe RunEvent.RunCompleted
   }
 }

@@ -5,7 +5,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import org.llm4s.agent.Agent
-import org.llm4s.agent.AgentResult
+import org.llm4s.javaapi.JAgentResult
 import org.llm4s.agent.graph.StateUpdate
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
@@ -17,7 +17,9 @@ import org.llm4s.agent.graph.tool.ToolSet
 import org.llm4s.error.LLMError
 import org.llm4s.error.NetworkError
 import org.llm4s.javaapi.Answer
+import org.llm4s.javaapi.AgentStatusKind
 import org.llm4s.javaapi.InterruptKind
+import org.llm4s.javaapi.JMessageRole
 import org.llm4s.javaapi.PendingInterrupt
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.AssistantMessage
@@ -27,7 +29,6 @@ import org.llm4s.llmconnect.model.CompletionOptions
 import org.llm4s.llmconnect.model.Conversation
 import org.llm4s.llmconnect.model.StreamedChunk
 import org.llm4s.llmconnect.model.ToolCall
-import org.llm4s.llmconnect.model.ToolMessage
 import org.llm4s.toolapi.Schema
 import scala.Function1
 import scala.Option
@@ -45,6 +46,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import java.util.Optional
 
 /**
  * [AgentKt.pending], [AgentKt.resume] and [AgentKt.recover] over the real agent runtime, behind the
@@ -142,9 +144,36 @@ class AgentKtPendingTest {
         assertTrue(ran.isEmpty())
 
         val done = agent.resume(first.threadId(), listOf(Answer.approve(p.id())))
-        assertEquals(Option.apply("shipped"), done.answer())
+        assertEquals(Optional.of("shipped"), done.answer())
         assertEquals(listOf("""{"text":"prod"}"""), ran.toList())
         assertTrue(AgentKt.pending(done).isEmpty())
+    }
+
+    @Test
+    fun `a result reads with Java types only - when over the status kind and each message's role`() = runBlocking {
+        val agent = agentOf({ completion("", listOf(call("c1", "deploy", "prod"))) }, { completion("shipped") })
+        val first = agent.run("deploy")
+        fun describe(result: JAgentResult): String = when (result.status().kind()) {
+            AgentStatusKind.COMPLETED -> "completed:" + result.answer().get()
+            AgentStatusKind.BLOCKED -> "blocked:" + result.status().guardrail().get()
+            AgentStatusKind.STEP_LIMIT_REACHED -> "step-limit"
+            AgentStatusKind.SUSPENDED -> "suspended:" + result.status().pending().joinToString { it.toolName() }
+        }
+        assertEquals("suspended:deploy", describe(first))
+        assertEquals(AgentKt.pending(first), first.status().pending())
+
+        val done = agent.resume(first.threadId(), listOf(Answer.approve(first.status().pending().single().id())))
+        assertEquals("completed:shipped", describe(done))
+        val history = done.messages().map { m ->
+            when (m.role()) {
+                JMessageRole.SYSTEM, JMessageRole.USER -> m.content()
+                JMessageRole.ASSISTANT -> m.content() + m.toolCalls().joinToString { it.name() + it.argumentsJson() }
+                JMessageRole.TOOL -> m.toolCallId().get() + "=" + m.content()
+            }
+        }
+        assertEquals(listOf("deploy", """deploy{"text":"prod"}""", "c1=deployed", "shipped"), history)
+        assertEquals(2L, done.usage().requestCount())
+        assertTrue(done.usage().byModel().keys.all { it is String })
     }
 
     @Test
@@ -157,8 +186,8 @@ class AgentKtPendingTest {
         assertTrue(p.reason().isEmpty)
 
         val done = agent.resume(first.threadId(), listOf(Answer.reply(p.id(), """{"ok":true}""")))
-        assertEquals(Option.apply("confirmed"), done.answer())
-        val results = CollectionConverters.asJava(done.messages()).filterIsInstance<ToolMessage>().map { it.content() }
+        assertEquals(Optional.of("confirmed"), done.answer())
+        val results = done.messages().filter { it.role() == JMessageRole.TOOL }.map { it.content() }
         assertTrue(results.any { it.contains("""confirmed {"ok":true}""") }, "the tool's result: $results")
     }
 
@@ -169,12 +198,12 @@ class AgentKtPendingTest {
             { completion("", listOf(call("c1", "confirm", "go"), call("c2", "deploy", "prod"))) },
             { completion("both") },
         )
-        var turn: AgentResult = agent.run("both")
+        var turn: JAgentResult = agent.run("both")
         val pending = AgentKt.pending(turn)
         assertEquals(listOf(InterruptKind.APPROVAL, InterruptKind.QUESTION), pending.map { it.kind() })
 
         turn = agent.resume(turn.threadId(), listOf(Answer.approve(pending.first().id())))
-        assertEquals(Option.empty(), turn.answer())
+        assertEquals(Optional.empty(), turn.answer())
         assertEquals(listOf(pending.last()), AgentKt.pending(turn))
 
         while (AgentKt.pending(turn).isNotEmpty()) {
@@ -186,7 +215,7 @@ class AgentKtPendingTest {
             }
             turn = agent.resume(turn.threadId(), answers)
         }
-        assertEquals(Option.apply("both"), turn.answer())
+        assertEquals(Optional.of("both"), turn.answer())
         assertEquals(listOf("""{"text":"prod"}"""), ran.toList())
     }
 
@@ -198,7 +227,7 @@ class AgentKtPendingTest {
         assertFailsWith<LLMException> { agent.resume("no-such-thread", listOf(Answer.approve("i"))) }
         assertFailsWith<LLMException> { agent.resume(first.threadId(), listOf(Answer.edit(AgentKt.pending(first).single().id(), "{bad"))) }
         // none of them resumed anything
-        assertEquals(Option.apply("ok"), agent.resume(first.threadId(), listOf(Answer.approve(AgentKt.pending(first).single().id()))).answer())
+        assertEquals(Optional.of("ok"), agent.resume(first.threadId(), listOf(Answer.approve(AgentKt.pending(first).single().id()))).answer())
         assertFailsWith<LLMException> { agent.resume(first.threadId(), listOf(Answer.approve(AgentKt.pending(first).single().id()))) }
     }
 
@@ -213,7 +242,7 @@ class AgentKtPendingTest {
         )
         val first = agent.run("deploy")
         assertFailsWith<LLMException> { agent.resume(first.threadId(), listOf(Answer.approve(AgentKt.pending(first).single().id()))) }
-        assertEquals(Option.apply("back"), agent.recover(first.threadId()).answer())
+        assertEquals(Optional.of("back"), agent.recover(first.threadId()).answer())
         assertEquals(listOf("""{"text":"prod"}"""), ran.toList()) // the approved call is not run again
         assertFailsWith<LLMException> { agent.recover(first.threadId()) }
     }
@@ -239,7 +268,7 @@ class AgentKtPendingTest {
         resuming.cancelAndJoin()
         assertTrue(resuming.isCancelled)
         // the turn has ended (cancelled): the thread is free, and recover finishes it
-        assertEquals(Option.apply("recovered"), agent.recover(first.threadId()).answer())
+        assertEquals(Optional.of("recovered"), agent.recover(first.threadId()).answer())
     }
 
     @Test

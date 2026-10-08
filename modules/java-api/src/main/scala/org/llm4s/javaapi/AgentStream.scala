@@ -1,6 +1,6 @@
 package org.llm4s.javaapi
 
-import org.llm4s.agent.{ AgentEventBuffer, AgentResult, AgentRun }
+import org.llm4s.agent.{ AgentEventBuffer, AgentRun }
 import org.llm4s.core.safety.Safety
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.Result
@@ -17,7 +17,7 @@ import scala.util.Using
  *
  * {{{
  * AgentStream stream = agent.stream(threadId, "Explain monads", listener).get();
- * LlmResult<AgentResult> result = stream.await();   // or stream.cancel()
+ * LlmResult<JAgentResult> result = stream.await();   // or stream.cancel()
  * }}}
  */
 final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listener: AgentStreamListener) {
@@ -25,7 +25,7 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
   private val cancelled = new AtomicBoolean(false)
   private val delivered = new CountDownLatch(1)
   // set once the listener's events end; empty if the listener threw a fatal error
-  private val outcome = new AtomicReference[Option[Result[AgentResult]]](None)
+  private val outcome = new AtomicReference[Option[Result[JAgentResult]]](None)
   private val deliverer: Thread =
     Thread.ofVirtual().name(s"llm4s-java-stream-${run.runId.value}").unstarted(() => deliver())
 
@@ -62,7 +62,7 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
    * and the turn carries on: only [[cancel]] stops it. A call from the listener itself, which would
    * wait on itself, returns a failed result at once.
    */
-  def await(): LlmResult[AgentResult] =
+  def await(): LlmResult[JAgentResult] =
     if (Thread.currentThread() eq deliverer)
       LlmResult.failure(ValidationError("await", "called from the stream's own listener, which it would wait on"))
     else
@@ -102,7 +102,7 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
    * outcome. A consumer that stops (a disconnected subscription, or a listener that throws or
    * interrupts its own thread) cancels the turn and fails with why it stopped.
    */
-  @tailrec private def events(): Result[AgentResult] = {
+  @tailrec private def events(): Result[JAgentResult] = {
     val step = for {
       taken <- guarded(buffer.take()).flatten
       more <- taken.filterNot(_ => cancelled.get) match {
@@ -112,7 +112,7 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
     } yield more
     step match {
       case Right(true)  => events()
-      case Right(false) => run.await()
+      case Right(false) => run.await().map(JAgentResult.of)
       case Left(error) =>
         cancel()
         Left(error)

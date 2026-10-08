@@ -4,7 +4,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
-import org.llm4s.agent.AgentResult
+import org.llm4s.javaapi.JAgentResult
 import org.llm4s.javaapi.JAgent
 import org.llm4s.javaapi.LlmException
 import org.llm4s.javaapi.LlmResult
@@ -18,9 +18,9 @@ class AgentKtTest {
     private val agent = AgentKt(mockJAgent)
 
     @Test
-    fun `run returns AgentResult on success`() = runTest {
-        val state = mockk<AgentResult>()
-        val result = mockk<LlmResult<AgentResult>>()
+    fun `run returns JAgentResult on success`() = runTest {
+        val state = mockk<JAgentResult>()
+        val result = mockk<LlmResult<JAgentResult>>()
         every { result.isSuccess } returns true
         every { result.get() } returns state
         every { mockJAgent.run("query") } returns result
@@ -30,7 +30,7 @@ class AgentKtTest {
 
     @Test
     fun `run throws LLMException on failure`() = runTest {
-        val result = mockk<LlmResult<AgentResult>>()
+        val result = mockk<LlmResult<JAgentResult>>()
         val err = mockk<LlmException>(relaxed = true)
         every { result.isSuccess } returns false
         every { result.getError() } returns err
@@ -41,10 +41,10 @@ class AgentKtTest {
     }
 
     @Test
-    fun `continueConversation returns the next turn's AgentResult on success`() = runTest {
-        val previous = mockk<AgentResult>()
-        val next = mockk<AgentResult>()
-        val result = mockk<LlmResult<AgentResult>>()
+    fun `continueConversation returns the next turn's JAgentResult on success`() = runTest {
+        val previous = mockk<JAgentResult>()
+        val next = mockk<JAgentResult>()
+        val result = mockk<LlmResult<JAgentResult>>()
         every { result.isSuccess } returns true
         every { result.get() } returns next
         every { mockJAgent.continueConversation(previous, "more") } returns result
@@ -54,8 +54,8 @@ class AgentKtTest {
 
     @Test
     fun `continueConversation throws LLMException on failure`() = runTest {
-        val previous = mockk<AgentResult>()
-        val result = mockk<LlmResult<AgentResult>>()
+        val previous = mockk<JAgentResult>()
+        val result = mockk<LlmResult<JAgentResult>>()
         val err = mockk<LlmException>(relaxed = true)
         every { result.isSuccess } returns false
         every { result.getError() } returns err
@@ -67,7 +67,7 @@ class AgentKtTest {
 
     @Test
     fun `forget removes the conversation`() = runTest {
-        val previous = mockk<AgentResult>()
+        val previous = mockk<JAgentResult>()
         val result = mockk<LlmResult<Void>>()
         every { result.isSuccess } returns true
         every { result.get() } returns null
@@ -79,7 +79,7 @@ class AgentKtTest {
 
     @Test
     fun `forget throws LLMException on failure`() = runTest {
-        val previous = mockk<AgentResult>()
+        val previous = mockk<JAgentResult>()
         val result = mockk<LlmResult<Void>>()
         val err = mockk<LlmException>(relaxed = true)
         every { result.isSuccess } returns false

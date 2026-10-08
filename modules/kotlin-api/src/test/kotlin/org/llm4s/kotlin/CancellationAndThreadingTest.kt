@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import org.llm4s.agent.AgentResult
+import org.llm4s.javaapi.JAgentResult
 import org.llm4s.error.CancelledError
 import org.llm4s.error.ValidationError
 import org.llm4s.javaapi.JAgent
@@ -87,7 +87,7 @@ class CancellationAndThreadingTest {
         val release = CountDownLatch(1)
         every { mockJAgent.run("q") } answers {
             blockUntilInterrupted(started, interrupted, release)
-            LlmResult.success(mockk<AgentResult>())
+            LlmResult.success(mockk<JAgentResult>())
         }
 
         val job = launch(Dispatchers.Default) { agent.run("q") }
@@ -228,7 +228,7 @@ class CancellationAndThreadingTest {
     @Test
     fun `agent failures keep the message and the original error too`() = runBlocking {
         val scalaError = ValidationError.apply("query", "empty")
-        every { mockJAgent.run("q") } returns LlmResult.failure<AgentResult>(scalaError)
+        every { mockJAgent.run("q") } returns LlmResult.failure<JAgentResult>(scalaError)
 
         val ex = assertFailsWith<LLMException> { agent.run("q") }
         assertEquals(scalaError.message(), ex.message)
