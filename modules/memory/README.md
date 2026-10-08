@@ -55,7 +55,9 @@ environment. Stores and managers are built in code, at the application edge:
   (cleanup on, threshold at 90% of the cap).
 - `MemoryManagerConfig(autoRecordMessages = true, autoExtractEntities = false, defaultImportance = 0.5,
   contextTokenBudget = 2000, consolidationEnabled = false, consolidationConfig)` for the manager.
-  Only `defaultImportance` is read by the managers today; `autoRecordMessages`, `autoExtractEntities`,
+  The managers read `defaultImportance`; `LLMMemoryManager.consolidateMemories` also reads
+  `consolidationConfig.strictMode` and `consolidationConfig.maxMemoriesPerGroup`.
+  `autoRecordMessages`, `autoExtractEntities`,
   `contextTokenBudget` and `consolidationEnabled` are declared but have no effect yet
   ([#1579](https://github.com/llm4s/llm4s/issues/1579)).
 - An embedding provider for the semantic stores. `LLMEmbeddingService(client, modelConfig)` wraps any

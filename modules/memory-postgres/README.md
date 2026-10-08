@@ -86,7 +86,10 @@ def open(embeddings: EmbeddingService) = {
   } yield (store, manager)
 }
 
-// when the application shuts down: open(embeddings).foreach { case (store, _) => store.close() }
+// Call open once and retain its result during the application's lifetime.
+val opened = open(embeddings)
+// When the application shuts down, close that original store:
+// opened.foreach { case (store, _) => store.close() }
 ```
 
 This needs a running server, so the example is compile-checked but was not run. `store.close()` shuts
