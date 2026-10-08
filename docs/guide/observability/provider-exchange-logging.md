@@ -213,7 +213,7 @@ final class ErrorsOnlySink(delegate: ProviderExchangeSink) extends ProviderExcha
 ## Using it safely
 
 - **Keep it off in production** unless you are chasing a specific problem, and turn it off again after.
-  For production monitoring use [tracing and metrics](index.md), which record what an agent did and what
+  For production monitoring use [tracing and metrics](index), which record what an agent did and what
   it cost rather than the provider's wire format.
 - **Protect the directory.** The sink creates the file with the process's default permissions; restrict
   access to the directory yourself, and delete old files, because nothing rotates or expires them.
@@ -237,7 +237,7 @@ final class ErrorsOnlySink(delegate: ProviderExchangeSink) extends ProviderExcha
 
 ## Related
 
-- [Monitoring](index.md): tracing, logging and health checks for production
-- [Writing a Provider](../writing-a-provider.md): how a provider records its exchanges with
+- [Monitoring](index): tracing, logging and health checks for production
+- [Writing a Provider](../writing-a-provider): how a provider records its exchanges with
   `ProviderExchangeRecorder`
-- [Configuration](../../getting-started/configuration.md): the full configuration reference
+- [Configuration](../../getting-started/configuration): the full configuration reference

@@ -76,7 +76,7 @@ At `DEBUG` level (not recommended for production):
 ### Capturing Provider Requests and Responses
 
 To see the exact request body a client sent and the exact body that came back, opt in to
-[Provider Exchange Logging](provider-exchange-logging.md): each completed call is handed to a sink, and a
+[Provider Exchange Logging](provider-exchange-logging): each completed call is handed to a sink, and a
 ready-made sink appends JSON Lines to a file. It is off by default, and what it writes contains your
 prompts and the model's answers, so read its privacy notes before enabling it.
 
@@ -695,7 +695,7 @@ These are tracked in the [Production Readiness Roadmap](../../reference/roadmap.
 
 ## Related Documentation
 
-- [Provider Exchange Logging](provider-exchange-logging.md) - Capture raw provider requests and responses for debugging
+- [Provider Exchange Logging](provider-exchange-logging) - Capture raw provider requests and responses for debugging
 - [In-Process Tracing Use Cases](enhanced-tracing-use-cases.md) - Full catalogue of `TraceCollectorTracing` + `InMemoryTraceStore` scenarios
 - [Langfuse Workflow Patterns](../../langfuse-workflow-patterns.md) - Detailed trace event sequences
 - [Configuration Guide](../../getting-started/configuration.md) - Complete configuration reference
