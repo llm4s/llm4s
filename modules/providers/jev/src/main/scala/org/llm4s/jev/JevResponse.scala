@@ -133,13 +133,24 @@ object JevResponse {
   private[jev] val ScoreTolerance: Double = 1e-9
 
   /**
-   * The deepest 2xx body read. The envelope is four levels (the root, `answers`, an answer and its `legend`), and a
-   * Score level's description, the only value the client keeps unexamined, adds its own nesting: 64 leaves a
-   * structured description 60 levels, far more than any the API documents (a string, or a flat object or array).
+   * The deepest 2xx body read. The envelope is [[LegendEnvelopeDepth]] levels (the root, `answers`, an answer and its
+   * `legend`), and a Score level's description, the only value the client keeps unexamined, adds its own nesting: 64
+   * leaves a structured description [[MaxLevelDescriptionDepth]] (60) levels, far more than any the API documents (a
+   * string, or a flat object or array). A request whose description is deeper is refused before it is sent.
    * The limit is far below [[org.llm4s.util.BoundedJson.MaxDepth]] because the description is kept in the
    * [[JevResponse]]: at 512 levels, its `toString`, `hashCode` and `==` overflow a thread stack of 512 KiB or less.
    */
   private[jev] val MaxResponseDepth: Int = 64
+
+  /** The levels of a 2xx body around a Score level's description: the root, `answers`, the answer and its `legend`. */
+  private[jev] val LegendEnvelopeDepth: Int = 4
+
+  /**
+   * The deepest Score level description a request may carry: the API echoes each description back in the answer's
+   * `legend`, so one deeper than this would make the response, billed already, too deep for [[parse]] to read.
+   * Request validation refuses it before anything is sent; derived here so the two limits cannot drift apart.
+   */
+  private[jev] val MaxLevelDescriptionDepth: Int = MaxResponseDepth - LegendEnvelopeDepth
 
   /** A level key is a level number written canonically (`0`, `1`, `12`), so no two keys can name the same level. */
   private val LevelKey = "0|[1-9][0-9]*".r

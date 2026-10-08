@@ -372,7 +372,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its request: one answer per question asked, each of its question's type, a Choice's selected option among the
   options asked with the highest probability and a probability for every option, a Score with every level asked,
   each numbered once (canonical level keys) and a score within the levels (a score a rounding error outside them,
-  within 1e-9, is clamped in); a body nested more than 64 levels deep is refused unparsed, and an error body nested
+  within 1e-9, is clamped in); a body nested more than 64 levels deep is refused unparsed (so a Score level
+  description, which the API echoes back, nested more than 60 levels deep is refused before the request is sent), and an error body nested
   more than 32 levels deep is not read, so neither can overflow a small thread stack;
   a Score level's legend entry keeps the string, object or array the question gave. Configuration is the
   `llm4s.jev` block and `TYPESAFE_API_KEY` (bound to `llm4s.credentials.jev.apiKey`), `TYPESAFE_BASE_URL` and

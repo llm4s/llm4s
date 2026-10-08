@@ -1,9 +1,12 @@
 package org.llm4s.jev
 
 import org.llm4s.error.ValidationError
+import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import java.util.concurrent.atomic.AtomicReference
 
 class JevRequestSpec extends AnyFlatSpec with Matchers with EitherValues {
 
@@ -140,6 +143,73 @@ class JevRequestSpec extends AnyFlatSpec with Matchers with EitherValues {
     refused(score(levels(1))).message should include("between 2 and 10")
     refused(score(levels(11))).message should include("between 2 and 10")
     refused(score(Seq(ujson.Str("a"), ujson.Null))).field shouldBe "questions.s.criteria[1]"
+  }
+
+  // ---- a level description's depth: the API echoes it back, so it must fit the response parser's limit ----
+
+  /** `depth` arrays nested around a string, built without recursion: `[["x"]]` is 2 deep. */
+  private def nested(depth: Int): ujson.Value =
+    (1 to depth).foldLeft[ujson.Value](ujson.Str("x"))((inner, _) => ujson.Arr(inner))
+
+  private def scoreWith(description: ujson.Value): JevRequest =
+    JevRequest("s", Map("s" -> JevQuestion.Score(ujson.Str("q"), Seq(ujson.Str("low"), description))))
+
+  it should "accept a level description at the deepest the response parser reads back, and parse its echo" in {
+    val limit       = JevResponse.MaxLevelDescriptionDepth
+    val description = nested(limit)
+
+    limit shouldBe JevResponse.MaxResponseDepth - JevResponse.LegendEnvelopeDepth
+    scoreWith(description).validate shouldBe Right(())
+
+    // the API's response echoes the description as the legend: the client must be able to read it
+    val echoed =
+      s"""{"model":"jev-1.13.0","answers":{"s":{"type":"score","score":0.5,"legend":{"0":"low","1":${ujson.write(
+          description
+        )}},"probabilities":{"0":0.5,"1":0.5},"confidence":0.4}},"usage":{"input_tokens":1,"output_tokens":2}}"""
+    val levels = JevResponse.parse(echoed, None).value.score("s").value.levels
+
+    levels.map(_.description) shouldBe Seq(ujson.Str("low"), description)
+  }
+
+  it should "refuse, before sending, a level description one level deeper than the response parser reads back" in {
+    val limit = JevResponse.MaxLevelDescriptionDepth
+    val error = refused(scoreWith(nested(limit + 1)))
+
+    error.field shouldBe "questions.s.criteria[1]"
+    error.message should include(s"nested more than $limit levels deep")
+    error.message should include("echoes")
+    // an object nests as deep as an array
+    val deepObject = (1 to limit + 1).foldLeft[ujson.Value](ujson.Str("x"))((inner, _) => ujson.Obj("k" -> inner))
+    refused(scoreWith(deepObject)).field shouldBe "questions.s.criteria[1]"
+    // and a deep branch after a shallow one is found
+    refused(scoreWith(ujson.Obj("a" -> "shallow", "b" -> nested(limit)))).field shouldBe "questions.s.criteria[1]"
+    scoreWith(ujson.Obj("a" -> "shallow", "b" -> nested(limit - 1))).validate shouldBe Right(())
+  }
+
+  it should "refuse a level description nested 100,000 levels deep without overflowing a 256 KiB stack" in {
+    val request = scoreWith(nested(100000))
+    val outcome = new AtomicReference[Either[Throwable, Result[Unit]]](null)
+    val thread =
+      new Thread(null, () => outcome.set(scala.util.Try(request.validate).toEither), "small-stack", 256L * 1024)
+    thread.start()
+    thread.join(60000)
+    thread.isAlive shouldBe false
+    // A StackOverflowError is fatal, so Try rethrows it: the thread dies and records nothing.
+    val result =
+      Option(outcome.get).getOrElse(fail("validate died on the small stack, most likely of a StackOverflowError"))
+    result.isRight shouldBe true
+    result.toOption.get.left.value.message should include("nested more than")
+  }
+
+  it should "not limit the depth of values the API does not echo back" in {
+    val deep = nested(JevResponse.MaxResponseDepth + 10)
+
+    JevRequest(deep, Map("a" -> noul)).validate shouldBe Right(())
+    JevRequest("s", Map("a" -> JevQuestion.Noul(deep, Some(deep), Some(deep)))).validate shouldBe Right(())
+    JevRequest("s", Map("c" -> JevQuestion.Choice(deep, Seq("a" -> Some(deep))))).validate shouldBe Right(())
+    JevRequest("s", Map("s" -> JevQuestion.Score(deep, Seq(ujson.Str("a"), ujson.Str("b"))))).validate shouldBe Right(
+      ()
+    )
   }
 
   it should "refuse a blank model" in {

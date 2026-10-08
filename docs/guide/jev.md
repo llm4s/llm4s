@@ -113,7 +113,7 @@ val decision = for {
 |---|---|---|
 | `JevQuestion.Noul` | a yes/no question, optionally what yes and no mean | `probability` of yes, 0 to 1 |
 | `JevQuestion.Choice` | options, each with an optional description (at most 255) | `choice`, a `probabilities` map and a `confidence` |
-| `JevQuestion.Score` | 2 to 10 ordered level descriptions | `score` (it can land between levels), `levels` with their probabilities, and a `confidence` |
+| `JevQuestion.Score` | 2 to 10 ordered level descriptions | `score` (it can land between levels; one a floating-point rounding error, within 1e-9, outside 0 to the highest level is clamped into range), `levels` with their probabilities, and a `confidence` |
 
 The ids (`"department"`, ...) are yours; the answers come back under the same ids and Jev never sees them. `state` and
 `instructions` can be a string, or JSON structure when a question refers to data: see TypeSafe's
@@ -170,11 +170,13 @@ TypeSafe does not document the JSON shape of an error body, so the text in the e
 removed before anything is read from it, and an error about a 200 that quotes the key masks it as `***`. The forms
 recognised are the key as written, JSON-escaped (`\/` and `\uXXXX` included) and URL-encoded as `java.net.URLEncoder`
 writes it (`tsk/live+0` as `tsk%2Flive%2B0`). Any other transformation of the key, or a part or prefix of it, is not
-recognised and would not be masked. An error body nested more than 32 levels deep (real ones are at most three) is not
-read at all: the error carries only the status. A 200 nested more than 64 levels deep is refused as a `ProcessingError`:
-the envelope takes four levels, so a structured Score level description may nest up to 60. These limits are well below
-the 512 levels LLM4S allows elsewhere because the client walks an error body and keeps a description in the response, and
-at 512 levels those recursions can overflow a small thread stack.
+recognised and would not be masked. An error body nested more than 32 levels deep (real ones take a handful of levels,
+four for a FastAPI-style `detail` list) is not read at all: the error carries only the status. A 200 nested more than 64
+levels deep is refused as a `ProcessingError`: the envelope takes four levels, so a structured Score level description
+may nest up to 60, and since Jev echoes each description back, a request with one nested deeper is refused with a
+`ValidationError` before it is sent. These limits are well below the 512 levels LLM4S allows elsewhere because the
+client walks an error body and keeps a description in the response, and at 512 levels those recursions can overflow a
+small thread stack.
 
 ## Retries, and what is not de-duplicated
 

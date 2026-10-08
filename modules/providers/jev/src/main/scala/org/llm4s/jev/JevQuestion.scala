@@ -3,6 +3,8 @@ package org.llm4s.jev
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
+import scala.annotation.tailrec
+
 /**
  * A typed question for Jev, TypeSafe's System One decision model.
  *
@@ -160,10 +162,54 @@ object JevQuestion {
     else
       levels.zipWithIndex
         .collectFirst {
-          case (level, index) if checkText(s"$at.criteria[$index]", level).isLeft =>
-            checkText(s"$at.criteria[$index]", level)
+          case (level, index) if checkLevel(s"$at.criteria[$index]", level).isLeft =>
+            checkLevel(s"$at.criteria[$index]", level)
         }
         .getOrElse(Right(()))
+
+  /**
+   * A level description is checked as text, and for depth: the API echoes it back in the answer's `legend`, and a
+   * response deeper than [[JevResponse.MaxResponseDepth]] is refused, so a description deeper than
+   * [[JevResponse.MaxLevelDescriptionDepth]] would be sent, billed and then unreadable. No other value of a request
+   * comes back in the response, so none other is limited.
+   */
+  private def checkLevel(field: String, level: ujson.Value): Result[Unit] =
+    checkText(field, level).flatMap { _ =>
+      val limit = JevResponse.MaxLevelDescriptionDepth
+      if (nestedDeeperThan(level, limit))
+        Left(
+          ValidationError(
+            field,
+            s"is nested more than $limit levels deep; Jev echoes a level description back in its response, " +
+              s"which is read to at most ${JevResponse.MaxResponseDepth} levels including its envelope"
+          )
+        )
+      else Right(())
+    }
+
+  /**
+   * Whether `value` nests arrays and objects more than `limit` levels deep (a string is 0, `[]` is 1), counted as
+   * [[org.llm4s.util.BoundedJson.exceedsDepth]] counts text. The walk is iterative and stops one level past `limit`,
+   * so a caller's value nested 100,000 levels deep is judged without recursion, on any stack.
+   */
+  private[jev] def nestedDeeperThan(value: ujson.Value, limit: Int): Boolean = {
+    @tailrec
+    def walk(pending: List[(ujson.Value, Int)]): Boolean = pending match {
+      case Nil => false
+      case (current, depth) :: rest =>
+        val children = current match {
+          case o: ujson.Obj => Some(o.value.valuesIterator)
+          case a: ujson.Arr => Some(a.value.iterator)
+          case _            => None
+        }
+        children match {
+          case None                         => walk(rest)
+          case Some(_) if depth + 1 > limit => true
+          case Some(items)                  => walk(items.map(_ -> (depth + 1)).toList ::: rest)
+        }
+    }
+    walk(List(value -> 0))
+  }
 
   /** The question as the API's JSON; assumes it has been validated. */
   private[jev] def toJson(question: JevQuestion): ujson.Value = question match {

@@ -35,7 +35,8 @@ private[jev] object JevErrors {
 
   /**
    * The deepest error body read as JSON. An error body is a flat object or one wrapped in another (`message`,
-   * `error.message`, a `detail` list of validation errors), three levels at most, so 32 leaves ample headroom.
+   * `error.message`), or a FastAPI-style `detail` list of validation errors (`{"detail":[{"loc":["body",...]}]}`,
+   * four levels): a handful of levels, so 32 leaves ample headroom.
    * The limit is far below [[org.llm4s.util.BoundedJson.MaxDepth]] because the body is not only parsed but walked
    * and re-encoded here, then parsed again by the mapper: at 512 levels those recursions overflow a 256 KiB thread
    * stack, and a `StackOverflowError` is not caught by `Try` or any `Result`.
