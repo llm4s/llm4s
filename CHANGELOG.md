@@ -368,7 +368,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Result[JevResponse]`. Questions are `JevQuestion.Noul` (probability of yes), `Choice` (the selected option, a
   distribution and a confidence) and `Score` (a probability-weighted score over 2 to 10 ordered levels, with a
   confidence); answers are `NoulAnswer`, `ChoiceAnswer` and `ScoreAnswer`, read with `response.noul(id)`,
-  `.choice(id)` and `.score(id)`, with the resolved model, token usage and the request id. Configuration is the
+  `.choice(id)` and `.score(id)`, with the resolved model, token usage and the request id. A response is checked against
+  its request: one answer per question asked, each of its question's type, a Choice's selected option among the
+  options asked with the highest probability and a probability for every option, a Score with every level asked;
+  a Score level's legend entry keeps the string, object or array the question gave. Configuration is the
   `llm4s.jev` block and `TYPESAFE_API_KEY` (bound to `llm4s.credentials.jev.apiKey`), `TYPESAFE_BASE_URL` and
   `TYPESAFE_DEFAULT_MODEL`. Failures map onto LLM4S's errors (401/403 `AuthenticationError`, 400/422
   `ValidationError`, 429 `RateLimitError` with the server's `Retry-After` or `retry-after-ms`, 5xx including 529
@@ -1924,7 +1927,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
-- Jev response parsing preserves structured score legends and validates that selected choices have maximal probability.
 - **`llm4s-bedrock`: a `toolUse` input nested more than 512 levels deep is refused as a malformed tool
   call, never converted or sent back** ([#1648](https://github.com/llm4s/llm4s/issues/1648)). #1630
   ([#1562](https://github.com/llm4s/llm4s/issues/1562)) bounded every place model-written JSON is parsed

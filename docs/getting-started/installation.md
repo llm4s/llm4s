@@ -467,7 +467,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-jev" % llm4sVersion
 A typed client for TypeSafe's Jev decision model: send a state and typed questions (Noul, Choice, Score), get typed answers.
 It is not a chat provider and returns no `Completion`. Configured under `llm4s.jev`, with the key in `TYPESAFE_API_KEY`. A
 community module under `modules/providers/`; it brings no dependency beyond `llm4s-core`. See
-[Jev decision model](../guide/jev.md).
+[Jev decision model](../guide/jev).
 
 ### For IBM watsonx.ai
 
