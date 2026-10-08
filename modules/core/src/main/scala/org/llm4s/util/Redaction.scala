@@ -157,6 +157,9 @@ private[llm4s] object Redaction {
   /** `\"key\": [` or `\"key\": {`: the start of an array or object value of JSON that sits inside a string. */
   private val EscapedJsonContainerStart: Regex = s"""(\\\\"($Key)\\\\"\\s*:\\s*)([\\[{])""".r
 
+  /** `'key': [` or `'key': {`: the start of an array or object value under a single-quoted key. */
+  private val SingleQuotedContainerStart: Regex = s"""('($Key)'\\s*:\\s*)([\\[{])""".r
+
   /** `key=value` outside a URL query string: form bodies, log lines, shell-style settings, `a.b.password=...`. */
   private val EqualsPair: Regex =
     s"""((?<![A-Za-z0-9_-])($Key)=)([^\\s&"',;<>]+)""".r
@@ -270,10 +273,11 @@ private[llm4s] object Redaction {
     // field patterns below is already the placeholder. Then the quoted shapes, then the bare ones, so that a value is
     // never matched by a looser pattern first.
     val escapedContainers = redactContainers(EscapedJsonContainerStart, input, placeholder, ValueEnd.EscapedQuote)
-    val containers        = redactContainers(JsonContainerStart, escapedContainers, placeholder, ValueEnd.Quote('"'))
-    val escaped           = redactQuoted(EscapedJsonStringStart, containers, placeholder, ValueEnd.EscapedQuote)
-    val double            = redactQuoted(JsonStringStart, escaped, placeholder, ValueEnd.Quote('"'))
-    val single            = redactQuoted(SingleQuotedStart, double, placeholder, ValueEnd.Quote('\''))
+    val doubleContainers  = redactContainers(JsonContainerStart, escapedContainers, placeholder, ValueEnd.Quote('"'))
+    val containers = redactContainers(SingleQuotedContainerStart, doubleContainers, placeholder, ValueEnd.Quote('\''))
+    val escaped    = redactQuoted(EscapedJsonStringStart, containers, placeholder, ValueEnd.EscapedQuote)
+    val double     = redactQuoted(JsonStringStart, escaped, placeholder, ValueEnd.Quote('"'))
+    val single     = redactQuoted(SingleQuotedStart, double, placeholder, ValueEnd.Quote('\''))
     // A number becomes a string, so that the redacted JSON still parses.
     val quotedEquals   = redactQuoted(DoubleQuotedEqualsStart, single, placeholder, ValueEnd.Quote('"'))
     val allQuoted      = redactQuoted(SingleQuotedEqualsStart, quotedEquals, placeholder, ValueEnd.Quote('\''))
@@ -291,6 +295,13 @@ private[llm4s] object Redaction {
     /** A backslash followed by `"`, the closing quote of a string inside a string. */
     case EscapedQuote
   }
+
+  /** The text that opens and closes a string ending with `end`: `"`, `'` or `\"`. */
+  private def quoteOf(end: ValueEnd): String =
+    end match {
+      case ValueEnd.EscapedQuote => "\\\""
+      case ValueEnd.Quote(q)     => q.toString
+    }
 
   /**
    * The index of the character that ends the value starting at `from`: the closing quote, or, for a string inside a
@@ -381,6 +392,10 @@ private[llm4s] object Redaction {
    * grow the call stack, and each character is visited once. The value ends at its closing bracket, at the end of
    * the input (a payload cut off in the middle of it) or, for JSON inside a string, at the bare quote that ends the
    * enclosing string, which is left for the caller.
+   *
+   * In a plain document (`end` a `Quote`) a leaf may be double- or single-quoted whatever the key's quote, as a
+   * Python dict or a JavaScript literal mixes them, and each is scanned to its own quote. Inside a string a bare `"`
+   * ends the enclosing string and `'` is an ordinary character. A number is written back in the key's quote.
    */
   private def redactLeaves(
     input: String,
@@ -389,9 +404,10 @@ private[llm4s] object Redaction {
     placeholder: String,
     end: ValueEnd
   ): Int = {
-    val length  = input.length
-    val quote   = end match { case ValueEnd.EscapedQuote => "\\\""; case ValueEnd.Quote(q) => q.toString }
-    val openers = new java.lang.StringBuilder
+    val length       = input.length
+    val quote        = quoteOf(end)
+    val insideString = end == ValueEnd.EscapedQuote
+    val openers      = new java.lang.StringBuilder
 
     def inObject: Boolean = openers.length > 0 && openers.charAt(openers.length - 1) == '{'
 
@@ -405,22 +421,24 @@ private[llm4s] object Redaction {
       inObject && i < length && input.charAt(i) == ':'
     }
 
-    // The string whose opening quote (one character, or `\"`) starts at `open`; returns the index after it.
-    def emitString(open: Int): Int = {
-      val contentStart = open + quote.length
-      val contentEnd   = scanQuotedValue(input, contentStart, end)
+    // The string whose opening quote (`"`, `'` or `\"`, as `stringEnd` says) starts at `open`; returns the index
+    // after it.
+    def emitString(open: Int, stringEnd: ValueEnd): Int = {
+      val stringQuote  = quoteOf(stringEnd)
+      val contentStart = open + stringQuote.length
+      val contentEnd   = scanQuotedValue(input, contentStart, stringEnd)
       // For JSON inside a string, `scanQuotedValue` may stop at a bare quote: the enclosing string ends there.
-      val closed = contentEnd < length && (end match {
+      val closed = contentEnd < length && (stringEnd match {
         case ValueEnd.Quote(_)     => true
         case ValueEnd.EscapedQuote => input.charAt(contentEnd) == '\\'
       })
-      val next = if (closed) contentEnd + quote.length else contentEnd
+      val next = if (closed) contentEnd + stringQuote.length else contentEnd
       if (closed && isKey(next)) {
         out.append(input, open, next)
       } else {
-        out.append(quote)
+        out.append(stringQuote)
         if (contentEnd > contentStart) out.append(placeholder)
-        if (closed) out.append(quote)
+        if (closed) out.append(stringQuote)
       }
       next
     }
@@ -441,19 +459,18 @@ private[llm4s] object Redaction {
         out.append(c)
         i += 1
         done = openers.length == 0
-      } else if (c == '"') {
-        end match {
-          case ValueEnd.Quote(_)     => i = emitString(i)
-          case ValueEnd.EscapedQuote => done = true // the enclosing string ends, and the container with it
-        }
-      } else if (c == '\\' && end == ValueEnd.EscapedQuote) {
+      } else if (c == '"' && insideString) {
+        done = true // the enclosing string ends, and the container with it
+      } else if ((c == '"' || c == '\'') && !insideString) {
+        i = emitString(i, ValueEnd.Quote(c))
+      } else if (c == '\\' && insideString) {
         var next = i
         while (next < length && input.charAt(next) == '\\') next += 1
         val slashes     = next - i
         val beforeQuote = next < length && input.charAt(next) == '"'
         if (beforeQuote && slashes % 4 == 1) {
           out.append(input, i, next - 1)
-          i = emitString(next - 1)
+          i = emitString(next - 1, ValueEnd.EscapedQuote)
         } else if (beforeQuote && slashes % 2 == 0) {
           out.append(input, i, next)
           i = next

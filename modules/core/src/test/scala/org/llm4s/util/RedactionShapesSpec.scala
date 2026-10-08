@@ -355,6 +355,73 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---------------------------------------------------------------------------------------------
+  // A single-quoted key with an array or an object value: a Python dict or a JavaScript literal in a prompt
+  // ---------------------------------------------------------------------------------------------
+
+  it should "redact every string of an array under a single-quoted credential key" in {
+    Redaction.redact("{'token': ['abc123', 'def456'], 'user': 'ann'}") shouldBe
+      s"{'token': ['$R', '$R'], 'user': 'ann'}"
+  }
+
+  it should "redact every leaf of an object under a single-quoted credential key, and keep its keys" in {
+    val out = Redaction.redact("{'credentials': {'user': 'ann', 'pass': 'hunter2value', 'port': 5432}, 'n': 1}")
+    out shouldBe s"{'credentials': {'user': '$R', 'pass': '$R', 'port': '$R'}, 'n': 1}"
+  }
+
+  it should "redact the leaves of a nested single-quoted container, and leave true, false and null" in {
+    Redaction.redact("{'token': [{'value': 'a1', 'tags': ['x1', 'y1'], 'on': true}, 'b1', null, false]}") shouldBe
+      s"{'token': [{'value': '$R', 'tags': ['$R', '$R'], 'on': true}, '$R', null, false]}"
+  }
+
+  it should "redact a single-quoted leaf that contains an escaped quote or a bracket" in {
+    Redaction.redact("""{'token': ['a\']b12345', 'c{d12345', "e\"]f12345"], 'user': 'ann'}""") shouldBe
+      s"""{'token': ['$R', '$R', "$R"], 'user': 'ann'}"""
+  }
+
+  it should "redact a container whose quotes are mixed, in either direction" in {
+    // A double-quoted key with single-quoted leaves was mangled, not redacted: `abc` stayed and `123` was taken
+    // for a number, giving `['abc"[REDACTED]"']`.
+    Redaction.redact("""{"token": ['abc123', 'def456']}""") shouldBe s"""{"token": ['$R', '$R']}"""
+    Redaction.redact("""{'token': ["abc123", "def456"]}""") shouldBe s"""{'token': ["$R", "$R"]}"""
+    Redaction.redact("""{'credentials': {"user": 'ann', 'pass': "hunter2value"}}""") shouldBe
+      s"""{'credentials': {"user": '$R', 'pass': "$R"}}"""
+  }
+
+  it should "redact a single-quoted array that is cut off before its closing bracket" in {
+    Redaction.redact("{'token': ['abc123', 'de") shouldBe s"{'token': ['$R', '$R"
+    Redaction.redact("{'token': ['abc123', ") shouldBe s"{'token': ['$R', "
+  }
+
+  it should "leave an array or an object under a single-quoted key that is not a credential" in {
+    val input = "{'max_tokens': [1, 2], 'tokens': {'a': 'b'}, 'messages': [{'role': 'user', 'content': 'hi there'}]}"
+    Redaction.redact(input) shouldBe input
+  }
+
+  it should "redact a single-quoted credential array inside a container that is not a credential" in {
+    Redaction.redact("{'messages': [{'role': 'user', 'token': ['abc123']}]}") shouldBe
+      s"{'messages': [{'role': 'user', 'token': ['$R']}]}"
+  }
+
+  it should "leave an empty single-quoted container and an already redacted one as they are" in {
+    Seq("{'token': []}", "{'token': {}}", s"{'token': ['$R'], 'n': 1}").foreach { input =>
+      withClue(s"input $input: ")(Redaction.redact(input) shouldBe input)
+    }
+  }
+
+  it should "give the same result when a single-quoted container is redacted twice" in {
+    Seq(
+      "{'token': ['abc', 12, {'a': 'b'}], 'credentials': {'user': 'u', 'pass': 'p'}}",
+      """{"token": ['abc123']}""",
+      """{'token': ["abc123"]}"""
+    ).foreach { input =>
+      withClue(s"input $input: ") {
+        val once = Redaction.redact(input)
+        Redaction.redact(once) shouldBe once
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // Idempotence, and what is left alone
   // ---------------------------------------------------------------------------------------------
 

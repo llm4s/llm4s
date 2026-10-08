@@ -1982,6 +1982,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the error by the prefix `tooDeep` writes, whatever limit follows it; `BoundedJson` is `private[llm4s]`,
   so no public signature changes. The Gemini and Vertex AI warning now reads `a chunk is nested more than
   512 levels deep` rather than quoting the error's `Invalid json: ` message.
+- **Redaction covers a single-quoted key with an array or an object value**
+  ([#1647](https://github.com/llm4s/llm4s/issues/1647)): a single-quoted string value had been redacted
+  (`{'api_key': 'x'}`), but `{'token': ['abc']}` and `{'credentials': {'user': 'u', 'pass': 'p'}}` - a
+  Python dict or a JavaScript literal in a prompt - were written in the clear, and a single-quoted leaf under
+  a double-quoted key, `{"token": ['abc123']}`, was mangled rather than redacted (`['abc"[REDACTED]"']`,
+  the digits taken for a number). The leaves under a single-quoted credential key are now replaced like the
+  double-quoted ones, and a leaf may be double- or single-quoted whatever the key's quote.
 - **`llm4s-java-api`: `InterruptedException` is never thrown, and the Javadoc says so**
   ([#1591](https://github.com/llm4s/llm4s/issues/1591)): `catch (InterruptedException e)` around
   `JLlmClient.complete` or `JAgent.run` does not compile ("never thrown in body of corresponding try statement"),

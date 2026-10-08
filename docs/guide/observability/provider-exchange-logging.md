@@ -164,7 +164,8 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   payload leaves it), numbers under such a key (including exponent forms such as `1e10`, and inside a
   string too; the number is written back as the string `"[REDACTED]"`, so the JSON still parses), arrays
   and objects under such a key (`{"token": ["..."]}`, `{"credentials": {"user": "...", "pass": "..."}}`:
-  every string and number leaf under the key is replaced, however deep, also inside a string; the
+  every string and number leaf under the key is replaced, however deep, also inside a string and when
+  the key or the leaves are single-quoted, as a Python dict is, `{'token': ['...']}`; the
   brackets, the keys of nested objects, `true`, `false` and `null` are kept, so the JSON still parses and
   keeps its shape), `key=value` pairs and quoted
   `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,

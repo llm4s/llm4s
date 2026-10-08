@@ -254,6 +254,10 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
       """{"credentials": {"user": "ann", "pass": "abc123456789", "port": 5432}}""" ->
         """{"credentials": {"user": "[REDACTED]", "pass": "[REDACTED]", "port": "[REDACTED]"}}""",
       """{"content": "{\"token\": [\"abc123456789\"]}"}""" -> """{"content": "{\"token\": [\"[REDACTED]\"]}"}""",
+      // the key or the leaves single-quoted, as a Python dict is
+      "{'token': ['abc123456789'], 'credentials': {'user': 'ann', 'pass': 'abc123456789'}}" ->
+        "{'token': ['[REDACTED]'], 'credentials': {'user': '[REDACTED]', 'pass': '[REDACTED]'}}",
+      """{"token": ['abc123456789']}""" -> """{"token": ['[REDACTED]']}""",
       """{"max_tokens": [1, 2], "messages": [{"role": "user", "content": "hi"}]}""" ->
         """{"max_tokens": [1, 2], "messages": [{"role": "user", "content": "hi"}]}""",
       // compound key names are sensitive by suffix; token-count fields are not
