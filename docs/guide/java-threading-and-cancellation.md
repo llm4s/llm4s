@@ -121,12 +121,13 @@ The flag is still set when the result comes back, so there is nothing to restore
 only if you mean to carry on. The test runs this snippet against a call interrupted on a real provider's request
 path and against a custom client that throws `InterruptedException`, and checks the flag in both cases.
 
-### An agent run is not cancelled by interrupting its caller
+### Interrupting the caller cancels an agent run
 
 If the thread blocked in `JAgent.run` is interrupted, `run` returns a failed result with a `CancelledError` and the
-interrupt flag set, but the run itself carries on: its model call is neither interrupted nor stopped, and it
-finishes in the background. This is the documented behaviour of the runtime's `RunHandle.await`: "only `cancel`
-stops a run". `JAgent` has no method that cancels a run, so from Java there is no way to stop one in this release.
+interrupt flag set, and the run is cancelled with it: its model call is interrupted, and the thread is left for
+`recover` (since [#1330](https://github.com/llm4s/llm4s/issues/1330); before, the run carried on in the background).
+To stop a run from Java, interrupt the thread that called `run` - for example `Future.cancel(true)` on the task that
+called it.
 
 ## Timeouts
 
