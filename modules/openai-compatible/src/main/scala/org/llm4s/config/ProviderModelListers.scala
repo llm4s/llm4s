@@ -7,11 +7,10 @@ import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.http.HttpResponse.*
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.types.ProviderModelTypes.ModelName
-import org.llm4s.types.{ Result, TryOps }
-import org.llm4s.util.Redaction
+import org.llm4s.types.Result
+import org.llm4s.util.{ BoundedJson, Redaction }
 
 import scala.concurrent.duration.*
-import scala.util.Try
 
 /**
  * The factory behind the model listers of providers serving the OpenAI `/models` shape.
@@ -72,8 +71,8 @@ object ProviderModelListers:
                   Redaction.remoteBody(response.body, apiKey.map(_.asKey).toSeq)
                 )
               )
-          jsonResponse <- okResponse.toJson("responseBody")
-          models       <- parseModels(jsonResponse.body, provider)
+          json   <- readBody(okResponse.body)
+          models <- parseModels(json, provider)
         yield models
 
   /**
@@ -95,12 +94,27 @@ object ProviderModelListers:
       extraHeaders ++
       config.headers
 
-  private def parseModels(json: ujson.Value, provider: ProviderId): Result[List[DiscoveredModel]] =
-    val dataResult =
-      Try(json("data").arr.toList).toResult.left
-        .map(err => ValidationError("data", s"Missing or invalid models payload: ${err.message}"))
+  /**
+   * The listing's body, read with `BoundedJson` so that a deeply nested one is refused before it
+   * is parsed ([[https://github.com/llm4s/llm4s/issues/1658 #1658]]).
+   */
+  private def readBody(body: String): Result[ujson.Value] =
+    BoundedJson
+      .read(body)
+      .left
+      .map(err => ValidationError("responseBody", s"Failed to parse JSON response: ${err.message}"))
 
-    dataResult.map(_.flatMap(parseModel(_, provider)))
+  /**
+   * The `data` array's models. Every step uses an accessor that returns an `Option`: `json("data")`
+   * on a non-object throws `ujson.Value.InvalidData`, whose message renders the whole value
+   * recursively, and on a deeply nested top-level array that overflowed the stack (#1658).
+   */
+  private def parseModels(json: ujson.Value, provider: ProviderId): Result[List[DiscoveredModel]] =
+    json.objOpt
+      .flatMap(_.get("data"))
+      .flatMap(_.arrOpt)
+      .toRight(ValidationError("data", "Missing or invalid models payload: expected an object with a `data` array"))
+      .map(_.toList.flatMap(parseModel(_, provider)))
 
   private def parseModel(json: ujson.Value, provider: ProviderId): Option[DiscoveredModel] =
     // An entry that is not an object, or has no id, is skipped rather than failing the listing.

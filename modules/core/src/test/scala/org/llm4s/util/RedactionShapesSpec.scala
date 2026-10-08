@@ -355,6 +355,273 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---------------------------------------------------------------------------------------------
+  // A single-quoted key with an array or an object value: a Python dict or a JavaScript literal in a prompt
+  // ---------------------------------------------------------------------------------------------
+
+  it should "redact every string of an array under a single-quoted credential key" in {
+    Redaction.redact("{'token': ['abc123', 'def456'], 'user': 'ann'}") shouldBe
+      s"{'token': ['$R', '$R'], 'user': 'ann'}"
+  }
+
+  it should "redact every leaf of an object under a single-quoted credential key, and keep its keys" in {
+    val out = Redaction.redact("{'credentials': {'user': 'ann', 'pass': 'hunter2value', 'port': 5432}, 'n': 1}")
+    out shouldBe s"{'credentials': {'user': '$R', 'pass': '$R', 'port': '$R'}, 'n': 1}"
+  }
+
+  it should "redact the leaves of a nested single-quoted container, and leave true, false and null" in {
+    Redaction.redact("{'token': [{'value': 'a1', 'tags': ['x1', 'y1'], 'on': true}, 'b1', null, false]}") shouldBe
+      s"{'token': [{'value': '$R', 'tags': ['$R', '$R'], 'on': true}, '$R', null, false]}"
+  }
+
+  it should "redact a single-quoted leaf that contains an escaped quote or a bracket" in {
+    Redaction.redact("""{'token': ['a\']b12345', 'c{d12345', "e\"]f12345"], 'user': 'ann'}""") shouldBe
+      s"""{'token': ['$R', '$R', "$R"], 'user': 'ann'}"""
+  }
+
+  it should "redact a container whose quotes are mixed, in either direction" in {
+    // A double-quoted key with single-quoted leaves was mangled, not redacted: `abc` stayed and `123` was taken
+    // for a number, giving `['abc"[REDACTED]"']`.
+    Redaction.redact("""{"token": ['abc123', 'def456']}""") shouldBe s"""{"token": ['$R', '$R']}"""
+    Redaction.redact("""{'token': ["abc123", "def456"]}""") shouldBe s"""{'token': ["$R", "$R"]}"""
+    Redaction.redact("""{'credentials': {"user": 'ann', 'pass': "hunter2value"}}""") shouldBe
+      s"""{'credentials': {"user": '$R', 'pass': "$R"}}"""
+  }
+
+  it should "redact a single-quoted array that is cut off before its closing bracket" in {
+    Redaction.redact("{'token': ['abc123', 'de") shouldBe s"{'token': ['$R', '$R"
+    Redaction.redact("{'token': ['abc123', ") shouldBe s"{'token': ['$R', "
+  }
+
+  it should "leave an array or an object under a single-quoted key that is not a credential" in {
+    val input = "{'max_tokens': [1, 2], 'tokens': {'a': 'b'}, 'messages': [{'role': 'user', 'content': 'hi there'}]}"
+    Redaction.redact(input) shouldBe input
+  }
+
+  it should "redact a single-quoted credential array inside a container that is not a credential" in {
+    Redaction.redact("{'messages': [{'role': 'user', 'token': ['abc123']}]}") shouldBe
+      s"{'messages': [{'role': 'user', 'token': ['$R']}]}"
+  }
+
+  it should "leave an empty single-quoted container and an already redacted one as they are" in {
+    Seq("{'token': []}", "{'token': {}}", s"{'token': ['$R'], 'n': 1}").foreach { input =>
+      withClue(s"input $input: ")(Redaction.redact(input) shouldBe input)
+    }
+  }
+
+  it should "give the same result when a single-quoted container is redacted twice" in {
+    Seq(
+      "{'token': ['abc', 12, {'a': 'b'}], 'credentials': {'user': 'u', 'pass': 'p'}}",
+      """{"token": ['abc123']}""",
+      """{'token': ["abc123"]}"""
+    ).foreach { input =>
+      withClue(s"input $input: ") {
+        val once = Redaction.redact(input)
+        Redaction.redact(once) shouldBe once
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // A single-quoted key inside a double-quoted string. `'token': [` can sit inside a JSON string value, where `'` is
+  // not escaped, so the walk must end where that string does: taking its closing `"` for a leaf opener desynchronised
+  // the quotes and wrote a credential of a later field, which the string pass then could not match, out mangled but
+  // readable (`"hunter'[REDACTED]'value"`). The four shapes the review found, then their neighbours.
+  // ---------------------------------------------------------------------------------------------
+
+  it should "not swallow the field after a JSON string that merely mentions 'token': [" in {
+    val out = Redaction.redact(s"""{"content": "see 'token': [ for details", "api_key": "$secretText"}""")
+    out shouldBe s"""{"content": "see 'token': [ for details", "api_key": "$R"}"""
+    ujson.read(out)("api_key").str shouldBe R
+  }
+
+  it should "not swallow the fields after a JSON string that merely mentions 'credentials': {" in {
+    val out = Redaction.redact(s"""{"content": "add 'credentials': { to it", "api_key": "$secretText", "x": 1}""")
+    out shouldBe s"""{"content": "add 'credentials': { to it", "api_key": "$R", "x": 1}"""
+    ujson.read(out)("x").num shouldBe 1
+  }
+
+  it should "end a single-quoted array cut off inside a JSON string at that string's end, and redact the field after" in {
+    val out = Redaction.redact(s"""{"content": "{'token': ['abc', ", "password": "$secretText"}""")
+    out shouldBe s"""{"content": "{'token': ['$R', ", "password": "$R"}"""
+    ujson.read(out)("password").str shouldBe R
+  }
+
+  it should "leave the fields after a single-quoted key whose leaves are escaped double-quoted strings" in {
+    // Inside a string the container's own syntax has no `"`, so a `"`, escaped or not, is foreign and ends the walk:
+    // the leaf is left to the other passes, and `model` and `n` keep their values.
+    val input = """{"content": "{'token': [\"abc\"]}", "model": "gpt-4o", "n": 1}"""
+    val out   = Redaction.redact(input)
+    out shouldBe input
+    ujson.read(out)("model").str shouldBe "gpt-4o"
+  }
+
+  it should "redact a closed single-quoted dict inside a JSON string, and the field after it" in {
+    val out = Redaction.redact(s"""{"content": "{'token': ['abc123']}", "api_key": "$secretText"}""")
+    out shouldBe s"""{"content": "{'token': ['$R']}", "api_key": "$R"}"""
+    ujson.read(out)("content").str shouldBe s"{'token': ['$R']}"
+  }
+
+  it should "redact a single-quoted dict inside escaped JSON inside a JSON string, and the escaped field after it" in {
+    val input =
+      s"""{"content": "{\\"messages\\": [{\\"content\\": \\"{'token': ['abc123']}\\"}], \\"api_key\\": \\"$secretText\\"}"}"""
+    val out = Redaction.redact(input)
+    out shouldBe
+      s"""{"content": "{\\"messages\\": [{\\"content\\": \\"{'token': ['$R']}\\"}], \\"api_key\\": \\"$R\\"}"}"""
+    ujson.read(ujson.read(out)("content").str)("api_key").str shouldBe R
+  }
+
+  it should "redact a single-quoted leaf under an escaped key inside a JSON string" in {
+    // Was mangled, not redacted: `['abc\"[REDACTED]\"']`, the digits taken for a number.
+    Redaction.redact("""{"content": "{\"token\": ['abc123', 'def456']}"}""") shouldBe
+      s"""{"content": "{\\"token\\": ['$R', '$R']}"}"""
+  }
+
+  it should "redact a single-quoted leaf inside a JSON string that contains an escaped double quote" in {
+    Redaction.redact("""{"content": "{'token': ['a\"b123']}", "n": 1}""") shouldBe
+      s"""{"content": "{'token': ['$R']}", "n": 1}"""
+  }
+
+  it should "not take an apostrophe for a quote" in {
+    // An apostrophe inside a JSON string is an ordinary character of that string.
+    val prose = Redaction.redact(s"""{"content": "it's a 'token': [x]", "api_key": "$secretText"}""")
+    prose shouldBe s"""{"content": "it's a 'token': [x]", "api_key": "$R"}"""
+    // An apostrophe in prose before the document does not open a string that the document would then sit in.
+    Redaction.redact("User's config: {\"token\": ['abc123']}") shouldBe s"User's config: {\"token\": ['$R']}"
+    // An apostrophe inside a single-quoted container inside a JSON string opens a leaf that the string's end closes:
+    // the field after it is redacted, the document parses, and nothing is readable.
+    val bare = Redaction.redact(s"""{"content": "{'token': [it's", "api_key": "$secretText"}""")
+    bare shouldBe s"""{"content": "{'token': [it'$R", "api_key": "$R"}"""
+    (bare should not).include(secretText)
+    ujson.read(bare)("api_key").str shouldBe R
+  }
+
+  it should "not take the end of a single-quoted string for a leaf when it mentions \"token\": [" in {
+    // The mirror image: a double-quoted key inside a single-quoted string. Only `"` opens a leaf there, as before
+    // #1647 - an apostrophe in prose makes a `'` too uncertain to end the walk on - so the walk runs to the closing
+    // brace, and every bare word it passes is replaced, bar a key before `:`: the credential after the string is
+    // unreadable, where the head of round 1 wrote it out as `hunter"[REDACTED]"value`. The key `api_key` is kept, so
+    // that the single-quoted field pass after the walk still finds it and redacts its value.
+    val out = Redaction.redact(s"{'content': 'see \"token\": [ for details', 'api_key': '$secretText'}")
+    out shouldBe s"""{'content': 'see "token": [ "$R" "$R"', 'api_key': '$R'}"""
+    (out should not).include("hunter")
+    (out should not).include("value")
+  }
+
+  it should "replace a bare value under a credential key, and keep literals and an unquoted key" in {
+    Redaction.redact("""{"token": [abc123, -1, 2.5e3, true, null], "n": 1}""") shouldBe
+      s"""{"token": ["$R", "$R", "$R", true, null], "n": 1}"""
+    Redaction.redact("{'token': [None, True, False, abc]}") shouldBe s"{'token': [None, True, False, '$R']}"
+    Redaction.redact(s"""{"credentials": {user: ann, pass: $secretText}}""") shouldBe
+      s"""{"credentials": {user: "$R", pass: "$R"}}"""
+    // Inside a double-quoted string the walk cannot pass the string's end, so a bare word there is kept as prose.
+    Redaction.redact(
+      """{"content": "{\"token\": [abc, 12]}"}"""
+    ) shouldBe s"""{"content": "{\\"token\\": [abc, \\"$R\\"]}"}"""
+  }
+
+  it should "leave nothing readable when a stray quote before the document misleads the choice of walk" in {
+    // An unpaired `"` before the document inverts the pairing of the quotes, so `'token': [` is taken for a
+    // top-level container and the walk runs on into the fields after the string. Whatever it passes is replaced,
+    // so the credential is gone, though the document is not kept in shape.
+    val out = Redaction.redact(s"""body="{"content": "see 'token': [ for details", "api_key": "$secretText"}"""")
+    (out should not).include("hunter")
+    (out should not).include("value")
+    (out should not).include("2")
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // A walk never hides a key from the passes after it. A container that a string merely mentions, or that is cut
+  // off, runs on into prose, where an apostrophe (it's, O'Brien, users', don't) was taken for the opening quote of a
+  // leaf: the leaf swallowed the next `password='...'` up to its `='`, and the credential after it was left as a bare
+  // word the walk copied as prose, out of reach of the `key='value'` pass. Each was redacted before #1647.
+  // ---------------------------------------------------------------------------------------------
+
+  it should "not let an apostrophe in prose after a mentioned 'token': [ hide the next credential" in {
+    Seq(
+      """{"content": "see 'token': [ for details, it's password='hunter2' ok"}""" ->
+        s"""{"content": "see 'token': [ for details, it's password='$R' ok"}""",
+      """{"content": "see 'token': [ for details; O'Brien set api_key='hunter2'"}""" ->
+        s"""{"content": "see 'token': [ for details; O'Brien set api_key='$R'"}""",
+      """{"content": "see 'token': [ for details; the users' password='hunter2'"}""" ->
+        s"""{"content": "see 'token': [ for details; the users' password='$R'"}"""
+    ).foreach { case (input, expected) =>
+      withClue(s"input $input: ") {
+        val out = Redaction.redact(input)
+        (out should not).include("hunter2")
+        out shouldBe expected
+        ujson.read(out)("content").str should include("for details")
+      }
+    }
+  }
+
+  it should "not let an apostrophe in prose after a mentioned \\\"token\\\": [ hide the next credential" in {
+    val out = Redaction.redact("""{"content": "bad \"token\": [ field; don't use 'api_key': 'hunter2' here"}""")
+    (out should not).include("hunter2")
+    out shouldBe s"""{"content": "bad \\"token\\": [ field; don't use 'api_key': '$R' here"}"""
+  }
+
+  it should "not let an apostrophe after a cut-off embedded document hide the next credential" in {
+    val out = Redaction.redact("""{"content": "{\"token\": [\"a\", it's password='hunter2'"}""")
+    (out should not).include("hunter2")
+    out shouldBe s"""{"content": "{\\"token\\": [\\"$R\\", it's password='$R'"}"""
+  }
+
+  it should "not hide a key from the passes after the walk, whatever the walk takes for a leaf or a word" in {
+    // Shapes on which a differential fuzzer, run against the redaction before #1647, caught drafts of this change
+    // leaking: the walk replaced a key, or wrote a quote into the middle of a value, and the end of the value - past
+    // the walk - was left readable. The walk that guesses at leaves now runs after every field pass. The last two
+    // are the review's own low-realism shapes: a quote inside a leaf that ends the enclosing string.
+    Seq(
+      "{'token': [password='a]hunter2'}",
+      "{'token': [password=:a]hunter2",
+      "{'token': ['apikey': 'a{hunter2",
+      "{\"token\": [password=:a]hunter2",
+      "{\"token\": {\"\"apikey\":\":a'=hunter2",
+      "{'token': [\"\"password\":\"}hunter2",
+      "{\"token\": {'\"'hunter2:",
+      "{'token': {''apikey':':a\"=hunter2",
+      """{"content": "'token': ['token': '"hunter2"}""",
+      """{"content": "\"token\": ['\"'hunter2'"}"""
+    ).foreach(input => withClue(s"input $input: ")((Redaction.redact(input) should not).include("hunter2")))
+  }
+
+  it should "give the same result when a single-quoted container inside a string is redacted twice" in {
+    Seq(
+      s"""{"content": "see 'token': [ for details", "api_key": "$secretText"}""",
+      s"""{"content": "{'token': ['abc', ", "password": "$secretText"}""",
+      """{"content": "{'token': [\"abc\"]}", "model": "gpt-4o", "n": 1}""",
+      s"""{"content": "{'token': ['abc123']}", "api_key": "$secretText"}""",
+      """{"content": "{\"token\": ['abc123']}"}"""
+    ).foreach { input =>
+      withClue(s"input $input: ") {
+        val once = Redaction.redact(input)
+        Redaction.redact(once) shouldBe once
+      }
+    }
+  }
+
+  it should "redact a document of many JSON strings that mention 'token': [ in time linear in its length" in {
+    // One forward scan decides which string, if any, encloses each container, so the cost does not grow with the
+    // square of the length: a document four times as long takes about four times as long, never sixteen.
+    val unit = s"""{"role": "user", "content": "see 'token': [ for details", "api_key": "$secretText"}, """
+    def time(repeats: Int): Long = {
+      val input = "[" + (unit * repeats) + "{}]"
+      Redaction.redact(input) // warm up
+      val start = System.nanoTime()
+      val out   = Redaction.redact(input)
+      val taken = System.nanoTime() - start
+      (out should not).include(secretText)
+      ujson.read(out).arr.size shouldBe repeats + 1
+      taken
+    }
+    val small = time(500)
+    val large = time(2000)
+    withClue(s"500 units took ${small / 1000000} ms, 2000 units took ${large / 1000000} ms: ") {
+      large should be < (small * 12 + 50000000L)
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // Idempotence, and what is left alone
   // ---------------------------------------------------------------------------------------------
 

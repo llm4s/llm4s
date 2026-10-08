@@ -254,6 +254,17 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
       """{"credentials": {"user": "ann", "pass": "abc123456789", "port": 5432}}""" ->
         """{"credentials": {"user": "[REDACTED]", "pass": "[REDACTED]", "port": "[REDACTED]"}}""",
       """{"content": "{\"token\": [\"abc123456789\"]}"}""" -> """{"content": "{\"token\": [\"[REDACTED]\"]}"}""",
+      // the key or the leaves single-quoted, as a Python dict is
+      "{'token': ['abc123456789'], 'credentials': {'user': 'ann', 'pass': 'abc123456789'}}" ->
+        "{'token': ['[REDACTED]'], 'credentials': {'user': '[REDACTED]', 'pass': '[REDACTED]'}}",
+      """{"token": ['abc123456789']}""" -> """{"token": ['[REDACTED]']}""",
+      // bare leaves are replaced too; the literals are kept
+      """{"token": [abc123456789, 42, true, null]}""" -> """{"token": ["[REDACTED]", "[REDACTED]", true, null]}""",
+      // inside a string a single-quoted container ends where the string does, and a `\"`-quoted leaf under a
+      // single-quoted key there is left
+      """{"content": "see 'token': [ for details", "api_key": "abc123456789"}""" ->
+        """{"content": "see 'token': [ for details", "api_key": "[REDACTED]"}""",
+      """{"content": "{'token': [\"abc123456789\"]}", "n": 1}""" -> """{"content": "{'token': [\"abc123456789\"]}", "n": 1}""",
       """{"max_tokens": [1, 2], "messages": [{"role": "user", "content": "hi"}]}""" ->
         """{"max_tokens": [1, 2], "messages": [{"role": "user", "content": "hi"}]}""",
       // compound key names are sensitive by suffix; token-count fields are not
