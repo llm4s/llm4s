@@ -755,8 +755,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **An interrupted `Agent.run`, `recover` or `resume` cancels its turn** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   the call returns `Left(CancelledError)` with the interrupt flag set, as before, and now also cancels the turn it
-  was waiting on instead of leaving it running. Cancelling a graph run therefore cancels the agent turns its nodes
-  are waiting on. Use `start`/`startRecover`/`startResume` and await the `AgentRun` to keep a turn past an interrupt.
+  was waiting on instead of leaving it running, returning once that turn has ended (within 5 seconds), so `recover`
+  can follow at once; a caller already interrupted starts no turn. Cancelling a graph run therefore cancels the
+  agent turns its nodes are waiting on. Use `start`/`startRecover`/`startResume` and await the `AgentRun` to keep a turn past an interrupt.
 - **`AssistantMessage` is a growth-prone data type; `Completion.thinking` comes from the message**
   ([#1381](https://github.com/llm4s/llm4s/issues/1381)): `AssistantMessage` is `final case class AssistantMessage
   private (contentOpt, toolCalls, thinking)` with a companion `apply` (named arguments, defaults as before, plus the

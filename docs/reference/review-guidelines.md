@@ -2464,7 +2464,7 @@ Quick reference for finding code examples in llm4s codebase.
 | **Config boundary**     | `config/Llm4sConfig.scala`               | `Llm4sConfig.provider()`              |
 | **Error ADT**           | `error/LLMError.scala`                   | `sealed trait LLMError`               |
 | **Newtype**             | `types/ModelName.scala`                  | `case class ModelName(value: String)` |
-| **Resource management** | `agent/orchestration/`                   | `Resource[F, A]` usage                |
+| **Resource management** | `effect/cats/LLMClientIO.scala`          | `Resource[F, A]` usage                |
 
 ---
 

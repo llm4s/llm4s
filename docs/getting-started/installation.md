@@ -538,7 +538,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-agent" % llm4sVersion // same versi
 ```
 
 The agent runtime - `org.llm4s.agent` (`Agent`, `AgentResult`, guardrails, handoffs,
-orchestration) and the console assistant, `org.llm4s.assistant` - lives here.
+the graph runtime) and the console assistant, `org.llm4s.assistant` - lives here.
 Agent memory is the separate `llm4s-memory`; the ready-made tools are `llm4s-agent-tools`.
 `llm4s-core` keeps what the agent is built on: `LLMClient`, the tool API and the tracing
 contract. Package names are unchanged. See the

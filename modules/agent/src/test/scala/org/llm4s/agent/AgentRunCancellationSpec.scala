@@ -22,16 +22,19 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
    * calls answer "done". `entered` is released by each blocked call that starts; `interrupted` by
    * each that saw its interrupt.
    */
-  final private class BlockingClient(blockOn: Set[Int]) extends LLMClient {
-    private val calls = new AtomicInteger(0)
-    val entered       = new Semaphore(0)
-    val interrupted   = new Semaphore(0)
+  final private class BlockingClient(blockOn: Set[Int], unwind: Long = 0L) extends LLMClient {
+    private val counter = new AtomicInteger(0)
+    def calls: Int      = counter.get
+    val entered         = new Semaphore(0)
+    val interrupted     = new Semaphore(0)
 
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
-      if (blockOn.contains(calls.incrementAndGet())) {
+      if (blockOn.contains(counter.incrementAndGet())) {
         entered.release()
         CancelledError.catchInterrupt(Thread.sleep(60_000)) match {
           case Left(e) =>
+            // a provider that takes a while to give up after its interrupt
+            if (unwind > 0) CancelledError.catchInterrupt(Thread.sleep(unwind)): Unit
             interrupted.release()
             Thread.currentThread().interrupt()
             Left(CancelledError("model call", Some(e)))
@@ -75,6 +78,38 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
     // ...and it ended: the thread is incomplete, not busy with a turn still running
     eventually(cause(agent.run(thread, "again").error) shouldBe a[GraphError.IncompleteRun])
     agent.recover(thread).value.answer shouldBe Some("done")
+  }
+
+  it should "return only once the cancelled turn has ended, so recover can follow at once" in {
+    val client = new BlockingClient(blockOn = Set(1), unwind = 200L)
+    val agent  = plain(client)
+    val thread = ThreadId("interrupted-then-recovered")
+
+    interruptedCall(client.entered)(agent.run(thread, "q"))._1.left.toOption.get shouldBe a[CancelledError]
+
+    // no waiting: the turn ended before run returned
+    agent.recover(thread).value.answer shouldBe Some("done")
+  }
+
+  it should "not start a turn when the calling thread is already interrupted" in {
+    val client  = new BlockingClient(blockOn = Set.empty)
+    val agent   = plain(client)
+    val thread  = ThreadId("already-interrupted")
+    val outcome = new LinkedBlockingQueue[(Result[AgentResult], Boolean)]()
+    Thread
+      .ofVirtual()
+      .start { () =>
+        Thread.currentThread().interrupt()
+        outcome.offer(agent.run(thread, "q") -> Thread.currentThread().isInterrupted): Unit
+      }
+      .join()
+    val (result, stillInterrupted) = outcome.poll(10, TimeUnit.SECONDS)
+
+    result.left.toOption.get shouldBe a[CancelledError]
+    stillInterrupted shouldBe true
+    client.calls shouldBe 0
+    // no thread was created: the same id starts a fresh turn
+    agent.run(thread, "q").value.answer shouldBe Some("done")
   }
 
   "Agent.recover" should "cancel the recovered turn when the calling thread is interrupted" in {

@@ -40,6 +40,18 @@ final class AgentRun private[agent] (
   def cancel(): Unit = handle.cancel()
 
   /**
+   * Cancels the turn and waits, within [[AgentRun.Drain]] and whatever interrupts the waiting thread,
+   * for it to end, so the thread is free for `recover` when this returns; a turn still running then
+   * is logged at WARN and left to end on its own.
+   */
+  private[agent] def cancelAndAwaitEnd(): Unit =
+    handle.cancel()
+    if !handle.awaitEnd(AgentRun.Drain) then
+      AgentRun.logger.warn(
+        s"Run ${runId.value} on ${threadId.value} did not end within ${AgentRun.Drain} of being cancelled; returning without it"
+      )
+
+  /**
    * Subscribes `listener` to this turn's events: its durable events replayed from the turn's start,
    * then live; its live events from now on (a live event sent before this call is missed - use
    * [[Agent.stream]] to receive every one). Run-scoped: nothing of another run on the thread is

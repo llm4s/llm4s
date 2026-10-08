@@ -585,7 +585,7 @@ val agent = Agent.builder("triage", client)
 ```
 
 A handoff must be the only tool call in its message. Use handoffs for simple 2-3 agent
-delegation. Use DAGs for complex parallel workflows.
+delegation. Use a graph (`GraphBuilder`; the `multi-agent-graph` cookbook recipe) for complex parallel workflows.
 
 ### Memory
 

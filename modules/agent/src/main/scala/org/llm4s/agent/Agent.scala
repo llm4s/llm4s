@@ -55,11 +55,12 @@ final class Agent private[agent] (
    * is unchanged.
    *
    * Interrupting the calling thread cancels the turn: `run` returns `Left(CancelledError)` with the
-   * interrupt flag still set, and the thread is left for [[recover]]. To keep a turn running past an
+   * interrupt flag still set, once the turn has ended, leaving the thread for [[recover]]. A caller
+   * already interrupted gets that `Left` without a turn being started. To keep a turn running past an
    * interrupt, use [[start]] and await the [[AgentRun]].
    */
   def run(threadId: ThreadId, query: String, config: RunConfig, history: Seq[Message]): Result[AgentResult] =
-    start(threadId, query, config, history).flatMap(awaitOrCancel)
+    blocking(start(threadId, query, config, history))
 
   /** One turn on `threadId`, new, completed or blocked. */
   def run(threadId: ThreadId, query: String, config: RunConfig): Result[AgentResult] =
@@ -100,7 +101,7 @@ final class Agent private[agent] (
    * Interrupting the calling thread cancels the turn, as for [[run]].
    */
   def recover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentResult] =
-    startRecover(threadId, config).flatMap(awaitOrCancel)
+    blocking(startRecover(threadId, config))
 
   /** [[recover]], returning at once with the running turn - to cancel it, or to await its result. */
   def startRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentRun] =
@@ -117,7 +118,7 @@ final class Agent private[agent] (
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig()
   ): Result[AgentResult] =
-    startResume(threadId, answers, config).flatMap(awaitOrCancel)
+    blocking(startResume(threadId, answers, config))
 
   /** [[resume]], returning at once with the running turn - to cancel it, or to await its result. */
   def startResume(
@@ -214,15 +215,21 @@ final class Agent private[agent] (
       .map(agentRun(_, Some(scope), listening.drain))
 
   /**
-   * Awaits `run`. An interrupted wait cancels the turn as well, so a blocking call - `run` inside a
-   * graph node whose run is cancelled - never leaves its turn running; the interrupt flag stays set.
+   * Starts a turn with `begin` and awaits it. A caller already interrupted starts nothing. An
+   * interrupted wait cancels the turn and returns once it has ended, so a blocking call - `run` inside
+   * a graph node whose run is cancelled - never leaves its turn running, and the thread is free for
+   * [[recover]]. Either way the interrupt flag stays set.
    */
-  private def awaitOrCancel(run: AgentRun): Result[AgentResult] =
-    run.await() match
-      case cancelled @ Left(_: CancelledError) =>
-        run.cancel()
-        cancelled
-      case other => other
+  private def blocking(begin: => Result[AgentRun]): Result[AgentResult] =
+    if Thread.currentThread().isInterrupted then Left(CancelledError("agent turn"))
+    else
+      begin.flatMap { run =>
+        run.await() match
+          case cancelled @ Left(_: CancelledError) =>
+            run.cancelAndAwaitEnd()
+            cancelled
+          case other => other
+      }
 
   private def recoverWith(threadId: ThreadId, config: RunConfig, listening: Listening): Result[AgentRun] =
     val (observer, scope) = observed(config, listening)
