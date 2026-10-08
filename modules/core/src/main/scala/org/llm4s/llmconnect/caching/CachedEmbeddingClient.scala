@@ -98,6 +98,9 @@ class CachedEmbeddingClient(
   /** Returns cache hit/miss statistics for this client. */
   def cacheStats: CacheStats = cache.stats()
 
-  /** Clears all cached vectors and resets statistics. */
+  /**
+   * Calls the backend's `clear()`. With `InMemoryEmbeddingCache` this empties the cache and resets the
+   * statistics; a custom `EmbeddingCache` decides for itself, and the trait default does nothing.
+   */
   def clearCache(): Unit = cache.clear()
 }
