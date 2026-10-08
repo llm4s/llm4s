@@ -50,6 +50,15 @@ class StructuredOutputRecipeSpec extends AnyFlatSpec with Matchers with EitherVa
     error.message should include("category")
   }
 
+  it should "refuse an urgency outside 1 to 5, which a provider that ignores the schema can still produce" in {
+    val outside = """{"category": "billing", "urgency": 100, "summary": "Charged twice."}"""
+
+    val error = StructuredOutputRecipe.classify(replying(outside), "x").left.value
+
+    error shouldBe a[ValidationError]
+    error.message should include("urgency")
+  }
+
   it should "send the schema with the request, with the categories as an enum" in {
     val client = replying(good)
 
@@ -60,6 +69,8 @@ class StructuredOutputRecipeSpec extends AnyFlatSpec with Matchers with EitherVa
     format shouldBe a[ResponseFormat.JsonSchema]
     val sentSchema = StructuredOutputRecipe.ticketSchema.toJsonSchema(strict = true)
     sentSchema("properties")("category")("enum").arr.map(_.str).toSeq shouldBe StructuredOutputRecipe.categories
+    sentSchema("properties")("urgency")("minimum").num shouldBe 1
+    sentSchema("properties")("urgency")("maximum").num shouldBe 5
   }
 
   "StructuredOutputRecipe.demo" should "print the ticket the scripted model produced" in {

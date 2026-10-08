@@ -38,7 +38,7 @@ object StructuredOutputRecipe extends RecipeApp {
   val ticketSchema = Schema
     .`object`[Ticket]("A customer support ticket")
     .withRequiredField("category", Schema.string("The kind of ticket").withEnum(categories))
-    .withRequiredField("urgency", Schema.integer("From 1 (can wait) to 5 (urgent)"))
+    .withRequiredField("urgency", Schema.integer("From 1 (can wait) to 5 (urgent)").withRange(Some(1), Some(5)))
     .withRequiredField("summary", Schema.string("One sentence describing the problem"))
 
   def classify(client: LLMClient, text: String): Result[Ticket] =
@@ -48,6 +48,12 @@ object StructuredOutputRecipe extends RecipeApp {
         categories.contains(ticket.category),
         (),
         ValidationError.invalid("category", s"'${ticket.category}' is not one of ${categories.mkString(", ")}")
+      )
+      // The schema states the range, but a provider that ignores it can still answer outside it.
+      _ <- Either.cond(
+        1 <= ticket.urgency && ticket.urgency <= 5,
+        (),
+        ValidationError.invalid("urgency", s"${ticket.urgency} is outside 1 to 5")
       )
     } yield ticket
   // snippet:end

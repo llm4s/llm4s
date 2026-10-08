@@ -34,6 +34,18 @@ class DocumentQaRecipeSpec extends AnyFlatSpec with Matchers with EitherValues {
     (prompt should not).include("Remote work")
   }
 
+  it should "give the no-document answer for a question of only stop words, with no error and no model call" in {
+    val client = DocumentQaRecipe.script
+
+    // "What", "is" and "it" are all stop words or too short, so the keyword query is empty;
+    // FTS5 rejects an empty MATCH, and the recipe must not reach it (Codex review, #1595).
+    val result = answer(client, handbook, "What is it?").value
+
+    result.text shouldBe "I could not find anything about that in the documents."
+    result.sources shouldBe Seq.empty
+    client.calls shouldBe empty
+  }
+
   it should "pick a different passage for a different question" in {
     val client = DocumentQaRecipe.script
 

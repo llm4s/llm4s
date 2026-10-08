@@ -60,9 +60,12 @@ object DocumentQaRecipe extends RecipeApp {
         chunk          <- ChunkerFactory.simple().chunk(text, chunking)
       } yield KeywordDocument(s"$source-${chunk.index}", chunk.content, Map("source" -> source))
 
+      // A question of only stop words and short words has no content words. FTS5 rejects an empty
+      // MATCH as a syntax error, so skip the search and let the no-document answer stand.
+      val query = keywordQuery(question)
       val outcome = for {
         _    <- index.indexBatch(chunks)
-        hits <- index.search(keywordQuery(question), topK = 1)
+        hits <- if (query.isEmpty) Right(Seq.empty) else index.search(query, topK = 1)
         reply <-
           if (hits.isEmpty) Right(None)
           else {
