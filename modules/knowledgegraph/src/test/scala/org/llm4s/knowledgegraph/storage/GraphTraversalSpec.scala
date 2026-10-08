@@ -7,8 +7,6 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable
-import scala.concurrent.{ Await, ExecutionContext, Future }
-import scala.concurrent.duration._
 
 /**
  * Direct tests of [[GraphTraversal.bfs]], the breadth-first traversal behind `InMemoryGraphStore` and
@@ -22,11 +20,32 @@ class GraphTraversalSpec extends AnyFunSuite with Matchers {
   private def node(id: String): Node = Node(id, "Thing")
 
   /**
-   * Runs a traversal under a hard time limit. A traversal that loops forever (a broken cycle guard) then fails the
-   * test after ten seconds instead of hanging the whole suite.
+   * How many `getNode`/`getNeighborIds` calls one traversal may make before the test fails it. The largest
+   * legitimate traversal here is the 20,001-node chain and star, about 40,000 calls (one `getNode` and one
+   * `getNeighborIds` per node), so the budget is a six-fold headroom over that; a traversal cannot loop
+   * without consulting the callbacks (the queue only refills from neighbour results), so a broken cycle
+   * guard trips the budget within a couple of seconds. The budget replaces a `Future` plus `Await` time
+   * limit: a timed-out `Await` could not stop the runaway traversal, which kept spinning on a global
+   * `ExecutionContext` worker and could starve the rest of the suite (Codex review). Here the failure
+   * happens on the test's own thread, with nothing left running and no wall clock involved.
    */
-  private def bounded[A](body: => A): A =
-    Await.result(Future(body)(ExecutionContext.global), 10.seconds)
+  private val CallBudget = 250000
+
+  /** Wraps a traversal's two callbacks so a runaway traversal fails fast instead of spinning forever. */
+  private def budgeted(
+    getNode: String => Result[Option[Node]],
+    getNeighbours: (String, Direction) => Result[Seq[String]]
+  ): (String => Result[Option[Node]], (String, Direction) => Result[Seq[String]]) = {
+    var calls = 0
+    def spend(): Unit = {
+      calls += 1
+      if (calls > CallBudget)
+        throw new IllegalStateException(
+          s"the traversal made more than $CallBudget getNode/getNeighborIds calls: a runaway loop (broken cycle guard?)"
+        )
+    }
+    (id => { spend(); getNode(id) }, (id, direction) => { spend(); getNeighbours(id, direction) })
+  }
 
   /** An in-memory graph that records how the traversal used it. */
   final private class Fixture(
@@ -53,8 +72,10 @@ class GraphTraversalSpec extends AnyFunSuite with Matchers {
       }
     }
 
-    def bfs(start: String, config: TraversalConfig = TraversalConfig()): Result[Seq[Node]] =
-      bounded(GraphTraversal.bfs(start, config)(getNode, getNeighborIds))
+    def bfs(start: String, config: TraversalConfig = TraversalConfig()): Result[Seq[Node]] = {
+      val (budgetedNode, budgetedNeighbours) = budgeted(getNode, getNeighborIds)
+      GraphTraversal.bfs(start, config)(budgetedNode, budgetedNeighbours)
+    }
 
     def visitedIds(start: String, config: TraversalConfig = TraversalConfig()): Seq[String] =
       bfs(start, config) match {
@@ -121,12 +142,11 @@ class GraphTraversalSpec extends AnyFunSuite with Matchers {
 
   test("the returned nodes are the ones getNode produced, not copies rebuilt from their ids") {
     val special = Node("a", "Person", Map("name" -> ujson.Str("Alice")))
-    val result = bounded(
-      GraphTraversal.bfs("a", TraversalConfig())(
-        id => Right(if (id == "a") Some(special) else None),
-        (_, _) => Right(Seq.empty)
-      )
+    val (budgetedNode, budgetedNeighbours) = budgeted(
+      id => Right(if (id == "a") Some(special) else None),
+      (_, _) => Right(Seq.empty)
     )
+    val result = GraphTraversal.bfs("a", TraversalConfig())(budgetedNode, budgetedNeighbours)
     result shouldBe Right(Seq(special))
   }
 
@@ -230,13 +250,16 @@ class GraphTraversalSpec extends AnyFunSuite with Matchers {
     def neighbours(id: String, direction: Direction): Result[Seq[String]] =
       Right((if (direction == Direction.Incoming) incoming else outgoing).getOrElse(id, Seq.empty))
     val nodes = Set("a", "b", "c")
-    def run(direction: Direction): Seq[String] =
-      bounded(
-        GraphTraversal.bfs("a", TraversalConfig(direction = direction))(
-          id => Right(if (nodes.contains(id)) Some(node(id)) else None),
-          neighbours
-        )
-      ).map(_.map(_.id)).getOrElse(fail("expected a traversal"))
+    def run(direction: Direction): Seq[String] = {
+      val (budgetedNode, budgetedNeighbours) = budgeted(
+        id => Right(if (nodes.contains(id)) Some(node(id)) else None),
+        neighbours
+      )
+      GraphTraversal
+        .bfs("a", TraversalConfig(direction = direction))(budgetedNode, budgetedNeighbours)
+        .map(_.map(_.id))
+        .getOrElse(fail("expected a traversal"))
+    }
     run(Direction.Outgoing) shouldBe Seq("a", "b")
     run(Direction.Incoming) shouldBe Seq("a", "c")
   }
