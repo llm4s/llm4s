@@ -22,9 +22,13 @@ import org.llm4s.types.Result
  *  - a fixed system message that asks for a bare number between 0 and 1;
  *  - a user message made of `evaluationPrompt` and the content between triple quotes.
  *
- * **Cost, latency and privacy:** every validation adds one LLM round trip and its token cost to the run, so
+ * **Cost, latency and privacy:** every validation adds one `llmClient.complete` call to the run. With a plain
+ * provider client that is one round trip and its token cost; a wrapping client changes the count -
+ * `CachingLLMClient` first embeds the system and user messages (an embedding request that sends the judged
+ * content to its embedding provider, hit or miss) and on a cache hit skips only the completion request, and
+ * `ReliableClient` can retry a failed request or reject the call with its circuit breaker open. Either way
  * these guardrails do not belong on latency-sensitive paths. The content being judged is sent to whichever
- * provider `llmClient` talks to. A cheaper or separate model can serve as judge, which also avoids a model
+ * provider `llmClient` talks to, including any embedding provider a caching wrapper uses. A cheaper or separate model can serve as judge, which also avoids a model
  * grading its own answer.
  *
  * **Scoring:** a reply is a score only when the whole reply is one plain decimal number from 0 to 1, optionally

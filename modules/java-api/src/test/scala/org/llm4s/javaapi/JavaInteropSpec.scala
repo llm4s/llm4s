@@ -6,7 +6,7 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.lang.reflect.Modifier
+import java.lang.reflect.{ GenericArrayType, Modifier, ParameterizedType, Type, TypeVariable, WildcardType }
 import scala.jdk.CollectionConverters._
 
 /**
@@ -46,6 +46,61 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     )
   }
 
+  "a streamed agent turn" should "compile from Java, with a lambda listener, and run end to end" in {
+    val streaming = StreamFixtures.Scripted(
+      onChunk => {
+        onChunk(StreamedChunk(id = "c", content = Some("4")))
+        Right(Completion("id", 0L, "4", "m", AssistantMessage("4")))
+      },
+      () => Right(Completion("id", 0L, "4", "m", AssistantMessage("4")))
+    )
+    val log = JavaInteropCheck
+      .streaming(StreamFixtures.jAgentOf(streaming)(_.withStreaming()), new java.util.concurrent.CountDownLatch(0))
+      .asScala
+      .toList
+    log should contain("durable")
+    log should contain("delta:4")
+    log.takeRight(3) shouldBe List("answer:4", "refused:true", "resume-refused:true")
+  }
+
+  it should "report a LiveGap to a Java listener" in {
+    // a gap is matched with instanceof; the flood outruns a listener that waits for the run to complete
+    val store = StreamFixtures.SignalsCompletion()
+    val flooding = StreamFixtures.Scripted(
+      onChunk => {
+        (0 until 3000).foreach(i => onChunk(StreamFixtures.chunk(i)))
+        Right(StreamFixtures.completion("4"))
+      },
+      () => Right(StreamFixtures.completion("4"))
+    )
+    val agent = StreamFixtures.jAgentOf(flooding)(
+      _.withRuntime(org.llm4s.agent.graph.GraphRuntime(store)).withStreaming()
+    )
+    val log = JavaInteropCheck.streaming(agent, store.completed).asScala.toList
+    log.exists(_.startsWith("gap:")) shouldBe true
+    log.takeRight(3) shouldBe List("answer:4", "refused:true", "resume-refused:true")
+  }
+
+  /** Every class a type mentions: itself, its type arguments, bounds and array components, recursively. */
+  private def mentioned(t: Type): List[Class[_]] = t match {
+    case c: Class[_]          => if (c.isArray) mentioned(c.getComponentType) else List(c)
+    case p: ParameterizedType => mentioned(p.getRawType) ++ p.getActualTypeArguments.toList.flatMap(mentioned)
+    case w: WildcardType      => (w.getUpperBounds ++ w.getLowerBounds).toList.flatMap(mentioned)
+    case g: GenericArrayType  => mentioned(g.getGenericComponentType)
+    case _: TypeVariable[_]   => Nil
+    case _                    => Nil
+  }
+
+  /** A Scala library or ujson type: what the facade keeps out of Java signatures. */
+  private def scalaOnly(c: Class[_]): Boolean = c.getName.startsWith("scala.") || c.getName.startsWith("ujson.")
+
+  "the interop guard" should "see a Scala type inside a generic signature" in {
+    val m = classOf[JavaInteropSpec].getDeclaredMethod("leaky", classOf[java.util.List[_]])
+    m.getGenericParameterTypes.toList.flatMap(mentioned).exists(scalaOnly) shouldBe true
+  }
+
+  def leaky(xs: java.util.List[(String, ujson.Value)]): Int = xs.size
+
   "the public Java-visible surface" should "not expose scala.* types outside the allowlisted internals" in {
     val classes = List(
       classOf[LlmResult[_]],
@@ -53,14 +108,18 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
       classOf[JAgent],
       Class.forName("org.llm4s.javaapi.Llm4s"),
       classOf[ConversationBuilder],
-      classOf[LlmException]
+      classOf[LlmException],
+      classOf[AgentStream],
+      classOf[AgentStreamListener],
+      Class.forName("org.llm4s.javaapi.StreamEvents"),
+      classOf[Answer]
     )
     val offenders = for {
       cls <- classes
       m   <- cls.getMethods.toList if Modifier.isPublic(m.getModifiers) && m.getDeclaringClass == cls
       if !internalByDesign(m.getName)
-      t <- m.getReturnType :: m.getParameterTypes.toList
-      if t.getName.startsWith("scala.")
+      t <- (m.getGenericReturnType :: m.getGenericParameterTypes.toList).flatMap(mentioned)
+      if scalaOnly(t)
     } yield s"${cls.getSimpleName}.${m.getName}: ${t.getName}"
     offenders shouldBe Nil
   }

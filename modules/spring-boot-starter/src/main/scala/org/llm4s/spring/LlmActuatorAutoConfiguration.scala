@@ -6,7 +6,8 @@ import org.springframework.boot.autoconfigure.AutoConfiguration
 import org.springframework.boot.autoconfigure.condition.{
   ConditionalOnBean,
   ConditionalOnClass,
-  ConditionalOnMissingBean
+  ConditionalOnMissingBean,
+  ConditionalOnProperty
 }
 import org.springframework.context.annotation.{ Bean, Configuration }
 
@@ -16,6 +17,10 @@ import java.util.concurrent.ExecutorService
 @Configuration
 @ConditionalOnClass(name = Array("org.springframework.boot.actuate.health.HealthIndicator"))
 @ConditionalOnBean(Array(classOf[JLlmClient]))
+// The same switch as Llm4sAutoConfiguration: llm4s.enabled=false turns the whole starter off. Without
+// this, an application supplying its own JLlmClient with the starter disabled failed startup, because
+// this configuration stayed eligible while Llm4sProperties and the executor bean were gone (#1592).
+@ConditionalOnProperty(prefix = "llm4s", name = Array("enabled"), havingValue = "true", matchIfMissing = true)
 class LlmActuatorAutoConfiguration {
 
   @Bean

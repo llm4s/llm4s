@@ -270,6 +270,40 @@ RetryPolicy.custom(
 )
 ```
 
+## Tool Call Timeouts and Retries
+
+Separate from the LLM-client retry above, a `ToolRegistry` can bound and retry individual tool calls:
+
+```scala
+import org.llm4s.toolapi._
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration._
+
+val config = ToolExecutionConfig(
+  timeout = Some(5.seconds),
+  retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 200.millis, backoffFactor = 2.0))
+)
+
+val registry = new ToolRegistry(Seq(myTool))
+registry.execute(request, config)                                       // blocks the calling thread
+registry.executeAsync(request, config)                                  // Future
+registry.executeAll(requests, ToolExecutionStrategy.ParallelWithLimit(4), config)
+```
+
+- **What is retried.** A `Timeout`, and an `ExecutionError` whose cause is an `IOException` or a
+  `TimeoutException`. Not retried: an unknown tool, invalid or null arguments, a tool's own error result, and a
+  cancellation. `maxAttempts` counts the first try.
+- **How long it waits.** Before retry *n* the wait is `baseDelay * backoffFactor^(n-1)`, so the first retry waits
+  `baseDelay`. There is no jitter. Each attempt gets its own `timeout`.
+- **`executeAsync` and `executeAll` hold no thread while backing off.** An attempt occupies a thread of your
+  `ExecutionContext` for as long as it runs; the wait between attempts is a scheduled delay, and the next attempt is
+  dispatched to your `ExecutionContext` when it elapses. A small pool therefore keeps serving other work while many
+  calls wait to retry. (Six calls that each fail once and back off 0.8 s finish in about 0.8 s on a two-thread pool;
+  a sleeping backoff needs one 0.8 s wait per wave of two.)
+- **`execute` waits on the calling thread.** A synchronous caller has nothing to resume, so it blocks for the
+  backoff. The wait is interruptible: if the thread is interrupted while it waits, the call ends as
+  `ToolCallError.Cancelled` (the interrupt flag is left set) and is not retried.
+
 ## Circuit Breaker
 
 Three states: **Closed** (normal), **Open** (failing fast), **Half-Open** (testing recovery).

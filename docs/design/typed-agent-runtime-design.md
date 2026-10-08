@@ -963,6 +963,14 @@ Decisions:
   buffer that never blocks the dispatcher: durable events are always queued, and live events past its
   capacity are dropped and reported as one `LiveGap`, so a slow consumer loses deltas, not the run.
   Interrupting or stopping early cancels the turn; a kernel `Disconnected` fails the stream.
+- **Java and Kotlin** ([#1377](https://github.com/llm4s/llm4s/issues/1377)). `JAgent.stream*` take an
+  `AgentStreamListener` (`onEvent`, then one of `onComplete` / `onError`) and return an `AgentStream`
+  (`await`, `cancel`); one virtual thread per stream drains the same buffer into the listener, so a
+  slow listener gets a `LiveGap`, and one that throws cancels the turn. `AgentKt.stream*` are cold
+  `Flow<AgentStreamItem>`s over that listener and a channel it fills: cancelling the collection cancels
+  the turn, and starting and cancelling it run on `Dispatchers.IO`. Resume answers are `Answer`s
+  (JSON as `String`), so no Scala or ujson type is in either signature. `Llm4s.createAgent(client,
+  tools, streaming)` gives either facade text deltas; `Llm4s.wrapAgent` takes a builder-made agent.
 - **Durable names are the agent's.** `ToolExecuted.tool` is `"<unknown>"` for a tool the agent does
   not have; each non-handoff call of a mixed handoff batch is reported as `Errored`. The live tool
   result is `ToolCallResult` (`agent.tool_call_result`), apart from the loop's `toolloop.ToolResult`.
@@ -986,7 +994,6 @@ and `AgentState#toTraceEvent` are removed for `AgentRunEnded`; `TracingSubscribe
 
 Limits:
 
-- Java (`JAgent`) and Kotlin (`AgentKt`) event streams are not yet available; [#1377](https://github.com/llm4s/llm4s/issues/1377) covers them.
 - The kernel's `TaskFailed` and `RunFailed` events store error messages, so a guardrail reason that quotes
   user text reaches the log through them. This predates #1329; `agent.*` payloads are content-free.
 - Live events are not replayed, and a late `AgentRun.subscribe` misses earlier ones.
