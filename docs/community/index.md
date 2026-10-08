@@ -170,8 +170,9 @@ Notes:
   same dates.
 - India and Singapore do not change their clocks, so the session is an hour later there in winter than in summer.
 - The United States changes its clocks on different dates from the UK and the EU. For a few Sundays a year (usually
-  two or three in March and one around the end of October) New York and San Francisco are one hour later than the
-  table shows: 05:00 in New York and 02:00 in San Francisco.
+  two or three in March and one around the end of October) New York is one hour later than the table shows: 05:00.
+  San Francisco is also later at 02:00, except on the first US daylight-saving Sunday in March: the session is
+  still at 01:00 PST there, before the local clock change at 02:00.
 - Check the [Luma calendar](https://luma.com/calendar/cal-Zd9BLb5jbZewxLA) for the exact time in your own time zone.
 
 [Join Discord for updates →](https://discord.gg/4uvTPn6qww)
