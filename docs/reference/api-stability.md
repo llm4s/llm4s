@@ -38,8 +38,9 @@ every top-level public type of a frozen module also carries its tier, from `org.
 | `@Experimental` | Not covered. It can change or disappear in a minor release, with a migration note in that release's CHANGELOG. |
 
 Both are Java annotations with runtime retention, so an IDE, a tool or a Java caller can read them; a
-Scala-only annotation would be invisible to all three. A companion `object` needs no annotation of its
-own: the one on its class, trait or enum covers the pair. A type that is `private` or `private[x]` needs
+Scala-only annotation would be invisible to all three. A Stable companion shares the tier of its class, trait or enum. An Experimental companion
+`object` must also carry `@Experimental`: Scala emits a separate companion class, and MiMa
+reads each class's own annotation. A type that is `private` or `private[x]` needs
 none. A type in a module 1.0 does not freeze (anything Beta or Experimental in the
 [Package Map](v1-scope#package-map)) carries neither.
 

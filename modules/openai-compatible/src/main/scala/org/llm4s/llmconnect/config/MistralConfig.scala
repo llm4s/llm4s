@@ -36,6 +36,7 @@ case class MistralConfig(
     s"MistralConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
 
+@Experimental
 object MistralConfig:
   val DEFAULT_BASE_URL: String = "https://api.mistral.ai"
 

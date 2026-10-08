@@ -191,7 +191,9 @@ package org.llm4s.mimadryrun
 final class MimaDryRunStableProbe { def value: Int = 1 }
 
 @org.llm4s.annotation.Experimental
-final class MimaDryRunExperimentalProbe { def value: Int = 2 }
+final case class MimaDryRunExperimentalProbe(value: Int = 2)
+@org.llm4s.annotation.Experimental
+object MimaDryRunExperimentalProbe
 EOF
   set_baseline "$PROBE_VERSION"
   write_dryrun_sbt "$PROBE_VERSION"
