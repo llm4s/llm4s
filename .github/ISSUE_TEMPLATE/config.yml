@@ -20,6 +20,6 @@ contact_links:
     url: https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md
     about: Learn how to contribute to LLM4S
   
-  - name: 💡 Discussions
-    url: https://github.com/llm4s/llm4s/discussions
-    about: Share ideas, design proposals, and general discussions
+  - name: 🙋 Getting help
+    url: https://github.com/llm4s/llm4s/blob/main/SUPPORT.md
+    about: Where to ask questions, report bugs and find the documentation

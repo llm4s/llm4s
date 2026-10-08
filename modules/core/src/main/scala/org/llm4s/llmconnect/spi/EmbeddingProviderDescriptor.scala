@@ -103,7 +103,7 @@ trait EmbeddingProviderDescriptor:
       model   <- EmbeddingConfigSpec.resolveModel(id, section, modelOverride, configSpec)
       baseUrl <- EmbeddingConfigSpec.resolveBaseUrl(id, section, configSpec)
       apiKey  <- EmbeddingConfigSpec.resolveApiKey(id, section, configSpec)
-    yield EmbeddingProviderConfig(baseUrl = baseUrl, model = model, apiKey = apiKey)
+    yield EmbeddingProviderConfig(baseUrl = baseUrl, model = model, apiKey = apiKey, timeouts = section.timeouts)
 
   /**
    * Constructs the embedding provider for an already-resolved config.

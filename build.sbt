@@ -512,7 +512,7 @@ lazy val core = (project in file("modules/core"))
 // dependency, they do not rewrite imports.
 
 lazy val knowledgegraph = (project in file("modules/knowledgegraph"))
-  .dependsOn(core)
+  .dependsOn(core % "compile->compile;test->test")
   .settings(
     name := "llm4s-knowledgegraph",
     commonSettings,
@@ -587,7 +587,7 @@ lazy val rag = (project in file("modules/rag"))
 // rather than rewriting imports.
 
 lazy val memory = (project in file("modules/memory"))
-  .dependsOn(core)
+  .dependsOn(core % "compile->compile;test->test")
   .settings(
     name := "llm4s-memory",
     commonSettings,
@@ -990,6 +990,10 @@ lazy val watsonx = (project in file("modules/providers/watsonx"))
 // helpers used to live in core's test sources, which are not published. A test library, so
 // ScalaTest is a compile dependency. Every in-repo provider module dogfoods it (`% Test`).
 //
+// It needs JDK 21: the interruption checks run on `Thread.ofVirtual` and the local server on
+// `Executors.newVirtualThreadPerTaskExecutor` (#1582). The docs say so; no module sets a
+// `-release` or `javacOptions` target, and where the floor is enforced is for #1493 to decide.
+//
 // Core's own tests cannot use it - that would be a project cycle - so anything core's tests
 // share with it lives in core's main sources, `private[llm4s]` (`config.ReferenceConfig`).
 lazy val providerTestkit = (project in file("modules/provider-testkit"))
@@ -1146,6 +1150,10 @@ lazy val deployService = (project in file("modules/deploy-service"))
   )
   .settings(DeployServiceDocker.settings)
 
+lazy val docSnippetsReport = taskKey[Unit](
+  "List every Scala block of the documentation pages that are compile-checked, with its hash and whether it is skipped"
+)
+
 lazy val samples = (project in file("modules//samples"))
   .dependsOn(
     core,
@@ -1183,7 +1191,34 @@ lazy val samples = (project in file("modules//samples"))
     // (org.llm4s.samples.*). Samples are compile-checked, not covered.
     coverageDisabled,
     libraryDependencies += Deps.termflow,
-    appLogging
+    // Test-only: `JsonLibrariesGuideSpec` runs the recipes of docs/guide/json-libraries.md against the real libraries.
+    // Samples are unpublished, so none of these reaches a user's classpath or a frozen module.
+    libraryDependencies ++= Seq(
+      Deps.circeCore  % Test,
+      Deps.ujsonCirce % Test,
+      Deps.playJson   % Test,
+      Deps.zioJson    % Test
+    ),
+    appLogging,
+    // The Scala blocks of the getting-started pages are compiled as test sources, so a snippet that no longer
+    // compiles fails `sbt test` (#1477). The generator and its rules are in project/DocSnippets.scala; the blocks
+    // that are deliberately not compiled are listed in src/test/docs-snippets/skip.txt.
+    Test / sourceGenerators += Def.task {
+      DocSnippets.generate(
+        (ThisBuild / baseDirectory).value / "docs",
+        baseDirectory.value / "src" / "test" / "docs-snippets" / "skip.txt",
+        (Test / sourceManaged).value / "docsnippets",
+        streams.value.log
+      )
+    }.taskValue,
+    // Warnings (unused imports and values, in a snippet written to be read) are not errors in generated sources.
+    Test / scalacOptions += "-Wconf:src=.*docsnippets.*:s",
+    docSnippetsReport := println(
+      DocSnippets.report(
+        (ThisBuild / baseDirectory).value / "docs",
+        baseDirectory.value / "src" / "test" / "docs-snippets" / "skip.txt"
+      )
+    )
   )
 
 lazy val configPolicy = (project in file("modules/config-policy"))

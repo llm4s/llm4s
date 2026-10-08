@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Google Summer of Code
-nav_order: 5
+nav_order: 10
 has_children: true
 permalink: /gsoc/
 description: "LLM4S participation in Google Summer of Code."

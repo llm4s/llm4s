@@ -7,6 +7,7 @@ import scala.concurrent.duration._
 import org.llm4s.error.CancelledError
 import java.util.concurrent.atomic.AtomicInteger
 import scala.annotation.unused
+import scala.util.{ Failure, Success, Try }
 import scala.util.control.NonFatal
 
 /**
@@ -140,11 +141,11 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
         var lastResult: Either[ToolCallError, ujson.Value] = null
         while (attempt < policy.maxAttempts) {
           lastResult = runOneAttemptWithTimeout(request, config.timeout)
-          lastResult match {
-            case Right(_) => return lastResult
-            case Left(err) if ToolCallError.isRetryable(err) && attempt + 1 < policy.maxAttempts =>
+          ToolRegistry.retryDelay(lastResult, attempt, policy) match {
+            case Some(delay) =>
               attempt += 1
-              val delay = policy.delayBeforeAttempt(attempt)
+              // A synchronous caller has nothing to resume, so the wait is on its own thread. It is
+              // interruptible: an interruption ends the wait as a cancellation, never as another attempt.
               if (delay.toMillis > 0) {
                 val slept = CancelledError.catchInterrupt(blocking(Thread.sleep(delay.toMillis)))
                 if (slept.isLeft) {
@@ -152,7 +153,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
                   return Left(ToolCallError.Cancelled(request.functionName))
                 }
               }
-            case _ => return lastResult
+            case None => return lastResult
           }
         }
         lastResult
@@ -274,6 +275,11 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   /**
    * Execute a tool call asynchronously with optional timeout and retry.
    *
+   * Each attempt runs on a thread of `ec` and holds it for the attempt only. The backoff between two
+   * attempts holds no thread: it is a scheduled delay, after which the next attempt is dispatched to `ec`,
+   * so a small pool keeps serving other work while many calls wait to retry. (The synchronous `execute`
+   * still waits on its caller's thread, interruptibly, because a synchronous caller has nothing to resume.)
+   *
    * @param request The tool call request
    * @param config  Optional timeout and retry policy
    * @param ec      ExecutionContext for async execution
@@ -282,8 +288,18 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
     request: ToolCallRequest,
     config: ToolExecutionConfig
   )(implicit ec: ExecutionContext): Future[Either[ToolCallError, ujson.Value]] =
+    config.retryPolicy match {
+      case Some(policy) => retryAsync(request, config.timeout, policy, 0)
+      case None         => attemptOnPool(request, config.timeout)
+    }
+
+  /** One attempt (with its optional timeout) on a pool thread; the thread is held for the attempt only. */
+  private def attemptOnPool(
+    request: ToolCallRequest,
+    timeout: Option[FiniteDuration]
+  )(implicit ec: ExecutionContext): Future[Either[ToolCallError, ujson.Value]] =
     Future(blocking {
-      val result = execute(request, config)
+      val result = runOneAttemptWithTimeout(request, timeout)
       // A Cancelled call left the flag set on this pool thread; the Future carries the outcome,
       // and a flag left behind would cancel the next, unrelated task the pool runs here.
       result match {
@@ -292,6 +308,67 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
       }
       result
     })
+
+  /**
+   * Attempts, and between attempts waits out the backoff without holding a thread: a positive delay is
+   * scheduled ([[Backoff.after]]) and the next attempt is dispatched to `ec` when it elapses. Which errors
+   * are retried and how long each wait is are decided by the same [[ToolRegistry.retryDelay]] as the
+   * synchronous loop.
+   *
+   * Zero-delay retries are drained by a plain loop rather than by recursing through an already-completed
+   * future: under an inline, non-trampolining `ExecutionContext` (for example
+   * `ExecutionContext.fromExecutor(_.run())`) every continuation runs on the caller's stack, so a recursive
+   * `flatMap` chain grew by a constant per attempt and a policy with `Duration.Zero` and a large
+   * `maxAttempts` overflowed it. An attempt that completes on this very stack is handled inside the loop;
+   * one that completes elsewhere re-enters the loop from its `onComplete`, which such a context dispatches
+   * on the completing thread's fresh stack.
+   */
+  private def retryAsync(
+    request: ToolCallRequest,
+    timeout: Option[FiniteDuration],
+    policy: ToolRetryPolicy,
+    attempt: Int
+  )(implicit ec: ExecutionContext): Future[Either[ToolCallError, ujson.Value]] = {
+    val done = Promise[Either[ToolCallError, ujson.Value]]()
+
+    // Settles `done`, schedules a delayed retry, or returns the next attempt index for an immediate retry.
+    def settle(outcome: Try[Either[ToolCallError, ujson.Value]], attempt: Int): Option[Int] =
+      outcome match {
+        case Failure(t) =>
+          done.tryFailure(t): Unit
+          None
+        case Success(result) =>
+          ToolRegistry.retryDelay(result, attempt, policy) match {
+            case None =>
+              done.trySuccess(result): Unit
+              None
+            case Some(delay) if delay.toNanos > 0L =>
+              Backoff.after(delay).onComplete(_ => loop(attempt + 1))
+              None
+            case Some(_) =>
+              Some(attempt + 1)
+          }
+      }
+
+    def loop(startAttempt: Int): Unit = {
+      var next = Option(startAttempt)
+      while (next.isDefined) {
+        val attempt   = next.get
+        val attempted = attemptOnPool(request, timeout)
+        next = attempted.value match {
+          // Completed on this stack (inline ExecutionContext): stay in this loop, constant stack.
+          case Some(outcome) => settle(outcome, attempt)
+          // Completes elsewhere: the callback starts a fresh loop on whichever stack runs it.
+          case None =>
+            attempted.onComplete(outcome => settle(outcome, attempt).foreach(loop))
+            None
+        }
+      }
+    }
+
+    loop(attempt)
+    done.future
+  }
 
   /**
    * Execute multiple tool calls with a configurable strategy.
@@ -388,6 +465,22 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
 }
 
 object ToolRegistry {
+
+  /**
+   * How long to wait before the next attempt, or `None` when `result` is final: a success, an error that is
+   * not retryable (cancellation included), or the last attempt the policy allows. `attempt` is 0 for the
+   * initial try. Shared by the synchronous and the asynchronous retry loops so that they cannot disagree.
+   */
+  private[toolapi] def retryDelay(
+    result: Either[ToolCallError, ujson.Value],
+    attempt: Int,
+    policy: ToolRetryPolicy
+  ): Option[FiniteDuration] =
+    result match {
+      case Left(err) if ToolCallError.isRetryable(err) && attempt + 1 < policy.maxAttempts =>
+        Some(policy.delayBeforeAttempt(attempt + 1))
+      case _ => None
+    }
 
   /**
    * Creates an empty tool registry with no tools

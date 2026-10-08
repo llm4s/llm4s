@@ -137,10 +137,10 @@ object AssistantError {
 
   // Console-specific constructors
   def consoleInputFailed(cause: Throwable): AssistantError =
-    IOError(s"Failed to read user input: ${cause.getMessage}", "read", Some(cause))
+    IOError(s"Failed to read user input: ${LLMError.describeCause(cause)}", "read", Some(cause))
 
   def consoleOutputFailed(displayType: String, cause: Throwable): AssistantError =
-    DisplayError(s"Failed to display $displayType: ${cause.getMessage}", displayType, Some(cause))
+    DisplayError(s"Failed to display $displayType: ${LLMError.describeCause(cause)}", displayType, Some(cause))
 
   // Command parsing constructors
   def emptyCommandTitle(command: String): AssistantError =

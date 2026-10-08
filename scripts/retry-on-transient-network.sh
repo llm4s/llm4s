@@ -66,6 +66,7 @@ while :; do
 
   if [ "$attempt" -le "$MAX_RETRIES" ] && is_transient; then
     wait_seconds=$((BACKOFF * attempt))
+    [ "$wait_seconds" -gt 120 ] && wait_seconds=120   # the per-wait cap holds for the computed wait, not only the base
     echo "::warning title=Transient network failure::attempt $attempt of $((MAX_RETRIES + 1)) failed on a download error; retrying in ${wait_seconds}s: $*" >&2
     echo "retry-on-transient-network: attempt $attempt failed with a transient download error (exit $rc); retrying in ${wait_seconds}s" >&2
     sleep "$wait_seconds"
