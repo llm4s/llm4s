@@ -12,7 +12,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{ Seconds, Span }
 
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.{ LinkedBlockingQueue, Semaphore, TimeUnit }
+import java.util.concurrent.{ CountDownLatch, LinkedBlockingQueue, Semaphore, TimeUnit }
+import scala.concurrent.duration._
 class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually {
 
   implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(5, Seconds))
@@ -40,6 +41,36 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
             Left(CancelledError("model call", Some(e)))
           case Right(_) => Left(ValidationError("blocking", "was never interrupted"))
         }
+      } else Right(CompletionFixture.simple("done"))
+
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = complete(conversation, options)
+
+    override def getContextWindow(): Int     = 8192
+    override def getReserveCompletion(): Int = 1024
+  }
+
+  /**
+   * A model whose first call ignores interrupts until `release` is counted down, then answers "late";
+   * `entered` is released when that call starts. Later calls answer "done".
+   */
+  final private class DeafClient extends LLMClient {
+    private val counter = new AtomicInteger(0)
+    val entered         = new Semaphore(0)
+    val release         = new CountDownLatch(1)
+
+    @scala.annotation.tailrec
+    private def awaitRelease(): Unit =
+      if !CancelledError.catchInterrupt(release.await()).isRight then awaitRelease()
+
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+      if (counter.incrementAndGet() == 1) {
+        entered.release()
+        awaitRelease()
+        Right(CompletionFixture.simple("late"))
       } else Right(CompletionFixture.simple("done"))
 
     override def streamComplete(
@@ -127,5 +158,47 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
     client.interrupted.tryAcquire(2, 10, TimeUnit.SECONDS) shouldBe true
     eventually(cause(agent.run(thread, "again").error) shouldBe a[GraphError.IncompleteRun])
     agent.recover(thread).value.answer shouldBe Some("done")
+  }
+
+  "AgentRun.cancelAndAwaitEnd" should "return within its bound when the provider ignores the interrupt, leaving the thread busy" in {
+    val client = new DeafClient
+    val agent  = plain(client)
+    val thread = ThreadId("deaf-provider")
+    val run    = agent.start(thread, "q").toOption.get
+    client.entered.tryAcquire(10, TimeUnit.SECONDS) shouldBe true
+
+    val began = System.nanoTime()
+    run.cancelAndAwaitEnd(200.millis) shouldBe false
+    (System.nanoTime() - began).nanos should be >= 200.millis
+    // the turn is still running, so the thread is busy until it ends
+    cause(agent.run(thread, "again").error) shouldBe a[GraphError.ThreadBusy]
+
+    client.release.countDown()
+    // once the provider returns, the cancelled turn ends and leaves the thread to recover
+    eventually(cause(agent.run(thread, "again").error) shouldBe a[GraphError.IncompleteRun])
+    // the late reply may be kept for recovery or asked again; either way the turn completes
+    agent.recover(thread).value.answer should not be empty
+  }
+
+  it should "keep waiting through an interrupt of the waiting thread, and leave its flag set" in {
+    val client  = new DeafClient
+    val agent   = plain(client)
+    val run     = agent.start(ThreadId("deaf-interrupted"), "q").toOption.get
+    val outcome = new LinkedBlockingQueue[(Boolean, Long, Boolean)]()
+    client.entered.tryAcquire(10, TimeUnit.SECONDS) shouldBe true
+
+    val waiter = Thread.ofVirtual().start { () =>
+      val began = System.nanoTime()
+      val ended = run.cancelAndAwaitEnd(500.millis)
+      outcome.offer((ended, System.nanoTime() - began, Thread.currentThread().isInterrupted)): Unit
+    }
+    Thread.sleep(100)
+    waiter.interrupt()
+    val (ended, waited, stillInterrupted) = outcome.poll(10, TimeUnit.SECONDS)
+
+    ended shouldBe false
+    waited.nanos should be >= 500.millis
+    stillInterrupted shouldBe true
+    client.release.countDown()
   }
 }

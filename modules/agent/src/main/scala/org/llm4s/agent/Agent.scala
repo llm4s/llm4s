@@ -55,9 +55,11 @@ final class Agent private[agent] (
    * is unchanged.
    *
    * Interrupting the calling thread cancels the turn: `run` returns `Left(CancelledError)` with the
-   * interrupt flag still set, once the turn has ended, leaving the thread for [[recover]]. A caller
-   * already interrupted gets that `Left` without a turn being started. To keep a turn running past an
-   * interrupt, use [[start]] and await the [[AgentRun]].
+   * interrupt flag still set, once the turn has ended, leaving the thread for [[recover]]. It waits for
+   * the end within [[AgentRun.Drain]]: a turn whose provider ignores its interrupt for longer is logged
+   * at WARN and left to end on its own, and until it does the thread is `GraphError.ThreadBusy`. A
+   * caller already interrupted gets that `Left` without a turn being started. To keep a turn running
+   * past an interrupt, use [[start]] and await the [[AgentRun]].
    */
   def run(threadId: ThreadId, query: String, config: RunConfig, history: Seq[Message]): Result[AgentResult] =
     blocking(start(threadId, query, config, history))
@@ -216,9 +218,11 @@ final class Agent private[agent] (
 
   /**
    * Starts a turn with `begin` and awaits it. A caller already interrupted starts nothing. An
-   * interrupted wait cancels the turn and returns once it has ended, so a blocking call - `run` inside
-   * a graph node whose run is cancelled - never leaves its turn running, and the thread is free for
-   * [[recover]]. Either way the interrupt flag stays set.
+   * interrupted wait cancels the turn and returns once it has ended, within [[AgentRun.Drain]], so a
+   * blocking call - `run` inside a graph node whose run is cancelled - does not leave its turn running
+   * and the thread is free for [[recover]]. The wait is bounded so that a provider ignoring its
+   * interrupt cannot hang a cancelled caller; such a turn is left to end on its own (see
+   * [[AgentRun.cancelAndAwaitEnd]]). Either way the interrupt flag stays set.
    */
   private def blocking(begin: => Result[AgentRun]): Result[AgentResult] =
     if Thread.currentThread().isInterrupted then Left(CancelledError("agent turn"))
@@ -226,7 +230,7 @@ final class Agent private[agent] (
       begin.flatMap { run =>
         run.await() match
           case cancelled @ Left(_: CancelledError) =>
-            run.cancelAndAwaitEnd()
+            run.cancelAndAwaitEnd(): Unit
             cancelled
           case other => other
       }

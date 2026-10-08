@@ -126,7 +126,8 @@ path and against a custom client that throws `InterruptedException`, and checks 
 If the thread blocked in `JAgent.run` is interrupted, `run` returns a failed result with a `CancelledError` and the
 interrupt flag set, and the run is cancelled with it: its model call is interrupted, and the thread is left for
 `recover` (since [#1330](https://github.com/llm4s/llm4s/issues/1330); before, the run carried on in the background).
-To stop a run from Java, interrupt the thread that called `run` - for example `Future.cancel(true)` on the task that
+`run` waits up to 5 seconds for the cancelled run to end; a provider that ignores the interrupt for longer is logged at
+WARN and left to finish on its own, and until it does the thread is busy (`ThreadBusy`). To stop a run from Java, interrupt the thread that called `run` - for example `Future.cancel(true)` on the task that
 called it.
 
 ## Timeouts
