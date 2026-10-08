@@ -35,6 +35,17 @@ class OpenAICompatibleWorkloadIdentitySpec
 
   private val conversation = Conversation(Seq(UserMessage("hi")))
 
+  /** `body` run on a thread with a deliberately small (256 KB) stack; a throw, overflow included, fails the test. */
+  private def onSmallStack[A](body: => A): A =
+    val result  = new java.util.concurrent.atomic.AtomicReference[Option[A]](None)
+    val failure = new java.util.concurrent.atomic.AtomicReference[Option[Throwable]](None)
+    val thread  = new Thread(null, () => result.set(Some(body)), "small-stack", 256L * 1024)
+    thread.setUncaughtExceptionHandler((_, e) => failure.set(Some(e)))
+    thread.start()
+    thread.join(60000)
+    failure.get.foreach(e => fail(s"threw on a 256 KB stack: $e"))
+    result.get.getOrElse(fail("did not finish"))
+
   // On POSIX the name gets a backslash, as every Windows path has, so the HOCON escaping is exercised everywhere.
   private val svidPrefix = if java.io.File.separatorChar == '/' then "svid\\Ufile" else "svid"
 
@@ -317,6 +328,58 @@ class OpenAICompatibleWorkloadIdentitySpec
         error shouldBe an[AuthenticationError]
         error.message should include("lacks permission")
         for secret <- Seq(bearer, clientId, subject) do (error.message should not).include(secret)
+        c.close()
+    }
+
+    "return a Left, never overflow, for an API error body nested 100,000 deep, on complete or stream" in {
+      given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+      val key                                    = "opaque-static-key-deep-3"
+      val depth                                  = 100000
+      val deep = s"""{"error":{"message":"bad key $key"},"x":""" + "[" * depth + "]" * depth + "}"
+      for
+        status    <- Seq(400, 401, 500, 503)
+        streaming <- Seq(false, true)
+      do
+        val http = MockHttpClient(Seq(HttpResponse(status, deep)))
+        val c = new OpenAICompatibleClient(
+          OpenAICompatibleClient
+            .Settings("p", "P", "m", "https://h/v1", OpenAICompatibleClient.Credential.Static(key), 8192, 2048),
+          OpenAICompatibleDialect.Standard
+        ) {
+          override protected[provider] val httpClient: Llm4sHttpClient = http
+        }
+        val result = onSmallStack {
+          if streaming then c.streamComplete(conversation, CompletionOptions(), _ => ())
+          else c.complete(conversation, CompletionOptions())
+        }
+        withClue(s"HTTP $status, streaming=$streaming: ") {
+          result.isLeft shouldBe true
+          (result.left.value.message should not).include(key)
+        }
+        c.close()
+    }
+
+    "exchange with the section's request timeout, or the default when it sets none" in {
+      given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+      import scala.concurrent.duration.DurationInt
+      val exchange = OpenAICompatibleClient.Credential.Exchange(
+        TokenExchangeConfig(IdentitySource.Literal("opaque-svid-literal-5"), "https://ws.example/oidc/v1/token")
+      )
+      for (timeouts, expected) <- Seq(
+          org.llm4s.llmconnect.config.ProviderTimeouts(request = Some(7.seconds)) -> 7.seconds,
+          org.llm4s.llmconnect.config.ProviderTimeouts.default -> OpenAICompatibleClient.RequestTimeout
+        )
+      do
+        val http = MockHttpClient(Seq(HttpResponse(400, """{"error":"invalid_grant"}""")))
+        val c = new OpenAICompatibleClient(
+          OpenAICompatibleClient.Settings("p", "P", "m", "https://h/v1", exchange, 8192, 2048, timeouts),
+          OpenAICompatibleDialect.Standard
+        ) {
+          override protected[provider] val httpClient: Llm4sHttpClient = http
+        }
+        c.complete(conversation, CompletionOptions()).left.value shouldBe an[AuthenticationError]
+        http.lastUrl shouldBe Some("https://ws.example/oidc/v1/token")
+        http.lastTimeout shouldBe Some(expected)
         c.close()
     }
 

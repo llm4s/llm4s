@@ -845,12 +845,14 @@ object AnthropicClient {
 
   /**
    * The configured values an error must not repeat: the API key, or with workload identity the ids
-   * `AnthropicWorkloadIdentity.toString` redacts.
+   * `AnthropicWorkloadIdentity.toString` redacts, when long enough to scrub without garbling the body
+   * ([[Redaction.identifiers]]).
    */
   private[provider] def credentialSecrets(config: AnthropicConfig): Seq[String] =
     config.workloadIdentity match {
-      case None     => Seq(config.apiKey)
-      case Some(wi) => Seq(wi.federationRuleId, wi.organizationId) ++ wi.serviceAccountId ++ wi.workspaceId
+      case None => Seq(config.apiKey)
+      case Some(wi) =>
+        Redaction.identifiers(Seq(wi.federationRuleId, wi.organizationId) ++ wi.serviceAccountId ++ wi.workspaceId)
     }
   import org.llm4s.types.TryOps
 

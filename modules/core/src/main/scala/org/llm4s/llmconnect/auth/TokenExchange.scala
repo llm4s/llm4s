@@ -6,7 +6,7 @@ import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.provider.HttpErrorMapper
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
+import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.net.{ URI, URLEncoder }
 import java.nio.charset.StandardCharsets
@@ -84,9 +84,9 @@ object TokenExchangeConfig:
 @Experimental
 object TokenExchange:
 
-  val GrantType: String              = "urn:ietf:params:oauth:grant-type:token-exchange"
-  val JwtTokenType: String           = "urn:ietf:params:oauth:token-type:jwt"
-  val DefaultTimeout: FiniteDuration = 30.seconds
+  private[llm4s] val GrantType: String    = "urn:ietf:params:oauth:grant-type:token-exchange"
+  private[llm4s] val JwtTokenType: String = "urn:ietf:params:oauth:token-type:jwt"
+  val DefaultTimeout: FiniteDuration      = 30.seconds
 
   /**
    * The longest lifetime a token is believed to have, whatever the endpoint's `expires_in` says: a reply
@@ -210,10 +210,11 @@ object TokenExchange:
 
   /**
    * The values a token-endpoint reply must never repeat into an error: the subject token posted, the
-   * configured identity token when it is a literal, and the `clientId` (redacted in `toString` too).
+   * configured identity token when it is a literal, and the `clientId` (redacted in `toString` too) when it
+   * is long enough to scrub without garbling the body ([[Redaction.identifiers]]).
    */
   private def sensitiveValues(config: TokenExchangeConfig, jwt: String): Seq[String] =
-    Seq(jwt) ++ config.clientId ++ (config.identityToken match
+    Seq(jwt) ++ Redaction.identifiers(config.clientId) ++ (config.identityToken match
       case IdentitySource.Literal(token) => Seq(token)
       case IdentitySource.File(_)        => Nil
     )
@@ -239,7 +240,8 @@ object TokenExchange:
     lazy val errorBody = safeBody(response.body, secrets)
     response.statusCode match
       case status if status >= 200 && status < 300 =>
-        val obj = Try(ujson.read(response.body)).toOption.flatMap(_.objOpt)
+        // Bounded: the reply is a remote server's, and a too-deep one is just a reply with no access_token.
+        val obj = BoundedJson.read(response.body).toOption.flatMap(_.objOpt)
         obj
           .flatMap(_.get("access_token").flatMap(_.strOpt).map(_.trim).filter(_.nonEmpty))
           .toRight(AuthenticationError(Provider, "token endpoint reply has no access_token"))
@@ -277,7 +279,7 @@ object TokenExchange:
     token.split('.') match
       case Array(_, payload, _) =>
         Try(new String(Base64.getUrlDecoder.decode(payload), StandardCharsets.UTF_8)).toOption
-          .flatMap(json => Try(ujson.read(json)).toOption)
+          .flatMap(json => BoundedJson.read(json).toOption)
           .flatMap(_.objOpt)
           .flatMap(_.get("exp"))
           .flatMap(_.numOpt)

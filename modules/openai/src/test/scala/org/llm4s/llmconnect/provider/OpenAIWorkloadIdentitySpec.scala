@@ -137,6 +137,28 @@ class OpenAIWorkloadIdentitySpec
         do (error.message should not).include(secret)
     }
 
+    "scrub a short literal identity token, but not short ids that would garble every error body" in {
+      val config = OpenAIConfig(
+        apiKey = "",
+        model = "gpt-4o-mini",
+        organization = None,
+        baseUrl = "https://api.openai.com/v1",
+        contextWindow = 8192,
+        reserveCompletion = 1024,
+        workloadIdentity = Some(
+          OpenAIWorkloadIdentity(IdentitySource.Literal("tok"), "idp", "prod").withClientId("app")
+        )
+      )
+      OpenAIClient.credentialSecrets(config) shouldBe Seq("tok")
+      val error = OpenAIClient.mapError(
+        new com.openai.errors.OpenAIInvalidDataException("app in prod rejected tok"),
+        "openai",
+        OpenAIClient.credentialSecrets(config)
+      )
+      error.message should include("app in prod rejected")
+      (error.message should not).include("tok")
+    }
+
     "read the identity token for the async path off the common pool" in {
       val file = Files.createTempFile("svid", ".jwt")
       Files.writeString(file, "eyJ.svid.sig")

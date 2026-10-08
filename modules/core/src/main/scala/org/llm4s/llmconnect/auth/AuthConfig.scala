@@ -22,9 +22,9 @@ final case class AuthConfig private (identityToken: IdentitySource, extras: Map[
     s"AuthConfig($identityToken, ${extras.keys.toSeq.sorted.map(k => s"$k -> ***").mkString("Map(", ", ", ")")})"
 
 object AuthConfig:
-  val IdentityTokenFileKey: String = "identityTokenFile"
-  val IdentityTokenKey: String     = "identityToken"
-  val ReservedKeys: Set[String]    = Set(IdentityTokenFileKey, IdentityTokenKey)
+  private[llm4s] val IdentityTokenFileKey: String = "identityTokenFile"
+  private[llm4s] val IdentityTokenKey: String     = "identityToken"
+  private[llm4s] val ReservedKeys: Set[String]    = Set(IdentityTokenFileKey, IdentityTokenKey)
 
   /** Creates an [[AuthConfig]]. Named arguments are the supported way to construct one. */
   def apply(identityToken: IdentitySource, extras: Map[String, String] = Map.empty): AuthConfig =

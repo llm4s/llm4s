@@ -3,7 +3,13 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
-import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentitySource, TokenExchange, TokenExchangeConfig }
+import org.llm4s.llmconnect.auth.{
+  AccessTokenProvider,
+  CachingAccessTokenProvider,
+  IdentitySource,
+  TokenExchange,
+  TokenExchangeConfig
+}
 import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
@@ -303,12 +309,14 @@ class OpenAICompatibleClient(
   /**
    * Where a dynamic credential's tokens come from. An [[OpenAICompatibleClient.Credential.Exchange]]
    * exchanges through this client's own [[httpClient]] - lazily, so a spec's substitute is the one
-   * used - which `releaseResources` closes with everything else.
+   * used - which `releaseResources` closes with everything else - and with the section's request timeout
+   * ([[requestTimeout]]), so a slow token endpoint is given up on when a slow completion would be.
    */
   private lazy val tokenProvider: Option[AccessTokenProvider] = settings.credential match
     case OpenAICompatibleClient.Credential.Dynamic(provider) => Some(provider)
-    case OpenAICompatibleClient.Credential.Exchange(config)  => Some(TokenExchange.provider(config, httpClient))
-    case _                                                   => None
+    case OpenAICompatibleClient.Credential.Exchange(config) =>
+      Some(new CachingAccessTokenProvider(TokenExchange.rfc8693(config, httpClient, timeout = requestTimeout)))
+    case _ => None
 
   /** The current bearer value, if this client sends one. */
   private def bearer(): Result[Option[String]] = settings.credential match
@@ -328,7 +336,8 @@ class OpenAICompatibleClient(
 
   /**
    * The credentials a request with `requestHeaders` carried, which an error body must not repeat: the
-   * bearer token sent, and for an exchange its client id and literal identity token.
+   * bearer token sent, and for an exchange its literal identity token and its client id (when long enough to
+   * scrub without garbling the body, [[Redaction.identifiers]]).
    */
   private def credentialSecrets(requestHeaders: Map[String, String]): Seq[String] = {
     val bearer = requestHeaders.collect {
@@ -336,7 +345,7 @@ class OpenAICompatibleClient(
     }
     val exchange = settings.credential match {
       case OpenAICompatibleClient.Credential.Exchange(config) =>
-        config.clientId.toSeq ++ (config.identityToken match {
+        Redaction.identifiers(config.clientId) ++ (config.identityToken match {
           case IdentitySource.Literal(token) => Seq(token)
           case IdentitySource.File(_)        => Nil
         })

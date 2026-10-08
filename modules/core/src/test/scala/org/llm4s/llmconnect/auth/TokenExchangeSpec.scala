@@ -1,14 +1,17 @@
 package org.llm4s.llmconnect.auth
 
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, ServiceError }
-import org.llm4s.http.{ HttpResponse, MockHttpClient }
+import com.sun.net.httpserver.HttpServer
+import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient }
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-import java.net.URLDecoder
+import java.net.{ InetSocketAddress, URLDecoder }
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicReference
+import scala.util.Using
 
 class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with OptionValues:
 
@@ -343,5 +346,57 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
       provider.token() shouldBe Right("dbx-1")
       provider.token() shouldBe Right("dbx-1")
       http.postCallCount shouldBe 1
+    }
+  }
+
+  "TokenExchange.rfc8693 against a token endpoint replying with JSON nested 100,000 deep" should {
+    given Using.Releasable[HttpServer] = _.stop(0)
+
+    val depth    = 100000
+    val clientId = "sp-client-deep-77"
+    val deepBody = s"""{"error":"invalid_grant","client":"$clientId","x":""" + "[" * depth + "]" * depth + "}"
+
+    /** A local endpoint answering every request with `status` and `body`. */
+    def server(status: Int, body: String): HttpServer =
+      val bytes = body.getBytes(StandardCharsets.UTF_8)
+      val s     = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0)
+      s.createContext(
+        "/token",
+        exchange => {
+          exchange.getRequestBody.readAllBytes()
+          exchange.sendResponseHeaders(status, bytes.length.toLong)
+          exchange.getResponseBody.write(bytes)
+          exchange.close()
+        }
+      )
+      s.start()
+      s
+
+    /** `body` run on a thread with a deliberately small (256 KB) stack; a throw, overflow included, fails the test. */
+    def onSmallStack[A](body: => A): A =
+      val result  = new AtomicReference[Option[A]](None)
+      val failure = new AtomicReference[Option[Throwable]](None)
+      val thread  = new Thread(null, () => result.set(Some(body)), "small-stack", 256L * 1024)
+      thread.setUncaughtExceptionHandler((_, e) => failure.set(Some(e)))
+      thread.start()
+      thread.join(60000)
+      failure.get.foreach(e => fail(s"threw on a 256 KB stack: $e"))
+      result.get.getOrElse(fail("did not finish"))
+
+    "return a Left, never overflow, and never repeat the client id, for 400, 503 and 200" in {
+      for status <- Seq(400, 503, 200) do
+        Using.resource(server(status, deepBody)) { s =>
+          val cfg = TokenExchangeConfig(
+            IdentitySource.Literal(jwt),
+            s"http://127.0.0.1:${s.getAddress.getPort}/token",
+            clientId = Some(clientId)
+          )
+          val result = onSmallStack(TokenExchange.rfc8693(cfg, Llm4sHttpClient.create(), clock)())
+          withClue(s"HTTP $status: ") {
+            result.isLeft shouldBe true
+            (result.left.value.message should not).include(clientId)
+            (result.left.value.message should not).include(jwt)
+          }
+        }
     }
   }

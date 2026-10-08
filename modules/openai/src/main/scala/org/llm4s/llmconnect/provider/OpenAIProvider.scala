@@ -25,9 +25,9 @@ object OpenAIProvider extends ProviderDescriptor:
   val DEFAULT_BASE_URL: String = "https://api.openai.com/v1"
 
   /** `auth` keys for OpenAI's workload identity federation. */
-  val IdentityProviderIdKey: String = "identityProviderId"
-  val ServiceAccountIdKey: String   = "serviceAccountId"
-  val ClientIdKey: String           = "clientId"
+  private[llm4s] val IdentityProviderIdKey: String = "identityProviderId"
+  private[llm4s] val ServiceAccountIdKey: String   = "serviceAccountId"
+  private[llm4s] val ClientIdKey: String           = "clientId"
 
   /** Each `workloadIdentity` field a config refusal names, as the `auth` key the section spells it with. */
   private val AuthSectionKeys: Map[String, String] =

@@ -5,7 +5,6 @@ import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 import scala.annotation.{ tailrec, unused }
-import scala.util.Try
 import scala.util.matching.Regex
 
 /**
@@ -310,22 +309,43 @@ private[llm4s] object Redaction {
 
   private val MinRepeatedSecretLength = 8
 
-  /** The string values of sensitive fields, at any depth, when `input` is JSON; otherwise none. */
-  private def sensitiveJsonValues(input: String): Seq[String] = {
-    def strings(value: ujson.Value): Seq[String] = value match {
-      case ujson.Str(s)   => Seq(s)
-      case ujson.Obj(obj) => obj.values.toSeq.flatMap(strings)
-      case ujson.Arr(arr) => arr.toSeq.flatMap(strings)
-      case _              => Nil
-    }
-    def sensitive(value: ujson.Value): Seq[String] = value match {
-      case ujson.Obj(obj) =>
-        obj.toSeq.flatMap((key, v) => if (isSensitiveKey(key)) strings(v) else sensitive(v))
-      case ujson.Arr(arr) => arr.toSeq.flatMap(sensitive)
-      case _              => Nil
-    }
+  /**
+   * Of `ids` - identifiers a request carried that are not themselves credentials, such as a client id, an
+   * identity-provider, organization or federation-rule id - those long enough to scrub by exact match: eight
+   * characters or more, the floor applied to sensitive JSON values. A short id (`app`, `prod`) would garble every
+   * error body it was scrubbed from, so it is left out. Never pass a bearer token, API key, JWT or identity token
+   * through this: those go to [[scrub]] / [[remoteBody]] as they are, whatever their length.
+   */
+  def identifiers(ids: Iterable[String]): Seq[String] =
+    ids.iterator.filter(_ != null).map(_.trim).filter(_.length >= MinRepeatedSecretLength).toSeq
+
+  /**
+   * The string values of sensitive fields, at any depth, when `input` is JSON; otherwise none. The body is a
+   * remote server's, so it is parsed through [[BoundedJson]]: one nested too deeply is treated as no JSON (the
+   * configured secrets and the general patterns still apply to its text). The traversal is iterative as well, so
+   * it cannot overflow the stack whatever the depth of the value.
+   */
+  private def sensitiveJsonValues(input: String): Seq[String] =
     // A very short value is left to the key pattern: replacing every occurrence of, say, "a" would garble the body.
-    Try(ujson.read(input)).toOption.fold(Seq.empty[String])(sensitive).filter(_.trim.length >= MinRepeatedSecretLength)
+    BoundedJson
+      .read(input)
+      .toOption
+      .fold(Seq.empty[String])(sensitiveStrings)
+      .filter(_.trim.length >= MinRepeatedSecretLength)
+
+  /** Every string leaf under a sensitive key of `root`, found with an explicit stack rather than recursion. */
+  private def sensitiveStrings(root: ujson.Value): Seq[String] = {
+    val found = Seq.newBuilder[String]
+    // Each entry is a value and whether it sits under a sensitive key.
+    val stack = scala.collection.mutable.Stack[(ujson.Value, Boolean)](root -> false)
+    while (stack.nonEmpty)
+      stack.pop() match {
+        case (ujson.Str(s), true)    => found += s
+        case (ujson.Obj(obj), under) => obj.foreach((key, v) => stack.push(v -> (under || isSensitiveKey(key))))
+        case (ujson.Arr(arr), under) => arr.foreach(v => stack.push(v -> under))
+        case _                       => ()
+      }
+    found.result()
   }
 
   // ============================================================

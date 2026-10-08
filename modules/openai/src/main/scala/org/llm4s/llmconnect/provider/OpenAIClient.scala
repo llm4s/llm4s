@@ -776,14 +776,17 @@ object OpenAIClient {
 
   /**
    * The configured values an error built from a remote reply must not repeat: the API key, or with
-   * workload identity the ids `toString` redacts and a literal identity token.
+   * workload identity a literal identity token and the ids `toString` redacts (those long enough to scrub
+   * without garbling the body, [[Redaction.identifiers]]).
    */
   private[provider] def credentialSecrets(config: ProviderConfig): Seq[String] = config match {
     case openAI: OpenAIConfig =>
       openAI.workloadIdentity match {
         case None => Seq(openAI.apiKey)
         case Some(wi) =>
-          Seq(wi.identityProviderId, wi.serviceAccountId) ++ wi.clientId ++ (wi.identityToken match {
+          Redaction.identifiers(
+            Seq(wi.identityProviderId, wi.serviceAccountId) ++ wi.clientId
+          ) ++ (wi.identityToken match {
             case IdentitySource.Literal(token) => Seq(token)
             case IdentitySource.File(_)        => Nil
           })

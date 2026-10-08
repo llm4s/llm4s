@@ -97,10 +97,10 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
   val ReserveCompletionKey: String = "reserveCompletion"
 
   /** `auth` keys: the RFC 8693 token endpoint (required), and the optional exchange parameters. */
-  val TokenUrlKey: String = "tokenUrl"
-  val ClientIdKey: String = "clientId"
-  val ScopeKey: String    = "scope"
-  val AudienceKey: String = "audience"
+  private[llm4s] val TokenUrlKey: String = "tokenUrl"
+  private[llm4s] val ClientIdKey: String = "clientId"
+  private[llm4s] val ScopeKey: String    = "scope"
+  private[llm4s] val AudienceKey: String = "audience"
 
   /** Each `tokenExchange` field a config refusal names, as the `auth` key the section spells it with. */
   private val AuthSectionKeys: Map[String, String] =

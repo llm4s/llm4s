@@ -130,7 +130,7 @@ object CachingAccessTokenProvider:
   val DefaultRefreshMargin: FiniteDuration = 60.seconds
 
   /** The operation a [[CancelledError]] names when a caller is interrupted waiting for a token. */
-  val Operation: String = "workload-identity.token"
+  private[llm4s] val Operation: String = "workload-identity.token"
 
   /** How long a rejected fetch (not recoverable) is shared with the callers that arrive meanwhile. */
   private[auth] val FailureTtl: FiniteDuration = 5.seconds

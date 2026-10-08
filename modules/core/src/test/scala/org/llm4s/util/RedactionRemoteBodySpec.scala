@@ -5,8 +5,30 @@ import org.scalatest.matchers.should.Matchers
 
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicReference
 
 class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
+
+  /**
+   * Runs `body` on a thread with a deliberately small (256 KB) stack and returns its value; fails the test if it
+   * threw anything, a `StackOverflowError` included - which `Try` would not catch.
+   */
+  private def onSmallStack[A](body: => A): A = {
+    val result  = new AtomicReference[Option[A]](None)
+    val failure = new AtomicReference[Option[Throwable]](None)
+    val thread  = new Thread(null, () => result.set(Some(body)), "small-stack", 256L * 1024)
+    thread.setUncaughtExceptionHandler((_, e) => failure.set(Some(e)))
+    thread.start()
+    thread.join(60000)
+    failure.get.foreach(e => fail(s"threw on a 256 KB stack: $e"))
+    result.get.getOrElse(fail("did not finish"))
+  }
+
+  private val Depth  = 100000
+  private val Secret = "opaque-bearer-deep-1"
+  private val deepBody =
+    s"""{"error":{"message":"bad bearer $Secret"},"nested":""" + "[" * Depth + s""""$Secret"""" + "]" * Depth + "}"
+  private val deepArray = "[" * Depth + s""""$Secret"""" + "]" * Depth
 
   "Redaction.remoteBody" should "scrub every configured secret by exact match, URL-encoded and JSON-escaped" in {
     val secret  = "s3cr+t/\"value\"-1234"
@@ -67,5 +89,40 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
     val out  = Redaction.scrubRemote(body, Seq("opaque-bearer-99"))
     (out should not).include("opaque-bearer-99")
     ujson.read(out)("error")("message").str shouldBe "bad bearer [REDACTED]"
+  }
+
+  "Redaction.scrubRemote and remoteBody" should "return for a body nested 100,000 deep on a small stack, never repeating a secret" in {
+    for body <- Seq(deepBody, deepArray) do {
+      val scrubbed = onSmallStack(Redaction.scrubRemote(body, Seq(Secret)))
+      val remote   = onSmallStack(Redaction.remoteBody(body, Seq(Secret)))
+      (scrubbed should not).include(Secret)
+      (remote should not).include(Secret)
+      scrubbed.length should be > Depth
+    }
+  }
+
+  it should "still find a sensitive JSON value in a body nested within the bound" in {
+    val body = """{"message":"echo opaque-access-tok-9","x":""" + "[" * 400 +
+      """{"access_token":"opaque-access-tok-9"}""" + "]" * 400 + "}"
+    val out = onSmallStack(Redaction.scrubRemote(body))
+    (out should not).include("opaque-access-tok-9")
+  }
+
+  "Redaction.identifiers" should "keep identifiers of eight characters or more and drop shorter ones" in {
+    Redaction.identifiers(Seq("app", "prod", " ab12345 ", "sp-client-4d2e81", null, "")) shouldBe
+      Seq("sp-client-4d2e81")
+    Redaction.identifiers(Seq("org_1234")) shouldBe Seq("org_1234")
+  }
+
+  it should "leave a body readable when a short identifier occurs in it, and scrub a long one" in {
+    val body = """{"error":{"message":"app prod rejected for client sp-client-4d2e81"}}"""
+    val out  = Redaction.remoteBody(body, Redaction.identifiers(Seq("app", "prod", "sp-client-4d2e81")))
+    out should include("app prod rejected")
+    (out should not).include("sp-client-4d2e81")
+  }
+
+  it should "never weaken the scrub of a credential passed as a secret, however short" in {
+    val out = Redaction.remoteBody("token k9x echoed", Seq("k9x"))
+    (out should not).include("k9x")
   }
 }

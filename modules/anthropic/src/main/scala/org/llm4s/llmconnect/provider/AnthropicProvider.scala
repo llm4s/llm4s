@@ -18,10 +18,10 @@ object AnthropicProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("anthropic")
 
   /** `auth` keys for Anthropic's workload identity federation. */
-  val FederationRuleIdKey: String = "federationRuleId"
-  val OrganizationIdKey: String   = "organizationId"
-  val ServiceAccountIdKey: String = "serviceAccountId"
-  val WorkspaceIdKey: String      = "workspaceId"
+  private[llm4s] val FederationRuleIdKey: String = "federationRuleId"
+  private[llm4s] val OrganizationIdKey: String   = "organizationId"
+  private[llm4s] val ServiceAccountIdKey: String = "serviceAccountId"
+  private[llm4s] val WorkspaceIdKey: String      = "workspaceId"
 
   /** Each `workloadIdentity` field a config refusal names, as the `auth` key the section spells it with. */
   private val AuthSectionKeys: Map[String, String] =

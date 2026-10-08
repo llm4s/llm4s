@@ -144,7 +144,7 @@ final case class ProviderConfigSpec private (
   def extra(name: String): Option[ProviderConfigKey] = extras.find(_.name == name)
 
   /** Whether a section for this provider may carry an `auth` block. */
-  def supportsAuth: Boolean = authExtras.nonEmpty
+  private[llm4s] def supportsAuth: Boolean = authExtras.nonEmpty
 
 object ProviderConfigSpec:
 

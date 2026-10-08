@@ -309,6 +309,19 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
         for secret <- echoed do (error.message should not).include(secret)
     }
 
+    "not scrub ids too short to scrub without garbling the body, but always an API key" in {
+      val short = config.withWorkloadIdentity(
+        AnthropicWorkloadIdentity(Path.of("/var/run/svid.jwt"), "rule", "org", workspaceId = Some("prod"))
+      )
+      AnthropicClient.credentialSecrets(short) shouldBe Nil
+      AnthropicClient.credentialSecrets(config.withApiKey("k").withWorkloadIdentity(None)) shouldBe Seq("k")
+      val error = AnthropicClient.mapError(
+        new IllegalStateException("org prod rejected"),
+        AnthropicClient.credentialSecrets(short)
+      )
+      error.message should include("org prod rejected")
+    }
+
     "redact an API key echoed by a failure when no workload identity is configured" in {
       val keyed = config.withApiKey("opaque-anthropic-key-1").withWorkloadIdentity(None)
       val error = AnthropicClient.mapError(
