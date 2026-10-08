@@ -1986,6 +1986,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ToolMessage(result, "")` after a replayed `"id": ""` call got `"id": ""` on its `functionResponse`, where parse and
   replay both read an empty id as "no id". The three sites now agree: an empty id is never collected, so no
   `functionResponse` carries one; the signed part still goes back verbatim. Same on Vertex AI.
+- **`TokenizerMapping` reports a Claude model under the `azure/` prefix as approximate, as it tokenizes it**
+  ([#1572](https://github.com/llm4s/llm4s/issues/1572)): `getTokenizerId` tested its Claude guard before the
+  `azure/` prefix, while `getAccuracyInfo` tested the prefix first, so a name such as `azure/claude-3-sonnet` was
+  tokenized as a Claude model but reported `Exact("Azure uses OpenAI tokenizers")`, and `isExactMapping` returned
+  `true` for a model the class documentation's table calls approximate. `getAccuracyInfo` now takes the guards in
+  `getTokenizerId`'s order, so `azure/claude-...` is `Approximate` with accuracy 0.75 and `isExactMapping` is
+  `false` for it, as for `claude-...` and `anthropic/...`. The tokenizer selected does not change (`cl100k_base`
+  either way), and an Azure deployment whose name does not contain `claude` is still reported exact.
 - **`llm4s-agent-tools`: `json_tool` refuses what it used to mishandle**
   ([#1508](https://github.com/llm4s/llm4s/issues/1508), [#1509](https://github.com/llm4s/llm4s/issues/1509),
   [#1510](https://github.com/llm4s/llm4s/issues/1510)): a `query` path with an array index too large for an `Int`

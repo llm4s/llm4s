@@ -169,6 +169,24 @@ class TokenizerMappingSpec extends AnyFlatSpec with Matchers {
     expectApproximate(0.75)("claude-3-sonnet", "anthropic/claude-3-sonnet", "anthropic/some-future-model", "CLAUDE-3")
   }
 
+  it should "report a Claude model under the azure prefix as approximate, as getTokenizerId maps it as Claude" in {
+    // `getTokenizerId` tests the Claude guard before the azure/ prefix, so `azure/claude-...` is
+    // tokenized as a Claude model; the table says Claude is approximate, whoever hosts it, so this
+    // method must take the same guard first and not report "Azure uses OpenAI tokenizers"
+    expectApproximate(0.75)("azure/claude-3-sonnet", "azure/claude-x", "AZURE/Claude-3-5-Sonnet")
+  }
+
+  it should "agree with getTokenizerId for azure/claude and anthropic names" in {
+    Seq("azure/claude-3-sonnet", "azure/claude-x", "anthropic/claude-3-sonnet", "anthropic/some-future-model").foreach {
+      model =>
+        withClue(s"model '$model': ") {
+          TokenizerMapping.getTokenizerId(model) shouldBe TokenizerId.CL100K_BASE
+          expectApproximate(0.75)(model)
+          TokenizerMapping.isExactMapping(model) shouldBe false
+        }
+    }
+  }
+
   it should "report ollama models as approximate with accuracy 0.80" in {
     expectApproximate(0.80)("ollama/llama2", "OLLAMA/Mistral")
   }
@@ -205,6 +223,12 @@ class TokenizerMappingSpec extends AnyFlatSpec with Matchers {
 
   it should "be false for Claude, ollama and unknown models" in {
     Seq("claude-3-sonnet", "anthropic/claude-3-sonnet", "ollama/llama2", "mistral-large", "").foreach { model =>
+      withClue(s"model '$model': ")(TokenizerMapping.isExactMapping(model) shouldBe false)
+    }
+  }
+
+  it should "be false for a Claude model under the azure prefix, as for any Claude model" in {
+    Seq("azure/claude-3-sonnet", "azure/claude-x").foreach { model =>
       withClue(s"model '$model': ")(TokenizerMapping.isExactMapping(model) shouldBe false)
     }
   }

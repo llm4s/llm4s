@@ -116,14 +116,16 @@ object TokenizerMapping {
       case name if isOpenAIGPT4o(name) || isOpenAIGPT4(name) || isOpenAIGPT3_5(name) || isOpenAIGPT3(name) =>
         TokenizerAccuracy.Exact("Native OpenAI tokenizer")
 
-      case name if isAzureOpenAI(name) =>
-        TokenizerAccuracy.Exact("Azure uses OpenAI tokenizers")
-
+      // Same guard order as `getTokenizerId`: a Claude model under the azure/ prefix is tokenized
+      // as Claude there, so it is approximate here, not "Azure uses OpenAI tokenizers"
       case name if isAnthropic(name) =>
         TokenizerAccuracy.Approximate(
           "Claude uses proprietary tokenizer. cl100k_base approximation may be 20-30% off.",
           accuracy = 0.75
         )
+
+      case name if isAzureOpenAI(name) =>
+        TokenizerAccuracy.Exact("Azure uses OpenAI tokenizers")
 
       case name if isOllama(name) =>
         TokenizerAccuracy.Approximate(
@@ -139,7 +141,8 @@ object TokenizerMapping {
    * Check if the tokenizer mapping is exact or approximate for a model.
    *
    * Exact mappings are available for OpenAI and Azure OpenAI models.
-   * Other providers use approximations.
+   * Other providers use approximations: a Claude model is approximate under
+   * any prefix, including `azure/`, since it is tokenized as Claude.
    *
    * @param modelName The model identifier
    * @return True if token counts will be exact, false if approximate
