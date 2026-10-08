@@ -498,10 +498,11 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   it should "not take the end of a single-quoted string for a leaf when it mentions \"token\": [" in {
     // The mirror image: a double-quoted key inside a single-quoted string. Only `"` opens a leaf there, as before
     // #1647 - an apostrophe in prose makes a `'` too uncertain to end the walk on - so the walk runs to the closing
-    // brace, and every bare word it passes is replaced: the credential after the string is unreadable, where the
-    // head of round 1 wrote it out as `hunter"[REDACTED]"value`.
+    // brace, and every bare word it passes is replaced, bar a key before `:`: the credential after the string is
+    // unreadable, where the head of round 1 wrote it out as `hunter"[REDACTED]"value`. The key `api_key` is kept, so
+    // that the single-quoted field pass after the walk still finds it and redacts its value.
     val out = Redaction.redact(s"{'content': 'see \"token\": [ for details', 'api_key': '$secretText'}")
-    out shouldBe s"""{'content': 'see "token": [ "$R" "$R"', '"$R"': '"$R"'}"""
+    out shouldBe s"""{'content': 'see "token": [ "$R" "$R"', 'api_key': '$R'}"""
     (out should not).include("hunter")
     (out should not).include("value")
   }
@@ -526,6 +527,62 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     (out should not).include("hunter")
     (out should not).include("value")
     (out should not).include("2")
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // A walk never hides a key from the passes after it. A container that a string merely mentions, or that is cut
+  // off, runs on into prose, where an apostrophe (it's, O'Brien, users', don't) was taken for the opening quote of a
+  // leaf: the leaf swallowed the next `password='...'` up to its `='`, and the credential after it was left as a bare
+  // word the walk copied as prose, out of reach of the `key='value'` pass. Each was redacted before #1647.
+  // ---------------------------------------------------------------------------------------------
+
+  it should "not let an apostrophe in prose after a mentioned 'token': [ hide the next credential" in {
+    Seq(
+      """{"content": "see 'token': [ for details, it's password='hunter2' ok"}""" ->
+        s"""{"content": "see 'token': [ for details, it's password='$R' ok"}""",
+      """{"content": "see 'token': [ for details; O'Brien set api_key='hunter2'"}""" ->
+        s"""{"content": "see 'token': [ for details; O'Brien set api_key='$R'"}""",
+      """{"content": "see 'token': [ for details; the users' password='hunter2'"}""" ->
+        s"""{"content": "see 'token': [ for details; the users' password='$R'"}"""
+    ).foreach { case (input, expected) =>
+      withClue(s"input $input: ") {
+        val out = Redaction.redact(input)
+        (out should not).include("hunter2")
+        out shouldBe expected
+        ujson.read(out)("content").str should include("for details")
+      }
+    }
+  }
+
+  it should "not let an apostrophe in prose after a mentioned \\\"token\\\": [ hide the next credential" in {
+    val out = Redaction.redact("""{"content": "bad \"token\": [ field; don't use 'api_key': 'hunter2' here"}""")
+    (out should not).include("hunter2")
+    out shouldBe s"""{"content": "bad \\"token\\": [ field; don't use 'api_key': '$R' here"}"""
+  }
+
+  it should "not let an apostrophe after a cut-off embedded document hide the next credential" in {
+    val out = Redaction.redact("""{"content": "{\"token\": [\"a\", it's password='hunter2'"}""")
+    (out should not).include("hunter2")
+    out shouldBe s"""{"content": "{\\"token\\": [\\"$R\\", it's password='$R'"}"""
+  }
+
+  it should "not hide a key from the passes after the walk, whatever the walk takes for a leaf or a word" in {
+    // Shapes on which a differential fuzzer, run against the redaction before #1647, caught drafts of this change
+    // leaking: the walk replaced a key, or wrote a quote into the middle of a value, and the end of the value - past
+    // the walk - was left readable. The walk that guesses at leaves now runs after every field pass. The last two
+    // are the review's own low-realism shapes: a quote inside a leaf that ends the enclosing string.
+    Seq(
+      "{'token': [password='a]hunter2'}",
+      "{'token': [password=:a]hunter2",
+      "{'token': ['apikey': 'a{hunter2",
+      "{\"token\": [password=:a]hunter2",
+      "{\"token\": {\"\"apikey\":\":a'=hunter2",
+      "{'token': [\"\"password\":\"}hunter2",
+      "{\"token\": {'\"'hunter2:",
+      "{'token': {''apikey':':a\"=hunter2",
+      """{"content": "'token': ['token': '"hunter2"}""",
+      """{"content": "\"token\": ['\"'hunter2'"}"""
+    ).foreach(input => withClue(s"input $input: ")((Redaction.redact(input) should not).include("hunter2")))
   }
 
   it should "give the same result when a single-quoted container inside a string is redacted twice" in {

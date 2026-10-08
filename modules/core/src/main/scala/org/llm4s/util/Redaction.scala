@@ -194,7 +194,8 @@ private[llm4s] object Redaction {
       val step1 = redactAuthHeaders(input, placeholder)
       val step2 = redactQueryParams(step1, placeholder)
       val step3 = redactJsonFields(step2, placeholder)
-      redactApiKeys(step3, placeholder)
+      val step4 = redactApiKeys(step3, placeholder)
+      redactContainerLeaves(step4, placeholder)
     }
 
   /**
@@ -272,21 +273,37 @@ private[llm4s] object Redaction {
     )
 
   private def redactJsonFields(input: String, placeholder: String): String = {
-    // Arrays and objects first: every leaf under a sensitive key is replaced in one pass, and what is left for the
-    // field patterns below is already the placeholder. Then the quoted shapes, then the bare ones, so that a value is
-    // never matched by a looser pattern first.
-    val escapedContainers = redactContainers(EscapedJsonContainerStart, input, placeholder, ValueEnd.EscapedQuote)
-    val doubleContainers  = redactContainers(JsonContainerStart, escapedContainers, placeholder, ValueEnd.Quote('"'))
-    val containers = redactContainers(SingleQuotedContainerStart, doubleContainers, placeholder, ValueEnd.Quote('\''))
-    val escaped    = redactQuoted(EscapedJsonStringStart, containers, placeholder, ValueEnd.EscapedQuote)
-    val double     = redactQuoted(JsonStringStart, escaped, placeholder, ValueEnd.Quote('"'))
-    val single     = redactQuoted(SingleQuotedStart, double, placeholder, ValueEnd.Quote('\''))
+    // Arrays and objects first: the strings and numbers under a sensitive key are replaced in one pass, and what is
+    // left for the field patterns below is already the placeholder. Then the quoted shapes, then the bare ones, so
+    // that a value is never matched by a looser pattern first. The rest of each container - its other leaves, and
+    // the containers under a single-quoted key - waits for `redactContainerLeaves`, after every field pass.
+    val escapedContainers =
+      redactContainers(EscapedJsonContainerStart, input, placeholder, ValueEnd.EscapedQuote, leaves = false)
+    val containers =
+      redactContainers(JsonContainerStart, escapedContainers, placeholder, ValueEnd.Quote('"'), leaves = false)
+    val escaped = redactQuoted(EscapedJsonStringStart, containers, placeholder, ValueEnd.EscapedQuote)
+    val double  = redactQuoted(JsonStringStart, escaped, placeholder, ValueEnd.Quote('"'))
+    val single  = redactQuoted(SingleQuotedStart, double, placeholder, ValueEnd.Quote('\''))
     // A number becomes a string, so that the redacted JSON still parses.
     val quotedEquals   = redactQuoted(DoubleQuotedEqualsStart, single, placeholder, ValueEnd.Quote('"'))
     val allQuoted      = redactQuoted(SingleQuotedEqualsStart, quotedEquals, placeholder, ValueEnd.Quote('\''))
     val escapedNumbers = redactPairs(EscapedJsonNumberField, allQuoted, placeholder, wrap = "\\\"")
     val numbers        = redactPairs(JsonNumberField, escapedNumbers, placeholder, wrap = "\"")
     Seq(EqualsPair, HeaderLine).foldLeft(numbers)((acc, pattern) => redactPairs(pattern, acc, placeholder))
+  }
+
+  /**
+   * Every leaf of a container under a sensitive key that the passes before left: a string in the other quote than
+   * the key's, a bare word, and the whole of a container under a single-quoted key (`{'token': ['...']}`, a Python
+   * dict in a prompt). It runs last, after the field passes and the API-key patterns, because what it takes for a
+   * leaf is a guess - a `'` may be an apostrophe of prose, and a container that a message merely mentions runs on
+   * into the text after it - and a guess made before them could swallow the key of a field they would have redacted
+   * and leave its value readable. After them it can only replace more.
+   */
+  private def redactContainerLeaves(input: String, placeholder: String): String = {
+    val escaped = redactContainers(EscapedJsonContainerStart, input, placeholder, ValueEnd.EscapedQuote, leaves = true)
+    val double  = redactContainers(JsonContainerStart, escaped, placeholder, ValueEnd.Quote('"'), leaves = true)
+    redactContainers(SingleQuotedContainerStart, double, placeholder, ValueEnd.Quote('\''), leaves = true)
   }
 
   /** How a quoted value ends. */
@@ -411,11 +428,11 @@ private[llm4s] object Redaction {
   /**
    * What a container walk takes a quote for. A leaf opens on the key's own quote, and on the other quote only where
    * that quote cannot be the end of a string enclosing the container: taking the end of the enclosing string for a
-   * leaf opener desynchronises the quotes, and the walk runs on into the fields after the string, which the string
-   * pass can then no longer match. `EnclosingQuotes` decides which walk from the quotes before the container, and a
-   * stray quote before it (an unpaired `"` in a log prefix) can mislead it; that the `Plain` and `InSingleQuotes`
-   * walks replace every bare word they pass, not only the quoted leaves and numbers, is what keeps a credential
-   * unreadable even then. The `InDoubleQuotes` walk cannot pass the `"` that ends its string, so it keeps prose.
+   * leaf opener desynchronises the quotes, and the walk runs on into the fields after the string. `EnclosingQuotes`
+   * decides which walk from the quotes before the container, and a stray quote before it (an unpaired `"` in a log
+   * prefix) can mislead it; that the `Plain` and `InSingleQuotes` walks replace every bare word they pass, not only
+   * the quoted leaves and numbers, is what keeps a credential unreadable even then. The `InDoubleQuotes` walk cannot
+   * pass the `"` that ends its string, so it keeps prose.
    */
   private enum Walk {
 
@@ -439,14 +456,26 @@ private[llm4s] object Redaction {
   }
 
   /**
-   * Replaces every leaf of each `"key": [...]` or `"key": {...}` whose key is sensitive - every string, number and
-   * bare word - and leaves the brackets, the keys of nested objects, `true`, `false` and `null`, so that the redacted
-   * JSON still parses and keeps its shape. `start` matches up to and including the opening bracket (group 3). A
-   * container whose key is not sensitive is entered, not skipped, so a credential inside it is still found. The
-   * string that encloses a `"key"` or `'key'` match, if any, picks the walk; an escaped key is inside a double-quoted
-   * string by construction.
+   * Replaces the leaves of each `"key": [...]` or `"key": {...}` whose key is sensitive, and leaves the brackets, the
+   * keys of nested objects, `true`, `false` and `null`, so that the redacted JSON still parses and keeps its shape.
+   * `start` matches up to and including the opening bracket (group 3). A container whose key is not sensitive is
+   * entered, not skipped, so a credential inside it is still found.
+   *
+   * With `leaves = false` this is the walk that runs before the field passes, as it always has: a `'` is an ordinary
+   * character, and only the strings in the key's quote and the numbers are replaced. The field passes after it read
+   * the quotes it leaves, so it may not take a `'` of prose for a leaf (and swallow the key of the next
+   * `password='...'`), nor write a quote where there was none. With `leaves = true` it is the walk that runs after
+   * every other pass, when nothing is left to read its output: every leaf is replaced, whatever its quote, and so is
+   * every bare word outside a double-quoted string. The string that encloses a `"key"` or `'key'` match, if any,
+   * picks that walk; an escaped key is inside a double-quoted string by construction.
    */
-  private def redactContainers(start: Regex, input: String, placeholder: String, end: ValueEnd): String = {
+  private def redactContainers(
+    start: Regex,
+    input: String,
+    placeholder: String,
+    end: ValueEnd,
+    leaves: Boolean
+  ): String = {
     val matcher   = start.pattern.matcher(input)
     val out       = new java.lang.StringBuilder(input.length)
     val enclosing = new EnclosingQuotes(input)
@@ -469,7 +498,7 @@ private[llm4s] object Redaction {
         val open = matcher.start(3)
         if (isSensitiveKey(matcher.group(2))) {
           out.append(input, copiedTo, open)
-          val valueEnd = redactLeaves(input, open, out, placeholder, end, walkAt(matcher.start(1)))
+          val valueEnd = redactLeaves(input, open, out, placeholder, end, walkAt(matcher.start(1)), leaves)
           loop(valueEnd, valueEnd)
         } else {
           loop(open + 1, copiedTo)
@@ -481,15 +510,16 @@ private[llm4s] object Redaction {
   }
 
   /**
-   * Appends to `out` the array or object that opens at `from`, with every leaf replaced, and returns the index just
+   * Appends to `out` the array or object that opens at `from`, with its leaves replaced, and returns the index just
    * after it. Brackets are counted on an explicit stack, so the depth of the value does not grow the call stack, and
-   * each character is visited once. The value ends at its closing bracket, at the end of the input (a payload cut
-   * off in the middle of it) or, inside a string, at the `"` that ends the enclosing string, which is left for the
-   * caller.
+   * each character is visited a bounded number of times. The value ends at its closing bracket, at the end of the
+   * input (a payload cut off in the middle of it) or, inside a string, at the `"` that ends the enclosing string,
+   * which is left for the caller.
    *
-   * Which quotes open a leaf, and which end the container, is `walk`'s (see [[Walk]]). A bare leaf - a number, or,
-   * outside a double-quoted string, a word that is not quoted - is written back as the placeholder in the key's
-   * quote, `end`, bar the literals of `KeptLiterals` and an unquoted key.
+   * Which quotes open a leaf, and which end the container, is `walk`'s (see [[Walk]]); without `leaves` the walk is
+   * the one before #1647 (see [[redactContainers]]). A bare leaf is written back as the placeholder in the key's
+   * quote, `end`: a number, a word with a digit or `-` in it, and, with `leaves` and outside a double-quoted string,
+   * any other word, bar the literals of `KeptLiterals` and a word before `:`.
    */
   private def redactLeaves(
     input: String,
@@ -497,7 +527,8 @@ private[llm4s] object Redaction {
     out: java.lang.StringBuilder,
     placeholder: String,
     end: ValueEnd,
-    walk: Walk
+    walk: Walk,
+    leaves: Boolean
   ): Int = {
     val length         = input.length
     val quote          = quoteOf(end)
@@ -506,14 +537,28 @@ private[llm4s] object Redaction {
 
     def inObject: Boolean = openers.length > 0 && openers.charAt(openers.length - 1) == '{'
 
+    def isSpace(c: Char): Boolean = c == ' ' || c == '\t' || c == '\n' || c == '\r'
+
     // A string of an object that is followed by `:` is a key, not a value.
     def isKey(after: Int): Boolean = {
       var i = after
-      while (
-        i < length && (input.charAt(i) == ' ' || input.charAt(i) == '\t' || input
-          .charAt(i) == '\n' || input.charAt(i) == '\r')
-      ) i += 1
+      while (i < length && isSpace(input.charAt(i))) i += 1
       inObject && i < length && input.charAt(i) == ':'
+    }
+
+    // Whether a `:` follows `after`, past whitespace and the quotes and backslashes that close a key: what ends there
+    // is a key (`user` of `{user: ...}`, or `'token'` of `{'token': ...}`), not a value. The run skipped is kept, so
+    // that a long run of quotes, each of which asks, is read once.
+    var skippedFrom = -1
+    var skippedTo   = -1
+    def keyFollows(after: Int): Boolean = {
+      if (after < skippedFrom || after > skippedTo) {
+        var j = after
+        while (j < length && (isSpace(input.charAt(j)) || "\"'\\".indexOf(input.charAt(j).toInt) >= 0)) j += 1
+        skippedFrom = after
+        skippedTo = j
+      }
+      skippedTo < length && input.charAt(skippedTo) == ':'
     }
 
     // The string whose opening quote (`"`, `'` or `\"`, as `stringEnd` says) starts at `open`; returns the index
@@ -539,17 +584,66 @@ private[llm4s] object Redaction {
       next
     }
 
+    // A string in the other quote than the key's (`'abc'` under `"token"`, `"abc"` under `'token'`), or in the key's
+    // own `'`: a key before `:` is kept whole, and a string that cannot be a value - prose, whose `'` is an apostrophe
+    // run on by a letter, or text with a `:` or `=`, which is no leaf but a field the passes before have seen to - is
+    // not taken for one: its quote is an ordinary character and the walk goes on inside it.
+    def emitOtherString(open: Int, stringEnd: ValueEnd): Int = {
+      val contentStart = open + 1
+      val contentEnd   = scanQuotedValue(input, contentStart, stringEnd)
+      val closed = contentEnd < length && (stringEnd match {
+        case ValueEnd.QuoteInString(q) => input.charAt(contentEnd) == q
+        case _                         => true
+      })
+      val next = if (closed) contentEnd + 1 else contentEnd
+      if (closed && keyFollows(next)) {
+        out.append(input, open, next)
+        next
+      } else if (
+        (closed && inDoubleQuotes && next < length && input.charAt(next).isLetterOrDigit) ||
+        !isLeafText(input, contentStart, contentEnd)
+      ) {
+        out.append(input.charAt(open))
+        open + 1
+      } else {
+        out.append(input.charAt(open))
+        if (contentEnd > contentStart) out.append(placeholder)
+        if (closed) out.append(input.charAt(contentEnd))
+        next
+      }
+    }
+
     // What ends a bare leaf - a number, or a value that is not quoted - and separates leaves: whitespace, `,`, `:`,
     // a bracket, a quote and a backslash.
     def separates(c: Char): Boolean =
-      c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ',' || c == ':' || c == '[' || c == ']' ||
-        c == '{' || c == '}' || c == '"' || c == '\'' || c == '\\'
+      isSpace(c) || c == ',' || c == ':' || c == '[' || c == ']' || c == '{' || c == '}' || c == '"' ||
+        c == '\'' || c == '\\'
+
+    // A word as the walk before #1647 wrote it: every character as it is, bar a number, which is replaced.
+    def copyWord(start: Int, stop: Int): Unit = {
+      var j = start
+      while (j < stop) {
+        val c = input.charAt(j)
+        if (c == '-' || (c >= '0' && c <= '9')) {
+          j += 1
+          while (j < stop && isNumberChar(input.charAt(j))) j += 1
+          out.append(quote).append(placeholder).append(quote)
+        } else {
+          out.append(c)
+          j += 1
+        }
+      }
+    }
 
     var i    = from
     var done = false
     while (i < length && !done) {
       val c = input.charAt(i)
-      if (c == '[' || c == '{') {
+      if (leaves && placeholder.nonEmpty && c == placeholder.charAt(0) && input.startsWith(placeholder, i)) {
+        // A value a pass before has replaced: kept as it is, brackets and all.
+        out.append(placeholder)
+        i += placeholder.length
+      } else if (c == '[' || c == '{') {
         openers.append(c)
         out.append(c)
         i += 1
@@ -560,15 +654,10 @@ private[llm4s] object Redaction {
         done = openers.length == 0
       } else if (c == '"') {
         if (inDoubleQuotes) done = true // the enclosing string ends, and the container with it
-        else i = emitString(i, ValueEnd.Quote('"'))
-      } else if (c == '\'') {
-        walk match {
-          case Walk.Plain          => i = emitString(i, ValueEnd.Quote('\''))
-          case Walk.InDoubleQuotes => i = emitString(i, ValueEnd.QuoteInString('\''))
-          case Walk.InSingleQuotes =>
-            out.append(c)
-            i += 1
-        }
+        else if (end == ValueEnd.Quote('"')) i = emitString(i, ValueEnd.Quote('"'))
+        else i = emitOtherString(i, ValueEnd.Quote('"'))
+      } else if (c == '\'' && leaves && walk != Walk.InSingleQuotes) {
+        i = emitOtherString(i, if (inDoubleQuotes) ValueEnd.QuoteInString('\'') else ValueEnd.Quote('\''))
       } else if (c == '\\' && inDoubleQuotes) {
         var next = i
         while (next < length && input.charAt(next) == '\\') next += 1
@@ -590,26 +679,58 @@ private[llm4s] object Redaction {
           out.append(input, i, stop)
           i = stop
         }
+      } else if (c == '\\' && leaves) {
+        // A backslash escapes the character after it, as it does for the scan of a string, so that a string whose
+        // quote was not taken for a leaf is walked as that scan read it, and each quote opens at most one scan.
+        val stop = math.min(length, i + 2)
+        out.append(input, i, stop)
+        i = stop
       } else if (separates(c)) {
         out.append(c)
         i += 1
       } else {
-        // A bare leaf: a number, or a word that is not quoted, as `token: [abc]` has. Inside a double-quoted string
-        // the walk cannot pass the `"` that ends it, so a word there is prose of the string and is copied; in the
-        // other walks a quote before the container may have been mistaken for the end of a string, and the walk may
-        // run on into the fields after it, so a word is replaced too and nothing the walk passes is left readable.
-        var next = i + 1
-        while (next < length && !separates(input.charAt(next))) next += 1
-        val number = c == '-' || (c >= '0' && c <= '9')
-        if (!number && (inDoubleQuotes || isKey(next) || KeptLiterals.contains(input.substring(i, next)))) {
-          out.append(input, i, next)
-        } else {
-          out.append(quote).append(placeholder).append(quote)
+        // A bare leaf: a number, or a word that is not quoted, as `token: [abc]` has. A word with a digit or `-` is
+        // replaced whole, where the walk before #1647 replaced only its number (`abc"[REDACTED]"`); the quote it writes
+        // is where that walk wrote one, a few characters on, so the passes after read the text after it as they did.
+        var next   = i + 1
+        var digits = c == '-' || (c >= '0' && c <= '9')
+        var eq     = c == '='
+        while (next < length && !separates(input.charAt(next))) {
+          val d = input.charAt(next)
+          if (d == '-' || (d >= '0' && d <= '9')) digits = true
+          if (d == '=') eq = true
+          next += 1
         }
+        val number = c == '-' || (c >= '0' && c <= '9')
+        val replace =
+          if (!leaves) digits && !eq && !keyFollows(next)
+          else number || !(inDoubleQuotes || keyFollows(next) || KeptLiterals.contains(input.substring(i, next)))
+        if (replace) out.append(quote).append(placeholder).append(quote)
+        else if (leaves) out.append(input, i, next)
+        else copyWord(i, next)
         i = next
       }
     }
     i
+  }
+
+  private def isNumberChar(c: Char): Boolean =
+    (c >= '0' && c <= '9') || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-'
+
+  /**
+   * Whether `input(from until to)`, the content of a string that the last container walk found, can be a leaf: it
+   * holds no `:` and no `=`. Text with either is a field (`password='...'`, `'api_key': '...'`) that a quote of prose
+   * before it runs into, not a value; the walk goes on inside it, and the prose around the field is kept.
+   */
+  private def isLeafText(input: String, from: Int, to: Int): Boolean = {
+    var j    = from
+    var leaf = true
+    while (leaf && j < to) {
+      val c = input.charAt(j)
+      leaf = c != ':' && c != '='
+      j += 1
+    }
+    leaf
   }
 
   /**
