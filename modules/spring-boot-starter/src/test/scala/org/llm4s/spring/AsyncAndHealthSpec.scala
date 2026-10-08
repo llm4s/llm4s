@@ -401,16 +401,36 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "be DOWN when the provider throws instead of answering, and never print the settings secrets" in {
-    val provider = new FakeProvider(_ => throw new InterruptedException(s"stopped $secret"))
+  it should "be DOWN when the provider throws a fatal error instead of answering, and never print the settings secrets" in {
+    // JLlmClient captures a non-fatal throwable and an InterruptedException as failed results; a fatal error
+    // (a LinkageError here) still escapes, so the executor's future fails and the indicator describes its cause
+    val provider = new FakeProvider(_ => throw new LinkageError(s"stopped $secret"))
     withPool(pool(1)) { ex =>
       val ind = indicator(provider, probe = true, ex)
       val h   = ind.health()
       h.getStatus shouldBe Status.DOWN
-      (h.getDetails.get("error").toString should not).include(secret)
+      h.getDetails.get("probe") shouldBe "failed"
+      val error = h.getDetails.get("error").toString
+      error should include("LinkageError")
+      (error should not).include(secret)
     }
     (HealthSettings("openai", "m", true, Duration.ofSeconds(1), Duration.ofSeconds(1), Seq(secret)).toString should not)
       .include(secret)
+  }
+
+  it should "be DOWN, with the message redacted, when the provider throws InterruptedException (#1591)" in {
+    // JLlmClient.complete never throws it: the probe gets a CancelledError result, which is reported like any
+    // other failed result (its message names the operation, not the exception's text)
+    val provider = new FakeProvider(_ => throw new InterruptedException(s"stopped $secret"))
+    withPool(pool(1)) { ex =>
+      val h = indicator(provider, probe = true, ex).health()
+      h.getStatus shouldBe Status.DOWN
+      h.getDetails.get("probe") shouldBe "failed"
+      val error = h.getDetails.get("error").toString
+      error should include("cancelled")
+      (error should not).include(secret)
+      provider.calls.get shouldBe 1
+    }
   }
 
   it should "be DOWN, not throw, when the executor refuses the probe" in {
