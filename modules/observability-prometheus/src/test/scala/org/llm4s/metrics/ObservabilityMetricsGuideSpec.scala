@@ -129,19 +129,28 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
     MetricsConfigLoader.load(ConfigSource.fromConfig(config)) shouldBe Right((MetricsCollector.noop, None))
   }
 
-  "the guide's wiring snippet" should "build a client from the default provider that reports to the collector" in {
-    // The snippet, line for line (the default provider on this module's test classpath is the fixture provider).
-    val metrics = new PrometheusMetrics(new PrometheusRegistry())
-
-    val client = for {
+  "the guide's wiring snippet" should "build the client and the configured endpoint from configuration" in {
+    // The snippet, line for line (the default provider on this module's test classpath is the fixture
+    // provider; the module's shipped default is `enabled = false`, so the loader returns the no-op
+    // collector and no endpoint, and there is nothing to stop on shutdown).
+    val application = for {
       providerConfig  <- Llm4sConfig.defaultProvider()
       registryService <- Llm4sConfig.modelRegistryService()
       given ModelRegistryService = registryService
-      client <- LLMConnect.getClient(providerConfig, metrics)
-    } yield client
+      configured <- MetricsConfigLoader.default()
+      (metrics, endpoint) = configured
+      client <- LLMConnect.getClient(providerConfig, metrics).left.map { error =>
+        endpoint.foreach(_.stop()) // release the server if client creation fails
+        error
+      }
+    } yield (client, endpoint)
 
-    client.isRight shouldBe true
-    client.foreach(_.close())
+    application.isRight shouldBe true
+    application.foreach { case (client, endpoint) =>
+      endpoint shouldBe None // the shipped default is `enabled = false`
+      client.close()
+      endpoint.foreach(_.stop())
+    }
   }
 
   // ---- "What is recorded per call" ------------------------------------------------------------
@@ -290,7 +299,7 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
       samples(scrape(endpoint)) shouldBe empty
     }
 
-  "MetricsCollector.compose" should "send every call to every collector it was given" in {
+  "MetricsCollector.compose" should "send every non-image call to every collector it was given" in {
     final class Counting extends MetricsCollector {
       var requests                                                                           = 0
       override def observeRequest(p: String, m: String, o: Outcome, d: FiniteDuration): Unit = requests += 1
@@ -305,6 +314,31 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
       counting.requests shouldBe 1
       samples(scrape(endpoint)).exists(_.startsWith("llm4s_requests_total")) shouldBe true
     }
+  }
+
+  it should "leave the image-generation methods as no-ops, as the guide warns" in {
+    final class CountingImages extends MetricsCollector {
+      var images                                                                             = 0
+      override def observeRequest(p: String, m: String, o: Outcome, d: FiniteDuration): Unit = ()
+      override def addTokens(p: String, m: String, in: Long, out: Long): Unit                = ()
+      override def recordCost(p: String, m: String, usd: Double): Unit                       = ()
+      override def observeImageGeneration(
+        provider: String,
+        model: String,
+        operation: String,
+        outcome: Outcome,
+        duration: FiniteDuration,
+        imageCount: Int
+      ): Unit = images += 1
+      override def recordImageGenerationCost(provider: String, model: String, costUsd: Double, imageCount: Int): Unit =
+        images += 1
+    }
+    val counting = new CountingImages
+    val composed = MetricsCollector.compose(counting)
+    composed.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
+    composed.recordImageGenerationCost("openai", "dall-e-3", 0.04, 1)
+    // compose does not override these two, so the child receives nothing (see the guide's Metrics section)
+    counting.images shouldBe 0
   }
 
   "stopping the endpoint" should "be safe to do twice, and free the port" in {
