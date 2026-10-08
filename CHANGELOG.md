@@ -1968,6 +1968,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Gemini 3 model answers with HTTP 400, the failure #1416 fixed. An absent or empty stored id is now "no id" on replay
   too, as it already was at parse, so the part goes back exactly as Gemini signed it, `"id": ""` included; the
   `functionResponse` still carries no id. Same on Vertex AI.
+- **`llm4s-gemini`: an empty replayed function-call `id` is never echoed onto a `functionResponse`**
+  ([#1622](https://github.com/llm4s/llm4s/issues/1622)): the clients collect the ids of the `functionCall` parts they
+  replay so a tool result can echo its call's id, and collected an empty one too, so a tool result hand-built as
+  `ToolMessage(result, "")` after a replayed `"id": ""` call got `"id": ""` on its `functionResponse`, where parse and
+  replay both read an empty id as "no id". The three sites now agree: an empty id is never collected, so no
+  `functionResponse` carries one; the signed part still goes back verbatim. Same on Vertex AI.
 - **`llm4s-agent-tools`: `json_tool` refuses what it used to mishandle**
   ([#1508](https://github.com/llm4s/llm4s/issues/1508), [#1509](https://github.com/llm4s/llm4s/issues/1509),
   [#1510](https://github.com/llm4s/llm4s/issues/1510)): a `query` path with an array index too large for an `Int`

@@ -252,7 +252,9 @@ class VertexAIClient(
       case am: AssistantMessage =>
         // Tool call IDs map to function names so the following ToolMessages can be keyed by name
         am.toolCalls.foreach(tc => toolCallIdToName(tc.id) = tc.name)
-        // a functionCall part sent with Gemini's own id needs that id echoed on its functionResponse
+        // a functionCall part sent with Gemini's own id needs that id echoed on its functionResponse; an empty
+        // id is "no id", as GeminiThoughtSignatures.parse and matchesCall read it, even though the signed part
+        // goes back verbatim with it
         // text, then function calls, each part carrying the thought signature Gemini gave it (if it is still valid)
         val parts = GeminiThoughtSignatures.parts(providerName, am)
         parts.foreach { p =>
@@ -261,6 +263,7 @@ class VertexAIClient(
             .flatMap(_.objOpt)
             .flatMap(_.get("id"))
             .flatMap(_.strOpt)
+            .filter(_.nonEmpty)
             .foreach(callIdsSentWithId += _)
         }
         if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.contentOpt.isDefined))

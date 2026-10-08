@@ -365,6 +365,34 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       responses.head.obj.contains("id") shouldBe false
     }
 
+    it should "not echo a replayed empty functionCall.id onto a tool result keyed by that empty id" in {
+      // The signed part goes back with its `"id":""` verbatim, but an empty id is "no id" everywhere: a caller
+      // that hand-builds the tool result with the id it sees on the wire must not get `"id":""` echoed on the
+      // functionResponse, as parse and matchesCall already read an empty id as absent (#1622).
+      val (client, wire) = make("gemini-2.0-flash")
+      wire.body = s"""{"candidates":[{"content":{"role":"model","parts":[
+        {"functionCall":{"id":"","name":"get_weather","args":{"city":"Paris"}},"thoughtSignature":"SIG-EMPTY-ID"}
+      ]},"finishReason":"STOP"}]}"""
+      val first = client.complete(firstTurn, CompletionOptions()).value.message
+
+      wire.body = response(text("Sunny."))
+      val handBuilt =
+        Conversation(Seq[Message](UserMessage("Weather in Paris and Rome?"), first, ToolMessage("sunny", "")))
+      client.complete(handBuilt, CompletionOptions()).value
+
+      val sent = modelPartsOf(wire.lastRequest).filter(_.obj.contains("functionCall"))
+      sent.map(_("functionCall")) shouldBe Seq(ujson.Obj("id" -> "", "name" -> "get_weather", "args" -> city))
+
+      val responses = wire
+        .lastRequest("contents")
+        .arr
+        .toSeq
+        .flatMap(_("parts").arr.toSeq)
+        .flatMap(_.obj.get("functionResponse"))
+      responses should have size 1
+      responses.head.obj.contains("id") shouldBe false
+    }
+
     it should "not put an id on the functionResponse of a call Gemini sent without one" in {
       val (client, wire) = make("gemini-2.0-flash")
       wire.body = response(call("get_weather", city, Some("SIG-CALL")))
