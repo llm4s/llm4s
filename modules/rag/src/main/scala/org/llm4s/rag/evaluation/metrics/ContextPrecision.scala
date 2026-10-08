@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.rag.evaluation._
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.BoundedJson
 
 import scala.util.Try
 
@@ -169,21 +170,33 @@ Respond with ONLY a JSON array:"""
    * Parse relevance assessments from LLM response.
    */
   private def parseRelevances(response: String, expectedCount: Int): Result[Seq[Double]] =
-    Try {
-      val jsonStr = extractJsonArray(response)
-      val arr     = ujson.read(jsonStr).arr
+    readArray(response)
+      .flatMap { arr =>
+        Try {
+          // Build a map of index -> relevance
+          val relevanceMap = arr.map { v =>
+            val obj      = v.obj
+            val index    = obj("index").num.toInt
+            val relevant = obj("relevant").bool
+            index -> (if (relevant) 1.0 else 0.0)
+          }.toMap
 
-      // Build a map of index -> relevance
-      val relevanceMap = arr.map { v =>
-        val obj      = v.obj
-        val index    = obj("index").num.toInt
-        val relevant = obj("relevant").bool
-        index -> (if (relevant) 1.0 else 0.0)
-      }.toMap
+          // Return relevances in order, defaulting to 0.0 for missing indices
+          (0 until expectedCount).map(i => relevanceMap.getOrElse(i, 0.0))
+        }.toResult
+      }
+      .left
+      .map(e => EvaluationError.parseError(s"Failed to parse relevance assessments: ${e.message}"))
 
-      // Return relevances in order, defaulting to 0.0 for missing indices
-      (0 until expectedCount).map(i => relevanceMap.getOrElse(i, 0.0))
-    }.toResult.left.map(e => EvaluationError.parseError(s"Failed to parse relevance assessments: ${e.message}"))
+  /**
+   * The JSON array in a reply. The text is the model's: a document nested more than 512 levels deep is
+   * refused before it is parsed, since a value that deep overflows the stack of whatever renders it,
+   * an `InvalidData` message included (#1562).
+   */
+  private def readArray(response: String): Result[Seq[ujson.Value]] =
+    Try(extractJsonArray(response)).toResult
+      .flatMap(jsonStr => BoundedJson.read(jsonStr))
+      .flatMap(json => Try(json.arr.toSeq).toResult)
 
   /**
    * Extract JSON array from potentially markdown-wrapped response.

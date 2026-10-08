@@ -3,6 +3,7 @@ package org.llm4s.config
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.AuthConfig
+import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.types.Result
 
@@ -23,6 +24,7 @@ object ProvidersConfigModel:
    *  @param extras      every other key in the section, as a string: the provider-specific keys a
    *                     descriptor declares in `ProviderConfigSpec.extras`, and anything unknown,
    *                     which validation reports and drops
+   *  @param timeouts    the `timeouts` block as read, not yet checked for positive values
    *  @param auth         the section's `auth` block, if any, as scalars: the identity-token key and
    *                      whatever the provider reads from it
    */
@@ -33,6 +35,7 @@ object ProvidersConfigModel:
     apiKey: Option[String],
     headers: Option[Map[String, String]] = None,
     extras: Map[String, String] = Map.empty,
+    timeouts: Option[ProviderTimeouts] = None,
     auth: Option[Map[String, String]] = None
   )
 
@@ -67,6 +70,10 @@ object ProvidersConfigModel:
    *                      OpenAI's `organization`, the generic `openai-compatible` provider's
    *                      `contextWindow` and `reserveCompletion` - so that this type does not
    *                      change as providers come and go.
+   *  @param timeouts     the section's `timeouts` block: how long a request and a stream may take.
+   *                      Absent values leave each client on its own default
+   *                      ([[org.llm4s.llmconnect.config.ProviderTimeouts]]). Every provider that makes
+   *                      HTTP calls reads it, so it is a built-in field like `headers`, not an extra.
    *  @param auth         the section's workload-identity block, if any: the identity token to
    *                      exchange and the keys its provider declares in
    *                      `ProviderConfigSpec.authExtras`. Validation guarantees it is never set
@@ -79,6 +86,7 @@ object ProvidersConfigModel:
     apiKey: Option[ApiKey],
     headers: Map[String, String],
     extras: Map[String, String],
+    timeouts: ProviderTimeouts,
     auth: Option[AuthConfig]
   ):
 
@@ -90,6 +98,7 @@ object ProvidersConfigModel:
     def withApiKey(apiKey: Option[ApiKey]): NamedProviderConfig        = copy(apiKey = apiKey)
     def withHeaders(headers: Map[String, String]): NamedProviderConfig = copy(headers = headers)
     def withExtras(extras: Map[String, String]): NamedProviderConfig   = copy(extras = extras)
+    def withTimeouts(timeouts: ProviderTimeouts): NamedProviderConfig  = copy(timeouts = timeouts)
     def withAuth(auth: AuthConfig): NamedProviderConfig                = copy(auth = Some(auth))
     def withAuth(auth: Option[AuthConfig]): NamedProviderConfig        = copy(auth = auth)
     // The API key, header values and extra values may be credentials (`x-api-key`, a gateway
@@ -158,9 +167,21 @@ object ProvidersConfigModel:
       apiKey: Option[ApiKey],
       headers: Map[String, String] = Map.empty,
       extras: Map[String, String] = Map.empty,
+      timeouts: ProviderTimeouts = ProviderTimeouts.default,
       auth: Option[AuthConfig] = None
     ): NamedProviderConfig =
-      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, auth)
+      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, timeouts, auth)
+
+    /** The signature before `timeouts` was added, kept so code compiled against it still links. */
+    def apply(
+      provider: ProviderId,
+      model: ModelName,
+      baseUrl: Option[BaseUrl],
+      apiKey: Option[ApiKey],
+      headers: Map[String, String],
+      extras: Map[String, String]
+    ): NamedProviderConfig =
+      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, ProviderTimeouts.default, None)
   }
 
   /**

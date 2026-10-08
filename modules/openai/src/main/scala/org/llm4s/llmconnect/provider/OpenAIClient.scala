@@ -8,7 +8,7 @@ import com.openai.azure.credential.AzureApiKeyCredential
 import com.openai.azure.{ AzureOpenAIServiceVersion, AzureUrlPathMode }
 import com.openai.client.okhttp.OpenAIOkHttpClient
 import com.openai.client.{ OpenAIClient => SdkClient }
-import com.openai.core.{ JsonField, ObjectMappers }
+import com.openai.core.{ JsonField, ObjectMappers, RequestOptions }
 import com.openai.core.http.{ HttpClient => SdkHttpClient, StreamResponse }
 import com.openai.errors.{ OpenAIException, OpenAIIoException, OpenAIServiceException }
 import com.openai.models.chat.completions.{
@@ -31,7 +31,13 @@ import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.auth.{ IdentitySource, IdentityTokenSource }
-import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, OpenAIWorkloadIdentity, ProviderConfig }
+import org.llm4s.llmconnect.config.{
+  AzureConfig,
+  OpenAIConfig,
+  OpenAIWorkloadIdentity,
+  ProviderConfig,
+  ProviderTimeouts
+}
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
@@ -40,7 +46,7 @@ import org.llm4s.model.{ ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
+import org.llm4s.util.{ BoundedJson, Redaction }
 import org.slf4j.{ Logger, LoggerFactory }
 
 import java.time.Instant
@@ -595,9 +601,37 @@ class OpenAIClient private[provider] (
       message = assistantMessage,
       toolCalls = toolCalls.toList,
       usage = usage,
-      estimatedCost = cost
+      estimatedCost = cost,
+      citations = message.map(extractCitations).getOrElse(List.empty)
     )
   }
+
+  /**
+   * The sources the model cited: the `url_citation` annotations of the message, in the order sent
+   * (OpenAI's Chat Completions search models return them with no request option: `gpt-5-search-api`
+   * today, the retired `*-search-preview` models before 2026-07-23). Read as leniently as
+   * the rest of the response: an annotation without a non-empty `url` is dropped (one is never
+   * made up), and an index that is not at least zero and within `Int` is read as absent. If the
+   * SDK cannot parse the `annotations` list at all (an element that is not an annotation object),
+   * it reports the whole field as unknown and no citation is returned, but the answer is. OpenAI
+   * does not return a passage with a citation, so `citedText` stays unset.
+   * Streamed chunks are not read: the SDK's `Delta` has no annotations (#1216).
+   */
+  private def extractCitations(message: ChatCompletionMessage): List[Citation] =
+    known(message._annotations()).map(_.asScala.toList).getOrElse(List.empty).flatMap { annotation =>
+      for {
+        cited <- known(annotation._urlCitation())
+        url   <- known(cited._url()).filter(_.nonEmpty)
+      } yield Citation(
+        url = url,
+        title = known(cited._title()),
+        startIndex = known(cited._startIndex()).flatMap(citationIndex),
+        endIndex = known(cited._endIndex()).flatMap(citationIndex)
+      )
+    }
+
+  private def citationIndex(index: java.lang.Long): Option[Int] =
+    Option(index).map(_.longValue).filter(i => i >= 0 && i <= Int.MaxValue).map(_.toInt)
 
   private def toTokenUsage(u: CompletionUsage): TokenUsage = {
     val promptTokens     = known(u._promptTokens()).fold(0)(_.intValue)
@@ -613,7 +647,9 @@ class OpenAIClient private[provider] (
 
   /**
    * Extracts function tool calls from a response message, parsing each one's arguments once.
-   * A call whose arguments are not valid JSON is dropped.
+   * A call whose arguments are not valid JSON is dropped, as is one whose arguments are nested
+   * more than 512 levels deep: they are model output, and a value that deep overflows the stack
+   * of whatever renders it next (#1562).
    */
   private def extractToolCalls(message: ChatCompletionMessage): Seq[ToolCall] =
     known(message._toolCalls())
@@ -623,7 +659,7 @@ class OpenAIClient private[provider] (
       .map(_.asFunction())
       .flatMap { ftc =>
         val function = known(ftc._function())
-        function.flatMap(f => known(f._arguments())).flatMap(raw => Try(ujson.read(raw)).toOption).map { args =>
+        function.flatMap(f => known(f._arguments())).flatMap(raw => BoundedJson.read(raw).toOption).map { args =>
           ToolCall(
             id = known(ftc._id()).getOrElse(""),
             name = function.flatMap(f => known(f._name())).getOrElse(""),
@@ -839,16 +875,38 @@ object OpenAIClient {
 
 private[provider] object OpenAIClientTransport {
 
-  /** A transport over an `openai-java` client, closing it with the transport. */
-  def sdk(client: SdkClient): OpenAIClientTransport =
+  /**
+   * The SDK options carrying `timeout`, or none when the section sets no value, in which case the
+   * SDK's own default applies, as before the `timeouts` block existed.
+   *
+   * The timeout goes on each call rather than on the SDK client, because the client's timeout is one
+   * value for every call and covers a streamed response in full: a short `request` timeout set there
+   * would also cut every stream, and `request` and `stream` are separate settings.
+   */
+  private[provider] def requestOptions(
+    timeout: Option[scala.concurrent.duration.FiniteDuration]
+  ): Option[RequestOptions] =
+    timeout.map(t => RequestOptions.builder().timeout(java.time.Duration.ofNanos(t.toNanos)).build())
+
+  /**
+   * A transport over an `openai-java` client, closing it with the transport.
+   *
+   * @param timeouts the section's `timeouts`: `request` bounds a completion, `stream` a streamed one
+   */
+  def sdk(client: SdkClient, timeouts: ProviderTimeouts = ProviderTimeouts.default): OpenAIClientTransport =
     new OpenAIClientTransport {
+      private val requestOpts = requestOptions(timeouts.request)
+      private val streamOpts  = requestOptions(timeouts.stream)
+
       override def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion =
-        client.chat().completions().create(params)
+        requestOpts.fold(client.chat().completions().create(params))(o => client.chat().completions().create(params, o))
 
       override def createChatCompletionStream(
         params: ChatCompletionCreateParams
       ): StreamResponse[ChatCompletionChunk] =
-        client.chat().completions().createStreaming(params)
+        streamOpts.fold(client.chat().completions().createStreaming(params))(o =>
+          client.chat().completions().createStreaming(params, o)
+        )
 
       override def close(): Unit = client.close()
     }
@@ -872,7 +930,7 @@ private[provider] object OpenAIClientTransport {
       case Some(wi) => builder.workloadIdentity(sdkWorkloadIdentity(wi))
       case None     => builder.apiKey(config.apiKey)
     }
-    sdk(customize(builder).build())
+    sdk(customize(builder).build(), config.timeouts)
   }
 
   /** Carries a failure to read the identity token through the SDK, which only understands exceptions. */
@@ -938,7 +996,7 @@ private[provider] object OpenAIClientTransport {
       .azureUrlPathMode(pathMode)
     if (pathMode == AzureUrlPathMode.LEGACY || config.apiVersion != AzureConfig.DEFAULT_API_VERSION)
       builder.azureServiceVersion(azureServiceVersion(config.apiVersion))
-    sdk(builder.build())
+    sdk(builder.build(), config.timeouts)
   }
 
   private[provider] def azureUrlPathMode(endpoint: String): AzureUrlPathMode =

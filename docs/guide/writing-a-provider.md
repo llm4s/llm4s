@@ -206,7 +206,7 @@ The spec says what a section needs. The fields a provider author uses:
 
 `ProviderConfigSpec.apiKeyAndDefaultBaseUrl(defaultBaseUrl, apiKeyEnv)` builds the common shape.
 
-Anything beyond the built-in fields (`provider`, `model`, `baseUrl`, `apiKey`, `headers` -
+Anything beyond the built-in fields (`provider`, `model`, `baseUrl`, `apiKey`, `headers`, `timeouts` -
 `ProviderConfigSpec.BuiltinKeys`) is declared as an extra rather than smuggled through a built-in
 field:
 
@@ -416,6 +416,32 @@ A non-2xx status is **not** an error at this layer: it is a `Right` response for
 `postStream`. `HttpResponse`, `HttpRawResponse` and `StreamingHttpResponse` all carry `headers`
 (lower-case keys); `response.header("Retry-After")` looks one up case-insensitively. A
 `StreamingHttpResponse`'s body is yours to close, on an error status too.
+
+### Honouring the `timeouts` block
+
+Every provider section, and every embedding section, may carry `timeouts { request = ..., stream = ... }`.
+You do not read the block: the loader parses it into `NamedProviderConfig.timeouts` (checked to be positive
+and finite) and applies it to the config your descriptor builds, by calling `ProviderConfig.withTimeouts`.
+To honour it, carry a `ProviderTimeouts` in your config type and pass it on when you call the HTTP client:
+
+```scala
+final case class AcmeConfig(
+  apiKey: String,
+  model: String,
+  baseUrl: String,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
+) extends ProviderConfig:
+  // ... providerId, contextWindow and the rest ...
+  override def withTimeouts(timeouts: ProviderTimeouts): AcmeConfig = copy(timeouts = timeouts)
+
+// in the client: your own default stays when the section sets none
+httpClient.post(url, headers, body, timeout = config.timeouts.requestOr(2.minutes))
+httpClient.postStream(url, headers, body, timeout = config.timeouts.streamOr(10.minutes))
+```
+
+A config that does not override `withTimeouts` ignores the block, since the default returns `this`; a
+provider with no timeouts to offer needs to do nothing. An embedding provider reads
+`EmbeddingProviderConfig.timeouts.requestOr(...)`, and only `request` has a meaning there.
 
 Methods added to the trait after 1.0 will have default implementations, so a test double that
 implements it keeps compiling.
@@ -628,6 +654,13 @@ run. Add it in test scope; it brings ScalaTest with it:
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-provider-testkit" % llm4sVersion % Test
 ```
+
+The testkit **requires JDK 21**: `assertCancelsWhenInterrupted` and its siblings run the call on a
+virtual thread (`Thread.ofVirtual`), and `LocalProviderTestServer` answers on
+`Executors.newVirtualThreadPerTaskExecutor`, both JDK 21 APIs. The build that runs your
+`Llm4s<Name>ModuleSpec` needs a JDK 21 toolchain, whatever your provider module itself targets
+(the library's own minimum JDK is settled in
+[#1493](https://github.com/llm4s/llm4s/issues/1493)).
 
 It has four parts, all in `org.llm4s.testkit`:
 

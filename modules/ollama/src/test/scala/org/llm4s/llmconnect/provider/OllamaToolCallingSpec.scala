@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
+import org.llm4s.testutil.SmallStack
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -172,6 +173,21 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       argumentsSent(ujson.Null) shouldBe ujson.Obj()
     }
 
+    "send an empty object for string arguments nested too deeply, never the parsed document" in {
+      // A string argument is model text (the accumulator keeps streamed arguments as a `Str`). Parsing
+      // one this deep succeeds - the parser is iterative - but the object it builds overflows the stack
+      // when the request body is rendered, so it is refused before parsing and sent as `{}`, as any
+      // string that is not a JSON object is. On a 1 MB stack, so an overflow is a `Left` here (#1562).
+      val deep = "{\"a\":" * 100000 + "1" + "}" * 100000
+      val call = ToolCall("c", "get_weather", ujson.Str(deep))
+      val outcome = SmallStack.run {
+        val body = requestBody(Conversation(Seq(UserMessage("q"), AssistantMessage(None, Seq(call)))))
+        val sent = body("messages")(1)("tool_calls")(0)("function")("arguments")
+        (sent == ujson.Obj(), ujson.write(body).length < 10000)
+      }
+      outcome shouldBe Right((true, true))
+    }
+
     "send a tool result as `role: tool`, naming the tool of the call it answers" in {
       val body = requestBody(
         Conversation(
@@ -335,6 +351,45 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
     "read a call without arguments as an empty object" in {
       withOllama(reply("", ujson.Obj("function" -> ujson.Obj("name" -> "get_time")))) { (client, _) =>
         ask(client).toOption.get.toolCalls.head.arguments shouldBe ujson.Obj()
+      }
+    }
+
+    "refuse string arguments nested too deeply as a malformed call, never an overflow" in {
+      // The string is model text inside the envelope's string literal: the envelope parses, and the
+      // second parse is the boundary. On a 1 MB stack, reduced inside the thread, since rendering a
+      // value this deep in a failure message would itself overflow (#1562).
+      val deep = "{\"a\":" * 100000 + "1" + "}" * 100000
+      withOllama(reply("", call("get_weather", ujson.Str(deep)))) { (client, _) =>
+        val outcome = SmallStack.run(
+          ask(client).left.map(e => (e.getClass.getSimpleName, e.message)).map(_ => "a completion")
+        )
+        outcome match {
+          case Right(Left((kind, message))) =>
+            kind shouldBe "ProcessingError"
+            message should include("malformed tool call")
+            message should include("arguments are nested more than 512 levels deep")
+          case Right(Right(other)) => fail(s"expected a Left, got $other")
+          case Left(thrown)        => fail(s"expected a Left, but complete threw $thrown")
+        }
+      }
+    }
+
+    "name the depth when refusing string arguments just over the limit, never 'not a JSON object'" in {
+      // 513 levels: one over the limit, and a document the parser would otherwise have read as an object.
+      // The site tells a too-deep refusal from a parse failure through `BoundedJson.TooDeep` (#1651); if
+      // that detection fell through, the call would be refused for the wrong reason.
+      val justOver = "{\"a\":" * 513 + "1" + "}" * 513
+      withOllama(reply("", call("get_weather", ujson.Str(justOver)))) { (client, _) =>
+        ask(client) match {
+          case Left(e: ProcessingError) =>
+            e.message should include("arguments are nested more than 512 levels deep")
+            (e.message should not).include("not a JSON object")
+          case other => fail(s"expected a ProcessingError, got $other")
+        }
+      }
+      val atLimit = "{\"a\":" * 512 + "1" + "}" * 512
+      withOllama(reply("", call("get_weather", ujson.Str(atLimit)))) { (client, _) =>
+        ask(client).toOption.get.toolCalls.head.arguments.obj.keySet shouldBe Set("a")
       }
     }
 

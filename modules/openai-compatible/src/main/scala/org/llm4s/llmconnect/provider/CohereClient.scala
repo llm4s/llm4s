@@ -45,7 +45,8 @@ class CohereClient(
         baseUrl = CohereConfig.compatibilityBaseUrl(config.baseUrl),
         credential = OpenAICompatibleClient.Credential.Static(config.apiKey),
         contextWindow = config.contextWindow,
-        reserveCompletion = config.reserveCompletion
+        reserveCompletion = config.reserveCompletion,
+        timeouts = config.timeouts
       ),
       CohereDialect,
       metrics,

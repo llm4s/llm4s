@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
+import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
@@ -76,10 +77,17 @@ private[config] object NamedProviderConfigNormalizer:
                 )
               )
 
+    // The error names the key as the user wrote it: llm4s.providers.<name>.timeouts.request.
+    val timeouts =
+      section.timeouts.fold[Result[ProviderTimeouts]](Right(ProviderTimeouts.default)) { t =>
+        ProviderTimeouts.validatedAt(s"llm4s.providers.${providerName.asName}.timeouts", t.request, t.stream)
+      }
+
     for
-      id    <- providerType
-      model <- modelName
-      auth  <- authConfig
+      id       <- providerType
+      model    <- modelName
+      auth     <- authConfig
+      timeouts <- timeouts
     yield NamedProviderConfig(
       provider = id,
       model = ModelName(model),
@@ -89,5 +97,6 @@ private[config] object NamedProviderConfigNormalizer:
       // Trimmed and kept as read. Which of these the provider accepts is decided by
       // `NamedProviderSectionValidator`, which knows the descriptor; this does not.
       extras = section.extras.collect { case (key, value) if value.trim.nonEmpty => key -> value.trim },
+      timeouts = timeouts,
       auth = auth
     )

@@ -99,7 +99,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
       val respEither: Result[org.llm4s.http.HttpResponse] =
         requireApiKey(cfg).flatMap(_ =>
           httpClient
-            .post(url, headers, payload.render(), timeout = 2.minutes)
+            .post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
             .left
             .map {
               case cancelled: CancelledError => cancelled

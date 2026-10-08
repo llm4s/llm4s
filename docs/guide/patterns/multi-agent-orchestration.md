@@ -7,7 +7,7 @@ nav_order: 1
 
 # Multi-Agent Orchestration Patterns
 
-> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](https://github.com/llm4s/llm4s/tree/main/modules/samples).
 
 Learn how to design systems where multiple agents collaborate, delegate tasks, and handle complex workflows. This guide covers agent communication patterns, handoff mechanisms, and failure recovery strategies.
 

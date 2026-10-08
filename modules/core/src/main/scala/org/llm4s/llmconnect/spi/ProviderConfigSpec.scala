@@ -178,7 +178,7 @@ object ProviderConfigSpec:
    * generic `openai-compatible` provider's `contextWindow` - is a [[ProviderConfigKey]] its
    * provider declares, not a built-in, and is unknown to every provider that does not declare it.
    */
-  val BuiltinKeys: Set[String] = Set("provider", "model", "baseUrl", "apiKey", "headers", "auth")
+  val BuiltinKeys: Set[String] = Set("provider", "model", "baseUrl", "apiKey", "headers", "timeouts", "auth")
 
   /**
    * The built-in fields that can be a deprecated alias (`ProviderConfigKey.deprecatedAliases`):

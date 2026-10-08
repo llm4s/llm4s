@@ -28,6 +28,8 @@ import org.llm4s.util.Redaction
  *                          only to a loopback host, for tests). [[AnthropicConfig.fromValues]]
  *                          checks this, and `AnthropicClient` refuses a config built any other way that
  *                          breaks it.
+ * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
+ *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
 @Stable
 final case class AnthropicConfig private (
@@ -36,11 +38,13 @@ final case class AnthropicConfig private (
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  workloadIdentity: Option[AnthropicWorkloadIdentity]
+  workloadIdentity: Option[AnthropicWorkloadIdentity],
+  override val timeouts: ProviderTimeouts
 ) extends ProviderConfig:
-  override val providerId: ProviderId                    = ProviderId("anthropic")
-  override def endpointUrl: Option[String]               = Some(baseUrl)
-  override def withModel(model: String): AnthropicConfig = copy(model = model)
+  override val providerId: ProviderId                                    = ProviderId("anthropic")
+  override def endpointUrl: Option[String]                               = Some(baseUrl)
+  override def withModel(model: String): AnthropicConfig                 = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): AnthropicConfig = copy(timeouts = timeouts)
 
   def withApiKey(apiKey: String): AnthropicConfig                    = copy(apiKey = apiKey)
   def withBaseUrl(baseUrl: String): AnthropicConfig                  = copy(baseUrl = baseUrl)
@@ -79,7 +83,15 @@ object AnthropicConfig {
     reserveCompletion: Int,
     workloadIdentity: Option[AnthropicWorkloadIdentity] = None
   ): AnthropicConfig =
-    new AnthropicConfig(apiKey, model, baseUrl, contextWindow, reserveCompletion, workloadIdentity)
+    new AnthropicConfig(
+      apiKey,
+      model,
+      baseUrl,
+      contextWindow,
+      reserveCompletion,
+      workloadIdentity,
+      ProviderTimeouts.default
+    )
 
   /**
    * The API key and model, every other field at its default: the entry point for Java and Kotlin,

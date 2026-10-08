@@ -284,18 +284,70 @@ section with an `apiKey`.
 | `apiKey` | The API key; required by every cloud provider. Optional in the section when the vendor's shared key is set ([API keys](#api-keys)) |
 | `baseUrl` | Overrides the provider's default endpoint; **required** for `ollama` and `openai-compatible` |
 | `headers` | Extra HTTP headers; sent by generic `openai-compatible` endpoints and by model listing |
+| `timeouts` | How long a request and a stream may take: `timeouts { request = 3m, stream = 15m }`. Every provider that makes HTTP calls reads it; see [Timeouts](#timeouts) |
 | `organization` | OpenAI, Requesty and OpenRouter: the OpenAI organisation id, sent as `OpenAI-Organization` |
 | `endpoint`, `apiVersion` | Azure OpenAI: the resource endpoint (required) and API version |
 | `project`, `location` | Vertex AI: the GCP project id (required) and region (default `us-central1`) |
 | `region`, `profile`, `accessKeyId`, `secretAccessKey`, `sessionToken` | AWS Bedrock: the AWS region (required, never defaulted); a shared-config profile; or explicit credentials, with a session token for temporary ones. With none of the credential keys the AWS default credential chain is used. `baseUrl` overrides the endpoint |
 | `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
 
-The first five keys are shared by every provider. The rest belong to the providers named, which
+The first six keys are shared by every provider. The rest belong to the providers named, which
 declare them ([provider-specific keys](../guide/providers#provider-specific-keys)); in a section for
 any other provider such a key is ignored with a warning naming it, as a misspelt key is.
 
 Each provider module's `reference.conf` has a commented example section, and the
 [provider guide](../guide/providers) covers each provider in detail.
+
+### Timeouts
+
+Every provider section, and every embedding section, accepts an optional `timeouts` block:
+
+```hocon
+llm4s.providers.my-openai {
+  provider = "openai"
+  model    = "gpt-4o"
+  timeouts {
+    request = 3m      # a call that returns one response: a completion, an embedding
+    stream  = 15m     # a streamed completion
+  }
+}
+
+llm4s.embeddings.openai.timeouts.request = 30s
+```
+
+Each value is a duration (`30s`, `2m`, `1500ms`, `1h`) and is optional: **a value you leave out keeps
+that client's own default, so a section without the block behaves exactly as it did before.** A value
+must be positive and finite; `0s`, a negative value, `Inf` and anything that is not a duration are
+refused when the section is loaded, naming the key (`llm4s.providers.my-openai.timeouts.request`). A
+misspelt key inside the block (`reqest = 3m`) is refused too, rather than silently leaving the default
+in force. In an embedding section only `request` has a meaning, since an embedding call does not stream.
+The usual precedence applies: `-D` system properties, then `application.conf`, then a module's
+`reference.conf`; to take a value from the environment, bind it yourself with
+`timeouts.request = ${?MY_REQUEST_TIMEOUT}`, which leaves the default in force while the variable is unset.
+
+| Provider | `request` default | `stream` default | What the timeout bounds |
+|---|---|---|---|
+| `openai-compatible`, `deepseek`, `zai`, `openrouter`, `mistral`, `cohere` (chat) | 2 minutes | 5 minutes | the wait for the response to begin |
+| `gemini`, `vertexai`, `ollama`, `watsonx` (chat) | 2 minutes | 10 minutes | the wait for the response to begin |
+| `openai`, `azure`, `requesty`, `anthropic` | the SDK's own default | the SDK's own default | the whole call, including a streamed body |
+| `bedrock` | the AWS SDK's own default | no limit | the whole call, including retries and a streamed body |
+| Embeddings: `openai`, `ollama` | 2 minutes | n/a | the wait for the response to begin |
+| Embeddings: `voyage`, `jina`, `cohere` | 2 minutes | n/a | the wait for the response to begin |
+
+Four things to know:
+
+- **The HTTP-based clients bound the wait for the response to begin**, not the time a stream may then
+  run. A stream whose server has begun answering is not cut by `stream`.
+- **The OpenAI, Azure, Requesty and Anthropic clients use their vendor's SDK**, which bounds the whole
+  call and retries a call that fails or times out **twice** by default (llm4s does not change that). A
+  `request = 30s` there can therefore take up to three attempts and their backoff before the call
+  fails. `request` and `stream` are independent: a short `request` does not cut a stream.
+- **Bedrock uses the AWS SDK.** `request` becomes the SDK's API-call timeout, which covers its retries,
+  so a `request = 30s` call fails within 30 seconds; `stream` is a deadline on the whole `ConverseStream`
+  call, so unlike the HTTP-based clients it does cut a stream that is still running. Either expiry is a
+  `TimeoutError`.
+- **Model listing, the Vertex AI token request and the watsonx IAM token exchange keep their own fixed
+  timeouts**, which the block does not change.
 
 ### Examples for other providers
 
@@ -555,6 +607,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.agent.memory.LLMEmbeddingService
+import org.llm4s.model.ModelRegistryService
 
 // Core logic depends on injected service
 class RAGService(embeddingService: LLMEmbeddingService) {
@@ -567,9 +620,12 @@ class RAGService(embeddingService: LLMEmbeddingService) {
 object RAGApplication extends App {
   val startup = for {
     // 1. Load config
-    (provider, cfg) <- Llm4sConfig.embeddings()
-    model <- Llm4sConfig.textEmbeddingModel()
-    
+    embeddingConfig <- Llm4sConfig.embeddings()
+    (provider, cfg) = embeddingConfig
+    model    <- Llm4sConfig.textEmbeddingModel()
+    registry <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
+
     // 2. Build dependencies
     client <- EmbeddingClient.from(provider, cfg)
     
@@ -1134,9 +1190,9 @@ openai-main {
 
 **Solutions:**
 
-1. **Request timeouts are not configurable yet.** Each client uses an internal default
-   (two minutes for a completion, five for a stream in the OpenAI-compatible clients);
-   configurable timeouts are tracked in [#712](https://github.com/llm4s/llm4s/issues/712).
+1. **Raise (or lower) the timeouts.** Each client has a default (see [Timeouts](#timeouts)):
+   two minutes for a completion, and five or ten minutes for a stream. A section's
+   `timeouts { request = 5m, stream = 20m }` block changes them per provider.
 
 2. **Use streaming for long responses:**
 ```scala
@@ -1145,10 +1201,9 @@ client.complete(Conversation(Seq(UserMessage("Your query"))))
 
 // Streaming: get tokens as they arrive
 client.streamComplete(
-  Conversation(Seq(UserMessage("Your query")))
-) { chunk =>
-  chunk.content.foreach(print)
-}
+  Conversation(Seq(UserMessage("Your query"))),
+  onChunk = chunk => chunk.content.foreach(print)
+)
 ```
 
 3. **Reduce response length:**
@@ -1167,13 +1222,15 @@ client.complete(
 
 1. **Batch embeddings instead of loading all at once:**
 ```scala
+import org.llm4s.llmconnect.model.EmbeddingRequest
+
 val documents: List[String] = loadDocuments()
 val batchSize = 100
 
 val embeddings = documents.grouped(batchSize).flatMap { batch =>
-  embedder.embed(batch) match {
-    case Right(emb) => emb
-    case Left(err) => 
+  embedder.embed(EmbeddingRequest(batch, embeddingModel)) match {
+    case Right(response) => response.embeddings
+    case Left(err) =>
       println(s"Batch failed: $err")
       List.empty
   }

@@ -39,6 +39,8 @@ import org.llm4s.util.Redaction
  *                          OpenAI (vLLM, Ollama's `/v1`) stream no usage without it; turn it
  *                          off for an endpoint that rejects the field. A named section sets it
  *                          with the `streamUsage` key.
+ * @param timeouts          how long a request and a stream may take: the section's `timeouts` block. An absent
+ *                          value keeps the client's own default ([[ProviderTimeouts]])
  * @param tokenExchange     workload-identity auth: the identity token is exchanged here for the bearer
  *                          token, which replaces `apiKey`; never set together with `apiKey` or an
  *                          `Authorization` entry in `headers`, and its `tokenUrl` and `baseUrl` must be
@@ -56,11 +58,13 @@ final case class OpenAICompatibleConfig private (
   reserveCompletion: Int,
   headers: Map[String, String],
   streamUsage: Boolean,
+  override val timeouts: ProviderTimeouts,
   tokenExchange: Option[TokenExchangeConfig]
 ) extends ProviderConfig:
   override def providerId: ProviderId                           = ProviderId(OpenAICompatibleConfig.ProviderIdName)
   override def endpointUrl: Option[String]                      = Some(baseUrl)
   override def withModel(model: String): OpenAICompatibleConfig = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): OpenAICompatibleConfig = copy(timeouts = timeouts)
 
   def withBaseUrl(baseUrl: String): OpenAICompatibleConfig          = copy(baseUrl = baseUrl)
   def withApiKey(apiKey: String): OpenAICompatibleConfig            = copy(apiKey = Some(apiKey))
@@ -112,6 +116,7 @@ object OpenAICompatibleConfig {
     reserveCompletion: Int = DEFAULT_RESERVE_COMPLETION,
     headers: Map[String, String] = Map.empty,
     streamUsage: Boolean = true,
+    timeouts: ProviderTimeouts = ProviderTimeouts.default,
     tokenExchange: Option[TokenExchangeConfig] = None
   ): OpenAICompatibleConfig =
     new OpenAICompatibleConfig(
@@ -122,6 +127,7 @@ object OpenAICompatibleConfig {
       reserveCompletion,
       headers,
       streamUsage,
+      timeouts,
       tokenExchange
     )
 

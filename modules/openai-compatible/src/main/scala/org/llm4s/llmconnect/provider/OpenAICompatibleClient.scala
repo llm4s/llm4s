@@ -4,7 +4,7 @@ import org.llm4s.annotation.Stable
 import org.llm4s.error.{ AuthenticationError, ValidationError }
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.auth.{ AccessTokenProvider, IdentitySource, TokenExchange, TokenExchangeConfig }
-import org.llm4s.llmconnect.config.OpenAICompatibleConfig
+import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
@@ -293,10 +293,12 @@ class OpenAICompatibleClient(
    * `OpenRouterClient` had not (#912), so an endpoint that accepted the connection and never
    * answered hung the caller. Scoped to the provider package so specs can shorten it.
    */
-  protected[provider] def requestTimeout: FiniteDuration = OpenAICompatibleClient.RequestTimeout
+  protected[provider] def requestTimeout: FiniteDuration =
+    settings.timeouts.requestOr(OpenAICompatibleClient.RequestTimeout)
 
   /** The timeout `streamComplete` sends with its request. See [[requestTimeout]]. */
-  protected[provider] def streamTimeout: FiniteDuration = OpenAICompatibleClient.StreamTimeout
+  protected[provider] def streamTimeout: FiniteDuration =
+    settings.timeouts.streamOr(OpenAICompatibleClient.StreamTimeout)
 
   /**
    * Where a dynamic credential's tokens come from. An [[OpenAICompatibleClient.Credential.Exchange]]
@@ -475,9 +477,44 @@ class OpenAICompatibleClient(
       message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList, thinking = thinking),
       toolCalls = toolCalls.toList,
       usage = usage,
-      estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u))
+      estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u)),
+      citations = parseCitations(message)
     )
   }
+
+  /**
+   * The sources a reply cites: the `url_citation` entries of the message's `annotations`, in the
+   * order sent, in the shape OpenAI documents for its search models and OpenRouter for `:online`
+   * models, `{"type":"url_citation","url_citation":{"url","title","content","start_index","end_index"}}`.
+   *
+   * Lenient on purpose: a citation never fails a completion whose answer arrived. An entry of another
+   * type, or without a non-empty `url`, is dropped (one is never made up), and a field of the wrong
+   * type, or an index that is not a whole number of at least zero, is read as absent. Streamed events
+   * are not read: neither provider documents where a stream carries them (#1216).
+   */
+  protected[provider] def parseCitations(message: ujson.Value): List[Citation] =
+    message.objOpt
+      .flatMap(_.get("annotations"))
+      .flatMap(_.arrOpt)
+      .map(_.toList.flatMap(parseCitation))
+      .getOrElse(List.empty)
+
+  private def parseCitation(annotation: ujson.Value): Option[Citation] =
+    for {
+      entry <- annotation.objOpt
+      if entry.get("type").flatMap(_.strOpt).contains("url_citation")
+      cited <- entry.get("url_citation").flatMap(_.objOpt)
+      url   <- cited.get("url").flatMap(_.strOpt).filter(_.nonEmpty)
+    } yield Citation(
+      url = url,
+      title = cited.get("title").flatMap(_.strOpt),
+      citedText = cited.get("content").flatMap(_.strOpt),
+      startIndex = citationIndex(cited, "start_index"),
+      endIndex = citationIndex(cited, "end_index")
+    )
+
+  private def citationIndex(cited: collection.Map[String, ujson.Value], key: String): Option[Int] =
+    cited.get(key).flatMap(_.numOpt).filter(n => n.isWhole && n >= 0 && n <= Int.MaxValue).map(_.toInt)
 
   /** Token usage from a `usage` object, or from the first element of a `usage` array. */
   private def parseUsage(usage: ujson.Value): Option[TokenUsage] =
@@ -620,13 +657,16 @@ object OpenAICompatibleClient {
 
   /**
    * The timeout on `complete`'s request: two minutes, what the old `MistralClient` and
-   * `CohereClient` used, and what `OllamaClient`, `GeminiClient` and `VertexAIClient` use. A
-   * single internal default for now; configurable timeouts are
-   * [[https://github.com/llm4s/llm4s/issues/712 #712]].
+   * `CohereClient` used, and what `OllamaClient`, `GeminiClient` and `VertexAIClient` use. This is
+   * the default: a section's `timeouts.request` replaces it
+   * ([[https://github.com/llm4s/llm4s/issues/712 #712]]).
    */
   val RequestTimeout: FiniteDuration = 2.minutes
 
-  /** The timeout on `streamComplete`'s request: five minutes, as in the clients this one replaced. */
+  /**
+   * The timeout on `streamComplete`'s request: five minutes, as in the clients this one replaced. A
+   * section's `timeouts.stream` replaces it.
+   */
   val StreamTimeout: FiniteDuration = 5.minutes
 
   /**
@@ -699,7 +739,8 @@ object OpenAICompatibleClient {
     baseUrl: String,
     credential: Credential,
     contextWindow: Int,
-    reserveCompletion: Int
+    reserveCompletion: Int,
+    timeouts: ProviderTimeouts = ProviderTimeouts.default
   ) {
     override def toString: String =
       s"Settings(providerName=$providerName, displayName=$displayName, model=$model, baseUrl=$baseUrl, " +
@@ -719,7 +760,8 @@ object OpenAICompatibleClient {
         case None => config.apiKey.filter(_.trim.nonEmpty).fold(Credential.Anonymous)(Credential.Static(_))
       },
       contextWindow = config.contextWindow,
-      reserveCompletion = config.reserveCompletion
+      reserveCompletion = config.reserveCompletion,
+      timeouts = config.timeouts
     )
 
   /**

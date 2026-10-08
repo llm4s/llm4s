@@ -19,8 +19,11 @@ inThisBuild(
     organization     := "org.llm4s",
     organizationName := "llm4s",
     versionScheme    := Some("early-semver"),
-    homepage         := Some(url("https://github.com/llm4s/")),
-    licenses         := List("MIT" -> url("https://mit-license.org/")),
+    // The documentation site. The organization keeps the GitHub organization page, which the POM's
+    // `<organization><url>` shows; both used to be the organization page.
+    homepage             := Some(url("https://llm4s.org")),
+    organizationHomepage := Some(url("https://github.com/llm4s/")),
+    licenses             := List("MIT" -> url("https://mit-license.org/")),
     developers := List(
       Developer(
         "rorygraves",
@@ -38,10 +41,13 @@ inThisBuild(
     pgpPublicRing := file("/tmp/public.asc"),
     pgpSecretRing := file("/tmp/secret.asc"),
     pgpPassphrase := sys.env.get("PGP_PASSPHRASE").map(_.toArray),
+    // Scaladex associates an artifact with a repository by the POM's `scm` element and supports only public
+    // GitHub repositories (https://github.com/scalacenter/scaladex#how-it-works): a plain `https` repository URL
+    // without a trailing slash is the form it parses most simply.
     scmInfo := Some(
       ScmInfo(
-        url("https://github.com/llm4s/llm4s/"),
-        "scm:git:git@github.com:llm4s/llm4s.git"
+        url("https://github.com/llm4s/llm4s"),
+        "scm:git:https://github.com/llm4s/llm4s.git"
       )
     ),
     version := {
@@ -134,6 +140,8 @@ def mimaFrozen(module: String) = Seq(
 
 // ---- shared settings ----
 lazy val commonSettings = Seq(
+  // The one-sentence POM description of each published module (project/PomDescriptions.scala).
+  description := PomDescriptions.of(name.value),
   // Modules outside the frozen set have no baseline; keep MiMa quiet for them.
   mimaFailOnNoPrevious    := false,
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
@@ -189,7 +197,7 @@ Global / excludeLintKeys += coveragePolicy
 // A module can ship without a stability tier or an install line, because nothing connects what the
 // build publishes to the docs that name it. See project/PublishedArtifacts.scala.
 lazy val publishedArtifactsCheck = taskKey[Unit](
-  "Fail the build if a published llm4s-* artifact is not named in v1-scope.md and installation.md"
+  "Fail the build if a published llm4s-* artifact is not named in v1-scope.md and installation.md, or has no POM description of its own"
 )
 // What a release must put on Maven Central, one `artifact <id>` or `stub <id>` per line, for
 // scripts/verify-release.sh. Run it with `sbt -error listPublishedArtifacts`.
@@ -295,7 +303,10 @@ lazy val llm4s = (project in file("."))
     publishedArtifactsCheck / aggregate := false,
     publishedArtifactsCheck := {
       val projects = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
+      val described =
+        Def.task((name.value, (publish / skip).value, description.value)).all(ScopeFilter(inAnyProject)).value
       PublishedArtifacts.check(projects, (ThisBuild / baseDirectory).value, streams.value.log)
+      PomDescriptions.check(described, streams.value.log)
     },
     listPublishedArtifacts / aggregate := false,
     listPublishedArtifacts := {
@@ -500,7 +511,7 @@ lazy val core = (project in file("modules/core"))
 // dependency, they do not rewrite imports.
 
 lazy val knowledgegraph = (project in file("modules/knowledgegraph"))
-  .dependsOn(core)
+  .dependsOn(core % "compile->compile;test->test")
   .settings(
     name := "llm4s-knowledgegraph",
     commonSettings,
@@ -575,7 +586,7 @@ lazy val rag = (project in file("modules/rag"))
 // rather than rewriting imports.
 
 lazy val memory = (project in file("modules/memory"))
-  .dependsOn(core)
+  .dependsOn(core % "compile->compile;test->test")
   .settings(
     name := "llm4s-memory",
     commonSettings,
@@ -954,6 +965,10 @@ lazy val watsonx = (project in file("modules/providers/watsonx"))
 // helpers used to live in core's test sources, which are not published. A test library, so
 // ScalaTest is a compile dependency. Every in-repo provider module dogfoods it (`% Test`).
 //
+// It needs JDK 21: the interruption checks run on `Thread.ofVirtual` and the local server on
+// `Executors.newVirtualThreadPerTaskExecutor` (#1582). The docs say so; no module sets a
+// `-release` or `javacOptions` target, and where the floor is enforced is for #1493 to decide.
+//
 // Core's own tests cannot use it - that would be a project cycle - so anything core's tests
 // share with it lives in core's main sources, `private[llm4s]` (`config.ReferenceConfig`).
 lazy val providerTestkit = (project in file("modules/provider-testkit"))
@@ -1111,6 +1126,10 @@ lazy val deployService = (project in file("modules/deploy-service"))
   )
   .settings(DeployServiceDocker.settings)
 
+lazy val docSnippetsReport = taskKey[Unit](
+  "List every Scala block of the documentation pages that are compile-checked, with its hash and whether it is skipped"
+)
+
 lazy val samples = (project in file("modules//samples"))
   .dependsOn(
     core,
@@ -1147,7 +1166,34 @@ lazy val samples = (project in file("modules//samples"))
     // (org.llm4s.samples.*). Samples are compile-checked, not covered.
     coverageDisabled,
     libraryDependencies += Deps.termflow,
-    appLogging
+    // Test-only: `JsonLibrariesGuideSpec` runs the recipes of docs/guide/json-libraries.md against the real libraries.
+    // Samples are unpublished, so none of these reaches a user's classpath or a frozen module.
+    libraryDependencies ++= Seq(
+      Deps.circeCore  % Test,
+      Deps.ujsonCirce % Test,
+      Deps.playJson   % Test,
+      Deps.zioJson    % Test
+    ),
+    appLogging,
+    // The Scala blocks of the getting-started pages are compiled as test sources, so a snippet that no longer
+    // compiles fails `sbt test` (#1477). The generator and its rules are in project/DocSnippets.scala; the blocks
+    // that are deliberately not compiled are listed in src/test/docs-snippets/skip.txt.
+    Test / sourceGenerators += Def.task {
+      DocSnippets.generate(
+        (ThisBuild / baseDirectory).value / "docs",
+        baseDirectory.value / "src" / "test" / "docs-snippets" / "skip.txt",
+        (Test / sourceManaged).value / "docsnippets",
+        streams.value.log
+      )
+    }.taskValue,
+    // Warnings (unused imports and values, in a snippet written to be read) are not errors in generated sources.
+    Test / scalacOptions += "-Wconf:src=.*docsnippets.*:s",
+    docSnippetsReport := println(
+      DocSnippets.report(
+        (ThisBuild / baseDirectory).value / "docs",
+        baseDirectory.value / "src" / "test" / "docs-snippets" / "skip.txt"
+      )
+    )
   )
 
 lazy val configPolicy = (project in file("modules/config-policy"))
