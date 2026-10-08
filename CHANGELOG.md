@@ -1999,8 +1999,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calling the model, and its conversation thread stayed busy, so a `recover` or a new turn on it failed with
   `ThreadBusy` until the turn finished. Both now run the turn as `stream` does (`run` on a new thread with a random
   id, as `JAgent.run` does; `continueConversation` on `previous.threadId()`), its events discarded: cancelling the
-  caller cancels the turn and returns once it has ended, leaving the thread for `recover`. Every `AgentKt` suspend
-  function that runs a turn now behaves the same way. Results and failures are otherwise unchanged - the same
+  caller cancels the turn and returns once it has ended, leaving the thread for `recover`; if the turn had already
+  completed when the cancellation arrived, its result is committed to the thread and `recover` throws `LLMException`
+  (no incomplete execution). Every `AgentKt` suspend function that runs a turn now behaves the same way, and
+  collects the turn's discarded events on `Dispatchers.IO`, not the caller's dispatcher (`Dispatchers.Main`). Results and failures are otherwise unchanged - the same
   `JAgentResult`, and `LLMException` with the same message and cause. No public signature changes; Java's
   blocking `JAgent` methods are unchanged.
 - **`llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama`: a deep or malformed model listing is a `Left`, not an

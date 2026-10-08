@@ -2,6 +2,8 @@ package org.llm4s.kotlin
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.asCoroutineDispatcher
+import java.util.concurrent.Executors
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CancellationException
@@ -335,6 +337,54 @@ class AgentKtPendingTest {
         val recovered = agent.recover(first.threadId())
         assertEquals(Optional.of("recovered"), recovered.answer())
         assertEquals(Optional.of("done"), agent.continueConversation(recovered, "again").answer())
+    }
+
+    @Test
+    fun `a cancellation that loses the race to a completed turn throws, but the turn's result is committed`() = runBlocking {
+        val modelCalled = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val agent = agentOf(
+            { completion("first") },
+            {
+                modelCalled.countDown()
+                release.await(seconds, TimeUnit.SECONDS)
+                completion("second")
+            },
+        )
+        val first = agent.run("hi")
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val caller = executor.asCoroutineDispatcher()
+            val continuing = async(caller) { agent.continueConversation(first, "more") }
+            assertTrue(withContext(Dispatchers.IO) { modelCalled.await(seconds, TimeUnit.SECONDS) })
+            // the caller is suspended in the turn: occupy its only thread, so the result cannot be handed back to it
+            val occupied = CountDownLatch(1)
+            val freed = CountDownLatch(1)
+            executor.execute {
+                occupied.countDown()
+                freed.await(seconds, TimeUnit.SECONDS)
+            }
+            assertTrue(withContext(Dispatchers.IO) { occupied.await(seconds, TimeUnit.SECONDS) })
+            release.countDown()
+            // the turn completes and is committed: recover first sees a busy thread, then nothing to recover
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds)
+            var refusal = ""
+            while (!refusal.contains("no incomplete execution") && System.nanoTime() < deadline) {
+                refusal = assertFailsWith<LLMException> { agent.recover(first.threadId()) }.message.orEmpty()
+            }
+            assertTrue(refusal.contains("no incomplete execution"), refusal)
+            // only now is the caller cancelled, before it could resume with the result
+            continuing.cancel()
+            freed.countDown()
+            assertFailsWith<CancellationException> { continuing.await() }
+            assertTrue(continuing.isCancelled)
+            // the completed turn is the thread's latest: the next turn continues from it
+            val next = agent.continueConversation(first, "again")
+            assertEquals(Optional.of("done"), next.answer())
+            assertTrue(next.messages().any { it.content() == "second" }, "the committed turn's answer is in the history")
+        } finally {
+            executor.shutdownNow()
+        }
     }
 
     @Test

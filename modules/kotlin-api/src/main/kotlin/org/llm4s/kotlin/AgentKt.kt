@@ -41,8 +41,11 @@ sealed interface AgentStreamItem {
  * Every suspend function that runs a turn - [run], [continueConversation], [resume] and [recover] -
  * cancels the turn when its caller is cancelled (a cancelled scope, a `withTimeout`): it throws
  * `CancellationException` once the turn has ended, and the conversation thread is no longer busy, left
- * for [recover] to finish the cancelled turn. Each runs as the matching flow does - [stream],
- * [streamResume] or [streamRecover] - its events discarded.
+ * for [recover] to finish the cancelled turn. If the turn had already completed when the cancellation
+ * arrived, it still throws `CancellationException`, but the turn's result is committed to the thread:
+ * [recover] then throws [LLMException] (no incomplete execution), and the next turn continues from it.
+ * Each runs as the matching flow does - [stream], [streamResume] or [streamRecover] - its events
+ * discarded, collected on [Dispatchers.IO] rather than the caller's dispatcher.
  *
  * Every turn returns a [JAgentResult], read with Java types only: `answer()` is an `Optional<String>`,
  * `messages()` a `List`, and `status().kind()` an [org.llm4s.javaapi.AgentStatusKind] to `when` over.
@@ -113,8 +116,13 @@ class AgentKt internal constructor(private val underlying: JAgent) {
      */
     suspend fun recover(threadId: String): JAgentResult = resultOf(streamRecover(threadId))
 
-    /** The result of [turn]'s collection, its last item: the flow ends with [AgentStreamItem.Done] or throws. */
-    private suspend fun resultOf(turn: Flow<AgentStreamItem>): JAgentResult = (turn.last() as AgentStreamItem.Done).result
+    /**
+     * The result of [turn]'s collection, its last item: the flow ends with [AgentStreamItem.Done] or throws.
+     * Collected on [Dispatchers.IO], so the discarded events never hop to the caller's dispatcher;
+     * `withContext` waits for the collection - and so the turn's cancellation - to end before it returns.
+     */
+    private suspend fun resultOf(turn: Flow<AgentStreamItem>): JAgentResult =
+        withContext(Dispatchers.IO) { (turn.last() as AgentStreamItem.Done).result }
 
     /**
      * Runs [query] as one turn on [threadId] - a new conversation, or the next turn of one - as a cold

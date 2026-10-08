@@ -216,6 +216,9 @@ the `JAgentResult` or throw `LLMException`. Every `AgentKt` suspend function tha
 `streamResume`, `streamRecover`), so cancelling the caller - a cancelled scope, `withTimeout` -
 cancels the turn. The call throws `CancellationException` once the turn has ended, and the
 conversation thread is no longer busy: it is left for `recover`, which finishes the cancelled turn.
+If the turn had already completed when the cancellation arrived, the call still throws
+`CancellationException`, but the turn's result is committed to the thread: `recover` then has nothing to
+recover and throws `LLMException` ("no incomplete execution"), and the next turn continues from that result.
 
 ```kotlin
 var turn = agent.run("Deploy the release")
