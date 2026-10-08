@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Agents
-nav_order: 1
+nav_order: 12
 parent: User Guide
 has_children: true
 ---

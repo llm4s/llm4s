@@ -2,7 +2,7 @@
 layout: page
 title: Java
 parent: User Guide
-nav_order: 6
+nav_order: 19
 ---
 
 # Using LLM4S from Java

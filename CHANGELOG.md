@@ -1916,6 +1916,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declaring `throws InterruptedException` would have forced a catch of an exception that is never thrown on every
   caller. The Javadoc of `complete` and `run`, the Java guide and the threading guide now say what to do instead:
   test the result for a `CancelledError` (`ThreadingGuideSnippets.completeOrNull`); a snippet test pins it.
+- **Docs: every page under a parent has its own `nav_order`, and CI checks it**
+  ([#1623](https://github.com/llm4s/llm4s/issues/1623)): ten `nav_order` values were shared by two or three pages
+  under the same parent (`Basic Usage` and `Agents` both 1, `Permission-Based RAG` and `RAG Evaluation` both 4,
+  `Structured Output` and `Java` both 6, `Built-in Tools` and `Monitoring` both 10, `Context Window Pruning` and
+  `Production Deployment` both 11, `Advanced Topics` and `Google Summer of Code` both 5, `Contribute`, `Migrations`
+  and `People` all 9, among others), so the site ordered them by title and the number meant nothing. The colliding
+  pages are renumbered, keeping the existing order where it was sensible, and the stale
+  `docs/reference/review-guidelines.main.backup.md`, a second *Code Review Guidelines* page under Reference, is
+  removed. A new check, `scripts/check-doc-nav-order.sh`, runs in CI quick checks and fails on a duplicate.
 - Calculator decimal output uses a stable locale, including on JVMs configured with comma decimal separators.
 - **`llm4s-agent-tools`: `CalculatorTool` rejects results that are not finite**
   ([#1516](https://github.com/llm4s/llm4s/issues/1516)): an overflow (`10^400`, `1e200 * 1e200`) or an undefined

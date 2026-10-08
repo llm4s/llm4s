@@ -91,6 +91,11 @@ jobs:
       - name: Check install snippets do not pin a literal version
         run: scripts/check-doc-versions.sh
 
+      # Fails when two docs pages under the same parent declare the same `nav_order`: the site then orders them by
+      # title instead, so the number stops meaning anything and nothing reports it (#1623).
+      - name: Check docs nav_order is unique within each parent
+        run: scripts/check-doc-nav-order.sh
+
       # The release's docs deploy: release.yml dispatches pages.yml on `main` (the github-pages environment rejects a
       # tag ref, #1152) and waits for it. This runs the dispatcher against a fake `gh`, with no network, and checks that
       # pages.yml, release.yml and the script agree on the run's title and the tag pattern, and that no workflow input

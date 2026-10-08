@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Monitoring
-nav_order: 10
+nav_order: 21
 parent: User Guide
 has_children: true
 ---

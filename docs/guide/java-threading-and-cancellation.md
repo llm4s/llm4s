@@ -2,7 +2,7 @@
 layout: page
 title: Java Threading and Cancellation
 parent: User Guide
-nav_order: 16
+nav_order: 20
 ---
 
 # Java Threading and Cancellation
