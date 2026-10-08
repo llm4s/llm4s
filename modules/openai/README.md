@@ -27,7 +27,8 @@ themselves through `META-INF/services`. Which release carries which module is in
 
 ## Configuration
 
-A chat section needs only `provider` and `model` when the vendor's variable is set. The key is the
+An OpenAI or Requesty chat section needs only `provider` and `model` when the vendor's variable is set.
+An Azure chat section also requires `endpoint`. The key is the
 section's own `apiKey`, else the shared `llm4s.credentials.<id>.apiKey` this module's
 `reference.conf` binds to the variable above:
 
