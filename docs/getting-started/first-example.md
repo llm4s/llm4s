@@ -121,15 +121,15 @@ In LLM4S, we follow a strict configuration boundary. The entry point (`Main`) bu
 ### 2. Complete with Messages
 
 ```scala
-response <- client.complete(
-  messages = List(UserMessage("What is Scala?")),
-  model = None
+val response = client.complete(
+  Conversation(List(UserMessage("What is Scala?"))),
+  CompletionOptions()
 )
 ```
 
-- **messages**: A list of conversation messages (User, Assistant, System)
-- **model**: Optional model override (None uses configured model)
-- Returns `Result[CompletionResponse]`
+- **conversation**: The conversation messages (User, Assistant, System), wrapped in `Conversation`
+- **options**: Per-request completion settings; the model is selected when the client is configured
+- Returns `Result[Completion]`
 
 ### 3. Result Handling
 

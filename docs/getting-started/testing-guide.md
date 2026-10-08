@@ -455,19 +455,21 @@ class ToolCallingSpec extends AnyFlatSpec with Matchers {
         conversation: Conversation,
         options: CompletionOptions = CompletionOptions()
       ): Result[Completion] = {
+        val message = if (conversation.messages.exists(_.isInstanceOf[ToolMessage])) {
+          AssistantMessage("Weather in London: 20°C")
+        } else {
+          AssistantMessage(
+            contentOpt = None,
+            toolCalls = Seq(ToolCall("call_1", "get_weather", ujson.Obj("city" -> "London")))
+          )
+        }
         Right(Completion(
           id = "mock-1",
           created = System.currentTimeMillis(),
-          content = "",
+          content = message.content,
           model = "mock-model",
-          message = AssistantMessage(""),
-          toolCalls = List(
-            ToolCall(
-              id = "call_1",
-              name = "get_weather",
-              arguments = ujson.Obj("city" -> "London")
-            )
-          )
+          message = message,
+          toolCalls = message.toolCalls.toList
         ))
       }
       override def streamComplete(
