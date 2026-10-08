@@ -12,6 +12,13 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHECK="${TIER_DRIFT_CHECK:-$REPO_ROOT/scripts/check-tier-drift.sh}"   # TIER_DRIFT_CHECK: run the tests against another copy (mutation checks)
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
+
+# The pickers read build.sbt the way the check does: comments are not live code, so a block-commented
+# mimaFrozen call must never be picked as a mutation target. The check's own stripper is extracted and
+# imported - always from the repository's script, never from $CHECK, so a mutated copy under test
+# cannot sabotage the pickers themselves.
+sed -n '/^def strip_scala_comments/,/^def read(/p' "$REPO_ROOT/scripts/check-tier-drift.sh" | sed '$d' > "$WORK/striputil.py"
+grep -q "def strip_scala_comments" "$WORK/striputil.py" || { echo "FAIL: could not extract strip_scala_comments from check-tier-drift.sh"; exit 2; }
 FILES="build.sbt docs/reference/v1-scope.md docs/reference/compatibility-policy.md docs/reference/api-stability.md"
 PASSED=0
 FAILED=0
@@ -41,10 +48,12 @@ PY
 
 # pick KEY: print a value chosen from the real files (never hard-coded).
 pick() {
-  python3 - "$REPO_ROOT" "$1" <<'PY'
+  python3 - "$REPO_ROOT" "$1" "$WORK" <<'PY'
 import re, sys
 root, key = sys.argv[1], sys.argv[2]
-build = open(root + "/build.sbt", encoding="utf-8").read()
+sys.path.insert(0, sys.argv[3])
+from striputil import strip_scala_comments
+build = strip_scala_comments(open(root + "/build.sbt", encoding="utf-8").read())
 scope = open(root + "/docs/reference/v1-scope.md", encoding="utf-8").read()
 frozen = re.findall(r'^\s*mimaFrozen\("(llm4s-[a-z0-9-]+)"\)', build, re.M)
 names = re.findall(r'^\s*name\s*:=\s*"(llm4s-[a-z0-9-]+)"', build, re.M)
@@ -52,11 +61,33 @@ table = scope.split("## Package Map", 1)[1].split("\n## ", 1)[0]
 listed = re.findall(r'`(llm4s-[a-z0-9-]+)`', "\n".join(l.split("|")[2] for l in table.split("\n") if l.count("|") >= 4))
 nonfrozen_listed = [n for n in dict.fromkeys(listed) if n not in frozen and "Frozen" not in
                     "".join(l.split("|")[3] for l in table.split("\n") if l.count("|") >= 4 and ("`%s`" % n) in l.split("|")[2])]
+proj = None
+projname = {}
+skipped = set()
+for l in build.split("\n"):
+    m = re.match(r'^lazy val\s+(\w+)\s*=\s*\(project\s+in\s+file\(', l)
+    if m:
+        proj = m.group(1)
+    m = re.search(r'name\s*:=\s*"(llm4s-[a-z0-9-]+)"', l)
+    if m and proj:
+        projname[proj] = m.group(1)
+    if "publish / skip := true" in l and proj:
+        skipped.add(proj)
+published = {projname[p] for p in projname if p not in skipped}
+rows_of = {}
+for l in table.split("\n"):
+    if l.count("|") >= 4:
+        toks = re.findall(r'`(llm4s-[a-z0-9-]+)`', l.split("|")[2])
+        for tok in toks:
+            rows_of.setdefault(tok, []).append(toks)
+pub_single = [n for n in sorted(published) if n not in frozen and n in rows_of
+              and all(set(ts) == {n} for ts in rows_of[n])]
 out = {
     "frozen":        [m for m in frozen if m != "llm4s-agent"][0],
     "frozen_last":   [m for m in frozen if m != "llm4s-agent"][-1],
     "nonfrozen":     nonfrozen_listed[0],
     "nonfrozen_dir": None,
+    "pubmod":        pub_single[0] if pub_single else "",
 }
 print(out[key])
 PY
@@ -90,9 +121,11 @@ FROZEN="$(pick frozen)"
 FROZEN_LAST="$(pick frozen_last)"
 NONFROZEN="$(pick nonfrozen)"
 [ -n "$FROZEN" ] && [ -n "$NONFROZEN" ] || { echo "test setup: could not pick modules from the real files" >&2; exit 2; }
-DIR_OF() { python3 - "$REPO_ROOT" "$1" <<'PY'
+DIR_OF() { python3 - "$REPO_ROOT" "$1" "$WORK" <<'PY'
 import re, sys
-build = open(sys.argv[1] + "/build.sbt", encoding="utf-8").read().split("\n")
+sys.path.insert(0, sys.argv[3])
+from striputil import strip_scala_comments
+build = strip_scala_comments(open(sys.argv[1] + "/build.sbt", encoding="utf-8").read()).split("\n")
 path = None
 for l in build:
     m = re.match(r'^lazy val\s+\w+\s*=\s*\(project\s+in\s+file\("modules/+([^"]+)"\)\)', l)
@@ -103,7 +136,9 @@ PY
 }
 FROZEN_DIR="$(DIR_OF "$FROZEN")"
 NONFROZEN_DIR="$(DIR_OF "$NONFROZEN")"
-echo "== using: frozen=$FROZEN ($FROZEN_DIR), last frozen=$FROZEN_LAST, non-frozen=$NONFROZEN ($NONFROZEN_DIR)"
+PUBMOD="$(pick pubmod)"
+[ -n "$PUBMOD" ] || { echo "test setup: no published non-frozen module with single-target Package Map rows" >&2; exit 2; }
+echo "== using: frozen=$FROZEN ($FROZEN_DIR), last frozen=$FROZEN_LAST, non-frozen=$NONFROZEN ($NONFROZEN_DIR), published=$PUBMOD"
 
 # ---------------------------------------------------------------- the real repository
 fresh
@@ -250,6 +285,24 @@ for l in text.split("\n"):
 write("\n".join(out) + "\nThe old \`llm4s-long-gone-module\` was folded into core.\n")
 PY
 expect_pass "extra spaces in the table and a historical module name in prose"
+
+fresh
+edit docs/reference/v1-scope.md <<PY
+# every Package Map row of a published module is opted out: the marker silences tier comparisons,
+# it must not turn the artifact "undocumented" for the published-coverage check (Codex review, iter 2)
+out = []
+marked = 0
+for l in text.split("\n"):
+    cells = l.split("|")
+    if l.lstrip().startswith("|") and len(cells) >= 4 and "\`$PUBMOD\`" in cells[2]:
+        l = l.rstrip() + " <!-- tier-drift: ignore -->"
+        marked += 1
+    out.append(l)
+if not marked:
+    sys.exit("test setup: no Package Map row targets $PUBMOD")
+write("\n".join(out))
+PY
+expect_pass "opted-out rows still cover their published artifact"
 
 fresh
 edit docs/reference/v1-scope.md <<PY

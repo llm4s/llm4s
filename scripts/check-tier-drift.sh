@@ -258,6 +258,7 @@ if fd_line is not None:
 # ------------------------------------------------------------------------------------------ v1-scope.md
 scope = read(SCOPE)
 rows = []   # (line, target modules, tier)
+ignored = set()  # modules named by rows opted out with the IGNORE marker
 start = next((i for i, l in enumerate(scope) if re.match(r"^##\s+Package Map\s*$", l)), None)
 if start is None:
     if scope:
@@ -267,10 +268,16 @@ else:
         l = scope[j]
         if re.match(r"^##\s", l):
             break
-        if not l.lstrip().startswith("|") or IGNORE in l:
+        if not l.lstrip().startswith("|"):
             continue
         cells = [c.strip() for c in l.strip().strip("|").split("|")]
         if len(cells) < 3 or set(cells[0]) <= set("-: ") or cells[0].lower() == "package":
+            continue
+        if IGNORE in l:
+            # An opted-out row is silent for every tier comparison, but its artifacts still count as
+            # having a row: the marker must not turn a published artifact "undocumented" (it still
+            # cannot stand in for a frozen module's Frozen row; that comparison stays strict).
+            ignored.update(tokens(cells[1]))
             continue
         t = re.match(r"\W*(Frozen|Beta|Experimental)\b", cells[2])  # the tier word starts the cell: "Not Frozen yet" is no tier
         if not t:
@@ -301,7 +308,7 @@ if rows and build:
     for m in sorted(frozen_rows):
         if m not in F and m in names:
             drift.append((SCOPE, frozen_rows[m], f"the Package Map marks {m} Frozen at 1.0 but {BUILD} has no mimaFrozen call for it"))
-    for m in sorted(published - set(tiers)):
+    for m in sorted(published - set(tiers) - ignored):
         drift.append((SCOPE, start + 1 if start is not None else 1,
                       f"{m} is published by {BUILD} but has no row in the Package Map (a mention elsewhere on the page is not a tier)"))
 
