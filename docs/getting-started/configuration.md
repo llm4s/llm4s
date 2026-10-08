@@ -334,7 +334,7 @@ The usual precedence applies: `-D` system properties, then `application.conf`, t
 | Embeddings: `openai`, `ollama` | 2 minutes | n/a | the wait for the response to begin |
 | Embeddings: `voyage`, `jina`, `cohere` | 2 minutes | n/a | the wait for the response to begin |
 
-Four things to know:
+Five things to know:
 
 - **The HTTP-based clients bound the wait for the response to begin**, not the time a stream may then
   run. A stream whose server has begun answering is not cut by `stream`.
@@ -346,8 +346,13 @@ Four things to know:
   so a `request = 30s` call fails within 30 seconds; `stream` is a deadline on the whole `ConverseStream`
   call, so unlike the HTTP-based clients it does cut a stream that is still running. Either expiry is a
   `TimeoutError`.
+- **The workload identity token exchange of an `openai-compatible` section with `auth`** (see
+  [Workload identity](#workload-identity-spiffe)) follows that section's `timeouts.request`, so a
+  slow token endpoint is given up on when a slow completion would be; with `request` unset it uses
+  the request default, 2 minutes.
 - **Model listing, the Vertex AI token request and the watsonx IAM token exchange keep their own fixed
-  timeouts**, which the block does not change.
+  timeouts**, which the block does not change. That includes the exchange model listing makes for an
+  `openai-compatible` section with `auth`.
 
 ### Examples for other providers
 
