@@ -52,7 +52,8 @@ The snippets below build on these definitions (`Invoice`, `invoiceSchema` and `e
 what else they use.
 
 The result is a `Result[Invoice]`: `Right(Invoice("Acme Supplies Ltd", 1250.0, "GBP"))` for a reply of
-`{"vendor":"Acme Supplies Ltd","amount":1250.0,"currency":"GBP"}`, and a `Left` otherwise (section 7).
+`{"vendor":"Acme Supplies Ltd","amount":1250.0,"currency":"GBP"}`. Other replies that can be deserialised
+as `Invoice` also return `Right`; replies that cannot be deserialised return `Left` (section 7).
 A runnable version that builds the client from configuration is `StructuredOutputExample`:
 
 ```bash
