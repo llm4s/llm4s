@@ -8,8 +8,7 @@ import org.scalatest.wordspec.AnyWordSpec
  *
  * It follows the repository's growth-prone pattern: a companion `apply` carrying the defaults and
  * `with*` setters. The tests pin the flags' defaults, that each setter changes exactly its own flag
- * and leaves the original alone, and value equality. Whether the constructor and `copy` stay private
- * is not tested here: see the pull request description.
+ * and leaves the original alone, value equality, and that the constructor and `copy` stay private.
  */
 class ProviderFeaturesSpec extends AnyWordSpec with Matchers:
 
@@ -154,5 +153,20 @@ class ProviderFeaturesSpec extends AnyWordSpec with Matchers:
       val values = allCombinations.map { case (streaming, toolCalling) => ProviderFeatures(streaming, toolCalling) }
 
       values.toSet should have size 4
+    }
+  }
+
+  // Note on falsifiability: these macros expand when THIS file compiles. A main-only change under
+  // zinc's incremental compilation may not recompile this spec, so the macros are not re-expanded
+  // and the tests appear to pass against a public constructor; a clean build (as in CI) is the
+  // real guard, and with this file recompiled both tests do fail when the constructor goes public.
+  "access" should {
+
+    "keep the constructor private, so `new` does not compile" in {
+      assertTypeError("new ProviderFeatures(true, true)")
+    }
+
+    "keep copy private, so callers go through the setters" in {
+      assertTypeError("ProviderFeatures.default.copy(streaming = false)")
     }
   }
