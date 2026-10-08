@@ -51,23 +51,18 @@ class CompositeGuardrail[A](
    * reported together.
    */
   private def validateAny(value: A): Result[A] = {
-    @tailrec def next(remaining: List[Guardrail[A]], errors: Vector[LLMError]): Result[A] =
-      remaining match {
-        case Nil =>
-          Left(
-            ValidationError.invalid(
-              "composite",
-              s"All validations failed: ${errors.map(_.formatted).mkString("; ")}"
-            )
-          )
-        case guardrail :: rest =>
-          guardrail.validate(value) match {
-            case passed @ Right(_) => passed
-            case Left(err)         => next(rest, errors :+ err)
-          }
+    val remaining = guardrails.iterator
+    @tailrec def next(errors: Vector[LLMError]): Result[A] =
+      if (!remaining.hasNext) {
+        Left(ValidationError.invalid("composite", s"All validations failed: ${errors.map(_.formatted).mkString("; ")}"))
+      } else {
+        remaining.next().validate(value) match {
+          case passed @ Right(_) => passed
+          case Left(err)         => next(errors :+ err)
+        }
       }
 
-    next(guardrails.toList, Vector.empty)
+    next(Vector.empty)
   }
 
   /**
@@ -80,9 +75,9 @@ class CompositeGuardrail[A](
       case None            => Right(value)
     }
 
-  val name: String = s"CompositeGuardrail(${guardrails.map(_.name).mkString(", ")})"
+  lazy val name: String = s"CompositeGuardrail(${guardrails.map(_.name).mkString(", ")})"
 
-  override val description: Option[String] = Some(
+  override lazy val description: Option[String] = Some(
     s"Composite guardrail with mode=$mode: ${guardrails.map(_.name).mkString(", ")}"
   )
 }
@@ -118,9 +113,9 @@ object CompositeGuardrail {
     def validate(value: A): Result[A] =
       guardrails.foldLeft[Result[A]](Right(value))((acc, guardrail) => acc.flatMap(guardrail.validate))
 
-    val name: String = s"SequentialGuardrail(${guardrails.map(_.name).mkString(" -> ")})"
+    lazy val name: String = s"SequentialGuardrail(${guardrails.map(_.name).mkString(" -> ")})"
 
-    override val description: Option[String] = Some(
+    override lazy val description: Option[String] = Some(
       s"Sequential validation: ${guardrails.map(_.name).mkString(" -> ")}"
     )
   }

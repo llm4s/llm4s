@@ -169,6 +169,11 @@ class CompositeGuardrailSpec extends AnyFlatSpec with Matchers {
     log.toList shouldBe List("a1")
   }
 
+  it should "not construct the lazy tail after the first passing guardrail" in {
+    val guardrails = LazyList.cons(passing, throw new IllegalStateException("unused tail evaluated"))
+    CompositeGuardrail.any(guardrails).validate("test") shouldBe Right("test")
+  }
+
   it should "run the guardrails before the first pass, and none after it" in {
     val log = ListBuffer.empty[String]
     val composite = CompositeGuardrail.any(
