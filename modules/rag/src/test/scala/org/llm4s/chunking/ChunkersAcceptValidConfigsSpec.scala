@@ -65,6 +65,13 @@ class ChunkersAcceptValidConfigsSpec extends AnyFlatSpec with Matchers with Scal
     }
   }
 
+  "SimpleChunker" should "handle integer-boundary window sizes without overflow" in {
+    val config = ChunkingConfig(targetSize = Int.MaxValue, maxSize = Int.MaxValue, overlap = Int.MaxValue - 1)
+    val chunks = SimpleChunker().chunk("abc", config)
+    chunks.map(_.index) shouldBe chunks.indices.toList
+    chunks.map(_.content) shouldBe List("abc", "bc", "c")
+  }
+
   "ChunkingConfig" should "be impossible to build in a state a chunker could not handle" in {
     an[IllegalArgumentException] should be thrownBy ChunkingConfig(targetSize = 100, overlap = 100)
     an[IllegalArgumentException] should be thrownBy ChunkingConfig(targetSize = 0)
