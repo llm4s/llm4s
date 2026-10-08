@@ -299,7 +299,7 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
       samples(scrape(endpoint)) shouldBe empty
     }
 
-  "MetricsCollector.compose" should "send every non-image call to every collector it was given" in {
+  "MetricsCollector.compose" should "send every call to every collector it was given" in {
     final class Counting extends MetricsCollector {
       var requests                                                                           = 0
       override def observeRequest(p: String, m: String, o: Outcome, d: FiniteDuration): Unit = requests += 1
@@ -316,7 +316,7 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "leave the image-generation methods as no-ops, as the guide warns" in {
+  it should "forward the image-generation methods too, as the guide says" in {
     final class CountingImages extends MetricsCollector {
       var images                                                                             = 0
       override def observeRequest(p: String, m: String, o: Outcome, d: FiniteDuration): Unit = ()
@@ -337,8 +337,8 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
     val composed = MetricsCollector.compose(counting)
     composed.observeImageGeneration("openai", "dall-e-3", "generate", Outcome.Success, 1.second, 1)
     composed.recordImageGenerationCost("openai", "dall-e-3", 0.04, 1)
-    // compose does not override these two, so the child receives nothing (see the guide's Metrics section)
-    counting.images shouldBe 0
+    // compose forwards both image methods, so the child receives each call (#1609; see the guide's Metrics section)
+    counting.images shouldBe 2
   }
 
   "the build-the-pieces-yourself snippet" should "retain the endpoint and surface a bind failure as a Left" in {

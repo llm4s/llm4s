@@ -653,7 +653,7 @@ sum by (model) (increase(llm4s_cost_usd_total[1h]))
 
 ### Send metrics to more than one place
 
-`MetricsCollector.compose` forwards every `MetricsCollector` method except the two image-generation ones (`observeImageGeneration` and `recordImageGenerationCost`) to each collector it is given, so Prometheus can run next to `CostTracker` (in `llm4s-observability`) or a collector of your own. A collector that throws does not stop the others. The two image-generation methods keep their no-op defaults on the composed collector, so neither child records them; use a collector directly with `InstrumentedImageGenerationClient` to record image metrics:
+`MetricsCollector.compose` forwards every `MetricsCollector` method, the two image-generation ones (`observeImageGeneration` and `recordImageGenerationCost`) included, to each collector it is given, so Prometheus can run next to `CostTracker` (in `llm4s-observability`) or a collector of your own, and a composed collector handed to `InstrumentedImageGenerationClient` records image metrics in every child. A collector that throws does not stop the others:
 
 ```scala
 import org.llm4s.metrics.MetricsCollector

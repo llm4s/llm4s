@@ -1937,6 +1937,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   item's slot and delivered as a `LiveGap` just before it, so a subscription queues at most `2 * capacity`
   events and gap markers - `capacity` durable, `capacity` live - plus one end-of-run barrier per run that
   ended while they were queued, however dropped live events and durable commits interleave.
+- **`llm4s-core`: `MetricsCollector.compose` forwards the image-generation methods**
+  ([#1609](https://github.com/llm4s/llm4s/issues/1609)): the composed collector overrode six of the trait's
+  methods and left `observeImageGeneration` and `recordImageGenerationCost` at their no-op defaults, so
+  `MetricsCollector.compose(prometheus, costTracker)` recorded requests, tokens, cost, errors, retries and
+  circuit-breaker transitions in both and image metrics in neither, although each collector alone recorded
+  them. It now forwards every method of the trait, so a composed collector handed to
+  `InstrumentedImageGenerationClient` records image metrics in every child; a collector that throws still does
+  not stop the others. `MetricsCollectorComposeSpec` pins the contract for the whole trait by reflection, so a
+  method added to `MetricsCollector` without a forward in `compose` fails the build. The observability guide,
+  which documented the gap as a limitation, and `ObservabilityMetricsGuideSpec`, which pinned it, now say and
+  check forwarding.
 - **`MemoryStore.storeAll` is all or nothing, and the SQL stores write a batch in one transaction**: `storeAll`
   was the trait's default, a loop of `store` calls. In `SQLiteMemoryStore` and `VectorMemoryStore` each `store` ran
   three statements (the row, then the full-text entry's delete and insert) under autocommit, so a batch of n
