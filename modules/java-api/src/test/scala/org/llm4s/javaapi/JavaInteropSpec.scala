@@ -81,6 +81,48 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     log.takeRight(3) shouldBe List("answer:4", "refused:true", "resume-refused:true")
   }
 
+  "a suspended turn" should "be read and answered from Java: an approval round trip" in {
+    import SuspensionFixtures.*
+    val agent =
+      agentOver(scripted(Right(calling(call("c1", "deploy", "prod"))), Right(StreamFixtures.completion("shipped"))))
+    JavaInteropCheck.answering(agent, "deploy", "{}").asScala.toList shouldBe
+      List("""approve:deploy:{"text":"prod"}:deploying prod""", "answer:shipped")
+  }
+
+  it should "be read and answered from Java: a question round trip" in {
+    import SuspensionFixtures.*
+    val agent =
+      agentOver(scripted(Right(calling(call("c1", "confirm", "go"))), Right(StreamFixtures.completion("yes"))))
+    JavaInteropCheck.answering(agent, "ask", """{"ok":true}""").asScala.toList shouldBe
+      List("""reply:confirm:{"prompt":"really go?"}""", "answer:yes")
+  }
+
+  it should "be read and answered from Java: approvals and questions together" in {
+    import SuspensionFixtures.*
+    val agent = agentOver(
+      scripted(
+        Right(calling(call("c1", "confirm", "go"), call("c2", "deploy", "prod"))),
+        Right(StreamFixtures.completion("both"))
+      )
+    )
+    JavaInteropCheck.answering(agent, "both", """{"ok":true}""").asScala.toList shouldBe List(
+      """approve:deploy:{"text":"prod"}:deploying prod""",
+      """reply:confirm:{"prompt":"really go?"}""",
+      "answer:both"
+    )
+  }
+
+  "a failed turn" should "be recovered from Java" in {
+    val calls = new java.util.concurrent.atomic.AtomicInteger(0)
+    val down  = org.llm4s.error.NetworkError("down", None, "http://x")
+    def reply(): Result[Completion] =
+      if (calls.getAndIncrement() == 0) Left(down) else Right(StreamFixtures.completion("back"))
+    val agent = StreamFixtures.jAgentOf(new StreamFixtures.Scripted(_ => reply(), () => reply()))()
+    agent.stream(org.llm4s.agent.graph.ThreadId("java-recover"), "hi", _ => ()).get().await().isFailure shouldBe true
+    JavaInteropCheck.recovering(agent, "java-recover").asScala.toList shouldBe
+      List("answer:back", "again-refused:true", "resume-refused:true")
+  }
+
   /** Every class a type mentions: itself, its type arguments, bounds and array components, recursively. */
   private def mentioned(t: Type): List[Class[_]] = t match {
     case c: Class[_]          => if (c.isArray) mentioned(c.getComponentType) else List(c)
@@ -112,7 +154,9 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
       classOf[AgentStream],
       classOf[AgentStreamListener],
       Class.forName("org.llm4s.javaapi.StreamEvents"),
-      classOf[Answer]
+      classOf[Answer],
+      classOf[PendingInterrupt],
+      classOf[InterruptKind]
     )
     val offenders = for {
       cls <- classes

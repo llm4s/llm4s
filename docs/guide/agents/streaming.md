@@ -185,7 +185,9 @@ way, with the same buffer and the same rules: a slow consumer loses live events 
 `StreamEvent.LiveGap(n)`, never cancels the run; a run that ends without a terminal event still
 ends the stream with the run's error; and cancelling the stream cancels the run and returns once it
 has ended, so the thread can be recovered at once. Both take the thread id as a `String`, as fs2 and
-ZIO take a `ThreadId`; `streamResume` and `streamRecover` exist on both.
+ZIO take a `ThreadId`; `streamResume` and `streamRecover` exist on both. To read what a suspended
+turn waits for (`JAgent.pending`, `AgentKt.pending`), or to resume or recover without a stream, see
+[Suspended turns from Java and Kotlin](index#suspended-turns-from-java-and-kotlin).
 
 **Java.** `JAgent.stream(threadId, query, listener)` returns an `LlmResult<AgentStream>` at once - a
 failed result for a refused start, and the listener hears nothing. An `AgentStreamListener` gets

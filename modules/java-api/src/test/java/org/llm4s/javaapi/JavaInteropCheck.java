@@ -108,6 +108,46 @@ public final class JavaInteropCheck {
     return log;
   }
 
+  /**
+   * A suspended turn from Java: run, read what it waits for with JAgent.pending - a switch over the
+   * Java enum, JSON as Strings, Optional for the kind-specific field - answer each with Answer, and
+   * resume until the turn is no longer suspended. Approvals are approved; a question gets {@code reply}.
+   */
+  public static List<String> answering(JAgent agent, String query, String reply) {
+    List<String> log = new ArrayList<>();
+    LlmResult<AgentResult> turn = agent.run(query);
+    List<PendingInterrupt> pending = JAgent.pending(turn.get());
+    while (!pending.isEmpty()) {
+      List<Answer> answers = new ArrayList<>();
+      for (PendingInterrupt p : pending) {
+        switch (p.kind()) {
+          case APPROVAL -> {
+            log.add("approve:" + p.toolName() + ":" + p.argumentsJson() + ":" + p.reason().orElse("?"));
+            answers.add(Answer.approve(p.id()));
+          }
+          case QUESTION -> {
+            log.add("reply:" + p.toolName() + ":" + p.questionJson().orElse("?"));
+            answers.add(Answer.reply(p.id(), reply));
+          }
+        }
+      }
+      turn = agent.resume(turn.get().threadId(), answers);
+      pending = JAgent.pending(turn.get());
+    }
+    log.add("answer:" + turn.get().answer().get());
+    return log;
+  }
+
+  /** Recovers a thread from Java, by its id as a String; a failed result for one with nothing to recover. */
+  public static List<String> recovering(JAgent agent, String threadId) {
+    List<String> log = new ArrayList<>();
+    LlmResult<AgentResult> recovered = agent.recover(threadId);
+    log.add("answer:" + recovered.get().answer().get());
+    log.add("again-refused:" + agent.recover(threadId).isFailure());
+    log.add("resume-refused:" + agent.resume(threadId, List.of(Answer.approve("no-such-interrupt"))).isFailure());
+    return log;
+  }
+
   private static void awaitQuietly(CountDownLatch gate) {
     try {
       gate.await(60, TimeUnit.SECONDS);

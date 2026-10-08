@@ -290,7 +290,7 @@ tracks it:
 | An asynchronous call | none; wrap `complete` yourself, or use the [Spring Boot starter](spring-boot)'s `completeAsync`. Threading and cancellation are being documented in [#1500](https://github.com/llm4s/llm4s/issues/1500) |
 | Structured output into a Java record | [#1486](https://github.com/llm4s/llm4s/issues/1486) |
 | Defining tools | an agent takes a Scala `ToolRegistry`: [#1484](https://github.com/llm4s/llm4s/issues/1484) |
-| Agents | `Llm4s.createAgent` and `JAgent` exist, but the Java agent API is being reworked ([#1386](https://github.com/llm4s/llm4s/pull/1386), [#1392](https://github.com/llm4s/llm4s/issues/1392), [#1393](https://github.com/llm4s/llm4s/issues/1393)), so this guide does not cover it yet |
+| Agents | `Llm4s.createAgent` and `JAgent` exist, but the result types are still Scala's until [#1393](https://github.com/llm4s/llm4s/issues/1393), so this guide does not cover them yet. The agent guide covers [streaming a turn](agents/streaming#java-and-kotlin) and [suspended turns](agents/#suspended-turns-from-java-and-kotlin) from Java |
 | Embeddings and RAG | [#1490](https://github.com/llm4s/llm4s/issues/1490), [#1491](https://github.com/llm4s/llm4s/issues/1491) |
 | A fake client for your own tests | [#1497](https://github.com/llm4s/llm4s/issues/1497) |
 

@@ -170,6 +170,59 @@ which belong to the `Agent`. `AgentResult` is a value to read, not something to 
   `forget` refuses a thread whose run is still active (`ThreadBusy`) or that belongs to another
   tenant (`TenantMismatch`); an unknown thread is `Right(())`.
 
+### Suspended turns from Java and Kotlin
+
+The Java facade (`llm4s-java-api`) reads a suspended turn without Scala types.
+`JAgent.pending(result)` returns a `java.util.List<PendingInterrupt>`: a `Suspended` turn's
+approvals, then its questions, and an empty list for any other turn. Each `PendingInterrupt` has
+`id()`, `kind()` (the Java enum `InterruptKind`, `APPROVAL` or `QUESTION`), `toolName()` and
+`argumentsJson()`. An approval also has `reason()`, and a question has `questionJson()`, the tool's
+question as JSON. Both are `Optional<String>`, empty for the other kind. Answer each pending item
+with `Answer.approve(id)`, `reject(id, reason)`, `edit(id, argumentsJson)` or `reply(id, json)`, then
+call `agent.resume(threadId, answers)`, which blocks like `run` and returns an `LlmResult<AgentResult>`.
+You can answer only some of them: the result is `Suspended` again, with the rest still pending.
+
+```java
+LlmResult<AgentResult> turn = agent.run("Deploy the release");
+List<PendingInterrupt> pending = JAgent.pending(turn.get());
+while (!pending.isEmpty()) {
+    List<Answer> answers = new ArrayList<>();
+    for (PendingInterrupt p : pending) {
+        switch (p.kind()) {
+            case APPROVAL -> answers.add(Answer.approve(p.id()));        // or reject / edit
+            case QUESTION -> answers.add(Answer.reply(p.id(), "{\"ok\":true}"));
+        }
+    }
+    turn = agent.resume(turn.get().threadId(), answers);
+    pending = JAgent.pending(turn.get());
+}
+```
+
+`agent.recover(threadId)` continues a turn that failed or was cancelled, and also returns an
+`LlmResult<AgentResult>`. A failed result means one of these: a malformed answer, an answer to an id
+the thread is not waiting for, a thread that is not suspended (`resume`), or a thread with nothing to
+recover. `resume` and `recover` handle an interrupt the way `run` does: the call returns a
+`CancelledError`, but the turn keeps running. To cancel a turn, use `streamResume` or `streamRecover`
+and cancel the stream (see [Streaming Events](streaming#java-and-kotlin)).
+
+The Kotlin API reuses these types. `AgentKt.pending(result)` returns a `List<PendingInterrupt>`.
+`agent.resume(threadId, answers)` and `agent.recover(threadId)` are `suspend` functions that return
+the `AgentResult` or throw `LLMException`. They run the turn as `streamResume` and `streamRecover` do,
+so cancelling the caller cancels the turn. The thread is then left for `recover`.
+
+```kotlin
+var turn = agent.run("Deploy the release")
+while (AgentKt.pending(turn).isNotEmpty()) {
+    val answers = AgentKt.pending(turn).map { p ->
+        when (p.kind()) {
+            InterruptKind.APPROVAL -> Answer.approve(p.id())
+            InterruptKind.QUESTION -> Answer.reply(p.id(), """{"ok":true}""")
+        }
+    }
+    turn = agent.resume(turn.threadId(), answers)
+}
+```
+
 ### Agent Lifecycle
 
 ```

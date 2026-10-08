@@ -971,6 +971,15 @@ Decisions:
   the turn, and starting and cancelling it run on `Dispatchers.IO`. Resume answers are `Answer`s
   (JSON as `String`), so no Scala or ujson type is in either signature. `Llm4s.createAgent(client,
   tools, streaming)` gives either facade text deltas; `Llm4s.wrapAgent` takes a builder-made agent.
+  [#1392](https://github.com/llm4s/llm4s/issues/1392) adds the suspended turn to both facades.
+  `JAgent.pending(result)` and `AgentKt.pending` read `AgentStatus.Suspended` as a
+  `java.util.List<PendingInterrupt>`. Approvals come first, then questions. Each item has an id, a
+  Java-enum `InterruptKind`, the tool name and its arguments as JSON text, and either the reason or the
+  question as JSON text, in an `Optional`. `JAgent.resume` and `recover` block as `run` does.
+  `AgentKt.resume` and `recover` are `suspend` functions over the `streamResume` and `streamRecover`
+  flows, so cancelling the caller cancels the turn. `PendingInterrupt` is the view that the Java-friendly
+  `AgentResult` of [#1393](https://github.com/llm4s/llm4s/issues/1393) reuses: a `Suspended` status
+  carries the same list.
 - **Durable names are the agent's.** `ToolExecuted.tool` is `"<unknown>"` for a tool the agent does
   not have; each non-handoff call of a mixed handoff batch is reported as `Errored`. The live tool
   result is `ToolCallResult` (`agent.tool_call_result`), apart from the loop's `toolloop.ToolResult`.

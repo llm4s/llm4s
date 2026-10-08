@@ -1,16 +1,20 @@
 package org.llm4s.samples;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import org.llm4s.agent.AgentResult;
 import org.llm4s.agent.events.AgentEvents;
 import org.llm4s.agent.graph.StreamEvent;
 import org.llm4s.javaapi.AgentStream;
+import org.llm4s.javaapi.Answer;
 import org.llm4s.javaapi.ConversationBuilder;
 import org.llm4s.javaapi.JAgent;
 import org.llm4s.javaapi.JLlmClient;
 import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.LlmResult;
+import org.llm4s.javaapi.PendingInterrupt;
 import org.llm4s.javaapi.StreamEvents;
 import org.llm4s.llmconnect.model.Conversation;
 import org.llm4s.toolapi.ToolRegistry;
@@ -113,8 +117,46 @@ public final class HelloLLM4S {
         }
         System.out.println();
         System.out.println("(" + result.get().status().getClass().getSimpleName() + ")");
+
+        LlmResult<AgentResult> answered = approveWhatItWaitsFor(agent, result);
         // the conversation stays in the agent's runtime until forgotten
-        agent.forget(result.get());
-        return true;
+        agent.forget(answered.isSuccess() ? answered.get() : result.get());
+        return answered.isSuccess();
+    }
+
+    /**
+     * A turn whose tools need approval, or ask a question, ends {@code Suspended}: {@link JAgent#pending} lists
+     * what it waits for, as Strings and a Java enum, and {@code resume} answers it and continues, blocking like
+     * {@code run}. This sample's agent has no tools, so its turns wait for nothing and the loop does not run; an
+     * agent built with {@code Agent.builder}, approval middleware and tools, wrapped with {@code Llm4s.wrapAgent},
+     * stops here until each call is answered. Approving every call is for the sample: a real caller would show
+     * each one to a person, and {@code Answer.reject(id, reason)} or {@code Answer.edit(id, argumentsJson)} it.
+     * A question is returned unanswered, still pending.
+     */
+    private static LlmResult<AgentResult> approveWhatItWaitsFor(JAgent agent, LlmResult<AgentResult> turn) {
+        while (turn.isSuccess() && !JAgent.pending(turn.get()).isEmpty()) {
+            List<Answer> answers = new ArrayList<>();
+            for (PendingInterrupt pending : JAgent.pending(turn.get())) {
+                switch (pending.kind()) {
+                    case APPROVAL -> {
+                        System.out.println("Approving " + pending.toolName() + " " + pending.argumentsJson()
+                            + ": " + pending.reason().orElse(""));
+                        answers.add(Answer.approve(pending.id()));
+                    }
+                    case QUESTION -> {
+                        // the answer is JSON of the asking tool's answer type, Answer.reply(id, json), which only
+                        // the application knows; the sample leaves the question pending
+                        System.out.println(pending.toolName() + " asks " + pending.questionJson().orElse(""));
+                        return turn;
+                    }
+                }
+            }
+            turn = agent.resume(turn.get().threadId(), answers);
+        }
+        if (turn.isFailure()) {
+            // a turn that failed or was cancelled can be continued with agent.recover(threadId)
+            System.err.println("Resuming failed: " + turn.getError().getMessage());
+        }
+        return turn;
     }
 }

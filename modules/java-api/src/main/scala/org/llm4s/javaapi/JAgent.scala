@@ -22,6 +22,17 @@ import scala.jdk.CollectionConverters.*
  * never thrown, so the methods declare no checked exception and `javac` rejects a
  * `catch (InterruptedException e)` around them - test the result for a `CancelledError` instead.
  *
+ * A turn whose tools need approval, or ask a question, ends `Suspended`: [[JAgent.pending]] lists what
+ * it waits for, and `resume(threadId, answers)` answers some or all of it and continues. A turn that
+ * failed or was cancelled continues with `recover(threadId)`. Both block, as `run` does.
+ *
+ * {{{
+ * LlmResult<AgentResult> turn = agent.run("Deploy the release");
+ * List<Answer> answers = new ArrayList<>();
+ * for (PendingInterrupt p : JAgent.pending(turn.get())) answers.add(Answer.approve(p.id()));
+ * if (!answers.isEmpty()) turn = agent.resume(turn.get().threadId(), answers);
+ * }}}
+ *
  * `stream`, `streamResume` and `streamRecover` run a turn on a thread you name and hand its events
  * to an [[AgentStreamListener]] as they happen, returning an [[AgentStream]] at once - to await the
  * turn's result, or to cancel it. From Java a thread id is a `String`.
@@ -95,6 +106,29 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
           streaming(listener)((agent, onEnd, l) => agent.streamResumeEnding(threadId, byId, RunConfig(), onEnd)(l))
       )
 
+  /**
+   * Answers some of `threadId`'s pending approvals and questions - read them with [[JAgent.pending]] -
+   * and continues the turn, returning its result; unanswered ones stay pending, so the result can be
+   * `Suspended` again. Build each answer with [[Answer.approve]], [[Answer.reject]], [[Answer.edit]] or
+   * [[Answer.reply]]; for an id answered twice, the last answer counts. A `null` or malformed answer,
+   * an answer to an id the thread does not wait for, or a thread that is not suspended is a failed
+   * result. Blocks and reports an interrupt as [[run]] does: a `CancelledError` result, the interrupt
+   * flag left set, and the turn carries on.
+   */
+  def resume(threadId: ThreadId, answers: java.util.List[Answer]): LlmResult[AgentResult] =
+    if (threadId.value == null) LlmResult.failure(ValidationError.required("threadId"))
+    else if (answers == null) LlmResult.failure(ValidationError.required("answers"))
+    else decoded(answers).fold(LlmResult.failure, byId => call("JAgent.resume")(_.resume(threadId, byId)))
+
+  /**
+   * Continues `threadId`'s failed or cancelled turn - a `stream` that was cancelled, a run that failed
+   * on a provider error - re-running only the work that did not finish, and returns its result. A
+   * thread with nothing to recover is a failed result. Blocks and reports an interrupt as [[run]] does.
+   */
+  def recover(threadId: ThreadId): LlmResult[AgentResult] =
+    if (threadId.value == null) LlmResult.failure(ValidationError.required("threadId"))
+    else call("JAgent.recover")(_.recover(threadId))
+
   /** `answers` by interrupt id, the last answer to an id winning; or the first answer that is not one. */
   private def decoded(answers: java.util.List[Answer]): Result[Map[InterruptId, ujson.Value]] =
     answers.asScala.foldLeft[Result[Map[InterruptId, ujson.Value]]](Right(Map.empty)) { (byId, answer) =>
@@ -135,4 +169,16 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
     LlmResult.from(
       CancelledError.attempt(operation)(underlying.flatMap(agent => Safety.safely(body(agent)).flatMap(identity)))
     )
+}
+
+object JAgent {
+
+  /**
+   * What `result`'s turn waits for: for a `Suspended` turn, its pending approvals, then its questions,
+   * as [[PendingInterrupt]]s; an empty list for a turn that completed, was blocked, reached its step
+   * limit, or a `null` result. The list is unmodifiable. Answer them with [[Answer]] and continue with
+   * [[JAgent.resume]] or [[JAgent.streamResume]].
+   */
+  def pending(result: AgentResult): java.util.List[PendingInterrupt] =
+    if (result == null) java.util.List.of() else PendingInterrupt.of(result.status)
 }

@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Suspended agent turns from Java and Kotlin** ([#1392](https://github.com/llm4s/llm4s/issues/1392)):
+  `llm4s-java-api`'s `JAgent.pending(result)` returns a `java.util.List<PendingInterrupt>`. For a
+  `Suspended` turn it lists the approvals, then the questions. For any other turn the list is empty.
+  Each `PendingInterrupt` has `id()`, `kind()` (the Java enum `InterruptKind`, `APPROVAL` or `QUESTION`),
+  `toolName()`, `argumentsJson()`, and `reason()` or `questionJson()` as an `Optional<String>`. No Scala
+  or ujson type is involved. `JAgent.resume(threadId, List<Answer>)` and `JAgent.recover(threadId)` are
+  blocking versions of `streamResume` and `streamRecover`. They return `LlmResult<AgentResult>` and
+  handle an interrupt as `run` does. A partial resume returns `Suspended` again, with the unanswered
+  items still pending. The Kotlin API adds `AgentKt.pending(result)` and the `suspend` functions
+  `resume(threadId, answers)` and `recover(threadId)`. These run the turn as the streams do, so
+  cancelling the caller cancels the turn and leaves the thread for `recover`. The Java sample approves
+  what a suspended turn waits for. See
+  [Suspended turns from Java and Kotlin](docs/guide/agents/index.md#suspended-turns-from-java-and-kotlin).
 - **Thinking stays in the conversation and goes back to the provider** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
   `AssistantMessage` carries the model's reasoning as `thinking: Seq[ThinkingBlock]` - `ThinkingBlock.Text(text,
   signature)`, `ThinkingBlock.Redacted(data)` or `ThinkingBlock.Opaque(provider, data)` (provider-specific replay

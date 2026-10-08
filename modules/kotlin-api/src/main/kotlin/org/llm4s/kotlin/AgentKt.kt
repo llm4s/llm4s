@@ -7,6 +7,7 @@ import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.withContext
 import org.llm4s.agent.AgentResult
@@ -17,6 +18,7 @@ import org.llm4s.javaapi.AgentStreamListener
 import org.llm4s.javaapi.JAgent
 import org.llm4s.javaapi.LlmException
 import org.llm4s.javaapi.LlmResult
+import org.llm4s.javaapi.PendingInterrupt
 import java.util.concurrent.atomic.AtomicReference
 
 /** An item of an agent turn's [kotlinx.coroutines.flow.Flow]: each of the turn's events, then its result. */
@@ -34,6 +36,10 @@ sealed interface AgentStreamItem {
  * Dispatches the blocking agent run on [Dispatchers.IO] (cancelling the caller interrupts it) and converts
  * Scala [org.llm4s.javaapi.LlmResult] errors into [LLMException]. A conversation is a thread of the agent's
  * in-memory runtime, kept until [forget] removes it.
+ *
+ * A turn whose tools need approval, or ask a question, ends `Suspended`: [pending] lists what it waits
+ * for, and [resume] answers some or all of it and continues. A turn that failed or was cancelled
+ * continues with [recover].
  *
  * [stream], [streamResume] and [streamRecover] run a turn on a thread you name as a cold [Flow] of its
  * events ([AgentStreamItem.Event]), then its result ([AgentStreamItem.Done]).
@@ -71,6 +77,28 @@ class AgentKt internal constructor(private val underlying: JAgent) {
         underlying.forget(previous).unwrap("Agent forget failed")
         Unit
     }
+
+    /**
+     * Answers some of [threadId]'s pending approvals and questions - read them with [pending] - and
+     * suspends until the continued turn ends, returning its result; unanswered ones stay pending, so the
+     * result can be `Suspended` again. Build each answer with [Answer.approve], [Answer.reject],
+     * [Answer.edit] or [Answer.reply]. A malformed answer, an answer to an id the thread does not wait
+     * for, a thread that is not suspended, or a failed turn throws [LLMException].
+     *
+     * Cancelling the caller cancels the turn and returns once it has ended, leaving the thread for
+     * [recover]. The turn runs as [streamResume] does, its events discarded.
+     */
+    suspend fun resume(threadId: String, answers: List<Answer>): AgentResult = resultOf(streamResume(threadId, answers))
+
+    /**
+     * Continues [threadId]'s failed or cancelled turn, re-running only the work that did not finish, and
+     * suspends until it ends, returning its result. A thread with nothing to recover, or a failed turn,
+     * throws [LLMException]. Cancelling the caller cancels the turn, as for [resume].
+     */
+    suspend fun recover(threadId: String): AgentResult = resultOf(streamRecover(threadId))
+
+    /** The result of [turn]'s collection, its last item: the flow ends with [AgentStreamItem.Done] or throws. */
+    private suspend fun resultOf(turn: Flow<AgentStreamItem>): AgentResult = (turn.last() as AgentStreamItem.Done).result
 
     /**
      * Runs [query] as one turn on [threadId] - a new conversation, or the next turn of one - as a cold
@@ -136,5 +164,15 @@ class AgentKt internal constructor(private val underlying: JAgent) {
             items.cancel()
             started.get()?.let { withContext(NonCancellable + Dispatchers.IO) { it.cancel() } }
         }
+    }
+
+    companion object {
+        /**
+         * What [result]'s turn waits for: for a `Suspended` turn, its pending approvals, then its
+         * questions, as [PendingInterrupt]s - `id()`, `kind()`, `toolName()`, `argumentsJson()`,
+         * `reason()` and `questionJson()`; an empty list for any other turn. Answer them with [Answer] and
+         * continue with [resume] or [streamResume].
+         */
+        fun pending(result: AgentResult): List<PendingInterrupt> = JAgent.pending(result)
     }
 }
