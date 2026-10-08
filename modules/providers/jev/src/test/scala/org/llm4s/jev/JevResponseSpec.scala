@@ -86,6 +86,24 @@ class JevResponseSpec extends AnyFlatSpec with Matchers with EitherValues {
     ).score("q").value.score shouldBe -0.5
   }
 
+  it should "preserve structured score descriptions" in {
+    val body = withAnswer(
+      """{"type":"score","score":0.5,"legend":{"0":{"label":"low"},"1":["high",{"detail":true}]},"probabilities":{"0":0.5,"1":0.5},"confidence":1}"""
+    )
+    val levels = parse(body).score("q").value.levels
+    levels.map(_.description) shouldBe Seq(ujson.Obj("label" -> "low"), ujson.Arr("high", ujson.Obj("detail" -> true)))
+  }
+
+  it should "reject a selected choice below the maximum and accept ties" in {
+    malformed(
+      withAnswer("""{"type":"choice","choice":"a","probabilities":{"a":0.1,"b":0.9},"confidence":1}""")
+    ) should include("highest probability")
+    parse(withAnswer("""{"type":"choice","choice":"a","probabilities":{"a":0.5,"b":0.5},"confidence":1}"""))
+      .choice("q")
+      .value
+      .choice shouldBe "a"
+  }
+
   // ---- typed access ----
 
   it should "say so when an answer is absent or of another type" in {
@@ -155,7 +173,7 @@ class JevResponseSpec extends AnyFlatSpec with Matchers with EitherValues {
     ) should include("not a level number")
     malformed(
       withAnswer("""{"type":"score","score":1,"legend":{"0":1},"probabilities":{"0":1},"confidence":1}""")
-    ) should include("expected a string")
+    ) should include("expected a string, object or array")
     malformed(
       withAnswer("""{"type":"score","score":null,"legend":{"0":"a"},"probabilities":{"0":1},"confidence":1}""")
     ) should include("expected a finite number")

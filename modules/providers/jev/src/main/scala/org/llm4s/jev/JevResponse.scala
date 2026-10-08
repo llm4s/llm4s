@@ -61,6 +61,11 @@ object JevResponse {
     case _            => fail(path, "expected a string")
   }
 
+  private def description(value: ujson.Value, path: String): Result[ujson.Value] = value match {
+    case _: ujson.Str | _: ujson.Obj | _: ujson.Arr => Right(value)
+    case _                                          => fail(path, "expected a string, object or array")
+  }
+
   private def number(value: ujson.Value, path: String): Result[Double] = value match {
     case ujson.Num(d) if !d.isNaN && !d.isInfinity => Right(d)
     case _                                         => fail(path, "expected a finite number")
@@ -109,6 +114,9 @@ object JevResponse {
             _ <-
               if (probs.contains(choice)) Right(())
               else fail(s"$at.choice", s"'$choice' is not among the probabilities")
+            _ <-
+              if (probs.values.forall(_ <= probs(choice))) Right(())
+              else fail(s"$at.choice", "selected choice does not have the highest probability")
             confidence <- field(o, at, "confidence").flatMap(unit(_, s"$at.confidence"))
           } yield ChoiceAnswer(choice, probs, confidence)
         case "score" => parseScore(o, at)
@@ -130,7 +138,7 @@ object JevResponse {
       described <- sequence(legend.value.toSeq.map { case (key, v) =>
         for {
           index       <- levelIndex(key, s"$at.legend")
-          description <- string(v, s"$at.legend.$key")
+          description <- description(v, s"$at.legend.$key")
         } yield index -> (key, description)
       })
       _ <-

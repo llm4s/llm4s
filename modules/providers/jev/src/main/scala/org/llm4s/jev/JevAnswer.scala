@@ -26,7 +26,7 @@ final case class NoulAnswer(probability: Double) extends JevAnswer
 final case class ChoiceAnswer(choice: String, probabilities: Map[String, Double], confidence: Double) extends JevAnswer
 
 /** One level of a [[ScoreAnswer]]. */
-final case class ScoreLevel(index: Int, description: String, probability: Double)
+final case class ScoreLevel(index: Int, description: ujson.Value, probability: Double)
 
 /**
  * The answer to a [[JevQuestion.Score]].
