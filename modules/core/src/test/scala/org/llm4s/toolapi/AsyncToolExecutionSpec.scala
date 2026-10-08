@@ -11,7 +11,7 @@ import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
 
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Await
+import scala.concurrent.{ Await, Future }
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 import scala.util.Try
@@ -243,8 +243,13 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
 
       implicit val patience: PatienceConfig = PatienceConfig(Span(10, Seconds), Span(10, Millis))
       eventually(probe.startCount shouldBe 2)
-      // Hold the two calls open for a moment: with the limit enforced nothing else may start
-      Thread.sleep(300)
+      // With the two calls held open, prove the executor is still scheduling new tasks: each canary
+      // below is submitted to the same ExecutionContext the workers use and runs to completion. A
+      // third worker, had the limit not held one back, was submitted before these canaries, so it
+      // would have started by now; a loaded machine makes the canaries slower (or times them out),
+      // never this assertion wrongly green. This replaces a fixed 300 ms wait, which on a loaded
+      // machine could end before a runaway third call had been scheduled at all.
+      (1 to 5).foreach(_ => Await.result(Future(()), 10.seconds))
       probe.startCount shouldBe 2
       probe.maxConcurrent shouldBe 2
 
