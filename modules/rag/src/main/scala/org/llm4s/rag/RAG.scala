@@ -35,11 +35,21 @@ import scala.concurrent.{ ExecutionContext, Future }
  *
  * @example
  * {{{
+ * import org.llm4s.chunking.ChunkerFactory
+ * import org.llm4s.config.Llm4sConfig
+ * import org.llm4s.model.ModelRegistryService
+ * import org.llm4s.rag.RAG
+ * import org.llm4s.rag.RAG.RAGConfigOps // `build` is an extension of RAGConfig; without this import it is not found
+ *
+ * // `build` also needs a ModelRegistryService and a ProviderRegistry in scope. The registry
+ * // below comes from `Llm4sConfig.modelRegistryService()`; ProviderRegistry.default is a given already.
+ * given ModelRegistryService = Llm4sConfig.modelRegistryService().toOption.get
+ *
  * // Create pipeline
  * val rag = RAG.builder()
  *   .withEmbeddings("openai")
  *   .withChunking(ChunkerFactory.Strategy.Sentence, 800, 150)
- *   .build()
+ *   .build
  *   .toOption.get
  *
  * // Ingest documents
@@ -52,7 +62,7 @@ import scala.concurrent.{ ExecutionContext, Future }
  * val ragWithLLM = RAG.builder()
  *   .withEmbeddings("openai")
  *   .withLLM(llmClient)
- *   .build()
+ *   .build
  *   .toOption.get
  *
  * val answer = ragWithLLM.queryWithAnswer("What is X?")
@@ -1447,6 +1457,11 @@ object RAG {
 
   /**
    * Create a RAG builder with default configuration.
+   *
+   * The result is a [[RAGConfig]], not a RAG: turn it into one with `.build`, which is an extension
+   * supplied by [[RAGConfigOps]] and is not found unless `import org.llm4s.rag.RAG.RAGConfigOps` is in scope.
+   * `build` also needs a `ModelRegistryService` given (`ProviderRegistry.default` is a given already), and it
+   * takes only a `using` clause, so it is written `.build`, not `.build()`.
    */
   def builder(): RAGConfig = RAGConfig.default
 
