@@ -62,6 +62,16 @@ class RedactionReplacementSpec extends AnyFlatSpec with Matchers {
     Redaction.redact("Authorization: Bearer abc", placeholder = "$0") shouldBe "Authorization: $0"
   }
 
+  // The two above are redacted again by a later, already quoted pass, so they would pass without the fix; these
+  // two reach only the query-parameter and header passes.
+  it should "write it literally for a query key no later pass treats as sensitive" in {
+    Redaction.redact("GET /x?monkey=abc", placeholder = "$0") shouldBe "GET /x?monkey=$0"
+  }
+
+  it should "write it literally for an Authorization header in the middle of a line" in {
+    Redaction.redact("sent Authorization: abc", placeholder = "$0") shouldBe "sent Authorization: $0"
+  }
+
   it should "write it literally for a JSON Authorization field" in {
     Redaction.redact("""{"Authorization": "Bearer abc"}""", placeholder = "$0") shouldBe """{"Authorization": "$0"}"""
   }
