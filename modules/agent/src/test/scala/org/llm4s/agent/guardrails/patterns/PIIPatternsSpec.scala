@@ -124,6 +124,16 @@ class PIIPatternsSpec extends AnyFlatSpec with Matchers {
     PIIType.CreditCard.findAll("3782 822463 10005") should have size 1
   }
 
+  it should "preserve line breaks between card-shaped digit groups" in {
+    for (separator <- Seq("\n", "\r", "\r\n", "\u0085", "\u2028", "\u2029"))
+      for (groups <- Seq(Seq("3782", "822463", "10005"), Seq("4111", "1111", "1111", "1111"))) {
+        val text = groups.mkString(separator)
+        PIIType.CreditCard.findAll(text) shouldBe empty
+        PIIPatterns.maskAll(text, Seq(PIIType.CreditCard)) shouldBe text
+      }
+    PIIType.CreditCard.findAll("3782\t822463\t10005") should have size 1
+  }
+
   // ==========================================================================
   // Email Detection
   // ==========================================================================

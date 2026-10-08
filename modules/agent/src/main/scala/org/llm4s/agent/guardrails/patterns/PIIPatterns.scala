@@ -75,8 +75,8 @@ object PIIPatterns {
       val name = "Credit Card"
       // Visa: 4xxx, MC: 51-55xx/2221-2720, Amex: 34/37xx, Discover: 6011/65xx; then the 15-digit Amex layout
       val pattern =
-        ("""(?<!\d)(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}(?!\d)""" +
-          """|(?<!\d)3[47]\d{2}[-\s]?\d{6}[-\s]?\d{5}(?!\d)""").r
+        ("""(?<!\d)(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[-\h]?\d{4}[-\h]?\d{4}[-\h]?\d{4}(?!\d)""" +
+          """|(?<!\d)3[47]\d{2}[-\h]?\d{6}[-\h]?\d{5}(?!\d)""").r
       def mask(value: String): String = "[REDACTED_CARD]"
     }
 
