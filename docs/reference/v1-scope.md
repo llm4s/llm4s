@@ -79,7 +79,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `llmconnect/provider` — Cohere embeddings, on Cohere's native `/v2/embed` (Cohere chat is a dialect in `llm4s-openai-compatible`) — **new** | `llm4s-cohere` (`modules/providers/cohere`) | Beta |
 | `llmconnect/provider` — IBM watsonx.ai, on the text-generation endpoints IBM has deprecated (never run against the live service; migration to the chat API is [#1314](https://github.com/llm4s/llm4s/issues/1314)) — **new** | `llm4s-watsonx` (`modules/providers/watsonx`) | Beta |
 | `llmconnect/provider` — other community providers | `llm4s-openai-compatible` dialects, or `modules/providers/<name>` | Beta |
-| `testkit` — the checks a provider module's `Llm4s<Name>ModuleSpec` makes (`ProviderModuleChecks`, `ProviderTestConfig`, `CredentialsRoundTrip`, `LocalProviderTestServer`), formerly unpublished helpers in core's test sources — **new** | `llm4s-provider-testkit` (`modules/provider-testkit`), a test-scope dependency | Beta |
+| `testkit` — the checks a provider module's `Llm4s<Name>ModuleSpec` makes (`ProviderModuleChecks`, `ProviderTestConfig`, `CredentialsRoundTrip`, `LocalProviderTestServer`), formerly unpublished helpers in core's test sources — **new** | `llm4s-provider-testkit` (`modules/provider-testkit`), a test-scope dependency; requires JDK 21 (virtual threads) | Beta |
 | `rag`, `vectorstore`, `chunking`, `reranker`, `eval` — **carved** | `llm4s-rag` | Beta |
 | `extract` (consolidated from `rag/extract` + `llmconnect/extractors`) and `rag/embed` (from `llmconnect/encoding`) — **carved** | `llm4s-rag` | Beta |
 | `agent/memory` (excluding `PostgresMemoryStore`) — **carved** | `llm4s-memory` | Beta |
@@ -117,7 +117,7 @@ Notes:
 
 ## Scala and JDK support
 
-1.0 targets **Scala 3 only (3.7.1)**. Scala 2.13 support is deferred to post-1.0 and, if it happens, would target the frozen spine (`llm4s-core`, `llm4s-agent`, and the frozen provider modules) rather than the full tree. The tracing and metrics contracts are part of `llm4s-core`; the observability integration modules are not in the spine. JDK 21 is used in CI.
+1.0 targets **Scala 3 only (3.7.1)**. Scala 2.13 support is deferred to post-1.0 and, if it happens, would target the frozen spine (`llm4s-core`, `llm4s-agent`, and the frozen provider modules) rather than the full tree. The tracing and metrics contracts are part of `llm4s-core`; the observability integration modules are not in the spine. JDK 21 is used in CI. `llm4s-provider-testkit` requires JDK 21: its interruption checks and `LocalProviderTestServer` run on virtual threads ([#1582](https://github.com/llm4s/llm4s/issues/1582)). The minimum JDK for the other artifacts is decided in [#1493](https://github.com/llm4s/llm4s/issues/1493).
 
 See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind the Scala-3-only decision.
 

@@ -1906,6 +1906,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-provider-testkit` says it requires JDK 21** ([#1582](https://github.com/llm4s/llm4s/issues/1582)):
+  its interruption checks run the call on a virtual thread and `LocalProviderTestServer` answers on
+  `Executors.newVirtualThreadPerTaskExecutor`, both JDK 21 APIs, but nothing said so. The provider guide, the
+  installation page, the 1.0 scope and the compatibility policy now state it, as do the two Scaladocs. No
+  build setting changes; the minimum JDK for the other artifacts, and where it is enforced, is decided in
+  [#1493](https://github.com/llm4s/llm4s/issues/1493).
 - **`llm4s-java-api`: `InterruptedException` is never thrown, and the Javadoc says so**
   ([#1591](https://github.com/llm4s/llm4s/issues/1591)): `catch (InterruptedException e)` around
   `JLlmClient.complete` or `JAgent.run` does not compile ("never thrown in body of corresponding try statement"),

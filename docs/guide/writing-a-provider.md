@@ -643,6 +643,13 @@ run. Add it in test scope; it brings ScalaTest with it:
 libraryDependencies += "org.llm4s" %% "llm4s-provider-testkit" % llm4sVersion % Test
 ```
 
+The testkit **requires JDK 21**: `assertCancelsWhenInterrupted` and its siblings run the call on a
+virtual thread (`Thread.ofVirtual`), and `LocalProviderTestServer` answers on
+`Executors.newVirtualThreadPerTaskExecutor`, both JDK 21 APIs. The build that runs your
+`Llm4s<Name>ModuleSpec` needs a JDK 21 toolchain, whatever your provider module itself targets
+(the library's own minimum JDK is settled in
+[#1493](https://github.com/llm4s/llm4s/issues/1493)).
+
 It has four parts, all in `org.llm4s.testkit`:
 
 | | What it gives you |

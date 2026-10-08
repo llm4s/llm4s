@@ -965,6 +965,10 @@ lazy val watsonx = (project in file("modules/providers/watsonx"))
 // helpers used to live in core's test sources, which are not published. A test library, so
 // ScalaTest is a compile dependency. Every in-repo provider module dogfoods it (`% Test`).
 //
+// It needs JDK 21: the interruption checks run on `Thread.ofVirtual` and the local server on
+// `Executors.newVirtualThreadPerTaskExecutor` (#1582). The docs say so; no module sets a
+// `-release` or `javacOptions` target, and where the floor is enforced is for #1493 to decide.
+//
 // Core's own tests cannot use it - that would be a project cycle - so anything core's tests
 // share with it lives in core's main sources, `private[llm4s]` (`config.ReferenceConfig`).
 lazy val providerTestkit = (project in file("modules/provider-testkit"))
