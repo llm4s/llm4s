@@ -176,16 +176,16 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
   // ---- Semantic Search
 
   private def semanticSearch(embeddingService: EmbeddingService): Result[Seq[ScoredMemory]] =
-    for {
-      store <- VectorMemoryStore.inMemory(embeddingService)
-      m1    <- SimpleMemoryManager.withStore(store).recordKnowledge("Paris is the capital of France", "geography")
-      m2    <- m1.recordKnowledge("Berlin is the capital of Germany", "geography")
-      m3    <- m2.recordKnowledge("Rome is the capital of Italy", "geography")
-
-      // Search by meaning
-      results <- m3.store.search("European capitals", topK = 2)
-    } yield results
-
+    VectorMemoryStore.inMemory(embeddingService).flatMap { store =>
+      Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
+        for {
+          m1      <- SimpleMemoryManager.withStore(store).recordKnowledge("Paris is the capital of France", "geography")
+          m2      <- m1.recordKnowledge("Berlin is the capital of Germany", "geography")
+          m3      <- m2.recordKnowledge("Rome is the capital of Italy", "geography")
+          results <- m3.store.search("European capitals", topK = 2)
+        } yield results
+      }
+    }
   private def searchWithFilter(store: MemoryStore): Result[Seq[ScoredMemory]] = {
     val filter = MemoryFilter.ByType(MemoryType.Knowledge) &&
       MemoryFilter.MinImportance(0.7) &&
@@ -232,24 +232,26 @@ class MemoryGuideSpec extends AnyWordSpec with Matchers with EitherValues {
   // ---- Persistence Patterns
 
   private def saveAndLoad(path: String): Result[String] =
-    for {
-      // Create a persistent store
-      store <- SQLiteMemoryStore(path)
-      _     <- SimpleMemoryManager.withStore(store).recordUserFact("Likes Scala", Some("user-1"))
-      _ = store.close()
-
-      // On the next run, open the same file: the memories are still there
-      reopened <- SQLiteMemoryStore(path)
-      context  <- SimpleMemoryManager.withStore(reopened).getUserContext(Some("user-1"))
-      _ = reopened.close()
-    } yield context
+    SQLiteMemoryStore(path)
+      .flatMap { store =>
+        Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
+          SimpleMemoryManager.withStore(store).recordUserFact("Likes Scala", Some("user-1")).map(_ => ())
+        }
+      }
+      .flatMap { _ =>
+        SQLiteMemoryStore(path).flatMap { reopened =>
+          Using.resource(new AutoCloseable { override def close(): Unit = reopened.close() }) { _ =>
+            SimpleMemoryManager.withStore(reopened).getUserContext(Some("user-1"))
+          }
+        }
+      }
 
   private class PersistentMemory(dbPath: String) {
     def withManager[A](use: MemoryManager => Result[A]): Result[A] =
       SQLiteMemoryStore(dbPath).flatMap { store =>
-        val outcome = use(SimpleMemoryManager.withStore(store))
-        store.close()
-        outcome
+        Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
+          use(SimpleMemoryManager.withStore(store))
+        }
       }
   }
 

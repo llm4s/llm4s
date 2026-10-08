@@ -400,16 +400,19 @@ is accepted but no manager reads it yet, so record each turn yourself, as above,
 ```scala
 import org.llm4s.agent.memory._
 
-def semanticSearch(embeddingService: EmbeddingService): Result[Seq[ScoredMemory]] =
-  for {
-    store <- VectorMemoryStore.inMemory(embeddingService)
-    m1    <- SimpleMemoryManager.withStore(store).recordKnowledge("Paris is the capital of France", "geography")
-    m2    <- m1.recordKnowledge("Berlin is the capital of Germany", "geography")
-    m3    <- m2.recordKnowledge("Rome is the capital of Italy", "geography")
+import scala.util.Using
 
-    // Search by meaning
-    results <- m3.store.search("European capitals", topK = 2)
-  } yield results
+def semanticSearch(embeddingService: EmbeddingService): Result[Seq[ScoredMemory]] =
+  VectorMemoryStore.inMemory(embeddingService).flatMap { store =>
+    Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
+      for {
+        m1 <- SimpleMemoryManager.withStore(store).recordKnowledge("Paris is the capital of France", "geography")
+        m2 <- m1.recordKnowledge("Berlin is the capital of Germany", "geography")
+        m3 <- m2.recordKnowledge("Rome is the capital of Italy", "geography")
+        results <- m3.store.search("European capitals", topK = 2)
+      } yield results
+    }
+  }
 ```
 
 The results are `ScoredMemory` values, best first. With a real embedding model they are the
@@ -520,32 +523,36 @@ distinct conversations) and `embeddedCount`. `byType` leaves out types with no m
 ### Save and Load
 
 ```scala
-// Using SQLite for persistence
-val result = for {
-  // Create a persistent store
-  store <- SQLiteMemoryStore("memory.db")
-  _     <- SimpleMemoryManager.withStore(store).recordUserFact("Likes Scala", Some("user-1"))
-  _ = store.close()
+import scala.util.Using
 
-  // On the next run, open the same file: the memories are still there
-  reopened <- SQLiteMemoryStore("memory.db")
-  context  <- SimpleMemoryManager.withStore(reopened).getUserContext(Some("user-1"))
-  _ = reopened.close()
-} yield context
+// Both opened stores close even when a Result is Left.
+val result = SQLiteMemoryStore("memory.db").flatMap { store =>
+  Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
+    SimpleMemoryManager.withStore(store).recordUserFact("Likes Scala", Some("user-1")).map(_ => ())
+  }
+}.flatMap { _ =>
+  SQLiteMemoryStore("memory.db").flatMap { reopened =>
+    Using.resource(new AutoCloseable { override def close(): Unit = reopened.close() }) { _ =>
+      SimpleMemoryManager.withStore(reopened).getUserContext(Some("user-1"))
+    }
+  }
+}
 // Right("Known facts about the user:\n- Likes Scala")
 ```
 
 ### Cross-Session Memory
 
 ```scala
+import scala.util.Using
+
 class PersistentMemory(dbPath: String) {
 
   // Open the store, run something against a manager on it, and close the store again
   def withManager[A](use: MemoryManager => Result[A]): Result[A] =
     SQLiteMemoryStore(dbPath).flatMap { store =>
-      val outcome = use(SimpleMemoryManager.withStore(store))
-      store.close()
-      outcome
+      Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
+        use(SimpleMemoryManager.withStore(store))
+      }
     }
 }
 
