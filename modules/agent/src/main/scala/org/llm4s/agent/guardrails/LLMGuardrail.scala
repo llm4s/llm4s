@@ -39,8 +39,9 @@ import scala.util.Try
  *  - `0.9`, `Score: 0.9`, `**0.9**` and `The score is 0.9` all read as 0.9.
  *  - A leading minus is dropped: `-0.5` reads as 0.5.
  *  - A number outside the range is clamped, not rejected: `85`, `85%`, `8/10`, `1e-3` and `0,9` all read
- *    as 1.0, which passes any threshold up to 1.0. A judge that answers on a 0 to 100 scale therefore
- *    approves everything, so keep the prompt explicit about the scale.
+ *    as 1.0, which passes any threshold up to 1.0. Positive whole-number scores on a 0 to 100 scale
+ *    therefore pass, but `0` stays 0.0 and fractional scores below the threshold still fail. Keep the
+ *    prompt explicit about the scale.
  *  - Several numbers are not rejected as such: their digits run together. `0 or 1` reads as `01`, which is
  *    1.0, and `0.5 or 1` as `0.51`, so such a reply can pass. Only when the remainder is not a valid number -
  *    no digits, a trailing full stop (`0.85.`), or two decimal points (`0.5 or 0.6` becomes `0.50.6`) - is
