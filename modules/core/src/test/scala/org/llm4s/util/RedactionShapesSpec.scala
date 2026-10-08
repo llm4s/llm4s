@@ -383,4 +383,29 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
       withClue(s"input starting ${input.take(8)}: ")(onSmallStack(input) shouldBe input)
     }
   }
+  it should "redact an entire embedded string containing escaped quotes" in {
+    val values = Seq("ab\"cd12345", "ab\\\"cd12345", "ends\\")
+    values.foreach { value =>
+      val embedded = ujson.Obj("password" -> value, "name" -> "keep").render()
+      val input    = ujson.Obj("content" -> embedded).render()
+      val output   = ujson.read(Redaction.redact(input))("content").str
+      ujson.read(output)("password").str shouldBe R
+      ujson.read(output)("name").str shouldBe "keep"
+      Redaction.redact(Redaction.redact(input)) shouldBe Redaction.redact(input)
+    }
+  }
+
+  it should "redact single and double quoted assignment values" in {
+    Redaction.redact("PASSWORD=\"hunter2value\" NAME=\"keep\"") shouldBe s"PASSWORD=\"$R\" NAME=\"keep\""
+    Redaction.redact("PASSWORD='hunter2value' NAME='keep'") shouldBe s"PASSWORD='$R' NAME='keep'"
+  }
+
+  it should "redact exponent-form numeric credentials" in {
+    Seq("1e10", "-1.25E+10", "1e-10").foreach { number =>
+      val output = Redaction.redact(s"""{"password":$number,"count":$number}""")
+      ujson.read(output)("password").str shouldBe R
+      ujson.read(output)("count").num shouldBe number.toDouble
+    }
+  }
+
 }

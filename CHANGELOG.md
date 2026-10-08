@@ -1849,6 +1849,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the square root of a negative were errors. Any result that is infinite or not a number is now an error,
   like those two, so a model is no longer handed `"Infinity"` as an answer; **a caller that relied on receiving
   `Infinity` or `NaN` now gets a `Left`** (the tool description says so).
+- Credential redaction handles escaped quotes in embedded JSON, quoted assignments, and exponent-form numeric values.
 - **`llm4s-agent-tools`: file tools confined by path component, not string prefix**
   ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `FileConfig.isPathAllowed` and
   `WriteConfig.isPathAllowed` compared paths with `String.startsWith`, so an allowed `/srv/agent-data` also

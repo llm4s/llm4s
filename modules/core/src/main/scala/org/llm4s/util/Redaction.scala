@@ -144,11 +144,14 @@ private[llm4s] object Redaction {
 
   /** `"key": 12345`: a number is a credential too when the key says so (a numeric PIN or passcode). */
   private val JsonNumberField: Regex =
-    s"""("($Key)"\\s*:\\s*)(-?\\d+(?:\\.\\d+)?)(?![\\w.-])""".r
+    s"""("($Key)"\\s*:\\s*)(-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)(?![\\w.-])""".r
 
   /** `key=value` outside a URL query string: form bodies, log lines, shell-style settings, `a.b.password=...`. */
   private val EqualsPair: Regex =
     s"""((?<![A-Za-z0-9_-])($Key)=)([^\\s&"',;<>]+)""".r
+
+  private val DoubleQuotedEqualsStart: Regex = s"""((?<![A-Za-z0-9_-])($Key)=")""".r
+  private val SingleQuotedEqualsStart: Regex = s"""((?<![A-Za-z0-9_-])($Key)=')""".r
 
   /** A header-style line, `x-api-key: value`, at the start of a line. */
   private val HeaderLine: Regex =
@@ -257,7 +260,9 @@ private[llm4s] object Redaction {
     val double  = redactQuoted(JsonStringStart, escaped, placeholder, ValueEnd.Quote('"'))
     val single  = redactQuoted(SingleQuotedStart, double, placeholder, ValueEnd.Quote('\''))
     // A number becomes a string, so that the redacted JSON still parses.
-    val numbers = redactPairs(JsonNumberField, single, placeholder, wrap = "\"")
+    val quotedEquals = redactQuoted(DoubleQuotedEqualsStart, single, placeholder, ValueEnd.Quote('"'))
+    val allQuoted    = redactQuoted(SingleQuotedEqualsStart, quotedEquals, placeholder, ValueEnd.Quote('\''))
+    val numbers      = redactPairs(JsonNumberField, allQuoted, placeholder, wrap = "\"")
     Seq(EqualsPair, HeaderLine).foldLeft(numbers)((acc, pattern) => redactPairs(pattern, acc, placeholder))
   }
 
@@ -288,8 +293,15 @@ private[llm4s] object Redaction {
           if (c == quote) from
           else scanQuotedValue(input, if (c == '\\') from + 2 else from + 1, end)
         case ValueEnd.EscapedQuote =>
-          if (c == '"' || (c == '\\' && from + 1 < input.length && input.charAt(from + 1) == '"')) from
-          else scanQuotedValue(input, from + 1, end)
+          if (c == '"') from
+          else if (c == '\\') {
+            var next = from
+            while (next < input.length && input.charAt(next) == '\\') next += 1
+            val slashes = next - from
+            if (next < input.length && input.charAt(next) == '"' && slashes % 4 == 1) next - 1
+            else if (next < input.length && input.charAt(next) == '"' && slashes % 2 == 0) next
+            else scanQuotedValue(input, next + 1, end)
+          } else scanQuotedValue(input, from + 1, end)
       }
     }
 
