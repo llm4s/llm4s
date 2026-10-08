@@ -67,10 +67,80 @@ drift = []   # (file, line, message)
 fatal = []   # messages: something the check relies on is missing, so it cannot say the tiers agree
 
 
-def read(rel):
+def strip_scala_comments(text):
+    # Blank out `//` line comments and `/* */` block comments (nested, as Scala allows), outside
+    # double-quoted strings, keeping every newline, so a commented-out `mimaFrozen(...)` or
+    # `"llm4s-..." ->` entry is not read as live and line numbers in messages stay right.
+    out = []
+    i, n = 0, len(text)
+    in_str = in_line = in_triple = False
+    depth = 0
+    while i < n:
+        c = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if in_triple:
+            out.append(c)
+            if c == '"' and text[i:i + 3] == '"""':
+                out.append('""')
+                in_triple = False
+                i += 2
+            i += 1
+            continue
+        if in_line:
+            if c == "\n":
+                in_line = False
+                out.append(c)
+            else:
+                out.append(" ")
+        elif depth:
+            if c == "\n":
+                out.append(c)
+            elif c == "*" and nxt == "/":
+                depth -= 1
+                out.append("  ")
+                i += 1
+            elif c == "/" and nxt == "*":
+                depth += 1
+                out.append("  ")
+                i += 1
+            else:
+                out.append(" ")
+        elif in_str:
+            out.append(c)
+            if c == "\\":
+                out.append(nxt)
+                i += 1
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"' and text[i:i + 3] == '"""':
+                in_triple = True
+                out.append('"""')
+                i += 2
+            elif c == '"':
+                in_str = True
+                out.append(c)
+            elif c == "/" and nxt == "/":
+                in_line = True
+                out.append("  ")
+                i += 1
+            elif c == "/" and nxt == "*":
+                depth = 1
+                out.append("  ")
+                i += 1
+            else:
+                out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def read(rel, scala=False):
     try:
         with open(os.path.join(root, rel), encoding="utf-8") as f:
-            return f.read().split("\n")
+            text = f.read()
+        if scala:
+            text = strip_scala_comments(text)
+        return text.split("\n")
     except OSError as e:
         fatal.append(f"{rel}: cannot read ({e.strerror or e})")
         return []
@@ -81,7 +151,8 @@ def tokens(text):
 
 
 # ------------------------------------------------------------------------------------------ build.sbt
-build = read(BUILD)
+build_raw = read(BUILD)              # with comments: the exemption list lives in a comment above stabilityTierCheck
+build = strip_scala_comments("\n".join(build_raw)).split("\n") if build_raw else []  # without comments: a commented-out entry is not live
 
 proj_re = re.compile(r'^lazy val\s+(\w+)\s*=\s*\(project\s+in\s+file\("([^"]+)"\)\)')
 projects = []
@@ -139,8 +210,9 @@ exceptions = set()
 if check_line is not None:
     j = check_line - 1
     comment = []
-    while j >= 1 and build[j - 1].lstrip().startswith("//"):
-        comment.insert(0, build[j - 1].lstrip()[2:].strip())
+    # the exemption list is itself a comment, so it is read from the unstripped text (same line numbers)
+    while j >= 1 and build_raw[j - 1].lstrip().startswith("//"):
+        comment.insert(0, build_raw[j - 1].lstrip()[2:].strip())
         j -= 1
     m = re.search(r"minus\s+((?:`llm4s-[a-z0-9-]+`(?:\s*(?:,|and)\s*)?)+)", " ".join(comment))
     if m:

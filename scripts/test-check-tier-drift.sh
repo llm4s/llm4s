@@ -312,6 +312,29 @@ write("\n".join(out))
 PY
 expect_fail "a tier cell that only mentions Frozen" "has no tier"
 
+# ---------------------------------------------------------------- a commented-out entry is not live (Codex review)
+fresh
+edit build.sbt <<PY
+# a block-commented mimaFrozen call must leave the frozen set
+write(text.replace('mimaFrozen("$FROZEN")', '/* mimaFrozen("$FROZEN") */', 1))
+PY
+expect_fail "a block-commented mimaFrozen call is not frozen any more" "which build.sbt does not freeze"
+
+fresh
+edit build.sbt <<PY
+# a line-commented frozenDependencyCheck entry must leave D
+m = re.search(r'^(\s*)("$FROZEN"\s*->)', text, re.M)
+write(text[:m.start(2)] + "// " + text[m.start(2):])
+PY
+expect_fail "a line-commented frozenDependencyCheck entry is not checked any more" "frozenDependencyCheck is not called with $FROZEN"
+
+fresh
+edit build.sbt <<PY
+# a trailing comment on a live call changes nothing
+write(text.replace('mimaFrozen("$FROZEN")', 'mimaFrozen("$FROZEN") // the frozen set, see docs/reference/v1-scope.md', 1))
+PY
+expect_pass "a trailing comment on a live mimaFrozen call still counts"
+
 # ---------------------------------------------------------------- a page the check cannot read must not pass
 fresh
 edit docs/reference/v1-scope.md <<PY
