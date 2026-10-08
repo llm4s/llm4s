@@ -296,9 +296,14 @@ class AgentRunSemanticsSpec extends AnyFlatSpec with Matchers:
     )
     val result = scala.util.Try(agent.run("hello"))
     result.isSuccess shouldBe true
-    info(
-      s"guardrail that throws: ${result.get.fold(e => s"Left(${e.getClass.getSimpleName})", r => s"Right(${r.status})")}"
-    )
+    // The throw must fail the run, not vanish: a regression that swallows it and completes the
+    // run would otherwise pass this test (Codex review). MiddlewareStack's contract is a Left
+    // naming the middleware and carrying the original exception.
+    result.get match
+      case Left(e: GraphError.MiddlewareFailed) =>
+        e.middleware shouldBe "guardrails"
+        e.cause shouldBe a[IllegalStateException]
+      case other => fail(s"a throwing guardrail must fail the run as Left(MiddlewareFailed), got $other")
   }
 
   "A listener that throws" should "not change the run's result" in {
