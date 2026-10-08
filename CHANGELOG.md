@@ -1924,6 +1924,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Redaction keeps a `$` or `\` in a query parameter, and writes a placeholder as it is**
+  ([#1655](https://github.com/llm4s/llm4s/issues/1655)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, returned a query parameter to `Regex.replaceAllIn` without `Regex.quoteReplacement`, so
+  a `$` or `\` in it was read as a group reference or an escape. `?q=\` threw `IllegalArgumentException`,
+  `?q=$5` threw `IndexOutOfBoundsException`, `?api$key=abc` threw `IllegalArgumentException` (illegal group
+  reference), `?q=$1` became `?q=?` and `?path=C:\dir` became `?path=C:dir`. A caller's `placeholder` reached
+  the Authorization, Bearer, Basic and API-key replacements unquoted too, so a placeholder of `$0` wrote back
+  the credential it replaced. Every replacement in `Redaction` and `SecretPatterns.redactAll` /
+  `redactAllWithPlaceholder` is now quoted: the parameters are kept exactly, a sensitive value is still
+  redacted, and the placeholder is written literally. No signature changes.
 - **`llm4s-bedrock`: a `toolUse` input nested more than 512 levels deep is refused as a malformed tool
   call, never converted or sent back** ([#1648](https://github.com/llm4s/llm4s/issues/1648)). #1630
   ([#1562](https://github.com/llm4s/llm4s/issues/1562)) bounded every place model-written JSON is parsed

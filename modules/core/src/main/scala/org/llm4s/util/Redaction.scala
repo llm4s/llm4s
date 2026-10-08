@@ -237,17 +237,20 @@ private[llm4s] object Redaction {
   // Private redaction helpers
   // ============================================================
 
+  // Every replacement below is quoted: the placeholder is the caller's, and a `$` or `\` in a replacement string is
+  // otherwise read as a group reference or an escape, which throws or writes back the text being redacted.
   private def redactAuthHeaders(input: String, placeholder: String): String = {
+    val quoted = Regex.quoteReplacement(placeholder)
     // Handle "Authorization": "..." in JSON
     val step1 = """(?i)("Authorization"\s*:\s*")([^"]+)(")""".r
-      .replaceAllIn(input, m => s"${m.group(1)}$placeholder${m.group(3)}")
+      .replaceAllIn(input, m => Regex.quoteReplacement(s"${m.group(1)}$placeholder${m.group(3)}"))
     // Handle Authorization: ... in headers
     val step2 = """(?i)(Authorization:\s*)([^\n\r]+)""".r
-      .replaceAllIn(step1, m => s"${m.group(1)}$placeholder")
+      .replaceAllIn(step1, m => Regex.quoteReplacement(s"${m.group(1)}$placeholder"))
     // Handle standalone Bearer tokens
-    val step3 = """(?i)\bBearer\s+([a-zA-Z0-9\-_\.]+)""".r.replaceAllIn(step2, placeholder)
+    val step3 = """(?i)\bBearer\s+([a-zA-Z0-9\-_\.]+)""".r.replaceAllIn(step2, quoted)
     // Handle standalone Basic auth tokens
-    """(?i)\bBasic\s+([a-zA-Z0-9+/=]+)""".r.replaceAllIn(step3, placeholder)
+    """(?i)\bBasic\s+([a-zA-Z0-9+/=]+)""".r.replaceAllIn(step3, quoted)
   }
 
   private def redactQueryParams(input: String, placeholder: String): String =
@@ -257,11 +260,14 @@ private[llm4s] object Redaction {
         val separator = m.group(1)
         val key       = m.group(2)
 
-        if (SensitiveQueryParams.exists(s => key.toLowerCase(Locale.ROOT).contains(s.toLowerCase(Locale.ROOT)))) {
-          s"$separator$key=$placeholder"
-        } else {
-          m.matched
-        }
+        // Quoted: the key and the value are the input's, and may hold `$` or `\`.
+        val text =
+          if (SensitiveQueryParams.exists(s => key.toLowerCase(Locale.ROOT).contains(s.toLowerCase(Locale.ROOT)))) {
+            s"$separator$key=$placeholder"
+          } else {
+            m.matched
+          }
+        Regex.quoteReplacement(text)
       }
     )
 
