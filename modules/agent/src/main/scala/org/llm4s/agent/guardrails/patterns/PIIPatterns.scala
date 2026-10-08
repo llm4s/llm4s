@@ -101,8 +101,8 @@ object PIIPatterns {
     case object Phone extends PIIType {
       val name = "Phone"
       val pattern =
-        ("""(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)""" +
-          """|(?<!\d)\+\d(?:[-.\s()]{0,2}\d){7,14}(?!\d)""").r
+        ("""(?<!\d)(?:\+?1[-.\h]?)?(?:\(\d{3}\)|\d{3})[-.\h]?\d{3}[-.\h]?\d{4}(?!\d)""" +
+          """|(?<!\d)\+\d(?:[-.\h()]{0,2}\d){7,14}(?!\d)""").r
       def mask(value: String): String = "[REDACTED_PHONE]"
     }
 

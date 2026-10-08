@@ -51,6 +51,16 @@ class PIIMaskerInternationalSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "preserve line breaks between plus-prefixed digits" in {
+    Seq("\n", "\r", "\r\n", "\u0085", "\u2028", "\u2029").foreach { separator =>
+      Seq(8, 10, 15).foreach { digits =>
+        val input = (1 to digits).map(_ % 10).mkString("+", separator, "")
+        phones.transform(input) shouldBe input
+      }
+    }
+    phones.transform("Call +44\t20\t7946\t0958 now") shouldBe "Call [REDACTED_PHONE] now"
+  }
+
   it should "give the same result from the default masker and from the one with every type" in {
     internationalNumbers.foreach { case (label, number) =>
       withClue(s"$label '$number': ") {
