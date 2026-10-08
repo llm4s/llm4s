@@ -526,21 +526,24 @@ The module's `reference.conf` ships `enabled = false`, `prometheus.enabled = tru
 Pass the collector to the client when you build it:
 
 ```scala
-import org.llm4s.config.Llm4sConfig
+import org.llm4s.config.{Llm4sConfig, MetricsConfigLoader}
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.metrics.PrometheusMetrics
-import io.prometheus.metrics.model.registry.PrometheusRegistry
 
-val metrics = new PrometheusMetrics(new PrometheusRegistry())
-
-val client = for {
+val application = for {
   providerConfig  <- Llm4sConfig.defaultProvider()
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
-  client <- LLMConnect.getClient(providerConfig, metrics)
-} yield client
+  configured <- MetricsConfigLoader.default()
+  (metrics, endpoint) = configured
+  client <- LLMConnect.getClient(providerConfig, metrics).left.map { error =>
+    endpoint.foreach(_.stop()) // release the server if client creation fails
+    error
+  }
+} yield (client, endpoint)
 ```
+
+On success, retain the returned endpoint alongside the client and call `endpoint.foreach(_.stop())` during application shutdown. The collector and endpoint from the loader share the same registry.
 
 `LlmClientOptions(metrics = ...)` is the same thing through the options overload of `LLMConnect.getClient`. The endpoint that `MetricsConfigLoader` starts stays up until you call `PrometheusEndpoint.stop()`, which is safe to call twice.
 
@@ -635,7 +638,7 @@ sum by (model) (increase(llm4s_cost_usd_total[1h]))
 
 ### Send metrics to more than one place
 
-`MetricsCollector.compose` returns a collector that forwards every call to each collector it is given, so Prometheus can run next to `CostTracker` (in `llm4s-observability`) or a collector of your own. A collector that throws does not stop the others:
+`MetricsCollector.compose` forwards the LLM request, token, latency, cost and error methods to each collector it is given, so Prometheus can run next to `CostTracker` (in `llm4s-observability`) or a collector of your own. A collector that throws does not stop the others. Image-generation methods currently inherit no-op defaults on the composed collector; use a collector directly with `InstrumentedImageGenerationClient` to record image metrics:
 
 ```scala
 import org.llm4s.metrics.MetricsCollector
