@@ -123,7 +123,7 @@ touched), sets `mimaBaselineVersion` there, publishes every module to a temporar
 - runs a **negative control**: a baseline with two extra classes, one `@Stable` and one `@Experimental`, that
   the code then lacks. MiMa must fail on the `@Stable` one and must not report the `@Experimental` one.
 
-It took about three minutes on a laptop with warm caches (184 s). It proves the wiring: the coordinates, the
+It took about three minutes on a laptop with warm caches (between 156 s and 184 s over three runs; an independent run took 175 s). It proves the wiring: the coordinates, the
 `_3` suffix, resolution, that the check can fail, and that `@Experimental` types are outside the freeze. It does
 **not** prove that any API is compatible with anything: there is no 0.5.0 baseline yet. It is a manual script,
 not a CI job, because it publishes the whole build. `scripts/test-mima-dry-run.sh` tests the script itself

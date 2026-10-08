@@ -29,6 +29,10 @@
 #   REPO_ROOT              the repository to check (default: the one this script is in)
 # Environment: SBT  the sbt launcher to run (default: sbt). Run it on the JDK CI uses (21).
 #
+# Stopping it: use Ctrl-C, which signals the whole process group, sbt included. A plain `kill <pid of this script>`
+# is deferred by bash until the running sbt command finishes (a couple of minutes), and only then removes the
+# temp directory; it leaves sbt running meanwhile. Nothing outside the temp directory is touched either way.
+#
 # Exit status: 0 the dry run held; 1 a check failed; 2 bad usage; 3 the script no longer matches the build.
 set -euo pipefail
 
