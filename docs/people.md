@@ -80,7 +80,7 @@ project discussions and direction.
 ## Security Committee
 
 The Security Committee receives and handles reports of security vulnerabilities.
-To report a security issue privately, see [`SECURITY.md`](https://github.com/llm4s/llm4s/blob/main/SECURITY.md).
+To report a security issue privately, see [`SECURITY.md`](../SECURITY.md).
 
 | | Name | GitHub |
 |---|---|---|

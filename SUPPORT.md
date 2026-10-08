@@ -18,7 +18,7 @@ Where to go depends on what you need.
 ## I found a security vulnerability
 
 Do not describe it in a public issue, pull request or channel. Follow the
-[private reporting instructions in SECURITY.md](https://github.com/llm4s/llm4s/blob/main/SECURITY.md).
+[private reporting instructions in SECURITY.md](SECURITY.md).
 The [Security Committee](docs/people.md#security-committee) handles vulnerability reports.
 Use GitHub private vulnerability reporting from the repository
 [Security tab](https://github.com/llm4s/llm4s/security) when available; otherwise ask a Security Committee
