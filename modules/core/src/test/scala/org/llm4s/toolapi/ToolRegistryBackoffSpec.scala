@@ -174,6 +174,25 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "stay stack-safe when a zero backoff retries many times on an inline execution context" in {
+    // `ExecutionContext.fromExecutor(_.run())` is inline and, unlike `ExecutionContext.parasitic`, does not
+    // trampoline: every attempt, flatMap and callback runs on the caller's stack. A zero-delay backoff whose
+    // retries recursed through `Backoff.after(Duration.Zero)` (an already-completed future) therefore grew
+    // the stack by a constant per attempt and a large maxAttempts overflowed it (Codex round 2). The retry
+    // loop must drain consecutive zero-delay attempts iteratively instead.
+    val inlineEc    = ExecutionContext.fromExecutor((runnable: Runnable) => runnable.run())
+    val attempts    = new AtomicInteger(0)
+    val failing     = toolOf("always") { attempts.incrementAndGet(); throw new java.io.IOException("always") }
+    val registry    = new ToolRegistry(Seq(failing))
+    val maxAttempts = 50000
+    val result = Await.result(
+      registry.executeAsync(request("always"), retry(maxAttempts, Duration.Zero))(inlineEc),
+      60.seconds
+    )
+    result.left.toOption.get shouldBe a[ToolCallError.ExecutionError]
+    attempts.get shouldBe maxAttempts
+  }
+
   it should "grow the delay exponentially across several retries" in {
     val attempts = new AtomicInteger(0)
     val registry = new ToolRegistry(Seq(flaky("flaky", 3, attempts)))
