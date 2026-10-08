@@ -11,8 +11,10 @@ import org.scalatest.matchers.should.Matchers
 /**
  * The sources a search model cites (#1216): `url_citation` annotations on the assistant message,
  * which `openai-java` models as `ChatCompletionMessage.Annotation.UrlCitation` with a `url`, a
- * `title` and the `start_index` / `end_index` of the supported span. OpenAI's `*-search-preview`
- * chat models return them without any request option. A citation is read leniently, as the rest of
+ * `title` and the `start_index` / `end_index` of the URL citation in the message (where the inline
+ * citation sits, not a supported-claim span). OpenAI's Chat Completions search models
+ * (`gpt-5-search-api`; the `*-search-preview` models were retired on 2026-07-23) return them
+ * without any request option. A citation is read leniently, as the rest of
  * the response is: one that cannot be read is dropped and never fails a completion whose answer
  * arrived, and none is made up.
  */
@@ -21,7 +23,7 @@ final class OpenAIClientCitationsSpec extends AnyFlatSpec with Matchers with Eit
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
-  private val model = "gpt-4o-search-preview"
+  private val model = "gpt-5-search-api"
 
   private val config = OpenAIConfig
     .fromValues(modelName = model, apiKey = "test-api-key", organization = None, baseUrl = "https://example.invalid/v1")

@@ -587,7 +587,8 @@ class OpenAIClient private[provider] (
 
   /**
    * The sources the model cited: the `url_citation` annotations of the message, in the order sent
-   * (OpenAI's `*-search-preview` models return them with no request option). Read as leniently as
+   * (OpenAI's Chat Completions search models return them with no request option: `gpt-5-search-api`
+   * today, the retired `*-search-preview` models before 2026-07-23). Read as leniently as
    * the rest of the response: an annotation without a non-empty `url` is dropped (one is never
    * made up), and an index that is not at least zero and within `Int` is read as absent. If the
    * SDK cannot parse the `annotations` list at all (an element that is not an annotation object),

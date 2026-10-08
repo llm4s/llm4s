@@ -15,7 +15,7 @@ import java.nio.charset.StandardCharsets
  * The sources a model cites (#1216), as OpenAI and OpenRouter report them: `url_citation`
  * annotations on the assistant message, `{"type":"url_citation","url_citation":{"url", "title",
  * "content", "start_index", "end_index"}}`. Search models reach them without any request option
- * (OpenAI's `*-search-preview`, OpenRouter's `:online` suffix). Streamed chunks report none, and
+ * (OpenAI's `gpt-5-search-api`, OpenRouter's `:online` suffix). Streamed chunks report none, and
  * no citation is ever made up: a malformed annotation is dropped, never a failed completion.
  */
 class OpenAICompatibleCitationsSpec extends AnyFlatSpec with Matchers with EitherValues {
@@ -23,7 +23,7 @@ class OpenAICompatibleCitationsSpec extends AnyFlatSpec with Matchers with Eithe
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def clientFor(baseUrl: String = "http://localhost:1/v1") = new OpenAICompatibleClient(
-    OpenAICompatibleClient.settings(OpenAICompatibleConfig("gpt-4o-mini-search-preview", baseUrl, None)),
+    OpenAICompatibleClient.settings(OpenAICompatibleConfig("gpt-5-search-api", baseUrl, None)),
     OpenAICompatibleDialect.Standard
   )
 

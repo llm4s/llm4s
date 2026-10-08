@@ -1593,15 +1593,15 @@ A `Citation` has a `url`, always, and these fields, each `None` when the provide
 |---|---|
 | `title` | the source's title |
 | `citedText` | a passage of the source that came with the citation (OpenRouter's `content`); it describes the source, not the answer |
-| `startIndex`, `endIndex` | the span of the answer the source supports, as the provider reports it: positions in `Completion.content` |
+| `startIndex`, `endIndex` | where the inline citation sits, as the provider reports it: positions in `Completion.content`. OpenAI documents them as the first and last character "of the URL citation in the message"; no provider documents them as the span of prose the source supports |
 
-Take the two indices as the provider's span and check its convention before cutting `content` with them:
-OpenAI documents `end_index` only as "the index of the last character", so whether it is inclusive is
-the provider's call. `hasSpan` says whether both are present.
+Take the two indices as the location of the citation, not of the supported claim, and check the
+provider's convention before cutting `content` with them (whether `end_index` is inclusive is the
+provider's call). `hasSpan` says whether both are present.
 
 | Provider | Citations |
 |---|---|
-| OpenAI (search models for Chat Completions), Azure, Requesty | Read from the message's `url_citation` annotations (`url`, `title`, `start_index`, `end_index`). Search models return them with no request option; Azure and Requesty return them only if the deployment does. |
+| OpenAI (search models for Chat Completions), Azure, Requesty | Read from the message's `url_citation` annotations (`url`, `title`, `start_index`, `end_index`). Search models (`gpt-5-search-api`; the `*-search-preview` models were retired on 2026-07-23) return them with no request option; Azure and Requesty return them only if the deployment does. |
 | OpenRouter (`:online` models, or the web plugin) | The same annotations, plus `content` as `citedText`. |
 | DeepSeek, Z.ai, Mistral, Cohere, a generic `openai-compatible` endpoint | Read if the reply carries standard `url_citation` annotations; none of them is documented to. |
 | Anthropic, Gemini, Vertex AI, Ollama, Bedrock, watsonx | Empty. Anthropic's citations come from document inputs and its web search tool, and Gemini's `groundingMetadata` from its Google Search tool; llm4s cannot yet request either, so no response can carry them. |
