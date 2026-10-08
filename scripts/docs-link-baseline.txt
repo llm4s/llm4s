@@ -153,9 +153,6 @@ docs/reference/migration.md -> ../guide/agents/streaming.html
 docs/reference/migration.md -> ../guide/writing-a-provider
 docs/reference/migration.md -> ../guide/writing-a-provider#testing
 docs/reference/release.md -> v1-scope
-docs/reference/review-guidelines.main.backup.md -> configuration-boundary.md
-docs/reference/review-guidelines.main.backup.md -> scalafix.md
-docs/reference/review-guidelines.main.backup.md -> testing-guide.md
 docs/reference/review-guidelines.md -> #8-fp-patterns-in-llm4s
 docs/reference/review-guidelines.md -> ../fp-patterns-reference.md
 docs/reference/review-guidelines.md -> configuration-boundary.md
