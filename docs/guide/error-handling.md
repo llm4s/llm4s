@@ -133,9 +133,8 @@ set. Other modules define errors of their own, below.
 **Same name, different type.** A failed tool call is not an `org.llm4s.error.ExecutionError`.
 `ToolRegistry.execute`, and the MCP tool registry, return a `ToolCallError` (`org.llm4s.toolapi`), whose
 case for a tool that threw is `ToolCallError.ExecutionError`. `ToolCallError` is not an `LLMError`, and the
-agent hands it back to the model as the tool's result instead of failing the run. Orchestration fails with
-`OrchestrationError.NodeExecutionError` or `PlanExecutionError`, and a graph's tool loop with
-`GraphError.ToolFailed`; both are described below.
+agent hands it back to the model as the tool's result instead of failing the run. A graph's tool loop fails
+with `GraphError.ToolFailed`, described below.
 
 **`ServiceError` and its status.** The marker says a `ServiceError` is recoverable, but a 404 is not
 going to fix itself. When it matters, look at `httpStatus`: `error.isRecoverableStatus` (from
@@ -173,7 +172,6 @@ cause, which of several failures it reports), so none carries a marker:
 | Module | Package | Errors |
 |---|---|---|
 | `llm4s-core` | `org.llm4s.llmconnect.model` | `EmbeddingError`: how `EmbeddingClient.embed` and the embedding providers (OpenAI, Ollama, Voyage, Cohere, Jina) report a failure other than cancellation, except that the Cohere provider reports a 429 as a `RateLimitError` |
-| `llm4s-agent` | `org.llm4s.agent.orchestration` | `OrchestrationError.PlanExecutionError` from `PlanRunner`; `NodeExecutionError` from `PlanRunner` and `TypedAgent`, which has its own `recoverable` flag (`Policies.withRetry` reads it) |
 | `llm4s-rag` | `org.llm4s.rag.evaluation`, `org.llm4s.reranker` | `EvaluationError` from RAGAS evaluation and the RAG benchmark tools; `RerankError` from the Cohere and LLM rerankers (`Reranker.rerank`) |
 | `llm4s-speech` | `org.llm4s.speech.stt`, `.tts` | `STTError.ProcessingFailed` from the speech-to-text clients (an empty transcription, no recognisable speech, an unparseable response; its `retryable` flag says `true`); `TTSError.SynthesisFailed` from the text-to-speech clients (an empty audio body) |
 
@@ -181,7 +179,6 @@ The rest of those families are marked:
 
 | Module | Recoverable | Non-recoverable |
 |---|---|---|
-| `llm4s-agent` (`org.llm4s.agent.orchestration`) | `OrchestrationError.AgentTimeoutError`, from `Policies.withTimeout` | `PlanValidationError` and `TypeMismatchError`, from `PlanRunner` |
 | `llm4s-speech` (`org.llm4s.speech.stt`, `.tts`, `.io`) | `STTError.EngineNotAvailable`, `TTSError.EngineNotAvailable` | `STTError.UnsupportedFormat`, `STTError.InvalidInput`, `WavFileGenerator.WavError`, `AudioIO.AudioIOError` |
 
 So are two whole families: `GraphError` in `llm4s-agent`

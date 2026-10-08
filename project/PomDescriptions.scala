@@ -19,7 +19,7 @@ object PomDescriptions {
   /** Artifact name (without the Scala binary suffix) to its description. */
   val byArtifact: Map[String, String] = Map(
     "llm4s-agent" ->
-      "Agent runtime for LLM4S: agents, guardrails, handoffs, orchestration, streaming and an assistant.",
+      "Agent runtime for LLM4S: agents, guardrails, handoffs, a typed graph runtime, streaming and an assistant.",
     "llm4s-agent-tools" ->
       "Built-in tools for LLM4S agents: core utilities, file system, HTTP, shell and web search.",
     "llm4s-anthropic" ->

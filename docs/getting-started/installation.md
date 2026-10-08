@@ -526,7 +526,7 @@ only if you name these types in your own signatures. It replaces three overlappi
 types that used to ship in `llm4s-core`, which is a source break — see the
 [migration note](../reference/migration.md#slice-3-llm4s-media).
 
-### For agents (`Agent`, guardrails, handoffs, orchestration)
+### For agents (`Agent`, guardrails, handoffs, graphs)
 
 {: .note }
 > Not yet published. `llm4s-agent` exists in the build as of

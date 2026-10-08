@@ -178,7 +178,7 @@ llm4s/
 | `NoConfigFactory`  | `ConfigFactory.load()` | `org.llm4s.config`                   | CRITICAL |
 | `NoSysEnv`         | `sys.env(...)`         | `config/`, `samples/`, `workspace/`  | CRITICAL |
 | `NoSystemGetenv`   | `System.getenv(...)`   | Same as above                        | CRITICAL |
-| `NoKeywordTry`     | `try { ... }`          | `core.safety`, `agent.orchestration` | HIGH     |
+| `NoKeywordTry`     | `try { ... }`          | `core.safety`                        | HIGH     |
 | `NoInfixOperators` | `list map f`           | Use `list.map(f)`                    | MEDIUM   |
 
 ---

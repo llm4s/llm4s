@@ -106,7 +106,7 @@ llm4s/
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
-│   ├── agent/                 # Agent runtime: Agent, guardrails, handoffs, orchestration, streaming; assistant (published)
+│   ├── agent/                 # Agent runtime: Agent, graph runtime, guardrails, handoffs, streaming; assistant (published)
 │   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
 │   ├── llm4s-effect/          # cats-effect IO / fs2 wrappers over LLMClient and Agent (published)
 │   ├── llm4s-zio/             # ZIO 2 / ZIO Streams wrappers over LLMClient and Agent (published)
