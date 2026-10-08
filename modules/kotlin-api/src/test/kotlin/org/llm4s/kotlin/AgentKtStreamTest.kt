@@ -38,6 +38,7 @@ import org.llm4s.javaapi.LlmException
 import org.llm4s.javaapi.LlmResult
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.AssistantMessage
+import org.llm4s.llmconnect.model.Citation
 import org.llm4s.llmconnect.model.Completion
 import org.llm4s.llmconnect.model.CompletionOptions
 import org.llm4s.llmconnect.model.Conversation
@@ -95,6 +96,7 @@ class AgentKtStreamTest {
                 "id", 0L, text, "m", AssistantMessage.apply(text),
                 scala.jdk.javaapi.CollectionConverters.asScala(listOf<ToolCall>()).toList(),
                 Option.empty(), Option.empty(),
+                scala.jdk.javaapi.CollectionConverters.asScala(listOf<Citation>()).toList(),
             ),
         )
 
@@ -141,6 +143,7 @@ class AgentKtStreamTest {
                             "id", 0L, "recovered", "m", AssistantMessage.apply("recovered"),
                             scala.jdk.javaapi.CollectionConverters.asScala(listOf<ToolCall>()).toList(),
                             Option.empty(), Option.empty(),
+                            scala.jdk.javaapi.CollectionConverters.asScala(listOf<Citation>()).toList(),
                         ),
                     )
                 }
