@@ -69,7 +69,7 @@ Two things describe `A`, and they have to agree:
 
 - **The schema**, an `ObjectSchema[A]` built with `Schema.\`object\``, `withRequiredField` and `withProperty`.
   It is what the provider is shown. The same builders define tool parameters; see
-  [Agents and tools](agents/index.md).
+  [Agents and tools](agents/).
 - **A uPickle reader**, an implicit `upickle.default.Reader[A]` (a `ReadWriter` from `macroRW` is the usual way).
   It is what turns the reply into `A`.
 
@@ -200,7 +200,7 @@ breaks one of those still comes back as `Right(A)`, which matters most where the
 the schema (section 8). Check such constraints on the result yourself.
 
 A failed provider call is a different error, returned unchanged (a `NetworkError`, `RateLimitError` and so on;
-see [Error Handling](error-handling.md)). Telling the two apart is a pattern match:
+see [Error Handling](error-handling)). Telling the two apart is a pattern match:
 
 ```scala
 import org.llm4s.error.ValidationError
@@ -267,6 +267,6 @@ use these providers.
 
 ## Related
 
-- [Error Handling](error-handling.md): every `LLMError`, and how to combine results.
-- [Providers](providers.md): configuring each provider.
+- [Error Handling](error-handling): every `LLMError`, and how to combine results.
+- [Providers](providers): configuring each provider.
 - `StructuredOutputExample` in `modules/samples`: the runnable version of section 1.

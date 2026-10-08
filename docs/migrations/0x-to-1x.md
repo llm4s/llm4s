@@ -201,7 +201,7 @@ no overload with the old arity.
 
 To set timeouts from code, use `withTimeouts(ProviderTimeouts(...))`; from config, the section's
 `timeouts { request = 3m, stream = 15m }` block (see
-[Timeouts](../getting-started/configuration.md#timeouts)).
+[Timeouts](../getting-started/configuration#timeouts)).
 
 ---
 
