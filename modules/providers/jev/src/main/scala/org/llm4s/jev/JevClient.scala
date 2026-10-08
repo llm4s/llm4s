@@ -85,7 +85,10 @@ final class JevClient private (
       if (response.statusCode >= 200 && response.statusCode < 300) {
         if (response.body.length > JevClient.MaxResponseChars)
           Left(
-            ProcessingError("jev-response", s"Jev's response is larger than ${JevClient.MaxResponseChars} characters")
+            ProcessingError(
+              "jev-response",
+              s"Jev's response is longer than ${JevClient.MaxResponseChars} UTF-16 code units"
+            )
           )
         else
           JevResponse
@@ -190,8 +193,9 @@ object JevClient {
   private[jev] val RequestIdHeader: String = "x-typesafe-request-id"
 
   /**
-   * The longest response body accepted. Answers are small (a few numbers per question), so this is generous; a body
-   * beyond it is refused before it is parsed. The shared HTTP client has already read the body by then.
+   * The longest response body accepted, in UTF-16 code units (`String.length` of the decoded body, not bytes or
+   * code points). Answers are small (a few numbers per question), so this is generous; a body beyond it is refused
+   * before it is parsed. The shared HTTP client has already read the body by then.
    */
   private[jev] val MaxResponseChars: Int = 16 * 1024 * 1024
 

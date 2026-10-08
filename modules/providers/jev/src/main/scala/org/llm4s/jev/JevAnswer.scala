@@ -31,7 +31,8 @@ final case class ScoreLevel(index: Int, description: ujson.Value, probability: D
 /**
  * The answer to a [[JevQuestion.Score]].
  *
- * @param score      the probability-weighted level, which can land between levels (`1.05` is just above level 1)
+ * @param score      the probability-weighted level, which can land between levels (`1.05` is just above level 1). It
+ *                   lies within the levels: a score the API sends a rounding error outside them is clamped in
  * @param levels     every level with its description and probability, in level order
  * @param confidence how certain the model is, from 0 to 1
  */

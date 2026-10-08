@@ -124,6 +124,23 @@ object JevResponse {
     } yield answer
   }
 
+  /**
+   * How far a Score's `score` may fall outside its levels and still be accepted: the score is a probability-weighted
+   * sum computed in floating point, so it can miss the end of the range by a rounding error (`2.0000000000000004`
+   * for probabilities summing to one ulp over 1 on three levels, or `-1e-300`). A score within this tolerance is
+   * clamped into the range, so [[ScoreAnswer.score]] always lies within the levels; one further out is refused.
+   */
+  private[jev] val ScoreTolerance: Double = 1e-9
+
+  /**
+   * The deepest 2xx body read. The envelope is four levels (the root, `answers`, an answer and its `legend`), and a
+   * Score level's description, the only value the client keeps unexamined, adds its own nesting: 64 leaves a
+   * structured description 60 levels, far more than any the API documents (a string, or a flat object or array).
+   * The limit is far below [[org.llm4s.util.BoundedJson.MaxDepth]] because the description is kept in the
+   * [[JevResponse]]: at 512 levels, its `toString`, `hashCode` and `==` overflow a thread stack of 512 KiB or less.
+   */
+  private[jev] val MaxResponseDepth: Int = 64
+
   /** A level key is a level number written canonically (`0`, `1`, `12`), so no two keys can name the same level. */
   private val LevelKey = "0|[1-9][0-9]*".r
 
@@ -149,12 +166,12 @@ object JevResponse {
         else fail(s"$at.probabilities", "the levels do not match the legend")
       // The score is the probability-weighted level, so it lies between the lowest level and the highest.
       top = described.map(_._1).maxOption.getOrElse(0)
-      _ <-
-        if (score >= 0.0 && score <= top) Right(())
+      clamped <-
+        if (score >= -ScoreTolerance && score <= top + ScoreTolerance) Right(score.max(0.0).min(top.toDouble))
         else fail(s"$at.score", s"$score is outside the levels 0 to $top")
       confidence <- field(o, at, "confidence").flatMap(unit(_, s"$at.confidence"))
     } yield ScoreAnswer(
-      score,
+      clamped,
       described.sortBy(_._1).map { case (index, (key, description)) => ScoreLevel(index, description, probs(key)) },
       confidence
     )
@@ -164,20 +181,20 @@ object JevResponse {
    *
    * Strict about what the documentation bounds (probabilities and confidence from 0 to 1, a count of tokens, a
    * choice among its probabilities, score levels matching the legend, each level numbered once, and a score within
-   * the levels) and silent about the rest. The body is never quoted in an error, only the path to the part that does
-   * not match. A body nested more than [[org.llm4s.util.BoundedJson.MaxDepth]] levels deep is refused unparsed: a
-   * value that deep, kept in a level's description, would overflow the stack of whatever later printed, hashed or
-   * compared the response.
+   * the levels, give or take [[ScoreTolerance]]) and silent about the rest. The body is never quoted in an error, only
+   * the path to the part that does not match. A body nested more than [[MaxResponseDepth]] levels deep is refused
+   * unparsed: a value that deep, kept in a level's description, could overflow the stack of whatever later printed,
+   * hashed or compared the response.
    */
   private[jev] def parse(body: String, requestId: Option[String]): Result[JevResponse] =
     BoundedJson
-      .read(body)
+      .read(body, MaxResponseDepth)
       .left
       .map {
         case BoundedJson.TooDeep() =>
           ProcessingError(
             "jev-response",
-            s"Jev's response is nested more than ${BoundedJson.MaxDepth} levels deep, which its API never is"
+            s"Jev's response is nested more than $MaxResponseDepth levels deep, which its API never is"
           )
         case _ => ProcessingError("jev-response", "Jev's response is not valid JSON")
       }

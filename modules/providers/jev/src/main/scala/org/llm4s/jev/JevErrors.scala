@@ -33,6 +33,15 @@ private[jev] object JevErrors {
 
   private val MaxDelayMillis = Long.MaxValue / 1000000L
 
+  /**
+   * The deepest error body read as JSON. An error body is a flat object or one wrapped in another (`message`,
+   * `error.message`, a `detail` list of validation errors), three levels at most, so 32 leaves ample headroom.
+   * The limit is far below [[org.llm4s.util.BoundedJson.MaxDepth]] because the body is not only parsed but walked
+   * and re-encoded here, then parsed again by the mapper: at 512 levels those recursions overflow a 256 KiB thread
+   * stack, and a `StackOverflowError` is not caught by `Try` or any `Result`.
+   */
+  private[jev] val MaxErrorDepth: Int = 32
+
   /** The delay `retry-after-ms` asks for, if the header is a non-negative whole number of milliseconds. */
   private def retryAfterMs(headers: Map[String, Seq[String]]): Option[FiniteDuration] =
     HttpHeaders
@@ -64,15 +73,15 @@ private[jev] object JevErrors {
    * `body` with the API key removed as [[mask]] does. A JSON body is decoded first and every string in it (keys
    * and values) masked, then re-encoded, so the key is caught however the server escaped it (`\/`, `\"`,
    * `\uXXXX`): the mapper decodes those escapes, so masking only the raw text would let the decoded key through.
-   * Any other body, and a JSON body nested more than [[org.llm4s.util.BoundedJson.MaxDepth]] levels deep, is
-   * masked as text: walking or re-encoding a value that deep would overflow the stack, and a `StackOverflowError`
-   * is not caught by `Try` or any `Result`.
+   * Any other body, and a JSON body nested more than [[MaxErrorDepth]] levels deep, is masked as text: walking or
+   * re-encoding a deeply nested value can overflow the stack, and a `StackOverflowError` is not caught by `Try` or
+   * any `Result`.
    */
   private[jev] def redactBody(body: String, apiKey: String): String =
     if (apiKey.isEmpty) body
     else
       BoundedJson
-        .read(body)
+        .read(body, MaxErrorDepth)
         .toOption
         .map(json => ujson.write(redactJson(json, apiKey)))
         .getOrElse(mask(body, apiKey))
@@ -86,12 +95,13 @@ private[jev] object JevErrors {
   }
 
   /**
-   * The body handed to the mapper. A body nested too deeply to redact as JSON is not passed on at all: its
+   * The body handed to the mapper. A body nested more than [[MaxErrorDepth]] levels deep, too deep to redact as
+   * JSON, is not passed on at all: its
    * text-masked form could still carry a JSON-escaped key, which the mapper would decode from a top-level
    * `message`. The mapper then reports its default message, with the status.
    */
   private def mapperBody(body: String, apiKey: String): String =
-    if (BoundedJson.exceedsDepth(body)) "" else redactBody(body, apiKey)
+    if (BoundedJson.exceedsDepth(body, MaxErrorDepth)) "" else redactBody(body, apiKey)
 
   /** The error for `response`, which has a non-2xx status. */
   def fromResponse(response: HttpResponse, apiKey: String): LLMError = {

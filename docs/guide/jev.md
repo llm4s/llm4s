@@ -170,8 +170,11 @@ TypeSafe does not document the JSON shape of an error body, so the text in the e
 removed before anything is read from it, and an error about a 200 that quotes the key masks it as `***`. The forms
 recognised are the key as written, JSON-escaped (`\/` and `\uXXXX` included) and URL-encoded as `java.net.URLEncoder`
 writes it (`tsk/live+0` as `tsk%2Flive%2B0`). Any other transformation of the key, or a part or prefix of it, is not
-recognised and would not be masked. An error body nested more than 512 levels deep is not read at all: the error
-carries only the status.
+recognised and would not be masked. An error body nested more than 32 levels deep (real ones are at most three) is not
+read at all: the error carries only the status. A 200 nested more than 64 levels deep is refused as a `ProcessingError`:
+the envelope takes four levels, so a structured Score level description may nest up to 60. These limits are well below
+the 512 levels LLM4S allows elsewhere because the client walks an error body and keeps a description in the response, and
+at 512 levels those recursions can overflow a small thread stack.
 
 ## Retries, and what is not de-duplicated
 
@@ -203,4 +206,5 @@ in any case, and a map naming one header twice (`X-Trace` and `x-trace`) is refu
   whether `Retry-After` is seconds or a date (both are read), and which of `Retry-After` and `retry-after-ms` wins when both
   are sent (this client prefers `retry-after-ms`).
 - Each HTTP attempt has a 30 s timeout by default, an LLM4S choice (the API documents none). The shared HTTP client reads a
-  response in full, so the cap on a response (16,777,216 characters, as the body decodes to text) refuses an oversized body before it is parsed, not before it is read.
+  response in full, so the cap on a response (16,777,216 UTF-16 code units, counted once the body is decoded to text)
+  refuses an oversized body before it is parsed, not before it is read.

@@ -5,6 +5,8 @@ import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.util.concurrent.atomic.AtomicReference
+
 class JevResponseSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   import FakeJev.Examples
@@ -95,6 +97,19 @@ class JevResponseSpec extends AnyFlatSpec with Matchers with EitherValues {
     malformed(withAnswer(score(2.01))) should include("outside the levels 0 to 2")
   }
 
+  it should "accept a score a rounding error outside its levels, clamped into them" in {
+    // 3 levels whose probabilities sum to one ulp over 1: the weighted level lands just past the top
+    parse(withAnswer(score(2.0000000000000004))).score("q").value.score shouldBe 2.0
+    parse(withAnswer(score(-1e-300))).score("q").value.score shouldBe 0.0
+    parse(withAnswer(score(2.0 + JevResponse.ScoreTolerance / 2))).score("q").value.score shouldBe 2.0
+  }
+
+  it should "still refuse a score clearly outside its levels" in {
+    malformed(withAnswer(score(2.0 + 1e-6))) should include("outside the levels 0 to 2")
+    malformed(withAnswer(score(-1e-6))) should include("outside the levels 0 to 2")
+    malformed(withAnswer(score(2.0 + JevResponse.ScoreTolerance * 2))) should include("outside the levels 0 to 2")
+  }
+
   it should "refuse a level key that is not a canonical level number, so no two keys name one level" in {
     Seq("00", "+0", "01", "-1", " 1", "1.0", "99999999999").foreach { key =>
       withClue(s"'$key' ") {
@@ -108,17 +123,52 @@ class JevResponseSpec extends AnyFlatSpec with Matchers with EitherValues {
     val deep  = "[" * depth + "]" * depth
     val error = malformed(withAnswer(score(0.5, legend = s""""0":"a","1":$deep""")))
 
-    error should include(s"nested more than ${org.llm4s.util.BoundedJson.MaxDepth} levels deep")
+    error should include(s"nested more than ${JevResponse.MaxResponseDepth} levels deep")
   }
 
-  it should "parse a structured description at the depth limit, and print and hash the response" in {
-    // four levels of envelope (the root, answers, the answer, its legend) and the description: exactly the limit
-    val depth    = org.llm4s.util.BoundedJson.MaxDepth - 4
-    val nested   = "[" * depth + "]" * depth
-    val response = parse(withAnswer(score(0.5, legend = s""""0":"a","1":$nested""")))
+  /** Runs `body` on a thread with a 256 KiB stack, so a recursion over a deeply nested value overflows it. */
+  private def onSmallStack[A](body: => A): A = {
+    val outcome = new AtomicReference[Either[Throwable, A]](null)
+    val thread  = new Thread(null, () => outcome.set(scala.util.Try(body).toEither), "small-stack", 256L * 1024)
+    thread.start()
+    thread.join(60000)
+    thread.isAlive shouldBe false
+    // A StackOverflowError is fatal, so Try rethrows it: the thread dies and records nothing.
+    Option(outcome.get).getOrElse(fail("the call died on the small stack, most likely of a StackOverflowError")) match {
+      case Right(a) => a
+      case Left(e)  => throw e
+    }
+  }
 
-    response.toString should not be empty
-    response.hashCode shouldBe response.hashCode
+  it should "parse a structured description at the depth limit, and print and hash the response on a small stack" in {
+    // four levels of envelope (the root, answers, the answer, its legend) and the description: exactly the limit
+    val depth = JevResponse.MaxResponseDepth - 4
+    val body  = withAnswer(score(0.5, legend = s""""0":"a","1":${"[" * depth + "]" * depth}"""))
+
+    val (printed, hashed, equal) = onSmallStack {
+      val response = parse(body)
+      (response.toString, response.hashCode, response == parse(body))
+    }
+
+    printed should not be empty
+    hashed shouldBe parse(body).hashCode
+    equal shouldBe true
+  }
+
+  it should "refuse a description one level past the limit" in {
+    val depth = JevResponse.MaxResponseDepth - 3
+    val error = malformed(withAnswer(score(0.5, legend = s""""0":"a","1":${"[" * depth + "]" * depth}""")))
+
+    error should include(s"nested more than ${JevResponse.MaxResponseDepth} levels deep")
+  }
+
+  it should "refuse, on a small stack, a description nested 511 levels deep (under the shared 512-level limit)" in {
+    val depth  = 511 - 4
+    val body   = withAnswer(score(0.5, legend = s""""0":"a","1":${"[" * depth + "]" * depth}"""))
+    val result = onSmallStack(JevResponse.parse(body, None))
+
+    result.left.value shouldBe a[ProcessingError]
+    result.left.value.message should include("nested more than")
   }
 
   it should "preserve structured score descriptions" in {

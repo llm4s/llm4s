@@ -921,7 +921,7 @@ lazy val jev = (project in file("modules/providers/jev"))
   .settings(
     name := "llm4s-jev",
     commonSettings,
-    // Measured 98.09% statement coverage (`sbt coverage jev/test jev/coverageReport`). Floor is the
+    // Measured 98.72% statement coverage (`sbt coverage jev/test jev/coverageReport`). Floor is the
     // measured value rounded down to the nearest 5. Never lower it.
     coverageFloor(95),
     Test / fork                     := true,

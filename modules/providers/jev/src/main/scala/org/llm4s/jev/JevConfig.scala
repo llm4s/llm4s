@@ -19,7 +19,9 @@ import scala.util.Try
  *
  * A config is checked by [[JevConfig#validate]], which [[JevClient]] runs when it is built.
  *
- * @param apiKey  the API key; never printed by `toString` and never put into an error or a log line
+ * @param apiKey  the API key; never printed by `toString` or logged, and masked in an error wherever the server
+ *                echoed it verbatim, JSON-escaped or URL-encoded (a partial or otherwise transformed echo of the key
+ *                is not recognised)
  * @param baseUrl the API root, without a path. It must be `https`: the key is sent as a bearer token, so a plain
  *                `http` URL is accepted only for a loopback host (`localhost`, `127.0.0.0/8`, `::1`), which is
  *                how a test points the client at a local server.

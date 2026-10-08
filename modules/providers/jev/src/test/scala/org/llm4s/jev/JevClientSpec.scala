@@ -6,6 +6,7 @@ import ch.qos.logback.core.read.ListAppender
 import org.llm4s.error.*
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.testkit.LocalProviderTestServer
+import org.llm4s.util.BoundedJson
 import org.scalatest.{ BeforeAndAfterEach, EitherValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -265,7 +266,7 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
       val error = new Rig(url).client.evaluate(request).left.value
 
       error shouldBe a[ProcessingError]
-      error.message should include("larger than")
+      error.message should include("longer than")
     }
   }
 
@@ -567,6 +568,66 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
       error.asInstanceOf[ServiceError].httpStatus shouldBe 500
       (error.message should not).include(key)
       (error.formatted should not).include(key)
+    }
+  }
+
+  it should "return a Left, on a small stack, for a non-2xx body nested 511 levels deep" in {
+    // under the shared 512-level limit, but deep enough to overflow a 256 KiB stack if it were walked and re-encoded
+    val body = s"""{"message":"bad key $secret","x":${"[" * 510}"$secret"${"]" * 510}}"""
+    BoundedJson.exceedsDepth(body) shouldBe false
+    serve(Reply(500, body)) { (url, _) =>
+      val result = onSmallStack(new Rig(url).client.evaluate(request))
+
+      val error = result.left.value
+      error shouldBe a[ServiceError]
+      error.asInstanceOf[ServiceError].httpStatus shouldBe 500
+      (error.message should not).include(secret)
+      (error.formatted should not).include(secret)
+    }
+  }
+
+  it should "redact, on a small stack, a non-2xx body nested 511 levels deep without reading it as JSON" in {
+    val body     = s"""{"message":"bad key $secret","x":${"[" * 510}"$secret"${"]" * 510}}"""
+    val redacted = onSmallStack(JevErrors.redactBody(body, secret))
+
+    (redacted should not).include(secret)
+  }
+
+  it should "still read a non-2xx body at the error depth limit, with the key masked" in {
+    // the object, then nested arrays: exactly the limit
+    val depth = JevErrors.MaxErrorDepth - 1
+    val body  = s"""{"message":"bad key $secret","x":${"[" * depth}"$secret"${"]" * depth}}"""
+    BoundedJson.exceedsDepth(body, JevErrors.MaxErrorDepth) shouldBe false
+
+    val redacted = onSmallStack(JevErrors.redactBody(body, secret))
+    ujson.read(redacted)("message").str shouldBe "bad key ***"
+    (redacted should not).include(secret)
+
+    serve(Reply(500, body)) { (url, _) =>
+      val error = onSmallStack(new Rig(url).client.evaluate(request)).left.value
+      error.message should include("bad key ***")
+    }
+  }
+
+  it should "pass no body to the mapper one level past the error depth limit" in {
+    val depth = JevErrors.MaxErrorDepth
+    val body  = s"""{"message":"bad key","x":${"[" * depth}${"]" * depth}}"""
+    serve(Reply(500, body)) { (url, _) =>
+      val error = new Rig(url).client.evaluate(request).left.value
+      error shouldBe a[ServiceError]
+      (error.message should not).include("bad key")
+    }
+  }
+
+  it should "return a Left, on a small stack, for a 200 whose legend description is nested 511 levels deep" in {
+    val nested = "[" * 507 + "]" * 507
+    serve(ok(Examples.Score.replace("\"Very angry\"", nested))) { (url, _) =>
+      val result = onSmallStack(
+        new Rig(url).client.evaluate(JevRequest("s", Map("frustration" -> JevQuestion.score("How?", "a", "b", "c"))))
+      )
+
+      result.left.value shouldBe a[ProcessingError]
+      result.left.value.message should include("nested more than")
     }
   }
 
