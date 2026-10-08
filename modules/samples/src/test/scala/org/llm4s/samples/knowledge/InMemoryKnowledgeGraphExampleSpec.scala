@@ -1,6 +1,10 @@
 package org.llm4s.samples.knowledge
 
 import org.llm4s.knowledgegraph.Edge
+import org.llm4s.types.TryOps
+import java.nio.file.Paths
+import scala.collection.mutable.ArrayBuffer
+import scala.util.Try
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -54,5 +58,36 @@ class InMemoryKnowledgeGraphExampleSpec extends AnyFlatSpec with Matchers with E
     lines.exists(_.contains("most connected node is acme")) shouldBe true
     lines.exists(_.contains("Average degree: 2.33")) shouldBe true
     lines.exists(_.contains("read back: 6 nodes and 7 edges")) shouldBe true
+  }
+
+  it should "return cleanup errors and attempt both paths" in {
+    val paths     = Seq(Paths.get("graph.json"), Paths.get("directory"))
+    val attempted = ArrayBuffer.empty[java.nio.file.Path]
+    val result = InMemoryKnowledgeGraphExample.cleanup(
+      Right(42),
+      paths,
+      path => {
+        attempted += path
+        throw new java.io.IOException("cannot delete")
+      }
+    )
+    result.isLeft shouldBe true
+    attempted.toSeq shouldBe paths
+  }
+
+  it should "preserve an existing error even when cleanup also fails" in {
+    val original  = Try[Int](throw new java.io.IOException("save failed")).toResult
+    val paths     = Seq(Paths.get("graph.json"), Paths.get("directory"))
+    val attempted = ArrayBuffer.empty[java.nio.file.Path]
+    val result = InMemoryKnowledgeGraphExample.cleanup(
+      original,
+      paths,
+      path => {
+        attempted += path
+        throw new java.io.IOException("cleanup failed")
+      }
+    )
+    result shouldBe original
+    attempted.toSeq shouldBe paths
   }
 }

@@ -14,7 +14,7 @@ import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.types.{ Result, TryOps }
 import org.slf4j.LoggerFactory
 
-import java.nio.file.Files
+import java.nio.file.{ Files, Path }
 import scala.util.Try
 
 /**
@@ -134,9 +134,14 @@ object InMemoryKnowledgeGraphExample {
         _     <- new JsonGraphStore(file).save(graph)
         stats <- new JsonGraphStore(file).stats()
       } yield stats
-      List(file, directory).foreach(path => Files.deleteIfExists(path))
-      outcome
+      cleanup(outcome, List(file, directory), path => { Files.deleteIfExists(path); () })
     }
+
+  /** Attempt every deletion; preserve an earlier failure, otherwise return the first cleanup error. */
+  private[samples] def cleanup[A](outcome: Result[A], paths: Seq[Path], delete: Path => Unit): Result[A] = {
+    val deletions = paths.map(path => Try(delete(path)).toResult)
+    outcome.flatMap(value => deletions.collectFirst { case Left(error) => Left(error) }.getOrElse(Right(value)))
+  }
 
   private def person(id: String, name: String, role: String): Node =
     Node(id, "Person", Map("name" -> ujson.Str(name), "role" -> ujson.Str(role)))
