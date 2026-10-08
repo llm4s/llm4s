@@ -558,7 +558,15 @@ import org.llm4s.metrics.{ PrometheusEndpoint, PrometheusMetrics }
 val registry = new PrometheusRegistry()
 val metrics  = new PrometheusMetrics(registry)
 
-PrometheusEndpoint.start(9090, registry) // Result[PrometheusEndpoint]; the series are served at /metrics
+val endpoint: Option[PrometheusEndpoint] =
+  PrometheusEndpoint.start(9090, registry) match { // Result[PrometheusEndpoint]; serves /metrics
+    case Right(ep) => Some(ep)
+    case Left(error) =>
+      // the port could not be bound: report this as a startup failure rather than
+      // running with metrics configured but nothing to scrape
+      None
+  }
+// retain the handle: endpoint.foreach(_.stop()) at application shutdown (safe to call twice)
 ```
 
 ### What a call records
@@ -566,7 +574,7 @@ PrometheusEndpoint.start(9090, registry) // Result[PrometheusEndpoint]; the seri
 - **Every call**, successful or not, records one request with its latency and its outcome. A failure is classified into an error kind (`rate_limit`, `timeout`, `authentication`, `network`, `validation`, `service_error`, `execution_error`, `cancelled` or `unknown`) from the error the client returned.
 - **Tokens and cost are recorded only on success**, and only when the completion carries them: tokens when the provider reported usage, cost when the client attached an estimated cost. A call with neither adds nothing to those series.
 - **A streamed call is recorded once, when the stream has finished**, with the total latency, not as it goes.
-- **Embedding, reranking and RAG calls are not recorded.** Image generation is, through `InstrumentedImageGenerationClient`, which wraps an image client.
+- **Embedding calls are not recorded, and no RAG- or reranking-specific series exists.** The chat calls that RAG and the LLM reranker make through an instrumented client are recorded as ordinary requests - `RAG`'s answer generation and `LLMReranker`'s scoring both go through the client's `complete` - so that traffic does show up in the request series under the provider and model. The Cohere reranker calls Cohere's API directly, not through an LLM client, and is not recorded. Image generation is recorded through `InstrumentedImageGenerationClient`, which wraps an image client.
 
 ### The series
 
@@ -649,7 +657,7 @@ val both = MetricsCollector.compose(metrics, myCollector)
 
 ### Limits
 
-- **Retries, circuit-breaker transitions and `ReliableClient`'s error events do not reach Prometheus.** `ReliableClient` takes its own `collector` argument and reports those three kinds of event to it, but `PrometheusMetrics` does not implement them, so no series for them exists. Only errors that end a call are counted, through the request outcome.
+- **Retries, circuit-breaker transitions and `ReliableClient`'s error events have no series of their own.** `ReliableClient` takes its own `collector` argument and reports those three kinds of event to it, but `PrometheusMetrics` does not implement them. The request series still see every attempt: `ReliableClient` calls the wrapped client once per attempt, and a metrics-enabled client records each of those calls, so a call that fails twice and then succeeds adds three requests - two `error_*`, one `success` - and three latency observations. Request and error rates are per attempt, not per logical call.
 - **The latency buckets are fixed** (0.1 to 120 seconds); there is no way to configure them.
 - **Counters live in the process.** A restart starts them from zero, which is what `rate()` and `increase()` expect.
 - **The endpoint has no authentication and no TLS**: llm4s starts it with only a port and a registry. Keep it off the public network and let your network policy decide who can scrape it.

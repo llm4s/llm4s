@@ -341,6 +341,29 @@ class ObservabilityMetricsGuideSpec extends AnyFlatSpec with Matchers {
     counting.images shouldBe 0
   }
 
+  "the build-the-pieces-yourself snippet" should "retain the endpoint and surface a bind failure as a Left" in {
+    // Mirrors the guide's "Or build the pieces yourself" block (port 0 here, for a free port):
+    // the Result is handled, the handle retained, and the documented shutdown call made.
+    val registry = new PrometheusRegistry()
+    val metrics  = new PrometheusMetrics(registry)
+    val endpoint: Option[PrometheusEndpoint] =
+      PrometheusEndpoint.start(0, registry) match {
+        case Right(ep) => Some(ep)
+        case Left(_)   => None
+      }
+    endpoint should not be empty // on success the snippet keeps the handle
+    // the series it serves are the collector's: record one request and scrape it back
+    metrics.observeRequest("openai", "gpt-4o", Outcome.Success, 1.second)
+    endpoint.foreach(ep => samples(scrape(ep)).exists(_.startsWith("llm4s_requests_total")) shouldBe true)
+    // and the Left branch is real: the port the endpoint holds cannot be bound a second time
+    val taken = endpoint.map(_.port).getOrElse(fail("no endpoint"))
+    PrometheusEndpoint.start(taken, new PrometheusRegistry()) match {
+      case Left(_)       => () // what the snippet's comment documents: a bind failure is a Left
+      case Right(second) => second.stop(); fail("binding an in-use port should be a Left")
+    }
+    endpoint.foreach(_.stop()) // the documented shutdown call
+  }
+
   "stopping the endpoint" should "be safe to do twice, and free the port" in {
     val registry = new PrometheusRegistry()
     PrometheusEndpoint.start(0, registry) match {
