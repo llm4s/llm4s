@@ -1924,6 +1924,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama`: a deep or malformed model listing is a `Left`, not an
+  exception** ([#1660](https://github.com/llm4s/llm4s/issues/1660)). `AnthropicModelLister`,
+  `GeminiModelLister` and `OllamaModelLister` read the listing with the unbounded `HttpResponse.toJson` and
+  then throwing accessors - `json("data")` / `json("models")` and `.arr` inside a `Try`, `.obj` on each entry
+  and on the page outside one. `ujson.Value.InvalidData`'s message renders the value recursively, so a
+  listing 10,000 levels deep - a top-level array, or one under `data` / `models` or as an entry of it -
+  overflowed a 1 MB thread stack with a `StackOverflowError`, which `Try` does not catch; and a two-level
+  `{"data":[[1]]}` or `{"models":["x"]}` threw `InvalidData` out of `listModels`. Each lister now reads the
+  body through the depth-bounded `BoundedJson`, as `ProviderModelListers` does since #1658, and uses `Option`
+  accessors only: a body that is not JSON, nested more than 512 levels deep, not an object, or without a
+  `data` / `models` array is a `Left`, and an entry that is not an object is skipped, as an entry without an
+  `id` / `name` always was. Ordinary listings, pagination and the `has_more` / `last_id` checks are
+  unchanged. No public signature changes.
 - **Redaction keeps a `$` or `\` in a query parameter, and writes a placeholder as it is**
   ([#1655](https://github.com/llm4s/llm4s/issues/1655)): `Redaction.redact` and `redactForLogging`, and so the
   exchange-log sink, returned a query parameter to `Regex.replaceAllIn` without `Regex.quoteReplacement`, so
