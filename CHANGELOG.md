@@ -1895,6 +1895,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-java-api`: `InterruptedException` is never thrown, and the Javadoc says so**
+  ([#1591](https://github.com/llm4s/llm4s/issues/1591)): `catch (InterruptedException e)` around
+  `JLlmClient.complete` or `JAgent.run` does not compile ("never thrown in body of corresponding try statement"),
+  because the facade reports an interrupt as a `CancelledError` result with the thread's interrupt flag left set
+  rather than throwing. That is now the contract for every client: an `InterruptedException` that a custom
+  `LLMClient` let escape used to propagate out of `complete` as an undeclared checked exception that Java could
+  not catch by name, and is now the same `CancelledError`, with the flag restored. The signatures are unchanged -
+  declaring `throws InterruptedException` would have forced a catch of an exception that is never thrown on every
+  caller. The Javadoc of `complete` and `run`, the Java guide and the threading guide now say what to do instead:
+  test the result for a `CancelledError` (`ThreadingGuideSnippets.completeOrNull`); a snippet test pins it.
 - Calculator decimal output uses a stable locale, including on JVMs configured with comma decimal separators.
 - **`llm4s-agent-tools`: `CalculatorTool` rejects results that are not finite**
   ([#1516](https://github.com/llm4s/llm4s/issues/1516)): an overflow (`10^400`, `1e200 * 1e200`) or an undefined

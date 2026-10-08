@@ -3,7 +3,7 @@ package org.llm4s.javaapi
 import org.llm4s.agent.{ Agent, AgentEventBuffer, AgentResult, AgentRun }
 import org.llm4s.agent.graph.{ InterruptId, RunConfig, StreamEvent, ThreadId }
 import org.llm4s.core.safety.Safety
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.Result
 
 import scala.jdk.CollectionConverters.*
@@ -15,6 +15,12 @@ import scala.jdk.CollectionConverters.*
  * [[LlmResult]]`[`[[AgentResult]]`]` so Java callers do not need to deal with
  * Scala's `Either` or `Result` types directly. A conversation is a thread of the
  * agent's in-memory runtime, kept until [[forget]] removes it.
+ *
+ * `run` and `continueConversation` block the calling thread and never throw. Interrupting that
+ * thread returns a failed result whose error is a [[org.llm4s.error.CancelledError CancelledError]],
+ * with the interrupt flag still set, while the run itself carries on; `InterruptedException` is
+ * never thrown, so the methods declare no checked exception and `javac` rejects a
+ * `catch (InterruptedException e)` around them - test the result for a `CancelledError` instead.
  *
  * `stream`, `streamResume` and `streamRecover` run a turn on a thread you name and hand its events
  * to an [[AgentStreamListener]] as they happen, returning an [[AgentStream]] at once - to await the
@@ -31,21 +37,32 @@ import scala.jdk.CollectionConverters.*
  */
 final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
 
-  /** Runs `query` as the first turn of a new conversation. A `null` query yields a failed result. */
+  /**
+   * Runs `query` as the first turn of a new conversation. A `null` query yields a failed result.
+   *
+   * Blocks the calling thread until the turn ends. If that thread is interrupted while it waits, the
+   * result is a failure whose error is a [[org.llm4s.error.CancelledError CancelledError]] and the
+   * thread's interrupt flag is left set; the run itself is not stopped. `InterruptedException` is
+   * never thrown, and the method declares none.
+   */
   def run(query: String): LlmResult[AgentResult] =
     if (query == null) LlmResult.failure(ValidationError.required("query"))
-    else call(_.run(query))
+    else call("JAgent.run")(_.run(query))
 
-  /** Runs `query` as the next turn of `previous`'s conversation. A `null` argument yields a failed result. */
+  /**
+   * Runs `query` as the next turn of `previous`'s conversation. A `null` argument yields a failed result.
+   * Blocks and reports an interrupt as [[run]] does: a `CancelledError` result, the interrupt flag
+   * left set, never an `InterruptedException`.
+   */
   def continueConversation(previous: AgentResult, query: String): LlmResult[AgentResult] =
     if (previous == null) LlmResult.failure(ValidationError.required("previous"))
     else if (query == null) LlmResult.failure(ValidationError.required("query"))
-    else call(_.continueConversation(previous, query))
+    else call("JAgent.continueConversation")(_.continueConversation(previous, query))
 
   /** Removes `previous`'s conversation from the agent's runtime. A `null` argument yields a failed result. */
   def forget(previous: AgentResult): LlmResult[Void] =
     if (previous == null) LlmResult.failure(ValidationError.required("previous"))
-    else call(_.forget(previous.threadId).map(_ => null))
+    else call("JAgent.forget")(_.forget(previous.threadId).map(_ => null))
 
   /**
    * Runs `query` as one turn on `threadId` - a new conversation, or the next turn of one - handing
@@ -103,11 +120,19 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
   ): LlmResult[AgentStream] =
     if (listener == null) LlmResult.failure(ValidationError.required("listener"))
     else
-      call { agent =>
+      call("JAgent.stream") { agent =>
         val buffer = AgentEventBuffer(AgentStream.BufferSize)
         start(agent, () => buffer.end(), buffer.listener).map(AgentStream.start(_, buffer, listener))
       }
 
-  private def call[A](body: Agent => Result[A]): LlmResult[A] =
-    LlmResult.from(underlying.flatMap(agent => Safety.safely(body(agent)).flatMap(identity)))
+  /**
+   * `body` as a result that never throws. An `InterruptedException` escaping it - the runtime answers
+   * an interrupt with `Left(CancelledError)` itself - becomes a `CancelledError` named `operation`,
+   * with the interrupt flag restored, so no caller meets a checked exception the method does not
+   * declare (#1591).
+   */
+  private def call[A](operation: String)(body: Agent => Result[A]): LlmResult[A] =
+    LlmResult.from(
+      CancelledError.attempt(operation)(underlying.flatMap(agent => Safety.safely(body(agent)).flatMap(identity)))
+    )
 }

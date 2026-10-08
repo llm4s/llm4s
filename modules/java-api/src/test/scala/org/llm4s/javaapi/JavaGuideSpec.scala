@@ -1,6 +1,6 @@
 package org.llm4s.javaapi
 
-import org.llm4s.error.{ AuthenticationError, LLMError, NetworkError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, CancelledError, LLMError, NetworkError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OllamaConfig, OpenAIConfig }
 import org.llm4s.llmconnect.model._
@@ -293,7 +293,7 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
       closes.get() shouldBe 1
     }
 
-    "let an interruption propagate instead of turning it into a failed result" in {
+    "turn an interruption into a CancelledError with the interrupt flag restored, as the guide says (#1591)" in {
       val interrupted = new LLMClient {
         override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
           throw new InterruptedException("cancelled")
@@ -301,8 +301,22 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
         override def getContextWindow(): Int                                                         = 4096
         override def getReserveCompletion(): Int                                                     = 512
       }
+      // on a thread of its own, so the restored flag does not leak into other tests
+      val result  = new java.util.concurrent.atomic.AtomicReference[LlmResult[String]]()
+      val flagSet = new java.util.concurrent.atomic.AtomicReference[java.lang.Boolean](java.lang.Boolean.FALSE)
+      val thread = new Thread(() => {
+        result.set(client(interrupted).complete("hi"))
+        flagSet.set(java.lang.Boolean.valueOf(Thread.currentThread().isInterrupted))
+      })
+      thread.setDaemon(true)
+      thread.start()
+      thread.join(20000L)
 
-      intercept[InterruptedException](client(interrupted).complete("hi")).getMessage shouldBe "cancelled"
+      thread.isAlive shouldBe false
+      result.get().isFailure shouldBe true
+      result.get().getError().error shouldBe a[CancelledError]
+      result.get().getError().getCause.getMessage shouldBe "cancelled"
+      flagSet.get().booleanValue() shouldBe true
     }
   }
 

@@ -93,19 +93,33 @@ if (result.isFailure() && result.getError().error() instanceof CancelledError) {
 `Future.cancel(true)` on a task that wraps a call interrupts the thread running it, which cancels the provider
 call in the same way. The Spring Boot starter's `completeAsync` is built on this.
 
-### `InterruptedException` is thrown, but Java cannot catch it by name
+### `InterruptedException` is never thrown, so Java cannot catch it
 
-`JLlmClient` does not capture `InterruptedException`: if a custom `LLMClient` lets one escape, it propagates out of
-`complete`, as its Scaladoc says. The method declares no checked exceptions, so the Java compiler rejects
-`catch (InterruptedException e)` around a call:
+Neither `JLlmClient.complete` nor `JAgent.run` throws `InterruptedException`. An interrupt comes back as the
+`CancelledError` result above, with the flag set, and an `InterruptedException` that a custom `LLMClient` lets escape
+is turned into the same `CancelledError`, with the flag restored. The methods therefore declare no checked exception,
+and the Java compiler rejects `catch (InterruptedException e)` around either call:
 
 ```
 error: exception InterruptedException is never thrown in body of corresponding try statement
 ```
 
 (This message was produced with JDK 21; the test checks the declared exception list, which is what makes the
-compiler behave this way.) To handle it, catch `Exception`, restore the flag with `Thread.currentThread().interrupt()`
-and return, as `ThreadingGuideSnippets.completeOrNull` does. The built-in providers return a `CancelledError` instead of throwing, as above.
+compiler behave this way.) Test the result instead of catching an exception the call never throws:
+
+```java
+LlmResult<String> result = client.complete("hi");
+if (result.isFailure() && result.getError().error() instanceof CancelledError) {
+    // interrupted while blocked: Thread.currentThread().isInterrupted() is still true, so a
+    // loop or an executor further up the stack sees the interruption too
+    return null;
+}
+return result.getOrNull();
+```
+
+The flag is still set when the result comes back, so there is nothing to restore; clear it with `Thread.interrupted()`
+only if you mean to carry on. The test runs this snippet against a call interrupted on a real provider's request
+path and against a custom client that throws `InterruptedException`, and checks the flag in both cases.
 
 ### An agent run is not cancelled by interrupting its caller
 

@@ -29,17 +29,22 @@ final class ThreadingGuideSnippets {
   }
 
   /**
-   * "InterruptedException is thrown, but Java cannot catch it by name": catch Exception, restore the
-   * interrupt flag and return.
+   * "InterruptedException is never thrown, so Java cannot catch it": a catch (InterruptedException e)
+   * around complete does not compile (#1591); test the result for a CancelledError instead. The
+   * interrupt flag is still set at that point, so there is nothing to restore.
    */
   static String completeOrNull(JLlmClient client) {
-    try {
-      return client.complete("hi").get();
-    } catch (Exception e) {
-      if (e instanceof InterruptedException) {
-        Thread.currentThread().interrupt();
-      }
+    LlmResult<String> result = client.complete("hi");
+    if (result.isFailure() && result.getError().error() instanceof CancelledError) {
+      // interrupted while blocked: Thread.currentThread().isInterrupted() is still true, so a
+      // loop or an executor further up the stack sees the interruption too
       return null;
     }
+    return result.getOrNull();
+  }
+
+  /** The same test, written as a predicate over both signals: the result and the thread's flag. */
+  static boolean wasInterrupted(LlmResult<String> result) {
+    return wasCancelled(result) && Thread.currentThread().isInterrupted();
   }
 }

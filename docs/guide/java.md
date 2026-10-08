@@ -273,7 +273,10 @@ something first, implement `RecoverableError`: `RateLimitError`, `TimeoutError`,
 `NonRecoverableError`: retrying the same request will not help. The [error handling guide](error-handling) has the full
 list and the recovery tools, written for Scala.
 
-If the call is interrupted, `InterruptedException` is not turned into a failed result: it propagates out of `complete`. The method does not declare it, so Java will not let you catch it by name; catch `Exception` if you need to.
+If the thread blocked in `complete` is interrupted, the call returns a failed result whose error is a `CancelledError`,
+with the thread's interrupt flag still set. `InterruptedException` is never thrown, so the method does not declare it
+and Java will not let you write `catch (InterruptedException e)` around the call; test the result for a
+`CancelledError` instead. The [threading and cancellation guide](java-threading-and-cancellation) has the details.
 
 ## What is not here yet
 
