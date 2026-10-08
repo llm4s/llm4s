@@ -291,20 +291,25 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
     val go      = new CountDownLatch(1)
     val done    = new CountDownLatch(threads)
 
-    (0 until threads).foreach { t =>
-      pool.execute { () =>
-        ready.countDown()
-        go.await()
-        (0 until perThr).foreach { i =>
-          recordInto(sink, provider = s"provider-$t", requestBody = s"body-$t-$i", requestId = Some(s"req-$t-$i"))
+    val finished =
+      try {
+        (0 until threads).foreach { t =>
+          pool.execute { () =>
+            ready.countDown()
+            go.await()
+            (0 until perThr).foreach { i =>
+              recordInto(sink, provider = s"provider-$t", requestBody = s"body-$t-$i", requestId = Some(s"req-$t-$i"))
+            }
+            done.countDown()
+          }
         }
-        done.countDown()
+        ready.await(10, TimeUnit.SECONDS) shouldBe true
+        go.countDown()
+        done.await(30, TimeUnit.SECONDS)
+      } finally {
+        go.countDown()
+        pool.shutdownNow()
       }
-    }
-    ready.await(10, TimeUnit.SECONDS) shouldBe true
-    go.countDown()
-    val finished = done.await(30, TimeUnit.SECONDS)
-    pool.shutdown()
 
     finished shouldBe true
     val all = sink.exchanges
