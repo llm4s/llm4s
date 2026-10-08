@@ -284,7 +284,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over the purpose. `RAG` and `RAGPipeline` embed the question they answer as a query and what they index as
   documents, the memory stores embed the text they search with as a query (`EmbeddingService.embedQuery`,
   which delegates to `embed` by default, so existing implementations are unaffected), and `CachedEmbeddingClient`
-  keeps a query and a document with the same text in separate cache entries (document keys are unchanged). **Behaviour changes:** Voyage now sends `input_type` (`document` by
+  keeps a query and a document with the same text in separate cache entries. **Behaviour changes:** Voyage now sends `input_type` (`document` by
   default; it sent none before), so re-index for the best retrieval quality - older document vectors still
   work; and a Jina or Cohere provider built without an explicit task now follows each request's purpose
   instead of always sending the document type. `EmbeddingRequest` becomes a growth-prone type (private
@@ -525,6 +525,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   testing. Its snippets after the first section are compiled and run by `ErrorHandlingGuideSpec`. The Basic Usage
   guide listed error types that do not exist (`ProviderConnectionError`, `InvalidApiKeyError`, ...) and
   called `LLMError` sealed; it now shows the real ones and links to the guide.
+- **Caching guide** ([#1297](https://github.com/llm4s/llm4s/issues/1297)): `docs/guide/caching.md` explains the embedding
+  cache (`CachedEmbeddingClient`, `InMemoryEmbeddingCache`, custom keys and backends) and the semantic completion cache
+  (`CachingLLMClient`, `CacheConfig`): what a hit needs, what the key and the prompt contain, TTL, eviction, the cases
+  that bypass the cache, what it reports through tracing, and its limits. Its snippets are compiled and run by
+  `CachingGuideSpec`. The caching changes it brought with it are listed under Changed.
 - **Structured output guide** ([#1310](https://github.com/llm4s/llm4s/issues/1310)):
   `docs/guide/structured-output.md` explains `LLMClient.completeStructured[A]`: a minimal example, how the
   reply is recovered from a fence or prose, that the schema is derived with `strict = true` and so lists every
@@ -776,6 +781,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Embedding cache keys are unambiguous; the completion cache refuses a NaN threshold and serves an entry exactly
+  `ttl` old** ([#1297](https://github.com/llm4s/llm4s/issues/1297)). **Breaking:** `CacheKeyGenerator.sha256(parts*)`
+  length-prefixes every part instead of joining text and model with `:` (under which the text `a:b` with model `c`
+  and the text `a` with model `b:c` shared a key), and `CachedEmbeddingClient`'s key function takes
+  `(text, modelName, purpose: InputPurpose)` instead of a `#query`-suffixed model name (under which a query for model
+  `m` and a document for a model named `m#query` shared a key); the default is `CacheKeyGenerator.embeddingKey`.
+  `sha256` also hashes every UTF-16 code unit of the parts rather than their UTF-8 bytes, under which an isolated
+  surrogate (`"\uD800"`, `"\uD801"`) was replaced by `?` and distinct strings shared a key.
+  **Migration:** a custom key function gains the `InputPurpose` parameter and should include it in the key; vectors
+  stored under the old keys in a persistent `EmbeddingCache` are no longer found and are re-embedded on first use.
+  `CacheConfig.create` now refuses a `NaN` similarity threshold, which it accepted before (every similarity check
+  then failed, so nothing was ever served from the cache), and `CachingLLMClient` serves an entry
+  exactly `ttl` old instead of counting it as expired, matching `InMemoryEmbeddingCache`.
 - **`AssistantMessage` is a growth-prone data type; `Completion.thinking` comes from the message**
   ([#1381](https://github.com/llm4s/llm4s/issues/1381)): `AssistantMessage` is `final case class AssistantMessage
   private (contentOpt, toolCalls, thinking)` with a companion `apply` (named arguments, defaults as before, plus the
@@ -2129,6 +2147,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly and returns a `Left` (`Regex matching aborted: pattern recursed too deeply for the input (stack
   overflow)`), which `RegexValidator` reports as a `Regex security error` `ValidationError`. Other fatal errors
   still propagate. The workspace runner's `WorkspaceRegexSafetyManager` has the same fix.
+- **`llm4s-agent`: a judge guardrail refuses a reply that is not one number from 0 to 1, instead of clamping it into a pass**
+  ([#1405](https://github.com/llm4s/llm4s/issues/1405)): `LLMGuardrail` (and so `LLMSafetyGuardrail`,
+  `LLMFactualityGuardrail`, `LLMQualityGuardrail` and `LLMToneGuardrail`) reduced the judge's reply to its digits
+  and dots and clamped the number into 0.0 to 1.0, so `85`, `85%`, `8/10`, `1e-3` and `0,9` all read as 1.0 and
+  passed any threshold up to 1.0, `0.7 out of 1` read as 0.71, and `-0.5` read as 0.5. A judge that answered on a
+  0 to 100 scale approved everything. A reply is now a score only when the whole reply is one plain decimal
+  number from 0 to 1 (`0.9`, `.5`, `1`) of at most 64 characters, with whitespace, markdown emphasis, quotes,
+  brackets or bare code-fence backticks before or after it (not necessarily balanced) and optionally a `Score:`
+  label before it (`Score: 0.9`, `**Score:** 0.9`, but not `**Score**: 0.9`). Anything else is a
+  `ValidationError` on field `llm_response`, which fails the guardrail like an unreadable reply always did: a
+  sign glued or apart (`-0.5`, `- 1`, `negative 1`), a percentage or other scale as a sign or in words (`85%`,
+  `1 %`, `1 percent`, `1 per mille`, `1 per ten thousand`, `100 bps`), a fraction, an exponent, a decimal comma,
+  a trailing full stop, another label or a sentence (`Rating: 0.9`, `The score is 0.9`), a code fence with a
+  language tag, a number longer than 64 characters (refused before it is parsed), or more than one number. The score is compared at the precision the judge wrote it and the threshold as the decimal it is
+  written as, so `1.0000000000000001` is out of range and `0.79999999999999999` does not reach a threshold of
+  0.8. `LLMGuardrail.evaluateWithLLM` returns `Result[BigDecimal]` instead of `Result[Double]`. **Migration:** a
+  judge that passed because it answered on another scale, or in a sentence, now fails with `Could not parse LLM
+  judge score`: make it answer with only a number between 0 and 1, as the fixed system message already asks. A
+  subclass that calls or overrides `evaluateWithLLM` takes a `BigDecimal` (`.toDouble` where a `Double` is
+  needed). The score-reading rules are documented on `LLMGuardrail`.
 - **`llm4s-gemini`: a signed function call with an empty `id` is replayed with its thought signature**
   ([#1615](https://github.com/llm4s/llm4s/issues/1615)): a `functionCall` returned with `"id": ""` got a generated
   tool-call id at parse, but the signed part was kept verbatim, so on the next turn its stored `""` was compared with
