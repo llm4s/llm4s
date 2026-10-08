@@ -977,7 +977,8 @@ Decisions:
   Java-enum `InterruptKind`, the tool name and its arguments as JSON text, and either the reason or the
   question as JSON text, in an `Optional`. `JAgent.resume` and `recover` block as `run` does.
   `AgentKt.resume` and `recover` are `suspend` functions over the `streamResume` and `streamRecover`
-  flows, so cancelling the caller cancels the turn. `PendingInterrupt` is the view that the Java-friendly
+  flows, so cancelling the caller cancels the turn; since #1663 `AgentKt.run` and `continueConversation`
+  run over `stream` the same way. `PendingInterrupt` is the view that the Java-friendly
   `JAgentResult` of [#1393](https://github.com/llm4s/llm4s/issues/1393) reuses: a `SUSPENDED`
   `JAgentStatus` carries the same list, built by the same `PendingInterrupt.of`.
 - **The JVM facades return Java values (#1393).** `JAgent` and `AgentKt` turns, `AgentStream.await()` and

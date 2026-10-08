@@ -1992,6 +1992,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   original message, redacted (`Authentication failed for unknown: HTTP 401 Unauthorized`), where it said
   only `Authentication failed`; neither it nor `RateLimitError` has a field for a `Throwable`, so a
   classified exception's stack trace is still not kept. No public signature changes.
+- **Kotlin: cancelling `AgentKt.run` or `continueConversation` cancels the turn, as `resume` and `recover` do**
+  ([#1663](https://github.com/llm4s/llm4s/issues/1663), Kotlin API). `run` and `continueConversation` wrapped the
+  blocking `JAgent` call in `runInterruptible`, so cancelling the caller - a cancelled scope, `withTimeout` -
+  interrupted only the wait: the call threw `CancellationException`, but the turn kept running in the background,
+  calling the model, and its conversation thread stayed busy, so a `recover` or a new turn on it failed with
+  `ThreadBusy` until the turn finished. Both now run the turn as `stream` does (`run` on a new thread with a random
+  id, as `JAgent.run` does; `continueConversation` on `previous.threadId()`), its events discarded: cancelling the
+  caller cancels the turn and returns once it has ended, leaving the thread for `recover`. Every `AgentKt` suspend
+  function that runs a turn now behaves the same way. Results and failures are otherwise unchanged - the same
+  `JAgentResult`, and `LLMException` with the same message and cause. No public signature changes; Java's
+  blocking `JAgent` methods are unchanged.
 - **`llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama`: a deep or malformed model listing is a `Left`, not an
   exception** ([#1660](https://github.com/llm4s/llm4s/issues/1660)). `AnthropicModelLister`,
   `GeminiModelLister` and `OllamaModelLister` read the listing with the unbounded `HttpResponse.toJson` and

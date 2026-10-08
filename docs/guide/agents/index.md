@@ -211,11 +211,11 @@ and cancel the stream (see [Streaming Events](streaming#java-and-kotlin)).
 The Kotlin API reuses these types: every `AgentKt` turn returns a `JAgentResult`, and `when` over
 `status().kind()` covers it. `AgentKt.pending(result)` is the same `List<PendingInterrupt>`.
 `agent.resume(threadId, answers)` and `agent.recover(threadId)` are `suspend` functions that return
-the `JAgentResult` or throw `LLMException`. They run the turn as `streamResume` and `streamRecover` do,
-so cancelling the caller cancels the turn. The thread is then left for `recover`. `run` and
-`continueConversation` behave differently: cancelling their caller interrupts only the wait. The call
-throws `CancellationException`, but the turn keeps running in the background, and its conversation
-thread stays busy (a new turn on it is refused) until the turn finishes. To stop such a turn, run it with `stream` and cancel the collection.
+the `JAgentResult` or throw `LLMException`. Every `AgentKt` suspend function that runs a turn - `run`,
+`continueConversation`, `resume` and `recover` - runs it as the matching flow does (`stream`,
+`streamResume`, `streamRecover`), so cancelling the caller - a cancelled scope, `withTimeout` -
+cancels the turn. The call throws `CancellationException` once the turn has ended, and the
+conversation thread is no longer busy: it is left for `recover`, which finishes the cancelled turn.
 
 ```kotlin
 var turn = agent.run("Deploy the release")

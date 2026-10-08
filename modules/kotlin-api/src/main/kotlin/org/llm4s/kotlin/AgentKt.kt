@@ -19,6 +19,7 @@ import org.llm4s.javaapi.JAgentResult
 import org.llm4s.javaapi.LlmException
 import org.llm4s.javaapi.LlmResult
 import org.llm4s.javaapi.PendingInterrupt
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 
 /** An item of an agent turn's [kotlinx.coroutines.flow.Flow]: each of the turn's events, then its result. */
@@ -33,22 +34,22 @@ sealed interface AgentStreamItem {
 /**
  * Kotlin coroutine wrapper around [JAgent].
  *
- * Dispatches the blocking agent run on [Dispatchers.IO] and converts Scala [org.llm4s.javaapi.LlmResult]
- * errors into [LLMException]. A conversation is a thread of the agent's in-memory runtime, kept until
- * [forget] removes it.
+ * Runs each turn off the caller's thread and converts Scala [org.llm4s.javaapi.LlmResult] errors into
+ * [LLMException]. A conversation is a thread of the agent's in-memory runtime, kept until [forget]
+ * removes it.
  *
- * Cancelling the caller of [run] or [continueConversation] interrupts only the wait: the call throws
- * `CancellationException`, but the turn keeps running in the background, and its conversation thread
- * stays busy (a new turn on it is refused) until the turn finishes. To stop a turn, run it with
- * [stream] and cancel the collection.
+ * Every suspend function that runs a turn - [run], [continueConversation], [resume] and [recover] -
+ * cancels the turn when its caller is cancelled (a cancelled scope, a `withTimeout`): it throws
+ * `CancellationException` once the turn has ended, and the conversation thread is no longer busy, left
+ * for [recover] to finish the cancelled turn. Each runs as the matching flow does - [stream],
+ * [streamResume] or [streamRecover] - its events discarded.
  *
  * Every turn returns a [JAgentResult], read with Java types only: `answer()` is an `Optional<String>`,
  * `messages()` a `List`, and `status().kind()` an [org.llm4s.javaapi.AgentStatusKind] to `when` over.
  *
  * A turn whose tools need approval, or ask a question, ends `SUSPENDED`: `result.status().pending()` - or
  * [pending] - lists what it waits for, and [resume] answers some or all of it and continues. A turn that failed or was cancelled
- * continues with [recover]. Unlike [run], cancelling the caller of [resume] or [recover] cancels the
- * turn itself, leaving the thread for [recover].
+ * continues with [recover].
  *
  * [stream], [streamResume] and [streamRecover] run a turn on a thread you name as a cold [Flow] of its
  * events ([AgentStreamItem.Event]), then its result ([AgentStreamItem.Done]).
@@ -65,21 +66,27 @@ sealed interface AgentStreamItem {
 class AgentKt internal constructor(private val underlying: JAgent) {
 
     /**
-     * Suspends until the agent completes the given [query], the first turn of a new conversation, and
-     * returns the resulting [JAgentResult]. Throws [LLMException] on failure.
+     * Suspends until the agent completes the given [query], the first turn of a new conversation on a
+     * thread with a random id, and returns the resulting [JAgentResult]. Throws [LLMException] on failure.
+     *
+     * Cancelling the caller cancels the turn and returns once it has ended. The turn runs as [stream]
+     * does, its events discarded.
      */
-    suspend fun run(query: String): JAgentResult = runInterruptible(Dispatchers.IO) {
-        underlying.run(query).unwrap("Agent run failed")
-    }
+    suspend fun run(query: String): JAgentResult = runTurn(UUID.randomUUID().toString(), query)
 
     /**
-     * Suspends until the agent completes [query] as the next turn of [previous]'s conversation. Throws
-     * [LLMException] on failure.
+     * Suspends until the agent completes [query] as the next turn of [previous]'s conversation - only its
+     * `threadId()` is read. Throws [LLMException] on failure.
+     *
+     * Cancelling the caller cancels the turn and returns once it has ended, leaving the thread for
+     * [recover]. The turn runs as [stream] does, its events discarded.
      */
     suspend fun continueConversation(previous: JAgentResult, query: String): JAgentResult =
-        runInterruptible(Dispatchers.IO) {
-            underlying.continueConversation(previous, query).unwrap("Agent run failed")
-        }
+        runTurn(previous.threadId(), query)
+
+    /** [query] as one turn on [threadId], as [stream] runs it; a failure's fallback message is `run`'s. */
+    private suspend fun runTurn(threadId: String, query: String): JAgentResult =
+        resultOf(streaming("Agent run failed") { underlying.stream(threadId, query, it) })
 
     /** Removes [previous]'s conversation from the agent's runtime. Throws [LLMException] on failure. */
     suspend fun forget(previous: JAgentResult): Unit = runInterruptible(Dispatchers.IO) {
@@ -122,27 +129,28 @@ class AgentKt internal constructor(private val underlying: JAgent) {
      * on [Dispatchers.IO]; the events are handed over from the stream's own thread.
      */
     fun stream(threadId: String, query: String): Flow<AgentStreamItem> =
-        streaming { underlying.stream(threadId, query, it) }
+        streaming("Agent stream failed") { underlying.stream(threadId, query, it) }
 
     /**
      * Answers some of [threadId]'s pending approvals and questions and continues, as a [Flow]; see
      * [stream]. Build each answer with [Answer.approve], [Answer.reject], [Answer.edit] or [Answer.reply].
      */
     fun streamResume(threadId: String, answers: List<Answer>): Flow<AgentStreamItem> =
-        streaming { underlying.streamResume(threadId, answers, it) }
+        streaming("Agent stream failed") { underlying.streamResume(threadId, answers, it) }
 
     /** Continues [threadId]'s failed or cancelled turn, as a [Flow]; see [stream]. */
     fun streamRecover(threadId: String): Flow<AgentStreamItem> =
-        streaming { underlying.streamRecover(threadId, it) }
+        streaming("Agent stream failed") { underlying.streamRecover(threadId, it) }
 
     /**
      * Starts the turn with a listener that hands each event to a channel - blocking the stream's own
      * thread, never the turn, when the channel is full - and closes it with the turn's outcome, then emits
      * what the channel receives. The start is not cancellable, so a turn is never started and forgotten.
      * However the collection ends - `Done`, an error, or cancelled - the turn is then cancelled and awaited
-     * (a no-op once it has ended), off the caller's dispatcher.
+     * (a no-op once it has ended), off the caller's dispatcher. [failure] is an error's message when it has
+     * none of its own.
      */
-    private fun streaming(start: (AgentStreamListener) -> LlmResult<AgentStream>): Flow<AgentStreamItem> = flow {
+    private fun streaming(failure: String, start: (AgentStreamListener) -> LlmResult<AgentStream>): Flow<AgentStreamItem> = flow {
         val items = Channel<AgentStreamItem>(Channel.BUFFERED)
         val listener = object : AgentStreamListener {
             override fun onEvent(event: StreamEvent) {
@@ -157,7 +165,7 @@ class AgentKt internal constructor(private val underlying: JAgent) {
             // a CancelledError here is a turn cancelled by someone other than this collector: an error to the
             // collector, as fs2 and ZIO raise it, not a CancellationException its coroutine would swallow
             override fun onError(error: LlmException) {
-                items.close(error.toKotlin("Agent stream failed", cancellation = false))
+                items.close(error.toKotlin(failure, cancellation = false))
             }
         }
         // set inside the non-cancellable start: withContext can still throw on return when the collector was
@@ -166,7 +174,7 @@ class AgentKt internal constructor(private val underlying: JAgent) {
         try {
             withContext(NonCancellable + Dispatchers.IO) {
                 start(listener).also { if (it.isSuccess) started.set(it.get()) }
-            }.unwrap("Agent stream failed", cancellation = false)
+            }.unwrap(failure, cancellation = false)
             emitAll(items)
         } finally {
             // releases a listener blocked on a full channel nobody reads any more

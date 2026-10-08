@@ -135,6 +135,10 @@ To stop a turn from Java, start it with `JAgent.stream`, `streamResume` or `stre
 thread for `streamRecover` or `recover`. This is checked by `JAgentStreamSpec` and `JAgentPendingSpec`, not by
 `ThreadingModelSpec`.
 
+The Kotlin API differs here: every `AgentKt` suspend function that runs a turn - `run`, `continueConversation`,
+`resume` and `recover` - runs it on these streams, so cancelling the calling coroutine cancels the turn (see
+[Suspended turns from Java and Kotlin](agents/#suspended-turns-from-java-and-kotlin)).
+
 ## Timeouts
 
 A call that gets no answer ends with a `TimeoutError`. The limit is set by each provider client: two minutes for a

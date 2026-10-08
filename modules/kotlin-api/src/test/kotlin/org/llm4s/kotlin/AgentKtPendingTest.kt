@@ -4,8 +4,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import org.llm4s.javaapi.LlmException
+import org.llm4s.javaapi.Llm4s as JLlm4s
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.test.assertIs
 import org.llm4s.agent.Agent
 import org.llm4s.javaapi.JAgentResult
+import org.llm4s.agent.graph.GraphError
 import org.llm4s.agent.graph.StateUpdate
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
@@ -49,8 +58,9 @@ import kotlin.test.assertTrue
 import java.util.Optional
 
 /**
- * [AgentKt.pending], [AgentKt.resume] and [AgentKt.recover] over the real agent runtime, behind the
- * real Java facade: only the model is scripted. `deploy` needs approval; `confirm` asks a question.
+ * [AgentKt.pending], [AgentKt.resume] and [AgentKt.recover] - and cancelling [AgentKt.run] and
+ * [AgentKt.continueConversation] - over the real agent runtime, behind the real Java facade: only the model
+ * is scripted. `deploy` needs approval; `confirm` asks a question; `whoami` records its turn's thread.
  */
 class AgentKtPendingTest {
 
@@ -86,6 +96,13 @@ class AgentKtPendingTest {
             success("confirmed $answer")
     }
 
+    /** Records the thread its turn runs on. */
+    private val threadOfTurn = AtomicReference<String>()
+    private val whoami: AgentTool<ujson.Value> = AgentTool.apply<ujson.Value>(spec("whoami"), AgentTool.`apply$default$2`<ujson.Value>()) { _: ujson.Value, context: ToolContext ->
+        threadOfTurn.set(context.run().position().threadId().toString())
+        success("noted")
+    }
+
     private fun <T> seq(vararg items: T): scala.collection.immutable.Seq<T> = CollectionConverters.asScala(items.toList()).toSeq()
 
     private fun call(id: String, name: String, text: String): ToolCall = ToolCall.apply(id, name, parse("""{"text":"$text"}"""))
@@ -115,17 +132,27 @@ class AgentKtPendingTest {
         override fun getReserveCompletion(): Int = 256
     }
 
-    private fun agentOf(vararg replies: () -> Either<LLMError, Completion>): AgentKt {
+    private fun agentOf(vararg replies: () -> Either<LLMError, Completion>): AgentKt = Llm4s.wrapAgent(scalaAgentOf(*replies))
+
+    private fun scalaAgentOf(vararg replies: () -> Either<LLMError, Completion>): Agent {
         val approval: AgentMiddleware = ApprovalMiddleware(
             { request -> if (request.spec().name() == "deploy") Option.apply("deploying") else Option.empty() },
             "approval",
         )
-        val tools = ToolSet.of(seq<AgentTool<*>>(deploy, confirm)).toOption().get() as ToolSet
-        val agent = Agent.builder("test", Scripted(replies.toList(), completion("done")))
+        val tools = ToolSet.of(seq<AgentTool<*>>(deploy, confirm, whoami)).toOption().get() as ToolSet
+        return Agent.builder("test", Scripted(replies.toList(), completion("done")))
             .withTools(tools)
             .withMiddleware(seq(approval))
             .build().toOption().get() as Agent
-        return Llm4s.wrapAgent(agent)
+    }
+
+    /** A model call that parks until the cancelled turn interrupts it, then reports the cancellation. */
+    private fun parking(parked: CountDownLatch, unparked: CountDownLatch): () -> Either<LLMError, Completion> = {
+        parked.countDown()
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(120)
+        while (!Thread.currentThread().isInterrupted && System.nanoTime() < deadline) LockSupport.parkNanos(10_000_000L)
+        if (Thread.currentThread().isInterrupted) unparked.countDown()
+        Left(org.llm4s.error.CancelledError.apply("test", Option.empty()))
     }
 
     @Test
@@ -269,6 +296,92 @@ class AgentKtPendingTest {
         assertTrue(resuming.isCancelled)
         // the turn has ended (cancelled): the thread is free, and recover finishes it
         assertEquals(Optional.of("recovered"), agent.recover(first.threadId()).answer())
+    }
+
+    // ---- cancelling run or continueConversation cancels the turn ---------------------------------
+
+    @Test
+    fun `cancelling a run cancels the turn, freeing its thread for recover and the next turn`() = runBlocking {
+        val parked = CountDownLatch(1)
+        val unparked = CountDownLatch(1)
+        val agent = agentOf(
+            { completion("", listOf(call("c1", "whoami", "x"))) },
+            parking(parked, unparked),
+            { completion("recovered") },
+        )
+        val running = async(Dispatchers.Default) { agent.run("go") }
+        assertTrue(withContext(Dispatchers.IO) { parked.await(seconds, TimeUnit.SECONDS) })
+        withTimeout(seconds * 1000) { running.cancelAndJoin() }
+        assertTrue(running.isCancelled)
+        assertFailsWith<CancellationException> { running.await() }
+        assertTrue(withContext(Dispatchers.IO) { unparked.await(seconds, TimeUnit.SECONDS) }, "the model call was interrupted")
+        // the turn has ended (cancelled): the thread is not busy, recover finishes it, and the conversation goes on
+        val recovered = agent.recover(threadOfTurn.get())
+        assertEquals(Optional.of("recovered"), recovered.answer())
+        assertEquals(Optional.of("done"), agent.continueConversation(recovered, "again").answer())
+    }
+
+    @Test
+    fun `a timeout around continueConversation cancels the turn, freeing its thread`() = runBlocking {
+        val parked = CountDownLatch(1)
+        val unparked = CountDownLatch(1)
+        val agent = agentOf({ completion("first") }, parking(parked, unparked), { completion("recovered") })
+        val first = agent.run("hi")
+        // the model parks until interrupted, and the timeout is generous enough for it to have parked by then
+        val outcome = runCatching { withTimeout(5_000) { agent.continueConversation(first, "more") } }
+        assertIs<TimeoutCancellationException>(outcome.exceptionOrNull())
+        assertEquals(0L, parked.count, "the timeout landed while the model call was parked")
+        assertTrue(withContext(Dispatchers.IO) { unparked.await(seconds, TimeUnit.SECONDS) }, "the model call was interrupted")
+        val recovered = agent.recover(first.threadId())
+        assertEquals(Optional.of("recovered"), recovered.answer())
+        assertEquals(Optional.of("done"), agent.continueConversation(recovered, "again").answer())
+    }
+
+    @Test
+    fun `run and continueConversation return what the Java facade's blocking calls return`() = runBlocking {
+        fun script(): Array<() -> Either<LLMError, Completion>> =
+            arrayOf({ completion("", listOf(call("c1", "whoami", "x"))) }, { completion("one") }, { completion("two") })
+        val java = JLlm4s.wrapAgent(scalaAgentOf(*script()))
+        val kotlin = Llm4s.wrapAgent(scalaAgentOf(*script()))
+        fun shape(r: JAgentResult): List<Any> =
+            listOf(r.status().kind(), r.answer(), r.messages().map { it.role() to it.content() }, r.usage().requestCount())
+
+        val javaFirst = java.run("go").get()
+        val kotlinFirst = kotlin.run("go")
+        assertEquals(shape(javaFirst), shape(kotlinFirst))
+        assertEquals(shape(java.continueConversation(javaFirst, "more").get()), shape(kotlin.continueConversation(kotlinFirst, "more")))
+    }
+
+    @Test
+    fun `a failed run or continueConversation throws the Java facade's error, as LLMException`() = runBlocking<Unit> {
+        val down = NetworkError.apply("down", Option.empty(), "http://x")
+        fun script(): Array<() -> Either<LLMError, Completion>> = arrayOf({ completion("first") }, { Left(down) })
+        val java = JLlm4s.wrapAgent(scalaAgentOf(*script()))
+        val kotlin = Llm4s.wrapAgent(scalaAgentOf(*script()))
+        val javaFirst = java.run("go").get()
+        val kotlinFirst = kotlin.run("go")
+
+        val expected = java.continueConversation(javaFirst, "more").getError()
+        val thrown = assertFailsWith<LLMException> { kotlin.continueConversation(kotlinFirst, "more") }
+        assertEquals(expected.message, thrown.message)
+        assertEquals(expected.error().javaClass, assertIs<LlmException>(thrown.cause).error().javaClass)
+
+        // a refused start (the thread is not completed: its failed turn waits for recover) is the facade's refusal too
+        val refused = java.continueConversation(javaFirst, "again").getError()
+        val thrownRefusal = assertFailsWith<LLMException> { kotlin.continueConversation(kotlinFirst, "again") }
+        // the same message, but for the two threads' (and checkpoints') random ids
+        val ids = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+        assertEquals(refused.message!!.replace(ids, "<id>"), thrownRefusal.message!!.replace(ids, "<id>"))
+        assertEquals(refused.error().javaClass, assertIs<LlmException>(thrownRefusal.cause).error().javaClass)
+    }
+
+    @Test
+    fun `a turn cancelled by its own run, the caller not cancelled, throws LLMException as the facade's error`() = runBlocking<Unit> {
+        val selfCancelled: () -> Either<LLMError, Completion> = { Left(org.llm4s.error.CancelledError.apply("model", Option.empty())) }
+        val expected = JLlm4s.wrapAgent(scalaAgentOf(selfCancelled)).run("go").getError()
+        assertIs<GraphError.Cancelled>(expected.error())
+        val thrown = assertFailsWith<LLMException> { agentOf(selfCancelled).run("go") }
+        assertIs<GraphError.Cancelled>(assertIs<LlmException>(thrown.cause).error())
     }
 
     @Test

@@ -4,10 +4,13 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
+import org.llm4s.javaapi.AgentStream
+import org.llm4s.javaapi.AgentStreamListener
 import org.llm4s.javaapi.JAgentResult
 import org.llm4s.javaapi.JAgent
 import org.llm4s.javaapi.LlmException
 import org.llm4s.javaapi.LlmResult
+import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -17,37 +20,53 @@ class AgentKtTest {
     private val mockJAgent = mockk<JAgent>()
     private val agent = AgentKt(mockJAgent)
 
+    /** The facade's stream start, as [JAgent.stream] answers it: [drive] runs the listener from a thread of its own. */
+    private fun started(drive: (AgentStreamListener) -> Unit): (AgentStreamListener) -> LlmResult<AgentStream> = { listener ->
+        thread { drive(listener) }
+        LlmResult.success(mockk<AgentStream>(relaxed = true))
+    }
+
     @Test
-    fun `run returns JAgentResult on success`() = runTest {
+    fun `run returns JAgentResult on success, each run on a new thread`() = runTest {
         val state = mockk<JAgentResult>()
-        val result = mockk<LlmResult<JAgentResult>>()
-        every { result.isSuccess } returns true
-        every { result.get() } returns state
-        every { mockJAgent.run("query") } returns result
+        val threads = mutableListOf<String>()
+        every { mockJAgent.stream(any(), "query", any()) } answers {
+            threads.add(firstArg())
+            started { it.onComplete(state) }(thirdArg())
+        }
 
         assertEquals(state, agent.run("query"))
+        assertEquals(state, agent.run("query"))
+        assertEquals(2, threads.toSet().size)
     }
 
     @Test
     fun `run throws LLMException on failure`() = runTest {
-        val result = mockk<LlmResult<JAgentResult>>()
+        val result = mockk<LlmResult<AgentStream>>()
         val err = mockk<LlmException>(relaxed = true)
         every { result.isSuccess } returns false
         every { result.getError() } returns err
         every { err.message } returns "agent failed"
-        every { mockJAgent.run("query") } returns result
+        every { mockJAgent.stream(any(), "query", any()) } returns result
 
-        assertFailsWith<LLMException> { agent.run("query") }
+        assertEquals("agent failed", assertFailsWith<LLMException> { agent.run("query") }.message)
+    }
+
+    @Test
+    fun `a failure without a message of its own reads as a failed run`() = runTest {
+        val err = mockk<LlmException>(relaxed = true)
+        every { err.message } returns null
+        every { mockJAgent.stream(any(), "query", any()) } answers { started { it.onError(err) }(thirdArg()) }
+
+        assertEquals("Agent run failed", assertFailsWith<LLMException> { agent.run("query") }.message)
     }
 
     @Test
     fun `continueConversation returns the next turn's JAgentResult on success`() = runTest {
         val previous = mockk<JAgentResult>()
         val next = mockk<JAgentResult>()
-        val result = mockk<LlmResult<JAgentResult>>()
-        every { result.isSuccess } returns true
-        every { result.get() } returns next
-        every { mockJAgent.continueConversation(previous, "more") } returns result
+        every { previous.threadId() } returns "t1"
+        every { mockJAgent.stream("t1", "more", any()) } answers { started { it.onComplete(next) }(thirdArg()) }
 
         assertEquals(next, agent.continueConversation(previous, "more"))
     }
@@ -55,14 +74,12 @@ class AgentKtTest {
     @Test
     fun `continueConversation throws LLMException on failure`() = runTest {
         val previous = mockk<JAgentResult>()
-        val result = mockk<LlmResult<JAgentResult>>()
         val err = mockk<LlmException>(relaxed = true)
-        every { result.isSuccess } returns false
-        every { result.getError() } returns err
+        every { previous.threadId() } returns "t1"
         every { err.message } returns "agent failed"
-        every { mockJAgent.continueConversation(previous, "more") } returns result
+        every { mockJAgent.stream("t1", "more", any()) } answers { started { it.onError(err) }(thirdArg()) }
 
-        assertFailsWith<LLMException> { agent.continueConversation(previous, "more") }
+        assertEquals("agent failed", assertFailsWith<LLMException> { agent.continueConversation(previous, "more") }.message)
     }
 
     @Test
