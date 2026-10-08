@@ -2,7 +2,7 @@ package org.llm4s.agent
 
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.toolloop.{ AgentInput, ToolLoop, TurnOutput }
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Message, SystemMessage }
 import org.llm4s.trace.Tracing
@@ -53,9 +53,13 @@ final class Agent private[agent] (
    * `GraphError.TenantMismatch` for another tenant's thread, `ThreadBusy`, `IncompleteRun`,
    * `PendingInterrupts` - come back unchanged. Either way no thread is created and an existing one
    * is unchanged.
+   *
+   * Interrupting the calling thread cancels the turn: `run` returns `Left(CancelledError)` with the
+   * interrupt flag still set, and the thread is left for [[recover]]. To keep a turn running past an
+   * interrupt, use [[start]] and await the [[AgentRun]].
    */
   def run(threadId: ThreadId, query: String, config: RunConfig, history: Seq[Message]): Result[AgentResult] =
-    start(threadId, query, config, history).flatMap(_.await())
+    start(threadId, query, config, history).flatMap(awaitOrCancel)
 
   /** One turn on `threadId`, new, completed or blocked. */
   def run(threadId: ThreadId, query: String, config: RunConfig): Result[AgentResult] =
@@ -91,9 +95,12 @@ final class Agent private[agent] (
   def forget(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Unit] =
     runtime.deleteThread(threadId, config)
 
-  /** Continues `threadId`'s failed or interrupted run, re-running only failed or unstarted work. */
+  /**
+   * Continues `threadId`'s failed or interrupted run, re-running only failed or unstarted work.
+   * Interrupting the calling thread cancels the turn, as for [[run]].
+   */
   def recover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentResult] =
-    startRecover(threadId, config).flatMap(_.await())
+    startRecover(threadId, config).flatMap(awaitOrCancel)
 
   /** [[recover]], returning at once with the running turn - to cancel it, or to await its result. */
   def startRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentRun] =
@@ -102,14 +109,15 @@ final class Agent private[agent] (
   /**
    * Answers some of `threadId`'s pending approvals and questions - built with
    * [[AgentResult.approve]], [[AgentResult.reject]], [[AgentResult.edit]] and [[AgentResult.reply]]
-   * - and continues. Unanswered ones stay pending.
+   * - and continues. Unanswered ones stay pending. Interrupting the calling thread cancels the turn,
+   * as for [[run]].
    */
   def resume(
     threadId: ThreadId,
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig()
   ): Result[AgentResult] =
-    startResume(threadId, answers, config).flatMap(_.await())
+    startResume(threadId, answers, config).flatMap(awaitOrCancel)
 
   /** [[resume]], returning at once with the running turn - to cancel it, or to await its result. */
   def startResume(
@@ -204,6 +212,17 @@ final class Agent private[agent] (
     runtime
       .resume(threadId, loop.graph, answers, config, observer = Some(observer))
       .map(agentRun(_, Some(scope), listening.drain))
+
+  /**
+   * Awaits `run`. An interrupted wait cancels the turn as well, so a blocking call - `run` inside a
+   * graph node whose run is cancelled - never leaves its turn running; the interrupt flag stays set.
+   */
+  private def awaitOrCancel(run: AgentRun): Result[AgentResult] =
+    run.await() match
+      case cancelled @ Left(_: CancelledError) =>
+        run.cancel()
+        cancelled
+      case other => other
 
   private def recoverWith(threadId: ThreadId, config: RunConfig, listening: Listening): Result[AgentRun] =
     val (observer, scope) = observed(config, listening)

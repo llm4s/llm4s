@@ -67,7 +67,8 @@ final class AgentRun private[agent] (
    * failed with; the outcome is retained, so every call made once the turn has ended returns the
    * same value. A call whose awaiting thread is interrupted before then returns
    * `Left(CancelledError)` instead, with the interrupt flag still set, and the turn keeps running: a
-   * later call returns its outcome, and only [[cancel]] stops it. With tracing, the turn's trace is
+   * later call returns its outcome, and only [[cancel]] stops it ([[Agent.run]], [[Agent.recover]]
+   * and [[Agent.resume]] cancel it). With tracing, the turn's trace is
    * complete when a call returns the turn's outcome.
    *
    * With a listener - from [[Agent.stream]], [[Agent.streamResume]], [[Agent.streamRecover]] or
