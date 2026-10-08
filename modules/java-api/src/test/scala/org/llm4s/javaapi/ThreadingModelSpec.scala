@@ -33,6 +33,12 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
 
   private def waitSeconds: Long = 20L
 
+  /**
+   * How many virtual threads the concurrency test puts inside a provider call at once: more than
+   * there are cores, so more than there are carrier threads.
+   */
+  private def concurrentCallers: Int = math.max(64, 4 * Runtime.getRuntime.availableProcessors())
+
   private def completion(text: String): Completion =
     Completion("id", 0L, text, "test-model", AssistantMessage(text))
 
@@ -86,11 +92,17 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
   /**
    * A local HTTP server (handlers on virtual threads). `release` is opened when the server closes,
    * so a handler that holds a request open is let go and the server can stop.
+   *
+   * The listen backlog is sized for [[concurrentCallers]] connections arriving at once. The JDK's
+   * default is 50, and the server's dispatcher thread accepts one connection per selector pass, so
+   * on a loaded runner more than 50 can be queued. Linux and macOS then drop the extra SYNs and the
+   * client retransmits them a second later, unseen; Windows refuses them, which the JDK HttpClient
+   * reports as a `ConnectException` and does not retry - a flake seen only on `windows-latest`.
    */
   final private class TestServer(handler: (HttpExchange, CountDownLatch) => Unit) extends AutoCloseable {
     private val release  = new CountDownLatch(1)
     private val handlers = Executors.newVirtualThreadPerTaskExecutor()
-    private val server   = HttpServer.create(new InetSocketAddress("localhost", 0), 0)
+    private val server   = HttpServer.create(new InetSocketAddress("localhost", 0), 2 * concurrentCallers)
     server.createContext("/", exchange => handler(exchange, release))
     server.setExecutor(handlers)
     server.start()
@@ -210,7 +222,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
 
   "a real provider client reached through JLlmClient" should
     "serve more virtual threads at once than there are cores, so a call does not hold a carrier thread" in {
-      val n        = math.max(64, 4 * Runtime.getRuntime.availableProcessors())
+      val n        = concurrentCallers
       val arrived  = new CountDownLatch(n)
       val inside   = new AtomicInteger(0)
       val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(waitSeconds)
@@ -225,11 +237,16 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
       }
       Using.resource(new TestServer(handler)) { server =>
         val client = server.client()
-        val outcomes = Using.resource(new Pool(Executors.newVirtualThreadPerTaskExecutor())) { pool =>
-          val futures = (0 until n).map(_ => pool.executor.submit(() => client.complete("hi").isSuccess))
+        val results = Using.resource(new Pool(Executors.newVirtualThreadPerTaskExecutor())) { pool =>
+          val futures = (0 until n).map(_ => pool.executor.submit(() => client.complete("hi")))
           futures.map(_.get(waitSeconds + 10, TimeUnit.SECONDS))
         }
-        outcomes.forall(identity) shouldBe true
+        // a failure names the calls that failed and how many requests the server saw, so a flake
+        // is told apart from a facade that serialised its callers
+        val failed = results.filter(_.isFailure).map(_.getError().error)
+        withClue(s"${n - arrived.getCount} of $n requests reached the server; failed calls: $failed:") {
+          failed shouldBe empty
+        }
         inside.get() shouldBe n
       }
     }
