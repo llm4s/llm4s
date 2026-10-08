@@ -1927,6 +1927,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were down. A cancellation is a fact about the interrupted thread, not the provider: `probeNow` now returns it apart
   from a provider outcome, it is reported to that caller only, and the next check probes again. A failed or timed-out
   probe is still cached. Found during review of #1640.
+- **Redaction covers a credential whose value is an array or an object**
+  ([#1576](https://github.com/llm4s/llm4s/issues/1576)): `Redaction.redact` and `redactForLogging` (and so the
+  exchange-log file sink) replaced only a string or a number under a sensitive key, so `{"token": ["abc"]}`
+  and `{"credentials": {"user": "u", "pass": "p"}}` were written in the clear. Every string and number leaf
+  under such a key is now replaced, however deep, in plain JSON and in JSON that sits inside a string; the
+  brackets, the keys of nested objects, `true`, `false` and `null` are kept, so the output still parses and
+  keeps its shape, and a payload cut off inside the value is redacted to the end. A number under a sensitive
+  key of JSON inside a string (`\"password\": 12345`) is redacted too. Keys that merely contain a credential
+  word (`max_tokens`, `messages`) still keep their arrays. The scanner counts brackets on an explicit stack
+  and visits each character once, so a megabyte-long array or one nested a hundred thousand levels deep
+  redacts on a small thread stack. Twice-escaped JSON and a secret that is not under any key remain
+  unredacted by decision; the exchange-logging guide says so.
 - **`llm4s-java-api`: `InterruptedException` is never thrown, and the Javadoc says so**
   ([#1591](https://github.com/llm4s/llm4s/issues/1591)): `catch (InterruptedException e)` around
   `JLlmClient.complete` or `JAgent.run` does not compile ("never thrown in body of corresponding try statement"),

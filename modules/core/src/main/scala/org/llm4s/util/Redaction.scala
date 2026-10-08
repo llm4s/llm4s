@@ -15,8 +15,9 @@ import scala.util.matching.Regex
  *  - API keys (OpenAI, Anthropic, Google, Voyage, Langfuse)
  *  - Bearer tokens and Authorization headers
  *  - URL query parameters with sensitive keys
- *  - Sensitive fields, whatever the shape: JSON (also inside a string, single-quoted, or with a number value),
- *    `key=value` pairs and `x-api-key: value` header lines (api_key, password, token, client_secret, etc.)
+ *  - Sensitive fields, whatever the shape: JSON (also inside a string, single-quoted, with a number value, or with
+ *    an array or object value, whose every string and number leaf is replaced), `key=value` pairs and
+ *    `x-api-key: value` header lines (api_key, password, token, client_secret, etc.)
  *
  * @example
  * {{{
@@ -146,6 +147,16 @@ private[llm4s] object Redaction {
   private val JsonNumberField: Regex =
     s"""("($Key)"\\s*:\\s*)(-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)(?![\\w.-])""".r
 
+  /** `\"key\": 12345`: the same number in JSON that sits inside a string. */
+  private val EscapedJsonNumberField: Regex =
+    s"""(\\\\"($Key)\\\\"\\s*:\\s*)(-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)(?![\\w.-])""".r
+
+  /** `"key": [` or `"key": {`: the start of an array or object value, with the opening bracket as group 3. */
+  private val JsonContainerStart: Regex = s"""("($Key)"\\s*:\\s*)([\\[{])""".r
+
+  /** `\"key\": [` or `\"key\": {`: the start of an array or object value of JSON that sits inside a string. */
+  private val EscapedJsonContainerStart: Regex = s"""(\\\\"($Key)\\\\"\\s*:\\s*)([\\[{])""".r
+
   /** `key=value` outside a URL query string: form bodies, log lines, shell-style settings, `a.b.password=...`. */
   private val EqualsPair: Regex =
     s"""((?<![A-Za-z0-9_-])($Key)=)([^\\s&"',;<>]+)""".r
@@ -255,14 +266,19 @@ private[llm4s] object Redaction {
     )
 
   private def redactJsonFields(input: String, placeholder: String): String = {
-    // Quoted shapes first, then the bare ones, so that a value is never matched by a looser pattern first.
-    val escaped = redactQuoted(EscapedJsonStringStart, input, placeholder, ValueEnd.EscapedQuote)
-    val double  = redactQuoted(JsonStringStart, escaped, placeholder, ValueEnd.Quote('"'))
-    val single  = redactQuoted(SingleQuotedStart, double, placeholder, ValueEnd.Quote('\''))
+    // Arrays and objects first: every leaf under a sensitive key is replaced in one pass, and what is left for the
+    // field patterns below is already the placeholder. Then the quoted shapes, then the bare ones, so that a value is
+    // never matched by a looser pattern first.
+    val escapedContainers = redactContainers(EscapedJsonContainerStart, input, placeholder, ValueEnd.EscapedQuote)
+    val containers        = redactContainers(JsonContainerStart, escapedContainers, placeholder, ValueEnd.Quote('"'))
+    val escaped           = redactQuoted(EscapedJsonStringStart, containers, placeholder, ValueEnd.EscapedQuote)
+    val double            = redactQuoted(JsonStringStart, escaped, placeholder, ValueEnd.Quote('"'))
+    val single            = redactQuoted(SingleQuotedStart, double, placeholder, ValueEnd.Quote('\''))
     // A number becomes a string, so that the redacted JSON still parses.
-    val quotedEquals = redactQuoted(DoubleQuotedEqualsStart, single, placeholder, ValueEnd.Quote('"'))
-    val allQuoted    = redactQuoted(SingleQuotedEqualsStart, quotedEquals, placeholder, ValueEnd.Quote('\''))
-    val numbers      = redactPairs(JsonNumberField, allQuoted, placeholder, wrap = "\"")
+    val quotedEquals   = redactQuoted(DoubleQuotedEqualsStart, single, placeholder, ValueEnd.Quote('"'))
+    val allQuoted      = redactQuoted(SingleQuotedEqualsStart, quotedEquals, placeholder, ValueEnd.Quote('\''))
+    val escapedNumbers = redactPairs(EscapedJsonNumberField, allQuoted, placeholder, wrap = "\\\"")
+    val numbers        = redactPairs(JsonNumberField, escapedNumbers, placeholder, wrap = "\"")
     Seq(EqualsPair, HeaderLine).foldLeft(numbers)((acc, pattern) => redactPairs(pattern, acc, placeholder))
   }
 
@@ -329,6 +345,136 @@ private[llm4s] object Redaction {
 
     val copiedTo = loop(0, 0)
     out.append(input, copiedTo, input.length).toString
+  }
+
+  /**
+   * Replaces every string and number leaf of each `"key": [...]` or `"key": {...}` whose key is sensitive, and leaves
+   * the brackets, the keys of nested objects, `true`, `false` and `null`, so that the redacted JSON still parses and
+   * keeps its shape. `start` matches up to and including the opening bracket (group 3). A container whose key is
+   * not sensitive is entered, not skipped, so a credential inside it is still found.
+   */
+  private def redactContainers(start: Regex, input: String, placeholder: String, end: ValueEnd): String = {
+    val matcher = start.pattern.matcher(input)
+    val out     = new java.lang.StringBuilder(input.length)
+
+    @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
+      if (searchFrom > input.length || !matcher.find(searchFrom)) {
+        copiedTo
+      } else {
+        val open = matcher.start(3)
+        if (isSensitiveKey(matcher.group(2))) {
+          out.append(input, copiedTo, open)
+          val valueEnd = redactLeaves(input, open, out, placeholder, end)
+          loop(valueEnd, valueEnd)
+        } else {
+          loop(open + 1, copiedTo)
+        }
+      }
+
+    val copiedTo = loop(0, 0)
+    out.append(input, copiedTo, input.length).toString
+  }
+
+  /**
+   * Appends to `out` the array or object that opens at `from`, with every string and number leaf replaced, and
+   * returns the index just after it. Brackets are counted on an explicit stack, so the depth of the value does not
+   * grow the call stack, and each character is visited once. The value ends at its closing bracket, at the end of
+   * the input (a payload cut off in the middle of it) or, for JSON inside a string, at the bare quote that ends the
+   * enclosing string, which is left for the caller.
+   */
+  private def redactLeaves(
+    input: String,
+    from: Int,
+    out: java.lang.StringBuilder,
+    placeholder: String,
+    end: ValueEnd
+  ): Int = {
+    val length  = input.length
+    val quote   = end match { case ValueEnd.EscapedQuote => "\\\""; case ValueEnd.Quote(q) => q.toString }
+    val openers = new java.lang.StringBuilder
+
+    def inObject: Boolean = openers.length > 0 && openers.charAt(openers.length - 1) == '{'
+
+    // A string of an object that is followed by `:` is a key, not a value.
+    def isKey(after: Int): Boolean = {
+      var i = after
+      while (
+        i < length && (input.charAt(i) == ' ' || input.charAt(i) == '\t' || input
+          .charAt(i) == '\n' || input.charAt(i) == '\r')
+      ) i += 1
+      inObject && i < length && input.charAt(i) == ':'
+    }
+
+    // The string whose opening quote (one character, or `\"`) starts at `open`; returns the index after it.
+    def emitString(open: Int): Int = {
+      val contentStart = open + quote.length
+      val contentEnd   = scanQuotedValue(input, contentStart, end)
+      // For JSON inside a string, `scanQuotedValue` may stop at a bare quote: the enclosing string ends there.
+      val closed = contentEnd < length && (end match {
+        case ValueEnd.Quote(_)     => true
+        case ValueEnd.EscapedQuote => input.charAt(contentEnd) == '\\'
+      })
+      val next = if (closed) contentEnd + quote.length else contentEnd
+      if (closed && isKey(next)) {
+        out.append(input, open, next)
+      } else {
+        out.append(quote)
+        if (contentEnd > contentStart) out.append(placeholder)
+        if (closed) out.append(quote)
+      }
+      next
+    }
+
+    def isNumberChar(c: Char): Boolean =
+      (c >= '0' && c <= '9') || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-'
+
+    var i    = from
+    var done = false
+    while (i < length && !done) {
+      val c = input.charAt(i)
+      if (c == '[' || c == '{') {
+        openers.append(c)
+        out.append(c)
+        i += 1
+      } else if (c == ']' || c == '}') {
+        if (openers.length > 0) openers.setLength(openers.length - 1)
+        out.append(c)
+        i += 1
+        done = openers.length == 0
+      } else if (c == '"') {
+        end match {
+          case ValueEnd.Quote(_)     => i = emitString(i)
+          case ValueEnd.EscapedQuote => done = true // the enclosing string ends, and the container with it
+        }
+      } else if (c == '\\' && end == ValueEnd.EscapedQuote) {
+        var next = i
+        while (next < length && input.charAt(next) == '\\') next += 1
+        val slashes     = next - i
+        val beforeQuote = next < length && input.charAt(next) == '"'
+        if (beforeQuote && slashes % 4 == 1) {
+          out.append(input, i, next - 1)
+          i = emitString(next - 1)
+        } else if (beforeQuote && slashes % 2 == 0) {
+          out.append(input, i, next)
+          i = next
+          done = true
+        } else {
+          // An escape between values (`\n` of a pretty-printed document), copied with the character it escapes.
+          val stop = math.min(length, next + 1)
+          out.append(input, i, stop)
+          i = stop
+        }
+      } else if (c == '-' || (c >= '0' && c <= '9')) {
+        var next = i + 1
+        while (next < length && isNumberChar(input.charAt(next))) next += 1
+        out.append(quote).append(placeholder).append(quote)
+        i = next
+      } else {
+        out.append(c)
+        i += 1
+      }
+    }
+    i
   }
 
   /**

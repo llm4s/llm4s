@@ -95,6 +95,12 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     ujson.read(out)("secret").str shouldBe R
   }
 
+  it should "redact a number under a credential key in JSON that sits inside a string" in {
+    val out = Redaction.redact("""{"content": "{\"password\": 12345678, \"max_tokens\": 100}"}""")
+    out shouldBe s"""{"content": "{\\"password\\": \\"$R\\", \\"max_tokens\\": 100}"}"""
+    ujson.read(ujson.read(out)("content").str)("password").str shouldBe R
+  }
+
   it should "leave a number under a key that is not a credential" in {
     val input = """{"max_tokens": 100, "temperature": 0.7, "count": 12}"""
     Redaction.redact(input) shouldBe input
@@ -258,12 +264,105 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---------------------------------------------------------------------------------------------
+  // An array or an object under a credential key: every string and number leaf under it is a secret
+  // ---------------------------------------------------------------------------------------------
+
+  it should "redact every string of an array under a credential key, and keep the JSON valid" in {
+    val out = Redaction.redact("""{"token": ["abc123", "def456"], "user": "ann"}""")
+    out shouldBe s"""{"token": ["$R", "$R"], "user": "ann"}"""
+    ujson.read(out)("token").arr.map(_.str) shouldBe Seq(R, R)
+  }
+
+  it should "redact every leaf of an object under a credential key, and keep its keys" in {
+    val out    = Redaction.redact("""{"credentials": {"user": "ann", "pass": "hunter2value", "port": 5432}, "n": 1}""")
+    val parsed = ujson.read(out)
+    parsed("credentials")("user").str shouldBe R
+    parsed("credentials")("pass").str shouldBe R
+    parsed("credentials")("port").str shouldBe R
+    parsed("n").num shouldBe 1
+    (out should not).include("hunter2value")
+    (out should not).include("ann")
+  }
+
+  it should "redact the numbers of an array under a credential key, written back as strings" in {
+    val out = Redaction.redact("""{"secret": [1, 2.5, -3e2, 7]}""")
+    (out should not).include("2.5")
+    ujson.read(out)("secret").arr.map(_.str) shouldBe Seq(R, R, R, R)
+  }
+
+  it should "redact the leaves of nested arrays and objects, and leave true, false and null" in {
+    val out = Redaction.redact("""{"token": [{"value": "a1", "tags": ["x1", "y1"], "on": true}, "b1", null, false]}""")
+    val parsed = ujson.read(out)("token")
+    parsed(0)("value").str shouldBe R
+    parsed(0)("tags").arr.map(_.str) shouldBe Seq(R, R)
+    parsed(0)("on").bool shouldBe true
+    parsed(1).str shouldBe R
+    parsed(2) shouldBe ujson.Null
+    parsed(3).bool shouldBe false
+    Seq("a1", "x1", "y1", "b1").foreach(leaf => (out should not).include(leaf))
+  }
+
+  it should "redact a leaf that contains an escaped quote or a bracket" in {
+    val out = Redaction.redact("""{"token": ["a\"]b12345", "c{d12345", "e\\"], "user": "ann"}""")
+    out shouldBe s"""{"token": ["$R", "$R", "$R"], "user": "ann"}"""
+  }
+
+  it should "leave an empty array, an empty object and an already redacted array as they are" in {
+    Seq("""{"token": []}""", """{"token": {}}""", s"""{"token": ["$R"], "n": 1}""").foreach { input =>
+      withClue(s"input $input: ")(Redaction.redact(input) shouldBe input)
+    }
+  }
+
+  it should "leave an array or an object under a key that is not a credential" in {
+    val input =
+      """{"max_tokens": [1, 2], "tokens": {"a": "b"}, "messages": [{"role": "user", "content": "hi there"}], "token_count": {"n": 3}}"""
+    Redaction.redact(input) shouldBe input
+  }
+
+  it should "redact a credential array inside a container that is not a credential" in {
+    Redaction.redact("""{"messages": [{"role": "user", "token": ["abc123"]}]}""") shouldBe
+      s"""{"messages": [{"role": "user", "token": ["$R"]}]}"""
+  }
+
+  it should "redact an array under a credential key in JSON that sits inside a string" in {
+    val input = """{"content": "{\"token\": [\"abc123\", \"def456\"], \"n\": 1}"}"""
+    val out   = Redaction.redact(input)
+    out shouldBe s"""{"content": "{\\"token\\": [\\"$R\\", \\"$R\\"], \\"n\\": 1}"}"""
+    val embedded = ujson.read(ujson.read(out)("content").str)
+    embedded("token").arr.map(_.str) shouldBe Seq(R, R)
+    embedded("n").num shouldBe 1
+  }
+
+  it should "redact an object under a credential key in JSON that sits inside a string" in {
+    val embedded = ujson.Obj("credentials" -> ujson.Obj("user" -> "ann", "pass" -> "p\"q"), "keep" -> "yes").render()
+    val input    = ujson.Obj("content" -> embedded).render()
+    val out      = ujson.read(ujson.read(Redaction.redact(input))("content").str)
+    out("credentials")("user").str shouldBe R
+    out("credentials")("pass").str shouldBe R
+    out("keep").str shouldBe "yes"
+  }
+
+  it should "redact an array that is cut off before its closing bracket, as a truncated payload is" in {
+    Redaction.redact("""{"token": ["abc123", "de""") shouldBe s"""{"token": ["$R", "$R"""
+    Redaction.redact("""{"token": ["abc123", """) shouldBe s"""{"token": ["$R", """
+    Redaction.redact("""{"content": "{\"token\": [\"abc123\", \"de""") shouldBe
+      s"""{"content": "{\\"token\\": [\\"$R\\", \\"$R"""
+  }
+
+  it should "end an array inside a string at the quote that ends the enclosing string" in {
+    Redaction.redact("""{"content": "{\"token\": [\"abc123\", \"de", "n": 1}""") shouldBe
+      s"""{"content": "{\\"token\\": [\\"$R\\", \\"$R", "n": 1}"""
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // Idempotence, and what is left alone
   // ---------------------------------------------------------------------------------------------
 
   it should "give the same result when applied twice" in {
     val inputs = Seq(
       """{"content": "{\"api_key\": \"a\", \"n\": 1}", "password": 12345, "x": "y"}""",
+      """{"token": ["abc", 12, {"a": "b"}], "credentials": {"user": "u", "pass": "p"}}""",
+      """{"content": "{\"token\": [\"abc\", {\"a\": \"b\"}]}"}""",
       "password=hunter2value&user=ann",
       "x-api-key: hunter2value\nok: 1",
       """{"password": "ab\"cd"}""",
@@ -376,6 +475,26 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
 
   it should "redact a megabyte-long number" in {
     onSmallStack("{\"password\": " + ("1" * MegaChars) + "}") shouldBe s"""{"password": "$R"}"""
+  }
+
+  it should "redact an array of many elements, and one element of a megabyte, under a credential key" in {
+    val many = "{\"token\": [" + ("\"hunter2value\", " * 50000) + "\"end\"], \"n\": 1}"
+    val out  = onSmallStack(many)
+    (out should not).include("hunter2value")
+    out should startWith(s"""{"token": ["$R", "$R", """)
+    out should endWith(s""""$R"], "n": 1}""")
+    onSmallStack("{\"token\": [\"" + ("a" * MegaChars) + "\", 1]}") shouldBe s"""{"token": ["$R", "$R"]}"""
+  }
+
+  it should "redact an array nested a hundred thousand levels deep under a credential key" in {
+    val depth = 100000
+    val input = "{\"token\": " + ("[" * depth) + "\"hunter2value\"" + ("]" * depth) + "}"
+    onSmallStack(input) shouldBe "{\"token\": " + ("[" * depth) + s""""$R"""" + ("]" * depth) + "}"
+  }
+
+  it should "leave a megabyte-long array under a key that is not a credential" in {
+    val input = "{\"messages\": [" + ("\"hunter2value\", " * 50000) + "\"end\"]}"
+    onSmallStack(input) shouldBe input
   }
 
   it should "leave a megabyte of word characters, of spaces and of newlines unchanged" in {

@@ -249,6 +249,13 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
       "PASSWORD='hunter2value' NAME='keep'"     -> "PASSWORD='[REDACTED]' NAME='keep'",
       // a header-style line
       "x-api-key: abc123456789" -> "x-api-key: [REDACTED]",
+      // an array or an object under a sensitive key: every string and number leaf, the keys and brackets kept
+      """{"token": ["abc123456789", "def123456789"]}""" -> """{"token": ["[REDACTED]", "[REDACTED]"]}""",
+      """{"credentials": {"user": "ann", "pass": "abc123456789", "port": 5432}}""" ->
+        """{"credentials": {"user": "[REDACTED]", "pass": "[REDACTED]", "port": "[REDACTED]"}}""",
+      """{"content": "{\"token\": [\"abc123456789\"]}"}""" -> """{"content": "{\"token\": [\"[REDACTED]\"]}"}""",
+      """{"max_tokens": [1, 2], "messages": [{"role": "user", "content": "hi"}]}""" ->
+        """{"max_tokens": [1, 2], "messages": [{"role": "user", "content": "hi"}]}""",
       // compound key names are sensitive by suffix; token-count fields are not
       """{"client_secret": "abc123456789", "refresh_token": "abc123456789"}""" ->
         """{"client_secret": "[REDACTED]", "refresh_token": "[REDACTED]"}""",
