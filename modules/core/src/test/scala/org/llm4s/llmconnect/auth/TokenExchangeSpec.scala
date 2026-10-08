@@ -399,4 +399,28 @@ class TokenExchangeSpec extends AnyWordSpec with Matchers with EitherValues with
           }
         }
     }
+
+    // A top-level array, not an object: `.obj` on it threw `InvalidData`, whose message rendered the
+    // whole value recursively and overflowed the stack on the non-2xx path through HttpErrorMapper (#1658).
+    "return a Left, never overflow, for a top-level array nested 100,000 deep, for 500, 503 and 200" in {
+      val deepArray = "[" * depth + "]" * depth
+      for status <- Seq(500, 503, 200) do
+        Using.resource(server(status, deepArray)) { s =>
+          val cfg = TokenExchangeConfig(
+            IdentitySource.Literal(jwt),
+            s"http://127.0.0.1:${s.getAddress.getPort}/token",
+            clientId = Some(clientId)
+          )
+          val outcome = org.llm4s.testutil.SmallStack.run(
+            TokenExchange.rfc8693(cfg, Llm4sHttpClient.create(), clock)(),
+            stackBytes = 256L * 1024
+          )
+          withClue(s"HTTP $status: ") {
+            val result = outcome.fold(e => fail(s"threw on a 256 KiB stack: $e"), identity)
+            result.isLeft shouldBe true
+            (result.left.value.message should not).include(clientId)
+            (result.left.value.message should not).include(jwt)
+          }
+        }
+    }
   }

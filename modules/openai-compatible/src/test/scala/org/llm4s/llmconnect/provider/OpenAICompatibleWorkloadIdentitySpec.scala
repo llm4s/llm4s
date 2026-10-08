@@ -359,6 +359,55 @@ class OpenAICompatibleWorkloadIdentitySpec
         c.close()
     }
 
+    // A top-level array, not an object: `.obj` on it threw `InvalidData`, whose message rendered the
+    // whole value recursively and overflowed the stack in HttpErrorMapper (#1658).
+    "return a Left, never overflow, for a top-level array nested 100,000 deep, with an exchanged token" in {
+      given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+      val bearer                                 = "opaque-dbx-token-deep-9"
+      val clientId                               = "sp-client-deep-array"
+      val subject                                = "opaque-svid-literal-deep"
+      val deepArray                              = "[" * 100000 + "]" * 100000
+      val exchanged = HttpResponse(200, s"""{"access_token":"$bearer","expires_in":3600}""")
+      val cases = Seq(
+        // the API rejects the exchanged token with a deep body
+        ("API 400", Seq(exchanged, HttpResponse(400, deepArray))),
+        ("API 500", Seq(exchanged, HttpResponse(500, deepArray))),
+        // the token endpoint itself replies with a deep body
+        ("token endpoint 200", Seq(HttpResponse(200, deepArray))),
+        ("token endpoint 500", Seq(HttpResponse(500, deepArray)))
+      )
+      for
+        (label, responses) <- cases
+        streaming          <- Seq(false, true)
+      do
+        val http = MockHttpClient(responses)
+        val config = OpenAICompatibleConfig(
+          model = "m",
+          baseUrl = "https://ws.example/serving-endpoints",
+          tokenExchange = Some(
+            TokenExchangeConfig(
+              IdentitySource.Literal(subject),
+              "https://ws.example/oidc/v1/token",
+              clientId = Some(clientId)
+            )
+          )
+        )
+        val c = new OpenAICompatibleClient(OpenAICompatibleClient.settings(config), OpenAICompatibleDialect.Standard) {
+          override protected[provider] val httpClient: Llm4sHttpClient = http
+        }
+        val outcome = org.llm4s.testutil.SmallStack.run(
+          if streaming then c.streamComplete(conversation, CompletionOptions(), _ => ())
+          else c.complete(conversation, CompletionOptions()),
+          stackBytes = 256L * 1024
+        )
+        withClue(s"$label, streaming=$streaming: ") {
+          val result = outcome.fold(e => fail(s"threw on a 256 KiB stack: $e"), identity)
+          result.isLeft shouldBe true
+          for secret <- Seq(bearer, clientId, subject) do (result.left.value.message should not).include(secret)
+        }
+        c.close()
+    }
+
     "exchange with the section's request timeout, or the default when it sets none" in {
       given org.llm4s.model.ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
       import scala.concurrent.duration.DurationInt
