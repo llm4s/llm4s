@@ -279,11 +279,13 @@ else:
             # cannot stand in for a frozen module's Frozen row; that comparison stays strict).
             ignored.update(tokens(cells[1]))
             continue
-        t = re.match(r"\W*(Frozen|Beta|Experimental)\b", cells[2])  # the tier word starts the cell: "Not Frozen yet" is no tier
+        # The tier label starts the cell, and the Frozen tier is the exact label "Frozen at 1.0" that the
+        # header above and every drift message promise: "Not Frozen yet" and "Frozen at 2.0" are no tier.
+        t = re.match(r"\W*(Frozen at 1\.0|Beta|Experimental)\b", cells[2])
         if not t:
             drift.append((SCOPE, j + 1, f"Package Map row for {cells[0].strip('`')[:40]} has no tier (Frozen at 1.0, Beta or Experimental)"))
             continue
-        rows.append((j + 1, tokens(cells[1]), t.group(1)))
+        rows.append((j + 1, tokens(cells[1]), "Frozen" if t.group(1).startswith("Frozen") else t.group(1)))
     if not rows:
         fatal.append(f"{SCOPE}: the Package Map has no readable rows")
 

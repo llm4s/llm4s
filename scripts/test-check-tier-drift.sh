@@ -365,6 +365,26 @@ write("\n".join(out))
 PY
 expect_fail "a tier cell that only mentions Frozen" "has no tier"
 
+fresh
+edit docs/reference/v1-scope.md <<PY
+# "Frozen at 2.0" is not the promised label "Frozen at 1.0": it must be reported as an unknown tier,
+# never read as Frozen - with the old prefix match a frozen module's rows so rewritten still passed
+# (Codex review, iter 3)
+out = []
+changed = 0
+for l in text.split("\n"):
+    cells = l.split("|")
+    if len(cells) >= 5 and "\`$FROZEN\`" in cells[2] and "Frozen at 1.0" in cells[3]:
+        cells[3] = cells[3].replace("Frozen at 1.0", "Frozen at 2.0")
+        l = "|".join(cells)
+        changed += 1
+    out.append(l)
+if not changed:
+    sys.exit("test setup: no Frozen at 1.0 row targets $FROZEN")
+write("\n".join(out))
+PY
+expect_fail "a tier cell saying Frozen at 2.0 is an unknown tier, not Frozen" "has no tier"
+
 # ---------------------------------------------------------------- a commented-out entry is not live (Codex review)
 fresh
 edit build.sbt <<PY
@@ -372,6 +392,14 @@ edit build.sbt <<PY
 write(text.replace('mimaFrozen("$FROZEN")', '/* mimaFrozen("$FROZEN") */', 1))
 PY
 expect_fail "a block-commented mimaFrozen call is not frozen any more" "which build.sbt does not freeze"
+
+fresh
+edit build.sbt <<PY
+# Scala block comments nest: the first */ closes only the inner comment, so a mimaFrozen call after it
+# is still commented out. A stripper that stops at the first */ would keep the call live and pass here.
+write(text.replace('mimaFrozen("$FROZEN")', '/* outer /* inner */ mimaFrozen("$FROZEN") still comment */', 1))
+PY
+expect_fail "a mimaFrozen call inside a nested block comment is not frozen any more" "which build.sbt does not freeze"
 
 fresh
 edit build.sbt <<PY
