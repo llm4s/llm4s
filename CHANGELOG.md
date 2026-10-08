@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Reassemble streamed tool-call argument fragments in the chat TUI before tool approval and execution.
+
+
 ### Added
 - **Thinking stays in the conversation and goes back to the provider** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
   `AssistantMessage` carries the model's reasoning as `thinking: Seq[ThinkingBlock]` - `ThinkingBlock.Text(text,
