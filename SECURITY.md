@@ -36,10 +36,18 @@ time to prepare a fix before the issue is made public, and we will credit you in
 In scope: the code in this repository and the `llm4s-*` artifacts published from it.
 
 The built-in tools that read and write files, run programs and make HTTP requests are security-sensitive by design.
-Their guards, and how to configure them safely, are described in [the built-in tools guide](docs/guide/builtin-tools.md)
-(see *Safety: what each tool can do*) and in the [security reference](docs/reference/security.md). A way around a guard
-that those pages say is enforced is a vulnerability. Running a tool with a configuration you chose to make permissive
-is not.
+How to configure them safely, and the limits that remain, are described in
+[the built-in tools guide](docs/guide/builtin-tools.md) (see *Safety: what each tool can do*) and in the
+[security reference](docs/reference/security.md).
+
+Those pages are open about limits that are inherent in the design. For example, the path settings are a filter and not a
+sandbox, a symbolic link inside an allowed directory is not a security boundary, the shell tool is not covered by the
+file settings and inherits the environment of the process, and the HTTP check can be passed by DNS rebinding. **Please
+report such things privately all the same.** A demonstrated way around a guard that the guide says is enforced, or a
+disclosure or escape that the guide does not warn about, is a vulnerability. A limit that the guide already documents is
+a hardening request, and we may discuss and fix it in public once we have agreed that with you. Running a tool with a
+configuration you chose to make permissive is not a vulnerability. If you are not sure which of these you have, report
+it privately: we would rather hear about it.
 
 Out of scope:
 
