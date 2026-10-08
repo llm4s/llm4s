@@ -73,15 +73,17 @@ config: `PgSearchIndex(pgConfig)`, then `initializeSchema()`, then `RAGConfig().
 ```scala
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.rag.{ RAG, RAGConfig }
+import org.llm4s.model.ModelRegistryService
 
 val hits = for {
   service       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = service
   embeddingPair <- Llm4sConfig.embeddings()
   (provider, embeddingConfig) = embeddingPair
   rag <- RAG.build(
     RAGConfig().withEmbeddings(provider, embeddingConfig.model).withTopK(3),
     _ => Right(embeddingConfig)
-  )(using service)
+  )
   _       <- rag.ingestText("Scala is a statically typed language for the JVM.", "doc-1")
   results <- rag.query("What kind of language is Scala?")
 } yield {
