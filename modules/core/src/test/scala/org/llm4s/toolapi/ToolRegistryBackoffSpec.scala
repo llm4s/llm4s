@@ -62,6 +62,21 @@ class ToolRegistryBackoffSpec extends AnyFlatSpec with Matchers {
     (a, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start))
   }
 
+  // ============ the delay scheduler's thread is never where a continuation runs ============
+
+  "Backoff.after" should "not run an inline continuation on the JVM's delay-scheduler thread" in {
+    // `ExecutionContext.parasitic` runs a continuation on whichever thread completes the future. Were the
+    // promise completed on the delay scheduler's own thread, a retried attempt under an inline context
+    // would occupy the JVM-wide singleton that serves every delayed CompletableFuture, holding back every
+    // other backoff in the process (Codex review). The completion is handed to the JDK's default
+    // asynchronous executor instead, so the scheduler thread only ever triggers the handoff.
+    val threadName = Await.result(
+      Backoff.after(10.millis).map(_ => Thread.currentThread().getName)(ExecutionContext.parasitic),
+      10.seconds
+    )
+    (threadName should not).include("CompletableFutureDelayScheduler")
+  }
+
   // ============ the claim: no pool thread is parked during backoff ============
 
   "ToolRegistry.executeAsync" should "leave its execution-context thread free while a retry waits out its backoff" in {
