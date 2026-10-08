@@ -200,8 +200,10 @@ class GeminiClient(
                             prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
                             completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
                           } accumulator.updateTokens(prompt, completion)
-                        case Left(tooDeep) if tooDeep == BoundedJson.tooDeep() =>
-                          logger.warn(s"[Gemini] Stream refused: a chunk's ${tooDeep.message}")
+                        case Left(tooDeep @ BoundedJson.TooDeep()) =>
+                          logger.warn(
+                            s"[Gemini] Stream refused: a chunk is nested more than ${BoundedJson.MaxDepth} levels deep"
+                          )
                           refused = Some(tooDeep)
                         case Left(_) => () // unreadable chunk: skipped
                       }

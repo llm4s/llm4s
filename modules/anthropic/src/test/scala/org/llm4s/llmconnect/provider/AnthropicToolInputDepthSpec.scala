@@ -90,7 +90,8 @@ class AnthropicToolInputDepthSpec extends AnyFlatSpec with Matchers {
         case Right(Left((kind, message))) =>
           kind shouldBe "ProcessingError"
           message should include("malformed tool call")
-          message should include("512")
+          // the site's own wording, not the parser error's: the refusal was told apart as too deep (#1651)
+          message should include("arguments are nested more than 512 levels deep")
         case Right(Right(other)) => fail(s"expected a Left, but the reply was accepted and $other")
         case Left(thrown)        => fail(s"expected a Left, but the round trip threw $thrown")
       }

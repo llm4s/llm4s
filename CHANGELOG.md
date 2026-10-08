@@ -1954,6 +1954,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and visits each character once, so a megabyte-long array or one nested a hundred thousand levels deep
   redacts on a small thread stack. Twice-escaped JSON and a secret that is not under any key remain
   unredacted by decision; the exchange-logging guide says so.
+- **A too-deep refusal is recognised structurally, not by equality with a freshly built error**
+  ([#1651](https://github.com/llm4s/llm4s/issues/1651), found in review of #1644). The Ollama, Anthropic,
+  Gemini and Vertex AI clients told a document `BoundedJson` refused as too deep from one it could not parse
+  with `case Left(e) if e == BoundedJson.tooDeep()`, which holds only for the error of the default limit with
+  its exact wording: a read with another limit, or a reworded message, would have fallen through to each
+  site's generic arm - for the Gemini and Vertex AI streams, the arm that skips the chunk, which is the
+  silent drop #1643 fixed. The four sites now match `BoundedJson.TooDeep()`, an extractor that recognises
+  the error by the prefix `tooDeep` writes, whatever limit follows it; `BoundedJson` is `private[llm4s]`,
+  so no public signature changes. The Gemini and Vertex AI warning now reads `a chunk is nested more than
+  512 levels deep` rather than quoting the error's `Invalid json: ` message.
 - **`llm4s-java-api`: `InterruptedException` is never thrown, and the Javadoc says so**
   ([#1591](https://github.com/llm4s/llm4s/issues/1591)): `catch (InterruptedException e)` around
   `JLlmClient.complete` or `JAgent.run` does not compile ("never thrown in body of corresponding try statement"),

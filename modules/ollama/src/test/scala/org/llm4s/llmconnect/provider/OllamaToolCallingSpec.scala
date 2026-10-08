@@ -367,10 +367,29 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
           case Right(Left((kind, message))) =>
             kind shouldBe "ProcessingError"
             message should include("malformed tool call")
-            message should include("512")
+            message should include("arguments are nested more than 512 levels deep")
           case Right(Right(other)) => fail(s"expected a Left, got $other")
           case Left(thrown)        => fail(s"expected a Left, but complete threw $thrown")
         }
+      }
+    }
+
+    "name the depth when refusing string arguments just over the limit, never 'not a JSON object'" in {
+      // 513 levels: one over the limit, and a document the parser would otherwise have read as an object.
+      // The site tells a too-deep refusal from a parse failure through `BoundedJson.TooDeep` (#1651); if
+      // that detection fell through, the call would be refused for the wrong reason.
+      val justOver = "{\"a\":" * 513 + "1" + "}" * 513
+      withOllama(reply("", call("get_weather", ujson.Str(justOver)))) { (client, _) =>
+        ask(client) match {
+          case Left(e: ProcessingError) =>
+            e.message should include("arguments are nested more than 512 levels deep")
+            (e.message should not).include("not a JSON object")
+          case other => fail(s"expected a ProcessingError, got $other")
+        }
+      }
+      val atLimit = "{\"a\":" * 512 + "1" + "}" * 512
+      withOllama(reply("", call("get_weather", ujson.Str(atLimit)))) { (client, _) =>
+        ask(client).toOption.get.toolCalls.head.arguments.obj.keySet shouldBe Set("a")
       }
     }
 

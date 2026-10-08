@@ -458,7 +458,7 @@ object OllamaClient {
       // object it would build overflows the stack of whatever renders it (#1562).
       BoundedJson.read(s) match {
         case Right(o: ujson.Obj) => Right(o)
-        case Left(e) if e == BoundedJson.tooDeep() =>
+        case Left(BoundedJson.TooDeep()) =>
           Left(malformed(s"arguments are nested more than ${BoundedJson.MaxDepth} levels deep"))
         case _ => Left(malformed("arguments are not a JSON object"))
       }

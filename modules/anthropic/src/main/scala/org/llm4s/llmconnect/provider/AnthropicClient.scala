@@ -703,7 +703,7 @@ curl https://api.anthropic.com/v1/messages \
           BoundedJson.read(input) match {
             case Right(arguments) =>
               Right(taken :+ ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = arguments))
-            case Left(e) if e == BoundedJson.tooDeep() =>
+            case Left(BoundedJson.TooDeep()) =>
               Left(malformedToolCall(s"arguments are nested more than ${BoundedJson.MaxDepth} levels deep"))
             case Left(e) => Left(malformedToolCall(e.message))
           }
