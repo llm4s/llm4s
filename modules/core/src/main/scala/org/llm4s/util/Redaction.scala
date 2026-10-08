@@ -309,38 +309,63 @@ private[llm4s] object Redaction {
   /**
    * Where the query value that starts at `from` begins, and its length. A value ends where a query value does, at
    * `&` or whitespace, or at the quote that ends the string the URL sits in, which is kept with the backslashes
-   * that escape it in JSON that sits inside a string. That quote is followed by `,`, a bracket, whitespace or the end
-   * of the input, never by a character a value is made of; a quote that is (`?key=ab'cd`, which RFC 3986 allows
-   * unencoded) is part of the value. A value written in quotes (`'abc'`, `"abc"`, or `\"abc\"` in JSON inside a
-   * string), as a query string in prose or code may have it, starts after its opening quote by the same rule, so the
-   * quote that ends the enclosing string, as in `"https://x.test/?token="}`, leaves the value empty. A loop that
-   * reads each character once.
+   * that escape it in JSON that sits inside a string.
+   *
+   * RFC 3986 allows `'` unencoded in a query, with `!$()*,;=:@`, and JavaScript's `encodeURIComponent` leaves
+   * `'()*!` as they are, so a value may hold a quote. A run of `'` is part of the value when the character after it
+   * is a letter, a digit, one of `._~%+/-`, or one of `!$*(@=`: `?key=ab'cd`, `pa'(ss)w0rd`, `Xk9'!mQ2`, `ab''cd`,
+   * and `''Xk9` at the start of a value. A `"`, which a query may not hold unencoded, is part of it only before a
+   * letter, a digit or one of `._~%+/-`. Any other quote ends the value: the quote that ends a string is followed by
+   * `,`, `)`, `;`, `:`, a bracket, `>`, `\`, `"`, whitespace or the end of the input. So does a quote before one of
+   * `,);:` inside a value (`ab',cd`): it cannot be told from the end of a string, as in `fetch('...?token=ab')`, and
+   * the value is redacted up to it.
+   *
+   * A value written in quotes (`'abc'`, `"abc"`, or `\"abc\"` in JSON inside a string), as a query string in prose
+   * or code may have it, starts after a single opening quote by the same rule, so the quote that ends the enclosing
+   * string, as in `"https://x.test/?token="}`, leaves the value empty. A loop that reads each character once.
    */
   private def queryValue(input: String, from: Int): (Int, Int) = {
     def isQuote(i: Int): Boolean = i < input.length && (input.charAt(i) == '"' || input.charAt(i) == '\'')
     def isUrlChar(i: Int): Boolean =
       i < input.length && (input.charAt(i).isLetterOrDigit || "._~%+/-".indexOf(input.charAt(i).toInt) >= 0)
+    // A character that may follow a `'` inside a value: one of a token, or a sub-delimiter a string never ends before.
+    def continuesAfterApostrophe(i: Int): Boolean =
+      isUrlChar(i) || (i < input.length && "!$*(@=".indexOf(input.charAt(i).toInt) >= 0)
     // The index after the run of backslashes at `i`, if any.
     def afterSlashes(i: Int): Int = {
       var j = i
       while (j < input.length && input.charAt(j) == '\\') j += 1
       j
     }
+    // The quote at `q` is part of the value: the index to read on from, or -1 when it ends the value.
+    def afterInnerQuote(q: Int): Int =
+      if (input.charAt(q) == '"') { if (isUrlChar(q + 1)) q + 1 else -1 }
+      else {
+        var r = q
+        while (r < input.length && input.charAt(r) == '\'') r += 1
+        if (continuesAfterApostrophe(r)) r else -1
+      }
     val quoteAt = afterSlashes(from)
-    val start   = if (isQuote(quoteAt) && isUrlChar(quoteAt + 1)) quoteAt + 1 else from
-    var end     = start
-    var done    = false
+    val opens =
+      isQuote(quoteAt) && (if (input.charAt(quoteAt) == '"') isUrlChar(quoteAt + 1)
+                           else continuesAfterApostrophe(quoteAt + 1))
+    val start = if (opens) quoteAt + 1 else from
+    var end   = start
+    var done  = false
     while (!done && end < input.length) {
       val c = input.charAt(end)
       if (c == '\\') {
         // A quote after backslashes ends the value as a bare quote does; other backslashes are the value's.
         val next = afterSlashes(end)
         if (!isQuote(next)) end = next
-        else if (isUrlChar(next + 1)) end = next + 1
-        else done = true
+        else {
+          val after = afterInnerQuote(next)
+          if (after >= 0) end = after else done = true
+        }
       } else if (c == '"' || c == '\'') {
         // A quote inside a token (`ab'cd`) is followed by more of it; the quote that ends a string is not.
-        if (isUrlChar(end + 1)) end += 1 else done = true
+        val after = afterInnerQuote(end)
+        if (after >= 0) end = after else done = true
       } else if (c == '&' || isRegexSpace(c)) {
         done = true
       } else {

@@ -204,7 +204,9 @@ Both are limits you should know about:
   body, and a credential there is not guaranteed to match a pattern: a secret that is not under a key (a
   key pasted into a prompt as prose), and JSON escaped twice (JSON inside a string inside a string,
   `\\\"api_key\\\": ...`) are not redacted, by decision ([#1576](https://github.com/llm4s/llm4s/issues/1576)):
-  a pattern cannot know what a secret is, and only one level of escaping is recognised. Do not rely on
+  a pattern cannot know what a secret is, and only one level of escaping is recognised. A URL query value
+  that holds a `'` before `,`, `)`, `;` or `:` (`?token=ab',cd`) is redacted only up to that quote, since it
+  cannot be told from the quote that ends a string, as in `fetch('...?token=ab')`. Do not rely on
   redaction to make the file safe to share.
 
 A sink you write is **not** redacted or truncated: it is handed the exchange exactly as the client built

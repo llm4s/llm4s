@@ -1983,8 +1983,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "password": "hunter2}SECRET", "keys": ["SECRETBB"]}}` the tail of `password` and the whole of `keys` were
   written in the clear. A key is now one run of the characters a query key can hold: no whitespace, quote, `?`,
   `&` or `=`. A value ends at `&`, at whitespace, or at the quote that ends the string the URL sits in, which is kept
-  with the backslashes that escape it. A quote followed by more of the value, as in `?key=ab'cd`, is part of it. A
-  quoted value (`?key='abc'`, or `\"abc\"` in JSON inside a string) is redacted inside its quotes, and an empty
+  with the backslashes that escape it. RFC 3986 allows `'` unencoded in a query, so a run of `'` followed by a
+  letter, a digit, one of `._~%+/-` or one of `!$*(@=` is part of the value (`?key=ab'cd`, `pa'(ss)w0rd`,
+  `Xk9'!mQ2`, `ab''cd`, and `''Xk9` at its start); a `"` is part of it only before a letter, a digit or one of
+  `._~%+/-`. One exception: a value that holds `'` before `,`, `)`, `;` or `:` (`?token=ab',cd`) is redacted only
+  up to that quote, and the text after it is written, because such a quote cannot be told from the one that ends a
+  string, as in `fetch('...?token=ab')`. A quoted value (`?key='abc'`, or `\"abc\"` in JSON inside a string) is redacted inside its quotes, and an empty
   value is left as it is. The value of a parameter that is kept is searched too, so `?next=/cb?token=...`, which
   was written in the clear, is redacted. The sensitive parameter names are unchanged; `?api_key=`, `&token=`,
   `?access_token=` and `?filter[api_key]=` are still redacted, and redacted JSON keeps its structure and still

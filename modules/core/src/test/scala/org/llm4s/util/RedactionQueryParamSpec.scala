@@ -155,6 +155,50 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
     Redaction.redact("GET /x?monkey=ab'cd&x=1 and ?monkey=ef\"gh ok") shouldBe s"GET /x?monkey=$R&x=1 and ?monkey=$R ok"
   }
 
+  it should "redact the whole of a sensitive query value with a quote before a sub-delimiter RFC 3986 allows" in {
+    Redaction.redact("GET https://h/login?user=bob&password=pa'(ss)w0rd&x=1") shouldBe
+      s"GET https://h/login?user=bob&password=$R&x=1"
+    Redaction.redact("https://h/login?password=Xk9'!mQ2zR") shouldBe s"https://h/login?password=$R"
+    Redaction.redact("?token=ab'*cd") shouldBe s"?token=$R"
+    Redaction.redact("?token=ab'@cd") shouldBe s"?token=$R"
+    Redaction.redact("?token=ab'=cd") shouldBe s"?token=$R"
+    Redaction.redact("?token=ab'$cd") shouldBe s"?token=$R"
+  }
+
+  it should "redact the whole of a sensitive query value in a JSON string with a quote before a sub-delimiter" in {
+    val out = Redaction.redact("""{"url": "https://h/login?password=Xk9'$mQ2zR"}""")
+    out shouldBe s"""{"url": "https://h/login?password=$R"}"""
+    parses(out) shouldBe true
+  }
+
+  it should "redact the whole of a sensitive query value with a run of quotes inside it or at its start" in {
+    Redaction.redact("?token=ab''cd") shouldBe s"?token=$R"
+    Redaction.redact("?password=''Xk9mQ2") shouldBe s"?password=$R"
+  }
+
+  it should "keep the quotes that end a string after a value with a run of quotes, and an empty quoted value" in {
+    Redaction.redact("{'url': 'https://h/x?token=ab''', 'n': 1}") shouldBe s"{'url': 'https://h/x?token=$R''', 'n': 1}"
+    Redaction.redact("set ?token='' here") shouldBe "set ?token='' here"
+  }
+
+  it should "keep the quote and the text after it when a quote that ends a string closes a value" in {
+    Redaction.redact("fetch('https://h/x?token=SECRETAA')") shouldBe s"fetch('https://h/x?token=$R')"
+    Redaction.redact("INSERT INTO t VALUES ('https://h/x?token=SECRETAA');") shouldBe
+      s"INSERT INTO t VALUES ('https://h/x?token=$R');"
+    Redaction.redact("{'url': 'https://h/x?token=SECRETAA', 'n': 1}") shouldBe
+      s"{'url': 'https://h/x?token=$R', 'n': 1}"
+    Redaction.redact("{'url': 'https://h/x?token=SECRETAA': 1}") shouldBe s"{'url': 'https://h/x?token=$R': 1}"
+  }
+
+  // The stated exception: a quote before `,`, `)`, `;` or `:` cannot be told from the quote that ends a string
+  // (`fetch('...?token=ab')`), so a value that holds one is redacted only up to it, and the rest is written.
+  it should "redact a sensitive query value only up to a quote before ',', ')', ';' or ':' (stated exception)" in {
+    Redaction.redact("?token=ab',cd") shouldBe s"?token=$R',cd"
+    Redaction.redact("?token=ab')cd") shouldBe s"?token=$R')cd"
+    Redaction.redact("?token=ab';cd") shouldBe s"?token=$R';cd"
+    Redaction.redact("?token=ab':cd") shouldBe s"?token=$R':cd"
+  }
+
   it should "redact a sensitive parameter of a URL nested in the value of a parameter that is kept" in {
     Redaction.redact("GET /login?next=/cb?token=SECRETAA&x=1") shouldBe s"GET /login?next=/cb?token=$R&x=1"
   }

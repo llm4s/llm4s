@@ -659,10 +659,10 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     redactedOnceAndTwice("""{'password': 'Basic dXNlcg=="}}hunter2secret'}""") shouldBe s"{'password': '$R'}"
     redactedOnceAndTwice("""{"content": "{'token': 'Bearer abc"]}hunter2secret'}"}""") shouldBe
       s"""{"content": "{'token': '$R'}"}"""
-    // A pass before that replaced a `'` - here the query parameter `&token=b'` - may have taken the quote that closed
-    // the credential, so the end of the string is not trusted and the value runs on as on main.
+    // The query parameter `&token=b'` ends at the quote that closes the credential, and the query pass keeps that
+    // quote (#1667), so the credential is redacted up to it and the text after it is kept.
     redactedOnceAndTwice("""level=info msg="{'password': 'Qx"]]9secret&token=b'}"""") shouldBe
-      s"""level=info msg="{'password': '$R"""
+      s"""level=info msg="{'password': '$R'}""""
     // With a `'` later in the document, an unclosed value runs on to it, as on main: over-redaction, never a leak.
     redactedOnceAndTwice(
       """{"content": "use 'password': ' carefully", "model": "gpt-4o", "note": "say 'hi'"}"""
