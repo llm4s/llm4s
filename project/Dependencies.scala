@@ -46,6 +46,12 @@ object Versions {
   // ZIO
   val zio = "2.1.16"
 
+  // Apache Pekko (Apache-2.0). 1.7.1 is the latest stable line; its class files are version 52 (Java 8), apart from 39
+  // classes of version 55 (Java 11) for the JDK 9+ Flow converters and fork-join pool, so it does not raise the JDK floor.
+  // Built with Scala 3.3 LTS, which the 3.7.1 compiler reads. Used by `llm4s-pekko` only; a frozen module may not
+  // resolve it. Never Akka: its licence is not Apache-2.0.
+  val pekko = "1.7.1"
+
   // AWS SDK
   val awsSdk        = "2.46.14"
   val opentelemetry = "1.63.0"
@@ -104,6 +110,12 @@ object Deps {
   val zioStreams = "dev.zio" %% "zio-streams"  % Versions.zio
   val zioTest    = "dev.zio" %% "zio-test"     % Versions.zio
   val zioTestSbt = "dev.zio" %% "zio-test-sbt" % Versions.zio
+
+  // Apache Pekko Streams
+  val pekkoStream = "org.apache.pekko" %% "pekko-stream" % Versions.pekko
+  // Test only: `TestSink` / `TestSource` probes and the actor testkit that `llm4s-pekko`'s specs use.
+  val pekkoStreamTestkit = "org.apache.pekko" %% "pekko-stream-testkit" % Versions.pekko
+  val pekkoTestkit       = "org.apache.pekko" %% "pekko-testkit"        % Versions.pekko
 
   // AWS SDK
   val awsS3             = "software.amazon.awssdk" % "s3"             % Versions.awsSdk

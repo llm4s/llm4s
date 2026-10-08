@@ -257,6 +257,7 @@ lazy val llm4s = (project in file("."))
     providerTestkit,
     llm4sEffect,
     llm4sZio,
+    llm4sPekko,
     javaApi,
     springBootStarter,
     samples,
@@ -424,6 +425,29 @@ lazy val llm4sZio = (project in file("modules/llm4s-zio"))
       Deps.zioTestSbt % Test
     ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
+// `llm4s-pekko` (#1457) is the third streaming bridge, after `llm4s-effect` (fs2) and `llm4s-zio` (ZStream): the
+// same `Agent` events and `LLMClient.streamComplete` chunks as an Apache Pekko Streams `Source`. It depends on core,
+// the agent runtime and `pekko-stream` only. Pekko stays out of every frozen module (`FrozenDependencies` bans
+// `org.apache.pekko` and Akka there).
+lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
+  .dependsOn(core, agent)
+  .settings(
+    name := "llm4s-pekko",
+    description := "Apache Pekko Streams for LLM4S: LLM responses and agent runs as Sources, with backpressure and cancellation.",
+    commonSettings,
+    // Measured 97.54% statement and 88.24% branch coverage (`sbt coverage llm4sPekko/test llm4sPekko/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.pekkoStream,
+      Deps.scalatest          % Test,
+      Deps.pekkoStreamTestkit % Test,
+      Deps.pekkoTestkit       % Test
+    )
   )
 
 lazy val core = (project in file("modules/core"))
@@ -1136,7 +1160,8 @@ lazy val samples = (project in file("modules//samples"))
     agent,
     agentTools,
     llm4sEffect,
-    llm4sZio
+    llm4sZio,
+    llm4sPekko
   )
   .settings(
     name := "llm4s-samples",
@@ -1465,6 +1490,7 @@ lazy val docs = (project in file("modules/docs"))
     knowledgegraphNeo4j,
     llm4sEffect,
     llm4sZio,
+    llm4sPekko,
     javaApi,
     springBootStarter
   )
@@ -1507,6 +1533,7 @@ lazy val docs = (project in file("modules/docs"))
         (knowledgegraphNeo4j / Compile / sources).value ++
         (llm4sEffect / Compile / sources).value ++
         (llm4sZio / Compile / sources).value ++
+        (llm4sPekko / Compile / sources).value ++
         (javaApi / Compile / sources).value ++
         (springBootStarter / Compile / sources).value
     },

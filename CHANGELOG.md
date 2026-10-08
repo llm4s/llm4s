@@ -23,6 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decide - `encodeThinking` (given the turn's blocks), `thinkingDetails` and `decodeThinkingDetails` - and drop it by
   default. The agent's tool loop stores the completion's message unchanged, so a run sends a tool-call turn's
   thinking in the call after the tool results, and later turns read it back from the checkpoint.
+- **`llm4s-pekko`: LLM responses and agent runs as Apache Pekko Streams `Source`s**
+  ([#1457](https://github.com/llm4s/llm4s/issues/1457)): a new Beta module (`modules/llm4s-pekko`, package
+  `org.llm4s.pekko`) that depends on `llm4s-core`, `llm4s-agent` and `pekko-stream` 1.7 (Apache-2.0; Akka is not
+  used). `LLMClientPekko(client).streamComplete(conversation)` is a `Source[StreamedChunk, NotUsed]` and `complete` a
+  `Future`; `AgentPekko(agent).stream`, `streamResume` and `streamRecover` are `Source[AgentStreamItem, NotUsed]` (each
+  event of the turn, then `Done(result)`) and `run`, `continueConversation`, `recover` and `resume` are `Future`s, as
+  `AgentIO` and `AgentZ` offer for fs2 and ZIO. The provider call blocks, so each stream runs it on a daemon thread of its
+  own and hands items over through a bounded buffer: a consumer that lags blocks the provider's thread (nothing is
+  dropped), and cancelling the stream interrupts it. An agent turn is cancelled when its stream is, a slow consumer gets
+  a `StreamEvent.LiveGap` instead of holding the run up, and an `LLMError` is carried by an `LLMException`. A `Future`
+  cannot be cancelled. `FrozenDependencies` now bans `org.apache.pekko` and `com.typesafe.akka` from frozen modules.
+  See [Apache Pekko Integration](docs/guide/pekko.md).
 - **`llm4s-speech`: opt-in MP3 output for cloud TTS** ([#1307](https://github.com/llm4s/llm4s/issues/1307)):
   `TTSOptions(outputFormat = AudioFormat.Mp3)` makes the OpenAI, ElevenLabs and Azure clients request the
   service's MP3 and return its bytes untouched. PCM stays the default. `AudioFormat.Mp3` is a new case
