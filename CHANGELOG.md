@@ -359,6 +359,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case is still a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`;
   new `GraphError` and `RunEvent` cases break exhaustive matches. Design:
   `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
+- **CI re-runs a step that failed on a transient download error, and nothing else**:
+  `scripts/retry-on-transient-network.sh` wraps the `Check formatting` step (`scalafmt` fetches scalafmt-core at
+  run time) and the MiMa step. It re-runs the command at most twice (`RETRY_MAX`, capped at 5; waits of 15 s and
+  30 s, `RETRY_BACKOFF_SECONDS`, capped at 120 s), and only when an `[error]` line carries a network marker
+  (`failed to download [`, `Connection reset`, `Read timed out`, `UnknownHostException`, ...). A formatting error,
+  a failing test, a compile error, a missing dependency or a marker on any other line is never retried, and the
+  last attempt's own exit status is the step's, so the wrapper cannot turn a failure into a pass. Over three days
+  (300 runs) 2 of 267 `Quick Checks` runs failed this way, both with a warm 450 MB sbt cache restored, plus one MiMa
+  run; each needed a manual re-run. `scripts/test-retry-on-transient-network.sh`, run in `quick-checks`, covers the
+  retry bounds and every case that must not be retried against a fake command, with no network.
 - **CI verifies the documented support matrix** ([#967](https://github.com/llm4s/llm4s/issues/967)):
   `scripts/check-doc-support.sh`, in the `quick-checks` job, fails when the docs say something the build does not
   do. The build's side comes from sbt itself: a new `dumpBuildModel <file>` command (`project/BuildModel.scala`)
@@ -636,6 +646,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than with a foreign signature. Pruning, compression, summarisation, an edit or an inserted message anywhere earlier therefore
   unseals every later turn, whoever made the change; `hasSealedThinking` reports the state. Token estimates
   (`ConversationTokenCounter`, the agent's default pruning counter) now count thinking, which providers resend.
+- **Every published module's POM carries a one-sentence description, and the POM URLs are normalised**
+  ([#1455](https://github.com/llm4s/llm4s/issues/1455)): each `llm4s-*` artifact used to publish its own name as its
+  `<description>` (`llm4s-core` described as "llm4s-core"); the descriptions now live in one table,
+  `project/PomDescriptions.scala`, and `sbt publishedArtifactsCheck` fails for a published module without its own
+  distinct description. The POM `<url>` is `https://llm4s.org` (it was the GitHub organization page), and `<scm>` is
+  `https://github.com/llm4s/llm4s` with an `https` connection string (the URL had a trailing slash and the connection
+  was an SSH form). The organization URL and every `<dependencies>` block are unchanged. Maven Central search and IDEs
+  show the descriptions; Scaladex ranks by the GitHub description and topics, which a maintainer sets in the
+  repository settings.
 - **`llm4s-anthropic`: tool calls and results as content blocks** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
   an assistant turn's tool calls go to Anthropic as `tool_use` blocks after its text, and each `ToolMessage` as a
   `tool_result` block, consecutive results in one user turn. Before, a tool-call turn was dropped and its results
@@ -2000,6 +2019,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or format outside those bounds used to get a wrong "success" or a generic `ProcessingError` and now gets a
   `ValidationError`; the output is shorter by the converter's padding, and the source's last fraction of a
   millisecond (at most 0.3 ms) is no longer in it.
+- **The docs deploy is no longer rejected on a release tag** ([#1152](https://github.com/llm4s/llm4s/issues/1152)):
+  `release.yml` called `pages.yml` as a reusable workflow, which runs on the caller's ref, the release tag, and the
+  `github-pages` environment allows deployments only from `main`, so the deploy was rejected before it started
+  ("Tag "v0.4.1" is not allowed to deploy to github-pages") and the release run ended red after a successful
+  publish. The release's `docs` job now dispatches `pages.yml` on `main` with the tag as a new `ref` input
+  (`scripts/dispatch-docs-deploy.sh`), so the run, and the deploy, are on `main`, while the build still checks out
+  the tag, so the version and the install snippets are the release's. The job waits for that run and fails when the
+  deploy fails, keeping the order #1147 built (docs only after the artifacts are on Maven Central and the GitHub
+  Release exists). No repository setting is needed; an environment rule for `v*` tags remains an equally valid
+  alternative. `pages.yml` is no longer callable with `workflow_call`, and a manual run takes an optional release
+  tag. A pushed docs change on `main` deploys exactly as before. Not yet exercised by a real release: the next one
+  is its first run (see `docs/reference/release.md` for a way to check it sooner).
 - **`RAG.refresh` emptied the index when its loader failed, and `RAG.sync` deleted documents it
   could not read** (follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236)).
   `refresh` and `refreshAsync` cleared the index before reading the loader, so a listing

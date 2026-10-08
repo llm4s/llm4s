@@ -401,6 +401,10 @@ BREAKING CHANGE: If applicable
 
 Types: `[FEATURE]`, `[BUG FIX]`, `[ENHANCEMENT]`, `[REFACTOR]`, `[DOCS]`, `[TEST]`, `[PERF]`
 
+## Reporting security issues
+
+Do not report a vulnerability in a public issue or pull request. Follow [SECURITY.md](SECURITY.md).
+
 ## Getting Help
 
 - **Issues:** [GitHub Issues](https://github.com/llm4s/llm4s/issues)
