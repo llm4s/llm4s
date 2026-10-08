@@ -280,10 +280,14 @@ class AgentKtStreamTest {
     private val mockJAgent = mockk<JAgent>()
     private val mocked = AgentKt(mockJAgent)
 
-    /** A started stream whose listener is driven by [drive] on a thread of its own, as the facade's is. */
+    /**
+     * A started stream whose listener is driven by [drive] on a thread of its own, as the facade's is; its
+     * `await()` returns once [drive] has, as the facade's does.
+     */
     private fun started(handle: AgentStream, drive: (AgentStreamListener) -> Unit): (AgentStreamListener) -> LlmResult<AgentStream> =
         { listener ->
-            thread { drive(listener) }
+            val driver = thread { drive(listener) }
+            every { handle.await() } answers { driver.join(); LlmResult.success(mockk()) }
             LlmResult.success(handle)
         }
 
@@ -349,6 +353,7 @@ class AgentKtStreamTest {
         val delivered = CountDownLatch(1)
         val handle = mockk<AgentStream>()
         every { handle.cancel() } answers { cancelled.countDown() }
+        every { handle.await() } answers { delivered.await(seconds, TimeUnit.SECONDS); LlmResult.success(mockk()) }
         every { mockJAgent.stream("t", "q", any()) } answers {
             val listener = thirdArg<AgentStreamListener>()
             entered.countDown()

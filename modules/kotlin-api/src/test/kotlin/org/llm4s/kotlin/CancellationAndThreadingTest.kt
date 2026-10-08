@@ -86,6 +86,11 @@ class CancellationAndThreadingTest {
         val cancelled = CountDownLatch(1)
         val handle = mockk<AgentStream>()
         every { handle.cancel() } answers { cancelled.countDown() }
+        // as the facade's: returns once delivery ends, which here only cancelling the turn does
+        every { handle.await() } answers {
+            cancelled.await(seconds, TimeUnit.SECONDS)
+            LlmResult.failure(org.llm4s.error.CancelledError.apply("run", scala.Option.empty()))
+        }
         // the turn never ends on its own: only cancelling it does
         every { mockJAgent.stream(any(), "q", any()) } answers {
             started.countDown()

@@ -2005,6 +2005,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collects the turn's discarded events on `Dispatchers.IO`, not the caller's dispatcher (`Dispatchers.Main`). Results and failures are otherwise unchanged - the same
   `JAgentResult`, and `LLMException` with the same message and cause. No public signature changes; Java's
   blocking `JAgent` methods are unchanged.
+- **Kotlin: a stream whose listener fails fatally ends the `AgentKt` call instead of suspending it forever**
+  ([#1671](https://github.com/llm4s/llm4s/issues/1671), Kotlin API). `stream`, `streamResume`, `streamRecover` -
+  and the `run`, `continueConversation`, `resume` and `recover` built on them - closed their channel only from
+  the Java facade listener's `onComplete` or `onError`. When delivery dies of a fatal error (one `Safety` does not
+  capture: a `VirtualMachineError` such as `OutOfMemoryError` or `StackOverflowError`, a `LinkageError`),
+  `AgentStream` skips that callback and `await()` reports "the stream's listener failed fatally", but nothing
+  closed the channel, so the collector suspended until something outside cancelled it. The Kotlin side now
+  closes the channel from `AgentStream.await()`'s outcome, on a virtual thread, once delivery ends; the call
+  throws `LLMException` with the facade's report (the fatal error itself ended the facade's delivery thread and
+  goes to its uncaught-exception handler). A normal end is unchanged. No public signature changes; the Java
+  facade is unchanged.
 - **`llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama`: a deep or malformed model listing is a `Left`, not an
   exception** ([#1660](https://github.com/llm4s/llm4s/issues/1660)). `AnthropicModelLister`,
   `GeminiModelLister` and `OllamaModelLister` read the listing with the unbounded `HttpResponse.toJson` and

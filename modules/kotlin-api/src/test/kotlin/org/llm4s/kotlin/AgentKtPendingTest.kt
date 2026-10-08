@@ -1,5 +1,13 @@
 package org.llm4s.kotlin
 
+import io.mockk.every
+import io.mockk.mockk
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.toList
+import org.llm4s.agent.graph.StreamEvent
+import org.llm4s.javaapi.AgentStreamListener
+import org.llm4s.javaapi.JAgent
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -438,5 +446,75 @@ class AgentKtPendingTest {
     fun `pending is empty for a completed turn`() = runBlocking {
         val done = agentOf({ completion("hi") }).run("hi")
         assertTrue(AgentKt.pending(done).isEmpty())
+    }
+
+    // ---- a listener that fails fatally (#1671) -------------------------------------------------
+
+    /**
+     * [listener], but its `onEvent` - or, when [atEnd], only its `onComplete` - first throws a fatal error, one
+     * the facade's `Safety` does not capture: the facade's delivery thread dies of it and skips the terminal callback.
+     */
+    private class FailsFatally(private val listener: AgentStreamListener, private val atEnd: Boolean) : AgentStreamListener {
+        override fun onEvent(event: StreamEvent) = if (atEnd) listener.onEvent(event) else throw StackOverflowError("listener")
+        override fun onComplete(result: JAgentResult) = throw StackOverflowError("listener")
+        override fun onError(error: LlmException) = listener.onError(error)
+    }
+
+    /** [real], every stream's listener wrapped in [FailsFatally]. */
+    private fun failingFacade(real: JAgent, atEnd: Boolean): AgentKt {
+        val facade = mockk<JAgent>()
+        every { facade.stream(any(), any(), any()) } answers { real.stream(firstArg(), secondArg(), FailsFatally(thirdArg(), atEnd)) }
+        every { facade.streamResume(any(), any(), any()) } answers { real.streamResume(firstArg(), secondArg(), FailsFatally(thirdArg(), atEnd)) }
+        every { facade.streamRecover(any(), any()) } answers { real.streamRecover(firstArg(), FailsFatally(secondArg(), atEnd)) }
+        return AgentKt(facade)
+    }
+
+    private fun assertFatal(ex: LLMException) =
+        assertTrue(ex.message.orEmpty().contains("failed fatally"), "the facade's report of the fatal listener: ${ex.message}")
+
+    @Test
+    fun `run, continueConversation and a stream end with LLMException when the listener fails fatally, not suspend`() = runBlocking<Unit> {
+        val real = JLlm4s.wrapAgent(scalaAgentOf())
+        val bad = failingFacade(real, atEnd = false)
+        withTimeout(seconds * 1000) {
+            val ex = assertFailsWith<LLMException> { bad.run("go") }
+            assertFatal(ex)
+            assertIs<org.llm4s.error.ValidationError>(assertIs<LlmException>(ex.cause).error())
+            val first = AgentKt(real).run("go")
+            assertFatal(assertFailsWith<LLMException> { bad.continueConversation(first, "more") })
+            assertFatal(assertFailsWith<LLMException> { bad.stream("fatal-stream", "go").toList() })
+        }
+    }
+
+    @Test
+    fun `resume and recover end with LLMException when the listener fails fatally, and the thread still recovers`() = runBlocking<Unit> {
+        // after the suspending call, every model call parks until the turn is cancelled - while blocking is set
+        val blocking = AtomicBoolean(true)
+        val gate: () -> Either<LLMError, Completion> = {
+            if (blocking.get()) parking(CountDownLatch(1), CountDownLatch(1))() else completion("recovered")
+        }
+        val real = JLlm4s.wrapAgent(scalaAgentOf({ completion("", listOf(call("c1", "deploy", "prod"))) }, *Array(8) { gate }))
+        val good = AgentKt(real)
+        val bad = failingFacade(real, atEnd = false)
+        withTimeout(seconds * 1000) {
+            val first = good.run("deploy")
+            val id = AgentKt.pending(first).single().id()
+            assertFatal(assertFailsWith<LLMException> { bad.resume(first.threadId(), listOf(Answer.approve(id))) })
+            assertFatal(assertFailsWith<LLMException> { bad.recover(first.threadId()) })
+            blocking.set(false)
+            assertEquals(Optional.of("recovered"), good.recover(first.threadId()).answer())
+        }
+    }
+
+    @Test
+    fun `a listener whose onComplete fails fatally ends the call with LLMException, not suspend`() = runBlocking<Unit> {
+        val bad = failingFacade(JLlm4s.wrapAgent(scalaAgentOf()), atEnd = true)
+        withTimeout(seconds * 1000) {
+            assertFatal(assertFailsWith<LLMException> { bad.run("go") })
+            val events = mutableListOf<AgentStreamItem>()
+            assertFatal(assertFailsWith<LLMException> { bad.stream("fatal-end", "go").collect { events.add(it) } })
+            // every event reached the flow; only the result, whose delivery failed, did not
+            assertTrue(events.isNotEmpty() && events.all { it is AgentStreamItem.Event })
+        }
     }
 }

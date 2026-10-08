@@ -129,7 +129,9 @@ class AgentKt internal constructor(private val underlying: JAgent) {
      * [Flow]: each collection starts the turn, emits every event of it, then [AgentStreamItem.Done].
      *
      * A refused start (a blank query, a busy thread) or a failed turn throws [LLMException], as does a
-     * turn that ends without a terminal event (a crash). Cancelling the collection - its scope, a
+     * turn that ends without a terminal event (a crash), or whose delivery to the flow fails fatally (a
+     * `VirtualMachineError` such as `OutOfMemoryError`): that error ends the facade's delivery thread, and the
+     * flow ends with the facade's report of it rather than suspending. Cancelling the collection - its scope, a
      * `take(n)`, a timeout - cancels the turn and returns once it has ended, leaving the thread for
      * [streamRecover]. A collector too slow for the stream's buffer never holds the turn up: it loses
      * live events (text deltas, tool progress) and receives one `StreamEvent.LiveGap` with their count
@@ -153,7 +155,8 @@ class AgentKt internal constructor(private val underlying: JAgent) {
     /**
      * Starts the turn with a listener that hands each event to a channel - blocking the stream's own
      * thread, never the turn, when the channel is full - and closes it with the turn's outcome, then emits
-     * what the channel receives. The start is not cancellable, so a turn is never started and forgotten.
+     * what the channel receives; if delivery ends without either callback (the listener failed fatally), the
+     * stream's `await()` outcome closes it. The start is not cancellable, so a turn is never started and forgotten.
      * However the collection ends - `Done`, an error, or cancelled - the turn is then cancelled and awaited
      * (a no-op once it has ended), off the caller's dispatcher. [failure] is an error's message when it has
      * none of its own.
@@ -180,9 +183,15 @@ class AgentKt internal constructor(private val underlying: JAgent) {
         // cancelled meanwhile, and a turn it started must be cancelled all the same
         val started = AtomicReference<AgentStream?>(null)
         try {
-            withContext(NonCancellable + Dispatchers.IO) {
+            val stream = withContext(NonCancellable + Dispatchers.IO) {
                 start(listener).also { if (it.isSuccess) started.set(it.get()) }
             }.unwrap(failure, cancellation = false)
+            // a listener that fails fatally (a VirtualMachineError, a LinkageError) skips its terminal callback, so
+            // nothing would close the channel: await() still returns once delivery ends, and closes it if still open
+            // (a no-op after onComplete or onError). A virtual thread, so a long turn holds no pooled thread.
+            Thread.ofVirtual().name("llm4s-kotlin-stream-end").start {
+                items.close(unterminated(stream.await(), failure))
+            }
             emitAll(items)
         } finally {
             // releases a listener blocked on a full channel nobody reads any more
@@ -190,6 +199,15 @@ class AgentKt internal constructor(private val underlying: JAgent) {
             started.get()?.let { withContext(NonCancellable + Dispatchers.IO) { it.cancel() } }
         }
     }
+
+    /**
+     * What ends a flow whose listener never closed its channel, from the stream's [outcome]: its error (the facade's
+     * "listener failed fatally"), or - for a turn that completed but whose `onComplete` failed fatally - an
+     * [LLMException] saying so. The fatal error itself ended the facade's delivery thread and is not seen here.
+     */
+    private fun unterminated(outcome: LlmResult<JAgentResult>, failure: String): RuntimeException =
+        if (outcome.isSuccess) LLMException("$failure: the stream's listener failed fatally before it ended the flow")
+        else outcome.getError().toKotlin(failure, cancellation = false)
 
     companion object {
         /**

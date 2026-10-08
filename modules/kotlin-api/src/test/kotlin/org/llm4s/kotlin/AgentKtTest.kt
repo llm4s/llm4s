@@ -20,10 +20,15 @@ class AgentKtTest {
     private val mockJAgent = mockk<JAgent>()
     private val agent = AgentKt(mockJAgent)
 
-    /** The facade's stream start, as [JAgent.stream] answers it: [drive] runs the listener from a thread of its own. */
+    /**
+     * The facade's stream start, as [JAgent.stream] answers it: [drive] runs the listener from a thread of its own,
+     * and `await()` returns once it has, as the facade's does.
+     */
     private fun started(drive: (AgentStreamListener) -> Unit): (AgentStreamListener) -> LlmResult<AgentStream> = { listener ->
-        thread { drive(listener) }
-        LlmResult.success(mockk<AgentStream>(relaxed = true))
+        val driver = thread { drive(listener) }
+        val handle = mockk<AgentStream>(relaxed = true)
+        every { handle.await() } answers { driver.join(); LlmResult.success(mockk()) }
+        LlmResult.success(handle)
     }
 
     @Test

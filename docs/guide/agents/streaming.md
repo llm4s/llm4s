@@ -222,7 +222,10 @@ runs the turn, emitting `AgentStreamItem.Event(event)` for each event, then
 `AgentStreamItem.Done(result)`, a `JAgentResult`. A refused start or a failed run throws `LLMException`. Cancelling
 the collection - its scope, `take(n)`, `withTimeout` - cancels the turn; starting and cancelling it
 run on `Dispatchers.IO`. A turn cancelled by anything but the collection fails it with
-`LLMException`, as in fs2 and ZIO.
+`LLMException`, as in fs2 and ZIO. So does a delivery that dies of a fatal error (an
+`OutOfMemoryError`, a `LinkageError`): the Java listener then hears no terminal callback, and the flow -
+or `run`, `continueConversation`, `resume` or `recover` - ends with the facade's report of it instead of
+suspending.
 
 ```kotlin
 val agent = Llm4s.createAgent(client, ToolRegistry.empty(), streaming = true)
