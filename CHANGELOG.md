@@ -1988,7 +1988,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Python dict or a JavaScript literal in a prompt - were written in the clear, and a single-quoted leaf under
   a double-quoted key, `{"token": ['abc123']}`, was mangled rather than redacted (`['abc"[REDACTED]"']`,
   the digits taken for a number). The leaves under a single-quoted credential key are now replaced like the
-  double-quoted ones, and a leaf may be double- or single-quoted whatever the key's quote.
+  double-quoted ones, and a leaf may be double- or single-quoted whatever the key's quote. Inside a string a
+  single-quoted container ends where the string does, so a `'token': [` that a message merely mentions
+  (`{"content": "see 'token': [ for details", "api_key": "..."}`) does not take the fields after it; a
+  `\"`-quoted leaf under a single-quoted key inside a string is left, by decision, since a `"` there may be
+  the end of a string inside the string. Outside a string, a bare value under a credential key (`token:
+  [abc]`, an unquoted word as well as a number) is replaced too, so that a walk misled by a stray quote
+  before the document leaves nothing readable; `true`, `false`, `null`, Python's `True`, `False`, `None`
+  and an unquoted key are kept.
 - **`llm4s-java-api`: `InterruptedException` is never thrown, and the Javadoc says so**
   ([#1591](https://github.com/llm4s/llm4s/issues/1591)): `catch (InterruptedException e)` around
   `JLlmClient.complete` or `JAgent.run` does not compile ("never thrown in body of corresponding try statement"),

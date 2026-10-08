@@ -164,10 +164,13 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   payload leaves it), numbers under such a key (including exponent forms such as `1e10`, and inside a
   string too; the number is written back as the string `"[REDACTED]"`, so the JSON still parses), arrays
   and objects under such a key (`{"token": ["..."]}`, `{"credentials": {"user": "...", "pass": "..."}}`:
-  every string and number leaf under the key is replaced, however deep, also inside a string and when
-  the key or the leaves are single-quoted, as a Python dict is, `{'token': ['...']}`; the
-  brackets, the keys of nested objects, `true`, `false` and `null` are kept, so the JSON still parses and
-  keeps its shape), `key=value` pairs and quoted
+  every leaf under the key is replaced, however deep - strings, numbers and, outside a string, bare
+  words - also inside a string and when the key or the leaves are single-quoted, as a Python dict is,
+  `{'token': ['...']}`; the brackets, the keys of nested objects, `true`, `false` and `null` are kept, so
+  the JSON still parses and keeps its shape; inside a string a single-quoted container ends where the
+  string does, so a `'token': [` that a message merely mentions does not take the fields after it, and
+  a `\"`-quoted leaf under a single-quoted key there, `\"{'token': [\\\"...\\\"]}\"`, is left, since a
+  `"` inside a string may be the end of a string inside it), `key=value` pairs and quoted
   `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,
   `spring.datasource.password=...`, `PASSWORD="..."`), `key: value` header lines (for example
   `x-api-key: ...`), and strings shaped like known provider API keys (for example `sk-` keys). A quoted
