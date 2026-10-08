@@ -61,8 +61,9 @@ survives cancellation of the graph run: the node's task is interrupted, but the 
 
 Change: when `await()` returns `Left(e: CancelledError)`, `run` calls the `AgentRun`'s `cancel()` and
 then returns that same `Left`. The interrupt flag stays set (§4.4: never clear the flag on a path that
-returns to the caller). `continueConversation` and the other `run` overloads go through this method,
-so they get the same behaviour. `start`/`AgentRun.await` are unchanged: a caller holding the
+returns to the caller). `continueConversation`, `runMultiTurn` and the other `run` overloads go through this method,
+so they get the same behaviour. `recover` and `resume` block the same way (`startRecover`/`startResume`
+then `await`), so they share the rule, through one private helper. `start`/`AgentRun.await` are unchanged: a caller holding the
 `AgentRun` decides for itself whether to cancel it.
 
 `cancel()` on a run that has already finished is a no-op, because `stop` records a cause only if none
@@ -134,9 +135,9 @@ await) and `demo`.
    `GraphRuntime`, including any admission or closing commit.
 4. **Cancellation:** a script whose skeptic blocks until interrupted. `RunHandle.cancel()` ends the
    graph run `RunResult.Failed(_, GraphError.Cancelled(...))`, and the skeptic agent's inner run is
-   cancelled too: its blocking model call observes the interrupt, and the skeptic agent's own thread
-   is then refused `IncompleteRun`, not `ThreadBusy`. The node runs its agent on a `ThreadId` it
-   derives from the graph run, so the spec can find it. This is what
+   cancelled too: its blocking model call observes the interrupt. Before §2 it would sleep on
+   after the graph run had ended. The `IncompleteRun` check is §2's agent-level test; the recipe's
+   agents are internal to it. This is what
    replaces `CancellationToken`.
 5. **The demo** prints the answer.
 
