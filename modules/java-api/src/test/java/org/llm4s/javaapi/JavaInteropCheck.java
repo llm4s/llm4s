@@ -4,8 +4,15 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.llm4s.agent.AgentResult;
+import org.llm4s.agent.events.AgentEvents;
+import org.llm4s.agent.graph.StreamEvent;
 import org.llm4s.error.LLMError;
 import org.llm4s.llmconnect.model.Conversation;
 
@@ -70,6 +77,43 @@ public final class JavaInteropCheck {
       // (known gap, see the PR review).
     }
     return log;
+  }
+
+  /**
+   * Streams a turn from Java: a lambda as the listener, a thread id as a String, events read with
+   * StreamEvents and instanceof, the result from await, and a cancel on the finished stream. The
+   * listener holds its first event until {@code gate} opens.
+   */
+  public static List<String> streaming(JAgent agent, CountDownLatch gate) {
+    List<String> log = new CopyOnWriteArrayList<>();
+    AtomicBoolean first = new AtomicBoolean(true);
+    AgentStreamListener listener =
+        event -> {
+          if (first.getAndSet(false)) {
+            awaitQuietly(gate);
+          }
+          if (event instanceof StreamEvent.Durable) {
+            log.add("durable");
+          } else if (event instanceof StreamEvent.LiveGap) {
+            log.add("gap:" + ((StreamEvent.LiveGap) event).dropped());
+          }
+          StreamEvents.decode(AgentEvents.TextDelta(), event).ifPresent(d -> log.add("delta:" + d.text()));
+        };
+    AgentStream stream = agent.stream("java-thread", "hi", listener).get();
+    LlmResult<AgentResult> result = stream.await();
+    stream.cancel();
+    log.add("answer:" + result.get().answer().get());
+    log.add("refused:" + agent.stream("java-thread-2", " ", listener).isFailure());
+    log.add("resume-refused:" + agent.streamResume("java-thread", List.of(Answer.approve("no-such-interrupt")), listener).isFailure());
+    return log;
+  }
+
+  private static void awaitQuietly(CountDownLatch gate) {
+    try {
+      gate.await(60, TimeUnit.SECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   /** Failure handling from Java: getOrNull, getError, Optional, CompletableFuture, get() throwing. */

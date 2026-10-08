@@ -7,7 +7,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.springframework.boot.actuate.health.Status
+import org.springframework.boot.actuate.health.{ Health, Status }
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.{ Bean, Configuration }
@@ -23,7 +23,7 @@ import java.util.concurrent.{
   ThreadPoolExecutor,
   TimeUnit
 }
-import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference }
 import scala.jdk.CollectionConverters._
 
 object AsyncAndHealthSpec {
@@ -401,16 +401,99 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "be DOWN when the provider throws instead of answering, and never print the settings secrets" in {
-    val provider = new FakeProvider(_ => throw new InterruptedException(s"stopped $secret"))
+  it should "be DOWN when the provider throws a fatal error instead of answering, and never print the settings secrets" in {
+    // JLlmClient captures a non-fatal throwable and an InterruptedException as failed results; a fatal error
+    // (a LinkageError here) still escapes, so the executor's future fails and the indicator describes its cause
+    val provider = new FakeProvider(_ => throw new LinkageError(s"stopped $secret"))
     withPool(pool(1)) { ex =>
       val ind = indicator(provider, probe = true, ex)
       val h   = ind.health()
       h.getStatus shouldBe Status.DOWN
-      (h.getDetails.get("error").toString should not).include(secret)
+      h.getDetails.get("probe") shouldBe "failed"
+      val error = h.getDetails.get("error").toString
+      error should include("LinkageError")
+      (error should not).include(secret)
     }
     (HealthSettings("openai", "m", true, Duration.ofSeconds(1), Duration.ofSeconds(1), Seq(secret)).toString should not)
       .include(secret)
+  }
+
+  it should "be DOWN, with the message redacted, when the provider throws InterruptedException (#1591)" in {
+    // JLlmClient.complete never throws it: the probe gets a CancelledError result, which is reported like any
+    // other failed result (its message names the operation, not the exception's text)
+    val provider = new FakeProvider(_ => throw new InterruptedException(s"stopped $secret"))
+    withPool(pool(1)) { ex =>
+      val h = indicator(provider, probe = true, ex).health()
+      h.getStatus shouldBe Status.DOWN
+      h.getDetails.get("probe") shouldBe "failed"
+      val error = h.getDetails.get("error").toString
+      error should include("cancelled")
+      (error should not).include(secret)
+      provider.calls.get shouldBe 1
+    }
+  }
+
+  it should "be DOWN, not throw, with the interrupt flag kept, when the thread checking health is interrupted while the probe runs" in {
+    // Actuator shutting down, or a management pool interrupting its worker, interrupts the thread inside
+    // health() while it waits on the probe. The contract is that of JLlmClient: never an InterruptedException
+    // out of health(), the flag left set for the caller, and the probe call itself cancelled.
+    val provider = new FakeProvider(p => { p.blockUntilReleasedOrInterrupted(); ok("late") })
+    withPool(pool(1)) { ex =>
+      val ind       = indicator(provider, probe = true, ex)
+      val health    = new AtomicReference[Health]()
+      val thrown    = new AtomicReference[Throwable]()
+      val flagAfter = new AtomicBoolean(false)
+      val checker = new Thread(
+        () =>
+          try health.set(ind.health())
+          catch { case t: Throwable => thrown.set(t) }
+          finally flagAfter.set(Thread.currentThread().isInterrupted),
+        "health-checker"
+      )
+      checker.start()
+      provider.entered.await(secs, TimeUnit.SECONDS) shouldBe true
+      checker.interrupt()
+      checker.join(secs * 1000)
+      checker.isAlive shouldBe false
+      withClue(s"health() threw ${thrown.get}: ") {
+        thrown.get shouldBe null
+      }
+      val h = health.get()
+      h.getStatus shouldBe Status.DOWN
+      h.getDetails.get("probe") shouldBe "cancelled"
+      h.getDetails.get("error").toString should include("interrupted")
+      flagAfter.get shouldBe true
+      // the abandoned probe is cancelled rather than left running on the executor
+      provider.interrupted.await(secs, TimeUnit.SECONDS) shouldBe true
+      provider.calls.get shouldBe 1
+    }
+  }
+
+  it should "not cache a cancelled probe: the next uninterrupted check within the TTL probes again (#1642)" in {
+    // A cancellation is a fact about the interrupted caller's thread, not about the provider: unlike a timeout
+    // or a failure it must not be served from the cache to the next caller, who gets the provider's real state.
+    val provider = new FakeProvider(p =>
+      if (p.calls.get == 1) { p.blockUntilReleasedOrInterrupted(); ok("late") }
+      else ok("pong")
+    )
+    withPool(pool(1)) { ex =>
+      val ind     = indicator(provider, probe = true, ex)
+      val health  = new AtomicReference[Health]()
+      val checker = new Thread(() => health.set(ind.health()), "health-checker")
+      checker.start()
+      provider.entered.await(secs, TimeUnit.SECONDS) shouldBe true
+      checker.interrupt()
+      checker.join(secs * 1000)
+      checker.isAlive shouldBe false
+      health.get().getDetails.get("probe") shouldBe "cancelled"
+      provider.interrupted.await(secs, TimeUnit.SECONDS) shouldBe true
+      // same TTL window, an uninterrupted thread: the provider is asked again and answers
+      val h = ind.health()
+      provider.calls.get shouldBe 2
+      h.getStatus shouldBe Status.UP
+      h.getDetails.get("probe") shouldBe "ok"
+      Thread.currentThread().isInterrupted shouldBe false
+    }
   }
 
   it should "be DOWN, not throw, when the executor refuses the probe" in {
