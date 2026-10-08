@@ -1912,6 +1912,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installation page, the 1.0 scope and the compatibility policy now state it, as do the two Scaladocs. No
   build setting changes; the minimum JDK for the other artifacts, and where it is enforced, is decided in
   [#1493](https://github.com/llm4s/llm4s/issues/1493).
+- **`llm4s-spring-boot-starter`: `LlmHealthIndicator.health()` reports DOWN instead of throwing when its thread is
+  interrupted** ([#1636](https://github.com/llm4s/llm4s/issues/1636)): the probe waited on its future inside a
+  `Try`, which does not catch `InterruptedException`, so interrupting the thread checking health while the
+  provider call ran (Actuator shutting down, a management pool interrupting its worker) propagated the exception
+  out of `health()`, with the interrupt flag cleared and the probe left running on the executor. The wait now goes
+  through `CancelledError.attempt`, as `JLlmClient` does: the check is `DOWN` with `probe=cancelled` and an `error`
+  detail, the interrupt flag is set again for the caller, and the abandoned probe is cancelled like a timed-out
+  one. `health()` never throws `InterruptedException`; the README and the Spring Boot guide say so.
 - **`llm4s-java-api`: `InterruptedException` is never thrown, and the Javadoc says so**
   ([#1591](https://github.com/llm4s/llm4s/issues/1591)): `catch (InterruptedException e)` around
   `JLlmClient.complete` or `JAgent.run` does not compile ("never thrown in body of corresponding try statement"),

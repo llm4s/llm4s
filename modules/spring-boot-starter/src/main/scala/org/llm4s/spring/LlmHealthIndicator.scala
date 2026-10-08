@@ -1,7 +1,9 @@
 package org.llm4s.spring
 
+import org.llm4s.error.CancelledError
 import org.llm4s.javaapi.{ ConversationBuilder, JLlmClient, LlmResult }
 import org.llm4s.llmconnect.model.CompletionOptions
+import org.llm4s.types.Result
 import org.springframework.boot.actuate.health.{ Health, HealthIndicator }
 
 import java.time.Duration
@@ -41,6 +43,9 @@ object HealthSettings {
  * "reachable". With `llm4s.health.probe=true` it sends a one-token completion on `executor`, waits at
  * most `llm4s.health.probe-timeout`, and caches the outcome for `llm4s.health.probe-ttl`. A failed
  * or timed-out probe is DOWN with a redacted message.
+ *
+ * `health()` never throws `InterruptedException`: a thread interrupted while it waits for the probe
+ * gets DOWN with `probe=cancelled`, its interrupt flag set again, and the probe call is cancelled.
  */
 final class LlmHealthIndicator(
   private val client: JLlmClient,
@@ -82,14 +87,22 @@ final class LlmHealthIndicator(
     Try(executor.submit(call)) match {
       case Failure(t) => down("failed", describe(t))
       case Success(f) =>
-        Try(f.get(settings.timeout.toNanos, TimeUnit.NANOSECONDS)) match {
-          case Success(r) if r.isSuccess => builder("UP", "ok").build()
-          case Success(r)                => down("failed", redact(r.getError().getMessage))
-          case Failure(_: TimeoutException) =>
+        // `Try` does not catch `InterruptedException`: an interrupt of the thread checking health while it
+        // waits (Actuator shutting down, a management pool interrupting its worker) is caught here, so that
+        // health() never throws it, and the flag is set again for the caller, as JLlmClient does.
+        val awaited: Result[Try[LlmResult[String]]] =
+          CancelledError.attempt("health probe")(Right(Try(f.get(settings.timeout.toNanos, TimeUnit.NANOSECONDS))))
+        awaited match {
+          case Right(Success(r)) if r.isSuccess => builder("UP", "ok").build()
+          case Right(Success(r))                => down("failed", redact(r.getError().getMessage))
+          case Right(Failure(_: TimeoutException)) =>
             f.cancel(true)
             down("timeout", s"no answer within ${settings.timeout.toMillis} ms")
           // ExecutionException wraps what the call threw; anything else is described as it is.
-          case Failure(t) => down("failed", describe(Option(t.getCause).getOrElse(t)))
+          case Right(Failure(t)) => down("failed", describe(Option(t.getCause).getOrElse(t)))
+          case Left(e) =>
+            f.cancel(true)
+            down("cancelled", s"${e.message}: interrupted while waiting for the probe")
         }
     }
   }

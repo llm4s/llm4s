@@ -7,7 +7,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.springframework.boot.actuate.health.Status
+import org.springframework.boot.actuate.health.{ Health, Status }
 import org.springframework.boot.autoconfigure.AutoConfigurations
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.context.annotation.{ Bean, Configuration }
@@ -23,7 +23,7 @@ import java.util.concurrent.{
   ThreadPoolExecutor,
   TimeUnit
 }
-import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference }
+import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference }
 import scala.jdk.CollectionConverters._
 
 object AsyncAndHealthSpec {
@@ -429,6 +429,42 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
       val error = h.getDetails.get("error").toString
       error should include("cancelled")
       (error should not).include(secret)
+      provider.calls.get shouldBe 1
+    }
+  }
+
+  it should "be DOWN, not throw, with the interrupt flag kept, when the thread checking health is interrupted while the probe runs" in {
+    // Actuator shutting down, or a management pool interrupting its worker, interrupts the thread inside
+    // health() while it waits on the probe. The contract is that of JLlmClient: never an InterruptedException
+    // out of health(), the flag left set for the caller, and the probe call itself cancelled.
+    val provider = new FakeProvider(p => { p.blockUntilReleasedOrInterrupted(); ok("late") })
+    withPool(pool(1)) { ex =>
+      val ind       = indicator(provider, probe = true, ex)
+      val health    = new AtomicReference[Health]()
+      val thrown    = new AtomicReference[Throwable]()
+      val flagAfter = new AtomicBoolean(false)
+      val checker = new Thread(
+        () =>
+          try health.set(ind.health())
+          catch { case t: Throwable => thrown.set(t) }
+          finally flagAfter.set(Thread.currentThread().isInterrupted),
+        "health-checker"
+      )
+      checker.start()
+      provider.entered.await(secs, TimeUnit.SECONDS) shouldBe true
+      checker.interrupt()
+      checker.join(secs * 1000)
+      checker.isAlive shouldBe false
+      withClue(s"health() threw ${thrown.get}: ") {
+        thrown.get shouldBe null
+      }
+      val h = health.get()
+      h.getStatus shouldBe Status.DOWN
+      h.getDetails.get("probe") shouldBe "cancelled"
+      h.getDetails.get("error").toString should include("interrupted")
+      flagAfter.get shouldBe true
+      // the abandoned probe is cancelled rather than left running on the executor
+      provider.interrupted.await(secs, TimeUnit.SECONDS) shouldBe true
       provider.calls.get shouldBe 1
     }
   }

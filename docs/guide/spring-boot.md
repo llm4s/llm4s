@@ -240,7 +240,9 @@ is never reported.
 With `llm4s.health.probe=true` it sends a one-token completion on the executor, waits at most `llm4s.health.probe-timeout`, and
 reuses the outcome (a failure too) for `llm4s.health.probe-ttl`, so health polling does not call the provider each time. A
 failed or timed-out probe is `DOWN` with `probe=failed` or `probe=timeout` and an `error` message that has the API key and
-token-like strings removed. A probe is a billed call: keep the TTL generous.
+token-like strings removed. A health check whose thread is interrupted while it waits (Actuator shutting down, say) is
+`DOWN` with `probe=cancelled` and the interrupt flag left set; `health()` never throws `InterruptedException`. A probe is a
+billed call: keep the TTL generous.
 
 ## Testing code that uses the template
 
