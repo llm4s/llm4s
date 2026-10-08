@@ -268,45 +268,28 @@ give the same events as fs2 and ZIO streams.
 
 ## Built-in Tools
 
-LLM4S provides pre-built tools for common tasks, in the `llm4s-agent-tools` module (they work with
-plain tool calling through `ToolRegistry` too, without an `Agent`):
+The `llm4s-agent-tools` module ships ready-made tools - a calculator, the date and time, UUIDs, JSON, files, HTTP, a
+shell and web search - in bundles you register with an agent. They work with plain tool calling through
+`ToolRegistry` too, without an `Agent`. The [Built-in Tools guide](/guide/builtin-tools) lists every tool and its
+parameters, and says what each bundle lets a model do: read its safety section before you give a model files, the
+network or a shell. For the module itself, see
+[installation](/getting-started/installation#for-built-in-tools-web-search-http-filesystem-shell).
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-agent-tools" % llm4sVersion
-```
-
-The search tools read their settings with `ToolsConfigLoader` - for example
-`ToolsConfigLoader.loadBraveSearchTool()` - from `llm4s.tools.*`, whose `BRAVE_SEARCH_*` and
-`EXA_*` bindings ship in that module.
-
-```scala
+import org.llm4s.agent.Agent
+import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.builtin.BuiltinTools
 
-// Core tools (always safe)
-BuiltinTools.core          // DateTime, Calculator, UUID, JSON
-
-// Safe for most use cases
-BuiltinTools.safe()        // + web search, HTTP
-
-// With file access (read-only)
-BuiltinTools.withFiles()   // + read-only file access
-
-// All tools (use with caution)
-BuiltinTools.development() // All tools including write access
+val result = for {
+  tools <- BuiltinTools.coreSafe // date/time, calculator, UUID, JSON: no files, network or processes
+  agent <- Agent.builder("assistant", client).withTools(new ToolRegistry(tools)).build()
+  state <- agent.run("What is 15% of 850?")
+} yield state
 ```
 
-**Available tools:**
-
-| Tool | Description |
-|------|-------------|
-| `DateTimeTool` | Current date/time, timezone conversion |
-| `CalculatorTool` | Mathematical calculations |
-| `UUIDTool` | Generate unique identifiers |
-| `JSONTool` | Parse and format JSON |
-| `HTTPTool` | Make HTTP requests |
-| `WebSearchTool` | Search the web |
-| `FileReadTool` | Read files (with restrictions) |
-| `ShellTool` | Execute shell commands (development only) |
+The bundles, smallest to largest: `coreSafe`, `withHttpSafe()` (adds read-only HTTP), `withFilesSafe()` (adds
+read-only files) and `developmentSafe()` (adds file writing and a shell). `customSafe(...)` builds exactly the tools
+whose configuration you pass.
 
 ---
 

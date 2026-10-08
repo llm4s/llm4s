@@ -341,6 +341,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case is still a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`;
   new `GraphError` and `RunEvent` cases break exhaustive matches. Design:
   `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
+- **CI re-runs a step that failed on a transient download error, and nothing else**:
+  `scripts/retry-on-transient-network.sh` wraps the `Check formatting` step (`scalafmt` fetches scalafmt-core at
+  run time) and the MiMa step. It re-runs the command at most twice (`RETRY_MAX`, capped at 5; waits of 15 s and
+  30 s, `RETRY_BACKOFF_SECONDS`, capped at 120 s), and only when an `[error]` line carries a network marker
+  (`failed to download [`, `Connection reset`, `Read timed out`, `UnknownHostException`, ...). A formatting error,
+  a failing test, a compile error, a missing dependency or a marker on any other line is never retried, and the
+  last attempt's own exit status is the step's, so the wrapper cannot turn a failure into a pass. Over three days
+  (300 runs) 2 of 267 `Quick Checks` runs failed this way, both with a warm 450 MB sbt cache restored, plus one MiMa
+  run; each needed a manual re-run. `scripts/test-retry-on-transient-network.sh`, run in `quick-checks`, covers the
+  retry bounds and every case that must not be retried against a fake command, with no network.
 - **CI verifies the documented support matrix** ([#967](https://github.com/llm4s/llm4s/issues/967)):
   `scripts/check-doc-support.sh`, in the `quick-checks` job, fails when the docs say something the build does not
   do. The build's side comes from sbt itself: a new `dumpBuildModel <file>` command (`project/BuildModel.scala`)
@@ -358,6 +368,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sbt. Three stale claims it found are fixed: `sbt dependencyCheck` (no such task) in the review guidelines,
   `sbt run "Explain ..."` in the g8 guide (sbt reads the quoted text as a second command; it is now
   `sbt "run Explain ..."`), and `modules/gradle-demo`, which CLAUDE.md did not name.
+- **Built-in tools guide** ([#1296](https://github.com/llm4s/llm4s/issues/1296)):
+  `docs/guide/builtin-tools.md` lists every built-in tool with its parameters and result, the bundles that hold
+  them (`coreSafe`, `withHttpSafe()`, `withFilesSafe()`, `developmentSafe()`, `customSafe(...)`), how to register
+  them with a `ToolRegistry` and an `Agent`, how to configure the search tools, and what each tool can do, with
+  the defaults of `FileConfig`, `WriteConfig`, `HttpConfig` and `ShellConfig`. The bundle tables, parameter table,
+  defaults and safety statements are asserted against the real code by `BuiltinToolsGuideSpec`, and the agent
+  snippet is run by `BuiltinToolsGuideAgentSpec`. The Agents guide described `BuiltinTools.core`, `safe()`,
+  `withFiles()` and `development()`, which were removed in favour of the `Safe` variants, and tools that do not
+  exist (`WebSearchTool`, `FileReadTool`); it now shows the real names and links to the guide.
 - **Error handling guide** ([#960](https://github.com/llm4s/llm4s/issues/960)):
   `docs/guide/error-handling.md` teaches `Result[A]` and `LLMError` in practice: the basic pattern,
   for-comprehensions, a table of the error types in `org.llm4s.error` with whether each is recoverable and
@@ -609,6 +628,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than with a foreign signature. Pruning, compression, summarisation, an edit or an inserted message anywhere earlier therefore
   unseals every later turn, whoever made the change; `hasSealedThinking` reports the state. Token estimates
   (`ConversationTokenCounter`, the agent's default pruning counter) now count thinking, which providers resend.
+- **Every published module's POM carries a one-sentence description, and the POM URLs are normalised**
+  ([#1455](https://github.com/llm4s/llm4s/issues/1455)): each `llm4s-*` artifact used to publish its own name as its
+  `<description>` (`llm4s-core` described as "llm4s-core"); the descriptions now live in one table,
+  `project/PomDescriptions.scala`, and `sbt publishedArtifactsCheck` fails for a published module without its own
+  distinct description. The POM `<url>` is `https://llm4s.org` (it was the GitHub organization page), and `<scm>` is
+  `https://github.com/llm4s/llm4s` with an `https` connection string (the URL had a trailing slash and the connection
+  was an SSH form). The organization URL and every `<dependencies>` block are unchanged. Maven Central search and IDEs
+  show the descriptions; Scaladex ranks by the GitHub description and topics, which a maintainer sets in the
+  repository settings.
 - **`llm4s-anthropic`: tool calls and results as content blocks** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
   an assistant turn's tool calls go to Anthropic as `tool_use` blocks after its text, and each `ToolMessage` as a
   `tool_result` block, consecutive results in one user turn. Before, a tool-call turn was dropped and its results
@@ -1739,6 +1767,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a request that sends an earlier turn's `reasoning_content` back now also sets `"thinking": {"clear_thinking": false}`,
   merged into any existing `thinking` object. Z.ai's standard endpoint has preserved thinking off by default
   (`clear_thinking` defaults to `true`) and drops replayed reasoning without it; `thinking.type` is left unset.
+- **`llm4s-agent-tools`: file tools confined by path component, not string prefix**
+  ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `FileConfig.isPathAllowed` and
+  `WriteConfig.isPathAllowed` compared paths with `String.startsWith`, so an allowed `/srv/agent-data` also
+  admitted `/srv/agent-data-secret`, and `developmentSafe(workingDirectory)` could read and write a sibling
+  directory whose name began with the working directory's. Both now use `Path.startsWith` on normalised absolute
+  paths; blocked paths are matched the same way (`/var` no longer blocks `/variable`).
+- **`llm4s-agent-tools`: `list_directory` honours `followSymlinks = false`**
+  ([#1296](https://github.com/llm4s/llm4s/issues/1296)): it checked the requested path with a link-following
+  `Files.isDirectory`, so a directory symbolic link inside an allowed path listed the directory it pointed to.
+  Without `followSymlinks` it now refuses the link with `Not a directory`, as `read_file` refuses a linked file.
+- **`llm4s-agent-tools`: `http_request` reads at most `maxResponseSize` bytes**
+  ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `HTTPTool` read the whole body into a string and only then
+  cut it to `maxResponseSize` characters, so a large or endless response could exhaust memory before `truncated`
+  was set. It now reads at most `maxResponseSize` bytes from the stream and stops; the limit counts bytes, as
+  documented, not decoded characters.
 - **`llm4s-agent`: a burst of live events no longer disconnects a subscriber as `Lagging`**
   ([#1387](https://github.com/llm4s/llm4s/issues/1387)): a subscription's queue held durable and live
   events against one `capacity`, so a model streaming faster than the dispatcher thread was scheduled filled
@@ -1961,6 +2004,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or format outside those bounds used to get a wrong "success" or a generic `ProcessingError` and now gets a
   `ValidationError`; the output is shorter by the converter's padding, and the source's last fraction of a
   millisecond (at most 0.3 ms) is no longer in it.
+- **The docs deploy is no longer rejected on a release tag** ([#1152](https://github.com/llm4s/llm4s/issues/1152)):
+  `release.yml` called `pages.yml` as a reusable workflow, which runs on the caller's ref, the release tag, and the
+  `github-pages` environment allows deployments only from `main`, so the deploy was rejected before it started
+  ("Tag "v0.4.1" is not allowed to deploy to github-pages") and the release run ended red after a successful
+  publish. The release's `docs` job now dispatches `pages.yml` on `main` with the tag as a new `ref` input
+  (`scripts/dispatch-docs-deploy.sh`), so the run, and the deploy, are on `main`, while the build still checks out
+  the tag, so the version and the install snippets are the release's. The job waits for that run and fails when the
+  deploy fails, keeping the order #1147 built (docs only after the artifacts are on Maven Central and the GitHub
+  Release exists). No repository setting is needed; an environment rule for `v*` tags remains an equally valid
+  alternative. `pages.yml` is no longer callable with `workflow_call`, and a manual run takes an optional release
+  tag. A pushed docs change on `main` deploys exactly as before. Not yet exercised by a real release: the next one
+  is its first run (see `docs/reference/release.md` for a way to check it sooner).
 - **`RAG.refresh` emptied the index when its loader failed, and `RAG.sync` deleted documents it
   could not read** (follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236)).
   `refresh` and `refreshAsync` cleared the index before reading the loader, so a listing

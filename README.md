@@ -681,6 +681,8 @@ Interested in contributing? Start here:
 
  **LLM4S GitHub Issues:** https://lnkd.in/eXrhwgWY
 
+ **Security:** to report a vulnerability, follow [SECURITY.md](SECURITY.md); please do not use a public issue.
+
 ## Join the Community
 
 Want to be part of developing this and interact with other developers? Join our Discord community!
