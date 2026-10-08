@@ -2,7 +2,7 @@
 layout: page
 title: Jev decision model
 parent: User Guide
-nav_order: 16
+nav_order: 23
 ---
 
 # Jev, TypeSafe's decision model
