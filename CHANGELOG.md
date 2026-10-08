@@ -1920,6 +1920,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through `CancelledError.attempt`, as `JLlmClient` does: the check is `DOWN` with `probe=cancelled` and an `error`
   detail, the interrupt flag is set again for the caller, and the abandoned probe is cancelled like a timed-out
   one. `health()` never throws `InterruptedException`; the README and the Spring Boot guide say so.
+- **`llm4s-spring-boot-starter`: a cancelled health probe is not cached**
+  ([#1642](https://github.com/llm4s/llm4s/issues/1642)): `probeCached` stored every outcome for
+  `llm4s.health.probe-ttl`, so the `DOWN` / `probe=cancelled` that an interrupted thread gets was served to every
+  other caller within the TTL - a thread queued behind it, the next uninterrupted Actuator poll - as if the provider
+  were down. A cancellation is a fact about the interrupted thread, not the provider: `probeNow` now returns it apart
+  from a provider outcome, it is reported to that caller only, and the next check probes again. A failed or timed-out
+  probe is still cached. Found during review of #1640.
 - **`llm4s-java-api`: `InterruptedException` is never thrown, and the Javadoc says so**
   ([#1591](https://github.com/llm4s/llm4s/issues/1591)): `catch (InterruptedException e)` around
   `JLlmClient.complete` or `JAgent.run` does not compile ("never thrown in body of corresponding try statement"),

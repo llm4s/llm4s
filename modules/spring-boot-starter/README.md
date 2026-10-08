@@ -56,7 +56,8 @@ health polling does not hit or bill the provider each time. A failed or timed-ou
 with `probe=failed|timeout` and an `error` message with the API key and token-like strings redacted.
 A health check whose thread is interrupted while it waits (Actuator shutting down, say) is `DOWN`
 with `probe=cancelled`, the interrupt flag left set; `health()` never throws `InterruptedException`.
-The probe is billed: keep the TTL generous.
+A cancelled probe is not cached: it says something about that thread, not the provider, so the next
+check probes again. The probe is billed: keep the TTL generous.
 
 | Property | Default | |
 |----------|---------|---|

@@ -469,6 +469,33 @@ class AsyncAndHealthSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "not cache a cancelled probe: the next uninterrupted check within the TTL probes again (#1642)" in {
+    // A cancellation is a fact about the interrupted caller's thread, not about the provider: unlike a timeout
+    // or a failure it must not be served from the cache to the next caller, who gets the provider's real state.
+    val provider = new FakeProvider(p =>
+      if (p.calls.get == 1) { p.blockUntilReleasedOrInterrupted(); ok("late") }
+      else ok("pong")
+    )
+    withPool(pool(1)) { ex =>
+      val ind     = indicator(provider, probe = true, ex)
+      val health  = new AtomicReference[Health]()
+      val checker = new Thread(() => health.set(ind.health()), "health-checker")
+      checker.start()
+      provider.entered.await(secs, TimeUnit.SECONDS) shouldBe true
+      checker.interrupt()
+      checker.join(secs * 1000)
+      checker.isAlive shouldBe false
+      health.get().getDetails.get("probe") shouldBe "cancelled"
+      provider.interrupted.await(secs, TimeUnit.SECONDS) shouldBe true
+      // same TTL window, an uninterrupted thread: the provider is asked again and answers
+      val h = ind.health()
+      provider.calls.get shouldBe 2
+      h.getStatus shouldBe Status.UP
+      h.getDetails.get("probe") shouldBe "ok"
+      Thread.currentThread().isInterrupted shouldBe false
+    }
+  }
+
   it should "be DOWN, not throw, when the executor refuses the probe" in {
     val provider = echo
     val ex       = pool(1)
