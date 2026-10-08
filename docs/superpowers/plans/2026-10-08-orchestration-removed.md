@@ -731,7 +731,7 @@ Then insert before `## Agent middleware`:
 | `CancellationToken` | `RunHandle.cancel()` / `AgentRun.cancel()`, or interrupting the calling thread |
 | `PlanId` | `RunId` |
 
-```scala
+~~~scala
 // before
 val plan   = Plan.builder.addNode(research).addNode(summary).addEdge(Edge("e", research, summary)).build
 val result = PlanRunner().execute(plan, Map("research" -> question), token)   // Future[Result[Map[String, Any]]]
@@ -746,7 +746,7 @@ val research = b.node[String]("research", writes = Set(findings)) { (q, _, _) =>
 }
 val handle = b.compile(research)(_.get(findings)).flatMap(GraphRuntime.inMemory().start(ThreadId("t-1"), _, question))
 handle.foreach(_.cancel())   // instead of token.cancel()
-```
+~~~
 
 `Agent.run`, `continueConversation`, `runMultiTurn`, `recover` and `resume` now cancel their turn when the calling thread is interrupted, so cancelling a graph run also cancels the agent turns its nodes are waiting on. Before, the turn kept running after `run` returned `Left(CancelledError)`. A caller that wants the turn to outlive an interrupt uses `start`, `startRecover` or `startResume`, and awaits the `AgentRun` itself.
 ````
