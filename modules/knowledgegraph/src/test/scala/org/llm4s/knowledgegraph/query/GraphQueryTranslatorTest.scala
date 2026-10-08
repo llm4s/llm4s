@@ -3,7 +3,7 @@ package org.llm4s.knowledgegraph.query
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
-import org.llm4s.knowledgegraph.{ Edge, Node }
+import org.llm4s.knowledgegraph.{ Edge, Node, SmallStack }
 import org.llm4s.knowledgegraph.storage.{ Direction, InMemoryGraphStore }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion }
@@ -255,5 +255,23 @@ class GraphQueryTranslatorTest extends AnyFunSuite with Matchers with MockFactor
     val result = translator.parseQueryResponse("""{"type": "find_path", "from_node_id": "alice"}""")
 
     result should be(a[Left[_, _]])
+  }
+
+  // The reply is model output: nested too deeply it is a Left naming the limit, refused before it is
+  // parsed into a value whose rendering (an error message, a log line) overflows the stack - a
+  // StackOverflowError is not caught by `Try` and escaped the Result (#1562). On a 1 MB stack, so
+  // the outcome is deterministic; it is reduced inside it so no deep value is rendered.
+  test("parseQueryResponse returns a Left naming the limit, not a StackOverflowError, for a reply nested too deeply") {
+    val llmClient  = mock[LLMClient]
+    val translator = new GraphQueryTranslator(llmClient, buildTestStore())
+    val deep       = "[" * 100000 + "]" * 100000
+
+    SmallStack.run(translator.parseQueryResponse(deep).left.map(e => (e, e.message)).map(_ => "a query")) match {
+      case Right(Left((e: ProcessingError, message))) =>
+        e.operation shouldBe "query_parse"
+        message should include("512")
+      case Right(other) => fail(s"expected a ProcessingError, got ${other.fold(_.getClass.getName, identity)}")
+      case Left(thrown) => fail(s"expected a Left, but parseQueryResponse threw $thrown")
+    }
   }
 }

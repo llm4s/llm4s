@@ -37,6 +37,7 @@ import org.llm4s.model.{ ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
+import org.llm4s.util.BoundedJson
 import org.slf4j.{ Logger, LoggerFactory }
 
 import java.time.Instant
@@ -626,7 +627,9 @@ class OpenAIClient private[provider] (
 
   /**
    * Extracts function tool calls from a response message, parsing each one's arguments once.
-   * A call whose arguments are not valid JSON is dropped.
+   * A call whose arguments are not valid JSON is dropped, as is one whose arguments are nested
+   * more than 512 levels deep: they are model output, and a value that deep overflows the stack
+   * of whatever renders it next (#1562).
    */
   private def extractToolCalls(message: ChatCompletionMessage): Seq[ToolCall] =
     known(message._toolCalls())
@@ -636,7 +639,7 @@ class OpenAIClient private[provider] (
       .map(_.asFunction())
       .flatMap { ftc =>
         val function = known(ftc._function())
-        function.flatMap(f => known(f._arguments())).flatMap(raw => Try(ujson.read(raw)).toOption).map { args =>
+        function.flatMap(f => known(f._arguments())).flatMap(raw => BoundedJson.read(raw).toOption).map { args =>
           ToolCall(
             id = known(ftc._id()).getOrElse(""),
             name = function.flatMap(f => known(f._name())).getOrElse(""),

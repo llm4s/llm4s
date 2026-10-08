@@ -5,6 +5,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ObjectSchema
 import org.llm4s.types.{ HeadroomPercent, Result, TokenBudget }
+import org.llm4s.util.BoundedJson
 
 import scala.util.Try
 
@@ -95,9 +96,12 @@ trait LLMClient extends AutoCloseable {
     val opts       = options.withResponseFormat(jsonSchema)
     for {
       completion <- complete(conversation, opts)
-      parsed <- Try(ujson.read(LLMClient.extractJson(completion.content))).toEither.left.map(e =>
-        ValidationError("structured_output", s"Response is not valid JSON: ${e.getMessage}")
-      )
+      // The reply is model output: `BoundedJson` refuses a document nested more than 512 levels
+      // deep before it is parsed, since reading it into `A` below would overflow the stack (#1562)
+      parsed <- BoundedJson
+        .read(LLMClient.extractJson(completion.content))
+        .left
+        .map(e => ValidationError("structured_output", s"Response is not valid JSON: ${e.message}"))
       // uPickle reads a JSON null into a null reference for case classes; the schema is an object
       // schema so a null document is never a valid answer and must not reach callers as Right(null)
       _ <- Either.cond(
@@ -192,7 +196,8 @@ object LLMClient {
     else firstJsonBlock(unfenced).getOrElse(unfenced)
   }
 
-  private def isJson(text: String): Boolean = Try(ujson.read(text)).isSuccess
+  // bounded, so a candidate too deep to be read is not "JSON" and is not parsed at all
+  private def isJson(text: String): Boolean = BoundedJson.read(text).isRight
 
   private def firstJsonBlock(text: String): Option[String] = {
     @scala.annotation.tailrec

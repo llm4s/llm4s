@@ -3,9 +3,8 @@ package org.llm4s.knowledgegraph.extraction
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.error.ProcessingError
+import org.llm4s.util.BoundedJson
 import org.slf4j.LoggerFactory
-
-import scala.util.Try
 
 /**
  * Shared utility for parsing LLM JSON output into a [[Graph]].
@@ -39,8 +38,10 @@ private[extraction] object GraphJsonParser {
       .stripSuffix("```")
       .trim
 
-    // Parse JSON and map parsing errors to ProcessingError without throwing
-    val parsedJsonResult = Try(ujson.read(cleanJson)).toResult.left.map { error =>
+    // Parse JSON and map parsing errors to ProcessingError without throwing. The text is model
+    // output, so a document nested more than 512 levels deep is refused before it is parsed: a
+    // value that deep overflows the stack of whatever renders it (#1562).
+    val parsedJsonResult = BoundedJson.read(cleanJson).left.map { error =>
       logger.error(s"Failed to parse graph JSON: $cleanJson", error)
       ProcessingError(errorCode, s"Failed to parse LLM output as graph: ${error.message}")
     }

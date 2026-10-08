@@ -279,4 +279,42 @@ class GraphJsonParserSpec extends AnyFunSuite with Matchers {
       }
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Nesting depth: the reply is model output. A reply nested too deeply is refused before it is
+  // parsed, because every later traversal of the value (rendering it into a log line or an error
+  // message, serialising the graph) recurses once per level, and a StackOverflowError is not caught
+  // by `Try`, so it would escape `parse` (#1562). Run on a 1 MB stack so the outcome does not depend
+  // on the JVM's default stack size; the outcome is reduced inside it so no deep value is rendered.
+  // ---------------------------------------------------------------------------
+
+  test("a reply nested too deeply is a ProcessingError naming the limit, not parsed") {
+    val inputs = List(
+      "unbalanced arrays"  -> ("[" * 100000),
+      "balanced arrays"    -> ("[" * 100000 + "]" * 100000),
+      "balanced objects"   -> ("{\"nodes\":" * 100000 + "1" + "}" * 100000),
+      "objects in a fence" -> ("```json\n" + "{\"nodes\":" * 100000 + "1" + "}" * 100000 + "\n```")
+    )
+    inputs.foreach { case (name, input) =>
+      withClue(name) {
+        org.llm4s.knowledgegraph.SmallStack.run(parse(input).left.map(e => (e, e.message)).map(_ => "a graph")) match {
+          case Right(Left((e: ProcessingError, message))) =>
+            e.operation shouldBe ErrorCode
+            message should include("Failed to parse LLM output as graph")
+            message should include("512")
+          case Right(other) => fail(s"expected a ProcessingError, got ${other.fold(_.getClass.getName, identity)}")
+          case Left(thrown) => fail(s"expected a Left, but parse threw $thrown")
+        }
+      }
+    }
+  }
+
+  test("a reply nested 512 levels deep is parsed, 513 is refused") {
+    // the document, its nodes array, the node and its properties are four levels; the arrays add the rest
+    def nested(depth: Int): String =
+      """{"nodes": [{"id": "a", "label": "X", "properties": {"deep": """ + "[" * (depth - 4) + "]" * (depth - 4) +
+        """}}], "edges": []}"""
+    org.llm4s.knowledgegraph.SmallStack.run(parse(nested(512))).map(_.map(_.nodes.size)) shouldBe Right(Right(1))
+    org.llm4s.knowledgegraph.SmallStack.run(parse(nested(513))).map(_.isLeft) shouldBe Right(true)
+  }
 }
