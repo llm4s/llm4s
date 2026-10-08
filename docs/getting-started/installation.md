@@ -142,9 +142,9 @@ lazy val myProject = (project in file("."))
 > [#1462](https://github.com/llm4s/llm4s/issues/1462) but ships in the next release.
 
 A project that uses several llm4s modules (a provider, `llm4s-rag`, `llm4s-observability`) can state the
-version once, in the bill of materials `llm4s-bom`, and leave it off every module. Mismatched llm4s versions
-in one build then cannot happen. The BOM contains no code; it only pins each published artifact to the version
-it was released with.
+version once, in the bill of materials `llm4s-bom`, and leave it off every module. The BOM contains no code;
+it supplies the versions released together. Explicit overrides and dependency conflict resolution can still
+select different versions, so check the resolved dependency graph.
 
 Maven and Gradle have no notion of Scala cross-versioning, so the modules are written with the Scala binary
 suffix (`llm4s-core_3`), and the BOM itself has none (`llm4s-bom`).
@@ -185,6 +185,11 @@ dependencies {
     implementation("org.llm4s:llm4s-openai_3")
 }
 ```
+
+Gradle `platform(...)` treats the BOM versions as recommendations that other dependencies can upgrade.
+For strict version pinning in an application, use `enforcedPlatform(...)` instead. Publishing libraries
+should generally keep `platform(...)` to avoid forcing their versions on consumers. See the
+[Gradle platform documentation](https://docs.gradle.org/current/userguide/platforms.html#sub:bom_import).
 
 **sbt** has no BOM import, so the BOM is optional there: keep one `val` for the version, as the sections
 below do (`%%` adds the `_3` suffix itself):
