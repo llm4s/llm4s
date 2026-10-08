@@ -38,6 +38,8 @@ object PomDescriptions {
       "Image generation and image vision and processing clients for LLM4S.",
     "llm4s-java-api" ->
       "Java-friendly facade over LLM4S: a client, an agent and a conversation builder for Java callers.",
+    "llm4s-jev" ->
+      "JSON Embedded Vectors for LLM4S: structured evaluation scores and vector-aware JSON parsing.",
     "llm4s-jina" ->
       "Jina AI embedding provider for LLM4S.",
     "llm4s-knowledgegraph" ->
