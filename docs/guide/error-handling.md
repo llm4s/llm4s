@@ -107,11 +107,11 @@ is not recoverable, since nothing says a retry can help.
 
 | Error | Recoverable | Where the library raises it |
 |---|---|---|
-| `AuthenticationError` | no | A provider rejects the credentials: HTTP 401 or 403, Anthropic's `UnauthorizedException`, Bedrock's access-denied or missing-credentials exceptions, Gemini's invalid-key 400. Also when Vertex AI or watsonx cannot obtain a token, and from `DefaultErrorMapper` for an exception whose message mentions 401. |
+| `AuthenticationError` | no | A provider rejects the credentials: HTTP 401 or 403, Anthropic's `UnauthorizedException`, Bedrock's access-denied or missing-credentials exceptions, Gemini's invalid-key 400. Also when Vertex AI or watsonx cannot obtain a token, and from `DefaultErrorMapper` for an exception whose message names HTTP status 401 (`HTTP 401`, `401 Unauthorized`, `status code: 401`). |
 | `ConfigurationError` | no | Configuration is missing or invalid: no provider section, no API key, a provider id that no module on the classpath registers, an embedding model with no known dimensions, or a block a config loader cannot read (providers, embeddings, tracing, metrics, tools, RAG, speech). |
 | `ValidationError` | no | A request or value is rejected: an invalid message or conversation, a model the model registry does not know, a guardrail rejecting input or output (the built-in guardrails reject with one), HTTP 400 (on field `request`), Anthropic's or Bedrock's invalid-request exceptions, or a response body that cannot be parsed. |
 | `InvalidInputError` | no | Only `llm4s-image`'s image processing (`LocalImageProcessor`, saving an image): an unreadable path, a bad resize or crop, a path traversal. It carries the `field`, the `value` and the `reason`. |
-| `RateLimitError` | yes | A provider's rate limit: HTTP 429, or Anthropic's or Bedrock's throttling exception. Also `ReliableClient`'s own limiter, and `DefaultErrorMapper` for an exception whose message mentions 429. It carries `retryAfter` when the provider says how long to wait. |
+| `RateLimitError` | yes | A provider's rate limit: HTTP 429, or Anthropic's or Bedrock's throttling exception. Also `ReliableClient`'s own limiter, and `DefaultErrorMapper` for an exception whose message names HTTP status 429 (`HTTP 429`, `429 Too Many Requests`, `status code: 429`). It carries `retryAfter` when the provider says how long to wait. |
 | `ServiceError` | yes | Any other non-2xx status from a provider (through `HttpErrorMapper` or `Llm4sHttpClient`, and from Bedrock and watsonx), or a call rejected by an open circuit breaker (`ReliableClient` or `ErrorRecovery.CircuitBreaker`, status 503). It carries `httpStatus`; see the note below. |
 | `NetworkError` | yes | A connection fails, a host is unknown or I/O breaks, in llm4s's HTTP client or the Bedrock client; `DefaultErrorMapper`, which the OpenAI and Anthropic clients use for I/O failures, gives one for a socket timeout or a refused connection. Also a URL refused by the SSRF check, and a failed `llm4s-rag` URL, web-crawl or S3 load, including a non-2xx answer to `UrlLoader`. |
 | `TimeoutError` | yes | A connect, request or socket timeout elapses in llm4s's own HTTP client, or a `ReliableClient` deadline passes. The vendor-SDK clients map timeouts themselves: OpenAI and Bedrock report a `NetworkError`, and Anthropic maps its exceptions through `DefaultErrorMapper`. |
@@ -273,8 +273,12 @@ Option.empty[String].toResult(NotFoundError("no such key", "model")) // Left(Not
 
 `toResult` and `toLLMError` map an exception through `DefaultErrorMapper`: an interrupt becomes a
 `CancelledError`, a socket timeout or a refused connection a `NetworkError`, an exception whose message
-mentions 401 or 429 an `AuthenticationError` or a `RateLimitError`, and anything else an `UnknownError`
-that keeps the exception. Pass your own `ErrorMapper` for a finer mapping. `Try` (and so
+names HTTP status 401 or 429 an `AuthenticationError` (code `401`, with the redacted message) or a
+`RateLimitError`, and anything else an `UnknownError` that keeps the exception. A message names a status
+only in an HTTP context, at a word boundary - after `HTTP`, `status`, `status code`, `error code` or
+`response code`, before its reason phrase (`401 Unauthorized`, `429 Too Many Requests`), or leading the
+message as `openai-java` and `anthropic-java` write it (`401: <body>`) - so `Index 4012 out of bounds` or
+`port 14290` is an `UnknownError`. Pass your own `ErrorMapper` for a finer mapping. `Try` (and so
 `Result.safely`) never captures an `InterruptedException`, which Scala treats as fatal, so let an
 interrupt propagate or map it yourself with `toLLMError`.
 

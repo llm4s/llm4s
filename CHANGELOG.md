@@ -1937,6 +1937,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`DefaultErrorMapper` classifies 401 and 429 only when the message names an HTTP status, and keeps the
+  cause otherwise** ([#1668](https://github.com/llm4s/llm4s/issues/1668)). The mapper behind `Safety.safely`,
+  `Safety.fromTry`, `toResult` and `toLLMError` turned any exception whose message *contained* `401` into
+  `AuthenticationError("unknown", "Authentication failed")` and `429` into `RateLimitError("unknown")`, dropping
+  the exception. So `Index 4012 out of bounds for length 10`, `request 1700401234 timed out`, `port 14290` or
+  `wrote 1429 tokens` became a non-retryable "your credentials are wrong", or a retryable rate limit that retry
+  and circuit-breaker logic would repeat on a deterministic bug, with the stack trace lost. Behaviour change:
+  the mapper now classifies a status only at a word boundary in an HTTP context - after `HTTP`, `status`,
+  `status code`, `error code` or `response code` (`HTTP 401`, `HTTP/1.1 429`, `Status Code: 429`,
+  `statusCode=401`), before its reason phrase (`401 Unauthorized`, `Error: 429 - Too Many Requests`), or
+  leading the message as `openai-java` and `anthropic-java` write their service exceptions (`401: <body>`,
+  also behind a wrapping exception's `ClassName: `). Everything else is an `UnknownError` carrying the
+  exception as its cause. An `AuthenticationError` from the mapper now has code `401` and keeps the
+  original message, redacted (`Authentication failed for unknown: HTTP 401 Unauthorized`), where it said
+  only `Authentication failed`; neither it nor `RateLimitError` has a field for a `Throwable`, so a
+  classified exception's stack trace is still not kept. No public signature changes.
 - **`llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama`: a deep or malformed model listing is a `Left`, not an
   exception** ([#1660](https://github.com/llm4s/llm4s/issues/1660)). `AnthropicModelLister`,
   `GeminiModelLister` and `OllamaModelLister` read the listing with the unbounded `HttpResponse.toJson` and

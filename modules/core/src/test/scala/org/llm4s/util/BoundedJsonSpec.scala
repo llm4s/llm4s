@@ -30,7 +30,7 @@ final class BoundedJsonSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not mistake a parse error at index 429 or 401 for a rate limit or an authentication failure" in {
-    // `DefaultErrorMapper` classifies any exception whose message contains "429" or "401", and the
+    // `DefaultErrorMapper` used to classify any exception whose message contained "429" or "401" (#1668), and the
     // parser's exception names the JSON path it stopped at (`$[429]`) - so a reply that goes wrong at
     // that element used to come back as a RateLimitError or an AuthenticationError.
     Seq(429, 401).foreach { index =>
