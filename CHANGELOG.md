@@ -1934,6 +1934,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the credential it replaced. Every replacement in `Redaction` and `SecretPatterns.redactAll` /
   `redactAllWithPlaceholder` is now quoted: the parameters are kept exactly, a sensitive value is still
   redacted, and the placeholder is written literally. No signature changes.
+- **A deeply nested provider error body falls back to the default message instead of overflowing the stack**
+  ([#1658](https://github.com/llm4s/llm4s/issues/1658)). `HttpErrorMapper` read a non-2xx body with
+  `ujson.read` and then `.obj`; parsing is iterative, but `.obj` on a top-level array throws
+  `ujson.Value.InvalidData`, whose message renders the whole value recursively, so an error body of 10,000
+  nested `[` (about 20 KB) overflowed a 1 MB thread stack - a `StackOverflowError`, which `Try` does not
+  catch, out of every provider's non-2xx path, including `OpenAICompatibleClient`'s `complete` and
+  `streamComplete` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and the generic `openai-compatible`
+  provider). The body is now read through the depth-bounded `BoundedJson` with `Option` accessors only, so
+  a body that is not JSON, not an object, or nested more than 512 levels deep yields `"<provider> API error
+  (HTTP <status>)"`; ordinary `{"message": ...}`, `{"error": {"message": ...}}` and `{"error": "..."}`
+  bodies read as before. The same hazard is closed in `llm4s-openai-compatible`: `OpenAICompatibleClient`
+  refuses a 2xx reply or a stream event nested more than 512 levels deep with a `Left`, as it does
+  malformed JSON, and `ProviderModelListers.openAICompatible` reads the listing through `BoundedJson` and
+  returns `Missing or invalid models payload` for a body that is not an object with a `data` array. No
+  public signature changes.
 - **`llm4s-bedrock`: a `toolUse` input nested more than 512 levels deep is refused as a malformed tool
   call, never converted or sent back** ([#1648](https://github.com/llm4s/llm4s/issues/1648)). #1630
   ([#1562](https://github.com/llm4s/llm4s/issues/1562)) bounded every place model-written JSON is parsed
