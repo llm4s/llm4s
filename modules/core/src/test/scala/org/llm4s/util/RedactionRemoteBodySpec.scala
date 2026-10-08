@@ -30,6 +30,19 @@ class RedactionRemoteBodySpec extends AnyFlatSpec with Matchers {
     out should include("error_description")
   }
 
+  it should "redact the RFC 8693 request fields by key, however short their values" in {
+    // Values under eight characters are left to the key patterns of `redact`, not scrubbed as repeats.
+    val body =
+      """{"subject_token":"st-1","actor_token":"ac-1","assertion":"as-1","client_assertion":"ca-1",""" +
+        """"subjectToken":"st-2","grant_type":"urn:ietf:params:oauth:grant-type:token-exchange"}"""
+    val out = Redaction.remoteBody(body)
+    for value <- Seq("st-1", "ac-1", "as-1", "ca-1", "st-2") do (out should not).include(value)
+    out should include("urn:ietf:params:oauth:grant-type:token-exchange")
+    val pairs = Redaction.redact("subject_token=st-3&actor_token=ac-3")
+    (pairs should not).include("st-3")
+    (pairs should not).include("ac-3")
+  }
+
   it should "redact a field value containing escaped quotes completely" in {
     val out = Redaction.remoteBody("""{"access_token":"ab\"tail-part"}""")
     (out should not).include("tail-part")

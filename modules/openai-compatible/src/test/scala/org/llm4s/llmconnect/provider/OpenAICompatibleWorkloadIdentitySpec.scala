@@ -129,6 +129,33 @@ class OpenAICompatibleWorkloadIdentitySpec
     }
   }
 
+  "an openai-compatible section with auth and timeouts" should {
+    "load as a config carrying both the token exchange and the timeouts" in {
+      val config = ProviderTestConfig
+        .loadProvider(
+          "main",
+          """llm4s.providers.main {
+            |  provider = "openai-compatible"
+            |  model    = "m"
+            |  baseUrl  = "https://api.example/v1"
+            |  timeouts { request = 45s, stream = 5m }
+            |  auth { identityToken = "eyJ.x.y", tokenUrl = "https://t.example/token" }
+            |}""".stripMargin
+        )
+        .value
+        .asInstanceOf[OpenAICompatibleConfig]
+      config.tokenExchange.map(_.tokenUrl) shouldBe Some("https://t.example/token")
+      config.timeouts.request shouldBe Some(scala.concurrent.duration.DurationInt(45).seconds)
+      config.timeouts.stream shouldBe Some(scala.concurrent.duration.DurationInt(5).minutes)
+      val settings = OpenAICompatibleClient.settings(config)
+      settings.timeouts shouldBe config.timeouts
+      settings.credential shouldBe a[OpenAICompatibleClient.Credential.Exchange]
+      config
+        .withTimeouts(org.llm4s.llmconnect.config.ProviderTimeouts.default)
+        .tokenExchange shouldBe config.tokenExchange
+    }
+  }
+
   "an openai-compatible section with auth" should {
     "exchange the SVID and send the access token on complete and stream" in FakeTokenExchangeServer.withServer { fake =>
       val jwt = TestJwt.es256("spiffe://llm4s.test/app", "databricks")

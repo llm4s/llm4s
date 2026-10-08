@@ -63,6 +63,17 @@ class ProviderAuthConfigSpec extends AnyWordSpec with Matchers with EitherValues
       error.message should include("identityTokenFile")
     }
 
+    "be read beside a timeouts block, each kept as its own built-in field" in {
+      val config = load(
+        section("""auth { identityToken = "eyJ.x.y", tokenUrl = "https://t" }, timeouts { request = 3m }""")
+      ).value
+      config.auth.value.identityToken shouldBe IdentitySource.Literal("eyJ.x.y")
+      config.timeouts.request shouldBe Some(scala.concurrent.duration.DurationInt(3).minutes)
+      config.extras shouldBe empty
+      config.withTimeouts(config.timeouts).auth shouldBe config.auth
+      config.withAuth(None).timeouts shouldBe config.timeouts
+    }
+
     "accept a literal identity token" in {
       load(
         section("""auth { identityToken = "eyJ.x.y", tokenUrl = "https://t" }""")

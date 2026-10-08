@@ -165,6 +165,16 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
     def fromValues(baseUrl: String, apiKey: String = "") =
       AnthropicConfig.fromValues("claude-test", apiKey, baseUrl, Some(identity))
 
+    "keep the workload identity and the timeouts independently" in {
+      import scala.concurrent.duration.DurationInt
+      val timeouts = org.llm4s.llmconnect.config.ProviderTimeouts(Some(45.seconds), Some(5.minutes))
+      val config   = fromValues("https://api.anthropic.com").value.withTimeouts(timeouts)
+      config.timeouts shouldBe timeouts
+      config.workloadIdentity shouldBe Some(identity)
+      config.withWorkloadIdentity(None).timeouts shouldBe timeouts
+      AnthropicConfig.validate(config).isRight shouldBe true
+    }
+
     "be refused by fromValues with a plain-http baseUrl to a non-loopback host" in {
       val error = fromValues("http://api.example").left.value
       error shouldBe a[ConfigurationError]

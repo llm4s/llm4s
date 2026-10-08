@@ -242,6 +242,16 @@ class OpenAIWorkloadIdentitySpec
       fromValues().value.workloadIdentity.value shouldBe identity
     }
 
+    "keep the workload identity and the timeouts independently" in {
+      import scala.concurrent.duration.DurationInt
+      val timeouts = org.llm4s.llmconnect.config.ProviderTimeouts(Some(45.seconds), Some(5.minutes))
+      val config   = fromValues().value.withTimeouts(timeouts)
+      config.timeouts shouldBe timeouts
+      config.workloadIdentity.value shouldBe identity
+      config.withWorkloadIdentity(None).timeouts shouldBe timeouts
+      OpenAIConfig.validate(config).isRight shouldBe true
+    }
+
     "be refused by fromValues with an apiKey as well" in {
       fromValues(apiKey = "sk-x").left.value shouldBe a[ConfigurationError]
     }
