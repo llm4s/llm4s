@@ -133,7 +133,7 @@ trait LLMGuardrail extends OutputGuardrail {
         Left(
           ValidationError.invalid(
             "output",
-            s"LLM judge score (${"%.2f".format(score)}) below threshold (${"%.2f".format(threshold)}) for $name"
+            s"LLM judge score (${"%.2f".format(score.bigDecimal)}) below threshold (${"%.2f".format(threshold)}) for $name"
           )
         )
       }
