@@ -168,7 +168,10 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   words - also inside a string and when the key or the leaves are single-quoted, as a Python dict is,
   `{'token': ['...']}`; the brackets, the keys of nested objects, `true`, `false` and `null` are kept, so
   the JSON still parses and keeps its shape; inside a string a single-quoted container ends where the
-  string does, so a `'token': [` that a message merely mentions does not take the fields after it, and
+  string does, so a `'token': [` that a message merely mentions does not take the fields after it, nor
+  the prose after an apostrophe in it (`it's`), and an unclosed `'password': '` there ends where the
+  string ends rather than taking the rest of the document; outside any string, the bare words after an
+  unclosed `'token': [` are replaced to the end of the input, since nothing tells them from leaves; and
   a `\"`-quoted leaf under a single-quoted key there, `\"{'token': [\\\"...\\\"]}\"`, is left, since a
   `"` inside a string may be the end of a string inside it), `key=value` pairs and quoted
   `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,

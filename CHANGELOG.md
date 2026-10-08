@@ -2005,6 +2005,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `data` / `models` array is a `Left`, and an entry that is not an object is skipped, as an entry without an
   `id` / `name` always was. Ordinary listings, pagination and the `has_more` / `last_id` checks are
   unchanged. No public signature changes.
+- **Redaction keeps the text after a merely mentioned credential key readable**
+  ([#1654](https://github.com/llm4s/llm4s/issues/1654), part of
+  [#1657](https://github.com/llm4s/llm4s/issues/1657)): three over-redactions in `Redaction.redact` and
+  `redactForLogging`, and so the exchange-log sink; none exposed a credential. An unclosed `'password': '`
+  inside a JSON string (`{"content": "use 'password': ' carefully", "model": "gpt-4o"}`) ran to the next `'`
+  or the end of the input and took every field after the string; a single-quoted value (and a `key='`
+  assignment) inside a double-quoted string now also ends at a `"` that ends that string - one followed by a
+  `,` and the next `"key":`, a closing bracket or the end of the input, and not the first character of the
+  value - so the output is `{"content": "use 'password': '[REDACTED]",
+  "model": "gpt-4o"}`. A `'token': [` mentioned inside a JSON string took the apostrophe of `it's` for a leaf
+  that the string's end closed (`... Thanks, it'[REDACTED]"}`); the apostrophe of a word of prose there - between
+  two letters, in a word after whitespace - is now kept when only the string's end would close it, while a quote
+  after a bracket, a comma, a space or a Python prefix (`b'`, `rb'`) still opens a leaf. And a bare word after a
+  backslash under a credential key (`{"token": [\a1, "x"], "password": "..."}`) had its replacement quote written
+  straight after the backslash, which read as `\"` and lost the rest of the document; the escaped character is now
+  kept, as before #1647, and the rest of the word replaced. Each of these redacts to the same output when redacted
+  again. Left by decision: outside any string, the bare words after an unclosed `'token': [` are still replaced to
+  the end of the input (`note: see 'token': [ for details` -> `note: see 'token': [ '[REDACTED]' '[REDACTED]'`),
+  since they read as the leaves of a YAML flow sequence or a cut-off dict and nothing tells them from prose; and
+  redacting twice still changes some inputs with unbalanced quotes, which the `redact` Scaladoc now says, where
+  `redactPairs` had claimed redacting twice gives the same result. No signature changes.
 - **Redaction keeps a `$` or `\` in a query parameter, and writes a placeholder as it is**
   ([#1655](https://github.com/llm4s/llm4s/issues/1655)): `Redaction.redact` and `redactForLogging`, and so the
   exchange-log sink, returned a query parameter to `Regex.replaceAllIn` without `Regex.quoteReplacement`, so

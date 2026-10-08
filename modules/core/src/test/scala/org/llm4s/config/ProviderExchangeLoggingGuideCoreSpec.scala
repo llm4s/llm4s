@@ -264,6 +264,11 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
       // single-quoted key there is left
       """{"content": "see 'token': [ for details", "api_key": "abc123456789"}""" ->
         """{"content": "see 'token': [ for details", "api_key": "[REDACTED]"}""",
+      """{"content": "see 'token': [ for details, it's urgent"}""" ->
+        """{"content": "see 'token': [ for details, it's urgent"}""",
+      """{"content": "use 'password': ' carefully", "model": "gpt-4o"}""" ->
+        """{"content": "use 'password': '[REDACTED]", "model": "gpt-4o"}""",
+      "see 'token': [ for details" -> "see 'token': [ '[REDACTED]' '[REDACTED]'",
       """{"content": "{'token': [\"abc123456789\"]}", "n": 1}""" -> """{"content": "{'token': [\"abc123456789\"]}", "n": 1}""",
       """{"max_tokens": [1, 2], "messages": [{"role": "user", "content": "hi"}]}""" ->
         """{"max_tokens": [1, 2], "messages": [{"role": "user", "content": "hi"}]}""",

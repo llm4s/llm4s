@@ -183,6 +183,11 @@ private[llm4s] object Redaction {
    * 3. Sensitive JSON fields
    * 4. Known API key patterns
    *
+   * Redacting the output a second time usually changes nothing, but that is not guaranteed: where quotes are
+   * unbalanced or stray, the text a first pass replaced can change how a second pass pairs the quotes, and the
+   * second pass may then replace more. It never makes readable what the first pass replaced, since that text is no
+   * longer in its input.
+   *
    * @param input The input string potentially containing sensitive data
    * @param placeholder The placeholder to use for redacted content
    * @return The input with sensitive data redacted
@@ -289,10 +294,11 @@ private[llm4s] object Redaction {
       redactContainers(JsonContainerStart, escapedContainers, placeholder, ValueEnd.Quote('"'), leaves = false)
     val escaped = redactQuoted(EscapedJsonStringStart, containers, placeholder, ValueEnd.EscapedQuote)
     val double  = redactQuoted(JsonStringStart, escaped, placeholder, ValueEnd.Quote('"'))
-    val single  = redactQuoted(SingleQuotedStart, double, placeholder, ValueEnd.Quote('\''))
+    val single  = redactQuoted(SingleQuotedStart, double, placeholder, ValueEnd.Quote('\''), endsWithString = true)
     // A number becomes a string, so that the redacted JSON still parses.
-    val quotedEquals   = redactQuoted(DoubleQuotedEqualsStart, single, placeholder, ValueEnd.Quote('"'))
-    val allQuoted      = redactQuoted(SingleQuotedEqualsStart, quotedEquals, placeholder, ValueEnd.Quote('\''))
+    val quotedEquals = redactQuoted(DoubleQuotedEqualsStart, single, placeholder, ValueEnd.Quote('"'))
+    val allQuoted =
+      redactQuoted(SingleQuotedEqualsStart, quotedEquals, placeholder, ValueEnd.Quote('\''), endsWithString = true)
     val escapedNumbers = redactPairs(EscapedJsonNumberField, allQuoted, placeholder, wrap = "\\\"")
     val numbers        = redactPairs(JsonNumberField, escapedNumbers, placeholder, wrap = "\"")
     Seq(EqualsPair, HeaderLine).foldLeft(numbers)((acc, pattern) => redactPairs(pattern, acc, placeholder))
@@ -369,19 +375,106 @@ private[llm4s] object Redaction {
     }
 
   /**
+   * The index of the character that ends a single-quoted value starting at `from` inside a double-quoted string: its
+   * closing `'`, or a bare `"` that ends the enclosing string, as `endsString` reads it. Any other `"` is taken for
+   * part of the value. A value that is closed by neither runs to the end of the input, as `scanQuotedValue` has it.
+   */
+  @tailrec
+  private def scanSingleQuotedInString(input: String, from: Int): Int =
+    if (from >= input.length) {
+      input.length
+    } else {
+      val c = input.charAt(from)
+      if (c == '\'') from
+      else if (c == '"' && endsString(input, from + 1)) from
+      else scanSingleQuotedInString(input, if (c == '\\') from + 2 else from + 1)
+    }
+
+  /**
+   * Whether the text from `from` on is what follows the end of a JSON string value in an object: past whitespace,
+   * the end of the input, a `,` before the next `"key":`, or a `}` or `]` followed by the end of the input, another
+   * `}` or `]`, or a `,` before the next `"`, `{` or `[`. Only that much is read: whitespace and at most one key, so
+   * each character is read a bounded number of times however many quotes ask.
+   */
+  private def endsString(input: String, from: Int): Boolean = {
+    val length = input.length
+    def skipSpace(at: Int): Int = {
+      var i = at
+      while (i < length && Character.isWhitespace(input.charAt(i))) i += 1
+      i
+    }
+    def isKeyChar(c: Char): Boolean =
+      (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-'
+    // `"key"` and then `:`, the key shaped as `Key` is.
+    def keyAt(at: Int): Boolean =
+      at + 1 < length && input.charAt(at) == '"' && input.charAt(at + 1).isLetter && input.charAt(at + 1) < 128 && {
+        var j = at + 2
+        while (j < length && j < at + 65 && isKeyChar(input.charAt(j))) j += 1
+        j < length && input.charAt(j) == '"' && {
+          val colon = skipSpace(j + 1)
+          colon < length && input.charAt(colon) == ':'
+        }
+      }
+    val i = skipSpace(from)
+    if (i == length) true
+    else
+      input.charAt(i) match {
+        case ',' => keyAt(skipSpace(i + 1))
+        case '}' | ']' =>
+          val j = skipSpace(i + 1)
+          j == length || input.charAt(j) == '}' || input.charAt(j) == ']' || (input.charAt(j) == ',' && {
+            val k = skipSpace(j + 1)
+            k < length && "\"{[".indexOf(input.charAt(k).toInt) >= 0
+          })
+        case _ => false
+      }
+  }
+
+  /**
    * Replaces the value of every `"key": "value"` whose key is sensitive. `start` matches up to the opening quote; the
    * value runs to the end found by `scanQuotedValue`, and the closing quote is left in place. An empty value is left as it is.
+   *
+   * With `endsWithString`, a single-quoted value whose key sits inside a double-quoted string (`EnclosingQuotes`)
+   * ends at the end of that string if no `'` closes it first (`scanSingleQuotedInString`): a message that mentions
+   * `'password': '` without closing it then does not take the rest of the document.
    */
-  private def redactQuoted(start: Regex, input: String, placeholder: String, end: ValueEnd): String = {
-    val matcher = start.pattern.matcher(input)
-    val out     = new java.lang.StringBuilder(input.length)
+  private def redactQuoted(
+    start: Regex,
+    input: String,
+    placeholder: String,
+    end: ValueEnd,
+    endsWithString: Boolean = false
+  ): String = {
+    val matcher   = start.pattern.matcher(input)
+    val out       = new java.lang.StringBuilder(input.length)
+    val enclosing = if (endsWithString) Some(new EnclosingQuotes(input)) else None
+
+    // A value that a pass before has already ended at the end of its string is the placeholder followed by that end:
+    // it ends there again, whatever the quotes the placeholder replaced made of the string around it, so that
+    // redacting the output a second time changes nothing.
+    def alreadyEnded(valueStart: Int): Boolean = {
+      val after = valueStart + placeholder.length
+      endsWithString && placeholder.nonEmpty && input.startsWith(placeholder, valueStart) && after < input.length &&
+      input.charAt(after) == '"' && endsString(input, after + 1)
+    }
+
+    def valueEndOf(keyStart: Int, valueStart: Int): Int =
+      if (alreadyEnded(valueStart)) valueStart + placeholder.length
+      else if (enclosing.exists(_.enclosingAt(keyStart) == '"')) {
+        // A value the end of the string would leave empty (`'password': '", ...`) is no value: the quote after the
+        // key may as well be the start of one that runs on, so it is scanned as outside a string.
+        val stringEnd = scanSingleQuotedInString(input, valueStart)
+        if (stringEnd == valueStart && stringEnd < input.length && input.charAt(stringEnd) == '"')
+          scanQuotedValue(input, valueStart, end)
+        else stringEnd
+      } else scanQuotedValue(input, valueStart, end)
 
     @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
       if (searchFrom > input.length || !matcher.find(searchFrom)) {
         copiedTo
       } else {
         val valueStart = matcher.end
-        val valueEnd   = scanQuotedValue(input, valueStart, end)
+        val valueEnd   = valueEndOf(matcher.start(1), valueStart)
         if (isSensitiveKey(matcher.group(2)) && valueEnd > valueStart) {
           out.append(input, copiedTo, valueStart).append(placeholder)
           loop(valueEnd, valueEnd)
@@ -590,10 +683,28 @@ private[llm4s] object Redaction {
       next
     }
 
+    // Whether a leaf scanned inside a double-quoted string stopped at a bare `"`, the end of the enclosing string,
+    // and not at its own quote or the end of the input.
+    def endedByString(contentEnd: Int): Boolean =
+      inDoubleQuotes && contentEnd < length && input.charAt(contentEnd) == '"'
+
+    // Whether the `'` at `open` is the apostrophe of a word of prose, as in `it's` or `O'Brien`: it sits between two
+    // letters or digits, and the word before it follows whitespace - not a bracket, a comma or a quote, after which a
+    // leaf would start - and is not a Python string prefix (`b'...'`, `rb'...'`: one or two of b, r, u and f).
+    def isProseApostrophe(open: Int): Boolean =
+      open + 1 < length && input.charAt(open + 1).isLetterOrDigit && {
+        var j = open - 1
+        while (j >= 0 && input.charAt(j).isLetterOrDigit) j -= 1
+        val word = input.substring(j + 1, open)
+        word.nonEmpty && j >= 0 && Character.isWhitespace(input.charAt(j)) &&
+        !(word.length <= 2 && word.forall(c => "bBrRuUfF".indexOf(c.toInt) >= 0))
+      }
+
     // A string in the other quote than the key's (`'abc'` under `"token"`, `"abc"` under `'token'`), or in the key's
     // own `'`: a key before `:` is kept whole, and a string that cannot be a value - prose, whose `'` is an apostrophe
-    // run on by a letter, or text with a `:` or `=`, which is no leaf but a field the passes before have seen to - is
-    // not taken for one: its quote is an ordinary character and the walk goes on inside it.
+    // run on by a letter, or the apostrophe of a word of prose that only the end of the enclosing string would close
+    // (the `'` of `it's urgent!"`), or text with a `:` or `=`, which is no leaf but a field the passes before have
+    // seen to - is not taken for one: its quote is an ordinary character and the walk goes on inside it.
     def emitOtherString(open: Int, stringEnd: ValueEnd): Int = {
       val contentStart = open + 1
       val contentEnd   = scanQuotedValue(input, contentStart, stringEnd)
@@ -607,6 +718,7 @@ private[llm4s] object Redaction {
         next
       } else if (
         (closed && inDoubleQuotes && next < length && input.charAt(next).isLetterOrDigit) ||
+        (endedByString(contentEnd) && isProseApostrophe(open)) ||
         !isLeafText(input, contentStart, contentEnd)
       ) {
         out.append(input.charAt(open))
@@ -624,6 +736,14 @@ private[llm4s] object Redaction {
     def separates(c: Char): Boolean =
       isSpace(c) || c == ',' || c == ':' || c == '[' || c == ']' || c == '{' || c == '}' || c == '"' ||
         c == '\'' || c == '\\'
+
+    // Whether an odd run of backslashes ends just before `at`, so that the character at `at` is escaped. Each run is
+    // counted for the one word after it, so the cost stays linear.
+    def escapedAt(at: Int): Boolean = {
+      var j = at - 1
+      while (j >= 0 && input.charAt(j) == '\\') j -= 1
+      (at - 1 - j) % 2 == 1
+    }
 
     // A word as the walk before #1647 wrote it: every character as it is, bar a number, which is replaced.
     def copyWord(start: Int, stop: Int): Unit = {
@@ -711,7 +831,13 @@ private[llm4s] object Redaction {
         val replace =
           if (!leaves) digits && !eq && !keyFollows(next)
           else number || !(inDoubleQuotes || keyFollows(next) || KeptLiterals.contains(input.substring(i, next)))
-        if (replace) out.append(quote).append(placeholder).append(quote)
+        if (replace && escapedAt(i)) {
+          // The word follows a backslash, which escapes its first character: a quote written there would be read as
+          // `\"`, and the quotes after it would pair the other way round. The escaped character is kept, as the walk
+          // before #1647 kept it, and the rest of the word is replaced.
+          out.append(input.charAt(i))
+          if (next > i + 1) out.append(quote).append(placeholder).append(quote)
+        } else if (replace) out.append(quote).append(placeholder).append(quote)
         else if (leaves) out.append(input, i, next)
         else copyWord(i, next)
         i = next
@@ -740,8 +866,9 @@ private[llm4s] object Redaction {
   }
 
   /**
-   * Replaces the value of every match whose key is sensitive. Redacting a value that is already the
-   * placeholder gives the placeholder, so redacting twice gives the same result as redacting once.
+   * Replaces the value of every match whose key is sensitive. A value that is already the placeholder is replaced
+   * by the placeholder, so this pass leaves its own output as it is; whether the whole of `redact` does is said
+   * on [[redact]].
    */
   private def redactPairs(
     pattern: Regex,

@@ -600,6 +600,86 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  // ---------------------------------------------------------------------------------------------
+  // A credential key that a message merely mentions leaves the text after it readable (#1654, #1657)
+  // ---------------------------------------------------------------------------------------------
+
+  /** Redacts `input`, checks that redacting the result again changes nothing, and returns the result. */
+  private def redactedOnceAndTwice(input: String): String = {
+    val once = Redaction.redact(input)
+    withClue(s"redacting the output for $input a second time: ")(Redaction.redact(once) shouldBe once)
+    once
+  }
+
+  it should "end an unclosed single-quoted value inside a JSON string where that string ends (#1654)" in {
+    // Was `{"content": "use 'password': '[REDACTED]`: with no closing `'`, the value ran to the end of the input,
+    // and the fields after the string, and the closing brace, were gone.
+    val out =
+      redactedOnceAndTwice("""{"content": "use 'password': ' carefully", "model": "gpt-4o", "temperature": 0.2}""")
+    out shouldBe s"""{"content": "use 'password': '$R", "model": "gpt-4o", "temperature": 0.2}"""
+    ujson.read(out)("model").str shouldBe "gpt-4o"
+    ujson.read(out)("temperature").num shouldBe 0.2
+    redactedOnceAndTwice("""{"content": "set password=' carefully", "model": "gpt-4o"}""") shouldBe
+      s"""{"content": "set password='$R", "model": "gpt-4o"}"""
+    // The end of the string is found before a `'` later in the document, which used to end the value.
+    redactedOnceAndTwice(
+      """{"content": "use 'password': ' carefully", "model": "gpt-4o", "note": "it's ok"}"""
+    ) shouldBe
+      s"""{"content": "use 'password': '$R", "model": "gpt-4o", "note": "it's ok"}"""
+  }
+
+  it should "still redact a single-quoted value inside a JSON string up to its own quote or a quote that ends the string" in {
+    redactedOnceAndTwice(s"""{"content": "use 'password': '$secretText' now", "n": 1}""") shouldBe
+      s"""{"content": "use 'password': '$R' now", "n": 1}"""
+    // A `"` that is not followed by what follows the end of a JSON string - a `,` before the next key, a closing
+    // bracket, the end of the input - is taken for part of the value, so a stray quote in it ends nothing.
+    redactedOnceAndTwice(s"""{"content": "x 'password': 'ab"$secretText more"}""") shouldBe
+      s"""{"content": "x 'password': '$R"}"""
+    redactedOnceAndTwice(s"""{"content": "x 'password': 'ab", $secretText"}""") shouldBe
+      s"""{"content": "x 'password': '$R"}"""
+    // Outside a string, the value still runs to its closing quote, or to the end of a payload cut off inside it.
+    redactedOnceAndTwice(s"""{'password': 'ab", "$secretText'}""") shouldBe s"{'password': '$R'}"
+    redactedOnceAndTwice(s"{'password': '$secretText") shouldBe s"{'password': '$R"
+  }
+
+  it should "keep prose after a 'token': [ that a JSON string mentions (#1657)" in {
+    // Was `... Thanks, it'[REDACTED]"}`: the `'` of `it's` opened a leaf that the string's end closed, and a second
+    // pass redacted from the `'` of `isn't` as well.
+    val input = """{"content":"The 'token': [ field isn't documented. Thanks, it's urgent!"}"""
+    redactedOnceAndTwice(input) shouldBe input
+    val logLine =
+      """INFO Request body: {"model":"gpt-4o-mini","messages":[{"role":"user","content":"Summarise: The 'token': [ field in Bob's YAML isn't documented; it's a list of strings. Thanks, it's urgent!"}],"stream":true}"""
+    redactedOnceAndTwice(logLine) shouldBe logLine
+    // Only the apostrophe of a word of prose - between two letters, in a word that follows whitespace - is kept so.
+    // A quote after a bracket, a space, a word that starts the container, or a Python string prefix still opens a
+    // leaf, closed or cut off.
+    redactedOnceAndTwice(s"""{"content": "{'token': ['$secretText"}""") shouldBe s"""{"content": "{'token': ['$R"}"""
+    redactedOnceAndTwice(s"""{"content": "{'token': [ '$secretText"}""") shouldBe s"""{"content": "{'token': [ '$R"}"""
+    redactedOnceAndTwice(s"""{"content": "{'token': [O'$secretText"}""") shouldBe s"""{"content": "{'token': [O'$R"}"""
+    redactedOnceAndTwice(s"""{"content": "{'token': [x, b'$secretText"}""") shouldBe
+      s"""{"content": "{'token': [x, b'$R"}"""
+    redactedOnceAndTwice(s"""{"content": "{'token': [x, rb'$secretText"}""") shouldBe
+      s"""{"content": "{'token': [x, rb'$R"}"""
+  }
+
+  it should "keep the escaped character when it replaces a bare word after a backslash (#1657)" in {
+    // Was `{"token": [\"[REDACTED]"[REDACTED]"...`: the quote written after the backslash read as `\"`, the quotes
+    // after it paired the other way round, and the rest of the document, the `password` key with it, was lost.
+    redactedOnceAndTwice("""{"token": [\a1, "x"], "password": "QZXJVK"}""") shouldBe
+      s"""{"token": [\\a"$R", "$R"], "password": "$R"}"""
+    redactedOnceAndTwice("""{"token": [\1abc, "x"], "password": "QZXJVK"}""") shouldBe
+      s"""{"token": [\\1"$R", "$R"], "password": "$R"}"""
+  }
+
+  it should "still replace the bare words after a 'token': [ that text outside any string mentions" in {
+    // Left by decision (#1657): outside a string, the words after an unclosed `'token': [` read as the plain leaves
+    // of a YAML flow sequence or a cut-off dict, and nothing tells a word of prose from such a leaf; replacing them
+    // is what keeps a credential unreadable when a stray quote misleads the walk. The result is stable.
+    redactedOnceAndTwice("note: see 'token': [ for details. Content-Type: application/json, model gpt-4o-mini") shouldBe
+      s"note: see 'token': [ '$R' '$R' Content-Type: '$R', '$R' '$R'"
+    redactedOnceAndTwice(s"'token': [$secretText, abc]") shouldBe s"'token': ['$R', '$R']"
+  }
+
   it should "redact a document of many JSON strings that mention 'token': [ in time linear in its length" in {
     // One forward scan decides which string, if any, encloses each container, so the cost does not grow with the
     // square of the length: a document four times as long takes about four times as long, never sixteen.
