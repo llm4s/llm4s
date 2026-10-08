@@ -1909,6 +1909,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   admitted `/srv/agent-data-secret`, and `developmentSafe(workingDirectory)` could read and write a sibling
   directory whose name began with the working directory's. Both now use `Path.startsWith` on normalised absolute
   paths; blocked paths are matched the same way (`/var` no longer blocks `/variable`).
+- **`llm4s-core`: `ProcessingError.context` names the cause's class when the exception has no message**
+  ([#1556](https://github.com/llm4s/llm4s/issues/1556)): the `cause` entry was the exception's `getMessage`, which
+  is `null` for an exception built without one (`new RuntimeException()`, a bare `NullPointerException`), so the
+  `Map[String, String]` held `"cause" -> null`, `formatted` printed `cause=null`, and any later read of the value
+  (`toLowerCase`, JSON encoding) threw. The entry is now the class name (`cause=java.lang.RuntimeException`)
+  when the message is `null` or empty; a cause with a message keeps its message, and an error without a cause
+  has no `cause` entry, as before. `AssistantError.consoleInputFailed` and `consoleOutputFailed`, which
+  interpolated the same `getMessage` into their message (`Failed to read user input: null`), fall back the same way.
 - **`llm4s-knowledgegraph`: `GraphJsonParser` returns a `Left` for a reply that is not a JSON object**
   ([#1527](https://github.com/llm4s/llm4s/issues/1527)): the parser read `json.obj` outside the `Try` that guards the
   parse, so a model reply whose top-level value was an array, a string, a number, `true`, `false` or `null` threw

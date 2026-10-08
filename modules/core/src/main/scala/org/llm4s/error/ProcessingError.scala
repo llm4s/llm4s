@@ -22,7 +22,7 @@ final case class ProcessingError private (
 ) extends LLMError
     with NonRecoverableError {
   override val context: Map[String, String] = Map("operation" -> operation) ++
-    cause.map(c => Map("cause" -> c.getMessage)).getOrElse(Map.empty)
+    cause.map(c => Map("cause" -> LLMError.describeCause(c))).getOrElse(Map.empty)
 }
 
 object ProcessingError {
@@ -31,8 +31,9 @@ object ProcessingError {
    * Creates a processing error for a failed `operation`.
    *
    * The message is `Processing failed during <operation>: <message>`. `context` holds `operation` and,
-   * when a `cause` is given, `cause` set to that exception's `getMessage` (`null` if the exception has
-   * no message).
+   * when a `cause` is given, `cause` set to that exception's `getMessage`, or to its class name (for
+   * example `java.lang.RuntimeException`) when the exception has no message or an empty one, so the
+   * context never holds `null`.
    *
    * @param operation the processing operation that failed (e.g. `"audio-resample"`)
    * @param message what went wrong, appended after the operation name in the error message
