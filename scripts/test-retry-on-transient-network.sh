@@ -126,7 +126,7 @@ rc=$(RETRY_BACKOFF_SECONDS=15 run)
 [ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "15 30 " ] && pass "backoff is 15 s then 30 s" || fail "backoff is 15 s then 30 s" "$(tr '\n' ' ' < "$SLEEP_LOG")"
 plan "1\n$TRANSIENT_LINE"
 rc=$(RETRY_BACKOFF_SECONDS=9999 RETRY_MAX=2 run)
-[ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "120 240 " ] && pass "a base wait is capped at 120 s" || fail "a base wait is capped at 120 s" "$(tr '\n' ' ' < "$SLEEP_LOG")"
+[ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "120 120 " ] && pass "every wait is capped at 120 s, the later multiples too" || fail "every wait is capped at 120 s, the later multiples too" "$(tr '\n' ' ' < "$SLEEP_LOG")"
 
 # 14. Bad settings and no command are refused with status 2, before anything runs.
 plan "0\nshould not run"
