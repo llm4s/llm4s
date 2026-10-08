@@ -2,6 +2,7 @@ package org.llm4s.toolapi.builtin.core
 
 import org.llm4s.toolapi._
 import org.llm4s.types.Result
+import org.llm4s.util.BoundedJson
 import upickle.default._
 
 import scala.annotation.tailrec
@@ -161,41 +162,23 @@ object JSONTool {
         Left(s"Unknown operation: $other. Supported: parse, format, query, validate")
     }
 
-  /** Deepest nesting (arrays and objects together) any operation accepts; see the object's Scaladoc. */
-  private val MaxNestingDepth = 512
+  /**
+   * Deepest nesting (arrays and objects together) any operation accepts; see the object's Scaladoc. The
+   * library's one limit for model- and tool-produced JSON (`BoundedJson`, #1562).
+   */
+  private val MaxNestingDepth = BoundedJson.MaxDepth
 
   /**
    * Refuse a document nested deeper than [[MaxNestingDepth]] before it is read or written.
    *
-   * The depth is measured on the raw text, ignoring brackets inside string literals, so a document that would
-   * overflow the stack is never handed to the parser or the writer. Malformed text is not judged here: the
-   * parser reports it.
+   * The depth is measured on the raw text by `BoundedJson`'s iterative scan, ignoring brackets inside string
+   * literals, so a document that would overflow the stack is never handed to the parser or the writer.
+   * Malformed text is not judged here: the parser reports it.
    */
   private def withinDepthLimit(jsonStr: String): Either[String, Unit] =
-    if (maxNesting(jsonStr) > MaxNestingDepth)
+    if (BoundedJson.exceedsDepth(jsonStr, MaxNestingDepth))
       Left(s"JSON is nested more than $MaxNestingDepth levels deep, which is more than this tool reads or writes")
     else Right(())
-
-  /** The deepest nesting in `text`, stopping as soon as it passes [[MaxNestingDepth]]. */
-  private def maxNesting(text: String): Int = {
-    @tailrec
-    def scan(i: Int, depth: Int, deepest: Int, inString: Boolean, escaped: Boolean): Int =
-      if (i >= text.length || deepest > MaxNestingDepth) deepest
-      else {
-        val c = text.charAt(i)
-        if (inString) {
-          if (escaped) scan(i + 1, depth, deepest, inString = true, escaped = false)
-          else if (c == '\\') scan(i + 1, depth, deepest, inString = true, escaped = true)
-          else if (c == '"') scan(i + 1, depth, deepest, inString = false, escaped = false)
-          else scan(i + 1, depth, deepest, inString = true, escaped = false)
-        } else if (c == '"') scan(i + 1, depth, deepest, inString = true, escaped = false)
-        else if (c == '[' || c == '{')
-          scan(i + 1, depth + 1, math.max(deepest, depth + 1), inString = false, escaped = false)
-        else if (c == ']' || c == '}') scan(i + 1, math.max(0, depth - 1), deepest, inString = false, escaped = false)
-        else scan(i + 1, depth, deepest, inString = false, escaped = false)
-      }
-    scan(0, 0, 0, inString = false, escaped = false)
-  }
 
   /**
    * Query a JSON value using path notation.

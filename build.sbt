@@ -511,7 +511,7 @@ lazy val core = (project in file("modules/core"))
 // dependency, they do not rewrite imports.
 
 lazy val knowledgegraph = (project in file("modules/knowledgegraph"))
-  .dependsOn(core)
+  .dependsOn(core % "compile->compile;test->test")
   .settings(
     name := "llm4s-knowledgegraph",
     commonSettings,
@@ -586,7 +586,7 @@ lazy val rag = (project in file("modules/rag"))
 // rather than rewriting imports.
 
 lazy val memory = (project in file("modules/memory"))
-  .dependsOn(core)
+  .dependsOn(core % "compile->compile;test->test")
   .settings(
     name := "llm4s-memory",
     commonSettings,

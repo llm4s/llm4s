@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.utils.SimilarityUtils
 import org.llm4s.rag.evaluation._
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.BoundedJson
 
 import scala.util.Try
 
@@ -162,11 +163,20 @@ Respond with ONLY a JSON array of strings:"""
    * Parse generated questions from LLM response.
    */
   private def parseQuestions(response: String): Result[Seq[String]] =
-    Try {
-      val jsonStr = extractJsonArray(response)
-      val arr     = ujson.read(jsonStr).arr
-      arr.map(_.str).toSeq
-    }.toResult.left.map(e => EvaluationError.parseError(s"Failed to parse generated questions: ${e.message}"))
+    readArray(response)
+      .flatMap(arr => Try(arr.map(_.str)).toResult)
+      .left
+      .map(e => EvaluationError.parseError(s"Failed to parse generated questions: ${e.message}"))
+
+  /**
+   * The JSON array in a reply. The text is the model's: a document nested more than 512 levels deep is
+   * refused before it is parsed, since a value that deep overflows the stack of whatever renders it,
+   * an `InvalidData` message included (#1562).
+   */
+  private def readArray(response: String): Result[Seq[ujson.Value]] =
+    Try(extractJsonArray(response)).toResult
+      .flatMap(jsonStr => BoundedJson.read(jsonStr))
+      .flatMap(json => Try(json.arr.toSeq).toResult)
 
   /**
    * Extract JSON array from potentially markdown-wrapped response.

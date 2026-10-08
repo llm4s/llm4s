@@ -10,6 +10,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.BoundedJson
 import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedReader, InputStreamReader }
@@ -424,12 +425,15 @@ object OllamaClient {
    * Arguments of a call as a JSON object; Ollama's request side takes an object, never a string.
    * An object is sent as it is, and a string that parses to an object is parsed. Anything else (a string
    * that is not JSON or not an object, an array, a number) cannot be sent: it goes as `{}`, with a
-   * WARN naming the tool, never the arguments, which can hold secrets.
+   * WARN naming the tool, never the arguments, which can hold secrets. A string is the model's own text
+   * (a streamed call's arguments stay a `Str`), so one nested more than 512 levels deep is not parsed
+   * either - the object it would build overflows the stack when the request is rendered - and goes as
+   * `{}` like any other string that is not a JSON object (#1562).
    */
   private[provider] def requestArguments(toolName: String, arguments: ujson.Value): ujson.Value = {
     val parsed = arguments match {
       case o: ujson.Obj => Some(o)
-      case ujson.Str(s) => Try(ujson.read(s)).toOption.collect { case o: ujson.Obj => o }
+      case ujson.Str(s) => BoundedJson.read(s).toOption.collect { case o: ujson.Obj => o }
       case _            => None
     }
     parsed.getOrElse {
@@ -448,10 +452,15 @@ object OllamaClient {
     case None | Some(ujson.Null)              => Right(ujson.Obj())
     case Some(o: ujson.Obj)                   => Right(o)
     case Some(ujson.Str(s)) if s.trim.isEmpty => Right(ujson.Obj())
-    case Some(ujson.Str(s)) =>
-      Try(ujson.read(s)).toOption match {
-        case Some(o: ujson.Obj) => Right(o)
-        case _                  => Left(malformed("arguments are not a JSON object"))
+    case Some(ujson.Str(s))                   =>
+      // The string is the model's text inside the envelope's string literal, so this second parse is the
+      // boundary: a document nested more than 512 levels deep is refused before it is parsed, since the
+      // object it would build overflows the stack of whatever renders it (#1562).
+      BoundedJson.read(s) match {
+        case Right(o: ujson.Obj) => Right(o)
+        case Left(e) if e == BoundedJson.tooDeep() =>
+          Left(malformed(s"arguments are nested more than ${BoundedJson.MaxDepth} levels deep"))
+        case _ => Left(malformed("arguments are not a JSON object"))
       }
     case Some(_) => Left(malformed("arguments are not a JSON object"))
   }

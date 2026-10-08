@@ -19,10 +19,29 @@ final class BoundedJsonSpec extends AnyFlatSpec with Matchers {
     BoundedJson.read("""{"a":[1,2,{"b":null}]}""") shouldBe Right(ujson.read("""{"a":[1,2,{"b":null}]}"""))
   }
 
-  it should "report malformed JSON as a Left carrying the parser's message" in {
-    val result = BoundedJson.read("{not json")
-    result.isLeft shouldBe true
-    result.left.map(_.message.nonEmpty) shouldBe Left(true)
+  it should "report malformed JSON as a ValidationError on `json` carrying the parser's message" in {
+    BoundedJson.read("{not json") match {
+      case Left(e: ValidationError) =>
+        e.field shouldBe "json"
+        e.message should startWith("Invalid json: ")
+        e.message.length should be > "Invalid json: ".length
+      case other => fail(s"expected a ValidationError, got $other")
+    }
+  }
+
+  it should "not mistake a parse error at index 429 or 401 for a rate limit or an authentication failure" in {
+    // `DefaultErrorMapper` classifies any exception whose message contains "429" or "401", and the
+    // parser's exception names the JSON path it stopped at (`$[429]`) - so a reply that goes wrong at
+    // that element used to come back as a RateLimitError or an AuthenticationError.
+    Seq(429, 401).foreach { index =>
+      val malformed = "[" + "0," * index + "x]"
+      BoundedJson.read(malformed) match {
+        case Left(e: ValidationError) =>
+          e.field shouldBe "json"
+          e.message should include(s"$$[$index]")
+        case other => fail(s"expected a ValidationError for a parse error at element $index, got $other")
+      }
+    }
   }
 
   it should "accept a document nested exactly 512 levels and refuse 513" in {
@@ -60,7 +79,7 @@ final class BoundedJsonSpec extends AnyFlatSpec with Matchers {
     // the scan refuses it before the parser could report the missing brackets
     BoundedJson.read("[" * 513) shouldBe Left(BoundedJson.tooDeep())
     // short of the limit, the parser reports the malformed text
-    BoundedJson.read("[" * 3).left.map(_.isInstanceOf[ValidationError]) shouldBe Left(false)
+    BoundedJson.read("[" * 3).left.map(_.message.contains("levels deep")) shouldBe Left(false)
   }
 
   "BoundedJson.exceedsDepth" should "answer by the same scan" in {

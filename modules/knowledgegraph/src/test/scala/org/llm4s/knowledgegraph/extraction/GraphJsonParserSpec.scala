@@ -297,7 +297,7 @@ class GraphJsonParserSpec extends AnyFunSuite with Matchers {
     )
     inputs.foreach { case (name, input) =>
       withClue(name) {
-        org.llm4s.knowledgegraph.SmallStack.run(parse(input).left.map(e => (e, e.message)).map(_ => "a graph")) match {
+        org.llm4s.testutil.SmallStack.run(parse(input).left.map(e => (e, e.message)).map(_ => "a graph")) match {
           case Right(Left((e: ProcessingError, message))) =>
             e.operation shouldBe ErrorCode
             message should include("Failed to parse LLM output as graph")
@@ -314,7 +314,7 @@ class GraphJsonParserSpec extends AnyFunSuite with Matchers {
     def nested(depth: Int): String =
       """{"nodes": [{"id": "a", "label": "X", "properties": {"deep": """ + "[" * (depth - 4) + "]" * (depth - 4) +
         """}}], "edges": []}"""
-    org.llm4s.knowledgegraph.SmallStack.run(parse(nested(512))).map(_.map(_.nodes.size)) shouldBe Right(Right(1))
-    org.llm4s.knowledgegraph.SmallStack.run(parse(nested(513))).map(_.isLeft) shouldBe Right(true)
+    org.llm4s.testutil.SmallStack.run(parse(nested(512))).map(_.map(_.nodes.size)) shouldBe Right(Right(1))
+    org.llm4s.testutil.SmallStack.run(parse(nested(513))).map(_.isLeft) shouldBe Right(true)
   }
 }

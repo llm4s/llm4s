@@ -3,6 +3,7 @@ package org.llm4s.rag.evaluation
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.BoundedJson
 
 import java.nio.file.{ Files, Paths }
 import scala.util.Try
@@ -249,17 +250,22 @@ Respond with ONLY a JSON array:"""
   }
 
   private def parseQAPairs(response: String): Result[Seq[(String, String)]] =
-    Try {
-      val jsonStr = extractJsonArray(response)
-      val arr     = ujson.read(jsonStr).arr
-
-      arr.map { v =>
-        val obj      = v.obj
-        val question = obj("question").str
-        val answer   = obj("answer").str
-        (question, answer)
-      }.toSeq
-    }.toResult.left.map(e => EvaluationError.parseError(s"Failed to parse QA pairs: ${e.message}"))
+    // The text is the model's: a document nested more than 512 levels deep is refused before it is
+    // parsed, since a value that deep overflows the stack of whatever renders it (#1562).
+    Try(extractJsonArray(response)).toResult
+      .flatMap(jsonStr => BoundedJson.read(jsonStr))
+      .flatMap { json =>
+        Try {
+          json.arr.map { v =>
+            val obj      = v.obj
+            val question = obj("question").str
+            val answer   = obj("answer").str
+            (question, answer)
+          }.toSeq
+        }.toResult
+      }
+      .left
+      .map(e => EvaluationError.parseError(s"Failed to parse QA pairs: ${e.message}"))
 
   private def extractJsonArray(response: String): String = {
     val trimmed = response.trim

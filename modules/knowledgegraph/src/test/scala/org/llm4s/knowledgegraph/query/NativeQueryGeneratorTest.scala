@@ -3,7 +3,7 @@ package org.llm4s.knowledgegraph.query
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
-import org.llm4s.knowledgegraph.SmallStack
+import org.llm4s.testutil.SmallStack
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion }
 import org.llm4s.error.ProcessingError
