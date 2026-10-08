@@ -80,7 +80,13 @@ class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues
   // ---- Invalid chunking settings
 
   private def chunkingConfig(size: Int, overlap: Int): Result[ChunkingConfig] =
-    Try(ChunkingConfig(targetSize = size, maxSize = size * 3 / 2, overlap = overlap)).toResult
+    Try(
+      ChunkingConfig(
+        targetSize = size,
+        maxSize = math.min(size.toLong * 3 / 2, Int.MaxValue.toLong).toInt,
+        overlap = overlap
+      )
+    ).toResult
 
   "an invalid ChunkingConfig" should {
     "throw IllegalArgumentException naming the rule that failed" in {
@@ -102,6 +108,8 @@ class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues
 
     "become a Left when the sizes come from user input and are checked with Try" in {
       chunkingConfig(800, 150).value.overlap shouldBe 150
+      chunkingConfig(1000000000, 0).value.maxSize shouldBe 1500000000
+      chunkingConfig(Int.MaxValue, Int.MaxValue - 1).value.maxSize shouldBe Int.MaxValue
       chunkingConfig(800, 800).left.value.message should include("overlap must be >= 0 and < targetSize")
       chunkingConfig(0, 0).left.value.message should include("targetSize must be positive")
     }
