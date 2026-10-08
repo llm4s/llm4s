@@ -108,7 +108,7 @@ class VertexAIClient(
                 if (response.statusCode >= 200 && response.statusCode < 300)
                   parseCompletionResponse(response.body).map(c =>
                     c.withMessage(
-                      ThinkingReplay.bind(replayOrigin, c.message, transformed.messages, transformed.options)
+                      ThinkingReplay.bindOrigin(replayOrigin, c.message)
                     )
                   )
                 else handleErrorResponse(response.statusCode, response.body, response.headers)
@@ -200,7 +200,7 @@ class VertexAIClient(
                       ) // the accumulator keeps streamed calls on the message only
                       .withEstimatedCost(cost)
                       .withMessage(
-                        ThinkingReplay.bind(replayOrigin, message, transformed.messages, transformed.options)
+                        ThinkingReplay.bindOrigin(replayOrigin, message)
                       )
                     recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
                     completion
@@ -226,10 +226,14 @@ class VertexAIClient(
     val contents         = scala.collection.mutable.ArrayBuffer[ujson.Value]()
     var systemInstr      = Option.empty[String]
     val toolCallIdToName = scala.collection.mutable.Map[String, String]()
+    // The ids of function calls sent with Gemini's own `functionCall.id`: their results echo it back
+    val callIdsSentWithId = scala.collection.mutable.Set[String]()
 
-    // Thought signatures are sent back only where they are valid: every other assistant message has its sealed
-    // thinking dropped here (see ThinkingReplay)
-    val messages = ThinkingReplay.replayable(replayOrigin, conversation.messages, options)
+    // Thought signatures are sent back only to the provider and model that produced them; unlike
+    // Anthropic's prefix rule, Google wants them PRESERVED when earlier history is pruned or edited
+    // (Gemini 3 answers 400 for a missing function-call signature), so the binding is origin-only
+    // and a foreign or re-modelled signature is dropped here (see ThinkingReplay.bindOrigin)
+    val messages = ThinkingReplay.replayableOrigin(replayOrigin, conversation.messages)
 
     messages.foreach {
       case SystemMessage(content) =>
@@ -241,8 +245,17 @@ class VertexAIClient(
       case am: AssistantMessage =>
         // Tool call IDs map to function names so the following ToolMessages can be keyed by name
         am.toolCalls.foreach(tc => toolCallIdToName(tc.id) = tc.name)
+        // a functionCall part sent with Gemini's own id needs that id echoed on its functionResponse
         // text, then function calls, each part carrying the thought signature Gemini gave it (if it is still valid)
         val parts = GeminiThoughtSignatures.parts(providerName, am)
+        parts.foreach { p =>
+          p.objOpt
+            .flatMap(_.get("functionCall"))
+            .flatMap(_.objOpt)
+            .flatMap(_.get("id"))
+            .flatMap(_.strOpt)
+            .foreach(callIdsSentWithId += _)
+        }
         if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.contentOpt.isDefined))
           contents += ujson.Obj("role" -> "model", "parts" -> ujson.Arr(parts: _*))
 
@@ -252,10 +265,15 @@ class VertexAIClient(
           "role" -> "user",
           "parts" -> ujson.Arr(
             ujson.Obj(
-              "functionResponse" -> ujson.Obj(
-                "name"     -> functionName,
-                "response" -> ujson.Obj("result" -> content)
-              )
+              "functionResponse" -> {
+                val response = ujson.Obj(
+                  "name"     -> functionName,
+                  "response" -> ujson.Obj("result" -> content)
+                )
+                // a populated functionCall.id must come back on the matching functionResponse
+                if (callIdsSentWithId.contains(toolCallId)) response("id") = toolCallId
+                response
+              }
             )
           )
         )

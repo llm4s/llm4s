@@ -16,7 +16,8 @@ import scala.util.Try
  * it can be reused in subsequent requests", in googleapis/js-genai `src/types.ts` and googleapis/python-genai
  * `google/genai/types.py`); the rules this class follows are:
  *
- *  - '''Function calls.''' If a response holds `functionCall` parts, a signature is required for correct
+ *  - '''Function calls.''' A populated `functionCall.id` must be echoed by the matching
+ *    `functionResponse`, so it becomes the tool call's id. If a response holds `functionCall` parts, a signature is required for correct
  *    processing, and in a response with parallel calls only the first `functionCall` part carries one.
  *    Gemini 3 models answer HTTP 400 when a required signature is not returned. The part must be sent back
  *    ''exactly as returned'', with its signature.
@@ -33,8 +34,11 @@ import scala.util.Try
  * before it is unchanged. The block's `data` is a small JSON object that says which part the signature
  * belongs to:
  *
- *  - `{"call": "<tool call id>", "sig": "<signature>"}` for a `functionCall` part. The tool call's id is the
- *    one this client generated for it (Gemini returns none), so the signature goes back on the right call.
+ *  - `{"call": "<tool call id>", "fc": <functionCall as returned>, "sig": "<signature>"}` for a
+ *    `functionCall` part. The tool call's id is the `functionCall.id` Gemini populated, or one this client
+ *    generated when it did not; `fc` is the part's payload exactly as returned (optional `id`, `args`
+ *    present or absent), replayed verbatim while it still spells the tool call, so the signed part goes
+ *    back exactly as received.
  *  - `{"at": <n>, "text": "<part text>", "sig": "<signature>"}` for a text part: `n` is the number of
  *    characters of message content that precede the part, and `text` is the part's own text (empty for a
  *    signature that arrived on an empty part). On replay the content is split at those offsets so a signed
@@ -65,7 +69,7 @@ private[provider] object GeminiThoughtSignatures {
    * @param provider   the client's provider id, the `provider` of every signature block it makes
    * @param textOffset the number of message-content characters before the first of `parts`; 0 for a whole
    *                   response, the text streamed so far for a stream chunk
-   * @param newId      makes the id of each function call (Gemini returns none)
+   * @param newId      makes the id of a function call that arrives without `functionCall.id`
    */
   def parse(provider: String, parts: Seq[ujson.Value], textOffset: Int, newId: () => String): Parsed = {
     val text       = new StringBuilder
@@ -77,10 +81,13 @@ private[provider] object GeminiThoughtSignatures {
       val signature = signatureOf(part)
       val obj       = part.objOpt
       if (obj.exists(_.contains("functionCall"))) {
-        val fc   = part("functionCall")
-        val call = ToolCall(id = newId(), name = fc("name").str, arguments = fc.obj.getOrElse("args", ujson.Obj()))
+        val fc = part("functionCall")
+        // Gemini may populate the optional functionCall.id, and a populated id must be echoed by the
+        // matching functionResponse, so it becomes the tool call's own id; a UUID only when absent.
+        val id   = fc.objOpt.flatMap(_.get("id")).flatMap(_.strOpt).filter(_.nonEmpty).getOrElse(newId())
+        val call = ToolCall(id = id, name = fc("name").str, arguments = fc.obj.getOrElse("args", ujson.Obj()))
         calls += call
-        signature.foreach(s => signatures += callBlock(provider, call.id, s))
+        signature.foreach(s => signatures += callBlock(provider, call.id, fc, s))
       } else if (isThought(part)) {
         obj.flatMap(_.get("text")).flatMap(_.strOpt).foreach(thought.append)
       } else {
@@ -103,8 +110,21 @@ private[provider] object GeminiThoughtSignatures {
     val signed = Replay.from(provider, message.thinking)
     val text   = message.contentOpt.fold(Seq.empty[ujson.Value])(textParts(_, signed.text))
     val calls = message.toolCalls.map { tc =>
-      val part = ujson.Obj("functionCall" -> ujson.Obj("name" -> tc.name, "args" -> tc.arguments))
-      signed.calls.get(tc.id).foreach(s => part(Field) = s)
+      def rebuilt = ujson.Obj("functionCall" -> ujson.Obj("name" -> tc.name, "args" -> tc.arguments))
+      val part = signed.calls.get(tc.id) match {
+        case Some(SignedCall(sig, Some(fc))) if matchesCall(fc, tc) =>
+          // the signed part goes back exactly as returned: same id (or none), args present or absent
+          val p = ujson.Obj("functionCall" -> fc)
+          p(Field) = sig
+          p
+        case Some(SignedCall(_, Some(_))) =>
+          rebuilt // the call was edited after signing: the signature no longer belongs to it
+        case Some(SignedCall(sig, None)) =>
+          val p = rebuilt // a block from before the payload was kept: rebuild, keep the signature
+          p(Field) = sig
+          p
+        case None => rebuilt
+      }
       part: ujson.Value
     }
     text ++ calls
@@ -144,11 +164,24 @@ private[provider] object GeminiThoughtSignatures {
 
   // ---- the signature blocks
 
-  private def callBlock(provider: String, callId: String, signature: String): ThinkingBlock =
-    ThinkingBlock.Opaque(provider, ujson.Obj("call" -> callId, "sig" -> signature).render())
+  // `fc` is the functionCall object exactly as Gemini returned it (its optional `id`, `args` present
+  // or absent), so the signed part can be replayed exactly as received, as Google requires.
+  private def callBlock(provider: String, callId: String, fc: ujson.Value, signature: String): ThinkingBlock =
+    ThinkingBlock.Opaque(provider, ujson.Obj("call" -> callId, "fc" -> fc, "sig" -> signature).render())
 
   private def textBlock(provider: String, at: Int, text: String, signature: String): ThinkingBlock =
     ThinkingBlock.Opaque(provider, ujson.Obj("at" -> at, "text" -> text, "sig" -> signature).render())
+
+  /**
+   * Whether the stored functionCall still spells the tool call: same name, same id (when it had
+   *  one: it became the call's id at parse), and the same arguments (`args` absent matches `{}`).
+   */
+  private def matchesCall(fc: ujson.Value, tc: ToolCall): Boolean =
+    fc.objOpt.exists { o =>
+      o.get("name").flatMap(_.strOpt).contains(tc.name) &&
+      o.get("id").flatMap(_.strOpt).forall(_ == tc.id) &&
+      o.get("args").fold(tc.arguments == (ujson.Obj(): ujson.Value))(_ == tc.arguments)
+    }
 
   private def signatureOf(part: ujson.Value): Option[String] =
     part.objOpt.flatMap(_.get(Field)).flatMap(_.strOpt).filter(_.nonEmpty)
@@ -156,8 +189,11 @@ private[provider] object GeminiThoughtSignatures {
   private def isThought(part: ujson.Value): Boolean =
     part.objOpt.flatMap(_.get("thought")).exists(_.boolOpt.contains(true))
 
+  /** A signed function call: the signature, and the functionCall payload exactly as returned. */
+  final private case class SignedCall(sig: String, fc: Option[ujson.Value])
+
   /** The signatures of one provider found in a message's thinking, by what they belong to. */
-  final private case class Replay(calls: Map[String, String], text: Seq[(Int, String, String)])
+  final private case class Replay(calls: Map[String, SignedCall], text: Seq[(Int, String, String)])
 
   private object Replay {
     def from(provider: String, thinking: Seq[ThinkingBlock]): Replay = {
@@ -169,7 +205,7 @@ private[provider] object GeminiThoughtSignatures {
         for {
           id  <- o.get("call").flatMap(_.strOpt)
           sig <- o.get("sig").flatMap(_.strOpt)
-        } yield id -> sig
+        } yield id -> SignedCall(sig, o.get("fc"))
       }.toMap
       val text = parsed
         .flatMap { o =>

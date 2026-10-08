@@ -183,9 +183,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   part when it calls a function, sometimes the last text part) and expects it back on the same part; Gemini 3
   models answer HTTP 400 when a required signature is missing, so thinking context used to be lost, or the
   request failed, across tool calls. Each signature is now kept on `AssistantMessage.thinking` as a sealed
-  `ThinkingBlock.Opaque("gemini" | "vertexai", ...)`, bound and replayed through the same binding as
-  Anthropic's and OpenRouter's thinking: it goes back only to the provider and model that produced it, while
-  the conversation before it is unchanged. A function call's signature is sent on that call's part (on the
+  `ThinkingBlock.Opaque("gemini" | "vertexai", ...)`, bound to the provider and model that produced it
+  alone: Google asks for signatures to be preserved when history is modified or trimmed (the reverse of
+  Anthropic's prefix rule), so pruning or compressing earlier turns leaves them in place, and only a change
+  of provider or model, or an edit to the carrying message itself, unseals one. A function call's signature is sent on that call's part (on the
   first call only, for parallel calls, as Gemini returns it); a text part's signature is sent with the text
   split where it sat. The Gemini API and Vertex AI are separate signing authorities, so a conversation moved
   from one to the other keeps its text and drops the signatures. The sources, the Anthropic-to-Bedrock failover
@@ -196,7 +197,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - a streamed `Completion` carries its tool calls on `Completion.toolCalls`, as OpenAI's and Ollama's do (they
     were on the message only);
   - a thought-summary part (`"thought": true`) is thinking text and no longer part of the answer;
-  - a `functionCall` without `args` is accepted.
+  - a `functionCall` without `args` is accepted, and a signed call's part is replayed exactly as
+    returned (`args` stay absent if they were);
+  - a populated `functionCall.id` becomes the tool call's id and is echoed on its `functionResponse`.
 - **Ollama honours `responseFormat`** ([#932](https://github.com/llm4s/llm4s/issues/932)):
   `OllamaClient` now sends the `/api/chat` `format` field for streaming and non-streaming requests,
   so `completeStructured` is constrained natively. `ResponseFormat.Json` sends `"format": "json"`

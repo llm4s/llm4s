@@ -274,7 +274,10 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
 
     // ---------------------------------------------------------------- when they are not sent
 
-    it should "not send a signature when the conversation before the turn has changed" in {
+    it should "keep sending a signature when the conversation before the turn was pruned or edited" in {
+      // The reverse of Anthropic's prefix rule: Google says modified or trimmed history must preserve
+      // thought signatures, and Gemini 3 answers HTTP 400 when the current turn's function-call
+      // signature is missing, so compressing or pruning earlier turns must not strip it.
       val (client, wire) = make("gemini-2.0-flash")
       wire.body = response(call("get_weather", city, Some("SIG-CALL")))
       val first = client.complete(firstTurn, CompletionOptions()).value.message
@@ -287,8 +290,65 @@ class GeminiThoughtSignatureSpec extends AnyFlatSpec with Matchers with MockFact
       wire.body = response(text("Sunny."))
       client.complete(edited, CompletionOptions()).value
 
-      sentSignatures(wire.lastRequest) shouldBe empty
-      modelPartsOf(wire.lastRequest).map(_.obj.contains("functionCall")) shouldBe Seq(true)
+      sentSignatures(wire.lastRequest) shouldBe Seq("SIG-CALL")
+      val signedPart = modelPartsOf(wire.lastRequest).find(_.obj.contains("functionCall")).get
+      signedPart("thoughtSignature").str shouldBe "SIG-CALL"
+    }
+
+    it should "adopt Gemini's functionCall.id as the tool call's id and echo it on the functionResponse" in {
+      val (client, wire) = make("gemini-2.0-flash")
+      wire.body = s"""{"candidates":[{"content":{"role":"model","parts":[
+        {"functionCall":{"id":"fc-9","name":"get_weather","args":{"city":"Paris"}},"thoughtSignature":"SIG-ID"}
+      ]},"finishReason":"STOP"}]}"""
+
+      val first = client.complete(firstTurn, CompletionOptions()).value.message
+      first.toolCalls.map(_.id) shouldBe Seq("fc-9")
+
+      wire.body = response(text("Sunny."))
+      client.complete(continuation(first), CompletionOptions()).value
+
+      val responses = wire
+        .lastRequest("contents")
+        .arr
+        .toSeq
+        .flatMap(_("parts").arr.toSeq)
+        .flatMap(_.obj.get("functionResponse"))
+      responses.map(_("id").str) shouldBe Seq("fc-9")
+    }
+
+    it should "replay a signed call exactly as returned: the id kept, absent args stay absent" in {
+      val (client, wire) = make("gemini-2.0-flash")
+      wire.body = s"""{"candidates":[{"content":{"role":"model","parts":[
+        {"functionCall":{"id":"fc-9","name":"ping"},"thoughtSignature":"SIG-X"}
+      ]},"finishReason":"STOP"}]}"""
+
+      val first = client.complete(firstTurn, CompletionOptions()).value.message
+      wire.body = response(text("Done."))
+      client.complete(continuation(first), CompletionOptions()).value
+
+      val sent = modelPartsOf(wire.lastRequest).filter(_.obj.contains("functionCall"))
+      sent should have size 1
+      sent.head("functionCall") shouldBe ujson.Obj("id" -> "fc-9", "name" -> "ping")
+      sent.head("functionCall").obj.contains("args") shouldBe false
+      sent.head("thoughtSignature").str shouldBe "SIG-X"
+    }
+
+    it should "not put an id on the functionResponse of a call Gemini sent without one" in {
+      val (client, wire) = make("gemini-2.0-flash")
+      wire.body = response(call("get_weather", city, Some("SIG-CALL")))
+      val first = client.complete(firstTurn, CompletionOptions()).value.message
+
+      wire.body = response(text("Sunny."))
+      client.complete(continuation(first), CompletionOptions()).value
+
+      val responses = wire
+        .lastRequest("contents")
+        .arr
+        .toSeq
+        .flatMap(_("parts").arr.toSeq)
+        .flatMap(_.obj.get("functionResponse"))
+      responses should have size 1
+      responses.head.obj.contains("id") shouldBe false
     }
 
     it should "not send a signature once the turn's own tool calls or content were changed" in {

@@ -1533,13 +1533,17 @@ these clients follow:
 - A part with a signature is never merged with one without.
 
 Each signature is kept as a sealed `ThinkingBlock.Opaque` block of the client's provider id (`gemini` or
-`vertexai`) and replayed through the same binding as the other sealed thinking, so it goes back only to the
-provider and model that produced it while the conversation before it is unchanged. A function call's
-signature is stored against the tool call's id and sent on that call's `functionCall` part; a text part's
-signature records its character offset in the message content, and the content is split there when the turn is
-sent, so a signed part is never merged with an unsigned one (if the content no longer fits, the text
-signature is left out). Parts are rebuilt as text first, then function calls, as these clients have always
-sent them.
+`vertexai`) and goes back only to the provider and model that produced it. Unlike Anthropic's prefix rule,
+the binding is to that origin alone: Google asks for signatures to be preserved when history is modified or
+trimmed, and Gemini 3 answers HTTP 400 when the current turn's function-call signature is missing, so
+pruning or compressing earlier turns leaves them in place. What unseals one is a change of provider or
+model, or an edit to the message that carries it. A function call's signature is stored against the tool
+call's id with the `functionCall` payload exactly as Gemini returned it, and the part is replayed verbatim
+(its optional `id` kept, `args` present or absent as received); a populated `functionCall.id` becomes the
+tool call's own id and the matching `functionResponse` echoes it. A text part's signature records its
+character offset in the message content, and the content is split there when the turn is sent, so a signed
+part is never merged with an unsigned one (if the content no longer fits, the text signature is left out).
+Parts are rebuilt as text first, then function calls, as these clients have always sent them.
 
 Google's documentation does not say whether a signature from the Gemini API validates on Vertex AI, so the two
 clients are separate signing authorities: a conversation moved from one to the other keeps its text and
