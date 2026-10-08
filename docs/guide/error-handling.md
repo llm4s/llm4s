@@ -278,7 +278,9 @@ names HTTP status 401 or 429 an `AuthenticationError` (code `401`, with the reda
 only in an HTTP context, at a word boundary - after `HTTP`, `status`, `status code`, `error code` or
 `response code`, before its reason phrase (`401 Unauthorized`, `429 Too Many Requests`), or leading the
 message as `openai-java` and `anthropic-java` write it (`401: <body>`) - so `Index 4012 out of bounds` or
-`port 14290` is an `UnknownError`. Pass your own `ErrorMapper` for a finer mapping. `Try` (and so
+`port 14290` is an `UnknownError`. A JSON-style `"status": 429` or `http_status=401` counts too. The SDK
+shape has no other HTTP marker, so a message that merely *starts* with `401: ` or `429: ` is classified as
+well. Only the first 4 KiB and the last 1 KiB of a message are scanned. Pass your own `ErrorMapper` for a finer mapping. `Try` (and so
 `Result.safely`) never captures an `InterruptedException`, which Scala treats as fatal, so let an
 interrupt propagate or map it yourself with `toLLMError`.
 
