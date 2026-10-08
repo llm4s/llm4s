@@ -91,7 +91,8 @@ object PomDescriptions {
   def problems(published: Seq[(String, String)]): Seq[String] = {
     val perArtifact = published.sortBy(_._1).flatMap { case (artifact, description) =>
       if (description.trim.isEmpty) Some(s"$artifact: the description is empty")
-      else if (description.trim == artifact) Some(s"$artifact: the description only repeats the artifact name")
+      else if (description.trim == artifact)
+        Some(s"$artifact: the description only repeats the artifact name (no entry in project/PomDescriptions.scala)")
       else if (description.exists(c => c == '\n' || c == '\r')) Some(s"$artifact: the description spans several lines")
       else None
     }
