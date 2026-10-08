@@ -8,8 +8,8 @@ nav_order: 15
 # Test Coverage
 
 LLM4S measures **statement coverage** with [`sbt-scoverage`](https://github.com/scoverage/sbt-scoverage), one policy
-per module. There is no single project-wide threshold: each module declares its own floor, and CI checks every
-module against it.
+per module. There is no single project-wide threshold: each module declares its own policy, and the CI coverage
+job checks the floors of the modules it measures (with the exceptions below).
 
 ## How coverage is enforced
 
@@ -44,8 +44,10 @@ Run it to see the current floors. The numbers are deliberately not copied here, 
 
 ### What CI runs
 
-The `Code Coverage` job in `.github/workflows/ci.yml` runs `<module>/test <module>/coverageReport` for each
-measured module. `<module>/coverageReport` is the step that enforces that module's floor. The aggregate report is
+The `Code Coverage` job in `.github/workflows/ci.yml` runs `<module>/test <module>/coverageReport` for the modules
+listed in that job. `<module>/coverageReport` is the step that enforces that module's floor. `knowledgegraphNeo4j`
+and `benchmarks` declare floors but are not included in the job, so CI does not currently enforce their floors.
+The benchmark workflow runs tests without coverage. The aggregate report is
 informational only, because a build-wide average is not a meaningful gate.
 
 A new module has to be added to that job in the same change that adds it, or the code it holds drops out of
