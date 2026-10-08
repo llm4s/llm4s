@@ -10,6 +10,30 @@ import org.scalatest.matchers.should.Matchers
 
 class ToolCallingGuideSpec extends AnyFlatSpec with Matchers {
 
+  // This spec EXECUTES the testing guide's tool-calling example; the page's own copy is only
+  // compiled (project/DocSnippets.scala). The two must not drift apart silently, so the lines that
+  // carry the example's substance must appear verbatim in the page.
+  "the testing guide" should "contain the mock this spec executes, line for line" in {
+    val page = {
+      // the test runs with the repository root or the module directory as cwd; walk up to docs/
+      var dir = new java.io.File(".").getCanonicalFile
+      while (dir != null && !new java.io.File(dir, "docs/getting-started/testing-guide.md").isFile)
+        dir = dir.getParentFile
+      dir should not be null
+      val src = scala.io.Source.fromFile(new java.io.File(dir, "docs/getting-started/testing-guide.md"), "UTF-8")
+      try src.mkString
+      finally src.close()
+    }
+    Seq(
+      "conversation.messages.exists(_.isInstanceOf[ToolMessage])",
+      """AssistantMessage("Weather in London: 20°C")""",
+      """toolCalls = Seq(ToolCall("call_1", "get_weather", ujson.Obj("city" -> "London")))""",
+      "toolCalls = message.toolCalls.toList",
+      "outcome.isRight shouldBe true",
+      """capturedCity shouldBe Some("London")"""
+    ).foreach(line => withClue(s"the guide no longer shows: $line -- ")(page should include(line)))
+  }
+
   "Agent" should "invoke weather tool" in {
     var toolWasCalled                = false
     var capturedCity: Option[String] = None
