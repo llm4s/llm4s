@@ -2109,13 +2109,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and dots and clamped the number into 0.0 to 1.0, so `85`, `85%`, `8/10`, `1e-3` and `0,9` all read as 1.0 and
   passed any threshold up to 1.0, `0.7 out of 1` read as 0.71, and `-0.5` read as 0.5. A judge that answered on a
   0 to 100 scale approved everything. A reply is now a score only when the whole reply is one plain decimal
-  number from 0 to 1 (`0.9`, `.5`, `1`), with whitespace, markdown emphasis, quotes, brackets or a code fence
-  around it and optionally a `Score:` label before it (`Score: 0.9`, `**Score:** 0.9`). Anything else is a
+  number from 0 to 1 (`0.9`, `.5`, `1`) of at most 64 characters, with whitespace, markdown emphasis, quotes,
+  brackets or bare code-fence backticks before or after it (not necessarily balanced) and optionally a `Score:`
+  label before it (`Score: 0.9`, `**Score:** 0.9`, but not `**Score**: 0.9`). Anything else is a
   `ValidationError` on field `llm_response`, which fails the guardrail like an unreadable reply always did: a
   sign glued or apart (`-0.5`, `- 1`, `negative 1`), a percentage or other scale as a sign or in words (`85%`,
   `1 %`, `1 percent`, `1 per mille`, `1 per ten thousand`, `100 bps`), a fraction, an exponent, a decimal comma,
-  a trailing full stop, another label or a sentence (`Rating: 0.9`, `The score is 0.9`), or more than one
-  number. The score is compared at the precision the judge wrote it and the threshold as the decimal it is
+  a trailing full stop, another label or a sentence (`Rating: 0.9`, `The score is 0.9`), a code fence with a
+  language tag, a number longer than 64 characters (refused before it is parsed), or more than one number. The score is compared at the precision the judge wrote it and the threshold as the decimal it is
   written as, so `1.0000000000000001` is out of range and `0.79999999999999999` does not reach a threshold of
   0.8. `LLMGuardrail.evaluateWithLLM` returns `Result[BigDecimal]` instead of `Result[Double]`. **Migration:** a
   judge that passed because it answered on another scale, or in a sentence, now fails with `Could not parse LLM

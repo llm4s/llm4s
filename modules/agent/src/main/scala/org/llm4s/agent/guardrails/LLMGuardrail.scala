@@ -37,8 +37,10 @@ import org.llm4s.types.Result
  * range, because a clamped value would read as 1.0 for the usual mistakes (a 0 to 100 answer, a fraction, a
  * percentage) and approve the content. The rules, in full:
  *  - Accepted: `0.9`, `.5`, `0`, `1`, `1.0`, with surrounding whitespace or a trailing newline, with markdown
- *    emphasis, quotes, brackets or a code fence around it (`**0.9**`, `"0.9"`, ` ```0.9``` `), and with a
- *    `Score:` label in any case before it (`Score: 0.9`, `score:0.9`, `**Score:** 0.9`).
+ *    emphasis, quotes, brackets or code-fence backticks before or after the number (`**0.9**`, `"0.9"`,
+ *    ` ```0.9``` `), and with a `Score:` label in any case before it (`Score: 0.9`, `score:0.9`,
+ *    `**Score:** 0.9`). The wrapping characters before and after the number are read independently and need
+ *    not match or balance, so `((0.9` and `0.9 *` are accepted too; they carry no meaning either way.
  *  - Refused, as unreadable: everything else. That includes a number outside 0 to 1 (`85`, `1.5`); a sign,
  *    glued or apart (`-0.5`, `- 1`, `negative 1`, `+0.5`); a percentage, fraction, exponent or any scale, as a
  *    sign or in words (`85%`, `1 %`, `1 percent`, `1 per ten thousand`, `100 bps`, `8/10`, `0.7 out of 1`,
@@ -46,6 +48,11 @@ import org.llm4s.types.Result
  *    (`Rating: 0.9`, `The score is 0.9`, `0.9, because ...`); more than one number; and a reply with no number.
  *    The grammar lists what is accepted rather than what is refused, so a scale or sign written in a form no one
  *    anticipated is refused too.
+ *  - The edges of the grammar: the label is strict, so emphasis may wrap `Score:` as a whole (`**Score:** 0.9`)
+ *    but not split it (`**Score**: 0.9` is refused); a code fence is accepted only bare, so a fence with a
+ *    language tag (`text` after the opening backticks, on the line before `0.7`) is refused, the tag being a
+ *    word the grammar does not admit; and the number is at most 64 characters, so a reply of thousands of digits
+ *    is refused before it is parsed.
  *  - The score is compared at the precision the judge wrote it, and the threshold as the decimal it is written
  *    as: `1.0000000000000001` is out of range, and `0.79999999999999999` does not reach a threshold of 0.8, though
  *    both would round to the bound as a `Double`.
@@ -200,11 +207,16 @@ object LLMGuardrail {
 
   /**
    * The whole grammar of a score reply, matched against the entire reply, case-insensitively:
-   *  - optional leading whitespace and wrapping (markdown emphasis, quotes, brackets, code-fence backticks);
-   *  - an optional label `score:`, itself optionally wrapped (`**Score:** 0.9`);
+   *  - optional leading whitespace and wrapping characters (markdown emphasis, quotes, brackets, code-fence
+   *    backticks), but no word, so a code fence with a language tag (`text` after the opening backticks) is
+   *    refused;
+   *  - an optional label `score:`, wrapped only as a whole (`**Score:** 0.9`, not `**Score**: 0.9`);
    *  - one plain decimal: digits with an optional fraction, or a fraction alone; no sign, exponent, comma or
    *    percent;
-   *  - optional trailing wrapping and whitespace.
+   *  - optional trailing wrapping characters and whitespace.
+   *
+   * The wrapping before and after the number is two independent character runs, not a pair: it need not match
+   * or balance (`((0.9` and `0.9 *` are accepted), which is harmless because wrapping carries no meaning.
    *
    * Nothing else may appear, so a sign, unit, scale, denominator or explanation anywhere in the reply, however it
    * is written, makes the reply unreadable rather than leaving a bare number behind to be read. The grammar lists
@@ -215,14 +227,29 @@ object LLMGuardrail {
   )
 
   /**
+   * The longest number, in characters, read as a score. Parsing a decimal string into a `BigDecimal` costs more
+   * than linear time in its length (a million digits take tens of seconds of CPU), and the reply comes from a
+   * model, so an over-long number is refused before it is parsed. 64 characters is far more than any genuine
+   * score needs - a `Double` prints in at most 24, and the default reply cap is 10 tokens - while still admitting
+   * long fractions (`0.123456789`), extra leading zeros (`0000.5`) and the 17-digit values the precision rules
+   * above are about.
+   */
+  private val MaxScoreLength = 64
+
+  /**
    * The score a judge's reply holds, or `None` when the reply is not one plain decimal number from 0 to 1 (see the
    * scoring notes on the trait). The value stays a decimal at full precision, so neither the range check here nor
    * the threshold comparison in `validate` sees a rounded `Double`: `1.0000000000000001` is out of range, and
-   * `0.79999999999999999` is below a threshold of 0.8.
+   * `0.79999999999999999` is below a threshold of 0.8. A number longer than 64 characters is refused unparsed.
    */
   private[guardrails] def readScore(reply: String): Option[BigDecimal] = {
     val matcher = ScoreReply.matcher(reply)
-    if (matcher.matches()) Some(BigDecimal(matcher.group(1))).filter(d => d >= 0 && d <= 1) else None
+    if (!matcher.matches()) None
+    else {
+      val number = matcher.group(1)
+      if (number.length > MaxScoreLength) None
+      else Some(BigDecimal(number)).filter(d => d >= 0 && d <= 1)
+    }
   }
 
   /**

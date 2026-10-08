@@ -131,6 +131,8 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     "0.7 (high)",
     "Score: 0.7 overall",
     "Rating: 0.7",
+    // the grammar's edges: emphasis may wrap the whole label but not split it, and a fence must be bare
+    "**Score**: 0.7",
     "```text\n0.7\n```",
     // nothing to read
     "",
@@ -152,11 +154,15 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     "\"0.7\""        -> 0.7,
     "(0.7)"          -> 0.7,
     "```\n0.7\n```"  -> 0.7,
-    ".5"             -> 0.5,
-    "0"              -> 0.0,
-    "0.0"            -> 0.0,
-    "1"              -> 1.0,
-    "1.0"            -> 1.0
+    // wrapping before and after the number is read independently, so it need not balance
+    "((((0.7" -> 0.7,
+    "0.7 *"   -> 0.7,
+    "0000.5"  -> 0.5,
+    ".5"      -> 0.5,
+    "0"       -> 0.0,
+    "0.0"     -> 0.0,
+    "1"       -> 1.0,
+    "1.0"     -> 1.0
   )
 
   behavior.of("LLMGuardrail score parsing")
@@ -234,6 +240,37 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
         case other                  => fail(s"expected a ValidationError, got $other")
       }
     }
+  }
+
+  it should "refuse a number of a million digits quickly, before parsing it" in {
+    // Parsing a million-digit decimal takes tens of seconds; the length cap refuses it unparsed.
+    val reply   = "0." + "9" * 1000000
+    val started = System.nanoTime()
+    val result  = LLMGuardrail.readScore(reply)
+    val elapsed = (System.nanoTime() - started) / 1000000L
+
+    result shouldBe None
+    elapsed should be < 2000L
+    judge(reply, threshold = 0.0).swap.toOption.get match {
+      case error: ValidationError =>
+        error.field shouldBe "llm_response"
+        error.message should include("Could not parse LLM judge score")
+      case other => fail(s"expected a ValidationError, got $other")
+    }
+  }
+
+  it should "read a number of up to 64 characters and refuse a longer one" in {
+    val atCap   = "0." + "5" * 62
+    val overCap = "0." + "5" * 63
+
+    atCap.length shouldBe 64
+    LLMGuardrail.readScore(atCap) shouldBe Some(BigDecimal(atCap))
+    judge(atCap, threshold = 0.5) shouldBe Right("content")
+    judge(s"**Score:** $atCap", threshold = 0.5) shouldBe Right("content")
+
+    LLMGuardrail.readScore(overCap) shouldBe None
+    LLMGuardrail.readScore("0" * 60 + ".5") shouldBe Some(BigDecimal("0.5"))
+    LLMGuardrail.readScore("0" * 63 + ".5") shouldBe None
   }
 
   it should "name the reply and what was expected when it refuses one" in {
