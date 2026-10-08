@@ -259,9 +259,9 @@ val mcpTools = MCPClient.loadTools("mcp-server-name")
 
 ## Example Gallery
 
-Browse **69 working examples** organized by category:
+Browse the working examples organized by category:
 
-### Basic Examples (9)
+### Basic Examples
 - [Basic LLM Calling](/examples/#basic-llm-calling)
 - [Streaming Responses](/examples/#streaming)
 - [Multi-Provider Setup](/guide/basic-usage#multi-provider-pattern)
@@ -270,7 +270,7 @@ Browse **69 working examples** organized by category:
 
 [View all basic examples →](/examples/#basic-examples)
 
-### Agent Examples (6)
+### Agent Examples
 - [Single-Step Agent](/examples/#single-step)
 - [Multi-Step Agent](/examples/#multi-step)
 - [Multi-Turn Conversations](/examples/#multi-turn)
@@ -280,7 +280,7 @@ Browse **69 working examples** organized by category:
 
 [View all agent examples →](/examples/#agent-examples)
 
-### Tool Examples (5)
+### Tool Examples
 - [Weather Tool](/examples/#weather)
 - [Multi-Tool Agent](/examples/#multi-tool)
 - [Tool Error Messages](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/toolapi/ErrorMessageDemonstration.scala)
@@ -288,7 +288,7 @@ Browse **69 working examples** organized by category:
 
 [View all tool examples →](/examples/#tool-examples)
 
-### Context Management Examples (8)
+### Context Management Examples
 - [Context Pipeline](/examples/#context-pipeline)
 - [Token Windows](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/context/tokens/TokenWindowExample.scala)
 - [History Digest](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/context/HistoryDigestExample.scala)
@@ -298,11 +298,11 @@ Browse **69 working examples** organized by category:
 [View all context examples →](/examples/#context-management)
 
 ### More Examples
-- [Embeddings](/examples/#embeddings) (5 examples)
-- [MCP Integration](/examples/#mcp-examples) (3 examples)
-- [Streaming](/examples/#streaming-examples) (2 examples)
+- [Embeddings](/examples/#embeddings)
+- [MCP Integration](/examples/#mcp-examples)
+- [Streaming](/examples/#streaming-examples)
 
-[Browse all 46 examples →](/examples/)
+[Browse all examples →](/examples/)
 
 ---
 
@@ -453,7 +453,7 @@ val result = for {
 - **Discord**: [Join our community](https://discord.gg/4uvTPn6qww) - Active community for questions
 - **GitHub Issues**: [Report bugs](https://github.com/llm4s/llm4s/issues) - Bug reports and feature requests
 - **Documentation**: Browse the [user guide](../guide/basic-usage) - Comprehensive guides
-- **Examples**: Check [working examples](/examples/) - 46 code samples
+- **Examples**: Check [working examples](/examples/) - runnable code samples
 
 ### Stay Updated
 
