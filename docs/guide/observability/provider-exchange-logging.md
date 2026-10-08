@@ -159,7 +159,19 @@ The file sink changes `request_body`, `response_body` and `error_message` before
 
 - **Redaction.** It replaces, with `[REDACTED]`: an `Authorization` header and bearer tokens, URL query
   parameters with sensitive names (`api_key`, `token`, `password` and similar), JSON fields with sensitive
-  names, and strings shaped like known provider API keys (for example `sk-` keys).
+  names (also when the JSON sits inside a prompt or response string with escaped quotes,
+  `\"api_key\": \"...\"`, or is single-quoted, or is cut off before its closing quote, as a truncated
+  payload leaves it), numbers under such a key (including exponent forms such as `1e10`; the number is
+  written back as the string `"[REDACTED]"`, so the JSON still parses), `key=value` pairs and quoted
+  `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,
+  `spring.datasource.password=...`, `PASSWORD="..."`), `key: value` header lines (for example
+  `x-api-key: ...`), and strings shaped like known provider API keys (for example `sk-` keys). A quoted
+  value is redacted whole, escaped quotes included. A key is sensitive when its whole name, lower-cased
+  with `_` and `-` dropped, is `token`, `authorization` or `credential(s)`, or ends in `apikey`, `secret`,
+  `password`, `passwd`, `privatekey`, `accesstoken`, `refreshtoken`, `idtoken`, `authtoken`,
+  `sessiontoken` or `bearertoken`: `client_secret`, `x-api-key`, `refresh_token` and `db_password` are
+  redacted; `max_tokens`, `prompt_tokens`, `token_count` and `next_page_token` are not, because the match
+  is never on a substring.
 - **Truncation.** It keeps the first 1000 characters, after redaction, and appends
   `... [truncated, N chars omitted]` with the count it dropped.
 
@@ -169,8 +181,10 @@ Both are limits you should know about:
   conversation or a long completion is only partly in the file. For complete bodies, write your own sink.
 - **Redaction recognises patterns, not meaning.** It does not look for personal data: an email address or
   a phone number is written as it is. Text you put in a prompt is inside a JSON string in the request
-  body, and a credential there is not guaranteed to match a pattern. Do not rely on redaction to make the
-  file safe to share.
+  body, and a credential there is not guaranteed to match a pattern: a secret that is not under a key, a
+  credential whose value is an array or an object (`{"token": ["..."]}`), and JSON escaped twice (JSON
+  inside a string inside a string) are not redacted. Do not rely on redaction to make the file safe to
+  share.
 
 A sink you write is **not** redacted or truncated: it is handed the exchange exactly as the client built
 it, including the full bodies. If your sink writes bodies anywhere, redaction is your job.
@@ -226,7 +240,8 @@ final class ErrorsOnlySink(delegate: ProviderExchangeSink) extends ProviderExcha
 ## Known limitations
 
 - The file sink truncates bodies to 1000 characters; see above.
-- Redaction is pattern-based and best effort; it does not detect personal data.
+- Redaction is pattern-based and best effort; it does not detect personal data. A credential whose value
+  is an array or an object, and JSON escaped twice, are not redacted.
 - `requestId` and `correlationId` are never filled by the built-in clients.
 - `ProviderExchangeOutcome` declares `Cancelled`, but the recorder produces only `Success` and `Error`: a
   cancelled call is recorded as an `Error` carrying the cancellation message.

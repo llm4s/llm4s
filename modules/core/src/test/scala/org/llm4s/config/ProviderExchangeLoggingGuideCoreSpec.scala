@@ -229,6 +229,40 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "redact the further shapes the guide lists: embedded, single-quoted and truncated JSON, numbers, assignments and header lines" in {
+    val cases = List(
+      // JSON inside a prompt or response string, with escaped quotes
+      """{"content": "{\"api_key\": \"hunter2secret\"}"}""" -> """{"content": "{\"api_key\": \"[REDACTED]\"}"}""",
+      // a value containing an escaped quote is redacted whole
+      """{"password": "ab\"cd12345"}""" -> """{"password": "[REDACTED]"}""",
+      // cut off before its closing quote, as a truncated payload leaves it
+      """{"user": "ann", "password": "hunter2va""" -> """{"user": "ann", "password": "[REDACTED]""",
+      // single-quoted JSON
+      """{'api_key': 'abc123456789'}""" -> """{'api_key': '[REDACTED]'}""",
+      // a number, including an exponent form, written back as a string
+      """{"password": 12345678}""" -> """{"password": "[REDACTED]"}""",
+      """{"password": 1e10}"""     -> """{"password": "[REDACTED]"}""",
+      // key=value, a dotted property name, and quoted assignments outside a query string
+      "login password=hunter2secret ok"         -> "login password=[REDACTED] ok",
+      "spring.datasource.password=hunter2"      -> "spring.datasource.password=[REDACTED]",
+      """PASSWORD="hunter2value" NAME="keep"""" -> """PASSWORD="[REDACTED]" NAME="keep"""",
+      "PASSWORD='hunter2value' NAME='keep'"     -> "PASSWORD='[REDACTED]' NAME='keep'",
+      // a header-style line
+      "x-api-key: abc123456789" -> "x-api-key: [REDACTED]",
+      // compound key names are sensitive by suffix; token-count fields are not
+      """{"client_secret": "abc123456789", "refresh_token": "abc123456789"}""" ->
+        """{"client_secret": "[REDACTED]", "refresh_token": "[REDACTED]"}""",
+      """{"max_tokens": 256, "prompt_tokens": 12, "token_count": 3, "next_page_token": "abc123456789"}""" ->
+        """{"max_tokens": 256, "prompt_tokens": 12, "token_count": 3, "next_page_token": "abc123456789"}"""
+    )
+
+    cases.foreach { case (raw, redacted) =>
+      withClue(s"for: $raw") {
+        written(exchange(requestBody = raw))("request_body").str shouldBe redacted
+      }
+    }
+  }
+
   it should "redact the response body and the error message too" in {
     val row =
       written(exchange(responseBody = Some("""{"token":"abc123abc123"}"""), errorMessage = Some("Bearer abc123")))
