@@ -225,6 +225,22 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
     Files.exists(root.resolve("magic.mgc")) shouldBe false
   }
 
+  it should "refuse file-reading date flags and validate exempt commands' working directories" in {
+    val root   = newRoot()
+    val config = withinRoot(root)
+    Seq("date -f /outside", "date --file=/outside", "date -r /outside", "date --reference=/outside")
+      .foreach(command => refused(run(config, command)) should include("is not allowed"))
+    refused(run(config.copy(workingDirectory = Some(root.getParent.toString)), "date")) should
+      include("working directory is outside")
+  }
+
+  it should "apply denied flags to absolute executable names" in {
+    val root   = newRoot()
+    val config = ShellConfig(allowedCommands = Seq("/usr/bin/file"), workingDirectory = Some(root.toString))
+    refused(run(config, "/usr/bin/file -C")) should include("is not allowed")
+    Files.exists(root.resolve("magic.mgc")) shouldBe false
+  }
+
   it should "still run file and wc with their ordinary flags" in {
     posixOnly()
     val root = newRoot()

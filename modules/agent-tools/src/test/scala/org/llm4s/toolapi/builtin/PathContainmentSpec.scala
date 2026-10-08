@@ -200,6 +200,42 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
     Files.exists(t.resolve("outside/missing.txt")) shouldBe false
   }
 
+  it should "refuse a final symlink inserted after the write target was resolved" in {
+    val t = newRoot()
+    Files.createDirectories(t.resolve("data"))
+    val outside = file(t.resolve("outside/secret.txt"), "KEEP")
+    val target  = t.resolve("data/new.txt")
+    val checked = WriteConfig(allowedPaths = Seq(t.resolve("data").toString))
+      .resolve(target)
+      .getOrElse(fail("the missing target should resolve"))
+    link(target, outside)
+    Seq(false -> false, false -> true, true -> false, true -> true).foreach { case (append, overwrite) =>
+      Try(
+        WriteFileTool.writeResolved(
+          checked,
+          "replace".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+          append,
+          overwrite
+        )
+      ).isFailure shouldBe true
+      Files.readString(outside) shouldBe "KEEP"
+    }
+  }
+
+  it should "refuse a file created after resolution when overwrite is forbidden" in {
+    val t = newRoot()
+    Files.createDirectories(t.resolve("data"))
+    val target = t.resolve("data/new.txt")
+    val checked = WriteConfig(allowedPaths = Seq(t.resolve("data").toString))
+      .resolve(target)
+      .getOrElse(fail("the missing target should resolve"))
+    file(target, "KEEP")
+    Try(
+      WriteFileTool.writeResolved(checked, "replace".getBytes(java.nio.charset.StandardCharsets.UTF_8), false, false)
+    ).isFailure shouldBe true
+    Files.readString(target) shouldBe "KEEP"
+  }
+
   it should "accept an allowed entry that is itself a link, for the files behind it" in {
     val t = newRoot()
     file(t.resolve("real/ok.txt"), "behind-link")

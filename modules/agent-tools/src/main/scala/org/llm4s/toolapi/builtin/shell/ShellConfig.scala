@@ -19,7 +19,9 @@ import scala.concurrent.duration.*
  * the file tools to every file-like argument (see [[org.llm4s.toolapi.builtin.filesystem.FileConfig]]): each
  * argument that is not a flag is resolved against the working directory and must be allowed, the working
  * directory itself must be allowed, and a flag that carries a path (`-f/etc/passwd`) is refused. `echo`, `pwd`,
- * `date`, `whoami` and `which` take no file arguments and are not checked. `ls -L` and `ls -H`, which follow
+ * The working directory is checked for every command. Arguments of `date`, `whoami` and `which` are not
+ * treated as paths, but `date` file-reading flags (`-f`, `-r`, `--file`, `--reference`) are refused.
+ * `ls -L` and `ls -H`, which follow
  * links while listing, are refused when a policy is set. A command that walks directories by itself (`ls -R`,
  * `grep -r`, `find`) is checked at its starting point only.
  *

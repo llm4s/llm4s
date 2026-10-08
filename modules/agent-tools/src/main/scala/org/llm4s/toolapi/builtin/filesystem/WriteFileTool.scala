@@ -4,7 +4,8 @@ import org.llm4s.toolapi._
 import org.llm4s.types.Result
 import upickle.default._
 
-import java.nio.file.{ Files, Paths, StandardOpenOption }
+import java.nio.ByteBuffer
+import java.nio.file.{ FileAlreadyExistsException, Files, LinkOption, Path, Paths, StandardOpenOption }
 import scala.util.Try
 
 /**
@@ -136,25 +137,48 @@ object WriteFileTool {
                   }
                 }
 
-                // Write file
-                val options = if (append) {
-                  Array(StandardOpenOption.CREATE, StandardOpenOption.APPEND)
-                } else {
-                  Array(StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
-                }
-
-                Files.write(real, contentBytes, options: _*)
+                val created = writeResolved(real, contentBytes, append, config.allowOverwrite)
 
                 WriteFileResult(
                   path = path.toString,
                   bytesWritten = contentBytes.length,
-                  created = !fileExists,
-                  appended = append && fileExists
+                  created = created,
+                  appended = append && !created
                 )
               }.toEither.left.map(e => s"Failed to write file: ${e.getMessage}")
             }
           }
       }
     }
+  }
+
+  /** Opens the checked final component atomically, without following a link inserted after resolution. */
+  private[builtin] def writeResolved(
+    real: Path,
+    content: Array[Byte],
+    append: Boolean,
+    allowOverwrite: Boolean
+  ): Boolean = {
+    val (channel, created) =
+      try
+        (
+          Files.newByteChannel(
+            real,
+            StandardOpenOption.WRITE,
+            StandardOpenOption.CREATE_NEW,
+            LinkOption.NOFOLLOW_LINKS
+          ),
+          true
+        )
+      catch {
+        case _: FileAlreadyExistsException if append || allowOverwrite =>
+          val mode = if (append) StandardOpenOption.APPEND else StandardOpenOption.TRUNCATE_EXISTING
+          (Files.newByteChannel(real, StandardOpenOption.WRITE, mode, LinkOption.NOFOLLOW_LINKS), false)
+      }
+    try {
+      val bytes = ByteBuffer.wrap(content)
+      while (bytes.hasRemaining) channel.write(bytes)
+      created
+    } finally channel.close()
   }
 }

@@ -140,17 +140,20 @@ object ShellTool {
   private val NoFileArguments = Set("echo", "pwd", "date", "whoami", "which")
 
   /** Flags that make an otherwise read-only command write a file or read a list of files, by command. */
-  private val DeniedShortFlags = Map("file" -> Set('C', 'm', 'f'))
+  private val DeniedShortFlags = Map("file" -> Set('C', 'm', 'f'), "date" -> Set('f', 'r'))
   private val DeniedLongFlags = Map(
     "file" -> Set("--compile", "--magic-file", "--files-from"),
+    "date" -> Set("--file", "--reference"),
     "wc"   -> Set("--files0-from")
   )
 
   /** Why the command may not run, or `None`. */
-  private def refusal(command: String, args: Seq[String], config: ShellConfig): Option[String] =
-    deniedFlag(command, args)
+  private def refusal(command: String, args: Seq[String], config: ShellConfig): Option[String] = {
+    val executable = Try(Paths.get(command).getFileName.toString).getOrElse(command)
+    deniedFlag(executable, args)
       .map(flag => s"Flag '$flag' is not allowed for '$command'")
-      .orElse(config.pathPolicy.flatMap(policy => pathRefusal(command, args, config, policy)))
+      .orElse(config.pathPolicy.flatMap(policy => pathRefusal(executable, args, config, policy)))
+  }
 
   private def flagsOf(args: Seq[String]): Seq[String] =
     args.takeWhile(_ != "--").filter(arg => arg.startsWith("-") && arg.length > 1)
@@ -173,19 +176,18 @@ object ShellTool {
     args: Seq[String],
     config: ShellConfig,
     policy: FileConfig
-  ): Option[String] =
-    if (NoFileArguments.contains(command)) None
-    else {
-      val base = Try(config.workingDirectory.fold(Paths.get(""))(Paths.get(_)).toAbsolutePath.normalize()).toOption
-      base match {
-        case None =>
-          Some("Invalid working directory")
-        case Some(dir) if !policy.isPathAllowed(dir) =>
-          Some("The working directory is outside the allowed paths")
-        case Some(dir) =>
-          argumentRefusal(command, args.toList, flagsEnded = false, dir, policy)
-      }
+  ): Option[String] = {
+    val base = Try(config.workingDirectory.fold(Paths.get(""))(Paths.get(_)).toAbsolutePath.normalize()).toOption
+    base match {
+      case None =>
+        Some("Invalid working directory")
+      case Some(dir) if !policy.isPathAllowed(dir) =>
+        Some("The working directory is outside the allowed paths")
+      case Some(_) if NoFileArguments.contains(command) => None
+      case Some(dir) =>
+        argumentRefusal(command, args.toList, flagsEnded = false, dir, policy)
     }
+  }
 
   @tailrec
   private def argumentRefusal(
