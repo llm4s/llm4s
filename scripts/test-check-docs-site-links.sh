@@ -72,6 +72,18 @@ expect_pass "relative links resolve against the page URL, with and without .html
 new_case; page t '[a](/guide/a) [g](/guide/) [h](/) [x](/guide/a.html) [dir](/guide)'
 expect_pass "site-absolute links, the directory index and the root permalink resolve"
 
+new_case; page t '[i](index) [gi](/guide/index) [ri](/index) [ih](index.html)'
+expect_pass "an (index) link to a directory index page resolves, as does /index for the root permalink"
+
+new_case; printf -- '---\npermalink: /pp/\n---\n# P\n' > "$C/docs/p.md"; page t '[pi](/pp/index) [pih](/pp/index.html)'
+expect_pass "a permalink ending in / is served at its index and index.html"
+
+new_case; page t '[x](sub/index)'
+expect_fail "an (index) link into a directory without an index page still fails" "docs/guide/t.md:4 -> sub/index (page-missing)"
+
+new_case; page t '[x](a/index)'
+expect_fail "an (index) link under a page that is not an index still fails" "-> a/index (page-missing)"
+
 new_case; page t '[i](a#intro) [i2](a#intro-1) [s](a#setup-steps-v2) [c](a#uses-config-here) [m](#my-section)
 ## My section'
 expect_pass "anchors: headings, the repeat suffix, punctuation, inline code, and the page's own headings"

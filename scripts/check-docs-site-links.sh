@@ -5,8 +5,10 @@
 # A link passes when the site serves its target. The rules below were checked against https://llm4s.org with
 # curl on 2026-10-07 unless marked UNVERIFIED:
 #   - A page with front matter is rendered at /path/name.html and also at /path/name; /path/name/ and
-#     /path/name.md are 404. An index.md is served at /dir/ (and /dir, which redirects). A `permalink:` in
-#     the front matter replaces the URL. The site is built by plain Jekyll 3.9 (docs/Gemfile), without
+#     /path/name.md are 404. An index.md is served at /dir/ (and /dir, which redirects), /dir/index.html and
+#     /dir/index - so `[x](index)` on a sibling page works, and /index serves the root (checked 2026-10-08);
+#     /path/name/index for a page that is not an index is 404. A `permalink:` in the front matter replaces
+#     the URL, and a permalink ending in `/` is served at its `index` and `index.html` too. The site is built by plain Jekyll 3.9 (docs/Gemfile), without
 #     jekyll-relative-links, so a `.md` link to a rendered page is NOT rewritten and returns 404.
 #   - A .md file WITHOUT front matter is not rendered: Jekyll copies it, so it is served raw at its .md URL
 #     and 404s without the extension (docs/reference/migration.md, MODEL_METADATA.md). A link to it is
@@ -210,13 +212,14 @@ class Site(object):
             if canonical.endswith("/"):
                 accepted.add(canonical.rstrip("/") or "/")
                 accepted.add(canonical + "index.html")
+                accepted.add(canonical + "index")  # /dir/index is served too, including /index for the root
             else:
                 accepted.add(canonical + ".html")
         elif posixpath.basename(stem) == "index":
             directory = "/" + posixpath.dirname(stem)
             directory = directory if directory.endswith("/") else directory + "/"
             canonical = directory
-            accepted = {directory, directory + "index.html"}
+            accepted = {directory, directory + "index.html", directory + "index"}
             if directory != "/":
                 accepted.add(directory.rstrip("/"))
         else:

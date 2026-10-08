@@ -477,10 +477,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that `scripts/docs-link-baseline.txt` does not list and on a listed link that no longer breaks. The rules were
   checked against the live site: a `.md` link to a rendered page is a 404 (the site is built without
   `jekyll-relative-links`), and a page without front matter is served raw, so a link to it is reported too. The
-  baseline starts with 209 known-broken links (68 `.md` links, 58 pages never written, 58 links to pages without
-  front matter, 16 links that leave `docs/`, 9 stale anchors); fixing one means deleting its line.
+  baseline starts with 168 known-broken links (70 `.md` links, 59 links to pages without front matter, 23 pages
+  never written, 8 links that leave `docs/`, 8 stale anchors); fixing one means deleting its line.
   `--print` lists what is broken now and `--update-baseline` rewrites the file.
-  `scripts/test-check-docs-site-links.sh` runs 29 cases against fixture trees, with no network.
+  `scripts/test-check-docs-site-links.sh` runs 33 cases against fixture trees, with no network.
 - **Built-in tools guide** ([#1296](https://github.com/llm4s/llm4s/issues/1296)):
   `docs/guide/builtin-tools.md` lists every built-in tool with its parameters and result, the bundles that hold
   them (`coreSafe`, `withHttpSafe()`, `withFilesSafe()`, `developmentSafe()`, `customSafe(...)`), how to register
