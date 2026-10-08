@@ -1993,7 +1993,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alternative. `pages.yml` is no longer callable with `workflow_call`, and a manual run takes an optional release
   tag. A pushed docs change on `main` deploys exactly as before. Not yet exercised by a real release: the next one
   is its first run (see `docs/reference/release.md` for a way to check it sooner).
-
 - **`RAG.refresh` emptied the index when its loader failed, and `RAG.sync` deleted documents it
   could not read** (follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236)).
   `refresh` and `refreshAsync` cleared the index before reading the loader, so a listing

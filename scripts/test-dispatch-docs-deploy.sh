@@ -14,7 +14,7 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT="$REPO_ROOT/scripts/dispatch-docs-deploy.sh"
+SCRIPT="${DISPATCH_SCRIPT:-$REPO_ROOT/scripts/dispatch-docs-deploy.sh}"   # DISPATCH_SCRIPT: run the tests against another copy (mutation checks)
 PAGES="$REPO_ROOT/.github/workflows/pages.yml"
 RELEASE="$REPO_ROOT/.github/workflows/release.yml"
 WORK="$(mktemp -d)"
@@ -84,9 +84,21 @@ new_case() {
 }
 
 # run_script <tag> -> sets OUT and RC
+# The script runs in the background under a watchdog: one that never returns (a lost timeout) is killed after
+# WATCHDOG seconds and its case fails with exit 124, instead of hanging this whole test (and a CI job with it).
 run_script() {
-  OUT="$(PATH="$FAKE_BIN:$PATH" GITHUB_REPOSITORY=o/r DOCS_POLL_INTERVAL="${POLL:-0.05}" \
-        DOCS_FIND_TIMEOUT="${FIND_T:-3}" DOCS_RUN_TIMEOUT="${RUN_T:-3}" "$SCRIPT" "$1" 2>&1)" && RC=0 || RC=$?
+  local out="$CASE_DIR/script.out" pid wd
+  : > "$out"
+  ( PATH="$FAKE_BIN:$PATH" GITHUB_REPOSITORY=o/r DOCS_POLL_INTERVAL="${POLL:-0.05}" \
+      DOCS_FIND_TIMEOUT="${FIND_T:-3}" DOCS_RUN_TIMEOUT="${RUN_T:-3}" exec "$SCRIPT" "$1" ) > "$out" 2>&1 &
+  pid=$!
+  ( sleep "${WATCHDOG:-30}"; kill "$pid" 2>/dev/null ) &
+  wd=$!
+  wait "$pid" && RC=0 || RC=$?
+  kill "$wd" 2>/dev/null || true
+  wait "$wd" 2>/dev/null || true
+  [ "$RC" -ne 143 ] || RC=124
+  OUT="$(cat "$out")"
 }
 logged() { grep -c "$1" "$FAKE_LOG" || true; }
 
@@ -95,6 +107,7 @@ new_case v0.5.0
 run_script "$TAG"
 check "deploys: exit 0" "$([ "$RC" = 0 ] && echo yes || echo no)" "rc=$RC: $OUT"
 check "dispatches pages.yml on main with the tag as ref" "$(grep -q 'gh workflow run pages.yml -R o/r --ref main -f ref=v0.5.0' "$FAKE_LOG" && echo yes || echo no)" "$(cat "$FAKE_LOG")"
+check "lists runs on main only (--branch main), so a same-titled run elsewhere is never waited for" "$(grep 'run list' "$FAKE_LOG" | grep -q -- '--branch main' && ! grep 'run list' "$FAKE_LOG" | grep -vq -- '--branch main' && echo yes || echo no)" "$(grep 'run list' "$FAKE_LOG")"
 check "dispatches exactly once" "$([ "$(logged 'workflow run')" = 1 ] && echo yes || echo no)"
 check "waits for run 12, not the older run 11" "$(grep -q 'run view 12' "$FAKE_LOG" && ! grep -q 'run view 11 ' "$FAKE_LOG" && echo yes || echo no)" "$(cat "$FAKE_LOG")"
 check "reports the run's URL" "$(echo "$OUT" | grep -q 'actions/runs/12' && echo yes || echo no)" "$OUT"

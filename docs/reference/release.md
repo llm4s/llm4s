@@ -3,7 +3,9 @@
 ## Creating a New Release
 
 ### 1. Tag Format
-All release tags MUST use the `v` prefix format: `v0.3.2`, `v1.0.0`, etc.
+All release tags MUST use the `v` prefix format: `v0.3.2`, `v1.0.0`, etc. Use three numeric parts, optionally followed by a suffix such as `-RC1`
+(`vMAJOR.MINOR.PATCH[-suffix]`). The release workflow runs for any `v[0-9]*` tag, but the docs deploy accepts only that form: a tag such as
+`v1.0` would publish to Maven Central and then fail the `docs` job, with the artifacts already out.
 
 ### 2. Release Steps
 
