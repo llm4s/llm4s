@@ -263,6 +263,55 @@ else
   echo "FAIL [a row marked tier-drift: ignore] test setup: the marker row was not inserted (the 'types' row changed shape)"; FAILED=$((FAILED + 1))
 fi
 
+# ---------------------------------------------------------------- one case per direction of each comparison
+fresh
+edit build.sbt <<PY
+# frozenDependencyCheck is called with a module that is not frozen
+m = re.search(r'^(\s*)"llm4s-core"\s*->', text, re.M)
+write(text[:m.start()] + m.group(1) + '"$NONFROZEN" -> resolved((core / update).value, (core / libraryDependencies).value),\n' + text[m.start():])
+PY
+expect_fail "frozenDependencyCheck is called with a module that is not frozen" "frozenDependencyCheck is called with $NONFROZEN, which is not frozen"
+
+fresh
+edit docs/reference/api-stability.md <<PY
+# the What MiMa Covers table lists a module that is not frozen
+lines = text.split("\n")
+start = next(i for i, l in enumerate(lines) if re.match(r"^##\s+What MiMa Covers\s*\$", l))
+end = next((i for i in range(start + 1, len(lines)) if re.match(r"^##\s", lines[i])), len(lines))
+last = max(i for i in range(start + 1, end) if lines[i].lstrip().startswith("|"))
+lines.insert(last + 1, "| \`modules/$NONFROZEN_DIR\` | \`$NONFROZEN\` |")
+write("\n".join(lines))
+PY
+expect_fail "the MiMa table lists a module that is not frozen" "the \"What MiMa Covers\" table lists $NONFROZEN, which build.sbt does not freeze"
+
+fresh
+edit docs/reference/v1-scope.md <<PY
+# a non-frozen module's tier is a word that is no tier
+out = []
+for l in text.split("\n"):
+    cells = l.split("|")
+    if len(cells) >= 5 and "\`$NONFROZEN\`" in cells[2]:
+        cells[3] = " Gamma "
+        l = "|".join(cells)
+    out.append(l)
+write("\n".join(out))
+PY
+expect_fail "a non-frozen module with an unknown tier" "has no tier"
+
+fresh
+edit docs/reference/v1-scope.md <<PY
+# "Not Frozen yet" must not be read as Frozen: the tier word has to start the cell
+out = []
+for l in text.split("\n"):
+    cells = l.split("|")
+    if len(cells) >= 5 and "\`$NONFROZEN\`" in cells[2]:
+        cells[3] = " Not Frozen yet "
+        l = "|".join(cells)
+    out.append(l)
+write("\n".join(out))
+PY
+expect_fail "a tier cell that only mentions Frozen" "has no tier"
+
 # ---------------------------------------------------------------- a page the check cannot read must not pass
 fresh
 edit docs/reference/v1-scope.md <<PY

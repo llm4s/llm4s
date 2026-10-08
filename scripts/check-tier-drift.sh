@@ -200,11 +200,11 @@ else:
         cells = [c.strip() for c in l.strip().strip("|").split("|")]
         if len(cells) < 3 or set(cells[0]) <= set("-: ") or cells[0].lower() == "package":
             continue
-        t = re.search(r"Frozen|Beta|Experimental", cells[2])
+        t = re.match(r"\W*(Frozen|Beta|Experimental)\b", cells[2])  # the tier word starts the cell: "Not Frozen yet" is no tier
         if not t:
             drift.append((SCOPE, j + 1, f"Package Map row for {cells[0].strip('`')[:40]} has no tier (Frozen at 1.0, Beta or Experimental)"))
             continue
-        rows.append((j + 1, tokens(cells[1]), t.group(0)))
+        rows.append((j + 1, tokens(cells[1]), t.group(1)))
     if not rows:
         fatal.append(f"{SCOPE}: the Package Map has no readable rows")
 
