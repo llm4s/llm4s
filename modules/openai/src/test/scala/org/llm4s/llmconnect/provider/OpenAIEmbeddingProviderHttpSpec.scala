@@ -9,6 +9,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
+import org.llm4s.testutil.EchoedCredentials
 
 /** `OpenAIEmbeddingProvider` against a local server: the request it sends and every way the reply can go. */
 class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
@@ -86,5 +87,17 @@ class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
     val result = p.embed(request)
     Thread.interrupted() shouldBe true
     result.isLeft shouldBe true
+  }
+
+  "OpenAIEmbeddingProvider" should "redact credentials echoed in an error body before truncating it, in its error and its log (#1674)" in {
+    Seq(EchoedCredentials.Text, EchoedCredentials.JsonError).foreach { reply =>
+      withServer("/v1/embeddings")(ex => sendJsonResponse(ex, 500, reply)) { baseUrl =>
+        val (result, lines) = EchoedCredentials.logged(provider(baseUrl).embed(request))
+        val error           = embeddingError(result)
+        error.message should include("[REDACTED]")
+        EchoedCredentials.leaked(error.message) shouldBe empty
+        lines.flatMap(EchoedCredentials.leaked) shouldBe empty
+      }
+    }
   }
 }

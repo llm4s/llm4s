@@ -139,7 +139,8 @@ class WatsonXClient(
         Left(
           AuthenticationError(
             providerName,
-            s"IAM token exchange failed (HTTP ${response.statusCode}): ${scrub(response.body, "").take(256)}"
+            s"IAM token exchange failed (HTTP ${response.statusCode}): ${org.llm4s.util.Redaction
+                .safeBody(scrub(response.body, ""), 256)}"
           )
         )
     }

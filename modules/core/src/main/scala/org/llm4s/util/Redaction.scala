@@ -64,6 +64,22 @@ private[llm4s] object Redaction {
     if (body.length <= maxLength) body
     else body.take(maxLength) + s"... (truncated, original length: ${body.length})"
 
+  /**
+   * A provider's response body (or any text from outside the process) made fit for a log line or an error message:
+   * redacted in full, then truncated with `truncateForLog`.
+   *
+   * Redaction always runs on the whole text before the cut. Cutting first can leave a credential straddling the cut
+   * point, or strip the closing quote or key that a redaction pattern needs, so the fragment that survives is no longer
+   * recognised and is written in the clear. Use this, never `truncateForLog` alone, for any text that reaches a log, an
+   * `LLMError` message, a trace or the provider exchange sink.
+   *
+   * @param body The text to redact and truncate
+   * @param maxLength Maximum length of the redacted text before truncation (default: 2048)
+   * @return The redacted text, truncated with metadata when it is longer than `maxLength`
+   */
+  def safeBody(body: String, maxLength: Int = 2048): String =
+    if (body == null) "null" else truncateForLog(redact(body), maxLength)
+
   // ============================================================
   // Pattern-based redaction (for log messages)
   // ============================================================

@@ -140,7 +140,7 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
         logger.error(
           "[GeminiVisionClient] HTTP error {}: {}",
           response.statusCode.asInstanceOf[AnyRef],
-          org.llm4s.util.Redaction.truncateForLog(response.body)
+          org.llm4s.util.Redaction.safeBody(response.body)
         )
         Left(
           LLMError.apiCallFailed(
@@ -167,7 +167,8 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
           case _                     => None
         }
       }
-      .getOrElse(org.llm4s.util.Redaction.truncateForLog(responseBody, 512))
+      .map(org.llm4s.util.Redaction.safeBody(_, 512))
+      .getOrElse(org.llm4s.util.Redaction.safeBody(responseBody, 512))
     s"Status $statusCode: $detail"
   }
 

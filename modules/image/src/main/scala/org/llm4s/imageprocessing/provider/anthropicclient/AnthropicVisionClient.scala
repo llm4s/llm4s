@@ -218,17 +218,17 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
                     (message, errorType) match {
                       case (Some(msg), Some(typ)) => s"$typ: $msg"
                       case (Some(msg), None)      => msg
-                      case _                      => org.llm4s.util.Redaction.truncateForLog(responseBody)
+                      case _                      => responseBody
                     }
                   }
-                  .map(d => s"Status $statusCode: $d")
-                  .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.truncateForLog(responseBody)}")
+                  .map(d => s"Status $statusCode: ${org.llm4s.util.Redaction.safeBody(d)}")
+                  .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.safeBody(responseBody)}")
 
-              // Log a truncated version to avoid leaking very large or sensitive payloads
+              // Log a redacted, truncated version to avoid leaking very large or sensitive payloads
               logger.error(
                 "[AnthropicVisionClient] HTTP error {}: {}",
                 statusCode.asInstanceOf[AnyRef],
-                org.llm4s.util.Redaction.truncateForLog(responseBody)
+                org.llm4s.util.Redaction.safeBody(responseBody)
               )
               Left(visionFailed(s"Anthropic API call failed - $errorMessage"))
           }).fold(e => Left(visionFailed(e.getMessage)), identity)

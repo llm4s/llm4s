@@ -148,7 +148,7 @@ class LangfuseTracing(
         Right(())
       case Right(response) =>
         logger.error(s"[Langfuse] Batch export failed: ${response.statusCode}")
-        logger.error(s"[Langfuse] Response body: ${org.llm4s.util.Redaction.truncateForLog(response.body)}")
+        logger.error(s"[Langfuse] Response body: ${org.llm4s.util.Redaction.safeBody(response.body)}")
         val runtimeException = new RuntimeException(s"Langfuse export failed: ${response.statusCode}")
         Left(UnknownError(runtimeException.getMessage, runtimeException))
     }

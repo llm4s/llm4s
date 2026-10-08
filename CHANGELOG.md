@@ -1993,6 +1993,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was written in the clear, is redacted. The sensitive parameter names are unchanged; `?api_key=`, `&token=`,
   `?access_token=` and `?filter[api_key]=` are still redacted, and redacted JSON keeps its structure and still
   parses. No signature changes.
+- **Provider response bodies are redacted before they are truncated for a log line or an error**
+  ([#1674](https://github.com/llm4s/llm4s/issues/1674)). Many clients put a provider's error body into a log line
+  or an error message through `Redaction.truncateForLog` alone, or not even that, so a body that echoed a request
+  header, an API key or a token - `Authorization: Bearer ...`, `"api_key": "..."`, `?key=AIza...` - was written in
+  the clear. Every such site now goes through one internal helper that redacts the whole text and then truncates
+  it, as Cohere's and Jina's embedding providers already did: the OpenAI, Anthropic and Gemini vision clients and
+  the Stable Diffusion and Hugging Face image clients (`llm4s-image`); the Streamable HTTP and SSE MCP transports'
+  HTTP error bodies, and the message of a JSON-RPC error from any transport (`llm4s-mcp`); the Langfuse batch
+  sender's and tracer's error-body log lines and the per-event rejection summary (`llm4s-observability`); the
+  Ollama, OpenAI and Voyage embedding providers; Cohere's reranker and Qdrant's error messages (`llm4s-rag`);
+  `GraphJsonParser`'s preview of a reply it could not parse (`llm4s-knowledgegraph`); Vertex AI's token
+  refresh and JWT exchange errors (`llm4s-gemini`); watsonx's IAM exchange error, which removed only the
+  configured key; the grounding and context-relevance guardrails' quote of a reply they could not parse
+  (`llm4s-agent`); and `HttpResponse.ensureSuccess`'s `ServiceError`, which the model listers use (`llm4s-core`).
+  `OllamaClient`'s "does not support tools" error cut the server's decoded message to 200 characters and never
+  redacted it; it now redacts the whole message first. Redacting before the cut matters: a key that straddles the
+  cut point leaves a fragment too short for its pattern to recognise, which the old order let through. A truncated
+  body's `original length` now counts the redacted text. No public signature changes.
 - **`DefaultErrorMapper` classifies 401 and 429 only when the message names an HTTP status, and keeps the
   cause otherwise** ([#1668](https://github.com/llm4s/llm4s/issues/1668)). The mapper behind `Safety.safely`,
   `Safety.fromTry`, `toResult` and `toLLMError` turned any exception whose message *contained* `401` into

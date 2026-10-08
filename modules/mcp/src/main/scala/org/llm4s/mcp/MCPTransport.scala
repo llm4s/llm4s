@@ -163,7 +163,7 @@ class StreamableHTTPTransportImpl(
           // Handle other HTTP errors
           Left(
             SimpleError(
-              s"Transport error: HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
+              s"Transport error: HTTP error ${response.statusCode}: ${Redaction.safeBody(response.body)}"
             )
           )
         } else {
@@ -189,10 +189,11 @@ class StreamableHTTPTransportImpl(
             logger.debug(s"StreamableHTTPTransport($name) parsed JSON response: id=${jsonResponse.id}")
             jsonResponse.error match {
               case Some(error) =>
+                val message = Redaction.safeBody(error.message)
                 logger.error(
-                  s"StreamableHTTPTransport($name) JSON-RPC error from $url: code=${error.code}, message=${error.message}"
+                  s"StreamableHTTPTransport($name) JSON-RPC error from $url: code=${error.code}, message=$message"
                 )
-                Left(SimpleError(s"JSON-RPC Error ${error.code}: ${error.message}"))
+                Left(SimpleError(s"JSON-RPC Error ${error.code}: $message"))
               case None =>
                 logger.debug(s"StreamableHTTPTransport($name) request successful: id=${jsonResponse.id}")
                 Right(jsonResponse)
@@ -267,7 +268,9 @@ class StreamableHTTPTransportImpl(
         logger.debug(s"StreamableHTTPTransport($name) ignoring SSE retry directive: $trimmedLine")
       } else if (!trimmedLine.startsWith(":")) {
         // Lines starting with : are comments, ignore others that don't match format
-        logger.debug(s"StreamableHTTPTransport($name) ignoring unrecognized SSE line: $trimmedLine")
+        logger.debug(
+          s"StreamableHTTPTransport($name) ignoring unrecognized SSE line: ${Redaction.safeBody(trimmedLine)}"
+        )
       }
     }
 
@@ -345,7 +348,7 @@ class StreamableHTTPTransportImpl(
         // Handle HTTP errors (notifications still use HTTP)
         if (response.statusCode >= 400) {
           val errorMsg =
-            s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
+            s"HTTP error ${response.statusCode}: ${Redaction.safeBody(response.body)}"
           logger.error(s"StreamableHTTPTransport($name) notification error for $url: $errorMsg")
           Left(SimpleError(s"Notification error: $errorMsg"))
         } else {
@@ -469,7 +472,7 @@ class SSETransportImpl(
           // Handle other HTTP errors
           Left(
             SimpleError(
-              s"Transport error: HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
+              s"Transport error: HTTP error ${response.statusCode}: ${Redaction.safeBody(response.body)}"
             )
           )
         } else {
@@ -495,10 +498,9 @@ class SSETransportImpl(
             logger.debug(s"SSETransport($name) parsed JSON response: id=${jsonResponse.id}")
             jsonResponse.error match {
               case Some(error) =>
-                logger.error(
-                  s"SSETransport($name) JSON-RPC error from $url: code=${error.code}, message=${error.message}"
-                )
-                Left(SimpleError(s"JSON-RPC Error ${error.code}: ${error.message}"))
+                val message = Redaction.safeBody(error.message)
+                logger.error(s"SSETransport($name) JSON-RPC error from $url: code=${error.code}, message=$message")
+                Left(SimpleError(s"JSON-RPC Error ${error.code}: $message"))
               case None =>
                 logger.debug(s"SSETransport($name) request successful: id=${jsonResponse.id}")
                 Right(jsonResponse)
@@ -586,7 +588,7 @@ class SSETransportImpl(
         // Handle HTTP errors
         if (response.statusCode >= 400) {
           val errorMsg =
-            s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
+            s"HTTP error ${response.statusCode}: ${Redaction.safeBody(response.body)}"
           logger.error(s"SSETransport($name) notification error for $url: $errorMsg")
           Left(SimpleError(s"Notification error: $errorMsg"))
         } else {
@@ -938,10 +940,11 @@ class StdioTransportImpl(
                         case Success(response) =>
                           response.error match {
                             case Some(error) =>
+                              val message = Redaction.safeBody(error.message)
                               logger.error(
-                                s"StdioTransport($name) JSON-RPC error: code=${error.code}, message=${error.message}"
+                                s"StdioTransport($name) JSON-RPC error: code=${error.code}, message=$message"
                               )
-                              Left(SimpleError(s"JSON-RPC Error ${error.code}: ${error.message}"))
+                              Left(SimpleError(s"JSON-RPC Error ${error.code}: $message"))
                             case None =>
                               logger.debug(s"StdioTransport($name) request successful: id=${response.id}")
                               Right(response)

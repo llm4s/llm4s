@@ -293,7 +293,8 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
       case 401 => return Left(ImageAuthenticationError("API request failed with status 401: Unauthorized"))
       case 429 => return Left(ImageRateLimitError("API request failed with status 429: Rate limit"))
       case _ =>
-        val errorMsg = s"API request failed with status ${response.statusCode}: ${response.body}"
+        val errorMsg =
+          s"API request failed with status ${response.statusCode}: ${org.llm4s.util.Redaction.safeBody(response.body)}"
         logger.error(errorMsg)
         return Left(ImageServiceError(errorMsg, response.statusCode))
     }

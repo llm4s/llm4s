@@ -143,7 +143,7 @@ class VertexAIAuthProvider(
           Left(
             AuthenticationError(
               "vertexai",
-              s"Token refresh failed (HTTP ${response.statusCode}): ${response.body}"
+              s"Token refresh failed (HTTP ${response.statusCode}): ${org.llm4s.util.Redaction.safeBody(response.body)}"
             )
           )
         }
@@ -225,7 +225,7 @@ class VertexAIAuthProvider(
           Left(
             AuthenticationError(
               "vertexai",
-              s"JWT token exchange failed (HTTP ${response.statusCode}): ${response.body}"
+              s"JWT token exchange failed (HTTP ${response.statusCode}): ${org.llm4s.util.Redaction.safeBody(response.body)}"
             )
           )
         }

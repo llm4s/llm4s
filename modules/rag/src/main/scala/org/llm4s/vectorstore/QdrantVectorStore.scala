@@ -390,7 +390,13 @@ final class QdrantVectorStore private (
       .map(e => ProcessingError("qdrant-store", s"HTTP PUT failed: ${e.message}"))
       .flatMap { response =>
         if (response.statusCode >= 200 && response.statusCode < 300) Right(())
-        else Left(ProcessingError("qdrant-store", s"HTTP PUT failed: ${response.statusCode} - ${response.body}"))
+        else
+          Left(
+            ProcessingError(
+              "qdrant-store",
+              s"HTTP PUT failed: ${response.statusCode} - ${org.llm4s.util.Redaction.safeBody(response.body)}"
+            )
+          )
       }
 
   private def httpDelete(url: String): Result[Unit] =
@@ -409,7 +415,12 @@ final class QdrantVectorStore private (
     } else if (response.statusCode == 404) {
       Left(ProcessingError("qdrant-store", "Not found"))
     } else {
-      Left(ProcessingError("qdrant-store", s"HTTP error: ${response.statusCode} - ${response.body}"))
+      Left(
+        ProcessingError(
+          "qdrant-store",
+          s"HTTP error: ${response.statusCode} - ${org.llm4s.util.Redaction.safeBody(response.body)}"
+        )
+      )
     }
 
   private def authHeaders: Map[String, String] =

@@ -306,7 +306,7 @@ class ContextRelevanceGuardrail(
               Left(
                 ValidationError.invalid(
                   "context_relevance_parse",
-                  s"Could not parse context relevance from LLM response: ${response.take(200)}"
+                  s"Could not parse context relevance from LLM response: ${org.llm4s.util.Redaction.safeBody(response, 200)}"
                 )
               )
           }

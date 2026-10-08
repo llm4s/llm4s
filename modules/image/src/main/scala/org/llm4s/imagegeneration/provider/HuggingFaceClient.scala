@@ -287,7 +287,13 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
           case 200 => Right(response.body)
           case 401 => Left(ImageAuthenticationError("Unauthorized"))
           case 429 => Left(ImageRateLimitError("Rate limit"))
-          case _   => Left(ImageServiceError(new String(response.body, java.nio.charset.StandardCharsets.UTF_8), 500))
+          case _ =>
+            Left(
+              ImageServiceError(
+                org.llm4s.util.Redaction.safeBody(new String(response.body, java.nio.charset.StandardCharsets.UTF_8)),
+                500
+              )
+            )
         }
       }
   }

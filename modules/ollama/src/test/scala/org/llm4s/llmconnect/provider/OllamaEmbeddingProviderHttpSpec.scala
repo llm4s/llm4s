@@ -10,6 +10,7 @@ import org.scalatest.matchers.should.Matchers
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.jdk.CollectionConverters.*
+import org.llm4s.testutil.EchoedCredentials
 
 /** `OllamaEmbeddingProvider` against a local server: the requests it sends and every way the reply can go. */
 class OllamaEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
@@ -82,5 +83,17 @@ class OllamaEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
     val result = p.embed(request)
     Thread.interrupted() shouldBe true
     result.isLeft shouldBe true
+  }
+
+  "OllamaEmbeddingProvider" should "redact credentials echoed in an error body before truncating it, in its error and its log (#1674)" in {
+    Seq(EchoedCredentials.Text, EchoedCredentials.JsonError).foreach { reply =>
+      withServer("/api/embeddings")(ex => sendJsonResponse(ex, 500, reply)) { baseUrl =>
+        val (result, lines) = EchoedCredentials.logged(provider(baseUrl).embed(request))
+        val error           = embeddingError(result)
+        error.message should include("[REDACTED]")
+        EchoedCredentials.leaked(error.message) shouldBe empty
+        lines.flatMap(EchoedCredentials.leaked) shouldBe empty
+      }
+    }
   }
 }

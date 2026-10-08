@@ -284,7 +284,7 @@ class GroundingGuardrail(
             Left(
               ValidationError.invalid(
                 "grounding_parse",
-                s"Could not parse grounding evaluation from LLM response: ${response.take(200)}"
+                s"Could not parse grounding evaluation from LLM response: ${org.llm4s.util.Redaction.safeBody(response, 200)}"
               )
             )
         }
