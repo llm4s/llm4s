@@ -1,7 +1,8 @@
 package org.llm4s.javaapi
 
 import org.llm4s.agent.{ AgentResult, AgentStatus }
-import org.llm4s.agent.graph.{ GraphError, ThreadId }
+import org.llm4s.agent.graph.{ GraphError, InterruptId, ThreadId }
+import org.llm4s.agent.graph.toolloop.{ ApprovalRequest, ApprovalSource, ToolQuestionRequest }
 import org.llm4s.error.{ CancelledError, NetworkError, ValidationError }
 import org.llm4s.llmconnect.model.ToolMessage
 import org.scalatest.flatspec.AnyFlatSpec
@@ -119,6 +120,19 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     p.toString shouldBe s"""PendingInterrupt(APPROVAL ${p.id}: deploy {"text":"prod"})"""
   }
 
+  it should "report a missing approval reason or question as empty, never as a null in an Optional" in {
+    val c = call("c1", "deploy", "x")
+    val status = AgentStatus.Suspended(
+      Vector(InterruptId("a1") -> ApprovalRequest("m1", c, null, ApprovalSource.Tool)),
+      Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, null))
+    )
+    val List(approval, question) = PendingInterrupt.of(status).asScala.toList: @unchecked
+    approval.kind shouldBe InterruptKind.APPROVAL
+    approval.reason() shouldBe java.util.Optional.empty()
+    question.kind shouldBe InterruptKind.QUESTION
+    question.questionJson() shouldBe java.util.Optional.empty()
+  }
+
   "InterruptKind" should "be a Java enum" in {
     classOf[InterruptKind].isEnum shouldBe true
     InterruptKind.valueOf("QUESTION") shouldBe InterruptKind.QUESTION
@@ -151,6 +165,7 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     agent.resume(null.asInstanceOf[ThreadId], java.util.List.of()).getError().error shouldBe a[ValidationError]
     agent.resume(first.threadId, null).getError().error shouldBe a[ValidationError]
     agent.resume(first.threadId, java.util.Arrays.asList(null)).getError().error shouldBe a[ValidationError]
+    agent.resume(first.threadId, java.util.List.of()).getError().error shouldBe a[GraphError.InvalidResume]
     val id = JAgent.pending(first).get(0).id
     agent.resume(first.threadId, java.util.List.of(Answer.edit(id, "{not json"))).getError().getMessage should
       include("not valid JSON")

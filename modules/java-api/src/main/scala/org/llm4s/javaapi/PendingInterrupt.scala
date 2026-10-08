@@ -36,17 +36,17 @@ final class PendingInterrupt private (
   private val detail: String
 ) {
 
-  /** Why the call needs approval, for an `APPROVAL`; empty for a `QUESTION`. */
+  /** Why the call needs approval, for an `APPROVAL` that gives a reason; empty for a `QUESTION`. */
   def reason(): Optional[String] = when(InterruptKind.APPROVAL)
 
   /**
-   * The question the tool asked, as JSON text in the tool's question type, for a `QUESTION`; empty for
-   * an `APPROVAL`. [[Answer.reply]] takes the answer as JSON text of the tool's answer type.
+   * The question the tool asked, as JSON text in the tool's question type, for a `QUESTION` that has
+   * one; empty for an `APPROVAL`. [[Answer.reply]] takes the answer as JSON text of the tool's answer type.
    */
   def questionJson(): Optional[String] = when(InterruptKind.QUESTION)
 
   private def when(wanted: InterruptKind): Optional[String] =
-    if (kind == wanted) Optional.of(detail) else Optional.empty()
+    if (kind == wanted) Optional.ofNullable(detail) else Optional.empty()
 
   override def equals(other: Any): Boolean = other match {
     case that: PendingInterrupt =>
@@ -89,6 +89,6 @@ object PendingInterrupt {
       InterruptKind.QUESTION,
       request.call.name,
       request.call.arguments.render(),
-      request.question.render()
+      Option(request.question).map(_.render()).orNull
     )
 }

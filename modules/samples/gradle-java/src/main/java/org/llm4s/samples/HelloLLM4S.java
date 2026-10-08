@@ -131,10 +131,11 @@ public final class HelloLLM4S {
      * agent built with {@code Agent.builder}, approval middleware and tools, wrapped with {@code Llm4s.wrapAgent},
      * stops here until each call is answered. Approving every call is for the sample: a real caller would show
      * each one to a person, and {@code Answer.reject(id, reason)} or {@code Answer.edit(id, argumentsJson)} it.
-     * A question is returned unanswered, still pending.
+     * Questions are reported and left pending: the turn is resumed with the approvals alone, and returned
+     * {@code Suspended} once only questions remain.
      */
     private static LlmResult<AgentResult> approveWhatItWaitsFor(JAgent agent, LlmResult<AgentResult> turn) {
-        while (turn.isSuccess() && !JAgent.pending(turn.get()).isEmpty()) {
+        while (turn.isSuccess()) {
             List<Answer> answers = new ArrayList<>();
             for (PendingInterrupt pending : JAgent.pending(turn.get())) {
                 switch (pending.kind()) {
@@ -143,20 +144,19 @@ public final class HelloLLM4S {
                             + ": " + pending.reason().orElse(""));
                         answers.add(Answer.approve(pending.id()));
                     }
-                    case QUESTION -> {
-                        // the answer is JSON of the asking tool's answer type, Answer.reply(id, json), which only
-                        // the application knows; the sample leaves the question pending
-                        System.out.println(pending.toolName() + " asks " + pending.questionJson().orElse(""));
-                        return turn;
-                    }
+                    // the answer is JSON of the asking tool's answer type, Answer.reply(id, json), which only the
+                    // application knows; the sample leaves the question pending
+                    case QUESTION -> System.out.println(
+                        "Leaving pending: " + pending.toolName() + " asks " + pending.questionJson().orElse(""));
                 }
+            }
+            if (answers.isEmpty()) {
+                return turn; // nothing pending, or only questions
             }
             turn = agent.resume(turn.get().threadId(), answers);
         }
-        if (turn.isFailure()) {
-            // a turn that failed or was cancelled can be continued with agent.recover(threadId)
-            System.err.println("Resuming failed: " + turn.getError().getMessage());
-        }
+        // a turn that failed or was cancelled can be continued with agent.recover(threadId)
+        System.err.println("The turn failed: " + turn.getError().getMessage());
         return turn;
     }
 }

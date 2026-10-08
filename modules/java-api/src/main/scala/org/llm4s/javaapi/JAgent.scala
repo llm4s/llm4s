@@ -111,8 +111,8 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
    * and continues the turn, returning its result; unanswered ones stay pending, so the result can be
    * `Suspended` again. Build each answer with [[Answer.approve]], [[Answer.reject]], [[Answer.edit]] or
    * [[Answer.reply]]; for an id answered twice, the last answer counts. A `null` or malformed answer,
-   * an answer to an id the thread does not wait for, or a thread that is not suspended is a failed
-   * result. Blocks and reports an interrupt as [[run]] does: a `CancelledError` result, the interrupt
+   * an empty answers list (`GraphError.InvalidResume`), an answer to an id the thread does not wait
+   * for, or a thread that is not suspended is a failed result. Blocks and reports an interrupt as [[run]] does: a `CancelledError` result, the interrupt
    * flag left set, and the turn carries on.
    */
   def resume(threadId: ThreadId, answers: java.util.List[Answer]): LlmResult[AgentResult] =

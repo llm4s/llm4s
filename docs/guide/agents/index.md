@@ -199,8 +199,8 @@ while (!pending.isEmpty()) {
 ```
 
 `agent.recover(threadId)` continues a turn that failed or was cancelled, and also returns an
-`LlmResult<AgentResult>`. A failed result means one of these: a malformed answer, an answer to an id
-the thread is not waiting for, a thread that is not suspended (`resume`), or a thread with nothing to
+`LlmResult<AgentResult>`. A failed result means one of these: a malformed answer, an empty answers
+list (`InvalidResume`), an answer to an id the thread is not waiting for, a thread that is not suspended (`resume`), or a thread with nothing to
 recover. `resume` and `recover` handle an interrupt the way `run` does: the call returns a
 `CancelledError`, but the turn keeps running. To cancel a turn, use `streamResume` or `streamRecover`
 and cancel the stream (see [Streaming Events](streaming#java-and-kotlin)).
@@ -208,7 +208,10 @@ and cancel the stream (see [Streaming Events](streaming#java-and-kotlin)).
 The Kotlin API reuses these types. `AgentKt.pending(result)` returns a `List<PendingInterrupt>`.
 `agent.resume(threadId, answers)` and `agent.recover(threadId)` are `suspend` functions that return
 the `AgentResult` or throw `LLMException`. They run the turn as `streamResume` and `streamRecover` do,
-so cancelling the caller cancels the turn. The thread is then left for `recover`.
+so cancelling the caller cancels the turn. The thread is then left for `recover`. `run` and
+`continueConversation` behave differently: cancelling their caller interrupts only the wait. The call
+throws `CancellationException`, but the turn keeps running in the background, and its conversation
+thread stays busy (a new turn on it is refused) until the turn finishes. To stop such a turn, run it with `stream` and cancel the collection.
 
 ```kotlin
 var turn = agent.run("Deploy the release")

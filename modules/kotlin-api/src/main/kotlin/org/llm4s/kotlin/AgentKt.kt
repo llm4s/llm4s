@@ -33,13 +33,19 @@ sealed interface AgentStreamItem {
 /**
  * Kotlin coroutine wrapper around [JAgent].
  *
- * Dispatches the blocking agent run on [Dispatchers.IO] (cancelling the caller interrupts it) and converts
- * Scala [org.llm4s.javaapi.LlmResult] errors into [LLMException]. A conversation is a thread of the agent's
- * in-memory runtime, kept until [forget] removes it.
+ * Dispatches the blocking agent run on [Dispatchers.IO] and converts Scala [org.llm4s.javaapi.LlmResult]
+ * errors into [LLMException]. A conversation is a thread of the agent's in-memory runtime, kept until
+ * [forget] removes it.
+ *
+ * Cancelling the caller of [run] or [continueConversation] interrupts only the wait: the call throws
+ * `CancellationException`, but the turn keeps running in the background, and its conversation thread
+ * stays busy (a new turn on it is refused) until the turn finishes. To stop a turn, run it with
+ * [stream] and cancel the collection.
  *
  * A turn whose tools need approval, or ask a question, ends `Suspended`: [pending] lists what it waits
  * for, and [resume] answers some or all of it and continues. A turn that failed or was cancelled
- * continues with [recover].
+ * continues with [recover]. Unlike [run], cancelling the caller of [resume] or [recover] cancels the
+ * turn itself, leaving the thread for [recover].
  *
  * [stream], [streamResume] and [streamRecover] run a turn on a thread you name as a cold [Flow] of its
  * events ([AgentStreamItem.Event]), then its result ([AgentStreamItem.Done]).
