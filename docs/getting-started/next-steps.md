@@ -505,7 +505,7 @@ val result = for {
 - [Advanced Topics](/advanced/) - Production topics
 
 ### Examples
-- [All Examples](/examples/) - Browse 46 examples
+- [All Examples](/examples/) - Browse all examples
 - [Basic](/examples/#basic-examples) - Getting started
 - [Agents](/examples/#agent-examples) - Agent patterns
 - [Tools](/examples/#tool-examples) - Tool integration
