@@ -21,7 +21,9 @@ import scala.util.Try
  *
  * Use it wherever text a model wrote (a structured reply, tool-call arguments, a guardrail's input)
  * or a tool returned is parsed. JSON the library wrote itself, configuration and provider response
- * envelopes - in which the model's text sits inside string literals - do not need it.
+ * envelopes - in which the model's text sits inside string literals - do not need it, unless the
+ * model's JSON is a native value in the envelope, as Gemini's `functionCall.args` is (#1643): then
+ * the envelope parse is the boundary the model's JSON crosses, and it is the parse to bound.
  */
 private[llm4s] object BoundedJson {
 

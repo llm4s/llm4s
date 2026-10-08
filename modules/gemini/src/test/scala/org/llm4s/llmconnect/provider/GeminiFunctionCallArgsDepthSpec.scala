@@ -18,7 +18,9 @@ import java.nio.charset.StandardCharsets
  * the response envelope as a native object, so the envelope parse is the only boundary it crosses. That
  * parse is iterative and admits any depth; what overflows is rendering the call back on the next turn (and,
  * for a signed call, storing the part for replay), once per level. The envelope is therefore read through
- * the 512-level bound every other model-written JSON has (#1562), for Gemini and Vertex AI alike.
+ * the 512-level bound every other model-written JSON has (#1562), for Gemini and Vertex AI alike - and the
+ * streamed reply fails the same way the non-streamed one does: a chunk over the limit fails the stream,
+ * rather than vanishing from a completion that then reports success without its call.
  */
 class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with MockFactory {
 
@@ -52,8 +54,10 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
   private val textReply =
     """{"candidates":[{"content":{"parts":[{"text":"Sunny"}],"role":"model"},"finishReason":"STOP"}]}"""
 
-  private def sse(json: String): ByteArrayInputStream =
-    new ByteArrayInputStream(s"data: ${json.replace("\n", "")}\n".getBytes(StandardCharsets.UTF_8))
+  private def sse(json: String*): ByteArrayInputStream =
+    new ByteArrayInputStream(
+      json.map(j => s"data: ${j.replace("\n", "")}\n").mkString.getBytes(StandardCharsets.UTF_8)
+    )
 
   /** Gemini: every POST returns `reply`. */
   private def gemini(mockHttp: Llm4sHttpClient): LLMClient =
@@ -113,13 +117,22 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     shouldRefuse(roundTrip(client)(client.complete(question, CompletionOptions())))
   }
 
-  "GeminiClient.streamComplete" should "drop a chunk whose functionCall args are nested too deeply, never overflow" in {
+  "GeminiClient.streamComplete" should "fail the stream on a chunk whose functionCall args are nested too deeply, never overflow" in {
     val mockHttp = stub[Llm4sHttpClient]
     (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, sse(callReply(deepArgs)))))
     (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, textReply, Map.empty)))
-    val client  = gemini(mockHttp)
-    val outcome = roundTrip(client)(client.streamComplete(question, CompletionOptions(), _ => ()))
-    outcome shouldBe Right(Right("a completion with 0 call(s), sent back"))
+    val client = gemini(mockHttp)
+    shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions(), _ => ())))
+  }
+
+  it should "still skip a chunk that is not JSON at all, as before" in {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.postStream _)
+      .when(*, *, *, *)
+      .returns(Right(StreamingHttpResponse(200, sse("{not json", textReply))))
+    val completion =
+      gemini(mockHttp).streamComplete(question, CompletionOptions(), _ => ()).fold(e => fail(e.message), identity)
+    completion.content shouldBe "Sunny"
   }
 
   "VertexAIClient.complete" should "refuse a functionCall whose args are nested too deeply, never overflow" in {
@@ -128,12 +141,23 @@ class GeminiFunctionCallArgsDepthSpec extends AnyFlatSpec with Matchers with Moc
     shouldRefuse(roundTrip(client)(client.complete(question, CompletionOptions())))
   }
 
-  "VertexAIClient.streamComplete" should "drop a chunk whose functionCall args are nested too deeply, never overflow" in {
+  "VertexAIClient.streamComplete" should "fail the stream on a chunk whose functionCall args are nested too deeply, never overflow" in {
     val mockHttp = stub[Llm4sHttpClient]
     (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, sse(callReply(deepArgs)))))
-    val client  = vertex(mockHttp, textReply)
-    val outcome = roundTrip(client)(client.streamComplete(question, CompletionOptions(), _ => ()))
-    outcome shouldBe Right(Right("a completion with 0 call(s), sent back"))
+    val client = vertex(mockHttp, textReply)
+    shouldRefuse(roundTrip(client)(client.streamComplete(question, CompletionOptions(), _ => ())))
+  }
+
+  it should "still skip a chunk that is not JSON at all, as before" in {
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.postStream _)
+      .when(*, *, *, *)
+      .returns(Right(StreamingHttpResponse(200, sse("{not json", textReply))))
+    val completion =
+      vertex(mockHttp, textReply)
+        .streamComplete(question, CompletionOptions(), _ => ())
+        .fold(e => fail(e.message), identity)
+    completion.content shouldBe "Sunny"
   }
 
   "GeminiClient" should "still accept a functionCall whose args are nested to the limit" in {

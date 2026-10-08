@@ -168,36 +168,45 @@ class VertexAIClient(
               val rawStream   = StringBuilder()
               val signatures = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
               var textLength = 0 // characters of answer text streamed so far: where a text signature sits
+              // a chunk nested too deeply: the stream fails with it, unread
+              var refused = Option.empty[org.llm4s.error.LLMError]
 
               Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) { reader =>
-                Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
+                Iterator.continually(reader.readLine()).takeWhile(l => l != null && refused.isEmpty).foreach { line =>
                   rawStream.append(line).append('\n')
                   val trimmed = line.trim
                   if (trimmed.startsWith("data: ")) {
                     val jsonStr = trimmed.stripPrefix("data: ").trim
                     if (jsonStr.nonEmpty) {
                       // a chunk's functionCall.args is the model's JSON, native in the envelope: one nested too
-                      // deeply is dropped, as any chunk that cannot be read is, never parsed and sent back (#1562)
-                      BoundedJson.read(jsonStr).foreach { json =>
-                        parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
-                          textLength += parsed.text.length
-                          signatures ++= parsed.signatures
-                          chunks.foreach { chunk =>
-                            accumulator.addChunk(chunk)
-                            onChunk(chunk)
+                      // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
+                      // (#1562); a chunk that is not JSON at all is skipped, as it always was
+                      BoundedJson.read(jsonStr) match {
+                        case Right(json) =>
+                          parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
+                            textLength += parsed.text.length
+                            signatures ++= parsed.signatures
+                            chunks.foreach { chunk =>
+                              accumulator.addChunk(chunk)
+                              onChunk(chunk)
+                            }
                           }
-                        }
-                        for {
-                          usage      <- Try(json("usageMetadata")).toOption
-                          prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
-                          completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
-                        } accumulator.updateTokens(prompt, completion)
+                          for {
+                            usage      <- Try(json("usageMetadata")).toOption
+                            prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
+                            completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
+                          } accumulator.updateTokens(prompt, completion)
+                        case Left(tooDeep) if tooDeep == BoundedJson.tooDeep() =>
+                          logger.warn(s"[VertexAI] Stream refused: a chunk's ${tooDeep.message}")
+                          refused = Some(tooDeep)
+                        case Left(_) => () // unreadable chunk: skipped
                       }
                     }
                   }
                 }
               }.toEither.left
                 .map(HttpFailures.streamReadError(_, url, streamTimeout))
+                .flatMap(_ => refused.toLeft(()))
                 .flatMap(_ =>
                   accumulator.toCompletion.map { c =>
                     val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
