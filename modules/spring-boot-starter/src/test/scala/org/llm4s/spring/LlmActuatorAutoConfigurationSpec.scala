@@ -56,6 +56,20 @@ class LlmActuatorAutoConfigurationSpec extends AnyFlatSpec with Matchers {
       }
   }
 
+  it should "switch the health indicator off with llm4s.enabled=false, even when the application supplies its own JLlmClient" in {
+    // Codex review of #1592: without a property condition on LlmActuatorAutoConfiguration, this
+    // combination used to fail startup: the actuator config stayed eligible through the user's
+    // JLlmClient bean while the disabled Llm4sAutoConfiguration took Llm4sProperties and the
+    // executor bean with it.
+    runner
+      .withUserConfiguration(classOf[MockClientConfig])
+      .withPropertyValues("llm4s.enabled=false")
+      .run { ctx =>
+        ctx.getStartupFailure shouldBe null
+        ctx.getBeansOfType(classOf[LlmHealthIndicator]).size() shouldBe 0
+      }
+  }
+
   it should "allow the LlmHealthIndicator bean to be overridden" in {
     runner
       .withUserConfiguration(classOf[MockClientConfig], classOf[CustomIndicatorConfig])
