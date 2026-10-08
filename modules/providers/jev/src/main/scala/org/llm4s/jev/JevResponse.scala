@@ -2,8 +2,7 @@ package org.llm4s.jev
 
 import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.llm4s.types.Result
-
-import scala.util.Try
+import org.llm4s.util.BoundedJson
 
 /**
  * Jev's answers to one [[JevRequest]].
@@ -125,9 +124,13 @@ object JevResponse {
     } yield answer
   }
 
+  /** A level key is a level number written canonically (`0`, `1`, `12`), so no two keys can name the same level. */
+  private val LevelKey = "0|[1-9][0-9]*".r
+
   private def levelIndex(key: String, path: String): Result[Int] =
-    key.toIntOption
-      .filter(_ >= 0)
+    Option(key)
+      .filter(LevelKey.matches)
+      .flatMap(_.toIntOption)
       .toRight(ProcessingError("jev-response", s"Jev's level key at $path is not a level number"))
 
   private def parseScore(o: ujson.Obj, at: String): Result[JevAnswer] =
@@ -144,6 +147,11 @@ object JevResponse {
       _ <-
         if (probs.keySet == described.map(_._2._1).toSet) Right(())
         else fail(s"$at.probabilities", "the levels do not match the legend")
+      // The score is the probability-weighted level, so it lies between the lowest level and the highest.
+      top = described.map(_._1).maxOption.getOrElse(0)
+      _ <-
+        if (score >= 0.0 && score <= top) Right(())
+        else fail(s"$at.score", s"$score is outside the levels 0 to $top")
       confidence <- field(o, at, "confidence").flatMap(unit(_, s"$at.confidence"))
     } yield ScoreAnswer(
       score,
@@ -155,12 +163,24 @@ object JevResponse {
    * Reads the API's response body (https://docs.typesafe.ai/api.md#response-body).
    *
    * Strict about what the documentation bounds (probabilities and confidence from 0 to 1, a count of tokens, a
-   * choice among its probabilities, score levels matching the legend) and silent about the rest. The body is never
-   * quoted in an error, only the path to the part that does not match.
+   * choice among its probabilities, score levels matching the legend, each level numbered once, and a score within
+   * the levels) and silent about the rest. The body is never quoted in an error, only the path to the part that does
+   * not match. A body nested more than [[org.llm4s.util.BoundedJson.MaxDepth]] levels deep is refused unparsed: a
+   * value that deep, kept in a level's description, would overflow the stack of whatever later printed, hashed or
+   * compared the response.
    */
   private[jev] def parse(body: String, requestId: Option[String]): Result[JevResponse] =
-    Try(ujson.read(body)).toEither.left
-      .map(_ => ProcessingError("jev-response", "Jev's response is not valid JSON"))
+    BoundedJson
+      .read(body)
+      .left
+      .map {
+        case BoundedJson.TooDeep() =>
+          ProcessingError(
+            "jev-response",
+            s"Jev's response is nested more than ${BoundedJson.MaxDepth} levels deep, which its API never is"
+          )
+        case _ => ProcessingError("jev-response", "Jev's response is not valid JSON")
+      }
       .flatMap { json =>
         for {
           root    <- obj(json, "the response")

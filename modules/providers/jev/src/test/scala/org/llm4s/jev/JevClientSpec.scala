@@ -493,6 +493,97 @@ class JevClientSpec extends AnyFlatSpec with Matchers with EitherValues with Bef
     }
   }
 
+  it should "keep the key out of an error when the server echoes it URL-encoded" in {
+    val key     = "tsk/live+0123=abc"
+    val encoded = "tsk%2Flive%2B0123%3Dabc"
+    java.net.URLEncoder.encode(key, java.nio.charset.StandardCharsets.UTF_8) shouldBe encoded
+    Seq(
+      Reply(401, s"""{"message":"bad key $encoded"}"""),
+      ok(withChoice(encoded))
+    ).foreach { reply =>
+      serve(reply) { (url, _) =>
+        val error = new Rig(url, tweak = _.withApiKey(key)).client.evaluate(choiceRequest).left.value
+
+        withClue(s"${reply.status} ") {
+          error.message should include("***")
+          Seq(error.message, error.formatted, error.toString).foreach { text =>
+            (text should not).include(key)
+            (text should not).include(encoded)
+          }
+        }
+      }
+    }
+  }
+
+  private def choiceRequest =
+    JevRequest("s", Map("department" -> JevQuestion.choice("Which team?", "billing" -> "Payments")))
+
+  it should "mask the URL-encoded key in a body read as text" in {
+    JevErrors.redactBody(
+      "plain text, url tsk%2Flive%2B0123%3Dabc.",
+      "tsk/live+0123=abc"
+    ) shouldBe "plain text, url ***."
+  }
+
+  private def withChoice(choice: String): String =
+    s"""{"model":"jev-1.13.0","answers":{"department":{"type":"choice","choice":"$choice","probabilities":{"$choice":1.0},"confidence":1.0}},"usage":{"input_tokens":1,"output_tokens":1}}"""
+
+  /** Runs `body` on a thread with a 256 KiB stack, so a recursion over a deeply nested value overflows it. */
+  private def onSmallStack[A](body: => A): A = {
+    val outcome = new AtomicReference[Either[Throwable, A]](null)
+    val thread  = new Thread(null, () => outcome.set(scala.util.Try(body).toEither), "small-stack", 256L * 1024)
+    thread.start()
+    thread.join(60000)
+    thread.isAlive shouldBe false
+    // A StackOverflowError is fatal, so Try rethrows it: the thread dies and records nothing.
+    Option(outcome.get).getOrElse(fail("the call died on the small stack, most likely of a StackOverflowError")) match {
+      case Right(a) => a
+      case Left(e)  => throw e
+    }
+  }
+
+  private def deepDepth = 100000
+
+  it should "redact a non-2xx body nested too deeply to walk, without overflowing the stack" in {
+    val body =
+      s"""{"message":"bad key $secret","nested":${"[" * deepDepth}"$secret"${"]" * deepDepth}}"""
+
+    val redacted = onSmallStack(JevErrors.redactBody(body, secret))
+
+    (redacted should not).include(secret)
+    redacted should include("***")
+  }
+
+  it should "return a Left for a non-2xx body nested 100,000 levels deep, with no key in it however escaped" in {
+    val key     = "tsk/live\"quote\\back"
+    val escaped = ujson.write(ujson.Str(key)).drop(1).dropRight(1).replace("/", "\\/")
+    val body    = s"""{"message":"bad key $escaped","nested":${"[" * deepDepth}${"]" * deepDepth}}"""
+    serve(Reply(500, body)) { (url, _) =>
+      val rig    = new Rig(url, tweak = _.withApiKey(key))
+      val result = onSmallStack(rig.client.evaluate(request))
+
+      val error = result.left.value
+      error shouldBe a[ServiceError]
+      error.asInstanceOf[ServiceError].httpStatus shouldBe 500
+      (error.message should not).include(key)
+      (error.formatted should not).include(key)
+    }
+  }
+
+  it should "return a Left, on a small stack, for a 200 nested 100,000 levels deep" in {
+    val deep = "[" * deepDepth + "]" * deepDepth
+    serve(ok(Examples.Score.replace("\"Very angry\"", deep))) { (url, _) =>
+      val rig = new Rig(url)
+      val result = onSmallStack(
+        rig.client.evaluate(JevRequest("s", Map("frustration" -> JevQuestion.score("How?", "a", "b", "c"))))
+      )
+
+      val error = result.left.value
+      error shouldBe a[ProcessingError]
+      error.message should include("nested more than")
+    }
+  }
+
   it should "keep the key out of the logs, on success, on failure and on retry" in {
     serve(Reply(503, s"""{"message":"$secret"}"""), ok(), Reply(401, s"""{"message":"$secret"}""")) { (url, _) =>
       val rig = new Rig(url, JevRetryPolicy.default)

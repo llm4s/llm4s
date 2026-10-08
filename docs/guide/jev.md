@@ -77,8 +77,8 @@ val client = JevClient(config) // validates the config
 
 The key is a bearer token, so the client refuses to send it in the clear: the base URL must be `https`, except for a loopback
 host (`localhost`, `127.0.0.0/8`, `::1`), which is how a test points the client at a local server. A URL that carries
-credentials, such as `http://localhost@evil.example/`, is refused. The key never appears in `toString`, in an error or in a log
-line.
+credentials, such as `http://localhost@evil.example/`, is refused. The key never appears in `toString` or in a log line, and
+an error masks it wherever a server echoed it in one of the forms listed under [Errors](#errors).
 
 ## Ask questions
 
@@ -167,8 +167,11 @@ def describe(error: LLMError): String = error match {
 
 TypeSafe does not document the JSON shape of an error body, so the text in the error is a best effort (a `message`, an
 `error.message`, ...), truncated, and never the whole body. If a server echoes your API key in an error body, the key is
-removed before anything is read from it (as written or JSON-escaped, `\/` and `\uXXXX` included), and an error about
-a 200 that quotes the key masks it as `***`.
+removed before anything is read from it, and an error about a 200 that quotes the key masks it as `***`. The forms
+recognised are the key as written, JSON-escaped (`\/` and `\uXXXX` included) and URL-encoded as `java.net.URLEncoder`
+writes it (`tsk/live+0` as `tsk%2Flive%2B0`). Any other transformation of the key, or a part or prefix of it, is not
+recognised and would not be masked. An error body nested more than 512 levels deep is not read at all: the error
+carries only the status.
 
 ## Retries, and what is not de-duplicated
 
@@ -200,4 +203,4 @@ in any case, and a map naming one header twice (`X-Trace` and `x-trace`) is refu
   whether `Retry-After` is seconds or a date (both are read), and which of `Retry-After` and `retry-after-ms` wins when both
   are sent (this client prefers `retry-after-ms`).
 - Each HTTP attempt has a 30 s timeout by default, an LLM4S choice (the API documents none). The shared HTTP client reads a
-  response in full, so the 16 MiB cap on a response refuses an oversized body before it is parsed, not before it is read.
+  response in full, so the cap on a response (16,777,216 characters, as the body decodes to text) refuses an oversized body before it is parsed, not before it is read.

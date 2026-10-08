@@ -453,6 +453,7 @@ The Cohere embedding provider (`EMBEDDING_MODEL=cohere/<model>`), on Cohere's na
 with its `llm4s.embeddings.cohere` config block and a typed `CohereInputType` (`search_document`,
 `search_query`, ...). Cohere chat is a different module: `llm4s-openai-compatible`. A community
 provider module under `modules/providers/`; it brings no dependency beyond `llm4s-core`.
+
 ### For the Jev decision model
 
 {: .note }

@@ -76,14 +76,49 @@ class JevResponseSpec extends AnyFlatSpec with Matchers with EitherValues {
     parse(Examples.Noul).withRequestId(Some("r")).requestId shouldBe Some("r")
   }
 
-  it should "accept the bounds of 0 and 1 and a score outside them" in {
+  it should "accept the bounds of 0 and 1, and a score at the lowest and the highest level" in {
     parse(withAnswer("""{"type":"noul","noul":0}""")).noul("q").value.probability shouldBe 0.0
     parse(withAnswer("""{"type":"noul","noul":1}""")).noul("q").value.probability shouldBe 1.0
-    parse(
-      withAnswer(
-        """{"type":"score","score":-0.5,"legend":{"0":"a","1":"b"},"probabilities":{"0":0.5,"1":0.5},"confidence":0}"""
-      )
-    ).score("q").value.score shouldBe -0.5
+    parse(withAnswer(score(0.0))).score("q").value.score shouldBe 0.0
+    parse(withAnswer(score(2.0))).score("q").value.score shouldBe 2.0
+  }
+
+  private def score(value: Double, legend: String = """"0":"a","1":"b","2":"c"""", probs: String = ""): String = {
+    val keys          = ujson.read(s"{$legend}").obj.keys
+    val probabilities = if (probs.nonEmpty) probs else keys.map(k => s""""$k":0.0""").mkString(",")
+    s"""{"type":"score","score":$value,"legend":{$legend},"probabilities":{$probabilities},"confidence":0.5}"""
+  }
+
+  it should "refuse a score outside its levels: the probability-weighted level lies between the first and the last" in {
+    malformed(withAnswer(score(-0.5))) should include("answers.q.score")
+    malformed(withAnswer(score(-0.5))) should include("outside the levels 0 to 2")
+    malformed(withAnswer(score(2.01))) should include("outside the levels 0 to 2")
+  }
+
+  it should "refuse a level key that is not a canonical level number, so no two keys name one level" in {
+    Seq("00", "+0", "01", "-1", " 1", "1.0", "99999999999").foreach { key =>
+      withClue(s"'$key' ") {
+        malformed(withAnswer(score(0.5, legend = s""""0":"a","$key":"b""""))) should include("not a level number")
+      }
+    }
+  }
+
+  it should "refuse a body nested deeper than any API response, and keep no value that deep" in {
+    val depth = 100000
+    val deep  = "[" * depth + "]" * depth
+    val error = malformed(withAnswer(score(0.5, legend = s""""0":"a","1":$deep""")))
+
+    error should include(s"nested more than ${org.llm4s.util.BoundedJson.MaxDepth} levels deep")
+  }
+
+  it should "parse a structured description at the depth limit, and print and hash the response" in {
+    // four levels of envelope (the root, answers, the answer, its legend) and the description: exactly the limit
+    val depth    = org.llm4s.util.BoundedJson.MaxDepth - 4
+    val nested   = "[" * depth + "]" * depth
+    val response = parse(withAnswer(score(0.5, legend = s""""0":"a","1":$nested""")))
+
+    response.toString should not be empty
+    response.hashCode shouldBe response.hashCode
   }
 
   it should "preserve structured score descriptions" in {

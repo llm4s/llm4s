@@ -27,8 +27,9 @@ import scala.concurrent.duration.FiniteDuration
  * `ValidationError` before anything is sent, a rejected key an `AuthenticationError`, a rate limit a `RateLimitError`
  * carrying the delay the server asked for, an outage a `ServiceError`, a transport failure a `NetworkError` or
  * `TimeoutError`, a response that does not match the API a `ProcessingError`, and an interrupt a `CancelledError`.
- * Transient failures are retried as the config's [[JevRetryPolicy]] says. The API key is never printed, logged or
- * put into an error.
+ * Transient failures are retried as the config's [[JevRetryPolicy]] says. The API key is never printed or logged,
+ * and is masked in an error wherever the server echoed it verbatim, JSON-escaped or URL-encoded (a partial echo of
+ * the key is not recognised).
  *
  * '''No idempotency key.''' TypeSafe's documentation describes no idempotency key or other de-duplication
  * mechanism, so this client does not invent one: each attempt of a retried request is a new, billable call. A
@@ -132,12 +133,13 @@ final class JevClient private (
    * choice, a question id), so a server that echoed the key into one would otherwise carry it into the error.
    */
   private def redacted(error: LLMError): LLMError = error match {
-    case processing: ProcessingError if config.apiKey.nonEmpty && processing.message.contains(config.apiKey) =>
+    case processing: ProcessingError if JevErrors.reveals(processing.message, config.apiKey) =>
       ProcessingError(
         processing.operation,
-        processing.message
-          .stripPrefix(s"Processing failed during ${processing.operation}: ")
-          .replace(config.apiKey, "***"),
+        JevErrors.mask(
+          processing.message.stripPrefix(s"Processing failed during ${processing.operation}: "),
+          config.apiKey
+        ),
         processing.cause
       )
     case other => other

@@ -370,14 +370,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   confidence); answers are `NoulAnswer`, `ChoiceAnswer` and `ScoreAnswer`, read with `response.noul(id)`,
   `.choice(id)` and `.score(id)`, with the resolved model, token usage and the request id. A response is checked against
   its request: one answer per question asked, each of its question's type, a Choice's selected option among the
-  options asked with the highest probability and a probability for every option, a Score with every level asked;
+  options asked with the highest probability and a probability for every option, a Score with every level asked,
+  each numbered once (canonical level keys) and a score within the levels; a body nested more than 512 levels deep is
+  refused unparsed;
   a Score level's legend entry keeps the string, object or array the question gave. Configuration is the
   `llm4s.jev` block and `TYPESAFE_API_KEY` (bound to `llm4s.credentials.jev.apiKey`), `TYPESAFE_BASE_URL` and
   `TYPESAFE_DEFAULT_MODEL`. Failures map onto LLM4S's errors (401/403 `AuthenticationError`, 400/422
   `ValidationError`, 429 `RateLimitError` with the server's `Retry-After` or `retry-after-ms`, 5xx including 529
   `ServiceError`) and transient ones are retried as TypeSafe's SDKs do (two retries, 0.5 s doubling to 5 s with
   jitter, a 30 s budget, `RetryPolicy.isTransient` as the rule). The key is sent only as a bearer token over https
-  (plain http only for a loopback host) and never reaches a log line, an error or `toString`. **No idempotency
+  (plain http only for a loopback host) and never reaches a log line or `toString`; an error masks it where a
+  server echoed it as written, JSON-escaped or URL-encoded (a partial echo is not recognised). **No idempotency
   key:** TypeSafe documents none, so none is invented and each retry is a separate billable call; a header the
   caller adds with `JevRequest.withHeader` is sent unchanged on every attempt. A Beta module under
   `modules/providers/jev`, no dependency beyond `llm4s-core`; tested against a local fake server built from the

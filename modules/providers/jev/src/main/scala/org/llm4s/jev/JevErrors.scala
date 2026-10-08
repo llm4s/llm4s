@@ -3,9 +3,11 @@ package org.llm4s.jev
 import org.llm4s.error.{ LLMError, RateLimitError, ServiceError }
 import org.llm4s.http.{ HttpHeaders, HttpResponse }
 import org.llm4s.llmconnect.provider.HttpErrorMapper
+import org.llm4s.util.BoundedJson
 
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import scala.concurrent.duration.*
-import scala.util.Try
 
 /**
  * Turns a failed Jev HTTP response into an [[org.llm4s.error.LLMError]].
@@ -22,8 +24,8 @@ import scala.util.Try
  *
  * The documentation does not give the shape of the error body, so the text in the error is the mapper's best
  * effort (a `message`, an `error.message`, ...), truncated, and never the whole body. The API key is removed from
- * the body before anything is read from it, raw or JSON-escaped, so a server that echoed the key cannot put it in
- * an error.
+ * the body before anything is read from it, in the forms [[mask]] lists; a partial or otherwise transformed echo
+ * of the key is not recognised.
  */
 private[jev] object JevErrors {
 
@@ -42,29 +44,58 @@ private[jev] object JevErrors {
       .map(FiniteDuration(_, MILLISECONDS))
 
   /**
-   * `body` with every occurrence of `apiKey` replaced by `***`. A JSON body is decoded first and every string in it
-   * (keys and values) redacted, then re-encoded, so the key is caught however the server escaped it (`\/`, `\"`,
-   * `\uXXXX`): the mapper decodes those escapes, so redacting only the raw text would let the decoded key through.
-   * Any other body is redacted as text.
+   * `text` with the API key replaced by `***` wherever it appears verbatim or percent-encoded as
+   * `java.net.URLEncoder` writes it in UTF-8 (`tsk/live+0` as `tsk%2Flive%2B0`, upper-case hex). A key holds no
+   * space (the config refuses one), so there is no `+`-for-space variant to cover. Nothing else is recognised: not
+   * a prefix or a fragment of the key, nor another encoding.
+   */
+  private[jev] def mask(text: String, apiKey: String): String =
+    if (apiKey.isEmpty) text
+    else {
+      val encoded = URLEncoder.encode(apiKey, StandardCharsets.UTF_8)
+      text.replace(apiKey, "***").replace(encoded, "***")
+    }
+
+  /** Whether `text` holds the API key in a form [[mask]] removes. */
+  private[jev] def reveals(text: String, apiKey: String): Boolean =
+    apiKey.nonEmpty && mask(text, apiKey) != text
+
+  /**
+   * `body` with the API key removed as [[mask]] does. A JSON body is decoded first and every string in it (keys
+   * and values) masked, then re-encoded, so the key is caught however the server escaped it (`\/`, `\"`,
+   * `\uXXXX`): the mapper decodes those escapes, so masking only the raw text would let the decoded key through.
+   * Any other body, and a JSON body nested more than [[org.llm4s.util.BoundedJson.MaxDepth]] levels deep, is
+   * masked as text: walking or re-encoding a value that deep would overflow the stack, and a `StackOverflowError`
+   * is not caught by `Try` or any `Result`.
    */
   private[jev] def redactBody(body: String, apiKey: String): String =
     if (apiKey.isEmpty) body
     else
-      Try(ujson.read(body)).toOption
+      BoundedJson
+        .read(body)
+        .toOption
         .map(json => ujson.write(redactJson(json, apiKey)))
-        .getOrElse(body.replace(apiKey, "***"))
+        .getOrElse(mask(body, apiKey))
 
   private def redactJson(json: ujson.Value, apiKey: String): ujson.Value = json match {
-    case ujson.Str(s)     => ujson.Str(s.replace(apiKey, "***"))
+    case ujson.Str(s)     => ujson.Str(mask(s, apiKey))
     case ujson.Arr(items) => ujson.Arr.from(items.map(redactJson(_, apiKey)))
     case ujson.Obj(fields) =>
-      ujson.Obj.from(fields.map { case (k, v) => k.replace(apiKey, "***") -> redactJson(v, apiKey) })
+      ujson.Obj.from(fields.map { case (k, v) => mask(k, apiKey) -> redactJson(v, apiKey) })
     case other => other
   }
 
+  /**
+   * The body handed to the mapper. A body nested too deeply to redact as JSON is not passed on at all: its
+   * text-masked form could still carry a JSON-escaped key, which the mapper would decode from a top-level
+   * `message`. The mapper then reports its default message, with the status.
+   */
+  private def mapperBody(body: String, apiKey: String): String =
+    if (BoundedJson.exceedsDepth(body)) "" else redactBody(body, apiKey)
+
   /** The error for `response`, which has a non-2xx status. */
   def fromResponse(response: HttpResponse, apiKey: String): LLMError = {
-    val body = redactBody(response.body, apiKey)
+    val body = mapperBody(response.body, apiKey)
     // The mapper handles 400 as a validation error; Jev's 422 is the same thing.
     val status = if (response.statusCode == 422) 400 else response.statusCode
     val mapped: LLMError =
