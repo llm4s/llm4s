@@ -8,7 +8,7 @@ nav_order: 1
 # Cookbook
 {: .no_toc }
 
-Five complete recipes for things you would actually build. Each is a small Scala program in
+Six complete recipes for things you would actually build. Each is a small Scala program in
 [`modules/samples`](https://github.com/llm4s/llm4s/tree/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook)
 with a `run` function you can copy, and each runs with **no API key**: by default a scripted client stands in for the
 model, so you can see the whole flow work in seconds. Add `--live` to run the same code against the provider chosen
@@ -247,9 +247,81 @@ What the spec checks:
 
 **Watch out:** The in-memory store counts a query word as a match when the memory text contains it as a substring, so a short word such as "I" or "or" matches almost anything, and "Java?" with its question mark matches nothing ([#1594](https://github.com/llm4s/llm4s/issues/1594)). The recipe searches with the question's content words only. The question still has to share a word with the fact: "Which language do I prefer, Scala or Java?" finds "Prefers Scala over Java", but "What do I like?" finds nothing.
 
+<!-- recipe: multi-agent-graph -->
+## 6. Several agents in one graph
+
+Ask two specialist agents the same question in parallel, then let an editor agent combine their views once both have answered. The graph runtime runs both specialists in one superstep, applies their updates in task order whichever finishes first, and a static join holds the editor until both have committed. This replaces `PlanRunner` and `TypedAgent`, removed in [#1330](https://github.com/llm4s/llm4s/issues/1330).
+
+Run it:
+
+```bash
+sbt "samples/runMain org.llm4s.samples.cookbook.MultiAgentGraphRecipe"
+sbt "samples/runMain org.llm4s.samples.cookbook.MultiAgentGraphRecipe --live"
+```
+
+The core of the recipe:
+
+```scala
+private val questionKey = StateKey.replace[String]("question", "")
+private val views       = StateKey.appending[View]("views")
+private val answer      = StateKey.replace[String]("answer", "")
+
+/** Runs `agent` on `query`; a turn that does not complete fails the node. */
+private def ask(agent: Agent, query: String): Result[String] =
+  agent.run(query).flatMap(AgentResults.requireCompleted)
+
+def graph(client: LLMClient): Result[CompiledGraph[String, Review]] =
+  for {
+    optimist <- Agent.builder("optimist", client).withSystemPrompt(OptimistPrompt).build()
+    skeptic  <- Agent.builder("skeptic", client).withSystemPrompt(SkepticPrompt).build()
+    editor   <- Agent.builder("editor", client).withSystemPrompt(EditorPrompt).build()
+    compiled <- {
+      val b = GraphBuilder("multi-agent-review", "v1")
+      // each specialist reads the question and appends its view; both run in the same superstep
+      def specialist(name: String, agent: Agent): NodeRef[Unit] =
+        b.node[Unit](name, writes = Set(views)) { (_, state, _) =>
+          NodeResult.fromResult(for {
+            q    <- state.get(questionKey)
+            text <- ask(agent, q)
+          } yield Command.empty.update(views, View(name, text)))
+        }
+      val optimistNode = specialist("optimist", optimist)
+      val skepticNode  = specialist("skeptic", skeptic)
+      val editorNode = b.node[Unit]("editor", writes = Set(answer)) { (_, state, _) =>
+        NodeResult.fromResult(for {
+          q    <- state.get(questionKey)
+          vs   <- state.get(views)
+          text <- ask(editor, (s"Question: $q" +: vs.map(v => s"${v.specialist}: ${v.text}")).mkString("\n"))
+        } yield Command.empty.update(answer, text))
+      }
+      val brief = b.node[String]("brief", writes = Set(questionKey)) { (q, _, _) =>
+        NodeResult.Continue(Command.empty.update(questionKey, q).goto(optimistNode).goto(skepticNode))
+      }
+      // the editor runs once both specialists have committed
+      b.staticJoin("views", Set(optimistNode, skepticNode), editorNode): Unit
+      b.compile(brief)(state => state.get(answer).flatMap(a => state.get(views).map(Review(a, _))))
+    }
+  } yield compiled
+
+def start(runtime: GraphRuntime, client: LLMClient, question: String): Result[RunHandle[Review]] =
+  graph(client).flatMap(g => runtime.start(ReviewThread, g, question))
+```
+
+The whole file, with the scripted client: [`MultiAgentGraphRecipe.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/cookbook/MultiAgentGraphRecipe.scala).
+
+What the spec checks:
+
+- the views come back in task order even when the first specialist answers last
+- the editor is asked once, after both specialists, with both views
+- each superstep ends in one checkpoint: the brief, both specialists together, then the editor
+- a specialist that fails fails the run before the editor is asked
+- cancelling the run cancels the specialist agent it is waiting on
+
+**Watch out:** A node that calls `agent.run` blocks its task until the agent's turn ends, so cancelling the graph run cancels that turn. A node that calls `agent.start` and returns without awaiting it leaves the turn running: cancel it yourself.
+
 ## More recipes
 
-These five are a start, not the whole list. The [examples index](index) lists the rest of the samples, and the
+These six are a start, not the whole list. The [examples index](index) lists the rest of the samples, and the
 [issue that tracks the cookbook](https://github.com/llm4s/llm4s/issues/1476) lists the recipes still wanted: summarise a
 long document, stream tokens, fall back between providers, and more. A recipe is a good first contribution: copy one of
-the five files, add its registry entry in `Recipe.scala`, and the spec tells you what else the page needs.
+the six files, add its registry entry in `Recipe.scala`, and the spec tells you what else the page needs.
