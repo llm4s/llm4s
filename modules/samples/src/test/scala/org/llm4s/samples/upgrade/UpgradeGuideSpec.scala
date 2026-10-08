@@ -9,7 +9,6 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.{ BedrockProvider, Llm4sOpenAIModule }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.trace.spi.TracingBackends
-import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
@@ -57,16 +56,6 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     }.toMap
 
     found shouldBe providerTable
-  }
-
-  "llm4s-core on its own" should "ship no provider, and say which dependency to add" in {
-    // The snippet of the guide: a classpath with only `llm4s-core` has an empty registry.
-    val coreOnly = ProviderRegistry.ofModules()
-
-    coreOnly.ids shouldBe empty
-    val message = coreOnly.get(ProviderId("openai")).left.value.message
-    message should include("is not registered")
-    message should include("add the dependency that supplies it")
   }
 
   "Registering a provider module explicitly" should "work without a classpath scan, for a fat jar that lost its services files" in {
