@@ -38,6 +38,12 @@ class CacheKeyGeneratorSpec extends AnyFlatSpec with Matchers {
     CacheKeyGenerator.sha256("x#query", "m") should not be CacheKeyGenerator.sha256("x", "m#query")
   }
 
+  it should "preserve isolated UTF-16 surrogates instead of replacing them" in {
+    val strings = Seq(0xd800.toChar.toString, 0xd801.toChar.toString, 0xdc00.toChar.toString, "?")
+    strings.map(CacheKeyGenerator.sha256(_)).distinct should have size strings.size
+    strings.map(s => CacheKeyGenerator.embeddingKey(s, "m", InputPurpose.Query)).distinct should have size strings.size
+  }
+
   "CacheKeyGenerator.embeddingKey" should "differ by purpose" in {
     CacheKeyGenerator.embeddingKey("t", "m", InputPurpose.Query) should not be
       CacheKeyGenerator.embeddingKey("t", "m", InputPurpose.Document)

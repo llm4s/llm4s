@@ -1755,6 +1755,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- Cache keys preserve isolated UTF-16 surrogates. Existing persisted cache keys must be regenerated after this encoding change.
 - **`llm4s-agent-tools`: file tools confined by path component, not string prefix**
   ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `FileConfig.isPathAllowed` and
   `WriteConfig.isPathAllowed` compared paths with `String.startsWith`, so an allowed `/srv/agent-data` also

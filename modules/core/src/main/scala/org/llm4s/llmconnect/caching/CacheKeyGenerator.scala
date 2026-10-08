@@ -4,7 +4,6 @@ import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.InputPurpose
 
 import java.security.MessageDigest
-import java.nio.charset.StandardCharsets
 
 /**
  * Utility object for generating cache keys using secure hashing.
@@ -39,7 +38,13 @@ object CacheKeyGenerator {
   def sha256(parts: String*): String = {
     val input  = parts.map(part => s"${part.length}:$part").mkString
     val digest = MessageDigest.getInstance("SHA-256")
-    val hash   = digest.digest(input.getBytes(StandardCharsets.UTF_8))
+    // Feed every UTF-16 code unit directly. Charset encoders replace isolated surrogates,
+    // which would make distinct Java strings collide before hashing.
+    input.foreach { codeUnit =>
+      digest.update((codeUnit.toInt >>> 8).toByte)
+      digest.update(codeUnit.toByte)
+    }
+    val hash = digest.digest()
 
     hash.map(byte => "%02x".format(byte & 0xff)).mkString
   }
