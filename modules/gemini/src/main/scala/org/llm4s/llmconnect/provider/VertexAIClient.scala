@@ -12,6 +12,7 @@ import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.{ ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
+import org.llm4s.util.BoundedJson
 import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedReader, InputStreamReader }
@@ -175,7 +176,9 @@ class VertexAIClient(
                   if (trimmed.startsWith("data: ")) {
                     val jsonStr = trimmed.stripPrefix("data: ").trim
                     if (jsonStr.nonEmpty) {
-                      Try(ujson.read(jsonStr)).foreach { json =>
+                      // a chunk's functionCall.args is the model's JSON, native in the envelope: one nested too
+                      // deeply is dropped, as any chunk that cannot be read is, never parsed and sent back (#1562)
+                      BoundedJson.read(jsonStr).foreach { json =>
                         parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
                           textLength += parsed.text.length
                           signatures ++= parsed.signatures
@@ -336,57 +339,60 @@ class VertexAIClient(
       case _ => ()
     }
 
+  // the envelope holds the model's functionCall.args as a native object, so this parse is the boundary it
+  // crosses: a reply nested more than 512 levels deep is refused before it is parsed (#1562, as GeminiClient)
   private def parseCompletionResponse(responseText: String): Result[Completion] =
-    Try {
-      val json       = ujson.read(responseText)
-      val candidates = json("candidates").arr
+    BoundedJson.read(responseText).flatMap { json =>
+      Try {
+        val candidates = json("candidates").arr
 
-      if (candidates.isEmpty) {
-        Left(org.llm4s.error.ValidationError("response", "No candidates in Vertex AI response"))
-      } else {
-        val candidate = candidates.head
-        val content   = candidate("content")
-        val parts     = content("parts").arr
+        if (candidates.isEmpty) {
+          Left(org.llm4s.error.ValidationError("response", "No candidates in Vertex AI response"))
+        } else {
+          val candidate = candidates.head
+          val content   = candidate("content")
+          val parts     = content("parts").arr
 
-        // Answer text, function calls (Vertex AI doesn't provide tool call IDs: each gets a generated one), the
-        // thought summary if one was requested, and the thought signatures, split by part
-        val parsed      = GeminiThoughtSignatures.parse(providerName, parts.toSeq, 0, () => UUID.randomUUID().toString)
-        val textContent = parsed.text
-        val toolCalls   = parsed.calls
+          // Answer text, function calls (Vertex AI doesn't provide tool call IDs: each gets a generated one), the
+          // thought summary if one was requested, and the thought signatures, split by part
+          val parsed = GeminiThoughtSignatures.parse(providerName, parts.toSeq, 0, () => UUID.randomUUID().toString)
+          val textContent = parsed.text
+          val toolCalls   = parsed.calls
 
-        val usageOpt = Try {
-          val usage = json("usageMetadata")
-          TokenUsage(
-            promptTokens = usage("promptTokenCount").num.toInt,
-            completionTokens = usage("candidatesTokenCount").num.toInt,
-            totalTokens = usage("totalTokenCount").num.toInt
+          val usageOpt = Try {
+            val usage = json("usageMetadata")
+            TokenUsage(
+              promptTokens = usage("promptTokenCount").num.toInt,
+              completionTokens = usage("candidatesTokenCount").num.toInt,
+              totalTokens = usage("totalTokenCount").num.toInt
+            )
+          }.toOption
+
+          // the signatures are sealed thinking: ThinkingReplay binds them to the request in `complete`
+          val thinking =
+            Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
+          val message = AssistantMessage(
+            contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
+            toolCalls = toolCalls,
+            thinking = thinking
           )
-        }.toOption
+          val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
 
-        // the signatures are sealed thinking: ThinkingReplay binds them to the request in `complete`
-        val thinking =
-          Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
-        val message = AssistantMessage(
-          contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
-          toolCalls = toolCalls,
-          thinking = thinking
-        )
-        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
-
-        Right(
-          Completion(
-            id = UUID.randomUUID().toString,
-            content = textContent,
-            model = config.model,
-            toolCalls = toolCalls.toList,
-            created = System.currentTimeMillis() / 1000,
-            message = message,
-            usage = usageOpt,
-            estimatedCost = cost
+          Right(
+            Completion(
+              id = UUID.randomUUID().toString,
+              content = textContent,
+              model = config.model,
+              toolCalls = toolCalls.toList,
+              created = System.currentTimeMillis() / 1000,
+              message = message,
+              usage = usageOpt,
+              estimatedCost = cost
+            )
           )
-        )
-      }
-    }.toEither.left.map(e => e.toLLMError).flatten
+        }
+      }.toEither.left.map(e => e.toLLMError).flatten
+    }
 
   /**
    * Parse a streaming chunk into the parts it held and the [[StreamedChunk]]s they make: one per function call

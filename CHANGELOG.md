@@ -2000,6 +2000,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   method added to `MetricsCollector` without a forward in `compose` fails the build. The observability guide,
   which documented the gap as a limitation, and `ObservabilityMetricsGuideSpec`, which pinned it, now say and
   check forwarding.
+- **A `tool_use` input or `functionCall.args` nested too deeply is refused instead of overflowing the
+  stack** ([#1643](https://github.com/llm4s/llm4s/issues/1643), completing
+  [#1562](https://github.com/llm4s/llm4s/issues/1562)). #1630 bounded every parse of model-written JSON at
+  512 levels but left two where the model's JSON arrives inside the provider's envelope rather than as text:
+  `AnthropicClient` read a `tool_use` block's `input` with a bare `ujson.read`, relying on the SDK's Jackson
+  parser, whose own cap is 1,000, so an input 513 to about 998 levels deep became a `ToolCall` and overflowed
+  the stack when the next turn rendered it back; and `GeminiClient` and `VertexAIClient`, which have no SDK,
+  parsed the envelope with `ujson.read` and took `functionCall.args` - a native object in it - as the call's
+  arguments at any depth. The Anthropic client now reads the input through `BoundedJson.read`, and one over
+  the limit is a malformed tool call (a `ProcessingError` naming the limit, as for the Ollama client); the
+  Gemini and Vertex AI clients read the envelope through it, so a reply nested more than 512 levels deep is
+  a `ValidationError` naming the limit and a streamed chunk that deep is dropped, as any chunk that cannot be
+  read is. No public signature changes.
 - **`MemoryStore.storeAll` is all or nothing, and the SQL stores write a batch in one transaction**: `storeAll`
   was the trait's default, a loop of `store` calls. In `SQLiteMemoryStore` and `VectorMemoryStore` each `store` ran
   three statements (the row, then the full-text entry's delete and insert) under autocommit, so a batch of n
