@@ -97,7 +97,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
    * default is 50, and the server's dispatcher thread accepts one connection per selector pass, so
    * on a loaded runner more than 50 can be queued. Linux and macOS then drop the extra SYNs and the
    * client retransmits them a second later, unseen; Windows refuses them, which the JDK HttpClient
-   * reports as a `ConnectException` and does not retry - a flake seen only on `windows-latest`.
+   * retries once, at once, and then reports as a `ConnectException` - a flake seen only on `windows-latest`.
    */
   final private class TestServer(handler: (HttpExchange, CountDownLatch) => Unit) extends AutoCloseable {
     private val release  = new CountDownLatch(1)
