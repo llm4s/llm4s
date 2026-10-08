@@ -276,7 +276,12 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
       """{"client_secret": "abc123456789", "refresh_token": "abc123456789"}""" ->
         """{"client_secret": "[REDACTED]", "refresh_token": "[REDACTED]"}""",
       """{"max_tokens": 256, "prompt_tokens": 12, "token_count": 3, "next_page_token": "abc123456789"}""" ->
-        """{"max_tokens": 256, "prompt_tokens": 12, "token_count": 3, "next_page_token": "abc123456789"}"""
+        """{"max_tokens": 256, "prompt_tokens": 12, "token_count": 3, "next_page_token": "abc123456789"}""",
+      // the known trade-offs of text already cut off: a single-quoted value inside a raw double-quoted string ends at
+      // a `"` that reads as the string's end when no `'` that could close it follows, and a `'` between two letters
+      // or digits is an apostrophe
+      """msg="{'password': 'Qx"]]9secretPW"""     -> """msg="{'password': '[REDACTED]"]]9secretPW""",
+      """msg="{'password': 'Qx"]]9SECRETPW'it"""" -> """msg="{'password': '[REDACTED]"]]9SECRETPW'it""""
     )
 
     cases.foreach { case (raw, redacted) =>

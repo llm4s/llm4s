@@ -2031,7 +2031,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the end of the input (`note: see 'token': [ for details` -> `note: see 'token': [ '[REDACTED]' '[REDACTED]'`),
   since they read as the leaves of a YAML flow sequence or a cut-off dict and nothing tells them from prose; and
   redacting twice still changes some inputs with unbalanced quotes, which the `redact` Scaladoc now says, where
-  `redactPairs` had claimed redacting twice gives the same result. No signature changes.
+  `redactPairs` had claimed redacting twice gives the same result. Two known trade-offs, pinned by tests: a
+  *truncated* input - an unclosed single-quoted value inside a raw (unescaped) double-quoted string, holding a `"`
+  followed by what follows a string's end, with no `'` that could close it after it (`msg="{'password': 'Qx"]]9secretPW`
+  cut off) - shows the part after that `"` (`'[REDACTED]"]]9secretPW`), where main hid it by running to the end of
+  the input; every llm4s call site (`redactForLogging`, the exchange-log sink, Cohere's and Jina's error bodies, the
+  MCP payload preview) redacts the full text before truncating it, and a caller must do the same. And a closing `'`
+  with a letter or digit on both sides (`'Qx"]]9SECRETPW'it"`) is read as an apostrophe, so it does not close the
+  value and the same applies. No signature changes.
 - **Redaction keeps a `$` or `\` in a query parameter, and writes a placeholder as it is**
   ([#1655](https://github.com/llm4s/llm4s/issues/1655)): `Redaction.redact` and `redactForLogging`, and so the
   exchange-log sink, returned a query parameter to `Regex.replaceAllIn` without `Regex.quoteReplacement`, so

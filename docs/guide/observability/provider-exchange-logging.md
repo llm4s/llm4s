@@ -187,7 +187,13 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   redacted; `max_tokens`, `prompt_tokens`, `token_count` and `next_page_token` are not, because the match
   is never on a substring.
 - **Truncation.** It keeps the first 1000 characters, after redaction, and appends
-  `... [truncated, N chars omitted]` with the count it dropped.
+  `... [truncated, N chars omitted]` with the count it dropped. Redact the full text before you cut it, as
+  this sink and every other llm4s call site do: redaction of text that is already cut off is weaker. An
+  unclosed single-quoted value inside a raw (unescaped) double-quoted string, holding a `"` followed by what
+  follows a string's end and with no `'` after it that could close it, ends at that `"`, so the part after
+  it is shown - `msg="{'password': 'Qx"]]9secretPW` cut off there becomes
+  `msg="{'password': '[REDACTED]"]]9secretPW`. A closing `'` with a letter or digit on both sides
+  (`'Qx"]]9SECRETPW'it"`) reads as an apostrophe, not as the end of the value, so the same happens there.
 
 Both are limits you should know about:
 

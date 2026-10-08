@@ -670,6 +670,35 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
       s"""{"content": "use 'password': '$R'hi'"}"""
   }
 
+  it should "show the part of a truncated single-quoted credential after a quote that reads as a string's end (known trade-off, #1654)" in {
+    // Known trade-off, pinned so that a change to it is deliberate. Inside a raw (unescaped) `"`-quoted string, an
+    // unclosed single-quoted value holding a `"` followed by what follows the end of a string (here `]]`) ends at that
+    // `"` when no `'` that could close it follows - which is what an input cut off inside the credential looks like.
+    // The part after the `"` is shown; main hid it by running the value to the end of the input. Every llm4s call site
+    // redacts the full text before truncating it; callers must do the same.
+    redactedOnceAndTwice("""level=info msg="request: {'password': 'Qx"]]9secretPW""") shouldBe
+      s"""level=info msg="request: {'password': '$R"]]9secretPW"""
+    redactedOnceAndTwice("""msg="{'password': 'Qx"]]9secretPW""") shouldBe s"""msg="{'password': '$R"]]9secretPW"""
+    // Redacted before it is cut, as every call site does, the same credential is hidden whole.
+    val full = """level=info msg="request: {'password': 'Qx"]]9secretPW', 'user': 'bob'}""""
+    (Redaction.redactForLogging(full, maxLength = 45) should not).include("secretPW")
+    Redaction.redactForLogging(full, maxLength = 45) should startWith(
+      """level=info msg="request: {'password': '[REDA"""
+    )
+    // Outside any string the value still runs to the end of the input.
+    redactedOnceAndTwice("""{'password': 'Qx"]]9secretPW""") shouldBe s"{'password': '$R"
+  }
+
+  it should "read a closing quote between two letters or digits as an apostrophe (known trade-off, #1654)" in {
+    // Known trade-off, pinned so that a change to it is deliberate. A `'` with a letter or digit on both sides is
+    // read as the apostrophe of a word (`it's`), not as a quote that could close the value, so, with no other `'`
+    // after it, the value ends at the `"` that reads as the string's end and the rest is shown.
+    redactedOnceAndTwice("""level=info msg="request: {'password': 'Qx"]]9SECRETPW'it"""") shouldBe
+      s"""level=info msg="request: {'password': '$R"]]9SECRETPW'it""""
+    redactedOnceAndTwice("""msg="{'password': 'Qx"]]9SECRETPW'it"""") shouldBe
+      s"""msg="{'password': '$R"]]9SECRETPW'it""""
+  }
+
   it should "keep prose after a 'token': [ that a JSON string mentions (#1657)" in {
     // Was `... Thanks, it'[REDACTED]"}`: the `'` of `it's` opened a leaf that the string's end closed, and a second
     // pass redacted from the `'` of `isn't` as well.
