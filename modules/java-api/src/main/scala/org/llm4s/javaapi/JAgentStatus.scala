@@ -19,7 +19,8 @@ import java.util.{ Objects, Optional }
  * }
  * }}}
  *
- * A value: two are equal when every field is.
+ * A value: two are equal when every field is. `toString` prints the full answer or reason, as the Scala
+ * `AgentStatus` does. Not `Serializable`.
  *
  * @param kind which case this is
  * @param answer the final answer, for `COMPLETED`
@@ -46,8 +47,8 @@ final class JAgentStatus private (
   override def hashCode: Int = Objects.hash(fields.map(_.asInstanceOf[AnyRef])*)
 
   override def toString: String = kind match {
-    case AgentStatusKind.COMPLETED => s"COMPLETED(${answer.get})"
-    case AgentStatusKind.BLOCKED   => s"BLOCKED(${guardrail.get}: ${reason.get})"
+    case AgentStatusKind.COMPLETED => s"COMPLETED(${answer.orElse("")})"
+    case AgentStatusKind.BLOCKED   => s"BLOCKED(${guardrail.orElse("")}: ${reason.orElse("")})"
     case AgentStatusKind.SUSPENDED => s"SUSPENDED(${pending.size} pending)"
     case other                     => other.name
   }
@@ -58,9 +59,15 @@ object JAgentStatus {
   /** `status` as Java and Kotlin callers read it; a `Suspended` one's interrupts via [[PendingInterrupt.of]]. */
   private[javaapi] def of(status: AgentStatus): JAgentStatus = status match {
     case AgentStatus.Completed(answer) =>
-      new JAgentStatus(AgentStatusKind.COMPLETED, Optional.of(answer), Optional.empty, Optional.empty, none)
+      new JAgentStatus(AgentStatusKind.COMPLETED, Optional.ofNullable(answer), Optional.empty, Optional.empty, none)
     case AgentStatus.Blocked(guardrail, reason) =>
-      new JAgentStatus(AgentStatusKind.BLOCKED, Optional.empty, Optional.of(guardrail), Optional.of(reason), none)
+      new JAgentStatus(
+        AgentStatusKind.BLOCKED,
+        Optional.empty,
+        Optional.ofNullable(guardrail),
+        Optional.ofNullable(reason),
+        none
+      )
     case AgentStatus.StepLimitReached =>
       new JAgentStatus(AgentStatusKind.STEP_LIMIT_REACHED, Optional.empty, Optional.empty, Optional.empty, none)
     case suspended: AgentStatus.Suspended =>

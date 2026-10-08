@@ -6,7 +6,7 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.lang.reflect.{ GenericArrayType, Modifier, ParameterizedType, Type, TypeVariable, WildcardType }
+import java.lang.reflect.{ GenericArrayType, Method, Modifier, ParameterizedType, Type, TypeVariable, WildcardType }
 import scala.jdk.CollectionConverters._
 
 /**
@@ -17,8 +17,15 @@ import scala.jdk.CollectionConverters._
 class JavaInteropSpec extends AnyFlatSpec with Matchers {
 
   // Scala `private[javaapi]` is public in bytecode, so these are knowingly Java-visible. They are
-  // internal (documented as such) and allowlisted so any NEW Scala type in a signature fails here.
-  private val internalByDesign = Set("from", "underlying")
+  // internal (documented as such) and allowlisted by declaring class and name, so any NEW Scala type
+  // in a signature fails here - a `from` or `underlying` on another class included.
+  private val internalByDesign: Set[(Class[?], String)] = Set(
+    classOf[LlmResult[?]] -> "from",
+    classOf[JLlmClient]   -> "underlying",
+    classOf[Answer]       -> "underlying"
+  )
+
+  private def isInternal(m: Method): Boolean = internalByDesign(m.getDeclaringClass -> m.getName)
 
   private def answering(answer: String): LLMClient = new LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
@@ -171,7 +178,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     val offenders = for {
       cls <- facade
       m   <- cls.getMethods.toList if Modifier.isPublic(m.getModifiers) && m.getDeclaringClass == cls
-      if !internalByDesign(m.getName)
+      if !isInternal(m)
       t <- (m.getGenericReturnType :: m.getGenericParameterTypes.toList).flatMap(mentioned)
       if scalaOnly(t)
     } yield s"${cls.getSimpleName}.${m.getName}: ${t.getName}"
@@ -202,7 +209,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
   private def reachableLeaks(roots: List[Class[_]], boundary: Set[String]): List[String] = {
     def handed(cls: Class[_]): List[(String, Class[_])] =
       for {
-        m <- cls.getMethods.toList if Modifier.isPublic(m.getModifiers) && !internalByDesign(m.getName)
+        m <- cls.getMethods.toList if Modifier.isPublic(m.getModifiers) && !isInternal(m)
         types = m.getGenericReturnType :: (if (callbacks(cls)) m.getGenericParameterTypes.toList else Nil)
         t <- types.flatMap(mentioned)
       } yield s"${cls.getSimpleName}.${m.getName}" -> t

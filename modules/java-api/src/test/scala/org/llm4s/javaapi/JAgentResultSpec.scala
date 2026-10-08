@@ -81,6 +81,16 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
     an[UnsupportedOperationException] should be thrownBy s.pending.clear()
   }
 
+  it should "read a null answer, guardrail or reason as empty, not throw" in {
+    val completed = JAgentStatus.of(AgentStatus.Completed(null))
+    completed.answer shouldBe Optional.empty
+    completed.toString shouldBe "COMPLETED()"
+    val blocked = JAgentStatus.of(AgentStatus.Blocked(null, null))
+    blocked.guardrail shouldBe Optional.empty
+    blocked.reason shouldBe Optional.empty
+    blocked.toString shouldBe "BLOCKED(: )"
+  }
+
   "PendingInterrupt.of" should "list nothing for a status that is not suspended" in {
     PendingInterrupt.of(AgentStatus.Completed("a")).asScala shouldBe empty
     PendingInterrupt.of(AgentStatus.StepLimitReached).asScala shouldBe empty
@@ -118,6 +128,20 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
     tool.toolCallId shouldBe Optional.of("call-1")
     tool.toolCalls.asScala shouldBe empty
     tool.thinking shouldBe Optional.empty
+  }
+
+  it should "read a null text as empty, never null, and a null tool-call id as empty" in {
+    JMessage.of(UserMessage(null)).content shouldBe ""
+    JMessage.of(SystemMessage(null)).content shouldBe ""
+    JMessage.of(AssistantMessage(Some(null))).content shouldBe ""
+    val tool = JMessage.of(ToolMessage(null, null))
+    tool.content shouldBe ""
+    tool.toolCallId shouldBe Optional.empty
+    tool.toString shouldBe "TOOL: "
+  }
+
+  it should "render a call's ujson.Str arguments as a JSON string literal" in {
+    JToolCall.of(ToolCall("c1", "say", ujson.Str("hi"))).argumentsJson shouldBe "\"hi\""
   }
 
   it should "read an assistant message's tool calls, as JSON text, and its reasoning" in {
@@ -190,6 +214,32 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
     m.hashCode shouldBe JModelUsage.of(ModelUsage(1L, 2L, 3L, 0L, BigDecimal("0.1"))).hashCode
     m should not be JModelUsage.of(ModelUsage(1L, 2L, 4L, 0L, BigDecimal("0.1")))
     m should not be "usage"
+  }
+
+  it should "compare costs by numeric value, whatever their scale, as Scala's BigDecimal does" in {
+    def model(cost: String) = JModelUsage.of(ModelUsage(1L, 2L, 3L, 0L, BigDecimal(cost)))
+    BigDecimal("1.0") shouldBe BigDecimal("1.00")
+    model("1.0") shouldBe model("1.00")
+    model("1.0").hashCode shouldBe model("1.00").hashCode
+    model("100") shouldBe model("1E+2")
+    model("0") shouldBe model("0.000")
+    model("1.0") should not be model("1.01")
+
+    def summary(cost: String) =
+      JUsageSummary.of(
+        UsageSummary(1L, 2L, 3L, 0L, BigDecimal(cost), Map("m" -> ModelUsage(1L, 2L, 3L, 0L, BigDecimal(cost))))
+      )
+    summary("1.0") shouldBe summary("1.00")
+    summary("1.0").hashCode shouldBe summary("1.00").hashCode
+    summary("1.0") should not be summary("1.01")
+    summary("1.0").totalCost shouldBe new java.math.BigDecimal("1.0")
+  }
+
+  it should "print a cost in plain notation, not scientific" in {
+    JModelUsage.of(ModelUsage(1L, 2L, 3L, 0L, BigDecimal("1E-7"))).toString shouldBe
+      "JModelUsage(1 requests, 2 in, 3 out, 0 thinking, 0.0000001 USD)"
+    JUsageSummary.of(UsageSummary(totalCost = BigDecimal("1E-7"))).toString shouldBe
+      "JUsageSummary(0 requests, 0 in, 0 out, 0 thinking, 0.0000001 USD)"
   }
 
   private def costing(text: String): Completion =

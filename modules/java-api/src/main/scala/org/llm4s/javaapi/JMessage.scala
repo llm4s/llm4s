@@ -30,13 +30,16 @@ import scala.jdk.OptionConverters.*
  * }
  * }}}
  *
- * A value: two are equal when every field is.
+ * A value: two are equal when every field is. `toString` prints the full text, as the Scala `Message`
+ * does. Not `Serializable`.
  *
  * @param role who wrote it
- * @param content its text; empty, never `null`, for an assistant message with only tool calls
+ * @param content its text; empty, never `null`, for an assistant message with only tool calls (and for a
+ *                message whose Scala text is `null`)
  * @param toolCalls the tool calls an `ASSISTANT` message asked for, in order; an empty list for the
  *                  other roles. Unmodifiable.
- * @param toolCallId the id of the tool call a `TOOL` message answers; empty for the other roles
+ * @param toolCallId the id of the tool call a `TOOL` message answers; empty for the other roles (and
+ *                   for a `TOOL` message whose id is `null`)
  * @param thinking the reasoning text an `ASSISTANT` message's model reported; empty when there was
  *                 none, and for the other roles
  */
@@ -69,27 +72,38 @@ object JMessage {
     case assistant: AssistantMessage =>
       new JMessage(
         JMessageRole.ASSISTANT,
-        assistant.content,
+        text(assistant.content),
         java.util.List.copyOf(assistant.toolCalls.map(JToolCall.of).asJava),
         Optional.empty,
         ThinkingBlock.text(assistant.thinking).toJava
       )
     case ToolMessage(content, toolCallId) =>
-      new JMessage(JMessageRole.TOOL, content, java.util.List.of(), Optional.of(toolCallId), Optional.empty)
+      new JMessage(
+        JMessageRole.TOOL,
+        text(content),
+        java.util.List.of(),
+        Optional.ofNullable(toolCallId),
+        Optional.empty
+      )
   }
 
   private def plain(role: JMessageRole, content: String): JMessage =
-    new JMessage(role, content, java.util.List.of(), Optional.empty, Optional.empty)
+    new JMessage(role, text(content), java.util.List.of(), Optional.empty, Optional.empty)
+
+  /** `content`, with a `null` - which a Scala message can hold - read as empty, as [[JMessage.content]] promises. */
+  private def text(content: String): String = Option(content).getOrElse("")
 }
 
 /**
  * A tool call an assistant message asked for, as [[JMessage.toolCalls]] lists them: JSON as text.
  *
- * A value: two are equal when every field is.
+ * A value: two are equal when every field is. `toString` prints the full arguments, as the Scala
+ * `ToolCall` does. Not `Serializable`.
  *
  * @param id the call's id, which the `TOOL` message answering it carries as `toolCallId()`
  * @param name the tool's name
- * @param argumentsJson the call's arguments, a JSON object as text
+ * @param argumentsJson the call's arguments as JSON text - an object, as a model sends them, though a
+ *                      call built with a `ujson.Str` renders as a JSON string literal
  */
 final class JToolCall private (val id: String, val name: String, val argumentsJson: String) {
 

@@ -308,8 +308,13 @@ Each status's data has its own accessor, empty for the other kinds: `answer()` f
 `reason()` for `BLOCKED`, and `pending()` for `SUSPENDED` - the approvals and questions the turn waits for, which the
 agent guide's [suspended turns](agents/#suspended-turns-from-java-and-kotlin) section answers. A `JMessage` has a
 `role()` (the Java enum `JMessageRole`), its `content()`, the `toolCalls()` an assistant message asked for, with their
-arguments as JSON text, and the `toolCallId()` a tool message answers. `usage()` counts tokens as `long`s, the cost as a
-`java.math.BigDecimal`, and `byModel()` breaks both down per model. No accessor returns a Scala or `ujson` type.
+arguments as JSON text (an object, as a model sends them; a call built with a `ujson.Str` renders as a JSON string
+literal), and the `toolCallId()` a tool message answers. `usage()` counts tokens as `long`s, the cost as a
+`java.math.BigDecimal` (two usages are equal when their costs are numerically equal, whatever the scale), and
+`byModel()` breaks both down per model. No accessor returns a Scala or `ujson` type.
+
+These types are values, but not `Serializable`. Their `toString` prints the full text - a message's content, a tool
+call's arguments, an answer or a guardrail's reason - as the Scala types do, so mind what you log.
 
 ## What is not here yet
 

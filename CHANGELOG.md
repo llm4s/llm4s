@@ -794,7 +794,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `r.status().kind() == AgentStatusKind.COMPLETED`, and `Blocked`'s fields are `status().guardrail()` / `reason()`;
   iterate `r.messages()` directly instead of converting a Scala `Vector`, and branch on `m.role()` instead of
   `instanceof ToolMessage`; read `usage().inputTokens()` and friends as `long`s and `totalCost()` as a
-  `BigDecimal`. Scala code that needs the Scala `AgentResult` uses `Agent` directly, not the Java facade.
+  `BigDecimal`. Scala code that needs the Scala `AgentResult` uses `Agent` directly, not the Java facade. Scala callers
+  of `JAgent.stream`, `streamResume`, `resume`, `recover` and `streamRecover` that passed a `ThreadId` now pass its
+  `.value` (a `String`). `argumentsJson()` (on `JToolCall` and `PendingInterrupt`) is the arguments as JSON text: an
+  object as a model sends them, but a call built with a `ujson.Str` renders as a JSON string literal. A `JMessage`'s
+  `content()` is never `null` (a Scala message's `null` text reads as empty), and a `null` answer, guardrail, reason or
+  tool-call id reads as an empty `Optional`. A turn's result that does not convert fails the stream through `onError`
+  and `await()`. `JUsageSummary` and `JModelUsage` compare costs by numeric value (`1.0` equals `1.00`) and print them
+  in plain notation. The `J*` types are not `Serializable`, and their `toString` prints full content, as the Scala
+  types do.
 - **Embedding cache keys are unambiguous; the completion cache refuses a NaN threshold and serves an entry exactly
   `ttl` old** ([#1297](https://github.com/llm4s/llm4s/issues/1297)). **Breaking:** `CacheKeyGenerator.sha256(parts*)`
   length-prefixes every part instead of joining text and model with `:` (under which the text `a:b` with model `c`

@@ -21,7 +21,9 @@ import scala.jdk.CollectionConverters.*
  * }}}
  *
  * A value: two are equal when every field is. Built only by the facade; a conversation continues by
- * its [[threadId]], with `JAgent.continueConversation`, `resume` or `recover`.
+ * its [[threadId]], with `JAgent.continueConversation`, `resume` or `recover`. Neither it nor any type it
+ * reaches is `Serializable`; [[JMessage]], [[JToolCall]] and [[JAgentStatus]] print their full text in
+ * `toString`, as the Scala types do, so mind what a log line includes.
  *
  * @param threadId the conversation's thread
  * @param runId this run

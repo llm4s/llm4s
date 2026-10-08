@@ -15,7 +15,8 @@ import scala.jdk.CollectionConverters.*
  * u.byModel().forEach((model, m) -> System.out.println(model + ": " + m.requestCount() + " calls"));
  * }}}
  *
- * A value: two are equal when every field is.
+ * A value: two are equal when every field is, a cost by its numeric value whatever its scale (`1.0`
+ * equals `1.00`), as Scala's `BigDecimal` compares. [[toString]] writes the cost in plain notation.
  *
  * @param requestCount model calls, across every model
  * @param inputTokens prompt tokens sent, across every model
@@ -33,7 +34,8 @@ final class JUsageSummary private (
   val byModel: java.util.Map[String, JModelUsage]
 ) {
 
-  private def fields: List[Any] = List(requestCount, inputTokens, outputTokens, thinkingTokens, totalCost, byModel)
+  private def fields: List[Any] =
+    List(requestCount, inputTokens, outputTokens, thinkingTokens, totalCost.stripTrailingZeros, byModel)
 
   override def equals(other: Any): Boolean = other match {
     case that: JUsageSummary => fields == that.fields
@@ -43,7 +45,7 @@ final class JUsageSummary private (
   override def hashCode: Int = Objects.hash(fields.map(_.asInstanceOf[AnyRef])*)
 
   override def toString: String =
-    s"JUsageSummary($requestCount requests, $inputTokens in, $outputTokens out, $thinkingTokens thinking, $totalCost USD)"
+    s"JUsageSummary($requestCount requests, $inputTokens in, $outputTokens out, $thinkingTokens thinking, ${totalCost.toPlainString} USD)"
 }
 
 object JUsageSummary {
@@ -65,7 +67,8 @@ object JUsageSummary {
 /**
  * One model's share of a [[JUsageSummary]], as [[JUsageSummary.byModel]] maps it.
  *
- * A value: two are equal when every field is.
+ * A value: two are equal when every field is, the cost by its numeric value whatever its scale, as
+ * for [[JUsageSummary]].
  *
  * @param requestCount calls to this model
  * @param inputTokens prompt tokens sent to this model
@@ -81,7 +84,8 @@ final class JModelUsage private (
   val totalCost: java.math.BigDecimal
 ) {
 
-  private def fields: List[Any] = List(requestCount, inputTokens, outputTokens, thinkingTokens, totalCost)
+  private def fields: List[Any] =
+    List(requestCount, inputTokens, outputTokens, thinkingTokens, totalCost.stripTrailingZeros)
 
   override def equals(other: Any): Boolean = other match {
     case that: JModelUsage => fields == that.fields
@@ -91,7 +95,7 @@ final class JModelUsage private (
   override def hashCode: Int = Objects.hash(fields.map(_.asInstanceOf[AnyRef])*)
 
   override def toString: String =
-    s"JModelUsage($requestCount requests, $inputTokens in, $outputTokens out, $thinkingTokens thinking, $totalCost USD)"
+    s"JModelUsage($requestCount requests, $inputTokens in, $outputTokens out, $thinkingTokens thinking, ${totalCost.toPlainString} USD)"
 }
 
 object JModelUsage {

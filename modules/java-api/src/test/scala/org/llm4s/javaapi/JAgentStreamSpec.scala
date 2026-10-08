@@ -74,6 +74,22 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     recorder.terminals.get shouldBe 1
   }
 
+  it should "deliver a result that does not convert for Java to onError and to await, not fail fatally" in {
+    // the Scala turn completes with a call whose arguments are null in its history; its Java view cannot render them
+    val call   = ToolCall("call-1", "missing", null)
+    def client = SuspensionFixtures.scripted(Right(SuspensionFixtures.calling(call)))
+    agentOf(client)().run("hi").map(_.status) shouldBe Right(org.llm4s.agent.AgentStatus.Completed("done"))
+    val recorder = Recorder()
+    val outcome  = jAgentOf(client)().stream("j-convert", "hi", recorder).get().await()
+    outcome.isFailure shouldBe true
+    (outcome.getError().getMessage should not).include("failed fatally")
+    outcome.getError().getCause shouldBe a[NullPointerException]
+    recorder.failed.get.error shouldBe outcome.getError().error
+    recorder.completed.get shouldBe null
+    recorder.terminals.get shouldBe 1
+    jAgentOf(client)().run("hi").getError().getCause shouldBe a[NullPointerException]
+  }
+
   it should "carry text deltas from an agent created with streaming, and none without" in {
     val client = new Scripted(
       onChunk => {

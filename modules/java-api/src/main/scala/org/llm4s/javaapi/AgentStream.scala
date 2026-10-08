@@ -100,7 +100,8 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
   /**
    * Delivers events until the buffer ends - or the turn is cancelled - then returns the turn's
    * outcome. A consumer that stops (a disconnected subscription, or a listener that throws or
-   * interrupts its own thread) cancels the turn and fails with why it stopped.
+   * interrupts its own thread) cancels the turn and fails with why it stopped. A turn's result that
+   * does not convert to a [[JAgentResult]] fails too, so the listener still hears `onError`.
    */
   @tailrec private def events(): Result[JAgentResult] = {
     val step = for {
@@ -112,7 +113,7 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
     } yield more
     step match {
       case Right(true)  => events()
-      case Right(false) => run.await().map(JAgentResult.of)
+      case Right(false) => run.await().flatMap(result => Safety.safely(JAgentResult.of(result)))
       case Left(error) =>
         cancel()
         Left(error)

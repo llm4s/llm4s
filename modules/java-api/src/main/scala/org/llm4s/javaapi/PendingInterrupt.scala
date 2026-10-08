@@ -26,7 +26,8 @@ import scala.jdk.CollectionConverters.*
  * @param id the interrupt's id, to answer it with [[Answer]]
  * @param kind whether it waits for an approval or for the answer to a question
  * @param toolName the name of the tool whose call is waiting
- * @param argumentsJson the call's arguments, a JSON object as text
+ * @param argumentsJson the call's arguments as JSON text - an object, as a model sends them, though a
+ *                      call built with a `ujson.Str` renders as a JSON string literal
  */
 final class PendingInterrupt private (
   val id: String,
