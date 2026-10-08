@@ -240,8 +240,8 @@ To properly position llm4s, we compare it against three leading Python agent fra
 **llm4s Advantages:**
 - ✅ Fine-grained control over agent flow
 - ✅ Type-safe agent composition (compile-time)
-- ✅ Concurrency control (maxConcurrentNodes)
-- ✅ Cancellation support (CancellationToken)
+- ✅ Concurrency control (`RunBudgets.maxConcurrency`; `PlanRunner` removed in #1330)
+- ✅ Cancellation support (`RunHandle.cancel`, thread interruption; `CancellationToken` removed in #1330)
 - ✅ Predictable execution (no hidden manager logic)
 
 **CrewAI Quote:** "Easily orchestrate autonomous agents through intuitive Crews"
@@ -495,13 +495,13 @@ state2.conversation.messageCount  // 2 ✓ As expected
 
 | Feature | llm4s | OpenAI Agents SDK | Notes |
 |---------|-------|-------------------|-------|
-| **Orchestration Pattern** | ✅ DAG-based with `PlanRunner` | ✅ Handoffs + Agent-as-Tool | Different paradigms |
+| **Orchestration Pattern** | ✅ Typed graph runtime (`GraphBuilder`) | ✅ Handoffs + Agent-as-Tool | Different paradigms |
 | **Type Safety** | ✅ Compile-time type checking | ⚠️ Runtime validation | llm4s advantage |
 | **Parallel Execution** | ✅ Batch-based parallelism | ✅ asyncio.gather support | Similar |
 | **Sequential Execution** | ✅ Topological ordering | ✅ Control flow in code | Similar |
 | **Agent Delegation** | ⚠️ Manual via DAG edges | ✅ Native handoffs | OpenAI cleaner API |
-| **Concurrency Control** | ✅ `maxConcurrentNodes` | ⚠️ Manual with asyncio | llm4s advantage |
-| **Cancellation** | ✅ `CancellationToken` | ⚠️ Not documented | llm4s advantage |
+| **Concurrency Control** | ✅ `RunBudgets.maxConcurrency` | ⚠️ Manual with asyncio | llm4s advantage |
+| **Cancellation** | ✅ `RunHandle.cancel` | ⚠️ Not documented | llm4s advantage |
 
 ### 3. Session & State Management
 

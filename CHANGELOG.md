@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
+  `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
+  and its spec checks update order, the barrier, step boundaries and cancellation with no API key.
 - **Thinking stays in the conversation and goes back to the provider** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
   `AssistantMessage` carries the model's reasoning as `thinking: Seq[ThinkingBlock]` - `ThinkingBlock.Text(text,
   signature)`, `ThinkingBlock.Redacted(data)` or `ThinkingBlock.Opaque(provider, data)` (provider-specific replay
@@ -750,6 +753,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **An interrupted `Agent.run`, `recover` or `resume` cancels its turn** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
+  the call returns `Left(CancelledError)` with the interrupt flag set, as before, and now also cancels the turn it
+  was waiting on instead of leaving it running. Cancelling a graph run therefore cancels the agent turns its nodes
+  are waiting on. Use `start`/`startRecover`/`startResume` and await the `AgentRun` to keep a turn past an interrupt.
 - **`AssistantMessage` is a growth-prone data type; `Completion.thinking` comes from the message**
   ([#1381](https://github.com/llm4s/llm4s/issues/1381)): `AssistantMessage` is `final case class AssistantMessage
   private (contentOpt, toolCalls, thinking)` with a companion `apply` (named arguments, defaults as before, plus the
@@ -1762,6 +1769,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `org.llm4s.toolapi.ToolHints` in `llm4s-core` (`@Experimental`), because `llm4s-mcp` cannot depend on the agent runtime.
 
 ### Removed
+- **Orchestration: `PlanRunner`, `DAG`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`**
+  ([#1330](https://github.com/llm4s/llm4s/issues/1330)): `org.llm4s.agent.orchestration` is deleted, with
+  `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (`org.llm4s.agent.AgentId` is the agent's
+  id). Build the same flows with `GraphBuilder` and run them on `GraphRuntime`; cancel with `RunHandle.cancel()`.
+  See the migration guide's "Orchestration removed (#1330)" and the `multi-agent-graph` cookbook recipe.
 - **`ToolCallPolicy` and `PolicyDecision`** ([#1279](https://github.com/llm4s/llm4s/issues/1279)),
   with `ApprovalSource.Policy` and `ToolLoop.build`'s `policy` parameter, replaced by
   `AgentMiddleware`. Migration: a policy becomes an `AgentMiddleware` overriding `wrapToolCall`:
