@@ -11,10 +11,9 @@ import scala.util.Using
  * Edge cases of [[CalculatorTool]] that `CoreToolsSpec` does not cover: the operations it skips (abs, min,
  * max, modulo), the error paths, how operation names and operands are read, and how results are rendered.
  *
- * Every expectation here was observed by running the tool, not assumed. Two behaviours that look wrong are
- * recorded with `pendingUntilFixed` instead of being pinned as correct (a result formatted with the JVM's
- * default locale, and non-finite results returned as values); they start failing the day they are fixed,
- * which forces the test to be promoted.
+ * Every expectation here was observed by running the tool, not assumed. A behaviour that looks wrong is
+ * recorded with `pendingUntilFixed` instead of being pinned as correct (non-finite results returned as
+ * values); it starts failing the day it is fixed, which forces the test to be promoted.
  */
 class CalculatorToolEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
@@ -250,11 +249,9 @@ class CalculatorToolEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // ---- behaviour that looks wrong: recorded, not pinned
 
   "CalculatorTool formatting" should "not depend on the JVM's default locale" in {
-    pendingUntilFixed {
-      withFormatLocale(Locale.GERMANY) {
-        ok("divide", 1.0, Some(2.0)).formatted shouldBe "0.5"
-        ok("divide", 1.0, Some(3.0)).formatted shouldBe "0.333333"
-      }
+    withFormatLocale(Locale.GERMANY) {
+      ok("divide", 1.0, Some(2.0)).formatted shouldBe "0.5"
+      ok("divide", 1.0, Some(3.0)).formatted shouldBe "0.333333"
     }
   }
 

@@ -151,7 +151,7 @@ object CalculatorTool {
       val formatted = if (r == r.toLong) {
         r.toLong.toString
       } else {
-        f"$r%.6f".replaceAll("0+$", "").replaceAll("\\.$", "")
+        String.format(java.util.Locale.ROOT, "%.6f", Double.box(r)).replaceAll("0+$", "").replaceAll("\\.$", "")
       }
 
       CalculatorResult(
