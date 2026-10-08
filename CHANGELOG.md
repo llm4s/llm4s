@@ -1908,6 +1908,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly and returns a `Left` (`Regex matching aborted: pattern recursed too deeply for the input (stack
   overflow)`), which `RegexValidator` reports as a `Regex security error` `ValidationError`. Other fatal errors
   still propagate. The workspace runner's `WorkspaceRegexSafetyManager` has the same fix.
+- **`llm4s-gemini`: a signed function call with an empty `id` is replayed with its thought signature**
+  ([#1615](https://github.com/llm4s/llm4s/issues/1615)): a `functionCall` returned with `"id": ""` got a generated
+  tool-call id at parse, but the signed part was kept verbatim, so on the next turn its stored `""` was compared with
+  the generated id, the part was taken for an edited call and rebuilt without its `thoughtSignature` - which a
+  Gemini 3 model answers with HTTP 400, the failure #1416 fixed. An absent or empty stored id is now "no id" on replay
+  too, as it already was at parse, so the part goes back exactly as Gemini signed it, `"id": ""` included; the
+  `functionResponse` still carries no id. Same on Vertex AI.
 - **`llm4s-agent-tools`: `json_tool` refuses what it used to mishandle**
   ([#1508](https://github.com/llm4s/llm4s/issues/1508), [#1509](https://github.com/llm4s/llm4s/issues/1509),
   [#1510](https://github.com/llm4s/llm4s/issues/1510)): a `query` path with an array index too large for an `Int`

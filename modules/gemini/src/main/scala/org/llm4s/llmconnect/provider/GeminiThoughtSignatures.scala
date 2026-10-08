@@ -175,11 +175,13 @@ private[provider] object GeminiThoughtSignatures {
   /**
    * Whether the stored functionCall still spells the tool call: same name, same id (when it had
    *  one: it became the call's id at parse), and the same arguments (`args` absent matches `{}`).
+   *  An absent or empty stored `id` is "no id", as [[parse]] read it: the call's id was generated, and the
+   *  stored part - `"id":""` included - is still the one Gemini signed.
    */
   private def matchesCall(fc: ujson.Value, tc: ToolCall): Boolean =
     fc.objOpt.exists { o =>
       o.get("name").flatMap(_.strOpt).contains(tc.name) &&
-      o.get("id").flatMap(_.strOpt).forall(_ == tc.id) &&
+      o.get("id").flatMap(_.strOpt).filter(_.nonEmpty).forall(_ == tc.id) &&
       o.get("args").fold(tc.arguments == (ujson.Obj(): ujson.Value))(_ == tc.arguments)
     }
 
