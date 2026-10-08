@@ -394,6 +394,10 @@ class SmokeContractOfflineSpec
     val counted = Some(TokenUsage(promptTokens = 5, completionTokens = 5, totalTokens = 10, thinkingTokens = Some(4)))
     SmokeChecks.reasoning(ReasoningSetup(reasoningClient("Hi", counted), options, expectsThinkingText = false)) shouldBe
       Outcome.Held
+    val uncounted = Some(TokenUsage(promptTokens = 5, completionTokens = 5, totalTokens = 10, thinkingTokens = Some(0)))
+    failedMessage(
+      SmokeChecks.reasoning(ReasoningSetup(reasoningClient("Hi", uncounted), options, expectsThinkingText = false))
+    ).value should include("reasoning")
     failedMessage(
       SmokeChecks.reasoning(ReasoningSetup(reasoningClient("", counted), options, expectsThinkingText = false))
     ).value should include("answer was empty")

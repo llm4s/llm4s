@@ -457,7 +457,7 @@ object SmokeChecks {
             )
           else
             Either.cond(
-              completion.thinking.exists(_.nonEmpty) || completion.usage.exists(_.thinkingTokens.isDefined),
+              completion.thinking.exists(_.nonEmpty) || completion.usage.exists(_.thinkingTokens.exists(_ > 0)),
               (),
               "the provider reported neither thinking text nor reasoning tokens"
             )
