@@ -78,8 +78,10 @@ JMH options cheatsheet:
 ## Regression Detection
 
 The CI benchmark job (`benchmarks.yml`) runs on pushes to `main` and release tags.
-It fails when any benchmark regresses by more than **10 %** vs the stored baseline in
-`docs/reference/benchmarks-baseline.json`.
+Regression detection is currently disabled because
+`docs/reference/benchmarks-baseline.json` is empty (`[]`). The workflow skips comparison
+until a baseline is committed. With a populated baseline, it fails when a measured
+benchmark regresses by more than **10 %** against that baseline.
 
 To update the baseline after an intentional performance change:
 

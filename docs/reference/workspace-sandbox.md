@@ -29,7 +29,7 @@ When running the workspace runner (e.g. in Docker):
 ### Profiles
 
 - **permissive**: Current behavior—shell allowed, standard limits (1MB file size, 500 dir entries, 30s command timeout)
-- **locked**: Read-only file ops only; shell disabled; strict limits (10s timeout)
+- **locked**: Shell disabled; strict limits (10s timeout). File writes and modifications remain allowed; this profile does not enforce a read-only filesystem.
 
 ### HOCON (Client)
 
