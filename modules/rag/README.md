@@ -61,9 +61,11 @@ llm4s.rerank {
 }
 ```
 
-Load them at the application edge with `RerankerConfigLoader.default()` and
-`PgSearchIndexConfigLoader.load(...)` and pass the result to `RAG.build`; the library does not read
-the environment elsewhere. The embedding provider and model are chosen with `EMBEDDING_MODEL`
+Load them at the application edge. The reranker config is a function argument of `RAG.build`
+(`resolveRerankerConfig = () => RerankerConfigLoader.default()`). The `SearchIndex.PgConfig` from
+`PgSearchIndexConfigLoader.load(...)` builds the permission-aware index, which is attached to the
+config: `PgSearchIndex(pgConfig)`, then `initializeSchema()`, then `RAGConfig().withSearchIndex(index)`
+(see the permission-based RAG guide). The library does not read the environment elsewhere. The embedding provider and model are chosen with `EMBEDDING_MODEL`
 (`provider/model`) and each provider module's own `llm4s.embeddings.<id>` block.
 
 ## Minimal example
@@ -89,7 +91,7 @@ val hits = for {
 ```
 
 With no paths set, `RAG` keeps its vector and keyword stores in memory. For a file-backed index use
-`RAGConfig.withSQLite("./rag.db")`; for Postgres use `withPgVector(...)` or `withPgHybrid(...)`.
+`RAGConfig().withSQLite("./rag.db")`; for Postgres use `withPgVector(...)` or `withPgHybrid(...)`.
 Answer generation needs an LLM: add `withLLM(client)` and call `queryWithAnswer`.
 
 ## What it supports, and its limits

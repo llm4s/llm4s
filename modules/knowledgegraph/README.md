@@ -24,7 +24,7 @@ question-answering classes take an `LLMClient` you build the usual way (see the
 |---|---|---|
 | Model | `Node(id, label, properties)`, `Edge(source, target, relationship, properties)`, `Graph` | properties are `ujson.Value`s; `Graph` is immutable and has `merge`, `validate`, `getNeighbors`, `findNodesByLabel` and similar |
 | Storage | `GraphStore`, `InMemoryGraphStore`, `JsonGraphStore` | every `GraphStore` method returns a `Result`; `traverse(startId, TraversalConfig)` does a breadth-first walk with `maxDepth` and `Direction` |
-| Extraction | `KnowledgeGraphGenerator`, `SchemaGuidedExtractor`, `MultiDocumentGraphBuilder`, `EntityLinker`, `CoreferenceResolver` | LLM-driven; they write into a `GraphStore` |
+| Extraction | `KnowledgeGraphGenerator`, `SchemaGuidedExtractor`, `MultiDocumentGraphBuilder`, `EntityLinker`, `CoreferenceResolver` | LLM-driven; `KnowledgeGraphGenerator` writes into its `GraphStore`; the others return a `Graph`, a `SourceTrackedGraph` or text to the caller |
 | Query | `GraphQuery`, `GraphQueryExecutor`, `GraphQueryTranslator`, `GraphRanking` | |
 | Question answering | `GraphQAPipeline` | identifies entities, traverses for context, ranks them and asks the LLM; the answer carries the nodes and edges that supported it |
 | Tool | `GraphQueryTool` | exposes the pipeline to an agent as a tool |
