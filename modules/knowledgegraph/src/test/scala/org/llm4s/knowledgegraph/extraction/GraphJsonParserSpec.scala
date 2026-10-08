@@ -1,10 +1,16 @@
 package org.llm4s.knowledgegraph.extraction
 
+import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import org.llm4s.error.ProcessingError
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.slf4j.LoggerFactory
+
+import scala.jdk.CollectionConverters.*
 
 /**
  * `GraphJsonParser` turns the JSON an LLM returns into a [[Graph]]. Both the generator and the
@@ -316,5 +322,75 @@ class GraphJsonParserSpec extends AnyFunSuite with Matchers {
         """}}], "edges": []}"""
     org.llm4s.testutil.SmallStack.run(parse(nested(512))).map(_.map(_.nodes.size)) shouldBe Right(Right(1))
     org.llm4s.testutil.SmallStack.run(parse(nested(513))).map(_.isLeft) shouldBe Right(true)
+  }
+
+  // ---------------------------------------------------------------------------
+  // What a failure logs. The reply is model output and can be megabytes, and it echoes the documents
+  // the graph was extracted from, so the ERROR line a failure writes carries a bounded preview of
+  // it, never the whole reply (#1635).
+  // ---------------------------------------------------------------------------
+
+  private val twoHundredKb: Int = 200 * 1024
+
+  private def capturingErrors[A](body: => A): (A, Seq[String]) = {
+    val logger   = LoggerFactory.getLogger(GraphJsonParser.getClass).asInstanceOf[LogbackLogger]
+    val appender = new ListAppender[ILoggingEvent]()
+    val previous = logger.getLevel
+    appender.start()
+    logger.addAppender(appender)
+    logger.setLevel(Level.ERROR)
+    val result =
+      try body
+      finally {
+        logger.detachAppender(appender)
+        logger.setLevel(previous)
+      }
+    (result, appender.list.asScala.toSeq.map(_.getFormattedMessage))
+  }
+
+  private def assertBoundedErrorLine(logged: Seq[String], replyLength: Int, prefix: String): Unit = {
+    logged should have size 1
+    val line = logged.head
+    line should startWith(prefix)
+    line.length should be <= 1024
+    line should include(s"original length: $replyLength")
+  }
+
+  test("a 200 KB reply that is not JSON logs one ERROR line bounded to a preview, not the whole reply") {
+    val reply = "{" + "x" * twoHundredKb
+
+    val (result, logged) = capturingErrors(parse(reply))
+
+    result.isLeft shouldBe true
+    assertBoundedErrorLine(logged, reply.length, "Failed to parse graph JSON")
+  }
+
+  test("a 200 KB reply nested too deeply logs one ERROR line bounded to a preview") {
+    val reply = "[" * twoHundredKb
+
+    val (result, logged) = capturingErrors(org.llm4s.testutil.SmallStack.run(parse(reply)))
+
+    result.map(_.isLeft) shouldBe Right(true)
+    assertBoundedErrorLine(logged, reply.length, "Failed to parse graph JSON")
+  }
+
+  test("a 200 KB JSON reply whose structure is not a graph logs one ERROR line bounded to a preview") {
+    // valid JSON with the required fields, but the node has no id, so extraction fails after parsing
+    val reply = s"""{"nodes": [{"label": "X", "text": "${"x" * twoHundredKb}"}], "edges": []}"""
+
+    val (result, logged) = capturingErrors(parse(reply))
+
+    result.isLeft shouldBe true
+    assertBoundedErrorLine(logged, reply.length, "Failed to extract graph structure from JSON")
+  }
+
+  test("a short reply is logged whole") {
+    val reply = """{"nodes":[{"label":"X"}],"edges":[]}"""
+
+    val (_, logged) = capturingErrors(parse(reply))
+
+    logged should have size 1
+    logged.head should include(reply)
+    (logged.head should not).include("original length")
   }
 }

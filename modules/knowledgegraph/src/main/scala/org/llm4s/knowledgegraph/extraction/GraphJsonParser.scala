@@ -3,7 +3,7 @@ package org.llm4s.knowledgegraph.extraction
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.error.ProcessingError
-import org.llm4s.util.BoundedJson
+import org.llm4s.util.{ BoundedJson, Redaction }
 import org.slf4j.LoggerFactory
 
 /**
@@ -15,6 +15,16 @@ import org.slf4j.LoggerFactory
  */
 private[extraction] object GraphJsonParser {
   private val logger = LoggerFactory.getLogger(getClass)
+
+  /** How much of a reply a failure's ERROR line shows. */
+  private val MaxLoggedReplyChars = 512
+
+  /**
+   * The reply as a failure logs it. The reply is model output - it can be megabytes, and it echoes the
+   * documents the graph was extracted from - so the log line carries its first [[MaxLoggedReplyChars]]
+   * and the full length, never the whole reply (#1635).
+   */
+  private def preview(reply: String): String = Redaction.truncateForLog(reply, MaxLoggedReplyChars)
 
   /**
    * Parses a JSON string (optionally wrapped in a markdown code fence) into a [[Graph]].
@@ -42,7 +52,7 @@ private[extraction] object GraphJsonParser {
     // output, so a document nested more than 512 levels deep is refused before it is parsed: a
     // value that deep overflows the stack of whatever renders it (#1562).
     val parsedJsonResult = BoundedJson.read(cleanJson).left.map { error =>
-      logger.error(s"Failed to parse graph JSON: $cleanJson", error)
+      logger.error(s"Failed to parse graph JSON: ${preview(cleanJson)}", error)
       ProcessingError(errorCode, s"Failed to parse LLM output as graph: ${error.message}")
     }
 
@@ -88,7 +98,9 @@ private[extraction] object GraphJsonParser {
           .toResult
           .left
           .map { error =>
-            logger.error(s"Failed to extract graph structure from JSON: ${json}", error)
+            // the reply as received, not the parsed value re-rendered: rendering it costs as much as
+            // it is long, only to be cut to a preview
+            logger.error(s"Failed to extract graph structure from JSON: ${preview(cleanJson)}", error)
             ProcessingError(errorCode, s"Failed to extract graph structure: ${error.message}")
           }
           .flatMap { graph =>

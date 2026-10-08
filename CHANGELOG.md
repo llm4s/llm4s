@@ -1953,6 +1953,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   admitted `/srv/agent-data-secret`, and `developmentSafe(workingDirectory)` could read and write a sibling
   directory whose name began with the working directory's. Both now use `Path.startsWith` on normalised absolute
   paths; blocked paths are matched the same way (`/var` no longer blocks `/variable`).
+- **`llm4s-knowledgegraph`: a failed graph extraction logs a preview of the reply, not the whole reply**
+  ([#1635](https://github.com/llm4s/llm4s/issues/1635)): `GraphJsonParser` used to put the entire model reply on
+  the ERROR line when it did not parse, or parsed but was not a graph - the second site re-rendering the whole
+  parsed value to do so. The reply is model output, so a megabyte reply became a megabyte log line, and it echoes
+  the documents the graph was extracted from. Both lines now carry the reply's first 512 characters and its full
+  length (`Redaction.truncateForLog`). The `ProcessingError` returned is unchanged.
 - **`llm4s-core`: `ProcessingError.context` names the cause's class when the exception has no message**
   ([#1556](https://github.com/llm4s/llm4s/issues/1556)): the `cause` entry was the exception's `getMessage`, which
   is `null` for an exception built without one (`new RuntimeException()`, a bare `NullPointerException`), so the
