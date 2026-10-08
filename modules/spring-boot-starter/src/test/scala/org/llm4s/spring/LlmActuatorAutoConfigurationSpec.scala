@@ -70,6 +70,30 @@ class LlmActuatorAutoConfigurationSpec extends AnyFlatSpec with Matchers {
       }
   }
 
+  // Pins the havingValue = "true" literal of this configuration's own @ConditionalOnProperty (#1592
+  // added it). The absent-property tests above pass through matchIfMissing with any literal, and the
+  // user configuration supplies only the client, so the indicator can come only from this
+  // auto-configuration.
+  it should "register LlmHealthIndicator when llm4s.enabled=true is set explicitly (havingValue = \"true\")" in {
+    runner
+      .withUserConfiguration(classOf[MockClientConfig])
+      .withPropertyValues("llm4s.enabled=true")
+      .run { ctx =>
+        ctx.getStartupFailure shouldBe null
+        ctx.getBeansOfType(classOf[LlmHealthIndicator]).keySet().toArray.toSeq shouldBe Seq("llmHealthIndicator")
+      }
+  }
+
+  it should "compare llm4s.enabled to havingValue case-insensitively, as Spring's OnPropertyCondition does (llm4s.enabled=TRUE)" in {
+    runner
+      .withUserConfiguration(classOf[MockClientConfig])
+      .withPropertyValues("llm4s.enabled=TRUE")
+      .run { ctx =>
+        ctx.getStartupFailure shouldBe null
+        ctx.getBeansOfType(classOf[LlmHealthIndicator]).size() shouldBe 1
+      }
+  }
+
   it should "allow the LlmHealthIndicator bean to be overridden" in {
     runner
       .withUserConfiguration(classOf[MockClientConfig], classOf[CustomIndicatorConfig])
