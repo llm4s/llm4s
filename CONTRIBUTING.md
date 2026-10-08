@@ -96,7 +96,7 @@ and [API keys](docs/getting-started/configuration.md#api-keys).
 ### 7. Where to ask for help
 - **Discord:** [Join the community](https://discord.gg/4uvTPn6qww)
 - **Issues:** [Open an issue](https://github.com/llm4s/llm4s/issues) for bugs, questions, or feature requests
-- **Dev Hour:** We host a contributor dev hour on Discord every Tuesday at 17:00 UTC.
+- **Dev Hour:** We host a contributor dev hour on Discord every Sunday at 09:00 London time (10:00 in Italy and Germany, 13:30 or 14:30 in India, 16:00 or 17:00 in Singapore, 04:00 in New York, 01:00 in San Francisco; the [full schedule](docs/community/index.md#llm4s-dev-hours) shows summer and winter times).
 - **Support guide:** [SUPPORT.md](SUPPORT.md) lists where to ask questions, report bugs and report vulnerabilities.
 
 ## Pull Request Workflow
