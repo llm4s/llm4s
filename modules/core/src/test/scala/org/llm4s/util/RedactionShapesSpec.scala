@@ -642,6 +642,34 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     redactedOnceAndTwice(s"{'password': '$secretText") shouldBe s"{'password': '$R"
   }
 
+  it should "redact a single-quoted credential holding a quote and a bracket as a whole, as main does (#1654)" in {
+    // A `"` followed by `]]`, `]}`, `}}` or `, "key":` reads as the end of a JSON string. Inside a string - a logfmt
+    // `msg="..."`, an unescaped embedding, or after a Python `b'x"y'` - the value used to end there, and the rest of
+    // the credential was left readable. A `'` that can close the value follows, so it runs on to it.
+    redactedOnceAndTwice("""level=info msg="request: {'password': 'Qx"]]9secretPW', 'user': 'bob'}"""") shouldBe
+      s"""level=info msg="request: {'password': '$R', 'user': 'bob'}""""
+    redactedOnceAndTwice("""level=info msg="request: {'password': 'Qx", "user": 9secretPW', 'user': 'bob'}"""") shouldBe
+      s"""level=info msg="request: {'password': '$R', 'user': 'bob'}""""
+    redactedOnceAndTwice("""{'name': b'x"y', 'bearer_token': '5WBF9"]]<XWU4HMJW9BMWX'}""") shouldBe
+      s"""{'name': b'x"y', 'bearer_token': '$R'}"""
+    redactedOnceAndTwice("""{"content": "{'apiKey': 'YWYF"]]S2V'}"}""") shouldBe s"""{"content": "{'apiKey': '$R'}"}"""
+    // A Bearer or Basic token is replaced first, by the header patterns; the rest of the value is still redacted,
+    // outside a string and inside one.
+    redactedOnceAndTwice("""{'token': 'Bearer abc"]}hunter2secret'}""") shouldBe s"{'token': '$R'}"
+    redactedOnceAndTwice("""{'password': 'Basic dXNlcg=="}}hunter2secret'}""") shouldBe s"{'password': '$R'}"
+    redactedOnceAndTwice("""{"content": "{'token': 'Bearer abc"]}hunter2secret'}"}""") shouldBe
+      s"""{"content": "{'token': '$R'}"}"""
+    // A pass before that replaced a `'` - here the query parameter `&token=b'` - may have taken the quote that closed
+    // the credential, so the end of the string is not trusted and the value runs on as on main.
+    redactedOnceAndTwice("""level=info msg="{'password': 'Qx"]]9secret&token=b'}"""") shouldBe
+      s"""level=info msg="{'password': '$R"""
+    // With a `'` later in the document, an unclosed value runs on to it, as on main: over-redaction, never a leak.
+    redactedOnceAndTwice(
+      """{"content": "use 'password': ' carefully", "model": "gpt-4o", "note": "say 'hi'"}"""
+    ) shouldBe
+      s"""{"content": "use 'password': '$R'hi'"}"""
+  }
+
   it should "keep prose after a 'token': [ that a JSON string mentions (#1657)" in {
     // Was `... Thanks, it'[REDACTED]"}`: the `'` of `it's` opened a leaf that the string's end closed, and a second
     // pass redacted from the `'` of `isn't` as well.
@@ -660,6 +688,12 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
       s"""{"content": "{'token': [x, b'$R"}"""
     redactedOnceAndTwice(s"""{"content": "{'token': [x, rb'$secretText"}""") shouldBe
       s"""{"content": "{'token': [x, rb'$R"}"""
+    // Nor where JSON escaped in the string follows the apostrophe: the walk would pair its `\"` from the wrong one and
+    // keep the credential as a word of prose, so the leaf runs to the end of the string, as on main.
+    redactedOnceAndTwice(
+      """{"content": "see \"token\": [ here, it's \" {\"secret_key\": \"hunterSecretValue\"}"}"""
+    ) shouldBe
+      s"""{"content": "see \\"token\\": [ here, it'$R"}"""
   }
 
   it should "keep the escaped character when it replaces a bare word after a backslash (#1657)" in {

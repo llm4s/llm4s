@@ -2011,13 +2011,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `redactForLogging`, and so the exchange-log sink; none exposed a credential. An unclosed `'password': '`
   inside a JSON string (`{"content": "use 'password': ' carefully", "model": "gpt-4o"}`) ran to the next `'`
   or the end of the input and took every field after the string; a single-quoted value (and a `key='`
-  assignment) inside a double-quoted string now also ends at a `"` that ends that string - one followed by a
-  `,` and the next `"key":`, a closing bracket or the end of the input, and not the first character of the
-  value - so the output is `{"content": "use 'password': '[REDACTED]",
-  "model": "gpt-4o"}`. A `'token': [` mentioned inside a JSON string took the apostrophe of `it's` for a leaf
+  assignment) inside a double-quoted string now also ends at a `"` that ends that string - one followed, past
+  whitespace, by the end of the input, by a `,` and the next `"key":`, or by a `}` or `]` that is itself followed
+  by the end of the input, another `}` or `]`, or a `,` before a `"`, `{` or `[` - so the output is
+  `{"content": "use 'password': '[REDACTED]", "model": "gpt-4o"}`. It ends there only where no `'` that could
+  close the value (any `'` but the apostrophe between two letters or digits, as in `it's`) follows anywhere in the
+  input, where that `"` is not the first character of the value, and where the passes before have replaced no
+  `'`; otherwise it runs to the next `'` or the end of the input, as on main, so a credential holding a `"`
+  (`'Qx"]]9secret'`, `'Qx", "k": 9secret'`, or `'Bearer abc"]}secret'`, whose token the header pattern replaces
+  first) is still redacted whole. A `'token': [` mentioned inside a JSON string took the apostrophe of `it's` for a leaf
   that the string's end closed (`... Thanks, it'[REDACTED]"}`); the apostrophe of a word of prose there - between
-  two letters, in a word after whitespace - is now kept when only the string's end would close it, while a quote
-  after a bracket, a comma, a space or a Python prefix (`b'`, `rb'`) still opens a leaf. And a bare word after a
+  two letters, in a word after whitespace - is now kept when only the string's end would close it and no `\"`
+  (JSON escaped in the string) comes before that end, while a quote after a bracket, a comma, a space or a Python
+  prefix (`b'`, `rb'`) still opens a leaf. And a bare word after a
   backslash under a credential key (`{"token": [\a1, "x"], "password": "..."}`) had its replacement quote written
   straight after the backslash, which read as `\"` and lost the rest of the document; the escaped character is now
   kept, as before #1647, and the rest of the word replaced. Each of these redacts to the same output when redacted

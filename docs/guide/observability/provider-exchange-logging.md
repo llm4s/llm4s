@@ -169,9 +169,12 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `{'token': ['...']}`; the brackets, the keys of nested objects, `true`, `false` and `null` are kept, so
   the JSON still parses and keeps its shape; inside a string a single-quoted container ends where the
   string does, so a `'token': [` that a message merely mentions does not take the fields after it, nor
-  the prose after an apostrophe in it (`it's`), and an unclosed `'password': '` there ends where the
-  string ends rather than taking the rest of the document; outside any string, the bare words after an
-  unclosed `'token': [` are replaced to the end of the input, since nothing tells them from leaves; and
+  the prose after an apostrophe in it (`it's`) unless escaped JSON (`\"`) follows it, and an unclosed
+  `'password': '` there ends where the string ends rather than taking the rest of the document - but only
+  where no `'` that could close it follows anywhere in the input, and not where that end would leave the
+  value empty (`'password': '",`); otherwise it runs to the next `'`, or to the end of the input, as it
+  does outside a string, so a credential that holds a `"` (`'Qx"]]9secret'`) is redacted whole; outside
+  any string, the bare words after an unclosed `'token': [` are replaced to the end of the input, since nothing tells them from leaves; and
   a `\"`-quoted leaf under a single-quoted key there, `\"{'token': [\\\"...\\\"]}\"`, is left, since a
   `"` inside a string may be the end of a string inside it), `key=value` pairs and quoted
   `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,
