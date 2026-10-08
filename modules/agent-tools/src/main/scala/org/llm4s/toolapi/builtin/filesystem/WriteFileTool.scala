@@ -6,7 +6,7 @@ import upickle.default._
 
 import java.nio.ByteBuffer
 import java.nio.file.{ FileAlreadyExistsException, Files, LinkOption, Path, Paths, StandardOpenOption }
-import scala.util.Try
+import scala.util.{ Try, Using }
 
 /**
  * Result from writing a file.
@@ -160,7 +160,7 @@ object WriteFileTool {
     allowOverwrite: Boolean
   ): Boolean = {
     val (channel, created) =
-      try
+      Try {
         (
           Files.newByteChannel(
             real,
@@ -170,15 +170,15 @@ object WriteFileTool {
           ),
           true
         )
-      catch {
+      }.recover {
         case _: FileAlreadyExistsException if append || allowOverwrite =>
           val mode = if (append) StandardOpenOption.APPEND else StandardOpenOption.TRUNCATE_EXISTING
           (Files.newByteChannel(real, StandardOpenOption.WRITE, mode, LinkOption.NOFOLLOW_LINKS), false)
-      }
-    try {
+      }.get
+    Using.resource(channel) { openChannel =>
       val bytes = ByteBuffer.wrap(content)
-      while (bytes.hasRemaining) channel.write(bytes)
+      while (bytes.hasRemaining) openChannel.write(bytes)
       created
-    } finally channel.close()
+    }
   }
 }
