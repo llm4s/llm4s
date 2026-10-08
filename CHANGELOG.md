@@ -1842,6 +1842,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- Explicit non-OpenAI GPT-3 provider names retain approximate tokenizer accuracy.
 - Calculator decimal output uses a stable locale, including on JVMs configured with comma decimal separators.
 - **`llm4s-agent-tools`: `CalculatorTool` rejects results that are not finite**
   ([#1516](https://github.com/llm4s/llm4s/issues/1516)): an overflow (`10^400`, `1e200 * 1e200`) or an undefined

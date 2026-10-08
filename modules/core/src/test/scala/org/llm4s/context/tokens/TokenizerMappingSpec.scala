@@ -235,4 +235,13 @@ class TokenizerMappingSpec extends AnyFlatSpec with Matchers {
     TokenizerAccuracy.Approximate("close", accuracy = 0.9).isExact shouldBe false
     TokenizerAccuracy.Unknown("who knows").isExact shouldBe false
   }
+  it should "keep explicitly non-OpenAI GPT-3 names approximate" in {
+    expectTokenizer(TokenizerId.CL100K_BASE)("anthropic/gpt-3", "ollama/gpt-3")
+    expectApproximate(0.75)("anthropic/gpt-3")
+    expectApproximate(0.80)("ollama/gpt-3")
+    expectExact("gpt-3", "openai/gpt-3", "azure/gpt-3")
+    TokenizerMapping.isExactMapping("anthropic/gpt-3") shouldBe false
+    TokenizerMapping.isExactMapping("ollama/gpt-3") shouldBe false
+  }
+
 }

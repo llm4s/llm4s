@@ -84,7 +84,8 @@ object TokenizerMapping {
     modelName.contains("gpt-3.5")
 
   private def isOpenAIGPT3(modelName: String): Boolean =
-    modelName.contains("gpt-3") && !modelName.contains("gpt-3.5")
+    modelName.contains("gpt-3") && !modelName.contains("gpt-3.5") &&
+      (!modelName.contains("/") || modelName.startsWith("openai/") || modelName.startsWith("azure/"))
 
   private def isAnthropic(modelName: String): Boolean =
     modelName.startsWith("anthropic/") || modelName.contains("claude")
