@@ -160,6 +160,25 @@ jobs:
       - name: Compile
         run: sbt compile
 
+      # Builds the CycloneDX BOMs that the release workflow attaches to a GitHub release (docs/reference/sbom.md), so a
+      # change that breaks their generation fails here and not on release day. It also fails when a published module has
+      # no BOM, or a BOM names a build-machine path or a test framework. The dependencies are resolved by now, so this is
+      # a few seconds of sbt, not a second build.
+      - name: Generate and check the SBOMs
+        run: |
+          sbt -batch publishedBoms
+          sbt -batch -error listPublishedArtifacts | grep -E '^(artifact|stub) ' > target/published-artifacts.txt
+          scripts/test-check-sbom.sh
+          scripts/check-sbom.sh target/boms target/published-artifacts.txt
+
+      - name: Upload the SBOMs
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: target/boms/*.bom.json
+          retention-days: 14
+          if-no-files-found: error
+
       # Fails when a frozen module resolves a document-parsing, speech, cloud-storage, database,
       # observability-backend or foreign vendor-SDK dependency, so the programme's definition of done
       # (#1126) stays true until the 1.0 freeze.

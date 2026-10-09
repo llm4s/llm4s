@@ -414,6 +414,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers, a stream that ends without a terminal event or with `error`, `cancelled` or `time_limit`
   is a `Left(ServiceError)`, `baseUrl` and `iamUrl` must be `https` (except localhost), the API key
   is trimmed, and setting both `projectId` and `spaceId` is a configuration error.
+- **A CycloneDX SBOM per published module, and a dependency scan** ([#1464](https://github.com/llm4s/llm4s/issues/1464)):
+  `sbt publishedBoms` writes one CycloneDX 1.6 JSON BOM for each of the 32 published `llm4s-*` modules into
+  `target/boms` (`<artifact>-<version>.bom.json`; the samples, `it`, benchmarks and the relocation stubs have none),
+  using the `sbt-sbom` build plugin, which adds nothing to the published POMs (all 46 generated POMs are
+  byte-identical with and without it). The release workflow's new `sbom` job attaches them to the GitHub Release
+  after it exists, so a failure there cannot affect Maven Central, the Release, the docs or the image; CI builds and
+  validates them on every pull request (`scripts/check-sbom.sh`, tested by `scripts/test-check-sbom.sh`: bad JSON, no
+  components, a build-machine path, a test framework, a published module without a BOM) and uploads them as an
+  artifact. A new `Dependency scan` workflow runs OSV-Scanner over the BOMs on pull requests that touch the
+  dependency files and weekly, report only for now. See `docs/reference/sbom.md`.
 - **Run API and event dispatch for graph runs** (Experimental, `org.llm4s.agent.graph`,
   [#1277](https://github.com/llm4s/llm4s/issues/1277)): `GraphRuntime.start`/`recover`/`resume`
   admit a run on the caller's thread and return `Result[RunHandle[O]]` once the thread is claimed;
