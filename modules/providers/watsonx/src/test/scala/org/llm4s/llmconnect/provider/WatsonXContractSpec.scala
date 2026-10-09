@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ ServiceError, ValidationError }
+import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.llm4s.http.HttpResponse
 import org.llm4s.llmconnect.model.*
 import org.llm4s.model.ModelRegistryService
@@ -9,7 +9,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import upickle.default.*
 
-/** Maintainer decisions: tools are rejected before any HTTP call; error stop reasons are failures. */
+/** Behaviour a caller relies on: tools work end to end, abnormal endings fail, malformed replies are errors. */
 class WatsonXContractSpec extends AnyFunSuite with Matchers:
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   import StubHttp.*
@@ -26,100 +26,110 @@ class WatsonXContractSpec extends AnyFunSuite with Matchers:
 
   private val hi = Conversation(Seq(UserMessage("Hi")))
 
-  private def generationWith(stop: Option[String]): HttpResponse =
-    val field = stop.fold("")(s => s""","stop_reason":"$s"""")
+  private def reply(message: String, finish: String = "tool_calls"): HttpResponse =
     HttpResponse(
       200,
-      s"""{"id":"g","results":[{"generated_text":"Hello","generated_token_count":2,"input_token_count":7$field}]}"""
+      s"""{"id":"g","choices":[{"index":0,"message":$message,"finish_reason":"$finish"}],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}"""
     )
 
-  test("tools are rejected by complete with a ValidationError naming 'tools' and NO http request at all") {
-    val http   = routed(_ => Right(iamToken()), _ => Right(generation))
+  private def complete(response: HttpResponse, options: CompletionOptions = CompletionOptions()) =
+    new WatsonXClient(config, httpClient = routed(_ => Right(iamToken()), _ => Right(response)))
+      .complete(hi, options)
+
+  test("tools are accepted: they go over the wire and the model's tool call comes back") {
+    val http = routed(
+      _ => Right(iamToken()),
+      _ =>
+        Right(
+          reply(
+            """{"role":"assistant","content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":"ping","arguments":"{\"x\":1}"}}]}"""
+          )
+        )
+    )
     val result = new WatsonXClient(config, httpClient = http).complete(hi, CompletionOptions().withTools(Seq(tool)))
-    result.left.toOption match
-      case Some(e: ValidationError) =>
-        e.field shouldBe "tools"
-        e.message should include("tool calling")
-        (e.message should not).include(ApiKey)
-      case other => fail(s"expected ValidationError, got $other")
-    http.requests shouldBe empty
+    val call   = ToolCall("call-1", "ping", ujson.Obj("x" -> 1))
+    val c      = result.getOrElse(fail(s"expected success, got $result"))
+    c.toolCalls shouldBe List(call)
+    c.message.toolCalls shouldBe Seq(call)
+    c.content shouldBe ""
+    c.usage.map(u => (u.promptTokens, u.completionTokens, u.totalTokens)) shouldBe Some((7, 2, 9))
+    ujson.read(http.modelRequests.head.body)("tools")(0)("function")("name").str shouldBe "ping"
   }
 
-  test("tools are rejected by streamComplete with a ValidationError, onChunk is never called, NO http request") {
-    val http   = streaming(streamOf(bytes("data: {}\n\n")))
-    var chunks = 0
-    val result = new WatsonXClient(config, httpClient = http)
-      .streamComplete(hi, CompletionOptions().withTools(Seq(tool)), _ => chunks += 1)
-    result.left.toOption.exists(_.isInstanceOf[ValidationError]) shouldBe true
-    chunks shouldBe 0
-    http.requests shouldBe empty
+  test("a reply with text and several calls keeps both, in order") {
+    val c = complete(
+      reply(
+        """{"role":"assistant","content":"Checking.","tool_calls":[{"id":"a","function":{"name":"ping","arguments":"{}"}},{"id":"b","function":{"name":"ping","arguments":{"k":1}}}]}"""
+      )
+    ).getOrElse(fail("expected success"))
+    c.content shouldBe "Checking."
+    c.toolCalls.map(_.id) shouldBe List("a", "b")
+    c.toolCalls.map(_.arguments) shouldBe List(ujson.Obj(), ujson.Obj("k" -> 1))
+    c.message.content shouldBe "Checking."
   }
 
-  test("an empty tool list is not tools: the call goes through") {
-    val http = routed(_ => Right(iamToken()), _ => Right(generation))
-    new WatsonXClient(config, httpClient = http)
-      .complete(hi, CompletionOptions().withTools(Seq.empty))
-      .isRight shouldBe true
-    http.modelRequests should have size 1
+  test("a call without an id gets a generated one; an empty or null tool_calls is no calls") {
+    val withoutId = complete(reply("""{"content":"x","tool_calls":[{"function":{"name":"ping"}}]}"""))
+    withoutId.map(_.toolCalls.map(call => (call.id.startsWith("call_"), call.name, call.arguments))) shouldBe
+      Right(List((true, "ping", ujson.Obj())))
+    Seq("""{"content":"x","tool_calls":[]}""", """{"content":"x","tool_calls":null}""", """{"content":"x"}""")
+      .foreach(message => withClue(message)(complete(reply(message)).map(_.toolCalls) shouldBe Right(Nil)))
   }
 
-  test("the other unsupported options still do not fail a call") {
-    val http = routed(_ => Right(iamToken()), _ => Right(generation))
-    val opts = CompletionOptions()
-      .withPresencePenalty(0.5)
-      .withFrequencyPenalty(0.5)
-      .withReasoning(ReasoningEffort.High)
-      .withResponseFormat(Some(ResponseFormat.Json))
-    new WatsonXClient(config, httpClient = http).complete(hi, opts).isRight shouldBe true
-  }
-
-  test("the stop_sequences really go over the wire, in complete and in streamComplete") {
-    val http = routed(_ => Right(iamToken()), _ => Right(generation))
-    new WatsonXClient(config, httpClient = http).complete(hi, CompletionOptions()): Unit
-    ujson.read(http.modelRequests.head.body)("parameters")("stop_sequences")(0).str shouldBe "\n[USER]:"
-
-    val sttp = streaming(
-      streamOf(bytes("data: " + """{"results":[{"generated_text":"x","stop_reason":"eos_token"}]}""" + "\n\n"))
+  test("a malformed tool call is a ProcessingError that does not echo the arguments or the key") {
+    val malformed = Seq(
+      """{"tool_calls":"nope"}""",
+      """{"tool_calls":[1]}""",
+      """{"tool_calls":[{"id":"a"}]}""",
+      """{"tool_calls":[{"id":"a","function":{}}]}""",
+      """{"tool_calls":[{"id":"a","function":{"name":""}}]}""",
+      """{"tool_calls":[{"id":"a","function":{"name":"ping","arguments":"SECRETARGS"}}]}""",
+      """{"tool_calls":[{"id":"a","function":{"name":"ping","arguments":"[1]"}}]}""",
+      """{"tool_calls":[{"id":"a","function":{"name":"ping","arguments":5}}]}"""
     )
-    new WatsonXClient(config, httpClient = sttp).streamComplete(hi, CompletionOptions(), _ => ()): Unit
-    ujson.read(sttp.modelRequests.head.body)("parameters")("stop_sequences").arr.map(_.str) should contain("\n[USER]:")
-  }
-
-  test("complete(): stop_reason table, error values are a ServiceError, everything else (or absent) is Right") {
-    val table: Seq[(Option[String], Boolean)] = Seq(
-      None                  -> true,
-      Some("not_finished")  -> true,
-      Some("eos_token")     -> true,
-      Some("stop_sequence") -> true,
-      Some("max_tokens")    -> true,
-      Some("token_limit")   -> true,
-      Some("brand_new")     -> true,
-      Some("")              -> true,
-      Some("error")         -> false,
-      Some("cancelled")     -> false,
-      Some("time_limit")    -> false,
-      Some("ERROR")         -> false,
-      Some("Time_Limit")    -> false
-    )
-    table.foreach { case (stop, ok) =>
-      val http   = routed(_ => Right(iamToken()), _ => Right(generationWith(stop)))
-      val result = new WatsonXClient(config, httpClient = http).complete(hi, CompletionOptions())
-      withClue(s"stop_reason=$stop: ") {
-        result.isRight shouldBe ok
-        if !ok then
-          result.left.toOption.exists(_.isInstanceOf[ServiceError]) shouldBe true
-          result.left.toOption.map(_.message).getOrElse("") should include(stop.getOrElse("").toLowerCase)
+    malformed.foreach { message =>
+      withClue(message) {
+        complete(reply(message)).left.toOption match
+          case Some(e: ProcessingError) =>
+            (e.message + e.toString should not).include("SECRETARGS")
+            (e.message + e.toString should not).include(ApiKey)
+          case other => fail(s"expected ProcessingError, got $other")
       }
     }
   }
 
-  test("error messages for abnormal endings and rejected tools never contain the API key") {
-    val http      = routed(_ => Right(iamToken()), _ => Right(generationWith(Some("error"))))
-    val nonStream = new WatsonXClient(config, httpClient = http).complete(hi, CompletionOptions())
+  test("a reply with a null or missing content is empty text, not a failure") {
+    Seq("""{"role":"assistant","content":null}""", """{"role":"assistant"}""", "null").foreach { message =>
+      withClue(message)(complete(reply(message, "stop")).map(_.content) shouldBe Right(""))
+    }
+  }
+
+  test("a reply without usage still succeeds, with no usage") {
+    val body =
+      """{"id":"g","choices":[{"index":0,"message":{"role":"assistant","content":"x"},"finish_reason":"stop"}]}"""
+    complete(HttpResponse(200, body)).map(c => (c.content, c.usage)) shouldBe Right(("x", None))
+  }
+
+  test("usage without a total sums the prompt and completion tokens") {
+    val body =
+      """{"choices":[{"message":{"content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":4}}"""
+    complete(HttpResponse(200, body)).map(_.usage.map(_.totalTokens)) shouldBe Right(Some(9))
+  }
+
+  test("a reply with no choices is a ValidationError") {
+    Seq("""{"choices":[]}""", "{}", """{"choices":[1]}""").foreach { body =>
+      withClue(body)(
+        complete(HttpResponse(200, body)).left.toOption.exists(_.isInstanceOf[ValidationError]) shouldBe true
+      )
+    }
+  }
+
+  test("error messages for abnormal endings and malformed replies never contain the API key") {
+    val abnormal  = complete(reply("""{"content":"x"}""", "error"))
+    val malformed = complete(reply("""{"tool_calls":"nope"}"""))
     val streamed = new WatsonXClient(config, httpClient = streaming(streamOf(bytes(""))))
       .streamComplete(hi, CompletionOptions(), _ => ())
-    val rejected = new WatsonXClient(config, httpClient = http).complete(hi, CompletionOptions().withTools(Seq(tool)))
-    Seq(nonStream, streamed, rejected).foreach { r =>
+    Seq(abnormal, malformed, streamed).foreach { r =>
       r.isLeft shouldBe true
       val text = r.left.toOption.map(e => e.toString + e.message).getOrElse("")
       (text should not).include(ApiKey)

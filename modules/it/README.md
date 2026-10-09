@@ -133,6 +133,41 @@ A suite whose service is missing cancels its tests, which ScalaTest reports as s
 Set `LLM4S_IT_STRICT=true` - as every tier's CI job does - to make that a failure instead,
 so a service that did not start cannot pass for a suite that did.
 
+## The watsonx assumption probe
+
+`llm4s-watsonx` has never been run against the real service: there was no IBM account behind the project.
+`WatsonXAssumptionProbeSpec` (`@Cloud`) is the first run for whoever has one. It checks, one test per detail,
+what `WatsonXClient` takes from IBM's public pages and IBM's open-source clients, and prints a table saying
+which held.
+
+```bash
+export WATSONX_API_KEY=...        # IBM Cloud API key
+export WATSONX_PROJECT_ID=...     # or WATSONX_SPACE_ID
+export WATSONX_BASE_URL=https://eu-de.ml.cloud.ibm.com   # optional; default https://us-south.ml.cloud.ibm.com
+export WATSONX_MODEL=ibm/granite-4-h-small               # optional; must support tool calling
+sbt "it/testOnly org.llm4s.llmconnect.smoke.WatsonXAssumptionProbeSpec"
+```
+
+Without `WATSONX_API_KEY` and a project or space id every test is cancelled and nothing is sent to IBM. The
+cost is a few dozen requests of at most a few hundred tokens each. `sbt testSmoke` runs it with the other
+`@Cloud` suites.
+
+**Reading the report.** The last thing the run prints is a table, one row per assumption:
+
+| Result | Meaning | What to do |
+|---|---|---|
+| `held` | the service behaves as the client assumes | nothing |
+| `NOT HELD` | the assumption is wrong; the failed test's message names it and the place in `WatsonXClient` to change | send the table and the message |
+| `skipped` | no credentials, or the test was cancelled | run it with an account |
+
+Rows marked `(info)` check things the client does not depend on, to settle the documentation. A `NOT HELD`
+there needs no client change.
+
+**What to send back.** The table, and the sanitised bodies of one plain reply, one tool-call reply and one
+stream, with the API key, the bearer token and anything you would not publish removed. They replace the
+fake-server fixtures in `modules/providers/watsonx/src/test`, which turns what was a guess into a regression
+test. Then #1314 can close.
+
 ## Environment variables
 
 - Neo4j via `NEO4J_URI`, `NEO4J_USER`, and `NEO4J_PASSWORD`

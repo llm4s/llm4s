@@ -22,7 +22,7 @@ class WatsonXCancellationSpec extends AnyFunSuite with Matchers:
   private val firstEvent =
     """id: 1
       |event: message
-      |data: {"results":[{"generated_text":"Hi","generated_token_count":1,"input_token_count":4,"stop_reason":"not_finished"}]}
+      |data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":null}]}
       |
       |""".stripMargin
 

@@ -101,9 +101,10 @@ object StubHttp {
   def iamToken(token: String = "tok-1", expiresIn: Int = 3600): HttpResponse =
     HttpResponse(200, s"""{"access_token":"$token","expires_in":$expiresIn}""")
 
-  val generation: HttpResponse = HttpResponse(
+  /** A chat reply: the text `Hello`, a normal stop and seven prompt and two completion tokens. */
+  val chatReply: HttpResponse = HttpResponse(
     200,
-    """{"id":"g-1","results":[{"generated_text":"Hello","generated_token_count":2,"input_token_count":7}]}"""
+    """{"id":"c-1","choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}"""
   )
 
   /** IAM answers `iam`; model calls answer `model`. */

@@ -28,7 +28,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
   private val iam = HttpResponse(200, """{"access_token":"tok-1","expires_in":3600}""")
   private val generation = HttpResponse(
     200,
-    """{"id":"g-1","results":[{"generated_text":"Hello","generated_token_count":2,"input_token_count":7}]}"""
+    """{"id":"g-1","choices":[{"index":0,"message":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}"""
   )
   private val hi = Conversation(Seq(SystemMessage("be brief"), UserMessage("Hi")))
 
@@ -38,7 +38,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     now: () => Long = () => 1000L
   ) = new WatsonXClient(cfg, httpClient = http, nowSeconds = now)
 
-  test("complete exchanges the key at the IAM endpoint, then calls text/generation with the bearer token") {
+  test("complete exchanges the key at the IAM endpoint, then calls text/chat with the bearer token") {
     val http   = new MockHttpClient(Seq(iam, generation))
     val result = client(http).complete(hi, CompletionOptions(maxTokens = Some(64)))
 
@@ -47,7 +47,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     completion.id shouldBe "g-1"
     completion.usage.map(u => (u.promptTokens, u.completionTokens, u.totalTokens)) shouldBe Some((7, 2, 9))
 
-    http.lastUrl shouldBe Some("https://wx.example.com/ml/v1/text/generation?version=2024-05-31")
+    http.lastUrl shouldBe Some("https://wx.example.com/ml/v1/text/chat?version=2024-05-31")
     http.lastHeaders.flatMap(_.get("Authorization")) shouldBe Some("Bearer tok-1")
     http.postCallCount shouldBe 2
   }
@@ -71,7 +71,7 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     c.complete(hi, CompletionOptions()).isRight shouldBe true
     now = 1000L + 3600L - 301L // 301s left: still outside the 300s buffer
     c.complete(hi, CompletionOptions()).isRight shouldBe true
-    http.postCallCount shouldBe 3 // one IAM exchange, two generations
+    http.postCallCount shouldBe 3 // one IAM exchange, two chat calls
 
     now = 1000L + 3600L - 299L // inside the buffer: refresh
     c.complete(hi, CompletionOptions()).isRight shouldBe true
@@ -105,13 +105,13 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     denied.complete(hi, CompletionOptions()).left.toOption.exists(_.isInstanceOf[AuthenticationError]) shouldBe true
   }
 
-  test("a response without results is a ValidationError") {
+  test("a response without choices is a ValidationError") {
     val result =
       client(new MockHttpClient(Seq(iam, HttpResponse(200, """{"id":"x"}""")))).complete(hi, CompletionOptions())
     result.left.toOption.exists(_.isInstanceOf[ValidationError]) shouldBe true
   }
 
-  test("the request body names the project, the model and flattens the conversation") {
+  test("the request body names the project, the model and sends the conversation as role messages") {
     val conversation = Conversation(
       Seq(
         SystemMessage("be brief"),
@@ -126,9 +126,14 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     body("model_id").str shouldBe "ibm/granite-13b-instruct-v2"
     body("project_id").str shouldBe "project-1"
     body.obj.contains("space_id") shouldBe false
-    body("parameters")("max_new_tokens").num shouldBe 32
-    body("input").str shouldBe
-      "[SYSTEM]: be brief\n[USER]: Hi\n[ASSISTANT]: Hello\n[TOOL_RESULT:call-7]: 42\n[USER]: Thanks\n[ASSISTANT]: "
+    body("max_tokens").num shouldBe 32
+    body("messages").arr.map(m => (m("role").str, m("content").str)) shouldBe Seq(
+      ("system", "be brief"),
+      ("user", "Hi"),
+      ("assistant", "Hello"),
+      ("tool", "42"),
+      ("user", "Thanks")
+    )
   }
 
   test("a space id replaces the project id, and top_p is sent only when it is not the default") {
@@ -136,18 +141,18 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
     val body   = client(new MockHttpClient(iam), spaced).createRequestBody(hi, CompletionOptions(topP = 0.5))
     body("space_id").str shouldBe "space-9"
     body.obj.contains("project_id") shouldBe false
-    body("parameters")("top_p").num shouldBe 0.5
+    body("top_p").num shouldBe 0.5
 
     client(new MockHttpClient(iam))
-      .createRequestBody(hi, CompletionOptions())("parameters")
+      .createRequestBody(hi, CompletionOptions())
       .obj
       .contains("top_p") shouldBe false
   }
 
-  test("streamComplete posts to generation_stream and accumulates text, finish and usage") {
+  test("streamComplete posts to chat_stream and accumulates text, finish and usage") {
     val events = Seq(
-      """{"results":[{"generated_text":"Hel","generated_token_count":1,"input_token_count":7,"stop_reason":"not_finished"}]}""",
-      """{"results":[{"generated_text":"lo","generated_token_count":2,"input_token_count":7,"stop_reason":"eos_token"}]}"""
+      """{"choices":[{"delta":{"content":"Hel"},"finish_reason":null}],"usage":{"prompt_tokens":7,"completion_tokens":1,"total_tokens":8}}""",
+      """{"choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}"""
     ).map(data => s"id: 1\nevent: message\ndata: $data\n").mkString("\n")
     val http   = new MockHttpClient(Seq(iam, HttpResponse(200, events)))
     val chunks = ListBuffer.empty[StreamedChunk]
@@ -156,9 +161,9 @@ class WatsonXClientSpec extends AnyFunSuite with Matchers:
       .streamComplete(hi, CompletionOptions(), chunks += _)
       .getOrElse(fail("expected a completion"))
 
-    http.lastUrl shouldBe Some("https://wx.example.com/ml/v1/text/generation_stream?version=2024-05-31")
+    http.lastUrl shouldBe Some("https://wx.example.com/ml/v1/text/chat_stream?version=2024-05-31")
     chunks.flatMap(_.content).mkString shouldBe "Hello"
-    chunks.map(_.finishReason) shouldBe Seq(None, Some("eos_token"))
+    chunks.map(_.finishReason) shouldBe Seq(None, None, Some("stop"))
     completion.content shouldBe "Hello"
     completion.model shouldBe "ibm/granite-13b-instruct-v2"
     completion.usage.map(u => (u.promptTokens, u.completionTokens)) shouldBe Some((7, 2))

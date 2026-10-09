@@ -903,6 +903,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `withOrganization`, `withContextWindow`, `withReserveCompletion`, `withExplicitProviderId`); `new OpenAIConfig(...)`
   becomes `OpenAIConfig(...)`; Java and Kotlin call the companion's `apply` - `OpenAIConfig.apply(key, "gpt-4o")
   .withOrganization("org-1")` - instead of the constructor. Pattern matching (`case OpenAIConfig(...)`) is unchanged.
+- **`llm4s-watsonx` moves to the chat endpoints, and tool calling works**
+  ([#1314](https://github.com/llm4s/llm4s/issues/1314), `llm4s-watsonx`): the client called watsonx.ai's
+  text-generation endpoints (`/ml/v1/text/generation` and `/generation_stream`), which IBM deprecated in
+  February 2026; it now calls `/ml/v1/text/chat` and `/ml/v1/text/chat_stream`. The conversation goes as role
+  `messages` instead of one prompt string with `[SYSTEM]:` / `[USER]:` markers, so user content can no longer
+  forge a turn and no stop sequences are sent. `CompletionOptions.tools` are accepted (before, they were rejected
+  with a `ValidationError`): they are sent as `tools` with `tool_choice_option: "auto"`, a reply's `tool_calls`
+  (whole, or streamed in pieces merged by `index`) become `ToolCall`s, and a `ToolMessage` goes back as a `tool`
+  message with its `tool_call_id`. The IAM token exchange, the `Result` error mapping, redaction and
+  cancellation are unchanged, and so is the configuration (`WatsonXConfig`, the `llm4s.providers.<name>` keys,
+  `apiVersion`). **Not verified against the real service**: there is no watsonx account behind the project, so
+  the wire shapes are those IBM's public pages report, cross-checked against IBM's own open-source clients (the
+  pinned sources are in `WatsonXClient`'s Scaladoc); the `@Cloud` probe suite `WatsonXAssumptionProbeSpec`
+  re-checks them against a real account. The module stays Beta and #1314 stays open until it has been run. **Migration:** a `stop_reason`
+  of the old API is now a `finish_reason` (`stop`, `length`, `tool_calls`; `error`, `cancelled` and `time_limit`
+  are still failures); `WatsonXClient.StopSequences` is gone and `WatsonXClient.ErrorStopReasons` is
+  `WatsonXClient.ErrorFinishReasons`; a model without tool support is answered by the service, not rejected
+  by the client.
 - **`LLMError.isRecoverable` is total** ([#1380](https://github.com/llm4s/llm4s/issues/1380), `llm4s-core`,
   `llm4s-agent`, `llm4s-speech`): it matched only `RecoverableError` and `NonRecoverableError` and threw a
   `MatchError` on any other `LLMError` (`EmbeddingError`, `RerankError`, `EvaluationError`, the orchestration and
