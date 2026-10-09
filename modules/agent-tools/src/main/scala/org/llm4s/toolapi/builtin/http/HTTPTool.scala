@@ -6,6 +6,7 @@ import org.llm4s.types.Result
 import org.llm4s.util.DurationRounding
 import upickle.default._
 
+import java.io.InputStream
 import java.net.{ HttpURLConnection, URI }
 import java.nio.charset.StandardCharsets
 import scala.concurrent.duration.{ DurationLong, FiniteDuration }
@@ -126,6 +127,21 @@ object HTTPTool {
    * Default HTTP tool instance, returning a Result for safe error handling.
    */
   val toolSafe: Result[ToolFunction[Map[String, Any], HTTPResult]] = createSafe()
+
+  /**
+   * Read a response body without ever holding more than `maxBytes + 1` bytes.
+   *
+   * A body that is longer than the cap is cut at the cap and reported as truncated; reading stops once the byte
+   * after the cap has been seen, instead of reading the whole body first. The cap counts bytes (so an endless
+   * response never has to fit in memory); a cut that falls inside a multi-byte character decodes it as U+FFFD.
+   */
+  private[http] def readBounded(in: InputStream, maxBytes: Long): (String, Boolean) = {
+    val limit    = math.min(math.max(maxBytes, 0L), (Int.MaxValue - 9).toLong).toInt
+    val bytes    = in.readNBytes(limit + 1)
+    val isLonger = bytes.length > limit
+    val kept     = if (isLonger) java.util.Arrays.copyOf(bytes, limit) else bytes
+    (new String(kept, StandardCharsets.UTF_8), isLonger)
+  }
 
   /** Headers that must be stripped when a redirect crosses to a different host. */
   private val SensitiveHeaders: Set[String] =
@@ -303,15 +319,13 @@ object HTTPTool {
         connection.getInputStream
       }
 
-      // Read at most maxResponseSize bytes (plus one, to detect a longer body) so that an
-      // oversized or endless response never has to fit in memory, then decode. A cut that
-      // falls inside a multi-byte character decodes it as U+FFFD.
-      val limit = math.min(math.max(config.maxResponseSize, 0L), (Int.MaxValue - 9).toLong).toInt
+      // Read at most maxResponseSize bytes (plus one, to detect a longer body) so that an oversized or endless
+      // response never has to fit in memory, then decode. A cut that falls inside a multi-byte character decodes it
+      // as U+FFFD. A body over the cap also drops the connection, so the server is not left sending the rest.
       val (responseBody, truncated) = using(inputStream) { is =>
-        val bytes    = is.readNBytes(limit + 1)
-        val isLonger = bytes.length > limit
-        val kept     = if (isLonger) java.util.Arrays.copyOf(bytes, limit) else bytes
-        (new String(kept, StandardCharsets.UTF_8), isLonger)
+        val bounded = readBounded(is, config.maxResponseSize)
+        if (bounded._2) connection.disconnect()
+        bounded
       }
 
       connection.disconnect()

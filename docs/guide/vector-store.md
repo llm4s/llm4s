@@ -772,7 +772,7 @@ val chunker = ChunkerFactory.sentence()
 // Chunk a document
 val chunks = chunker.chunk(documentText, ChunkingConfig(
   targetSize = 800,   // Target chunk size in characters
-  maxSize = 1200,     // Hard limit for chunk size
+  maxSize = 1200,     // Longer sentences are split at whitespace; a single longer word stays whole
   overlap = 150       // Overlap between consecutive chunks
 ))
 

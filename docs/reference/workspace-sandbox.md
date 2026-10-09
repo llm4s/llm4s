@@ -1,3 +1,10 @@
+---
+layout: page
+title: Workspace Sandbox
+parent: Reference
+nav_order: 17
+---
+
 # Workspace Sandbox Configuration
 
 The LLM4S workspace subsystem provides powerful capabilities (read/write files, execute commands, search) that require explicit sandboxing and security configuration.
@@ -21,8 +28,8 @@ When running the workspace runner (e.g. in Docker):
 
 ### Profiles
 
-- **permissive**: Current behavior—shell allowed, standard limits (1MB file size, 500 dir entries, 30s command timeout)
-- **locked**: Read-only file ops only; shell disabled; strict limits (10s timeout)
+- **permissive**: Current behavior—shell allowed with the read-write command allowlist (`ReadWriteCommands`), standard limits (1MB file size, 500 dir entries, 30s command timeout)
+- **locked**: Shell disabled; strict limits (10s timeout). File writes and modifications remain allowed; this profile does not enforce a read-only filesystem.
 
 ### HOCON (Client)
 
@@ -45,6 +52,7 @@ llm4s.workspace.sandbox {
 | `readOnlyPaths` | List[String] | Paths under workspace that are read-only (Phase 2) |
 | `allowedPaths` | List[String] | If non-empty, only these paths accessible (Phase 2) |
 | `networkAllowed` | Boolean | Documentation only; Phase 2: enforce network restrictions |
+| `allowedCommands` | Set[String] | Executable names `executeCommand` may run; field default `ReadOnlyCommands`; the permissive profile (the default profile) uses `ReadWriteCommands`, which adds write-capable ones (`cp`, `mv`, `rm`, `mkdir`, …). Arguments are not checked, so this is not a read-only guarantee ([#1715](https://github.com/llm4s/llm4s/issues/1715)) |
 
 ## Security Gaps Addressed
 
@@ -70,7 +78,7 @@ Run the containerized runner with locked sandbox:
 
 1. After `sbt workspaceRunner/docker:publishLocal`, get the image tag:
    ```bash
-   docker images llm4s/workspace-runner --format "{{.Tag}}"
+   {% raw %}docker images llm4s/workspace-runner --format "{{.Tag}}"{% endraw %}
    ```
    Use that tag (for example `0.3.2` or a dynver snapshot such as `0.3.2+abc123-SNAPSHOT`) in place of `TAG` below.
 

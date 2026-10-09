@@ -1,3 +1,10 @@
+---
+layout: page
+title: Migration Guide
+parent: Reference
+nav_order: 2
+---
+
 # Migration Guide
 
 ## Stage 1 migration: agent runtime
@@ -88,7 +95,7 @@ Embedding, reranker, MCP, image clients and the Whisper and Tacotron2 speech eng
 
 ### Orchestration removed (#1330)
 
-`org.llm4s.agent.orchestration` is deleted: `PlanRunner`, `Plan`, `Node`, `Edge`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`, with `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (the agent's id is `org.llm4s.agent.AgentId`). `PlanRunner` passed `Map[String, Any]` between nodes and cast each node to `TypedAgent[Any, Any]`. A typed graph does the same job with checked handles, checkpoints and recovery. The [multi-agent graph recipe](../examples/cookbook.md#6-several-agents-in-one-graph) is a worked replacement.
+`org.llm4s.agent.orchestration` is deleted: `PlanRunner`, `Plan`, `Node`, `Edge`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`, with `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (the agent's id is `org.llm4s.agent.AgentId`). `PlanRunner` passed `Map[String, Any]` between nodes and cast each node to `TypedAgent[Any, Any]`. A typed graph does the same job with checked handles, checkpoints and recovery. The [multi-agent graph recipe](../examples/cookbook#6-several-agents-in-one-graph) is a worked replacement.
 
 | Removed | Use instead |
 |---|---|
@@ -1369,7 +1376,7 @@ Two things to know:
 
 Variables that `reference.conf` files do bind - `TRACING_MODE`, `LANGFUSE_*`, `OTEL_SERVICE_NAME`,
 `OTEL_EXPORTER_OTLP_ENDPOINT`, `EMBEDDING_MODEL`, `VOYAGE_API_KEY` and others - still work; see
-[the variables llm4s reads](../getting-started/configuration.md#environment-variables-llm4s-reads).
+[the variables llm4s reads](../getting-started/configuration#environment-variables-llm4s-reads).
 Two tools read `LLM_MODEL` themselves: the chat-tui sample (`ChatTuiConfig`) and the config-policy
 env check (`EnvCheckPolicies`).
 
@@ -1643,7 +1650,7 @@ llm4s.providers {
 
 To support it, a named provider section may now carry `contextWindow`, `reserveCompletion` and a
 `headers` object, which `NamedProviderConfig` exposes. Providers other than `openai-compatible`
-ignore them. See [OpenAI-compatible endpoints](../guide/providers.md#openai-compatible-endpoints).
+ignore them. See [OpenAI-compatible endpoints](../guide/providers#openai-compatible-endpoints).
 
 ### Registration is the dependency
 

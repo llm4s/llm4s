@@ -521,9 +521,12 @@ for both purposes against a local server, as `VoyageAIInputTypeSpec` does.
   tool-call chunk must carry its call's id** - if the wire format identifies continuations only
   by index, map index to id yourself; a chunk with an empty id is skipped. It is mutable: one per
   request.
-- `StreamingToolArgumentParser.parse(raw: String): ujson.Value` turns an argument fragment into
-  the `ToolCall.arguments` value the accumulator expects (`{}` for empty, the parsed JSON when
-  complete, the raw string otherwise).
+- Pass each streamed argument fragment to the accumulator as-is, as `ujson.Str(raw)` (`ujson.Obj()`
+  for an empty one): the accumulator joins the fragments and parses the whole. Do not parse a
+  fragment on its own - a fragment that happens to be valid JSON (`":"`, `"Paris"`, `1`) would lose
+  its quotes or be dropped. `StreamingToolArgumentParser.parse(raw: String): ujson.Value` is for a
+  reassembled argument string (`{}` for empty, the parsed JSON when complete, the raw string
+  otherwise); `StreamingAccumulator` uses it on the joined arguments.
 
 ### `ProviderModelLister`
 

@@ -325,9 +325,13 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     val runtime  = GraphRuntime.inMemory()
     val agent    = jAgentOf(model.client)(_.withRuntime(runtime).withStreaming())
     val threadId = "j20"
-    val recorder = Recorder(e => if (AgentEvents.TextDelta.unapply(e).isDefined) throw new LinkageError("fatal"))
+    val fatal    = new LinkageError("fatal")
+    val raising  = new FatalListenerError(fatal)
+    val recorder = Recorder(e => if (AgentEvents.TextDelta.unapply(e).isDefined) raising.raise())
     val outcome  = agent.stream(threadId, "hi", recorder).get().await()
     outcome.getError().getMessage should include("failed fatally")
+    // the error is not swallowed: it ends the stream's thread, which this test waits for (#1719)
+    (raising.awaitDeath() should be).theSameInstanceAs(fatal)
     recorder.terminals.get shouldBe 0
     model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
     eventually(runtime.liveSubscriptions(ThreadId(threadId)) shouldBe 0)

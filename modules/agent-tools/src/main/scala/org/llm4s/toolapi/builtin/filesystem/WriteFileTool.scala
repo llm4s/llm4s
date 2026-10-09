@@ -4,8 +4,9 @@ import org.llm4s.toolapi._
 import org.llm4s.types.Result
 import upickle.default._
 
-import java.nio.file.{ Files, Paths, StandardOpenOption }
-import scala.util.Try
+import java.nio.ByteBuffer
+import java.nio.file.{ FileAlreadyExistsException, Files, LinkOption, Path, Paths, StandardOpenOption }
+import scala.util.{ Try, Using }
 
 /**
  * Result from writing a file.
@@ -106,55 +107,83 @@ object WriteFileTool {
     encodingStr: String,
     config: WriteConfig
   ): Either[String, WriteFileResult] = {
-    val pathResult =
-      Try(Paths.get(pathStr).toAbsolutePath.normalize()).toEither.left.map(e => s"Invalid path: ${e.getMessage}")
+    val inputs = for {
+      charset <- Try(java.nio.charset.Charset.forName(encodingStr)).toEither.left
+        .map(_ => s"Unsupported encoding: $encodingStr")
+      _ <- Either.cond(charset.canEncode, (), s"Unsupported encoding for writing: $encodingStr")
+      path <- Try(Paths.get(pathStr).toAbsolutePath.normalize()).toEither.left
+        .map(e => s"Invalid path: ${e.getMessage}")
+    } yield (charset, path)
 
-    pathResult.flatMap { path =>
-      // Security check - must be in allowed paths
-      if (!config.isPathAllowed(path)) {
-        Left(s"Access denied: path '$pathStr' is not in allowed paths. Allowed: ${config.allowedPaths.mkString(", ")}")
-      } else {
-        Try(java.nio.charset.Charset.forName(encodingStr)).toEither.left
-          .map(_ => s"Unsupported encoding: $encodingStr")
-          .map(content.getBytes)
-          .flatMap { contentBytes =>
-            if (contentBytes.length > config.maxFileSize) {
-              Left(s"Content too large: ${contentBytes.length} bytes (max: ${config.maxFileSize} bytes)")
+    inputs.flatMap { case (charset, path) =>
+      // Security check - the real location must be in the allowed paths, and the file is written there
+      config.resolve(path) match {
+        case None =>
+          Left(
+            s"Access denied: path '$pathStr' is not in allowed paths. Allowed: ${config.allowedPaths.mkString(", ")}"
+          )
+        case Some(real) =>
+          val contentBytes = content.getBytes(charset)
+
+          if (contentBytes.length > config.maxFileSize) {
+            Left(s"Content too large: ${contentBytes.length} bytes (max: ${config.maxFileSize} bytes)")
+          } else {
+            val fileExists = Files.exists(real)
+
+            if (fileExists && !append && !config.allowOverwrite) {
+              Left(s"File already exists and overwrite is not allowed: $pathStr")
             } else {
-              val fileExists = Files.exists(path)
-
-              if (fileExists && !append && !config.allowOverwrite) {
-                Left(s"File already exists and overwrite is not allowed: $pathStr")
-              } else {
-                Try {
-                  // Create parent directories if needed
-                  if (config.createDirectories) {
-                    val parent = path.getParent
-                    if (parent != null && !Files.exists(parent)) {
-                      Files.createDirectories(parent)
-                    }
+              Try {
+                // Create parent directories if needed
+                if (config.createDirectories) {
+                  val parent = real.getParent
+                  if (parent != null && !Files.exists(parent)) {
+                    Files.createDirectories(parent)
                   }
+                }
 
-                  // Write file
-                  val options = if (append) {
-                    Array(StandardOpenOption.CREATE, StandardOpenOption.APPEND)
-                  } else {
-                    Array(StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
-                  }
+                val created = writeResolved(real, contentBytes, append, config.allowOverwrite)
 
-                  Files.write(path, contentBytes, options: _*)
-
-                  WriteFileResult(
-                    path = path.toString,
-                    bytesWritten = contentBytes.length,
-                    created = !fileExists,
-                    appended = append && fileExists
-                  )
-                }.toEither.left.map(e => s"Failed to write file: ${e.getMessage}")
-              }
+                WriteFileResult(
+                  path = path.toString,
+                  bytesWritten = contentBytes.length,
+                  created = created,
+                  appended = append && !created
+                )
+              }.toEither.left.map(e => s"Failed to write file: ${e.getMessage}")
             }
           }
       }
+    }
+  }
+
+  /** Opens the checked final component atomically, without following a link inserted after resolution. */
+  private[builtin] def writeResolved(
+    real: Path,
+    content: Array[Byte],
+    append: Boolean,
+    allowOverwrite: Boolean
+  ): Boolean = {
+    val (channel, created) =
+      Try {
+        (
+          Files.newByteChannel(
+            real,
+            StandardOpenOption.WRITE,
+            StandardOpenOption.CREATE_NEW,
+            LinkOption.NOFOLLOW_LINKS
+          ),
+          true
+        )
+      }.recover {
+        case _: FileAlreadyExistsException if append || allowOverwrite =>
+          val mode = if (append) StandardOpenOption.APPEND else StandardOpenOption.TRUNCATE_EXISTING
+          (Files.newByteChannel(real, StandardOpenOption.WRITE, mode, LinkOption.NOFOLLOW_LINKS), false)
+      }.get
+    Using.resource(channel) { openChannel =>
+      val bytes = ByteBuffer.wrap(content)
+      while (bytes.hasRemaining) openChannel.write(bytes)
+      created
     }
   }
 }
