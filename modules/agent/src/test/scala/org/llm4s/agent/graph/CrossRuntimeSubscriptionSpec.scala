@@ -182,7 +182,9 @@ class CrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with Either
     val b      = GraphRuntime(store, Clock.systemUTC(), ClaimPolicy.default, WatchPolicy.disabled)
     val seen   = Seen()
     val sub    = b.subscribe(thread)(seen).value
-    eventually(b.liveSubscriptions(thread) shouldBe 1)
+    // replayed and live - the replay's read and the switch's catch-up read - so A's run reaches it only live
+    eventually(store.reads.get should be >= 2)
+    Thread.sleep(100) // the catch-up read itself returns after its count
     val readsAfterReplay = store.reads.get
     run(a, thread, "one")
     Thread.sleep(200)
