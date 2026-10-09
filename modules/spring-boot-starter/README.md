@@ -3,7 +3,8 @@
 Spring Boot auto-configuration for llm4s (`org.llm4s:llm4s-spring-boot-starter_3`, built on `llm4s-java-api`).
 
 ```properties
-llm4s.provider=openai          # openai | anthropic | ollama
+# openai | anthropic | ollama
+llm4s.provider=openai
 llm4s.model=gpt-4o
 llm4s.api-key=${OPENAI_API_KEY}
 ```
@@ -54,7 +55,10 @@ With `llm4s.health.probe=true` it sends a one-token completion (prompt `ping`, `
 executor, waits at most `probe-timeout`, and caches the outcome (also a failure) for `probe-ttl`, so
 health polling does not hit or bill the provider each time. A failed or timed-out probe is `DOWN`
 with `probe=failed|timeout` and an `error` message with the API key and token-like strings redacted.
-The probe is billed: keep the TTL generous.
+A health check whose thread is interrupted while it waits (Actuator shutting down, say) is `DOWN`
+with `probe=cancelled`, the interrupt flag left set; `health()` never throws `InterruptedException`.
+A cancelled probe is not cached: it says something about that thread, not the provider, so the next
+check probes again. The probe is billed: keep the TTL generous.
 
 | Property | Default | |
 |----------|---------|---|

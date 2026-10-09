@@ -189,6 +189,38 @@ class ThinkingReplaySpec extends AnyFlatSpec with Matchers {
     sealedStates(compressed).last shouldBe false
   }
 
+  // the origin-only mode inspects its own output: `sealedStates` would run the prefix mode on it
+  private def sealedAfterOrigin(to: ReplayOrigin, messages: Seq[Message]): Seq[Boolean] =
+    ThinkingReplay.replayableOrigin(to, messages).collect { case am: AssistantMessage => am.hasSealedThinking }
+
+  "ThinkingReplay.bindOrigin and replayableOrigin" should "keep an origin-bound turn when the history around it changes" in {
+    // the per-part rule (Gemini): a signature survives pruned or edited earlier history
+    val turn = ThinkingReplay.bindOrigin(origin, AssistantMessage(None, Seq(call)).withThinking(sealedThinking))
+    turn.thinkingBinding shouldBe defined
+    sealedAfterOrigin(origin, Seq(UserMessage("a different history"), turn)).last shouldBe true
+    sealedAfterOrigin(origin, Seq(turn)).last shouldBe true
+  }
+
+  it should "unseal an origin-bound turn for another provider, another model, or no binding" in {
+    val turn = ThinkingReplay.bindOrigin(origin, AssistantMessage(None, Seq(call)).withThinking(sealedThinking))
+    sealedAfterOrigin(ReplayOrigin("bedrock", origin.model), Seq(turn)).last shouldBe false
+    sealedAfterOrigin(ReplayOrigin(origin.provider, "claude-haiku-4-5"), Seq(turn)).last shouldBe false
+    sealedAfterOrigin(origin, Seq(AssistantMessage(None, Seq(call)).withThinking(sealedThinking))).last shouldBe false
+  }
+
+  it should "bind sealed thinking only, like bind" in {
+    ThinkingReplay.bindOrigin(origin, AssistantMessage("plain").withThinking("text")).thinkingBinding shouldBe None
+  }
+
+  it should "never accept a prefix binding, nor have its origin binding accepted by the prefix mode" in {
+    // the two modes are domain-separated: a binding from one never validates in the other
+    val prefixBound = signedTurn(UserMessage("hi"))
+    sealedAfterOrigin(origin, Seq(UserMessage("hi"), prefixBound)).last shouldBe false
+
+    val originBound = ThinkingReplay.bindOrigin(origin, AssistantMessage(None, Seq(call)).withThinking(sealedThinking))
+    sealedStates(Seq(originBound)).last shouldBe false
+  }
+
   "AssistantMessage" should "round-trip its binding through the codec, and keep JSON without it readable" in {
     val turn = signedTurn(UserMessage("hi"))
     read[AssistantMessage](write(turn)) shouldBe turn
