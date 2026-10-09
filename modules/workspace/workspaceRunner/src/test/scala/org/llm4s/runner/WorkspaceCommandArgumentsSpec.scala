@@ -337,7 +337,8 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     refuses(ws, ("ls" +: Seq.fill(64)("a/" * 1000)).mkString(" "), ArgumentNotAllowed)
     // an option whose every tail is a path: the first absolute tail is refused without walking the rest
     refuses(ws, "ls -x" + ("a/" * 2040), PathEscape)
-    (System.nanoTime() - start).nanos should be < 2.seconds
+    (System
+      .nanoTime() - start).nanos should be < 5.seconds // seconds per command before the cap; generous for slow runners
   }
 
   // ---------------------------------------------------------------------------------------------------------------

@@ -26,24 +26,29 @@ import scala.util.{ Try, Using }
  *     - a short option is refused anywhere in a cluster (`-ro out`), attached value or not;
  *     - a long option is refused under any abbreviation of at least one letter (`--outp`), since GNU programs and
  *       `git` accept an unambiguous prefix, and with or without `=value`.
- *  3. '''Paths''' (`PATH_ESCAPE_ATTEMPT`, the code the file operations use). Every argument - and, inside an option,
- *     every tail after its dash, so the `/etc/x` in `--file=/etc/x` and `-f/etc/x` - is resolved the way the kernel
- *     would resolve it from the real working directory: component by component, following each symbolic link
- *     where it is met, so `link/..` goes to the parent of the link's target, not back to the directory holding the
- *     link. The result must lie inside the real workspace root. An argument that does not name an existing file is
+ *  3. '''Paths''' (`PATH_ESCAPE_ATTEMPT`, the code the file operations use). Every argument - and the value of a
+ *     `--name=value` option and every tail of a short option, so the `/etc/x` in `--file=/etc/x` and `-f/etc/x` -
+ *     is resolved the way the kernel would resolve it from the real working directory: component by component,
+ *     following each symbolic link where it is met, so `link/..` goes to the parent of the link's target, not back
+ *     to the directory holding the link. The result must lie inside the real workspace root. An argument that does not name an existing file is
  *     judged the same way, so `../x` and `/tmp/x` are refused even when they do not exist yet. Programs that only
- *     print their arguments (`echo`, `pwd`, `whoami`, `hostname`) are not checked.
+ *     print their arguments (`echo`, `pwd`, `whoami`, `hostname`) are not checked. For `cp`, which writes through
+ *     a link it finds at the name it writes, the names it will write are checked too (see [[cpDestinationRefusal]]).
+ *     An argument over [[MaxArgumentLength]] characters, or paths costing more than [[MaxPathSteps]] lookups, are
+ *     refused with `ARGUMENT_NOT_ALLOWED` rather than walked.
  *
- * The path rule cannot tell a path from text that looks like one: a `grep` pattern that starts with `/` or has a
- * `..` component is refused too (write `[/]api` for `/api`).
+ * The path rule cannot tell a path from text that looks like one: a `grep` pattern or an option value that starts
+ * with `/` or has a `..` component is refused too (write `[/]api` for `/api`). A relative value without `..` can only
+ * leave the workspace through a link, so `--since=2024/01/01` and `--grep=feat/x` run.
  *
  * '''Limits.''' The checks cover what a command is given, not what a program reads by itself. A recursive walk
- * (`ls -R`, `grep -r`, `find`, `diff -r`) is checked where it starts; `ls -L`, `grep -R` and `find -L`, which
- * follow every link they meet, are refused, but `diff -r` follows links inside the tree it walks. `git` reads the
- * repository's own configuration, so a repository whose `.git/config` sets `core.fsmonitor`, `diff.external` or a
- * filter or textconv driver makes `git status` or `git diff` run that program; where the agent can write files
- * (the `writeFile` operation, or `cp`/`mv` in [[org.llm4s.shared.WorkspaceSandboxConfig.ReadWriteCommands]]) it
- * can write that configuration.
+ * (`ls -R`, `grep -r`, `find`, `diff -r`) is checked where it starts; `ls -L`, `grep -R`/`-S`, `find -L`,
+ * `cp -L`/`-H` and `chmod -L`/`-H`, which follow links they meet, are refused, but `diff -r` follows links inside the
+ * tree it walks. `git` reads the repository's own configuration and runs its hooks, so a repository whose
+ * `.git/config` sets `core.fsmonitor`, `diff.external` or a filter or textconv driver, or whose `.git/hooks` has a
+ * `post-index-change` hook, makes `git status` or `git diff` run that program; where the agent can write files (the
+ * `writeFile` operation, or `cp`/`mv` in [[org.llm4s.shared.WorkspaceSandboxConfig.ReadWriteCommands]]) it can write
+ * them (#1721). The checks run before the program starts and do not see a link a concurrent command makes.
  */
 private[runner] object CommandPolicy {
 
@@ -490,7 +495,15 @@ private[runner] object CommandPolicy {
     physicalPath(workDir, arg, budget) match {
       case None                  => None // not a path on this platform (e.g. a ':' on Windows): nothing can be opened
       case Some(Left(refused))   => Some(refused)
-      case Some(Right(resolved)) => if (canonical(resolved).startsWith(realRoot)) None else Some(Outside)
+      case Some(Right(resolved)) => outsideOf(resolved, realRoot, budget)
+    }
+
+  /** `None` when the walked path `resolved`, canonicalised, lies inside `realRoot`. */
+  private def outsideOf(resolved: Path, realRoot: Path, budget: Budget): Option[Verdict] =
+    canonical(resolved, budget) match {
+      case None                                    => Some(TooCostly)
+      case Some(real) if real.startsWith(realRoot) => None
+      case Some(_)                                 => Some(Outside)
     }
 
   /**
@@ -502,7 +515,7 @@ private[runner] object CommandPolicy {
   private def physicalPath(base: Path, arg: String, budget: Budget): Option[Either[Verdict, Path]] =
     parse(arg).map { path =>
       val (start, names) = split(base, path)
-      walk(start, names, hops = 0, budget)
+      walk(start, names, hops = 0, missing = false, budget)
     }
 
   /**
@@ -523,13 +536,25 @@ private[runner] object CommandPolicy {
 
   private val MaxLinkHops = 40
 
+  /**
+   * `missing` is true once the walk is below a component that does not exist: nothing below it can be a link, so no
+   * file-system call is made until a `..` climbs back.
+   */
   @tailrec
-  private def walk(current: Path, names: List[String], hops: Int, budget: Budget): Either[Verdict, Path] =
+  private def walk(
+    current: Path,
+    names: List[String],
+    hops: Int,
+    missing: Boolean,
+    budget: Budget
+  ): Either[Verdict, Path] =
     names match {
       case Nil                  => Right(current)
       case _ if !budget.spend() => Left(TooCostly)
-      case ("" | ".") :: rest   => walk(current, rest, hops, budget)
-      case ".." :: rest         => walk(Option(current.getParent).getOrElse(current), rest, hops, budget)
+      case ("" | ".") :: rest   => walk(current, rest, hops, missing, budget)
+      case ".." :: rest =>
+        walk(Option(current.getParent).getOrElse(current), rest, hops, missing = false, budget)
+      case name :: rest if missing => walk(current.resolve(name), rest, hops, missing, budget)
       case name :: rest =>
         val next = current.resolve(name)
         if (Files.isSymbolicLink(next)) {
@@ -539,9 +564,9 @@ private[runner] object CommandPolicy {
               case None => Left(Outside)
               case Some(target) =>
                 val (start, targetNames) = split(current, target)
-                walk(start, targetNames ++ rest, hops + 1, budget)
+                walk(start, targetNames ++ rest, hops + 1, missing = false, budget)
             }
-        } else walk(next, rest, hops, budget)
+        } else walk(next, rest, hops, missing = !Files.exists(next, LinkOption.NOFOLLOW_LINKS), budget)
     }
 
   /**
@@ -549,14 +574,14 @@ private[runner] object CommandPolicy {
    * symbolic links; this also settles what Java does not report as a link (a Windows junction), letter case on a
    * case-insensitive file system and Windows short names, so the comparison with the real root is like for like.
    */
-  private def canonical(path: Path): Path = {
+  private def canonical(path: Path, budget: Budget): Option[Path] = {
     val normalized = path.normalize()
-    Iterator
-      .iterate(normalized)(_.getParent)
-      .takeWhile(_ != null)
-      .find(p => Files.exists(p))
-      .flatMap(ancestor => Try(ancestor.toRealPath().resolve(ancestor.relativize(normalized))).toOption)
-      .getOrElse(normalized)
+    val ancestors  = Iterator.iterate(normalized)(_.getParent).takeWhile(_ != null)
+    ancestors
+      .map(p => if (budget.spend()) Some(p) else None)
+      .find(p => p.forall(Files.exists(_)))
+      .getOrElse(Some(normalized))
+      .map(ancestor => Try(ancestor.toRealPath().resolve(ancestor.relativize(normalized))).getOrElse(normalized))
   }
 
   // ---- cp: writing through a link at the destination
@@ -677,7 +702,9 @@ private[runner] object CommandPolicy {
           case (_, Some(Left(TooCostly))) => Some(tooCostly("cp"))
           case (d, Some(Left(Outside)))   => Some(destinationEscape(d, None))
           case (d, Some(Right(resolved))) =>
-            if (!canonical(resolved).startsWith(realRoot)) Some(destinationEscape(d, None))
+            val outside = outsideOf(resolved, realRoot, budget)
+            if (outside.contains(TooCostly)) Some(tooCostly("cp"))
+            else if (outside.nonEmpty) Some(destinationEscape(d, None))
             else if (command.recursive && Files.isDirectory(resolved))
               outboundLinkUnder(resolved, realRoot, budget) match {
                 case Left(_)          => Some(tooCostly("cp"))
