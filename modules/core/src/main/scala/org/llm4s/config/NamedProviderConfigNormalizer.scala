@@ -1,10 +1,14 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.auth.{ AuthConfig, IdentitySource }
 import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
+
+import java.nio.file.Path
+import scala.util.Try
 
 /** Converts a `RawNamedProviderSection` into a validated `NamedProviderConfig` by resolving string fields. */
 private[config] object NamedProviderConfigNormalizer:
@@ -38,6 +42,41 @@ private[config] object NamedProviderConfigNormalizer:
         .filter(_.nonEmpty)
         .toRight(ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `model`"))
 
+    // The identity token is the one auth key core reads itself: exactly one of a file path (made
+    // absolute now, so the SDKs, which may resolve a relative path differently, get the same one) or
+    // a literal. Every other key is the provider's, and validation decides which are accepted.
+    val authConfig: Result[Option[AuthConfig]] =
+      section.auth match
+        case None => Right(None)
+        case Some(raw) =>
+          val values = raw.collect { case (key, value) if value.trim.nonEmpty => key -> value.trim }
+          val path   = s"llm4s.providers.${providerName.asName}.auth"
+          val rest   = values -- AuthConfig.ReservedKeys
+          (values.get(AuthConfig.IdentityTokenFileKey), values.get(AuthConfig.IdentityTokenKey)) match
+            case (Some(file), None) =>
+              Try(Path.of(file).toAbsolutePath.normalize).toEither.left
+                .map(e =>
+                  ConfigurationError(
+                    s"$path.${AuthConfig.IdentityTokenFileKey} is not a valid path on this platform: ${e.getMessage}"
+                  )
+                )
+                .map(absolute => Some(AuthConfig(IdentitySource.File(absolute), rest)))
+            case (None, Some(token)) =>
+              Right(Some(AuthConfig(IdentitySource.Literal(token), rest)))
+            case (None, None) =>
+              Left(
+                ConfigurationError(
+                  s"$path needs ${AuthConfig.IdentityTokenFileKey} (a path to the identity token file, " +
+                    s"e.g. a SPIFFE JWT-SVID) or ${AuthConfig.IdentityTokenKey}"
+                )
+              )
+            case (Some(_), Some(_)) =>
+              Left(
+                ConfigurationError(
+                  s"$path sets both ${AuthConfig.IdentityTokenFileKey} and ${AuthConfig.IdentityTokenKey}; set only one"
+                )
+              )
+
     // The error names the key as the user wrote it: llm4s.providers.<name>.timeouts.request.
     val timeouts =
       section.timeouts.fold[Result[ProviderTimeouts]](Right(ProviderTimeouts.default)) { t =>
@@ -47,6 +86,7 @@ private[config] object NamedProviderConfigNormalizer:
     for
       id       <- providerType
       model    <- modelName
+      auth     <- authConfig
       timeouts <- timeouts
     yield NamedProviderConfig(
       provider = id,
@@ -57,5 +97,6 @@ private[config] object NamedProviderConfigNormalizer:
       // Trimmed and kept as read. Which of these the provider accepts is decided by
       // `NamedProviderSectionValidator`, which knows the descriptor; this does not.
       extras = section.extras.collect { case (key, value) if value.trim.nonEmpty => key -> value.trim },
-      timeouts = timeouts
+      timeouts = timeouts,
+      auth = auth
     )

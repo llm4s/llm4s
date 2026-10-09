@@ -179,6 +179,17 @@ required fields are present, the API key has fallen back to `llm4s.credentials.<
 `section.extras` holds exactly your declared extra keys, defaults applied. `buildClient` must
 check the config's type rather than cast - `ProviderDescriptor.expectConfig` does that.
 
+### Workload identity
+
+A provider that can authenticate with a workload identity token (a SPIFFE JWT-SVID, say) declares
+the keys it reads from a section's `auth` block in `ProviderConfigSpec.authExtras`. Core parses
+`identityTokenFile` / `identityToken` itself and hands the rest to `buildConfig` as
+`section.auth`; read a key with `ProviderDescriptor.requireAuthExtra`. A section sets `apiKey` or
+`auth`, never both, and a section with `auth` never consults the shared credential.
+`TokenExchange.provider` gives an RFC 8693 exchange with caching and single-flight refresh, and
+`FakeTokenExchangeServer` and `TestJwt` in the testkit test it without a network. An SDK that does
+its own federation takes the identity token's file path instead (see `AnthropicProvider`).
+
 ### `ProviderConfigSpec` and `ProviderConfigKey`
 
 The spec says what a section needs. The fields a provider author uses:
@@ -191,6 +202,7 @@ The spec says what a section needs. The fields a provider author uses:
 | `baseUrlExample`, `baseUrlEnv` | shown in the missing-`baseUrl` message |
 | `apiKeyEnv` | the variables your `reference.conf` binds, named in the missing-key error |
 | `extras` | your provider-specific keys, as `ProviderConfigKey`s |
+| `authExtras` | the keys you read from a section's `auth` block, as `ProviderConfigKey`s; empty (the default) means the provider rejects `auth` |
 
 `ProviderConfigSpec.apiKeyAndDefaultBaseUrl(defaultBaseUrl, apiKeyEnv)` builds the common shape.
 

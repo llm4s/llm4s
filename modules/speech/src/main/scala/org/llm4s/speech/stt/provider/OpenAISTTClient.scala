@@ -63,6 +63,7 @@ final class OpenAISTTClient(config: STTConfig, httpClient: Llm4sHttpClient = Llm
          else Seq.empty)
 
     for {
+      _ <- CloudSpeechSupport.requireApiKey("OpenAI STT", config.apiKey)
       response <- httpClient.postMultipart(
         s"${config.baseUrl}/v1/audio/transcriptions",
         Map("Authorization" -> s"Bearer ${config.apiKey}"),

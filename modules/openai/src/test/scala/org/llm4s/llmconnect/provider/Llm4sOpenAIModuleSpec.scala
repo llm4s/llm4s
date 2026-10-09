@@ -9,7 +9,7 @@ import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.testkit.{ CredentialsRoundTrip, LocalProviderTestServer, ProviderModuleChecks }
+import org.llm4s.testkit.{ CredentialsRoundTrip, LocalProviderTestServer, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -103,6 +103,21 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       ) match
         case Right(azure: AzureConfig) => azure.apiVersion shouldBe AzureConfig.DEFAULT_API_VERSION
         case other                     => fail(s"Expected AzureConfig, got $other")
+    }
+
+    "build a client from an openai section with auth" in {
+      given ProviderRegistry = ProviderRegistry.default
+      val section = ProviderTestConfig
+        .loadSection(
+          "wi",
+          """llm4s.providers.wi {
+            |  provider = "openai"
+            |  model    = "gpt-4o-mini"
+            |  auth { identityTokenFile = "/var/run/svid", identityProviderId = "idp_1", serviceAccountId = "sa_1" }
+            |}""".stripMargin
+        )
+        .fold(error => fail(error.message), identity)
+      assertBuildsClient(OpenAIProvider, section).getClass.getSimpleName shouldBe "OpenAIClient"
     }
 
     "refuse a config belonging to another provider" in {

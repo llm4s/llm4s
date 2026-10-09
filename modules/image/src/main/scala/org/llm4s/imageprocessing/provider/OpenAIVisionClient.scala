@@ -5,6 +5,7 @@ import org.llm4s.imageprocessing.config.OpenAIVisionConfig
 import org.llm4s.media.{ ImageMediaType, MediaType }
 import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.types.Result
 import ujson.read
 
@@ -167,6 +168,16 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
     }
 
   private def callOpenAIVisionAPI(base64Image: String, prompt: String, mediaType: ImageMediaType): Result[String] =
+    // A blank key would be sent as `Authorization: Bearer `: refused before any request.
+    ProviderConfig
+      .nonEmpty("OpenAI vision", "apiKey", config.apiKey)
+      .flatMap(_ => callOpenAIVisionAPIWithKey(base64Image, prompt, mediaType))
+
+  private def callOpenAIVisionAPIWithKey(
+    base64Image: String,
+    prompt: String,
+    mediaType: ImageMediaType
+  ): Result[String] =
     // Serializing is the only step that can throw; the HTTP client returns failures as a Left
     Try(
       OpenAIRequestBody.serialize(

@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import com.sun.net.httpserver.HttpExchange
+import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse, EmbeddingUsage }
 import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
@@ -50,6 +51,20 @@ class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
     val (auth, body) = seen.get
     auth shouldBe "Bearer key"
     body("input").arr.map(_.str) shouldBe Seq("a", "b")
+  }
+
+  it should "refuse a blank apiKey, from build and before any request, rather than send an empty bearer" in {
+    val requests = new java.util.concurrent.atomic.AtomicInteger()
+    withServer("/v1/embeddings") { (ex: HttpExchange) =>
+      requests.incrementAndGet()
+      sendJsonResponse(ex, 200, """{"data":[{"embedding":[1.0]}]}""")
+    } { baseUrl =>
+      for key <- Seq("", "  ") do
+        val config = EmbeddingProviderConfig(baseUrl, "text-embedding-3-small", key)
+        OpenAIEmbeddingProvider.build(config).left.toOption.get shouldBe a[ConfigurationError]
+        OpenAIEmbeddingProvider.fromConfig(config).embed(request).left.toOption.get shouldBe a[ConfigurationError]
+    }
+    requests.get shouldBe 0
   }
 
   it should "post to <baseUrl>/embeddings when the base URL is the versioned root, as the default is" in {

@@ -72,10 +72,26 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
 
   "toString" should {
     "redact the API key and header values" in {
-      val shown = generic.copy(apiKey = Some("sk-secret"), headers = Map("X-Token" -> "tok-secret")).toString
+      val shown = generic.withApiKey("sk-secret").withHeaders(Map("X-Token" -> "tok-secret")).toString
       (shown should not).include("sk-secret")
       (shown should not).include("tok-secret")
       shown should include("X-Token")
       (deepseek.copy(apiKey = "ds-secret").toString should not).include("ds-secret")
+    }
+  }
+
+  "OpenAICompatibleConfig's two-argument apply and setters" should {
+    "build the same config as the defaulted apply, for Java and Kotlin callers" in {
+      val built = OpenAICompatibleConfig("m", "http://localhost:8000/v1")
+        .withApiKey("k")
+        .withContextWindow(32768)
+        .withReserveCompletion(4096)
+        .withHeader("X-Team", "search")
+      built shouldBe generic
+      OpenAICompatibleConfig("m", "http://localhost:8000/v1") shouldBe
+        OpenAICompatibleConfig("m", "http://localhost:8000/v1", apiKey = None)
+      built.withStreamUsage(false).streamUsage shouldBe false
+      built.withApiKey(None).apiKey shouldBe None
+      built.withBaseUrl("http://other/v1").baseUrl shouldBe "http://other/v1"
     }
   }

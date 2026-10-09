@@ -157,6 +157,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that throws fails the run with `GraphError.MiddlewareFailed(middleware, cause)`; a throwing
   `ModelStep` is not reported as a middleware failure. Design:
   `docs/design/typed-agent-runtime-design.md` §4.8.
+- **Workload identity (SPIFFE) for providers**: a named provider section may carry an `auth`
+  block instead of `apiKey` - an `identityTokenFile` (e.g. a JWT-SVID kept by `spiffe-helper`) plus
+  provider keys. `openai-compatible` exchanges it at an RFC 8693 endpoint (`tokenUrl`, `clientId`,
+  `scope`, `audience` - Databricks' `/oidc/v1/token`), caches the token until shortly before
+  expiry and refreshes and retries once on 401; `openai` (`identityProviderId`,
+  `serviceAccountId`, `clientId`) and `anthropic` (`federationRuleId`, `organizationId`,
+  `serviceAccountId`, `workspaceId`) use their SDKs' workload identity federation. New core types
+  in `org.llm4s.llmconnect.auth` (`AuthConfig` and `TokenExchangeConfig`, like the new
+  `OpenAIWorkloadIdentity` and `AnthropicWorkloadIdentity`, are built with `apply` and `with*`
+  setters, with no public `copy`); `ProviderConfigSpec.authExtras` declares a provider's auth keys;
+  `NamedProviderConfig.auth`, `OpenAIConfig.workloadIdentity` and `AnthropicConfig.workloadIdentity`
+  are new fields, `None` by default in the companion `apply` (`OpenAIConfig` and `AnthropicConfig`
+  follow the growth-prone pattern, #1388) and set with `withWorkloadIdentity`, which takes the value or
+  an `Option`; `ApiKeySource` gained `WorkloadIdentity`, reported only for a provider
+  that accepts `auth`. A section with `auth` may not also set `apiKey` or an `Authorization`
+  header. Model listing is not supported for `openai` and `anthropic` sections that use `auth`, and
+  says so. `llm4s-provider-testkit` gains `FakeTokenExchangeServer` and `TestJwt`. (#1354)
+  **The rules hold on every construction path:** `AnthropicConfig.fromValues`, `OpenAIConfig.fromValues`
+  and `OpenAICompatibleConfig.fromValues` apply them, and the named-section path goes through those
+  factories rather than its own copy; a config built with `apply` (including the short `apply(apiKey, model)` Java and Kotlin use) and the `with*` setters that breaks them is refused by its client
+  (`AnthropicClient`, `OpenAIClient`, `OpenRouterClient`, `OpenAICompatibleClient`: `apply` returns a
+  `ConfigurationError`, the constructor throws `IllegalArgumentException`). With workload identity a config
+  may not also set `apiKey`; an `OpenAICompatibleConfig.tokenExchange` refuses an `Authorization` header in
+  any case and a non-https `tokenUrl`; an `AnthropicConfig.workloadIdentity` refuses a non-https
+  `baseUrl`; and an `OpenAIConfig.workloadIdentity` is refused unless the config belongs to `openai`, since
+  a Requesty or OpenRouter config would send the OpenAI token to that provider. An `OpenAICompatibleClient`
+  whose credential is `Dynamic` or `Exchange` refuses a dialect that sets `Authorization`, and a `baseUrl`
+  (or, for `Exchange`, a `tokenUrl`) that is not `https` or loopback `http`. The `openai-compatible` model
+  lister builds its config through the same path as chat (`OpenAICompatibleProvider.buildConfig`), so
+  `Llm4sConfig.listModels` refuses what chat refuses before it exchanges anything.
+  **No client falls back to an empty key:** `OpenRouterClient` refuses an `OpenAIConfig` with
+  `workloadIdentity` (from `apply` as a `ConfigurationError`, from the constructor as an
+  `IllegalArgumentException`) even when `OpenAIConfig.validate` accepts it, rather than drop the identity
+  and send `Authorization: Bearer `. A blank `apiKey` is refused wherever a key is the only credential:
+  `OpenAIConfig` and `AnthropicConfig` without workload identity (and so `OpenAIClient`, `AnthropicClient`
+  and `OpenRouterClient`), `DeepSeekClient`, `ZaiClient`, `MistralClient`, `CohereClient`, an
+  `OpenAICompatibleClient` built with a blank `Credential.Static`, `OpenAIEmbeddingProvider`,
+  `OpenAIImageClient`, `OpenAIVisionClient`, `OpenAITTSClient` and `OpenAISTTClient`. An
+  `OpenAICompatibleConfig` whose `apiKey` is blank is treated as having none (`Credential.Anonymous`), as
+  `fromValues` already did.
+  **Migration:** `OpenAICompatibleConfig` follows the growth-prone data-type pattern: its constructor
+  and `copy` are private; build it with the companion `apply` (defaults unchanged) and adjust it with
+  `withBaseUrl`, `withApiKey`, `withContextWindow`, `withReserveCompletion`, `withHeaders`, `withHeader`,
+  `withStreamUsage`, `withTimeouts` and `withTokenExchange` (the companion `apply` takes `timeouts` before
+  `tokenExchange`). Java and Kotlin, which see no Scala default arguments, use
+  `OpenAICompatibleConfig.apply(model, baseUrl)` and the setters, so a new field no longer breaks them.
+  `OpenAICompatibleClient.Settings.apiKey: Option[String]` became
+  `credential: OpenAICompatibleClient.Credential` (`Anonymous`, `Static(key)`, `Dynamic(provider)`,
+  `Exchange(config)`). An `Exchange` credential exchanges through the client's own HTTP client, which
+  `close()` releases.
+  **The token exchange:** `tokenUrl`, and an `openai-compatible` section's `baseUrl` when it uses
+  `auth`, must be `https`; with `auth`, OpenAI's and Anthropic's `baseUrl` must be `https` to the
+  vendor's own API host - `api.openai.com`, `us.`/`eu.`/`ae.api.openai.com`, or `api.anthropic.com`,
+  an exact, case-insensitive match with no userinfo - because the exchanged token is a vendor
+  credential; plain `http` is accepted only for a loopback host (`localhost`, `127.x.y.z` or
+  `[::1]`, judged on the URL's real host, so `http://localhost@evil.example/` is refused), because
+  the request carries the identity token. `expires_in` is optional: without it the token's lifetime
+  is the access token's `exp` claim when it is a JWT, and otherwise `TokenExchange.DefaultLifetime`
+  (5 minutes). One that is not a finite, non-negative number is an `AuthenticationError`, and a huge
+  one is clamped to `TokenExchange.MaxLifetime` (24 hours). A failed token fetch is shared for 5
+  seconds, so N callers during an outage wait for one attempt, not N in turn, and a caller
+  interrupted while it waits gets a `CancelledError` with its interrupt flag set. Only a 401
+  triggers the refresh-and-retry; a 403 (valid token, missing permission) does not. To tell them
+  apart `HttpErrorMapper` now sets `AuthenticationError.code` to the HTTP status (`"401"` or
+  `"403"`), for every provider. An `identityTokenFile` that is not a valid path is a
+  `ConfigurationError`; with the `openai` SDK, a missing or empty token file is an
+  `AuthenticationError`, as with the other providers.
 - **`@Stable` and `@Experimental`: the tier of a public type, in the code** ([#1281](https://github.com/llm4s/llm4s/issues/1281),
   `org.llm4s.annotation` in `llm4s-core`): Java annotations with runtime retention, so an IDE, a tool or a
   Java caller can read them. Every top-level public type of `llm4s-core`, `llm4s-openai`,

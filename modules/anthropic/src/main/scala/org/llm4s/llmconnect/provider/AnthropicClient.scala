@@ -2,6 +2,13 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
+import com.anthropic.config.{
+  AuthenticationConfig,
+  AuthenticationType,
+  IdentityTokenConfig,
+  InMemoryProfileConfigProvider,
+  ProfileConfig
+}
 import com.anthropic.core.{ JsonObject, ObjectMappers, RequestOptions }
 import com.anthropic.models.messages.{
   ContentBlockParam,
@@ -28,7 +35,7 @@ import org.llm4s.llmconnect.streaming.*
 import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, ProcessingError, RateLimitError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, LLMError, ProcessingError, RateLimitError, UnknownError, ValidationError }
 import org.llm4s.error.ThrowableOps.*
 import org.llm4s.util.{ BoundedJson, Redaction }
 
@@ -102,12 +109,35 @@ class AnthropicClient(
   // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
 
+  /** The configured credentials, which an error built from a remote reply must not repeat. */
+  private val credentialSecrets: Seq[String] = AnthropicClient.credentialSecrets(config)
+
+  // A config built with `apply` or a `with*` setter skipped `fromValues`: `apply` refuses it as a
+  // ConfigurationError, and the constructor here, so a plain-http baseUrl never receives the identity token.
+  AnthropicConfig.validate(config).left.foreach(error => throw new IllegalArgumentException(error.message))
+
   // Initialize Anthropic client
-  private val client = AnthropicOkHttpClient
-    .builder()
-    .apiKey(config.apiKey)
-    .baseUrl(config.baseUrl)
-    .build()
+  private val client = {
+    val builder = AnthropicOkHttpClient.builder().baseUrl(config.baseUrl)
+    config.workloadIdentity match {
+      case None => builder.apiKey(config.apiKey)
+      case Some(wi) =>
+        val auth = AuthenticationConfig
+          .builder()
+          .`type`(AuthenticationType.OIDC_FEDERATION)
+          .federationRuleId(wi.federationRuleId)
+          .identityToken(IdentityTokenConfig.builder().source("file").path(wi.identityTokenFile.toString).build())
+        wi.serviceAccountId.foreach(auth.serviceAccountId)
+        val profile = ProfileConfig
+          .builder()
+          .authentication(auth.build())
+          .baseUrl(config.baseUrl)
+          .organizationId(wi.organizationId)
+        wi.workspaceId.foreach(profile.workspaceId)
+        builder.configurationProvider(InMemoryProfileConfigProvider.of(profile.build()))
+    }
+    builder.build()
+  }
 
   // The timeout goes on each call, not on the SDK client: the client's timeout is one value for every
   // call and covers a streamed response in full, so a short `request` there would cut every stream.
@@ -177,14 +207,7 @@ class AnthropicClient(
         // Make API call
         val attempt = Try(
           requestOptions.fold(messageService.create(messageParams))(messageService.create(messageParams, _))
-        ).toEither.left.map {
-          case e: com.anthropic.errors.UnauthorizedException =>
-            AuthenticationError("anthropic", AnthropicClient.safeMessage(e))
-          case _: com.anthropic.errors.RateLimitException => RateLimitError("anthropic")
-          case e: com.anthropic.errors.AnthropicInvalidDataException =>
-            ValidationError("input", AnthropicClient.safeMessage(e))
-          case e => e.toLLMError
-        }
+        ).toEither.left.map(AnthropicClient.mapError(_, credentialSecrets))
         // sealed thinking is bound to the request it answers, so it is replayed only while that holds
         val result = attempt
           .flatMap(convertFromAnthropicResponse)
@@ -426,14 +449,7 @@ curl https://api.anthropic.com/v1/messages \
             }
           }
         }.toEither.left
-          .map {
-            case e: com.anthropic.errors.UnauthorizedException =>
-              AuthenticationError("anthropic", AnthropicClient.safeMessage(e))
-            case _: com.anthropic.errors.RateLimitException => RateLimitError("anthropic")
-            case e: com.anthropic.errors.AnthropicInvalidDataException =>
-              ValidationError("input", AnthropicClient.safeMessage(e))
-            case e => e.toLLMError
-          }
+          .map(AnthropicClient.mapError(_, credentialSecrets))
 
         // Return the accumulated completion
         val result = attempt.flatMap(_ =>
@@ -809,13 +825,39 @@ curl https://api.anthropic.com/v1/messages \
 }
 
 object AnthropicClient {
-  import org.llm4s.types.TryOps
 
   /**
-   * An SDK exception's message, redacted and capped. anthropic-java writes the response body into it (`401: <body>`),
-   * and a body can echo the request's credentials (#1674).
+   * An SDK failure as an [[org.llm4s.error.LLMError]]. The SDK's exception messages carry the service's
+   * reply - or, with workload identity, the federation token endpoint's - which may repeat a credential:
+   * every message that becomes part of the error is scrubbed of `secrets` and of credential JSON fields,
+   * passed through the general redactor and truncated.
    */
-  private[provider] def safeMessage(e: Throwable): String = Option(e.getMessage).fold("")(Redaction.safeBody(_))
+  private[provider] def mapError(e: Throwable, secrets: Seq[String]): LLMError = {
+    def safe(message: String): String = Redaction.remoteBody(Option(message).getOrElse(""), secrets)
+    e match {
+      case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", safe(e.getMessage))
+      case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
+      case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", safe(e.getMessage))
+      case e =>
+        e.toLLMError match {
+          case unknown: UnknownError => UnknownError(safe(unknown.message), e)
+          case other                 => other
+        }
+    }
+  }
+
+  /**
+   * The configured values an error must not repeat: the API key, or with workload identity the ids
+   * `AnthropicWorkloadIdentity.toString` redacts, when long enough to scrub without garbling the body
+   * ([[Redaction.identifiers]]).
+   */
+  private[provider] def credentialSecrets(config: AnthropicConfig): Seq[String] =
+    config.workloadIdentity match {
+      case None => Seq(config.apiKey)
+      case Some(wi) =>
+        Redaction.identifiers(Seq(wi.federationRuleId, wi.organizationId) ++ wi.serviceAccountId ++ wi.workspaceId)
+    }
+  import org.llm4s.types.TryOps
 
   /** A thinking or redacted-thinking block being assembled from a stream. */
   final private[provider] case class StreamedThinking(
@@ -895,12 +937,14 @@ object AnthropicClient {
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
   )(using ModelRegistryService): Result[AnthropicClient] =
-    Try(new AnthropicClient(config, metrics)).toResult
+    AnthropicConfig.validate(config).flatMap(valid => Try(new AnthropicClient(valid, metrics)).toResult)
 
   def apply(
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[AnthropicClient] =
-    Try(new AnthropicClient(config, metrics, exchangeLogging)).toResult
+    AnthropicConfig
+      .validate(config)
+      .flatMap(valid => Try(new AnthropicClient(valid, metrics, exchangeLogging)).toResult)
 }

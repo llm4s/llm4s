@@ -29,5 +29,13 @@ enum ApiKeySource:
    */
   case Credentials(path: String)
 
+  /**
+   * The section authenticates with workload identity - an `auth` block - so it uses no API key,
+   * its own or shared.
+   *
+   * @param path the block's path, e.g. `llm4s.providers.databricks-main.auth`
+   */
+  case WorkloadIdentity(path: String)
+
   /** The config path the key is, or would be, read from. */
   def path: String

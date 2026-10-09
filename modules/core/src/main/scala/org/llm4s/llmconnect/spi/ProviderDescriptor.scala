@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.spi
 import org.llm4s.annotation.Stable
 import org.llm4s.config.{ ProviderModelLister, ProvidersConfigModel, SharedCredentials }
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.auth.AuthConfig
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
@@ -142,6 +143,18 @@ object ProviderDescriptor:
     key: String
   ): Result[String] =
     requireField(providerName, key, section.extra(key), s"llm4s.providers.<name>.$key")
+
+  /**
+   * Reads a key the provider declares in `ProviderConfigSpec.authExtras` as required, or gives a
+   * default.
+   *
+   * Validation has already enforced that, so this fails only for a section that did not come
+   * through validation - one built in code and handed to `buildConfig` directly.
+   *
+   * @param key the declared key's name, e.g. `"tokenUrl"`.
+   */
+  def requireAuthExtra(providerName: String, auth: AuthConfig, key: String): Result[String] =
+    requireField(providerName, s"auth.$key", auth.extra(key), s"llm4s.providers.$providerName.auth.$key")
 
   /**
    * Reads the `apiKey` that a `requiresApiKey` [[ProviderConfigSpec]] guarantees is present.

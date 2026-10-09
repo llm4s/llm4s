@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Experimental
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.MistralConfig
+import org.llm4s.llmconnect.config.{ MistralConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.ThinkingBlock
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
@@ -41,7 +41,7 @@ class MistralClient(
         displayName = "Mistral",
         model = config.model,
         baseUrl = MistralConfig.apiBaseUrl(config.baseUrl),
-        apiKey = Some(config.apiKey),
+        credential = OpenAICompatibleClient.Credential.Static(config.apiKey),
         contextWindow = config.contextWindow,
         reserveCompletion = config.reserveCompletion,
         timeouts = config.timeouts
@@ -54,17 +54,21 @@ class MistralClient(
 object MistralClient {
 
   def apply(config: MistralConfig)(using ModelRegistryService): Result[MistralClient] =
-    Try(new MistralClient(config)).toResult
+    ProviderConfig.nonEmpty("Mistral", "apiKey", config.apiKey).flatMap(_ => Try(new MistralClient(config)).toResult)
 
   def apply(config: MistralConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[MistralClient] =
-    Try(new MistralClient(config, metrics)).toResult
+    ProviderConfig
+      .nonEmpty("Mistral", "apiKey", config.apiKey)
+      .flatMap(_ => Try(new MistralClient(config, metrics)).toResult)
 
   def apply(
     config: MistralConfig,
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[MistralClient] =
-    Try(new MistralClient(config, metrics, exchangeLogging)).toResult
+    ProviderConfig
+      .nonEmpty("Mistral", "apiKey", config.apiKey)
+      .flatMap(_ => Try(new MistralClient(config, metrics, exchangeLogging)).toResult)
 }
 
 /**
