@@ -5,7 +5,9 @@ import org.llm4s.types.Result
 
 import java.util.concurrent.{ CompletableFuture, TimeUnit, TimeoutException }
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.locks.{ LockSupport, ReentrantLock }
+import scala.annotation.tailrec
+import scala.concurrent.duration.FiniteDuration
 import scala.util.Using
 import scala.util.control.Exception.allCatch
 
@@ -138,6 +140,21 @@ final private[graph] class DefaultRunHandle[O](
 
   def cancel(): Unit = stop(StopCause.Cancelled)
 
+  /** See [[DefaultRunHandle.awaitEnd]]. */
+  private[graph] def awaitEnd(timeout: FiniteDuration): Boolean =
+    val deadline = System.nanoTime() + timeout.toNanos
+    // the result is set after the run releases its thread claim, so a done result means the thread is free
+    @tailrec def waitFor(interrupted: Boolean): (Boolean, Boolean) =
+      val remaining = deadline - System.nanoTime()
+      if result.isDone || remaining <= 0 then (result.isDone, interrupted)
+      else
+        DefaultRunHandle.guarded(result.get(remaining, TimeUnit.NANOSECONDS)) match
+          case Left(_: InterruptedException) => waitFor(interrupted = true)
+          case _                             => (result.isDone, interrupted)
+    val (ended, interrupted) = waitFor(Thread.interrupted())
+    if interrupted then Thread.currentThread().interrupt()
+    ended
+
   /**
    * Records `stopCause` unless a cause is already recorded - including the run's own
    * [[StopCause.Finishing]] - and only then interrupts a live run that has not acknowledged its
@@ -212,7 +229,26 @@ final private[graph] class DefaultRunHandle[O](
         result.complete(settled): Unit
     })(_ => outcome = Some(DefaultRunHandle.guarded(body()).fold(crashed, identity)))
 
-private[graph] object DefaultRunHandle:
+private[agent] object DefaultRunHandle:
+
+  /**
+   * Waits at most `timeout` for `handle`'s run to end, whatever interrupts the waiting thread, and
+   * returns whether it ended. An interrupt received before or during the wait is kept: the flag is
+   * set again on return. For a caller that has cancelled the run and must not return while the run
+   * still holds its thread. Every handle the runtime admits is a [[DefaultRunHandle]], which waits on
+   * its result; any other [[RunHandle]] has its `status` polled, every millisecond.
+   */
+  def awaitEnd(handle: RunHandle[?], timeout: FiniteDuration): Boolean = handle match
+    case own: DefaultRunHandle[?] => own.awaitEnd(timeout)
+    case other =>
+      val deadline = System.nanoTime() + timeout.toNanos
+      @tailrec def poll(interrupted: Boolean): Boolean =
+        if other.status != RunStatus.Running || System.nanoTime() >= deadline then interrupted
+        else
+          LockSupport.parkNanos(math.min(1_000_000L, math.max(0L, deadline - System.nanoTime())))
+          poll(Thread.interrupted() || interrupted)
+      if poll(Thread.interrupted()) then Thread.currentThread().interrupt()
+      other.status != RunStatus.Running
 
   /**
    * Runs `body`, returning anything it throws - an `InterruptedException` or a fatal error included -

@@ -146,9 +146,34 @@ Using LLM4S in production? We'd love to hear about it! Share your story in Disco
 
 Regular virtual meetups for the community:
 
-- **When**: Announced in Discord
-- **What**: Code reviews, feature demos, Q&A
-- **Where**: Discord voice channels
+- **When**: every **Sunday at 09:00 London time** (see the table below for your city)
+- **What**: Code reviews, feature demos, Q&A, live coding and mob programming
+- **Where**: Discord voice channels. The [Luma calendar](https://luma.com/calendar/cal-Zd9BLb5jbZewxLA) lists each session.
+
+LLM4S is a global community. The maintainers and contributors are spread across the world, and everyone joins from
+where they are, so the session is held at a time that works across Europe, India, Singapore and the Americas. The
+time is fixed in **London local time**, so it moves by an hour in some cities when the clocks change.
+
+| City | UK on summer time (BST, late March to late October) | UK on winter time (GMT, late October to late March) |
+| ---- | --------------------------------------------------- | --------------------------------------------------- |
+| London | Sunday 09:00 | Sunday 09:00 |
+| Italy (Rome) | Sunday 10:00 | Sunday 10:00 |
+| Germany (Berlin) | Sunday 10:00 | Sunday 10:00 |
+| India (IST, UTC+5:30) | Sunday 13:30 | Sunday 14:30 |
+| Singapore (SGT, UTC+8) | Sunday 16:00 | Sunday 17:00 |
+| New York | Sunday 04:00 | Sunday 04:00 |
+| San Francisco | Sunday 01:00 | Sunday 01:00 |
+
+Notes:
+
+- Italy and Germany keep the same clock difference to London all year, because the UK and the EU change clocks on the
+  same dates.
+- India and Singapore do not change their clocks, so the session is an hour later there in winter than in summer.
+- The United States changes its clocks on different dates from the UK and the EU. For a few Sundays a year (usually
+  two or three in March and one around the end of October) New York is one hour later than the table shows: 05:00.
+  San Francisco is also later at 02:00, except on the first US daylight-saving Sunday in March: the session is
+  still at 01:00 PST there, before the local clock change at 02:00.
+- Check the [Luma calendar](https://luma.com/calendar/cal-Zd9BLb5jbZewxLA) for the exact time in your own time zone.
 
 [Join Discord for updates →](https://discord.gg/4uvTPn6qww)
 

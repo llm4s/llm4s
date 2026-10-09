@@ -45,8 +45,11 @@ check_links_in_file() {
 
 TARGET_FILES=(
   "$REPO_ROOT/CHANGELOG.md"
+  "$REPO_ROOT/SECURITY.md"
   "$REPO_ROOT/docs/migrations/index.md"
   "$REPO_ROOT/docs/migrations/0x-to-1x.md"
+  "$REPO_ROOT/ADOPTERS.md"
+  "$REPO_ROOT/SUPPORT.md"
 )
 
 for f in "${TARGET_FILES[@]}"; do

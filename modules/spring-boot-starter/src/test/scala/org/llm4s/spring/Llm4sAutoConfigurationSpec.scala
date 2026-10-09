@@ -145,6 +145,42 @@ class Llm4sAutoConfigurationSpec extends AnyFlatSpec with Matchers {
       .run(ctx => ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 1)
   }
 
+  // The two tests below pin the havingValue = "true" literal of @ConditionalOnProperty, which the
+  // absent-property test (matchIfMissing) and the enabled=false test cannot: either passes with any
+  // other literal. No user configuration supplies these beans, so they can only come from the
+  // auto-configuration itself.
+  it should "register every bean when llm4s.enabled=true is set explicitly (havingValue = \"true\")" in {
+    runner
+      .withPropertyValues("llm4s.enabled=true", "llm4s.provider=ollama", "llm4s.model=llama3")
+      .run { ctx =>
+        ctx.getStartupFailure shouldBe null
+        ctx.getBeansOfType(classOf[JLlmClient]).keySet().toArray.toSeq shouldBe Seq("llm4sClient")
+        ctx.getBeansOfType(classOf[LLM4STemplate]).keySet().toArray.toSeq shouldBe Seq("llm4sTemplate")
+        ctx.getBeansOfType(classOf[java.util.concurrent.ExecutorService]).keySet().toArray.toSeq shouldBe
+          Seq(Llm4sExecutors.BeanName)
+      }
+  }
+
+  it should "compare llm4s.enabled to havingValue case-insensitively, as Spring's OnPropertyCondition does (llm4s.enabled=TRUE)" in {
+    runner
+      .withPropertyValues("llm4s.enabled=TRUE", "llm4s.provider=ollama", "llm4s.model=llama3")
+      .run { ctx =>
+        ctx.getStartupFailure shouldBe null
+        ctx.getBeansOfType(classOf[LLM4STemplate]).keySet().toArray.toSeq shouldBe Seq("llm4sTemplate")
+      }
+  }
+
+  it should "not read llm4s.enabled as a Boolean: 'yes' is not havingValue, so nothing is registered" in {
+    // @ConditionalOnProperty compares the raw string, unlike the Boolean binding of Llm4sProperties.enabled.
+    runner
+      .withPropertyValues("llm4s.enabled=yes", "llm4s.provider=ollama", "llm4s.model=llama3")
+      .run { ctx =>
+        ctx.getStartupFailure shouldBe null
+        ctx.getBeansOfType(classOf[JLlmClient]).size() shouldBe 0
+        ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 0
+      }
+  }
+
   it should "register JLlmClient from properties for ollama (no api-key required)" in {
     runner
       .withPropertyValues(

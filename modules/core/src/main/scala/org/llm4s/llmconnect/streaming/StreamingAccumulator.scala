@@ -5,7 +5,6 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
 import scala.collection.mutable
-import scala.util.Try
 
 /**
  * Accumulates streaming chunks into a complete response.
@@ -102,16 +101,11 @@ final class StreamingAccumulator private () {
   def currentToolCalls: Seq[ToolCall] = {
     val completed = toolCalls.toSeq
     val partial = partialToolCalls.values.map { p =>
-      val args =
-        if (p.argumentsBuilder.isEmpty) ujson.Obj()
-        else {
-          val raw = p.argumentsBuilder.toString
-          Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
-        }
+      // the one boundary parser: empty -> {}, unparseable or nested too deeply -> the raw Str (#1562)
       ToolCall(
         id = p.id,
         name = p.name,
-        arguments = args
+        arguments = StreamingToolArgumentParser.parse(p.argumentsBuilder.toString)
       )
     }.toSeq
     completed ++ partial

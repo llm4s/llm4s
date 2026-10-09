@@ -26,7 +26,7 @@ llm4s {
 }
 ```
 
-Then `export OPENAI_API_KEY=sk-...` and call `Llm4sConfig.defaultProvider()`. A "missing required fields ... apiKey" error means neither the vendor's variable (`OPENAI_API_KEY`) nor the section's own `apiKey` is set - or the provider module that binds the variable is missing; only the section being loaded is validated, so check the error names the section you meant. See [Configuration](../getting-started/configuration.md#named-provider-sections).
+Then `export OPENAI_API_KEY=sk-...` and call `Llm4sConfig.defaultProvider()`. A "missing required fields ... apiKey" error means neither the vendor's variable (`OPENAI_API_KEY`) nor the section's own `apiKey` is set - or the provider module that binds the variable is missing; only the section being loaded is validated, so check the error names the section you meant. See [Configuration](../getting-started/configuration#named-provider-sections).
 
 **Q: My application configuration isn't overriding the defaults**
 A: LLM4S uses PureConfig. Ensure your `application.conf` is in the `src/main/resources` directory (or point at it with `-Dconfig.file=...`), and load providers with `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider("<section name>")` - the name of a section under `llm4s.providers`, not the provider type. `-D` system properties override `application.conf`.

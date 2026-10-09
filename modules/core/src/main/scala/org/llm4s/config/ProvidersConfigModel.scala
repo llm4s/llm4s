@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.types.ProviderModelTypes.*
 import org.llm4s.types.Result
 
@@ -22,6 +23,7 @@ object ProvidersConfigModel:
    *  @param extras      every other key in the section, as a string: the provider-specific keys a
    *                     descriptor declares in `ProviderConfigSpec.extras`, and anything unknown,
    *                     which validation reports and drops
+   *  @param timeouts    the `timeouts` block as read, not yet checked for positive values
    */
   final private[llm4s] case class RawNamedProviderSection(
     provider: Option[String],
@@ -29,7 +31,8 @@ object ProvidersConfigModel:
     baseUrl: Option[String],
     apiKey: Option[String],
     headers: Option[Map[String, String]] = None,
-    extras: Map[String, String] = Map.empty
+    extras: Map[String, String] = Map.empty,
+    timeouts: Option[ProviderTimeouts] = None
   )
 
   /**
@@ -63,6 +66,10 @@ object ProvidersConfigModel:
    *                      OpenAI's `organization`, the generic `openai-compatible` provider's
    *                      `contextWindow` and `reserveCompletion` - so that this type does not
    *                      change as providers come and go.
+   *  @param timeouts     the section's `timeouts` block: how long a request and a stream may take.
+   *                      Absent values leave each client on its own default
+   *                      ([[org.llm4s.llmconnect.config.ProviderTimeouts]]). Every provider that makes
+   *                      HTTP calls reads it, so it is a built-in field like `headers`, not an extra.
    */
   final case class NamedProviderConfig private (
     provider: ProviderId,
@@ -70,7 +77,8 @@ object ProvidersConfigModel:
     baseUrl: Option[BaseUrl],
     apiKey: Option[ApiKey],
     headers: Map[String, String],
-    extras: Map[String, String]
+    extras: Map[String, String],
+    timeouts: ProviderTimeouts
   ):
 
     def withProvider(provider: ProviderId): NamedProviderConfig        = copy(provider = provider)
@@ -81,6 +89,7 @@ object ProvidersConfigModel:
     def withApiKey(apiKey: Option[ApiKey]): NamedProviderConfig        = copy(apiKey = apiKey)
     def withHeaders(headers: Map[String, String]): NamedProviderConfig = copy(headers = headers)
     def withExtras(extras: Map[String, String]): NamedProviderConfig   = copy(extras = extras)
+    def withTimeouts(timeouts: ProviderTimeouts): NamedProviderConfig  = copy(timeouts = timeouts)
     // The API key, header values and extra values may be credentials (`x-api-key`, a gateway
     // token, a provider-declared secret), so all are redacted; names are kept because they are
     // what a user needs to debug a section.
@@ -146,9 +155,21 @@ object ProvidersConfigModel:
       baseUrl: Option[BaseUrl],
       apiKey: Option[ApiKey],
       headers: Map[String, String] = Map.empty,
-      extras: Map[String, String] = Map.empty
+      extras: Map[String, String] = Map.empty,
+      timeouts: ProviderTimeouts = ProviderTimeouts.default
     ): NamedProviderConfig =
-      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras)
+      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, timeouts)
+
+    /** The signature before `timeouts` was added, kept so code compiled against it still links. */
+    def apply(
+      provider: ProviderId,
+      model: ModelName,
+      baseUrl: Option[BaseUrl],
+      apiKey: Option[ApiKey],
+      headers: Map[String, String],
+      extras: Map[String, String]
+    ): NamedProviderConfig =
+      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras, ProviderTimeouts.default)
   }
 
   /**
