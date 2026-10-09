@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
+  `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
+  and its spec checks update order, the barrier, step boundaries and cancellation with no API key.
+- **Suspended agent turns from Java and Kotlin** ([#1392](https://github.com/llm4s/llm4s/issues/1392)):
+  `llm4s-java-api`'s `JAgent.pending(result)` returns a `java.util.List<PendingInterrupt>`. For a
+  `Suspended` turn it lists the approvals, then the questions. For any other turn the list is empty.
+  Each `PendingInterrupt` has `id()`, `kind()` (the Java enum `InterruptKind`, `APPROVAL` or `QUESTION`),
+  `toolName()`, `argumentsJson()`, and `reason()` or `questionJson()` as an `Optional<String>`. No Scala
+  or ujson type is involved. `JAgent.resume(threadId, List<Answer>)` and `JAgent.recover(threadId)` are
+  blocking versions of `streamResume` and `streamRecover`. They return `LlmResult<JAgentResult>` (#1393); an
+  interrupted caller gets a `CancelledError` and the turn is cancelled, leaving the thread for `recover`
+  (#1330). A partial resume returns `Suspended` again, with the unanswered
+  items still pending. The Kotlin API adds `AgentKt.pending(result)` and the `suspend` functions
+  `resume(threadId, answers)` and `recover(threadId)`. These run the turn as the streams do, so
+  cancelling the caller cancels the turn and leaves the thread for `recover`. The Java sample approves
+  what a suspended turn waits for. See
+  [Suspended turns from Java and Kotlin](docs/guide/agents/index.md#suspended-turns-from-java-and-kotlin).
 - **Thinking stays in the conversation and goes back to the provider** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
   `AssistantMessage` carries the model's reasoning as `thinking: Seq[ThinkingBlock]` - `ThinkingBlock.Text(text,
   signature)`, `ThinkingBlock.Redacted(data)` or `ThinkingBlock.Opaque(provider, data)` (provider-specific replay
@@ -23,6 +40,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decide - `encodeThinking` (given the turn's blocks), `thinkingDetails` and `decodeThinkingDetails` - and drop it by
   default. The agent's tool loop stores the completion's message unchanged, so a run sends a tool-call turn's
   thinking in the call after the tool results, and later turns read it back from the checkpoint.
+- **Agent event streams for Java and Kotlin** ([#1377](https://github.com/llm4s/llm4s/issues/1377)):
+  `llm4s-java-api`'s `JAgent.stream(threadId, query, listener)`, `streamResume(threadId, answers, listener)`
+  and `streamRecover(threadId, listener)` return an `LlmResult<AgentStream>` at once and hand the turn's events
+  to an `AgentStreamListener` - `onEvent` for each, then one of `onComplete(AgentResult)` or
+  `onError(LlmException)` - on the stream's own thread. Only `onEvent` is abstract, so a lambda is a listener.
+  `AgentStream.await()` returns the outcome once the listener has returned from its last call; `cancel()`
+  cancels the turn and returns once it has ended. Resume answers are `Answer.approve(id)`, `reject(id, reason)`,
+  `edit(id, argumentsJson)` and `reply(id, json)`. `StreamEvents.decode(eventType, event)` reads an event as an
+  `Optional`. `Llm4s.createAgent(client, tools, streaming)` builds an agent whose model calls stream, so its
+  turns carry text deltas, and `Llm4s.wrapAgent(agent)` puts an agent built with `Agent.builder` behind the
+  facade. The Kotlin API's `AgentKt.stream`, `streamResume` (a `List<Answer>`) and `streamRecover` are cold
+  `Flow<AgentStreamItem>`s (`Event(event)`, then `Done(result)`); cancelling the collection (its scope,
+  `take(n)`, a timeout) cancels the turn, a turn cancelled otherwise fails it with `LLMException`, and Kotlin's
+  `Llm4s.createAgent(client, tools, streaming)` and `wrapAgent` match Java's. As in the fs2 and ZIO streams, a consumer too slow for the stream's 256-event buffer loses live
+  events and receives a `StreamEvent.LiveGap` with their count - it never cancels the run - and a run that
+  ends without a terminal event still ends the stream with its error. The Java sample streams a turn.
 - **`llm4s-pekko`: LLM responses and agent runs as Apache Pekko Streams `Source`s**
   ([#1457](https://github.com/llm4s/llm4s/issues/1457)): a new Beta module (`modules/llm4s-pekko`, package
   `org.llm4s.pekko`) that depends on `llm4s-core`, `llm4s-agent` and `pekko-stream` 1.7 (Apache-2.0; Akka is not
@@ -146,6 +179,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   annotations changes no behaviour and no binary signature. **`llm4s-agent` is not covered yet**: its tier
   waits on the typed graph runtime ([#1266](https://github.com/llm4s/llm4s/issues/1266)). See
   [docs/reference/api-stability.md](docs/reference/api-stability.md#tiers-in-the-code).
+- **Provider HTTP timeouts are configurable** ([#712](https://github.com/llm4s/llm4s/issues/712)): a
+  provider section, and an embedding section, takes an optional `timeouts` block,
+  `timeouts { request = 3m, stream = 15m }`, each value a duration. A value left out keeps that client's own
+  default, so **a section without the block behaves exactly as before**. Values must be positive and finite
+  and are refused at load, naming the key (`llm4s.providers.<name>.timeouts.request`); a misspelt key inside
+  the block is refused too. Every chat client reads it - the OpenAI-compatible family (DeepSeek, Z.ai,
+  OpenRouter, Mistral, Cohere and the generic provider), Gemini, Vertex AI, Ollama, and OpenAI, Azure,
+  Requesty and Anthropic on their SDKs - and so do the OpenAI, Ollama, Voyage, Jina and Cohere embedding
+  providers. The HTTP-based clients bound the wait for the response to begin; the SDK-based clients bound the
+  whole call, per call, so a short `request` does not cut a stream. New public types in `llm4s-core`:
+  `ProviderTimeouts` (a `FiniteDuration` each for `request` and `stream`, `None` meaning the client's
+  default), `NamedProviderConfig.timeouts`, `EmbeddingProviderConfig.timeouts` and
+  `EmbeddingProviderSection.timeouts`; `ProviderConfig` gains `timeouts` and `withTimeouts`, both with
+  defaults, so a provider supplied by another module compiles unchanged and ignores the block until it
+  overrides them (`docs/guide/writing-a-provider.md`). `timeouts` joins `ProviderConfigSpec.BuiltinKeys`, so
+  a provider can no longer declare an extra of that name. The provider configs (`DeepSeekConfig`,
+  `ZaiConfig`, `MistralConfig`, `CohereConfig`, `OpenAICompatibleConfig`, `OpenAIConfig`, `AzureConfig`,
+  `AnthropicConfig`, `GeminiConfig`, `VertexAIConfig`, `OllamaConfig`, `BedrockConfig`, `WatsonXConfig`) and
+  `EmbeddingProviderConfig` gain a trailing `timeouts` field and a `withTimeouts` setter. **Migration:** Scala
+  source that constructs them or calls `apply` compiles unchanged (the field defaults to
+  `ProviderTimeouts.default`), but the constructor's arity changed, so code compiled against the old one must
+  be recompiled; Java and Kotlin callers, which cannot use Scala defaults, pass the default timeouts as the last
+  argument - `ProviderTimeouts.default()` from Kotlin, `ProviderTimeouts.apply(Option.empty(), Option.empty())`
+  from Java, where `default` is a keyword; a
+  pattern match on one needs the extra field. No overload keeps the old arity: nothing is frozen before 1.0
+  (see `docs/migrations/0x-to-1x.md`). The OpenAI and Anthropic SDKs retry a timed-out call twice by default, which llm4s does
+  not change. Model listing, the Vertex AI token request and the watsonx IAM exchange keep their fixed
+  timeouts. Bedrock applies `request` as the AWS SDK's API-call timeout and `stream` as a deadline on the
+  whole `ConverseStream` call; an expiry there is a `TimeoutError`.
 - **Agent tool contract for graph runs** (Experimental, `org.llm4s.agent.graph.tool`,
   [#1278](https://github.com/llm4s/llm4s/issues/1278)): `AgentTool[A]` and `AgentToolSpec[A]`
   replace the prototype `LoopTool`. A tool's arguments are typed by a core `SchemaDefinition[A]`
@@ -183,6 +245,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Handoff.of(id, agent, reason)` for a `Result`), and `handoffId` is `handoff_to_<id>` rather
   than `handoff_to_agent_<hash>`. Design: `docs/design/typed-agent-runtime-design.md` §4.7, with
   the Stage 0 carry-forward in §4.8.
+- **RAG chunking and fusion: what is validated, and how weighted scores are combined**
+  ([#1318](https://github.com/llm4s/llm4s/issues/1318), items 4 to 6; the validation shipped in #1358, and the one
+  fix this found is under Fixed): `docs/guide/vector-store.md` now states that an invalid `ChunkingConfig` or `WeightedScore` throws
+  `IllegalArgumentException` (decided, because the `RAGConfig` builders cannot return a `Left`), how to turn user
+  input into a `Left` (`ChunkingUtils.chunkTextValidated`, or `Try(...)` through `toResult`), that every
+  configuration that can be built is safe for every chunker, and that `WeightedScore` rescales each channel so its
+  weakest hit scores `0.1`, not the `0.0` of a miss. The snippets are compiled and run by `RagValidationGuideSpec`.
+  New property tests pin the guarantees: `ScoreNormalisationSpec` (the floor and the best hit, nothing scores like a
+  miss, the channel's order is kept, scale and offset do not matter) and `ChunkersAcceptValidConfigsSpec` (no
+  chunker throws for any valid config, and chunk indices run from 0 without gaps, which re-ingest relies on).
 - **Compatibility and Deprecation Policy** ([docs/reference/compatibility-policy.md](docs/reference/compatibility-policy.md),
   [#1281](https://github.com/llm4s/llm4s/issues/1281)): one page for what you can rely on when you upgrade, by
   tier; how versions are read (`early-semver`, 0.5.0 as the MiMa baseline); what the promise covers (public
@@ -190,6 +262,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rules for changing a Frozen API without breaking it; and how an API is deprecated (`@deprecated` with the
   replacement and the release, a CHANGELOG entry) and removed (never within a major version). It collects
   what `1.0 Scope`, `API Stability`, the provider guide and `CLAUDE.md` already said, and links to each.
+- **Gemini and Vertex AI keep and replay thought signatures** ([#1389](https://github.com/llm4s/llm4s/issues/1389)):
+  a thinking Gemini model attaches an opaque `thoughtSignature` to a part of its turn (the `functionCall`
+  part when it calls a function, sometimes the last text part) and expects it back on the same part; Gemini 3
+  models answer HTTP 400 when a required signature is missing, so thinking context used to be lost, or the
+  request failed, across tool calls. Each signature is now kept on `AssistantMessage.thinking` as a sealed
+  `ThinkingBlock.Opaque("gemini" | "vertexai", ...)`, bound to the provider and model that produced it
+  alone: Google asks for signatures to be preserved when history is modified or trimmed (the reverse of
+  Anthropic's prefix rule), so pruning or compressing earlier turns leaves them in place, and only a change
+  of provider or model, or an edit to the carrying message itself, unseals one. A function call's signature is sent on that call's part (on the
+  first call only, for parallel calls, as Gemini returns it); a text part's signature is sent with the text
+  split where it sat. The Gemini API and Vertex AI are separate signing authorities, so a conversation moved
+  from one to the other keeps its text and drops the signatures. The sources, the Anthropic-to-Bedrock failover
+  finding (left sealed per provider, with the reasons) and the remaining limits are in
+  [Thinking in conversation history](docs/guide/providers.md#thinking-in-conversation-history).
+  Behaviour changes in the same clients:
+  - a stream chunk holding several function calls now yields all of them (only the first was kept);
+  - a streamed `Completion` carries its tool calls on `Completion.toolCalls`, as OpenAI's and Ollama's do (they
+    were on the message only);
+  - a thought-summary part (`"thought": true`) is thinking text and no longer part of the answer;
+  - a `functionCall` without `args` is accepted, and a signed call's part is replayed exactly as
+    returned (`args` stay absent if they were);
+  - a populated `functionCall.id` becomes the tool call's id and is echoed on its `functionResponse`.
 - **Ollama honours `responseFormat`** ([#932](https://github.com/llm4s/llm4s/issues/932)):
   `OllamaClient` now sends the `/api/chat` `format` field for streaming and non-streaming requests,
   so `completeStructured` is constrained natively. `ResponseFormat.Json` sends `"format": "json"`
@@ -229,7 +323,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over the purpose. `RAG` and `RAGPipeline` embed the question they answer as a query and what they index as
   documents, the memory stores embed the text they search with as a query (`EmbeddingService.embedQuery`,
   which delegates to `embed` by default, so existing implementations are unaffected), and `CachedEmbeddingClient`
-  keeps a query and a document with the same text in separate cache entries (document keys are unchanged). **Behaviour changes:** Voyage now sends `input_type` (`document` by
+  keeps a query and a document with the same text in separate cache entries. **Behaviour changes:** Voyage now sends `input_type` (`document` by
   default; it sent none before), so re-index for the best retrieval quality - older document vectors still
   work; and a Jina or Cohere provider built without an explicit task now follows each request's purpose
   instead of always sending the document type. `EmbeddingRequest` becomes a growth-prone type (private
@@ -246,6 +340,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request ([#1218](https://github.com/llm4s/llm4s/issues/1218)). Add the dependency
   `"org.llm4s" %% "llm4s-jina"`; nothing else changes. HTTP 401 and 429 map to `EmbeddingError`
   with codes `"401"` and `"429"`.
+- **Metrics section in the monitoring guide** ([#700](https://github.com/llm4s/llm4s/issues/700)):
+  `docs/guide/observability/index.md` now covers `MetricsCollector` and `llm4s-observability-prometheus`: the
+  `llm4s.metrics` block and what `MetricsConfigLoader` returns for each setting, wiring a collector into a
+  client, what a call records (the request always; tokens and cost only on success; a stream once, at its end),
+  the ten Prometheus series with their labels and a sample scrape, scrape and PromQL examples, `compose`, and
+  the limits (retry, circuit-breaker and `ReliableClient` error events are not exported; fixed latency buckets;
+  an endpoint with no authentication). `ObservabilityMetricsGuideSpec` runs the configuration block and the
+  recording rules and compares the sample scrape, line for line, with what a real `/metrics` endpoint serves.
+  The guide's other two pages named in #700, Basic Usage and Providers, and its tracing, Langfuse and
+  OpenTelemetry sections were already complete.
 - **`llm4s-cohere`: Cohere embedding provider** (`modules/providers/cohere`, rebuilt from #1068 as an
   `EmbeddingProviderDescriptor`, so `llm4s-core` is untouched). `EMBEDDING_MODEL=cohere/embed-english-v3.0`
   with `COHERE_API_KEY` (bound to `llm4s.credentials.cohere.apiKey`, the key `llm4s-openai-compatible`
@@ -276,6 +380,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules (`llm4s-workspace-client`, `llm4s-workspace-shared`) are **Experimental** in 1.0 Scope, and the
   installation guide has lines for `llm4s-knowledgegraph-neo4j`, `llm4s-provider-testkit` and
   `llm4s-workspace-shared`.
+- **`Completion.citations`: the sources a model cited** ([#1216](https://github.com/llm4s/llm4s/issues/1216)):
+  a new `Citation(url, title, citedText, startIndex, endIndex)` (`@Stable`, growth-prone like `Completion`: private
+  constructor, `apply` with defaults, `with*` setters) and `Completion.citations: List[Citation]` with
+  `withCitations` and `hasCitations`. Models that search the web by themselves report `url_citation` annotations
+  on the message, and the OpenAI client (so Azure and Requesty too, for a deployment that returns them) and the
+  shared OpenAI-compatible client (OpenRouter's `:online` models, which also return the source passage as
+  `citedText`) now read them, in order. A reply without annotations gives an empty list, and a citation without a
+  `url` is dropped rather than made up. Source compatible: `citations` is the last parameter of
+  `Completion.apply` and defaults to empty, so existing callers compile unchanged (`.copy` stays private; use
+  `withCitations`). Not read, and listed on the issue: streamed chunks (neither provider documents where a stream
+  carries them), Anthropic's citations and Gemini's `groundingMetadata` (llm4s cannot yet request documents, web
+  search or grounding, so no response can carry them), and Perplexity's top-level `citations` (#1026).
 - **Cloud speech providers** (`llm4s-speech`, [#1010](https://github.com/llm4s/llm4s/issues/1010)):
   `OpenAITTSClient`, `ElevenLabsTTSClient`, `AzureTTSClient` (text-to-speech) and `OpenAISTTClient`,
   `AzureSTTClient` (speech-to-text), selected through `SpeechProviderSelector.tts()` / `.stt()` by a
@@ -353,6 +469,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case is still a `NonRecoverableError` except `DeadlineExceeded`, which is a `RecoverableError`;
   new `GraphError` and `RunEvent` cases break exhaustive matches. Design:
   `docs/design/typed-agent-runtime-design.md` §4.6, with the Stage 0 carry-forward in §4.8.
+- **CI re-runs a step that failed on a transient download error, and nothing else**:
+  `scripts/retry-on-transient-network.sh` wraps the `Check formatting` step (`scalafmt` fetches scalafmt-core at
+  run time) and the MiMa step. It re-runs the command at most twice (`RETRY_MAX`, capped at 5; waits of 15 s and
+  30 s, `RETRY_BACKOFF_SECONDS`, capped at 120 s), and only when an `[error]` line carries a network marker
+  (`failed to download [`, `Connection reset`, `Read timed out`, `UnknownHostException`, ...). A formatting error,
+  a failing test, a compile error, a missing dependency or a marker on any other line is never retried, and the
+  last attempt's own exit status is the step's, so the wrapper cannot turn a failure into a pass. Over three days
+  (300 runs) 2 of 267 `Quick Checks` runs failed this way, both with a warm 450 MB sbt cache restored, plus one MiMa
+  run; each needed a manual re-run. `scripts/test-retry-on-transient-network.sh`, run in `quick-checks`, covers the
+  retry bounds and every case that must not be retried against a fake command, with no network.
 - **CI verifies the documented support matrix** ([#967](https://github.com/llm4s/llm4s/issues/967)):
   `scripts/check-doc-support.sh`, in the `quick-checks` job, fails when the docs say something the build does not
   do. The build's side comes from sbt itself: a new `dumpBuildModel <file>` command (`project/BuildModel.scala`)
@@ -370,6 +496,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sbt. Three stale claims it found are fixed: `sbt dependencyCheck` (no such task) in the review guidelines,
   `sbt run "Explain ..."` in the g8 guide (sbt reads the quoted text as a second command; it is now
   `sbt "run Explain ..."`), and `modules/gradle-demo`, which CLAUDE.md did not name.
+- **CI keeps the documented stability tiers in step with the build** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
+  `scripts/check-tier-drift.sh`, in the `quick-checks` job and with no sbt, fails when the tiers the docs state
+  disagree with the code. `publishedArtifactsCheck` only needed a published artifact to be *mentioned* in
+  `docs/reference/v1-scope.md`; nothing read the tier a page gave, nothing noticed a page naming a module the
+  build no longer has, and the frozen set (the `mimaFrozen` call sites in `build.sbt`) was repeated by hand in
+  `stabilityTierModules`, in `frozenDependencyCheck`'s module list, in 1.0 Scope's Package Map, in the
+  compatibility policy and in two places in the API stability page. The script compares all of them: a frozen
+  module needs a Package Map row marked *Frozen at 1.0* and a module that is not frozen must have none, every
+  `llm4s-*` the Package Map names is a project in the build, every published artifact has a row in the table, and
+  the module lists agree with the frozen set (`stabilityTierModules` is the frozen set minus the module the
+  comment above `stabilityTierCheck` exempts). A page it cannot read fails the check instead of passing it, and a
+  Package Map row can opt out with `tier-drift: ignore`. It found no drift: the four files agree today.
+  `scripts/test-check-tier-drift.sh` mutates copies of the real files, one kind of drift at a time.
+- **CI checks every internal link in `docs/`, against a baseline that can only shrink**
+  ([#1482](https://github.com/llm4s/llm4s/issues/1482)): `scripts/check-docs-site-links.sh`, in the `quick-checks`
+  job, resolves each link in `docs/**/*.md` the way llm4s.org serves it - relative links against the page's URL,
+  site-absolute links, `permalink:` front matter, `/dir/` index pages, heading anchors - and fails on a broken link
+  that `scripts/docs-link-baseline.txt` does not list and on a listed link that no longer breaks. The rules were
+  checked against the live site: a `.md` link to a rendered page is a 404 (the site is built without
+  `jekyll-relative-links`), and a page without front matter is served raw, so a link to it is reported too. The
+  baseline starts with 168 known-broken links (70 `.md` links, 59 links to pages without front matter, 23 pages
+  never written, 8 links that leave `docs/`, 8 stale anchors); fixing one means deleting its line.
+  `--print` lists what is broken now and `--update-baseline` rewrites the file.
+  `scripts/test-check-docs-site-links.sh` runs 33 cases against fixture trees, with no network.
 - **Built-in tools guide** ([#1296](https://github.com/llm4s/llm4s/issues/1296)):
   `docs/guide/builtin-tools.md` lists every built-in tool with its parameters and result, the bundles that hold
   them (`coreSafe`, `withHttpSafe()`, `withFilesSafe()`, `developmentSafe()`, `customSafe(...)`), how to register
@@ -388,6 +538,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   testing. Its snippets after the first section are compiled and run by `ErrorHandlingGuideSpec`. The Basic Usage
   guide listed error types that do not exist (`ProviderConnectionError`, `InvalidApiKeyError`, ...) and
   called `LLMError` sealed; it now shows the real ones and links to the guide.
+- **RAG query transformer guide** ([#1545](https://github.com/llm4s/llm4s/issues/1545)):
+  `docs/guide/rag-query-transformers.md` explains how a RAG pipeline rewrites the query before it is embedded:
+  the built-in `LLMQueryRewriter` (temperature 0, default or custom system prompt, a `ProcessingError` on
+  `query-rewrite` when the LLM call fails) and `IdentityTransformer`, adding them with `withQueryTransformer`
+  (appends) or `withQueryTransformers` (replaces the chain), how `QueryTransformer.applyChain` runs the chain in
+  order and stops at the first error, and how to write a custom transformer. Contributed by @wanjinhao1.
+- **Caching guide** ([#1297](https://github.com/llm4s/llm4s/issues/1297)): `docs/guide/caching.md` explains the embedding
+  cache (`CachedEmbeddingClient`, `InMemoryEmbeddingCache`, custom keys and backends) and the semantic completion cache
+  (`CachingLLMClient`, `CacheConfig`): what a hit needs, what the key and the prompt contain, TTL, eviction, the cases
+  that bypass the cache, what it reports through tracing, and its limits. Its snippets are compiled and run by
+  `CachingGuideSpec`. The caching changes it brought with it are listed under Changed.
+- **Structured output guide** ([#1310](https://github.com/llm4s/llm4s/issues/1310)):
+  `docs/guide/structured-output.md` explains `LLMClient.completeStructured[A]`: a minimal example, how the
+  reply is recovered from a fence or prose, that the schema is derived with `strict = true` and so lists every
+  property as required (including ones declared optional), that only `responseFormat` is overridden, how to
+  set the schema name or strictness by calling `complete` directly, the `ValidationError` on `structured_output`
+  for a reply that is not JSON, is `null` or does not match, and what each provider does with the schema
+  (OpenAI, Azure, Requesty, the OpenAI-compatible providers, Cohere, Gemini, Vertex AI and Ollama send it;
+  Anthropic only instructs the model; watsonx and Bedrock send nothing). The code it shows is mirrored in, and run by,
+  `StructuredOutputGuideSpec`. The Scaladoc of `completeStructured` now states the all-fields-required behaviour
+  and the error contract (a reply is deserialised, not validated against the schema), and no longer claims every
+  OpenAI-compatible server enforces the schema; no code changed.
 - **Cancellation by interrupt for graph runs and providers** (Experimental, `org.llm4s.agent.graph`,
   [#1270](https://github.com/llm4s/llm4s/issues/1270)): each superstep runs in a bounded Ox scope on
   virtual threads (Ox is a new implementation dependency of `llm4s-agent`). Interrupting the thread
@@ -413,6 +585,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejection, unknown tools and failures; policy- and tool-raised approvals both resuming at one
   approval node; and edited approvals amending the source assistant message. Design:
   `docs/design/typed-agent-runtime-design.md` §4.5, with the Stage 0 carry-forward in §4.8.
+- **A guide to provider exchange logging** ([#1298](https://github.com/llm4s/llm4s/issues/1298)):
+  `docs/guide/observability/provider-exchange-logging.md`, linked from the Monitoring page, describes the opt-in
+  capture of raw provider request and response bodies: the fields of `ProviderExchange`, which clients record,
+  turning it on from `llm4s.exchangeLogging` (read with `Llm4sConfig.exchangeLogging()` and passed in
+  `LlmClientOptions`; nothing does so automatically) or from code, the JSON Lines file, and writing a
+  `ProviderExchangeSink`, with a privacy warning. It states what the file sink redacts and that it truncates
+  bodies to 1000 characters, that a sink you write receives the bodies untouched, and the limitations found while
+  checking it: a throwing sink fails silently, `Cancelled` is never produced, `requestId` and `correlationId` are
+  never set, and `duration_ms` is written as a string. Its snippets and claims are compiled and run by
+  `ProviderExchangeLoggingGuideSpec` (`llm4s-openai-compatible`) and `ProviderExchangeLoggingGuideCoreSpec`
+  (`llm4s-core`). Monitoring becomes a section with children in the docs navigation.
 - **A staged-deployment template: dev, staging, prod** ([#846](https://github.com/llm4s/llm4s/issues/846),
   reworked from #857 by @Shivampal157): `modules/deploy-service` (unpublished) serves `GET /health` and
   `GET /llm-check` (a configuration check, not a connectivity check: `200` when a default provider is
@@ -454,6 +637,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variable to `llm4s.credentials.<id>.apiKey` (`ProviderModuleChecks`); config loading from a
   HOCON string with an injected environment (`ProviderTestConfig`, `CredentialsRoundTrip`); and a
   local stub HTTP server (`LocalProviderTestServer`). Every in-repo provider module uses it.
+- **The cookbook: five runnable recipes, executed in CI** ([#1476](https://github.com/llm4s/llm4s/issues/1476)):
+  `sbt "samples/runMain org.llm4s.samples.cookbook.ToolCallingRecipe"` (and `StructuredOutputRecipe`,
+  `GuardrailsRecipe`, `DocumentQaRecipe`, `MemoryRecipe`) runs a complete example with no API key, against a
+  `ScriptedClient` that stands in for the model; `--live` runs the same code against the provider chosen by the
+  configuration. Each recipe has a spec that runs it against the script and checks what it did (the tool ran, a
+  request was refused before the model was called, only the best passage reached the prompt), and `CookbookDocsSpec`
+  fails when `docs/examples/cookbook.md` lists different recipes or embeds code that is not the code in the source
+  files. This is five of the eight recipes the issue asks for.
 - **`CostTrackingExample`: cost tracking end to end** ([#516](https://github.com/llm4s/llm4s/issues/516),
   reworked from #898 by @gudiwadasruthi): `sbt "samples/runMain org.llm4s.samples.metrics.CostTrackingExample"`
   shows what a call costs per request (`Completion.estimatedCost`), per agent run (`AgentState.usageSummary`
@@ -609,6 +800,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **An interrupted `Agent.run`, `continueConversation`, `recover` or `resume` cancels its turn, from Java too** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
+  the call returns `Left(CancelledError)` with the interrupt flag set, as before, and now also cancels the turn it
+  was waiting on instead of leaving it running, returning once that turn has ended (waiting up to 5 seconds for the turn to end), so `recover`
+  can follow at once; a caller already interrupted starts no turn. Cancelling a graph run therefore cancels the
+  agent turns its nodes are waiting on. Use `start`/`startRecover`/`startResume` and await the `AgentRun` to keep a turn past an interrupt.
+  With tracing, the cancelled turn's trace is complete (its last events delivered, its subscription detached) when
+  the call returns. A turn that had already begun committing its outcome cannot be cancelled: the call then returns
+  that outcome, with the interrupt flag still set. `run(query)`, whose random thread id a `Left` does not carry,
+  forgets the thread of a turn that failed or was cancelled once it has ended.
+  **Java-visible:** `llm4s-java-api`'s blocking `JAgent.run`, `continueConversation`, `resume` and `recover` go
+  through these calls, so an interrupted Java caller now cancels its turn too (they used to stop only the wait and
+  leave the turn running), as Kotlin's suspend functions already did. `AgentStream.cancel()` still cancels a streamed
+  turn without interrupting any thread. Its bounded wait, which Kotlin's cancellation uses, and Kotlin's one-shot
+  `run(query)` forgetting a failed turn's thread came later ([#1682](https://github.com/llm4s/llm4s/issues/1682),
+  [#1688](https://github.com/llm4s/llm4s/issues/1688), under Fixed).
+- **Java and Kotlin agent results use Java types only** ([#1393](https://github.com/llm4s/llm4s/issues/1393),
+  BREAKING, `llm4s-java-api`, Kotlin API). Every agent turn the Java facade returns - `JAgent.run`,
+  `continueConversation`, `resume`, `recover`, `AgentStream.await()`, `AgentStreamListener.onComplete` - is now a
+  `JAgentResult`, not the Scala `org.llm4s.agent.AgentResult`. `answer()` is an `Optional<String>`; `threadId()`,
+  `runId()` and `activeAgent()` are `String`s; `messages()` is an unmodifiable `java.util.List<JMessage>` (`role()`,
+  the Java enum `JMessageRole`, `content()`, `toolCalls()` as `JToolCall`s with `argumentsJson()`, `toolCallId()`,
+  `thinking()`); `usage()` is a `JUsageSummary` with `long` counts, a `java.math.BigDecimal` cost and a sorted
+  `java.util.Map<String, JModelUsage>` per model. `status()` is a `JAgentStatus`: `kind()` is the Java enum
+  `AgentStatusKind` (`COMPLETED`, `BLOCKED`, `STEP_LIMIT_REACHED`, `SUSPENDED`) for a `switch` or a Kotlin `when`, with
+  `answer()`, `guardrail()` and `reason()` as `Optional<String>` and `pending()` the `java.util.List<PendingInterrupt>`
+  that `JAgent.pending` (#1392) returned - built by the same `PendingInterrupt` factory, so `JAgent.pending(result)`
+  is now a shortcut for `result.status().pending()`. `JAgent.continueConversation`, `forget` and `pending`, and the
+  Kotlin `AgentKt` functions and `AgentStreamItem.Done`, take or carry a `JAgentResult`. `JAgent`'s thread-id
+  parameters are declared `String` (they already were in bytecode, so Java and Kotlin callers see no change).
+  `JavaInteropSpec` now walks every type reachable from a value the facade hands a caller and fails on any
+  `scala.*` or `ujson.*` type; three types are named boundaries it does not enter: `LLMError` behind
+  `LlmException.error()` ([#1487](https://github.com/llm4s/llm4s/issues/1487)), the `Conversation` that
+  `ConversationBuilder.build()` hands back to `complete` ([#1488](https://github.com/llm4s/llm4s/issues/1488)), and
+  the listener's `StreamEvent`s, read with `StreamEvents.decode`. The client facade's results were already Java
+  types (`LlmResult<String>`, `JLlmClient`, `JAgent`, `AgentStream`). No shims (pre-0.5.0). **Migration:** replace
+  `import org.llm4s.agent.AgentResult` with `org.llm4s.javaapi.JAgentResult`; `r.answer().get()` on a
+  `scala.Option` becomes `r.answer().orElseThrow()` (or `orElse`), `Option.apply(x)` comparisons become
+  `Optional.of(x)`; `r.status() instanceof AgentStatus.Completed` (or `getClass().getSimpleName()`) becomes
+  `r.status().kind() == AgentStatusKind.COMPLETED`, and `Blocked`'s fields are `status().guardrail()` / `reason()`;
+  iterate `r.messages()` directly instead of converting a Scala `Vector`, and branch on `m.role()` instead of
+  `instanceof ToolMessage`; read `usage().inputTokens()` and friends as `long`s and `totalCost()` as a
+  `BigDecimal`. Scala code that needs the Scala `AgentResult` uses `Agent` directly, not the Java facade. Scala callers
+  of `JAgent.stream`, `streamResume`, `resume`, `recover` and `streamRecover` that passed a `ThreadId` now pass its
+  `.value` (a `String`). `argumentsJson()` (on `JToolCall` and `PendingInterrupt`) is the arguments as JSON text: an
+  object as a model sends them, but a call built with a `ujson.Str` renders as a JSON string literal. A `JMessage`'s
+  `content()` is never `null` (a Scala message's `null` text reads as empty), and a `null` answer, guardrail, reason or
+  tool-call id reads as an empty `Optional`. A turn's result that does not convert fails the stream through `onError`
+  and `await()`. `JUsageSummary` and `JModelUsage` compare costs by numeric value (`1.0` equals `1.00`) and print them
+  in plain notation. The `J*` types are not `Serializable`, and their `toString` prints full content, as the Scala
+  types do.
+- **Embedding cache keys are unambiguous; the completion cache refuses a NaN threshold and serves an entry exactly
+  `ttl` old** ([#1297](https://github.com/llm4s/llm4s/issues/1297)). **Breaking:** `CacheKeyGenerator.sha256(parts*)`
+  length-prefixes every part instead of joining text and model with `:` (under which the text `a:b` with model `c`
+  and the text `a` with model `b:c` shared a key), and `CachedEmbeddingClient`'s key function takes
+  `(text, modelName, purpose: InputPurpose)` instead of a `#query`-suffixed model name (under which a query for model
+  `m` and a document for a model named `m#query` shared a key); the default is `CacheKeyGenerator.embeddingKey`.
+  `sha256` also hashes every UTF-16 code unit of the parts rather than their UTF-8 bytes, under which an isolated
+  surrogate (`"\uD800"`, `"\uD801"`) was replaced by `?` and distinct strings shared a key.
+  **Migration:** a custom key function gains the `InputPurpose` parameter and should include it in the key; vectors
+  stored under the old keys in a persistent `EmbeddingCache` are no longer found and are re-embedded on first use.
+  `CacheConfig.create` now refuses a `NaN` similarity threshold, which it accepted before (every similarity check
+  then failed, so nothing was ever served from the cache), and `CachingLLMClient` serves an entry
+  exactly `ttl` old instead of counting it as expired, matching `InMemoryEmbeddingCache`.
 - **`AssistantMessage` is a growth-prone data type; `Completion.thinking` comes from the message**
   ([#1381](https://github.com/llm4s/llm4s/issues/1381)): `AssistantMessage` is `final case class AssistantMessage
   private (contentOpt, toolCalls, thinking)` with a companion `apply` (named arguments, defaults as before, plus the
@@ -630,6 +884,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than with a foreign signature. Pruning, compression, summarisation, an edit or an inserted message anywhere earlier therefore
   unseals every later turn, whoever made the change; `hasSealedThinking` reports the state. Token estimates
   (`ConversationTokenCounter`, the agent's default pruning counter) now count thinking, which providers resend.
+- **Every published module's POM carries a one-sentence description, and the POM URLs are normalised**
+  ([#1455](https://github.com/llm4s/llm4s/issues/1455)): each `llm4s-*` artifact used to publish its own name as its
+  `<description>` (`llm4s-core` described as "llm4s-core"); the descriptions now live in one table,
+  `project/PomDescriptions.scala`, and `sbt publishedArtifactsCheck` fails for a published module without its own
+  distinct description. The POM `<url>` is `https://llm4s.org` (it was the GitHub organization page), and `<scm>` is
+  `https://github.com/llm4s/llm4s` with an `https` connection string (the URL had a trailing slash and the connection
+  was an SSH form). The organization URL and every `<dependencies>` block are unchanged. Maven Central search and IDEs
+  show the descriptions; Scaladex ranks by the GitHub description and topics, which a maintainer sets in the
+  repository settings.
 - **`llm4s-anthropic`: tool calls and results as content blocks** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
   an assistant turn's tool calls go to Anthropic as `tool_use` blocks after its text, and each `ToolMessage` as a
   `tool_result` block, consecutive results in one user turn. Before, a tool-call turn was dropped and its results
@@ -787,7 +1050,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `AgentCall` span.
   - Samples `StreamingAgentExample`, `StreamingWithToolsExample` and `EventCollectionExample` are
     back, with `AgentStreamIOExample` and `AgentStreamZIOExample`.
-  Limits: Java and Kotlin streams are a follow-up ([#1377](https://github.com/llm4s/llm4s/issues/1377)); the kernel's `TaskFailed`/`RunFailed` events
+  Limits: the kernel's `TaskFailed`/`RunFailed` events
   store error messages, which may quote content.
 - **Approval resumes through the middleware chain; `ToolLoop` gains a `finish` node**
   ([#1279](https://github.com/llm4s/llm4s/issues/1279)): `Approve` now runs the whole middleware
@@ -1595,8 +1858,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ToolRegistry` restores the interrupt flag when a tool throws an interruption wrapped in another exception (it
   already did for a bare `InterruptedException`), as `MCPToolRegistry` does; `MCPTransportImpl.sendRequest`, `sendNotification`,
   `MCPClient.initialize` and `getTools` return `Result` instead of `Either[String, _]` (read the old string as
-  `error.message`; the messages are unchanged); the concrete embedding providers' `embed` returns
-  `Result[EmbeddingResponse]`. `llm4s-provider-testkit` gains `assertCallCancelsWhenInterrupted` and
+  `error.message`; the messages are unchanged); an embedding provider's `embed` can return
+  `Left(CancelledError)` where it returned only an `EmbeddingError` (its declared type, `Result[EmbeddingResponse]`,
+  is unchanged). `llm4s-provider-testkit` gains `assertCallCancelsWhenInterrupted` and
   `assertEmbeddingCancelsWhenInterrupted`.
 - **`ToolHints` are read from MCP tool annotations** ([#1331](https://github.com/llm4s/llm4s/issues/1331); design
   §4.12): `llm4s-mcp` reads `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` and `title` from the
@@ -1612,6 +1876,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `org.llm4s.toolapi.ToolHints` in `llm4s-core` (`@Experimental`), because `llm4s-mcp` cannot depend on the agent runtime.
 
 ### Removed
+- **Orchestration: `PlanRunner`, `DAG`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`**
+  ([#1330](https://github.com/llm4s/llm4s/issues/1330)): `org.llm4s.agent.orchestration` is deleted, with
+  `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (`org.llm4s.agent.AgentId` is the agent's
+  id). Build the same flows with `GraphBuilder` and run them on `GraphRuntime`; cancel with `RunHandle.cancel()`.
+  See the migration guide's "Orchestration removed (#1330)" and the `multi-agent-graph` cookbook recipe.
 - **`ToolCallPolicy` and `PolicyDecision`** ([#1279](https://github.com/llm4s/llm4s/issues/1279)),
   with `ApprovalSource.Policy` and `ToolLoop.build`'s `policy` parameter, replaced by
   `AgentMiddleware`. Migration: a policy becomes an `AgentMiddleware` overriding `wrapToolCall`:
@@ -1756,12 +2025,566 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - workspace runner: allowlisted commands can no longer write, delete or run other programs through their
+  arguments** ([#1715](https://github.com/llm4s/llm4s/issues/1715)): `executeCommand` checked only the executable
+  name against `allowedCommands` and a set of shell metacharacters, so programs on `WorkspaceSandboxConfig.ReadOnlyCommands`
+  could delete files (`find -delete`, `git clean`, `git checkout -- .`, `git reset --hard`), write them (`find -fprint`,
+  `sort -o`, `uniq in out`, `git diff --output`), run programs that are not on the list (`find -exec`,
+  `git -c alias.x=!cmd x`, `git -c core.fsmonitor=cmd status`, `git grep -O`, `git diff --ext-diff`, or `GIT_EXTERNAL_DIFF` /
+  `PAGER` / `LD_PRELOAD` in `environment`), and read or write outside the workspace (`cat /etc/passwd`,
+  `grep -r x ..`, a symbolic link out of it). The runner now also checks, before the process starts:
+  - *Options* (`ARGUMENT_NOT_ALLOWED`): `find -delete -exec -execdir -ok -okdir -fprint -fprint0 -fprintf -fls
+    -files0-from -follow -L`; `sort -o --output --compress-program --files0-from` (and Windows `sort /O`);
+    `wc --files0-from`; `ls -L --dereference`; `grep -R --dereference-recursive -S`; `cp -L -H -s --dereference
+    --symbolic-link`; `chmod -L -H --dereference`; `hostname` with an operand, `-F` or `-b`; `uniq` with more than
+    one operand (every argument after the first operand counts, as BSD `uniq` does not reorder). `git` runs only `status`, `log`, `show`, `diff`, `ls-files`,
+    `ls-tree`, `grep`, `blame`, `rev-parse` and a listing `branch`; refuses every global option except `--version`,
+    `--no-pager`, `--no-optional-locks`, `--literal-pathspecs` and `--no-replace-objects` (so `-c`, `-C`,
+    `--exec-path`, `--git-dir`, `--work-tree`, `-p`); and refuses `--output`, `--ext-diff`, `--textconv`,
+    `--show-signature` and `git grep -O` / `--open-files-in-pager`; `git branch` takes the next argument as the
+    value of `--merged`, `--contains`, `--points-at`, `--sort` or `--format`. Every argument is scanned, after `--` too; a
+    short option is refused anywhere in a cluster (`-ro`) and a long one under any abbreviation (`--outp`), with or
+    without `=value`.
+  - *Paths* (`PATH_ESCAPE_ATTEMPT`, the code the file operations already use): each argument, the value of a
+    `--name=value` option, and each tail of a short option (`-f/x`) is resolved from the working directory as the
+    kernel resolves it - component by component, following symbolic links where they are met, so `link/..` is the
+    parent of the link's target - and must stay inside the real workspace root (`sort -t` and `--field-separator`
+    take a separator, not a path). The working directory is held to the same rule. `echo`, `pwd`, `whoami` and
+    `hostname` are not checked. `cp`, which writes through a link it finds at the name it writes, also has the
+    names it will write checked, and a recursive `cp` refuses a destination directory holding a link that leads
+    outside. An argument over 4096 characters, or paths needing more than 20000 lookups, is refused
+    (`ARGUMENT_NOT_ALLOWED`) rather than walked. A string that is not a valid path is refused, not thrown: an
+    argument with a NUL character, or whose check fails, gets `ARGUMENT_NOT_ALLOWED`, and a working directory or file
+    operation path the platform cannot parse gets `PATH_ESCAPE_ATTEMPT` (before, `InvalidPathException`, or on
+    Windows an `IOError` for a drive-relative path on a drive that does not exist, such as the `G:` of
+    `findstr /G:file`, escaped `executeCommand`).
+    On Windows, a device or NT-namespace path (`\\?\C:\x`, `\??\C:\x`), a drive-relative path on another drive
+    (`D:x`) and a wildcard argument leading outside (`..\*`) are refused, and so is an argument with a wildcard
+    or `:` followed by a `..` component, or that leads outside with those characters replaced by `_`: Win32 removes
+    `..` as text before it opens a name, so `type x*\..\..\outside\f` opened `..\outside\f` although the part
+    before the `*` is inside. An argument holding `"` is refused on Windows (`ARGUMENT_NOT_ALLOWED`): the C runtime's
+    argument parser and cmd.exe delete it as a quote, so `"..\outside\f` opened `..\outside\f` and a leading `"`
+    hid an absolute path. On Windows, the built-ins started through `cmd.exe /c` (`dir`, `type`, `copy`, `move`,
+    `echo`, ...) also refuse an argument holding `,`, `=`, `(`, `)`, `@`, `!`, a control character or a non-ASCII
+    space (`ARGUMENT_NOT_ALLOWED`; `echo` may print `,`, `=` and parentheses): `ProcessBuilder` quotes an argument
+    only for a space, tab, `"`, `<` or `>`, and cmd.exe splits on `,`, `;`, `=`, VT, FF and 0xFF too, so
+    `type a.txt,..\outside\f` typed `..\outside\f` after `a.txt`. A path must also stay inside under that lexical reading (`..` removed as text, then
+    links resolved) as well as the kernel's, so `l/../../x` with `l` -> `a/b` is refused on every platform.
+  - *Windows* (`ARGUMENT_NOT_ALLOWED`): the policy refuses what it cannot reason about, and only the forms
+    `docs/reference/workspace-sandbox.md#on-windows` lists are supported. Refused: a device name as a path component
+    (`nul`, `sub\con`, `NUL.txt`, `COM1`, `LPT¹`, `CONIN$`), a component ending in `.` or a space (Win32 strips them,
+    so `outside.` opened `outside`; this refuses `git log HEAD..` too); for programs that are not cmd.exe built-ins,
+    which may run under a runtime that re-parses their command line (MSYS2, Cygwin, Git for Windows), an argument
+    starting with `@` (a response file) or `~`, one holding `{ } [ ] ' ( )`, a path starting with `/`, and a
+    wildcard outside a last component that has a literal character other than `.` (`*`, `.*`, `*/a.txt`);
+    `findstr /F:list` (any switch with `F`) and a `/D:` directory list; and `sort` `/O`, `/T`, `-O`, `-T`, `-t`,
+    `--temporary-directory`. 8.3 short names and alternate data streams (`a.txt:s`, judged by the file before the
+    `:`) are not refused.
+  - *git's repository* (every platform): git looks for its repository in the directories above the working
+    directory, so a workspace inside a larger repository ran `git show HEAD:secret`, `git diff` and `git status` on
+    that repository and read files outside the workspace. The runner now starts `git` with
+    `GIT_CEILING_DIRECTORIES` set to the workspace root's parent and without any inherited `GIT_*` variable
+    (`GIT_DIR`-style locations, `GIT_CONFIG_*` / `GIT_CONFIG_PARAMETERS` / `GIT_CONFIG_COUNT` configuration,
+    `GIT_EXEC_PATH`, object directories); refuses `git` (`PATH_ESCAPE_ATTEMPT`) when the workspace root's parent
+    path holds the path-list separator (`:` on POSIX, `;` on Windows), which `GIT_CEILING_DIRECTORIES` cannot
+    escape, and when the nearest `.git` inside the workspace is a `gitdir:` file, a link, or a directory whose real
+    path lies outside the workspace (a Windows junction); and refuses a git argument starting with `:` (`:/`,
+    `:(top)`, `:a.txt`), which git resolves from the repository's top level.
+  - *Environment* (`ENVIRONMENT_NOT_ALLOWED`): `environment` may set only `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`,
+    `COLUMNS`, `LINES` and `NO_COLOR`.
+
+  The checks apply to every allowlist, `ReadWriteCommands` and custom ones included (a custom program gets the path
+  and environment rules). Still open: `git` reads the repository's own `.git/config` and runs its hooks, so where
+  the agent can write files it can set `core.fsmonitor`, `diff.external` or a filter, or add a hook such as
+  `.git/hooks/post-index-change`, that `git status` / `git diff` then runs, or point git at files outside through
+  `core.worktree`, `.git/commondir` or `.git/objects/info/alternates`
+  ([#1721](https://github.com/llm4s/llm4s/issues/1721)); `diff -r` follows links inside the tree it walks; a relative
+  link moved to another depth by the read-write list can come to point outside (paths through it are refused); and
+  the checks do not see a link made by a concurrent command.
+
+  **Migration.** The new error codes are plain strings in the existing `WorkspaceAgentErrorResponse`, so the protocol
+  is unchanged. Commands that worked before and are now refused: the forms above; any argument that is, or
+  resolves to, a location outside the workspace, including a `grep` pattern or option value that starts with `/` or
+  has a `..` component (write `[/]api` for `/api`); `ls -L`, `grep -R`/`-S`, `find -L`, `cp -L`/`-H`/`-s` and
+  `chmod -L`/`-H`; `uniq` with an option after its file (write `uniq -c a.txt`); a link-preserving `cp` (`-R`, `-a`,
+  `-P`, `-d`) of two sources with the same name, or of several sources one of which is `dir/` or `dir/.`;
+  `git branch <name>` without `--list`;
+  `git` subcommands other than the read ones; a `git` argument starting with `:`; `git` in a workspace that has no
+  repository of its own but lies inside one (it now reports `not a git repository`); `git` in a workspace whose
+  parent path holds `:` (POSIX) or `;` (Windows); on Windows, the forms listed
+  above; and `environment` variables outside the list. Run writes through the
+  `writeFile` / `modifyFile` operations or the read-write allowlist's own programs instead.
+- **A subscription receives every live event sent after `subscribe` returns** ([#1731](https://github.com/llm4s/llm4s/issues/1731)):
+  `GraphRuntime.subscribe` returned before its dispatcher joined the event hub's live set, which it
+  did only after replaying the log, so live events (`RunContext.progress`, `StreamEvent.Live`) sent in
+  between were silently lost - subscribing and then calling `start` lost the run's progress whenever
+  the store's first read was slow or the dispatcher thread started late. The subscription now joins
+  the live set before `subscribe` returns. Live events sent while it replays are held, up to its
+  `capacity` (the rest dropped and reported as a `StreamEvent.LiveGap`, as for a full queue), and
+  delivered in their place among the durable events: after those committed before them, before
+  those committed after. Durable delivery is unchanged. No API change.
+- **Security - `llm4s-core`, `llm4s-agent-tools`: the SSRF guard blocks IPv6 private ranges, redirect header
+  stripping is sticky, and the HTTP tool's `timeout` bounds the whole call** ([#1408](https://github.com/llm4s/llm4s/issues/1408),
+  findings F5, F7 and F8; F6 remains open):
+  - *F5, SSRF guard (`NetworkSecurity.isBlockedIP`).* It relied on the JDK's `isSiteLocalAddress`, which for IPv6
+    matches only the deprecated `fec0::/10`, so unique-local `fc00::/7` (`fd00::1`) passed, as did IPv6 forms that
+    carry a blocked IPv4 address: IPv4-compatible `::127.0.0.1`, NAT64 `64:ff9b::7f00:1` and 6to4 `2002:7f00:1::1`.
+    It now also refuses `fc00::/7`, the whole IPv4-compatible `::/96`, local-use NAT64 `64:ff9b:1::/48`, Teredo
+    `2001::/32`, `2001:db8::/32` and `3fff::/20` (documentation), `2001:2::/48` (benchmarking), `100::/64` (discard)
+    and `0.0.0.0/8`, and judges an IPv4-mapped (`::ffff:0:0/96`), NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`)
+    address by the IPv4 address it carries, against every blocked IPv4 range. No public signature changed.
+  - *F7, redirect headers (`HTTPTool`).* With `followRedirects`, `Authorization`, `Cookie` and
+    `Proxy-Authorization` were stripped only on a hop whose host differed from the previous hop's, and the next hop
+    was sent the original headers again, so `127.0.0.1` -> `localhost` -> `localhost` delivered `Authorization` to
+    the third hop; a hop to another port, or from `https` to `http`, on the same host kept them. They are now
+    stripped from the first hop whose origin (scheme, host and port) differs from the original request's, and stay
+    stripped for every later hop, including one back to the original origin.
+  - *F8, timeout (`HTTPTool`).* `HttpConfig.timeout` was set as the connect and the per-read timeout, so a server that
+    sent a byte every 100 ms held a 500 ms call for as long as it kept sending (and each redirect hop got a fresh
+    timeout). It is now one deadline for the whole call: name resolution, connecting, every redirect hop and reading
+    the body. The caller gets `TIMEOUT: HTTP request did not complete within <n> ms ...` at the deadline, and the
+    abandoned connection is closed. The field keeps its name and `FiniteDuration` type.
+  - **Migration.** A request to a host that resolves into one of the newly blocked ranges is now refused with
+    `SSRF_BLOCKED` (use `HttpConfig.withInternalIPsAllowed` deliberately if you need one; `allowedDomains` does not lift the check). A
+    redirect chain that relied on credentials surviving a change of host, port or scheme, or a return to the original
+    host, no longer sends them. A `timeout` sized for a slow single read may now be too short for a whole download or
+    a redirect chain: size it for the entire call. A zero `timeout` used to mean "no timeout" (`HttpURLConnection`'s
+    `0`); it now fails every call at once - set a large one instead.
+- **`llm4s-agent`: the PII Email pattern runs in linear time; an SSN stays within a line; `UTC+5` is not a phone number**
+  ([#1713](https://github.com/llm4s/llm4s/issues/1713)):
+  - `PIIType.Email`, in the default type set of `PIIMasker` and `PIIDetector`, began a match attempt at every
+    character of a run of letters, digits or `._%+-` and scanned to the end of the run each time, so it took
+    quadratic time: 10.9 s on 20,000 `a`s, and hours on a million-character base64 blob or minified line - a
+    denial-of-service risk in a guardrail that runs on every message. An attempt now starts only at the start of
+    such a run or where the previous match ended (`\G`), and a million-character run takes milliseconds. An attempt
+    inside a run succeeds exactly when one at its start does, so the matches are unchanged, back-to-back addresses
+    such as `a@b.com_x@y.org` included. The other PII patterns were measured on million-character adversarial runs
+    and are linear.
+  - `PIIType.SSN` separated its digit groups with `\s`, so `123\n45\n6789` was masked as one SSN. It now takes a
+    dash or horizontal whitespace (`\h`), as the phone and card patterns do: groups split by LF, CR, a vertical tab
+    or a form feed are no longer joined, and groups split by a no-break space or another Unicode horizontal space
+    now are.
+  - `PIIType.Phone` read a time-zone offset and the date after it as an international number, so
+    `UTC+5 2026-10-09 12:30` became `UTC[REDACTED_PHONE]:30`. A `+` right after `UTC` or `GMT` (any case, with or
+    without one space between) no longer starts an international number; a `+` after any other word still does, so
+    `a@b.com+44 20 7946 0958` and `Phone+44 20 7946 0958` are still masked. The Scaladoc now says that a separated
+    number longer than 15 digits is masked up to its 15th digit and the rest kept, which is what the pattern does.
+- **Streamed tool-call arguments reach `onChunk` verbatim** ([#1212](https://github.com/llm4s/llm4s/issues/1212)):
+  `OpenAICompatibleClient` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, generic) and `OpenAIClient` (OpenAI,
+  Azure, Requesty) used to hand `onChunk` each tool-call argument fragment already parsed, so a fragment that was
+  valid JSON on its own (`":"`, `"Paris"`) lost its quotes and a consumer concatenating the fragments got corrupt
+  arguments. Each fragment now arrives as a `ujson.Str` (an empty one as `{}`), as the Anthropic and Bedrock clients
+  already did; reassemble them with a `StreamingAccumulator`. The returned `Completion` was not affected. The chat
+  TUI sample now reassembles them that way before tool approval and execution.
+- **`llm4s-anthropic`: extended thinking with the default temperature** ([#1212](https://github.com/llm4s/llm4s/issues/1212)):
+  Anthropic accepts no temperature but 1 with thinking enabled, and the default `CompletionOptions` temperature of
+  0.7 made every request with a thinking budget fail with HTTP 400. `AnthropicClient` now omits `temperature` when
+  a thinking budget is set.
+- **`llm4s-rag`: `SentenceChunker` keeps every character of the input** ([#1718](https://github.com/llm4s/llm4s/issues/1718)):
+  it split with `Regex.split` on `([.!?])(\s+)([A-Z])`, which deleted the punctuation, the whitespace and the next
+  sentence's first letter at every boundary and glued the parts back together, so
+  `"Hello world. Next one. Third."` became the single sentence `"Hello worldext onehird."`. Boundaries are now
+  found with lookarounds, so only the whitespace between sentences is matched, and sentences are cut from the input
+  itself. Sentences in a chunk keep the whitespace that separated them (it used to be one space), so with no overlap
+  and no force-split sentence every chunk is a slice of the input. Abbreviations (`Dr.`, `e.g.`) only match as whole
+  words, so `summr.` or `first.` no longer hide a boundary, and a closing quote or bracket after the punctuation stays
+  with its sentence: `He said "Hi." Then` is `He said "Hi."` and `Then`. `ChunkerFactory.default`, `"sentence"` and
+  the semantic fallback all use this chunker. **Migration:** chunk text changes for any input with a sentence
+  boundary, and chunk sizes with it; indexes built with `SentenceChunker` hold corrupted text and should be
+  re-chunked and re-embedded.
+- **`llm4s-openai`: OpenAI embeddings reach `/v1/embeddings` with the default base URL**
+  ([#1413](https://github.com/llm4s/llm4s/pull/1413)): the default `llm4s.embeddings.openai.baseUrl` is
+  `https://api.openai.com/v1`, the versioned root the chat provider uses too, but `OpenAIEmbeddingProvider`
+  appended `/v1/embeddings` to it and posted to `https://api.openai.com/v1/v1/embeddings`. A base URL ending in
+  `/v1` now gets `/embeddings`; one without it (`https://api.openai.com`, a proxy root) still gets
+  `/v1/embeddings`, so a base URL that worked before is unchanged.
+- **`llm4s-rag`: `SimpleChunker` and `ChunkingUtils.chunkText` no longer throw for a very large window**
+  ([#1424](https://github.com/llm4s/llm4s/pull/1424)): the window end and the next start were computed in `Int`, so
+  a valid configuration such as `ChunkingConfig(targetSize = Int.MaxValue, maxSize = Int.MaxValue,
+  overlap = Int.MaxValue - 1)` overflowed on the second window and `substring` threw
+  `StringIndexOutOfBoundsException`. Both are now computed in `Long` and clamped to the text length; the chunks
+  produced for every other configuration are unchanged.
+- **`llm4s-openai-compatible`: Z.ai honours `CompletionOptions.reasoning`** ([#1681](https://github.com/llm4s/llm4s/issues/1681)):
+  it used to be ignored, so `ReasoningEffort.None` still thought (Z.ai's `thinking.type` defaults to `enabled`) and
+  effort levels never reached a model that takes `reasoning_effort`. Each effort now goes out in the form the
+  configured GLM model documents. On GLM-5.1, GLM-5 and GLM-4.5 to 4.7, `None` sends `"thinking": {"type": "disabled"}`
+  and the other levels send nothing. GLM-5.2 is sent `reasoning_effort` `none`, `low`, `medium` or, for `High`, `max`
+  (Z.ai currently runs `low` and `medium` as `high` on it). GLM-5.3 always thinks and rejects `disabled`, and accepts
+  only `low`, `high` and `max`, so `None` and `Low` send `low`, `Medium` sends `high` and `High` sends `max`; `None`
+  on GLM-5.3 logs a one-time warning that thinking tokens are still produced. `High` is Z.ai's maximum, its default,
+  so no level reasons more than `High`. Other models are sent nothing. With replayed reasoning, `thinking`
+  carries both `type` and `clear_thinking`. Without a `reasoning` option the request is unchanged.
+- **`llm4s-rag`: chunkers never split a surrogate pair** ([#1711](https://github.com/llm4s/llm4s/issues/1711)):
+  `SimpleChunker` and `ChunkingUtils.chunkText` cut by UTF-16 index, so a window end or an overlap start could fall
+  between the two halves of an astral character (emoji, CJK Extension B), leaving a lone surrogate in each chunk; an
+  embedding API rejects that or replaces it with U+FFFD. `SentenceChunker` could do the same at the start of its
+  overlap. Such a cut now moves back by one unit (forward only for `targetSize = 1` at an astral character, the one
+  case where a chunk is two units long), so chunks stay within their size and, with no overlap, still concatenate
+  back to the input. The reranker prompt, the RAGAS Langfuse observer and `BenchmarkConfig.shortName` truncate the
+  same way. Text without astral characters is chunked exactly as before. `SentenceChunker`, `MarkdownChunker` and
+  `SemanticChunker` keep a single word longer than `maxSize` whole, as before; this is now documented on
+  `ChunkingConfig.maxSize`.
+- **Cancelled and failed agent turns no longer leave threads nobody can name, and every cancel wait is bounded**
+  ([#1682](https://github.com/llm4s/llm4s/issues/1682), [#1688](https://github.com/llm4s/llm4s/issues/1688);
+  follow-ups to [#1330](https://github.com/llm4s/llm4s/issues/1330)'s cancellation):
+  - Kotlin `AgentKt.run(query)` runs its turn on a random thread id that nothing it throws carries. Once a failed or
+    cancelled turn has ended it now forgets that thread, as Scala `Agent.run(query)` and Java `JAgent.run(query)`
+    do; before, the thread stayed in the agent's runtime for the agent's lifetime. A forget that is refused - the
+    turn of a provider that ignores its interrupt is still running - is added to the thrown exception as a
+    suppressed one. `continueConversation`, `resume` and `recover` are unchanged: their thread is the caller's.
+  - `AgentStream.cancel()`, through which a cancelled Kotlin coroutine cancels its turn, waited for the turn's end
+    without a bound, so a provider that ignored its interrupt hung it. It now waits up to 5 seconds for the turn to
+    end, as the blocking `JAgent` calls do, then logs a WARN and returns, the thread busy (`ThreadBusy`) until the
+    turn ends. Java and Kotlin cancellation now behave the same.
+  - `JAgent.forget(threadId)` (`llm4s-java-api`) forgets a conversation by its thread id - one named for `stream`,
+    say, whose turn failed - as Scala `Agent.forget(threadId)` does; `forget(previous)` needed a result.
+  - `Agent.runMultiTurn` forgets its random thread when a follow-up turn fails or is cancelled: the `Left` it
+    returns carries no thread id, so the thread could be neither recovered nor forgotten.
+  - The interrupt flag a cancelled blocking call keeps is no longer lost when forgetting the one-shot turn's thread
+    throws (a `Checkpointer` whose `deleteThread` throws a fatal error the runtime does not turn into a `Left`).
+  - Scaladoc, the Java threading guide and the #1330 entry say the calls wait "up to 5 seconds for the turn to end":
+    with tracing, delivering the ended turn's last trace events can add to that.
+- **`llm4s-openai-compatible`: Z.ai keeps replayed reasoning** ([#1384](https://github.com/llm4s/llm4s/pull/1384),
+  [#1411](https://github.com/llm4s/llm4s/pull/1411)):
+  a request that sends an earlier turn's `reasoning_content` back now also sets `"thinking": {"clear_thinking": false}`,
+  merged into any existing `thinking` object. Z.ai's standard endpoint has preserved thinking off by default
+  (`clear_thinking` defaults to `true`) and drops replayed reasoning without it; `thinking.type` is left unset.
+- **Redaction redacts a JSON `Authorization` value containing an escaped quote in full**
+  ([#1672](https://github.com/llm4s/llm4s/issues/1672)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, took the value of a JSON `"Authorization"` field to end at the first `"`, including the `"` of
+  an escaped `\"` inside it. Only the text before the escaped quote was replaced, and the rest of the credential was
+  written in the clear: `{"authorization": "6FPVKYYYKXQ\"]WGMW"}` became `{"authorization": "[REDACTED]"]WGMW"}`.
+  The value is now read as the body of a JSON string, in which `\"` is part of the value and a quote after an
+  escaped backslash (`"abc\\"`) ends it, so the whole value is replaced: `{"authorization": "[REDACTED]"}`. A value
+  with no closing quote, as in a payload cut off in the middle of it, is redacted to the end of the input, as other
+  credential values already were. The `Authorization: ...` header line, an empty value and JSON inside a string are
+  redacted as before. No signature changes.
+- **Redaction keeps the escape on a quote after a redacted `key=value`, so nested JSON still parses**
+  ([#1677](https://github.com/llm4s/llm4s/issues/1677)): the `key=value` pass of `Redaction.redact` and
+  `redactForLogging`, and so of the exchange-log sink, took the backslash of an escaped closing quote as part of the
+  value. Inside JSON that sits in a string, `{"c": "{\"note\": \"token=abc\", \"x\": \"y\"}"}` became
+  `{"c": "{\"note\": \"token=[REDACTED]", \"x\": ...`: the bare `"` ended the outer string, the document no longer
+  parsed, and the passes after it paired its quotes the wrong way round. Of the backslashes before the quote a value
+  stops at, the pass now keeps those that escape it, at any depth of nesting (one for `\"`, three for `\\\"`), and
+  replaces the rest with the value; the output is `{"c": "{\"note\": \"token=[REDACTED]\", \"x\": \"y\"}"}`. A value
+  in plain JSON, and one ending in backslashes before anything but a quote, is redacted as before, and no text other
+  than those backslashes is kept that was replaced before.
+- **Redaction covers Python-repr credentials: single-quoted values with `:` or `=`, numbers, and double-quoted
+  values under single-quoted keys** ([#1675](https://github.com/llm4s/llm4s/issues/1675),
+  [#1687](https://github.com/llm4s/llm4s/issues/1687)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, left three shapes of a credential in a Python dict (or a JavaScript literal) readable that the
+  double-quoted forms redact. A single-quoted leaf holding a `:` or `=` under a single-quoted credential key was taken
+  for a field, not a value, so `{'credentials': {'pass': 'SECRETX:SECRETY'}}` became
+  `{'credentials': {'pass': 'SECRETX:'[REDACTED]''[REDACTED]`, `{'token': ['postgres://u:SECRETPW@h/db']}` kept the
+  user, and inside a JSON string the whole value stayed; such a leaf is now replaced where it stands as a value (after
+  `:` in a dict, after `[` or `,` in a list), `{'credentials': {'pass': '[REDACTED]'}}`, while an apostrophe of prose
+  that a mentioned `'token': [` runs into is still not taken for one. A number under a single-quoted credential key,
+  `{'password': 123456}`, was left as it was, also inside a string; it is now written back in the key's quote,
+  `{'password': '[REDACTED]'}`. A double-quoted value under a single-quoted key, which `repr` writes for a string that
+  holds a `'`, was not read at all: `{'Authorization': "Bearer x'y"}` kept `'y` and `{'password': "it's-secret"}`
+  was unchanged. It is now redacted to its closing quote, honouring escapes, where it reads as a value of the dict
+  (followed by `,` and the next key, by `}`, or cut off): `{'Authorization': "[REDACTED]"}`; the same holds inside a
+  JSON string (`\"it's\"`), and for such a leaf of a single-quoted container there, which used to end the container.
+  Double-quoted JSON is redacted as before. No signature changes.
+- **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
+  ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, read a query parameter as `[?&]`, a key of any characters up to the next `=`, and a value up
+  to the next `&` or whitespace. A `?` in prose, such as a question in a chat message, started a "parameter" whose
+  key ran across quotes, braces and lines to the next `=` anywhere later in the document. When that span held a
+  sensitive word, its "value" replaced the closing quote and the fields after it. The field passes then read the
+  mangled text out of step and left credentials readable: in
+  `{"messages": [{"content": "Is this right?"}], "credentials": {"dsn": "postgres://u@h/db?sslmode=require",
+  "password": "hunter2}SECRET", "keys": ["SECRETBB"]}}` the tail of `password` and the whole of `keys` were
+  written in the clear. A key is now one run of the characters a query key can hold: no whitespace, quote, `?`,
+  `&` or `=`. A value ends at `&`, at whitespace, or at the quote that ends the string the URL sits in, which is kept
+  with the backslashes that escape it. RFC 3986 allows `'` unencoded in a query, so a run of `'` followed by a
+  letter, a digit, one of `._~%+/-` or one of `!$*(@=` is part of the value (`?key=ab'cd`, `pa'(ss)w0rd`,
+  `Xk9'!mQ2`, `ab''cd`, and `''Xk9` at its start); a `"` is part of it only before a letter, a digit or one of
+  `._~%+/-`. One exception: a value that holds `'` before `,`, `)`, `;` or `:` (`?token=ab',cd`) is redacted only
+  up to that quote, and the text after it is written, because such a quote cannot be told from the one that ends a
+  string, as in `fetch('...?token=ab')`. A quoted value (`?key='abc'`, or `\"abc\"` in JSON inside a string) is redacted inside its quotes, and an empty
+  value is left as it is. The value of a parameter that is kept is searched too, so `?next=/cb?token=...`, which
+  was written in the clear, is redacted. The sensitive parameter names are unchanged; `?api_key=`, `&token=`,
+  `?access_token=` and `?filter[api_key]=` are still redacted, and redacted JSON keeps its structure and still
+  parses. No signature changes.
+- **Provider response bodies are redacted before they are truncated for a log line or an error**
+  ([#1674](https://github.com/llm4s/llm4s/issues/1674)). Many clients put a provider's error body into a log line
+  or an error message through `Redaction.truncateForLog` alone, or not even that, so a body that echoed a request
+  header, an API key or a token - `Authorization: Bearer ...`, `"api_key": "..."`, `?key=AIza...` - was written in
+  the clear. Every such site now goes through one internal helper that redacts the whole text and then truncates
+  it, as Cohere's and Jina's embedding providers already did: the OpenAI, Anthropic and Gemini vision clients, the
+  OpenAI (DALL-E) image client's error message, raw body or JSON `message` alike, and the Stable Diffusion and
+  Hugging Face image clients (`llm4s-image`); the Streamable HTTP and SSE MCP transports' HTTP error bodies, the
+  message of a JSON-RPC error from any transport, and the DEBUG line for an unrecognised SSE line, now built only
+  when DEBUG is on (`llm4s-mcp`); the Langfuse batch
+  sender's and tracer's error-body log lines and the per-event rejection summary (`llm4s-observability`); the
+  Ollama, OpenAI and Voyage embedding providers; Cohere's reranker and Qdrant's error messages (`llm4s-rag`);
+  `GraphJsonParser`'s preview of a reply it could not parse (`llm4s-knowledgegraph`); Vertex AI's token
+  refresh and JWT exchange errors (`llm4s-gemini`); watsonx's IAM exchange error, which removed only the
+  configured key; the grounding, context-relevance and every `LLMGuardrail` judge's quote of a reply they could not
+  parse, cut to 200 characters (`llm4s-agent`); and `HttpResponse.ensureSuccess`'s `ServiceError`, which the model
+  listers use (`llm4s-core`). An SDK exception's message carries the response body too (anthropic-java writes
+  `401: <body>`), so the same applies to the messages taken from one: Anthropic's `AuthenticationError` and
+  `ValidationError` on both paths (`llm4s-anthropic`); every error Bedrock maps from an AWS exception
+  (`llm4s-bedrock`); and `DefaultErrorMapper`'s `AuthenticationError` and `UnknownError`, which every client and
+  `Safety.safely`, `Safety.fromTry`, `toResult` and `toLLMError` fall back on (`llm4s-core`). The `UnknownError`
+  keeps the original exception as its cause, unredacted: a logger that prints the cause prints its message.
+  `OllamaClient`'s "does not support tools" error cut the server's decoded message to 200 characters and never
+  redacted it; it now redacts the whole message first. Redacting before the cut matters: a key that straddles the
+  cut point leaves a fragment too short for its pattern to recognise, which the old order let through. A truncated
+  body's `original length` now counts the redacted text. No public signature changes.
+- **`DefaultErrorMapper` classifies 401 and 429 only when the message names an HTTP status, and keeps the
+  cause otherwise** ([#1668](https://github.com/llm4s/llm4s/issues/1668)). The mapper behind `Safety.safely`,
+  `Safety.fromTry`, `toResult` and `toLLMError` turned any exception whose message *contained* `401` into
+  `AuthenticationError("unknown", "Authentication failed")` and `429` into `RateLimitError("unknown")`, dropping
+  the exception. So `Index 4012 out of bounds for length 10`, `request 1700401234 timed out`, `port 14290` or
+  `wrote 1429 tokens` became a non-retryable "your credentials are wrong", or a retryable rate limit that retry
+  and circuit-breaker logic would repeat on a deterministic bug, with the stack trace lost. Behaviour change:
+  the mapper now classifies a status only at a word boundary in an HTTP context - after `HTTP`, `status`,
+  `status code`, `http status`, `error code` or `response code`, optionally as a quoted JSON key
+  (`HTTP 401`, `HTTP/1.1 429`, `Status Code: 429`, `statusCode=401`, `"status": 429`, `http_status=401`),
+  before its reason phrase (`401 Unauthorized`, `Error: 429 - Too Many Requests`), or leading the message
+  as `openai-java` and `anthropic-java` write their service exceptions (`401: <body>`, also behind up to
+  eight wrapping exceptions' `ClassName: `). Everything else is an `UnknownError` carrying the exception
+  as its cause. Known false positive: that SDK shape has no other HTTP marker, so any message that
+  *starts* with `401: ` or `429: ` is still classified. The mapper scans only a message's first 4 KiB and
+  last 1 KiB (a status leads the message, or, from the AWS SDK, ends it), with patterns that run in
+  linear time, so an exception carrying a large response body is cheap to map. An `AuthenticationError` from the mapper now has code `401` and keeps the
+  original message, redacted (`Authentication failed for unknown: HTTP 401 Unauthorized`), where it said
+  only `Authentication failed`; neither it nor `RateLimitError` has a field for a `Throwable`, so a
+  classified exception's stack trace is still not kept. No public signature changes.
+- **Kotlin: cancelling `AgentKt.run` or `continueConversation` cancels the turn, as `resume` and `recover` do**
+  ([#1663](https://github.com/llm4s/llm4s/issues/1663), Kotlin API). `run` and `continueConversation` wrapped the
+  blocking `JAgent` call in `runInterruptible`, so cancelling the caller - a cancelled scope, `withTimeout` -
+  interrupted only the wait: the call threw `CancellationException`, but the turn kept running in the background,
+  calling the model, and its conversation thread stayed busy, so a `recover` or a new turn on it failed with
+  `ThreadBusy` until the turn finished. Both now run the turn as `stream` does (`run` on a new thread with a random
+  id, as `JAgent.run` does; `continueConversation` on `previous.threadId()`), its events discarded: cancelling the
+  caller cancels the turn and returns once it has ended, leaving the thread for `recover`; if the turn had already
+  completed when the cancellation arrived, its result is committed to the thread and `recover` throws `LLMException`
+  (no incomplete execution). Every `AgentKt` suspend function that runs a turn now behaves the same way, and
+  collects the turn's discarded events on `Dispatchers.IO`, not the caller's dispatcher (`Dispatchers.Main`). Results and failures are otherwise unchanged - the same
+  `JAgentResult`, and `LLMException` with the same message and cause. No public signature changes; Java's
+  blocking `JAgent` methods are unchanged.
+- **Kotlin: a stream whose listener fails fatally ends the `AgentKt` call instead of suspending it forever**
+  ([#1671](https://github.com/llm4s/llm4s/issues/1671), Kotlin API). `stream`, `streamResume`, `streamRecover` -
+  and the `run`, `continueConversation`, `resume` and `recover` built on them - closed their channel only from
+  the Java facade listener's `onComplete` or `onError`. When delivery dies of a fatal error (one `Safety` does not
+  capture: a `VirtualMachineError` such as `OutOfMemoryError` or `StackOverflowError`, a `LinkageError`),
+  `AgentStream` skips that callback and `await()` reports "the stream's listener failed fatally", but nothing
+  closed the channel, so the collector suspended until something outside cancelled it. The Kotlin side now
+  closes the channel from `AgentStream.await()`'s outcome, on a virtual thread, once delivery ends; the call
+  throws `LLMException` with the facade's report (the fatal error itself ended the facade's delivery thread and
+  goes to its uncaught-exception handler). A normal end is unchanged. No public signature changes; the Java
+  facade is unchanged.
+- **`llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama`: a deep or malformed model listing is a `Left`, not an
+  exception** ([#1660](https://github.com/llm4s/llm4s/issues/1660)). `AnthropicModelLister`,
+  `GeminiModelLister` and `OllamaModelLister` read the listing with the unbounded `HttpResponse.toJson` and
+  then throwing accessors - `json("data")` / `json("models")` and `.arr` inside a `Try`, `.obj` on each entry
+  and on the page outside one. `ujson.Value.InvalidData`'s message renders the value recursively, so a
+  listing 10,000 levels deep - a top-level array, or one under `data` / `models` or as an entry of it -
+  overflowed a 1 MB thread stack with a `StackOverflowError`, which `Try` does not catch; and a two-level
+  `{"data":[[1]]}` or `{"models":["x"]}` threw `InvalidData` out of `listModels`. Each lister now reads the
+  body through the depth-bounded `BoundedJson`, as `ProviderModelListers` does since #1658, and uses `Option`
+  accessors only: a body that is not JSON, nested more than 512 levels deep, not an object, or without a
+  `data` / `models` array is a `Left`, and an entry that is not an object is skipped, as an entry without an
+  `id` / `name` always was. Ordinary listings, pagination and the `has_more` / `last_id` checks are
+  unchanged. No public signature changes.
+- **Redaction keeps the text after a merely mentioned credential key readable**
+  ([#1654](https://github.com/llm4s/llm4s/issues/1654), part of
+  [#1657](https://github.com/llm4s/llm4s/issues/1657)): three over-redactions in `Redaction.redact` and
+  `redactForLogging`, and so the exchange-log sink; none exposed a credential. An unclosed `'password': '`
+  inside a JSON string (`{"content": "use 'password': ' carefully", "model": "gpt-4o"}`) ran to the next `'`
+  or the end of the input and took every field after the string; a single-quoted value (and a `key='`
+  assignment) inside a double-quoted string now also ends at a `"` that ends that string - one followed, past
+  whitespace, by the end of the input, by a `,` and the next `"key":`, or by a `}` or `]` that is itself followed
+  by the end of the input, another `}` or `]`, or a `,` before a `"`, `{` or `[` - so the output is
+  `{"content": "use 'password': '[REDACTED]", "model": "gpt-4o"}`. It ends there only where no `'` that could
+  close the value (any `'` but the apostrophe between two letters or digits, as in `it's`) follows anywhere in the
+  input, where that `"` is not the first character of the value, and where the passes before have replaced no
+  `'`; otherwise it runs to the next `'` or the end of the input, as on main, so a credential holding a `"`
+  (`'Qx"]]9secret'`, `'Qx", "k": 9secret'`, or `'Bearer abc"]}secret'`, whose token the header pattern replaces
+  first) is still redacted whole. A `'token': [` mentioned inside a JSON string took the apostrophe of `it's` for a leaf
+  that the string's end closed (`... Thanks, it'[REDACTED]"}`); the apostrophe of a word of prose there - between
+  two letters, in a word after whitespace - is now kept when only the string's end would close it and no `\"`
+  (JSON escaped in the string) comes before that end, while a quote after a bracket, a comma, a space or a Python
+  prefix (`b'`, `rb'`) still opens a leaf. And a bare word after a
+  backslash under a credential key (`{"token": [\a1, "x"], "password": "..."}`) had its replacement quote written
+  straight after the backslash, which read as `\"` and lost the rest of the document; the escaped character is now
+  kept, as before #1647, and the rest of the word replaced. Each of these redacts to the same output when redacted
+  again. Left by decision: outside any string, the bare words after an unclosed `'token': [` are still replaced to
+  the end of the input (`note: see 'token': [ for details` -> `note: see 'token': [ '[REDACTED]' '[REDACTED]'`),
+  since they read as the leaves of a YAML flow sequence or a cut-off dict and nothing tells them from prose; and
+  redacting twice still changes some inputs with unbalanced quotes, which the `redact` Scaladoc now says, where
+  `redactPairs` had claimed redacting twice gives the same result. Two known trade-offs, pinned by tests: a
+  *truncated* input - an unclosed single-quoted value inside a raw (unescaped) double-quoted string, holding a `"`
+  followed by what follows a string's end, with no `'` that could close it after it (`msg="{'password': 'Qx"]]9secretPW`
+  cut off) - shows the part after that `"` (`'[REDACTED]"]]9secretPW`), where main hid it by running to the end of
+  the input; every llm4s call site (`redactForLogging`, the exchange-log sink, Cohere's and Jina's error bodies, the
+  MCP payload preview) redacts the full text before truncating it, and a caller must do the same. And a closing `'`
+  with a letter or digit on both sides (`'Qx"]]9SECRETPW'it"`) is read as an apostrophe, so it does not close the
+  value and the same applies. No signature changes.
+- **Redaction keeps a `$` or `\` in a query parameter, and writes a placeholder as it is**
+  ([#1655](https://github.com/llm4s/llm4s/issues/1655)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, returned a query parameter to `Regex.replaceAllIn` without `Regex.quoteReplacement`, so
+  a `$` or `\` in it was read as a group reference or an escape. `?q=\` threw `IllegalArgumentException`,
+  `?q=$5` threw `IndexOutOfBoundsException`, `?api$key=abc` threw `IllegalArgumentException` (illegal group
+  reference), `?q=$1` became `?q=?` and `?path=C:\dir` became `?path=C:dir`. A caller's `placeholder` reached
+  the Authorization, Bearer, Basic and API-key replacements unquoted too, so a placeholder of `$0` wrote back
+  the credential it replaced. Every replacement in `Redaction` and `SecretPatterns.redactAll` /
+  `redactAllWithPlaceholder` is now quoted: the parameters are kept exactly, a sensitive value is still
+  redacted, and the placeholder is written literally. No signature changes.
+- **A deeply nested provider error body falls back to the default message instead of overflowing the stack**
+  ([#1658](https://github.com/llm4s/llm4s/issues/1658)). `HttpErrorMapper` read a non-2xx body with
+  `ujson.read` and then `.obj`; parsing is iterative, but `.obj` on a top-level array throws
+  `ujson.Value.InvalidData`, whose message renders the whole value recursively, so an error body of 10,000
+  nested `[` (about 20 KB) overflowed a 1 MB thread stack - a `StackOverflowError`, which `Try` does not
+  catch, out of every provider's non-2xx path, including `OpenAICompatibleClient`'s `complete` and
+  `streamComplete` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and the generic `openai-compatible`
+  provider). The body is now read through the depth-bounded `BoundedJson` with `Option` accessors only, so
+  a body that is not JSON, not an object, or nested more than 512 levels deep yields `"<provider> API error
+  (HTTP <status>)"`; ordinary `{"message": ...}`, `{"error": {"message": ...}}` and `{"error": "..."}`
+  bodies read as before. The same hazard is closed in `llm4s-openai-compatible`: `OpenAICompatibleClient`
+  refuses a 2xx reply or a stream event nested more than 512 levels deep with a `Left`, as it does
+  malformed JSON, and `ProviderModelListers.openAICompatible` reads the listing through `BoundedJson` and
+  returns `Missing or invalid models payload` for a body that is not an object with a `data` array. No
+  public signature changes.
+- **`llm4s-bedrock`: a `toolUse` input nested more than 512 levels deep is refused as a malformed tool
+  call, never converted or sent back** ([#1648](https://github.com/llm4s/llm4s/issues/1648)). #1630
+  ([#1562](https://github.com/llm4s/llm4s/issues/1562)) bounded every place model-written JSON is parsed
+  and #1644 ([#1643](https://github.com/llm4s/llm4s/issues/1643)) closed the window left for Anthropic
+  and Gemini, but a Converse response's `toolUse.input` arrives as an AWS SDK `Document`, provider-native
+  rather than text, and was left out. The SDK's bundled Jackson parser admits it up to 1,000 levels, about
+  twice the library's limit, and `BedrockClient` converted it with a recursive visitor and rendered it
+  back on the next turn with a recursive builder, so an input 513 to ~998 levels deep became a `ToolCall`
+  that overflowed the stack when it was traversed - a `StackOverflowError`, which is not an `Exception`
+  and escaped `complete`'s `Result`. The `Document`'s depth is now measured iteratively before it is
+  converted, and `complete` returns `ProcessingError("bedrock-tool-calls", "malformed tool call:
+  arguments are nested more than 512 levels deep")` for one over the limit, as the Anthropic and Ollama
+  clients do; an input at the limit is still accepted and sent back. The streaming path was already
+  bounded, since `ConverseStream` delivers arguments as text that `StreamingAccumulator` reads through
+  `BoundedJson`.
+- **`llm4s-provider-testkit` says it requires JDK 21** ([#1582](https://github.com/llm4s/llm4s/issues/1582)):
+  its interruption checks run the call on a virtual thread and `LocalProviderTestServer` answers on
+  `Executors.newVirtualThreadPerTaskExecutor`, both JDK 21 APIs, but nothing said so. The provider guide, the
+  installation page, the 1.0 scope and the compatibility policy now state it, as do the two Scaladocs. No
+  build setting changes; the minimum JDK for the other artifacts, and where it is enforced, is decided in
+  [#1493](https://github.com/llm4s/llm4s/issues/1493).
+- **`llm4s-spring-boot-starter`: `LlmHealthIndicator.health()` reports DOWN instead of throwing when its thread is
+  interrupted** ([#1636](https://github.com/llm4s/llm4s/issues/1636)): the probe waited on its future inside a
+  `Try`, which does not catch `InterruptedException`, so interrupting the thread checking health while the
+  provider call ran (Actuator shutting down, a management pool interrupting its worker) propagated the exception
+  out of `health()`, with the interrupt flag cleared and the probe left running on the executor. The wait now goes
+  through `CancelledError.attempt`, as `JLlmClient` does: the check is `DOWN` with `probe=cancelled` and an `error`
+  detail, the interrupt flag is set again for the caller, and the abandoned probe is cancelled like a timed-out
+  one. `health()` never throws `InterruptedException`; the README and the Spring Boot guide say so.
+- **`llm4s-spring-boot-starter`: a cancelled health probe is not cached**
+  ([#1642](https://github.com/llm4s/llm4s/issues/1642)): `probeCached` stored every outcome for
+  `llm4s.health.probe-ttl`, so the `DOWN` / `probe=cancelled` that an interrupted thread gets was served to every
+  other caller within the TTL - a thread queued behind it, the next uninterrupted Actuator poll - as if the provider
+  were down. A cancellation is a fact about the interrupted thread, not the provider: `probeNow` now returns it apart
+  from a provider outcome, it is reported to that caller only, and the next check probes again. A failed or timed-out
+  probe is still cached. Found during review of #1640.
+- **Redaction covers a credential whose value is an array or an object**
+  ([#1576](https://github.com/llm4s/llm4s/issues/1576)): `Redaction.redact` and `redactForLogging` (and so the
+  exchange-log file sink) replaced only a string or a number under a sensitive key, so `{"token": ["abc"]}`
+  and `{"credentials": {"user": "u", "pass": "p"}}` were written in the clear. Every string and number leaf
+  under such a key is now replaced, however deep, in plain JSON and in JSON that sits inside a string; the
+  brackets, the keys of nested objects, `true`, `false` and `null` are kept, so the output still parses and
+  keeps its shape, and a payload cut off inside the value is redacted to the end. A number under a sensitive
+  key of JSON inside a string (`\"password\": 12345`) is redacted too. Keys that merely contain a credential
+  word (`max_tokens`, `messages`) still keep their arrays. The scanner counts brackets on an explicit stack
+  and visits each character once, so a megabyte-long array or one nested a hundred thousand levels deep
+  redacts on a small thread stack. Twice-escaped JSON and a secret that is not under any key remain
+  unredacted by decision; the exchange-logging guide says so.
+- **A too-deep refusal is recognised structurally, not by equality with a freshly built error**
+  ([#1651](https://github.com/llm4s/llm4s/issues/1651), found in review of #1644). The Ollama, Anthropic,
+  Gemini and Vertex AI clients told a document `BoundedJson` refused as too deep from one it could not parse
+  with `case Left(e) if e == BoundedJson.tooDeep()`, which holds only for the error of the default limit with
+  its exact wording: a read with another limit, or a reworded message, would have fallen through to each
+  site's generic arm - for the Gemini and Vertex AI streams, the arm that skips the chunk, which is the
+  silent drop #1643 fixed. The four sites now match `BoundedJson.TooDeep()`, an extractor that recognises
+  the error by the prefix `tooDeep` writes, whatever limit follows it; `BoundedJson` is `private[llm4s]`,
+  so no public signature changes. The Gemini and Vertex AI warning now reads `a chunk is nested more than
+  512 levels deep` rather than quoting the error's `Invalid json: ` message.
+- **Redaction covers a single-quoted key with an array or an object value**
+  ([#1647](https://github.com/llm4s/llm4s/issues/1647)): a single-quoted string value had been redacted
+  (`{'api_key': 'x'}`), but `{'token': ['abc']}` and `{'credentials': {'user': 'u', 'pass': 'p'}}` - a
+  Python dict or a JavaScript literal in a prompt - were written in the clear, and a single-quoted leaf under
+  a double-quoted key, `{"token": ['abc123']}`, was mangled rather than redacted (`['abc"[REDACTED]"']`,
+  the digits taken for a number). The leaves under a single-quoted credential key are now replaced like the
+  double-quoted ones, and a leaf may be double- or single-quoted whatever the key's quote. Inside a string a
+  single-quoted container ends where the string does, so a `'token': [` that a message merely mentions
+  (`{"content": "see 'token': [ for details", "api_key": "..."}`) does not take the fields after it; a
+  `\"`-quoted leaf under a single-quoted key inside a string is left, by decision, since a `"` there may be
+  the end of a string inside the string. Outside a string, a bare value under a credential key (`token:
+  [abc]`, an unquoted word as well as a number) is replaced too, so that a walk misled by a stray quote
+  before the document leaves nothing readable; `true`, `false`, `null`, Python's `True`, `False`, `None`
+  and an unquoted key are kept.
+- **`llm4s-java-api`: `InterruptedException` is never thrown, and the Javadoc says so**
+  ([#1591](https://github.com/llm4s/llm4s/issues/1591)): `catch (InterruptedException e)` around
+  `JLlmClient.complete` or `JAgent.run` does not compile ("never thrown in body of corresponding try statement"),
+  because the facade reports an interrupt as a `CancelledError` result with the thread's interrupt flag left set
+  rather than throwing. That is now the contract for every client: an `InterruptedException` that a custom
+  `LLMClient` let escape used to propagate out of `complete` as an undeclared checked exception that Java could
+  not catch by name, and is now the same `CancelledError`, with the flag restored. The signatures are unchanged -
+  declaring `throws InterruptedException` would have forced a catch of an exception that is never thrown on every
+  caller. The Javadoc of `complete` and `run`, the Java guide and the threading guide now say what to do instead:
+  test the result for a `CancelledError` (`ThreadingGuideSnippets.completeOrNull`); a snippet test pins it.
+- **Docs: every page under a parent has its own `nav_order`, and CI checks it**
+  ([#1623](https://github.com/llm4s/llm4s/issues/1623)): ten `nav_order` values were shared by two or three pages
+  under the same parent (`Basic Usage` and `Agents` both 1, `Permission-Based RAG` and `RAG Evaluation` both 4,
+  `Structured Output` and `Java` both 6, `Built-in Tools` and `Monitoring` both 10, `Context Window Pruning` and
+  `Production Deployment` both 11, `Advanced Topics` and `Google Summer of Code` both 5, `Contribute`, `Migrations`
+  and `People` all 9, among others), so the site ordered them by title and the number meant nothing. The colliding
+  pages are renumbered, keeping the existing order where it was sensible, and the stale
+  `docs/reference/review-guidelines.main.backup.md`, a second *Code Review Guidelines* page under Reference, is
+  removed. A new check, `scripts/check-doc-nav-order.sh`, runs in CI quick checks and fails on a duplicate.
+- Calculator decimal output uses a stable locale, including on JVMs configured with comma decimal separators.
+- **`llm4s-agent-tools`: `CalculatorTool` rejects results that are not finite**
+  ([#1516](https://github.com/llm4s/llm4s/issues/1516)): an overflow (`10^400`, `1e200 * 1e200`) or an undefined
+  power (`(-8)^(1/3)`) was returned as a success whose text was `Infinity` or `NaN`, while division by zero and
+  the square root of a negative were errors. Any result that is infinite or not a number is now an error,
+  like those two, so a model is no longer handed `"Infinity"` as an answer; **a caller that relied on receiving
+  `Infinity` or `NaN` now gets a `Left`** (the tool description says so).
+- Credential redaction handles escaped quotes in embedded JSON, quoted assignments, and exponent-form numeric values.
 - **`llm4s-agent-tools`: file tools confined by path component, not string prefix**
   ([#1296](https://github.com/llm4s/llm4s/issues/1296)): `FileConfig.isPathAllowed` and
   `WriteConfig.isPathAllowed` compared paths with `String.startsWith`, so an allowed `/srv/agent-data` also
   admitted `/srv/agent-data-secret`, and `developmentSafe(workingDirectory)` could read and write a sibling
   directory whose name began with the working directory's. Both now use `Path.startsWith` on normalised absolute
   paths; blocked paths are matched the same way (`/var` no longer blocks `/variable`).
+- **`llm4s-agent-tools`: `get_current_datetime` reads the same on every host and checks its parameters**
+  ([#1512](https://github.com/llm4s/llm4s/issues/1512), [#1513](https://github.com/llm4s/llm4s/issues/1513),
+  [#1511](https://github.com/llm4s/llm4s/issues/1511)): the `human` format used the JVM's default locale, so the
+  same call wrote localised month and weekday names (and a lower-case `am` under `en_GB`); it is now always English
+  (`Locale.US`, so the text under `en_US` is unchanged). `timezone` and `format` were marked required in the tool
+  schema although the handler defaults both, so a call with null arguments was refused with `NullArguments`; both
+  are optional now, as the guide already said. **Behaviour changes:** an unsupported `format` is now an error that
+  names the supported formats, where it used to answer in ISO; a `format` or `timezone` that is not a string is an
+  error naming the parameter, where it used to be ignored (the answer came in UTC / ISO). A JSON `null` still counts
+  as absent.
+- **`llm4s-knowledgegraph`: a failed graph extraction logs a preview of the reply, not the whole reply**
+  ([#1635](https://github.com/llm4s/llm4s/issues/1635)): `GraphJsonParser` used to put the entire model reply on
+  the ERROR line when it did not parse, or parsed but was not a graph - the second site re-rendering the whole
+  parsed value to do so. The reply is model output, so a megabyte reply became a megabyte log line, and it echoes
+  the documents the graph was extracted from. Both lines now carry the reply's first 512 characters and its full
+  length (`Redaction.truncateForLog`). The `ProcessingError` returned is unchanged.
+- **`llm4s-core`: `ProcessingError.context` names the cause's class when the exception has no message**
+  ([#1556](https://github.com/llm4s/llm4s/issues/1556)): the `cause` entry was the exception's `getMessage`, which
+  is `null` for an exception built without one (`new RuntimeException()`, a bare `NullPointerException`), so the
+  `Map[String, String]` held `"cause" -> null`, `formatted` printed `cause=null`, and any later read of the value
+  (`toLowerCase`, JSON encoding) threw. The entry is now the class name (`cause=java.lang.RuntimeException`)
+  when the message is `null` or empty; a cause with a message keeps its message, and an error without a cause
+  has no `cause` entry, as before. `AssistantError.consoleInputFailed` and `consoleOutputFailed`, which
+  interpolated the same `getMessage` into their message (`Failed to read user input: null`), fall back the same way.
+- **`llm4s-knowledgegraph`: `GraphJsonParser` returns a `Left` for a reply that is not a JSON object**
+  ([#1527](https://github.com/llm4s/llm4s/issues/1527)): the parser read `json.obj` outside the `Try` that guards the
+  parse, so a model reply whose top-level value was an array, a string, a number, `true`, `false` or `null` threw
+  `ujson.Value$InvalidData` out of `KnowledgeGraphGenerator` and `SchemaGuidedExtractor` instead of failing with a
+  `ProcessingError`. Such a reply is now a `ProcessingError` under the caller's error code. The message for a document
+  that lacks `nodes` or `edges` now reads "JSON must be an object containing 'nodes' and 'edges' fields"
+  (it named the fields without saying the document must be an object).
 - **`llm4s-agent-tools`: `list_directory` honours `followSymlinks = false`**
   ([#1296](https://github.com/llm4s/llm4s/issues/1296)): it checked the requested path with a link-following
   `Files.isDirectory`, so a directory symbolic link inside an allowed path listed the directory it pointed to.
@@ -1783,6 +2606,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   item's slot and delivered as a `LiveGap` just before it, so a subscription queues at most `2 * capacity`
   events and gap markers - `capacity` durable, `capacity` live - plus one end-of-run barrier per run that
   ended while they were queued, however dropped live events and durable commits interleave.
+- **`llm4s-core`: `MetricsCollector.compose` forwards the image-generation methods**
+  ([#1609](https://github.com/llm4s/llm4s/issues/1609)): the composed collector overrode six of the trait's
+  methods and left `observeImageGeneration` and `recordImageGenerationCost` at their no-op defaults, so
+  `MetricsCollector.compose(prometheus, costTracker)` recorded requests, tokens, cost, errors, retries and
+  circuit-breaker transitions in both and image metrics in neither, although each collector alone recorded
+  them. It now forwards every method of the trait, so a composed collector handed to
+  `InstrumentedImageGenerationClient` records image metrics in every child; a collector that throws still does
+  not stop the others. `MetricsCollectorComposeSpec` pins the contract for the whole trait by reflection, so a
+  method added to `MetricsCollector` without a forward in `compose` fails the build. The observability guide,
+  which documented the gap as a limitation, and `ObservabilityMetricsGuideSpec`, which pinned it, now say and
+  check forwarding.
+- **A `tool_use` input or `functionCall.args` nested too deeply is refused instead of overflowing the
+  stack** ([#1643](https://github.com/llm4s/llm4s/issues/1643), completing
+  [#1562](https://github.com/llm4s/llm4s/issues/1562)). #1630 bounded every parse of model-written JSON at
+  512 levels but left two where the model's JSON arrives inside the provider's envelope rather than as text:
+  `AnthropicClient` read a `tool_use` block's `input` with a bare `ujson.read`, relying on the SDK's Jackson
+  parser, whose own cap is 1,000, so an input 513 to about 998 levels deep became a `ToolCall` and overflowed
+  the stack when the next turn rendered it back; and `GeminiClient` and `VertexAIClient`, which have no SDK,
+  parsed the envelope with `ujson.read` and took `functionCall.args` - a native object in it - as the call's
+  arguments at any depth. The Anthropic client now reads the input through `BoundedJson.read`, and one over
+  the limit is a malformed tool call (a `ProcessingError` naming the limit, as for the Ollama client); the
+  Gemini and Vertex AI clients read the envelope through it, so a reply nested more than 512 levels deep is
+  a `ValidationError` naming the limit, streamed or not: a streamed chunk that deep fails the stream with
+  the same error and a warning naming the reason, rather than vanishing from a completion that then
+  reported success without its call (a chunk that is not JSON at all is still skipped, as before). No
+  public signature changes.
+- **A `tool_use` input or `functionCall.args` nested too deeply is refused instead of overflowing the
+  stack** ([#1643](https://github.com/llm4s/llm4s/issues/1643), completing
+  [#1562](https://github.com/llm4s/llm4s/issues/1562)). #1630 bounded every parse of model-written JSON at
+  512 levels but left two where the model's JSON arrives inside the provider's envelope rather than as text:
+  `AnthropicClient` read a `tool_use` block's `input` with a bare `ujson.read`, relying on the SDK's Jackson
+  parser, whose own cap is 1,000, so an input 513 to about 998 levels deep became a `ToolCall` and overflowed
+  the stack when the next turn rendered it back; and `GeminiClient` and `VertexAIClient`, which have no SDK,
+  parsed the envelope with `ujson.read` and took `functionCall.args` - a native object in it - as the call's
+  arguments at any depth. The Anthropic client now reads the input through `BoundedJson.read`, and one over
+  the limit is a malformed tool call (a `ProcessingError` naming the limit, as for the Ollama client); the
+  Gemini and Vertex AI clients read the envelope through it, so a reply nested more than 512 levels deep is
+  a `ValidationError` naming the limit and a streamed chunk that deep is dropped, as any chunk that cannot be
+  read is. No public signature changes.
 - **`MemoryStore.storeAll` is all or nothing, and the SQL stores write a batch in one transaction**: `storeAll`
   was the trait's default, a loop of `store` calls. In `SQLiteMemoryStore` and `VectorMemoryStore` each `store` ran
   three statements (the row, then the full-text entry's delete and insert) under autocommit, so a batch of n
@@ -1808,6 +2670,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly and returns a `Left` (`Regex matching aborted: pattern recursed too deeply for the input (stack
   overflow)`), which `RegexValidator` reports as a `Regex security error` `ValidationError`. Other fatal errors
   still propagate. The workspace runner's `WorkspaceRegexSafetyManager` has the same fix.
+- **`llm4s-agent`: a judge guardrail refuses a reply that is not one number from 0 to 1, instead of clamping it into a pass**
+  ([#1405](https://github.com/llm4s/llm4s/issues/1405)): `LLMGuardrail` (and so `LLMSafetyGuardrail`,
+  `LLMFactualityGuardrail`, `LLMQualityGuardrail` and `LLMToneGuardrail`) reduced the judge's reply to its digits
+  and dots and clamped the number into 0.0 to 1.0, so `85`, `85%`, `8/10`, `1e-3` and `0,9` all read as 1.0 and
+  passed any threshold up to 1.0, `0.7 out of 1` read as 0.71, and `-0.5` read as 0.5. A judge that answered on a
+  0 to 100 scale approved everything. A reply is now a score only when the whole reply is one plain decimal
+  number from 0 to 1 (`0.9`, `.5`, `1`) of at most 64 characters, with whitespace, markdown emphasis, quotes,
+  brackets or bare code-fence backticks before or after it (not necessarily balanced) and optionally a `Score:`
+  label before it (`Score: 0.9`, `**Score:** 0.9`, but not `**Score**: 0.9`). Anything else is a
+  `ValidationError` on field `llm_response`, which fails the guardrail like an unreadable reply always did: a
+  sign glued or apart (`-0.5`, `- 1`, `negative 1`), a percentage or other scale as a sign or in words (`85%`,
+  `1 %`, `1 percent`, `1 per mille`, `1 per ten thousand`, `100 bps`), a fraction, an exponent, a decimal comma,
+  a trailing full stop, another label or a sentence (`Rating: 0.9`, `The score is 0.9`), a code fence with a
+  language tag, a number longer than 64 characters (refused before it is parsed), or more than one number. The score is compared at the precision the judge wrote it and the threshold as the decimal it is
+  written as, so `1.0000000000000001` is out of range and `0.79999999999999999` does not reach a threshold of
+  0.8. `LLMGuardrail.evaluateWithLLM` returns `Result[BigDecimal]` instead of `Result[Double]`. **Migration:** a
+  judge that passed because it answered on another scale, or in a sentence, now fails with `Could not parse LLM
+  judge score`: make it answer with only a number between 0 and 1, as the fixed system message already asks. A
+  subclass that calls or overrides `evaluateWithLLM` takes a `BigDecimal` (`.toDouble` where a `Double` is
+  needed). The score-reading rules are documented on `LLMGuardrail`.
+- **`llm4s-agent`: a judge guardrail with a threshold outside 0.0 to 1.0 fails with a clear error, instead of silently
+  blocking everything or passing everything** ([#1520](https://github.com/llm4s/llm4s/issues/1520)): the threshold of
+  `LLMGuardrail` (and so of `LLMSafetyGuardrail`, `LLMFactualityGuardrail`, `LLMQualityGuardrail`,
+  `LLMToneGuardrail` and `LLMGuardrail(...)`) was not validated: above 1.0 (or `+Infinity`), or NaN, nothing could
+  pass, and below 0.0 (or `-Infinity`) everything that parsed passed. `validate` now returns a `ValidationError` on
+  field `threshold` for a value below 0.0, above 1.0 (an infinity too) or NaN, **before** calling the judge, so no
+  call is spent on a guardrail that cannot work. 0.0 and 1.0 are accepted, and a valid threshold is still compared
+  as the decimal it is written as (#1405). The check runs when `validate` runs, not when the guardrail is built, so
+  no constructor or factory signature changed and a subclass that overrides `threshold` is checked too.
+  **Migration:** a guardrail whose threshold was out of range, and so was blocking everything or approving
+  everything, now fails every `validate` with that error: correct the threshold.
+- **`llm4s-gemini`: a signed function call with an empty `id` is replayed with its thought signature**
+  ([#1615](https://github.com/llm4s/llm4s/issues/1615)): a `functionCall` returned with `"id": ""` got a generated
+  tool-call id at parse, but the signed part was kept verbatim, so on the next turn its stored `""` was compared with
+  the generated id, the part was taken for an edited call and rebuilt without its `thoughtSignature` - which a
+  Gemini 3 model answers with HTTP 400, the failure #1416 fixed. An absent or empty stored id is now "no id" on replay
+  too, as it already was at parse, so the part goes back exactly as Gemini signed it, `"id": ""` included; the
+  `functionResponse` still carries no id. Same on Vertex AI.
+- **`llm4s-gemini`: an empty replayed function-call `id` is never echoed onto a `functionResponse`**
+  ([#1622](https://github.com/llm4s/llm4s/issues/1622)): the clients collect the ids of the `functionCall` parts they
+  replay so a tool result can echo its call's id, and collected an empty one too, so a tool result hand-built as
+  `ToolMessage(result, "")` after a replayed `"id": ""` call got `"id": ""` on its `functionResponse`, where parse and
+  replay both read an empty id as "no id". The three sites now agree: an empty id is never collected, so no
+  `functionResponse` carries one; the signed part still goes back verbatim. Same on Vertex AI.
+- **`TokenizerMapping` reports a Claude model under the `azure/` prefix as approximate, as it tokenizes it**
+  ([#1572](https://github.com/llm4s/llm4s/issues/1572)): `getTokenizerId` tested its Claude guard before the
+  `azure/` prefix, while `getAccuracyInfo` tested the prefix first, so a name such as `azure/claude-3-sonnet` was
+  tokenized as a Claude model but reported `Exact("Azure uses OpenAI tokenizers")`, and `isExactMapping` returned
+  `true` for a model the class documentation's table calls approximate. `getAccuracyInfo` now takes the guards in
+  `getTokenizerId`'s order, so `azure/claude-...` is `Approximate` with accuracy 0.75 and `isExactMapping` is
+  `false` for it, as for `claude-...` and `anthropic/...`. The tokenizer selected does not change (`cl100k_base`
+  either way), and an Azure deployment whose name does not contain `claude` is still reported exact.
+- **`llm4s-agent-tools`: `json_tool` refuses what it used to mishandle**
+  ([#1508](https://github.com/llm4s/llm4s/issues/1508), [#1509](https://github.com/llm4s/llm4s/issues/1509),
+  [#1510](https://github.com/llm4s/llm4s/issues/1510)): a `query` path with an array index too large for an `Int`
+  (`a[99999999999]`) threw a `NumberFormatException` out of the handler and out of `execute`; it is now an error naming
+  the index. A path the parser could not read to the end was cut short and the value reached so far was returned as a
+  success (`a..b`, `a[x]`, `a[-1]` all returned `a`); it is now an error naming the text it stopped at. A document
+  nested more than 512 levels deep (arrays and objects together) made `parse` and `format` raise a
+  `StackOverflowError`, which `Try` does not catch; every operation, `validate` included, now refuses such a document
+  with an error before reading or writing it. A path that used to succeed only because its tail was ignored, such as
+  `items.[0]`, is now an error: write `items[0]`.
 - **`SafeParameterExtractor`: integer parameters reject fractions and overflow, and `validateRequired` checks
   types** ([#964](https://github.com/llm4s/llm4s/issues/964)): `getInt`, `getIntEnhanced` and `getOptionalInt`
   were `_.numOpt.map(_.toInt)`, so a tool argument of `3.14` returned `3` and `9223372036854775807` returned `-1`,
@@ -1823,6 +2747,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.toOption` (`UUIDTool`'s `count`, `ListDirectoryTool`'s `max_entries`, `ReadFileTool`'s `max_lines`, the
   workspace and knowledge-graph tools) fall back to their default for such a value instead of using the truncated
   one. No public signature changed.
+- **`llm4s-agent-tools`: file paths are judged by where they really are, a shell command gets a scrubbed
+  environment, and the HTTP tool stops reading at its cap** ([#1408](https://github.com/llm4s/llm4s/issues/1408),
+  findings F1 to F4; F5 to F9 remain open):
+  - *File tools (`read_file`, `list_directory`, `file_info`, `write_file`).* `allowedPaths` and `blockedPaths` were
+    compared as strings, so allowing `/srv/data` also allowed `/srv/data-secret`, and a symbolic link inside an
+    allowed directory led out of it (reads, listings, `file_info` and writes, `followSymlinks = false` included).
+    A path is now made absolute, every symbolic link is resolved, and the result is compared with each entry -
+    resolved the same way - one path component at a time (the tools remove `..` as text first and open the location
+    they judged; `isPathAllowed` reads a `..` after a link both as POSIX applies it, at the link target's parent,
+    and as Windows does, removing it as text first, and allows the path only when both locations are allowed, on
+    every OS);
+    blocked entries are matched on the real location too. The tools open the resolved path, so a link swapped in after the check no longer redirects the
+    open (a directory swapped for a link between the check and the open is a race that is narrowed, not closed).
+    A link that cannot be resolved (a dangling link) is refused. A hard link inside an allowed directory to a file
+    elsewhere is not contained: no path check can tell it from the file itself. `FileConfig.isPathAllowed` and
+    `WriteConfig.isPathAllowed` keep their signatures and use the same rule.
+  - *Shell tool.* A command no longer inherits the process environment, where provider API keys live: it receives
+    only the variables in the new `ShellConfig.inheritedEnvironment` (default `PATH`, `LANG`, `LC_ALL`, `TERM`,
+    `SystemRoot`) plus `environment`; `ShellConfig.development()` sets it to `None` and keeps inheriting everything.
+    The new `ShellConfig.pathPolicy` (and the `ShellConfig.readOnlyWithin(policy, workingDirectory)` preset) holds
+    every file-like argument of a command, and its working directory, to a `FileConfig`, judged as the program
+    will hand it to the OS (so `linksub/../secret` is judged both at the link target's parent and, as Windows reads
+    it, beside the link); `--` is not trusted to end the
+    options, because an option that takes an argument consumes it (`file -F -- -f list`), so every argument is
+    checked as a path and, when it starts with `-`, as a flag. Without a policy a command's file arguments are not
+    checked, as before. `file -C`/`-m`/`-M`/`-f`, `date -f`/`-r` and `wc --files0-from`, which write a file or read
+    one the command does not name, are refused, by the program's file name (so `/usr/bin/file -C` too), in any
+    abbreviated long form GNU accepts (`date --fil`), and after a `--` too.
+  - *HTTP tool.* A response body was read in full and then cut at `maxResponseSize`; reading now stops one byte
+    past the cap, with the same result for any body.
+  - **Migration.** A configuration that relied on a path prefix to cover sibling directories stops matching them
+    (list each directory); a symbolic link inside an allowed directory works only if its real target is inside an
+    allowed directory; a shell command that needs a process variable (for example `HOME`, `JAVA_HOME`) must be named
+    in `inheritedEnvironment` or set in `environment`; `file -C` and friends no longer run in the read-only preset.
+    On macOS `/var` is a link to `/private/var`, so the default `blockedPaths` (which includes `/var`) now also
+    blocks the real-path per-user temporary directories under `/private/var/folders`, which `java.io.tmpdir` and
+    `Files.createTempDirectory` return there; a configuration that reads or writes there must set its own
+    `blockedPaths`. A path with a `..` after a symbolic link whose POSIX and Windows readings disagree, one inside
+    and one outside, is refused on every OS (with `data/l -> data/a/b`, `data/l/../../x` is refused on Linux too);
+    spell it without the `..`.
+- **`llm4s-agent`: `PIIMasker` masks international phone numbers and 15-digit card numbers, and `PIIPatterns.maskAll`
+  no longer corrupts or fails on overlapping matches** ([#1517](https://github.com/llm4s/llm4s/issues/1517),
+  [#1568](https://github.com/llm4s/llm4s/issues/1568)): the
+  phone pattern only knew US numbers and the card pattern only the 16-digit layout, so `+44 20 7946 0958` and the
+  American Express number `3782 822463 10005` were passed through unmasked. `PIIType.Phone` now also matches a `+`
+  followed by 8 to 15 digits with spaces, dashes, dots or parentheses between them (a digit run without the `+` is
+  not treated as an international number), and `PIIType.CreditCard` the 4-6-5 layout with prefix 34 or 37, written
+  with or without separators. Separately, `maskAll` replaced each match by its original indices, so when two types
+  matched overlapping text it cut the wrong characters or threw: `PIIMasker.sensitive` and `PIIMasker.financial`
+  failed with a `StringIndexOutOfBoundsException` on a plain 16-digit card number (a card is also account-shaped),
+  and `PIIMasker.all` turned `123456789` into `[REDACTED_PASSPORT]_SSN]`. Overlapping matches are now merged into one
+  stretch that is replaced once, under the type whose match starts first (the longest, then the type listed first,
+  on a tie), so a plain 15- or 16-digit card number under those presets is `[REDACTED_CARD]`. No signature
+  changes. The separators inside a phone or card number are now horizontal whitespace, dashes and (for phones) dots
+  and parentheses only, so a line break no longer joins digit groups on separate lines into one number: before,
+  `555`, `123` and `4567` on three lines were masked together, and the line breaks with them. The guide's table
+  named the card placeholder `[REDACTED_CC]`; it is `[REDACTED_CARD]`.
 - **Guardrail case folding no longer depends on the JVM default locale**: `ProfanityFilter`, `ToneValidator`
   and `PromptInjectionDetector` lower-cased text with the default locale, so under a Turkish locale `HI`,
   `INAPPROPRIATE` and `IGNORE PREVIOUS INSTRUCTIONS` folded to a dotless `ı` and went undetected. They (and the
@@ -1834,6 +2815,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ïgnöre` and `ig<U+200B>nore` are now all detected. Look-alike letters from other scripts are not mapped.
   `ProfanityFilter` normalises its word list the same way (in case-sensitive mode too, without the case fold),
   and a non-breaking or other compatibility space now separates tokens there and in `ToneValidator`.
+- **`TokenizerMapping`: legacy `gpt-3` models are reported as exact, a `gpt-3` under another provider's prefix is no
+  longer tokenized as OpenAI's, and the Azure documentation matches the code**
+  ([#1557](https://github.com/llm4s/llm4s/issues/1557), [#1558](https://github.com/llm4s/llm4s/issues/1558)): the
+  class documentation lists `gpt-3 (legacy)` as `r50k_base`, accuracy Exact, but `getAccuracyInfo` left it out of its
+  OpenAI guard, so `gpt-3` and `gpt-3-davinci` were reported `Unknown` and `isExactMapping` returned `false` for them.
+  A legacy `gpt-3` name now counts as OpenAI's only when it is plain or prefixed `openai/` or `azure/`: `gpt-3`,
+  `gpt-3-davinci`, `openai/gpt-3` and `azure/gpt-3` keep `r50k_base` and are reported Exact (`azure/gpt-3` through
+  the OpenAI guard now, so its description reads "Native OpenAI tokenizer" rather than "Azure uses OpenAI
+  tokenizers"). **Tokenizer change:** `anthropic/gpt-3` and `ollama/gpt-3` selected `r50k_base` and now select
+  `cl100k_base`, as their provider arms do, and stay Approximate; a `gpt-3` under any other prefix (`mistral/gpt-3`)
+  falls to the `cl100k_base` fallback, with its warning, and stays Unknown. The class documentation's Azure example,
+  `azure/my-gpt4o-deployment`, never selected `o200k_base`: a deployment name is matched on the hyphenated OpenAI
+  spelling (`gpt-4o`), so the example is now `azure/my-gpt-4o-deployment` and the documentation says how the
+  matching works. The private `getAzureTokenizerId` is gone: its `gpt-4o`, `gpt-4` and `gpt-3` branches could not be
+  reached, because the guards above it already take every name that contains those texts, so `cl100k_base`, its
+  default, was its only reachable result and is now the Azure arm; no Azure deployment's tokenizer changes.
 - **RAG deletes only the chunks of the document you name** (https://github.com/llm4s/llm4s/issues/1000): `RAG.deleteDocumentChunks` deleted
   by a bare prefix, so deleting or re-syncing `doc-1` also deleted every chunk of `doc-10` and
   `doc-1-appendix`. It now matches the `<docId>-chunk-` prefix. Also, `FusionStrategy.WeightedScore(0, 0)`
@@ -1905,6 +2902,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ServiceError`, now also retries `NetworkError`, `ExecutionError`, `SystemError` and an `APIError` with no status or a
   retryable one, waiting `baseDelay` times the attempt number (the schedules of the three it already retried are
   unchanged); docs/guide/error-handling.md describes the rule.
+- **`ToolRegistry.executeAsync` and `executeAll` no longer park an execution-context thread while a retry waits out
+  its backoff (#1066).** The delay was a `Thread.sleep` inside `blocking`, so with many calls retrying at once a
+  fixed-size pool sat idle for the whole delay: six retrying calls with a 0.8 s backoff on a two-thread pool took
+  2.4 s, and now take about 0.8 s. The backoff is a scheduled delay (the JDK's shared daemon delay thread, no pool of
+  our own) and the next attempt is dispatched to the caller's `ExecutionContext` when it elapses; each attempt still
+  holds a pool thread for its own duration. The synchronous `execute` is unchanged: it waits on its caller's thread,
+  interruptibly, and an interruption ends the call as `Cancelled`. Which errors retry and how long each wait is are now
+  decided in one place for both paths. Reworked from #1197 by @ipsitsahoo, whose split between a synchronous and an
+  asynchronous retry path this keeps; the guide has a new "Tool Call Timeouts and Retries" section.
 - **MCP: text stays text, tool failures are `isError` results, `getTools` returns a `Left`** ([#1319](https://github.com/llm4s/llm4s/issues/1319)):
   the client no longer turns a text result that parses as JSON into a JSON value (a tool that returned
   `"24"` is not handed back as the number 24); an object result also travels as the `structuredContent` the
@@ -1929,6 +2935,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `0.4.0-SNAPSHOT`, which nothing publishes (releases are cut from tags only, and the build names a snapshot
   `0.4.1+165-abc1234-SNAPSHOT`); it now says how to build and publish `main` locally. A new check,
   `scripts/check-doc-versions.sh`, runs in CI quick checks and fails on a literal pin.
+- **`CompositeGuardrail.any` stops at the first guardrail that passes, and the composite sample no longer casts**
+  ([#1315](https://github.com/llm4s/llm4s/issues/1315)): `any` documented "returns on first success" but mapped over every
+  guardrail first, so one that costs a call (an LLM judge) ran even after an earlier one had passed. It now stops at the
+  first pass, with the same result as before: the first passing guardrail's, or every failure together when none passes.
+  `CompositeGuardrailExample` cast composites with `asInstanceOf[InputGuardrail]` to hand them to `GuardrailMiddleware`,
+  which throws a `ClassCastException` (a `CompositeGuardrail` is a `Guardrail[String]`, not an `InputGuardrail`); it wraps
+  them now, and the guardrails guide shows the wrapper. The guide also states how a guardrail list runs (every guardrail,
+  even after a failure), what a block sends (one `agent.guardrail_blocked`, then `RunFailed`, never `RunCompleted`) and that
+  `maxSteps` counts the same through every entry point; `AgentRunSemanticsSpec` pins each. The other findings of the issue
+  described the loop the graph runtime replaced and no longer apply (`AgentFailed`, `runWithEvents` and `runCollectingEvents`
+  are gone; see the migration guide). No migration is needed.
 - **`ToneValidator` classified every multi-line text as Neutral**: it looked for its keywords with
   `lower.matches(".*\\b(...)\\b.*")`, and `.` does not match a line break, so a newline anywhere in the text
   made all four keyword checks fail, whatever the text said. `"Thank you for your inquiry.\nWe will respond
@@ -1955,6 +2972,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Voyage embeddings post to the right URL.** The default base URL (and the documented
   `VOYAGE_EMBEDDING_BASE_URL`) end in `/v1`, and the client appended `/v1/embeddings`, so every
   request went to `/v1/v1/embeddings`. It now appends `/embeddings`.
+- **JSON a model or a tool produced is refused beyond 512 levels of nesting instead of overflowing
+  the stack** ([#1562](https://github.com/llm4s/llm4s/issues/1562)). `ujson.read` itself is
+  iterative, but every traversal of the value it builds - rendering it back to the provider or into
+  a log line or error message, `upickle.default.read[A]`, equality - recurses once per level, and a
+  `StackOverflowError` is not an `Exception`: `Try` does not catch it, so a reply such as 100,000
+  nested `[` escaped `Result`-returning APIs as an `Error` (`GraphJsonParser.parse`,
+  `GraphQueryTranslator`, `NativeQueryGenerator`, `ToolOutputCompressor` from a few thousand
+  levels). A `private[llm4s]` `org.llm4s.util.BoundedJson.read` now measures the depth on the raw
+  text first (an iterative, string-aware scan, as `json_tool`'s since #1510) and returns a `Left`
+  naming the 512-level limit, and every place that parses model- or tool-produced text uses it:
+  `LLMClient.completeStructured` (a `ValidationError` on `structured_output`), streamed and
+  non-streamed tool-call arguments in `StreamingToolArgumentParser`, `StreamingAccumulator`,
+  `OpenAICompatibleDialect.lenientToolCalls` (arguments become `{}`), `StandardToolCallDeserializer`
+  (the completion fails, as for malformed arguments) and `OpenAIClient` (the call is dropped, as
+  for malformed arguments), `ToolOutputCompressor` (the result is compressed as text), the
+  `JSONValidator` guardrail (rejected as not valid JSON), the knowledge-graph parsers
+  (`GraphJsonParser`, `GraphQueryTranslator`, `NativeQueryGenerator`, `GraphQAPipeline`,
+  `EntityLinker`: a `ProcessingError`, or the existing fallback), the RAG evaluation metrics
+  (`Faithfulness`, `AnswerRelevancy`, `ContextPrecision`, `ContextRecall`: an `EvaluationError`,
+  where a deep claims reply used to overflow through the `InvalidData` message `.str` builds),
+  `TestDataset` and `GroundTruthGenerator`, `LLMReranker` (neutral scores, as for any reply it
+  cannot read), `LLMMemoryManager.extractEntities` (a `ProcessingError`), and the Ollama client's
+  tool-call arguments when they arrive as a string: a reply's are a malformed call (a
+  `ProcessingError` naming the limit), and an assistant turn's are sent as `{}` like any string that
+  is not a JSON object, never parsed and rendered back. `json_tool` now measures its documents with
+  the same scan. The parser's own failure is reported as a `ValidationError` on `json` carrying its
+  message, mapped directly rather than through `DefaultErrorMapper`, which read the JSON path in
+  that message (`$[429]`) as a rate limit. Configuration, model metadata, JSON the library wrote
+  itself and provider response envelopes, in which the model's text sits inside string literals,
+  are parsed as before.
 - **`ReliableClient` applies `ReliabilityConfig.rateLimit`**
   ([#1133](https://github.com/llm4s/llm4s/issues/1133)). Only `ReliableProviders.wrap` honoured
   it, so `new ReliableClient(...)` with rate limiting enabled made every call unthrottled. The
@@ -1974,6 +3021,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read is treated as accepted with a warning, so tracing does not fail on an unexpected shape
   (found in review of [#1239](https://github.com/llm4s/llm4s/pull/1239)).
 
+- **`llm4s-core`: redaction covers credentials in more shapes** ([#1518](https://github.com/llm4s/llm4s/issues/1518)):
+  the redaction behind `ProviderExchangeSink` and the logged request and response bodies replaced a credential only in
+  `"key": "value"` JSON with a short list of exact key names, in URL query strings, in `Authorization` headers and in
+  strings shaped like a provider key. It now also redacts the same JSON when it sits inside a prompt or response
+  string (`\"api_key\": \"...\"`), single-quoted JSON, a number under a credential key (written back as a string, so
+  the JSON still parses), `key=value` pairs and `key: value` header lines outside a query string (including dotted
+  property names such as `spring.datasource.password=...`), and compound key names such as `client_secret`,
+  `x-api-key`, `refresh_token` and `db_password`. A value that contains an escaped quote used to be cut at the quote,
+  leaving the rest of the credential in the log; it is now redacted whole, and so is a value cut off before its closing
+  quote, as a truncated payload leaves it. A key is matched as a whole name, never as a
+  substring, so `max_tokens`, `prompt_tokens`, `token_count` and `next_page_token` are not redacted. Key names are now
+  lower-cased with `Locale.ROOT`, so a Turkish default locale no longer stops `API_KEY` from being recognised. Redaction
+  is still pattern-based and best effort: it does not detect a secret that is not under a key, and JSON escaped twice
+  is not recognised.
+- **Docs: the Reference section's Migration Guide, Release Process, Scalafix Rules and Test Coverage pages no longer
+  404** ([#444](https://github.com/llm4s/llm4s/issues/444)): `migration.md`, `release.md`, `scalafix.md` and
+  `test-coverage.md` (and `security.md`, `workspace-sandbox.md` and `benchmarks.md`) had no front matter, so Jekyll
+  served them as raw files and their links on llm4s.org returned 404. They now have a title, `parent: Reference` and a
+  `nav_order`, and are listed in the Reference index. `test-coverage.md` described a single 50% threshold that no
+  longer exists; it now describes the per-module `coverageFloor`, `coveragePolicyCheck` and the Codecov statuses.
+  Links inside the Reference pages that ended in `.md`, or pointed at repository-root files, now use the form the
+  site serves. Links to the newly rendered pages from `installation.md`, `providers.md`, `0x-to-1x.md` and
+  `migration.md` itself were changed from `.md` to the page URL in the same change, since a `.md` URL is a 404 once
+  its page is rendered, and the 55 entries `scripts/docs-link-baseline.txt` held for the links this fixes are removed.
 - **`AudioPreprocessing.resamplePcm16` could hang, and its output length was wrong**
   ([#1308](https://github.com/llm4s/llm4s/issues/1308)): a target rate of `-8000`, or a source rate of `-1`, sent
   Java Sound's converter into a loop that never ended (a test JVM spun at 100% CPU for twenty minutes), a target
@@ -1993,6 +3064,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or format outside those bounds used to get a wrong "success" or a generic `ProcessingError` and now gets a
   `ValidationError`; the output is shorter by the converter's padding, and the source's last fraction of a
   millisecond (at most 0.3 ms) is no longer in it.
+- **The docs deploy is no longer rejected on a release tag** ([#1152](https://github.com/llm4s/llm4s/issues/1152)):
+  `release.yml` called `pages.yml` as a reusable workflow, which runs on the caller's ref, the release tag, and the
+  `github-pages` environment allows deployments only from `main`, so the deploy was rejected before it started
+  ("Tag "v0.4.1" is not allowed to deploy to github-pages") and the release run ended red after a successful
+  publish. The release's `docs` job now dispatches `pages.yml` on `main` with the tag as a new `ref` input
+  (`scripts/dispatch-docs-deploy.sh`), so the run, and the deploy, are on `main`, while the build still checks out
+  the tag, so the version and the install snippets are the release's. The job waits for that run and fails when the
+  deploy fails, keeping the order #1147 built (docs only after the artifacts are on Maven Central and the GitHub
+  Release exists). No repository setting is needed; an environment rule for `v*` tags remains an equally valid
+  alternative. `pages.yml` is no longer callable with `workflow_call`, and a manual run takes an optional release
+  tag. A pushed docs change on `main` deploys exactly as before. Not yet exercised by a real release: the next one
+  is its first run (see `docs/reference/release.md` for a way to check it sooner).
 - **`RAG.refresh` emptied the index when its loader failed, and `RAG.sync` deleted documents it
   could not read** (follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236)).
   `refresh` and `refreshAsync` cleared the index before reading the loader, so a listing

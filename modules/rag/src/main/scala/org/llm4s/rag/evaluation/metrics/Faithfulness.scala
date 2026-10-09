@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.rag.evaluation._
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.BoundedJson
 
 import scala.util.Try
 
@@ -200,28 +201,39 @@ For each claim, determine if it is supported by the context. Respond with ONLY J
    * Parse extracted claims from LLM response.
    */
   private def parseClaims(response: String): Result[Seq[String]] =
-    Try {
-      val jsonStr = extractJsonArray(response)
-      val arr     = ujson.read(jsonStr).arr
-      arr.map(_.str).toSeq
-    }.toResult.left.map(e => EvaluationError.parseError(s"Failed to parse claims: ${e.message}"))
+    readArray(response)
+      .flatMap(arr => Try(arr.map(_.str)).toResult)
+      .left
+      .map(e => EvaluationError.parseError(s"Failed to parse claims: ${e.message}"))
 
   /**
    * Parse verification results from LLM response.
    */
   private def parseVerifications(response: String, originalClaims: Seq[String]): Result[Seq[ClaimVerification]] =
-    Try {
-      val jsonStr = extractJsonArray(response)
-      val arr     = ujson.read(jsonStr).arr
+    readArray(response)
+      .flatMap { arr =>
+        Try {
+          arr.zipWithIndex.map { case (v, idx) =>
+            val obj       = v.obj
+            val claim     = obj.get("claim").map(_.str).getOrElse(originalClaims.lift(idx).getOrElse(""))
+            val supported = obj.get("supported").exists(_.bool)
+            val evidence  = obj.get("evidence").flatMap(e => if (e.isNull) None else Some(e.str))
+            ClaimVerification(claim, supported, evidence)
+          }
+        }.toResult
+      }
+      .left
+      .map(e => EvaluationError.parseError(s"Failed to parse verifications: ${e.message}"))
 
-      arr.zipWithIndex.map { case (v, idx) =>
-        val obj       = v.obj
-        val claim     = obj.get("claim").map(_.str).getOrElse(originalClaims.lift(idx).getOrElse(""))
-        val supported = obj.get("supported").exists(_.bool)
-        val evidence  = obj.get("evidence").flatMap(e => if (e.isNull) None else Some(e.str))
-        ClaimVerification(claim, supported, evidence)
-      }.toSeq
-    }.toResult.left.map(e => EvaluationError.parseError(s"Failed to parse verifications: ${e.message}"))
+  /**
+   * The JSON array in a reply. The text is the model's: a document nested more than 512 levels deep is
+   * refused before it is parsed, since a value that deep overflows the stack of whatever renders it,
+   * an `InvalidData` message included (#1562).
+   */
+  private def readArray(response: String): Result[Seq[ujson.Value]] =
+    Try(extractJsonArray(response)).toResult
+      .flatMap(jsonStr => BoundedJson.read(jsonStr))
+      .flatMap(json => Try(json.arr.toSeq).toResult)
 
   /**
    * Extract JSON array from potentially markdown-wrapped response.

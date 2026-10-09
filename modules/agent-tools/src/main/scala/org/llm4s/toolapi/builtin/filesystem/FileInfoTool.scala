@@ -97,8 +97,8 @@ object FileInfoTool {
       Try(Paths.get(pathStr).toAbsolutePath.normalize()).toEither.left.map(e => s"Invalid path: ${e.getMessage}")
 
     path.flatMap { p =>
-      // Security check
-      if (!config.isPathAllowed(p)) {
+      // Security check: the policy judges the real location
+      if (config.resolve(p).isEmpty) {
         Left(s"Access denied: path '$pathStr' is not allowed")
       } else {
         val name   = p.getFileName.toString

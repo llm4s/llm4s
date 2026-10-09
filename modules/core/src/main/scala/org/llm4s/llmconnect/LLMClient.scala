@@ -5,6 +5,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ObjectSchema
 import org.llm4s.types.{ HeadroomPercent, Result, TokenBudget }
+import org.llm4s.util.BoundedJson
 
 import scala.util.Try
 
@@ -53,19 +54,38 @@ trait LLMClient extends AutoCloseable {
   /**
    * Sends the conversation and parses the response into a typed value using the provided schema.
    *
-   * Sets `ResponseFormat.JsonSchema` on the options so providers that support native structured
-   * output (OpenAI, Gemini) enforce the schema at generation time. Anthropic falls back to a
-   * best-effort system-prompt instruction, which is not schema-enforced. Because models may wrap
+   * Sets `ResponseFormat.JsonSchema` on the options. OpenAI, Azure OpenAI and Gemini enforce the
+   * schema at generation time, as does Ollama 0.5 or later through its `format` field. Requesty and
+   * the OpenAI-compatible providers (including Cohere) send it as `response_format`, but whether it
+   * is enforced is up to the server - for Requesty, a router, the backend model it routes to: one
+   * that ignores the field returns unconstrained text.
+   * Anthropic falls back to a best-effort system-prompt instruction, which is not schema-enforced.
+   * Clients that do not read `responseFormat` (watsonx, Bedrock) send no schema at all. Because models may wrap
    * JSON in markdown code fences or surround it with prose, the response is normalised
    * (fence stripped, first balanced `{...}` or `[...]` extracted) before being deserialised with
    * uPickle into the expected type `A`.
+   *
+   * The reply is '''not''' validated against the schema: it is only deserialised. A constraint the
+   * reader does not check - an enum, a numeric or string bound, `additionalProperties = false` (extra
+   * keys are ignored) - can be violated by a reply that still returns `Right(A)`. Check such
+   * constraints on the result yourself.
+   *
+   * The schema is derived with `strict = true`, which lists '''every''' property as required,
+   * including a property declared optional with `required = false`. Only `responseFormat` is
+   * overridden: every other option you pass is forwarded unchanged to `complete`, where the
+   * provider client may adjust or drop options the model does not support, as for any other
+   * `complete` call. `name` and `strict` on the
+   * format are left at their defaults (`"response"` and `true`); call `complete` with your own
+   * `ResponseFormat.JsonSchema` to set them.
    *
    * @param conversation conversation history
    * @param schema       JSON-Schema description of the expected response object
    * @param options      additional completion options (default: CompletionOptions())
    * @param reader       implicit uPickle reader for deserialising the JSON into `A`
    * @tparam A target type; must have a corresponding `upickle.default.Reader[A]`
-   * @return Right(A) on success, or Left(LLMError) when the provider call fails or the JSON cannot be parsed
+   * @return Right(A) on success. Left(ValidationError) with field `structured_output` when the
+   *         reply is not JSON, is JSON `null`, or cannot be deserialised as `A`; any other Left is
+   *         the provider call's own error, returned unchanged
    */
   def completeStructured[A](
     conversation: Conversation,
@@ -76,9 +96,12 @@ trait LLMClient extends AutoCloseable {
     val opts       = options.withResponseFormat(jsonSchema)
     for {
       completion <- complete(conversation, opts)
-      parsed <- Try(ujson.read(LLMClient.extractJson(completion.content))).toEither.left.map(e =>
-        ValidationError("structured_output", s"Response is not valid JSON: ${e.getMessage}")
-      )
+      // The reply is model output: `BoundedJson` refuses a document nested more than 512 levels
+      // deep before it is parsed, since reading it into `A` below would overflow the stack (#1562)
+      parsed <- BoundedJson
+        .read(LLMClient.extractJson(completion.content))
+        .left
+        .map(e => ValidationError("structured_output", s"Response is not valid JSON: ${e.message}"))
       // uPickle reads a JSON null into a null reference for case classes; the schema is an object
       // schema so a null document is never a valid answer and must not reach callers as Right(null)
       _ <- Either.cond(
@@ -173,7 +196,8 @@ object LLMClient {
     else firstJsonBlock(unfenced).getOrElse(unfenced)
   }
 
-  private def isJson(text: String): Boolean = Try(ujson.read(text)).isSuccess
+  // bounded, so a candidate too deep to be read is not "JSON" and is not parsed at all
+  private def isJson(text: String): Boolean = BoundedJson.read(text).isRight
 
   private def firstJsonBlock(text: String): Option[String] = {
     @scala.annotation.tailrec
