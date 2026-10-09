@@ -108,6 +108,28 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
       )
   }
 
+  it should "return an error for an unknown encoding" in {
+    val tempFile = testDir.resolve("read-bad-encoding.txt")
+    Files.writeString(tempFile, "Hello, World!")
+
+    val config = FileConfig(allowedPaths = Some(Seq(testDir.toString)), blockedPaths = Seq.empty)
+    ReadFileTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("path" -> tempFile.toString, "encoding" -> "utf-9")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err should include("Unsupported encoding: utf-9"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+          Files.deleteIfExists(tempFile)
+        }
+      )
+  }
+
   it should "deny access to blocked paths" in {
     assume(!isWindows, "Unix system paths not available on Windows")
     val config = FileConfig()
@@ -338,6 +360,26 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
                 Files.deleteIfExists(Paths.get(outputPath))
               }
             )
+        }
+      )
+  }
+
+  it should "return an error for an unknown encoding" in {
+    val config = WriteConfig(allowedPaths = Seq(testDir.toString), allowOverwrite = true)
+    WriteFileTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val outputPath = testDir.resolve("write-bad-encoding.txt").toString
+          val params     = ujson.Obj("path" -> outputPath, "content" -> "Hello!", "encoding" -> "utf-9")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err should include("Unsupported encoding: utf-9"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+          Files.exists(Paths.get(outputPath)) shouldBe false
         }
       )
   }

@@ -118,29 +118,32 @@ object ReadFileTool {
           if (fileSize > config.maxFileSize) {
             Left(s"File too large: ${fileSize} bytes (max: ${config.maxFileSize} bytes)")
           } else {
-            Try {
-              val charset    = java.nio.charset.Charset.forName(encodingStr)
-              val allLines   = Files.readAllLines(path, charset)
-              val totalLines = allLines.size()
+            Try(java.nio.charset.Charset.forName(encodingStr)).toEither.left
+              .map(_ => s"Unsupported encoding: $encodingStr")
+              .flatMap { charset =>
+                Try {
+                  val allLines   = Files.readAllLines(path, charset)
+                  val totalLines = allLines.size()
 
-              val (content, truncated) = maxLines match {
-                case Some(limit) if limit < totalLines =>
-                  val limitedLines = new java.util.ArrayList[String]()
-                  for (i <- 0 until limit)
-                    limitedLines.add(allLines.get(i))
-                  (String.join("\n", limitedLines), true)
-                case _ =>
-                  (String.join("\n", allLines), false)
+                  val (content, truncated) = maxLines match {
+                    case Some(limit) if limit < totalLines =>
+                      val limitedLines = new java.util.ArrayList[String]()
+                      for (i <- 0 until limit)
+                        limitedLines.add(allLines.get(i))
+                      (String.join("\n", limitedLines), true)
+                    case _ =>
+                      (String.join("\n", allLines), false)
+                  }
+
+                  ReadFileResult(
+                    path = path.toString,
+                    content = content,
+                    size = fileSize,
+                    lines = totalLines,
+                    truncated = truncated
+                  )
+                }.toEither.left.map(e => s"Failed to read file: ${e.getMessage}")
               }
-
-              ReadFileResult(
-                path = path.toString,
-                content = content,
-                size = fileSize,
-                lines = totalLines,
-                truncated = truncated
-              )
-            }.toEither.left.map(e => s"Failed to read file: ${e.getMessage}")
           }
         }
       }
