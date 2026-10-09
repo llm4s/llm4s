@@ -325,6 +325,14 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
       u(raw"""{"msg":"login password=$R~26user=bob"}""")
   }
 
+  it should "end a query parameter's value in escaped quotes at an escaped '&' that a pair follows" in {
+    Redaction.redact(u("x=1~26password=~27p~26ss=QZXJ~27 n=1")) shouldBe u(s"x=1~26password=$R~26ss=QZXJ~27 n=1")
+    Redaction.redact(u("https://h/p?password=~27p~26ss=QZXJ~27 n=1")) shouldBe
+      u(s"https://h/p?password=$R~26ss=QZXJ~27 n=1")
+    Redaction.redact(u("a~26b;password=~27p~26ss=QZXJ~27;n=1")) shouldBe u(s"a~26b;password=$R~26ss=QZXJ~27;n=1")
+    Redaction.redact(u("a;password=~27p~26ss=QZXJ~27;n=1")) shouldBe s"a;password=$R;n=1"
+  }
+
   it should "read a Bearer token only after the escape of a separator, whose 'u' is lower-case in JSON" in {
     Redaction.redact(u("~26Bearer zqxjv")) shouldBe u(s"~26$R")
     Redaction.redact(u("x~26Basic zqxjv")) shouldBe u(s"x~26$R")

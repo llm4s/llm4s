@@ -1338,6 +1338,15 @@ private[llm4s] object Redaction {
    * `u0022`, which System.Text.Json writes for `'` and `"`): such a value is one credential, as `password='p&user=x'`
    * is. Only the escapes of `&` are read differently: the value still ends where it ended before.
    *
+   * The escaped quotes are read only in a pair that this pass alone reads. `redactQueryParams`, which runs first,
+   * reads a parameter after `?`, `&` or the escape of either, whose key runs to the next `=` or its escape over any
+   * character but whitespace, a bare quote, `?`, `&` and the escapes of those two, so over `;` and escaped quotes
+   * too: after an escaped `&`, `b;password=` is the key `b;password`. It ends such a value at the first escaped `&`
+   * without reading quotes. The
+   * placeholder then stands where the escaped opening quote was, so this pass sees no quote, and the value ends at an
+   * escaped `&` that another pair follows: of `x=1&password=` and the escaped value `'p&ss=QZXJ'`, the text from the
+   * escaped `&` on, `ss=QZXJ` and the escaped closing quote, is kept.
+   *
    * The backslashes that escape the quote the value stops at are kept. Inside JSON that sits in a string,
    * `\"note\": \"token=abc\"`, the value runs up to the `"` of the escaped closing quote and so holds its `\`:
    * written over with the placeholder, the `"` left bare ended the enclosing string there, the document no longer
