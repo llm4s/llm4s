@@ -88,21 +88,23 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
   test("WebSocket workspace can execute commands without blocking heartbeats") {
     Tier.require(isDockerAvailable, "Docker not available or LLM4S_DOCKER_TESTS!=true")
 
+    // Commands are argv, not shell text (#1756): `tail -f` runs until the timeout, which stands in for the
+    // `sleep` the shell form used to chain.
+    workspace.writeFile("heartbeat.txt", "Starting long command\n", Some("overwrite")).success shouldBe true
+
     val startTime = System.currentTimeMillis()
+    val response  = workspace.executeCommand("tail -f heartbeat.txt", None, Some(3.seconds))
+    val duration  = System.currentTimeMillis() - startTime
 
-    val response = workspace.executeCommand(
-      "echo 'Starting long command'; sleep 3; echo 'Command completed'",
-      None,
-      Some(10.seconds)
-    )
-
-    val duration = System.currentTimeMillis() - startTime
-
-    response.exitCode shouldBe 0
+    response.exitCode shouldBe -1 // the runner's timeout
     response.stdout should include("Starting long command")
-    response.stdout should include("Command completed")
     duration should be >= 3000L
-    duration should be < 8000L
+    duration should be < 15000L
+
+    // The connection is still healthy afterwards.
+    val after = workspace.executeCommand("echo Command completed", None, Some(10.seconds))
+    after.exitCode shouldBe 0
+    after.stdout should include("Command completed")
   }
 
   test("WebSocket workspace supports concurrent operations") {
@@ -137,22 +139,25 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
   test("WebSocket workspace handles command streaming events") {
     Tier.require(isDockerAvailable, "Docker not available or LLM4S_DOCKER_TESTS!=true")
 
-    val response = workspace.executeCommand(
-      "echo 'Step 1'; echo 'Step 2'; echo 'Step 3'",
+    val chunks = new java.util.concurrent.ConcurrentLinkedQueue[StreamingOutputMessage]()
+    val response = workspace.executeCommandWithStreaming(
+      "echo 'Step 1' 'Step 2' 'Step 3'",
       None,
-      Some(10.seconds)
+      Some(10.seconds),
+      outputHandler = chunk => { chunks.add(chunk); () }
     )
 
     response.exitCode shouldBe 0
-    response.stdout should include("Step 1")
-    response.stdout should include("Step 2")
-    response.stdout should include("Step 3")
+    response.stdout shouldBe "Step 1 Step 2 Step 3\n"
+    import scala.jdk.CollectionConverters._
+    chunks.asScala.filter(_.outputType == "stdout").map(_.content).mkString shouldBe "Step 1 Step 2 Step 3\n"
   }
 
   test("WebSocket workspace handles errors gracefully") {
     Tier.require(isDockerAvailable, "Docker not available or LLM4S_DOCKER_TESTS!=true")
 
-    val response = workspace.executeCommand("exit 1", None, Some(5.seconds))
+    workspace.writeFile("errors.txt", "alpha\n", Some("overwrite")).success shouldBe true
+    val response = workspace.executeCommand("grep zzz errors.txt", None, Some(5.seconds))
     response.exitCode shouldBe 1
 
     assertThrows[WorkspaceAgentException] {
@@ -162,6 +167,41 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
     assertThrows[WorkspaceAgentException] {
       workspace.exploreFiles("../../../invalid/path")
     }
+  }
+
+  test("WebSocket commands go through the command policy, not a shell (#1756)") {
+    Tier.require(isDockerAvailable, "Docker not available or LLM4S_DOCKER_TESTS!=true")
+
+    def refusedCode(
+      command: String,
+      environment: Option[Map[String, String]] = None
+    ): String = {
+      val e = intercept[WorkspaceAgentException] {
+        workspace.executeCommand(command, None, Some(5.seconds), environment)
+      }
+      // The client reports a refusal as "<runner code>: <message>".
+      e.error.takeWhile(_ != ':')
+    }
+
+    refusedCode("echo one ; touch chained.txt") shouldBe "FORBIDDEN_CHARACTERS"
+    refusedCode("cat errors.txt | sh") shouldBe "FORBIDDEN_CHARACTERS"
+    refusedCode("echo $(id)") shouldBe "FORBIDDEN_CHARACTERS"
+    refusedCode("echo pwned > redirected.txt") shouldBe "FORBIDDEN_CHARACTERS"
+    refusedCode("sh -c id") shouldBe "EXECUTABLE_NOT_ALLOWED"
+    refusedCode("find . -delete") shouldBe "ARGUMENT_NOT_ALLOWED"
+    refusedCode("cat /etc/passwd") shouldBe "PATH_ESCAPE_ATTEMPT"
+    refusedCode("ls", Some(Map("LD_PRELOAD" -> "/tmp/evil.so"))) shouldBe "ENVIRONMENT_NOT_ALLOWED"
+
+    workspace.exploreFiles(".", Some(false)).files.map(_.path) should contain noneOf ("chained.txt", "redirected.txt")
+  }
+
+  test("WebSocket commands get end-of-file on stdin instead of hanging") {
+    Tier.require(isDockerAvailable, "Docker not available or LLM4S_DOCKER_TESTS!=true")
+
+    val startTime = System.currentTimeMillis()
+    val response  = workspace.executeCommand("cat", None, Some(20.seconds))
+    response.exitCode shouldBe 0
+    (System.currentTimeMillis() - startTime) should be < 10000L
   }
 }
 
@@ -193,11 +233,9 @@ object ContainerisedWorkspaceTest {
       println("Executing long-running command while heartbeats continue...")
       val startTime = System.currentTimeMillis()
 
-      val response = workspace.executeCommand(
-        "echo 'Starting long operation'; sleep 8; echo 'Long operation completed'",
-        None,
-        Some(15.seconds)
-      )
+      // Commands are argv, not shell text (#1756): `tail -f` on an empty file runs until the 8 s timeout.
+      workspace.writeFile("long-operation.txt", "", Some("overwrite"))
+      val response = workspace.executeCommand("tail -f long-operation.txt", None, Some(8.seconds))
 
       val duration = System.currentTimeMillis() - startTime
 
@@ -205,7 +243,7 @@ object ContainerisedWorkspaceTest {
       println(s"Exit code: ${response.exitCode}")
       println(s"Output: ${response.stdout}")
 
-      if (response.exitCode == 0) {
+      if (response.exitCode == -1 && workspace.executeCommand("echo still-connected").exitCode == 0) {
         println("SUCCESS: WebSocket implementation handles long commands without heartbeat timeout!")
       } else {
         println("FAILED: Command execution failed")

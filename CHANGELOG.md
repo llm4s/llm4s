@@ -2013,6 +2013,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - workspace runner: WebSocket commands go through the command policy, not a shell**
+  ([#1756](https://github.com/llm4s/llm4s/issues/1756)): `RunnerMain` served the WebSocket protocol's
+  `ExecuteCommandCommand`, the path `ContainerisedWorkspace.executeCommand` and `executeCommandWithStreaming` take, by
+  running the raw command string through `sh -c` (`cmd.exe /c` on Windows) with the client's `environment` copied into
+  the child unfiltered. Only `shellAllowed` was checked, so the `allowedCommands` allowlist, the forbidden shell
+  characters, the per-program option, path, git and Windows rules of #1715, the environment allowlist and the
+  null-device standard input of #1728 applied only to direct calls on `WorkspaceAgentInterfaceImpl`, and an agent
+  driving a containerised workspace could run any program (`ls; cat /etc/passwd`, `cat a | sh`, `echo $(id)`,
+  `find . -delete`, `LD_PRELOAD`). Both paths now share one function that tokenizes the command, applies every check
+  and builds the process from the argument vector; the WebSocket path keeps its stdout/stderr streaming,
+  cancellation and exit-code and duration reporting, and refuses with a `WorkspaceAgentErrorResponse` carrying the
+  direct path's code (`FORBIDDEN_CHARACTERS`, `EXECUTABLE_NOT_ALLOWED`, `ARGUMENT_NOT_ALLOWED`,
+  `PATH_ESCAPE_ATTEMPT`, `ENVIRONMENT_NOT_ALLOWED`, ...) followed by `CommandCompletedMessage` with exit code 1. The
+  protocol is unchanged. A working directory outside the workspace is now `PATH_ESCAPE_ATTEMPT` rather than
+  `INVALID_DIRECTORY`, and a WebSocket command sent with no timeout stops at the sandbox's `defaultCommandTimeout`
+  instead of running until it ends. **Migration:** WebSocket commands no longer go through a shell, so pipes,
+  redirection, `;`, `&&`, `$(...)`, backquotes and variable expansion are refused rather than interpreted, and only
+  programs on the runner's allowlist run. Write each command as one program and its arguments (`grep -rn TODO src`,
+  not `cd src && grep -rn TODO . | head`), quoting an argument that holds spaces; send a second command as a second
+  request, use `workingDirectory` instead of `cd`, and `writeFile` instead of redirection.
 - **Security - workspace runner: allowlisted commands can no longer write, delete or run other programs through their
   arguments** ([#1715](https://github.com/llm4s/llm4s/issues/1715)): `executeCommand` checked only the executable
   name against `allowedCommands` and a set of shell metacharacters, so programs on `WorkspaceSandboxConfig.ReadOnlyCommands`

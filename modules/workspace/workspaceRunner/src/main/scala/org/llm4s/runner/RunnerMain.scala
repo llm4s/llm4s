@@ -1,17 +1,15 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch, DisableSyntax.NoKeywordFinally, DisableSyntax.NoSystemGetenv
+// scalafix:off DisableSyntax.NoSystemGetenv
 package org.llm4s.runner
 
 import org.llm4s.shared._
 import org.slf4j.LoggerFactory
 import upickle.default._
 
-import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Paths }
-import java.util.concurrent.atomic.{ AtomicBoolean, AtomicLong }
+import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.{ ConcurrentHashMap, Executors, ScheduledExecutorService, TimeUnit }
-import scala.concurrent.{ ExecutionContext, Future, Promise }
+import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success, Try }
-import scala.concurrent.duration.DurationLong
 
 /**
  * WebSocket-based Workspace Runner service using Cask's native WebSocket support.
@@ -65,9 +63,7 @@ object RunnerMain extends cask.MainRoutes {
   }
 
   // Initialize workspace interface
-  private val workspaceInterface     = new WorkspaceAgentInterfaceImpl(workspacePath, isWindows, sandboxConfig)
-  private val effectiveSandboxConfig = sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive)
-  private val workspaceRootPath      = Paths.get(workspacePath).toAbsolutePath.normalize()
+  private val workspaceInterface = new WorkspaceAgentInterfaceImpl(workspacePath, isWindows, sandboxConfig)
 
   // Track active connections and their last heartbeat
   private val connections = new ConcurrentHashMap[cask.WsChannelActor, AtomicLong]()
@@ -82,12 +78,7 @@ object RunnerMain extends cask.MainRoutes {
   // Max captured output size per stream for final ExecuteCommandResponse payload
   private val MaxOutputSize = 1024L * 1024L // 1MB per stream
 
-  private case class RunningCommand(
-    process: Process,
-    cancelled: AtomicBoolean,
-    startTimeMs: Long,
-    completionSent: AtomicBoolean
-  )
+  private val commandExecutor = new WebSocketCommandExecutor(workspaceInterface, MaxOutputSize)(ec)
 
   // Default host binding - 0.0.0.0 to be accessible from outside container
   override def host: String = "0.0.0.0"
@@ -156,35 +147,13 @@ object RunnerMain extends cask.MainRoutes {
         handleCommand(channel, command)
 
       case CancelCommandMessage(commandId) =>
-        // Handle cancellation - only kill THIS client's process.
-        // Cancellation is acknowledged as command completion (exit 143).
-        val runningOpt = Option(clientProcesses.get(channel))
-          .flatMap(processes => Option(processes.get(commandId)))
-        runningOpt match {
-          case Some(running) =>
-            running.cancelled.set(true)
-            val process = running.process
-            val terminationAttempt = Try {
-              val destroyedProcess = process.destroyForcibly()
-              // Wait briefly for the process to actually terminate
-              if (!destroyedProcess.waitFor(5, TimeUnit.SECONDS)) {
-                logger.warn(s"Process for command $commandId did not terminate within timeout after cancellation")
-              }
-            }
-            terminationAttempt.failed.foreach { ex =>
-              logger.error(s"Error destroying process for command $commandId: ${ex.getMessage}", ex)
-            }
-            logger.info(s"Command $commandId cancelled by client")
-            // Acknowledge cancellation as completion, not as an error.
-            if (running.completionSent.compareAndSet(false, true)) {
-              val durationMs = System.currentTimeMillis() - running.startTimeMs
-              sendMessage(channel, CommandCompletedMessage(commandId, 143, durationMs.millis))
-            }
+        // Only kill THIS client's process. Cancellation is acknowledged as command completion (exit 143).
+        commandExecutor.cancel(
+          commandId,
+          Option(clientProcesses.get(channel)),
+          message => sendMessage(channel, message)
+        )
 
-          case None =>
-            logger.warn(s"Cancellation requested for unknown or non-running command id $commandId")
-            sendError(channel, s"No running command found for id $commandId", "UNKNOWN_COMMAND_ID", Some(commandId))
-        }
       case HeartbeatMessage(timestamp) =>
         logger.debug(s"Received heartbeat at timestamp $timestamp")
         sendMessage(channel, HeartbeatResponseMessage(System.currentTimeMillis()))
@@ -293,271 +262,16 @@ object RunnerMain extends cask.MainRoutes {
         )
     }
 
-  private def sendCommandFailure(
-    channel: cask.WsChannelActor,
-    commandId: String,
-    error: String,
-    code: String,
-    details: Option[String],
-    exitCode: Int,
-    durationMs: Long
-  ): Unit = {
-    sendMessage(channel, ResponseMessage(WorkspaceAgentErrorResponse(commandId, error, code, details)))
-    sendMessage(channel, CommandCompletedMessage(commandId, exitCode, durationMs.millis))
-  }
-
   /**
-   * Handle ExecuteCommand with true streaming - sends StreamingOutputMessage chunks
-   * for stdout/stderr and also sends final ExecuteCommandResponse for backward compatibility.
+   * Handle ExecuteCommand with true streaming - sends StreamingOutputMessage chunks for stdout/stderr and a final
+   * ExecuteCommandResponse. The command goes through the same checks and argv execution as the direct
+   * `executeCommand` (`WorkspaceAgentInterfaceImpl.prepareCommand`), never through a shell (#1756).
    */
   private def handleExecuteCommand(channel: cask.WsChannelActor, cmd: ExecuteCommandCommand): Unit = {
     // Ensure client has a process map (per-client isolation)
     val processes = clientProcesses.computeIfAbsent(channel, _ => new ConcurrentHashMap[String, RunningCommand]())
-
-    Future {
-      val startTime = System.currentTimeMillis()
-
-      if (!effectiveSandboxConfig.shellAllowed) {
-        sendCommandFailure(
-          channel,
-          cmd.commandId,
-          "Shell execution is disabled by sandbox config (shellAllowed=false)",
-          "SHELL_DISABLED",
-          None,
-          exitCode = 1,
-          durationMs = System.currentTimeMillis() - startTime
-        )
-      } else {
-        sendMessage(channel, CommandStartedMessage(cmd.commandId, cmd.command))
-
-        resolveWorkingDirectory(cmd.workingDirectory).fold(
-          err =>
-            sendCommandFailure(
-              channel,
-              cmd.commandId,
-              err.error,
-              err.code,
-              err.details,
-              exitCode = 1,
-              durationMs = System.currentTimeMillis() - startTime
-            ),
-          workDir => {
-            val builder =
-              if (isWindows)
-                new ProcessBuilder("cmd.exe", "/c", cmd.command)
-              else
-                new ProcessBuilder("sh", "-c", cmd.command)
-
-            builder.directory(workDir)
-            cmd.environment.foreach { env =>
-              val pbEnv = builder.environment()
-              env.foreach { case (k, v) => pbEnv.put(k, v) }
-            }
-
-            val processEither = Try(builder.start()).toEither
-            processEither.fold(
-              ex =>
-                sendCommandFailure(
-                  channel,
-                  cmd.commandId,
-                  Option(ex.getMessage).getOrElse("Failed to start process"),
-                  "EXECUTION_FAILED",
-                  Some(ex.getStackTrace.mkString("\n")),
-                  exitCode = 1,
-                  durationMs = System.currentTimeMillis() - startTime
-                ),
-              process => {
-                val running =
-                  RunningCommand(process, new AtomicBoolean(false), startTime, new AtomicBoolean(false))
-                processes.put(cmd.commandId, running)
-
-                val stdoutDone        = Promise[Unit]()
-                val stderrDone        = Promise[Unit]()
-                val exitDone          = Promise[Unit]()
-                val exitCodePromise   = Promise[Int]()
-                val stdoutTruncated   = new AtomicBoolean(false)
-                val stderrTruncated   = new AtomicBoolean(false)
-                val commandTimedOut   = new AtomicBoolean(false)
-                val stdoutAccumulator = new StringBuilder()
-                val stderrAccumulator = new StringBuilder()
-
-                def streamOutput(
-                  outputType: String,
-                  stream: java.io.InputStream,
-                  accumulator: StringBuilder,
-                  truncated: AtomicBoolean,
-                  done: Promise[Unit]
-                ): Unit =
-                  Future {
-                    val buffer    = new Array[Byte](8192)
-                    var bytesRead = 0
-                    var captured  = 0L
-
-                    try
-                      while ({
-                        bytesRead = stream.read(buffer)
-                        bytesRead != -1
-                      }) {
-                        val chunk = new String(buffer, 0, bytesRead, StandardCharsets.UTF_8)
-                        sendMessage(channel, StreamingOutputMessage(cmd.commandId, outputType, chunk))
-
-                        if (captured < MaxOutputSize) {
-                          val remaining = (MaxOutputSize - captured).toInt
-                          val toCopy    = math.min(remaining, bytesRead)
-                          if (toCopy > 0) {
-                            val toAppend = if (toCopy == bytesRead) chunk else chunk.substring(0, toCopy)
-                            accumulator.append(toAppend)
-                            captured += toCopy
-                          }
-                          if (toCopy < bytesRead) truncated.set(true)
-                        } else truncated.set(true)
-                      }
-                    catch {
-                      case ex: Exception =>
-                        logger.error(s"Error reading $outputType for command ${cmd.commandId}: ${ex.getMessage}", ex)
-                    } finally {
-                      sendMessage(channel, StreamingOutputMessage(cmd.commandId, outputType, "", isComplete = true))
-                      done.trySuccess(())
-                    }
-                  }(ec)
-
-                streamOutput("stdout", process.getInputStream, stdoutAccumulator, stdoutTruncated, stdoutDone)
-                streamOutput("stderr", process.getErrorStream, stderrAccumulator, stderrTruncated, stderrDone)
-
-                Future {
-                  val exitCode =
-                    try {
-                      val timeoutDeadlineMs = cmd.timeout.map(timeout => startTime + timeout.toMillis)
-                      timeoutDeadlineMs match {
-                        case Some(deadlineMs) =>
-                          var finished = false
-                          var timedOut = false
-                          while (!finished && !running.cancelled.get())
-                            if (System.currentTimeMillis() >= deadlineMs) {
-                              timedOut = true
-                              finished = true
-                            } else {
-                              finished = process.waitFor(500, TimeUnit.MILLISECONDS)
-                            }
-                          if (running.cancelled.get()) {
-                            process.destroyForcibly()
-                            143
-                          } else if (timedOut) {
-                            commandTimedOut.set(true)
-                            process.destroyForcibly()
-                            -1
-                          } else {
-                            process.exitValue()
-                          }
-                        case None =>
-                          process.waitFor()
-                      }
-                    } catch {
-                      case _: InterruptedException =>
-                        Thread.currentThread().interrupt()
-                        process.destroyForcibly()
-                        -1
-                      case ex: Exception =>
-                        logger.error(s"Error waiting for process ${cmd.commandId}: ${ex.getMessage}", ex)
-                        process.destroyForcibly()
-                        -1
-                    } finally {
-                      processes.remove(cmd.commandId)
-                      exitDone.trySuccess(())
-                    }
-                  exitCodePromise.trySuccess(exitCode)
-                }(ec)
-
-                stdoutDone.future
-                  .flatMap(_ => stderrDone.future)(ec)
-                  .flatMap(_ => exitDone.future)(ec)
-                  .flatMap(_ => exitCodePromise.future)(ec)
-                  .onComplete {
-                    case Success(rawExitCode) =>
-                      val durationMs = System.currentTimeMillis() - startTime
-                      val effectiveExitCode =
-                        if (running.cancelled.get()) 143
-                        else if (commandTimedOut.get()) -1
-                        else rawExitCode
-                      val isOutputTruncated = stdoutTruncated.get() || stderrTruncated.get()
-
-                      sendMessage(
-                        channel,
-                        ResponseMessage(
-                          ExecuteCommandResponse(
-                            commandId = cmd.commandId,
-                            stdout = stdoutAccumulator.result(),
-                            stderr = stderrAccumulator.result(),
-                            exitCode = effectiveExitCode,
-                            isOutputTruncated = isOutputTruncated,
-                            duration = durationMs.millis
-                          )
-                        )
-                      )
-                      if (running.completionSent.compareAndSet(false, true)) {
-                        sendMessage(
-                          channel,
-                          CommandCompletedMessage(cmd.commandId, effectiveExitCode, durationMs.millis)
-                        )
-                      }
-                    case Failure(ex) =>
-                      sendCommandFailure(
-                        channel,
-                        cmd.commandId,
-                        Option(ex.getMessage).getOrElse("Command execution failed"),
-                        "EXECUTION_FAILED",
-                        Some(ex.getStackTrace.mkString("\n")),
-                        exitCode = 1,
-                        durationMs = System.currentTimeMillis() - startTime
-                      )
-                  }(ec)
-              }
-            )
-          }
-        )
-      }
-    }(ec)
+    Future(commandExecutor.execute(cmd, processes, message => sendMessage(channel, message)))(ec)
   }
-
-  private def resolveWorkingDirectory(workingDirectory: Option[String]): Either[WorkspaceAgentException, java.io.File] =
-    Try {
-      workingDirectory match {
-        case Some(dir) => workspaceRootPath.resolve(dir).normalize()
-        case None      => workspaceRootPath
-      }
-    }.toEither match {
-      case Left(e) =>
-        Left(
-          new WorkspaceAgentException(
-            Option(e.getMessage).getOrElse("Invalid working directory"),
-            "INVALID_DIRECTORY",
-            None
-          )
-        )
-      case Right(candidatePath) =>
-        if (!candidatePath.startsWith(workspaceRootPath)) {
-          Left(
-            new WorkspaceAgentException(
-              s"Working directory '$workingDirectory' attempts to escape the workspace",
-              "INVALID_DIRECTORY",
-              None
-            )
-          )
-        } else {
-          val candidate = candidatePath.toFile
-          if (!candidate.exists() || !candidate.isDirectory) {
-            Left(
-              new WorkspaceAgentException(
-                "Invalid working directory",
-                "INVALID_DIRECTORY",
-                Some(s"Working directory does not exist: ${candidate.getPath}")
-              )
-            )
-          } else {
-            Right(candidate)
-          }
-        }
-    }
 
   private def sendMessage(channel: cask.WsChannelActor, message: WebSocketMessage): Unit = {
     val attempt = Try(write(message)).toEither
