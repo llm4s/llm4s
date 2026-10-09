@@ -137,6 +137,14 @@ class FakeTokenExchangeServerSpec extends AnyWordSpec with Matchers:
         "{}",
         "Authorization" -> "Bearer t1"
       ).body should include("\"type\":\"message\"")
+      val streamed = post(
+        fake.baseUrl + FakeTokenExchangeServer.AnthropicMessagesPath,
+        """{"stream":true}""",
+        "Authorization" -> "Bearer t1"
+      )
+      streamed.statusCode shouldBe 200
+      streamed.headers.firstValue("Content-Type").orElse("") should include("text/event-stream")
+      streamed.body should (include("event: message_start").and(include("event: message_stop")))
     }
 
     "treat a malformed Anthropic grant body as having no assertion" in FakeTokenExchangeServer.withServer { fake =>

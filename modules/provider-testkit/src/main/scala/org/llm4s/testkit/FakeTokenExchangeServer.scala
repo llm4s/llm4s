@@ -12,8 +12,8 @@ import scala.util.Try
 /**
  * A local identity provider plus a protected API, for testing workload-identity auth without a
  * network: an RFC 8693 token endpoint (Databricks' `/oidc/v1/token`), Anthropic's `jwt-bearer`
- * grant, and OpenAI-format and Anthropic-format endpoints that accept only the most recently
- * issued token. Tokens are `t1`, `t2`, ... in issue order.
+ * grant, and OpenAI-format and Anthropic-format endpoints (each streaming when the request asks)
+ * that accept only the most recently issued token. Tokens are `t1`, `t2`, ... in issue order.
  */
 final class FakeTokenExchangeServer private (server: HttpServer, executor: ExecutorService):
   import FakeTokenExchangeServer.*
@@ -71,7 +71,7 @@ final class FakeTokenExchangeServer private (server: HttpServer, executor: Execu
   server.createContext(ChatPath, ex => api(ex, openAIReply))
   server.createContext(OpenAIChatPath, ex => api(ex, openAIReply))
   server.createContext(ModelsPath, ex => api(ex, _ => (200, "application/json", """{"data":[{"id":"fake-model"}]}""")))
-  server.createContext(AnthropicMessagesPath, ex => api(ex, _ => (200, "application/json", AnthropicMessage)))
+  server.createContext(AnthropicMessagesPath, ex => api(ex, anthropicReply))
 
   private def exchange(ex: HttpExchange, fields: Map[String, String], subjectField: String): Unit =
     lock.synchronized(exchangeLog += fields)
@@ -116,6 +116,10 @@ final class FakeTokenExchangeServer private (server: HttpServer, executor: Execu
       (200, "text/event-stream", LocalProviderTestServer.openAISseBody(Seq("hello")))
     else (200, "application/json", LocalProviderTestServer.openAICompletion("hello"))
 
+  private def anthropicReply(request: String): (Int, String, String) =
+    if request.contains("\"stream\":true") then (200, "text/event-stream", AnthropicStream)
+    else (200, "application/json", AnthropicMessage)
+
 object FakeTokenExchangeServer:
   val TokenPath: String             = "/oidc/v1/token"
   val ChatPath: String              = "/serving-endpoints/chat/completions"
@@ -127,6 +131,20 @@ object FakeTokenExchangeServer:
   private val AnthropicMessage =
     """{"id":"msg_1","type":"message","role":"assistant","model":"claude-test","content":[{"type":"text","text":"hello"}],""" +
       """"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}"""
+
+  private val AnthropicStream = Seq(
+    "message_start" -> (
+      """{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","content":[],""" +
+        """"model":"claude-test","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}"""
+    ),
+    "content_block_start" -> """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""",
+    "content_block_delta" ->
+      """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello"}}""",
+    "content_block_stop" -> """{"type":"content_block_stop","index":0}""",
+    "message_delta" ->
+      """{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}""",
+    "message_stop" -> """{"type":"message_stop"}"""
+  ).map { case (event, data) => s"event: $event\ndata: $data\n\n" }.mkString
 
   def start(): FakeTokenExchangeServer =
     val server   = HttpServer.create(new InetSocketAddress("localhost", 0), 0)

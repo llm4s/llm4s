@@ -72,6 +72,62 @@ class AnthropicWorkloadIdentitySpec extends AnyWordSpec with Matchers with Eithe
       fake.issuedTokens.size should be >= 2
     }
 
+    "exchange the SVID and stream messages with the access token" in FakeTokenExchangeServer.withServer { fake =>
+      val file   = svidFile(TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com"))
+      val client = assertBuildsClient(AnthropicProvider, sectionOf(section(fake.baseUrl, file.toString)))
+      assertStreams(client)
+      fake.exchanges should have size 1
+      fake.apiAuthorizations shouldBe Seq("Bearer t1")
+    }
+
+    "refresh after a 401 while streaming" in FakeTokenExchangeServer.withServer { fake =>
+      val file   = svidFile(TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com"))
+      val client = assertBuildsClient(AnthropicProvider, sectionOf(section(fake.baseUrl, file.toString)))
+      assertStreams(client)
+      fake.rejectNextApiCalls(1)
+      assertStreams(client)
+      fake.issuedTokens.size should be >= 2
+      fake.apiAuthorizations.last shouldBe s"Bearer ${fake.issuedTokens.last}"
+    }
+
+    "exchange again once the token has expired" in FakeTokenExchangeServer.withServer { fake =>
+      fake.setExpiresIn(0)
+      val file   = svidFile(TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com"))
+      val client = assertBuildsClient(AnthropicProvider, sectionOf(section(fake.baseUrl, file.toString)))
+      client.complete(conversation, CompletionOptions()).isRight shouldBe true
+      client.complete(conversation, CompletionOptions()).isRight shouldBe true
+      fake.issuedTokens.size should be >= 2
+      fake.apiAuthorizations.last shouldBe s"Bearer ${fake.issuedTokens.last}"
+    }
+
+    "present the rotated SVID on the next exchange" in FakeTokenExchangeServer.withServer { fake =>
+      fake.setExpiresIn(0)
+      val first  = TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com")
+      val file   = svidFile(first)
+      val client = assertBuildsClient(AnthropicProvider, sectionOf(section(fake.baseUrl, file.toString)))
+      client.complete(conversation, CompletionOptions()).isRight shouldBe true
+      val second = TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com")
+      Files.writeString(file, second)
+      client.complete(conversation, CompletionOptions()).isRight shouldBe true
+      fake.exchanges.map(_("assertion")).distinct shouldBe Seq(first, second)
+    }
+
+    "make one exchange for concurrent calls" in FakeTokenExchangeServer.withServer { fake =>
+      import scala.jdk.CollectionConverters.*
+      val file   = svidFile(TestJwt.es256("spiffe://llm4s.test/app", "https://api.anthropic.com"))
+      val client = assertBuildsClient(AnthropicProvider, sectionOf(section(fake.baseUrl, file.toString)))
+      val pool   = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()
+      val calls = (1 to 10).map(_ =>
+        (
+          () => client.complete(conversation, CompletionOptions()).fold(_.toString, _ => "ok")
+        ): java.util.concurrent.Callable[String]
+      )
+      try pool.invokeAll(calls.asJava).asScala.map(_.get()).toList shouldBe List.fill(10)("ok")
+      finally pool.shutdown()
+      fake.issuedTokens shouldBe Seq("t1")
+      fake.apiAuthorizations shouldBe Seq.fill(10)("Bearer t1")
+    }
+
     // `refusedBaseUrl` reaches the fake, where the SDK would post the jwt-bearer grant, so a refusal that came
     // after any request would show in its records.
     "be refused on every entry point, before the SDK posts the grant, for a baseUrl the rules refuse" in
