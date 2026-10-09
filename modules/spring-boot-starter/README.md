@@ -37,7 +37,8 @@ The default executor is a bounded pool of daemon threads named `llm4s-async-N` (
 out) with a bounded queue; when the queue is full the returned future fails with
 `RejectedExecutionException` instead of growing without limit. It is shut down with
 `shutdownNow` when the context closes, interrupting calls still running. It is a plain pool rather
-than virtual threads so the starter also runs on JDK 17. Your own `llm4sTaskExecutor` must be an
+than virtual threads. The starter needs JDK 21 like the rest of llm4s, because it depends on `llm4s-agent`
+(see [supported JDKs](../../docs/reference/v1-scope.md#scala-and-jdk-support)). Your own `llm4sTaskExecutor` must be an
 `ExecutorService` whose `submit(..).cancel(true)` interrupts the task (every JDK pool does).
 
 | Property | Default | |

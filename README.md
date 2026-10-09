@@ -177,7 +177,7 @@ To ensure code quality, we use a Git pre-commit hook that automatically checks c
 
 ### Prerequisites
 
-- JDK 21+
+- JDK 21+ (see [supported JDKs](docs/reference/v1-scope.md#scala-and-jdk-support))
 - SBT
 - Docker
 
