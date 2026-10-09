@@ -26,7 +26,8 @@ form and keep working unchanged. For everything else, set `llm4s.providers.*` pr
 Spring-specific code, and so does any extra the provider declares:
 
 ```properties
-llm4s.providers.provider=gemini-main            # the default section
+# the default section
+llm4s.providers.provider=gemini-main
 llm4s.providers.gemini-main.provider=gemini
 llm4s.providers.gemini-main.model=gemini-2.0-flash
 llm4s.providers.gemini-main.api-key=${GOOGLE_API_KEY}
@@ -46,8 +47,9 @@ llm4s.providers.provider=local
 llm4s.providers.local.provider=openai-compatible
 llm4s.providers.local.model=my-model
 llm4s.providers.local.base-url=http://localhost:8000/v1
-llm4s.providers.local.context-window=32000        # extras of the generic provider
-llm4s.providers.local.headers.X-Team-Id=team-7    # header names are kept as written
+# extras of the generic provider; header names are kept as written
+llm4s.providers.local.context-window=32000
+llm4s.providers.local.headers.X-Team-Id=team-7
 ```
 
 - **Names.** Within a section, `kebab-case` and `snake_case` names are read as the `camelCase` names of the HOCON block
