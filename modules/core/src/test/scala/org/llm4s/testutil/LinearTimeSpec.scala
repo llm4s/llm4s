@@ -35,7 +35,7 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
   "LinearTime" should "observe the step of a coarse clock and sample well above it" in {
     val clock = quantised(WindowsTick)
     clock.granularity.toNanos shouldBe WindowsTick.toNanos +- 1.milli.toNanos
-    LinearTime.targetFor(clock) should be >= 200.millis
+    LinearTime.targetFor(clock) should be >= WindowsTick * 5L - 1.milli
   }
 
   it should "pass a linear workload of microseconds a run on a clock with 15.6 ms ticks" in {
@@ -43,7 +43,8 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
     val clock   = quantised(WindowsTick)
     val scaling = LinearTime.assertLinearOn(clock, "linear", 20000L, 80000L)(work)
     scaling.repeats should be > 1L
-    scaling.small should be >= LinearTime.targetFor(clock)
+    // calibration read at least the target; a later sample of as many runs can read up to two ticks less
+    scaling.small should be >= LinearTime.targetFor(clock) - clock.granularity * 2L
     scaling.ratio should be < 8.0
   }
 
@@ -53,6 +54,16 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
       LinearTime.assertLinearOn(clock, "quadratic", 200L, 800L, runs = 2)(n => work(n * n))
     }
     failure.getMessage should include("quadratic: not linear")
+  }
+
+  it should "charge the small and the large input the same overhead a run, so a sub-microsecond op reads its own ratio" in {
+    // The op's cost does not depend on its input: any ratio well above 1 is the harness's own overhead,
+    // charged to one input and not the other - a clock read per run costs more than this op does (#1736).
+    val scaling = LinearTime.assertLinear("constant", 1L, 4L)(_ => work(200))
+    withClue(scaling.toString) {
+      scaling.largePerRun.toNanos should be < 1.micro.toNanos
+      scaling.ratio should be < 2.0
+    }
   }
 
   it should "stop calibrating at the repeat cap on a clock that never moves" in {

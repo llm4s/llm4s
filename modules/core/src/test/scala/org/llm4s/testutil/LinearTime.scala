@@ -22,17 +22,28 @@ import scala.concurrent.duration.*
  * A clock is only as fine as its ticks: thread CPU time on Windows advances in steps of about 15.6 ms,
  * so a microsecond-scale input reads 0 and its 4x input a few ticks (#1735). Each sample therefore
  * repeats the operation a calibrated number of times: the repeat count doubles until one sample of the
- * small input costs at least [[targetFor]] - about 13 ticks of the clock, so a tick's quantisation is
- * under 8% of the sample - and the large input's samples repeat it as often. On a nanosecond clock
- * the floor is a few milliseconds.
+ * small input reads at least [[targetFor]] - five ticks of the clock - and the large input's samples
+ * repeat it as often. On a nanosecond clock the floor is a few milliseconds.
  *
  * A linear operation costs about `large / small` times as much on the large input; a quadratic one,
  * its square. With a 4x input the default bound of 8x sits halfway between linear (4x) and quadratic
- * (16x). The default `slack` added to the bound is two ticks of the clock, the most quantisation can
- * add to a reading of each input. Every single run of the operation is also held to `hangGuard` in wall
- * time, so a catastrophic regression fails even where the ratio would not show it; calibration stops
- * at `maxRepeats`, or once a sample takes `hangGuard` in wall time, and a large input's sample stops as
- * soon as it exceeds the bound.
+ * (16x). The default `slack` added to the bound is two ticks of the clock.
+ *
+ * Why five ticks: a sample read on a clock of tick `T` is within one tick of its true cost `s` (small)
+ * or `l` (large), either way. Quantisation can therefore cost the check far more than the two-tick
+ * slack: the small reading, one tick low, is multiplied by the 8x bound, so together with the large
+ * reading one tick high the worst case is nine ticks. The sample size, not the slack, absorbs that. A
+ * linear operation (`l = 4s`) fails only if `4s + T > 8(s - T) + 2T`, that is `s < 1.75T`; a quadratic
+ * one (`l = 16s`) escapes only if `16s - T <= 8(s + T) + 2T`, that is `s <= 1.375T`. Calibration stops
+ * at a reading of at least five ticks, so the true small sample is at least four: more than twice the
+ * linear failure point and nearly three times the quadratic escape point. Each sample being a few ticks,
+ * on Windows's 15.6 ms clock the suites that use this stay within seconds of their run on a fine clock.
+ *
+ * Every single run of the operation is also held to `hangGuard` in wall time, so a catastrophic
+ * regression fails even where the ratio would not show it; calibration stops at `maxRepeats`, or once
+ * a sample takes `hangGuard` in wall time, and a large input's sample stops at the first of its
+ * `StopChecks` clock reads to exceed the bound. Both inputs' samples read the clock at the same
+ * points, so neither pays an overhead the other does not.
  */
 object LinearTime {
 
@@ -65,8 +76,9 @@ object LinearTime {
   private val GranularitySteps  = 3
   private val GranularityBudget = 1.second
   private val MinTarget         = 5.millis
-  private val TicksPerSample    = 13
+  private val TicksPerSample    = 5
   private val MaxTarget         = 1.second
+  private val StopChecks        = 16L
 
   private[testutil] def observedGranularity(clock: Clock): FiniteDuration = {
     val deadline = System.nanoTime() + GranularityBudget.toNanos
@@ -85,7 +97,7 @@ object LinearTime {
     if (steps == 0) GranularityBudget else largest.nanos
   }
 
-  /** The least a sample of the small input should cost on `clock`: 13 of its ticks, at least 5 ms. */
+  /** The least a sample of the small input should cost on `clock`: five of its ticks, at least 5 ms. */
   private[testutil] def targetFor(clock: Clock): FiniteDuration =
     (clock.granularity * TicksPerSample.toLong).max(MinTarget).min(MaxTarget)
 
@@ -152,18 +164,27 @@ object LinearTime {
     /**
      * `repeats` runs of `op` on `input`: their cost on `clock`, their wall time, and whether the sample
      * stopped early, once past `stopAbove` nanoseconds.
+     *
+     * The runs go in `StopChecks` batches, and the clock is read once after each batch whether or not
+     * the sample has a bound to stop at, so a sample of either input pays the same overhead a run. Reading
+     * it after every run of the large input only - a thread-CPU-time read costs about half a microsecond -
+     * made a sub-microsecond operation read several times its own ratio.
      */
     def sample(input: A, repeats: Long, stopAbove: Long = Long.MaxValue): (Long, FiniteDuration, Boolean) = {
+      val batch     = math.max(1L, repeats / StopChecks)
       val start     = clock.nanos()
       val wallStart = System.nanoTime()
       var done      = 0L
-      var past      = false
-      while (done < repeats && !past) {
-        timed(label, hangGuard)(op(input))
-        done += 1
-        past = stopAbove != Long.MaxValue && clock.nanos() - start > stopAbove
+      var cost      = 0L
+      while (done < repeats && cost <= stopAbove) {
+        val end = math.min(repeats, done + batch)
+        while (done < end) {
+          timed(label, hangGuard)(op(input))
+          done += 1
+        }
+        cost = clock.nanos() - start
       }
-      (clock.nanos() - start, (System.nanoTime() - wallStart).nanos, done < repeats)
+      (cost, (System.nanoTime() - wallStart).nanos, done < repeats)
     }
 
     // JIT warm-up, alternating
