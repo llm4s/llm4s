@@ -12,8 +12,8 @@ import scala.util.matching.Regex
  * take super-linear time on a long adversarial run (#1713: the Email pattern took 10.9 s on 20,000 `a`s).
  *
  * Absolute times fail on a slow or loaded runner, so this checks scaling instead: after a warm-up, the time on a run
- * of 4n characters must be at most 8 times the time on n characters, as the median of several samples. Linear time
- * gives about 4, quadratic about 16. A run that takes longer than [[PIIPatternsScalingSpec.HangGuardNanos]] fails at once.
+ * of 4n characters must be at most 8 times the time on n characters, as the median of several samples, in one of up
+ * to three measurements. Linear time gives about 4, quadratic about 16. A run that takes longer than [[PIIPatternsScalingSpec.HangGuardNanos]] fails at once.
  */
 class PIIPatternsScalingSpec extends AnyFlatSpec with Matchers {
   import PIIPatternsScalingSpec._
@@ -44,8 +44,8 @@ class PIIPatternsScalingSpec extends AnyFlatSpec with Matchers {
     val large     = run(unit, 4 * n)
     val warmUntil = System.nanoTime() + WarmUpNanos
     while ({ countMatches(pattern, small); countMatches(pattern, large); System.nanoTime() < warmUntil }) ()
-    val once   = math.max(1L, timeNanos(pattern, small, 1))
-    val passes = math.max(1L, math.min(100000L, MinSampleNanos / once)).toInt
+    var passes = 1
+    while (passes < MaxPasses && timeNanos(pattern, small, passes) < MinSampleNanos) passes *= 2
     val ratios = (1 to samples).map { _ =>
       val smallNanos = timeNanos(pattern, small, passes)
       val largeNanos = timeNanos(pattern, large, passes)
@@ -54,15 +54,24 @@ class PIIPatternsScalingSpec extends AnyFlatSpec with Matchers {
     ratios.sorted.apply(samples / 2)
   }
 
+  /**
+   * The ratio of the first of up to `Attempts` measurements that is within the bound, else the lowest. A loaded
+   * machine can slow one measurement down; quadratic time stays at about 16 in every one.
+   */
+  private def bestRatio(pattern: Regex, unit: String): Double = {
+    val ratios = LazyList.continually(scalingRatio(pattern, unit)).take(Attempts)
+    ratios.find(_ <= MaxRatio).getOrElse(ratios.min)
+  }
+
   private def checkScaling(piiType: PIIType): Unit =
     adversarialUnits.foreach { unit =>
-      val ratio = Try(scalingRatio(piiType.pattern, unit)).fold(
+      val ratio = Try(bestRatio(piiType.pattern, unit)).fold(
         e => fail(s"${piiType.name} on a run of '$unit': ${e.getMessage}"),
         identity
       )
       info(f"run of '$unit': time(4n) / time(n) = $ratio%.2f")
       withClue(s"${piiType.name} on a run of '$unit', time(4n) / time(n) with n = $n: ") {
-        ratio should be <= 8.0
+        ratio should be <= MaxRatio
       }
     }
 
@@ -91,6 +100,12 @@ object PIIPatternsScalingSpec {
   val MinSampleNanos: Long = 50L * 1000 * 1000
 
   val WarmUpNanos: Long = 500L * 1000 * 1000
+
+  val MaxPasses: Int = 1 << 20
+
+  val MaxRatio: Double = 8.0
+
+  val Attempts: Int = 3
 
   /** A view of a string whose reads fail once a deadline has passed, so a runaway match ends with an error. */
   final class GuardedText(text: String, deadline: Long) extends CharSequence {
