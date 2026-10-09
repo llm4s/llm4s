@@ -2,7 +2,7 @@
 layout: page
 title: Coming from LangChain4j or Spring AI
 parent: User Guide
-nav_order: 21
+nav_order: 25
 ---
 
 # Coming from LangChain4j or Spring AI

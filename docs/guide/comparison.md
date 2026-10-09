@@ -2,7 +2,7 @@
 layout: page
 title: Comparing LLM4S
 parent: User Guide
-nav_order: 20
+nav_order: 24
 ---
 
 # Comparing LLM4S with other JVM libraries
