@@ -1,8 +1,9 @@
 ---
 layout: page
 title: Micrometer metrics
-nav_order: 12
-parent: User Guide
+parent: Monitoring
+grand_parent: User Guide
+nav_order: 2
 ---
 
 # Micrometer metrics
