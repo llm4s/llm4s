@@ -64,6 +64,49 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     Redaction.redact(input) shouldBe s"""{"password": "$R", "user": "ann"}"""
   }
 
+  it should "redact the whole of an Authorization value that contains an escaped quote (#1672)" in {
+    val out = Redaction.redact("""{"authorization": "6FPVKYYYKXQ\"]WGMW"}""")
+    out shouldBe s"""{"authorization": "$R"}"""
+    (out should not).include("WGMW")
+  }
+
+  it should "redact the whole of an Authorization value with several escaped quotes" in {
+    val out = Redaction.redact("""{"Authorization": "Bearer ab\"cdQ\"WXYZ\"tail9", "user": "ann"}""")
+    out shouldBe s"""{"Authorization": "$R", "user": "ann"}"""
+    Redaction.redact("""{"Authorization": "Basic dXNlcjpwYXNz\"QWXYZ"}""") shouldBe s"""{"Authorization": "$R"}"""
+    Redaction.redact("""{"AUTHORIZATION": "\"QWXYZ\""}""") shouldBe s"""{"AUTHORIZATION": "$R"}"""
+  }
+
+  it should "end an Authorization value at a quote that follows an escaped backslash" in {
+    // `\\` is an escaped backslash, so the quote after it closes the value and the next field is kept.
+    Redaction.redact("""{"Authorization": "abc\\", "user": "ann"}""") shouldBe
+      s"""{"Authorization": "$R", "user": "ann"}"""
+    Redaction.redact("""{"Authorization": "ab\\\"QWXYZ\\", "user": "ann"}""") shouldBe
+      s"""{"Authorization": "$R", "user": "ann"}"""
+  }
+
+  it should "redact an Authorization value with an escaped quote that is cut off, to the end of the input" in {
+    // The first line is a header line too: its redaction must not leave the rest of the value readable.
+    val out = Redaction.redact("Authorization: \nx: \"Authorization\": \"Basic QWX\\\"Y\nZtail9 more")
+    (out should not).include("Ztail9")
+    Redaction.redact("""{"Authorization": "Bearer ab\"QWXYZ""") shouldBe s"""{"Authorization": "$R"""
+  }
+
+  it should "leave an empty Authorization value as it is" in {
+    Redaction.redact("""{"Authorization": "", "user": "ann"}""") shouldBe """{"Authorization": "", "user": "ann"}"""
+  }
+
+  it should "redact an Authorization value with an escaped quote in JSON that sits inside a string" in {
+    val input = """{"content": "{\"authorization\": \"QWX\\\"]YZtail9\", \"n\": 1}"}"""
+    val out   = Redaction.redact(input)
+    out shouldBe s"""{"content": "{\\"authorization\\": \\"$R\\", \\"n\\": 1}"}"""
+    (out should not).include("YZtail9")
+  }
+
+  it should "redact the rest of an Authorization header line that holds an escaped quote" in {
+    Redaction.redact("Authorization: Bearer ab\\\"QWXYZ\nnext: 1") shouldBe s"Authorization: $R\nnext: 1"
+  }
+
   // ---------------------------------------------------------------------------------------------
   // Numbers
   // ---------------------------------------------------------------------------------------------

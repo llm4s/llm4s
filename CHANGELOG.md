@@ -1977,6 +1977,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a request that sends an earlier turn's `reasoning_content` back now also sets `"thinking": {"clear_thinking": false}`,
   merged into any existing `thinking` object. Z.ai's standard endpoint has preserved thinking off by default
   (`clear_thinking` defaults to `true`) and drops replayed reasoning without it; `thinking.type` is left unset.
+- **Redaction redacts a JSON `Authorization` value containing an escaped quote in full**
+  ([#1672](https://github.com/llm4s/llm4s/issues/1672)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, took the value of a JSON `"Authorization"` field to end at the first `"`, including the `"` of
+  an escaped `\"` inside it. Only the text before the escaped quote was replaced, and the rest of the credential was
+  written in the clear: `{"authorization": "6FPVKYYYKXQ\"]WGMW"}` became `{"authorization": "[REDACTED]"]WGMW"}`.
+  The value is now read as the body of a JSON string, in which `\"` is part of the value and a quote after an
+  escaped backslash (`"abc\\"`) ends it, so the whole value is replaced: `{"authorization": "[REDACTED]"}`. A value
+  with no closing quote, as in a payload cut off in the middle of it, is redacted to the end of the input, as other
+  credential values already were. The `Authorization: ...` header line, an empty value and JSON inside a string are
+  redacted as before. No signature changes.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the
   exchange-log sink, read a query parameter as `[?&]`, a key of any characters up to the next `=`, and a value up

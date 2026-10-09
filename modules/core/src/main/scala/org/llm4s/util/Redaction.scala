@@ -278,12 +278,24 @@ private[llm4s] object Redaction {
   // Private redaction helpers
   // ============================================================
 
+  /**
+   * `"Authorization": "value"`, the value as group 2 and its closing quote, if any, as group 3. The value is the body
+   * of a JSON string: any character but a quote or a backslash, or a backslash and the character it escapes, so an
+   * escaped quote (`\"`) is part of the value and a quote after an escaped backslash (`\\"`) ends it. Stopping at the
+   * first `"` instead redacted only the text before an escaped quote and left the rest readable (#1672). A value that
+   * is not closed runs to the end of the input, as `scanQuotedValue` has it, so a payload cut off in the middle of a
+   * credential still has it redacted; `(?s)` lets the escaped character be a line break. The repetition is possessive:
+   * java.util.regex runs a possessive group in a loop, so neither the cost nor the stack grows with the length of the
+   * value.
+   */
+  private val JsonAuthorization: Regex = """(?is)("Authorization"\s*:\s*")((?:[^"\\]|\\.?)++)("|\z)""".r
+
   // Every replacement below is quoted: the placeholder is the caller's, and a `$` or `\` in a replacement string is
   // otherwise read as a group reference or an escape, which throws or writes back the text being redacted.
   private def redactAuthHeaders(input: String, placeholder: String): String = {
     val quoted = Regex.quoteReplacement(placeholder)
     // Handle "Authorization": "..." in JSON
-    val step1 = """(?i)("Authorization"\s*:\s*")([^"]+)(")""".r
+    val step1 = JsonAuthorization
       .replaceAllIn(input, m => Regex.quoteReplacement(s"${m.group(1)}$placeholder${m.group(3)}"))
     // Handle Authorization: ... in headers
     val step2 = """(?i)(Authorization:\s*)([^\n\r]+)""".r
