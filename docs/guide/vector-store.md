@@ -883,7 +883,13 @@ val text = "one two three four five six seven eight nine ten"
 val chunks = ChunkingUtils.chunkTextValidated(text, size = 20, overlap = 20)
 
 def chunkingConfig(size: Int, overlap: Int): Result[ChunkingConfig] =
-  Try(ChunkingConfig(targetSize = size, maxSize = math.min(size.toLong * 3 / 2, Int.MaxValue.toLong).toInt, overlap = overlap)).toResult
+  Try(
+    ChunkingConfig(
+      targetSize = size,
+      maxSize = math.min(size.toLong * 3 / 2, Int.MaxValue.toLong).toInt, // Long: no overflow for a large size
+      overlap = overlap
+    )
+  ).toResult
 ```
 
 ### Chunking Best Practices

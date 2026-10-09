@@ -126,14 +126,4 @@ class RagValidationGuideSpec extends AnyWordSpec with Matchers with EitherValues
       badSize.asInstanceOf[ValidationError].field shouldBe "size"
     }
   }
-
-  "a chunker" should {
-    "accept every configuration ChunkingConfig lets you build, including the boundary" in {
-      val text    = "a b c d e f g h i j " * 20
-      val chunker = ChunkerFactory.simple()
-      // overlap = targetSize - 1 is the largest overlap allowed: each chunk still moves one character forward.
-      val chunks = chunker.chunk(text, ChunkingConfig(targetSize = 10, overlap = 9))
-      chunks should not be empty
-    }
-  }
 }

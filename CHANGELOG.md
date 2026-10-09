@@ -234,8 +234,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than `handoff_to_agent_<hash>`. Design: `docs/design/typed-agent-runtime-design.md` §4.7, with
   the Stage 0 carry-forward in §4.8.
 - **RAG chunking and fusion: what is validated, and how weighted scores are combined**
-  ([#1318](https://github.com/llm4s/llm4s/issues/1318), items 4 to 6; no behaviour change, the code shipped in
-  #1358): `docs/guide/vector-store.md` now states that an invalid `ChunkingConfig` or `WeightedScore` throws
+  ([#1318](https://github.com/llm4s/llm4s/issues/1318), items 4 to 6; the validation shipped in #1358, and the one
+  fix this found is under Fixed): `docs/guide/vector-store.md` now states that an invalid `ChunkingConfig` or `WeightedScore` throws
   `IllegalArgumentException` (decided, because the `RAGConfig` builders cannot return a `Left`), how to turn user
   input into a `Left` (`ChunkingUtils.chunkTextValidated`, or `Try(...)` through `toResult`), that every
   configuration that can be built is safe for every chunker, and that `WeightedScore` rescales each channel so its
@@ -2006,8 +2006,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
-- Character-based chunking uses overflow-safe window arithmetic, including valid configurations with
-  `targetSize = Int.MaxValue` and overlap one less than the target size (#1424).
+- **`llm4s-rag`: `SimpleChunker` and `ChunkingUtils.chunkText` no longer throw for a very large window**
+  ([#1424](https://github.com/llm4s/llm4s/pull/1424)): the window end and the next start were computed in `Int`, so
+  a valid configuration such as `ChunkingConfig(targetSize = Int.MaxValue, maxSize = Int.MaxValue,
+  overlap = Int.MaxValue - 1)` overflowed on the second window and `substring` threw
+  `StringIndexOutOfBoundsException`. Both are now computed in `Long` and clamped to the text length; the chunks
+  produced for every other configuration are unchanged.
 - **`llm4s-openai-compatible`: Z.ai honours `CompletionOptions.reasoning`** ([#1681](https://github.com/llm4s/llm4s/issues/1681)):
   it used to be ignored, so `ReasoningEffort.None` still thought (Z.ai's `thinking.type` defaults to `enabled`) and
   effort levels never reached a model that takes `reasoning_effort`. Each effort now goes out in the form the

@@ -72,6 +72,18 @@ class ChunkersAcceptValidConfigsSpec extends AnyFlatSpec with Matchers with Scal
     chunks.map(_.content) shouldBe List("abc", "bc", "c")
   }
 
+  "every chunker" should "accept the largest sizes ChunkingConfig allows" in {
+    val config = ChunkingConfig(targetSize = Int.MaxValue, maxSize = Int.MaxValue, overlap = Int.MaxValue - 1)
+    val text   = "# Title\n\nOne sentence. Another one here.\n\n```scala\nval x = 1\n```\n"
+    chunkers.foreach { case (name, chunker) =>
+      withClue(s"$name: ") {
+        val chunks = chunker.chunk(text, config)
+        chunks should not be empty
+        chunks.map(_.index) shouldBe chunks.indices.toList
+      }
+    }
+  }
+
   "ChunkingConfig" should "be impossible to build in a state a chunker could not handle" in {
     an[IllegalArgumentException] should be thrownBy ChunkingConfig(targetSize = 100, overlap = 100)
     an[IllegalArgumentException] should be thrownBy ChunkingConfig(targetSize = 0)
