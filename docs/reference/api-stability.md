@@ -55,6 +55,11 @@ replacing its execution model and its tier is an open question in
 [#1281](https://github.com/llm4s/llm4s/issues/1281). Add it to `stabilityTierModules` in `build.sbt`
 when that is settled.
 
+`scripts/check-tier-drift.sh` (also a CI quick check, and it needs no sbt) keeps this page, the tiers in
+[1.0 Scope](v1-scope) and the lists in `build.sbt` from drifting apart: the modules that call `mimaFrozen`
+are the frozen set, and every other place that states it must agree. See the script's header for the exact
+comparisons, and mark a Package Map row `tier-drift: ignore` to opt it out.
+
 MiMa skips a type annotated `@Experimental` inside a frozen module: `mimaFrozen` in `build.sbt` adds
 `mimaExcludeAnnotations += "org.llm4s.annotation.Experimental"`, so such a type needs no `ProblemFilters.exclude`
 entry (a `@Stable` type is still checked). `scripts/mima-dry-run.sh` proves both on every run; see

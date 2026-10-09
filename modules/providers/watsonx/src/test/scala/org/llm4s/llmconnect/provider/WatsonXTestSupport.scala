@@ -11,7 +11,13 @@ import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 
 /** One request a [[StubHttp]] saw. */
-final case class Seen(url: String, headers: Map[String, String], body: String, streaming: Boolean)
+final case class Seen(
+  url: String,
+  headers: Map[String, String],
+  body: String,
+  streaming: Boolean,
+  timeout: FiniteDuration
+)
 
 /**
  * A thread-safe scripted [[Llm4sHttpClient]]: `core`'s `MockHttpClient` mutates plain vars and a
@@ -39,7 +45,7 @@ final class StubHttp(
     body: String,
     timeout: FiniteDuration
   ): Result[HttpResponse] = {
-    val seen = Seen(url, headers, body, streaming = false)
+    val seen = Seen(url, headers, body, streaming = false, timeout)
     log.add(seen)
     respond(seen)
   }
@@ -50,7 +56,7 @@ final class StubHttp(
     body: String,
     timeout: FiniteDuration
   ): Result[StreamingHttpResponse] = {
-    val seen = Seen(url, headers, body, streaming = true)
+    val seen = Seen(url, headers, body, streaming = true, timeout)
     log.add(seen)
     streamBody(seen)
   }

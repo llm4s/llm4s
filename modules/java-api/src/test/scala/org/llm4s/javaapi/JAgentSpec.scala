@@ -1,6 +1,6 @@
 package org.llm4s.javaapi
 
-import org.llm4s.agent.AgentStatus
+import java.util.Optional
 import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{ APIError, LLMError }
 import org.llm4s.llmconnect.LLMClient
@@ -9,6 +9,8 @@ import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import scala.jdk.CollectionConverters.*
 
 class JAgentSpec extends AnyFlatSpec with Matchers {
 
@@ -52,15 +54,16 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
     val agent  = Llm4s.createAgent(new JLlmClient(completingClient("42")))
     val result = agent.run("What is 6*7?")
     result.isSuccess shouldBe true
-    result.get().status shouldBe AgentStatus.Completed("42")
+    result.get().status.kind shouldBe AgentStatusKind.COMPLETED
+    result.get().status.answer shouldBe Optional.of("42")
   }
 
   it should "return the LLM answer as the last message of the conversation" in {
     val agent  = Llm4s.createAgent(new JLlmClient(completingClient("Paris")))
     val result = agent.run("Capital of France?")
     result.isSuccess shouldBe true
-    result.get().messages.last.content shouldBe "Paris"
-    result.get().answer shouldBe Some("Paris")
+    result.get().messages.asScala.last.content shouldBe "Paris"
+    result.get().answer() shouldBe Optional.of("Paris")
   }
 
   it should "return a failure result when the underlying LLM call fails" in {
@@ -89,7 +92,7 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
     val first  = agent.run("one").get()
     val second = agent.continueConversation(first, "two").get()
     second.threadId shouldBe first.threadId
-    second.messages.map(_.content) shouldBe Vector("one", "ok", "two", "ok")
+    second.messages.asScala.map(_.content) shouldBe Seq("one", "ok", "two", "ok")
   }
 
   it should "return a failure for a null previous result or query" in {
@@ -103,7 +106,7 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
     val agent = Llm4s.createAgent(new JLlmClient(completingClient("ok")))
     val first = agent.run("one").get()
     agent.forget(first).isSuccess shouldBe true
-    agent.continueConversation(first, "two").get().messages.map(_.content) shouldBe Vector("two", "ok")
+    agent.continueConversation(first, "two").get().messages.asScala.map(_.content) shouldBe Seq("two", "ok")
     agent.forget(null).isFailure shouldBe true
   }
 }

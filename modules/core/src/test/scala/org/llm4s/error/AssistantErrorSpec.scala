@@ -233,6 +233,15 @@ class AssistantErrorSpec extends AnyFlatSpec with Matchers {
     val ioError = error.asInstanceOf[AssistantError.IOError]
     ioError.operation shouldBe "read"
     ioError.message should include("Failed to read user input")
+    ioError.message should include("Stream closed")
+  }
+
+  it should "name the cause's class when the cause has no message" in {
+    // Throwable#getMessage is null for an exception built without one (#1556)
+    val error = AssistantError.consoleInputFailed(new java.io.IOException())
+
+    error.message shouldBe "Failed to read user input: java.io.IOException"
+    (error.message should not).include("null")
   }
 
   "AssistantError.consoleOutputFailed" should "create console output error" in {
@@ -243,6 +252,14 @@ class AssistantErrorSpec extends AnyFlatSpec with Matchers {
     val displayError = error.asInstanceOf[AssistantError.DisplayError]
     displayError.displayType shouldBe "message"
     displayError.message should include("Failed to display message")
+    displayError.message should include("Broken pipe")
+  }
+
+  it should "name the cause's class when the cause has no message" in {
+    val error = AssistantError.consoleOutputFailed("welcome", new java.io.IOException())
+
+    error.message shouldBe "Failed to display welcome: java.io.IOException"
+    (error.message should not).include("null")
   }
 
   "AssistantError.emptyCommandTitle" should "create empty title error" in {

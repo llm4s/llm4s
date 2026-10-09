@@ -34,6 +34,7 @@ private[config] object RawProvidersConfigLoader:
       for
         builtins  <- builtinFieldsReader.from(cursor)
         objCursor <- cursor.asObjectCursor
+        timeouts  <- ProviderTimeoutsReader.read(objCursor)
         extraKeys = objCursor.objValue
           .keySet()
           .asScala
@@ -61,7 +62,7 @@ private[config] object RawProvidersConfigLoader:
                     )
             yield value.fold(acc)(acc.updated(key, _))
         }
-      yield builtins.copy(extras = extras)
+      yield builtins.copy(extras = extras, timeouts = timeouts)
     }
 
   /** The block as read, each section's read failure kept to that section. */

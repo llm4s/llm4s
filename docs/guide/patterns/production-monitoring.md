@@ -7,7 +7,7 @@ nav_order: 3
 
 # Production Monitoring
 
-> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](https://github.com/llm4s/llm4s/tree/main/modules/samples).
 
 Comprehensive strategies for observing, debugging, and optimizing LLM applications in production. This guide covers metrics collection, alerting, cost tracking, and debugging techniques.
 

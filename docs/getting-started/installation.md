@@ -611,7 +611,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-provider-testkit" % llm4sVersion % 
 ```
 
 The checks a provider module's own `Llm4s<Name>ModuleSpec` makes: discovery, sole ownership of its ids,
-explicit registration and the config-to-client round trip. See
+explicit registration and the config-to-client round trip. It requires JDK 21: its interruption checks
+and its local test server run on virtual threads. See
 [Writing a provider](../guide/writing-a-provider#testing).
 
 ### For Workspace (Containerized Execution)

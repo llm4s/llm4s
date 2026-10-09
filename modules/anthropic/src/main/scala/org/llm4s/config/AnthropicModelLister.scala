@@ -7,10 +7,10 @@ import org.llm4s.http.HttpResponse.*
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.types.ProviderModelTypes.{ ApiKey, ModelName }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.types.Result
+import org.llm4s.util.BoundedJson
 
 import scala.concurrent.duration.*
-import scala.util.Try
 
 /**
  * Model lister for the Anthropic provider, using the paginated `/v1/models` endpoint.
@@ -24,6 +24,8 @@ import scala.util.Try
 object AnthropicModelLister extends ProviderModelLister:
   private val AnthropicVersion = "2023-06-01"
   private val DefaultLimit     = "100"
+
+  private type JsonObject = upickle.core.LinkedHashMap[String, ujson.Value]
 
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
     for
@@ -52,9 +54,9 @@ object AnthropicModelLister extends ProviderModelLister:
           timeout = 10.seconds
         )
         .mapServiceError("anthropic", "Failed to discover models")
-      okResponse   <- response.ensureSuccess("anthropic")
-      jsonResponse <- okResponse.toJson("responseBody")
-      page         <- parseAnthropicPage(jsonResponse.body)
+      okResponse <- response.ensureSuccess("anthropic")
+      json       <- readBody(okResponse.body)
+      page       <- parseAnthropicPage(json)
       all = acc ++ page.models
       models <-
         if page.hasMore then
@@ -65,20 +67,28 @@ object AnthropicModelLister extends ProviderModelLister:
         else Right(all)
     yield models
 
-  private def parseAnthropicModels(json: ujson.Value): Result[List[DiscoveredModel]] =
-    val dataResult =
-      Try(json("data").arr.toList).toResult.left
-        .map(err => ValidationError("data", s"Missing or invalid models payload: ${err.message}"))
+  /**
+   * The listing's body, read with `BoundedJson` so that one nested too deeply is refused before it is
+   * parsed ([[https://github.com/llm4s/llm4s/issues/1660 #1660]]).
+   */
+  private def readBody(body: String): Result[ujson.Value] =
+    BoundedJson
+      .read(body)
+      .left
+      .map(err => ValidationError("responseBody", s"Failed to parse JSON response: ${err.message}"))
 
-    dataResult.flatMap: data =>
-      data.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)):
-        case (accResult, modelJson) =>
-          for
-            acc    <- accResult
-            parsed <- parseAnthropicModel(modelJson)
-          yield parsed match
-            case Some(model) => acc :+ model
-            case None        => acc
+  /**
+   * The `data` array's models. Every step uses an accessor that returns an `Option`: `json("data")`
+   * or `.obj` on an unexpected shape throws `ujson.Value.InvalidData`, whose message renders the
+   * whole value recursively (#1660). An entry that is not an object is skipped, as one without an
+   * `id` always was.
+   */
+  private def parseAnthropicModels(json: JsonObject): Result[List[DiscoveredModel]] =
+    json
+      .get("data")
+      .flatMap(_.arrOpt)
+      .toRight(ValidationError("data", "Missing or invalid models payload: expected an object with a `data` array"))
+      .map(_.toList.flatMap(parseAnthropicModel))
 
   final private case class AnthropicPage(
     models: List[DiscoveredModel],
@@ -86,31 +96,42 @@ object AnthropicModelLister extends ProviderModelLister:
     lastId: Option[String]
   )
 
-  private def parseAnthropicPage(json: ujson.Value): Result[AnthropicPage] =
+  private def parseAnthropicPage(body: ujson.Value): Result[AnthropicPage] =
     for
+      json <- body.objOpt.toRight(
+        ValidationError("data", "Missing or invalid models payload: expected an object with a `data` array")
+      )
       models  <- parseAnthropicModels(json)
       hasMore <- parseOptionalBoolean(json, "has_more").map(_.getOrElse(false))
       lastId  <- parseOptionalString(json, "last_id")
     yield AnthropicPage(models, hasMore, lastId)
 
-  private def parseAnthropicModel(json: ujson.Value): Result[Option[DiscoveredModel]] =
-    val obj = json.obj
-    obj.get("id").flatMap(_.strOpt).filter(_.nonEmpty) match
-      case None => Right(None)
-      case Some(id) =>
-        val metadata =
-          List(
-            obj.get("display_name").flatMap(_.strOpt).map("displayName" -> _),
-            obj.get("created_at").flatMap(_.strOpt).map("createdAt" -> _),
-            obj.get("type").flatMap(_.strOpt).map("type" -> _),
-          ).flatten.toMap
-        Right(Some(DiscoveredModel(ModelName(id), ProviderId("anthropic"), metadata)))
+  private def parseAnthropicModel(json: ujson.Value): Option[DiscoveredModel] =
+    json.objOpt.flatMap: obj =>
+      obj
+        .get("id")
+        .flatMap(_.strOpt)
+        .filter(_.nonEmpty)
+        .map: id =>
+          val metadata =
+            List(
+              obj.get("display_name").flatMap(_.strOpt).map("displayName" -> _),
+              obj.get("created_at").flatMap(_.strOpt).map("createdAt" -> _),
+              obj.get("type").flatMap(_.strOpt).map("type" -> _),
+            ).flatten.toMap
+          DiscoveredModel(ModelName(id), ProviderId("anthropic"), metadata)
 
-  private def parseOptionalString(json: ujson.Value, field: String): Result[Option[String]] =
-    Right(json.obj.get(field).flatMap(_.strOpt).filter(_.nonEmpty))
+  private def parseOptionalString(
+    json: JsonObject,
+    field: String
+  ): Result[Option[String]] =
+    Right(json.get(field).flatMap(_.strOpt).filter(_.nonEmpty))
 
-  private def parseOptionalBoolean(json: ujson.Value, field: String): Result[Option[Boolean]] =
-    json.obj.get(field) match
+  private def parseOptionalBoolean(
+    json: JsonObject,
+    field: String
+  ): Result[Option[Boolean]] =
+    json.get(field) match
       case None                                  => Right(None)
       case Some(value) if value.boolOpt.nonEmpty => Right(value.boolOpt)
       case Some(_)                               => Left(ValidationError(field, s"Invalid boolean value for `$field`"))

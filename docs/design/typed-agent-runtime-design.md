@@ -963,6 +963,33 @@ Decisions:
   buffer that never blocks the dispatcher: durable events are always queued, and live events past its
   capacity are dropped and reported as one `LiveGap`, so a slow consumer loses deltas, not the run.
   Interrupting or stopping early cancels the turn; a kernel `Disconnected` fails the stream.
+- **Java and Kotlin** ([#1377](https://github.com/llm4s/llm4s/issues/1377)). `JAgent.stream*` take an
+  `AgentStreamListener` (`onEvent`, then one of `onComplete` / `onError`) and return an `AgentStream`
+  (`await`, `cancel`); one virtual thread per stream drains the same buffer into the listener, so a
+  slow listener gets a `LiveGap`, and one that throws cancels the turn. `AgentKt.stream*` are cold
+  `Flow<AgentStreamItem>`s over that listener and a channel it fills: cancelling the collection cancels
+  the turn, and starting and cancelling it run on `Dispatchers.IO`. Resume answers are `Answer`s
+  (JSON as `String`), so no Scala or ujson type is in either signature. `Llm4s.createAgent(client,
+  tools, streaming)` gives either facade text deltas; `Llm4s.wrapAgent` takes a builder-made agent.
+  [#1392](https://github.com/llm4s/llm4s/issues/1392) adds the suspended turn to both facades.
+  `JAgent.pending(result)` and `AgentKt.pending` read `AgentStatus.Suspended` as a
+  `java.util.List<PendingInterrupt>`. Approvals come first, then questions. Each item has an id, a
+  Java-enum `InterruptKind`, the tool name and its arguments as JSON text, and either the reason or the
+  question as JSON text, in an `Optional`. `JAgent.resume` and `recover` block as `run` does.
+  `AgentKt.resume` and `recover` are `suspend` functions over the `streamResume` and `streamRecover`
+  flows, so cancelling the caller cancels the turn; since #1663 `AgentKt.run` and `continueConversation`
+  run over `stream` the same way. `PendingInterrupt` is the view that the Java-friendly
+  `JAgentResult` of [#1393](https://github.com/llm4s/llm4s/issues/1393) reuses: a `SUSPENDED`
+  `JAgentStatus` carries the same list, built by the same `PendingInterrupt.of`.
+- **The JVM facades return Java values (#1393).** `JAgent` and `AgentKt` turns, `AgentStream.await()` and
+  `onComplete` hand over a `JAgentResult` (in `llm4s-java-api`; `llm4s-agent` is unchanged): `String` ids,
+  `Optional<String> answer()`, an unmodifiable `java.util.List<JMessage>` (Java enum `JMessageRole`, tool calls
+  as `JToolCall` with JSON text), a `JUsageSummary` (`long`s, `BigDecimal`, a sorted per-model map), and a
+  `JAgentStatus` - a Java enum `kind()` (`AgentStatusKind`) plus per-case `Optional` accessors and `pending()`.
+  A kind enum with accessors, not a Java sealed hierarchy, matches `PendingInterrupt`/`InterruptKind` and keeps
+  `switch` and `when` working on JDK 17. Every type is a final class with a private constructor, so fields can be
+  added. `JavaInteropSpec` walks every type reachable from what the facade hands a caller and fails on
+  `scala.*`/`ujson.*`, stopping only at named boundaries (`LLMError`, #1487; `Conversation`, #1488; `StreamEvent`).
 - **Durable names are the agent's.** `ToolExecuted.tool` is `"<unknown>"` for a tool the agent does
   not have; each non-handoff call of a mixed handoff batch is reported as `Errored`. The live tool
   result is `ToolCallResult` (`agent.tool_call_result`), apart from the loop's `toolloop.ToolResult`.
@@ -986,7 +1013,6 @@ and `AgentState#toTraceEvent` are removed for `AgentRunEnded`; `TracingSubscribe
 
 Limits:
 
-- Java (`JAgent`) and Kotlin (`AgentKt`) event streams are not yet available; [#1377](https://github.com/llm4s/llm4s/issues/1377) covers them.
 - The kernel's `TaskFailed` and `RunFailed` events store error messages, so a guardrail reason that quotes
   user text reaches the log through them. This predates #1329; `agent.*` payloads are content-free.
 - Live events are not replayed, and a late `AgentRun.subscribe` misses earlier ones.

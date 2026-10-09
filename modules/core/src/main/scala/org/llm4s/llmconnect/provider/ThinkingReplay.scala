@@ -87,6 +87,46 @@ private[llm4s] object ThinkingReplay {
       }
     }
 
+  /**
+   * `message` with its sealed thinking bound to `origin` alone, for a provider whose signatures
+   * belong to the part that carries them rather than to the conversation prefix. Google's guidance
+   * for Gemini thought signatures is the reverse of Anthropic's prefix rule: modified or trimmed
+   * history must PRESERVE the signatures, and Gemini 3 answers HTTP 400 when the current turn's
+   * required function-call signature is missing - so pruning or compressing earlier turns must not
+   * unseal them. What still unseals: a change of provider or model ([[replayableOrigin]]), and any
+   * edit to the carrying message itself ([[AssistantMessage.withContent]] and
+   * [[AssistantMessage.withToolCalls]] unseal, and the client attaches a signature only to a part
+   * that still spells what it did).
+   */
+  def bindOrigin(origin: ReplayOrigin, message: AssistantMessage): AssistantMessage =
+    if (!message.hasSealedThinking) message.withThinkingBinding(None)
+    else message.withThinkingBinding(Some(originFingerprint(origin)))
+
+  /**
+   * `messages` as they may be sent to `origin` under the origin-only binding of [[bindOrigin]]:
+   * an assistant message keeps its sealed thinking exactly when its binding is `origin`'s own
+   * fingerprint - wherever the conversation around it has gone - and is unsealed otherwise,
+   * including when it carries a prefix binding from [[bind]]. Indices are unchanged.
+   */
+  def replayableOrigin(origin: ReplayOrigin, messages: Seq[Message]): Seq[Message] =
+    if (!messages.exists { case am: AssistantMessage => am.hasSealedThinking; case _ => false }) messages
+    else {
+      val current = originFingerprint(origin)
+      messages.map {
+        case am: AssistantMessage if am.hasSealedThinking && !am.thinkingBinding.contains(current) => am.unsealed
+        case other                                                                                 => other
+      }
+    }
+
+  // domain-separated from the prefix fingerprint: an origin-only binding never equals a prefix one
+  private def originFingerprint(origin: ReplayOrigin): String = {
+    val digest = MessageDigest.getInstance("SHA-256")
+    update(digest, "\u0000origin-only")
+    update(digest, origin.provider)
+    update(digest, origin.model)
+    hex(digest)
+  }
+
   /** The fingerprint of `messages`, as sent, as the history before a new assistant message. */
   private def fingerprint(origin: ReplayOrigin, messages: Seq[Message], options: CompletionOptions): String = {
     val digest = header(origin, messages, options)

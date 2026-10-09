@@ -521,7 +521,7 @@ Performance comparison running on Apple M1 Mac:
 CompletionOptions(
   temperature = 0.7,  // Higher = more creative (0.0-2.0)
   maxTokens = Some(1000),
-  topP = Some(0.9)
+  topP = 0.9
 )
 ```
 

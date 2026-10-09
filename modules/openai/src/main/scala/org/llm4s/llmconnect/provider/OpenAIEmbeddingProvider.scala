@@ -92,7 +92,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
       // A cancellation passes through as it is (design section 4.4); any other failure is an EmbeddingError.
       val respEither: Result[org.llm4s.http.HttpResponse] =
         httpClient
-          .post(url, headers, payload.render(), timeout = 2.minutes)
+          .post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
           .left
           .map {
             case cancelled: CancelledError => cancelled
