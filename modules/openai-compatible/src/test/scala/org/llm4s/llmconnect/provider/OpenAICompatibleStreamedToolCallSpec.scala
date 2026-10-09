@@ -66,6 +66,27 @@ class OpenAICompatibleStreamedToolCallSpec extends AnyFlatSpec with Matchers wit
     chunks.flatMap(_.toolCall) should have size 5
   }
 
+  it should "hand the caller fragments that reassemble, even one that is valid JSON on its own" in {
+    // `":"` is a JSON string; parsed before it reached the caller it became `:` and the caller's
+    // reassembly `{"topic:vault"}` (#1212, PR #1406 review).
+    val (chunks, toolCalls) = stream(
+      first(0, "call_1", "lookup", ""),
+      more(0, "{\""),
+      more(0, "topic"),
+      more(0, "\":\""),
+      more(0, "vault"),
+      more(0, "\"}"),
+      finish
+    )
+
+    toolCalls shouldBe Seq(ToolCall("call_1", "lookup", ujson.Obj("topic" -> "vault")))
+    chunks.flatMap(_.toolCall).map(_.arguments).collect { case ujson.Str(s) => s }.mkString shouldBe
+      """{"topic":"vault"}"""
+    val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator.create()
+    chunks.foreach(accumulator.addChunk)
+    accumulator.currentToolCalls shouldBe toolCalls
+  }
+
   it should "keep two calls interleaved by index apart" in {
     val (chunks, toolCalls) = stream(
       first(0, "call_a", "get_weather", """{"city":"""),

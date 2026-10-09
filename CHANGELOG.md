@@ -2026,6 +2026,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     without one space between) no longer starts an international number; a `+` after any other word still does, so
     `a@b.com+44 20 7946 0958` and `Phone+44 20 7946 0958` are still masked. The Scaladoc now says that a separated
     number longer than 15 digits is masked up to its 15th digit and the rest kept, which is what the pattern does.
+- **Streamed tool-call arguments reach `onChunk` verbatim** ([#1212](https://github.com/llm4s/llm4s/issues/1212)):
+  `OpenAICompatibleClient` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, generic) and `OpenAIClient` (OpenAI,
+  Azure, Requesty) used to hand `onChunk` each tool-call argument fragment already parsed, so a fragment that was
+  valid JSON on its own (`":"`, `"Paris"`) lost its quotes and a consumer concatenating the fragments got corrupt
+  arguments. Each fragment now arrives as a `ujson.Str` (an empty one as `{}`), as the Anthropic and Bedrock clients
+  already did; reassemble them with a `StreamingAccumulator`. The returned `Completion` was not affected. The chat
+  TUI sample now reassembles them that way before tool approval and execution.
+- **`llm4s-anthropic`: extended thinking with the default temperature** ([#1212](https://github.com/llm4s/llm4s/issues/1212)):
+  Anthropic accepts no temperature but 1 with thinking enabled, and the default `CompletionOptions` temperature of
+  0.7 made every request with a thinking budget fail with HTTP 400. `AnthropicClient` now omits `temperature` when
+  a thinking budget is set.
 - **`llm4s-rag`: `SentenceChunker` keeps every character of the input** ([#1718](https://github.com/llm4s/llm4s/issues/1718)):
   it split with `Regex.split` on `([.!?])(\s+)([A-Z])`, which deleted the punctuation, the whitespace and the next
   sentence's first letter at every boundary and glued the parts back together, so
