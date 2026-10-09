@@ -2,7 +2,7 @@
 layout: page
 title: Apache Pekko Integration
 parent: User Guide
-nav_order: 16
+nav_order: 24
 ---
 
 # Apache Pekko Integration
