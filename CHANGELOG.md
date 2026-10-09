@@ -2007,6 +2007,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **A subscription receives every live event sent after `subscribe` returns** ([#1731](https://github.com/llm4s/llm4s/issues/1731)):
+  `GraphRuntime.subscribe` returned before its dispatcher joined the event hub's live set, which it
+  did only after replaying the log, so live events (`RunContext.progress`, `StreamEvent.Live`) sent in
+  between were silently lost - subscribing and then calling `start` lost the run's progress whenever
+  the store's first read was slow or the dispatcher thread started late. The subscription now joins
+  the live set before `subscribe` returns. Live events sent while it replays are held, up to its
+  `capacity` (the rest dropped and reported as a `StreamEvent.LiveGap`, as for a full queue), and
+  delivered in their place among the durable events: after those committed before them, before
+  those committed after. Durable delivery is unchanged. No API change.
 - **`llm4s-openai`: OpenAI embeddings reach `/v1/embeddings` with the default base URL**
   ([#1413](https://github.com/llm4s/llm4s/pull/1413)): the default `llm4s.embeddings.openai.baseUrl` is
   `https://api.openai.com/v1`, the versioned root the chat provider uses too, but `OpenAIEmbeddingProvider`
