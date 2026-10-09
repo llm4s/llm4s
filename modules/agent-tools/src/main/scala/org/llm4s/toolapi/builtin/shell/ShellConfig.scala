@@ -18,11 +18,17 @@ import scala.concurrent.duration.*
  * read, whatever the file tools are configured to allow. Set `pathPolicy` to apply the same containment rule as
  * the file tools to every file-like argument (see [[org.llm4s.toolapi.builtin.filesystem.FileConfig]]): each
  * argument that is not a flag is resolved against the working directory and must be allowed, the working
- * directory itself must be allowed, and a flag that carries a path (`-f/etc/passwd`) is refused. `echo`, `pwd`,
- * The working directory is checked for every command. Arguments of `date`, `whoami` and `which` are not
- * treated as paths, but `date` file-reading flags (`-f`, `-r`, `--file`, `--reference`) are refused.
- * `ls -L` and `ls -H`, which follow
- * links while listing, are refused when a policy is set. A command that walks directories by itself (`ls -R`,
+ * directory itself must be allowed, and a flag that carries a path (`-f/etc/passwd`) is refused. The working
+ * directory is checked for every command. Arguments of `echo`, `pwd`, `date`, `whoami` and `which` are not
+ * treated as paths. `ls -L` and `ls -H` (and `--dereference*`), which follow links while listing, are refused
+ * when a policy is set.
+ *
+ * == Refused options ==
+ * Whatever the policy, the options that make an otherwise read-only command write a file or read a file it does
+ * not name as an argument are refused: `file -C`, `-m`, `-f` (`--compile`, `--magic-file`, `--files-from`),
+ * `date -f`, `-r` (`--file`, `--reference`) and `wc --files0-from`. Long options are matched on any prefix of at
+ * least one letter, since GNU programs accept an unambiguous abbreviation (`date --fil`). These rules match the
+ * program by its file name, so `/usr/bin/file -C` is refused as `file -C` is. A command that walks directories by itself (`ls -R`,
  * `grep -r`, `find`) is checked at its starting point only.
  *
  * @param allowedCommands List of allowed command names (e.g., "ls", "cat", "echo").
@@ -78,8 +84,8 @@ object ShellConfig {
    *
    * The programs on this list are ones whose ordinary use only reads, but this is an allowlist of program
    * names, not read-only execution: most options pass through unchecked, so `date -s` sets the clock when
-   * the process may. The options that write a file or read a list of files are refused (`file -C`, `-m`, `-f`
-   * and `wc --files0-from`). `env` is deliberately absent: with arguments it runs the
+   * the process may. The options that write a file or read one the command does not name are refused (`file -C`,
+   * `-m`, `-f`, `date -f`, `-r` and `wc --files0-from`; see the class documentation). `env` is deliberately absent: with arguments it runs the
    * program that follows it (`env sh -c ...`), so allowing it allows every program, and without them
    * it prints the process environment, which is where API keys live. The allowlist checks the program
    * a command starts with, not the programs that program starts - keep that in mind before adding a

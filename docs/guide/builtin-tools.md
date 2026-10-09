@@ -289,7 +289,8 @@ What the controls do, and where they stop:
   program does:
   - `readOnly()` is an allowlist of program names, not read-only execution. Its programs only read in ordinary use,
     but most options are passed through unchecked: `date -s` sets the clock when the process is allowed to. The
-    options that write a file or read a list of files are refused (`file -C`, `-m` and `-f`, and `wc --files0-from`).
+    options that write a file or read one the command does not name are refused (`file -C`, `-m` and `-f`, `date -f`
+    and `-r`, and `wc --files0-from`, including abbreviated long forms such as `date --fil`).
     `cat`, `head` and `tail` can read any file the process can read, **so the file settings above do not apply to the
     shell** unless you use `ShellConfig.readOnlyWithin(policy)`, which holds the working directory and each file-like
     argument to that rule. A command that walks directories itself (`ls -R`, `grep -r`, `find`) is checked only at the

@@ -59,8 +59,8 @@ object ShellResult {
  * A command receives a scrubbed environment (see [[ShellConfig]]): only the variables named in
  * `inheritedEnvironment`, plus `environment`. The files a command names are not checked unless
  * [[ShellConfig.pathPolicy]] is set; then every file-like argument must pass the same containment rule as the
- * file tools. `file -C`, `-m` and `-f` (which write a file or read a list of files) and `wc --files0-from` are
- * refused whatever the policy.
+ * file tools. `file -C`, `-m` and `-f`, `date -f` and `-r`, and `wc --files0-from` (which write a file or read one
+ * the command does not name) are refused whatever the policy, in any abbreviated long form too.
  *
  * == Features ==
  *
@@ -162,10 +162,25 @@ object ShellTool {
     val shortDenied = DeniedShortFlags.getOrElse(command, Set.empty[Char])
     val longDenied  = DeniedLongFlags.getOrElse(command, Set.empty[String])
     flagsOf(args).find { flag =>
-      if (flag.startsWith("--")) longDenied.exists(denied => flag == denied || flag.startsWith(denied + "="))
+      if (flag.startsWith("--")) longDenied.exists(denied => namesLongOption(flag, denied))
       else flag.drop(1).exists(shortDenied.contains)
     }
   }
+
+  /**
+   * Whether `flag` may select the long option `option` (spelled with its leading `--`). GNU `getopt_long` accepts
+   * any unambiguous prefix of a long option name (`date --fil` is `date --file`), and a value may follow `=`, so
+   * every non-empty prefix of the name counts. This also refuses some prefixes the program would reject as
+   * ambiguous, which costs nothing.
+   */
+  private def namesLongOption(flag: String, option: String): Boolean = {
+    val name = flag.takeWhile(_ != '=')
+    name.length > 2 && option.startsWith(name)
+  }
+
+  /** The long options that make `ls` follow links. */
+  private val LsDereferenceOptions =
+    Seq("--dereference", "--dereference-command-line", "--dereference-command-line-symlink-to-dir")
 
   /**
    * Hold the file-like arguments of a command to the path policy: the working directory and every argument that is
@@ -209,7 +224,7 @@ object ShellTool {
   private def flagRefusal(command: String, flag: String): Option[String] =
     if (flag.contains("/") || flag.contains("\\"))
       Some(s"Flag '$flag' carries a path, which the path policy cannot check")
-    else if (command == "ls" && flag.startsWith("--dereference"))
+    else if (command == "ls" && LsDereferenceOptions.exists(option => namesLongOption(flag, option)))
       Some(s"Flag '$flag' follows links, which the path policy does not allow")
     else if (command == "ls" && !flag.startsWith("--") && flag.drop(1).exists(c => c == 'L' || c == 'H'))
       Some(s"Flag '$flag' follows links, which the path policy does not allow")

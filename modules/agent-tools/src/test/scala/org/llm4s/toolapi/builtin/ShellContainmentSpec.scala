@@ -234,6 +234,35 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
       include("working directory is outside")
   }
 
+  it should "refuse abbreviations of the denied long options, which GNU programs accept" in {
+    val root   = newRoot()
+    val config = withinRoot(root)
+    Seq(
+      "date --fil /outside",
+      "date --f=/outside",
+      "date --ref=/outside",
+      "file --comp",
+      "file --magic=magic",
+      "file --files-f list",
+      "wc --files0 list",
+      "wc --f=list"
+    ).foreach(command => withClue(command)(refused(run(config, command)) should include("is not allowed")))
+    Seq("ls --deref", "ls --dereference-command", "ls --de")
+      .foreach(command => withClue(command)(refused(run(config, command)) should include("follows links")))
+  }
+
+  it should "still accept long options that only share a prefix with a denied one" in {
+    posixOnly()
+    val root = newRoot()
+    Files.writeString(root.resolve("a.txt"), "one two\n")
+    val config = withinRoot(root)
+
+    // The programs ran (BSD versions may reject these GNU options, so only the refusal is asserted)
+    run(config, "wc --words a.txt").isRight shouldBe true
+    run(config, "ls --directory .").isRight shouldBe true
+    run(config, "date --rfc-3339=date").isRight shouldBe true
+  }
+
   it should "apply denied flags to absolute executable names" in {
     val root   = newRoot()
     val config = ShellConfig(allowedCommands = Seq("/usr/bin/file"), workingDirectory = Some(root.toString))

@@ -2525,8 +2525,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `SystemRoot`) plus `environment`; `ShellConfig.development()` sets it to `None` and keeps inheriting everything.
     The new `ShellConfig.pathPolicy` (and the `ShellConfig.readOnlyWithin(policy, workingDirectory)` preset) holds
     every file-like argument of a command, and its working directory, to a `FileConfig`; without it a command's file
-    arguments are not checked, as before. `file -C`/`-m`/`-f` and `wc --files0-from`, which write a file or read a
-    list of files, are refused.
+    arguments are not checked, as before. `file -C`/`-m`/`-f`, `date -f`/`-r` and `wc --files0-from`, which write a
+    file or read one the command does not name, are refused, by the program's file name (so `/usr/bin/file -C` too)
+    and in any abbreviated long form GNU accepts (`date --fil`).
   - *HTTP tool.* A response body was read in full and then cut at `maxResponseSize`; reading now stops one character
     past the cap, with the same result for any body.
   - **Migration.** A configuration that relied on a path prefix to cover sibling directories stops matching them
