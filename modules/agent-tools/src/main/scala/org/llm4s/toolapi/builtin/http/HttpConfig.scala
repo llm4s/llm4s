@@ -10,7 +10,7 @@ import scala.concurrent.duration.*
  * == Security ==
  * By default, HTTPTool is configured with safe defaults:
  *  - Only GET and HEAD methods are allowed (read-only)
- *  - Internal IP ranges are blocked (10.x, 172.16-31.x, 192.168.x)
+ *  - Internal IP ranges are blocked (10.x, 172.16-31.x, 192.168.x, IPv6 unique-local fc00::/7, ...)
  *  - Cloud metadata endpoints are blocked (169.254.169.254)
  *  - Localhost and loopback addresses are blocked
  *
@@ -19,7 +19,10 @@ import scala.concurrent.duration.*
  * @param blockInternalIPs Whether to block requests to internal/private IP ranges (default: true).
  * @param maxResponseSize Maximum number of response body bytes read; the rest is never read, and the
  *                        result's `truncated` is `true`.
- * @param timeout Request timeout, applied to both connect and read.
+ * @param timeout Deadline for the whole call: connecting, every redirect hop and reading the body must all finish
+ *                within it (the SSRF check's name resolution too), so a server that sends slowly cannot hold the
+ *                call longer. A call that runs out of time fails with a `TIMEOUT:` error. A zero or negative timeout
+ *                fails every call.
  * @param followRedirects Whether to follow HTTP redirects.  Defaults to `false`; when
  *                        `true` each redirect hop is re-validated against the SSRF filter
  *                        before the next request is issued (open-redirect bypass prevention).
@@ -112,8 +115,9 @@ case class HttpConfig(
   /**
    * Create a copy with redirect following enabled.
    *
-   * Each redirect hop is re-validated against the SSRF filter, sensitive headers
-   * (Authorization, Cookie) are stripped on cross-origin hops, and 301/302
+   * Each redirect hop is re-validated against the SSRF filter; sensitive headers
+   * (Authorization, Cookie, Proxy-Authorization) are stripped from the first hop that leaves
+   * the original origin (scheme, host and port) and on every hop after it; and 301/302
    * redirects convert POST to GET per the HTTP specification.
    */
   def withRedirectsEnabled: HttpConfig =
