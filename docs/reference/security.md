@@ -1,3 +1,10 @@
+---
+layout: page
+title: Security Reference
+parent: Reference
+nav_order: 16
+---
+
 # Security Reference
 
 This document covers the threat model, trust boundaries, known risks, and mitigations for LLM4S.
@@ -71,10 +78,10 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 **Risk:** The built-in `HTTPTool` could be directed to internal network addresses, cloud metadata endpoints (169.254.169.254), or loopback addresses.
 
 **Mitigation (implemented):**
-- `HttpConfig.blockInternalIPs = true` by default; `NetworkSecurity.validateHostname()` resolves DNS and checks resolved IPs against private CIDR ranges (RFC 1918, RFC 5735, RFC 4193) and link-local ranges.
+- `HttpConfig.blockInternalIPs = true` by default; `NetworkSecurity.validateHostname()` resolves DNS and refuses a resolved IP that is loopback, link-local (including `169.254.0.0/16` and `fe80::/10`), IPv4 private (RFC 1918), multicast or unspecified, as well as the cloud metadata address and the IPv4 documentation (RFC 5737), carrier-grade NAT (`100.64.0.0/10`) and benchmarking (`198.18.0.0/15`) ranges. IPv6 unique-local addresses (`fc00::/7`, RFC 4193) are **not** blocked yet ([#1408](https://github.com/llm4s/llm4s/issues/1408), finding F5).
 - `HttpConfig.DefaultBlockedDomains` blocks `localhost`, `127.0.0.1`, `0.0.0.0`, `::1`, `metadata.google.internal`, `metadata.internal`, and `169.254.169.254` by hostname.
 - Redirects are NOT followed by default (`followRedirects = false`). When enabled, each redirect hop is individually re-validated against the SSRF filter.
-- Sensitive headers (`Authorization`, `Cookie`, `Proxy-Authorization`) are stripped on cross-origin redirect hops.
+- Sensitive headers (`Authorization`, `Cookie`, `Proxy-Authorization`) are stripped only on a hop whose host differs from the previous hop's. A same-host hop after the redirect has left the original host sends them again ([#1408](https://github.com/llm4s/llm4s/issues/1408), finding F7), so do not rely on this when `followRedirects` is enabled.
 - Only `GET` and `HEAD` methods are allowed by default (read-only).
 
 **Residual risk:** DNS rebinding attacks (where a hostname resolves to a public IP during validation but a private IP at connection time) are not explicitly mitigated at the Java `HttpURLConnection` level.
@@ -98,9 +105,12 @@ a file outside the workspace (#1715).
 **Mitigation (implemented):**
 - The command is split into words and started directly, without a shell, and shell metacharacters (`&`, `|`, `<`, `>`,
   `^`, `;`, `` ` ``, `$`, `%`) are refused in every word.
-- The executable must be a bare name in `WorkspaceSandboxConfig.allowedCommands`. `ReadOnlyCommands` is the
-  default; `ReadWriteCommands` (the `permissive` profile) adds `cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`, `copy`
-  and `move`. The `locked` profile turns the shell off.
+- The executable must be a bare name in `WorkspaceSandboxConfig.allowedCommands`; a path to an executable is
+  refused. The `permissive` profile, which the runner uses when `WORKSPACE_SANDBOX_PROFILE` is unset, uses
+  `ReadWriteCommands`, which adds `cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`, `copy` and `move`;
+  `ReadOnlyCommands` is the field default, for a `WorkspaceSandboxConfig` constructed directly. The `locked` profile
+  (`shellAllowed = false`) refuses every command. On Windows, built-ins such as `echo`, `dir`, `type`, `copy` and
+  `move` run through `cmd.exe /c`, after the forbidden-character check and the checks below.
 - Each program's arguments are checked (`ARGUMENT_NOT_ALLOWED`): options that delete, write, run another program,
   read a list of file names or follow every symbolic link are refused (`find -delete`/`-exec`/`-fprint`/`-L`,
   `sort -o`, `wc --files0-from`, `ls -L`, `grep -R`), `uniq` takes at most one operand, `hostname` none, and `git`
@@ -133,7 +143,7 @@ give the workspace credentials or network access that an escaped process could e
 - Scala Steward (`.github/workflows/scala-steward.yml`, configured by `.scala-steward.conf`) opens weekly pull requests for outdated sbt dependencies, sbt plugins, sbt itself and the Scala version. Neither tool raises security alerts for sbt dependencies; they keep versions current, which is what keeps published fixes flowing in.
 - The `secret-scan.yml` workflow prevents committed secrets from reaching the repository.
 
-**Recommended practice:** Periodically run `sbt dependencyUpdates` locally and review the OWASP National Vulnerability Database for Scala ecosystem libraries.
+**Recommended practice:** Review the Scala Steward pull requests promptly, run `sbt dependencyUpdates` (from `sbt-dependency-updates`) to see what is behind, and check the National Vulnerability Database (NIST) for the libraries llm4s depends on.
 
 ## Security Checklist for PR Authors
 

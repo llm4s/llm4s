@@ -276,7 +276,7 @@ Every PR with new code needs tests. This includes:
 - **Failure cases** - what happens when things go wrong?
 - Concurrency tests if applicable
 
-See the [Testing Guide](testing-guide.md) for details.
+See the [Testing Guide](testing-guide) for details.
 
 #### Be Careful with Public APIs
 
@@ -587,7 +587,7 @@ case unsupported =>
 
 #### 10. Testing Best Practices
 
-Every new feature needs unit tests. See the [Testing Guide](testing-guide.md) for comprehensive guidance.
+Every new feature needs unit tests. See the [Testing Guide](testing-guide) for comprehensive guidance.
 
 **Key points:**
 
@@ -1201,7 +1201,7 @@ implicit val showLLMError: Show[LLMError] = new Show[LLMError] {
 ```
 
 For advanced patterns (Kleisli, State monad, Tagless Final, etc.),
-see [FP Patterns Reference](../fp-patterns-reference.md).
+see the [Cats documentation](https://typelevel.org/cats/).
 
 ---
 
@@ -2445,9 +2445,9 @@ Before submitting a PR, verify:
 ### B.0 Related documentation (Merged from concise guide)
 
 
-- [Testing Guide](testing-guide.md) - Detailed testing practices
-- [Configuration Boundary](configuration-boundary.md) - Config architecture
-- [Scalafix Rules](scalafix.md) - Automated enforcement
+- [Testing Guide](testing-guide) - Detailed testing practices
+- [Configuration Boundary](configuration-boundary) - Config architecture
+- [Scalafix Rules](scalafix) - Automated enforcement
 
 ---
 

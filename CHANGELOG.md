@@ -2831,6 +2831,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lower-cased with `Locale.ROOT`, so a Turkish default locale no longer stops `API_KEY` from being recognised. Redaction
   is still pattern-based and best effort: it does not detect a secret that is not under a key, and JSON escaped twice
   is not recognised.
+- **Docs: the Reference section's Migration Guide, Release Process, Scalafix Rules and Test Coverage pages no longer
+  404** ([#444](https://github.com/llm4s/llm4s/issues/444)): `migration.md`, `release.md`, `scalafix.md` and
+  `test-coverage.md` (and `security.md`, `workspace-sandbox.md` and `benchmarks.md`) had no front matter, so Jekyll
+  served them as raw files and their links on llm4s.org returned 404. They now have a title, `parent: Reference` and a
+  `nav_order`, and are listed in the Reference index. `test-coverage.md` described a single 50% threshold that no
+  longer exists; it now describes the per-module `coverageFloor`, `coveragePolicyCheck` and the Codecov statuses.
+  Links inside the Reference pages that ended in `.md`, or pointed at repository-root files, now use the form the
+  site serves. Links to the newly rendered pages from `installation.md`, `providers.md`, `0x-to-1x.md` and
+  `migration.md` itself were changed from `.md` to the page URL in the same change, since a `.md` URL is a 404 once
+  its page is rendered, and the 55 entries `scripts/docs-link-baseline.txt` held for the links this fixes are removed.
 - **`AudioPreprocessing.resamplePcm16` could hang, and its output length was wrong**
   ([#1308](https://github.com/llm4s/llm4s/issues/1308)): a target rate of `-8000`, or a source rate of `-1`, sent
   Java Sound's converter into a loop that never ended (a test JVM spun at 100% CPU for twenty minutes), a target
