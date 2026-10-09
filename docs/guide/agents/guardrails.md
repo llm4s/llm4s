@@ -106,6 +106,8 @@ These use an LLM to evaluate subjective qualities:
 | `LLMQualityGuardrail` | Assess response quality | `new LLMQualityGuardrail(client)` |
 | `LLMToneGuardrail` | Validate tone compliance | `new LLMToneGuardrail(client, "professional")` |
 
+Each judge scores the content and passes it when the score reaches its `threshold`. The threshold must be between 0.0 and 1.0: for any other value, or NaN, `validate` returns a `ValidationError` on the field `threshold` without calling the judge.
+
 ### RAG-Specific Guardrails
 
 For retrieval-augmented generation:

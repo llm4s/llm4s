@@ -233,6 +233,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Handoff.of(id, agent, reason)` for a `Result`), and `handoffId` is `handoff_to_<id>` rather
   than `handoff_to_agent_<hash>`. Design: `docs/design/typed-agent-runtime-design.md` §4.7, with
   the Stage 0 carry-forward in §4.8.
+- **RAG chunking and fusion: what is validated, and how weighted scores are combined**
+  ([#1318](https://github.com/llm4s/llm4s/issues/1318), items 4 to 6; the validation shipped in #1358, and the one
+  fix this found is under Fixed): `docs/guide/vector-store.md` now states that an invalid `ChunkingConfig` or `WeightedScore` throws
+  `IllegalArgumentException` (decided, because the `RAGConfig` builders cannot return a `Left`), how to turn user
+  input into a `Left` (`ChunkingUtils.chunkTextValidated`, or `Try(...)` through `toResult`), that every
+  configuration that can be built is safe for every chunker, and that `WeightedScore` rescales each channel so its
+  weakest hit scores `0.1`, not the `0.0` of a miss. The snippets are compiled and run by `RagValidationGuideSpec`.
+  New property tests pin the guarantees: `ScoreNormalisationSpec` (the floor and the best hit, nothing scores like a
+  miss, the channel's order is kept, scale and offset do not matter) and `ChunkersAcceptValidConfigsSpec` (no
+  chunker throws for any valid config, and chunk indices run from 0 without gaps, which re-ingest relies on).
 - **Compatibility and Deprecation Policy** ([docs/reference/compatibility-policy.md](docs/reference/compatibility-policy.md),
   [#1281](https://github.com/llm4s/llm4s/issues/1281)): one page for what you can rely on when you upgrade, by
   tier; how versions are read (`early-semver`, 0.5.0 as the MiMa baseline); what the promise covers (public
@@ -1996,6 +2006,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-rag`: `SimpleChunker` and `ChunkingUtils.chunkText` no longer throw for a very large window**
+  ([#1424](https://github.com/llm4s/llm4s/pull/1424)): the window end and the next start were computed in `Int`, so
+  a valid configuration such as `ChunkingConfig(targetSize = Int.MaxValue, maxSize = Int.MaxValue,
+  overlap = Int.MaxValue - 1)` overflowed on the second window and `substring` threw
+  `StringIndexOutOfBoundsException`. Both are now computed in `Long` and clamped to the text length; the chunks
+  produced for every other configuration are unchanged.
 - **`llm4s-openai-compatible`: Z.ai honours `CompletionOptions.reasoning`** ([#1681](https://github.com/llm4s/llm4s/issues/1681)):
   it used to be ignored, so `ReasoningEffort.None` still thought (Z.ai's `thinking.type` defaults to `enabled`) and
   effort levels never reached a model that takes `reasoning_effort`. Each effort now goes out in the form the
@@ -2472,6 +2488,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   judge score`: make it answer with only a number between 0 and 1, as the fixed system message already asks. A
   subclass that calls or overrides `evaluateWithLLM` takes a `BigDecimal` (`.toDouble` where a `Double` is
   needed). The score-reading rules are documented on `LLMGuardrail`.
+- **`llm4s-agent`: a judge guardrail with a threshold outside 0.0 to 1.0 fails with a clear error, instead of silently
+  blocking everything or passing everything** ([#1520](https://github.com/llm4s/llm4s/issues/1520)): the threshold of
+  `LLMGuardrail` (and so of `LLMSafetyGuardrail`, `LLMFactualityGuardrail`, `LLMQualityGuardrail`,
+  `LLMToneGuardrail` and `LLMGuardrail(...)`) was not validated: above 1.0 (or `+Infinity`), or NaN, nothing could
+  pass, and below 0.0 (or `-Infinity`) everything that parsed passed. `validate` now returns a `ValidationError` on
+  field `threshold` for a value below 0.0, above 1.0 (an infinity too) or NaN, **before** calling the judge, so no
+  call is spent on a guardrail that cannot work. 0.0 and 1.0 are accepted, and a valid threshold is still compared
+  as the decimal it is written as (#1405). The check runs when `validate` runs, not when the guardrail is built, so
+  no constructor or factory signature changed and a subclass that overrides `threshold` is checked too.
+  **Migration:** a guardrail whose threshold was out of range, and so was blocking everything or approving
+  everything, now fails every `validate` with that error: correct the threshold.
 - **`llm4s-gemini`: a signed function call with an empty `id` is replayed with its thought signature**
   ([#1615](https://github.com/llm4s/llm4s/issues/1615)): a `functionCall` returned with `"id": ""` got a generated
   tool-call id at parse, but the signed part was kept verbatim, so on the next turn its stored `""` was compared with
