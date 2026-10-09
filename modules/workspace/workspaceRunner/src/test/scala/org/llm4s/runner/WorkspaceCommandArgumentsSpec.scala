@@ -410,20 +410,27 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
   it should "still check option values that name files outside the workspace" in inWorkspace { fx =>
     link(fx, "escape", fx.outside)
     val ws = fx.interface(ReadOnly)
+    // (command, refused as an option on Windows): a Windows runner refuses sort's `-t` and `-T` before any path is
+    // checked, since it cannot tell sort.exe from a GNU sort (see `windowsSortRefusal`), so there those commands are
+    // refused with ARGUMENT_NOT_ALLOWED instead.
     Seq(
-      "sort --random-source='{out}/secret.txt' a.txt",
-      "sort --random-source=escape/secret.txt a.txt",
-      "sort --random-source=../outside/secret.txt a.txt",
-      "sort -t/ '{out}/secret.txt'",
-      "sort -t / '{out}/secret.txt'",
-      "sort -Tt '{out}/secret.txt'",
-      "sort --field-separator / '{out}/secret.txt'",
-      "grep --exclude-from='{out}/secret.txt' x a.txt",
-      "grep --exclude-from=escape/secret.txt x a.txt",
-      "git log --grep=escape/secret.txt",
-      "git branch --merged '{out}'",
-      "cat -- --x=/../../outside/secret.txt"
-    ).foreach(command => refuses(ws, fx.expand(command), PathEscape))
+      "sort --random-source='{out}/secret.txt' a.txt"    -> false,
+      "sort --random-source=escape/secret.txt a.txt"     -> false,
+      "sort --random-source=../outside/secret.txt a.txt" -> false,
+      "sort -t/ '{out}/secret.txt'"                      -> true,
+      "sort -t / '{out}/secret.txt'"                     -> true,
+      "sort -Tt '{out}/secret.txt'"                      -> true,
+      "sort --field-separator / '{out}/secret.txt'"      -> false,
+      "grep --exclude-from='{out}/secret.txt' x a.txt"   -> false,
+      "grep --exclude-from=escape/secret.txt x a.txt"    -> false,
+      "git log --grep=escape/secret.txt"                 -> false,
+      "git branch --merged '{out}'"                      -> false,
+      "cat -- --x=/../../outside/secret.txt"             -> false
+    ).foreach { case (command, refusedOnWindows) =>
+      refuses(ws, fx.expand(command), if (isWindowsHost && refusedOnWindows) ArgumentNotAllowed else PathEscape)
+      // The same Windows verdict on every host, so a Windows-only rule that changes the code is seen off Windows too
+      if (refusedOnWindows) refuses(fx.interface(ReadOnly, windows = true), fx.expand(command), ArgumentNotAllowed)
+    }
   }
 
   it should "parse git branch filter values as values, not as branch names" in inWorkspace { fx =>
