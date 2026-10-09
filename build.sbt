@@ -133,9 +133,13 @@ addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 val mimaBaselineVersion: Option[String] = None
 
 // `module` is the artifact name (the project's `name`). Apply this to frozen modules only.
+// A type annotated `@Experimental` (org.llm4s.annotation, a runtime-retained Java annotation) is outside the
+// freeze, so MiMa skips it: no hand-written `ProblemFilters.exclude` per type. scripts/mima-dry-run.sh checks
+// that this works, and that a `@Stable` type is still reported.
 def mimaFrozen(module: String) = Seq(
   mimaPreviousArtifacts := mimaBaselineVersion.map(v => "org.llm4s" %% module % v).toSet,
-  mimaFailOnNoPrevious  := false
+  mimaFailOnNoPrevious  := false,
+  mimaExcludeAnnotations += "org.llm4s.annotation.Experimental"
 )
 
 // ---- shared settings ----

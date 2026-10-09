@@ -47,6 +47,7 @@ case class CohereConfig(
     s"CohereConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
 
+@Experimental
 object CohereConfig {
   private val logger                   = LoggerFactory.getLogger(getClass)
   private val DefaultContextWindow     = 128000
