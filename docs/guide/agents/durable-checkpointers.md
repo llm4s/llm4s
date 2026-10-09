@@ -9,8 +9,9 @@ grand_parent: User Guide
 # Durable Checkpointers
 {: .no_toc }
 
-Share one checkpoint store between runtimes and processes, recover a run whose process died, and test a store
-of your own against the contract every store must meet.
+Share one checkpoint store between runtimes and processes, recover a run whose process died, inspect, fork and
+correct a thread's checkpoint history, prune it, and test a store of your own against the contract every store
+must meet.
 {: .fs-6 .fw-300 }
 
 ## Table of contents
@@ -26,8 +27,10 @@ of your own against the contract every store must meet.
 Every agent turn and every graph run executes on a `GraphRuntime`, which stores its threads in a
 `Checkpointer` (`org.llm4s.agent.graph`). For each thread the store keeps:
 
-- the latest checkpoint, as versioned JSON: the graph's state and what is left to run;
-- the pending writes of tasks that finished in the current superstep, so `recover` does not run them again;
+- its checkpoint history, as versioned JSON: each checkpoint is the graph's state and what was left to run at
+  one superstep boundary, and the latest says what happens next;
+- the pending writes of tasks that finished in the latest checkpoint's superstep, so `recover` does not run them
+  again;
 - the durable event log, numbered `1, 2, 3, ...` per thread;
 - the **claim** of the run that holds the thread, if one does.
 
@@ -113,15 +116,101 @@ on executing supersteps whose results would be refused.
   subscribers of its own runtime. Its durable events are refused with its commits.
 - A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim.
 
+## Checkpoint history, fork and updateState
+
+A store keeps every checkpoint a thread's runs commit, not only the latest. `history` lists them newest first, a
+page at a time, and `checkpoint` reads one by id. Each is data; restore one with the graph to read its typed
+state:
+
+```scala
+val latestPage = runtime.history(threadId)                         // up to 100, newest first
+val nextPage   = runtime.history(threadId, before = Some(latestPage.toOption.get.last.id))
+val state      = runtime.checkpoint(threadId, id).flatMap(c => graph.restore(c.snapshot)).map(_.state)
+```
+
+Checkpoint ids are `<runId>/<n>`, where `n` counts along the thread, so an id never repeats on a thread even
+when one `RunId` serves several runs.
+
+**`fork`** starts a new thread from any checkpoint of the history. The new thread's first checkpoint carries
+that checkpoint's state, scheduled work, parked interrupts and status, and its event log begins with a
+`RunEvent.ThreadForked`. Continue it as its status says: `start` after `Completed` or `Failed`, `resume` after
+`Suspended`, `recover` after `Running`. The source thread is only read and is left unchanged.
+
+```scala
+runtime.fork(threadId, checkpointId, ThreadId("what-if")).flatMap { _ =>
+  runtime.start(ThreadId("what-if"), graph, "a different question")
+}
+```
+
+A fork never copies pending writes, so `recover` on a fork of a `Running` checkpoint runs that checkpoint's tasks
+again, in the new thread. The target must be a new thread id (`ThreadExists` otherwise).
+
+**`updateState`** applies a typed `StateUpdate` to the thread's latest checkpoint and commits the result as a new
+checkpoint, recorded with a `RunEvent.StateUpdated`. Use it to correct a thread's state, for example before
+`resume`. It is optimistic: you name the checkpoint you read, and it is refused with `CheckpointConflict` if the
+thread has moved on since. Only the state changes - the status, scheduled tasks and parked interrupts stay - so
+the same `start`, `recover` or `resume` continues the thread afterwards.
+
+```scala
+for
+  latest  <- runtime.history(threadId, limit = 1).map(_.head)
+  updated <- runtime.updateState(threadId, graph, latest.id, StateUpdate.update(notes, "corrected"), asNode = Some(writer))
+  handle  <- runtime.resume(threadId, graph, answers)
+yield handle
+```
+
+With `asNode`, the update must stay within that node's declared write set, as if the node had returned it. The
+thread is held, with a claim in the store, while it is updated, so a live run refuses it with `ThreadBusy`. Pending
+writes of tasks that already completed are carried over, so `recover` still does not run them again.
+
+Tool idempotency keys are derived from the thread, the checkpoint id, the superstep, the task and the call id.
+`updateState` moves the thread on by one superstep, and checkpoint ids count along the thread, so no later call
+reproduces an earlier key, whatever `RunId` you reuse. Forking to a new thread id derives new keys too.
+
+{: .warning }
+> `forget` (`deleteThread`) starts a thread id afresh. Reusing both the thread id and a `RunId` after it repeats
+> the earlier checkpoint ids and supersteps, and so the earlier tool idempotency keys. Use a fresh `RunId` (the
+> default) for runs on a forgotten thread id.
+
+### A guardrail Block leaves no trace in the history
+
+When a node blocks a run (`NodeResult.Block`, as a guardrail does), the run's closing `Failed` checkpoint
+**retracts its turn**: every checkpoint after the thread's last `Completed` or `Failed` one is removed from the
+history in the same commit - including the checkpoints of earlier runs of the same turn, such as one that
+suspended for review. Nothing of a blocked answer stays readable through `history`, `checkpoint` or `fork`. Events
+carry no message content and stay in the log.
+
+## Retention
+
+The history grows with every superstep. `prune` removes what a `RetentionPolicy` does not keep, by age or by
+size, alongside `compactEvents`:
+
+```scala
+runtime.prune(threadId, RetentionPolicy(maxAge = Some(30.days), maxCheckpoints = Some(50), maxEvents = Some(10000)))
+```
+
+- `maxAge` removes checkpoints and events older than it, by the store's clock;
+- `maxCheckpoints` keeps the newest checkpoints, and `maxEvents` the newest events.
+
+The latest checkpoint and its pending writes are always kept, so pruning never changes what the thread does next.
+Events are kept while their checkpoints are: pruning a checkpoint also removes the events recorded before the
+oldest checkpoint kept, raising the replay floor (`ReplayUnavailable`) as `compactEvents` does. `prune` needs no
+claim, so it can run while a run executes; call it on a schedule that suits you.
+
 ## Writing a store
 
-A store implements `Checkpointer`: `claim`, `renew` and `release` for claims; `commit`, `latest`, `eventsAfter`,
-`compactEvents` and `deleteThread` for the data. The Scaladoc of `Checkpointer` states the contract. In short:
+A store implements `Checkpointer`: `claim`, `renew` and `release` for claims; `commit`, `latest`, `history`,
+`checkpoint`, `eventsAfter`, `compactEvents`, `prune` and `deleteThread` for the data. The Scaladoc of
+`Checkpointer` states the contract. In short:
 
 - grant at most one live claim per thread, by the store's clock, and replace an expired one;
 - give every claim a token greater than every token issued for that thread before, also after `deleteThread`;
 - apply a `Commit` entirely or not at all, and only with the current claim's token (`StaleClaim`, checked first);
-- accept a new checkpoint only over the latest (`CheckpointConflict`), and pending writes only for it;
+- accept a new checkpoint only over the latest (`CheckpointConflict`) and with an id not already in the history,
+  and pending writes only for it;
+- keep every superseded checkpoint in the history until `prune`, a commit's `retractTurn` or `deleteThread`
+  removes it, and keep pending writes for the latest only;
+- on `retractTurn`, remove every checkpoint after the newest `Completed` or `Failed` one before adding the new one;
 - number events contiguously inside the commit, and never reuse a number;
 - release only with the current token, and treat any other as a no-op.
 
@@ -149,10 +238,11 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 ```
 
 It runs every case against your store: commits, conflicts, event numbering, compaction, `deleteThread`, round
-trips, claims and fencing (also from many threads at once), and two or more `GraphRuntime`s contending over one
+trips, the checkpoint history (paging, reads by id, unique ids, retraction and pruning by age, count and event
+count), claims and fencing (also from many threads at once), and two or more `GraphRuntime`s contending over one
 store - a live run refused elsewhere, renewal, takeover after expiry without re-running completed tasks, a stale
-run's commits refused, and only one of several runtimes admitted to recover a thread. `InMemoryCheckpointer`
-passes it.
+run's commits refused, only one of several runtimes admitted to recover a thread, `updateState` and `fork` fenced
+against a live run, and a blocked turn leaving nothing in the history. `InMemoryCheckpointer` passes it.
 
 Two hooks fit it to a durable store:
 
@@ -180,6 +270,7 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 ## See also
 
 - [Streaming events](streaming): subscribing to a thread's events, which a store numbers and replays.
-- `docs/design/typed-agent-runtime-design.md` §4.16, the design of claims and fencing.
+- `docs/design/typed-agent-runtime-design.md` §4.16, the design of claims and fencing, and §4.17, history, fork,
+  `updateState` and retention.
 - [Migration guide](../../reference/migration#stage-2-migration-durable-execution): what changed for code that
   implemented `Checkpointer` or built a `Commit`.

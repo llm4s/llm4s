@@ -170,8 +170,11 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
       underlying.eventsAfter(threadId, afterSeq, limit)
-    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long)              = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                                = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
 
   "A stop" should "never interrupt the closing commit of a run that has acknowledged it" in {
@@ -314,8 +317,11 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
       underlying.eventsAfter(threadId, afterSeq, limit)
-    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long)              = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                                = underlying.deleteThread(threadId)
+    def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+    def checkpoint(threadId: ThreadId, checkpointId: String)            = underlying.checkpoint(threadId, checkpointId)
+    def prune(threadId: ThreadId, policy: RetentionPolicy)              = underlying.prune(threadId, policy)
   }
 
   /** A clock that throws while `failing` says so for the read numbered by its argument (from 1). */
@@ -392,6 +398,9 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     }
     (store, armed)
   }
@@ -450,6 +459,9 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+      def history(threadId: ThreadId, before: Option[String], limit: Int) = underlying.history(threadId, before, limit)
+      def checkpoint(threadId: ThreadId, checkpointId: String) = underlying.checkpoint(threadId, checkpointId)
+      def prune(threadId: ThreadId, policy: RetentionPolicy)   = underlying.prune(threadId, policy)
     }
     val runtime = GraphRuntime(store)
     runtime.start(thread, instant, "x").left.value match {

@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Checkpoint history, fork, `updateState` and retention** ([#1702](https://github.com/llm4s/llm4s/issues/1702),
+  Stage 2 slice 3 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `Checkpointer` keeps every checkpoint a
+  thread's runs commit, not only the latest. `GraphRuntime.history(threadId, before, limit)` pages them newest first
+  and `checkpoint(threadId, id)` reads one. `fork(source, checkpointId, target)` starts a new thread from any of them,
+  with the checkpoint's state, scheduled work, parked interrupts and status (`RunEvent.ThreadForked`; no pending
+  writes copied). `updateState(threadId, graph, expected, update, asNode)` applies a typed `StateUpdate` to the
+  latest checkpoint as a new one - optimistic on `expected`, checked against `asNode`'s write set, held and fenced by
+  a claim, carrying completed tasks' pending writes over, one superstep on so tool idempotency keys never repeat
+  (`RunEvent.StateUpdated`). `prune(threadId, RetentionPolicy)` removes checkpoints and events by age (`maxAge`, by
+  the store's clock) or size (`maxCheckpoints`, `maxEvents`), never the latest checkpoint, raising the replay floor
+  as `compactEvents` does. A guardrail Block - any `NodeResult.Block` - retracts its whole turn from the history in
+  the commit that closes it, so nothing of a blocked answer stays readable or forkable. Every call checks the tenant.
+  `CheckpointerContract` gains the history, retraction, pruning, `fork` and `updateState` cases. See
+  [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#checkpoint-history-fork-and-updatestate) and the
+  [Stage 2 migration note](docs/reference/migration.md#checkpoint-history-fork-updatestate-and-retention-1702).
 - **Run-claim leases and a store contract suite for `Checkpointer`s** ([#1700](https://github.com/llm4s/llm4s/issues/1700),
   Stage 2 slice 1 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): runtimes in one process or many can share a
   checkpoint store. Each run claims its thread in the store before it starts - a `RunClaim` with an expiry, by the
@@ -805,6 +820,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **`Checkpointer` keeps a checkpoint history** ([#1702](https://github.com/llm4s/llm4s/issues/1702), BREAKING,
+  `llm4s-agent`): `Checkpointer` gains `history`, `checkpoint` and `prune`, and must keep every superseded checkpoint
+  and refuse a checkpoint id already in the history (`InvalidCommit`); `Commit` gains `retractTurn` (defaulted);
+  `GraphError` gains `CheckpointNotFound` and `ThreadExists`, and `RunEvent` gains `StateUpdated` and `ThreadForked`.
+  Checkpoint ids are `<runId>/<n>` with `n` counting along the thread, so a thread's second and later runs no longer
+  start at `<runId>/1`. `Checkpoint.CurrentFormat` stays 5. No shims; see the
+  [Stage 2 migration note](docs/reference/migration.md#checkpoint-history-fork-updatestate-and-retention-1702).
 - **The `Checkpointer` SPI is fenced by run claims** ([#1700](https://github.com/llm4s/llm4s/issues/1700), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `claim`, `renew` and `release`; `Commit` is `Commit(token, checkpoint,
   pendingWrites, events)` with a private constructor and `with*` setters, and a store applies it only with the
