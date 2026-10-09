@@ -200,10 +200,12 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     judge("0.69999999999999999", threshold = 0.7).isLeft shouldBe true
   }
 
-  it should "pass nothing at a NaN threshold and everything readable at a negative infinite one" in {
-    judge("1", threshold = Double.NaN).isLeft shouldBe true
-    judge("0", threshold = Double.NegativeInfinity) shouldBe Right("content")
-    judge("1", threshold = Double.PositiveInfinity).isLeft shouldBe true
+  it should "compare against a NaN or infinite threshold without a pass slipping through (validate refuses them first)" in {
+    // validate refuses these thresholds on field `threshold` before the judge is called (#1520,
+    // LLMGuardrailThresholdSpec); the comparison itself still passes nothing at NaN or +Infinity.
+    LLMGuardrail.reaches(BigDecimal(1), Double.NaN) shouldBe false
+    LLMGuardrail.reaches(BigDecimal(0), Double.NegativeInfinity) shouldBe true
+    LLMGuardrail.reaches(BigDecimal(1), Double.PositiveInfinity) shouldBe false
   }
 
   accepted.foreach { case (reply, score) =>

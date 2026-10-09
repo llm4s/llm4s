@@ -2,7 +2,13 @@
 
 ## Stage 1 migration: agent runtime
 
-Not in a release yet ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime-design.md` §4.13. #1329 (events and tracing) and #1330 (orchestration, below) extend this note.
+Not in a release yet ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime-design.md` §4.13. This note covers the whole of Stage 1 ([#1326](https://github.com/llm4s/llm4s/issues/1326)), five slices:
+
+- [#1327](https://github.com/llm4s/llm4s/issues/1327), kernel completion: [below](#kernel-completion-1327).
+- [#1328](https://github.com/llm4s/llm4s/issues/1328), the agent loop on `GraphRuntime`: this section.
+- [#1329](https://github.com/llm4s/llm4s/issues/1329), events and tracing: the bullets this section marks #1329.
+- [#1330](https://github.com/llm4s/llm4s/issues/1330), orchestration removed: [below](#orchestration-removed-1330).
+- [#1331](https://github.com/llm4s/llm4s/issues/1331), cancellation for non-chat clients: [below](#cancellation-for-non-chat-clients-and-mcp-tool-hints-1331).
 
 ```scala
 // before
@@ -61,6 +67,24 @@ val result = for {
 - **Graph loop API.** `ToolLoop.build(id, version, root, agents: Vector[LoopAgent])` builds a family of agents (the earlier `ToolLoop.build(id, version, model, tools, middleware)` is gone; `LoopAgent(id, model, tools)` with `withSystemPrompt`, `withMaxSteps`, `withMiddleware` and `withHandoffs` replaces its arguments), and `ModelStep.next` returns a `Completion`, so a `wrapModelCall` middleware's `next` returns `Result[Completion]`.
 - **Errors.** Provider, tool and middleware failures are `Left(GraphError...)`; the error content a tool failure gives the model is `{"error": ...}`. A guardrail block, the step limit and a suspension are `Right`.
 - **Samples.** `AsyncToolAgentExample` is deleted; `StreamingAgentExample`, `StreamingWithToolsExample` and `EventCollectionExample` are rewritten on `Agent.stream` (#1329); the other agent samples use the builder.
+
+### Kernel completion (#1327)
+
+`GraphBuilder.implement`, `node` and `resumeNode` take `retry: RetryPolicy` and `cache: Option[CachePolicy]`. Both default to off, so a graph that sets neither runs as before. `CompiledGraph.toMermaid` is new. These are source breaks, with no shims:
+
+- **`ToolContext`, `GraphError.ToolFailed`, `ModelRequest` and `ToolCallRequest` have a private constructor and no public `copy`.** Build them with `X(...)` and change them with `withY(...)`.
+- **Tool call ids and names are typed.** `ToolContext.toolCallId`, `GraphError.ToolFailed.tool` and `.toolCallId` are the opaque `ToolCallId` and `ToolName` types: read the string with `.value`, and make an id with `ToolCallId(call.id)`. `ToolCallRequest` gains `toolCallId` and `toolName`.
+- **`recover` re-runs a failed task under the node's full retry policy.** It used to give the task one more try.
+
+### Cancellation for non-chat clients and MCP tool hints (#1331)
+
+Embedding, reranker, MCP, image clients and the Whisper and Tacotron2 speech engines now return `Left(CancelledError)` when interrupted, as the cloud speech clients already did, with the thread's interrupt flag still set, and never retry it. Before, they reported an error of their own, and some reported a cancelled call as a success. Match `CancelledError` where you matched those errors: an embedding provider's `embed` can now return `Left(CancelledError)` where it returned only an `EmbeddingError`, so a match that narrows its `Left` to `EmbeddingError` needs a case for it. The CHANGELOG entry for #1331 lists every client's change. Source breaks, with no shims:
+
+- **Image generation errors** are `LLMError`s, with renamed cases: see [Image generation errors are `LLMError`s](#image-generation-errors-are-llmerrors).
+- **`MCPTransportImpl.sendRequest`, `sendNotification`, `MCPClient.initialize` and `getTools` return `Result`** instead of `Either[String, _]`: read the old string as `error.message`.
+- **`ToolHints` moves to `llm4s-core`**: import `org.llm4s.toolapi.ToolHints`, not `org.llm4s.agent.graph.tool.ToolHints`.
+
+`llm4s-mcp` also reads `ToolHints` from a server's tool annotations (`MCPClient.getToolHints`, `MCPToolRegistry.toolHints(name)`), but only for a server configured with `trustAnnotations = true` on its `MCPServerConfig` (default `false`). Any other server reports no hints, so `ToolHints.default` (approval required) applies.
 
 ### Orchestration removed (#1330)
 

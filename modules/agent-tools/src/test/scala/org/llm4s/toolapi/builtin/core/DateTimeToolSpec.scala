@@ -5,15 +5,21 @@ import org.scalatest.OptionValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.time.{ Instant, ZoneId, ZonedDateTime }
+import java.time.{ Clock, Instant, ZoneId, ZoneOffset, ZonedDateTime }
+import java.time.format.TextStyle
+import java.util.Locale
+import scala.util.Using
 
 /**
  * Tests for [[DateTimeTool]].
  *
- * The tool reads the current time directly (`ZonedDateTime.now`) and has no clock seam, so nothing here asserts a
- * wall-clock value. Each result is instead checked against ITSELF and against `java.time`: the `timestamp` has to be
- * close to the moment the test called the tool, and everything else (`components`, `iso8601`, the offset) has to agree
- * with that timestamp in the requested zone. That holds whenever the suite runs, in any default timezone or locale.
+ * The public tool reads the system clock, so the tests of it assert no wall-clock value: each result is checked against
+ * ITSELF and against `java.time` (the `timestamp` has to be close to the moment the test called the tool, and everything
+ * else has to agree with that timestamp in the requested zone). The exact values - daylight-saving transitions, a year
+ * end, the 12-hour clock - are asserted through `DateTimeTool.toolSafe(clock)` with a fixed clock.
+ *
+ * The `human` text is English whatever the host's default locale is: the locale tests below change the default and
+ * check that it stays the same.
  */
 class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
 
@@ -30,6 +36,37 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
 
   private def callOk(params: (String, ujson.Value)*): DateTimeResult =
     call(params: _*).fold(err => fail(s"Expected Right but got Left: $err"), identity)
+
+  /** Runs `body` with `locale` as the JVM default (every category), restoring all of them afterwards. */
+  private def withDefaultLocale[A](locale: Locale)(body: => A): A = {
+    val original = Locale.getDefault
+    val display  = Locale.getDefault(Locale.Category.DISPLAY)
+    val format   = Locale.getDefault(Locale.Category.FORMAT)
+    Locale.setDefault(locale)
+    Using.resource(new AutoCloseable {
+      override def close(): Unit = {
+        Locale.setDefault(original)
+        Locale.setDefault(Locale.Category.DISPLAY, display)
+        Locale.setDefault(Locale.Category.FORMAT, format)
+      }
+    })(_ => body)
+  }
+
+  /**
+   * The clock part and the English names that the `human` text has to start with, derived from the result's own
+   * timestamp with explicit English names and a hand-written AM/PM, so nothing here follows the default locale.
+   * The zone's display name at the end is left out on purpose: it differs between JDKs and platforms.
+   */
+  private def expectedHumanPrefix(result: DateTimeResult): String = {
+    val zoned  = local(result)
+    val hour12 = if (zoned.getHour % 12 == 0) 12 else zoned.getHour % 12
+    // Not `f"%02d"`: that formatter follows the default locale too, and would write Arabic-Indic digits under `ar`.
+    def pad2(n: Int): String = if (n < 10) s"0$n" else n.toString
+    val weekday              = zoned.getDayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
+    val month                = zoned.getMonth.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
+    val marker               = if (zoned.getHour < 12) "AM" else "PM"
+    s"$weekday, $month ${zoned.getDayOfMonth}, ${zoned.getYear} at $hour12:${pad2(zoned.getMinute)}:${pad2(zoned.getSecond)} $marker"
+  }
 
   /** The result's own instant, read back in the zone the caller asked for. */
   private def local(result: DateTimeResult): ZonedDateTime =
@@ -170,22 +207,57 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
   }
 
   Seq("human", "HUMAN", "Human").foreach { format =>
-    it should s"return a human-readable `datetime` for the format '$format', leaving iso8601 as ISO" in {
-      // The month and weekday names, AM/PM and the zone name follow the host's default locale, so only the parts that
-      // do not are asserted: the digits (`DateTimeFormatter.ofPattern` always writes ASCII digits, even under an
-      // Arabic default locale), their order, and the literal " at ".
+    it should s"return the English human-readable `datetime` for the format '$format', leaving iso8601 as ISO" in {
       val result = callOk("format" -> format, "timezone" -> "Europe/Berlin")
-      val zoned  = local(result)
-      val hour12 = if (zoned.getHour % 12 == 0) 12 else zoned.getHour % 12
-      // Not `f"%02d"`: that formatter follows the default locale too, and would write Arabic-Indic digits under `ar`.
-      def pad2(n: Int): String = if (n < 10) s"0$n" else n.toString
-      val clock                = s"$hour12:${pad2(zoned.getMinute)}:${pad2(zoned.getSecond)}"
 
       result.datetime should not be result.iso8601
-      result.datetime should include(s"${zoned.getDayOfMonth}, ${zoned.getYear} at $clock")
+      result.datetime should startWith(expectedHumanPrefix(result))
       // `iso8601` stays the ISO string whichever format was asked for.
       ZonedDateTime.parse(result.iso8601).toInstant.toEpochMilli shouldBe result.timestamp
       result.iso8601 should include("[Europe/Berlin]")
+    }
+  }
+
+  // Each of these writes month and weekday names, the AM/PM marker or the digits differently when the host's default
+  // is used: Arabic and Thai use other calendars or digits, German and Japanese other names, Hindi another marker.
+  Seq("de-DE", "ja-JP", "ar-SA", "hi-IN", "th-TH", "tr-TR", "fr-FR", "en-GB").foreach { tag =>
+    it should s"write the same English `human` text when the default locale is $tag" in {
+      withDefaultLocale(Locale.forLanguageTag(tag)) {
+        val result = callOk("format" -> "human", "timezone" -> "America/New_York")
+        result.datetime should startWith(expectedHumanPrefix(result))
+      }
+    }
+  }
+
+  it should "accept the format name in capitals under a Turkish default locale" in {
+    // `"ISO".toLowerCase` under `tr` is `"ıso"` (a dotless i), which is no format name: the name has to be lower-cased
+    // with a fixed locale, not the host's default.
+    withDefaultLocale(Locale.forLanguageTag("tr-TR")) {
+      val result = callOk("format" -> "ISO")
+      result.datetime shouldBe result.iso8601
+    }
+  }
+
+  // ---- unsupported formats
+
+  Seq("xml", "iso8601", "short", "", " iso").foreach { format =>
+    it should s"return a Left naming the supported formats for the unsupported format '$format'" in {
+      val result = call("format" -> format)
+      result.isLeft shouldBe true
+      // The refused value and the two choices: enough for a model to correct itself, without pinning the wording.
+      val message = result.left.toOption.value
+      message should include(s"'$format'")
+      message should include("iso")
+      message should include("human")
+    }
+  }
+
+  it should "surface an unsupported format as a HandlerError of this tool when executed" in {
+    tool.execute(ujson.Obj("format" -> "xml")) match {
+      case Left(ToolCallError.HandlerError(name, message)) =>
+        name shouldBe ToolName
+        message should include("xml")
+      case other => fail(s"Expected a HandlerError, got: $other")
     }
   }
 
@@ -244,11 +316,141 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
   // ---- parameters of the wrong type
 
   it should "reject a timezone that is not a string, rather than silently answering in UTC" in {
-    // Today a non-string `timezone` is treated as if it were absent and the call answers in UTC: a model that sends
-    // `5` is told the UTC time without any hint that its argument was ignored. This pins the behaviour that SHOULD
-    // hold; `pendingUntilFixed` keeps the gap visible and fails, asking for this to become a normal test, once fixed.
-    pendingUntilFixed {
-      call("timezone" -> ujson.Num(5)).isLeft shouldBe true
+    // A model that sends `5` used to be told the UTC time with no hint that its argument was ignored.
+    Seq[ujson.Value](
+      ujson.Num(5),
+      ujson.Num(0.5),
+      ujson.True,
+      ujson.False,
+      ujson.Arr("UTC"),
+      ujson.Obj("zone" -> "UTC")
+    )
+      .foreach { value =>
+        val result = call("timezone" -> value)
+        withClue(s"timezone $value: ") {
+          result.isLeft shouldBe true
+          // The parameter that was refused is named, so the model knows which argument to fix.
+          result.left.toOption.value should include("timezone")
+        }
+      }
+  }
+
+  it should "reject a format that is not a string, rather than silently answering in ISO" in {
+    Seq[ujson.Value](ujson.Num(1), ujson.True, ujson.Arr("human"), ujson.Obj("f" -> "human")).foreach { value =>
+      val result = call("format" -> value)
+      withClue(s"format $value: ") {
+        result.isLeft shouldBe true
+        result.left.toOption.value should include("format")
+      }
+    }
+  }
+
+  it should "treat a null timezone or format as absent, the same as leaving it out" in {
+    val result = callOk("timezone" -> ujson.Null, "format" -> ujson.Null)
+    result.timezone shouldBe "UTC"
+    result.datetime shouldBe result.iso8601
+  }
+
+  // ---- parameters are optional
+
+  "The DateTimeTool schema" should "declare no parameter as required, because every one has a default" in {
+    val parameters = tool.toOpenAITool(strict = false)("function")("parameters")
+    parameters("required").arr shouldBe empty
+    parameters("properties").obj.keySet shouldBe Set("timezone", "format")
+    parameters("properties")("format")("enum").arr.toSeq shouldBe Seq(ujson.Str("iso"), ujson.Str("human"), ujson.Null)
+  }
+
+  it should "allow null defaults when strict schemas require both properties" in {
+    val parameters = tool.toOpenAITool(strict = true)("function")("parameters")
+    parameters("required").arr.map(_.str).toSet shouldBe Set("timezone", "format")
+    Seq("timezone", "format").foreach { name =>
+      parameters("properties")(name)("type").arr.map(_.str).toSet shouldBe Set("string", "null")
+    }
+    val json = tool
+      .execute(ujson.Obj("timezone" -> ujson.Null, "format" -> ujson.Null))
+      .fold(e => fail(s"Expected defaults: $e"), identity)
+    json("timezone").str shouldBe "UTC"
+    json("datetime").str shouldBe json("iso8601").str
+  }
+
+  // ---- exact values, with a fixed clock
+
+  private def callAt(instant: String, params: (String, ujson.Value)*): DateTimeResult =
+    DateTimeTool
+      .toolSafe(Clock.fixed(Instant.parse(instant), ZoneOffset.UTC))
+      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+      .handler(SafeParameterExtractor(ujson.Obj.from(params)))
+      .fold(err => fail(s"Expected Right but got Left: $err"), identity)
+
+  "DateTimeTool with a fixed clock" should "report exactly that instant, in UTC by default" in {
+    val result = callAt("2026-07-04T00:05:09.123Z")
+    result.timestamp shouldBe Instant.parse("2026-07-04T00:05:09.123Z").toEpochMilli
+    result.iso8601 shouldBe "2026-07-04T00:05:09.123Z[UTC]"
+    result.datetime shouldBe result.iso8601
+    result.components shouldBe DateTimeComponents(2026, 7, 4, 0, 5, 9, "SATURDAY")
+  }
+
+  it should "take the zone from the timezone parameter, never from the clock" in {
+    val result = DateTimeTool
+      .toolSafe(Clock.fixed(Instant.parse("2026-07-04T00:05:09Z"), ZoneId.of("Asia/Tokyo")))
+      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+      .handler(SafeParameterExtractor(ujson.Obj()))
+      .fold(err => fail(s"Expected Right but got Left: $err"), identity)
+    result.iso8601 shouldBe "2026-07-04T00:05:09Z[UTC]"
+  }
+
+  it should "write midnight and noon on the 12-hour clock with an English marker" in {
+    callAt("2026-07-04T00:05:09Z", "format" -> "human").datetime should startWith(
+      "Saturday, July 4, 2026 at 12:05:09 AM"
+    )
+    callAt("2026-07-04T12:05:09Z", "format" -> "human").datetime should startWith(
+      "Saturday, July 4, 2026 at 12:05:09 PM"
+    )
+  }
+
+  it should "write the same human text under any default locale" in {
+    val expected = "Thursday, December 31, 2026 at 11:59:59 PM"
+    Seq("en-US", "de-DE", "ar-SA", "th-TH-u-nu-thai", "hi-IN", "ja-JP-u-ca-japanese").foreach { tag =>
+      withDefaultLocale(Locale.forLanguageTag(tag)) {
+        withClue(s"default locale $tag: ") {
+          callAt("2026-12-31T23:59:59Z", "format" -> "human").datetime should startWith(expected)
+        }
+      }
+    }
+  }
+
+  it should "cross the year in a zone ahead of UTC" in {
+    val result = callAt("2026-12-31T23:59:59Z", "timezone" -> "Pacific/Auckland")
+    result.iso8601 shouldBe "2027-01-01T12:59:59+13:00[Pacific/Auckland]"
+    result.components shouldBe DateTimeComponents(2027, 1, 1, 12, 59, 59, "FRIDAY")
+  }
+
+  it should "jump the clock forward at the spring daylight-saving gap" in {
+    // America/New_York, 8 March 2026: 01:59:59 EST is followed by 03:00:00 EDT.
+    callAt("2026-03-08T06:59:59Z", "timezone" -> "America/New_York").iso8601 shouldBe
+      "2026-03-08T01:59:59-05:00[America/New_York]"
+    callAt("2026-03-08T07:00:00Z", "timezone" -> "America/New_York").iso8601 shouldBe
+      "2026-03-08T03:00:00-04:00[America/New_York]"
+  }
+
+  it should "tell the two passes of the repeated autumn hour apart by offset and timestamp" in {
+    // America/New_York, 1 November 2026: 01:30 happens twice, first in EDT and then in EST.
+    val first  = callAt("2026-11-01T05:30:00Z", "timezone" -> "America/New_York")
+    val second = callAt("2026-11-01T06:30:00Z", "timezone" -> "America/New_York")
+    first.components shouldBe second.components
+    first.iso8601 shouldBe "2026-11-01T01:30:00-04:00[America/New_York]"
+    second.iso8601 shouldBe "2026-11-01T01:30:00-05:00[America/New_York]"
+    (second.timestamp - first.timestamp) shouldBe 3600000L
+  }
+
+  "DateTimeTool executed without arguments" should "answer with the defaults, for null as for an empty object" in {
+    Seq[ujson.Value](ujson.Null, ujson.Obj()).foreach { args =>
+      val json = tool.execute(args).fold(e => fail(s"Expected Right for $args: $e"), identity)
+      withClue(s"arguments $args: ") {
+        json("timezone").str shouldBe "UTC"
+        json("datetime").str shouldBe json("iso8601").str
+        json("iso8601").str should endWith("Z[UTC]")
+      }
     }
   }
 }

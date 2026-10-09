@@ -44,10 +44,10 @@ object ChunkingUtils {
     var start  = 0
 
     while (start < text.length) {
-      val end = math.min(start + size, text.length)
+      val end = math.min(start.toLong + size, text.length.toLong).toInt
       chunks += text.substring(start, end)
       // next window starts after removing the overlap
-      start = start + size - overlap
+      start = math.min(start.toLong + size - overlap, text.length.toLong).toInt
     }
 
     chunks.toSeq

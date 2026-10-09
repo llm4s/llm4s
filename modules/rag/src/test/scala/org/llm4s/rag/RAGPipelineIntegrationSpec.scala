@@ -463,8 +463,8 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers with OptionVa
     ingestAll(weighted)
     val got = weighted.query(query, topK = Some(5)).fold(err => fail(err.message), identity)
 
-    // Min-max normalisation: the best keyword hit scores 1.0, and a chunk only the vector
-    // channel found contributes nothing, so it scores 0.0. (Which of several tied chunks comes
+    // Per-channel normalisation: the best keyword hit scores 1.0 (the weakest genuine hit 0.1), and a chunk
+    // only the vector channel found contributes nothing, so it scores 0.0. (Which of several tied chunks comes
     // next is not specified, so only the top and the zero floor are pinned.)
     docIdOf(got.head.id) shouldBe docIdOf(keywordHits.head.id)
     got.head.score shouldBe 1.0 +- 1e-9

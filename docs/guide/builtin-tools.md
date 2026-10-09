@@ -113,7 +113,7 @@ a call without it comes back as a `Left` naming it. The others have defaults.
 
 | Tool | Bundle | Parameters | What it returns |
 |------|--------|------------|-----------------|
-| `get_current_datetime` | core | `timezone` (default UTC), `format` (`iso` or `human`) | `datetime`, `timezone`, `timestamp`, `iso8601`, `components` |
+| `get_current_datetime` | core | `timezone` (default UTC), `format` (`iso` or `human`: English text; anything else is an error) | `datetime`, `timezone`, `timestamp`, `iso8601`, `components` |
 | `calculator` | core | **`operation`** (`add`, `subtract`, `multiply`, `divide`, `power`, `sqrt`, `percentage`, `abs`, `min`, `max`, `modulo`), **`a`**, `b` (needed by the two-operand operations) | `expression`, `result`, `formatted` |
 | `generate_uuid` | core | `count` (1 to 10, default 1), `format` (`standard` or `compact`) | `uuids`: each with `uuid`, `version`, `variant` |
 | `json_tool` | core | **`operation`** (`parse`, `format`, `query`, `validate`), **`json`**, `path` (for `query`) | `success`, `result`, `formatted` |
