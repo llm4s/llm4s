@@ -2068,6 +2068,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (followed by `,` and the next key, by `}`, or cut off): `{'Authorization': "[REDACTED]"}`; the same holds inside a
   JSON string (`\"it's\"`), and for such a leaf of a single-quoted container there, which used to end the container.
   Double-quoted JSON is redacted as before. No signature changes.
+- **Redaction reads query parameters after a JSON-escaped `&`** ([#1676](https://github.com/llm4s/llm4s/issues/1676)):
+  Go's `encoding/json` writes `&` as `\u0026` by default, and HTML-safe serialisers do the same (some also write `=` as
+  `\u003d` and `?` as `\u003f`). `Redaction.redact` and `redactForLogging` treated the escape as ordinary text, so in
+  `{"url":"https://h/x?a=1\u0026token=SECRETPW"}` the `token` was not read as a parameter and its value was written in
+  the clear. The query pass now reads `\u0026` as `&`, `\u003f` as `?` where a query can start and `\u003d` as the `=` between
+  a key and its value. That includes the doubled-backslash forms in JSON that sits inside a string, and the hex digits
+  in either case. The output keeps the escapes as they were written: `{"url":"https://h/x?a=1\u0026token=[REDACTED]"}`.
+  A query value now ends at `\u0026` as it ends at `&`, so the parameters after a sensitive one stay readable. The
+  `key=value`, `key="..."` and `key='...'` field passes read a key that follows one of these escapes as they read
+  `&key=`. So do the `Bearer` and `Basic` token patterns after an escape. An input that holds none of these escapes
+  is redacted exactly as before.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the
   exchange-log sink, read a query parameter as `[?&]`, a key of any characters up to the next `=`, and a value up

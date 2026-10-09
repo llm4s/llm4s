@@ -206,4 +206,89 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
   it should "redact a query string with no URL before it" in {
     Redaction.redact("?api_key=SECRETAA&user=ann") shouldBe s"?api_key=$R&user=ann"
   }
+
+  // ---------------------------------------------------------------------------------------------
+  // JSON-escaped separators: Go's encoding/json writes '&' as its six-character escape, backslash and u0026, and
+  // HTML-safe serialisers also escape '=' (u003d) and '?' (u003f). The escapes separate a query as the characters do,
+  // and the output keeps them as they were written (#1676).
+  // ---------------------------------------------------------------------------------------------
+
+  /**
+   * `~26`, `~3d` and `~3f` stand for the JSON escapes of `&`, `=` and `?` (a backslash, `u00` and the hex digits).
+   * Scala reads a backslash-u sequence in any string literal, triple-quoted ones too, as the character it encodes, so
+   * the tests write the escapes this way.
+   */
+  private def u(s: String): String = s.replace("~", "\\" + "u00")
+
+  it should "redact a sensitive query parameter after a JSON-escaped '&' (#1676)" in {
+    val out = Redaction.redact(u("""{"url":"https://h/x?a=1~26token=SECRETPW"}"""))
+    out shouldBe u(raw"""{"url":"https://h/x?a=1~26token=$R"}""")
+    parses(out) shouldBe true
+    ujson.read(out)("url").str shouldBe s"https://h/x?a=1&token=$R"
+  }
+
+  it should "redact a sensitive parameter first, in the middle and last of an escaped query, and keep the others" in {
+    Redaction.redact(u("""{"url":"https://h/x?token=SECRETAA~26a=1~26b=2"}""")) shouldBe
+      u(raw"""{"url":"https://h/x?token=$R~26a=1~26b=2"}""")
+    Redaction.redact(u("""{"url":"https://h/x?a=1~26api_key=SECRETAA~26b=2"}""")) shouldBe
+      u(raw"""{"url":"https://h/x?a=1~26api_key=$R~26b=2"}""")
+    Redaction.redact(u("""{"url":"https://h/x?a=1~26b=2~26password=SECRETAA"}""")) shouldBe
+      u(raw"""{"url":"https://h/x?a=1~26b=2~26password=$R"}""")
+  }
+
+  it should "redact every sensitive parameter of an escaped query" in {
+    Redaction.redact(u("""{"url":"https://h/x?token=SECRETAA~26user=ann~26access_token=SECRETBB~26n=2"}""")) shouldBe
+      u(raw"""{"url":"https://h/x?token=$R~26user=ann~26access_token=$R~26n=2"}""")
+  }
+
+  it should "leave an escaped query with no sensitive parameter, and an escaped '&' in prose, as they are" in {
+    val input = u("""{"url":"https://h/x?a=1~26page=2~26model=gpt-4o","note":"fish ~26 chips"}""")
+    Redaction.redact(input) shouldBe input
+  }
+
+  it should "read an escaped '=' between a key and its value, and an escaped '?' where a query starts" in {
+    Redaction.redact(u("""{"url":"https://h/x?a=1~26token~3dSECRETAA~26b=2"}""")) shouldBe
+      u(raw"""{"url":"https://h/x?a=1~26token~3d$R~26b=2"}""")
+    Redaction.redact(u("""{"url":"https://h/x~3ftoken=SECRETAA"}""")) shouldBe
+      u(raw"""{"url":"https://h/x~3ftoken=$R"}""")
+    Redaction.redact(u("""{"url":"https://h/x~3fa~3d1~26api_key~3dSECRETAA~26b~3d2"}""")) shouldBe
+      u(raw"""{"url":"https://h/x~3fa~3d1~26api_key~3d$R~26b~3d2"}""")
+  }
+
+  it should "read an escaped '=' after a quote inside a sensitive value as it reads '='" in {
+    Redaction.redact(u("""{"url":"https://h/x?a=1~26password=ab'~3dcdSECRET~26b=2"}""")) shouldBe
+      u(raw"""{"url":"https://h/x?a=1~26password=$R~26b=2"}""")
+  }
+
+  it should "read escaped '?' and '=' with upper-case hex digits, which JSON allows" in {
+    Redaction.redact(u("""{"url":"https://h/x~3Fa=1~26token~3DSECRETAA"}""")) shouldBe
+      u(raw"""{"url":"https://h/x~3Fa=1~26token~3D$R"}""")
+  }
+
+  it should "redact a sensitive parameter after a double-escaped '&' in JSON that sits inside a string" in {
+    val out = Redaction.redact(u("""{"body":"{\"url\":\"https://h/x?a=1\~26token=SECRETAA\~26b=2\",\"n\":1}"}"""))
+    out shouldBe u(raw"""{"body":"{\"url\":\"https://h/x?a=1\~26token=$R\~26b=2\",\"n\":1}"}""")
+    parses(out) shouldBe true
+    ujson.read(ujson.read(out)("body").str)("url").str shouldBe s"https://h/x?a=1&token=$R&b=2"
+  }
+
+  it should "redact a sensitive parameter after an escaped '&' outside JSON, in a log line" in {
+    Redaction.redact(u("GET https://h/x?a=1~26secret=SECRETAA~26b=2 200")) shouldBe
+      u(s"GET https://h/x?a=1~26secret=$R~26b=2 200")
+  }
+
+  it should "redact a quoted key=value field after an escaped '&', as after '&'" in {
+    Redaction.redact(u("""{"form":"user=ann~26password='pa ss'~26n=1"}""")) shouldBe
+      u(raw"""{"form":"user=ann~26password='$R'~26n=1"}""")
+    Redaction.redact(u("""user=ann~26password="pa ss"~26n=1""")) shouldBe u(s"""user=ann~26password="$R"~26n=1""")
+  }
+
+  it should "still read a key that runs over an escape up to an unescaped '=', as the pass before #1676 did" in {
+    Redaction.redact(u("?a~3dtoken=SECRETAA")) shouldBe u(s"?a~3dtoken=$R")
+    Redaction.redact(u("?token~26a=SECRETAA")) shouldBe u(s"?token~26a=$R")
+  }
+
+  it should "read a backslash that starts no separator escape as part of a sensitive value" in {
+    Redaction.redact(u("""?token=ab~41cd\\xy&n=1""")) shouldBe s"?token=$R&n=1"
+  }
 }

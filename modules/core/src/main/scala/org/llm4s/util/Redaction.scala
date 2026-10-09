@@ -115,7 +115,8 @@ private[llm4s] object Redaction {
    * `queryValue`. The key is one run of the characters a query key can hold: no whitespace, quote, `?`, `&` or `=`.
    * So a `?` of prose, a question in a chat message, cannot start a key that runs across quotes, braces and lines to
    * a later `=` and take the text after that for a value (#1667). The run is possessive and cannot hold a `?` or `&`,
-   * so each character is read by at most one attempt.
+   * so each character is read by at most one attempt. `escapedQueryParamValues` reads the same parameters, and those
+   * whose separators are JSON escapes (#1676).
    */
   private val QueryParamStart: Regex = """([?&])([^=&?\s"']++)=""".r
 
@@ -207,12 +208,24 @@ private[llm4s] object Redaction {
   /** `'key': [` or `'key': {`: the start of an array or object value under a single-quoted key. */
   private val SingleQuotedContainerStart: Regex = s"""('($Key)'\\s*:\\s*)([\\[{])""".r
 
-  /** `key=value` outside a URL query string: form bodies, log lines, shell-style settings, `a.b.password=...`. */
-  private val EqualsPair: Regex =
-    s"""((?<![A-Za-z0-9_-])($Key)=)([^\\s&"',;<>]+)""".r
+  /**
+   * What may come before the key of a `key=value` pair: not a letter, a digit, `_` or `-`, which would make it the end
+   * of a longer word, or the JSON escape of `&`, `=` or `?` (a backslash and `u0026`, `u003d` or `u003f`), which ends
+   * in a digit or a letter but stands for a separator: a form body in JSON that Go's `encoding/json` wrote has every
+   * `&` escaped (#1676). A key does not start with the `u` of such an escape: `u0026` is no key, and read as one
+   * before a `=` it would take the next pair for its value. `[u]` keeps the compiler from reading the escape as one.
+   */
+  private val PairKeyStart: String =
+    """(?:(?<![A-Za-z0-9_-])|(?<=\\[u]00(?:26|3[dDfF])))(?!(?<=\\)[u]00(?:26|3[dDfF]))"""
 
-  private val DoubleQuotedEqualsStart: Regex = s"""((?<![A-Za-z0-9_-])($Key)=")""".r
-  private val SingleQuotedEqualsStart: Regex = s"""((?<![A-Za-z0-9_-])($Key)=')""".r
+  /**
+   * `key=` before the value of a pair outside a URL query string: form bodies, log lines, shell-style settings,
+   * `a.b.password=...`. Group 2 is the key; the value, at least one character, is read by `redactEqualsPairs`.
+   */
+  private val EqualsPairStart: Regex = s"""($PairKeyStart($Key)=)(?=[^\\s&"',;<>])""".r
+
+  private val DoubleQuotedEqualsStart: Regex = s"""($PairKeyStart($Key)=")""".r
+  private val SingleQuotedEqualsStart: Regex = s"""($PairKeyStart($Key)=')""".r
 
   /** A header-style line, `x-api-key: value`, at the start of a line. */
   private val HeaderLine: Regex =
@@ -316,10 +329,16 @@ private[llm4s] object Redaction {
     // Handle Authorization: ... in headers
     val step2 = """(?i)(Authorization:\s*)([^\n\r]+)""".r
       .replaceAllIn(step1, m => Regex.quoteReplacement(s"${m.group(1)}$placeholder"))
-    // Handle standalone Bearer tokens
-    val step3 = """(?i)\bBearer\s+([a-zA-Z0-9\-_\.]+)""".r.replaceAllIn(step2, quoted)
+    // Handle standalone Bearer tokens, also right after the JSON escape of `&`, `=` or `?`, which ends in a word
+    // character but stands for a separator (#1676)
+    val step3 = """(?i)(?:\b|(?<=\\[u]00(?:26|3[dDfF])))Bearer\s+([a-zA-Z0-9\-_\.]+)""".r.replaceAllIn(step2, quoted)
     // Handle standalone Basic auth tokens
-    """(?i)\bBasic\s+([a-zA-Z0-9+/=]+)""".r.replaceAllIn(step3, quoted)
+    """(?i)(?:\b|(?<=\\[u]00(?:26|3[dDfF])))Basic\s+([a-zA-Z0-9+/=]+)""".r.replaceAllIn(step3, quoted)
+  }
+
+  private def isSensitiveQueryKey(key: String): Boolean = {
+    val lower = key.toLowerCase(Locale.ROOT)
+    SensitiveQueryParams.exists(lower.contains)
   }
 
   /**
@@ -327,43 +346,151 @@ private[llm4s] object Redaction {
    * value are kept, and an empty value is left as it is: there is nothing to hide, and a placeholder written before a
    * quote would keep the `key='...'` pass after this one from reading the value. Appended, not passed to
    * `replaceAllIn`, so a `$` or `\` in the input or the placeholder is written as it is.
+   *
+   * The values are those of two readings of the query, and a character either takes is replaced. The first reads
+   * `QueryParamStart`, the one key of each `?` or `&`, as this pass always has. The second also reads the JSON escapes
+   * of the separators, which Go's `encoding/json` and HTML-safe serialisers write for `&` (and some for `=` and `?`),
+   * so a parameter after an escaped `&` is read as one after `&` is (#1676). Where the input holds no such escape, the
+   * two read the same parameters; where it does, the first keeps every value it read before.
    */
   private def redactQueryParams(input: String, placeholder: String): String = {
-    val matcher = QueryParamStart.pattern.matcher(input)
-    val out     = new java.lang.StringBuilder(input.length)
-
-    @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
-      if (searchFrom > input.length || !matcher.find(searchFrom)) {
-        copiedTo
-      } else {
-        val key = matcher.group(2).toLowerCase(Locale.ROOT)
-        if (SensitiveQueryParams.exists(key.contains)) {
-          val (valueStart, valueLength) = queryValue(input, matcher.end)
-          if (valueLength > 0) {
-            out.append(input, copiedTo, valueStart).append(placeholder)
-            loop(valueStart + valueLength, valueStart + valueLength)
-          } else {
-            loop(matcher.end, copiedTo)
-          }
-        } else {
-          // The value of a parameter that is kept is searched too: it may be a URL with a query of its own
-          // (`?next=/cb?token=...`). It is not scanned, so no character is read twice.
-          loop(matcher.end, copiedTo)
-        }
-      }
-
-    val copiedTo = loop(0, 0)
+    val values = mergeSpans(queryParamValues(input) ++ escapedQueryParamValues(input))
+    val out    = new java.lang.StringBuilder(input.length)
+    val copiedTo = values.foldLeft(0) { case (from, (start, end)) =>
+      out.append(input, from, start).append(placeholder)
+      end
+    }
     out.append(input, copiedTo, input.length).toString
   }
 
+  /** The `(start, end)` spans of the sensitive values of the parameters that `QueryParamStart` finds. */
+  private def queryParamValues(input: String): Vector[(Int, Int)] = {
+    val matcher = QueryParamStart.pattern.matcher(input)
+
+    @tailrec def loop(searchFrom: Int, found: Vector[(Int, Int)]): Vector[(Int, Int)] =
+      if (searchFrom > input.length || !matcher.find(searchFrom)) {
+        found
+      } else if (isSensitiveQueryKey(matcher.group(2))) {
+        val (valueStart, valueLength) = queryValue(input, matcher.end)
+        if (valueLength > 0) loop(valueStart + valueLength, found :+ (valueStart -> (valueStart + valueLength)))
+        else loop(matcher.end, found)
+      } else {
+        // The value of a parameter that is kept is searched too: it may be a URL with a query of its own
+        // (`?next=/cb?token=...`). It is not scanned, so no character is read twice.
+        loop(matcher.end, found)
+      }
+
+    loop(0, Vector.empty)
+  }
+
+  /**
+   * The `(start, end)` spans of the sensitive values of the parameters of a query whose separators may be written as
+   * JSON escapes: a key starts after `?`, `&` or the escape of either, and ends at `=` or its escape, where its value
+   * starts. Like the key of `QueryParamStart`, it holds no whitespace, quote, `?`, `&` or `=`, nor an escape of the
+   * last three. A loop that reads each character a bounded number of times.
+   */
+  private def escapedQueryParamValues(input: String): Vector[(Int, Int)] = {
+    val length = input.length
+    val found  = Vector.newBuilder[(Int, Int)]
+
+    // Reads the parameter whose key starts at `keyStart`, and returns the index to search on from.
+    def readParam(keyStart: Int): Int = {
+      var k         = keyStart
+      var valueFrom = -1
+      var stop      = false
+      while (!stop && k < length) {
+        val c = input.charAt(k)
+        if (c == '=') {
+          valueFrom = k + 1
+          stop = true
+        } else if (c == '&' || c == '?' || c == '"' || c == '\'' || isRegexSpace(c)) {
+          stop = true
+        } else if (c == '\\') {
+          val escapeEnd = separatorEscapeEnd(input, k)
+          if (escapeEnd < 0) k = afterBackslashes(input, k)
+          else {
+            if (escapedSeparator(input, escapeEnd) == '=') valueFrom = escapeEnd
+            stop = true
+          }
+        } else {
+          k += 1
+        }
+      }
+      if (valueFrom < 0 || k == keyStart) k
+      else if (isSensitiveQueryKey(input.substring(keyStart, k))) {
+        val (valueStart, valueLength) = queryValue(input, valueFrom)
+        if (valueLength > 0) found += (valueStart -> (valueStart + valueLength))
+        math.max(valueStart + valueLength, valueFrom)
+      } else {
+        valueFrom // searched, as `queryParamValues` searches the value of a parameter that is kept
+      }
+    }
+
+    var i = 0
+    while (i < length) {
+      val c = input.charAt(i)
+      if (c == '?' || c == '&') i = readParam(i + 1)
+      else if (c == '\\') {
+        val escapeEnd = separatorEscapeEnd(input, i)
+        i =
+          if (escapeEnd < 0) afterBackslashes(input, i)
+          else if (escapedSeparator(input, escapeEnd) == '=') escapeEnd
+          else readParam(escapeEnd)
+      } else {
+        i += 1
+      }
+    }
+    found.result()
+  }
+
+  /** Spans sorted by their start, with those that overlap joined into one. */
+  private def mergeSpans(spans: Vector[(Int, Int)]): Vector[(Int, Int)] =
+    spans.sortBy(_._1).foldLeft(Vector.empty[(Int, Int)]) { (merged, span) =>
+      merged.lastOption match {
+        case Some((start, end)) if span._1 < end => merged.init :+ (start -> math.max(end, span._2))
+        case _                                   => merged :+ span
+      }
+    }
+
+  /** The index after the run of backslashes at `i`. */
+  private def afterBackslashes(input: String, i: Int): Int = {
+    var j = i
+    while (j < input.length && input.charAt(j) == '\\') j += 1
+    j
+  }
+
+  /**
+   * The index after the JSON escape of `&`, `=` or `?` that the run of backslashes at `i` starts - `u`, then `0026`,
+   * `003d` or `003f`, the hex digits in either case - or -1 if it starts none. The run may hold more than one
+   * backslash: JSON that sits inside a string doubles it.
+   */
+  private def separatorEscapeEnd(input: String, i: Int): Int = {
+    val u = afterBackslashes(input, i)
+    val escapes =
+      u > i && u + 5 <= input.length && input.charAt(u) == 'u' && input.charAt(u + 1) == '0' &&
+        input.charAt(u + 2) == '0' && escapedSeparator(input, u + 5) != NotASeparator
+    if (escapes) u + 5 else -1
+  }
+
+  /** The separator that the escape ending at `end` writes, read from its last two hex digits, or `NotASeparator`. */
+  private def escapedSeparator(input: String, end: Int): Char =
+    (input.charAt(end - 2), Character.toLowerCase(input.charAt(end - 1))) match {
+      case ('2', '6') => '&'
+      case ('3', 'd') => '='
+      case ('3', 'f') => '?'
+      case _          => NotASeparator
+    }
+
+  private val NotASeparator: Char = ' '
+
   /**
    * Where the query value that starts at `from` begins, and its length. A value ends where a query value does, at
-   * `&` or whitespace, or at the quote that ends the string the URL sits in, which is kept with the backslashes
-   * that escape it in JSON that sits inside a string.
+   * `&`, its JSON escape or whitespace, or at the quote that ends the string the URL sits in, which is kept with the
+   * backslashes that escape it in JSON that sits inside a string.
    *
    * RFC 3986 allows `'` unencoded in a query, with `!$()*,;=:@`, and JavaScript's `encodeURIComponent` leaves
    * `'()*!` as they are, so a value may hold a quote. A run of `'` is part of the value when the character after it
-   * is a letter, a digit, one of `._~%+/-`, or one of `!$*(@=`: `?key=ab'cd`, `pa'(ss)w0rd`, `Xk9'!mQ2`, `ab''cd`,
+   * is a letter, a digit, one of `._~%+/-`, or one of `!$*(@=` (`=` also as its JSON escape): `?key=ab'cd`, `pa'(ss)w0rd`, `Xk9'!mQ2`, `ab''cd`,
    * and `''Xk9` at the start of a value. A `"`, which a query may not hold unencoded, is part of it only before a
    * letter, a digit or one of `._~%+/-`. Any other quote ends the value: the quote that ends a string is followed by
    * `,`, `)`, `;`, `:`, a bracket, `>`, `\`, `"`, whitespace or the end of the input. So does a quote before one of
@@ -378,15 +505,14 @@ private[llm4s] object Redaction {
     def isQuote(i: Int): Boolean = i < input.length && (input.charAt(i) == '"' || input.charAt(i) == '\'')
     def isUrlChar(i: Int): Boolean =
       i < input.length && (input.charAt(i).isLetterOrDigit || "._~%+/-".indexOf(input.charAt(i).toInt) >= 0)
-    // A character that may follow a `'` inside a value: one of a token, or a sub-delimiter a string never ends before.
+    // A character that may follow a `'` inside a value: one of a token, or a sub-delimiter a string never ends before,
+    // `=` also as its JSON escape.
     def continuesAfterApostrophe(i: Int): Boolean =
-      isUrlChar(i) || (i < input.length && "!$*(@=".indexOf(input.charAt(i).toInt) >= 0)
-    // The index after the run of backslashes at `i`, if any.
-    def afterSlashes(i: Int): Int = {
-      var j = i
-      while (j < input.length && input.charAt(j) == '\\') j += 1
-      j
-    }
+      isUrlChar(i) || (i < input.length && "!$*(@=".indexOf(input.charAt(i).toInt) >= 0) || {
+        val escapeEnd = if (i < input.length && input.charAt(i) == '\\') separatorEscapeEnd(input, i) else -1
+        escapeEnd >= 0 && escapedSeparator(input, escapeEnd) == '='
+      }
+    def afterSlashes(i: Int): Int = afterBackslashes(input, i)
     // The quote at `q` is part of the value: the index to read on from, or -1 when it ends the value.
     def afterInnerQuote(q: Int): Int =
       if (input.charAt(q) == '"') { if (isUrlChar(q + 1)) q + 1 else -1 }
@@ -405,9 +531,12 @@ private[llm4s] object Redaction {
     while (!done && end < input.length) {
       val c = input.charAt(end)
       if (c == '\\') {
-        // A quote after backslashes ends the value as a bare quote does; other backslashes are the value's.
-        val next = afterSlashes(end)
-        if (!isQuote(next)) end = next
+        // A quote after backslashes ends the value as a bare quote does, and the escape of `&` as `&` does; other
+        // backslashes are the value's.
+        val next      = afterSlashes(end)
+        val escapeEnd = separatorEscapeEnd(input, end)
+        if (escapeEnd >= 0 && escapedSeparator(input, escapeEnd) == '&') done = true
+        else if (!isQuote(next)) end = next
         else {
           val after = afterInnerQuote(next)
           if (after >= 0) end = after else done = true
@@ -470,30 +599,6 @@ private[llm4s] object Redaction {
     val singleNumbers = redactPairs(SingleQuotedNumberField, numbers, placeholder, wrap = "'")
     redactPairs(HeaderLine, redactEqualsPairs(singleNumbers, placeholder), placeholder)
   }
-
-  /**
-   * Replaces the value of every `key=value` whose key is sensitive, as `redactPairs` does, but keeps the backslashes
-   * that escape the quote the value stops at. Inside JSON that sits in a string, `\"note\": \"token=abc\"`, the value
-   * runs up to the `"` of the escaped closing quote and so holds its `\`: written over with the placeholder, the `"`
-   * left bare ended the enclosing string there, the document no longer parsed, and the passes after this one paired
-   * its quotes the wrong way round (#1677).
-   *
-   * Of a run of `n` backslashes before the quote, `2^t - 1` are kept, where `t` is the number of trailing one bits
-   * of `n`. A quote escaped `d` strings deep follows `2^d - 1` backslashes, and each backslash of the value before it
-   * adds `2^(d+1)` more, so what is kept is the escape and what is replaced is the value's: the quote is escaped at
-   * every depth as it was, and the document parses at every depth as it did. Only backslashes are kept, never a
-   * character of the value that is not one. A run before anything but a quote, and an even run, which escapes
-   * nothing, are replaced whole, as they were.
-   */
-  private def redactEqualsPairs(input: String, placeholder: String): String =
-    EqualsPair.replaceAllIn(
-      input,
-      m =>
-        Regex.quoteReplacement(
-          if (isSensitiveKey(m.group(2))) m.group(1) + placeholder + quoteEscape(input, m.start(3), m.end(3))
-          else m.matched
-        )
-    )
 
   /** The backslashes at the end of `input(from until to)` that escape a quote right after it, or "" if none do. */
   private def quoteEscape(input: String, from: Int, to: Int): String =
@@ -1218,6 +1323,58 @@ private[llm4s] object Redaction {
         Regex.quoteReplacement(text)
       }
     )
+
+  /**
+   * Replaces the value of every `key=value` pair whose key is sensitive. The value, which `EqualsPairStart` finds the
+   * start of, runs to whitespace, to one of `&"',;<>`, or to the JSON escape of `&`: a query string or a form body in
+   * JSON that Go's `encoding/json` wrote has every `&` escaped (#1676). The text after the escape is read for pairs
+   * again, as the text after `&` is. A loop that reads each character of a value once.
+   *
+   * The backslashes that escape the quote the value stops at are kept. Inside JSON that sits in a string,
+   * `\"note\": \"token=abc\"`, the value runs up to the `"` of the escaped closing quote and so holds its `\`:
+   * written over with the placeholder, the `"` left bare ended the enclosing string there, the document no longer
+   * parsed, and the passes after this one paired its quotes the wrong way round (#1677).
+   *
+   * Of a run of `n` backslashes before the quote, `2^t - 1` are kept, where `t` is the number of trailing one bits
+   * of `n`. A quote escaped `d` strings deep follows `2^d - 1` backslashes, and each backslash of the value before it
+   * adds `2^(d+1)` more, so what is kept is the escape and what is replaced is the value's: the quote is escaped at
+   * every depth as it was, and the document parses at every depth as it did. Only backslashes are kept, never a
+   * character of the value that is not one. A run before anything but a quote, and an even run, which escapes
+   * nothing, are replaced whole, as they were. A value cut at an escaped `&` keeps nothing: no quote follows it.
+   */
+  private def redactEqualsPairs(input: String, placeholder: String): String = {
+    val matcher = EqualsPairStart.pattern.matcher(input)
+    val out     = new java.lang.StringBuilder(input.length)
+
+    @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
+      if (searchFrom >= input.length || !matcher.find(searchFrom)) {
+        copiedTo
+      } else {
+        val valueStart = matcher.end
+        var valueEnd   = valueStart
+        var escapeEnd  = -1
+        while (escapeEnd < 0 && valueEnd < input.length && !endsEqualsValue(input.charAt(valueEnd)))
+          if (input.charAt(valueEnd) == '\\') {
+            val end = separatorEscapeEnd(input, valueEnd)
+            if (end >= 0 && escapedSeparator(input, end) == '&') escapeEnd = end
+            else valueEnd = afterBackslashes(input, valueEnd)
+          } else {
+            valueEnd += 1
+          }
+        val copied =
+          if (isSensitiveKey(matcher.group(2)) && valueEnd > valueStart) {
+            out.append(input, copiedTo, valueStart).append(placeholder).append(quoteEscape(input, valueStart, valueEnd))
+            valueEnd
+          } else copiedTo
+        loop(if (escapeEnd >= 0) escapeEnd else valueEnd, copied)
+      }
+
+    val copiedTo = loop(0, 0)
+    out.append(input, copiedTo, input.length).toString
+  }
+
+  /** The characters that end the value of a `key=value` pair: whitespace and `&"',;<>`. */
+  private def endsEqualsValue(c: Char): Boolean = isRegexSpace(c) || "&\"',;<>".indexOf(c.toInt) >= 0
 
   private def redactApiKeys(input: String, placeholder: String): String =
     // Delegate to the canonical patterns in SecretPatterns so there is a
