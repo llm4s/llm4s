@@ -52,7 +52,7 @@ class SqliteCrossProcessSpec extends AnyFlatSpec with Matchers with EitherValues
 
   "A run killed in another process" should "be held while it lives, then recovered here from the same file" in {
     val db     = SqliteFiles.fresh()
-    val log    = Files.createTempFile("llm4s-sqlite-child", ".log")
+    val log    = Files.createFile(SqliteFiles.directory.resolve(s"child-${java.util.UUID.randomUUID()}.log"))
     val thread = ThreadId("cross-process")
     // this process's clock: the child's claim lasts an hour by its own, and this store judges it by this one
     val clock   = ManualClock(Instant.now())
