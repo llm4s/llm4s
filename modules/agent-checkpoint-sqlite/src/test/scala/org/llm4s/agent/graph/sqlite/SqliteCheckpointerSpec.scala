@@ -12,14 +12,14 @@ import java.sql.{ Connection, DriverManager }
 import java.time.{ Clock, Instant }
 import java.util.concurrent.{ CountDownLatch, CyclicBarrier, LinkedBlockingQueue, TimeUnit }
 import scala.concurrent.duration.*
-import scala.util.Using
+import scala.util.{ Try, Using }
 
 class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues with OptionValues {
 
   private val start = Instant.parse("2026-10-10T09:00:00Z")
   private val ttl   = 30.seconds
 
-  private def jdbc(path: Path): Connection = DriverManager.getConnection(s"jdbc:sqlite:${path.toAbsolutePath}")
+  private def jdbc(path: Path): Connection = DriverManager.getConnection(SqliteCheckpointer.jdbcUrl(path))
 
   private def scalar[A](path: Path, sql: String)(read: java.sql.ResultSet => A): A =
     Using.resource(jdbc(path)) { c =>
@@ -66,24 +66,43 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 1
   }
 
-  it should "let many stores open one new file at once, migrating it exactly once" in {
-    val db      = SqliteFiles.fresh()
+  it should "let many stores open one new file at once, migrating it exactly once, round after round" in {
+    // the race is on a file that does not exist yet: every opener finds it in rollback-journal mode and tries to
+    // switch it to WAL at once. One round rarely shows a lost race, so it is run many times, each on a new file.
+    val rounds  = 40
     val openers = 8
-    val barrier = new CyclicBarrier(openers)
-    val opened  = new LinkedBlockingQueue[Either[String, SqliteCheckpointer]]()
-    val threads = (1 to openers).map { _ =>
-      Thread.ofVirtual().start { () =>
-        barrier.await(10, TimeUnit.SECONDS): Unit
-        opened.put(SqliteCheckpointer.open(db).left.map(_.message))
+    val failures = (1 to rounds).flatMap { round =>
+      val db      = SqliteFiles.fresh()
+      val barrier = new CyclicBarrier(openers)
+      val opened  = new LinkedBlockingQueue[Either[String, SqliteCheckpointer]]()
+      val threads = (1 to openers).map { _ =>
+        Thread.ofPlatform().start { () =>
+          barrier.await(10, TimeUnit.SECONDS): Unit
+          opened.put(SqliteCheckpointer.open(db).left.map(_.message))
+        }
       }
+      threads.foreach(_.join(30000))
+      val all = Iterator.continually(opened.poll()).takeWhile(_ != null).toVector
+      all.foreach(_.foreach(_.close()))
+      def read[A](sql: String)(get: java.sql.ResultSet => A): Either[String, A] =
+        Try(scalar(db, sql)(get)).toEither.left.map(e => s"round $round: $sql failed: ${e.getMessage}")
+      val checks = Vector(
+        read("SELECT COUNT(*) FROM llm4s_checkpoint_schema")(_.getInt(1)).filterOrElse(
+          _ == 1,
+          s"round $round: not exactly one schema version row"
+        ),
+        read("SELECT COUNT(*) FROM llm4s_checkpoint_meta")(_.getInt(1)).filterOrElse(
+          _ == 1,
+          s"round $round: not exactly one meta row"
+        ),
+        read("PRAGMA journal_mode")(_.getString(1)).filterOrElse(_ == "wal", s"round $round: not in WAL mode")
+      )
+      SqliteFiles.delete(db)
+      Option.when(all.size != openers)(s"round $round: ${all.size} of $openers opens returned").toVector ++
+        all.collect { case Left(message) => s"round $round: an open failed: $message" } ++
+        checks.collect { case Left(problem) => problem }
     }
-    threads.foreach(_.join(30000))
-    val all = Iterator.continually(opened.poll()).takeWhile(_ != null).toVector
-    all should have size openers.toLong
-    all.foreach(_.isRight shouldBe true)
-    all.foreach(_.foreach(_.close()))
-    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_schema")(_.getInt(1)) shouldBe 1
-    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_meta")(_.getInt(1)) shouldBe 1
+    withClue(failures.mkString("\n", "\n", "\n"))(failures shouldBe empty)
   }
 
   it should "refuse a file at a newer schema version, changing nothing" in {
@@ -120,6 +139,83 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
   it should "refuse a path whose directory does not exist" in {
     SqliteCheckpointer.open(SqliteFiles.directory.resolve("missing").resolve("x.db")).left.value shouldBe
       a[ProcessingError]
+  }
+
+  it should "open the file at exactly its path when the path holds a '?', spaces or other URI characters" in {
+    // a `?` in a plain jdbc:sqlite URL would start connection settings: here they would name another file and
+    // switch the journal off WAL. Windows file names cannot hold `?`, so there the rest of the name is tested.
+    val windows = System.getProperty("os.name").toLowerCase.contains("win")
+    val name    = if windows then "runs # 100% & more.db" else "runs ?journal_mode=delete&x=1 # 100%.db"
+    val dir     = Files.createDirectories(SqliteFiles.directory.resolve(s"odd path ${java.util.UUID.randomUUID()}"))
+    val db      = dir.resolve(name)
+    val store   = SqliteCheckpointer.open(db).value
+    val thread  = ThreadId("odd-path")
+    store.claim(thread, ClaimRequest(RunId("run"), ttl)).value: Unit
+    Files.exists(db) shouldBe true
+    new String(Files.readAllBytes(db).take(15), "US-ASCII") shouldBe "SQLite format 3"
+    // nothing else was created beside it but SQLite's own WAL and shared-memory files
+    Using.resource(Files.list(dir))(_.toArray.map(_.toString).toSet) shouldBe
+      Set(db.toString, s"$db-wal", s"$db-shm")
+    scalar(db, "PRAGMA journal_mode")(_.getString(1)) shouldBe "wal"
+    store.close()
+    val again = SqliteFiles.opened(db, Clock.systemUTC())
+    again.latest(thread).value shouldBe None
+    again.close()
+  }
+
+  // ---- claims ----
+
+  "A claim" should "store its expiry to the nanosecond, so a sub-second ttl lapses exactly when it should" in {
+    val db      = SqliteFiles.fresh()
+    val begun   = Instant.parse("2026-10-10T09:00:00.123456789Z")
+    val clock   = ManualClock(begun)
+    val store   = SqliteFiles.opened(db, clock)
+    val thread  = ThreadId("sub-second")
+    val claimed = store.claim(thread, ClaimRequest(RunId("first"), 1500.millis)).value
+    claimed.expiresAt shouldBe Instant.parse("2026-10-10T09:00:01.623456789Z")
+    scalar(db, "SELECT claim_expires_second, claim_expires_nano FROM llm4s_checkpoint_threads") { rows =>
+      (rows.getLong(1), rows.getLong(2))
+    } shouldBe ((claimed.expiresAt.getEpochSecond, 623456789L))
+    store.close()
+    // read back by another store, as after a restart: live one nanosecond before the expiry, lapsed at it
+    val reopened = SqliteFiles.opened(db, clock)
+    clock.set(claimed.expiresAt.minusNanos(1))
+    reopened.claim(thread, ClaimRequest(RunId("second"), 1500.millis)).left.value shouldBe
+      GraphError.ThreadBusy(thread.value, None, Some("first"))
+    clock.set(claimed.expiresAt)
+    val taken = reopened.claim(thread, ClaimRequest(RunId("second"), 1500.millis)).value
+    taken.token.value should be > claimed.token.value
+    // a renewal stores its expiry exactly too
+    clock.set(claimed.expiresAt.plusNanos(250))
+    reopened.renew(thread, taken.token, 1500.millis).value.expiresAt shouldBe
+      Instant.parse("2026-10-10T09:00:03.123457039Z")
+    reopened.close()
+    val third = SqliteFiles.opened(db, clock)
+    third.renew(thread, taken.token, 1.nano).value.expiresAt shouldBe claimed.expiresAt.plusNanos(251)
+    third.close()
+  }
+
+  // ---- events ----
+
+  "Compacting the event log" should "keep its replay floor in the file, so a reopened store refuses below it" in {
+    val db     = SqliteFiles.fresh()
+    val store  = SqliteFiles.opened(db, ManualClock(start))
+    val thread = ThreadId("compacted")
+    val token  = store.claim(thread, ClaimRequest(RunId("run"), ttl)).value.token
+    store.commit(thread, Commit(token, events = (1 to 5).map(i => event(s"e$i")).toVector)).value: Unit
+    store.compactEvents(thread, 4L).value
+    store.close()
+
+    val reopened = SqliteFiles.opened(db, ManualClock(start))
+    reopened.eventsAfter(thread, 0L, 10).left.value shouldBe GraphError.ReplayUnavailable(thread.value, 4L)
+    reopened.eventsAfter(thread, 2L, 10).left.value shouldBe GraphError.ReplayUnavailable(thread.value, 4L)
+    reopened.eventsAfter(thread, 3L, 10).value.map(_.seq) shouldBe Vector(4L, 5L)
+    scalar(db, "SELECT COUNT(*) FROM llm4s_checkpoint_events")(_.getInt(1)) shouldBe 2
+    // numbering goes on from where it was, and compacting below the floor does not lower it
+    reopened.commit(thread, Commit(token, events = Vector(event("e6")))).value.map(_.seq) shouldBe Vector(6L)
+    reopened.compactEvents(thread, 2L).value
+    reopened.eventsAfter(thread, 3L, 10).value.map(_.seq) shouldBe Vector(4L, 5L, 6L)
+    reopened.close()
   }
 
   "The schema migrations" should "run each step in turn up to the target, and report a missing step" in {
@@ -197,10 +293,24 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
       "0.0"
     store.eventsAfter(thread, 0L, 0).value shouldBe empty
 
+    def undecodable(result: Either[org.llm4s.error.LLMError, ?], operation: String, what: String): Unit =
+      result.left.value match {
+        case e: ProcessingError =>
+          e.operation shouldBe s"sqlite-checkpointer.$operation"
+          e.message should (include(s"stored $what does not decode").and(include(db.toString)))
+        case other => fail(s"not a ProcessingError: $other")
+      }
     exec(db, "UPDATE llm4s_checkpoint_events SET record_json = '{not json'")
-    store.eventsAfter(thread, 0L, 10).isLeft shouldBe true
+    undecodable(store.eventsAfter(thread, 0L, 10), "eventsAfter", "event")
     exec(db, "UPDATE llm4s_checkpoint_pending_writes SET write_json = '[]'")
-    store.latest(thread).isLeft shouldBe true
+    undecodable(store.latest(thread), "latest", "pending write")
+    exec(
+      db,
+      s"""UPDATE llm4s_checkpoint_threads SET checkpoint_json = '{"formatVersion": ${Checkpoint.CurrentFormat}, "id": 7}'"""
+    )
+    undecodable(store.latest(thread), "latest", "checkpoint")
+    exec(db, "UPDATE llm4s_checkpoint_threads SET checkpoint_json = 'not json at all'")
+    undecodable(store.latest(thread), "latest", "checkpoint")
     exec(db, "UPDATE llm4s_checkpoint_threads SET checkpoint_json = '{\"formatVersion\": 999}'")
     store.latest(thread).left.value shouldBe GraphError.UnsupportedCheckpointFormat(999, Checkpoint.CurrentFormat)
     store.close()

@@ -10,12 +10,30 @@ import java.time.Clock
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration.FiniteDuration
+import scala.util.{ Try, Using }
 
-/** Fresh database files under one temporary directory, and opening a store that must open. */
+/**
+ * Fresh database files under one temporary directory, and opening a store that must open. The directory and all
+ * in it are deleted when the test JVM (forked, one per test run) exits.
+ */
 object SqliteFiles:
-  lazy val directory: Path = Files.createTempDirectory("llm4s-sqlite-checkpointer")
+  lazy val directory: Path =
+    val created = Files.createTempDirectory("llm4s-sqlite-checkpointer")
+    Runtime.getRuntime.addShutdownHook(Thread.ofPlatform().unstarted(() => deleteTree(created)))
+    created
+
+  /** Deletes `root` and everything under it, deepest first; best effort, as a file still open may not go. */
+  private def deleteTree(root: Path): Unit =
+    if Files.exists(root) then
+      Using.resource(Files.walk(root)) { paths =>
+        paths.sorted(java.util.Comparator.reverseOrder[Path]()).forEach(p => Try(Files.deleteIfExists(p)): Unit)
+      }
 
   def fresh(): Path = directory.resolve(s"${UUID.randomUUID()}.db")
+
+  /** Deletes a database file and the WAL and shared-memory files SQLite keeps beside it. */
+  def delete(path: Path): Unit =
+    Vector("", "-wal", "-shm", "-journal").foreach(suffix => Files.deleteIfExists(Path.of(s"$path$suffix")): Unit)
 
   def opened(path: Path, clock: Clock): SqliteCheckpointer =
     SqliteCheckpointer.open(path, clock).fold(e => throw new IllegalStateException(e.message), identity)

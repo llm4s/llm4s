@@ -160,6 +160,8 @@ yield result
 ```
 
 `open` creates the file if it does not exist (its directory must), and brings it to the current schema version.
+Any number of stores may open one file at the same moment, also a new one: each waits up to `busyTimeout` for the
+others. The path may hold any character the file system allows, `?` and spaces included.
 `SqliteCheckpointer.open(path, clock)` and `open(path, clock, config)` take the clock claims expire by and a
 `SqliteCheckpointerConfig`.
 
@@ -205,6 +207,10 @@ applied, so two stores cannot both pass the checks.
 - **Durable commits.** `synchronous = FULL`: a commit that returned survives a crash or a power loss.
 - **Calls within one store are serialised.** A store is one connection; it is safe to share between threads, and
   a busy runtime gains from a store of its own rather than from sharing another runtime's.
+- **Virtual threads.** sqlite-jdbc makes its native calls inside `synchronized` methods, so on JDK 21 a call from
+  a virtual thread - as the runtime's tasks are - pins its carrier thread for as long as the call lasts: up to
+  `busyTimeout` while it waits for another connection's write. Calls within one store are serialised, so each store
+  pins at most one carrier at a time; keep `busyTimeout` short if many stores in one process write to busy files.
 
 ### Watching the file
 

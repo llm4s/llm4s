@@ -2,7 +2,7 @@ package org.llm4s.agent.graph.sqlite
 
 import org.llm4s.agent.graph.*
 import org.llm4s.error.{ LLMError, ProcessingError }
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.types.Result
 import org.llm4s.util.DurationRounding
 
 import java.nio.file.Path
@@ -163,8 +163,13 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
       case None => Right(None)
       case Some((json, writes)) =>
         for
-          checkpoint <- Try(ujson.read(json)).toResult.flatMap(Checkpoint.fromJson)
-          decoded    <- Try(writes.map(upickle.default.read[PendingWrite](_))).toResult
+          parsed <- decoding("latest", "checkpoint")(ujson.read(json))
+          // a format this build cannot read is the contract's refusal; anything else is a row that does not decode
+          checkpoint <- Checkpoint.fromJson(parsed).left.map {
+            case refusal: GraphError => refusal
+            case other               => undecodable("latest", "checkpoint", other.message, None)
+          }
+          decoded <- decoding("latest", "pending write")(writes.map(upickle.default.read[PendingWrite](_)))
         yield Some(StoredCheckpoint(checkpoint, decoded))
     }
 
@@ -183,7 +188,7 @@ final class SqliteCheckpointer private (val path: Path, clock: Clock, connection
             limit
           )(_.getString(1))
         )
-    }.flatMap(rows => Try(rows.map(upickle.default.read[EventRecord](_))).toResult)
+    }.flatMap(rows => decoding("eventsAfter", "event")(rows.map(upickle.default.read[EventRecord](_))))
 
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = writing("compactEvents") { c =>
     readRow(c, threadId).foreach { current =>
@@ -269,8 +274,9 @@ object SqliteCheckpointer:
 
   /**
    * Opens the store in the SQLite file at `path`, creating the file if it does not exist (its directory must),
-   * with claims expiring by `clock`. The file is switched to WAL mode and brought to the current schema version
-   * in one transaction, which also makes any number of stores opening one file at once safe. A file at a newer
+   * with claims expiring by `clock`. The file is switched to WAL mode, then brought to the current schema version in
+   * one transaction. Any number of stores may open one file at once, a new one too: an opener that finds the file
+   * busy with another's switch or migration retries until the busy timeout has passed. A file at a newer
    * schema version than this build knows, a file that is not a SQLite database, or one whose journal cannot be
    * switched to WAL is refused with a `ProcessingError`, and the connection is closed.
    */
@@ -287,17 +293,20 @@ object SqliteCheckpointer:
     given ErrorContext = ErrorContext(path)
     Try {
       Class.forName("org.sqlite.JDBC")
-      connect(s"jdbc:sqlite:${path.toAbsolutePath}")
+      connect(jdbcUrl(path))
     }.toEither.left.map(e => failure("open", Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))).flatMap {
       connection =>
+        val deadline = System.nanoTime() + config.busyTimeout.toNanos
         val prepared = Try {
-          prepare(connection, config)
-          transaction(connection, "BEGIN IMMEDIATE") { guard =>
-            val migrated = SqliteSchema.migrate(connection)
-            if migrated.isRight then
-              execute(connection, "COMMIT")
-              guard.committed = true
-            migrated
+          prepare(connection, config, deadline)
+          retryingBusy(deadline) {
+            transaction(connection, "BEGIN IMMEDIATE") { guard =>
+              val migrated = SqliteSchema.migrate(connection)
+              if migrated.isRight then
+                execute(connection, "COMMIT")
+                guard.committed = true
+              migrated
+            }
           }
         }.toEither.left
           .map(e => failure("open", Option(e.getMessage).getOrElse(e.getClass.getName), Some(e)))
@@ -308,17 +317,54 @@ object SqliteCheckpointer:
         prepared
     }
 
-  /** Per-connection settings, and WAL, which is a property of the file and persists once set. */
-  private def prepare(connection: Connection, config: SqliteCheckpointerConfig): Unit =
-    // first, so that switching the journal waits for a store that is opening the same file
+  /**
+   * The JDBC URL for the file at `path`, as a `file:` URI. sqlite-jdbc reads everything after a `?` in a plain
+   * `jdbc:sqlite:<path>` URL as connection settings, so a path containing `?` would open another file (and could set
+   * pragmas); in a URI the path is percent-encoded - `?` as `%3F`, a space as `%20` - and SQLite decodes it.
+   */
+  private[sqlite] def jdbcUrl(path: Path): String = s"jdbc:sqlite:${path.toAbsolutePath.toUri.toASCIIString}"
+
+  /**
+   * Per-connection settings, and WAL, which is a property of the file and persists once set.
+   *
+   * Switching the journal to WAL is not a transaction, so SQLite does not wait for the busy timeout when another
+   * connection holds the file - typically another store opening the same new file at the same moment - but fails at
+   * once with `SQLITE_BUSY`. The switch is therefore retried, with a short pause, until `deadline` (the busy timeout
+   * from the start of the open), as a transaction would have waited.
+   */
+  private def prepare(connection: Connection, config: SqliteCheckpointerConfig, deadline: Long): Unit =
     execute(connection, s"PRAGMA busy_timeout = ${DurationRounding.ceilMillisInt(config.busyTimeout)}")
-    val mode = Using.resource(connection.createStatement()) { statement =>
-      Using.resource(statement.executeQuery("PRAGMA journal_mode = WAL")) { rows =>
-        if rows.next() then rows.getString(1) else ""
+    val mode = retryingBusy(deadline) {
+      Using.resource(connection.createStatement()) { statement =>
+        Using.resource(statement.executeQuery("PRAGMA journal_mode = WAL")) { rows =>
+          if rows.next() then rows.getString(1) else ""
+        }
       }
     }
     require(mode.equalsIgnoreCase("wal"), s"the database's journal could not be switched to WAL (it is '$mode')")
     execute(connection, "PRAGMA synchronous = FULL")
+
+  /** `SQLITE_BUSY`: the low byte of the (possibly extended) result code sqlite-jdbc reports as the error code. */
+  private val SqliteBusy = 5
+
+  private def isBusy(e: Throwable): Boolean =
+    Iterator.iterate(e)(_.getCause).takeWhile(_ != null).take(8).exists {
+      case sql: java.sql.SQLException => (sql.getErrorCode & 0xff) == SqliteBusy
+      case _                          => false
+    }
+
+  /**
+   * `body`, run again after a short pause while it fails with `SQLITE_BUSY` and `deadline` (a `System.nanoTime`) has
+   * not passed; any other failure, or a busy one past the deadline, is thrown as it was.
+   */
+  @scala.annotation.tailrec
+  private def retryingBusy[A](deadline: Long, pauseMillis: Long = 1)(body: => A): A =
+    Try(body) match
+      case scala.util.Success(value) => value
+      case scala.util.Failure(e) if isBusy(e) && System.nanoTime() < deadline =>
+        Thread.sleep(pauseMillis + java.util.concurrent.ThreadLocalRandom.current().nextLong(pauseMillis + 1))
+        retryingBusy(deadline, math.min(pauseMillis * 2, 25L))(body)
+      case scala.util.Failure(e) => throw e
 
   // ---- rows ----
 
@@ -332,6 +378,17 @@ object SqliteCheckpointer:
     context: ErrorContext
   ): LLMError =
     ProcessingError(s"sqlite-checkpointer.$operation", s"$message (${context.path})", cause)
+
+  private def undecodable(operation: String, what: String, problem: String, cause: Option[Throwable])(using
+    ErrorContext
+  ): LLMError =
+    failure(operation, s"a stored $what does not decode: $problem", cause)
+
+  /** `body`, decoding stored rows; a row that does not decode is a `ProcessingError` naming the operation and file. */
+  private def decoding[A](operation: String, what: String)(body: => A)(using ErrorContext): Result[A] =
+    Try(body).toEither.left.map(e =>
+      undecodable(operation, what, Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))
+    )
 
   private def granted(threadId: ThreadId, claim: Claim): RunClaim =
     RunClaim(threadId, RunId(claim.holder), FencingToken(claim.token), claim.expiresAt)
