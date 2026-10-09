@@ -77,7 +77,7 @@ example below). An unknown profile name makes `loadSandboxConfig` return a `Left
 | `environment` sets a variable other than `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`, `COLUMNS`, `LINES`, `NO_COLOR` | `ENVIRONMENT_NOT_ALLOWED` |
 | An option the program refuses (below) | `ARGUMENT_NOT_ALLOWED` |
 | An argument longer than 4096 characters, or paths that need more than 20000 lookups to check | `ARGUMENT_NOT_ALLOWED` |
-| An argument holding a NUL character, or one whose check fails with an error | `ARGUMENT_NOT_ALLOWED` |
+| An argument holding a NUL character, on Windows one holding `"`, or one whose check fails with an error | `ARGUMENT_NOT_ALLOWED` |
 | An argument that names a location outside the workspace | `PATH_ESCAPE_ATTEMPT` |
 | `cp` only: a name it would write leads outside, or a recursive copy's destination holds a link that does | `PATH_ESCAPE_ATTEMPT` |
 
@@ -127,7 +127,13 @@ Windows) is refused. Only a `..` after a symbolic link makes the two differ. Tha
   before it opens a name or matches a wildcard, so such a string is also refused when it has a `..` component after
   that character (`x*\..\..\outside\f`, `x?\..\..`, `ab:c\..\..`, which open `..\outside\f` although their
   prefix is inside), or when, with each such character replaced by `_`, it leads outside; `dir *.txt`,
-  `type a?.txt` and `findstr /C:x a.txt` run.
+  `type a?.txt` and `findstr /C:x a.txt` run;
+- on Windows, an argument holding `"` is refused (`ARGUMENT_NOT_ALLOWED`) before any path or option check: the C
+  runtime's argument parser and cmd.exe delete `"` as a quote, so `"..\outside\f` opens `..\outside\f` and
+  `"C:\outside\f` an absolute path, and a Windows file name cannot hold one. Quote an argument in the command string
+  instead (`findstr "/C:two words" a.txt`): that quoting is removed before the checks. A wildcard in the last
+  component (`dir .*`) can match the `..` entry, but `dir` only lists it and `type` and `findstr` cannot read a
+  directory, so it is not refused.
 
 A working directory, or a file operation's path, that is not a valid path (a NUL character, or on Windows a `:` or
 wildcard in it) is refused with `PATH_ESCAPE_ATTEMPT` rather than failing with an exception.

@@ -2041,10 +2041,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     Windows an `IOError` for a drive-relative path on a drive that does not exist, such as the `G:` of
     `findstr /G:file`, escaped `executeCommand`).
     On Windows, a device or NT-namespace path (`\\?\C:\x`, `\??\C:\x`), a drive-relative path on another drive
-    (`D:x`) and a wildcard argument leading outside (`..\*`) are refused, and so is an argument with a wildcard, `"`
+    (`D:x`) and a wildcard argument leading outside (`..\*`) are refused, and so is an argument with a wildcard
     or `:` followed by a `..` component, or that leads outside with those characters replaced by `_`: Win32 removes
     `..` as text before it opens a name, so `type x*\..\..\outside\f` opened `..\outside\f` although the part
-    before the `*` is inside. A path must also stay inside under that lexical reading (`..` removed as text, then
+    before the `*` is inside. An argument holding `"` is refused on Windows (`ARGUMENT_NOT_ALLOWED`): the C runtime's
+    argument parser and cmd.exe delete it as a quote, so `"..\outside\f` opened `..\outside\f` and a leading `"`
+    hid an absolute path. A path must also stay inside under that lexical reading (`..` removed as text, then
     links resolved) as well as the kernel's, so `l/../../x` with `l` -> `a/b` is refused on every platform.
   - *Environment* (`ENVIRONMENT_NOT_ALLOWED`): `environment` may set only `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`,
     `COLUMNS`, `LINES` and `NO_COLOR`.

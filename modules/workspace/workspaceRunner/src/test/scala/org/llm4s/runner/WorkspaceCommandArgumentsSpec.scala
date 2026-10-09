@@ -485,7 +485,7 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     refuses(ws, s"findstr /G:${other}secret.txt a.txt", PathEscape)
   }
 
-  it should "refuse a wildcard, '\"' or ':' argument whose '..' after that character climbs out" in inWorkspace { fx =>
+  it should "refuse a wildcard or ':' argument whose '..' after that character climbs out" in inWorkspace { fx =>
     // Win32 removes `..` as text before it opens a name or matches a wildcard, so `x*\..\..\outside\secret.txt`
     // opens `..\outside\secret.txt`; the part before the `*` (`x`) is inside.
     val ro = fx.interface(ReadOnly, windows = true)
@@ -497,10 +497,23 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     unparseableControls.foreach(command => passesPolicy(ro, command))
   }
 
+  it should "refuse any argument holding '\"', which Windows removes as a quote before it opens the name" in inWorkspace {
+    fx =>
+      // The C runtime's argv parser and cmd.exe delete `"`, so `"..\x` opens `..\x` and `"C:\x` opens `C:\x`.
+      val ro = fx.interface(ReadOnly, windows = true)
+      quotedEscapes.map(fx.expand).foreach(command => refuses(ro, command, ArgumentNotAllowed))
+      refuses(fx.interface(ReadWrite, windows = true), "copy '\"..\\outside\\secret.txt' c.txt", ArgumentNotAllowed)
+      refuses(ro, "echo '\"x'", ArgumentNotAllowed)
+      unparseableControls.foreach(command => passesPolicy(ro, command))
+      // Off Windows `"` is an ordinary file-name character
+      passesPolicy(fx.interface(ReadOnly, windows = false), "cat 'q\"x.txt'")
+  }
+
   it should "refuse those arguments where the platform itself cannot parse them" in inWorkspace { fx =>
     assume(isWindowsHost, "these strings are unparseable paths only on Windows")
     val ws = fx.interface(ReadOnly, windows = true)
     unparseableEscapes.foreach(command => refuses(ws, command, PathEscape))
+    quotedEscapes.map(fx.expand).foreach(command => refuses(ws, command, ArgumentNotAllowed))
     refuses(fx.interface(ReadWrite, windows = true), "copy 'x*\\..\\..\\outside\\secret.txt' c.txt", PathEscape)
     unparseableControls.foreach(command => passesPolicy(ws, command))
   }
@@ -742,7 +755,6 @@ object WorkspaceCommandArgumentsSpec {
     "type 'x*\\..\\..\\outside\\secret.txt'",
     "type 'x?\\..\\..\\outside\\secret.txt'",
     "type 'ab:c\\..\\..\\outside\\secret.txt'",
-    "type 'x\"\\..\\..\\outside\\secret.txt'",
     "type 'x*\\..\\.. \\outside\\secret.txt'",
     "findstr secret 'x*\\..\\..\\outside\\secret.txt'",
     "findstr /G:'x?\\..\\..\\outside\\secret.txt' a.txt",
@@ -752,6 +764,23 @@ object WorkspaceCommandArgumentsSpec {
     "dir 'ab:c\\..\\..\\outside'",
     "git diff --no-index a.txt 'x*\\..\\..\\outside\\secret.txt'",
     "git log -- 'x?\\..\\..\\outside'"
+  )
+
+  /**
+   * Arguments holding `"`, which Windows' argv parser and cmd.exe delete as a quote toggle: `"..` opens `..`, and a
+   * leading `"` hides an absolute path (`{out}` is the outside directory). Refused on Windows whatever follows.
+   */
+  val quotedEscapes: Seq[String] = Seq(
+    "type 'x\"\\..\\..\\outside\\secret.txt'",
+    "type '\"..\\outside\\secret.txt'",
+    "type '.\".\\outside\\secret.txt'",
+    "type '\"{out}\\secret.txt'",
+    "findstr secret '\"{out}/secret.txt'",
+    "findstr /G:'\"{out}/secret.txt' a.txt",
+    "git diff --no-index a.txt '\"{out}/secret.txt'",
+    "type 'a\"\"{out}/secret.txt'",
+    "type '\"\\\\?\\C:\\outside\\secret.txt'",
+    "dir '\"..'"
   )
 
   /** Wildcards, switches and `:` values that stay inside: not refused. */

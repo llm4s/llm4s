@@ -43,8 +43,11 @@ import scala.util.{ Try, Using }
  *     starts with a separator but has no such part (`\\?\C:\x`) is refused, as is, on Windows, a drive-relative
  *     path on another drive (`D:x`). Because Win32 removes `..` as text before it opens a name or matches a wildcard,
  *     such an argument is also refused when it has a `..` component after that character (`x*\..\..\f`), or when,
- *     with each such character replaced by `_`, it leads outside. An argument holding a NUL character is refused (`ARGUMENT_NOT_ALLOWED`), and a
- *     check that fails with an exception refuses the command rather than throwing it.
+ *     with each such character replaced by `_`, it leads outside. An argument holding a NUL character, or on Windows a
+ *     `"` (which the argv parser and cmd.exe delete, so `"..\x` opens `..\x`), is refused (`ARGUMENT_NOT_ALLOWED`), and
+ *     a check that fails with an exception refuses the command rather than throwing it. A wildcard in the last
+ *     component (`.*`, `.?`) can match the `..` entry, but `dir` only lists that entry and `type` / `findstr` cannot
+ *     read a directory, so it is not refused; a wildcard is not allowed in an earlier component.
  *
  * The path rule cannot tell a path from text that looks like one: a `grep` pattern or an option value that starts
  * with `/` or has a `..` component is refused too (write `[/]api` for `/api`). A relative value without `..` can only
@@ -221,6 +224,7 @@ private[runner] object CommandPolicy {
     Try {
       environmentRefusal(environment, isWindows)
         .orElse(nulRefusal(program, args))
+        .orElse(if (isWindows) quoteRefusal(program, args) else None)
         .orElse(optionRefusal(program, args, isWindows))
         .orElse(pathRefusal(program, args, isWindows, Bases(workDir, spelledWorkDir.getOrElse(workDir)), realRoot))
     }.fold(
@@ -240,6 +244,18 @@ private[runner] object CommandPolicy {
     args
       .find(_.contains('\u0000'))
       .map(arg => notAllowed(program, arg.replace("\u0000", "\\0"), "it contains a NUL character."))
+
+  /**
+   * On Windows the C runtime's argv parser and cmd.exe delete `"` as a quote toggle, so the program opens a name
+   * other than the one checked: `"..\x` opens `..\x`, and a leading `"` makes `"C:\x` look relative. A Windows file
+   * name cannot hold `"`, and the tokenizer has already removed the command's own quoting, so any argument still
+   * holding one is refused. The working directory and environment values never reach a command line (they go to
+   * `CreateProcess` as the directory and the environment block, and only locale variables may be set).
+   */
+  private def quoteRefusal(program: String, args: Seq[String]): Option[Refusal] =
+    args
+      .find(_.contains('"'))
+      .map(notAllowed(program, _, "on Windows the program removes '\"' as a quote and would open a different name."))
 
   private def environmentRefusal(environment: Map[String, String], isWindows: Boolean): Option[Refusal] =
     environment.keys.toSeq.sorted
