@@ -66,7 +66,13 @@ class MiddlewareStackSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private val runContext: RunContext = GraphTestSupport.testRunContext()
   private val toolContext: ToolContext =
-    ToolContext(runContext, ToolCallId("call-1"), ThreadState.empty(Map.empty), approved = false)
+    ToolContext(
+      runContext,
+      ToolCallId("call-1"),
+      IdempotencyKey("key-1"),
+      ThreadState.empty(Map.empty),
+      approved = false
+    )
 
   private val request = ToolCallRequest(
     AgentToolSpec[Search]("search", "Searches", searchSchema),

@@ -267,6 +267,68 @@ which you set through the `RunConfig` you pass to `run`.
 
 `ToolExecutionStrategy` remains in core as a `ToolRegistry` feature; the agent no longer takes one.
 
+### Tool Side Effects
+
+**Every tool call gets exactly one result.** The agent, not the tool, writes the result the model
+sees, for every outcome: the tool's content on success, and an `{"error": ...}` result for a tool
+error, a thrown exception, invalid arguments, an unknown tool, a denial, a rejected approval and
+every call of a refused handoff batch. The model is called again only once every call of the batch
+has its result, so a call waiting for approval or an answer holds the model back, and a partial
+`resume` sends nothing to it. Before each model call the agent checks the request, as every
+`wrapModelCall` middleware left it, and refuses one in which a tool call does not have exactly one
+result straight after its message; a model message whose call ids repeat, or are blank, is refused
+before it is stored, and `history` you import must keep the same rule. The OpenAI and Anthropic
+clients are checked against this contract in both wire formats (`assertOneToolResultPerCall` in
+`llm4s-provider-testkit`).
+
+**A call cut short gets no result until it runs again.** When a turn is cancelled, times out, or
+fails on a tool's `Fatal` or a store error mid-batch, the calls that finished keep their results
+and the unfinished ones get none: the thread is left for `recover`, which runs only the unfinished
+calls and never repeats a finished one. `start` refuses the thread until then (`IncompleteRun`).
+Until [#1702](https://github.com/llm4s/llm4s/issues/1702) adds `updateState`, there is no way to
+give an unfinished call a result of your own: a call that misbehaves every time it runs - it hangs
+until cancelled, or fails with `Fatal` - leaves the thread two choices, `recover` (run it again) or
+`forget` (drop the thread and its history).
+
+**Tools run at least once, so pass the idempotency key on.** A call can run again: a retrying
+`wrapToolCall` middleware, `recover` after a cancellation, failure or crash, and an approval each
+run it once more, and a call cut short may already have done its work. `ToolContext.idempotencyKey`
+is the same in every run of one call, so a tool with an external side effect passes it to the
+system it calls, which then does the work once:
+
+```scala
+import org.llm4s.agent.graph.tool.{AgentTool, ToolOutcome}
+
+val charge = AgentTool(chargeSpec) { (args, context) =>
+  payments.charge(args.amount, idempotencyKey = context.idempotencyKey.value) match
+    case Right(receipt) => ToolOutcome.Success(ujson.Str(receipt.id))
+    case Left(error)    => ToolOutcome.Error(error.message)
+}
+```
+
+The key is 64 hexadecimal characters, derived from the thread, where on it the model call that
+issued the tool call ran (its checkpoint, superstep and task), and the call's id, and recorded
+with the call. A call of a later model request gets a new key even when the provider reuses its
+call id (`call_0` in every turn) and the turns share one `RunConfig`, and so does a call from a
+model request made again because the first response was never stored. The boundaries of the guarantee:
+
+- The key de-duplicates only where the external system honours it. Without one, a side effect can
+  happen more than once; the runtime never promises exactly-once execution.
+- Only an `AgentTool` sees the key. A tool added through `ToolRegistry` or
+  `AgentTool.fromToolFunction` - the built-in tools, MCP tools, and tools written with the Java or
+  Kotlin API - runs at least once like any other, but its `ToolFunction` handler has no
+  `ToolContext` to read the key from
+  ([#1740](https://github.com/llm4s/llm4s/issues/1740)). Write a tool with a side effect that must
+  not repeat as an `AgentTool`.
+- An approved or edited call keeps the key it was proposed with, and a call that asked a question
+  keeps it when it resumes. Make a tool's first run, before approval or an answer, free of side
+  effects.
+- The agent stores each call's result as soon as the call finishes (the runtime's `Sync`
+  durability), and a stored result is never run again. A process that dies between a tool's side
+  effect and that store runs the call again on `recover`, with the same key. A graph run under
+  `Async` or `OnExit` durability can lose more after its last durable commit: finished calls run
+  again with their keys, and a lost model response is asked for again, so its calls get new keys.
+
 ---
 
 ## Features
@@ -418,7 +480,8 @@ val next = agent.run(ThreadId(java.util.UUID.randomUUID().toString), "Continue o
 ```
 
 `history` is accepted only on a thread that does not exist yet, and may not contain system messages
-(prompts belong to the agents). Save only runs that completed; `history` that ends mid tool call is
+(prompts belong to the agents). Save only runs that completed; `history` in which a tool call does
+not have exactly one result straight after its message - one that ends mid tool call, say - is
 refused.
 
 ---

@@ -322,6 +322,55 @@ trait ProviderModuleChecks extends Assertions:
         failAt(s"$what returned Right($value) when its thread was interrupted; expected Left(CancelledError)")
       case None => failAt(s"$what threw instead of returning a Result when its thread was interrupted")
 
+  // ---- tool results ----
+
+  /**
+   * `client` sends every [[ToolResultContract.cases]] conversation with each tool call and each tool
+   * result intact, and with exactly one result per call straight after it in `format` - the
+   * contract an agent's tool loop relies on (see [[ToolResultContract]]). Each case is sent with
+   * `complete` to a [[LocalProviderTestServer]] that answers with `response`; the check fails on a
+   * call that returns `Left`, on any [[ToolResultContract.violations]] in the body the server
+   * received, and when the body carries fewer calls or native results than the conversation - a
+   * client that drops an unanswered call, or sends a result as text, hides a broken conversation
+   * instead of sending it.
+   *
+   * @param format   the wire format the client speaks
+   * @param response a successful completion in that format, e.g. [[LocalProviderTestServer.openAICompletion]]
+   *                 or [[LocalProviderTestServer.anthropicMessage]]
+   * @param path     the path the server answers on; `/` answers every path
+   * @param client   builds the client for the server's base URL (`http://localhost:<port>`)
+   */
+  def assertOneToolResultPerCall(format: ToolMessageFormat, response: String, path: String = "/")(
+    client: String => LLMClient
+  )(using pos: Position): Assertion =
+    ToolResultContract.cases.foreach { c =>
+      val seen = new java.util.concurrent.atomic.AtomicReference[Option[ujson.Value]](None)
+      LocalProviderTestServer.withServer(path) { exchange =>
+        val body = new String(exchange.getRequestBody.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+        seen.set(scala.util.Try(ujson.read(body)).toOption)
+        LocalProviderTestServer.sendJsonResponse(exchange, 200, response)
+      } { baseUrl =>
+        val built  = client(baseUrl)
+        val result = scala.util.Try(built.complete(c.conversation))
+        scala.util.Try(built.close()): Unit
+        result.fold(thrown => throw thrown, identity) match
+          case Left(error) => failAt(s"'${c.name}': complete returned Left(${error.message})")
+          case Right(_)    => ()
+      }
+      val body = seen.get.getOrElse(failAt(s"'${c.name}': the server received no JSON request body"))
+      ToolResultContract.violations(format, body) match
+        case Vector() => ()
+        case found    => failAt(s"'${c.name}': the request breaks the tool-result contract: ${found.mkString("; ")}")
+      val calls   = ToolResultContract.toolCallCount(format, body)
+      val results = ToolResultContract.toolResultCount(format, body)
+      if calls != c.toolCalls || results != c.toolResults then
+        failAt(
+          s"'${c.name}': the conversation has ${c.toolCalls} tool calls and ${c.toolResults} results, " +
+            s"but the request carries $calls calls and $results native results"
+        )
+    }
+    succeed
+
   /**
    * Builds an embedding provider the way `EmbeddingClient` does: resolve the descriptor for the
    * selected id in `registry`, then `build` it from `config`.

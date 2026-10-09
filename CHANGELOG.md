@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Tool idempotency keys, and a provider contract suite for one result per tool call** ([#1703](https://github.com/llm4s/llm4s/issues/1703)):
+  an agent tool reads its call's key as `ToolContext.idempotencyKey` (`org.llm4s.agent.graph.IdempotencyKey`, 64 hex
+  characters) and passes it to the system it calls, so a call the runtime runs again - a retrying `wrapToolCall`,
+  approval, an answered question, `recover` after a cancellation, `Fatal` or crash - does its work once. The key is
+  derived from the thread, where on it the issuing model call ran (checkpoint, superstep and task) and the call id
+  (`IdempotencyKey.derive`), and recorded with the call, so it is the same in every run of the call and new for a call
+  of another model request, even when the provider reuses its id and the turns share one `RunConfig`. `runMultiTurn`
+  gives each follow-up turn a fresh `RunId`. Tools added through `ToolRegistry` (built-in, MCP, Java and Kotlin
+  tools) do not see the key yet ([#1740](https://github.com/llm4s/llm4s/issues/1740)). `ApprovalRequest` and `ToolQuestionRequest` carry it too. Tools still run at
+  least once; the [agents guide](docs/guide/agents/index.md#tool-side-effects) documents the boundaries.
+  `llm4s-provider-testkit` adds `ToolResultContract` (`violations(format, requestBody)`, `toolCallCount`,
+  `toolResultCount`, and `cases`: conversations of every shape an agent's tool loop sends), `ToolMessageFormat`
+  (`OpenAIChat`, `AnthropicMessages`), `ProviderModuleChecks.assertOneToolResultPerCall` and
+  `LocalProviderTestServer.anthropicMessage`; the OpenAI, Anthropic and OpenAI-compatible module specs run it, and
+  `AgentToolResultContractSpec` runs the agent through the real OpenAI and Anthropic clients after every outcome of
+  a call - success, error, throw, unknown tool, invalid arguments, denial, rejection, edit, question, handoffs,
+  reused ids, cancellation, `Fatal` and a crash - checking every request.
 - **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
   and its spec checks update order, the barrier, step boundaries and cancellation with no API key.
@@ -788,6 +805,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking: no model request holds a tool call without exactly one result straight after it** ([#1703](https://github.com/llm4s/llm4s/issues/1703)):
+  the agent checks each request as every `wrapModelCall` middleware left it, positionally rather than by id (a
+  reused `call_0` can no longer hide a call with no result), and fails the model call with a `ValidationError`
+  instead of sending a dangling call. A model message whose tool-call ids repeat or are blank is refused before it
+  is stored, so `recover` asks the model again; a repeated id used to leave the thread unable to advance. Imported
+  `history` is held to the same rule. `ToolContext(run, toolCallId, state, approved)` becomes
+  `ToolContext(run, toolCallId, idempotencyKey, state, approved)`, and `ToolTask`, `ApprovalRequest` and
+  `ToolQuestionRequest` gain an `idempotencyKey` field. `llm4s-agent` gains test-only dependencies on
+  `llm4s-openai`, `llm4s-anthropic` and `llm4s-provider-testkit`. See the
+  [migration guide](docs/reference/migration.md#tool-side-effect-safety-1703).
 - **An interrupted `Agent.run`, `continueConversation`, `recover` or `resume` cancels its turn, from Java too** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   the call returns `Left(CancelledError)` with the interrupt flag set, as before, and now also cancels the turn it
   was waiting on instead of leaving it running, returning once that turn has ended (waiting up to 5 seconds for the turn to end), so `recover`

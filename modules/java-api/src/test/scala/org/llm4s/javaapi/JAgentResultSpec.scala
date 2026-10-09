@@ -1,7 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.agent.AgentStatus
-import org.llm4s.agent.graph.InterruptId
+import org.llm4s.agent.graph.{ IdempotencyKey, InterruptId }
 import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.graph.toolloop.{ ApprovalRequest, ApprovalSource, ToolQuestionRequest }
 import org.llm4s.agent.guardrails.builtin.LengthCheck
@@ -67,8 +67,8 @@ class JAgentResultSpec extends AnyFlatSpec with Matchers {
   it should "list a suspended turn's interrupts as PendingInterrupt.of does, approvals first" in {
     val c = SuspensionFixtures.call("c1", "deploy", "x")
     val suspended = AgentStatus.Suspended(
-      Vector(InterruptId("a1") -> ApprovalRequest("m1", c, "why", ApprovalSource.Tool)),
-      Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, ujson.Obj("q" -> 1)))
+      Vector(InterruptId("a1") -> ApprovalRequest("m1", c, "why", ApprovalSource.Tool, IdempotencyKey("k1"))),
+      Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, ujson.Obj("q" -> 1), IdempotencyKey("q1")))
     )
     val s = JAgentStatus.of(suspended)
     s.kind shouldBe AgentStatusKind.SUSPENDED

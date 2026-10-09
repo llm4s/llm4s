@@ -7,6 +7,54 @@ nav_order: 2
 
 # Migration Guide
 
+## Stage 2 migration: durable execution and human review
+
+Not in a release yet. Stage 2 of the typed agent runtime ([#1699](https://github.com/llm4s/llm4s/issues/1699)) is
+split into slices; each adds its part below. Design: `docs/design/typed-agent-runtime-design.md` §5.3 and §6.
+
+### Tool side-effect safety (#1703)
+
+Design §4.16. Tools see an idempotency key, and the agent holds every model request to one result per tool call.
+
+```scala
+// before
+val context = ToolContext(run, ToolCallId("call-1"), state)
+ApprovalRequest(messageId, call, reason, ApprovalSource.Tool)
+ToolQuestionRequest(messageId, call, question)
+
+// after
+val context = ToolContext(run, ToolCallId("call-1"), IdempotencyKey("key-1"), state)
+ApprovalRequest(messageId, call, reason, ApprovalSource.Tool, IdempotencyKey("key-1"))
+ToolQuestionRequest(messageId, call, question, IdempotencyKey("key-1"))
+```
+
+- **`ToolContext` takes the call's key**, after `toolCallId`: `ToolContext(run, toolCallId, idempotencyKey, state,
+  approved)`, with `withIdempotencyKey`. You build one only to unit-test a tool; any key will do there
+  (`IdempotencyKey("test")`, or `IdempotencyKey.derive(threadId, checkpointId, superstep, taskId, toolCallId)`).
+- **`ToolTask`, `ApprovalRequest` and `ToolQuestionRequest` gain `idempotencyKey`** - last in `ApprovalRequest` and
+  `ToolTask`, before the defaulted `approved` in `ToolQuestionRequest`. Code that only reads them (`AgentResult`'s
+  `Suspended`, `ToolLoop.requests`/`questions`, the Java and Kotlin `PendingInterrupt`) is unchanged.
+- **Pass the key to the systems your tools change.** The runtime runs a tool at least once: a retrying
+  `wrapToolCall`, approval, an answered question and `recover` after a cancellation, `Fatal` or crash run a call
+  again, with the same `context.idempotencyKey`. Send it as the external API's idempotency key (or store it in a
+  unique column), and keep a tool's first run, before approval or an answer, free of side effects. See
+  [Tool Side Effects](/guide/agents/#tool-side-effects).
+- **A model request with a dangling tool call fails instead of being sent.** A `wrapModelCall` middleware that
+  removes a `ToolMessage` but keeps its call (or the reverse) now fails the model call with a `ValidationError`
+  naming the call; prune whole turns, as `ContextWindowMiddleware` does. The check is positional: each call's result
+  must be in the run of tool messages straight after its assistant message.
+- **A model message with repeated or blank tool-call ids is refused**, before it is stored, as a blank answer is:
+  the run fails with `NodeFailed(ValidationError)`, and `recover` asks the model again. Before, a repeated id left
+  the thread unable to advance.
+- **Imported `history` must pair positionally too.** History that `Message.validateConversation` accepted only
+  because an earlier turn's result shared a reused id is refused with a `ValidationError`.
+- **No synthetic result for a call cut short.** Unchanged, and now stated: a cancelled, `Fatal` or crashed call
+  records no result, and the thread waits for `recover` (`start` returns `IncompleteRun`), which runs only the
+  unfinished calls with their keys.
+- **Provider authors:** a chat provider that takes tools can run
+  `ProviderModuleChecks.assertOneToolResultPerCall(format, response, path)(baseUrl => client)` from
+  `llm4s-provider-testkit`; see [Writing a provider](/guide/writing-a-provider#tool-results).
+
 ## Stage 1 migration: agent runtime
 
 Not in a release yet ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime-design.md` §4.13. This note covers the whole of Stage 1 ([#1326](https://github.com/llm4s/llm4s/issues/1326)), five slices:

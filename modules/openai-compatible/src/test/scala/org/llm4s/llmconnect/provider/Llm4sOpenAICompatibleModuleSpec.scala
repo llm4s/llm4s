@@ -6,12 +6,13 @@ import org.llm4s.llmconnect.config.ContextWindowResolver
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.testkit.LocalProviderTestServer.{
   holdOpen,
+  openAICompletion,
   openAISseBody,
   sendSseResponse,
   streamThenHold,
   withServer
 }
-import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
+import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig, ToolMessageFormat }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -114,6 +115,19 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with Pro
         withClue(s"${descriptor.id.asString}: ") {
           withServer("/")(exchange => sendSseResponse(exchange, openAISseBody(Seq("Hi")))) { baseUrl =>
             assertStreams(assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl)))))
+          }
+        }
+      }
+    }
+  }
+
+  "a client built by each openai-compatible descriptor" should {
+
+    "send exactly one tool message per tool call, keeping every call and result (design 5.3)" in {
+      expectations.foreach { (descriptor, _, _) =>
+        withClue(s"${descriptor.id.asString}: ") {
+          assertOneToolResultPerCall(ToolMessageFormat.OpenAIChat, openAICompletion("done")) { baseUrl =>
+            assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))))
           }
         }
       }
