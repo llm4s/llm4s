@@ -26,8 +26,9 @@ LLM4S is written in Scala. Its core API returns Scala types (`Either`, `Option`,
 model, `ConversationBuilder` builds a conversation, and every call returns an `LlmResult`, a result type modelled on
 `java.util.Optional` and `CompletableFuture`. A failed call is a value you check, not an exception you have to catch.
 
-It does not hide every Scala type. `Conversation`, `CompletionOptions`, `ProviderConfig` and `LLMError` are Scala
-classes that still appear in its signatures. [What is not here yet](#what-is-not-here-yet) says which of them gets in
+It does not hide every Scala type. `Conversation`, `ProviderConfig` and `LLMError` are Scala classes that still appear
+in its signatures, and so does core's `CompletionOptions`, in an overload that [`JCompletionOptions`](#completion-options)
+makes unnecessary. [What is not here yet](#what-is-not-here-yet) says which of them gets in
 your way.
 
 {: .note }
@@ -197,7 +198,9 @@ import java.util.concurrent.CompletableFuture;
 import org.llm4s.error.LLMError;
 import org.llm4s.error.RecoverableError;
 import org.llm4s.javaapi.ConversationBuilder;
+import org.llm4s.javaapi.JCompletionOptions;
 import org.llm4s.javaapi.JLlmClient;
+import org.llm4s.javaapi.JReasoningEffort;
 import org.llm4s.javaapi.Llm4s;
 import org.llm4s.javaapi.LlmException;
 import org.llm4s.javaapi.LlmResult;
@@ -223,6 +226,35 @@ System.out.println(answer.get());
 
 The builder has `system`, `user` and `assistant`, and messages are sent in the order you add them. It is immutable: each
 method returns a new builder, so one can be shared and extended. A `null` message throws `NullPointerException` at once.
+
+## Completion options
+
+`JCompletionOptions` sets how the model answers one request, built with a builder and passed with the conversation:
+
+```java
+JCompletionOptions options = JCompletionOptions.builder()
+    .temperature(0.2)
+    .maxTokens(512)
+    .reasoning(JReasoningEffort.MEDIUM)
+    .build();
+
+LlmResult<String> answer = client.complete(conversation, options);
+System.out.println(answer.get());
+```
+
+The builder has `temperature`, `topP`, `maxTokens`, `presencePenalty`, `frequencyPenalty`, `reasoning` (the Java enum
+`JReasoningEffort`: `NONE`, `LOW`, `MEDIUM` or `HIGH`) and `budgetTokens`, an explicit thinking budget for Anthropic
+models that overrides the one the reasoning level implies. A setting you leave out keeps the library's default:
+temperature `0.7`, top-p `1.0`, no penalties, and no token limit, reasoning level or thinking budget. The built options
+have an accessor of the same name for each setting. `maxTokens()` and `budgetTokens()` return an `OptionalInt` and
+`reasoning()` an `Optional<JReasoningEffort>`, empty when unset. Their setters also take an `OptionalInt` or `Optional`,
+so an empty one clears the value.
+
+The builder is immutable like `ConversationBuilder`: each setter returns a new builder, and `options.toBuilder()` starts
+one from existing options. A value no provider accepts throws `IllegalArgumentException` at once: a negative or
+non-finite temperature, a top-p outside `0` to `1`, a non-finite penalty, or a token count below `1`. A `null` throws
+`NullPointerException`. A value only some models reject, such as a temperature above `1` for some models, is left to
+the provider. A model that does not reason ignores `reasoning`. Tools and response formats are not options here yet.
 
 ## Reading a result
 
@@ -323,7 +355,6 @@ tracks it:
 
 | You may expect | State today |
 |---|---|
-| Completion options (temperature, max tokens, reasoning) | `complete(Conversation, CompletionOptions)` exists, but a `CompletionOptions` takes `scala.Option` and `Seq` arguments to construct: [#1488](https://github.com/llm4s/llm4s/issues/1488) |
 | Streaming tokens | `JLlmClient` has blocking `complete` calls only: [#1485](https://github.com/llm4s/llm4s/issues/1485) |
 | An asynchronous call | none; wrap `complete` yourself, or use the [Spring Boot starter](spring-boot)'s `completeAsync`. Threading and cancellation are being documented in [#1500](https://github.com/llm4s/llm4s/issues/1500) |
 | Structured output into a Java record | [#1486](https://github.com/llm4s/llm4s/issues/1486) |

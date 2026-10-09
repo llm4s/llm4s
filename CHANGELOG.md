@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Completion options from Java** ([#1488](https://github.com/llm4s/llm4s/issues/1488)): `llm4s-java-api`'s
+  `JCompletionOptions.builder()` sets `temperature`, `topP`, `maxTokens`, `presencePenalty`, `frequencyPenalty`,
+  `reasoning` (the Java enum `JReasoningEffort`: `NONE`, `LOW`, `MEDIUM`, `HIGH`) and `budgetTokens`, and
+  `JLlmClient.complete(Conversation, JCompletionOptions)` sends them. A value that may be absent is read as an
+  `Optional` / `OptionalInt` and can be cleared with an empty one, so no `scala.Option` is involved. The builder is
+  immutable, `toBuilder()` starts one from existing options, and a value no provider accepts (a negative or
+  non-finite temperature, a top-p outside `0..1`, a token count below 1) throws `IllegalArgumentException` when it
+  is set. The options map onto core's `CompletionOptions` through its `apply` and `with*` methods only. The
+  `complete(Conversation, CompletionOptions)` overload stays. The Java guide has a
+  [Completion options](docs/guide/java.md#completion-options) section, and the `gradle-java` sample uses the builder.
 - **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
   and its spec checks update order, the barrier, step boundaries and cancellation with no API key.
