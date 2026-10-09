@@ -544,6 +544,21 @@ Agent memory is the separate `llm4s-memory`; the ready-made tools are `llm4s-age
 contract. Package names are unchanged. See the
 [migration note](../reference/migration#slice-7-llm4s-agent---the-agent-runtime-leaves-core).
 
+### For durable agent threads (SQLite checkpointer)
+
+{: .note }
+> Not yet published. `llm4s-agent-checkpoint-sqlite` exists in the build as of
+> [#1701](https://github.com/llm4s/llm4s/issues/1701) but ships in the next release.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent-checkpoint-sqlite" % llm4sVersion // same version as llm4s-agent
+```
+
+`SqliteCheckpointer` (`org.llm4s.agent.graph.sqlite`) keeps graph and agent threads - checkpoints, pending
+writes, event logs and run claims - in one SQLite file, so a run survives a restart and `recover` continues it
+in a new process. It brings the SQLite JDBC driver (`org.xerial:sqlite-jdbc`), which `llm4s-agent` itself does
+not depend on. See [Durable Checkpointers](../guide/agents/durable-checkpointers#the-sqlite-store).
+
 ### For built-in tools (web search, HTTP, filesystem, shell)
 
 {: .note }

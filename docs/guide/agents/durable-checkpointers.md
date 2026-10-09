@@ -31,9 +31,14 @@ Every agent turn and every graph run executes on a `GraphRuntime`, which stores 
 - the durable event log, numbered `1, 2, 3, ...` per thread;
 - the **claim** of the run that holds the thread, if one does.
 
-`InMemoryCheckpointer` is the only store today, and the one `GraphRuntime.inMemory()` and `Agent.builder`
-use. A SQLite store is coming in [#1701](https://github.com/llm4s/llm4s/issues/1701). This page describes the
-contract all stores share, so it applies unchanged when a durable one arrives.
+Two stores ship with LLM4S:
+
+- `InMemoryCheckpointer`, the one `GraphRuntime.inMemory()` and `Agent.builder` use. Its threads live as long as
+  its instance.
+- `SqliteCheckpointer`, in `llm4s-agent-checkpoint-sqlite`: one SQLite file that survives a restart and that
+  processes on one host can share. See [The SQLite store](#the-sqlite-store).
+
+Both meet the same contract, described below.
 
 ## Runs claim their thread
 
@@ -112,6 +117,111 @@ on executing supersteps whose results would be refused.
 - Until it ends, such a run's live progress events (`StreamEvent.Live`, which are never stored) still reach the
   subscribers of its own runtime. Its durable events are refused with its commits.
 - A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim.
+
+## The SQLite store
+
+{: .note }
+> Not yet published. `llm4s-agent-checkpoint-sqlite` exists in the build as of
+> [#1701](https://github.com/llm4s/llm4s/issues/1701) but ships in the next release.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent-checkpoint-sqlite" % llm4sVersion // same version as llm4s-agent
+```
+
+`SqliteCheckpointer` keeps every thread - its latest checkpoint, pending writes, event log and claim - in one
+SQLite database file. Open it with a path, hand it to a `GraphRuntime` (or to `Agent.builder` through
+`withRuntime`), and close it when the process is done with it:
+
+```scala
+import org.llm4s.agent.graph.*
+import org.llm4s.agent.graph.sqlite.SqliteCheckpointer
+import java.nio.file.Path
+
+for
+  store   <- SqliteCheckpointer.open(Path.of("/var/lib/my-app/runs.db"))
+  runtime  = GraphRuntime(store)
+  handle  <- runtime.start(threadId, graph, input)
+  result  <- handle.await()
+yield result
+```
+
+`open` creates the file if it does not exist (its directory must), and brings it to the current schema version.
+Any number of stores may open one file at the same moment, also a new one: each waits up to `busyTimeout` for the
+others. The path may hold any character the file system allows, `?` and spaces included. It must be on a local
+disk: a Windows UNC path (`\\server\share\runs.db`) becomes a `file://server/share/runs.db` URI, which the
+native libraries bundled with sqlite-jdbc refuse (they are built without `SQLITE_ALLOW_URI_AUTHORITY`), and WAL
+does not work on a network file system anyway (see [Sharing one file between processes](#sharing-one-file-between-processes)).
+An open interrupted while it waits for a busy file returns a `CancelledError` and closes its connection.
+`SqliteCheckpointer.open(path, clock)` and `open(path, clock, config)` take the clock claims expire by and a
+`SqliteCheckpointerConfig`.
+
+### Restart and recovery
+
+Everything a run commits is in the file, so a process that stops - crashes, is killed, or is redeployed - loses
+only the work in flight. A new process opens the same file and continues:
+
+```scala
+// after a restart: the same file, a new store, a new runtime, the same graph
+for
+  store  <- SqliteCheckpointer.open(Path.of("/var/lib/my-app/runs.db"))
+  events <- store.eventsAfter(threadId, 0L, 100)     // the stopped run's event log, as it was committed
+  handle <- GraphRuntime(store).recover(threadId, graph)
+  result <- handle.await()
+yield result
+```
+
+`recover` reuses the pending writes of the tasks that had completed, so they are not run again; only the tasks
+that were running or not yet started run. A run that was killed still holds its claim until the claim expires
+(`ttl`, 30 seconds by default), so `recover` is refused with `ThreadBusy` until then; retry it. A run that
+failed - a node returned `NodeResult.Fail` - released its claim as it ended, and `recover` is admitted at once.
+Event numbers continue where the stopped run's log ended: none is reused, and a subscriber that had seen events
+`1..n` resubscribes with `afterSeq = n`.
+
+The sample `org.llm4s.samples.durable.SqliteRestartRecoveryExample` shows the whole sequence:
+`sbt "samples/runMain org.llm4s.samples.durable.SqliteRestartRecoveryExample"`.
+
+### Sharing one file between processes
+
+Several stores - in one process or in several on the same host - can open one file, each with its own connection,
+and the runtimes over them exclude each other through claims exactly as runtimes over one store do. Every write is
+one `BEGIN IMMEDIATE` transaction, in which the claim's token and the thread's version are checked and the commit
+applied, so two stores cannot both pass the checks.
+
+- **WAL mode.** The store switches the file to SQLite's write-ahead log. Readers - `latest`, `eventsAfter`, a
+  subscriber's replay - never wait for a writer, and a writer never waits for readers. WAL needs memory shared
+  between the processes that open the file, so keep the file on a local disk, not on a network file system.
+- **One writer at a time.** SQLite admits one writing transaction per file. The store's writes are short, so a
+  write that finds another in progress waits for it - up to `SqliteCheckpointerConfig.busyTimeout`, 5 seconds by
+  default - and only then fails, with a `ProcessingError` and nothing changed. Raise it if many processes write to
+  one file at once: `SqliteCheckpointer.open(path, clock, SqliteCheckpointerConfig(busyTimeout = 15.seconds))`.
+- **Durable commits.** `synchronous = FULL`: a commit that returned survives a crash or a power loss.
+- **Calls within one store are serialised.** A store is one connection; it is safe to share between threads, and
+  a busy runtime gains from a store of its own rather than from sharing another runtime's.
+- **Virtual threads.** sqlite-jdbc makes its native calls inside `synchronized` methods, so on JDK 21 a call from
+  a virtual thread - as the runtime's tasks are - pins its carrier thread for as long as the call lasts: up to
+  `busyTimeout` while it waits for another connection's write. Calls within one store are serialised, so each store
+  pins at most one carrier at a time; keep `busyTimeout` short if many stores in one process write to busy files.
+
+### Clocks
+
+A claim's expiry is judged by the clock of the store that grants or renews it - `Clock.systemUTC()` unless you pass
+one. Stores on one host share that host's clock. Processes on different hosts cannot share one SQLite file safely
+anyway (see WAL above), but if host clocks still differ - containers with skewed clocks, a clock step - a claim
+lasts longer or shorter than `ttl` as other processes see it. Fencing keeps every write safe regardless; skew only
+changes when a dead run's thread can be taken over.
+
+### Schema versions
+
+The file records its schema version. Opening a file at an older version upgrades it in one transaction, and
+opening a file written by a newer build is refused with a `ProcessingError`, so an older process never misreads
+it. Checkpoints inside keep their own format version, as with every store, and are migrated when read.
+
+### What it stores
+
+Only data: checkpoints, pending writes and events as JSON, never closures or class names, so a file can be read by
+any build that knows the graph. Its tables are prefixed `llm4s_checkpoint_`, so the file can hold other tables
+too. Like every store today it keeps only each thread's latest checkpoint, and drops events only when
+`compactEvents` is called; history and retention are [#1702](https://github.com/llm4s/llm4s/issues/1702).
 
 ## Writing a store
 

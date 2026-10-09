@@ -12,9 +12,24 @@ nav_order: 2
 Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes agent and graph threads durable and adds human review. One note covers the whole stage; each slice adds its part here as it lands:
 
 - [#1700](https://github.com/llm4s/llm4s/issues/1700), the durable `Checkpointer` contract - run-claim leases, fencing tokens and a store contract suite: [below](#durable-checkpointer-contract-1700).
-- [#1701](https://github.com/llm4s/llm4s/issues/1701) SQLite checkpointer, [#1702](https://github.com/llm4s/llm4s/issues/1702) history, fork and `updateState`, [#1703](https://github.com/llm4s/llm4s/issues/1703) tool side-effect safety, [#1704](https://github.com/llm4s/llm4s/issues/1704) human-review interrupts and [#1705](https://github.com/llm4s/llm4s/issues/1705) live subscriptions across runtimes: not yet landed.
+- [#1701](https://github.com/llm4s/llm4s/issues/1701), the SQLite checkpointer - a new module, nothing to change: [below](#sqlite-checkpointer-1701).
+- [#1702](https://github.com/llm4s/llm4s/issues/1702) history, fork and `updateState`, [#1703](https://github.com/llm4s/llm4s/issues/1703) tool side-effect safety, [#1704](https://github.com/llm4s/llm4s/issues/1704) human-review interrupts and [#1705](https://github.com/llm4s/llm4s/issues/1705) live subscriptions across runtimes: not yet landed.
 
 Design: `docs/design/typed-agent-runtime-design.md` §4.16 onwards. Guide: [Durable Checkpointers](../guide/agents/durable-checkpointers.html).
+
+### SQLite checkpointer (#1701)
+
+Nothing changes for existing code: the durable store is a new module, `llm4s-agent-checkpoint-sqlite`, and `llm4s-agent` is unchanged by it. To keep threads across restarts, add the dependency and replace the in-memory store:
+
+```scala
+// before: threads live as long as the process
+val runtime = GraphRuntime.inMemory()
+
+// after: threads live in a file, and `recover` continues a stopped run in the next process
+val runtime = SqliteCheckpointer.open(Path.of("runs.db")).map(store => GraphRuntime(store))
+```
+
+`SqliteCheckpointer` is in `org.llm4s.agent.graph.sqlite`. It brings the SQLite JDBC driver, at the version `llm4s-memory` already uses. Close it with `close()` when the process is done with it. See [Durable Checkpointers](../guide/agents/durable-checkpointers.html#the-sqlite-store).
 
 ### Durable `Checkpointer` contract (#1700)
 
