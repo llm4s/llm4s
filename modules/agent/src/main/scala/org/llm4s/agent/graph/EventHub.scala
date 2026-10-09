@@ -70,11 +70,21 @@ private[graph] trait Dispatched extends Subscription:
  * event handed to the hub after that - also while its dispatcher is still replaying the log. During
  * the replay those live events are held, up to `capacity` of them with the same drop-and-count rule
  * (a dropped one is reported as a `LiveGap`), each marked with the highest durable `seq` handed to
- * the subscription before it. The dispatcher delivers a held event just before the first durable
- * event with a higher `seq` - one committed after it - or, if no such event has been committed, once
- * the replay has caught up; so live events keep their place among the durable events around them,
- * as for a subscription past its replay. Durable events are unaffected: the replay reads them from the
- * store, so holding live events never makes a subscriber lag.
+ * the hub on the thread before it - the subscription starts from the hub's mark for the thread
+ * ([[durable]] records it), so an event held before any commit reaches the subscription is still
+ * placed. The dispatcher delivers a held event just before the first durable event with a higher
+ * `seq` - one handed over after it - or, if no such event has been handed over, once the replay has
+ * caught up; so live events keep their place among the durable events around them, as for a
+ * subscription past its replay. A commit is written to the store before it is handed over, so the
+ * replay can read one the hub has not handed over yet; it delivers only events the hub has handed
+ * over and leaves the rest to the hand-over, which then queues them behind every live event sent
+ * before it. Durable events are otherwise unaffected: the replay reads them from the store, so
+ * holding live events never makes a subscriber lag.
+ *
+ * The mark is kept only while a run holds the thread: the runtime calls [[release]] when the claim
+ * is released, after the run's last hand-over, so the hub keeps no state for idle threads. A live
+ * event sent on a thread no run holds - only a node's own thread outliving its run sends one - is
+ * held unmarked until the next commit is handed to the subscription, and placed just before it.
  */
 final private[graph] class EventHub(checkpointer: Checkpointer):
 
@@ -86,6 +96,13 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
   /** Subscribed dispatchers, by thread, including those still replaying; guarded by `hubLock`. */
   private var subscribers = Map.empty[String, Vector[Dispatcher]]
 
+  /**
+   * The highest `seq` handed over on each thread a run holds, by thread; guarded by `hubLock`. A
+   * run's claim is handed over before any of its live events is sent, so while a run sends live
+   * events its thread has a mark; [[release]] removes it.
+   */
+  private var handed = Map.empty[String, Long]
+
   /** Starts a dispatcher that replays events with `seq > afterSeq`, then delivers new ones. */
   def subscribe(
     threadId: ThreadId,
@@ -94,8 +111,12 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     listener: StreamEvent => Unit
   ): Result[Dispatched] =
     val dispatcher = new Dispatcher(threadId, afterSeq, capacity, listener)
-    // joined before the dispatcher starts, so no live event sent after this returns is missed
-    withLock(hubLock)(join(threadId, dispatcher))
+    // joined before the dispatcher starts, so no live event sent after this returns is missed, and
+    // marked with what the hub has handed over so far, so every live event it holds is placed
+    withLock(hubLock) {
+      dispatcher.seedHanded(handed.get(threadId.value))
+      join(threadId, dispatcher)
+    }
     Try(dispatcher.start()).toResult.left
       .map { error =>
         leave(threadId, dispatcher)
@@ -132,8 +153,23 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
   def durable(threadId: ThreadId, records: Vector[EventRecord]): Unit =
     if records.nonEmpty then
       withLock(hubLock) {
+        val top = records.iterator.map(_.seq).max
+        handed = handed.updated(threadId.value, handed.get(threadId.value).fold(top)(math.max(_, top)))
         subscribers.getOrElse(threadId.value, Vector.empty).foreach(d => records.foreach(d.offerDurable))
       }
+
+  /**
+   * Forgets the thread's hand-over mark. The runtime calls it when a run's claim on the thread is
+   * released - after the run's last hand-over, before another run can claim the thread - and when a
+   * thread is deleted, so the hub holds a mark only for threads a run holds.
+   */
+  def release(threadId: ThreadId): Unit =
+    withLock(hubLock) {
+      handed = handed - threadId.value
+    }
+
+  /** Whether the hub holds a hand-over mark for the thread; for tests. */
+  private[graph] def marked(threadId: ThreadId): Boolean = withLock(hubLock)(handed.contains(threadId.value))
 
   /** Offers live progress to the thread's subscribers; never blocks on a listener. */
   def live(threadId: ThreadId, event: StreamEvent.Live): Unit =
@@ -170,7 +206,8 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
 
   /**
    * A live event or gap marker held while its dispatcher replays, `after` the highest durable `seq`
-   * handed to the dispatcher before it; `None` if none was yet, until the first one is.
+   * handed to the hub before it; `None` if the hub had no mark for the thread (no run held it) and
+   * none has been handed to the dispatcher since, until the first one is.
    */
   final private case class Held(after: Option[Long], event: StreamEvent.Live | StreamEvent.LiveGap)
 
@@ -178,12 +215,13 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
    * One subscriber. It is in the live set from [[subscribe]] on, but until it has replayed it only
    * holds live events ([[Held]]) and notes the `seq` of durable ones, which the replay reads from the
    * store. It replays the log directly to the listener, each held live event just before the first
-   * durable event committed after it, then, under `hubLock`, queues what was committed since the
+   * durable event handed over after it, then, under `hubLock`, queues what was handed over since the
    * last read with the live events held among it, and switches to queueing what the hub hands it -
    * commits hand events over under the same lock, so none lands between the last read and the
-   * switch, and the `seq` check drops any already read. After that it drains its queue. The
-   * listener is never called while a lock is held. A `preJoined` dispatcher ([[observe]]) never
-   * replays, and only drains.
+   * switch, and the `seq` check drops any already read. Both stop at an event written to the store
+   * but not yet handed over ([[handedOver]]): the hand-over queues it, behind the live events sent
+   * before it. After that it drains its queue. The listener is never called while a lock is held. A
+   * `preJoined` dispatcher ([[observe]]) never replays, and only drains.
    */
   final private class Dispatcher(
     threadId: ThreadId,
@@ -217,9 +255,21 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
     private var pendingEnds = Vector.empty[RunId]
 
     // while replaying: live events held, oldest first, with their `after` ascending; at most
-    // `capacity` of them, gap markers included. `handedSeq` is the highest durable `seq` handed over.
+    // `capacity` of them, gap markers included. `handedSeq` is the highest durable `seq` handed to
+    // the hub on the thread: the hub's mark when the dispatcher joined, then what it is handed.
     private var held      = Vector.empty[Held]
     private var handedSeq = Option.empty[Long]
+
+    /** Starts from the hub's mark for the thread; called under `hubLock`, as the dispatcher joins. */
+    def seedHanded(mark: Option[Long]): Unit = withLock(lock) { handedSeq = mark }
+
+    /**
+     * Whether the event `seq`, read from the store, has been handed to the hub: one written but not
+     * yet handed over is left to the hand-over, so that it follows the live events sent before it.
+     * With no mark - no run held the thread when the dispatcher joined, and nothing has been handed
+     * to it since - everything read is history, and counts as handed over.
+     */
+    private def handedOver(seq: Long): Boolean = withLock(lock)(handedSeq.forall(seq <= _))
 
     /** A listener call is in progress; set, with `cancelled` checked, under `lock`. */
     private var delivering = false
@@ -269,18 +319,24 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
 
     /**
      * While replaying, a commit's event is read from the store, not queued: it only marks where the
-     * live events held so far go. Live events dropped before it are held as a gap marker here, merged
-     * into a gap marker just before it, or - with every slot taken - left pending, to be reported
-     * with the next item.
+     * live events held so far go. Live events dropped before it are held as a gap marker just before
+     * it: merged into the last held marker if that is already there, otherwise a marker of their
+     * own if a slot is free, otherwise merged into the last held marker, which moves to just before
+     * this event - the earlier drops are then reported late, never early, as a dropped event riding
+     * a durable one's slot ([[AfterGap]]) is. With every slot taken by live events they are left
+     * pending, to be reported with the next item.
      */
     private def noteDurable(seq: Long): Unit =
       if droppedLive > 0 then
         held.lastOption match
-          case Some(Held(after, StreamEvent.LiveGap(n))) =>
+          case Some(Held(after, StreamEvent.LiveGap(n))) if after == handedSeq =>
             held = held.init :+ Held(after, StreamEvent.LiveGap(n + droppedLive))
             droppedLive = 0
           case _ if held.size < capacity =>
             held = held :+ Held(handedSeq, StreamEvent.LiveGap(droppedLive))
+            droppedLive = 0
+          case Some(Held(_, StreamEvent.LiveGap(n))) =>
+            held = held.init :+ Held(handedSeq, StreamEvent.LiveGap(n + droppedLive))
             droppedLive = 0
           case _ => ()
       // the first commit handed over: everything held so far precedes it
@@ -407,32 +463,42 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
           case Left(End.Disconnect(failure)) => Some(failure)
           case Left(End.Cancelled)           => None
 
-    /** Delivers committed events directly until a read finds none. */
+    /**
+     * Delivers committed events directly until a read finds none, or finds one not yet handed over
+     * ([[handedOver]]), which [[switchToLive]] leaves to its hand-over.
+     */
     @tailrec private def replay(): Either[End, Unit] =
       read() match
         case Left(stop)                  => Left(stop)
         case Right(page) if page.isEmpty => Right(())
-        case Right(page) =>
-          page.foldLeft[Either[End, Unit]](Right(()))((done, record) =>
-            done.flatMap { _ =>
-              if record.seq <= lastQueuedSeq then Right(())
+        case Right(page)                 =>
+          // `Right(true)`: replayed the page; `Right(false)`: stopped at an event not handed over yet
+          page.foldLeft[Either[End, Boolean]](Right(true))((done, record) =>
+            done.flatMap { more =>
+              if !more || record.seq <= lastQueuedSeq then Right(more)
+              else if !handedOver(record.seq) then Right(false)
               else
                 // live events held from before this commit go first
                 withLock(lock)(takeHeldBefore(record.seq))
                   .foldLeft[Either[End, Unit]](Right(()))((sent, event) => sent.flatMap(_ => deliver(event)))
                   .flatMap(_ => deliver(StreamEvent.Durable(record)))
                   .map(_ => withLock(lock) { lastQueuedSeq = record.seq })
+                  .map(_ => true)
             }
           ) match
-            case Right(_) => replay()
-            case left     => left
+            case Right(true)  => replay()
+            case Right(false) => Right(())
+            case Left(stop)   => Left(stop)
 
     /**
-     * Under `hubLock`, queues whatever was committed since the last read - reading on while pages
+     * Under `hubLock`, queues whatever was handed over since the last read - reading on while pages
      * come back full - with the live events held among it, then the rest of the held events, and
-     * switches to queueing what the hub hands over. Live events dropped while replaying and not yet
-     * held as a gap marker were dropped after every held event, so they are reported after all of
-     * these, not with the first event caught up. A short store read under the lock; no listener call.
+     * switches to queueing what the hub hands over. An event read but not yet handed over
+     * ([[handedOver]]) ends the catch-up: commits hand over under `hubLock`, so it is handed to the
+     * dispatcher once it is in the live set, behind the held events. Live events dropped while
+     * replaying and not yet held as a gap marker were dropped after every held event, so they are
+     * reported after all of these, not with the first event caught up. A short store read under the
+     * lock; no listener call.
      */
     private def switchToLive(): Either[End, Unit] =
       withLock(hubLock) {
@@ -445,13 +511,15 @@ final private[graph] class EventHub(checkpointer: Checkpointer):
           read() match
             case Left(stop) => Left(stop)
             case Right(page) =>
+              val caughtUp = page.takeWhile(record => handedOver(record.seq))
               withLock(lock) {
-                page.foreach { record =>
+                caughtUp.foreach { record =>
                   if record.seq > lastQueuedSeq then queueHeld(takeHeldBefore(record.seq))
                   queueDurable(record)
                 }
               }
-              if page.size < PageSize || withLock(lock)(lagging) then Right(()) else catchUp()
+              if page.size < PageSize || caughtUp.size < page.size || withLock(lock)(lagging) then Right(())
+              else catchUp()
         catchUp().map { _ =>
           // live events held past the last commit, then barriers of runs that ended during the
           // replay, go behind everything caught up

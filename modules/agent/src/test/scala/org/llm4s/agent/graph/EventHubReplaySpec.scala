@@ -1,8 +1,10 @@
 package org.llm4s.agent.graph
 
 import org.llm4s.types.Result
+import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.{ Seconds, Span }
 
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
@@ -12,7 +14,8 @@ import scala.jdk.CollectionConverters.*
  * Live events handed to the event hub while a subscription replays (#1731): held, bounded, and
  * delivered in their place among the durable events, at the dispatcher.
  */
-class EventHubReplaySpec extends AnyFlatSpec with Matchers:
+class EventHubReplaySpec extends AnyFlatSpec with Matchers with Eventually:
+  implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = Span(5, Seconds))
 
   private val thread = ThreadId("t")
   private val run    = RunId("r1")
@@ -29,6 +32,15 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers:
       RunEvent.RunStarted(None, None)
     )
 
+  private def terminal(seq: Long): EventRecord =
+    EventRecord(thread.value, seq, run.value, None, None, None, java.time.Instant.EPOCH, RunEvent.RunCompleted)
+
+  private def label(event: StreamEvent): String = event match
+    case StreamEvent.Durable(r)                => r.seq.toString
+    case StreamEvent.Disconnected(_, reason)   => s"Disconnected($reason)"
+    case StreamEvent.LiveGap(n)                => s"gap:$n"
+    case StreamEvent.Live(_, _, _, _, _, _, p) => s"live:${p.num.toInt}"
+
   private def live(i: Int): StreamEvent.Live =
     StreamEvent.Live(thread.value, run.value, "task", "node", "test.progress", 1, ujson.Num(i))
 
@@ -37,12 +49,7 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers:
     val seen  = new CopyOnWriteArrayList[String]()
     val ended = new CountDownLatch(1)
     def apply(event: StreamEvent): Unit =
-      seen.add(event match
-        case StreamEvent.Durable(r)                => r.seq.toString
-        case StreamEvent.Disconnected(_, reason)   => s"Disconnected($reason)"
-        case StreamEvent.LiveGap(n)                => s"gap:$n"
-        case StreamEvent.Live(_, _, _, _, _, _, p) => s"live:${p.num.toInt}"
-      )
+      seen.add(label(event))
       if event.isInstanceOf[StreamEvent.Disconnected] then ended.countDown()
     def runEnded(runId: RunId): Unit =
       seen.add(s"end:${runId.value}")
@@ -108,16 +115,90 @@ class EventHubReplaySpec extends AnyFlatSpec with Matchers:
     hub.durable(thread, Vector(record(3))) // the 2 dropped are held as a gap marker, in the last slot
     (6 to 7).foreach(i => hub.live(thread, live(i)))
     log = log :+ record(4)
-    hub.durable(thread, Vector(record(4))) // all slots taken: merged into that gap marker
-    hub.live(thread, live(8))              // dropped, and pending: reported with the barrier
+    // all slots taken: merged into that gap marker, which moves to just before 4 - 6 and 7 were
+    // dropped after 3, so reporting them before it would be early; 4 and 5 are reported late instead
+    hub.durable(thread, Vector(record(4)))
+    hub.live(thread, live(8)) // dropped, and pending: reported with the barrier
     sub.endOfRun(run)
     store.release.countDown()
     listener.awaitEnd() shouldBe
-      Vector("1", "2", "live:1", "live:2", "live:3", "gap:4", "3", "4", "gap:1", "end:r1")
+      Vector("1", "2", "live:1", "live:2", "live:3", "3", "gap:4", "4", "gap:1", "end:r1")
     sub.cancel()
   }
 
-  it should "count held live events as dropped when its catch-up makes it lag" in {
+  // A commit is written to the store before the hub hands it over, so a replay can read one that has
+  // not been handed over yet. A subscription that joins mid-run, before any commit is handed to it,
+  // must still place a live event sent before that commit ahead of it.
+
+  "A subscription joining mid-run" should "deliver a live event sent before a commit the replay reads early before it" in {
+    @volatile var log = Vector(record(1))
+    val store         = ScriptedLog(_ => log)
+    val hub           = EventHub(store)
+    hub.durable(thread, Vector(record(1))) // the run's claim, handed over before the subscription
+    val listener = Recording()
+    val sub      = hub.subscribe(thread, afterSeq = 0L, capacity = 16, listener).fold(e => fail(e.message), identity)
+    store.reading.await(5, TimeUnit.SECONDS) shouldBe true
+    hub.live(thread, live(1)) // the node's progress: nothing handed to this subscription yet
+    log = log :+ record(2)    // then the node's commit is written ...
+    store.release.countDown() // ... and the replay reads it before it is handed over
+    eventually(listener.seen.asScala should contain("live:1"))
+    hub.durable(thread, Vector(record(2))) // the hand-over
+    eventually(listener.seen.asScala should contain("2"))
+    // what a subscription already past its replay, or an Observer, sees
+    listener.seen.asScala.toVector shouldBe Vector("1", "live:1", "2")
+    sub.cancel()
+  }
+
+  it should "deliver a run-scoped listener a live event sent before its run's terminal commit" in {
+    @volatile var log = Vector(record(1))
+    val store         = ScriptedLog(_ => log)
+    val hub           = EventHub(store)
+    hub.durable(thread, Vector(record(1)))
+    val seen  = new CopyOnWriteArrayList[String]()
+    val scope = org.llm4s.agent.RunScope(run, e => seen.add(label(e)): Unit)
+    val sub   = hub.subscribe(thread, afterSeq = 0L, capacity = 16, scope).fold(e => fail(e.message), identity)
+    scope.attach(sub)
+    store.reading.await(5, TimeUnit.SECONDS) shouldBe true
+    hub.live(thread, live(1))
+    log = log :+ terminal(2)
+    store.release.countDown()
+    eventually(seen.asScala should contain("live:1"))
+    hub.durable(thread, Vector(terminal(2)))
+    sub.endOfRun(run)
+    // the scope ends at its terminal event: a live event delivered after it would be lost
+    eventually(seen.asScala should contain("2"))
+    seen.asScala.toVector shouldBe Vector("1", "live:1", "2")
+  }
+
+  it should "deliver a live event sent between a commit's write and its hand-over before it" in {
+    @volatile var log = Vector(record(1))
+    val store         = ScriptedLog(_ => log)
+    val hub           = EventHub(store)
+    hub.durable(thread, Vector(record(1)))
+    val listener = Recording()
+    val sub      = hub.subscribe(thread, afterSeq = 0L, capacity = 16, listener).fold(e => fail(e.message), identity)
+    log = log :+ record(2) // written, not yet handed over
+    store.reading.await(5, TimeUnit.SECONDS) shouldBe true
+    store.release.countDown()
+    eventually(listener.seen.asScala should contain("1"))
+    // held or, once the subscription has switched to live, queued: either way before 2
+    hub.live(thread, live(1))
+    hub.durable(thread, Vector(record(2)))
+    eventually(listener.seen.asScala should contain("2"))
+    listener.seen.asScala.toVector shouldBe Vector("1", "live:1", "2")
+    sub.cancel()
+  }
+
+  "The hub" should "keep a thread's hand-over mark only until the thread is released" in {
+    val hub = EventHub(ScriptedLog(_ => Vector.empty))
+    hub.marked(thread) shouldBe false
+    hub.durable(thread, Vector(record(1), record(2)))
+    hub.marked(thread) shouldBe true
+    hub.release(thread)
+    hub.marked(thread) shouldBe false
+  }
+
+  "A replaying subscription" should "count held live events as dropped when its catch-up makes it lag" in {
     // the replay's read finds nothing; the switch to live's catch-up finds five commits
     @volatile var log = Vector.empty[EventRecord]
     val store         = ScriptedLog(n => if n == 1 then Vector.empty else log)

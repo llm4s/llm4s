@@ -123,12 +123,15 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
    * and its dispatcher (a virtual thread, parked while idle) lives until [[Subscription.cancel]];
    * see there for how cancel waits on a running listener. Only commits made through this runtime are
    * delivered live; another runtime or process sharing the checkpointer is seen only by subscribing
-   * again, which replays the log (store-level change notification is Stage 2). Returns at once: replay runs on the
-   * subscription's dispatcher thread, the only thread `listener` is called on, and a failed replay
-   * ends it with [[DisconnectReason.ReplayFailed]]. The subscription receives every live event sent
-   * after this returns: one sent while it replays is held - up to `capacity`, the rest dropped and
-   * counted as a [[StreamEvent.LiveGap]] - and delivered after the durable events committed before
-   * it and before those committed after it, as live events are once the replay is done. A listener that throws is disconnected
+   * again, which replays the log (store-level change notification is Stage 2). Returns without
+   * replaying: replay runs on the subscription's dispatcher thread, the only thread `listener` is
+   * called on, and a failed replay ends it with [[DisconnectReason.ReplayFailed]]. Joining the event
+   * hub takes its lock, which another subscription to any thread holds for its final catch-up read
+   * of the store, so `subscribe` can wait behind that one read. The subscription receives every live
+   * event sent after this returns: one sent while it replays is held - up to `capacity`, the rest
+   * dropped and counted as a [[StreamEvent.LiveGap]] - and delivered after the durable events
+   * committed before it and before those committed after it, as live events are once the replay is
+   * done. A listener that throws is disconnected
    * ([[DisconnectReason.ListenerFailed]]). `capacity` bounds durable and live events separately,
    * so live events never crowd out durable ones, and must be at least two: a live event is queued
    * only while two live slots are free, one being reserved for the [[StreamEvent.LiveGap]] marker
@@ -380,7 +383,17 @@ final class GraphRuntime(checkpointer: Checkpointer, clock: Clock = Clock.system
         Thread.currentThread().interrupt()
         Left(CancelledError("graph run admission", Some(interrupted)))
 
-  private def release(threadId: ThreadId): Unit = withLock(activeLock)(active.remove(threadId.value)): Unit
+  /**
+   * Releases the thread's claim. The event hub forgets the thread's hand-over mark first, while the
+   * thread is still held: every event of the run has been handed over, and no other run can claim
+   * the thread, and set a new mark, until it is released.
+   */
+  private def release(threadId: ThreadId): Unit =
+    hub.release(threadId)
+    withLock(activeLock)(active.remove(threadId.value)): Unit
+
+  /** Whether the event hub holds a hand-over mark for the thread; for tests. */
+  private[graph] def handOverMarked(threadId: ThreadId): Boolean = hub.marked(threadId)
 
   private def started(config: RunConfig): RunEvent =
     RunEvent.RunStarted(config.tenantId.map(_.value), config.principal.map(_.value))

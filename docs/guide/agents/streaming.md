@@ -116,7 +116,9 @@ start again. A task that `recover` runs again starts at attempt 1 under a new ta
 - `AgentRun.subscribe(capacity = 1024)(listener)` attaches later, to a run you started with
   `start`. It replays the run's durable events from its start, then delivers new ones, but it
   misses live events sent before it attached. Live events sent after it returns are not lost
-  while it replays: they are held and delivered in their place among the durable events.
+  while it replays: they are held and delivered in their place among the durable events. Up to
+  `capacity` are held; beyond that they are dropped and counted, as for a full queue, and the
+  listener gets a `LiveGap(dropped)` where they would have been.
 
 Both are run-scoped: a listener sees only this run's events, even when other runs share the thread,
 and ends after the run's terminal event (`RunCompleted`, `RunSuspended`, `RunFailed`,
@@ -264,7 +266,8 @@ listener { case Checked(v) => ... } // None for another name, version or an unde
   the log through the kernel event, not through an `agent.*` event.
 - **Live events are not replayed**, and a late `subscribe` misses earlier ones. A subscription
   receives every live event sent after `subscribe` returns, so `GraphRuntime.subscribe` followed by
-  `start` sees all of the run's.
+  `start` sees all of the run's - unless more arrive than its `capacity` holds, while it replays or
+  before its listener drains them: those are dropped and reported as a `LiveGap` with their count.
 
 See also the [observability guide](../observability/), the
 [migration note](../../reference/migration.html), and
