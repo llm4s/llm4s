@@ -95,7 +95,9 @@ object DateTimeTool {
         "format",
         Schema.nullable(
           Schema
-            .string("Output format: 'iso' for ISO-8601, 'human' for human-readable. Defaults to 'iso'.")
+            .string(
+              "Output format: 'iso' for ISO-8601, 'human' for human-readable. Defaults to 'iso' when omitted or null."
+            )
             .withEnum(SupportedFormats)
         ),
         required = false
@@ -105,7 +107,13 @@ object DateTimeTool {
   /**
    * The date/time tool instance, returning a Result for safe error handling.
    */
-  val toolSafe: Result[ToolFunction[Map[String, Any], DateTimeResult]] =
+  val toolSafe: Result[ToolFunction[Map[String, Any], DateTimeResult]] = toolSafe(Clock.systemUTC())
+
+  /**
+   * The tool reading the time from `clock`, so tests can pin the instant (a daylight-saving transition, a year end).
+   * Only the clock's instant is used; its zone is ignored, the `timezone` parameter decides that.
+   */
+  private[core] def toolSafe(clock: Clock): Result[ToolFunction[Map[String, Any], DateTimeResult]] =
     ToolBuilder[Map[String, Any], DateTimeResult](
       name = "get_current_datetime",
       description = "Get the current date and time, optionally in a specific timezone. " +
@@ -117,33 +125,31 @@ object DateTimeTool {
         formatParam   <- extractor.getOptionalString("format").left.map(_.getMessage)
         timezone = timezoneParam.getOrElse("UTC")
         format <- parseFormat(formatParam.getOrElse("iso"))
-        result <- Try {
-          val zoneId = ZoneId.of(timezone)
-          val now    = ZonedDateTime.now(zoneId)
-
-          val formattedDateTime = format match {
-            case Format.Human => now.format(HumanFormatter)
-            case Format.Iso   => now.format(DateTimeFormatter.ISO_ZONED_DATE_TIME)
-          }
-
-          DateTimeResult(
-            datetime = formattedDateTime,
-            timezone = timezone,
-            timestamp = now.toInstant.toEpochMilli,
-            iso8601 = now.format(DateTimeFormatter.ISO_ZONED_DATE_TIME),
-            components = DateTimeComponents(
-              year = now.getYear,
-              month = now.getMonthValue,
-              day = now.getDayOfMonth,
-              hour = now.getHour,
-              minute = now.getMinute,
-              second = now.getSecond,
-              dayOfWeek = now.getDayOfWeek.toString
-            )
-          )
-        }.toEither.left.map(e => s"Invalid timezone '$timezone': ${e.getMessage}")
-      } yield result
+        zoneId <- Try(ZoneId.of(timezone)).toEither.left.map(e => s"Invalid timezone '$timezone': ${e.getMessage}")
+      } yield describe(ZonedDateTime.ofInstant(clock.instant(), zoneId), timezone, format)
     }.buildSafe()
+
+  private def describe(now: ZonedDateTime, timezone: String, format: Format): DateTimeResult = {
+    val iso = now.format(DateTimeFormatter.ISO_ZONED_DATE_TIME)
+    DateTimeResult(
+      datetime = format match {
+        case Format.Human => now.format(HumanFormatter)
+        case Format.Iso   => iso
+      },
+      timezone = timezone,
+      timestamp = now.toInstant.toEpochMilli,
+      iso8601 = iso,
+      components = DateTimeComponents(
+        year = now.getYear,
+        month = now.getMonthValue,
+        day = now.getDayOfMonth,
+        hour = now.getHour,
+        minute = now.getMinute,
+        second = now.getSecond,
+        dayOfWeek = now.getDayOfWeek.toString
+      )
+    )
+  }
 
   /**
    * Get list of common timezone identifiers.

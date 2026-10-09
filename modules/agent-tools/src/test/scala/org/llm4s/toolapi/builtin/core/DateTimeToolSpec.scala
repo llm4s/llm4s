@@ -5,7 +5,7 @@ import org.scalatest.OptionValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.time.{ Instant, ZoneId, ZonedDateTime }
+import java.time.{ Clock, Instant, ZoneId, ZoneOffset, ZonedDateTime }
 import java.time.format.TextStyle
 import java.util.Locale
 import scala.util.Using
@@ -13,10 +13,10 @@ import scala.util.Using
 /**
  * Tests for [[DateTimeTool]].
  *
- * The tool reads the current time directly (`ZonedDateTime.now`) and has no clock seam, so nothing here asserts a
- * wall-clock value. Each result is instead checked against ITSELF and against `java.time`: the `timestamp` has to be
- * close to the moment the test called the tool, and everything else (`components`, `iso8601`, the offset) has to agree
- * with that timestamp in the requested zone. That holds whenever the suite runs, in any default timezone or locale.
+ * The public tool reads the system clock, so the tests of it assert no wall-clock value: each result is checked against
+ * ITSELF and against `java.time` (the `timestamp` has to be close to the moment the test called the tool, and everything
+ * else has to agree with that timestamp in the requested zone). The exact values - daylight-saving transitions, a year
+ * end, the 12-hour clock - are asserted through `DateTimeTool.toolSafe(clock)` with a fixed clock.
  *
  * The `human` text is English whatever the host's default locale is: the locale tests below change the default and
  * check that it stays the same.
@@ -371,6 +371,76 @@ class DateTimeToolSpec extends AnyFlatSpec with Matchers with OptionValues {
       .fold(e => fail(s"Expected defaults: $e"), identity)
     json("timezone").str shouldBe "UTC"
     json("datetime").str shouldBe json("iso8601").str
+  }
+
+  // ---- exact values, with a fixed clock
+
+  private def callAt(instant: String, params: (String, ujson.Value)*): DateTimeResult =
+    DateTimeTool
+      .toolSafe(Clock.fixed(Instant.parse(instant), ZoneOffset.UTC))
+      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+      .handler(SafeParameterExtractor(ujson.Obj.from(params)))
+      .fold(err => fail(s"Expected Right but got Left: $err"), identity)
+
+  "DateTimeTool with a fixed clock" should "report exactly that instant, in UTC by default" in {
+    val result = callAt("2026-07-04T00:05:09.123Z")
+    result.timestamp shouldBe Instant.parse("2026-07-04T00:05:09.123Z").toEpochMilli
+    result.iso8601 shouldBe "2026-07-04T00:05:09.123Z[UTC]"
+    result.datetime shouldBe result.iso8601
+    result.components shouldBe DateTimeComponents(2026, 7, 4, 0, 5, 9, "SATURDAY")
+  }
+
+  it should "take the zone from the timezone parameter, never from the clock" in {
+    val result = DateTimeTool
+      .toolSafe(Clock.fixed(Instant.parse("2026-07-04T00:05:09Z"), ZoneId.of("Asia/Tokyo")))
+      .fold(e => fail(s"Tool creation failed: ${e.formatted}"), identity)
+      .handler(SafeParameterExtractor(ujson.Obj()))
+      .fold(err => fail(s"Expected Right but got Left: $err"), identity)
+    result.iso8601 shouldBe "2026-07-04T00:05:09Z[UTC]"
+  }
+
+  it should "write midnight and noon on the 12-hour clock with an English marker" in {
+    callAt("2026-07-04T00:05:09Z", "format" -> "human").datetime should startWith(
+      "Saturday, July 4, 2026 at 12:05:09 AM"
+    )
+    callAt("2026-07-04T12:05:09Z", "format" -> "human").datetime should startWith(
+      "Saturday, July 4, 2026 at 12:05:09 PM"
+    )
+  }
+
+  it should "write the same human text under any default locale" in {
+    val expected = "Thursday, December 31, 2026 at 11:59:59 PM"
+    Seq("en-US", "de-DE", "ar-SA", "th-TH-u-nu-thai", "hi-IN", "ja-JP-u-ca-japanese").foreach { tag =>
+      withDefaultLocale(Locale.forLanguageTag(tag)) {
+        withClue(s"default locale $tag: ") {
+          callAt("2026-12-31T23:59:59Z", "format" -> "human").datetime should startWith(expected)
+        }
+      }
+    }
+  }
+
+  it should "cross the year in a zone ahead of UTC" in {
+    val result = callAt("2026-12-31T23:59:59Z", "timezone" -> "Pacific/Auckland")
+    result.iso8601 shouldBe "2027-01-01T12:59:59+13:00[Pacific/Auckland]"
+    result.components shouldBe DateTimeComponents(2027, 1, 1, 12, 59, 59, "FRIDAY")
+  }
+
+  it should "jump the clock forward at the spring daylight-saving gap" in {
+    // America/New_York, 8 March 2026: 01:59:59 EST is followed by 03:00:00 EDT.
+    callAt("2026-03-08T06:59:59Z", "timezone" -> "America/New_York").iso8601 shouldBe
+      "2026-03-08T01:59:59-05:00[America/New_York]"
+    callAt("2026-03-08T07:00:00Z", "timezone" -> "America/New_York").iso8601 shouldBe
+      "2026-03-08T03:00:00-04:00[America/New_York]"
+  }
+
+  it should "tell the two passes of the repeated autumn hour apart by offset and timestamp" in {
+    // America/New_York, 1 November 2026: 01:30 happens twice, first in EDT and then in EST.
+    val first  = callAt("2026-11-01T05:30:00Z", "timezone" -> "America/New_York")
+    val second = callAt("2026-11-01T06:30:00Z", "timezone" -> "America/New_York")
+    first.components shouldBe second.components
+    first.iso8601 shouldBe "2026-11-01T01:30:00-04:00[America/New_York]"
+    second.iso8601 shouldBe "2026-11-01T01:30:00-05:00[America/New_York]"
+    (second.timestamp - first.timestamp) shouldBe 3600000L
   }
 
   "DateTimeTool executed without arguments" should "answer with the defaults, for null as for an empty object" in {
