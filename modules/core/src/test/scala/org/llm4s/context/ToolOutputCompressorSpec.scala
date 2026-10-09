@@ -1,6 +1,7 @@
 package org.llm4s.context
 
 import org.llm4s.llmconnect.model._
+import org.llm4s.testutil.SmallStack
 import org.llm4s.types.ArtifactKey
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -275,5 +276,22 @@ class ToolOutputCompressorSpec extends AnyFlatSpec with Matchers {
 
     result.isRight shouldBe true
     result.toOption.get.length shouldBe 5
+  }
+
+  // A tool result is untrusted input: JSON nested too deeply to parse is treated as text, both on
+  // the inline-compression path (above 2 KB) and the externalisation path (above the threshold), and
+  // never overflows the stack (#1562). On a 1 MB stack, so the outcome is deterministic.
+  it should "treat a tool result nested too deeply to parse as text instead of overflowing the stack" in {
+    val inline       = "[" * 2000 + "]" * 2000 // 4 KB: compressed inline, below the 8 KB threshold
+    val externalized = "[" * 100000 + "]" * 100000
+    Seq(inline, externalized).foreach { deep =>
+      val store = ArtifactStore.inMemory()
+      withClue(s"${deep.length} bytes: ") {
+        SmallStack.run(ToolOutputCompressor.compressToolOutputs(Seq(ToolMessage(deep, "call_1")), store)) match {
+          case Right(Right(messages)) => messages should have size 1
+          case other                  => fail(s"expected Right(Right(messages)), got ${other.toString.take(200)}")
+        }
+      }
+    }
   }
 }

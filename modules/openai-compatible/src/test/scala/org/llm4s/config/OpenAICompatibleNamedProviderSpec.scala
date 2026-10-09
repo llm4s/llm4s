@@ -380,7 +380,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
       cfg.extras shouldBe empty
       warnings shouldBe Seq(
         "llm4s.providers.deepseek-window has unknown key(s) contextWindow, which are ignored. Besides the " +
-          "built-in fields (apiKey, baseUrl, headers, model, provider), provider = deepseek declares no " +
+          "built-in fields (apiKey, baseUrl, headers, model, provider, timeouts), provider = deepseek declares no " +
           "provider-specific keys."
       )
     }

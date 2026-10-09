@@ -14,11 +14,19 @@ import org.llm4s.it.tags.Docker
 /**
  * Integration tests for PostgresMemoryStore.
  *
- * These tests are skipped by default in CI to avoid dependency issues.
- * To run them locally:
+ * Tier 2 (`@Docker`). CI's `Integration Tests` job runs this suite on every pull request
+ * (`sbt testIntegration`): it starts a pgvector service container, sets
+ * `POSTGRES_TEST_ENABLED=true` and `LLM4S_IT_STRICT=true` (so a missing flag would fail the
+ * tests rather than skip them, see `Tier.require`).
+ *
+ * Locally the tests are skipped (cancelled) unless `POSTGRES_TEST_ENABLED=true` is set. To run them:
  *   1. Start Postgres: docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=password pgvector/pgvector:pg16
  *   2. Enable tests: export POSTGRES_TEST_ENABLED=true
  *   3. Run: sbt "it/testOnly org.llm4s.agent.memory.PostgresMemoryStoreSpec"
+ *
+ * The connection comes from `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER` and
+ * `POSTGRES_PASSWORD`; the defaults are localhost:5432, database `postgres`, user `postgres`,
+ * password `password`, which match the docker command above.
  */
 @Docker
 class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {

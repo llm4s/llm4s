@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
+import org.llm4s.testutil.{ EchoedCredentials, SmallStack }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -170,6 +171,21 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       argumentsSent(ujson.Arr(1, 2)) shouldBe ujson.Obj()
       argumentsSent(ujson.Num(7)) shouldBe ujson.Obj()
       argumentsSent(ujson.Null) shouldBe ujson.Obj()
+    }
+
+    "send an empty object for string arguments nested too deeply, never the parsed document" in {
+      // A string argument is model text (the accumulator keeps streamed arguments as a `Str`). Parsing
+      // one this deep succeeds - the parser is iterative - but the object it builds overflows the stack
+      // when the request body is rendered, so it is refused before parsing and sent as `{}`, as any
+      // string that is not a JSON object is. On a 1 MB stack, so an overflow is a `Left` here (#1562).
+      val deep = "{\"a\":" * 100000 + "1" + "}" * 100000
+      val call = ToolCall("c", "get_weather", ujson.Str(deep))
+      val outcome = SmallStack.run {
+        val body = requestBody(Conversation(Seq(UserMessage("q"), AssistantMessage(None, Seq(call)))))
+        val sent = body("messages")(1)("tool_calls")(0)("function")("arguments")
+        (sent == ujson.Obj(), ujson.write(body).length < 10000)
+      }
+      outcome shouldBe Right((true, true))
     }
 
     "send a tool result as `role: tool`, naming the tool of the call it answers" in {
@@ -338,6 +354,45 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
       }
     }
 
+    "refuse string arguments nested too deeply as a malformed call, never an overflow" in {
+      // The string is model text inside the envelope's string literal: the envelope parses, and the
+      // second parse is the boundary. On a 1 MB stack, reduced inside the thread, since rendering a
+      // value this deep in a failure message would itself overflow (#1562).
+      val deep = "{\"a\":" * 100000 + "1" + "}" * 100000
+      withOllama(reply("", call("get_weather", ujson.Str(deep)))) { (client, _) =>
+        val outcome = SmallStack.run(
+          ask(client).left.map(e => (e.getClass.getSimpleName, e.message)).map(_ => "a completion")
+        )
+        outcome match {
+          case Right(Left((kind, message))) =>
+            kind shouldBe "ProcessingError"
+            message should include("malformed tool call")
+            message should include("arguments are nested more than 512 levels deep")
+          case Right(Right(other)) => fail(s"expected a Left, got $other")
+          case Left(thrown)        => fail(s"expected a Left, but complete threw $thrown")
+        }
+      }
+    }
+
+    "name the depth when refusing string arguments just over the limit, never 'not a JSON object'" in {
+      // 513 levels: one over the limit, and a document the parser would otherwise have read as an object.
+      // The site tells a too-deep refusal from a parse failure through `BoundedJson.TooDeep` (#1651); if
+      // that detection fell through, the call would be refused for the wrong reason.
+      val justOver = "{\"a\":" * 513 + "1" + "}" * 513
+      withOllama(reply("", call("get_weather", ujson.Str(justOver)))) { (client, _) =>
+        ask(client) match {
+          case Left(e: ProcessingError) =>
+            e.message should include("arguments are nested more than 512 levels deep")
+            (e.message should not).include("not a JSON object")
+          case other => fail(s"expected a ProcessingError, got $other")
+        }
+      }
+      val atLimit = "{\"a\":" * 512 + "1" + "}" * 512
+      withOllama(reply("", call("get_weather", ujson.Str(atLimit)))) { (client, _) =>
+        ask(client).toOption.get.toolCalls.head.arguments.obj.keySet shouldBe Set("a")
+      }
+    }
+
     "read no tool calls from a missing, null or empty `tool_calls`" in {
       def callsOf(message: ujson.Obj): List[ToolCall] = {
         var calls = List.empty[ToolCall]
@@ -451,6 +506,26 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
 
     "leave the same message alone on any other status" in {
       withStatus(500, unsupported)(client => ask(client).left.toOption.get shouldBe a[ServiceError])
+    }
+
+    "redact credentials the server echoes in its message (#1674)" in {
+      val echoing = ujson.Obj("error" -> s"${EchoedCredentials.Text} does not support tools").render()
+      withStatus(400, echoing) { client =>
+        val error = validation(ask(client))
+        error.field shouldBe "tools"
+        error.message should include("[REDACTED]")
+        EchoedCredentials.leaked(error.message) shouldBe empty
+      }
+    }
+
+    "redact the server's whole message before cutting it to 200 characters (#1674)" in {
+      // The decoded message carries a key that the 200-character cut would split, leaving a fragment
+      // too short for the key pattern to recognise.
+      val key     = "sk-proj-" + ("abc123def456ghi789jk" * 2)
+      val lead    = "x" * (200 - "sk-proj-".length - 10)
+      val message = OllamaClient.serverMessage(ujson.Obj("error" -> s"$lead$key does not support tools").render())
+      (message should not).include("sk-proj-abc123def4")
+      message should include("[REDACTED]")
     }
   }
 

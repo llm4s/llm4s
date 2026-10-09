@@ -266,10 +266,10 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
 
   it should "not list a directory that is a symbolic link unless followSymlinks is set" in {
     assume(!isWindows, "creating symbolic links needs a privilege on Windows")
-    val dir     = tempDir()
-    val outside = tempDir()
-    Files.writeString(outside.resolve("secret.txt"), "secret")
-    val link = Files.createSymbolicLink(dir.resolve("link"), outside)
+    val dir    = tempDir()
+    val target = Files.createDirectory(dir.resolve("target"))
+    Files.writeString(target.resolve("note.txt"), "inside")
+    val link = Files.createSymbolicLink(dir.resolve("link"), target)
     def listLink(follow: Boolean) =
       call(
         BuiltinTools
@@ -282,7 +282,33 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
       )
 
     listLink(follow = false).left.value.getMessage should include("Not a directory")
-    listLink(follow = true).value("entries").arr.map(_("name").str) should contain("secret.txt")
+    listLink(follow = true).value("entries").arr.map(_("name").str) should contain("note.txt")
+  }
+
+  it should "refuse a link that leads outside allowedPaths whether or not followSymlinks is set" in {
+    assume(!isWindows, "creating symbolic links needs a privilege on Windows")
+    val dir     = tempDir()
+    val outside = tempDir()
+    Files.writeString(outside.resolve("secret.txt"), "secret")
+    val link = Files.createSymbolicLink(dir.resolve("link"), outside)
+    def tools(follow: Boolean) =
+      BuiltinTools
+        .customSafe(fileConfig =
+          Some(FileConfig(allowedPaths = Some(Seq(dir.toString)), blockedPaths = Seq.empty, followSymlinks = follow))
+        )
+        .value
+
+    for (follow <- Seq(false, true))
+      withClue(s"followSymlinks = $follow: ") {
+        call(tools(follow), "list_directory", ujson.Obj("path" -> link.toString)).left.value.getMessage should
+          include("Access denied")
+        call(
+          tools(follow),
+          "read_file",
+          ujson.Obj("path" -> link.resolve("secret.txt").toString)
+        ).left.value.getMessage should
+          include("Access denied")
+      }
   }
 
   "WriteConfig" should "write inside allowedPaths, refuse outside, and refuse to overwrite by default" in {
@@ -454,7 +480,7 @@ class BuiltinToolsGuideSpec extends AnyFlatSpec with Matchers with EitherValues 
     call(tools, "shell_command", ujson.Obj("command" -> "pwd")).value("stdout").str.trim shouldBe dir.toString
   }
 
-  it should "hand the child process the environment of the process that runs the tool" in {
+  it should "hand the child process the variables in inheritedEnvironment, PATH among them" in {
     assume(!isWindows, "printenv is a POSIX program")
     val tools =
       BuiltinTools.customSafe(shellConfig = Some(ShellConfig(allowedCommands = Seq("printenv")))).value

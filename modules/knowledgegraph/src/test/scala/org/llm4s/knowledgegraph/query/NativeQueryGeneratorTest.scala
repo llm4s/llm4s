@@ -3,6 +3,7 @@ package org.llm4s.knowledgegraph.query
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
+import org.llm4s.testutil.SmallStack
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion }
 import org.llm4s.error.ProcessingError
@@ -187,5 +188,26 @@ class NativeQueryGeneratorTest extends AnyFunSuite with Matchers with MockFactor
     QueryLanguage.Cypher.name shouldBe "Cypher"
     QueryLanguage.Gremlin.name shouldBe "Gremlin"
     QueryLanguage.SPARQL.name shouldBe "SPARQL"
+  }
+
+  // The reply is model output: nested too deeply it is a Left naming the limit, refused before it is
+  // parsed into a value whose rendering (here, the error message for a missing `query` field)
+  // overflows the stack - a StackOverflowError is not caught by `Try` and escaped the Result (#1562).
+  // On a 1 MB stack, so the outcome is deterministic.
+  test("generate returns a Left naming the limit, not a StackOverflowError, for a reply nested too deeply") {
+    val llmClient = mock[LLMClient]
+    val generator = new NativeQueryGenerator(llmClient)
+
+    (llmClient.complete _)
+      .expects(*, *)
+      .returning(Right(makeCompletion("[" * 100000 + "]" * 100000)))
+
+    SmallStack.run(generator.generate("Find Alice", QueryLanguage.Cypher)) match {
+      case Right(Left(e: ProcessingError)) =>
+        e.operation shouldBe "native_query_parse"
+        e.message should include("512")
+      case Right(other) => fail(s"expected a ProcessingError, got $other")
+      case Left(thrown) => fail(s"expected a Left, but generate threw $thrown")
+    }
   }
 }

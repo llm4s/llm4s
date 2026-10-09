@@ -113,3 +113,5 @@ private[config] object NamedProviderLoader:
     summon[ProviderRegistry]
       .resolve(section.provider, Some(s"llm4s.providers.$providerName.provider"))
       .flatMap(_.buildConfig(providerName, section))
+      // The timeouts block is read once, for every provider; a config that carries it takes it here.
+      .map(_.withTimeouts(section.timeouts))

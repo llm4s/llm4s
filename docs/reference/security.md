@@ -1,3 +1,10 @@
+---
+layout: page
+title: Security Reference
+parent: Reference
+nav_order: 16
+---
+
 # Security Reference
 
 This document covers the threat model, trust boundaries, known risks, and mitigations for LLM4S.
@@ -71,10 +78,11 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 **Risk:** The built-in `HTTPTool` could be directed to internal network addresses, cloud metadata endpoints (169.254.169.254), or loopback addresses.
 
 **Mitigation (implemented):**
-- `HttpConfig.blockInternalIPs = true` by default; `NetworkSecurity.validateHostname()` resolves DNS and checks resolved IPs against private CIDR ranges (RFC 1918, RFC 5735, RFC 4193) and link-local ranges.
+- `HttpConfig.blockInternalIPs = true` by default; `NetworkSecurity.validateHostname()` resolves DNS and refuses a resolved IP that is loopback, link-local (including `169.254.0.0/16` and `fe80::/10`), private (RFC 1918 for IPv4, unique-local `fc00::/7` and the deprecated site-local `fec0::/10` for IPv6), multicast, unspecified or in `0.0.0.0/8`, as well as the cloud metadata address, the documentation ranges (RFC 5737; `2001:db8::/32`, `3fff::/20`), carrier-grade NAT (`100.64.0.0/10`), benchmarking (`198.18.0.0/15`, `2001:2::/48`), IPv6 discard-only (`100::/64`), Teredo (`2001::/32`), local-use NAT64 (`64:ff9b:1::/48`) and the deprecated IPv4-compatible form (`::/96`). An IPv6 address that carries an IPv4 address - IPv4-mapped (`::ffff:0:0/96`), NAT64 (`64:ff9b::/96`) and 6to4 (`2002::/16`) - is refused when the IPv4 address it carries would be.
 - `HttpConfig.DefaultBlockedDomains` blocks `localhost`, `127.0.0.1`, `0.0.0.0`, `::1`, `metadata.google.internal`, `metadata.internal`, and `169.254.169.254` by hostname.
 - Redirects are NOT followed by default (`followRedirects = false`). When enabled, each redirect hop is individually re-validated against the SSRF filter.
-- Sensitive headers (`Authorization`, `Cookie`, `Proxy-Authorization`) are stripped on cross-origin redirect hops.
+- Sensitive headers (`Authorization`, `Cookie`, `Proxy-Authorization`) are stripped from the first redirect hop that leaves the original request's origin - a different scheme, host or port, so a downgrade from `https` to `http` counts - and stay stripped for every later hop, including one that returns to the original origin.
+- `HttpConfig.timeout` bounds the whole call: name resolution, connecting, every redirect hop and reading the body. A server that sends a byte at a time cannot hold the tool past it; the call fails with a `TIMEOUT:` error.
 - Only `GET` and `HEAD` methods are allowed by default (read-only).
 
 **Residual risk:** DNS rebinding attacks (where a hostname resolves to a public IP during validation but a private IP at connection time) are not explicitly mitigated at the Java `HttpURLConnection` level.
@@ -85,18 +93,65 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 
 **Mitigation:**
 - `SQLiteMemoryStore` path is chosen by the application developer. Use a path under a directory with restricted permissions (e.g., `chmod 700`).
-- For ephemeral use, pass `":memory:"` to `SQLiteMemoryStore.inMemory()` — no files are created.
+- For ephemeral use, use `SQLiteMemoryStore.inMemory()`, which opens the database at `":memory:"` itself — no files are created.
 - Delete the `.db-journal` file alongside the database file when decommissioning a store.
 
 ### 6. Workspace Sandbox Escapes
 
-**Risk:** `WorkspaceRegexSafetyManager` uses pattern matching to decide which shell commands are allowed inside the containerised workspace. A carefully crafted command string might bypass the regex checks.
+**Risk:** the workspace runner's `executeCommand` lets an agent run programs inside the workspace. A program on the
+allowlist can do more than its name suggests: `find -exec` and `git -c alias.x='!cmd' x` run other programs,
+`find -delete` and `git clean` delete files, `sort -o` and `uniq in out` write them, `cp -L` and `chmod -L` follow
+links out of the workspace, and any path argument can name a file outside it
+([#1715](https://github.com/llm4s/llm4s/issues/1715)).
 
 **Mitigation (implemented):**
-- The regex-based allowlist restricts commands to a known safe set.
-- The workspace module runs in a Docker container, providing an additional OS-level boundary.
+- The command is split into words and started directly, without a shell, and shell metacharacters (`&`, `|`, `<`, `>`,
+  `^`, `;`, `` ` ``, `$`, `%`) are refused in every word.
+- The executable must be a bare name in `WorkspaceSandboxConfig.allowedCommands`; a path to an executable is
+  refused. What is enforced is decided by the runner's `WORKSPACE_SANDBOX_PROFILE` alone: unset, the runner uses
+  the `permissive` profile, whose list is `ReadWriteCommands` (`ReadOnlyCommands` plus `cp`, `mv`, `rm`, `mkdir`,
+  `touch`, `chmod`, `copy` and `move`); `locked` (`shellAllowed = false`) refuses every command; an unknown name stops
+  the runner. `ReadOnlyCommands` is the field default, for a `WorkspaceSandboxConfig` constructed directly. The
+  workspace client's `llm4s.workspace.sandbox.profile` does not reach the container. On Windows, built-ins such as
+  `echo`, `dir`, `type`, `copy` and `move` run through `cmd.exe /c`, after the forbidden-character check and the
+  checks below.
+- Each program's arguments are checked (`ARGUMENT_NOT_ALLOWED`): options that delete, write, run another program,
+  read a list of file names or follow symbolic links are refused (`find -delete`/`-exec`/`-fprint`/`-L`, `sort -o`,
+  `wc --files0-from`, `ls -L`, `grep -R`/`-S`, `cp -L`/`-H`/`-s`, `chmod -L`/`-H`), `uniq` takes at most one operand,
+  `hostname` none, and `git` runs only read subcommands (`status`, `log`, `show`, `diff`, `ls-files`, `ls-tree`,
+  `grep`, `blame`, `rev-parse`, listing `branch`) with no global option bar `--version`, `--no-pager` and a few
+  harmless ones, and without `--output`, `--ext-diff`, `--textconv`, `--show-signature` or `grep -O`. Every argument
+  is scanned, including those after `--`; short options are matched inside clusters and long options under any
+  abbreviation.
+- Every path argument, and the working directory, must really lie inside the workspace (`PATH_ESCAPE_ATTEMPT`):
+  it is resolved the way the kernel resolves it, following symbolic links component by component. For `cp`, so are
+  the names it will write, since `cp` writes through a link it finds there, and a recursive `cp` refuses a destination
+  directory that holds a link leading outside. An argument longer than 4096 characters, or a command whose paths need
+  more than 20000 lookups, is refused rather than walked.
+- `environment` may set only locale and display variables (`ENVIRONMENT_NOT_ALLOWED`), so `GIT_*`, `PAGER`,
+  `LD_PRELOAD`, `PATH` and `HOME` cannot redirect a program.
+- The runner normally runs in a Docker container, an additional OS-level boundary.
 
-**Recommended practice:** Treat the regex layer as defence-in-depth only. Do not grant the workspace access to credentials or network resources that an escaped process could exploit.
+**Not covered:**
+- `git` reads the repository's own `.git/config` and runs its hooks. Where the agent can write files (the
+  `writeFile` operation, or the read-write allowlist) it can set `core.fsmonitor`, `diff.external` or a filter driver,
+  or add a hook such as `.git/hooks/post-index-change`, which a later `git status` or `git diff` runs, or point git
+  at files outside through `core.worktree`, `.git/commondir` or `.git/objects/info/alternates`
+  ([#1721](https://github.com/llm4s/llm4s/issues/1721)).
+- `diff -r` follows symbolic links it meets inside the tree it walks, and no portable option stops it.
+- A link that the read-write list moves or copies to another depth (`mv a/b/rel rel`) can come to point outside.
+  Path arguments through it are refused, and a later recursive `cp` into its directory is refused, but the link
+  itself is not.
+- The checks run before the program starts; a link made at a checked name by a concurrent command is not seen.
+  Windows `copy` has the path rule but not `cp`'s destination checks.
+- A path rule cannot tell a path from text, so an argument or option value that is absolute or climbs out with `..`
+  is refused even when it is text: a `grep` pattern `/api` (write `[/]api`), `git log --grep=/x`. A relative value
+  without `..` (`--since=2024/01/01`, `--exclude=*/target/*`) and `sort -t/` run.
+
+**Recommended practice:** use the `locked` profile, or `ReadOnlyCommands`, unless the agent needs more. Leave `git`
+out of `allowedCommands` when the agent can also write files and the repository's configuration matters. Do not
+give the workspace credentials or network access that an escaped process could exploit. See
+[Workspace sandbox](workspace-sandbox#command-policy).
 
 ### 7. Dependency CVEs
 
@@ -107,7 +162,7 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 - Scala Steward (`.github/workflows/scala-steward.yml`, configured by `.scala-steward.conf`) opens weekly pull requests for outdated sbt dependencies, sbt plugins, sbt itself and the Scala version. Neither tool raises security alerts for sbt dependencies; they keep versions current, which is what keeps published fixes flowing in.
 - The `secret-scan.yml` workflow prevents committed secrets from reaching the repository.
 
-**Recommended practice:** Periodically run `sbt dependencyUpdates` locally and review the OWASP National Vulnerability Database for Scala ecosystem libraries.
+**Recommended practice:** Review the Scala Steward pull requests promptly, run `sbt dependencyUpdates` (from `sbt-dependency-updates`) to see what is behind, and check the National Vulnerability Database (NIST) for the libraries llm4s depends on.
 
 ## Security Checklist for PR Authors
 

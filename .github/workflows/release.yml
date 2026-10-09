@@ -156,13 +156,28 @@ jobs:
   # Deploy the docs once the release is published and visible. Deliberately independent
   # of the container image below: a registry failure must not leave llm4s.org advertising
   # the previous version when the release itself succeeded.
+  #
+  # pages.yml is DISPATCHED on `main` with this tag as its `ref`, not called as a reusable workflow.
+  # A called workflow runs on the caller's ref, here the tag, and the `github-pages` environment
+  # allows deployments only from `main`, so it rejected the deploy on every release (#1152). The
+  # dispatched run deploys from `main` and builds the tag's content. This job waits for that run and
+  # fails if the deploy fails, so the release does not go green over a docs deploy that never happened.
+  # (An environment rule for `v*` tags would also fix it; see docs/reference/release.md.)
   docs:
     needs: github-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
-      pages: write
-      id-token: write
-    uses: ./.github/workflows/pages.yml
+      actions: write  # to dispatch pages.yml and read its run; pages: write belongs to that run, not this job
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Deploy the docs from main, built from this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/dispatch-docs-deploy.sh "$GITHUB_REF_NAME"
 
   # Container image. Split out of `publish` so that a registry failure cannot fail the
   # release after the artifacts are already on Maven Central and irreversible.

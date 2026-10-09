@@ -9,6 +9,7 @@ import scala.util.Try
 import scala.concurrent.duration.*
 import scala.concurrent.{ Future, ExecutionContext, blocking }
 import org.llm4s.error.LLMError
+import org.llm4s.util.Redaction
 
 /**
  * HuggingFace Inference API client for image generation.
@@ -287,7 +288,13 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
           case 200 => Right(response.body)
           case 401 => Left(ImageAuthenticationError("Unauthorized"))
           case 429 => Left(ImageRateLimitError("Rate limit"))
-          case _   => Left(ImageServiceError(new String(response.body, java.nio.charset.StandardCharsets.UTF_8), 500))
+          case _ =>
+            Left(
+              ImageServiceError(
+                Redaction.safeBody(new String(response.body, java.nio.charset.StandardCharsets.UTF_8)),
+                500
+              )
+            )
         }
       }
   }

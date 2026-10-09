@@ -3,17 +3,17 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
-import org.llm4s.llmconnect.config.OpenAICompatibleConfig
+import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
-import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
+import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ Result, TryOps }
-import org.llm4s.util.Redaction
+import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.io.{ BufferedReader, InputStream, InputStreamReader }
 import java.nio.charset.StandardCharsets
@@ -84,7 +84,7 @@ class OpenAICompatibleClient(
           logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
           val result =
             if (response.statusCode >= 200 && response.statusCode < 300)
-              Try(parseCompletion(ujson.read(body))).toResult.map(bindThinking(_, conversation, options))
+              Try(parseCompletion(readReply(body))).toResult.map(bindThinking(_, conversation, options))
             else HttpErrorMapper.mapHttpError(response.statusCode, body, providerName, response.headers)
           recordExchange(startedAt, requestText, Some(body), result)
           result
@@ -154,7 +154,7 @@ class OpenAICompatibleClient(
       while (sseParser.hasEvents)
         sseParser.nextEvent().foreach { event =>
           event.data.filter(_ != "[DONE]").foreach { data =>
-            val json = ujson.read(data)
+            val json = readReply(data)
             // Usage arrives on the last event, alongside the final delta or on an event of its
             // own with no choices. A later report replaces an earlier one; one without both
             // counts is ignored rather than failing the stream.
@@ -162,14 +162,8 @@ class OpenAICompatibleClient(
             // the model that served the request, which a router may choose; reported as `Completion.model`
             json.obj.get("model").flatMap(_.strOpt).filter(_.nonEmpty).foreach(m => servedModel = Some(m))
             details ++= streamedThinkingDetails(json)
-            parseStreamingEvent(json, toolCalls).foreach { (chunk, rawArguments) =>
-              // The accumulator concatenates argument fragments, so it gets each fragment
-              // verbatim. The parsed form handed to `onChunk` cannot be concatenated safely:
-              // a fragment that is itself valid JSON, such as `"Paris"`, parses to the bare
-              // string and would lose its quotes.
-              accumulator.addChunk(
-                chunk.withToolCall(chunk.toolCall.map(_.copy(arguments = ujson.Str(rawArguments))))
-              )
+            parseStreamingChunks(json, toolCalls).foreach { chunk =>
+              accumulator.addChunk(chunk)
               onChunk(chunk)
             }
           }
@@ -189,6 +183,17 @@ class OpenAICompatibleClient(
         .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
     }
   }
+
+  /**
+   * Parses a reply body or a stream event, throwing on one nested more than `BoundedJson`'s limit
+   * as on malformed JSON; the caller turns either into a `Left`. Every reader of the value, and
+   * `ujson.Value.InvalidData`'s message when a reader meets an unexpected shape, recurses once per
+   * nesting level, so a 100,000-deep array overflowed the stack, and `Try` does not catch a
+   * `StackOverflowError` ([[https://github.com/llm4s/llm4s/issues/1658 #1658]]).
+   */
+  private def readReply(text: String): ujson.Value =
+    if (BoundedJson.exceedsDepth(text)) throw new IllegalArgumentException(BoundedJson.tooDeep().message)
+    else ujson.read(text)
 
   /** The replay data on a streamed event's delta, if it has one. */
   private def streamedThinkingDetails(json: ujson.Value): Seq[ujson.Value] =
@@ -249,10 +254,12 @@ class OpenAICompatibleClient(
    * `OpenRouterClient` had not (#912), so an endpoint that accepted the connection and never
    * answered hung the caller. Scoped to the provider package so specs can shorten it.
    */
-  protected[provider] def requestTimeout: FiniteDuration = OpenAICompatibleClient.RequestTimeout
+  protected[provider] def requestTimeout: FiniteDuration =
+    settings.timeouts.requestOr(OpenAICompatibleClient.RequestTimeout)
 
   /** The timeout `streamComplete` sends with its request. See [[requestTimeout]]. */
-  protected[provider] def streamTimeout: FiniteDuration = OpenAICompatibleClient.StreamTimeout
+  protected[provider] def streamTimeout: FiniteDuration =
+    settings.timeouts.streamOr(OpenAICompatibleClient.StreamTimeout)
 
   /**
    * The headers every request carries. A header the dialect repeats is sent once, its values
@@ -371,9 +378,44 @@ class OpenAICompatibleClient(
       message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList, thinking = thinking),
       toolCalls = toolCalls.toList,
       usage = usage,
-      estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u))
+      estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u)),
+      citations = parseCitations(message)
     )
   }
+
+  /**
+   * The sources a reply cites: the `url_citation` entries of the message's `annotations`, in the
+   * order sent, in the shape OpenAI documents for its search models and OpenRouter for `:online`
+   * models, `{"type":"url_citation","url_citation":{"url","title","content","start_index","end_index"}}`.
+   *
+   * Lenient on purpose: a citation never fails a completion whose answer arrived. An entry of another
+   * type, or without a non-empty `url`, is dropped (one is never made up), and a field of the wrong
+   * type, or an index that is not a whole number of at least zero, is read as absent. Streamed events
+   * are not read: neither provider documents where a stream carries them (#1216).
+   */
+  protected[provider] def parseCitations(message: ujson.Value): List[Citation] =
+    message.objOpt
+      .flatMap(_.get("annotations"))
+      .flatMap(_.arrOpt)
+      .map(_.toList.flatMap(parseCitation))
+      .getOrElse(List.empty)
+
+  private def parseCitation(annotation: ujson.Value): Option[Citation] =
+    for {
+      entry <- annotation.objOpt
+      if entry.get("type").flatMap(_.strOpt).contains("url_citation")
+      cited <- entry.get("url_citation").flatMap(_.objOpt)
+      url   <- cited.get("url").flatMap(_.strOpt).filter(_.nonEmpty)
+    } yield Citation(
+      url = url,
+      title = cited.get("title").flatMap(_.strOpt),
+      citedText = cited.get("content").flatMap(_.strOpt),
+      startIndex = citationIndex(cited, "start_index"),
+      endIndex = citationIndex(cited, "end_index")
+    )
+
+  private def citationIndex(cited: collection.Map[String, ujson.Value], key: String): Option[Int] =
+    cited.get(key).flatMap(_.numOpt).filter(n => n.isWhole && n >= 0 && n <= Int.MaxValue).map(_.toInt)
 
   /** Token usage from a `usage` object, or from the first element of a `usage` array. */
   private def parseUsage(usage: ujson.Value): Option[TokenUsage] =
@@ -406,15 +448,16 @@ class OpenAICompatibleClient(
    *
    * `toolCalls` is the state of the stream this event belongs to - see [[StreamToolCalls]]. The
    * default, a fresh one, is right only for an event read on its own.
+   *
+   * A tool call's arguments are its fragment verbatim, as a string (an empty fragment is the
+   * empty-object sentinel), for the accumulator and `onChunk` alike: fragments are concatenated
+   * to rebuild the arguments, and one that is itself valid JSON, such as `":"` or `"Paris"`,
+   * would lose its quotes if parsed.
    */
   protected[provider] def parseStreamingChunks(
     json: ujson.Value,
     toolCalls: StreamToolCalls = new StreamToolCalls
   ): Seq[StreamedChunk] =
-    parseStreamingEvent(json, toolCalls).map(_._1)
-
-  /** As [[parseStreamingChunks]], pairing each chunk with its raw argument fragment. */
-  private def parseStreamingEvent(json: ujson.Value, toolCalls: StreamToolCalls): Seq[(StreamedChunk, String)] =
     json.obj.get("choices").flatMap(_.arrOpt).flatMap(_.headOption) match {
       case None => Seq.empty
       case Some(choice) =>
@@ -433,14 +476,11 @@ class OpenAICompatibleClient(
               id = call.obj.get("id").flatMap(_.strOpt).filter(_.nonEmpty),
               name = function.obj.get("name").flatMap(_.strOpt).filter(_.nonEmpty)
             )
-            (ToolCall(id, name, StreamingToolArgumentParser.parse(raw)), raw)
+            ToolCall(id, name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
         }
 
-        val first = (
-          StreamedChunk(chunkId, content, calls.headOption.map(_._1), finishReason, thinking),
-          calls.headOption.fold("")(_._2)
-        )
-        first +: calls.drop(1).map((tc, raw) => (StreamedChunk(chunkId, None, Some(tc), None, None), raw))
+        StreamedChunk(chunkId, content, calls.headOption, finishReason, thinking) +:
+          calls.drop(1).map(tc => StreamedChunk(chunkId, None, Some(tc), None, None))
     }
 
   private def recordExchange(
@@ -478,13 +518,16 @@ object OpenAICompatibleClient {
 
   /**
    * The timeout on `complete`'s request: two minutes, what the old `MistralClient` and
-   * `CohereClient` used, and what `OllamaClient`, `GeminiClient` and `VertexAIClient` use. A
-   * single internal default for now; configurable timeouts are
-   * [[https://github.com/llm4s/llm4s/issues/712 #712]].
+   * `CohereClient` used, and what `OllamaClient`, `GeminiClient` and `VertexAIClient` use. This is
+   * the default: a section's `timeouts.request` replaces it
+   * ([[https://github.com/llm4s/llm4s/issues/712 #712]]).
    */
   val RequestTimeout: FiniteDuration = 2.minutes
 
-  /** The timeout on `streamComplete`'s request: five minutes, as in the clients this one replaced. */
+  /**
+   * The timeout on `streamComplete`'s request: five minutes, as in the clients this one replaced. A
+   * section's `timeouts.stream` replaces it.
+   */
   val StreamTimeout: FiniteDuration = 5.minutes
 
   /**
@@ -528,7 +571,8 @@ object OpenAICompatibleClient {
     baseUrl: String,
     apiKey: Option[String],
     contextWindow: Int,
-    reserveCompletion: Int
+    reserveCompletion: Int,
+    timeouts: ProviderTimeouts = ProviderTimeouts.default
   ) {
     override def toString: String =
       s"Settings(providerName=$providerName, displayName=$displayName, model=$model, baseUrl=$baseUrl, " +
@@ -544,7 +588,8 @@ object OpenAICompatibleClient {
       baseUrl = config.baseUrl,
       apiKey = config.apiKey,
       contextWindow = config.contextWindow,
-      reserveCompletion = config.reserveCompletion
+      reserveCompletion = config.reserveCompletion,
+      timeouts = config.timeouts
     )
 
   /**
