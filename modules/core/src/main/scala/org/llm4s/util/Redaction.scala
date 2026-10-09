@@ -247,6 +247,15 @@ private[llm4s] object Redaction {
    * 3. Sensitive JSON fields
    * 4. Known API key patterns
    *
+   * The passes run in that order, each over the text the one before left. Where the input holds the JSON escape of
+   * `&`, `=`, `?`, `'` or `"` (backslashes, `u00` and the hex digits), which Go's `encoding/json`, System.Text.Json,
+   * Gson and other HTML-safe serialisers write, some passes read an escape as the character it stands for (#1676),
+   * and a value read so may run further than the same value written plainly: a query value that holds a quote runs
+   * over an escaped `&`, into the key of the field after it. So there every pass also reads the input as it was given,
+   * and what any pass replaces, in sequence or alone, is replaced: the edits are merged where they overlap or meet
+   * and made once, and no pass can take the key or the quote of a field from the pass that reads it. An input that
+   * holds no such escape is redacted by the passes in sequence alone, exactly as before.
+   *
    * Redacting the output a second time usually changes nothing, but that is not guaranteed: where quotes are
    * unbalanced or stray, the text a first pass replaced can change how a second pass pairs the quotes, and the
    * second pass may then replace more. It never makes readable what the first pass replaced, since that text is no
@@ -260,12 +269,227 @@ private[llm4s] object Redaction {
     if (input == null || input.isEmpty) {
       input
     } else {
-      val step1 = redactAuthHeaders(input, placeholder)
-      val step2 = redactQueryParams(step1, placeholder)
-      val step3 = redactJsonFields(step2, placeholder, input.count(_ == '\''))
-      val step4 = redactApiKeys(step3, placeholder)
-      redactContainerLeaves(step4, placeholder)
+      val escaped = holdsSeparatorOrQuoteEscape(input)
+      val passes  = redactionPasses(placeholder, input.count(_ == '\''), escaped)
+      if (escaped) {
+        // Every pass also reads the input as it was given, and what any of them replaces is merged with what the
+        // passes in sequence replace, and written once: no pass can take the key or the quote of a field from
+        // another pass's reading (#1676). Each pass runs twice and the edits are sorted once.
+        val alone = passes.flatMap(pass => pass(input).edits)
+        applyEdits(input, mergeEdits(sequenceEdits(input, passes) ++ alone, placeholder))
+      } else {
+        passes.foldLeft(input)((text, pass) => pass(text).result)
+      }
     }
+
+  /**
+   * What the passes replace when each reads the text the one before left, as edits of the input. Each character of
+   * a text is traced to the character of the input it was copied from, or to none where a pass wrote it (a
+   * placeholder, or a quote around one); the edits are the runs of the input that no character of the last text is
+   * traced to, with the text written in their place.
+   */
+  private def sequenceEdits(input: String, passes: Vector[String => Rewrite]): Vector[Edit] = {
+    var text   = input
+    var origin = Array.range(0, input.length)
+    passes.foreach { pass =>
+      val rewrite = pass(text)
+      origin = traced(text, origin, rewrite.edits)
+      text = rewrite.result
+    }
+    val found     = Vector.newBuilder[Edit]
+    var next      = 0  // the next character of the input that is not yet copied or replaced
+    var runFrom   = -1 // where in `text` the characters a pass wrote start
+    var maskStart = -1
+    var maskEnd   = -1
+    def record(upTo: Int, at: Int): Unit =
+      if (runFrom >= 0 || upTo > next) {
+        val from         = if (runFrom < 0) at else runFrom
+        val (start, end) = if (maskStart < 0) (-1, -1) else (maskStart - from, maskEnd - from)
+        found += Edit(next, upTo, text.substring(from, at), start, end)
+        runFrom = -1
+        maskStart = -1
+        maskEnd = -1
+      }
+    var i = 0
+    while (i < text.length) {
+      val o = origin(i)
+      if (o >= 0) {
+        record(o, i)
+        next = o + 1
+      } else {
+        if (runFrom < 0) runFrom = i
+        if (o == Masked) {
+          if (maskStart < 0) maskStart = i
+          maskEnd = i + 1
+        }
+      }
+      i += 1
+    }
+    record(input.length, text.length)
+    found.result()
+  }
+
+  /** What a character of a text is traced to when a pass wrote it: a placeholder, or the text around one. */
+  private val Masked: Int  = -2
+  private val Written: Int = -1
+
+  /** The trace of each character of the text `edits` make of `text`, whose characters are traced by `origin`. */
+  private def traced(text: String, origin: Array[Int], edits: Vector[Edit]): Array[Int] = {
+    val out  = Array.newBuilder[Int]
+    var from = 0
+    edits.foreach { edit =>
+      out.addAll(origin, from, edit.start - from)
+      var k = 0
+      while (k < edit.replacement.length) {
+        out += (if (edit.masked && k >= edit.maskStart && k < edit.maskEnd) Masked else Written)
+        k += 1
+      }
+      from = edit.end
+    }
+    out.addAll(origin, from, text.length - from)
+    out.result()
+  }
+
+  /**
+   * The passes of [[redact]], in the order they run over an input that holds no JSON escape of a separator or a
+   * quote: the authorization patterns, the query parameters, the fields (containers, quoted values, numbers,
+   * `key=value` pairs and header lines), the API-key patterns, and the leaves of containers.
+   */
+  private def redactionPasses(placeholder: String, inputQuotes: Int, escaped: Boolean): Vector[String => Rewrite] =
+    authHeaderPasses(placeholder) ++
+      Vector((text: String) => redactQueryParams(text, placeholder)) ++
+      jsonFieldPasses(placeholder, inputQuotes, escaped) ++
+      SecretPatterns.SecretType.default.toVector.map(t => (text: String) => regexPass(t.pattern, text, placeholder)) ++
+      containerLeafPasses(placeholder)
+
+  /**
+   * Whether the input holds the JSON escape of `&`, `=`, `?`, `'` or `"` (backslashes, `u00` and `26`, `3d`, `3f`,
+   * `27` or `22`, the hex digits in either case), which the passes read as the characters they stand for (#1676).
+   */
+  private def holdsSeparatorOrQuoteEscape(input: String): Boolean = {
+    var i     = input.indexOf('\\')
+    var found = false
+    while (!found && i >= 0) {
+      found = separatorEscapeEnd(input, i) >= 0 || quoteEscapeEnd(input, i) >= 0
+      i = input.indexOf('\\', afterBackslashes(input, i))
+    }
+    found
+  }
+
+  /**
+   * One replacement a pass makes: the input from `start` to `end` is written as `replacement`, whose placeholder,
+   * if it holds one, runs from `maskStart` to `maskEnd`.
+   */
+  final private case class Edit(start: Int, end: Int, replacement: String, maskStart: Int, maskEnd: Int) {
+    def masked: Boolean = maskStart >= 0
+    def before: String  = if (masked) replacement.substring(0, maskStart) else replacement
+    def after: String   = if (masked) replacement.substring(maskEnd) else ""
+  }
+
+  /**
+   * The output of one pass over `input`, built as the pass writes it - the text it keeps (`copy`), the text it adds
+   * (`text`) and the placeholder (`mask`) - and kept both as the text and as the edits that turn the input into it.
+   * The pass copies the input in order, so each character is read once more at most.
+   */
+  final private class Rewrite(input: String, placeholder: String) {
+    private val out         = new java.lang.StringBuilder(input.length)
+    private val found       = Vector.newBuilder[Edit]
+    private var cursor      = 0  // the input before this is copied or replaced
+    private var pendingFrom = -1 // where in `out` the replacement not yet recorded starts
+    private var maskStart   = -1
+    private var maskEnd     = -1
+
+    /** Keeps `input(from until to)`; the input between the last text kept and `from` is replaced by what was added. */
+    def copy(from: Int, to: Int): Unit = {
+      val start = math.max(from, cursor)
+      record(start)
+      if (to > start) out.append(input, start, to)
+      cursor = math.max(cursor, to)
+    }
+
+    def text(s: String): Unit = {
+      if (pendingFrom < 0) pendingFrom = out.length
+      out.append(s)
+    }
+
+    def mask(): Unit = {
+      if (pendingFrom < 0) pendingFrom = out.length
+      if (maskStart < 0) maskStart = out.length - pendingFrom
+      out.append(placeholder)
+      maskEnd = out.length - pendingFrom
+    }
+
+    private def record(upTo: Int): Unit =
+      if (pendingFrom >= 0 || upTo > cursor) {
+        val replacement = if (pendingFrom < 0) "" else out.substring(pendingFrom)
+        if (!input.regionMatches(cursor, replacement, 0, replacement.length) || upTo - cursor != replacement.length)
+          found += Edit(cursor, upTo, replacement, maskStart, maskEnd)
+        cursor = upTo
+        pendingFrom = -1
+        maskStart = -1
+        maskEnd = -1
+      }
+
+    /** Copies the rest of the input from `from`, after the last replacement. */
+    def finish(from: Int): Rewrite = {
+      copy(from, input.length)
+      this
+    }
+
+    def result: String      = out.toString
+    def edits: Vector[Edit] = found.result()
+  }
+
+  /**
+   * The edits of every pass, sorted, with those that overlap joined into one: it spans them all and writes one
+   * placeholder, with the text the first of them adds before its placeholder (an opening quote) and the text the last
+   * adds after it. Sort and one sweep, so linear in the input bar the sort.
+   */
+  private def mergeEdits(edits: Vector[Edit], placeholder: String): Vector[Edit] = {
+    val sorted = edits.distinct.sortBy(e => (e.start, -e.end))
+    val merged = Vector.newBuilder[Edit]
+    var i      = 0
+    while (i < sorted.length) {
+      val first = sorted(i)
+      var last  = first
+      var end   = first.end
+      var j     = i + 1
+      // Two placeholders that meet, with nothing a pass wrote between them, are one.
+      def meets(next: Edit): Boolean =
+        next.start == end && last.masked && last.after.isEmpty && next.masked && next.before.isEmpty
+      while (j < sorted.length && (sorted(j).start < end || meets(sorted(j)))) {
+        if (sorted(j).end > end || (sorted(j).end == end && sorted(j).start == end)) {
+          end = sorted(j).end
+          last = sorted(j)
+        }
+        j += 1
+      }
+      if (j == i + 1) merged += first
+      else {
+        val before = first.before
+        val after  = last.after
+        merged += Edit(
+          first.start,
+          end,
+          before + placeholder + after,
+          before.length,
+          before.length + placeholder.length
+        )
+      }
+      i = j
+    }
+    merged.result()
+  }
+
+  /** The input with the merged edits made. */
+  private def applyEdits(input: String, edits: Vector[Edit]): String = {
+    val out = new java.lang.StringBuilder(input.length)
+    val copiedTo = edits.foldLeft(0) { (from, edit) =>
+      out.append(input, from, edit.start).append(edit.replacement)
+      edit.end
+    }
+    out.append(input, copiedTo, input.length).toString
+  }
 
   /**
    * Redact sensitive data and truncate for logging.
@@ -326,22 +550,66 @@ private[llm4s] object Redaction {
    */
   private val JsonAuthorization: Regex = """(?is)("Authorization"\s*:\s*")((?:[^"\\]|\\.?)++)("|\z)""".r
 
-  // Every replacement below is quoted: the placeholder is the caller's, and a `$` or `\` in a replacement string is
-  // otherwise read as a group reference or an escape, which throws or writes back the text being redacted.
-  private def redactAuthHeaders(input: String, placeholder: String): String = {
-    val quoted = Regex.quoteReplacement(placeholder)
-    // Handle "Authorization": "..." in JSON
-    val step1 = JsonAuthorization
-      .replaceAllIn(input, m => Regex.quoteReplacement(s"${m.group(1)}$placeholder${m.group(3)}"))
-    // Handle Authorization: ... in headers
-    val step2 = """(?i)(Authorization:\s*)([^\n\r]+)""".r
-      .replaceAllIn(step1, m => Regex.quoteReplacement(s"${m.group(1)}$placeholder"))
-    // Handle standalone Bearer tokens, also right after the JSON escape of `&`, `=` or `?`, which ends in a word
-    // character but stands for a separator (#1676)
-    val step3 =
-      """(?i)(?:\b|(?<=\\(?-i:u)00(?:26|3[dD]|3[fF])))Bearer\s+([a-zA-Z0-9\-_\.]+)""".r.replaceAllIn(step2, quoted)
-    // Handle standalone Basic auth tokens
-    """(?i)(?:\b|(?<=\\(?-i:u)00(?:26|3[dD]|3[fF])))Basic\s+([a-zA-Z0-9+/=]+)""".r.replaceAllIn(step3, quoted)
+  /** `Authorization: ...` in a header. */
+  private val HeaderAuthorization: Regex = """(?i)(Authorization:\s*)([^\n\r]+)""".r
+
+  /** A standalone Bearer token. */
+  private val BearerToken: Regex = """(?i)\bBearer\s+([a-zA-Z0-9\-_\.]+)""".r
+
+  /** A standalone Basic auth token. */
+  private val BasicToken: Regex = """(?i)\bBasic\s+([a-zA-Z0-9+/=]+)""".r
+
+  /**
+   * What may come before a Bearer or Basic token that `\b` does not find: the JSON escape of `&`, `=` or `?`, which
+   * ends in a word character but stands for a separator (#1676), with the lower-case `u` JSON writes.
+   */
+  private val AfterSeparatorEscape: String = """(?<=\\(?-i:u)00(?:26|3[dD]|3[fF]))"""
+
+  private val EscapedBearerToken: Regex = s"""(?i)${AfterSeparatorEscape}Bearer\\s+([a-zA-Z0-9\\-_\\.]+)""".r
+  private val EscapedBasicToken: Regex  = s"""(?i)${AfterSeparatorEscape}Basic\\s+([a-zA-Z0-9+/=]+)""".r
+
+  /**
+   * `"Authorization": "..."` in JSON, then `Authorization: ...` in headers, then standalone Bearer and Basic tokens,
+   * keyword and all. A token after the escape of a separator is read by a pass of its own, so that a match there
+   * cannot take the keyword of a token the plain pattern reads (`Basic`, the escape of `=`, `Basic Basic 9K29`). The
+   * placeholder is the caller's and is written as it is: it is appended, never read as a replacement string, where a
+   * `$` or `\` would be a group reference or an escape.
+   */
+  private def authHeaderPasses(placeholder: String): Vector[String => Rewrite] =
+    Vector(
+      (text: String) => regexPass(JsonAuthorization, text, placeholder, group = 2),
+      (text: String) => regexPass(HeaderAuthorization, text, placeholder, group = 2),
+      (text: String) => regexPass(BearerToken, text, placeholder),
+      (text: String) => regexPass(EscapedBearerToken, text, placeholder),
+      (text: String) => regexPass(BasicToken, text, placeholder),
+      (text: String) => regexPass(EscapedBasicToken, text, placeholder)
+    )
+
+  /**
+   * Replaces `group` of every match of `pattern` (the whole match for group 0) that `replaces` accepts with the
+   * placeholder, written between two `wrap`s. The matches are those `replaceAllIn` would find: each search starts
+   * where the match before ended.
+   */
+  private def regexPass(
+    pattern: Regex,
+    input: String,
+    placeholder: String,
+    group: Int = 0,
+    wrap: String = "",
+    replaces: java.util.regex.Matcher => Boolean = _ => true
+  ): Rewrite = {
+    val matcher = pattern.pattern.matcher(input)
+    val out     = new Rewrite(input, placeholder)
+    var copied  = 0
+    while (matcher.find())
+      if (matcher.start(group) >= 0 && replaces(matcher)) {
+        out.copy(copied, matcher.start(group))
+        out.text(wrap)
+        out.mask()
+        out.text(wrap)
+        copied = matcher.end(group)
+      }
+    out.finish(copied)
   }
 
   private def isSensitiveQueryKey(key: String): Boolean = {
@@ -361,14 +629,15 @@ private[llm4s] object Redaction {
    * so a parameter after an escaped `&` is read as one after `&` is (#1676). Where the input holds no such escape, the
    * two read the same parameters; where it does, the first keeps every value it read before.
    */
-  private def redactQueryParams(input: String, placeholder: String): String = {
+  private def redactQueryParams(input: String, placeholder: String): Rewrite = {
     val values = mergeSpans(queryParamValues(input) ++ escapedQueryParamValues(input))
-    val out    = new java.lang.StringBuilder(input.length)
+    val out    = new Rewrite(input, placeholder)
     val copiedTo = values.foldLeft(0) { case (from, (start, end)) =>
-      out.append(input, from, start).append(placeholder)
+      out.copy(from, start)
+      out.mask()
       end
     }
-    out.append(input, copiedTo, input.length).toString
+    out.finish(copiedTo)
   }
 
   /** The `(start, end)` spans of the sensitive values of the parameters that `QueryParamStart` finds. */
@@ -590,46 +859,122 @@ private[llm4s] object Redaction {
   private def isRegexSpace(c: Char): Boolean =
     c == ' ' || c == '\t' || c == '\n' || c == '\u000B' || c == '\f' || c == '\r'
 
-  private def redactJsonFields(input: String, placeholder: String, inputQuotes: Int): String = {
+  private def jsonFieldPasses(placeholder: String, inputQuotes: Int, escaped: Boolean): Vector[String => Rewrite] = {
     // Arrays and objects first: the strings and numbers under a sensitive key are replaced in one pass, and what is
     // left for the field patterns below is already the placeholder. Then the quoted shapes, then the bare ones, so
     // that a value is never matched by a looser pattern first. The rest of each container - its other leaves, and
-    // the containers under a single-quoted key - waits for `redactContainerLeaves`, after every field pass.
-    val escapedContainers =
-      redactContainers(EscapedJsonContainerStart, input, placeholder, ValueEnd.EscapedQuote, leaves = false)
-    val containers =
-      redactContainers(JsonContainerStart, escapedContainers, placeholder, ValueEnd.Quote('"'), leaves = false)
-    val escaped = redactQuoted(EscapedJsonStringStart, containers, placeholder, ValueEnd.EscapedQuote)
-    val double  = redactQuoted(JsonStringStart, escaped, placeholder, ValueEnd.Quote('"'))
+    // the containers under a single-quoted key - waits for `containerLeafPasses`, after every field pass.
+    //
     // A single-quoted value inside a double-quoted string may end where that string does, but only where no `'` that
     // could close it follows. That is read from the text the passes before have left, so it is trusted only while
     // they have replaced no `'` of the input - one inside a value they redacted, or the closing quote of a credential
-    // that a pattern ran over - and the placeholder writes none of its own.
+    // that a pattern ran over - and the placeholder writes none of its own. Where every pass reads the input itself,
+    // the text is the input, and its quotes are all there.
     def quotesKept(text: String): Boolean = !placeholder.contains('\'') && text.count(_ == '\'') >= inputQuotes
-    val single =
-      redactQuoted(SingleQuotedStart, double, placeholder, ValueEnd.Quote('\''), endsWithString = quotesKept(double))
-    // A number becomes a string, so that the redacted JSON still parses.
-    val quotedEquals = redactQuoted(DoubleQuotedEqualsStart, single, placeholder, ValueEnd.Quote('"'))
-    val allQuoted =
-      redactQuoted(
-        SingleQuotedEqualsStart,
-        quotedEquals,
-        placeholder,
-        ValueEnd.Quote('\''),
-        endsWithString = quotesKept(quotedEquals)
-      )
-    // A double-quoted value under a single-quoted key: Python's repr of a string that holds a `'` (#1687), escaped
-    // when the dict sits inside a JSON string. After the single-quoted passes, so that the quotes `quotesKept` counts
-    // are the input's; only where it reads as a value of a dict (`asValue`).
-    val escapedUnderSingle =
-      redactQuoted(SingleQuotedKeyEscapedStringStart, allQuoted, placeholder, ValueEnd.EscapedQuote, asValue = true)
-    val underSingle =
-      redactQuoted(SingleQuotedKeyStringStart, escapedUnderSingle, placeholder, ValueEnd.Quote('"'), asValue = true)
-    val escapedNumbers = redactPairs(EscapedJsonNumberField, underSingle, placeholder, wrap = "\\\"")
-    val numbers        = redactPairs(JsonNumberField, escapedNumbers, placeholder, wrap = "\"")
-    // In the key's own quote, so that a dict inside a JSON string still sits in that string (#1675).
-    val singleNumbers = redactPairs(SingleQuotedNumberField, numbers, placeholder, wrap = "'")
-    redactPairs(HeaderLine, redactEqualsPairs(singleNumbers, placeholder), placeholder)
+    Vector(
+      (text: String) =>
+        redactContainers(EscapedJsonContainerStart, text, placeholder, ValueEnd.EscapedQuote, leaves = false),
+      (text: String) => redactContainers(JsonContainerStart, text, placeholder, ValueEnd.Quote('"'), leaves = false),
+      (text: String) => redactQuoted(EscapedJsonStringStart, text, placeholder, ValueEnd.EscapedQuote),
+      (text: String) => redactQuoted(JsonStringStart, text, placeholder, ValueEnd.Quote('"')),
+      (text: String) =>
+        redactQuoted(SingleQuotedStart, text, placeholder, ValueEnd.Quote('\''), endsWithString = quotesKept(text)),
+      (text: String) => redactQuoted(DoubleQuotedEqualsStart, text, placeholder, ValueEnd.Quote('"')),
+      (text: String) =>
+        redactQuoted(
+          SingleQuotedEqualsStart,
+          text,
+          placeholder,
+          ValueEnd.Quote('\''),
+          endsWithString = quotesKept(text)
+        ),
+      // A double-quoted value under a single-quoted key: Python's repr of a string that holds a `'` (#1687), escaped
+      // when the dict sits inside a JSON string. After the single-quoted passes, so that the quotes `quotesKept`
+      // counts are the input's; only where it reads as a value of a dict (`asValue`).
+      (text: String) =>
+        redactQuoted(SingleQuotedKeyEscapedStringStart, text, placeholder, ValueEnd.EscapedQuote, asValue = true),
+      (text: String) =>
+        redactQuoted(SingleQuotedKeyStringStart, text, placeholder, ValueEnd.Quote('"'), asValue = true),
+      // A number becomes a string, so that the redacted JSON still parses; in the key's own quote, so that a dict
+      // inside a JSON string still sits in that string (#1675).
+      (text: String) => redactPairs(EscapedJsonNumberField, text, placeholder, wrap = "\\\""),
+      (text: String) => redactPairs(JsonNumberField, text, placeholder, wrap = "\""),
+      (text: String) => redactPairs(SingleQuotedNumberField, text, placeholder, wrap = "'"),
+      (text: String) => redactEqualsPairs(text, placeholder, escaped),
+      (text: String) => redactPairs(HeaderLine, text, placeholder),
+      (text: String) => redactEscapedQuoted(EscapedQuoteFieldStart, text, placeholder, key = 3, slashes = 1, hex = 2),
+      (text: String) => redactEscapedQuoted(EscapedQuotePairStart, text, placeholder, key = 1, slashes = 2, hex = 3)
+    )
+  }
+
+  /**
+   * A quoted key, `:` and the opening quote of a string value, where each quote is a JSON escape - backslashes, `u00`
+   * and `22` for `"` or `27` for `'` - as System.Text.Json writes both quotes and Gson writes `'`: JSON or a dict that
+   * sits inside a string. Group 1 is the backslashes of the opening escape, which the other two repeat, group 2 the
+   * hex digits of the quote, group 3 the key. A match starts only at the first backslash of a run, so a long run is
+   * read once, not once from each of its backslashes.
+   */
+  private val EscapedQuoteFieldStart: Regex =
+    s"""(?<!\\\\)(\\\\++)u00(2[27])($Key)\\1u00\\2\\s*:\\s*\\1u00\\2""".r
+
+  /**
+   * `key=` and the opening quote of its value, written as a JSON escape: the escaped form of `key='...'` and
+   * `key="..."`. Group 1 is the key, group 2 the backslashes of the escape, group 3 the hex digits of the quote.
+   */
+  private val EscapedQuotePairStart: Regex = s"""$PairKeyStart($Key)$PairEquals(\\\\++)u00(2[27])""".r
+
+  /**
+   * Replaces the value of every field or pair whose quotes are JSON escapes (`EscapedQuoteFieldStart`,
+   * `EscapedQuotePairStart`) and whose key is sensitive (#1676), as the passes for `"key": "..."` and `key='...'`
+   * replace the value between bare quotes. `start` matches up to the opening quote, with the key, the backslashes of
+   * the quote's escape and its hex digits in the groups `key`, `slashes` and `hex`. The value runs to the escape of
+   * its quote with as many backslashes as the one that opens it, so the escape of a quote escaped once more inside
+   * it is the value's, or to a `"` that no backslash escapes, which ends the string the field sits in, or to the end
+   * of the input. Both are left in place. A loop that reads each character of a value once.
+   */
+  private def redactEscapedQuoted(
+    start: Regex,
+    input: String,
+    placeholder: String,
+    key: Int,
+    slashes: Int,
+    hex: Int
+  ): Rewrite = {
+    val matcher = start.pattern.matcher(input)
+    val out     = new Rewrite(input, placeholder)
+
+    def valueEnd(from: Int, openSlashes: Int, quoteDigit: Char): Int = {
+      var i   = from
+      var end = -1
+      while (end < 0 && i < input.length) {
+        val c = input.charAt(i)
+        if (c == '\\') {
+          val run = afterBackslashes(input, i)
+          if (
+            run - i == openSlashes && input.startsWith("u002", run) && run + 4 < input.length &&
+            input.charAt(run + 4) == quoteDigit
+          ) end = i
+          else if (run < input.length && input.charAt(run) == '"' && (run - i) % 2 == 1) i = run + 1
+          else i = run
+        } else if (c == '"') end = i
+        else i += 1
+      }
+      if (end < 0) input.length else end
+    }
+
+    @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
+      if (searchFrom >= input.length || !matcher.find(searchFrom)) copiedTo
+      else {
+        val valueStart = matcher.end
+        val end        = valueEnd(valueStart, matcher.group(slashes).length, matcher.group(hex).charAt(1))
+        if (isSensitiveKey(matcher.group(key)) && end > valueStart) {
+          out.copy(copiedTo, valueStart)
+          out.mask()
+          loop(end, end)
+        } else loop(math.max(end, valueStart), copiedTo)
+      }
+
+    out.finish(loop(0, 0))
   }
 
   /** The backslashes at the end of `input(from until to)` that escape a quote right after it, or "" if none do. */
@@ -650,11 +995,14 @@ private[llm4s] object Redaction {
    * into the text after it - and a guess made before them could swallow the key of a field they would have redacted
    * and leave its value readable. After them it can only replace more.
    */
-  private def redactContainerLeaves(input: String, placeholder: String): String = {
-    val escaped = redactContainers(EscapedJsonContainerStart, input, placeholder, ValueEnd.EscapedQuote, leaves = true)
-    val double  = redactContainers(JsonContainerStart, escaped, placeholder, ValueEnd.Quote('"'), leaves = true)
-    redactContainers(SingleQuotedContainerStart, double, placeholder, ValueEnd.Quote('\''), leaves = true)
-  }
+  private def containerLeafPasses(placeholder: String): Vector[String => Rewrite] =
+    Vector(
+      (text: String) =>
+        redactContainers(EscapedJsonContainerStart, text, placeholder, ValueEnd.EscapedQuote, leaves = true),
+      (text: String) => redactContainers(JsonContainerStart, text, placeholder, ValueEnd.Quote('"'), leaves = true),
+      (text: String) =>
+        redactContainers(SingleQuotedContainerStart, text, placeholder, ValueEnd.Quote('\''), leaves = true)
+    )
 
   /** How a quoted value ends. */
   private enum ValueEnd {
@@ -806,9 +1154,9 @@ private[llm4s] object Redaction {
     end: ValueEnd,
     endsWithString: Boolean = false,
     asValue: Boolean = false
-  ): String = {
+  ): Rewrite = {
     val matcher              = start.pattern.matcher(input)
-    val out                  = new java.lang.StringBuilder(input.length)
+    val out                  = new Rewrite(input, placeholder)
     val outsideStrings       = asValue && end == ValueEnd.Quote('"')
     val enclosing            = if (endsWithString || outsideStrings) Some(new EnclosingQuotes(input)) else None
     lazy val lastSingleQuote = lastClosingSingleQuote(input)
@@ -880,7 +1228,8 @@ private[llm4s] object Redaction {
         if (asValue && !endsAsValue(valueEnd)) {
           loop(matcher.end, copiedTo)
         } else if (isSensitiveKey(matcher.group(2)) && valueEnd > valueStart) {
-          out.append(input, copiedTo, valueStart).append(placeholder)
+          out.copy(copiedTo, valueStart)
+          out.mask()
           loop(valueEnd, valueEnd)
         } else {
           loop(valueEnd, copiedTo)
@@ -888,7 +1237,7 @@ private[llm4s] object Redaction {
       }
 
     val copiedTo = loop(0, 0)
-    out.append(input, copiedTo, input.length).toString
+    out.finish(copiedTo)
   }
 
   /**
@@ -992,9 +1341,9 @@ private[llm4s] object Redaction {
     placeholder: String,
     end: ValueEnd,
     leaves: Boolean
-  ): String = {
+  ): Rewrite = {
     val matcher   = start.pattern.matcher(input)
-    val out       = new java.lang.StringBuilder(input.length)
+    val out       = new Rewrite(input, placeholder)
     val enclosing = new EnclosingQuotes(input)
 
     def walkAt(keyStart: Int): Walk =
@@ -1014,7 +1363,7 @@ private[llm4s] object Redaction {
       } else {
         val open = matcher.start(3)
         if (isSensitiveKey(matcher.group(2))) {
-          out.append(input, copiedTo, open)
+          out.copy(copiedTo, open)
           val walk = walkAt(matcher.start(1))
           // Leaves in escaped double quotes, only where the key is not itself inside a string escaped within the
           // string, whose closing `\"` would otherwise be read as the opening quote of a leaf.
@@ -1027,7 +1376,7 @@ private[llm4s] object Redaction {
       }
 
     val copiedTo = loop(0, 0)
-    out.append(input, copiedTo, input.length).toString
+    out.finish(copiedTo)
   }
 
   /**
@@ -1045,7 +1394,7 @@ private[llm4s] object Redaction {
   private def redactLeaves(
     input: String,
     from: Int,
-    out: java.lang.StringBuilder,
+    out: Rewrite,
     placeholder: String,
     end: ValueEnd,
     walk: Walk,
@@ -1097,11 +1446,12 @@ private[llm4s] object Redaction {
       })
       val next = if (closed) contentEnd + stringQuote.length else contentEnd
       if (closed && isKey(next)) {
-        out.append(input, open, next)
+        out.copy(open, next)
       } else {
-        out.append(stringQuote)
-        if (contentEnd > contentStart) out.append(placeholder)
-        if (closed) out.append(stringQuote)
+        // The quotes are the input's: `stringQuote` is what opens the string at `open`, and closes it at `contentEnd`.
+        out.copy(open, contentStart)
+        if (contentEnd > contentStart) out.mask()
+        if (closed) out.copy(contentEnd, next)
       }
       next
     }
@@ -1178,7 +1528,7 @@ private[llm4s] object Redaction {
       })
       val next = if (closed) contentEnd + 1 else contentEnd
       if (closed && keyFollows(next)) {
-        out.append(input, open, next)
+        out.copy(open, next)
         next
       } else if (
         (closed && inDoubleQuotes && next < length && input.charAt(next).isLetterOrDigit) ||
@@ -1187,12 +1537,12 @@ private[llm4s] object Redaction {
           !(end == ValueEnd.Quote('\'') && input.charAt(open) == '\'' && precededAsValue(open) &&
             followedAsValue(next, orEnd = true)))
       ) {
-        out.append(input.charAt(open))
+        out.copy(open, open + 1)
         open + 1
       } else {
-        out.append(input.charAt(open))
-        if (contentEnd > contentStart) out.append(placeholder)
-        if (closed) out.append(input.charAt(contentEnd))
+        out.copy(open, open + 1)
+        if (contentEnd > contentStart) out.mask()
+        if (closed) out.copy(contentEnd, contentEnd + 1)
         next
       }
     }
@@ -1211,6 +1561,13 @@ private[llm4s] object Redaction {
       (at - 1 - j) % 2 == 1
     }
 
+    // The placeholder in the key's quote, in place of a bare leaf.
+    def wrapped(): Unit = {
+      out.text(quote)
+      out.mask()
+      out.text(quote)
+    }
+
     // A word as the walk before #1647 wrote it: every character as it is, bar a number, which is replaced.
     def copyWord(start: Int, stop: Int): Unit = {
       var j = start
@@ -1219,9 +1576,9 @@ private[llm4s] object Redaction {
         if (c == '-' || (c >= '0' && c <= '9')) {
           j += 1
           while (j < stop && isNumberChar(input.charAt(j))) j += 1
-          out.append(quote).append(placeholder).append(quote)
+          wrapped()
         } else {
-          out.append(c)
+          out.copy(j, j + 1)
           j += 1
         }
       }
@@ -1233,15 +1590,15 @@ private[llm4s] object Redaction {
       val c = input.charAt(i)
       if (leaves && placeholder.nonEmpty && c == placeholder.charAt(0) && input.startsWith(placeholder, i)) {
         // A value a pass before has replaced: kept as it is, brackets and all.
-        out.append(placeholder)
+        out.copy(i, i + placeholder.length)
         i += placeholder.length
       } else if (c == '[' || c == '{') {
         openers.append(c)
-        out.append(c)
+        out.copy(i, i + 1)
         i += 1
       } else if (c == ']' || c == '}') {
         if (openers.length > 0) openers.setLength(openers.length - 1)
-        out.append(c)
+        out.copy(i, i + 1)
         i += 1
         done = openers.length == 0
       } else if (c == '"') {
@@ -1257,32 +1614,32 @@ private[llm4s] object Redaction {
         val beforeQuote = next < length && input.charAt(next) == '"'
         if (beforeQuote && escapedLeaves && end != ValueEnd.EscapedQuote && slashes % 4 == 1 && escapedLeaf(i, next)) {
           // A double-quoted leaf of a Python dict inside the string, as repr writes a value holding a `'` (#1687).
-          out.append(input, i, next - 1)
+          out.copy(i, next - 1)
           i = emitString(next - 1, ValueEnd.EscapedQuote)
         } else if (beforeQuote && end != ValueEnd.EscapedQuote) {
           // Any `"` under a single-quoted key ends the container; the backslashes are left with it for the caller.
           done = true
         } else if (beforeQuote && slashes % 4 == 1) {
-          out.append(input, i, next - 1)
+          out.copy(i, next - 1)
           i = emitString(next - 1, ValueEnd.EscapedQuote)
         } else if (beforeQuote && slashes % 2 == 0) {
-          out.append(input, i, next)
+          out.copy(i, next)
           i = next
           done = true
         } else {
           // An escape between values (`\n` of a pretty-printed document), copied with the character it escapes.
           val stop = math.min(length, next + 1)
-          out.append(input, i, stop)
+          out.copy(i, stop)
           i = stop
         }
       } else if (c == '\\' && leaves) {
         // A backslash escapes the character after it, as it does for the scan of a string, so that a string whose
         // quote was not taken for a leaf is walked as that scan read it, and each quote opens at most one scan.
         val stop = math.min(length, i + 2)
-        out.append(input, i, stop)
+        out.copy(i, stop)
         i = stop
       } else if (separates(c)) {
-        out.append(c)
+        out.copy(i, i + 1)
         i += 1
       } else {
         // A bare leaf: a number, or a word that is not quoted, as `token: [abc]` has. A word with a digit or `-` is
@@ -1305,10 +1662,10 @@ private[llm4s] object Redaction {
           // The word follows a backslash, which escapes its first character: a quote written there would be read as
           // `\"`, and the quotes after it would pair the other way round. The escaped character is kept, as the walk
           // before #1647 kept it, and the rest of the word is replaced.
-          out.append(input.charAt(i))
-          if (next > i + 1) out.append(quote).append(placeholder).append(quote)
-        } else if (replace) out.append(quote).append(placeholder).append(quote)
-        else if (leaves) out.append(input, i, next)
+          out.copy(i, i + 1)
+          if (next > i + 1) wrapped()
+        } else if (replace) wrapped()
+        else if (leaves) out.copy(i, next)
         else copyWord(i, next)
         i = next
       }
@@ -1345,16 +1702,8 @@ private[llm4s] object Redaction {
     input: String,
     placeholder: String,
     wrap: String = ""
-  ): String =
-    pattern.replaceAllIn(
-      input,
-      m => {
-        val text =
-          if (isSensitiveKey(m.group(2))) m.group(1) + wrap + placeholder + wrap
-          else m.matched
-        Regex.quoteReplacement(text)
-      }
-    )
+  ): Rewrite =
+    regexPass(pattern, input, placeholder, group = 3, wrap = wrap, replaces = m => isSensitiveKey(m.group(2)))
 
   /**
    * Replaces the value of every `key=value` pair whose key is sensitive. The value, which `EqualsPairStart` finds the
@@ -1372,7 +1721,10 @@ private[llm4s] object Redaction {
    * bare quotes: until it closes, the value ends neither at an escaped `&` nor at whitespace, `&`, `,` or `;`, only
    * at a bare quote, which ends the string the pair sits in, at `<`, `>` or at a line break. After the closing escaped
    * quote, the rules above apply again. A key that is not sensitive keeps them throughout, so the pairs inside its
-   * quotes are still read.
+   * quotes are still read, and its value ends at the escape of a quote as at the quote - and, where the input is
+   * `escaped` (it holds the escape of a separator or a quote, see [[redact]]), at the escape of `<` or `>` as at the
+   * character - so the pair after it is read too: here by this pass, or, where the pair's value opens with an
+   * escaped quote, by `redactEscapedQuoted`, as `key='...'` is read by the pass for quoted values.
    *
    * The backslashes that escape the quote the value stops at are kept. Inside JSON that sits in a string,
    * `\"note\": \"token=abc\"`, the value runs up to the `"` of the escaped closing quote and so holds its `\`:
@@ -1386,9 +1738,9 @@ private[llm4s] object Redaction {
    * character of the value that is not one. A run before anything but a quote, and an even run, which escapes
    * nothing, are replaced whole, as they were. A value cut at an escaped `&` keeps nothing: no quote follows it.
    */
-  private def redactEqualsPairs(input: String, placeholder: String): String = {
+  private def redactEqualsPairs(input: String, placeholder: String, escaped: Boolean): Rewrite = {
     val matcher = EqualsPairStart.pattern.matcher(input)
-    val out     = new java.lang.StringBuilder(input.length)
+    val out     = new Rewrite(input, placeholder)
 
     @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
       if (searchFrom >= input.length || !matcher.find(searchFrom)) {
@@ -1400,9 +1752,12 @@ private[llm4s] object Redaction {
         var escapeEnd  = -1
         // The last hex digit of the escaped quote the value opened with and has not closed yet, or `NotAQuote`.
         var openQuote = NotAQuote
+        // The value of a key that is not sensitive ends at the escape of a quote, `<` or `>`, as it ends at the
+        // character, so the pair after it is read, by this pass or by the one for values in escaped quotes.
+        var stopped = false
         def ends(c: Char): Boolean =
           if (openQuote == NotAQuote || !sensitive) endsEqualsValue(c) else endsEscapedQuotedValue(c)
-        while (escapeEnd < 0 && valueEnd < input.length && !ends(input.charAt(valueEnd)))
+        while (!stopped && escapeEnd < 0 && valueEnd < input.length && !ends(input.charAt(valueEnd)))
           if (input.charAt(valueEnd) == '\\') {
             val end = separatorEscapeEnd(input, valueEnd)
             if (end >= 0 && escapedSeparator(input, end) == '&') {
@@ -1410,7 +1765,8 @@ private[llm4s] object Redaction {
               else valueEnd = end
             } else {
               val quoteEnd = quoteEscapeEnd(input, valueEnd)
-              if (quoteEnd >= 0) {
+              if (!sensitive && (quoteEnd >= 0 || (escaped && angleEscapeEnd(input, valueEnd) >= 0))) stopped = true
+              else if (quoteEnd >= 0) {
                 val quote = input.charAt(quoteEnd - 1)
                 if (valueEnd == valueStart) openQuote = quote
                 else if (quote == openQuote) openQuote = NotAQuote
@@ -1422,14 +1778,16 @@ private[llm4s] object Redaction {
           }
         val copied =
           if (sensitive && valueEnd > valueStart) {
-            out.append(input, copiedTo, valueStart).append(placeholder).append(quoteEscape(input, valueStart, valueEnd))
-            valueEnd
+            // The backslashes kept are the last before the quote, copied as they are.
+            out.copy(copiedTo, valueStart)
+            out.mask()
+            valueEnd - quoteEscape(input, valueStart, valueEnd).length
           } else copiedTo
         loop(if (escapeEnd >= 0) escapeEnd else valueEnd, copied)
       }
 
     val copiedTo = loop(0, 0)
-    out.append(input, copiedTo, input.length).toString
+    out.finish(copiedTo)
   }
 
   /** `key=`, or `key` and the JSON escape of `=`: the start of the next pair, read where an escaped `&` ends. */
@@ -1453,6 +1811,14 @@ private[llm4s] object Redaction {
 
   private val NotAQuote: Char = ' '
 
+  /** The index after the JSON escape of `<` or `>` (`u003c` or `u003e`) that the backslashes at `i` start, or -1. */
+  private def angleEscapeEnd(input: String, i: Int): Int = {
+    val u = afterBackslashes(input, i)
+    val escapes =
+      u > i && u + 5 <= input.length && input.startsWith("u003", u) && "cCeE".indexOf(input.charAt(u + 4).toInt) >= 0
+    if (escapes) u + 5 else -1
+  }
+
   /** The characters that end the value of a `key=value` pair: whitespace and `&"',;<>`. */
   private def endsEqualsValue(c: Char): Boolean = isRegexSpace(c) || "&\"',;<>".indexOf(c.toInt) >= 0
 
@@ -1463,8 +1829,4 @@ private[llm4s] object Redaction {
    */
   private def endsEscapedQuotedValue(c: Char): Boolean = c == '\n' || c == '\r' || "\"'<>".indexOf(c.toInt) >= 0
 
-  private def redactApiKeys(input: String, placeholder: String): String =
-    // Delegate to the canonical patterns in SecretPatterns so there is a
-    // single source of truth for credential regexes across the codebase.
-    SecretPatterns.redactAllWithPlaceholder(input, placeholder)
 }

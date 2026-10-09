@@ -2091,6 +2091,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   escaped quote, over whitespace, `&`, `,` and `;` as `key='...'` does, so
   `client_secret=\u0027a;b\u0027` is redacted whole, which it was not before; and the field passes read `\u003d`
   as the `=` of a pair, as Gson writes it.
+  Where the input holds one of these escapes, or `\u0027` or `\u0022`, every pass of `redact` also reads the input
+  as it was given, and what any pass replaces - alone, or in sequence as the passes ran before - is merged and
+  replaced once. A pass that reads further than a value, as a query value that holds a quote runs over `\u0026`,
+  can no longer take the key or the opening quote of the field after it from the pass that reads that field:
+  `{"msg":"GET https://h/x?a=1\u0026token=ab'cd\u0026password='correct horse battery'"}`, as Go writes it, becomes
+  `{"msg":"GET https://h/x?a=1\u0026token=[REDACTED]'"}`, where ` horse battery'` was left readable, and so for a
+  `'passwd':'...'` or `\"password\":\"...\"` field after such a value. A `Bearer` or `Basic` token after an
+  escape is read apart from the plain pattern, so it cannot take the keyword of the next token
+  (`Basic \u003DBasic Basic 9K29`). A field of JSON whose quotes System.Text.Json writes as `\u0022` (or a dict's
+  as `\u0027`) is read as `"token": "..."` is, and so is `key=` before a value in escaped quotes, so
+  `{"msg":"{\u0022url\u0022:\u0022https://h/x?token=abc\u0026page=2\u0022,\u0022nested\u0022:{\u0022token\u0022:\u0022NESTEDSECRET\u0022}}"}`
+  keeps `page=2` and redacts both tokens. The value of a `key=value` pair whose key is not sensitive ends at an
+  escaped quote, `<` or `>`, as it ends at the character, so the pair after it is read.
   An input that holds none of these escapes is redacted exactly as before.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the
