@@ -2096,6 +2096,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parent path holds `:` (POSIX) or `;` (Windows); on Windows, the forms listed
   above; and `environment` variables outside the list. Run writes through the
   `writeFile` / `modifyFile` operations or the read-write allowlist's own programs instead.
+- **A subscription receives every live event sent after `subscribe` returns** ([#1731](https://github.com/llm4s/llm4s/issues/1731)):
+  `GraphRuntime.subscribe` returned before its dispatcher joined the event hub's live set, which it
+  did only after replaying the log, so live events (`RunContext.progress`, `StreamEvent.Live`) sent in
+  between were silently lost - subscribing and then calling `start` lost the run's progress whenever
+  the store's first read was slow or the dispatcher thread started late. The subscription now joins
+  the live set before `subscribe` returns. Live events sent while it replays are held, up to its
+  `capacity` (the rest dropped and reported as a `StreamEvent.LiveGap`, as for a full queue), and
+  delivered in their place among the durable events: after those committed before them, before
+  those committed after. Durable delivery is unchanged. No API change.
 - **Security - `llm4s-core`, `llm4s-agent-tools`: the SSRF guard blocks IPv6 private ranges, redirect header
   stripping is sticky, and the HTTP tool's `timeout` bounds the whole call** ([#1408](https://github.com/llm4s/llm4s/issues/1408),
   findings F5, F7 and F8; F6 remains open):
