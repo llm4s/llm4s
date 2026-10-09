@@ -54,6 +54,11 @@ replacing its execution model and its tier is an open question in
 [#1281](https://github.com/llm4s/llm4s/issues/1281). Add it to `stabilityTierModules` in `build.sbt`
 when that is settled.
 
+`scripts/check-tier-drift.sh` (also a CI quick check, and it needs no sbt) keeps this page, the tiers in
+[1.0 Scope](v1-scope) and the lists in `build.sbt` from drifting apart: the modules that call `mimaFrozen`
+are the frozen set, and every other place that states it must agree. See the script's header for the exact
+comparisons, and mark a Package Map row `tier-drift: ignore` to opt it out.
+
 A type annotated `@Experimental` inside a frozen module needs a `ProblemFilters.exclude` entry that says
 why when the baseline is set (see [The Baseline](#the-baseline)); the annotation is what tells you which.
 

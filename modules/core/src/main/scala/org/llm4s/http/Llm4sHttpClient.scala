@@ -11,6 +11,7 @@ import org.llm4s.error.{
   ValidationError
 }
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.Redaction
 
 import java.io.IOException
 import java.net.URI
@@ -83,9 +84,14 @@ final case class JsonHttpResponse(
 
 object HttpResponse:
   extension (response: HttpResponse)
+    /**
+     * The response when its status is 2xx, else a `ServiceError` carrying the status and the body. The body in the
+     * error is redacted and capped (`Redaction.safeBody`, 2048 characters), since a provider's error body can echo
+     * the request's credentials.
+     */
     def ensureSuccess(provider: String): Result[HttpResponse] =
       if response.statusCode >= 200 && response.statusCode < 300 then Right(response)
-      else Left(ServiceError(response.statusCode, provider, response.body))
+      else Left(ServiceError(response.statusCode, provider, Redaction.safeBody(response.body)))
 
     def toJson(fieldName: String = "responseBody"): Result[JsonHttpResponse] =
       Try(ujson.read(response.body)).toResult.left

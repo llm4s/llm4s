@@ -76,6 +76,15 @@ object LLMError {
     errors.filterNot(isRecoverable)
 
   /**
+   * The text that names a cause in an error's message or `context`: the exception's message, or its class
+   * name (`java.lang.RuntimeException`) when the exception has no message or an empty one. `Throwable#getMessage`
+   * is `null` for an exception built without a message, and a `null` inside a `Map[String, String]` printed
+   * `cause=null` and failed any later read of the value (#1556).
+   */
+  private[llm4s] def describeCause(cause: Throwable): String =
+    Option(cause.getMessage).filter(_.nonEmpty).getOrElse(cause.getClass.getName)
+
+  /**
    * Cats integration
    */
 

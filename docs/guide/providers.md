@@ -657,7 +657,26 @@ Both sections are shown together for brevity. Only the section you load is valid
 its key - `OPENROUTER_API_KEY` or `ZAI_API_KEY` - needs to be set.
 
 OpenRouter maps `CompletionOptions.reasoning` onto the underlying model: a thinking budget for
-Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest. A GLM thinking
+Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest.
+
+Z.ai maps it onto what the configured GLM model documents. Thinking is on by default, and
+`reasoning_effort` defaults to `max` on the models that accept it. The mapping only ever rises with
+the effort, and `High` sends `max`, Z.ai's maximum and its default, so no level reasons more than
+`High`:
+
+| Model | `ReasoningEffort.None` | `Low` | `Medium` | `High` |
+|---|---|---|---|---|
+| GLM-5.3, GLM-5.3-Flash, GLM-5.3-FlashX | `reasoning_effort: low` | `low` | `high` | `max` |
+| GLM-5.2 | `reasoning_effort: none` | `low` | `medium` | `max` |
+| GLM-5.1, GLM-5, GLM-4.7, GLM-4.6, GLM-4.5 (and variants) | `thinking.type: disabled` | not sent | not sent | not sent |
+| any other model | not sent | not sent | not sent | not sent |
+
+GLM-5.3 always thinks and rejects `thinking.type: disabled`, so `None` gets the lowest effort it
+accepts, as Z.ai advises; it still produces, and bills, thinking tokens, and the first such request
+in a process logs a warning naming the model. GLM-5.3 accepts only `low`, `high` and `max`. GLM-5.2
+accepts `none`, `low`, `medium`, `high` and `max`, but Z.ai currently runs `low` and `medium` as
+`high` on it; llm4s still sends the level requested. The GLM-4.x and earlier GLM-5 models document
+no `reasoning_effort`. With `reasoning` unset, neither field is sent. A GLM thinking
 model's `reasoning_content` on Z.ai, and a model's `reasoning` and `reasoning_details` on OpenRouter,
 are returned on the message and sent back (see [Thinking in conversation history](#thinking-in-conversation-history)).
 
@@ -1498,7 +1517,8 @@ tool calls do, and each client sends it back where its provider takes it:
 | DeepSeek, Z.ai | `reasoning_content` | `reasoning_content` |
 | OpenRouter | `reasoning` / `thinking`, and `reasoning_details` | `reasoning`, and `reasoning_details` unchanged (same items, order and fields) |
 | Mistral (Magistral) | thinking chunks in `content` | a thinking chunk before the text chunk |
-| OpenAI, Azure, Gemini, Vertex AI, Cohere, generic `openai-compatible` | - | not sent: the API has no field for it |
+| Gemini API, Vertex AI | a `thoughtSignature` on a part: the `functionCall` part, or the last text part (and thought summaries, `thought: true`, as text) | the signature, on the same part ([below](#gemini-and-vertex-ai-thought-signatures)) |
+| OpenAI, Azure, Cohere, generic `openai-compatible` | - | not sent: the API has no field for it |
 
 Anthropic and Bedrock require the signed blocks back when a thinking model's turn ends in tool
 calls, and reject a thinking block without a signature, so unsigned thinking - from another
@@ -1516,6 +1536,38 @@ when a conversation continues after tool calls. Each item is kept, with every fi
 `ThinkingBlock.Opaque("openrouter", json)` block after the reasoning text - streamed items are
 joined by `index` first - and only the OpenRouter client sends them back; every other client ignores
 opaque blocks that are not its own.
+
+### Gemini and Vertex AI thought signatures
+
+A thinking Gemini model attaches an opaque, base64 `thoughtSignature` to a part of its turn and expects it
+back on the same part. Google's
+[Vertex AI guide](https://cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures) states the rules
+these clients follow:
+
+- A response with `functionCall` parts needs its signature back: Gemini 3 models answer HTTP 400 when a
+  required signature is missing. With parallel calls only the first `functionCall` part carries one; across
+  sequential steps each step's first call does. The part goes back "exactly as it was returned".
+- A response without function calls may carry a signature on its last part (streaming can deliver it on a part
+  with empty text). Sending it back is recommended, and leaving it out is not an error.
+- A part with a signature is never merged with one without.
+
+Each signature is kept as a sealed `ThinkingBlock.Opaque` block of the client's provider id (`gemini` or
+`vertexai`) and goes back only to the provider and model that produced it. Unlike Anthropic's prefix rule,
+the binding is to that origin alone: Google asks for signatures to be preserved when history is modified or
+trimmed, and Gemini 3 answers HTTP 400 when the current turn's function-call signature is missing, so
+pruning or compressing earlier turns leaves them in place. What unseals one is a change of provider or
+model, or an edit to the message that carries it. A function call's signature is stored against the tool
+call's id with the `functionCall` payload exactly as Gemini returned it, and the part is replayed verbatim
+(its optional `id` kept, `args` present or absent as received); a populated `functionCall.id` becomes the
+tool call's own id and the matching `functionResponse` echoes it. A text part's signature records its
+character offset in the message content, and the content is split there when the turn is sent, so a signed
+part is never merged with an unsigned one (if the content no longer fits, the text signature is left out).
+Parts are rebuilt as text first, then function calls, as these clients have always sent them.
+
+Google's documentation does not say whether a signature from the Gemini API validates on Vertex AI, so the two
+clients are separate signing authorities: a conversation moved from one to the other keeps its text and
+drops the signatures, never sending a foreign one. A signature on an image part, or on a thought-summary
+part, is not kept, since these clients neither request nor send those parts.
 
 Signed, redacted and opaque thinking is *sealed*: it is valid only in the conversation it was produced in.
 [Anthropic](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking) validates a
@@ -1555,6 +1607,35 @@ as a hash of all the messages in the conversation. llm4s enforces both halves wi
   Changing the configured model unseals every earlier turn. The endpoint is not part of it: a proxy or regional endpoint in
   front of the same provider changes nothing the provider checks.
 
+### Moving between Anthropic and Bedrock
+
+A conversation that moves between the Anthropic API and Bedrock (a failover, say) has its signed thinking
+unsealed: the text is kept, the signatures and redacted blocks are dropped, and nothing is rejected. Anthropic
+[documents](https://platform.claude.com/docs/en/build-with-claude/thinking#thinking-encryption) that signature
+values are compatible across platforms (the Claude API, Amazon Bedrock and Google Cloud), but that is only one
+of the conditions for a replayed block to be accepted. The API also checks the model that produced it
+(each model reads its own thinking blocks and those of a fixed set of other models) and that everything sent
+before it is unchanged, and rejects the request with a 400 or drops the block when either fails. The two
+clients name the same model differently (`claude-sonnet-4-5-20250929` against
+`anthropic.claude-sonnet-4-5-20250929-v1:0`) and serialise the system prompt and tools through different
+APIs, so this library cannot show that the prefix a block was signed over is the prefix the other platform
+sees. Losing the reasoning context on a failover is safe; a rejected request is not, so each remains its own
+signing authority. Treating them as one would need a mapping between the two model ids and a live check that
+a signature survives the move.
+
+### Limits that remain
+
+- **OpenRouter routers and fallbacks.** OpenRouter's documentation says dynamic routers (`openrouter/auto`,
+  `openrouter/free`) omit the reasoning field, so there is nothing to replay for them, and that the
+  `reasoning_details` sequence must match the original output with nothing rearranged or modified. It does
+  not say what happens to the details when a fallback sends the request to a different model, so they are
+  sent back unchanged, as its documentation asks.
+- **Editing a tool call on a turn that is still in progress** (a human-in-the-loop edit) unseals that turn's
+  thinking, because the signature covers the tool call. Anthropic's manual extended thinking requires the
+  final assistant turn of a thinking-enabled request to begin with a thinking block, so such a request can be
+  rejected; adaptive thinking drops that requirement. Gemini 3 answers 400 for a missing function-call
+  signature in the current turn.
+
 Earlier turns whose history is unchanged keep their sealed thinking: Anthropic recommends passing
 all thinking blocks back, keeps them in context on newer models, and accepts any unbroken run of the
 original blocks. A change unseals every turn after it and none before it, so the replayed blocks never
@@ -1572,6 +1653,51 @@ for {
   answer <- client.complete(next, options)             // the provider gets it back
 } yield answer
 ```
+
+---
+
+## Citations and grounding sources
+
+A model that searches the web by itself reports the sources behind its answer. llm4s returns them on
+`Completion.citations`, a `List[Citation]` that is empty for every completion that has none:
+
+```scala
+import org.llm4s.llmconnect.model.Completion
+
+def sources(completion: Completion): List[String] =
+  completion.citations.map(c => s"${c.title.getOrElse(c.url)} <${c.url}>")
+```
+
+A `Citation` has a `url`, always, and these fields, each `None` when the provider did not send it:
+
+| Field | Meaning |
+|---|---|
+| `title` | the source's title |
+| `citedText` | a passage of the source that came with the citation (OpenRouter's `content`); it describes the source, not the answer |
+| `startIndex`, `endIndex` | where the inline citation sits, as the provider reports it: positions in `Completion.content`. OpenAI documents them as the first and last character "of the URL citation in the message"; no provider documents them as the span of prose the source supports |
+
+Take the two indices as the location of the citation, not of the supported claim, and check the
+provider's convention before cutting `content` with them (whether `end_index` is inclusive is the
+provider's call). `hasSpan` says whether both are present.
+
+| Provider | Citations |
+|---|---|
+| OpenAI (search models for Chat Completions), Azure, Requesty | Read from the message's `url_citation` annotations (`url`, `title`, `start_index`, `end_index`). Search models (`gpt-5-search-api`; the `*-search-preview` models were retired on 2026-07-23) return them with no request option; Azure and Requesty return them only if the deployment does. |
+| OpenRouter (`:online` models, or the web plugin) | The same annotations, plus `content` as `citedText`. |
+| DeepSeek, Z.ai, Mistral, Cohere, a generic `openai-compatible` endpoint | Read if the reply carries standard `url_citation` annotations; none of them is documented to. |
+| Anthropic, Gemini, Vertex AI, Ollama, Bedrock, watsonx | Empty. Anthropic's citations come from document inputs and its web search tool, and Gemini's `groundingMetadata` from its Google Search tool; llm4s cannot yet request either, so no response can carry them. |
+
+Things to know:
+
+- **Streaming.** A completion assembled from streamed chunks has no citations: neither OpenAI nor
+  OpenRouter documents where a stream carries them, so streamed chunks are not read. (A model that does not
+  stream natively is answered with one ordinary call, and that completion keeps its citations.)
+- **A citation never fails a reply.** One without a `url` is dropped, a field of the wrong type is read as
+  absent, and the answer is returned either way. The OpenAI client treats an `annotations` list the SDK
+  cannot parse at all as no citations; the OpenAI-compatible client keeps the entries it can read.
+- **Not read:** Perplexity's top-level `citations` list (its provider is tracked in #1026).
+- The shapes come from the OpenAI Java SDK's `url_citation` types and OpenRouter's documentation. No live
+  provider was called while writing this.
 
 ---
 

@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.error.{ AuthenticationError, LLMError, NetworkError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.types.Result
+import org.llm4s.testutil.EchoedCredentials
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -120,6 +121,26 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[AuthenticationError]
     result.left.toOption.get.message should include("Token refresh failed")
+  }
+
+  it should "redact credentials the token endpoint echoes in its error body (#1674)" in {
+    val credFileContent =
+      """{"type": "authorized_user", "client_id": "id", "client_secret": "s", "refresh_token": "r"}"""
+
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(400, EchoedCredentials.Text, Map.empty)))
+
+    val provider = new VertexAIAuthProvider(
+      credentialFilePath = Some("/fake/path/creds.json"),
+      httpClient = mockHttp,
+      envReader = _ => None,
+      fileReader = _ => Right(credFileContent)
+    )
+
+    val message = provider.getAccessToken().left.toOption.get.message
+    message should include("Token refresh failed")
+    message should include("[REDACTED]")
+    EchoedCredentials.leaked(message) shouldBe empty
   }
 
   it should "return AuthenticationError for unsupported credential type" in {

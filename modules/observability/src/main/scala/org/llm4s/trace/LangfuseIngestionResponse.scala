@@ -1,5 +1,7 @@
 package org.llm4s.trace
 
+import org.llm4s.util.Redaction
+
 import scala.util.Try
 
 /**
@@ -42,6 +44,8 @@ private[trace] object LangfuseIngestionResponse {
       }
 
   /** One line for logs and errors: how many of the batch's events were rejected, and which. */
-  def summary(rejected: Seq[Rejection], batchSize: Int): String =
-    s"Langfuse rejected ${rejected.size} of $batchSize events: ${rejected.map(_.describe).mkString(", ")}"
+  def summary(rejected: Seq[Rejection], batchSize: Int): String = {
+    val described = Redaction.safeBody(rejected.map(_.describe).mkString(", "))
+    s"Langfuse rejected ${rejected.size} of $batchSize events: $described"
+  }
 }

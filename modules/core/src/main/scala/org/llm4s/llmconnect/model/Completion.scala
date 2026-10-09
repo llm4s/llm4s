@@ -15,6 +15,9 @@ import org.llm4s.annotation.Stable
  * @param usage Optional token usage statistics for the completion.
  * @param estimatedCost Optional estimated cost of this completion in USD.
  *                      Computed from token usage and model pricing when available.
+ * @param citations The sources the model cited in its answer, when the provider reports them
+ *                  (see [[Citation]]); empty for a model that does not search or does not cite,
+ *                  and for a completion assembled from streamed chunks, which carry none.
  */
 @Stable
 final case class Completion private (
@@ -25,7 +28,8 @@ final case class Completion private (
   message: AssistantMessage,
   toolCalls: List[ToolCall],
   usage: Option[TokenUsage],
-  estimatedCost: Option[Double]
+  estimatedCost: Option[Double],
+  citations: List[Citation]
 ) {
   def withId(id: String): Completion                               = copy(id = id)
   def withCreated(created: Long): Completion                       = copy(created = created)
@@ -37,6 +41,7 @@ final case class Completion private (
   def withUsage(usage: Option[TokenUsage]): Completion             = copy(usage = usage)
   def withEstimatedCost(estimatedCost: Double): Completion         = copy(estimatedCost = Some(estimatedCost))
   def withEstimatedCost(estimatedCost: Option[Double]): Completion = copy(estimatedCost = estimatedCost)
+  def withCitations(citations: List[Citation]): Completion         = copy(citations = citations)
 
   /**
    * Extract content as text (for compatibility)
@@ -47,6 +52,11 @@ final case class Completion private (
    * Check if completion contains tool calls
    */
   def hasToolCalls: Boolean = toolCalls.nonEmpty
+
+  /**
+   * Check if the provider reported any [[Citation]] for this completion
+   */
+  def hasCitations: Boolean = citations.nonEmpty
 
   /**
    * The text of the model's thinking/reasoning, when the provider reports it: the thinking
@@ -84,9 +94,10 @@ object Completion {
     message: AssistantMessage,
     toolCalls: List[ToolCall] = List.empty,
     usage: Option[TokenUsage] = None,
-    estimatedCost: Option[Double] = None
+    estimatedCost: Option[Double] = None,
+    citations: List[Citation] = List.empty
   ): Completion =
-    new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost)
+    new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost, citations)
 }
 
 /**
