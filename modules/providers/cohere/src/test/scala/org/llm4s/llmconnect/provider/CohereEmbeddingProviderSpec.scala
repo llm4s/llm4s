@@ -478,6 +478,11 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
       val err = result.left.toOption.get
       err.message should include("[REDACTED]")
       EchoedCredentials.leaked(err.message) shouldBe empty
+      val errorLines = lines.filter(l =>
+        l.contains("[CohereEmbeddingProvider] Auth error") || l.contains("[CohereEmbeddingProvider] HTTP error")
+      )
+      errorLines should not be empty
+      errorLines.foreach(_ should include("[REDACTED]"))
       lines.flatMap(EchoedCredentials.leaked) shouldBe empty
     }
   }

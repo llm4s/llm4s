@@ -4,6 +4,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
+import org.llm4s.util.Redaction
 
 /**
  * Base trait for LLM-based guardrails (the LLM-as-Judge pattern).
@@ -190,7 +191,9 @@ Score (0-1):"""
 
   /**
    * Reads a score from the reply, or fails: see the scoring notes on the trait for the rules. An unreadable reply
-   * fails with a `ValidationError` on field `llm_response` that quotes the reply and says what was expected.
+   * fails with a `ValidationError` on field `llm_response` that quotes the reply - redacted and cut to 200 characters,
+   * as the RAG guardrails quote theirs, since a judge can echo the content it was given (#1674) - and says what was
+   * expected.
    */
   private def parseScore(response: String): Result[BigDecimal] =
     LLMGuardrail
@@ -198,7 +201,7 @@ Score (0-1):"""
       .toRight(
         ValidationError.invalid(
           "llm_response",
-          s"Could not parse LLM judge score from response: '$response'. Expected a single number from 0 to 1."
+          s"Could not parse LLM judge score from response: '${Redaction.safeBody(response, 200)}'. Expected a single number from 0 to 1."
         )
       )
 }

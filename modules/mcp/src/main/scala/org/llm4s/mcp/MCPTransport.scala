@@ -268,9 +268,7 @@ class StreamableHTTPTransportImpl(
         logger.debug(s"StreamableHTTPTransport($name) ignoring SSE retry directive: $trimmedLine")
       } else if (!trimmedLine.startsWith(":")) {
         // Lines starting with : are comments, ignore others that don't match format
-        logger.debug(
-          s"StreamableHTTPTransport($name) ignoring unrecognized SSE line: ${Redaction.safeBody(trimmedLine)}"
-        )
+        logger.debugPayload(s"StreamableHTTPTransport($name) ignoring unrecognized SSE line: ", trimmedLine)
       }
     }
 

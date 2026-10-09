@@ -103,6 +103,9 @@ class CohereRerankerHttpSpec extends AnyFlatSpec with Matchers {
         val error           = rerankError(result)
         error.message should include("[REDACTED]")
         EchoedCredentials.leaked(error.message) shouldBe empty
+        val errorLines = lines.filter(_.contains("[CohereReranker] HTTP error"))
+        errorLines should not be empty
+        errorLines.foreach(_ should include("[REDACTED]"))
         lines.flatMap(EchoedCredentials.leaked) shouldBe empty
       }
     }

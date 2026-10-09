@@ -97,5 +97,30 @@ class MCPTransportRedactionSpec extends AnyWordSpec with Matchers with MockFacto
         withClue(s"$name: ")(assertRedacted(logged(transport(answering(200, rpcError)).sendRequest(request))))
       }
     }
+
+    "redact credentials in an unrecognized SSE line it logs at DEBUG" in {
+      val ok   = write(JsonRpcResponse(jsonrpc = "2.0", id = "1", result = Some(ujson.Obj()), error = None))
+      val body = EchoedText + "\n" + s"data: $ok\n\n"
+      val http = stub[Llm4sHttpClient]
+      (http.post _)
+        .when(*, *, *, *)
+        .returns(Right(HttpResponse(200, body, Map("content-type" -> Seq("text/event-stream")))))
+      val mcpLogger = LoggerFactory.getLogger("org.llm4s.mcp").asInstanceOf[LogbackLogger]
+      val previous  = mcpLogger.getLevel
+      mcpLogger.setLevel(ch.qos.logback.classic.Level.DEBUG)
+      val outcome =
+        Try(
+          logged(
+            new StreamableHTTPTransportImpl("http://localhost:8080/mcp", "t", 5.seconds, http).sendRequest(request)
+          )
+        )
+      mcpLogger.setLevel(previous)
+      val (result, lines) = outcome.get
+      result.isRight shouldBe true
+      val ignored = lines.filter(_.contains("ignoring unrecognized SSE line"))
+      ignored should not be empty
+      ignored.exists(_.contains("[REDACTED]")) shouldBe true
+      lines.foreach(assertNoSecret)
+    }
   }
 }

@@ -1998,15 +1998,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or an error message through `Redaction.truncateForLog` alone, or not even that, so a body that echoed a request
   header, an API key or a token - `Authorization: Bearer ...`, `"api_key": "..."`, `?key=AIza...` - was written in
   the clear. Every such site now goes through one internal helper that redacts the whole text and then truncates
-  it, as Cohere's and Jina's embedding providers already did: the OpenAI, Anthropic and Gemini vision clients and
-  the Stable Diffusion and Hugging Face image clients (`llm4s-image`); the Streamable HTTP and SSE MCP transports'
-  HTTP error bodies, and the message of a JSON-RPC error from any transport (`llm4s-mcp`); the Langfuse batch
+  it, as Cohere's and Jina's embedding providers already did: the OpenAI, Anthropic and Gemini vision clients, the
+  OpenAI (DALL-E) image client's error message, raw body or JSON `message` alike, and the Stable Diffusion and
+  Hugging Face image clients (`llm4s-image`); the Streamable HTTP and SSE MCP transports' HTTP error bodies, the
+  message of a JSON-RPC error from any transport, and the DEBUG line for an unrecognised SSE line, now built only
+  when DEBUG is on (`llm4s-mcp`); the Langfuse batch
   sender's and tracer's error-body log lines and the per-event rejection summary (`llm4s-observability`); the
   Ollama, OpenAI and Voyage embedding providers; Cohere's reranker and Qdrant's error messages (`llm4s-rag`);
   `GraphJsonParser`'s preview of a reply it could not parse (`llm4s-knowledgegraph`); Vertex AI's token
   refresh and JWT exchange errors (`llm4s-gemini`); watsonx's IAM exchange error, which removed only the
-  configured key; the grounding and context-relevance guardrails' quote of a reply they could not parse
-  (`llm4s-agent`); and `HttpResponse.ensureSuccess`'s `ServiceError`, which the model listers use (`llm4s-core`).
+  configured key; the grounding, context-relevance and every `LLMGuardrail` judge's quote of a reply they could not
+  parse, cut to 200 characters (`llm4s-agent`); and `HttpResponse.ensureSuccess`'s `ServiceError`, which the model
+  listers use (`llm4s-core`). An SDK exception's message carries the response body too (anthropic-java writes
+  `401: <body>`), so the same applies to the messages taken from one: Anthropic's `AuthenticationError` and
+  `ValidationError` on both paths (`llm4s-anthropic`); every error Bedrock maps from an AWS exception
+  (`llm4s-bedrock`); and `DefaultErrorMapper`'s `AuthenticationError` and `UnknownError`, which every client and
+  `Safety.safely`, `Safety.fromTry`, `toResult` and `toLLMError` fall back on (`llm4s-core`). The `UnknownError`
+  keeps the original exception as its cause, unredacted: a logger that prints the cause prints its message.
   `OllamaClient`'s "does not support tools" error cut the server's decoded message to 200 characters and never
   redacted it; it now redacts the whole message first. Redacting before the cut matters: a key that straddles the
   cut point leaves a fragment too short for its pattern to recognise, which the old order let through. A truncated

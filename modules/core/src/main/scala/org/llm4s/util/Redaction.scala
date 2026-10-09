@@ -73,6 +73,11 @@ private[llm4s] object Redaction {
    * recognised and is written in the clear. Use this, never `truncateForLog` alone, for any text that reaches a log, an
    * `LLMError` message, a trace or the provider exchange sink.
    *
+   * It differs from [[redactForLogging]] only in its defaults and its suffix: 2048 characters, a `null`-safe input
+   * and `truncateForLog`'s `(truncated, original length: N)`, the format the error messages and log lines it
+   * replaced already used; `redactForLogging` keeps its 1000-character default, `0` for no limit, a caller's
+   * placeholder and its `[truncated, N chars omitted]` suffix, which `safe` and the MCP payload log rely on.
+   *
    * @param body The text to redact and truncate
    * @param maxLength Maximum length of the redacted text before truncation (default: 2048)
    * @return The redacted text, truncated with metadata when it is longer than `maxLength`
@@ -229,7 +234,8 @@ private[llm4s] object Redaction {
   /**
    * Redact sensitive data and truncate for logging.
    *
-   * Applies pattern-based redaction first, then truncates if needed.
+   * Applies pattern-based redaction first, then truncates if needed. For a provider's response body in an error
+   * message or a log line, prefer [[safeBody]], which differs only in its defaults and truncation suffix.
    *
    * @param input The input to redact
    * @param maxLength Maximum length of the output (0 = no limit)

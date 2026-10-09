@@ -1,6 +1,6 @@
 package org.llm4s.testutil
 
-import ch.qos.logback.classic.{ Logger => LogbackLogger }
+import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import org.slf4j.LoggerFactory
@@ -36,13 +36,20 @@ object EchoedCredentials {
   /** The credentials that appear in `text`; empty when none leaked. */
   def leaked(text: String): Seq[String] = Secrets.filter(text.contains)
 
-  /** Runs `f` and returns its result with the formatted message of every log event written meanwhile. */
+  /**
+   * Runs `f` and returns its result with the formatted message of every log event written meanwhile, at any level
+   * down to DEBUG: the root logger's level is lowered for the call, so that a spec sees the lines a test
+   * configuration would otherwise drop, and can assert that the line it checks was written at all.
+   */
   def logged[A](f: => A): (A, Seq[String]) = {
     val root     = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME).asInstanceOf[LogbackLogger]
+    val previous = root.getLevel
     val appender = new ListAppender[ILoggingEvent]()
     appender.start()
     root.addAppender(appender)
+    root.setLevel(Level.DEBUG)
     val result = Try(f)
+    root.setLevel(previous)
     root.detachAppender(appender)
     (result.get, appender.list.asScala.toSeq.map(_.getFormattedMessage))
   }

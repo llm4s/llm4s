@@ -11,6 +11,7 @@ import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.{ Base64, UUID }
 import scala.concurrent.duration.*
+import org.llm4s.util.Redaction
 
 /**
  * Langfuse [[Tracing]] implementation for production observability.
@@ -148,7 +149,7 @@ class LangfuseTracing(
         Right(())
       case Right(response) =>
         logger.error(s"[Langfuse] Batch export failed: ${response.statusCode}")
-        logger.error(s"[Langfuse] Response body: ${org.llm4s.util.Redaction.safeBody(response.body)}")
+        logger.error(s"[Langfuse] Response body: ${Redaction.safeBody(response.body)}")
         val runtimeException = new RuntimeException(s"Langfuse export failed: ${response.statusCode}")
         Left(UnknownError(runtimeException.getMessage, runtimeException))
     }

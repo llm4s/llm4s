@@ -6,8 +6,8 @@ import ch.qos.logback.core.read.ListAppender
 import com.sun.net.httpserver.HttpServer
 import org.llm4s.error.LLMError
 import org.llm4s.http.{ HttpRawResponse, HttpResponse, MultipartPart }
-import org.llm4s.imagegeneration.{ HuggingFaceConfig, StableDiffusionConfig }
-import org.llm4s.imagegeneration.provider.{ HttpClient, HuggingFaceClient, StableDiffusionClient }
+import org.llm4s.imagegeneration.{ HuggingFaceConfig, OpenAIConfig, StableDiffusionConfig }
+import org.llm4s.imagegeneration.provider.{ HttpClient, HuggingFaceClient, OpenAIImageClient, StableDiffusionClient }
 import org.llm4s.imageprocessing.ImageProcessingClient
 import org.llm4s.imageprocessing.config.{ AnthropicVisionConfig, GeminiVisionConfig, OpenAIVisionConfig }
 import org.llm4s.imageprocessing.provider.anthropicclient.AnthropicVisionClient
@@ -160,6 +160,18 @@ class ErrorBodyRedactionSpec extends AnyFlatSpec with Matchers {
         error should include("[REDACTED]")
         assertNoSecret(error)
       }
+    }
+  }
+
+  "OpenAIImageClient" should "redact credentials echoed in an error body, raw or as a JSON error's message" in {
+    for {
+      status <- Seq(400, 500)
+      body   <- Seq(EchoedText, EchoedJsonError)
+    } withClue(s"$status, ${body.take(20)}: ") {
+      val client = new OpenAIImageClient(OpenAIConfig(apiKey = "k"), new Answering(status, body))
+      val error  = client.generateImage("a cat").left.getOrElse(fail("expected a failure")).message
+      error should include("[REDACTED]")
+      assertNoSecret(error)
     }
   }
 }

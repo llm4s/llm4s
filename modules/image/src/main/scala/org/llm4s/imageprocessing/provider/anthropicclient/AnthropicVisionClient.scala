@@ -13,6 +13,7 @@ import java.nio.file.{ Files, Paths }
 import java.time.Instant
 import java.util.Base64
 import scala.util.Try
+import org.llm4s.util.Redaction
 
 /**
  * Anthropic Claude Vision client for AI-powered image analysis.
@@ -221,14 +222,14 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
                       case _                      => responseBody
                     }
                   }
-                  .map(d => s"Status $statusCode: ${org.llm4s.util.Redaction.safeBody(d)}")
-                  .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.safeBody(responseBody)}")
+                  .map(d => s"Status $statusCode: ${Redaction.safeBody(d)}")
+                  .getOrElse(s"Status $statusCode: ${Redaction.safeBody(responseBody)}")
 
               // Log a redacted, truncated version to avoid leaking very large or sensitive payloads
               logger.error(
                 "[AnthropicVisionClient] HTTP error {}: {}",
                 statusCode.asInstanceOf[AnyRef],
-                org.llm4s.util.Redaction.safeBody(responseBody)
+                Redaction.safeBody(responseBody)
               )
               Left(visionFailed(s"Anthropic API call failed - $errorMessage"))
           }).fold(e => Left(visionFailed(e.getMessage)), identity)

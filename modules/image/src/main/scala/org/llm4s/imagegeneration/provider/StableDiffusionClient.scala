@@ -11,6 +11,7 @@ import scala.util.Try
 import scala.concurrent.duration.*
 import scala.concurrent.{ Future, ExecutionContext, blocking }
 import org.llm4s.error.LLMError
+import org.llm4s.util.Redaction
 
 /**
  * Represents the JSON payload for the Stable Diffusion WebUI API's text-to-image endpoint.
@@ -294,7 +295,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
       case 429 => return Left(ImageRateLimitError("API request failed with status 429: Rate limit"))
       case _ =>
         val errorMsg =
-          s"API request failed with status ${response.statusCode}: ${org.llm4s.util.Redaction.safeBody(response.body)}"
+          s"API request failed with status ${response.statusCode}: ${Redaction.safeBody(response.body)}"
         logger.error(errorMsg)
         return Left(ImageServiceError(errorMsg, response.statusCode))
     }

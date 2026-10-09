@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.UUID
 import scala.util.Try
+import org.llm4s.util.Redaction
 
 /**
  * Qdrant vector database implementation of VectorStore.
@@ -394,7 +395,7 @@ final class QdrantVectorStore private (
           Left(
             ProcessingError(
               "qdrant-store",
-              s"HTTP PUT failed: ${response.statusCode} - ${org.llm4s.util.Redaction.safeBody(response.body)}"
+              s"HTTP PUT failed: ${response.statusCode} - ${Redaction.safeBody(response.body)}"
             )
           )
       }
@@ -418,7 +419,7 @@ final class QdrantVectorStore private (
       Left(
         ProcessingError(
           "qdrant-store",
-          s"HTTP error: ${response.statusCode} - ${org.llm4s.util.Redaction.safeBody(response.body)}"
+          s"HTTP error: ${response.statusCode} - ${Redaction.safeBody(response.body)}"
         )
       )
     }

@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory
 import java.util.Locale
 
 import scala.util.Try
+import org.llm4s.util.Redaction
 
 /**
  * Result of a grounding evaluation.
@@ -284,7 +285,7 @@ class GroundingGuardrail(
             Left(
               ValidationError.invalid(
                 "grounding_parse",
-                s"Could not parse grounding evaluation from LLM response: ${org.llm4s.util.Redaction.safeBody(response, 200)}"
+                s"Could not parse grounding evaluation from LLM response: ${Redaction.safeBody(response, 200)}"
               )
             )
         }

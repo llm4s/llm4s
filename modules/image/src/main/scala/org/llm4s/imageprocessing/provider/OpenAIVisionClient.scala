@@ -12,6 +12,7 @@ import java.nio.file.{ Files, Paths }
 import java.time.Instant
 import java.util.Base64
 import scala.util.Try
+import org.llm4s.util.Redaction
 
 /**
  * OpenAI Vision client for AI-powered image analysis using GPT-4 Vision.
@@ -203,14 +204,14 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
                       case _                          => responseBody
                     }
                   }
-                  .map(d => s"Status $statusCode: ${org.llm4s.util.Redaction.safeBody(d)}")
-                  .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.safeBody(responseBody)}")
+                  .map(d => s"Status $statusCode: ${Redaction.safeBody(d)}")
+                  .getOrElse(s"Status $statusCode: ${Redaction.safeBody(responseBody)}")
 
               // Log a redacted, truncated version to avoid leaking very large or sensitive payloads
               logger.error(
                 "[OpenAIVisionClient] HTTP error {}: {}",
                 statusCode.asInstanceOf[AnyRef],
-                org.llm4s.util.Redaction.safeBody(responseBody)
+                Redaction.safeBody(responseBody)
               )
               Left(visionFailed(s"OpenAI API call failed - $errorMessage"))
           }).fold(e => Left(visionFailed(e.getMessage)), identity)

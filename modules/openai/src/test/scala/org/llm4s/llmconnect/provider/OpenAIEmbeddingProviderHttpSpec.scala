@@ -96,6 +96,9 @@ class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
         val error           = embeddingError(result)
         error.message should include("[REDACTED]")
         EchoedCredentials.leaked(error.message) shouldBe empty
+        val errorLines = lines.filter(_.contains("[OpenAIEmbeddingProvider] HTTP error"))
+        errorLines should not be empty
+        errorLines.foreach(_ should include("[REDACTED]"))
         lines.flatMap(EchoedCredentials.leaked) shouldBe empty
       }
     }
