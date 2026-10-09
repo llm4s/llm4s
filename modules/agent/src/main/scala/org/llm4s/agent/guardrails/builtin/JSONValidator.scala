@@ -3,8 +3,9 @@ package org.llm4s.agent.guardrails.builtin
 import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
+import org.llm4s.util.BoundedJson
 
-import scala.util.{ Failure, Success, Try }
+import scala.util.Try
 
 /**
  * Validates that output is valid JSON matching an optional schema.
@@ -29,17 +30,19 @@ import scala.util.{ Failure, Success, Try }
 class JSONValidator(schema: Option[ujson.Value] = None) extends OutputGuardrail {
 
   override def validate(value: String): Result[String] =
-    // 1) Parse JSON
-    Try(ujson.read(value)) match {
-      case Failure(ex) =>
+    // 1) Parse JSON. The output is model text: nested more than 512 levels deep it is refused
+    //    before it is parsed, since a value that deep overflows the stack of whatever renders it
+    //    (#1562), and is reported as not valid JSON like any other unparseable output
+    BoundedJson.read(value) match {
+      case Left(error) =>
         Left(
           ValidationError.invalid(
             "output",
-            s"Output is not valid JSON: ${ex.getMessage}"
+            s"Output is not valid JSON: ${error.message}"
           )
         )
 
-      case Success(parsedJson) =>
+      case Right(parsedJson) =>
         // 2) Validate using schema if provided
         schema match {
           case None => Right(value)

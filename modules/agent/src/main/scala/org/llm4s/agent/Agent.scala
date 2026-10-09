@@ -2,11 +2,12 @@ package org.llm4s.agent
 
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.graph.toolloop.{ AgentInput, ToolLoop, TurnOutput }
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Message, SystemMessage }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 /**
  * An agent family compiled onto the graph runtime: a model/tool loop whose conversations are
@@ -41,9 +42,15 @@ final class Agent private[agent] (
    * One turn on a new thread with a random id. The thread stays in the agent's runtime - on the
    * default in-memory runtime, in memory - until [[forget]] removes it; a caller that does not
    * continue the conversation should forget `result.threadId` when done.
+   *
+   * A `Left` carries no thread id, so nothing could recover or forget the thread: a turn that fails
+   * - cancelled by an interrupt included - is forgotten here once it has ended. A cancelled turn
+   * whose provider ignores its interrupt past [[AgentRun.Drain]] has not ended, and its thread is
+   * left in the runtime (logged at WARN). For a turn to recover, name its thread: `run(threadId, query)`.
    */
   def run(query: String, config: RunConfig = RunConfig()): Result[AgentResult] =
-    run(ThreadId(java.util.UUID.randomUUID().toString), query, config, Nil)
+    val threadId = ThreadId(java.util.UUID.randomUUID().toString)
+    forgottenOnFailure(threadId, config)(run(threadId, query, config, Nil))
 
   /**
    * One turn on `threadId`: a new thread is created, seeded with `history`; on a completed or
@@ -53,9 +60,20 @@ final class Agent private[agent] (
    * `GraphError.TenantMismatch` for another tenant's thread, `ThreadBusy`, `IncompleteRun`,
    * `PendingInterrupts` - come back unchanged. Either way no thread is created and an existing one
    * is unchanged.
+   *
+   * Interrupting the calling thread cancels the turn: `run` returns `Left(CancelledError)` with the
+   * interrupt flag still set, once the turn has ended, leaving the thread for [[recover]]. It waits up to
+   * 5 seconds ([[AgentRun.Drain]]) for the turn to end; with tracing, delivering the ended turn's last
+   * trace events can add to that. A turn whose provider ignores its interrupt for longer is logged at
+   * WARN and left to end on its own, and until it does the thread is `GraphError.ThreadBusy`. With
+   * tracing, the cancelled turn's trace is complete when `run` returns. A turn that had already begun
+   * committing its outcome when the interrupt came cannot be cancelled: `run` returns that outcome -
+   * `Completed`, `Suspended`, ... - with the interrupt flag still set. A caller already interrupted
+   * gets `Left(CancelledError)` without a turn being started. To keep a turn running past an
+   * interrupt, use [[start]] and await the [[AgentRun]].
    */
   def run(threadId: ThreadId, query: String, config: RunConfig, history: Seq[Message]): Result[AgentResult] =
-    start(threadId, query, config, history).flatMap(_.await())
+    blocking(start(threadId, query, config, history))
 
   /** One turn on `threadId`, new, completed or blocked. */
   def run(threadId: ThreadId, query: String, config: RunConfig): Result[AgentResult] =
@@ -70,16 +88,41 @@ final class Agent private[agent] (
 
   /**
    * `first` on a new thread, then each of `followUps` on it, stopping at the first turn whose
-   * status is not `Completed`; returns the last turn's result.
+   * status is not `Completed`; returns the last turn's result. A `Left` carries no thread id, so a
+   * conversation whose turn fails - cancelled by an interrupt included - is forgotten once that turn
+   * has ended, as for the one-shot [[run]].
    */
   def runMultiTurn(first: String, followUps: Seq[String], config: RunConfig = RunConfig()): Result[AgentResult] =
-    followUps.foldLeft(run(first, config)) { (previous, query) =>
-      previous.flatMap { result =>
-        result.status match
-          case AgentStatus.Completed(_) => continueConversation(result, query, config)
-          case _                        => Right(result)
+    run(first, config).flatMap { opening =>
+      forgottenOnFailure(opening.threadId, config) {
+        followUps.foldLeft[Result[AgentResult]](Right(opening)) { (previous, query) =>
+          previous.flatMap { result =>
+            result.status match
+              case AgentStatus.Completed(_) => continueConversation(result, query, config)
+              case _                        => Right(result)
+          }
+        }
       }
     }
+
+  /**
+   * `turns`, run on `threadId`, a thread the caller cannot name: on a `Left`, which carries no thread
+   * id, the thread is forgotten, its failed turn having ended. A cancelled turn whose provider ignores
+   * its interrupt past [[AgentRun.Drain]] has not: its thread is `ThreadBusy`, and is left (logged at
+   * WARN). A refused start created no thread, and forgetting an unknown thread is `Right`.
+   */
+  private def forgottenOnFailure(threadId: ThreadId, config: RunConfig)(
+    turns: => Result[AgentResult]
+  ): Result[AgentResult] =
+    turns match
+      case failed @ Left(_) =>
+        AgentRun.uninterrupted(forget(threadId, config)).left.foreach { e =>
+          Agent.logger.warn(
+            s"The thread ${threadId.value} of a failed turn its caller cannot name was not forgotten: ${e.message}"
+          )
+        }
+        failed
+      case done => done
 
   /**
    * Removes `threadId` - its history, usage and event log - from the agent's runtime, so that its id
@@ -91,9 +134,12 @@ final class Agent private[agent] (
   def forget(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Unit] =
     runtime.deleteThread(threadId, config)
 
-  /** Continues `threadId`'s failed or interrupted run, re-running only failed or unstarted work. */
+  /**
+   * Continues `threadId`'s failed or interrupted run, re-running only failed or unstarted work.
+   * Interrupting the calling thread cancels the turn, as for [[run]].
+   */
   def recover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentResult] =
-    startRecover(threadId, config).flatMap(_.await())
+    blocking(startRecover(threadId, config))
 
   /** [[recover]], returning at once with the running turn - to cancel it, or to await its result. */
   def startRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentRun] =
@@ -102,14 +148,15 @@ final class Agent private[agent] (
   /**
    * Answers some of `threadId`'s pending approvals and questions - built with
    * [[AgentResult.approve]], [[AgentResult.reject]], [[AgentResult.edit]] and [[AgentResult.reply]]
-   * - and continues. Unanswered ones stay pending.
+   * - and continues. Unanswered ones stay pending. Interrupting the calling thread cancels the turn,
+   * as for [[run]].
    */
   def resume(
     threadId: ThreadId,
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig()
   ): Result[AgentResult] =
-    startResume(threadId, answers, config).flatMap(_.await())
+    blocking(startResume(threadId, answers, config))
 
   /** [[resume]], returning at once with the running turn - to cancel it, or to await its result. */
   def startResume(
@@ -205,6 +252,31 @@ final class Agent private[agent] (
       .resume(threadId, loop.graph, answers, config, observer = Some(observer))
       .map(agentRun(_, Some(scope), listening.drain))
 
+  /**
+   * Starts a turn with `begin` and awaits it. A caller already interrupted starts nothing. An
+   * interrupted wait cancels the turn and returns once it has ended, waiting up to [[AgentRun.Drain]]
+   * for the turn to end, so a blocking call - `run` inside a graph node whose run is cancelled - does
+   * not leave its turn running and the thread is free for [[recover]]. The wait is bounded so that a
+   * provider ignoring its
+   * interrupt cannot hang a cancelled caller; such a turn is left to end on its own (see
+   * [[AgentRun.cancelAndAwaitEnd]]). A turn that ended is awaited once more
+   * ([[AgentRun.awaitEnded]]), which detaches its tracing; a cancel the turn's commit beat leaves it
+   * `Right` - its real outcome - and that is returned. Either way the interrupt flag stays set.
+   */
+  private def blocking(begin: => Result[AgentRun]): Result[AgentResult] =
+    if Thread.currentThread().isInterrupted then Left(CancelledError("agent turn"))
+    else
+      begin.flatMap { run =>
+        run.await() match
+          case cancelled @ Left(_: CancelledError) =>
+            if run.cancelAndAwaitEnd() then
+              run.awaitEnded() match
+                case outcome @ Right(_) => outcome
+                case Left(_)            => cancelled
+            else cancelled
+          case other => other
+      }
+
   private def recoverWith(threadId: ThreadId, config: RunConfig, listening: Listening): Result[AgentRun] =
     val (observer, scope) = observed(config, listening)
     runtime
@@ -253,6 +325,7 @@ final class Agent private[agent] (
     AgentRun(handle, loop, id, runtime, tracing, scope, drain)
 
 object Agent:
+  private val logger = LoggerFactory.getLogger(classOf[Agent])
 
   /** Model calls per turn when [[AgentBuilder.withMaxSteps]] is not set. */
   val DefaultMaxSteps: Int = 50

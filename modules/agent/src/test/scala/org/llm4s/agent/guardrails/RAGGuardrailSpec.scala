@@ -4,6 +4,7 @@ import org.llm4s.agent.guardrails.rag._
 import org.llm4s.error.{ NetworkError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
+import org.llm4s.testutil.EchoedCredentials
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -889,5 +890,22 @@ class RAGGuardrailSpec extends AnyFlatSpec with Matchers {
     val all    = RAGGuardrails.allGuardrails(config)
 
     all should have size 3 // 2 input + 1 output
+  }
+
+  // ==========================================================================
+  // An unparseable judge reply is quoted in the error: redacted first (#1674)
+  // ==========================================================================
+
+  "an unparseable grounding judge reply" should "be quoted in the error with any echoed credential redacted" in {
+    val reply = "I cannot evaluate this.\n" + EchoedCredentials.Text
+    val error = GroundingGuardrail(new MockGroundingLLMClient(reply))
+      .validateWithContext("Response", RAGContext("Test", Seq("Context")))
+      .swap
+      .toOption
+      .get
+      .formatted
+    error should include("Could not parse")
+    error should include("[REDACTED]")
+    EchoedCredentials.leaked(error) shouldBe empty
   }
 }

@@ -127,7 +127,7 @@ a call without it comes back as a `Left` naming it. The others have defaults.
 | `brave_web_search` | none | **`search_query`** | web results (`brave_image_search`, `brave_video_search` and `brave_news_search` exist too) |
 | `exa_search` | none | **`query`** | results with `title`, `url`, `text`, `highlights`, and more |
 
-`json_tool` queries use dot notation for objects and brackets for arrays: `data.users[0].name`.
+`json_tool` queries use dot notation for objects and brackets for arrays: `data.users[0].name`. A path is read to the end: an empty segment (`a..b`), an index that is not a whole number (`a[x]`, `a[-1]`) or an index too large for an `Int` is an error that names the text it stopped at, not a silently shortened query. Every operation refuses a document nested more than 512 levels deep.
 
 ## 4. Web search
 

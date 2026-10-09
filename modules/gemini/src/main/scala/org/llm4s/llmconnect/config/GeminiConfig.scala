@@ -16,6 +16,8 @@ import org.llm4s.util.Redaction
  * @param baseUrl       API base URL; defaults to [[GeminiConfig.DEFAULT_BASE_URL]].
  * @param contextWindow Model's total token capacity (prompt + completion combined).
  * @param reserveCompletion Tokens held back from prompt history for the completion.
+ * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
+ *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
 @Stable
 case class GeminiConfig(
@@ -23,11 +25,13 @@ case class GeminiConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
-  override val providerId: ProviderId                 = ProviderId("gemini")
-  override def endpointUrl: Option[String]            = Some(baseUrl)
-  override def withModel(model: String): GeminiConfig = copy(model = model)
+  override val providerId: ProviderId                                 = ProviderId("gemini")
+  override def endpointUrl: Option[String]                            = Some(baseUrl)
+  override def withModel(model: String): GeminiConfig                 = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): GeminiConfig = copy(timeouts = timeouts)
   override def toString: String =
     s"GeminiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
