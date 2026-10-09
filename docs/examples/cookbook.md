@@ -266,9 +266,12 @@ private val questionKey = StateKey.replace[String]("question", "")
 private val views       = StateKey.appending[View]("views")
 private val answer      = StateKey.replace[String]("answer", "")
 
-/** Runs `agent` on `query`; a turn that does not complete fails the node. */
+/**
+ * Runs `agent` on `query` on a thread of its own, then forgets that thread: the graph's thread is the record. A turn
+ * that does not complete fails the node; a failed or cancelled one-shot turn is forgotten by `run` itself.
+ */
 private def ask(agent: Agent, query: String): Result[String] =
-  agent.run(query).flatMap(AgentResults.requireCompleted)
+  agent.run(query).flatMap(turn => agent.forget(turn.threadId).flatMap(_ => AgentResults.requireCompleted(turn)))
 
 def graph(client: LLMClient): Result[CompiledGraph[String, Review]] =
   for {

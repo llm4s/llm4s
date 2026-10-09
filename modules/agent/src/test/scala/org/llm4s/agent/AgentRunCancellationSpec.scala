@@ -1,10 +1,21 @@
 package org.llm4s.agent
 
 import org.llm4s.agent.AgentFixture._
-import org.llm4s.agent.graph.{ GraphError, ThreadId }
+import org.llm4s.agent.graph.{
+  Checkpointer,
+  Commit,
+  EventRecord,
+  GraphError,
+  GraphRuntime,
+  InMemoryCheckpointer,
+  RunEvent,
+  StoredCheckpoint,
+  ThreadId
+}
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
+import org.llm4s.trace.{ TraceEvent, Tracing }
 import org.llm4s.types.Result
 import org.scalatest.concurrent.Eventually
 import org.scalatest.flatspec.AnyFlatSpec
@@ -12,7 +23,15 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.time.{ Seconds, Span }
 
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.{ CountDownLatch, LinkedBlockingQueue, Semaphore, TimeUnit }
+import java.util.concurrent.{
+  ConcurrentLinkedQueue,
+  CopyOnWriteArraySet,
+  CountDownLatch,
+  LinkedBlockingQueue,
+  Semaphore,
+  TimeUnit
+}
+import scala.jdk.CollectionConverters._
 import scala.concurrent.duration._
 class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually {
 
@@ -200,5 +219,133 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
     waited.nanos should be >= 500.millis
     stillInterrupted shouldBe true
     client.release.countDown()
+  }
+
+  /**
+   * An in-memory store that records the threads it stores and deletes; with `holdCompletion`, a commit
+   * carrying `RunCompleted` opens `committing` and then waits, deaf to interrupts, until `release`.
+   */
+  final private class WatchedStore(holdCompletion: Boolean = false) extends Checkpointer {
+    private val underlying = InMemoryCheckpointer()
+    val stored             = new CopyOnWriteArraySet[ThreadId]()
+    val deleted            = new CopyOnWriteArraySet[ThreadId]()
+    val committing         = new CountDownLatch(1)
+    val release            = new CountDownLatch(1)
+
+    @scala.annotation.tailrec
+    private def awaitRelease(): Unit =
+      if !CancelledError.catchInterrupt(release.await()).isRight then awaitRelease()
+
+    def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = {
+      stored.add(threadId)
+      if (holdCompletion && commit.events.exists(_.event == RunEvent.RunCompleted)) {
+        committing.countDown()
+        awaitRelease()
+      }
+      underlying.commit(threadId, commit)
+    }
+    def latest(threadId: ThreadId): Result[Option[StoredCheckpoint]] = underlying.latest(threadId)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] =
+      underlying.eventsAfter(threadId, afterSeq, limit)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId): Result[Unit] = {
+      deleted.add(threadId)
+      underlying.deleteThread(threadId)
+    }
+  }
+
+  /** Records every event; its `AgentRunEnded` is recorded only after `slowEnd`, as a slow tracing backend would. */
+  final private class SlowTracing(slowEnd: FiniteDuration) extends Tracing {
+    private val events = new ConcurrentLinkedQueue[TraceEvent]()
+    def traceEvent(event: TraceEvent): Result[Unit] = {
+      event match {
+        case _: TraceEvent.AgentRunEnded => Thread.sleep(slowEnd.toMillis)
+        case _                           => ()
+      }
+      events.add(event)
+      Right(())
+    }
+    def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
+    def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
+    def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
+    def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
+    def ended: Vector[TraceEvent.AgentRunEnded] = events.asScala.toVector.collect { case e: TraceEvent.AgentRunEnded =>
+      e
+    }
+  }
+
+  "An interrupted traced Agent.run" should "return only once the cancelled turn's trace is complete, then trace a recovery once" in {
+    val client  = new BlockingClient(blockOn = Set(1))
+    val tracing = new SlowTracing(300.millis)
+    val agent   = built(Agent.builder("assistant", client).withTracing(tracing))
+    val thread  = ThreadId("traced-interrupted")
+
+    interruptedCall(client.entered)(agent.run(thread, "q"))._1.left.toOption.get shouldBe a[CancelledError]
+
+    // no waiting: the turn's tracing delivered its AgentRunEnded and detached before run returned
+    tracing.ended.map(_.status) shouldBe Vector("cancelled")
+    agent.recover(thread).value.answer shouldBe Some("done")
+    // the recovery is traced once, by its own run's tracing: nothing of the cancelled turn's is still attached
+    tracing.ended.map(_.status) shouldBe Vector("cancelled", "completed")
+  }
+
+  "Agent.run interrupted while its turn commits" should "return the turn's real outcome, with the interrupt flag still set" in {
+    val store   = new WatchedStore(holdCompletion = true)
+    val agent   = built(Agent.builder("assistant", new BlockingClient(Set.empty)).withRuntime(GraphRuntime(store)))
+    val thread  = ThreadId("commit-beats-cancel")
+    val outcome = new LinkedBlockingQueue[(Result[AgentResult], Boolean)]()
+    val caller = Thread
+      .ofVirtual()
+      .start(() => outcome.offer(agent.run(thread, "q") -> Thread.currentThread().isInterrupted): Unit)
+
+    // the turn is committing its completion, which no cancel interrupts
+    store.committing.await(10, TimeUnit.SECONDS) shouldBe true
+    caller.interrupt()
+    // the caller's wait was interrupted and it now waits, bounded, for the turn's end
+    eventually(caller.getState shouldBe Thread.State.TIMED_WAITING)
+    store.release.countDown()
+
+    val (result, stillInterrupted) =
+      Option(outcome.poll(10, TimeUnit.SECONDS)).getOrElse(fail("the interrupted call did not return"))
+    result.value.answer shouldBe Some("done")
+    stillInterrupted shouldBe true
+    // the turn is complete: nothing is left to recover
+    cause(agent.recover(thread).error) shouldBe a[GraphError.NothingToRecover]
+  }
+
+  "A one-shot Agent.run" should "forget its random thread once a cancelled turn has ended" in {
+    val store  = new WatchedStore()
+    val client = new BlockingClient(blockOn = Set(1))
+    val agent  = built(Agent.builder("assistant", client).withRuntime(GraphRuntime(store)))
+
+    interruptedCall(client.entered)(agent.run("q"))._1.left.toOption.get shouldBe a[CancelledError]
+
+    store.stored.asScala should have size 1
+    store.deleted.asScala shouldBe store.stored.asScala
+  }
+
+  it should "forget its random thread when its turn fails, and keep it when the turn completes" in {
+    val store = new WatchedStore()
+    val down  = new AtomicInteger(0)
+    val client = new LLMClient {
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        if (down.getAndIncrement() == 0) Left(ValidationError("model", "down"))
+        else Right(CompletionFixture.simple("ok"))
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      override def getContextWindow(): Int     = 8192
+      override def getReserveCompletion(): Int = 1024
+    }
+    val agent = built(Agent.builder("assistant", client).withRuntime(GraphRuntime(store)))
+
+    agent.run("q").isLeft shouldBe true
+    store.deleted.asScala shouldBe store.stored.asScala
+
+    val kept = agent.run("q").value
+    store.stored.asScala should contain(kept.threadId)
+    store.deleted.asScala should not contain kept.threadId
   }
 }
