@@ -1,7 +1,7 @@
 ---
 layout: default
 title: People
-nav_order: 9
+nav_order: 12
 description: "People who build, maintain, and grow LLM4S."
 permalink: /people/
 ---

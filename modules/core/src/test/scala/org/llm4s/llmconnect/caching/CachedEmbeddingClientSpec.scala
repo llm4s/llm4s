@@ -38,7 +38,7 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
     val cachedClient = new CachedEmbeddingClient(baseClient, cache)
 
     // Pre-seed the cache for "text1"
-    cache.put(CacheKeyGenerator.sha256("text1", testModel.name), Seq(1.0))
+    cache.put(CacheKeyGenerator.embeddingKey("text1", testModel.name, InputPurpose.Document), Seq(1.0))
 
     val batchRequest = EmbeddingRequest(Seq("text1", "text2"), testModel)
 

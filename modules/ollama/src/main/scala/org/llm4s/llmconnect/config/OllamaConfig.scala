@@ -20,17 +20,21 @@ import org.llm4s.types.Result
  * @param baseUrl       Ollama server URL, e.g. `"http://localhost:11434"`.
  * @param contextWindow Model's total token capacity (prompt + completion combined).
  * @param reserveCompletion Tokens held back from prompt history for the completion.
+ * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
+ *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
 @Stable
 final case class OllamaConfig private (
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  override val timeouts: ProviderTimeouts
 ) extends ProviderConfig:
-  override val providerId: ProviderId                 = ProviderId("ollama")
-  override def endpointUrl: Option[String]            = Some(baseUrl)
-  override def withModel(model: String): OllamaConfig = copy(model = model)
+  override val providerId: ProviderId                                 = ProviderId("ollama")
+  override def endpointUrl: Option[String]                            = Some(baseUrl)
+  override def withModel(model: String): OllamaConfig                 = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): OllamaConfig = copy(timeouts = timeouts)
 
   def withBaseUrl(baseUrl: String): OllamaConfig                  = copy(baseUrl = baseUrl)
   def withContextWindow(contextWindow: Int): OllamaConfig         = copy(contextWindow = contextWindow)
@@ -41,7 +45,7 @@ object OllamaConfig {
 
   /** Builds a config without validating it; [[fromValues]] validates. */
   def apply(model: String, baseUrl: String, contextWindow: Int, reserveCompletion: Int): OllamaConfig =
-    new OllamaConfig(model, baseUrl, contextWindow, reserveCompletion)
+    new OllamaConfig(model, baseUrl, contextWindow, reserveCompletion, ProviderTimeouts.default)
 
   /**
    * The model and server URL, every other field at its default: the entry point for Java and

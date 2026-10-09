@@ -10,6 +10,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.{ BoundedJson, Redaction }
 import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedReader, InputStreamReader }
@@ -68,7 +69,8 @@ import scala.util.{ Try, Using }
  * == Timeouts ==
  *
  * Non-streaming requests time out after 120 seconds; streaming requests
- * after 600 seconds.
+ * after 600 seconds. A section's `timeouts { request = ..., stream = ... }` block overrides
+ * either ([[OllamaConfig.timeouts]]).
  *
  * @param config  Ollama configuration containing the model name and base URL.
  * @param metrics Receives per-call latency and token-usage events.
@@ -87,6 +89,12 @@ class OllamaClient(
   protected def providerName: String      = "ollama"
   protected def modelName: String         = config.model
 
+  /** How long a non-streaming call may take: the section's `timeouts.request`, else [[OllamaClient.DefaultRequestTimeout]]. */
+  protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(OllamaClient.DefaultRequestTimeout)
+
+  /** How long a streamed call may take: the section's `timeouts.stream`, else [[OllamaClient.DefaultStreamTimeout]]. */
+  protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(OllamaClient.DefaultStreamTimeout)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -100,7 +108,7 @@ class OllamaClient(
     val url         = s"${config.baseUrl}/api/chat"
     val headers     = Map("Content-Type" -> "application/json")
     val startedAt   = Instant.now()
-    httpClient.post(url, headers, requestText, timeout = 120.seconds) match {
+    httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
       case Left(error) =>
         recordingExchange(startedAt, requestText, "")(Left(error))
       case Right(response) =>
@@ -181,7 +189,7 @@ class OllamaClient(
     val startedAt   = Instant.now()
     val rawResponse = new StringBuilder
 
-    httpClient.postStream(url, headers, requestText, timeout = 10.minutes) match {
+    httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
       case Left(error) =>
         recordingExchange(startedAt, requestText, "")(Left(error))
       case Right(response) if response.statusCode != 200 =>
@@ -255,7 +263,7 @@ class OllamaClient(
                   }
                 }
             }
-        }.toEither.left.map(HttpFailures.streamReadError(_, url, 10.minutes))
+        }.toEither.left.map(HttpFailures.streamReadError(_, url, streamTimeout))
 
         val result = processResult
           .flatMap(_ => failure.fold(accumulator.toCompletion)(Left(_)))
@@ -366,6 +374,13 @@ class OllamaClient(
 }
 
 object OllamaClient {
+
+  /** The timeout of a non-streaming call when the section sets no `timeouts.request`: two minutes. */
+  val DefaultRequestTimeout: FiniteDuration = 120.seconds
+
+  /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
+  val DefaultStreamTimeout: FiniteDuration = 10.minutes
+
   import org.llm4s.types.TryOps
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -374,15 +389,21 @@ object OllamaClient {
   private[provider] def reportsNoToolSupport(body: String): Boolean =
     body.toLowerCase(java.util.Locale.ROOT).contains("does not support tools")
 
-  /** The `error` text of an Ollama error body, or the body itself when it is not that JSON; at most 200 characters. */
+  /**
+   * The `error` text of an Ollama error body, or the body itself when it is not that JSON, redacted and then cut to 200
+   * characters. Redaction runs on the whole decoded text before the cut, so a credential the server echoes cannot
+   * survive as a fragment the patterns no longer recognise (#1674).
+   */
   private[provider] def serverMessage(body: String): String =
-    Try(ujson.read(body)).toOption
-      .flatMap(_.objOpt)
-      .flatMap(_.get("error"))
-      .flatMap(_.strOpt)
-      .getOrElse(body)
-      .trim
-      .take(200)
+    Redaction.safeBody(
+      Try(ujson.read(body)).toOption
+        .flatMap(_.objOpt)
+        .flatMap(_.get("error"))
+        .flatMap(_.strOpt)
+        .getOrElse(body)
+        .trim,
+      200
+    )
 
   /**
    * The call ids of one reply. Synthesizes them for entries that carry none - older Ollama servers send
@@ -410,12 +431,15 @@ object OllamaClient {
    * Arguments of a call as a JSON object; Ollama's request side takes an object, never a string.
    * An object is sent as it is, and a string that parses to an object is parsed. Anything else (a string
    * that is not JSON or not an object, an array, a number) cannot be sent: it goes as `{}`, with a
-   * WARN naming the tool, never the arguments, which can hold secrets.
+   * WARN naming the tool, never the arguments, which can hold secrets. A string is the model's own text
+   * (a streamed call's arguments stay a `Str`), so one nested more than 512 levels deep is not parsed
+   * either - the object it would build overflows the stack when the request is rendered - and goes as
+   * `{}` like any other string that is not a JSON object (#1562).
    */
   private[provider] def requestArguments(toolName: String, arguments: ujson.Value): ujson.Value = {
     val parsed = arguments match {
       case o: ujson.Obj => Some(o)
-      case ujson.Str(s) => Try(ujson.read(s)).toOption.collect { case o: ujson.Obj => o }
+      case ujson.Str(s) => BoundedJson.read(s).toOption.collect { case o: ujson.Obj => o }
       case _            => None
     }
     parsed.getOrElse {
@@ -434,10 +458,15 @@ object OllamaClient {
     case None | Some(ujson.Null)              => Right(ujson.Obj())
     case Some(o: ujson.Obj)                   => Right(o)
     case Some(ujson.Str(s)) if s.trim.isEmpty => Right(ujson.Obj())
-    case Some(ujson.Str(s)) =>
-      Try(ujson.read(s)).toOption match {
-        case Some(o: ujson.Obj) => Right(o)
-        case _                  => Left(malformed("arguments are not a JSON object"))
+    case Some(ujson.Str(s))                   =>
+      // The string is the model's text inside the envelope's string literal, so this second parse is the
+      // boundary: a document nested more than 512 levels deep is refused before it is parsed, since the
+      // object it would build overflows the stack of whatever renders it (#1562).
+      BoundedJson.read(s) match {
+        case Right(o: ujson.Obj) => Right(o)
+        case Left(BoundedJson.TooDeep()) =>
+          Left(malformed(s"arguments are nested more than ${BoundedJson.MaxDepth} levels deep"))
+        case _ => Left(malformed("arguments are not a JSON object"))
       }
     case Some(_) => Left(malformed("arguments are not a JSON object"))
   }

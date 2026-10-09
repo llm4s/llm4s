@@ -9,7 +9,7 @@ nav_order: 2
 
 ## Stage 1 migration: agent runtime
 
-Not in a release yet ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime-design.md` §4.13. The migration slices that follow (#1329, events and tracing; #1330, orchestration) extend this note.
+Not in a release yet ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime-design.md` §4.13. #1329 (events and tracing) and #1330 (orchestration, below) extend this note.
 
 ```scala
 // before
@@ -68,6 +68,53 @@ val result = for {
 - **Graph loop API.** `ToolLoop.build(id, version, root, agents: Vector[LoopAgent])` builds a family of agents (the earlier `ToolLoop.build(id, version, model, tools, middleware)` is gone; `LoopAgent(id, model, tools)` with `withSystemPrompt`, `withMaxSteps`, `withMiddleware` and `withHandoffs` replaces its arguments), and `ModelStep.next` returns a `Completion`, so a `wrapModelCall` middleware's `next` returns `Result[Completion]`.
 - **Errors.** Provider, tool and middleware failures are `Left(GraphError...)`; the error content a tool failure gives the model is `{"error": ...}`. A guardrail block, the step limit and a suspension are `Right`.
 - **Samples.** `AsyncToolAgentExample` is deleted; `StreamingAgentExample`, `StreamingWithToolsExample` and `EventCollectionExample` are rewritten on `Agent.stream` (#1329); the other agent samples use the builder.
+
+### Orchestration removed (#1330)
+
+`org.llm4s.agent.orchestration` is deleted: `PlanRunner`, `Plan`, `Node`, `Edge`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`, with `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (the agent's id is `org.llm4s.agent.AgentId`). `PlanRunner` passed `Map[String, Any]` between nodes and cast each node to `TypedAgent[Any, Any]`. A typed graph does the same job with checked handles, checkpoints and recovery. The [multi-agent graph recipe](../examples/cookbook#6-several-agents-in-one-graph) is a worked replacement.
+
+| Removed | Use instead |
+|---|---|
+| `TypedAgent[I, O]`, `TypedAgent.fromFunction` and the other factories | a `GraphNode[I]` given to `GraphBuilder.node`; call an `Agent` inside the node for an LLM step |
+| `Node`, `Edge`, `Plan`, `Plan.builder` | `GraphBuilder.node` / `edge` / `staticJoin` / `dynamicJoin`, then `compile(entry)(output)` |
+| `PlanRunner.execute(plan, inputs, token)` | `GraphRuntime.start(threadId, graph, input).flatMap(_.await())` |
+| `PlanRunner(maxConcurrentNodes)` | `RunConfig` with `RunBudgets(maxConcurrency = n)` |
+| `Policies.withRetry` | `retry = RetryPolicy(...)` on `GraphBuilder.node` / `implement` |
+| `Policies.withTimeout` | `RunBudgets.withTimeout` (the whole run); a node bounds its own calls |
+| `Policies.withFallback` | ordinary `Result` code in the node (`primary.orElse(fallback)`) |
+| `OrchestrationError` | `GraphError` |
+| `CancellationToken` | `RunHandle.cancel()` / `AgentRun.cancel()`, or interrupting the calling thread |
+| `org.llm4s.types.PlanId` | `RunId` |
+| `org.llm4s.types.AgentId` | `org.llm4s.agent.AgentId` |
+
+```scala
+// before
+val plan   = Plan.builder.addNode(research).addNode(summary).addEdge(Edge("e", research, summary)).build
+val result = PlanRunner().execute(plan, Map("research" -> question), token)   // Future[Result[Map[String, Any]]]
+
+// after
+val b        = GraphBuilder("research", "v1")
+val findings = StateKey.replace[String]("findings", "")
+val digest   = StateKey.replace[String]("digest", "")
+val summary = b.node[Unit]("summary", writes = Set(digest)) { (_, state, _) =>
+  NodeResult.fromResult(for {
+    f    <- state.get(findings)
+    turn <- summariser.run(s"Summarise: $f")
+    text <- turn.answer.toRight(ValidationError("summary", "no answer"))
+  } yield Command.empty.update(digest, text))
+}
+val research = b.node[String]("research", writes = Set(findings)) { (q, _, _) =>
+  NodeResult.fromResult(
+    researcher.run(q)
+      .flatMap(_.answer.toRight(ValidationError("research", "no answer")))
+      .map(f => Command.empty.update(findings, f).goto(summary))
+  )
+}
+val handle = b.compile(research)(_.get(digest)).flatMap(GraphRuntime.inMemory().start(ThreadId("t-1"), _, question))
+handle.foreach(_.cancel())   // instead of token.cancel()
+```
+
+`Agent.run`, `continueConversation`, `runMultiTurn`, `recover` and `resume` now cancel their turn when the calling thread is interrupted, and return once it has ended (waiting up to 5 seconds for the turn to end), so `recover` can follow at once; a caller already interrupted starts no turn. Cancelling a graph run therefore also cancels the agent turns its nodes are waiting on. Before, the turn kept running after `run` returned `Left(CancelledError)`. A caller that wants the turn to outlive an interrupt uses `start`, `startRecover` or `startResume`, and awaits the `AgentRun` itself. With tracing, the cancelled turn's trace is complete when the call returns. A turn that had already begun committing its outcome when the interrupt came cannot be cancelled: the call returns that outcome (`Right`, `Completed` or `Suspended`), with the interrupt flag still set - test the flag, not only the result, if an interrupt must stop your own code. `run(query)`, whose random thread id a `Left` does not carry, forgets the thread of a turn that failed or was cancelled once it has ended; name the thread (`run(threadId, query)`) to recover such a turn. The Java facade's `JAgent.run`, `continueConversation`, `resume` and `recover` go through these calls, so an interrupted Java caller cancels its turn too; they used to stop only the wait.
 
 ## Agent middleware
 
@@ -660,7 +707,7 @@ LLM step); the custom prompt has no counterpart.
 
 `org.llm4s.types` keeps `Result`, `AsyncResult`, `TryOps` / `OptionOps` / `FutureOps`, and the
 newtypes the library's APIs take: `SessionId`, `TraceId`, `FilePath`, `DirectoryPath`, `AgentId`,
-`PlanId`, `SemanticBlockId`, `ArtifactKey`, `ExternalizedContent`, `ContentSize`,
+`PlanId` (both removed later with orchestration, #1330), `SemanticBlockId`, `ArtifactKey`, `ExternalizedContent`, `ContentSize`,
 `HeadroomPercent` and the `TokenBudget`, `ContextWindowSize`, `ByteCount` and
 `ExternalizationThreshold` aliases.
 

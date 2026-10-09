@@ -5,6 +5,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
+import org.llm4s.testutil.{ MockLLMClients, SmallStack }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -357,6 +358,30 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     val result = manager.extractEntities("Scala was created by Martin Odersky", Some("conv-1"))
 
     result.isLeft shouldBe true
+  }
+
+  it should "refuse an entity extraction reply nested too deeply as a parse error, never an overflow" in {
+    // Balanced, so the parser accepts it. Run on a 1 MB stack so an overflow is a `Left(StackOverflowError)`
+    // here rather than an aborted suite; the outcome is reduced inside that thread because rendering a
+    // value this deep in a failure message would itself overflow (#1562).
+    val deep    = "[" * 100000 + "]" * 100000
+    val manager = LLMMemoryManager.forTesting(new MockLLMClients.SimpleMock(deep))
+
+    val outcome = SmallStack.run(
+      manager
+        .extractEntities("Scala was created by Martin Odersky", Some("conv-1"))
+        .left
+        .map(e => (e.getClass.getSimpleName, e.message))
+        .map(_ => "a manager")
+    )
+    outcome match {
+      case Right(Left((kind, message))) =>
+        kind shouldBe "ProcessingError"
+        message should include("Failed to parse entity extraction output")
+        message should include("512")
+      case Right(Right(other)) => fail(s"expected a Left, got $other")
+      case Left(thrown)        => fail(s"expected a Left, but extractEntities threw $thrown")
+    }
   }
 
   it should "not add memories when entity extraction returns empty array" in {

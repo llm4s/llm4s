@@ -1,8 +1,9 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
-import org.llm4s.util.Redaction
+import org.llm4s.util.{ BoundedJson, Redaction }
 import org.llm4s.error.AuthenticationError
+import org.llm4s.error.LLMError
 import org.llm4s.error.ValidationError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
@@ -74,9 +75,18 @@ class GeminiClient(
 
   private val logger = LoggerFactory.getLogger(getClass)
 
+  /** How long a non-streaming call may take: the section's `timeouts.request`, else GeminiClient.DefaultRequestTimeout. */
+  protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(GeminiClient.DefaultRequestTimeout)
+
+  /** How long a streamed call may take: the section's `timeouts.stream`, else GeminiClient.DefaultStreamTimeout. */
+  protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(GeminiClient.DefaultStreamTimeout)
+
   protected def clientDescription: String = s"Gemini client for model ${config.model}"
   protected def providerName: String      = "gemini"
   protected def modelName: String         = config.model
+
+  // thought signatures are replayed only to the provider and model id they were produced by (see ReplayOrigin)
+  private val replayOrigin = ReplayOrigin(providerName, config.model)
 
   override def complete(
     conversation: Conversation,
@@ -103,12 +113,15 @@ class GeminiClient(
 
         val headers = Map("Content-Type" -> "application/json")
 
-        httpClient.post(url, headers, requestText, timeout = 120.seconds) match {
+        httpClient.post(url, headers, requestText, timeout = requestTimeout) match {
           case Left(error) =>
             recordingExchange(startedAt, requestText)(Left(error))(None)
           case Right(response) =>
             val result = Try {
-              if (response.statusCode >= 200 && response.statusCode < 300) parseCompletionResponse(response.body)
+              if (response.statusCode >= 200 && response.statusCode < 300)
+                parseCompletionResponse(response.body).map(c =>
+                  c.withMessage(ThinkingReplay.bindOrigin(replayOrigin, c.message))
+                )
               else handleErrorResponse(response.statusCode, response.body, response.headers)
             }.toEither.left
               .map(e => e.toLLMError)
@@ -143,7 +156,7 @@ class GeminiClient(
 
         val headers = Map("Content-Type" -> "application/json")
 
-        httpClient.postStream(url, headers, requestText, timeout = 10.minutes) match {
+        httpClient.postStream(url, headers, requestText, timeout = streamTimeout) match {
           case Left(error) =>
             recordingExchange(startedAt, requestText)(Left(error))(None)
           case Right(response) if response.statusCode < 200 || response.statusCode >= 300 =>
@@ -155,37 +168,62 @@ class GeminiClient(
             val accumulator = StreamingAccumulator.create()
             val messageId   = UUID.randomUUID().toString
             val rawStream   = StringBuilder()
+            val signatures  = scala.collection.mutable.ArrayBuffer.empty[ThinkingBlock] // thought signatures, in order
+            var textLength = 0 // characters of answer text streamed so far: where a text signature sits
+            var refused = Option.empty[LLMError] // a chunk nested too deeply: the stream fails with it, unread
 
             val result = Using(new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))) {
               reader =>
-                Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
+                Iterator.continually(reader.readLine()).takeWhile(l => l != null && refused.isEmpty).foreach { line =>
                   rawStream.append(line).append('\n')
                   val trimmed = line.trim
                   // SSE format: lines starting with "data: " contain JSON
                   if (trimmed.startsWith("data: ")) {
                     val jsonStr = trimmed.stripPrefix("data: ").trim
                     if (jsonStr.nonEmpty) {
-                      Try(ujson.read(jsonStr)).foreach { json =>
-                        parseStreamChunk(json, messageId).foreach { chunk =>
-                          accumulator.addChunk(chunk)
-                          onChunk(chunk)
-                        }
-                        // Extract token usage from usageMetadata if present
-                        for {
-                          usage      <- Try(json("usageMetadata")).toOption
-                          prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
-                          completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
-                        } accumulator.updateTokens(prompt, completion)
+                      // a chunk's functionCall.args is the model's JSON, native in the envelope: one nested too
+                      // deeply fails the stream as the same reply fails `complete`, never parsed and sent back
+                      // (#1562); a chunk that is not JSON at all is skipped, as it always was
+                      BoundedJson.read(jsonStr) match {
+                        case Right(json) =>
+                          parseStreamChunk(json, messageId, textLength).foreach { case (parsed, chunks) =>
+                            textLength += parsed.text.length
+                            signatures ++= parsed.signatures
+                            chunks.foreach { chunk =>
+                              accumulator.addChunk(chunk)
+                              onChunk(chunk)
+                            }
+                          }
+                          // Extract token usage from usageMetadata if present
+                          for {
+                            usage      <- Try(json("usageMetadata")).toOption
+                            prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
+                            completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
+                          } accumulator.updateTokens(prompt, completion)
+                        case Left(tooDeep @ BoundedJson.TooDeep()) =>
+                          logger.warn(
+                            s"[Gemini] Stream refused: a chunk is nested more than ${BoundedJson.MaxDepth} levels deep"
+                          )
+                          refused = Some(tooDeep)
+                        case Left(_) => () // unreadable chunk: skipped
                       }
                     }
                   }
                 }
             }.toEither.left
-              .map(HttpFailures.streamReadError(_, url, 10.minutes))
+              .map(HttpFailures.streamReadError(_, url, streamTimeout))
+              .flatMap(_ => refused.toLeft(()))
               .flatMap(_ =>
                 accumulator.toCompletion.map { c =>
                   val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-                  c.withModel(config.model).withEstimatedCost(cost)
+                  // the accumulator holds the streamed thought summary as unsigned text; the signatures go beside it
+                  val message = c.message.withThinking(c.message.thinking ++ signatures.toSeq)
+                  c.withModel(config.model)
+                    .withToolCalls(
+                      c.message.toolCalls.toList
+                    ) // the accumulator keeps streamed calls on the message only
+                    .withEstimatedCost(cost)
+                    .withMessage(ThinkingReplay.bindOrigin(replayOrigin, message))
                 }
               )
 
@@ -218,9 +256,17 @@ class GeminiClient(
 
     // Track tool call IDs to function names for proper tool message handling
     val toolCallIdToName = scala.collection.mutable.Map[String, String]()
+    // The ids of function calls sent with Gemini's own `functionCall.id`: their results echo it back
+    val callIdsSentWithId = scala.collection.mutable.Set[String]()
+
+    // Thought signatures are sent back only to the provider and model that produced them; unlike
+    // Anthropic's prefix rule, Google wants them PRESERVED when earlier history is pruned or edited
+    // (Gemini 3 answers 400 for a missing function-call signature), so the binding is origin-only
+    // and a foreign or re-modelled signature is dropped here (see ThinkingReplay.bindOrigin)
+    val messages = ThinkingReplay.replayableOrigin(replayOrigin, conversation.messages)
 
     // Process messages - Gemini uses "user" and "model" roles
-    conversation.messages.foreach {
+    messages.foreach {
       case SystemMessage(content) =>
         // Gemini handles system messages via systemInstruction
         systemInstr = Some(content)
@@ -231,30 +277,25 @@ class GeminiClient(
           "parts" -> ujson.Arr(ujson.Obj("text" -> content))
         )
 
-      case AssistantMessage(contentOpt, toolCalls, _, _) => // the format has no field for earlier thinking
-        if (toolCalls.nonEmpty) {
-          // Assistant message with tool calls
-          val parts = scala.collection.mutable.ArrayBuffer[ujson.Value]()
-          contentOpt.foreach(c => parts += ujson.Obj("text" -> c))
-          toolCalls.foreach { tc =>
-            // Track the mapping from tool call ID to function name
-            toolCallIdToName(tc.id) = tc.name
-            parts += ujson.Obj(
-              "functionCall" -> ujson.Obj(
-                "name" -> tc.name,
-                "args" -> tc.arguments
-              )
-            )
-          }
-          contents += ujson.Obj("role" -> "model", "parts" -> ujson.Arr(parts.toSeq: _*))
-        } else {
-          contentOpt.foreach { content =>
-            contents += ujson.Obj(
-              "role"  -> "model",
-              "parts" -> ujson.Arr(ujson.Obj("text" -> content))
-            )
-          }
+      case am: AssistantMessage =>
+        // Tool call IDs map to function names so the following ToolMessages can be keyed by name
+        am.toolCalls.foreach(tc => toolCallIdToName(tc.id) = tc.name)
+        // a functionCall part sent with Gemini's own id needs that id echoed on its functionResponse; an empty
+        // id is "no id", as GeminiThoughtSignatures.parse and matchesCall read it, even though the signed part
+        // goes back verbatim with it
+        // text, then function calls, each part carrying the thought signature Gemini gave it (if it is still valid)
+        val parts = GeminiThoughtSignatures.parts(providerName, am)
+        parts.foreach { p =>
+          p.objOpt
+            .flatMap(_.get("functionCall"))
+            .flatMap(_.objOpt)
+            .flatMap(_.get("id"))
+            .flatMap(_.strOpt)
+            .filter(_.nonEmpty)
+            .foreach(callIdsSentWithId += _)
         }
+        if (parts.nonEmpty && (am.toolCalls.nonEmpty || am.contentOpt.isDefined))
+          contents += ujson.Obj("role" -> "model", "parts" -> ujson.Arr(parts: _*))
 
       case ToolMessage(content, toolCallId) =>
         // Gemini uses functionResponse for tool results
@@ -265,10 +306,15 @@ class GeminiClient(
           "role" -> "user",
           "parts" -> ujson.Arr(
             ujson.Obj(
-              "functionResponse" -> ujson.Obj(
-                "name"     -> functionName,
-                "response" -> ujson.Obj("result" -> content)
-              )
+              "functionResponse" -> {
+                val response = ujson.Obj(
+                  "name"     -> functionName,
+                  "response" -> ujson.Obj("result" -> content)
+                )
+                // a populated functionCall.id must come back on the matching functionResponse
+                if (callIdsSentWithId.contains(toolCallId)) response("id") = toolCallId
+                response
+              }
             )
           )
         )
@@ -360,76 +406,77 @@ class GeminiClient(
     }
 
   /**
-   * Parse a non-streaming completion response.
+   * Parse a non-streaming completion response. A `functionCall.args` is the model's own JSON and sits in the
+   * envelope as a native object, so this parse is the boundary it crosses: a reply nested more than 512 levels
+   * deep is refused before it is parsed, since rendering the call back on the next turn would overflow the
+   * stack (#1562).
    */
   private def parseCompletionResponse(responseText: String): Result[Completion] =
-    Try {
-      val json       = ujson.read(responseText)
-      val candidates = json("candidates").arr
+    BoundedJson.read(responseText).flatMap { json =>
+      Try {
+        val candidates = json("candidates").arr
 
-      if (candidates.isEmpty) {
-        Left(ValidationError("response", "No candidates in Gemini response"))
-      } else {
-        val candidate = candidates.head
-        val content   = candidate("content")
-        val parts     = content("parts").arr
+        if (candidates.isEmpty) {
+          Left(ValidationError("response", "No candidates in Gemini response"))
+        } else {
+          val candidate = candidates.head
+          val content   = candidate("content")
+          val parts     = content("parts").arr
 
-        // Extract text content
-        val textContent = parts
-          .filter(p => p.obj.contains("text"))
-          .map(_("text").str)
-          .mkString
+          // Answer text, function calls (Gemini doesn't provide tool call IDs: each gets a generated one), the
+          // thought summary if one was requested, and the thought signatures, split by part
+          val parsed = GeminiThoughtSignatures.parse(providerName, parts.toSeq, 0, () => UUID.randomUUID().toString)
+          val textContent = parsed.text
+          val toolCalls   = parsed.calls
 
-        // Extract tool calls
-        val toolCalls = parts
-          .filter(p => p.obj.contains("functionCall"))
-          .map { p =>
-            val fc = p("functionCall")
-            ToolCall(
-              id = UUID.randomUUID().toString, // Gemini doesn't provide tool call IDs
-              name = fc("name").str,
-              arguments = fc("args")
+          // Extract usage
+          val usageOpt = Try {
+            val usage = json("usageMetadata")
+            TokenUsage(
+              promptTokens = usage("promptTokenCount").num.toInt,
+              completionTokens = usage("candidatesTokenCount").num.toInt,
+              totalTokens = usage("totalTokenCount").num.toInt
             )
-          }
-          .toSeq
+          }.toOption
 
-        // Extract usage
-        val usageOpt = Try {
-          val usage = json("usageMetadata")
-          TokenUsage(
-            promptTokens = usage("promptTokenCount").num.toInt,
-            completionTokens = usage("candidatesTokenCount").num.toInt,
-            totalTokens = usage("totalTokenCount").num.toInt
+          // the signatures are sealed thinking: ThinkingReplay binds them to the request in `complete`
+          val thinking =
+            Option.when(parsed.thought.nonEmpty)(ThinkingBlock.Text(parsed.thought)).toSeq ++ parsed.signatures
+          val message = AssistantMessage(
+            contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
+            toolCalls = toolCalls,
+            thinking = thinking
           )
-        }.toOption
 
-        val message = AssistantMessage(
-          contentOpt = if (textContent.nonEmpty) Some(textContent) else None,
-          toolCalls = toolCalls
-        )
+          // Estimate cost using CostEstimator
+          val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
 
-        // Estimate cost using CostEstimator
-        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
-
-        Right(
-          Completion(
-            id = UUID.randomUUID().toString,
-            content = textContent,
-            model = config.model,
-            toolCalls = toolCalls.toList,
-            created = System.currentTimeMillis() / 1000,
-            message = message,
-            usage = usageOpt,
-            estimatedCost = cost
+          Right(
+            Completion(
+              id = UUID.randomUUID().toString,
+              content = textContent,
+              model = config.model,
+              toolCalls = toolCalls.toList,
+              created = System.currentTimeMillis() / 1000,
+              message = message,
+              usage = usageOpt,
+              estimatedCost = cost
+            )
           )
-        )
-      }
-    }.toEither.left.map(e => e.toLLMError).flatten
+        }
+      }.toEither.left.map(e => e.toLLMError).flatten
+    }
 
   /**
-   * Parse a streaming chunk from Gemini.
+   * Parse a streaming chunk from Gemini into the parts it held and the [[StreamedChunk]]s they make: one per
+   * function call (a chunk holds a single call), or one when there is none. `textOffset` is the number of
+   * answer-text characters streamed before this chunk, so a text signature records where it sits.
    */
-  private def parseStreamChunk(json: ujson.Value, messageId: String): Option[StreamedChunk] =
+  private def parseStreamChunk(
+    json: ujson.Value,
+    messageId: String,
+    textOffset: Int
+  ): Option[(GeminiThoughtSignatures.Parsed, Seq[StreamedChunk])] =
     Try {
       val candidates = json("candidates").arr
       if (candidates.nonEmpty) {
@@ -437,36 +484,14 @@ class GeminiClient(
         val content   = candidate("content")
         val parts     = content("parts").arr
 
-        // Extract text delta
-        val textContent = parts
-          .filter(p => p.obj.contains("text"))
-          .map(_("text").str)
-          .mkString
+        // Extract text delta, function calls and thought signatures
+        val parsed =
+          GeminiThoughtSignatures.parse(providerName, parts.toSeq, textOffset, () => UUID.randomUUID().toString)
 
         // Extract finish reason
         val finishReason = Try(candidate("finishReason").str).toOption
 
-        // Extract tool calls
-        val toolCallOpt = parts
-          .filter(p => p.obj.contains("functionCall"))
-          .headOption
-          .map { p =>
-            val fc = p("functionCall")
-            ToolCall(
-              id = UUID.randomUUID().toString,
-              name = fc("name").str,
-              arguments = fc("args")
-            )
-          }
-
-        Some(
-          StreamedChunk(
-            id = messageId,
-            content = if (textContent.nonEmpty) Some(textContent) else None,
-            toolCall = toolCallOpt,
-            finishReason = finishReason
-          )
-        )
+        Some((parsed, GeminiThoughtSignatures.chunks(parsed, messageId, finishReason)))
       } else {
         None
       }
@@ -541,6 +566,12 @@ class GeminiClient(
 }
 
 object GeminiClient {
+
+  /** The timeout of a non-streaming call when the section sets no `timeouts.request`: two minutes. */
+  val DefaultRequestTimeout: FiniteDuration = 120.seconds
+
+  /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
+  val DefaultStreamTimeout: FiniteDuration = 10.minutes
   import org.llm4s.types.TryOps
 
   def apply(config: GeminiConfig)(using ModelRegistryService): Result[GeminiClient] =
