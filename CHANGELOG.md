@@ -2013,6 +2013,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`InMemoryStore` keyword search matches whole words, not substrings**
+  ([#1594](https://github.com/llm4s/llm4s/issues/1594)): the store split the query on whitespace and tested each piece
+  with `String.contains`, so short words matched inside longer ones - `i` in "Berlin", `or` in "works", `do` in
+  "doing" - and punctuation stayed on the query's words, so "Which language do I prefer, Scala or Java?" returned
+  "Works in the Berlin office" and `java?` never matched "Java". Query and memory are now split into words (runs of
+  letters and digits in any script, case-folded with `Locale.ROOT`, Latin accents ignored), and a memory scores the
+  share of the query's distinct words it contains as whole words - the words the SQLite stores' FTS5 index sees, which a
+  new spec checks query by query. **Behaviour change:** `InMemoryStore.search`, `EmbeddingMemoryStore`'s keyword
+  fallback and `SimpleMemoryManager.getRelevantContext` return fewer memories: a query word must now be a whole word
+  of the memory, so `scala` no longer matches "scalability" and `prefer` no longer matches "Prefers" (there is no
+  stemming). Case folding no longer depends on the JVM's default locale.
 - **Security - workspace runner: allowlisted commands can no longer write, delete or run other programs through their
   arguments** ([#1715](https://github.com/llm4s/llm4s/issues/1715)): `executeCommand` checked only the executable
   name against `allowedCommands` and a set of shell metacharacters, so programs on `WorkspaceSandboxConfig.ReadOnlyCommands`

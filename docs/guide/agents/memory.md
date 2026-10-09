@@ -95,14 +95,15 @@ the manager you get back. This prints:
 - Prefers Scala over Java
 ```
 
-The in-memory store searches by **keyword**: it splits the query on whitespace and returns a memory
-whose text contains one of the resulting terms as a substring. "Prefers Scala over Java" contains the
-term "scala" from the query, so it is returned; the Anthropic fact contains none of the terms, so it is
-not. A question such as "What does the user prefer?" would have returned nothing here, because its terms
-are `what`, `does`, `the`, `user` and `prefer?`, and the question mark stays attached to the last one, so
-`prefer?` is not found in "Prefers Scala over Java" (see
-[#1594](https://github.com/llm4s/llm4s/issues/1594)). To retrieve by meaning, use a vector store (see
-[Vector Store](#vector-store)).
+The in-memory store searches by **keyword**: it splits the query and each memory into words and returns
+the memories that share at least one whole word with the query, best first (a memory's score is the share
+of the query's distinct words it contains). "Prefers Scala over Java" shares the word "scala" with the
+query, so it is returned; the Anthropic fact shares none, so it is not. Words are runs of letters and
+digits in any script: punctuation separates them (`java?` is the word `java`), case and Latin accents are
+ignored (`ECOLE` matches `école`), and a word never matches inside a longer one, so `i` matches the word
+"I" but not "Berlin", and `prefer` does not match "Prefers" - there is no stemming. This is how the SQLite
+stores' FTS5 index reads text too ([#1594](https://github.com/llm4s/llm4s/issues/1594)). To retrieve by
+meaning, use a vector store (see [Vector Store](#vector-store)).
 
 ---
 

@@ -15,7 +15,7 @@ import java.time.Instant
  *
  * Features:
  * - Fast lookups using indexed data structures
- * - Basic keyword search (semantic search requires embeddings)
+ * - Whole-word keyword search, case-insensitive (semantic search requires embeddings)
  * - Thread-safe for concurrent access
  * - No external dependencies
  *
@@ -129,28 +129,33 @@ final case class InMemoryStore private (
   }
 
   /**
-   * Simple keyword-based search scoring.
+   * Keyword search: a memory's score is the share of the query's distinct words that occur in it as whole words.
+   *
+   * Query and memory text are split into words by [[KeywordTokens]], the way the SQLite stores' FTS5 index splits
+   * them, so `java?` matches `Java`, and `or` does not match `works`.
    */
   private def keywordSearch(
     query: String,
     memories: Seq[Memory],
     topK: Int
   ): Result[Seq[ScoredMemory]] = {
-    val queryTerms = query.toLowerCase.split("\\s+").toSet
+    val queryTerms = KeywordTokens.of(query)
 
-    val scored = memories.map { memory =>
-      val content      = memory.content.toLowerCase
-      val matchedTerms = queryTerms.count(content.contains)
-      val score        = if (queryTerms.isEmpty) 0.0 else matchedTerms.toDouble / queryTerms.size
-      ScoredMemory(memory, score)
+    if (queryTerms.isEmpty) Right(Seq.empty)
+    else {
+      val scored = memories.map { memory =>
+        val words        = KeywordTokens.of(memory.content)
+        val matchedTerms = queryTerms.count(words.contains)
+        ScoredMemory(memory, matchedTerms.toDouble / queryTerms.size)
+      }
+
+      Right(
+        scored
+          .filter(_.score > 0)
+          .sorted(ScoredMemory.byScoreDescending)
+          .take(topK)
+      )
     }
-
-    val sorted = scored
-      .filter(_.score > 0)
-      .sorted(ScoredMemory.byScoreDescending)
-      .take(topK)
-
-    Right(sorted)
   }
 
   override def delete(id: MemoryId): Result[MemoryStore] =
