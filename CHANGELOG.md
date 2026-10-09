@@ -774,7 +774,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **An interrupted `Agent.run`, `continueConversation`, `recover` or `resume` cancels its turn, from Java too** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   the call returns `Left(CancelledError)` with the interrupt flag set, as before, and now also cancels the turn it
-  was waiting on instead of leaving it running, returning once that turn has ended (within 5 seconds), so `recover`
+  was waiting on instead of leaving it running, returning once that turn has ended (waiting up to 5 seconds for the turn to end), so `recover`
   can follow at once; a caller already interrupted starts no turn. Cancelling a graph run therefore cancels the
   agent turns its nodes are waiting on. Use `start`/`startRecover`/`startResume` and await the `AgentRun` to keep a turn past an interrupt.
   With tracing, the cancelled turn's trace is complete (its last events delivered, its subscription detached) when
@@ -783,8 +783,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   forgets the thread of a turn that failed or was cancelled once it has ended.
   **Java-visible:** `llm4s-java-api`'s blocking `JAgent.run`, `continueConversation`, `resume` and `recover` go
   through these calls, so an interrupted Java caller now cancels its turn too (they used to stop only the wait and
-  leave the turn running); Java and Kotlin now behave the same. `AgentStream.cancel()` still cancels a streamed turn
-  without interrupting any thread.
+  leave the turn running), as Kotlin's suspend functions already did. `AgentStream.cancel()` still cancels a streamed
+  turn without interrupting any thread. Its bounded wait, which Kotlin's cancellation uses, and Kotlin's one-shot
+  `run(query)` forgetting a failed turn's thread came later ([#1682](https://github.com/llm4s/llm4s/issues/1682),
+  [#1688](https://github.com/llm4s/llm4s/issues/1688), under Fixed).
 - **Java and Kotlin agent results use Java types only** ([#1393](https://github.com/llm4s/llm4s/issues/1393),
   BREAKING, `llm4s-java-api`, Kotlin API). Every agent turn the Java facade returns - `JAgent.run`,
   `continueConversation`, `resume`, `recover`, `AgentStream.await()`, `AgentStreamListener.onComplete` - is now a
@@ -1994,11 +1996,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-openai-compatible`: Z.ai honours `CompletionOptions.reasoning`** ([#1681](https://github.com/llm4s/llm4s/issues/1681)):
+  it used to be ignored, so `ReasoningEffort.None` still thought (Z.ai's `thinking.type` defaults to `enabled`) and
+  effort levels never reached a model that takes `reasoning_effort`. Each effort now goes out in the form the
+  configured GLM model documents. On GLM-5.1, GLM-5 and GLM-4.5 to 4.7, `None` sends `"thinking": {"type": "disabled"}`
+  and the other levels send nothing. GLM-5.2 is sent `reasoning_effort` `none`, `low`, `medium` or, for `High`, `max`
+  (Z.ai currently runs `low` and `medium` as `high` on it). GLM-5.3 always thinks and rejects `disabled`, and accepts
+  only `low`, `high` and `max`, so `None` and `Low` send `low`, `Medium` sends `high` and `High` sends `max`; `None`
+  on GLM-5.3 logs a one-time warning that thinking tokens are still produced. `High` is Z.ai's maximum, its default,
+  so no level reasons more than `High`. Other models are sent nothing. With replayed reasoning, `thinking`
+  carries both `type` and `clear_thinking`. Without a `reasoning` option the request is unchanged.
+- **Cancelled and failed agent turns no longer leave threads nobody can name, and every cancel wait is bounded**
+  ([#1682](https://github.com/llm4s/llm4s/issues/1682), [#1688](https://github.com/llm4s/llm4s/issues/1688);
+  follow-ups to [#1330](https://github.com/llm4s/llm4s/issues/1330)'s cancellation):
+  - Kotlin `AgentKt.run(query)` runs its turn on a random thread id that nothing it throws carries. Once a failed or
+    cancelled turn has ended it now forgets that thread, as Scala `Agent.run(query)` and Java `JAgent.run(query)`
+    do; before, the thread stayed in the agent's runtime for the agent's lifetime. A forget that is refused - the
+    turn of a provider that ignores its interrupt is still running - is added to the thrown exception as a
+    suppressed one. `continueConversation`, `resume` and `recover` are unchanged: their thread is the caller's.
+  - `AgentStream.cancel()`, through which a cancelled Kotlin coroutine cancels its turn, waited for the turn's end
+    without a bound, so a provider that ignored its interrupt hung it. It now waits up to 5 seconds for the turn to
+    end, as the blocking `JAgent` calls do, then logs a WARN and returns, the thread busy (`ThreadBusy`) until the
+    turn ends. Java and Kotlin cancellation now behave the same.
+  - `JAgent.forget(threadId)` (`llm4s-java-api`) forgets a conversation by its thread id - one named for `stream`,
+    say, whose turn failed - as Scala `Agent.forget(threadId)` does; `forget(previous)` needed a result.
+  - `Agent.runMultiTurn` forgets its random thread when a follow-up turn fails or is cancelled: the `Left` it
+    returns carries no thread id, so the thread could be neither recovered nor forgotten.
+  - The interrupt flag a cancelled blocking call keeps is no longer lost when forgetting the one-shot turn's thread
+    throws (a `Checkpointer` whose `deleteThread` throws a fatal error the runtime does not turn into a `Left`).
+  - Scaladoc, the Java threading guide and the #1330 entry say the calls wait "up to 5 seconds for the turn to end":
+    with tracing, delivering the ended turn's last trace events can add to that.
 - **`llm4s-openai-compatible`: Z.ai keeps replayed reasoning** ([#1384](https://github.com/llm4s/llm4s/pull/1384),
   [#1411](https://github.com/llm4s/llm4s/pull/1411)):
   a request that sends an earlier turn's `reasoning_content` back now also sets `"thinking": {"clear_thinking": false}`,
   merged into any existing `thinking` object. Z.ai's standard endpoint has preserved thinking off by default
   (`clear_thinking` defaults to `true`) and drops replayed reasoning without it; `thinking.type` is left unset.
+- **Redaction redacts a JSON `Authorization` value containing an escaped quote in full**
+  ([#1672](https://github.com/llm4s/llm4s/issues/1672)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, took the value of a JSON `"Authorization"` field to end at the first `"`, including the `"` of
+  an escaped `\"` inside it. Only the text before the escaped quote was replaced, and the rest of the credential was
+  written in the clear: `{"authorization": "6FPVKYYYKXQ\"]WGMW"}` became `{"authorization": "[REDACTED]"]WGMW"}`.
+  The value is now read as the body of a JSON string, in which `\"` is part of the value and a quote after an
+  escaped backslash (`"abc\\"`) ends it, so the whole value is replaced: `{"authorization": "[REDACTED]"}`. A value
+  with no closing quote, as in a payload cut off in the middle of it, is redacted to the end of the input, as other
+  credential values already were. The `Authorization: ...` header line, an empty value and JSON inside a string are
+  redacted as before. No signature changes.
+- **Redaction keeps the escape on a quote after a redacted `key=value`, so nested JSON still parses**
+  ([#1677](https://github.com/llm4s/llm4s/issues/1677)): the `key=value` pass of `Redaction.redact` and
+  `redactForLogging`, and so of the exchange-log sink, took the backslash of an escaped closing quote as part of the
+  value. Inside JSON that sits in a string, `{"c": "{\"note\": \"token=abc\", \"x\": \"y\"}"}` became
+  `{"c": "{\"note\": \"token=[REDACTED]", \"x\": ...`: the bare `"` ended the outer string, the document no longer
+  parsed, and the passes after it paired its quotes the wrong way round. Of the backslashes before the quote a value
+  stops at, the pass now keeps those that escape it, at any depth of nesting (one for `\"`, three for `\\\"`), and
+  replaces the rest with the value; the output is `{"c": "{\"note\": \"token=[REDACTED]\", \"x\": \"y\"}"}`. A value
+  in plain JSON, and one ending in backslashes before anything but a quote, is redacted as before, and no text other
+  than those backslashes is kept that was replaced before.
+- **Redaction covers Python-repr credentials: single-quoted values with `:` or `=`, numbers, and double-quoted
+  values under single-quoted keys** ([#1675](https://github.com/llm4s/llm4s/issues/1675),
+  [#1687](https://github.com/llm4s/llm4s/issues/1687)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, left three shapes of a credential in a Python dict (or a JavaScript literal) readable that the
+  double-quoted forms redact. A single-quoted leaf holding a `:` or `=` under a single-quoted credential key was taken
+  for a field, not a value, so `{'credentials': {'pass': 'SECRETX:SECRETY'}}` became
+  `{'credentials': {'pass': 'SECRETX:'[REDACTED]''[REDACTED]`, `{'token': ['postgres://u:SECRETPW@h/db']}` kept the
+  user, and inside a JSON string the whole value stayed; such a leaf is now replaced where it stands as a value (after
+  `:` in a dict, after `[` or `,` in a list), `{'credentials': {'pass': '[REDACTED]'}}`, while an apostrophe of prose
+  that a mentioned `'token': [` runs into is still not taken for one. A number under a single-quoted credential key,
+  `{'password': 123456}`, was left as it was, also inside a string; it is now written back in the key's quote,
+  `{'password': '[REDACTED]'}`. A double-quoted value under a single-quoted key, which `repr` writes for a string that
+  holds a `'`, was not read at all: `{'Authorization': "Bearer x'y"}` kept `'y` and `{'password': "it's-secret"}`
+  was unchanged. It is now redacted to its closing quote, honouring escapes, where it reads as a value of the dict
+  (followed by `,` and the next key, by `}`, or cut off): `{'Authorization': "[REDACTED]"}`; the same holds inside a
+  JSON string (`\"it's\"`), and for such a leaf of a single-quoted container there, which used to end the container.
+  Double-quoted JSON is redacted as before. No signature changes.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the
   exchange-log sink, read a query parameter as `[?&]`, a key of any characters up to the next `=`, and a value up

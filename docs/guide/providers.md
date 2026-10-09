@@ -657,7 +657,26 @@ Both sections are shown together for brevity. Only the section you load is valid
 its key - `OPENROUTER_API_KEY` or `ZAI_API_KEY` - needs to be set.
 
 OpenRouter maps `CompletionOptions.reasoning` onto the underlying model: a thinking budget for
-Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest. A GLM thinking
+Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest.
+
+Z.ai maps it onto what the configured GLM model documents. Thinking is on by default, and
+`reasoning_effort` defaults to `max` on the models that accept it. The mapping only ever rises with
+the effort, and `High` sends `max`, Z.ai's maximum and its default, so no level reasons more than
+`High`:
+
+| Model | `ReasoningEffort.None` | `Low` | `Medium` | `High` |
+|---|---|---|---|---|
+| GLM-5.3, GLM-5.3-Flash, GLM-5.3-FlashX | `reasoning_effort: low` | `low` | `high` | `max` |
+| GLM-5.2 | `reasoning_effort: none` | `low` | `medium` | `max` |
+| GLM-5.1, GLM-5, GLM-4.7, GLM-4.6, GLM-4.5 (and variants) | `thinking.type: disabled` | not sent | not sent | not sent |
+| any other model | not sent | not sent | not sent | not sent |
+
+GLM-5.3 always thinks and rejects `thinking.type: disabled`, so `None` gets the lowest effort it
+accepts, as Z.ai advises; it still produces, and bills, thinking tokens, and the first such request
+in a process logs a warning naming the model. GLM-5.3 accepts only `low`, `high` and `max`. GLM-5.2
+accepts `none`, `low`, `medium`, `high` and `max`, but Z.ai currently runs `low` and `medium` as
+`high` on it; llm4s still sends the level requested. The GLM-4.x and earlier GLM-5 models document
+no `reasoning_effort`. With `reasoning` unset, neither field is sent. A GLM thinking
 model's `reasoning_content` on Z.ai, and a model's `reasoning` and `reasoning_details` on OpenRouter,
 are returned on the message and sent back (see [Thinking in conversation history](#thinking-in-conversation-history)).
 

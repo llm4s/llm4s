@@ -223,9 +223,12 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
 
   /**
    * An in-memory store that records the threads it stores and deletes; with `holdCompletion`, a commit
-   * carrying `RunCompleted` opens `committing` and then waits, deaf to interrupts, until `release`.
+   * carrying `RunCompleted` opens `committing` and then waits, deaf to interrupts, until `release`. With
+   * `throwOnDelete`, `deleteThread` records the thread and then throws a `LinkageError` - a store whose
+   * driver class is missing - which the runtime does not turn into a `Left`.
    */
-  final private class WatchedStore(holdCompletion: Boolean = false) extends Checkpointer {
+  final private class WatchedStore(holdCompletion: Boolean = false, throwOnDelete: Boolean = false)
+      extends Checkpointer {
     private val underlying = InMemoryCheckpointer()
     val stored             = new CopyOnWriteArraySet[ThreadId]()
     val deleted            = new CopyOnWriteArraySet[ThreadId]()
@@ -250,6 +253,7 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
     def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = underlying.compactEvents(threadId, beforeSeq)
     def deleteThread(threadId: ThreadId): Result[Unit] = {
       deleted.add(threadId)
+      if (throwOnDelete) throw new NoClassDefFoundError("store driver")
       underlying.deleteThread(threadId)
     }
   }
@@ -345,6 +349,55 @@ class AgentRunCancellationSpec extends AnyFlatSpec with Matchers with Eventually
     store.deleted.asScala shouldBe store.stored.asScala
 
     val kept = agent.run("q").value
+    store.stored.asScala should contain(kept.threadId)
+    store.deleted.asScala should not contain kept.threadId
+  }
+
+  it should "leave the caller's interrupt flag set when forgetting the cancelled turn's thread throws" in {
+    val store   = new WatchedStore(throwOnDelete = true)
+    val client  = new BlockingClient(blockOn = Set(1))
+    val agent   = built(Agent.builder("assistant", client).withRuntime(GraphRuntime(store)))
+    val outcome = new LinkedBlockingQueue[(Either[Throwable, Result[AgentResult]], Boolean)]()
+    val caller = Thread.ofVirtual().start { () =>
+      val result = scala.util.control.Exception.allCatch.either(agent.run("q"))
+      outcome.offer(result -> Thread.currentThread().isInterrupted): Unit
+    }
+    client.entered.tryAcquire(10, TimeUnit.SECONDS) shouldBe true
+    caller.interrupt()
+
+    val (result, stillInterrupted) =
+      Option(outcome.poll(10, TimeUnit.SECONDS)).getOrElse(fail("the interrupted call did not return"))
+    // the store's failure escapes forget, and run with it...
+    result.left.toOption.get shouldBe a[NoClassDefFoundError]
+    store.deleted.asScala should have size 1
+    // ...but the interrupt that cancelled the turn is not lost on the way
+    stillInterrupted shouldBe true
+  }
+
+  "Agent.runMultiTurn" should "forget its random thread when a follow-up turn fails, and keep it when every turn completes" in {
+    val store = new WatchedStore()
+    val calls = new AtomicInteger(0)
+    val client = new LLMClient {
+      // the first conversation's follow-up (the second call) fails; every other call answers
+      override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+        if (calls.incrementAndGet() == 2) Left(ValidationError("model", "down"))
+        else Right(CompletionFixture.simple("ok"))
+      override def streamComplete(
+        conversation: Conversation,
+        options: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = complete(conversation, options)
+      override def getContextWindow(): Int     = 8192
+      override def getReserveCompletion(): Int = 1024
+    }
+    val agent = built(Agent.builder("assistant", client).withRuntime(GraphRuntime(store)))
+
+    agent.runMultiTurn("first", Seq("second", "third")).isLeft shouldBe true
+    store.stored.asScala should have size 1
+    store.deleted.asScala shouldBe store.stored.asScala
+
+    val kept = agent.runMultiTurn("first", Seq("second")).value
+    kept.answer shouldBe Some("ok")
     store.stored.asScala should contain(kept.threadId)
     store.deleted.asScala should not contain kept.threadId
   }

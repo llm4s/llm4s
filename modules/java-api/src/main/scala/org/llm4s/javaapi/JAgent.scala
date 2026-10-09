@@ -20,7 +20,8 @@ import scala.jdk.CollectionConverters.*
  * `run`, `continueConversation`, `resume` and `recover` block the calling thread and never throw.
  * Interrupting that thread cancels the turn: the call returns a failed result whose error is a
  * [[org.llm4s.error.CancelledError CancelledError]], with the interrupt flag still set, once the
- * turn has ended (waiting at most 5 seconds for a provider that ignores its interrupt), and the
+ * turn has ended (it waits up to 5 seconds for the turn to end, for a provider that ignores its
+ * interrupt), and the
  * conversation's thread is left for `recover`. A thread already interrupted starts no turn.
  * `InterruptedException` is never thrown, so the methods declare no checked exception and `javac`
  * rejects a `catch (InterruptedException e)` around them - test the result for a `CancelledError`
@@ -57,10 +58,10 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
    *
    * Blocks the calling thread until the turn ends. If that thread is interrupted while it waits, the
    * turn is cancelled: the result is a failure whose error is a
-   * [[org.llm4s.error.CancelledError CancelledError]], returned once the turn has ended (within 5
-   * seconds), and the thread's interrupt flag is left set. A turn that had already begun committing
-   * its outcome is not cancelled, and that outcome is returned, the flag still set. A thread already
-   * interrupted starts no turn. The conversation's id is not in a failed result, so a failed or
+   * [[org.llm4s.error.CancelledError CancelledError]], returned once the turn has ended (it waits up to
+   * 5 seconds for the turn to end), and the thread's interrupt flag is left set. A turn that had
+   * already begun committing its outcome is not cancelled, and that outcome is returned, the flag still
+   * set. A thread already interrupted starts no turn. The conversation's id is not in a failed result, so a failed or
    * cancelled turn's conversation is forgotten. `InterruptedException` is never thrown, and the
    * method declares none.
    */
@@ -83,7 +84,20 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
   /** Removes `previous`'s conversation from the agent's runtime. A `null` argument yields a failed result. */
   def forget(previous: JAgentResult): LlmResult[Void] =
     if (previous == null) LlmResult.failure(ValidationError.required("previous"))
-    else call("JAgent.forget")(_.forget(ThreadId(previous.threadId)).map(_ => null))
+    else forgetThread(previous.threadId)
+
+  /**
+   * Removes the conversation on `threadId` from the agent's runtime - one you named for `stream`, say,
+   * whose turn failed, so no result carries its id. Forgetting an unknown thread succeeds; a thread
+   * whose turn is still running is refused (`GraphError.ThreadBusy`), and nothing is removed. A `null`
+   * argument yields a failed result.
+   */
+  def forget(threadId: String): LlmResult[Void] =
+    if (threadId == null) LlmResult.failure(ValidationError.required("threadId"))
+    else forgetThread(threadId)
+
+  private def forgetThread(threadId: String): LlmResult[Void] =
+    call("JAgent.forget")(_.forget(ThreadId(threadId)).map(_ => null))
 
   /**
    * Runs `query` as one turn on `threadId` - a new conversation, or the next turn of one - handing
