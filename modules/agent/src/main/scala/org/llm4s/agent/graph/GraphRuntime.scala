@@ -388,10 +388,13 @@ final class GraphRuntime(
    * - starting after checkpoint `before` when it is given: pass the last id of a page to read the
    * next. Each is data; read its typed state with `graph.restore(checkpoint.snapshot)`. The history
    * holds every checkpoint the thread's runs, [[updateState]] and [[fork]] committed, except those
-   * [[prune]] removed and those of a turn a guardrail blocked ([[NodeResult.Block]] retracts its turn,
-   * so nothing of it stays readable). A thread of another tenant is [[GraphError.TenantMismatch]]; a
-   * `before` not in the history is [[GraphError.CheckpointNotFound]]; a new thread has an empty history.
-   * `limit` must be positive (`ValidationError`). Reading needs no claim, so it never waits for a run.
+   * [[prune]] removed and the earlier checkpoints of a turn a guardrail blocked ([[NodeResult.Block]]
+   * retracts its turn). The retraction leaves the closing `Failed` checkpoint, which holds whatever the
+   * blocking node's own `Block` update leaves in the state: `Agent` removes the turn there with
+   * `MessageUpdate.RemoveTurn`, and a custom blocking node must remove the content in its `Block` update
+   * likewise. A thread of another tenant is [[GraphError.TenantMismatch]]; a `before` not in the history
+   * is [[GraphError.CheckpointNotFound]]; a new thread has an empty history. `limit` must be positive
+   * (`ValidationError`). Reading needs no claim, so it never waits for a run.
    */
   def history(
     threadId: ThreadId,
@@ -443,8 +446,14 @@ final class GraphRuntime(
    * checkpoint not in its history [[GraphError.CheckpointNotFound]]; a target that is the source is a
    * `ValidationError`, one that exists [[GraphError.ThreadExists]] (or `TenantMismatch` if it is
    * another tenant's), and one held by a run [[GraphError.ThreadBusy]]. The target is claimed in the
-   * store while it is created. A fork to a new thread id derives new tool idempotency keys, which
-   * include the thread.
+   * store while it is created.
+   *
+   * The snapshot is copied as it is, so tool calls already issued at the forked checkpoint keep the
+   * source thread's idempotency keys, which the snapshot records (once #1739 lands, in their `ToolTask`,
+   * `ApprovalRequest` or `ToolQuestionRequest`); only model calls the new thread makes afterwards derive
+   * new keys, since the key includes the thread. This is intended: a fork that re-runs a call the source
+   * already issued is de-duplicated against the source's call by its key, rather than performing the
+   * side effect a second time.
    */
   def fork(
     source: ThreadId,
@@ -596,7 +605,8 @@ final class GraphRuntime(
   /**
    * Removes the checkpoints and events of `threadId` that `policy` does not keep, by the store's clock
    * ([[Checkpointer.prune]]): never the latest checkpoint or its pending writes, so what the thread
-   * does next is unchanged; events go with their checkpoints, raising the replay floor
+   * does next is unchanged. Pruning a checkpoint also removes earlier events; `maxAge` and `maxEvents`
+   * may remove more, including the latest checkpoint's. Removing events raises the replay floor
    * ([[GraphError.ReplayUnavailable]]). A thread of another tenant is [[GraphError.TenantMismatch]];
    * an unknown thread is `Right(())`. It needs no claim, so it may run while a run executes.
    */

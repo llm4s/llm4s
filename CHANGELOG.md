@@ -18,8 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a claim, carrying completed tasks' pending writes over, one superstep on so tool idempotency keys never repeat
   (`RunEvent.StateUpdated`). `prune(threadId, RetentionPolicy)` removes checkpoints and events by age (`maxAge`, by
   the store's clock) or size (`maxCheckpoints`, `maxEvents`), never the latest checkpoint, raising the replay floor
-  as `compactEvents` does. A guardrail Block - any `NodeResult.Block` - retracts its whole turn from the history in
-  the commit that closes it, so nothing of a blocked answer stays readable or forkable. Every call checks the tenant.
+  as `compactEvents` does. A guardrail Block - any `NodeResult.Block` - retracts its turn's earlier checkpoints from
+  the history in the commit that closes it, so none of them stays readable or forkable; the closing `Failed`
+  checkpoint holds what the node's own `Block` update leaves, so a custom blocking node must remove the turn's
+  content in that update, as `Agent` does with `MessageUpdate.RemoveTurn`. Every call checks the tenant.
   `CheckpointerContract` gains the history, retraction, pruning, `fork` and `updateState` cases. See
   [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md#checkpoint-history-fork-and-updatestate) and the
   [Stage 2 migration note](docs/reference/migration.md#checkpoint-history-fork-updatestate-and-retention-1702).

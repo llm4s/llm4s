@@ -16,9 +16,9 @@ import scala.concurrent.duration.FiniteDuration
  *  - `maxEvents`: only the newest `maxEvents` events are kept.
  *
  * Whatever the limits, the thread's latest checkpoint and its pending writes are never removed, so
- * pruning never changes what `start`, `recover` or `resume` does next. Events are kept while their
- * checkpoints are: pruning a checkpoint also removes the events recorded before the oldest checkpoint
- * kept. Removing events raises the thread's replay floor exactly as [[Checkpointer.compactEvents]]
+ * pruning never changes what `start`, `recover` or `resume` does next. Pruning a checkpoint also
+ * removes the events recorded before the oldest checkpoint kept; `maxAge` and `maxEvents` may remove
+ * more events than that, including the latest checkpoint's. Removing events raises the thread's replay floor exactly as [[Checkpointer.compactEvents]]
  * does ([[GraphError.ReplayUnavailable]]).
  *
  * `apply` and the `with*` setters throw `IllegalArgumentException` for a non-positive `maxAge` or

@@ -86,8 +86,9 @@ trait Checkpointer:
   /**
    * Removes the checkpoints and events of the thread that `policy` does not keep (see
    * [[RetentionPolicy]]), by the store's clock. The latest checkpoint and its pending writes are always
-   * kept; events are kept while their checkpoints are, and removing events raises the replay floor as
-   * [[compactEvents]] does. Needs no claim: it touches nothing a run reads or writes. An unknown thread
+   * kept. Pruning a checkpoint also removes the events before the oldest checkpoint kept; `maxAge` and
+   * `maxEvents` may remove more, including the latest checkpoint's. Removing events raises the replay
+   * floor as [[compactEvents]] does. Needs no claim: it touches nothing a run reads or writes. An unknown thread
    * is `Right(())`.
    */
   def prune(threadId: ThreadId, policy: RetentionPolicy): Result[Unit]

@@ -603,6 +603,12 @@ class CheckpointHistorySpec extends AnyFlatSpec with Matchers with EitherValues 
     history.tail shouldBe settled
     // only the closing Failed checkpoint is left of the turn; the suspended one holding its draft is gone
     history.head.status shouldBe CheckpointStatus.Failed
+    // the retraction removes only earlier checkpoints: the closing one holds what the Block's own update
+    // leaves, and this node's appends, so the draft stays there (Agent's output Block commits RemoveTurn
+    // instead; a custom blocking node must remove the content in its Block update)
+    val settledLog = graph.restore(settled.head.snapshot).value.state.get(log).value
+    graph.restore(history.head.snapshot).value.state.get(log).value shouldBe
+      settledLog ++ Vector("secret:two", "withdrawn")
     history.tail.flatMap(c => graph.restore(c.snapshot).value.state.get(log).value) should not contain "secret:two"
     runtime.checkpoint(thread, secret.id).left.value shouldBe GraphError.CheckpointNotFound("t", secret.id)
     runtime.fork(thread, secret.id, other).left.value shouldBe GraphError.CheckpointNotFound("t", secret.id)

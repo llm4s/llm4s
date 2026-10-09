@@ -153,7 +153,7 @@ the same `start`, `recover` or `resume` continues the thread afterwards.
 
 ```scala
 for
-  latest  <- runtime.history(threadId, limit = 1).map(_.head)
+  latest  <- runtime.history(threadId, limit = 1).flatMap(_.headOption.toRight(ValidationError("thread", "no checkpoint yet")))
   updated <- runtime.updateState(threadId, graph, latest.id, StateUpdate.update(notes, "corrected"), asNode = Some(writer))
   handle  <- runtime.resume(threadId, graph, answers)
 yield handle
@@ -161,11 +161,21 @@ yield handle
 
 With `asNode`, the update must stay within that node's declared write set, as if the node had returned it. The
 thread is held, with a claim in the store, while it is updated, so a live run refuses it with `ThreadBusy`. Pending
-writes of tasks that already completed are carried over, so `recover` still does not run them again.
+writes of tasks that already completed are carried over, so `recover` still does not run them again. They apply
+after your update when the thread is recovered, so a carried write to a key you edited can overwrite your edit on
+`recover`. To be sure an edit stands, update a `Running` thread only in keys its completed tasks did not write.
 
 Tool idempotency keys are derived from the thread, the checkpoint id, the superstep, the task and the call id.
 `updateState` moves the thread on by one superstep, and checkpoint ids count along the thread, so no later call
-reproduces an earlier key, whatever `RunId` you reuse. Forking to a new thread id derives new keys too.
+reproduces an earlier key, whatever `RunId` you reuse.
+
+A fork copies the checkpoint's snapshot as it is. Once [#1739](https://github.com/llm4s/llm4s/issues/1739) lands,
+tool calls already issued at the forked checkpoint record their idempotency keys in the snapshot (in their
+`ToolTask`, `ApprovalRequest` or `ToolQuestionRequest`), so in the new thread they keep the source thread's keys;
+only model calls the fork makes afterwards derive new keys, since the key includes the thread. This is intended: a
+fork that re-runs a call the source already issued - `recover` of a `Running` checkpoint, or `resume` of a parked
+approval or question - is de-duplicated against the source's call by its key instead of performing the side effect
+a second time.
 
 {: .warning }
 > `forget` (`deleteThread`) starts a thread id afresh. Reusing both the thread id and a `RunId` after it repeats
@@ -177,8 +187,19 @@ reproduces an earlier key, whatever `RunId` you reuse. Forking to a new thread i
 When a node blocks a run (`NodeResult.Block`, as a guardrail does), the run's closing `Failed` checkpoint
 **retracts its turn**: every checkpoint after the thread's last `Completed` or `Failed` one is removed from the
 history in the same commit - including the checkpoints of earlier runs of the same turn, such as one that
-suspended for review. Nothing of a blocked answer stays readable through `history`, `checkpoint` or `fork`. Events
-carry no message content and stay in the log.
+suspended for review. Nothing of the blocked turn stays readable through those checkpoints with `history`,
+`checkpoint` or `fork`. Events carry no message content and stay in the log.
+
+The retraction removes the turn's *earlier* checkpoints. The closing `Failed` checkpoint itself - the thread's
+latest, which `history`, `checkpoint`, `fork` and the next `start` read - holds whatever the blocking node's own
+`Block` update leaves in the state. `Agent`'s output guardrail commits `MessageUpdate.RemoveTurn` there, and an
+input Block blocks before the loop stores the turn, so with `Agent` nothing of the turn remains. **A custom blocking node must remove the content in its `Block` update** the same way, or the closing
+checkpoint keeps it.
+
+One window remains before the guard runs. The model step commits the answer, and the output guardrail runs in the
+next superstep, so between those two commits `history`, `checkpoint` and `fork` can read the unguarded answer. The
+Block retracts it from this thread afterwards, but a fork made in that window is another thread and keeps its copy;
+the fork's copy of the open turn is guarded when the fork continues that turn.
 
 ## Retention
 
@@ -193,9 +214,13 @@ runtime.prune(threadId, RetentionPolicy(maxAge = Some(30.days), maxCheckpoints =
 - `maxCheckpoints` keeps the newest checkpoints, and `maxEvents` the newest events.
 
 The latest checkpoint and its pending writes are always kept, so pruning never changes what the thread does next.
-Events are kept while their checkpoints are: pruning a checkpoint also removes the events recorded before the
-oldest checkpoint kept, raising the replay floor (`ReplayUnavailable`) as `compactEvents` does. `prune` needs no
-claim, so it can run while a run executes; call it on a schedule that suits you.
+Pruning a checkpoint also removes the events recorded before the oldest checkpoint kept; `maxAge` and `maxEvents`
+may remove more events than that, including those of checkpoints still kept, the latest checkpoint's among them.
+Removing events raises the replay floor (`ReplayUnavailable`) as `compactEvents` does. `prune` needs no claim, so it
+can run while a run executes; call it on a schedule that suits you.
+
+`maxAge` compares the store's clock with the `createdAt` and event timestamps the committing runtimes stamped by
+theirs, so on a store shared by several hosts, clock skew between them shifts the effective age by that much.
 
 ## Writing a store
 
