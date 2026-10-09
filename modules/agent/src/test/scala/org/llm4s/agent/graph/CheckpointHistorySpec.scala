@@ -88,7 +88,8 @@ class CheckpointHistorySpec extends AnyFlatSpec with Matchers with EitherValues 
     }
     private val plan = b.node[Unit]("plan")((_, _, _) => continue(Command.empty.send(worker, "a").send(worker, "b")))
     val graph: CompiledGraph[Unit, Vector[String]] = b.compile(plan)(_.get(log)).value
-    def runs: Vector[String]                       = ran.asScala.toVector
+    // sorted: the workers of one superstep run concurrently, in no fixed order
+    def runs: Vector[String] = ran.asScala.toVector.sorted
   }
 
   private def ids(history: Vector[Checkpoint]): Vector[String] = history.map(_.id)
