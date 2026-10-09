@@ -27,9 +27,11 @@ object Bom {
 
   private val Group = "org.llm4s"
 
-  /** Settings that make a project publish a POM and nothing else, under an unsuffixed coordinate. */
+  /**
+   * Settings that make a project publish a POM and nothing else, under an unsuffixed coordinate. The project's
+   * `name` (`llm4s-bom`) is set in build.sbt, where the build guards read project names.
+   */
   def settings: Seq[Def.Setting[_]] = Seq(
-    name := "llm4s-bom",
     description :=
       "Bill of materials for LLM4S: import it to use every llm4s-* artifact at one version " +
         "without repeating the version. This artifact contains no code.",
