@@ -210,13 +210,29 @@ private[llm4s] object Redaction {
 
   /**
    * What may come before the key of a `key=value` pair: not a letter, a digit, `_` or `-`, which would make it the end
-   * of a longer word, or the JSON escape of `&`, `=` or `?` (a backslash and `u0026`, `u003d` or `u003f`), which ends
-   * in a digit or a letter but stands for a separator: a form body in JSON that Go's `encoding/json` wrote has every
-   * `&` escaped (#1676). A key does not start with the `u` of such an escape: `u0026` is no key, and read as one
-   * before a `=` it would take the next pair for its value. `[u]` keeps the compiler from reading the escape as one.
+   * of a longer word.
    */
-  private val PairKeyStart: String =
-    """(?:(?<![A-Za-z0-9_-])|(?<=\\[u]00(?:26|3[dDfF])))(?!(?<=\\)[u]00(?:26|3[dDfF]))"""
+  private val PlainKeyStart: String = """(?<![A-Za-z0-9_-])"""
+
+  /**
+   * The four hex digits of a JSON escape (backslashes, `u` and the digits) of a character a key may hold: a letter, a
+   * digit, `_` or `-`.
+   */
+  private val KeyCharHex: String = """00(?:2[dD]|3[0-9]|4[1-9a-fA-F]|5[0-9aAfF]|6[1-9a-fA-F]|7[0-9aA])"""
+
+  /**
+   * Where the key of a `key=value` pair may start in an input that holds the JSON escape of a separator or a quote
+   * (see [[redact]]): where it starts in the text the escapes stand for. That is after a character that is not a
+   * letter, a digit, `_` or `-` (`PlainKeyStart`), but not at the `u` of an escape - backslashes, `u` and four hex
+   * digits - that stands for such a character, or right after such an escape, which ends in a digit or a letter but
+   * stands for a separator: a form body in JSON that Go's `encoding/json` wrote has every `&` escaped (#1676). Read as
+   * a key, an escape takes the pair after it for its value: after the escape of `'`, the key `u0027` and the escape
+   * of `=` would hold `password=...`, and no pass read the credential. The escape of a letter, a digit, `_` or
+   * `-` is a character of the key, as it is in the text it stands for. `[u]` keeps the compiler from reading an
+   * escape in the pattern as one.
+   */
+  private val EscapedKeyStart: String =
+    s"""(?:$PlainKeyStart(?!(?<=\\\\)[u](?!$KeyCharHex)[0-9a-fA-F]{4})|(?<=\\\\[u][0-9a-fA-F]{4})(?<!\\\\[u]$KeyCharHex))"""
 
   /**
    * The `=` between the key and the value of a `key=value` pair, or its JSON escape (backslashes and `u003d`, the hex
@@ -226,13 +242,29 @@ private[llm4s] object Redaction {
   private val PairEquals: String = """(?:=|\\+[u]003[dD])"""
 
   /**
-   * `key=` before the value of a pair outside a URL query string: form bodies, log lines, shell-style settings,
-   * `a.b.password=...`. Group 2 is the key; the value, at least one character, is read by `redactEqualsPairs`.
+   * The patterns that find the start of a `key=value` pair, with the key starting where `keyStart` allows: one set
+   * for an input that holds no JSON escape of a separator or a quote, read as it always was, and one for an input
+   * that does (`EscapedKeyStart`).
+   *
+   *  - `equals`: `key=` before the value of a pair outside a URL query string: form bodies, log lines, shell-style
+   *    settings, `a.b.password=...`. Group 2 is the key; the value, at least one character, is read by
+   *    `redactEqualsPairs`.
+   *  - `doubleQuoted`, `singleQuoted`: `key="` and `key='`.
+   *  - `escapedQuote`: `key=` and the opening quote of its value, written as a JSON escape: the escaped form of
+   *    `key='...'` and `key="..."`. Group 1 is the key, group 2 the backslashes of the escape, group 3 the hex digits
+   *    of the quote.
    */
-  private val EqualsPairStart: Regex = s"""($PairKeyStart($Key)$PairEquals)(?=[^\\s&"',;<>])""".r
+  final private class PairStarts(keyStart: String) {
+    val equals: Regex       = s"""($keyStart($Key)$PairEquals)(?=[^\\s&"',;<>])""".r
+    val doubleQuoted: Regex = s"""($keyStart($Key)$PairEquals")""".r
+    val singleQuoted: Regex = s"""($keyStart($Key)$PairEquals')""".r
+    val escapedQuote: Regex = s"""$keyStart($Key)$PairEquals(\\\\++)u00(2[27])""".r
+  }
 
-  private val DoubleQuotedEqualsStart: Regex = s"""($PairKeyStart($Key)$PairEquals")""".r
-  private val SingleQuotedEqualsStart: Regex = s"""($PairKeyStart($Key)$PairEquals')""".r
+  private val PlainPairStarts: PairStarts   = new PairStarts(PlainKeyStart)
+  private val EscapedPairStarts: PairStarts = new PairStarts(EscapedKeyStart)
+
+  private def pairStarts(escaped: Boolean): PairStarts = if (escaped) EscapedPairStarts else PlainPairStarts
 
   /** A header-style line, `x-api-key: value`, at the start of a line. */
   private val HeaderLine: Regex =
@@ -871,6 +903,7 @@ private[llm4s] object Redaction {
     // that a pattern ran over - and the placeholder writes none of its own. Where every pass reads the input itself,
     // the text is the input, and its quotes are all there.
     def quotesKept(text: String): Boolean = !placeholder.contains('\'') && text.count(_ == '\'') >= inputQuotes
+    val pairs                             = pairStarts(escaped)
     Vector(
       (text: String) =>
         redactContainers(EscapedJsonContainerStart, text, placeholder, ValueEnd.EscapedQuote, leaves = false),
@@ -879,10 +912,10 @@ private[llm4s] object Redaction {
       (text: String) => redactQuoted(JsonStringStart, text, placeholder, ValueEnd.Quote('"')),
       (text: String) =>
         redactQuoted(SingleQuotedStart, text, placeholder, ValueEnd.Quote('\''), endsWithString = quotesKept(text)),
-      (text: String) => redactQuoted(DoubleQuotedEqualsStart, text, placeholder, ValueEnd.Quote('"')),
+      (text: String) => redactQuoted(pairs.doubleQuoted, text, placeholder, ValueEnd.Quote('"')),
       (text: String) =>
         redactQuoted(
-          SingleQuotedEqualsStart,
+          pairs.singleQuoted,
           text,
           placeholder,
           ValueEnd.Quote('\''),
@@ -903,7 +936,7 @@ private[llm4s] object Redaction {
       (text: String) => redactEqualsPairs(text, placeholder, escaped),
       (text: String) => redactPairs(HeaderLine, text, placeholder),
       (text: String) => redactEscapedQuoted(EscapedQuoteFieldStart, text, placeholder, key = 3, slashes = 1, hex = 2),
-      (text: String) => redactEscapedQuoted(EscapedQuotePairStart, text, placeholder, key = 1, slashes = 2, hex = 3)
+      (text: String) => redactEscapedQuoted(pairs.escapedQuote, text, placeholder, key = 1, slashes = 2, hex = 3)
     )
   }
 
@@ -918,14 +951,8 @@ private[llm4s] object Redaction {
     s"""(?<!\\\\)(\\\\++)u00(2[27])($Key)\\1u00\\2\\s*:\\s*\\1u00\\2""".r
 
   /**
-   * `key=` and the opening quote of its value, written as a JSON escape: the escaped form of `key='...'` and
-   * `key="..."`. Group 1 is the key, group 2 the backslashes of the escape, group 3 the hex digits of the quote.
-   */
-  private val EscapedQuotePairStart: Regex = s"""$PairKeyStart($Key)$PairEquals(\\\\++)u00(2[27])""".r
-
-  /**
    * Replaces the value of every field or pair whose quotes are JSON escapes (`EscapedQuoteFieldStart`,
-   * `EscapedQuotePairStart`) and whose key is sensitive (#1676), as the passes for `"key": "..."` and `key='...'`
+   * `PairStarts.escapedQuote`) and whose key is sensitive (#1676), as the passes for `"key": "..."` and `key='...'`
    * replace the value between bare quotes. `start` matches up to the opening quote, with the key, the backslashes of
    * the quote's escape and its hex digits in the groups `key`, `slashes` and `hex`. The value runs to the escape of
    * its quote with as many backslashes as the one that opens it, so the escape of a quote escaped once more inside
@@ -1706,7 +1733,7 @@ private[llm4s] object Redaction {
     regexPass(pattern, input, placeholder, group = 3, wrap = wrap, replaces = m => isSensitiveKey(m.group(2)))
 
   /**
-   * Replaces the value of every `key=value` pair whose key is sensitive. The value, which `EqualsPairStart` finds the
+   * Replaces the value of every `key=value` pair whose key is sensitive. The value, which `PairStarts.equals` finds the
    * start of, runs to whitespace, to one of `&"',;<>`, or to the JSON escape of `&`: a query string or a form body in
    * JSON that Go's `encoding/json` wrote has every `&` escaped (#1676). The text after the escape is read for pairs
    * again, as the text after `&` is. A loop that reads each character of a value once.
@@ -1739,7 +1766,7 @@ private[llm4s] object Redaction {
    * nothing, are replaced whole, as they were. A value cut at an escaped `&` keeps nothing: no quote follows it.
    */
   private def redactEqualsPairs(input: String, placeholder: String, escaped: Boolean): Rewrite = {
-    val matcher = EqualsPairStart.pattern.matcher(input)
+    val matcher = pairStarts(escaped).equals.pattern.matcher(input)
     val out     = new Rewrite(input, placeholder)
 
     @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =

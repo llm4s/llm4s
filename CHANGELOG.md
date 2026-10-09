@@ -2104,6 +2104,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{"msg":"{\u0022url\u0022:\u0022https://h/x?token=abc\u0026page=2\u0022,\u0022nested\u0022:{\u0022token\u0022:\u0022NESTEDSECRET\u0022}}"}`
   keeps `page=2` and redacts both tokens. The value of a `key=value` pair whose key is not sensitive ends at an
   escaped quote, `<` or `>`, as it ends at the character, so the pair after it is read.
+  In an input that holds one of these escapes, a `key=value` key starts where it would in the text the escapes stand
+  for: never at the `u` of an escape, and right after the escape of a character that ends a word (`'`, `<`,
+  `é`, ...), as after the character. The escape itself was read as a key before, so after `'` and `=`
+  the key `u0027` held `password=...` as its value and the credential was never read.
   An input that holds none of these escapes is redacted exactly as before.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the

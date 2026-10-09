@@ -142,6 +142,41 @@ class RedactionSpanMergeSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---------------------------------------------------------------------------------------------
+  // A key starts where it starts in the text the escapes stand for, never at the 'u' of an escape
+  // ---------------------------------------------------------------------------------------------
+
+  it should "not read the escape of a quote before an escaped '=' as a key that holds the pair after it" in {
+    // `u0027` and the escape of `=` read as a pair whose value was `password=...`, and the credential was never read
+    redacted("~27~3dpassword=hunter2xyz", "hunter2xyz") shouldBe u(s"~27~3dpassword=$R")
+    redacted("~27~3dfoo/token=hunter2xyz", "hunter2xyz") shouldBe u(s"~27~3dfoo/token=$R")
+    redacted("""{"m":"x~27~3dfoo:password=hunter2xyz"}""", "hunter2xyz") shouldBe
+      u(raw"""{"m":"x~27~3dfoo:password=$R"}""")
+    redacted("""{"m":"cmp ~3c~3dpassword=hunter2xyz rest"}""", "hunter2xyz") shouldBe
+      u(raw"""{"m":"cmp ~3c~3dpassword=$R rest"}""")
+  }
+
+  it should "not read the escape of any character that ends a word as a key" in {
+    Seq(
+      "~22~3dclient_secret=S7K2Q9XW" -> "~22~3dclient_secret=",
+      "~3c~3dpassword=S7K2Q9XW"      -> "~3c~3dpassword=",
+      "~3e~3dapi_key=S7K2Q9XW"       -> "~3e~3dapi_key=",
+      "~2b~3dpassword=S7K2Q9XW"      -> "~2b~3dpassword=",
+      "~60~3dapi_key=S7K2Q9XW"       -> "~60~3dapi_key=",
+      "~e9~3dpassword=S7K2Q9XW"      -> "~e9~3dpassword="
+    ).foreach { case (input, kept) => redacted(input, "S7K2Q9XW") shouldBe u(kept) + R }
+  }
+
+  it should "not read an escape as a key when the escape is escaped again, inside JSON in a string" in {
+    redacted("""\~27\~3dsecret=S7K2Q9XW""", "S7K2Q9XW") shouldBe u(s"""\\~27\\~3dsecret=$R""")
+    redacted("""\~27=secret=S7K2Q9XW""", "S7K2Q9XW") shouldBe u(s"""\\~27=secret=$R""")
+  }
+
+  it should "start a key right after the escape of a character that ends a word, as after the character" in {
+    redacted("~e9password=S7K2Q9XW~26a=1", "S7K2Q9XW") shouldBe u(s"~e9password=$R~26a=1")
+    redacted("~27password=S7K2Q9XW", "S7K2Q9XW") shouldBe u(s"~27password=$R")
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // What the passes in sequence redact is kept: a placeholder one pass writes can let the pass after it read on
   // ---------------------------------------------------------------------------------------------
 
