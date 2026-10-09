@@ -107,10 +107,15 @@ object WriteFileTool {
     encodingStr: String,
     config: WriteConfig
   ): Either[String, WriteFileResult] = {
-    val pathResult =
-      Try(Paths.get(pathStr).toAbsolutePath.normalize()).toEither.left.map(e => s"Invalid path: ${e.getMessage}")
+    val inputs = for {
+      charset <- Try(java.nio.charset.Charset.forName(encodingStr)).toEither.left
+        .map(_ => s"Unsupported encoding: $encodingStr")
+      _ <- Either.cond(charset.canEncode, (), s"Unsupported encoding for writing: $encodingStr")
+      path <- Try(Paths.get(pathStr).toAbsolutePath.normalize()).toEither.left
+        .map(e => s"Invalid path: ${e.getMessage}")
+    } yield (charset, path)
 
-    pathResult.flatMap { path =>
+    inputs.flatMap { case (charset, path) =>
       // Security check - the real location must be in the allowed paths, and the file is written there
       config.resolve(path) match {
         case None =>
@@ -118,7 +123,7 @@ object WriteFileTool {
             s"Access denied: path '$pathStr' is not in allowed paths. Allowed: ${config.allowedPaths.mkString(", ")}"
           )
         case Some(real) =>
-          val contentBytes = content.getBytes(java.nio.charset.Charset.forName(encodingStr))
+          val contentBytes = content.getBytes(charset)
 
           if (contentBytes.length > config.maxFileSize) {
             Left(s"Content too large: ${contentBytes.length} bytes (max: ${config.maxFileSize} bytes)")

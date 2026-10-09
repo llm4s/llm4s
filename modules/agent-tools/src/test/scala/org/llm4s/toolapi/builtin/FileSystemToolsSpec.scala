@@ -108,6 +108,25 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
       )
   }
 
+  it should "return an error naming the encoding for an unsupported or illegal name" in {
+    val tempFile = testDir.resolve("read-bad-encoding.txt")
+    Files.writeString(tempFile, "Hello, World!")
+
+    val config = FileConfig(allowedPaths = Some(Seq(testDir.toString)), blockedPaths = Seq.empty)
+    ReadFileTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool =>
+          // "utf-9" raises UnsupportedCharsetException, "bad name!" IllegalCharsetNameException
+          Seq("utf-9", "bad name!").foreach { encoding =>
+            val params = ujson.Obj("path" -> tempFile.toString, "encoding" -> encoding)
+            tool.handler(SafeParameterExtractor(params)) shouldBe Left(s"Unsupported encoding: $encoding")
+          }
+      )
+    Files.deleteIfExists(tempFile)
+  }
+
   it should "deny access to blocked paths" in {
     assume(!isWindows, "Unix system paths not available on Windows")
     val config = FileConfig()
@@ -338,6 +357,43 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
                 Files.deleteIfExists(Paths.get(outputPath))
               }
             )
+        }
+      )
+  }
+
+  it should "return an error naming the encoding for an unsupported or illegal name and create no file" in {
+    val config = WriteConfig(allowedPaths = Seq(testDir.toString), allowOverwrite = true)
+    WriteFileTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool =>
+          // "utf-9" raises UnsupportedCharsetException, "bad name!" IllegalCharsetNameException
+          Seq("utf-9", "bad name!").foreach { encoding =>
+            val outputPath = testDir.resolve("write-bad-encoding.txt").toString
+            val params     = ujson.Obj("path" -> outputPath, "content" -> "Hello!", "encoding" -> encoding)
+            tool.handler(SafeParameterExtractor(params)) shouldBe Left(s"Unsupported encoding: $encoding")
+            Files.exists(Paths.get(outputPath)) shouldBe false
+          }
+      )
+  }
+
+  it should "return an error for a charset that can only decode" in {
+    val decodeOnly = "ISO-2022-CN"
+    assume(
+      java.nio.charset.Charset.isSupported(decodeOnly) && !java.nio.charset.Charset.forName(decodeOnly).canEncode,
+      s"$decodeOnly is not a decode-only charset on this JDK"
+    )
+    val config = WriteConfig(allowedPaths = Seq(testDir.toString), allowOverwrite = true)
+    WriteFileTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val outputPath = testDir.resolve("write-decode-only.txt").toString
+          val params     = ujson.Obj("path" -> outputPath, "content" -> "Hello!", "encoding" -> decodeOnly)
+          tool.handler(SafeParameterExtractor(params)) shouldBe Left(s"Unsupported encoding for writing: $decodeOnly")
+          Files.exists(Paths.get(outputPath)) shouldBe false
         }
       )
   }

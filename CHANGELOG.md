@@ -2007,6 +2007,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-agent-tools`: `WriteFileTool` and `ReadFileTool` return an error for an unknown encoding instead of throwing**
+  ([#1710](https://github.com/llm4s/llm4s/issues/1710)): `WriteFileTool.writeFile` called
+  `Charset.forName(encodingStr)` outside any `Try`, so a model-supplied encoding such as `utf-9`
+  (`UnsupportedCharsetException`) or `bad name!` (`IllegalCharsetNameException`) escaped as an exception
+  instead of the `Left` error the other failures use. `ReadFileTool.readFile` did the lookup inside its
+  `Try` but reported it as a generic read failure. Both tools now look the charset up before touching the file
+  system and return `Left("Unsupported encoding: <name>")` for either exception, and `WriteFileTool` returns
+  `Left("Unsupported encoding for writing: <name>")` for a charset that can only decode, such as `ISO-2022-CN`,
+  which used to throw `UnsupportedOperationException`.
 - **`llm4s-agent`: the PII Email pattern runs in linear time; an SSN stays within a line; `UTC+5` is not a phone number**
   ([#1713](https://github.com/llm4s/llm4s/issues/1713)):
   - `PIIType.Email`, in the default type set of `PIIMasker` and `PIIDetector`, began a match attempt at every
