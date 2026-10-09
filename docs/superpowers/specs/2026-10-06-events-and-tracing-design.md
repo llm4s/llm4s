@@ -16,7 +16,7 @@ Slice 3 of [#1326](https://github.com/llm4s/llm4s/issues/1326), Stage 1 of the t
 - Agent streaming samples are rebuilt on the new model.
 
 Nothing is frozen: replaced API is deleted, with no shim; the changes join Stage 1's single
-migration note. Java (`JAgent`) and Kotlin (`AgentKt`) streams are a follow-up issue, [#1377](https://github.com/llm4s/llm4s/issues/1377).
+migration note. Java (`JAgent`) and Kotlin (`AgentKt`) streams were a follow-up issue, [#1377](https://github.com/llm4s/llm4s/issues/1377), now done.
 
 ## Findings that shape the design
 
@@ -335,4 +335,4 @@ One branch, `feat/1329-events-and-tracing`, one PR closing #1329. Commits, rough
 5. fs2 and ZIO.
 6. Samples and docs.
 
-A follow-up issue, [#1377](https://github.com/llm4s/llm4s/issues/1377), covers Java and Kotlin streams. 0.5.0 is not cut before this lands (§4.13).
+A follow-up issue, [#1377](https://github.com/llm4s/llm4s/issues/1377), covered Java and Kotlin streams; it has landed (`JAgent.stream*`, `AgentKt.stream*`).

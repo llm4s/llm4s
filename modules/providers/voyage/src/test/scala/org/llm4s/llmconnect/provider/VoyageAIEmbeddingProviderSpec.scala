@@ -9,6 +9,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.Outcome
 import org.slf4j.LoggerFactory
+import org.llm4s.testutil.EchoedCredentials
 
 class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFactory {
 
@@ -143,5 +144,16 @@ class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockF
 
     result.left.toOption.get.message should include("connection refused")
     result.left.toOption.get.context.get("provider") shouldBe Some("voyage")
+  }
+
+  "VoyageAIEmbeddingProvider" should "redact credentials echoed in an error body before putting it into the error (#1674)" in {
+    Seq(EchoedCredentials.Text, EchoedCredentials.JsonError).foreach { reply =>
+      val mockHttp = stub[Llm4sHttpClient]
+      (mockHttp.post _).when(*, *, *, *).returns(Right(httpErr(500, reply)))
+
+      val error = VoyageAIEmbeddingProvider.forTest(cfg, mockHttp).embed(req).left.toOption.get
+      error.message should include("[REDACTED]")
+      EchoedCredentials.leaked(error.message) shouldBe empty
+    }
   }
 }

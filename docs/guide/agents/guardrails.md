@@ -60,6 +60,18 @@ Underneath, a block is the graph runtime's *Block*: the run ends as a finished f
 `recover` has nothing to continue and `start` accepts like a completed thread. A `Left` from another
 middleware's `beforeAgent` or `afterAgent` blocks the same way, but is returned as that `Left`.
 
+A list of guardrails runs completely: each guardrail, in order, on the value the previous one
+returned, **even after one has failed**. That is why the block carries every failure's error, and why a
+guardrail that costs a call - an LLM judge - runs on every turn that reaches its list. To stop at the first
+failure, use [`CompositeGuardrail.sequential`](#sequential-short-circuit); the block then names the composite
+as the guardrail.
+
+A block sends one durable `agent.guardrail_blocked` event, naming the first failing guardrail and its phase
+(`Input` or `Output`), and no event comes from a guardrail that passed or that ran after the first failure.
+The run then ends with the kernel's `RunFailed`; `RunCompleted` is never sent for a blocked turn. An input
+block comes before any model call. An output block comes after the turn's `ModelCallCompleted` events, since
+the answer it refuses has been produced. See [Streaming](streaming) for the event stream.
+
 Guardrails on the root agent guard its whole handoff family: they apply to every turn's query and
 every final answer, whichever agent is active after a handoff. See
 [Guardrails and Middleware Across Handoffs](handoffs#guardrails-and-middleware-across-handoffs).
@@ -93,6 +105,8 @@ These use an LLM to evaluate subjective qualities:
 | `LLMFactualityGuardrail` | Verify factual accuracy | `new LLMFactualityGuardrail(client)` |
 | `LLMQualityGuardrail` | Assess response quality | `new LLMQualityGuardrail(client)` |
 | `LLMToneGuardrail` | Validate tone compliance | `new LLMToneGuardrail(client, "professional")` |
+
+Each judge scores the content and passes it when the score reaches its `threshold`. The threshold must be between 0.0 and 1.0: for any other value, or NaN, `validate` returns a `ValidationError` on the field `threshold` without calling the judge.
 
 ### RAG-Specific Guardrails
 
@@ -275,6 +289,30 @@ val sequentialValidation = CompositeGuardrail.sequential(Seq(
 // Stops at first failure, more efficient
 ```
 
+### Using a composite in an agent
+
+A composite is a `Guardrail[String]`, while `GuardrailMiddleware` takes `InputGuardrail`s and
+`OutputGuardrail`s, so wrap it. A cast does not work: it throws a `ClassCastException`.
+
+```scala
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.guardrails.{ CompositeGuardrail, Guardrail, InputGuardrail }
+import org.llm4s.types.Result
+
+def asInput(guardrail: Guardrail[String]): InputGuardrail = new InputGuardrail {
+  val name: String                            = guardrail.name
+  def validate(value: String): Result[String] = guardrail.validate(value)
+}
+
+val agent = Agent
+  .builder("assistant", client)
+  .withMiddleware(GuardrailMiddleware(Seq(asInput(sequentialValidation)), Seq.empty))
+  .build()
+```
+
+`all` runs every guardrail and reports every failure; `any` stops at the first guardrail that passes, so
+those after it do not run; `sequential` stops at the first failure.
+
 ---
 
 ## Custom Guardrails
@@ -453,9 +491,16 @@ agent.flatMap(_.run("Get user details"))
 |------|---------|-----------|
 | Email | `user@domain.com` | `[REDACTED_EMAIL]` |
 | SSN | `123-45-6789` | `[REDACTED_SSN]` |
-| Credit Card | `4111-1111-1111-1111` | `[REDACTED_CC]` |
-| Phone | `(555) 123-4567` | `[REDACTED_PHONE]` |
+| Credit Card | `4111-1111-1111-1111`, `3782 822463 10005` (15-digit American Express) | `[REDACTED_CARD]` |
+| Phone | `(555) 123-4567`, `+44 20 7946 0958` | `[REDACTED_PHONE]` |
 | IP Address | `192.168.1.1` | `[REDACTED_IP]` |
+
+A phone number is a US number (with an optional `+1` or `1` prefix) or an international number that starts with `+`
+and has 8 to 15 digits, with spaces, dashes, dots or parentheses between them. Digits without a `+` are not treated
+as an international number. A card number is recognised by its shape (a Visa, MasterCard, Amex or Discover prefix and
+the right number of digits); the check digit is not validated. When two types match overlapping text (a plain card
+number is also account-shaped, and a phone number can run into the email address after it), the overlapping text is
+masked once, under the type whose match starts first.
 
 ---
 

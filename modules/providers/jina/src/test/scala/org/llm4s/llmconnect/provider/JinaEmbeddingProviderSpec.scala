@@ -11,6 +11,7 @@ import org.scalatest.matchers.should.Matchers
 import ujson.read
 
 import scala.concurrent.duration.*
+import org.llm4s.testutil.EchoedCredentials
 
 class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFactory {
 
@@ -187,5 +188,17 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFacto
 
     result.left.toOption.get.code shouldBe Some("501")
     mockHttp.postCallCount shouldBe 0
+  }
+
+  "errors" should "redact credentials echoed in the body of a 401, a 429 or any other failure (#1674)" in {
+    for {
+      status <- Seq(401, 429, 500)
+      reply  <- Seq(EchoedCredentials.Text, EchoedCredentials.JsonError)
+    } withClue(s"HTTP $status: ") {
+      val err =
+        JinaEmbeddingProvider.forTest(cfg, new MockHttpClient(httpErr(status, reply))).embed(req).left.toOption.get
+      err.message should include("[REDACTED]")
+      EchoedCredentials.leaked(err.message) shouldBe empty
+    }
   }
 }

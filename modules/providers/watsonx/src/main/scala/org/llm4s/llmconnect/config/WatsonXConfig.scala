@@ -22,6 +22,8 @@ import org.llm4s.util.Redaction
  * @param iamUrl        IBM Cloud IAM token endpoint.
  * @param contextWindow Model's total token capacity (prompt + completion combined).
  * @param reserveCompletion Tokens held back from prompt history for the completion.
+ * @param timeouts      how long a request and a stream may take: the section's `timeouts` block. An absent
+ *                      value keeps the client's own default ([[ProviderTimeouts]]).
  */
 final case class WatsonXConfig(
   apiKey: String,
@@ -32,15 +34,17 @@ final case class WatsonXConfig(
   apiVersion: String,
   iamUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
-  override val providerId: ProviderId                  = ProviderId("watsonx")
-  override def endpointUrl: Option[String]             = Some(baseUrl)
-  override def withModel(model: String): WatsonXConfig = copy(model = model)
+  override val providerId: ProviderId                                  = ProviderId("watsonx")
+  override def endpointUrl: Option[String]                             = Some(baseUrl)
+  override def withModel(model: String): WatsonXConfig                 = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): WatsonXConfig = copy(timeouts = timeouts)
   override def toString: String =
     s"WatsonXConfig(apiKey=${Redaction.secret(apiKey)}, projectId=$projectId, spaceId=$spaceId, model=$model, " +
       s"baseUrl=$baseUrl, apiVersion=$apiVersion, iamUrl=$iamUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion)"
+      s"reserveCompletion=$reserveCompletion, timeouts=$timeouts)"
 
 object WatsonXConfig:
   val DEFAULT_BASE_URL: String    = "https://us-south.ml.cloud.ibm.com"

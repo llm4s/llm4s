@@ -3,9 +3,11 @@ package org.llm4s.llmconnect.smoke
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.OpenRouterClient
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.it.Tier
@@ -21,7 +23,7 @@ import org.llm4s.it.tags.Cloud
  * Requires: `OPENROUTER_API_KEY` environment variable.
  */
 @Cloud
-class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
+class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with ProviderSmokeContract {
 
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
@@ -73,4 +75,13 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
     result.isLeft shouldBe true
     result.swap.toOption.get shouldBe an[AuthenticationError]
   }
+
+  // ---- the shared capability contract (issue #1212): see ProviderSmokeContract ----
+
+  override protected def providerLabel: String                          = "OpenRouter"
+  override protected def apiKeyEnvVar: String                           = "OPENROUTER_API_KEY"
+  override protected def contractKey: Option[String]                    = apiKey
+  override protected def contractClient(key: String): Result[LLMClient] = Right(new OpenRouterClient(config(key)))
+
+  registerCapabilityContract()
 }

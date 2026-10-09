@@ -57,6 +57,8 @@ import scala.collection.mutable.ListBuffer
  *
  * Chat providers also run [[assertCancelsWhenInterrupted]] and [[assertCancelsStreamWhenInterrupted]]
  * against [[LocalProviderTestServer.holdOpen]] and [[LocalProviderTestServer.streamThenHold]].
+ * Those checks run the call on a virtual thread, and the server answers on one, so the testkit
+ * needs JDK 21 whatever the provider module itself targets.
  *
  * Modules are compared by class and descriptors by equality (normally reference equality on an
  * `object`), so pass the same descriptor instances your module lists.

@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Foundation
-nav_order: 10
+nav_order: 13
 description: "Support the LLM4S Foundation to ensure the long-term sustainability of type-safe AI in Scala."
 permalink: /foundation/
 ---

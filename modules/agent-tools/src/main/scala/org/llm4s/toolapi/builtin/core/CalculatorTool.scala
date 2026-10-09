@@ -26,6 +26,10 @@ object CalculatorResult {
  * - Percentage calculations
  * - Absolute value, min, max
  *
+ * A result that is not a finite number (an overflow such as `10^400`, or an undefined power such as
+ * `(-8)^(1/3)`) is reported as an error, as division by zero is. The formatted text always uses `.` as the
+ * decimal separator and ASCII digits, whatever the JVM's default locale is.
+ *
  * @example
  * {{{
  * import org.llm4s.toolapi.builtin.core.CalculatorTool
@@ -69,7 +73,8 @@ object CalculatorTool {
       name = "calculator",
       description = "Perform mathematical calculations. Supports: add, subtract, multiply, divide, " +
         "power (a^b), sqrt (square root of a), percentage (a% of b), abs (absolute value of a), " +
-        "min (minimum of a and b), max (maximum of a and b), modulo (a mod b).",
+        "min (minimum of a and b), max (maximum of a and b), modulo (a mod b). " +
+        "A result that overflows or is undefined (infinite or not a number) is reported as an error.",
       schema = schema
     ).withHandler { extractor =>
       for {
@@ -132,7 +137,12 @@ object CalculatorTool {
         )
     }
 
-    result.map { r =>
+    val finiteResult: Either[String, Double] = result.flatMap { r =>
+      if (r.isNaN || r.isInfinite) Left("Result is not a finite number (overflow or an undefined operation)")
+      else Right(r)
+    }
+
+    finiteResult.map { r =>
       val expression = operation.toLowerCase match {
         case "add"        => s"$a + ${bOpt.getOrElse(0)}"
         case "subtract"   => s"$a - ${bOpt.getOrElse(0)}"
@@ -151,7 +161,8 @@ object CalculatorTool {
       val formatted = if (r == r.toLong) {
         r.toLong.toString
       } else {
-        f"$r%.6f".replaceAll("0+$", "").replaceAll("\\.$", "")
+        // Locale.ROOT: the default locale would change the decimal separator and even the digits
+        String.format(java.util.Locale.ROOT, "%.6f", Double.box(r)).replaceAll("0+$", "").replaceAll("\\.$", "")
       }
 
       CalculatorResult(

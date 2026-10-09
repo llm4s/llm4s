@@ -7,7 +7,7 @@ nav_order: 5
 
 # Error Recovery Patterns
 
-> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](https://github.com/llm4s/llm4s/tree/main/modules/samples).
 
 Resilience strategies for handling failures, recovering from errors, and gracefully degrading functionality. This guide covers retries, circuit breakers, fallbacks, and failure scenarios.
 

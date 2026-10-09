@@ -316,18 +316,18 @@ The stored history is the same either way: `preserveContext = false` changes onl
 
 ---
 
-## Handoffs vs Orchestration
+## Handoffs vs Graphs
 
 | Use Case | Approach |
 |----------|----------|
 | 2-3 specialists, LLM-driven routing | **Handoffs** |
-| Complex multi-agent workflows | **Orchestration (DAGs)** |
+| Complex multi-agent workflows | **Graph (`GraphBuilder`)** |
 | Dynamic specialist selection | **Handoffs** |
-| Parallel agent execution | **Orchestration** |
+| Parallel agent execution | **Graph** |
 | Simple delegation | **Handoffs** |
-| Type-safe data flow | **Orchestration** |
+| Type-safe data flow | **Graph** |
 
-For complex workflows, see [Orchestration documentation](/design/agent-framework-roadmap#orchestration).
+For complex workflows, see the [multi-agent graph recipe](../../examples/cookbook.html#6-several-agents-in-one-graph): agents as nodes of a typed graph, run in parallel and joined.
 
 ---
 
