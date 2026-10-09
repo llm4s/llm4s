@@ -5,6 +5,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.core.read.ListAppender
 import org.llm4s.error.ProcessingError
 import org.llm4s.knowledgegraph.{ Edge, Graph, Node }
+import org.llm4s.testutil.EchoedCredentials
 import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -392,5 +393,27 @@ class GraphJsonParserSpec extends AnyFunSuite with Matchers {
     logged should have size 1
     logged.head should include(reply)
     (logged.head should not).include("original length")
+  }
+
+  test("a reply echoing credentials is logged redacted (#1674)") {
+    val reply = "{ not json\n" + EchoedCredentials.Text
+
+    val (result, logged) = capturingErrors(parse(reply))
+
+    result.isLeft shouldBe true
+    logged should have size 1
+    logged.head should include("[REDACTED]")
+    EchoedCredentials.leaked(logged.head) shouldBe empty
+  }
+
+  test("a key straddling the preview's cut point is redacted before the cut, not left as a fragment (#1674)") {
+    val key   = "sk-proj-" + ("abc123def456ghi789jk" * 2)
+    val lead  = "{ not json " + "x" * (512 - "{ not json ".length - "sk-proj-".length - 10)
+    val reply = lead + key + " " + "y" * 2000
+
+    val (_, logged) = capturingErrors(parse(reply))
+
+    logged should have size 1
+    (logged.head should not).include("sk-proj-abc123def4")
   }
 }

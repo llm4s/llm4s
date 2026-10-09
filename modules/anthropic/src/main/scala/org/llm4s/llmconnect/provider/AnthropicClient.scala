@@ -36,9 +36,8 @@ import org.llm4s.model.{ ModelRegistryService, RequestTransformer, Transformatio
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, LLMError, ProcessingError, RateLimitError, UnknownError, ValidationError }
-import org.llm4s.util.Redaction
 import org.llm4s.error.ThrowableOps.*
-import org.llm4s.util.BoundedJson
+import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.time.Instant
 import scala.jdk.CollectionConverters.*

@@ -1,7 +1,8 @@
 package org.llm4s.core.safety
 
 import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, UnknownError }
-import org.llm4s.testutil.SmallStack
+import org.llm4s.testutil.{ EchoedCredentials, SmallStack }
+import org.llm4s.util.Redaction
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -16,7 +17,9 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
     DefaultErrorMapper(t) match {
       case e: UnknownError =>
         (e.cause should be).theSameInstanceAs(t)
-        e.message shouldBe t.getMessage
+        // none of these messages holds a credential: a short one is kept as it is, a long one capped (#1674)
+        if (t.getMessage.length <= 2048) e.message shouldBe t.getMessage
+        else e.message shouldBe Redaction.safeBody(t.getMessage)
       case other => fail(s"expected an UnknownError for '${t.getMessage}', got $other")
     }
 
@@ -134,6 +137,26 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
     ).message
     leaked should include("HTTP 401 Unauthorized")
     (leaked should not).include("sk-abcdefghijklmnopqrstuvwxyz123456")
+  }
+
+  it should "redact and cap the message of an UnknownError and an AuthenticationError, keeping the cause as it is (#1674)" in {
+    val unknown = new IllegalStateException("upstream said: " + EchoedCredentials.Text + " " + "x" * 5000)
+    DefaultErrorMapper(unknown) match {
+      case e: UnknownError =>
+        e.message should include("[REDACTED]")
+        EchoedCredentials.leaked(e.message) shouldBe empty
+        e.message should include("(truncated, original length: ")
+        e.message.length should be < 2200
+        // the cause is the original exception, unredacted (documented on DefaultErrorMapper)
+        (e.cause should be).theSameInstanceAs(unknown)
+      case other => fail(s"expected an UnknownError, got $other")
+    }
+
+    // anthropic-java and openai-java write the body after the status: "401: <body>"
+    val auth = DefaultErrorMapper(new RuntimeException("401: " + EchoedCredentials.JsonError))
+    auth shouldBe an[AuthenticationError]
+    auth.message should include("[REDACTED]")
+    EchoedCredentials.leaked(auth.message) shouldBe empty
   }
 
   it should "map a message naming HTTP status 429 to RateLimitError" in {

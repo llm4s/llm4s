@@ -36,6 +36,12 @@ trait ErrorMapper {
  *
  * Only the first 4 KiB and the last 1 KiB of a message are scanned (see `ScanHead`), and every
  * pattern runs in linear time, so mapping an exception that carries a large response body is cheap.
+ *
+ * The message of every error built here is redacted and capped (`Redaction.safeBody`), since an
+ * exception's message often echoes a provider's response body and with it a request header or a key.
+ * The cause is not: an [[UnknownError]] keeps the original exception, whose own `getMessage` and stack
+ * trace are unredacted. A logger or handler that prints the cause (`logger.error(msg, err.cause)`,
+ * `printStackTrace`) writes that text in the clear.
  */
 @Stable
 object DefaultErrorMapper extends ErrorMapper {
@@ -110,11 +116,11 @@ object DefaultErrorMapper extends ErrorMapper {
       val message  = Option(ex.getMessage)
       val statuses = message.map(statusesIn).getOrElse(Set.empty)
       if (statuses.contains(Unauthorized))
-        AuthenticationError("unknown", Redaction.redact(message.getOrElse("")), Unauthorized.toString)
+        AuthenticationError("unknown", Redaction.safeBody(message.getOrElse("")), Unauthorized.toString)
       else if (statuses.contains(TooManyRequests))
         // RateLimitError has no field for a cause or a detail message; the exception cannot be kept.
         RateLimitError("unknown")
       else
-        UnknownError(message.getOrElse("Unknown error"), ex)
+        UnknownError(message.fold("Unknown error")(Redaction.safeBody(_)), ex)
   }
 }
