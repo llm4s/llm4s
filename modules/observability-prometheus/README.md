@@ -19,31 +19,26 @@ libraryDependencies += "org.llm4s" %% "llm4s-observability-prometheus" % "<versi
 Enable it:
 
 ```hocon
-llm4s {
-  metrics {
-    enabled = true
-    prometheus {
-      enabled = true
-      port = 9090
-    }
-  }
-}
+llm4s.metrics.enabled = true
+# the endpoint listens on port 9090 by default; to change it:
+# llm4s.metrics.prometheus.port = 9091
 ```
 
 ```scala
 import org.llm4s.config.MetricsConfigLoader
 
 for
-  (collector, endpointOpt) <- MetricsConfigLoader.default()
+  loaded <- MetricsConfigLoader.default()
+  (collector, endpointOpt) = loaded
 yield
   // pass `collector` to the code that makes LLM calls; it is a no-op collector
   // if metrics are disabled, so this is safe to wire up unconditionally
-  ()
+  (collector, endpointOpt)
 ```
 
-When enabled, loading starts the HTTP endpoint immediately; stop it with `endpoint.stop()`. Other
-code should receive the `MetricsCollector` by dependency injection rather than read these keys
-itself.
+When enabled, loading starts the HTTP endpoint immediately; stop it with
+`endpointOpt.foreach(_.stop())`. Other code should receive the `MetricsCollector` by dependency
+injection rather than read these keys itself.
 
 ## Configuration
 
@@ -56,5 +51,6 @@ Read from the `llm4s.metrics` block (see
 | `llm4s.metrics.prometheus.enabled` | `true` - only consulted when `llm4s.metrics.enabled = true` |
 | `llm4s.metrics.prometheus.port` | `9090` - port for the `/metrics` endpoint Prometheus scrapes |
 
-See the [observability guide](../../docs/guide/observability/index.md) for how Prometheus metrics
-relate to tracing, and its current limitations.
+See the [observability guide](../../docs/guide/observability/index.md#metrics) for the series
+recorded, scrape and alerting examples, and how Prometheus metrics relate to tracing; its current
+limitations are under [Limits](../../docs/guide/observability/index.md#limits).

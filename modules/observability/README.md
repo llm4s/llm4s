@@ -1,7 +1,11 @@
 # llm4s-observability
 
-Langfuse tracing backend for LLM4S. Sends spans to [Langfuse](https://langfuse.com) (cloud or
-self-hosted) for production LLM observability: prompts, completions, tool calls and cost.
+Tracing backends for LLM4S: Langfuse, and an in-process trace collector (`TraceCollectorTracing`,
+`InMemoryTraceStore`) that needs no external service and is handy for testing agents, plus
+`CostTracker` (`org.llm4s.metrics`).
+
+The Langfuse backend sends spans to [Langfuse](https://langfuse.com) (cloud or self-hosted) for
+production LLM observability: prompts, completions, tool calls and cost.
 
 ## Quick Start
 
@@ -46,13 +50,24 @@ another backend via `TracingComposer.combine` - use
 
 ```scala
 import org.llm4s.config.LangfuseConfigLoader
-import org.llm4s.trace.{ LangfuseTracing, TracingComposer }
+import org.llm4s.trace.{ ConsoleTracing, LangfuseTracing, TracingComposer }
 
 for
   langfuse <- LangfuseConfigLoader.default()
-yield TracingComposer.combine(LangfuseTracing.from(langfuse), new org.llm4s.trace.ConsoleTracing())
+yield TracingComposer.combine(LangfuseTracing.from(langfuse), new ConsoleTracing())
 ```
 
 See the [observability guide](../../docs/guide/observability/index.md#langfuse-monitoring-workflow)
 for the full Langfuse monitoring workflow, including what gets captured and a trace structure
 example.
+
+## In-process trace collector
+
+`TraceCollectorTracing` records spans into a `TraceStore` inside the JVM - `InMemoryTraceStore`
+ships with the module - where they can be queried, filtered and serialized to JSON. It needs no
+external service and no configuration, which makes it the backend for unit-testing agents and
+for in-process analytics. Build one with `TraceCollectorTracing(InMemoryTraceStore())`, which
+returns a `Result`.
+
+See [In-Process Trace Collection](../../docs/guide/observability/index.md#in-process-trace-collection)
+in the observability guide for querying, span analytics and deterministic agent testing.
