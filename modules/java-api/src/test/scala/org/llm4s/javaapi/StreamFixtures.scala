@@ -127,6 +127,30 @@ private[javaapi] object StreamFixtures {
     def deleteThread(threadId: ThreadId): Result[Unit]                   = underlying.deleteThread(threadId)
   }
 
+  /**
+   * A fatal error for a listener to throw. `Safety` does not capture it, so it ends the stream's thread
+   * uncaught, by design - after `await` has already returned. Left to the default handler, it would be printed
+   * to `System.err` whenever that thread gets to it, into whatever another spec is capturing then (#1719).
+   * [[raise]] gives the throwing thread its own handler, which records the error instead, and [[awaitDeath]]
+   * waits for that thread to end, so nothing of it outlives the test.
+   */
+  final class FatalListenerError(error: Throwable) {
+    private val thread = new AtomicReference[Thread](null)
+    private val died   = new AtomicReference[Throwable](null)
+
+    /** Throws `error` from the calling (the stream's) thread, once that thread's handler records it. */
+    def raise(): Nothing = {
+      val current = Thread.currentThread()
+      current.setUncaughtExceptionHandler((_, e) => died.set(e))
+      thread.set(current)
+      throw error
+    }
+
+    /** Waits for the thread that raised to end; returns what it died of - null if it did not end, or not of an uncaught error. */
+    def awaitDeath(): Throwable =
+      Option(thread.get).filter(_.join(java.time.Duration.ofSeconds(DeadlineSeconds))).map(_ => died.get).orNull
+  }
+
   /** A listener that records every callback, the threads they ran on, and runs `onEach` per event. */
   final class Recorder(onEach: StreamEvent => Unit = _ => ()) extends AgentStreamListener {
     private val received = new CopyOnWriteArrayList[StreamEvent]()
