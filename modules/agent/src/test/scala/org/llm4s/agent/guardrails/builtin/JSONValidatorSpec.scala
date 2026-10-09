@@ -1,5 +1,6 @@
 package org.llm4s.agent.guardrails.builtin
 
+import org.llm4s.testutil.SmallStack
 import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -185,5 +186,26 @@ class JSONValidatorSpec extends AnyFunSuite with Matchers {
       """{"properties":{"a":{"type":"object","properties":{"b":{"type":"string"}}}}}"""
     )
     JSONValidator.withSchema(schema).validate("""{"a":{"b":1}}""").isRight shouldBe true
+  }
+
+  // The output is model text: nested too deeply it is rejected like any other non-JSON, before it
+  // becomes a value that overflows the stack of whatever traverses it next (#1562). On a 1 MB stack,
+  // so deterministic.
+  test("output nested too deeply is rejected as not valid JSON instead of being parsed") {
+    Seq("[" * 100000 + "]" * 100000, "{\"a\":" * 100000 + "1" + "}" * 100000).foreach { deep =>
+      withClue(deep.take(8) + ": ") {
+        SmallStack.run(JSONValidator().validate(deep)) match {
+          case Right(Left(e)) =>
+            e.message should include("not valid JSON")
+            e.message should include("512")
+          case other => fail(s"expected Right(Left(error)), got ${other.toString.take(200)}")
+        }
+      }
+    }
+  }
+
+  test("output nested 512 levels deep is valid JSON, 513 is not") {
+    SmallStack.run(JSONValidator().validate("[" * 512 + "]" * 512)).map(_.isRight) shouldBe Right(true)
+    SmallStack.run(JSONValidator().validate("[" * 513 + "]" * 513)).map(_.isLeft) shouldBe Right(true)
   }
 }

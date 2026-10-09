@@ -111,6 +111,14 @@ class WatsonXRegressionSpec extends AnyFunSuite with Matchers:
     (error.map(_.message).getOrElse("") should not).include(ApiKey)
   }
 
+  test("an IAM error body echoing any other credential is redacted before it is cut (#1674)") {
+    val http  = routed(_ => Right(HttpResponse(400, org.llm4s.testutil.EchoedCredentials.Text)), _ => Right(generation))
+    val error = new WatsonXClient(config, httpClient = http).complete(hi, CompletionOptions()).left.toOption
+    val text  = error.map(_.message).getOrElse(fail("expected Left"))
+    text should include("[REDACTED]")
+    org.llm4s.testutil.EchoedCredentials.leaked(text) shouldBe empty
+  }
+
   test("neither secret appears in a stream error either") {
     Seq(401, 429, 500).foreach { status =>
       new WatsonXClient(

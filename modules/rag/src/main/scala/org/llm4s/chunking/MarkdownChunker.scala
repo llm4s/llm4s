@@ -284,6 +284,7 @@ class MarkdownChunker extends DocumentChunker {
           if (current.length + wordWithSpace.length <= maxSize) {
             current.append(wordWithSpace)
           } else if (current.isEmpty) {
+            // Single word exceeds max - kept whole, never cut inside (so never inside a surrogate pair, #1711)
             chunks += word
           } else {
             chunks += current.toString

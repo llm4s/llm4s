@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.Redaction
 
 import java.io.{ BufferedReader, InputStreamReader }
 import java.net.URLEncoder
@@ -80,6 +81,12 @@ import scala.util.{ Try, Using }
  * a normal stop. `complete` applies the same rule to `choices[0].finish_reason` (a missing one is fine). The
  * usage arrives in a final chunk that may have no choices (SDK-evidenced: LCIBM chat_models.py:379-383). Streamed tool calls are reported once, whole, after the last delta, never as fragments.
  *
+ * == Timeouts ==
+ *
+ * A chat call times out after two minutes and a streamed one after ten, unless the section's
+ * `timeouts { request = ..., stream = ... }` block sets either ([[WatsonXConfig.timeouts]]). The IAM
+ * token exchange keeps its own 30 seconds.
+ *
  * @param config          model, credentials, project or space and endpoints.
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging optional provider exchange logging.
@@ -99,6 +106,12 @@ class WatsonXClient(
   protected def clientDescription: String = s"watsonx client for model ${config.model}"
   protected def providerName: String      = "watsonx"
   protected def modelName: String         = config.model
+
+  /** How long a non-streaming call may take: the section's `timeouts.request`, else [[WatsonXClient.DefaultRequestTimeout]]. */
+  protected[provider] def requestTimeout: FiniteDuration = config.timeouts.requestOr(DefaultRequestTimeout)
+
+  /** How long a streamed call may take: the section's `timeouts.stream`, else [[WatsonXClient.DefaultStreamTimeout]]. */
+  protected[provider] def streamTimeout: FiniteDuration = config.timeouts.streamOr(DefaultStreamTimeout)
 
   final private case class IamToken(value: String, expiresAt: Long)
 
@@ -148,7 +161,7 @@ class WatsonXClient(
         Left(
           AuthenticationError(
             providerName,
-            s"IAM token exchange failed (HTTP ${response.statusCode}): ${scrub(response.body, "").take(256)}"
+            s"IAM token exchange failed (HTTP ${response.statusCode}): ${Redaction.safeBody(scrub(response.body, ""), 256)}"
           )
         )
     }
@@ -179,7 +192,7 @@ class WatsonXClient(
         val requestText = createRequestBody(conversation, options).render()
         val startedAt   = Instant.now()
         httpClient
-          .post(endpoint("/ml/v1/text/chat"), apiHeaders(token, "application/json"), requestText, 120.seconds)
+          .post(endpoint("/ml/v1/text/chat"), apiHeaders(token, "application/json"), requestText, requestTimeout)
           .flatMap { response =>
             noteStatus(response.statusCode, token)
             val result =
@@ -208,8 +221,9 @@ class WatsonXClient(
       val startedAt   = Instant.now()
       val raw         = new StringBuilder
 
-      val result = httpClient.postStream(url, apiHeaders(token, "text/event-stream"), requestText, 10.minutes).flatMap {
-        response =>
+      val result = httpClient
+        .postStream(url, apiHeaders(token, "text/event-stream"), requestText, streamTimeout)
+        .flatMap { response =>
           if (response.statusCode >= 200 && response.statusCode < 300)
             readStream(response.body, url, raw, onChunk)
           else {
@@ -218,7 +232,7 @@ class WatsonXClient(
             noteStatus(response.statusCode, token)
             HttpErrorMapper.mapHttpError(response.statusCode, scrub(err, token), providerName, response.headers)
           }
-      }
+        }
       recordExchange(startedAt, requestText, raw.result(), result)
       result
     }
@@ -290,7 +304,7 @@ class WatsonXClient(
           }
         }
       }
-    }.toEither.left.map(HttpFailures.streamReadError(_, url, 10.minutes))
+    }.toEither.left.map(HttpFailures.streamReadError(_, url, streamTimeout))
 
     val idPrefix = callIdPrefix()
     read
@@ -437,6 +451,12 @@ class WatsonXClient(
 }
 
 object WatsonXClient {
+
+  /** The timeout of a non-streaming call when the section sets no `timeouts.request`: two minutes. */
+  val DefaultRequestTimeout: FiniteDuration = 120.seconds
+
+  /** The timeout of a streamed call when the section sets no `timeouts.stream`: ten minutes. */
+  val DefaultStreamTimeout: FiniteDuration = 10.minutes
 
   private val IAM_TIMEOUT: FiniteDuration        = 30.seconds
   private val TOKEN_REFRESH_BUFFER_SECONDS: Long = 300L

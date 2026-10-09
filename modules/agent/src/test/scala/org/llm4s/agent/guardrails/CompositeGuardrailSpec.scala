@@ -156,7 +156,7 @@ class CompositeGuardrailSpec extends AnyFlatSpec with Matchers {
     msg should include("err-Y")
   }
 
-  it should "run all guardrails regardless of pass/fail" in {
+  it should "stop at the first guardrail that passes, so those after it do not run" in {
     val log = ListBuffer.empty[String]
     val composite = CompositeGuardrail.any(
       Seq(
@@ -165,8 +165,34 @@ class CompositeGuardrailSpec extends AnyFlatSpec with Matchers {
         tracking("a3", log, pass = true)
       )
     )
-    composite.validate("test")
-    log.toList shouldBe List("a1", "a2", "a3")
+    composite.validate("test") shouldBe Right("test")
+    log.toList shouldBe List("a1")
+  }
+
+  it should "run the guardrails before the first pass, and none after it" in {
+    val log = ListBuffer.empty[String]
+    val composite = CompositeGuardrail.any(
+      Seq(
+        tracking("a1", log, pass = false),
+        tracking("a2", log, pass = true),
+        tracking("a3", log, pass = true)
+      )
+    )
+    composite.validate("test") shouldBe Right("test")
+    log.toList shouldBe List("a1", "a2")
+  }
+
+  it should "run every guardrail when none passes, and report every failure" in {
+    val log = ListBuffer.empty[String]
+    val composite = CompositeGuardrail.any(
+      Seq(
+        tracking("a1", log, pass = false),
+        tracking("a2", log, pass = false)
+      )
+    )
+    val result = composite.validate("test")
+    result.isLeft shouldBe true
+    log.toList shouldBe List("a1", "a2")
   }
 
   it should "use real guardrails: one regex passes, one fails" in {

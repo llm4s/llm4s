@@ -8,6 +8,7 @@ import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 import scala.util.Try
+import org.llm4s.util.Redaction
 
 /**
  * Result of context relevance evaluation.
@@ -306,7 +307,7 @@ class ContextRelevanceGuardrail(
               Left(
                 ValidationError.invalid(
                   "context_relevance_parse",
-                  s"Could not parse context relevance from LLM response: ${response.take(200)}"
+                  s"Could not parse context relevance from LLM response: ${Redaction.safeBody(response, 200)}"
                 )
               )
           }
