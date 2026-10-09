@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an agent tool reads its call's key as `ToolContext.idempotencyKey` (`org.llm4s.agent.graph.IdempotencyKey`, 64 hex
   characters) and passes it to the system it calls, so a call the runtime runs again - a retrying `wrapToolCall`,
   approval, an answered question, `recover` after a cancellation, `Fatal` or crash - does its work once. The key is
-  derived from the thread, the checkpoint the issuing model call ran at and the call id (`IdempotencyKey.derive`), and
-  recorded with the call, so it is the same in every run of the call and new for a call of another model request,
-  even when the provider reuses its id. `ApprovalRequest` and `ToolQuestionRequest` carry it too. Tools still run at
+  derived from the thread, where on it the issuing model call ran (checkpoint, superstep and task) and the call id
+  (`IdempotencyKey.derive`), and recorded with the call, so it is the same in every run of the call and new for a call
+  of another model request, even when the provider reuses its id and the turns share one `RunConfig`. `runMultiTurn`
+  gives each follow-up turn a fresh `RunId`. Tools added through `ToolRegistry` (built-in, MCP, Java and Kotlin
+  tools) do not see the key yet ([#1740](https://github.com/llm4s/llm4s/issues/1740)). `ApprovalRequest` and `ToolQuestionRequest` carry it too. Tools still run at
   least once; the [agents guide](docs/guide/agents/index.md#tool-side-effects) documents the boundaries.
   `llm4s-provider-testkit` adds `ToolResultContract` (`violations(format, requestBody)`, `toolCallCount`,
   `toolResultCount`, and `cases`: conversations of every shape an agent's tool loop sends), `ToolMessageFormat`

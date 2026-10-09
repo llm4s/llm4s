@@ -285,6 +285,10 @@ clients are checked against this contract in both wire formats (`assertOneToolRe
 fails on a tool's `Fatal` or a store error mid-batch, the calls that finished keep their results
 and the unfinished ones get none: the thread is left for `recover`, which runs only the unfinished
 calls and never repeats a finished one. `start` refuses the thread until then (`IncompleteRun`).
+Until [#1702](https://github.com/llm4s/llm4s/issues/1702) adds `updateState`, there is no way to
+give an unfinished call a result of your own: a call that misbehaves every time it runs - it hangs
+until cancelled, or fails with `Fatal` - leaves the thread two choices, `recover` (run it again) or
+`forget` (drop the thread and its history).
 
 **Tools run at least once, so pass the idempotency key on.** A call can run again: a retrying
 `wrapToolCall` middleware, `recover` after a cancellation, failure or crash, and an approval each
@@ -302,14 +306,20 @@ val charge = AgentTool(chargeSpec) { (args, context) =>
 }
 ```
 
-The key is 64 hexadecimal characters, derived from the thread, the checkpoint at which the model
-call that issued the tool call ran, and the call's id, and recorded with the call. A call of a
-later model request gets a new key even when the provider reuses its call id (`call_0` in every
-turn), and so does a call from a model request made again because the first response was never
-stored. The boundaries of the guarantee:
+The key is 64 hexadecimal characters, derived from the thread, where on it the model call that
+issued the tool call ran (its checkpoint, superstep and task), and the call's id, and recorded
+with the call. A call of a later model request gets a new key even when the provider reuses its
+call id (`call_0` in every turn) and the turns share one `RunConfig`, and so does a call from a
+model request made again because the first response was never stored. The boundaries of the guarantee:
 
 - The key de-duplicates only where the external system honours it. Without one, a side effect can
   happen more than once; the runtime never promises exactly-once execution.
+- Only an `AgentTool` sees the key. A tool added through `ToolRegistry` or
+  `AgentTool.fromToolFunction` - the built-in tools, MCP tools, and tools written with the Java or
+  Kotlin API - runs at least once like any other, but its `ToolFunction` handler has no
+  `ToolContext` to read the key from
+  ([#1740](https://github.com/llm4s/llm4s/issues/1740)). Write a tool with a side effect that must
+  not repeat as an `AgentTool`.
 - An approved or edited call keeps the key it was proposed with, and a call that asked a question
   keeps it when it resumes. Make a tool's first run, before approval or an answer, free of side
   effects.

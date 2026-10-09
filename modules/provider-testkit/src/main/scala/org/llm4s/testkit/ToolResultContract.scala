@@ -202,10 +202,11 @@ object ToolResultContract:
 
   /** Exactly one result for each call, none for anything else, and no call id blank or repeated. */
   private def paired(where: String, calls: Vector[String], results: Vector[String]): Vector[String] =
-    val blank = Option.when(calls.exists(_.isEmpty))(s"$where: a tool call has no id").toVector
+    // blank as the agent's ToolResultRule counts it: empty or whitespace only
+    val blank = Option.when(calls.exists(_.trim.isEmpty))(s"$where: a tool call has a blank id").toVector
     val repeated =
-      calls.filter(_.nonEmpty).groupBy(identity).collect { case (id, n) if n.size > 1 => id }.toVector.sorted
-    val counted = calls.distinct.filter(_.nonEmpty).flatMap { id =>
+      calls.filter(_.trim.nonEmpty).groupBy(identity).collect { case (id, n) if n.size > 1 => id }.toVector.sorted
+    val counted = calls.distinct.filter(_.trim.nonEmpty).flatMap { id =>
       results.count(_ == id) match
         case 1 => None
         case 0 => Some(s"$where: tool call '$id' has no result straight after it")

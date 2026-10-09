@@ -25,21 +25,28 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
   private val thread = ThreadId("t")
   private val callId = ToolCallId("call_0")
 
+  private val task = TaskId("1.0")
+
   "IdempotencyKey.derive" should "be 64 lowercase hex characters, the same for the same call" in {
-    val key = IdempotencyKey.derive(thread, "run/1", callId)
+    val key = IdempotencyKey.derive(thread, "run/1", 1, task, callId)
     (key.value should fullyMatch).regex("[0-9a-f]{64}")
-    IdempotencyKey.derive(thread, "run/1", callId) shouldBe key
+    IdempotencyKey.derive(thread, "run/1", 1, task, callId) shouldBe key
   }
 
-  it should "differ when the thread, the checkpoint or the call differs" in {
-    val key = IdempotencyKey.derive(thread, "run/1", callId)
-    IdempotencyKey.derive(ThreadId("u"), "run/1", callId) should not be key
-    IdempotencyKey.derive(thread, "run/2", callId) should not be key
-    IdempotencyKey.derive(thread, "run/1", ToolCallId("call_1")) should not be key
+  it should "differ when the thread, the checkpoint, the superstep, the task or the call differs" in {
+    val key = IdempotencyKey.derive(thread, "run/1", 1, task, callId)
+    IdempotencyKey.derive(ThreadId("u"), "run/1", 1, task, callId) should not be key
+    IdempotencyKey.derive(thread, "run/2", 1, task, callId) should not be key
+    IdempotencyKey.derive(thread, "run/1", 2, task, callId) should not be key
+    IdempotencyKey.derive(thread, "run/1", 1, TaskId("1.1"), callId) should not be key
+    IdempotencyKey.derive(thread, "run/1", 1, task, ToolCallId("call_1")) should not be key
   }
 
-  it should "not confuse triples whose parts concatenate alike" in {
-    IdempotencyKey.derive(ThreadId("ab"), "c", callId) should not be IdempotencyKey.derive(ThreadId("a"), "bc", callId)
+  it should "not confuse inputs whose parts concatenate alike" in {
+    IdempotencyKey.derive(ThreadId("ab"), "c", 1, task, callId) should not be
+      IdempotencyKey.derive(ThreadId("a"), "bc", 1, task, callId)
+    IdempotencyKey.derive(thread, "run/1", 11, TaskId("1.0"), callId) should not be
+      IdempotencyKey.derive(thread, "run/1", 1, TaskId("11.0"), callId)
   }
 
   it should "encode as a plain JSON string" in {
@@ -48,27 +55,68 @@ class AgentToolSideEffectSafetySpec extends AnyFlatSpec with Matchers {
     upickle.default.read[IdempotencyKey]("\"k-1\"") shouldBe key
   }
 
-  "The key a tool sees" should "be derived from the thread, the model call's checkpoint and the call id" in {
-    val seen = new ConcurrentLinkedQueue[(String, IdempotencyKey)]()
+  /** A middleware recording where each model call ran. */
+  private def modelPositions(seen: ConcurrentLinkedQueue[RunPosition]): AgentMiddleware = new AgentMiddleware {
+    val id: MiddlewareId = MiddlewareId("model-positions")
+    override def wrapModelCall(request: ModelRequest, context: RunContext)(
+      next: ModelRequest => Result[Completion]
+    ): Result[Completion] = {
+      seen.add(context.position)
+      next(request)
+    }
+  }
+
+  "The key a tool sees" should "be derived from where the model call ran and the call id" in {
+    val seen = new ConcurrentLinkedQueue[IdempotencyKey]()
     val record = SpecTools.tool("record") { (_, context) =>
-      seen.add(context.run.position.checkpointId -> context.idempotencyKey)
+      seen.add(context.idempotencyKey)
       ToolOutcome.Success(ujson.Str("ok"))
     }
-    val runtime = GraphRuntime.inMemory()
-    val client  = ScriptedLLMClient.of(calling(call("c1", "record")), CompletionFixture.simple("done"))
-    val agent   = built(Agent.builder("assistant", client).withTools(SpecTools.set(record)).withRuntime(runtime))
-    val result  = agent.run(thread, "go").value
-    result.answer shouldBe Some("done")
+    val models = new ConcurrentLinkedQueue[RunPosition]()
+    val client = ScriptedLLMClient.of(calling(call("c1", "record")), CompletionFixture.simple("done"))
+    val agent = built(
+      Agent.builder("assistant", client).withTools(SpecTools.set(record)).withMiddleware(modelPositions(models))
+    )
+    agent.run(thread, "go").value.answer shouldBe Some("done")
 
-    val (toolCheckpoint, key) = seen.asScala.toVector match {
-      case Vector(one) => one
-      case other       => fail(s"expected one run, got $other")
+    val issuing = models.asScala.head
+    seen.asScala.toVector shouldBe Vector(
+      IdempotencyKey.derive(thread, issuing.checkpointId, issuing.superstep, issuing.taskId, ToolCallId("c1"))
+    )
+  }
+
+  /** A `record` tool that keeps every key it sees, and a model that calls it as `call_0` in two turns. */
+  private def reusedIdTurns() = {
+    val seen = new ConcurrentLinkedQueue[IdempotencyKey]()
+    val record = SpecTools.tool("record") { (_, context) =>
+      seen.add(context.idempotencyKey)
+      ToolOutcome.Success(ujson.Str("ok"))
     }
-    // checkpoints are numbered per run: the claim (input runs at it), then each superstep's; the model ran
-    // at the one before the tool's
-    val modelCheckpoint = s"${result.runId.value}/2"
-    toolCheckpoint shouldBe s"${result.runId.value}/3"
-    key shouldBe IdempotencyKey.derive(thread, modelCheckpoint, ToolCallId("c1"))
+    val client = ScriptedLLMClient.of(
+      calling(call("call_0", "record")),
+      CompletionFixture.simple("first"),
+      calling(call("call_0", "record")),
+      CompletionFixture.simple("second")
+    )
+    (built(Agent.builder("assistant", client).withTools(SpecTools.set(record))), seen)
+  }
+
+  "Calls of two turns reusing a provider call id" should "get different keys under runMultiTurn" in {
+    val (agent, seen) = reusedIdTurns()
+    agent.runMultiTurn("one", Seq("two")).value.answer shouldBe Some("second")
+    val keys = seen.asScala.toVector
+    keys should have size 2
+    keys.distinct should have size 2
+  }
+
+  it should "get different keys when one RunConfig, and so one RunId, serves both turns" in {
+    val (agent, seen) = reusedIdTurns()
+    val config        = RunConfig()
+    val first         = agent.run(ThreadId("reused-config"), "one", config).value
+    agent.continueConversation(first, "two", config).value.answer shouldBe Some("second")
+    val keys = seen.asScala.toVector
+    keys should have size 2
+    keys.distinct should have size 2
   }
 
   "A model message whose tool call ids repeat" should "be refused before it is stored; recover asks again" in {

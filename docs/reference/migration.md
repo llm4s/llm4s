@@ -30,7 +30,7 @@ ToolQuestionRequest(messageId, call, question, IdempotencyKey("key-1"))
 
 - **`ToolContext` takes the call's key**, after `toolCallId`: `ToolContext(run, toolCallId, idempotencyKey, state,
   approved)`, with `withIdempotencyKey`. You build one only to unit-test a tool; any key will do there
-  (`IdempotencyKey("test")`, or `IdempotencyKey.derive(threadId, checkpointId, toolCallId)`).
+  (`IdempotencyKey("test")`, or `IdempotencyKey.derive(threadId, checkpointId, superstep, taskId, toolCallId)`).
 - **`ToolTask`, `ApprovalRequest` and `ToolQuestionRequest` gain `idempotencyKey`** - last in `ApprovalRequest` and
   `ToolTask`, before the defaulted `approved` in `ToolQuestionRequest`. Code that only reads them (`AgentResult`'s
   `Suspended`, `ToolLoop.requests`/`questions`, the Java and Kotlin `PendingInterrupt`) is unchanged.

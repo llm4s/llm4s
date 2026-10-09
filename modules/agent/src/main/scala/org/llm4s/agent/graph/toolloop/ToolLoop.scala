@@ -167,10 +167,10 @@ object ModelStep:
  *    A call cut short by cancellation, a `Fatal` or a crash records no result, so the batch stays
  *    open and the thread waits for `recover`, which re-runs only that call (design 4.4, 5.3).
  *  - Every call carries an [[org.llm4s.agent.graph.IdempotencyKey]], derived by the model step
- *    from the thread, the checkpoint it ran at and the call's id, and recorded with the call: each
- *    run of the call - a retrying wrapper, approval, an answered question, `recover` - sees the same
- *    key in `ToolContext.idempotencyKey`, and a call of another model request a new one, even when
- *    the provider reuses its id.
+ *    from where it ran on the thread (checkpoint, superstep, task) and the call's id, and recorded
+ *    with the call: each run of the call - a retrying wrapper, approval, an answered question,
+ *    `recover` - sees the same key in `ToolContext.idempotencyKey`, and a call of another model
+ *    request a new one, even when the provider reuses its id and the run its `RunId`.
  *  - The model node re-checks the history with `Message.validateConversation` before every call,
  *    and refuses to send a request - as every `wrapModelCall` left it - in which a tool call lacks
  *    exactly one result straight after its message ([[ToolResultRule]]); a model message whose call
@@ -732,15 +732,16 @@ object ToolLoop:
 
   /**
    * The task for `call` of the assistant message `messageId`, with its idempotency key: derived from
-   * the thread, the checkpoint this model call ran at and the call's id (design §5.3), so a model
-   * request made again - after a failure, at a new checkpoint - gives its calls new keys even when
-   * the provider reuses their ids.
+   * where this model call ran on the thread - checkpoint, superstep, task - and the call's id
+   * (design §5.3), so a call of another model request gets a new key even when the provider reuses
+   * its id and the run reuses a [[org.llm4s.agent.graph.RunId]].
    */
   private def issued(messageId: String, call: ToolCall, context: RunContext): ToolTask =
+    val at = context.position
     ToolTask(
       messageId,
       call,
-      IdempotencyKey.derive(context.position.threadId, context.position.checkpointId, ToolCallId(call.id))
+      IdempotencyKey.derive(at.threadId, at.checkpointId, at.superstep, at.taskId, ToolCallId(call.id))
     )
 
   /**

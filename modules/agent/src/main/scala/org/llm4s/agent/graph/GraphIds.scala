@@ -78,9 +78,9 @@ object ToolCallId:
  * or a crash), and different for a call from another model request, even one that reuses the
  * provider's call id.
  *
- * The agent loop derives it with [[IdempotencyKey.derive]] from the thread, the checkpoint the
- * model call that issued the call ran at, and the call's id, and records it with the call, so it
- * reaches the tool as `ToolContext.idempotencyKey`. It de-duplicates only where the external
+ * The agent loop derives it with [[IdempotencyKey.derive]] from where on the thread the model
+ * call that issued the call ran - its checkpoint, superstep and task - and the call's id, and
+ * records it with the call, so it reaches the tool as `ToolContext.idempotencyKey`. It de-duplicates only where the external
  * system honours it: the runtime runs a tool at least once, never exactly once (design §4.1).
  */
 opaque type IdempotencyKey = String
@@ -91,16 +91,35 @@ object IdempotencyKey:
   def apply(value: String): IdempotencyKey = value
 
   /**
-   * The key of the call `toolCallId` issued by a model call that ran at `checkpointId` on
-   * `threadId`: 64 lowercase hexadecimal characters, the SHA-256 of the three values, so it is
-   * deterministic, of fixed length and reveals none of them. The checkpoint is what tells two model
-   * requests apart: a model request made again after a failure runs at a new checkpoint, so its
-   * calls get new keys even when the provider reuses their ids (design §5.3).
+   * The key of the call `toolCallId` issued by a model call that ran on `threadId` at checkpoint
+   * `checkpointId`, in superstep `superstep`, as task `taskId` (its `RunContext.position`): 64
+   * lowercase hexadecimal characters, the SHA-256 of the five values, so it is deterministic, of
+   * fixed length and reveals none of them.
+   *
+   * Together they name one model call on the thread, whatever the provider's call ids and run ids
+   * (design §5.3). The superstep counts on across a thread's runs, so a later turn's model call has
+   * a later one even when its run reuses a [[RunId]] - and so the checkpoint ids of an earlier run;
+   * the task tells apart model calls running side by side in one superstep; and the checkpoint tells
+   * apart a model request made again after its response was lost, which runs at a new checkpoint.
    */
-  def derive(threadId: ThreadId, checkpointId: String, toolCallId: ToolCallId): IdempotencyKey =
+  def derive(
+    threadId: ThreadId,
+    checkpointId: String,
+    superstep: Int,
+    taskId: TaskId,
+    toolCallId: ToolCallId
+  ): IdempotencyKey =
     val digest = java.security.MessageDigest.getInstance("SHA-256")
-    // each part length-prefixed, so no two different triples share an input
-    Seq("llm4s-tool-call-v1", threadId.value, checkpointId, toolCallId.value).foreach { part =>
+    // each part length-prefixed, so no two different inputs share a digest input; v2 added the
+    // superstep and task, as checkpoint ids repeat across runs that reuse a RunId
+    Seq(
+      "llm4s-tool-call-v2",
+      threadId.value,
+      checkpointId,
+      superstep.toString,
+      taskId.value,
+      toolCallId.value
+    ).foreach { part =>
       val bytes = part.getBytes(java.nio.charset.StandardCharsets.UTF_8)
       digest.update(java.nio.ByteBuffer.allocate(4).putInt(bytes.length).array())
       digest.update(bytes)

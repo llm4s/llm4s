@@ -142,9 +142,16 @@ class ToolResultContractSpec extends AnyFlatSpec with Matchers with ProviderModu
         ToolMessage("x", "a")
       )
     ToolResultContract.violations(OpenAIChat, openAI(messages)) shouldBe Vector(
-      "message 1: a tool call has no id",
+      "message 1: a tool call has a blank id",
       "message 1: tool call id 'a' is used more than once"
     )
+  }
+
+  it should "count a whitespace-only call id as blank, as the agent does" in {
+    val messages =
+      Seq(user, AssistantMessage(contentOpt = None, toolCalls = Seq(call(" "))), ToolMessage("x", " "))
+    ToolResultContract.violations(OpenAIChat, openAI(messages)) shouldBe
+      Vector("message 1: a tool call has a blank id")
   }
 
   it should "find an Anthropic tool_result that follows a text block" in {
