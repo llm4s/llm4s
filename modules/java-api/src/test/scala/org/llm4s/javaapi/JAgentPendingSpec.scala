@@ -2,7 +2,7 @@ package org.llm4s.javaapi
 
 import java.util.Optional
 import org.llm4s.agent.AgentStatus
-import org.llm4s.agent.graph.{ GraphError, InterruptId }
+import org.llm4s.agent.graph.{ GraphError, IdempotencyKey, InterruptId }
 import org.llm4s.agent.graph.toolloop.{ ApprovalRequest, ApprovalSource, ToolQuestionRequest }
 import org.llm4s.error.{ CancelledError, NetworkError, ValidationError }
 import org.llm4s.llmconnect.model.Completion
@@ -123,8 +123,8 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
   it should "report a missing approval reason or question as empty, never as a null in an Optional" in {
     val c = call("c1", "deploy", "x")
     val status = AgentStatus.Suspended(
-      Vector(InterruptId("a1") -> ApprovalRequest("m1", c, null, ApprovalSource.Tool)),
-      Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, null))
+      Vector(InterruptId("a1") -> ApprovalRequest("m1", c, null, ApprovalSource.Tool, IdempotencyKey("k1"))),
+      Vector(InterruptId("q1") -> ToolQuestionRequest("m1", c, null, IdempotencyKey("q1")))
     )
     val List(approval, question) = PendingInterrupt.of(status).asScala.toList: @unchecked
     approval.kind shouldBe InterruptKind.APPROVAL

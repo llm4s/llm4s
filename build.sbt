@@ -1322,8 +1322,12 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
 // agent is built on: `LLMClient`, `ToolRegistry`, `Tracing` and `TraceEvent`.
 //
 // Test depends on core's tests for `MockLLMClient`, `StubLLMClient` and the shared fixtures.
+// Test scope only, `openai`, `anthropic` and `providerTestkit`: `AgentToolResultContractSpec` runs the
+// tool loop through the real OpenAI and Anthropic clients against a local server and checks every
+// request with the testkit's tool-result contract (#1703). Never make either provider a compile
+// dependency: it would put a vendor SDK on every agent user's classpath.
 lazy val agent = (project in file("modules/agent"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core % "compile->compile;test->test", openai % Test, anthropic % Test, providerTestkit % Test)
   .settings(
     name := "llm4s-agent",
     commonSettings,

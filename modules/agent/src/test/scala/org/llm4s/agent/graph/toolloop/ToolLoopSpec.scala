@@ -1880,7 +1880,12 @@ class ToolLoopSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
   }
 
   "ToolQuestionRequest" should "round-trip through JSON" in {
-    val request = ToolQuestionRequest("m", ToolCall("c", "confirm", ujson.Obj("env" -> "prod")), ujson.Obj("p" -> 1))
+    val request = ToolQuestionRequest(
+      "m",
+      ToolCall("c", "confirm", ujson.Obj("env" -> "prod")),
+      ujson.Obj("p" -> 1),
+      IdempotencyKey("k")
+    )
     upickle.default.read[ToolQuestionRequest](upickle.default.write(request)) shouldBe request
     val approved = request.copy(approved = true)
     upickle.default.read[ToolQuestionRequest](upickle.default.write(approved)) shouldBe approved

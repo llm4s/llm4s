@@ -653,14 +653,14 @@ virtual thread (`Thread.ofVirtual`), and `LocalProviderTestServer` answers on
 (the library's own minimum JDK is settled in
 [#1493](https://github.com/llm4s/llm4s/issues/1493)).
 
-It has four parts, all in `org.llm4s.testkit`:
+It has these parts, all in `org.llm4s.testkit`:
 
 | | What it gives you |
 |---|---|
-| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
+| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertCancelsWhenInterrupted`, `assertCancelsStreamWhenInterrupted`, `assertOneToolResultPerCall`, `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
 | `ProviderTestConfig` | `loadSection`, `loadProvider` and `loadEmbeddings`: config loaded as an application loads it, from a HOCON string over every `reference.conf` on the classpath, with `${?VAR}` resolved against a `Map` you pass - never the real environment, so an exported `ACME_API_KEY` on your machine cannot make a test pass that fails in CI. |
 | `CredentialsRoundTrip` | `chatSectionKey`, `chatBindings`, `embeddingsKey`, `embeddingBindings`: which key a section or embeddings block with no `apiKey` of its own ends up with, for cases the assertions do not cover - an alias, two variables in precedence order, a variable that must *not* be picked up. |
-| `LocalProviderTestServer` | `withServer(path)(handler)(baseUrl => ...)`, `sendJsonResponse`, `sendSseResponse`, `holdOpen` / `streamThenHold` (requests that never finish, released when `withServer` ends), and OpenAI-format bodies: the JDK's HTTP server on an ephemeral port, to point a client at. |
+| `LocalProviderTestServer` | `withServer(path)(handler)(baseUrl => ...)`, `sendJsonResponse`, `sendSseResponse`, `holdOpen` / `streamThenHold` (requests that never finish, released when `withServer` ends), OpenAI-format bodies and an Anthropic-format `anthropicMessage`: the JDK's HTTP server on an ephemeral port, to point a client at. `ToolResultContract` (with `ToolMessageFormat`) reads a request body for the tool-result contract below. |
 
 ```scala
 package com.acme.llm4s
@@ -742,6 +742,30 @@ interrupted. It must not throw `InterruptedException` or clear the flag. A clien
 `assertEmbeddingCancelsWhenInterrupted`, and any other client call that returns a `Result` (a reranker, a speech
 or image client) `assertCallCancelsWhenInterrupted("name")(call)`. A client that does not extend `BaseLifecycleLLMClient` can use the public helpers `CancelledError.attempt`, `CancelledError.whenInterrupted`, `CancelledError.fromThrowable` and `CancelledError.isCancellation`. `fromThrowable` and `isCancellation` only classify: they never set the flag, so if your code catches an `InterruptedException` itself, restore the flag with `Thread.currentThread().interrupt()`. A bare `InterruptedIOException`, such as OkHttp's call timeout, is not a cancellation unless the thread is interrupted or an `InterruptedException` lies beneath it.
 
+### Tool results
+
+An agent's tool loop sends a conversation in which every tool call has exactly one result, straight
+after the assistant message that made it, and relies on your client to send it that way: OpenAI's
+format puts one `role: "tool"` message per call after the assistant message, Anthropic's one
+`tool_result` block per call at the start of the next user turn. A chat provider whose API takes
+tools runs `assertOneToolResultPerCall(format, response, path)(baseUrl => client)`: it sends each
+of `ToolResultContract.cases` - a parallel batch with error, rejection and denial results, an
+unknown tool, provider call ids reused across turns, a handoff, a refused handoff batch - to a
+`LocalProviderTestServer` answering with `response`, and fails on any
+`ToolResultContract.violations` in the body the server received, and when the body carries fewer
+calls or native results than the conversation: a client that drops a call it cannot pair, or sends
+a result as plain text, would hide a broken conversation rather than send it. `ToolMessageFormat`
+is `OpenAIChat` or `AnthropicMessages`; a provider with another wire format checks its own
+encoding against `ToolResultContract.cases` the same way.
+
+```scala
+"send exactly one tool result per call" in {
+  assertOneToolResultPerCall(ToolMessageFormat.OpenAIChat, LocalProviderTestServer.openAICompletion("done")) {
+    baseUrl => assertBuildsClient(AcmeProvider, section.withBaseUrl(BaseUrl(baseUrl)))
+  }
+}
+```
+
 ## Stability
 
 `llm4s-core` reaches a binary-compatibility baseline (MiMa) at 0.5.0 and freezes at 1.0. The
@@ -785,3 +809,4 @@ classpath; for an OpenAI-compatible vendor, contribute a dialect there instead.
 - [ ] no exceptions escape, no environment reads
 - [ ] `Llm4s<Name>ModuleSpec`, on `llm4s-provider-testkit`, covering discovery, sole ownership,
       explicit registration, the config-to-client round trip and the credential binding
+- [ ] a chat provider that takes tools runs `assertOneToolResultPerCall`
