@@ -101,19 +101,36 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
     events.value.lastOption.fold(0L)(_.seq)
   }
 
-  /** A store whose commits can be slowed down, or made to fail as if the process had died. */
+  /**
+   * A store whose commits can be slowed down, or made to fail as if the process had died, and that
+   * tells when a new subscription has switched to live delivery ([[awaitLive]]).
+   */
   final private class ControlledCheckpointer(val underlying: InMemoryCheckpointer = InMemoryCheckpointer())
       extends Checkpointer {
     @volatile var delayMillis: Long = 0L
     val crashed                     = new AtomicBoolean(false)
+    private val reads               = new AtomicInteger()
+    private val switching           = new CountDownLatch(1)
     def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] = {
       if delayMillis > 0 then Thread.sleep(delayMillis)
       if crashed.get then Left(ValidationError("store", "simulated crash")) else underlying.commit(threadId, commit)
     }
-    def latest(threadId: ThreadId)                                  = underlying.latest(threadId)
-    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = underlying.eventsAfter(threadId, afterSeq, limit)
-    def compactEvents(threadId: ThreadId, beforeSeq: Long)          = underlying.compactEvents(threadId, beforeSeq)
-    def deleteThread(threadId: ThreadId)                            = underlying.deleteThread(threadId)
+    def latest(threadId: ThreadId) = underlying.latest(threadId)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) = {
+      if reads.incrementAndGet() == 2 then switching.countDown()
+      underlying.eventsAfter(threadId, afterSeq, limit)
+    }
+
+    /**
+     * Waits until the first subscription on an empty store has switched to live delivery. `subscribe`
+     * returns before its dispatcher has replayed and joined the live set, and a live event sent before
+     * then is never delivered: live progress is not replayed (#1709). On an empty thread the replay is
+     * one read and the switch the second, made holding the hub's lock, which a live event's hand-over
+     * also takes - so once the second read has begun, every live event reaches the subscription.
+     */
+    def awaitLive(): Unit                                  = switching.await(5, TimeUnit.SECONDS) shouldBe true
+    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
   }
 
   private def kinds(records: Vector[EventRecord]): Vector[String] =
@@ -124,10 +141,12 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
   "GraphRuntime" should "run a new thread to completion and persist a completed checkpoint and its events" in {
     val f        = Fixture()
-    val store    = InMemoryCheckpointer()
+    val store    = ControlledCheckpointer()
     val runtime  = GraphRuntime(store)
     val recorder = Recorder()
     runtime.subscribe(thread)(recorder.listener).value
+    // the live progress asserted below reaches the subscription only once it is live
+    store.awaitLive()
 
     runtime
       .start(thread, f.graph, Vector("a", "b"), RunConfig().withRunId(RunId("run-1")))
@@ -452,6 +471,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
         recorder.listener(event)
       }
       .value
+    store.awaitLive()
     val durableSeenByWorker = mutable.ArrayBuffer.empty[Int]
     val committedSuperstep  = mutable.ArrayBuffer.empty[Int]
     f.onWorker = _ =>
@@ -530,7 +550,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
 
   "OnExit durability" should "write only its claim until the run ends, then commit the rest at once" in {
     val f              = Fixture()
-    val store          = InMemoryCheckpointer()
+    val store          = ControlledCheckpointer()
     val runtime        = GraphRuntime(store)
     val recorder       = Recorder()
     val seenMidRun     = mutable.ArrayBuffer.empty[(Option[StoredCheckpoint], Int)]
@@ -541,6 +561,7 @@ class GraphRuntimeSpec extends AnyFlatSpec with Matchers with EitherValues with 
         claimDelivered.countDown()
       }
       .value
+    store.awaitLive()
     // delivery is asynchronous: wait for the claim's RunStarted, then see that nothing follows it
     f.onWorker = _ => {
       claimDelivered.await(5, TimeUnit.SECONDS): Unit

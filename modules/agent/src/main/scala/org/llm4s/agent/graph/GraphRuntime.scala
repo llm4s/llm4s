@@ -97,8 +97,10 @@ object GraphRuntime:
  * progress as it happens. Each subscription has its own dispatcher thread and a queue of
  * `capacity` events, so a slow listener never holds up a run: one that falls behind by more than
  * `capacity` durable events is disconnected ([[DisconnectReason.Lagging]]), and live events that
- * do not fit are dropped and counted ([[StreamEvent.LiveGap]]). See [[EventHub]]. A subscription
- * made after `start` returns can miss the run's first live events, which are never replayed; an
+ * do not fit are dropped and counted ([[StreamEvent.LiveGap]]). See [[EventHub]]. Live events are
+ * never replayed, and a subscription receives them only once its dispatcher has replayed the log and
+ * switched to live delivery, which `subscribe` returns before; so a subscription can miss a run's
+ * first live events - one made after `start` returns, and even one made just before it. An
  * [[Observer]] passed to `start`, `recover` or `resume` is subscribed during admission, before the
  * claim commits, and so sees every event of the run ([[RunHandle.observation]]).
  */
