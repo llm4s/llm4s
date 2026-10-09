@@ -10,8 +10,7 @@ nav_order: 18
 Baseline JMH benchmark results for llm4s critical hot paths.
 Run with: `sbt "benchmarks/Jmh/run -rf json -rff results.json"`
 
-> Results below are from a reference run on a MacBook Pro M3, JDK 21, Scala 3.
-> Your numbers will differ by hardware; track **relative** changes for regression detection.
+> No reference results have been recorded yet, so the scores below are TBD. When they are, numbers will differ by hardware: track **relative** changes for regression detection.
 
 ## Token Counting — `ConversationTokenCounter`
 

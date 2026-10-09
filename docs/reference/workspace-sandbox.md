@@ -28,7 +28,7 @@ When running the workspace runner (e.g. in Docker):
 
 ### Profiles
 
-- **permissive**: Current behavior—shell allowed, standard limits (1MB file size, 500 dir entries, 30s command timeout)
+- **permissive**: Current behavior—shell allowed with the read-write command allowlist (`ReadWriteCommands`), standard limits (1MB file size, 500 dir entries, 30s command timeout)
 - **locked**: Shell disabled; strict limits (10s timeout). File writes and modifications remain allowed; this profile does not enforce a read-only filesystem.
 
 ### HOCON (Client)
@@ -52,6 +52,7 @@ llm4s.workspace.sandbox {
 | `readOnlyPaths` | List[String] | Paths under workspace that are read-only (Phase 2) |
 | `allowedPaths` | List[String] | If non-empty, only these paths accessible (Phase 2) |
 | `networkAllowed` | Boolean | Documentation only; Phase 2: enforce network restrictions |
+| `allowedCommands` | Set[String] | Executable names `executeCommand` may run; defaults to `ReadOnlyCommands`, `ReadWriteCommands` adds write-capable ones (`cp`, `mv`, `rm`, `mkdir`, …) |
 
 ## Security Gaps Addressed
 
