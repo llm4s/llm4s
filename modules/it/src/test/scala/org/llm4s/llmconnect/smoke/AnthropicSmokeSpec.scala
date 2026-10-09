@@ -90,12 +90,12 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers with EitherValues wit
   override protected def contractKey: Option[String]                    = apiKey
   override protected def contractClient(key: String): Result[LLMClient] = AnthropicClient(config(key))
   // Extended thinking needs a model that supports it, which the cheap default model above does not. The thinking
-  // budget is clamped to at least 1024 tokens and below max_tokens, so max_tokens leaves room for the answer.
+  // Low reasoning uses a 2048-token thinking budget; leave another 2048 tokens for the final answer.
   override protected def reasoningSetup: Option[String => Result[ReasoningSetup]] = Some { key =>
     AnthropicClient(config(key, ThinkingModel)).map { client =>
       ReasoningSetup(
         client,
-        CompletionOptions(maxTokens = Some(2048)).withReasoning(ReasoningEffort.Low),
+        CompletionOptions(temperature = 1.0, maxTokens = Some(4096)).withReasoning(ReasoningEffort.Low),
         expectsThinkingText = true
       )
     }
