@@ -1830,8 +1830,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ToolRegistry` restores the interrupt flag when a tool throws an interruption wrapped in another exception (it
   already did for a bare `InterruptedException`), as `MCPToolRegistry` does; `MCPTransportImpl.sendRequest`, `sendNotification`,
   `MCPClient.initialize` and `getTools` return `Result` instead of `Either[String, _]` (read the old string as
-  `error.message`; the messages are unchanged); the concrete embedding providers' `embed` returns
-  `Result[EmbeddingResponse]`. `llm4s-provider-testkit` gains `assertCallCancelsWhenInterrupted` and
+  `error.message`; the messages are unchanged); an embedding provider's `embed` can return
+  `Left(CancelledError)` where it returned only an `EmbeddingError` (its declared type, `Result[EmbeddingResponse]`,
+  is unchanged). `llm4s-provider-testkit` gains `assertCallCancelsWhenInterrupted` and
   `assertEmbeddingCancelsWhenInterrupted`.
 - **`ToolHints` are read from MCP tool annotations** ([#1331](https://github.com/llm4s/llm4s/issues/1331); design
   §4.12): `llm4s-mcp` reads `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` and `title` from the
