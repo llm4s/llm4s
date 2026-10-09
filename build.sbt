@@ -446,7 +446,6 @@ lazy val llm4sPekko = (project in file("modules/llm4s-pekko"))
   .dependsOn(core, agent)
   .settings(
     name := "llm4s-pekko",
-    description := "Apache Pekko Streams for LLM4S: LLM responses and agent runs as Sources, with backpressure and cancellation.",
     commonSettings,
     // Measured 97.54% statement and 88.24% branch coverage (`sbt coverage llm4sPekko/test llm4sPekko/coverageReport`).
     // Floor is the measured value rounded down to the nearest 5. Never lower it.
