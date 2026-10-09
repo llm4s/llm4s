@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.streaming
 
 import org.llm4s.llmconnect.model._
+import org.llm4s.testutil.SmallStack
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -326,5 +327,18 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     val completion = accumulator.toCompletion.toOption.get
     completion.message.toolCalls.map(_.id) shouldBe ids
     accumulator.toCompletion(0L).toOption.get.message.toolCalls.map(_.id) shouldBe ids
+  }
+
+  // Streamed arguments are model output: nested too deeply they stay a raw Str instead of becoming
+  // a value that overflows the stack of whatever renders it next (#1562). On a 1 MB stack, so
+  // deterministic; the comparisons happen inside it so no failure message renders a deep value.
+  test("tool-call arguments nested too deeply come back as a raw Str, not parsed") {
+    val deep        = "[" * 100000 + "]" * 100000
+    val accumulator = StreamingAccumulator.create()
+    accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall("call-1", "f", ujson.Str(deep))), None))
+
+    SmallStack.run(accumulator.currentToolCalls.map(_.arguments == ujson.Str(deep))) shouldBe Right(Seq(true))
+    SmallStack.run(accumulator.toCompletion.map(_.message.toolCalls.map(_.arguments == ujson.Str(deep)))) shouldBe
+      Right(Right(Seq(true)))
   }
 }

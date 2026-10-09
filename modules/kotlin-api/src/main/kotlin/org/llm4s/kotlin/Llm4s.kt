@@ -1,8 +1,10 @@
 package org.llm4s.kotlin
 
+import org.llm4s.agent.Agent
 import org.llm4s.javaapi.JAgent
 import org.llm4s.javaapi.JLlmClient
 import org.llm4s.javaapi.LlmResult
+import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.javaapi.Llm4s as JLlm4s
 
 /**
@@ -47,4 +49,18 @@ object Llm4s {
         val jAgent = factory.createAgent(client.underlying)
         return AgentKt(jAgent)
     }
+
+    /**
+     * Wraps an [LLMClientKt] in an [AgentKt] that can call [tools], whose model calls stream when
+     * [streaming] is set: then [AgentKt.stream] carries the answer's text deltas (`AgentEvents.TextDelta()`).
+     * Without it the agent calls the model's `complete`, and a stream carries no deltas.
+     */
+    fun createAgent(client: LLMClientKt, tools: ToolRegistry, streaming: Boolean): AgentKt =
+        AgentKt(JLlm4s.createAgent(client.underlying, tools, streaming))
+
+    /**
+     * Wraps an [Agent] built with `Agent.builder`, for what [createAgent] does not set: its middleware
+     * (guardrails, approvals), handoffs, system prompt or runtime.
+     */
+    fun wrapAgent(agent: Agent): AgentKt = AgentKt(JLlm4s.wrapAgent(agent))
 }

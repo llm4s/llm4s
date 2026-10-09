@@ -23,15 +23,15 @@ import org.llm4s.types.Result
  *
  * @param baseClient   The underlying client used to generate embeddings on cache misses.
  * @param cache        The storage backend for the embedding vectors.
- * @param keyGenerator Function that maps (text, model scope) to a cache key (defaults to SHA-256). The model
- *                     scope is the model name for a document request, and the model name followed by `#query`
- *                     for a query request, so a query and a document with the same text never share an entry.
+ * @param keyGenerator Function that maps (text, model name, purpose) to a cache key; defaults to
+ *                     [[CacheKeyGenerator.embeddingKey]]. The purpose is an argument so that a query and a
+ *                     document with the same text never share an entry.
  */
 @Stable
 class CachedEmbeddingClient(
   baseClient: EmbeddingClient,
   cache: EmbeddingCache[Seq[Double]],
-  keyGenerator: (String, String) => String = CacheKeyGenerator.sha256
+  keyGenerator: (String, String, InputPurpose) => String = CacheKeyGenerator.embeddingKey
 ) {
 
   /**
@@ -44,14 +44,11 @@ class CachedEmbeddingClient(
    */
   def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
     // A query and a document with the same text are different vectors for the models that embed
-    // them differently, so the purpose is part of the key. A document keeps the plain model name,
-    // so vectors cached before the purpose existed are still found.
-    val modelName = CachedEmbeddingClient.keyScope(request.model.name, request.purpose)
-
+    // them differently, so the purpose is part of the key.
     // Pair each input with its cache key and cached value (if any).
     val keysAndHits: Seq[(String, Option[Seq[Double]])] =
       request.input.map { text =>
-        val key = keyGenerator(text, modelName)
+        val key = keyGenerator(text, request.model.name, request.purpose)
         (key, cache.get(key))
       }
 
@@ -101,19 +98,9 @@ class CachedEmbeddingClient(
   /** Returns cache hit/miss statistics for this client. */
   def cacheStats: CacheStats = cache.stats()
 
-  /** Clears all cached vectors and resets statistics. */
-  def clearCache(): Unit = cache.clear()
-}
-
-object CachedEmbeddingClient {
-
   /**
-   * The model part of a cache key: the model name for a document, which is what keys were before
-   * [[InputPurpose]] existed, and the model name with `#query` for a query.
+   * Calls the backend's `clear()`. With `InMemoryEmbeddingCache` this empties the cache and resets the
+   * statistics; a custom `EmbeddingCache` decides for itself, and the trait default does nothing.
    */
-  private[caching] def keyScope(modelName: String, purpose: InputPurpose): String =
-    purpose match {
-      case InputPurpose.Document => modelName
-      case InputPurpose.Query    => s"$modelName#query"
-    }
+  def clearCache(): Unit = cache.clear()
 }

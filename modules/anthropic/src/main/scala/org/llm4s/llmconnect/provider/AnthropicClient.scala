@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
-import com.anthropic.core.{ JsonObject, ObjectMappers }
+import com.anthropic.core.{ JsonObject, ObjectMappers, RequestOptions }
 import com.anthropic.models.messages.{
   ContentBlockParam,
   Message,
@@ -28,8 +28,9 @@ import org.llm4s.llmconnect.streaming.*
 import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, RateLimitError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, ProcessingError, RateLimitError, ValidationError }
 import org.llm4s.error.ThrowableOps.*
+import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.time.Instant
 import scala.jdk.CollectionConverters.*
@@ -108,6 +109,14 @@ class AnthropicClient(
     .baseUrl(config.baseUrl)
     .build()
 
+  // The timeout goes on each call, not on the SDK client: the client's timeout is one value for every
+  // call and covers a streamed response in full, so a short `request` there would cut every stream.
+  // With no value in the section the SDK's own default applies, as before the `timeouts` block existed.
+  private val requestOptions: Option[RequestOptions] =
+    config.timeouts.request.map(t => RequestOptions.builder().timeout(java.time.Duration.ofNanos(t.toNanos)).build())
+  private val streamOptions: Option[RequestOptions] =
+    config.timeouts.stream.map(t => RequestOptions.builder().timeout(java.time.Duration.ofNanos(t.toNanos)).build())
+
   protected def clientDescription: String = s"Anthropic client for model ${config.model}"
   protected def providerName: String      = "anthropic"
   protected def modelName: String         = config.model
@@ -166,15 +175,19 @@ class AnthropicClient(
 
         val messageService = client.messages()
         // Make API call
-        val attempt = Try(messageService.create(messageParams)).toEither.left.map {
-          case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
-          case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
-          case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
-          case e                                                     => e.toLLMError
+        val attempt = Try(
+          requestOptions.fold(messageService.create(messageParams))(messageService.create(messageParams, _))
+        ).toEither.left.map {
+          case e: com.anthropic.errors.UnauthorizedException =>
+            AuthenticationError("anthropic", AnthropicClient.safeMessage(e))
+          case _: com.anthropic.errors.RateLimitException => RateLimitError("anthropic")
+          case e: com.anthropic.errors.AnthropicInvalidDataException =>
+            ValidationError("input", AnthropicClient.safeMessage(e))
+          case e => e.toLLMError
         }
         // sealed thinking is bound to the request it answers, so it is replayed only while that holds
         val result = attempt
-          .map(convertFromAnthropicResponse)
+          .flatMap(convertFromAnthropicResponse)
           .map(c =>
             c.withMessage(ThinkingReplay.bind(replayOrigin, c.message, transformed.messages, transformed.options))
           )
@@ -263,7 +276,11 @@ curl https://api.anthropic.com/v1/messages \
         // Process the stream
         val attempt = Try {
           val messageService = client.messages()
-          Using.resource(messageService.createStreaming(messageParams)) { streamResponse =>
+          Using.resource(
+            streamOptions.fold(messageService.createStreaming(messageParams))(
+              messageService.createStreaming(messageParams, _)
+            )
+          ) { streamResponse =>
             import scala.jdk.StreamConverters._
             val stream: Iterator[RawMessageStreamEvent] = streamResponse.stream().toScala(Iterator)
             stream.foreach { event =>
@@ -410,10 +427,12 @@ curl https://api.anthropic.com/v1/messages \
           }
         }.toEither.left
           .map {
-            case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
-            case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
-            case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
-            case e                                                     => e.toLLMError
+            case e: com.anthropic.errors.UnauthorizedException =>
+              AuthenticationError("anthropic", AnthropicClient.safeMessage(e))
+            case _: com.anthropic.errors.RateLimitException => RateLimitError("anthropic")
+            case e: com.anthropic.errors.AnthropicInvalidDataException =>
+              ValidationError("input", AnthropicClient.safeMessage(e))
+            case e => e.toLLMError
           }
 
         // Return the accumulated completion
@@ -609,84 +628,91 @@ curl https://api.anthropic.com/v1/messages \
       case _ =>
     }
 
-  // Convert Anthropic response to our model
-  private def convertFromAnthropicResponse(response: Message): Completion = {
-    val contentBlocks = response.content().asScala.toList
+  // Convert Anthropic response to our model; a Left when a tool_use block's input cannot be taken
+  private def convertFromAnthropicResponse(response: Message): Result[Completion] = extractToolCalls(response).map {
+    toolCalls =>
+      val contentBlocks = response.content().asScala.toList
 
-    // Extract text content
-    val textContent: Option[String] = {
-      val texts = contentBlocks.filter(_.isText).map(_.asText().text())
-      if (texts.nonEmpty) Some(texts.mkString) else None
-    }
+      // Extract text content
+      val textContent: Option[String] = {
+        val texts = contentBlocks.filter(_.isText).map(_.asText().text())
+        if (texts.nonEmpty) Some(texts.mkString) else None
+      }
 
-    // Extended thinking: every thinking block with its signature, and redacted thinking, in order
-    val thinking: Seq[ThinkingBlock] = contentBlocks.flatMap { block =>
-      if (block.isThinking) {
-        val t = block.asThinking()
-        Some(ThinkingBlock.Text(t.thinking(), Try(t.signature()).toOption.filter(_.nonEmpty)))
-      } else if (block.isRedactedThinking) Some(ThinkingBlock.Redacted(block.asRedactedThinking().data()))
-      else None
-    }
+      // Extended thinking: every thinking block with its signature, and redacted thinking, in order
+      val thinking: Seq[ThinkingBlock] = contentBlocks.flatMap { block =>
+        if (block.isThinking) {
+          val t = block.asThinking()
+          Some(ThinkingBlock.Text(t.thinking(), Try(t.signature()).toOption.filter(_.nonEmpty)))
+        } else if (block.isRedactedThinking) Some(ThinkingBlock.Redacted(block.asRedactedThinking().data()))
+        else None
+      }
 
-    // Extract tool calls if present
-    val toolCalls = extractToolCalls(response)
-    val message   = AssistantMessage(contentOpt = textContent, toolCalls = toolCalls, thinking = thinking)
+      val message = AssistantMessage(contentOpt = textContent, toolCalls = toolCalls, thinking = thinking)
 
-    // Extract token usage, including thinking tokens if available
-    val usage = response.usage()
+      // Extract token usage, including thinking tokens if available
+      val usage = response.usage()
 
-    val cachedTokens: Option[Int] =
-      Option(usage.cacheReadInputTokens())
-        .filter(_.isPresent)
-        .map(_.get().toInt)
+      val cachedTokens: Option[Int] =
+        Option(usage.cacheReadInputTokens())
+          .filter(_.isPresent)
+          .map(_.get().toInt)
 
-    val cacheCreationTokens: Option[Int] =
-      Option(usage.cacheCreationInputTokens())
-        .filter(_.isPresent)
-        .map(_.get().toInt)
+      val cacheCreationTokens: Option[Int] =
+        Option(usage.cacheCreationInputTokens())
+          .filter(_.isPresent)
+          .map(_.get().toInt)
 
-    val tokenUsage = TokenUsage(
-      promptTokens = usage.inputTokens().toInt,
-      completionTokens = usage.outputTokens().toInt,
-      totalTokens = (usage.inputTokens() + usage.outputTokens()).toInt,
-      cachedTokens = cachedTokens,
-      cacheCreationTokens = cacheCreationTokens
-    )
-
-    // Estimate cost using CostEstimator
-    val cost = CostEstimator.estimate(config.model, tokenUsage)
-
-    // Create completion
-    Completion(
-      id = response.id(),
-      content = message.content,
-      model = response.model().asString(),
-      toolCalls = toolCalls.toList,
-      created = System.currentTimeMillis() / 1000, // Use current time as created timestamp
-      message = message,
-      usage = Some(tokenUsage),
-      estimatedCost = cost
-    )
-  }
-
-  // Extract tool calls from Anthropic response
-  private def extractToolCalls(response: Message): Seq[ToolCall] = {
-    val toolCalls = response.content().asScala.toList.filter(_.isToolUse).map { cb =>
-      val toolUse   = cb.asToolUse()
-      val toolId    = toolUse.id()
-      val toolName  = toolUse.name()
-      val rawParams = toolUse._input()
-      val arguments = ujson.read(ObjectMappers.jsonMapper().writeValueAsString(rawParams))
-
-      ToolCall(
-        id = toolId,
-        name = toolName,
-        arguments = arguments
+      val tokenUsage = TokenUsage(
+        promptTokens = usage.inputTokens().toInt,
+        completionTokens = usage.outputTokens().toInt,
+        totalTokens = (usage.inputTokens() + usage.outputTokens()).toInt,
+        cachedTokens = cachedTokens,
+        cacheCreationTokens = cacheCreationTokens
       )
-    }
 
-    toolCalls
+      // Estimate cost using CostEstimator
+      val cost = CostEstimator.estimate(config.model, tokenUsage)
+
+      // Create completion
+      Completion(
+        id = response.id(),
+        content = message.content,
+        model = response.model().asString(),
+        toolCalls = toolCalls.toList,
+        created = System.currentTimeMillis() / 1000, // Use current time as created timestamp
+        message = message,
+        usage = Some(tokenUsage),
+        estimatedCost = cost
+      )
   }
+
+  private def malformedToolCall(detail: String): ProcessingError =
+    ProcessingError("anthropic-tool-calls", s"malformed tool call: $detail")
+
+  /**
+   * The tool calls of a response, in order: one per `tool_use` block, or a Left for the first whose input
+   * cannot be taken. The block's `input` is the model's own JSON. The SDK's parser admits it up to about
+   * 1,000 levels of nesting, which is past the 512 the library handles: an object that deep would overflow
+   * the stack when it is rendered back to Anthropic in the next turn, or into a log line or error message,
+   * once per level (#1562). So the input is measured against the same bound as every other model-written
+   * JSON before it is parsed, and one over it is a malformed call, as it is for the Ollama client.
+   */
+  private def extractToolCalls(response: Message): Result[Seq[ToolCall]] =
+    response.content().asScala.toList.filter(_.isToolUse).foldLeft[Result[Vector[ToolCall]]](Right(Vector.empty)) {
+      (calls, cb) =>
+        val toolUse = cb.asToolUse()
+        val input   = ObjectMappers.jsonMapper().writeValueAsString(toolUse._input())
+        calls.flatMap { taken =>
+          BoundedJson.read(input) match {
+            case Right(arguments) =>
+              Right(taken :+ ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = arguments))
+            case Left(BoundedJson.TooDeep()) =>
+              Left(malformedToolCall(s"arguments are nested more than ${BoundedJson.MaxDepth} levels deep"))
+            case Left(e) => Left(malformedToolCall(e.message))
+          }
+        }
+    }
 
   private def serializeStreamEvent(event: RawMessageStreamEvent): String =
     ObjectMappers.jsonMapper().writeValueAsString(event)
@@ -780,6 +806,12 @@ curl https://api.anthropic.com/v1/messages \
 
 object AnthropicClient {
   import org.llm4s.types.TryOps
+
+  /**
+   * An SDK exception's message, redacted and capped. anthropic-java writes the response body into it (`401: <body>`),
+   * and a body can echo the request's credentials (#1674).
+   */
+  private[provider] def safeMessage(e: Throwable): String = Option(e.getMessage).fold("")(Redaction.safeBody(_))
 
   /** A thinking or redacted-thinking block being assembled from a stream. */
   final private[provider] case class StreamedThinking(
