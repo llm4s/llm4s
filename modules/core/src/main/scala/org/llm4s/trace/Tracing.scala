@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ ConfigurationError, UnknownError }
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.llmconnect.model.{ Completion, EmbeddingUsage, TokenUsage }
@@ -41,9 +42,9 @@ import scala.util.control.NonFatal
  *
  * == Agent state ==
  *
- * There is no `traceAgentState(AgentState)`: agent state is traced as an ordinary
- * [[TraceEvent.AgentStateUpdated]], built with `AgentState#toTraceEvent`, so the
- * tracing contract does not depend on the agent runtime (D5, #1133).
+ * There is no `traceAgentState(AgentState)`. An agent run reports its end with
+ * [[TraceEvent.AgentRunEnded]]; the agent's per-step events arrive as `CustomEvent`s named
+ * `graph.*` and `agent.*`.
  *
  * == Composition ==
  *
@@ -57,6 +58,7 @@ import scala.util.control.NonFatal
  * @see [[TraceEvent]] for available event types
  * @see [[TracingComposer]] for composition utilities
  */
+@Stable
 trait Tracing {
   def traceEvent(event: TraceEvent): Result[Unit]
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit]
@@ -186,6 +188,7 @@ trait Tracing {
  * }
  * }}}
  */
+@Stable
 trait TracingComposer {
 
   /** Combine multiple tracers into one that sends events to all backends. */
@@ -288,6 +291,7 @@ private class TransformedTracing(underlying: Tracing, transform: TraceEvent => T
  * The `TRACING_MODE` environment variable (`llm4s.tracing.mode`) is the standard
  * way to select a mode; see `Llm4sConfig.tracing`.
  */
+@Stable
 sealed trait TracingMode extends Product with Serializable {
 
   /** The canonical config value for this mode, as [[TracingMode.fromString]] reads it. */

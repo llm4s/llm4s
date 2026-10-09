@@ -431,7 +431,16 @@ object StreamingOllama extends App {
 
 ## Tool Calling with Ollama
 
-Ollama supports tool calling (function calling) with compatible models:
+Ollama supports tool calling (function calling) with compatible models, and `llm4s-ollama`'s native client sends the tools and reads the calls (streamed or not) itself - no `/v1` OpenAI-compatible workaround is needed.
+
+Only models whose Ollama page lists the **tools** capability can do this (`llama3.1` can; the original `llama3`
+does not). Sending tools to any other model fails, and the client reports it instead of dropping the tools:
+
+```text
+Invalid tools: Ollama model 'llama3:latest' does not support tool calling (the server said: registry.ollama.ai/library/llama3:latest does not support tools). Use a model whose Ollama page lists the 'tools' capability, or send no tools.
+```
+
+Pull a tool-capable model (`ollama pull llama3.1`) and set `OLLAMA_MODEL` to it:
 
 ```scala
 import org.llm4s.agent.Agent
@@ -471,14 +480,14 @@ object OllamaTools extends App {
     registry       <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
-    agent = new Agent(client)
-    state <- agent.run("What's the weather in San Francisco?", tools)
-  } yield state
+    agent <- Agent.builder("weather-agent", client).withTools(tools).build()
+    result <- agent.run("What's the weather in San Francisco?")
+  } yield result
 
   result match {
-    case Right(state) =>
+    case Right(r) =>
       println("Final response:")
-      println(state.conversation.messages.last.content)
+      println(r.answer.getOrElse(s"Run ended: ${r.status}"))
     case Left(error) =>
       Console.err.println(s"Error: ${error.formatted}")
   }
@@ -512,7 +521,7 @@ Performance comparison running on Apple M1 Mac:
 CompletionOptions(
   temperature = 0.7,  // Higher = more creative (0.0-2.0)
   maxTokens = Some(1000),
-  topP = Some(0.9)
+  topP = 0.9
 )
 ```
 

@@ -1,5 +1,7 @@
 package org.llm4s.core.safety
 
+import org.llm4s.annotation.Stable
+
 import cats.syntax.either._
 import org.llm4s.error.LLMError
 import org.llm4s.types.Result
@@ -11,6 +13,7 @@ import scala.util.{ Failure, Success, Try }
  * Pure helpers for safe, typed error handling.
  * All helpers return Either-based results.
  */
+@Stable
 object Safety {
 
   /**

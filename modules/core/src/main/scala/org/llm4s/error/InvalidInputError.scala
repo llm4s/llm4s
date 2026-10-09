@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * Error for invalid input values that fail validation.
  *
@@ -18,6 +20,7 @@ package org.llm4s.error
  * error.context  // Map("field" -> "temperature", "value" -> "2.5", "reason" -> "...")
  * }}}
  */
+@Stable
 final case class InvalidInputError private (
   override val message: String,
   field: String,

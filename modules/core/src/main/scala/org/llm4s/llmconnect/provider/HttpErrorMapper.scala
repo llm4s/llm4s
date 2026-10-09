@@ -1,8 +1,10 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, ValidationError }
 import org.llm4s.http.HttpHeaders
 import org.llm4s.types.Result
+import org.llm4s.util.BoundedJson
 
 import java.time.{ Clock, Duration, ZonedDateTime }
 import java.time.format.DateTimeFormatter
@@ -17,6 +19,7 @@ import scala.util.Try
  * typed `Result` errors.  Provider-specific error details are extracted from
  * the JSON response body when possible and truncated to a safe length.
  */
+@Stable
 object HttpErrorMapper {
 
   private val MaxErrorDetailLength = 256
@@ -105,25 +108,32 @@ object HttpErrorMapper {
    *  2. `"error"` object → `"message"` string  (OpenAI / Mistral style)
    *  3. `"error"` as a plain string  (some providers)
    *
+   * The body is read with `BoundedJson`, and every step uses an accessor that
+   * returns an `Option` (`objOpt`, `strOpt`), so a body that is not JSON, not an object, or nested
+   * too deeply falls back to the generic message. `.obj` on a non-object throws
+   * `ujson.Value.InvalidData`, whose message renders the whole value recursively: on a deeply
+   * nested top-level array that was a `StackOverflowError`, which `Try` does not catch, out of
+   * every provider's error path ([[https://github.com/llm4s/llm4s/issues/1658 #1658]]).
+   *
    * @return a sanitised (redacted + trimmed + truncated) error detail string
    */
   private[provider] def extractErrorDetails(body: String, statusCode: Int, provider: String): String = {
     val defaultMsg = s"$provider API error (HTTP $statusCode)"
-    val raw = Try {
-      val json = ujson.read(body)
-      json.obj
-        .get("message")
-        .flatMap(_.strOpt)
-        .orElse(
-          json.obj.get("error").flatMap { error =>
-            // Try string first (avoids exception when error is not an object)
-            error.strOpt.orElse(
-              error.objOpt.flatMap(_.get("message").flatMap(_.strOpt))
-            )
-          }
-        )
-        .getOrElse(defaultMsg)
-    }.getOrElse(defaultMsg)
+    val raw = BoundedJson
+      .read(body)
+      .toOption
+      .flatMap(_.objOpt)
+      .flatMap { json =>
+        json
+          .get("message")
+          .flatMap(_.strOpt)
+          .orElse(
+            json.get("error").flatMap { error =>
+              error.strOpt.orElse(error.objOpt.flatMap(_.get("message").flatMap(_.strOpt)))
+            }
+          )
+      }
+      .getOrElse(defaultMsg)
     sanitize(raw)
   }
 

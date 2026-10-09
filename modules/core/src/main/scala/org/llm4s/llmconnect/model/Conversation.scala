@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.Result
 import upickle.default.{ macroRW, ReadWriter => RW }
 
@@ -12,6 +13,7 @@ import upickle.default.{ macroRW, ReadWriter => RW }
  *
  * @param messages Sequence of messages in the conversation.
  */
+@Stable
 case class Conversation(messages: Seq[Message]) {
 
   /**

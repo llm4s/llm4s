@@ -19,8 +19,11 @@ inThisBuild(
     organization     := "org.llm4s",
     organizationName := "llm4s",
     versionScheme    := Some("early-semver"),
-    homepage         := Some(url("https://github.com/llm4s/")),
-    licenses         := List("MIT" -> url("https://mit-license.org/")),
+    // The documentation site. The organization keeps the GitHub organization page, which the POM's
+    // `<organization><url>` shows; both used to be the organization page.
+    homepage             := Some(url("https://llm4s.org")),
+    organizationHomepage := Some(url("https://github.com/llm4s/")),
+    licenses             := List("MIT" -> url("https://mit-license.org/")),
     developers := List(
       Developer(
         "rorygraves",
@@ -38,10 +41,13 @@ inThisBuild(
     pgpPublicRing := file("/tmp/public.asc"),
     pgpSecretRing := file("/tmp/secret.asc"),
     pgpPassphrase := sys.env.get("PGP_PASSPHRASE").map(_.toArray),
+    // Scaladex associates an artifact with a repository by the POM's `scm` element and supports only public
+    // GitHub repositories (https://github.com/scalacenter/scaladex#how-it-works): a plain `https` repository URL
+    // without a trailing slash is the form it parses most simply.
     scmInfo := Some(
       ScmInfo(
-        url("https://github.com/llm4s/llm4s/"),
-        "scm:git:git@github.com:llm4s/llm4s.git"
+        url("https://github.com/llm4s/llm4s"),
+        "scm:git:https://github.com/llm4s/llm4s.git"
       )
     ),
     version := {
@@ -63,6 +69,9 @@ inThisBuild(
     ThisBuild / coverageHighlighting := true,
     ThisBuild / coverageExcludedPackages := Seq(
       "org\\.llm4s\\.runner\\..*",
+      // The deploy service's entry point starts a server and exits; the routes, the check and the
+      // configuration behind it are measured, and the image smoke test in deploy-staged.yml runs it.
+      "org\\.llm4s\\.deploy\\.DeployServiceMain",
       "org\\.llm4s\\.samples\\..*",
       "org\\.llm4s\\.workspace\\..*"
     ).mkString(";"),
@@ -113,8 +122,28 @@ addCommandAlias("testWorkspace", ItTiers.alias(ItTiers.Workspace))
 addCommandAlias("testOllama", ItTiers.alias(ItTiers.Ollama))
 addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 
+// ---- binary compatibility (MiMa) ----
+// MiMa compares a module with the artifact of the same name in a previous release. It can only
+// run once split artifacts exist: the last release (0.4.1) is a single `llm4s-core`, and the
+// modularisation (#1126) moved every package this check would cover. #1281 sets the baseline at
+// 0.5.0, the first release with the split coordinates, for the frozen modules only. Until then
+// `mimaBaselineVersion` is `None`, `mimaPreviousArtifacts` is empty and
+// `sbt mimaReportBinaryIssues` checks nothing. Set it to `Some("0.5.0")` when 0.5.0 is
+// published; see docs/reference/api-stability.md.
+val mimaBaselineVersion: Option[String] = None
+
+// `module` is the artifact name (the project's `name`). Apply this to frozen modules only.
+def mimaFrozen(module: String) = Seq(
+  mimaPreviousArtifacts := mimaBaselineVersion.map(v => "org.llm4s" %% module % v).toSet,
+  mimaFailOnNoPrevious  := false
+)
+
 // ---- shared settings ----
 lazy val commonSettings = Seq(
+  // The one-sentence POM description of each published module (project/PomDescriptions.scala).
+  description := PomDescriptions.of(name.value),
+  // Modules outside the frozen set have no baseline; keep MiMa quiet for them.
+  mimaFailOnNoPrevious    := false,
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
   Test / scalacOptions    := scalacOptionsForVersion(scalaVersion.value),
   // Suppress ScalaDoc warnings from third-party libraries (e.g., ScalaTest)
@@ -125,6 +154,9 @@ lazy val commonSettings = Seq(
   // Disable test Scaladoc generation during publish (not needed, saves memory in CI)
   Test / packageDoc / publishArtifact := false,
   Test / doc / sources                := Seq.empty,
+  // `-oD`: print each test's duration, so a slow test (or a platform that is slow at one thing,
+  // such as Windows refusing a loopback connection) shows up in the log, locally and in CI.
+  Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oD"),
   // Published modules log through `slf4j-api` only. Choosing a logging backend is the
   // application's decision: `logback-classic` and the `log4j-to-slf4j` bridge used to be compile
   // dependencies here, so every llm4s artifact put them on its users' classpath - a second
@@ -161,11 +193,32 @@ lazy val appLogging = libraryDependencies ++= Seq(Deps.logback, Deps.log4jToSlf4
 // so sbt's unused-setting lint cannot see the use.
 Global / excludeLintKeys += coveragePolicy
 
+// ---- published artifact check ----
+// A module can ship without a stability tier or an install line, because nothing connects what the
+// build publishes to the docs that name it. See project/PublishedArtifacts.scala.
+lazy val publishedArtifactsCheck = taskKey[Unit](
+  "Fail the build if a published llm4s-* artifact is not named in v1-scope.md and installation.md, or has no POM description of its own"
+)
+// What a release must put on Maven Central, one `artifact <id>` or `stub <id>` per line, for
+// scripts/verify-release.sh. Run it with `sbt -error listPublishedArtifacts`.
+lazy val listPublishedArtifacts = taskKey[Unit](
+  "Print the Maven coordinates a release must publish: artifact lines, then relocation stub lines"
+)
+
 // ---- coverage policy check ----
 // Fails the build when a module has neither a coverage floor nor an explicit opt-out.
 // The absence of a decision must be an error, not a silent default.
 lazy val coveragePolicyCheck = taskKey[Unit](
   "Fail the build if any module has not explicitly declared a coverage floor or opt-out"
+)
+
+// ---- frozen dependency check ----
+// A frozen module must not resolve a document-parsing, speech, cloud-storage, database,
+// observability-backend or foreign vendor-SDK dependency, directly or transitively: freezing it
+// would freeze that stack too. See project/FrozenDependencies.scala. The modules are the ones that
+// call `mimaFrozen`.
+lazy val frozenDependencyCheck = taskKey[Unit](
+  "Fail the build if a frozen module resolves a dependency the modularisation moved out of it"
 )
 
 // ---- integration tier check ----
@@ -174,6 +227,18 @@ lazy val coveragePolicyCheck = taskKey[Unit](
 lazy val itTierCheck = taskKey[Unit](
   "Fail the build if any suite in modules/it has not declared exactly one test tier"
 )
+
+// ---- stability tier check ----
+// The tier of a frozen module's public types lives in the code (`@Stable` / `@Experimental`,
+// `org.llm4s.annotation`), not only in docs/reference/v1-scope.md where it drifts. See
+// project/StabilityTiers.scala. The modules are the ones that call `mimaFrozen`, minus
+// `llm4s-agent`, whose tier waits on the typed graph runtime (#1266, open question in #1281).
+lazy val stabilityTierCheck = taskKey[Unit](
+  "Fail the build if a top-level public type of a frozen module is not marked @Stable or @Experimental"
+)
+val stabilityTierModules = Seq("core", "openai", "openai-compatible", "anthropic", "gemini", "ollama")
+// Beta dialects that live inside the frozen `llm4s-openai-compatible`: 1.0 Scope does not freeze them.
+val stabilityExperimentalFiles = Seq("""/(Mistral|Cohere)[A-Za-z]*\.scala$""".r)
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))
@@ -193,7 +258,15 @@ lazy val llm4s = (project in file("."))
     openai,
     openaiCompatible,
     voyage,
+    bedrock,
+    jina,
+    cohere,
+    watsonx,
     providerTestkit,
+    llm4sEffect,
+    llm4sZio,
+    javaApi,
+    springBootStarter,
     samples,
     configPolicy,
     workspaceShared,
@@ -206,7 +279,9 @@ lazy val llm4s = (project in file("."))
     agent,
     agentTools,
     knowledgegraphNeo4j,
+    gradleDemo,
     benchmarks,
+    deployService,
     // Aggregated so `it` is compiled, formatted and linted with everything else - it was
     // outside the aggregate entirely, so its suites could stop compiling unnoticed. Only the
     // `@Local` tier actually runs under `sbt test`; see `it / Test / testOptions` below.
@@ -220,12 +295,38 @@ lazy val llm4s = (project in file("."))
     relocationKnowledgegraphNeo4j
   )
   .settings(
-    publish / skip := true,
+    // `sbt "dumpBuildModel <file>"`: the build's projects, keys, commands and aliases as JSON, read by
+    // scripts/check-doc-support.sh. See project/BuildModel.scala.
+    commands += BuildModel.dumpCommand,
+    publish / skip                      := true,
+    mimaFailOnNoPrevious                := false,
+    publishedArtifactsCheck / aggregate := false,
+    publishedArtifactsCheck := {
+      val projects = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
+      val described =
+        Def.task((name.value, (publish / skip).value, description.value)).all(ScopeFilter(inAnyProject)).value
+      PublishedArtifacts.check(projects, (ThisBuild / baseDirectory).value, streams.value.log)
+      PomDescriptions.check(described, streams.value.log)
+    },
+    listPublishedArtifacts / aggregate := false,
+    listPublishedArtifacts := {
+      val projects      = Def.task((name.value, (publish / skip).value)).all(ScopeFilter(inAnyProject)).value
+      val (real, stubs) = PublishedArtifacts.coordinates(projects, (ThisBuild / scalaBinaryVersion).value)
+      real.foreach(a => println(s"artifact $a"))
+      stubs.foreach(a => println(s"stub $a"))
+    },
     // Root is an aggregator with no sources of its own. `coverageAggregate` runs here, and
     // the per-module floors are enforced by each module's own `coverageReport`, so the
     // aggregate number is reported but not gated (a build-wide average is exactly the kind
     // of misleading single threshold this change removes).
     coverageDisabled,
+    stabilityTierCheck / aggregate := false,
+    stabilityTierCheck := StabilityTiers.check(
+      (ThisBuild / baseDirectory).value,
+      stabilityTierModules,
+      stabilityExperimentalFiles,
+      streams.value.log
+    ),
     coveragePolicyCheck / aggregate := false,
     coveragePolicyCheck := {
       val log       = streams.value.log
@@ -248,6 +349,30 @@ lazy val llm4s = (project in file("."))
              |  coverageDisabled      // with a comment saying why it is not measured
              |Also add a codecov flag for the module in codecov.yml in the same commit.""".stripMargin
         )
+    },
+    frozenDependencyCheck / aggregate := false,
+    frozenDependencyCheck := {
+      def resolved(report: UpdateReport, declared: Seq[ModuleID]) =
+        report
+          .configuration(ConfigRef("runtime"))
+          .map(_.modules)
+          .getOrElse(Vector.empty)
+          .map(m => FrozenDependencies.Resolved(m.module, declared.exists(_.organization == m.module.organization)))
+      FrozenDependencies.check(
+        Seq(
+          "llm4s-core"   -> resolved((core / update).value, (core / libraryDependencies).value),
+          "llm4s-agent"  -> resolved((agent / update).value, (agent / libraryDependencies).value),
+          "llm4s-openai" -> resolved((openai / update).value, (openai / libraryDependencies).value),
+          "llm4s-openai-compatible" -> resolved(
+            (openaiCompatible / update).value,
+            (openaiCompatible / libraryDependencies).value
+          ),
+          "llm4s-anthropic" -> resolved((anthropic / update).value, (anthropic / libraryDependencies).value),
+          "llm4s-gemini"    -> resolved((gemini / update).value, (gemini / libraryDependencies).value),
+          "llm4s-ollama"    -> resolved((ollama / update).value, (ollama / libraryDependencies).value)
+        ),
+        streams.value.log
+      )
     }
   )
 
@@ -278,10 +403,45 @@ lazy val media = (project in file("modules/media"))
     )
   )
 
+lazy val llm4sEffect = (project in file("modules/llm4s-effect"))
+  .dependsOn(core, agent)
+  .settings(
+    name := "llm4s-effect",
+    commonSettings,
+    // Measured 65.22% statement coverage (`sbt coverage llm4sEffect/test llm4sEffect/coverageReport`).
+    // The uncovered rest is `LLMClientIO.resource`, which loads provider config from the environment.
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(65),
+    libraryDependencies ++= Seq(
+      Deps.catsEffect,
+      Deps.fs2,
+      Deps.scalatest % Test
+    )
+  )
+
+lazy val llm4sZio = (project in file("modules/llm4s-zio"))
+  .dependsOn(core, agent)
+  .settings(
+    name := "llm4s-zio",
+    commonSettings,
+    // Measured 65.91% statement coverage (`sbt coverage llm4sZio/test llm4sZio/coverageReport`).
+    // The uncovered rest is `LLMClientZ.layer`, which loads provider config from the environment.
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(65),
+    libraryDependencies ++= Seq(
+      Deps.zio,
+      Deps.zioStreams,
+      Deps.zioTest    % Test,
+      Deps.zioTestSbt % Test
+    ),
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
+  )
+
 lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
+    mimaFrozen("llm4s-core"),
     // Measured 73.67% statement coverage after the `agent` carve took the agent runtime (80.80%
     // covered) out (#1242); 75.90% after the `agent-tools` carve took the built-in tools
     // (66.18% covered) out; 74.09% after the `observability-prometheus` carve took
@@ -351,7 +511,7 @@ lazy val core = (project in file("modules/core"))
 // dependency, they do not rewrite imports.
 
 lazy val knowledgegraph = (project in file("modules/knowledgegraph"))
-  .dependsOn(core)
+  .dependsOn(core % "compile->compile;test->test")
   .settings(
     name := "llm4s-knowledgegraph",
     commonSettings,
@@ -426,7 +586,7 @@ lazy val rag = (project in file("modules/rag"))
 // rather than rewriting imports.
 
 lazy val memory = (project in file("modules/memory"))
-  .dependsOn(core)
+  .dependsOn(core % "compile->compile;test->test")
   .settings(
     name := "llm4s-memory",
     commonSettings,
@@ -475,14 +635,15 @@ lazy val memoryPostgres = (project in file("modules/memory-postgres"))
 // the rest of core and no edge to each other, so they carve independently.
 
 lazy val mcp = (project in file("modules/mcp"))
-  .dependsOn(core)
+  // `providerTestkit % Test` is for the interruption checks, run against a server that never answers.
+  .dependsOn(core, providerTestkit % Test)
   .settings(
     name := "llm4s-mcp",
     commonSettings,
     // Measured 70.79% statement coverage (`sbt coverage mcp/test mcp/coverageReport`) on the
     // code as carved out of core. Floor is the measured value rounded down to the nearest 5.
     // Never lower it.
-    coverageFloor(70),
+    coverageFloor(75),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -516,14 +677,16 @@ lazy val mcp = (project in file("modules/mcp"))
 // It was the build's only third-party resolver and it resolved nothing.
 
 lazy val speech = (project in file("modules/speech"))
-  .dependsOn(core)
+  // `providerTestkit % Test` is for `CloudSpeechCancellationSpec`: the testkit's interruption check, run
+  // against a server that never answers. Test scope only.
+  .dependsOn(core, providerTestkit % Test)
   .settings(
     name := "llm4s-speech",
     commonSettings,
     // Measured 80.68% statement coverage (`sbt coverage speech/test speech/coverageReport`) on
-    // the code as carved out of core. Floor is the measured value rounded down to the nearest
-    // 5. Never lower it.
-    coverageFloor(80),
+    // the code as carved out of core; 86.28% with the cloud providers (#1010) and their stubbed-HTTP
+    // specs. Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(85),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -542,14 +705,15 @@ lazy val image = (project in file("modules/image"))
   // `observabilityPrometheus % Test` is for `ImageGenerationCostTrackingSpec`, which reads the
   // image metrics back out of a real `PrometheusMetrics` registry. Test scope only: the
   // published `llm4s-image` depends on the `MetricsCollector` contract, not on Prometheus.
-  .dependsOn(media, core, observabilityPrometheus % Test)
+  .dependsOn(media, core, observabilityPrometheus % Test, providerTestkit % Test)
   .settings(
     name := "llm4s-image",
     commonSettings,
-    // Measured 66.82% statement coverage (`sbt coverage image/test image/coverageReport`) on
-    // the code as carved out of core. Floor is the measured value rounded down to the nearest
-    // 5. Never lower it. The two `@Local` vision suites in `modules/it` are not counted here.
-    coverageFloor(65),
+    // Measured 75.60% statement coverage (`sbt coverage image/test image/coverageReport`) with
+    // the Gemini vision client and its stub-server spec (66.82% as carved out of core). Floor is
+    // the measured value rounded down to the nearest 5. Never lower it. The two `@Local`
+    // vision suites in `modules/it` are not counted here.
+    coverageFloor(75),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -578,10 +742,11 @@ lazy val ollama = (project in file("modules/ollama"))
   .settings(
     name := "llm4s-ollama",
     commonSettings,
-    // Measured 77.44% statement coverage (`sbt coverage ollama/test ollama/coverageReport`) on
-    // the code as carved out of core. Floor is the measured value rounded down to the nearest
+    mimaFrozen("llm4s-ollama"),
+    // Measured 97.22% statement coverage (`sbt coverage ollama/test ollama/coverageReport`) after
+    // the `format` (structured output) wiring; 77.44% when carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The `@Ollama` suite in `modules/it` is not counted here.
-    coverageFloor(75),
+    coverageFloor(95),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -605,6 +770,7 @@ lazy val gemini = (project in file("modules/gemini"))
   .settings(
     name := "llm4s-gemini",
     commonSettings,
+    mimaFrozen("llm4s-gemini"),
     // Measured 87.53% statement coverage (`sbt coverage gemini/test gemini/coverageReport`) on
     // the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The `@Cloud` Gemini smoke suite in `modules/it` is not counted here.
@@ -629,6 +795,7 @@ lazy val anthropic = (project in file("modules/anthropic"))
   .settings(
     name := "llm4s-anthropic",
     commonSettings,
+    mimaFrozen("llm4s-anthropic"),
     // Measured 81.32% statement coverage (`sbt coverage anthropic/test anthropic/coverageReport`)
     // on the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The `@Cloud` Anthropic smoke suite in `modules/it` is not counted here.
@@ -655,6 +822,7 @@ lazy val openaiCompatible = (project in file("modules/openai-compatible"))
   .settings(
     name := "llm4s-openai-compatible",
     commonSettings,
+    mimaFrozen("llm4s-openai-compatible"),
     // Measured 92.92% statement coverage (`sbt coverage openaiCompatible/test
     // openaiCompatible/coverageReport`) with Mistral and Cohere added as dialects; it was 92.68%
     // with the first three clients consolidated onto `OpenAICompatibleClient`, their suites moved
@@ -696,6 +864,99 @@ lazy val voyage = (project in file("modules/providers/voyage"))
     )
   )
 
+// AWS Bedrock chat (#1008): rebuilt from #1029 as a `ProviderDescriptor` over the Bedrock Converse
+// and ConverseStream APIs. It takes the AWS SDK v2 `bedrockruntime` artifact (Apache-2.0, the same
+// SDK release train as `llm4s-rag`'s S3 client) and nothing else; core gains no dependency.
+
+lazy val bedrock = (project in file("modules/providers/bedrock"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-bedrock",
+    commonSettings,
+    // Measured 96.39% statement coverage (`sbt coverage bedrock/test bedrock/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. The `@Cloud`
+    // Bedrock smoke suite in `modules/it` is not counted here.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.awsBedrockRuntime,
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
+// Jina AI embeddings (#1028): an embedding provider only, rebuilt from #1060 as an
+// `EmbeddingProviderDescriptor` with a typed `JinaTask` setting. No dependency beyond core.
+
+lazy val jina = (project in file("modules/providers/jina"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-jina",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage jina/test jina/coverageReport`). Floor is
+    // the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(100),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
+// Cohere embeddings: an embedding provider only, as an `EmbeddingProviderDescriptor` with a typed
+// `CohereInputType` setting. Cohere's native `/v2/embed` is not OpenAI-compatible (`texts`,
+// `input_type`, `embedding_types`, vectors keyed by type), so it is a module of its own and not a
+// dialect in `llm4s-openai-compatible`, where Cohere chat lives. No dependency beyond core.
+
+lazy val cohere = (project in file("modules/providers/cohere"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-cohere",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage cohere/test cohere/coverageReport`). Floor is
+    // the measured value rounded down to the nearest 5. Never lower it. The `@Cloud`
+    // `CohereEmbeddingsSmokeSpec` in `modules/it` is not counted here.
+    coverageFloor(100),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
+// `llm4s-watsonx` (#1019): IBM watsonx.ai. Not OpenAI-compatible - its text-generation API takes
+// a flattened `input` string and authenticates by exchanging an IBM Cloud API key for an IAM
+// bearer token - so it is a provider module of its own rather than a dialect in
+// `openai-compatible`. No dependency beyond core.
+
+lazy val watsonx = (project in file("modules/providers/watsonx"))
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
+  .settings(
+    name := "llm4s-watsonx",
+    commonSettings,
+    // Measured 98.45% statement coverage (`sbt coverage watsonx/test watsonx/coverageReport`).
+    // Floor is the measured value rounded down to the nearest 5. Never lower it. There is no
+    // live suite in `modules/it`: watsonx.ai needs an IBM Cloud account (#1020).
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // `llm4s-provider-testkit` (#1133) is what a provider module's `Llm4s<Name>ModuleSpec` is written
 // with: discovery, sole ownership, explicit registration, the config-to-client round trip and
 // the `reference.conf` credential binding, as assertions, plus config loading from a HOCON
@@ -703,6 +964,10 @@ lazy val voyage = (project in file("modules/providers/voyage"))
 // provider module outside this repository can prove itself the way the in-repo ones do; those
 // helpers used to live in core's test sources, which are not published. A test library, so
 // ScalaTest is a compile dependency. Every in-repo provider module dogfoods it (`% Test`).
+//
+// It needs JDK 21: the interruption checks run on `Thread.ofVirtual` and the local server on
+// `Executors.newVirtualThreadPerTaskExecutor` (#1582). The docs say so; no module sets a
+// `-release` or `javacOptions` target, and where the floor is enforced is for #1493 to decide.
 //
 // Core's own tests cannot use it - that would be a project cycle - so anything core's tests
 // share with it lives in core's main sources, `private[llm4s]` (`config.ReferenceConfig`).
@@ -739,6 +1004,7 @@ lazy val openai = (project in file("modules/openai"))
   .settings(
     name := "llm4s-openai",
     commonSettings,
+    mimaFrozen("llm4s-openai"),
     // Measured 80.42% statement coverage (`sbt coverage openai/test openai/coverageReport`)
     // after the move to `openai-java` (#1132), up from 62.34% at the carve and 73.72% at the
     // switch: `OpenAIClient` is at 85% with the streamed tool-call specs and
@@ -821,6 +1087,48 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   )
   .settings(WorkspaceRunnerDocker.settings)
 
+// A small HTTP service - GET /health and GET /llm-check - for the staged-deployment workflow template
+// (.github/workflows/deploy-staged.yml) and the Kustomize manifests in deploy/ (#846). It is its own
+// module, not part of `samples`, so cask and a pinned main class do not land on the examples' classpath.
+// Unpublished: it is what a downstream project copies, so it depends on the library as a user's service
+// would, and builds its image with the Docker plugin like `workspaceRunner` does.
+lazy val deployService = (project in file("modules/deploy-service"))
+  .dependsOn(
+    core % "compile->compile;test->test",
+    ollama,
+    gemini,
+    anthropic,
+    openai,
+    openaiCompatible
+  )
+  .enablePlugins(JavaAppPackaging, DockerPlugin)
+  .settings(
+    name := "llm4s-deploy-service",
+    commonSettings,
+    Compile / mainClass := Some("org.llm4s.deploy.DeployServiceMain"),
+    // `cask.Main.main` starts the server on a background thread and returns, so an unforked `run`
+    // finishes at once and sbt exits (in batch mode) with the server still starting. Forked, sbt waits
+    // for the service's own JVM, which the server threads keep alive.
+    run / fork := true,
+    libraryDependencies ++= Seq(
+      Deps.cask,
+      Deps.ujson,
+      Deps.scalatest % Test
+    ),
+    appLogging,
+    publish / skip := true,
+    // Measured 92.91% statement coverage (`sbt coverage deployService/test deployService/coverageReport`),
+    // by unit tests plus the real routes on a real server on an ephemeral port. The entry point
+    // (`DeployServiceMain`) is excluded via ThisBuild / coverageExcludedPackages. Floor is the measured
+    // value rounded down to the nearest 5. Never lower it.
+    coverageFloor(90)
+  )
+  .settings(DeployServiceDocker.settings)
+
+lazy val docSnippetsReport = taskKey[Unit](
+  "List every Scala block of the documentation pages that are compile-checked, with its hash and whether it is skipped"
+)
+
 lazy val samples = (project in file("modules//samples"))
   .dependsOn(
     core,
@@ -837,11 +1145,17 @@ lazy val samples = (project in file("modules//samples"))
     openai,
     openaiCompatible,
     voyage,
+    bedrock,
+    jina,
+    cohere,
+    watsonx,
     knowledgegraphNeo4j,
     observability,
     observabilityPrometheus,
     agent,
-    agentTools
+    agentTools,
+    llm4sEffect,
+    llm4sZio
   )
   .settings(
     name := "llm4s-samples",
@@ -851,7 +1165,34 @@ lazy val samples = (project in file("modules//samples"))
     // (org.llm4s.samples.*). Samples are compile-checked, not covered.
     coverageDisabled,
     libraryDependencies += Deps.termflow,
-    appLogging
+    // Test-only: `JsonLibrariesGuideSpec` runs the recipes of docs/guide/json-libraries.md against the real libraries.
+    // Samples are unpublished, so none of these reaches a user's classpath or a frozen module.
+    libraryDependencies ++= Seq(
+      Deps.circeCore  % Test,
+      Deps.ujsonCirce % Test,
+      Deps.playJson   % Test,
+      Deps.zioJson    % Test
+    ),
+    appLogging,
+    // The Scala blocks of the getting-started pages are compiled as test sources, so a snippet that no longer
+    // compiles fails `sbt test` (#1477). The generator and its rules are in project/DocSnippets.scala; the blocks
+    // that are deliberately not compiled are listed in src/test/docs-snippets/skip.txt.
+    Test / sourceGenerators += Def.task {
+      DocSnippets.generate(
+        (ThisBuild / baseDirectory).value / "docs",
+        baseDirectory.value / "src" / "test" / "docs-snippets" / "skip.txt",
+        (Test / sourceManaged).value / "docsnippets",
+        streams.value.log
+      )
+    }.taskValue,
+    // Warnings (unused imports and values, in a snippet written to be read) are not errors in generated sources.
+    Test / scalacOptions += "-Wconf:src=.*docsnippets.*:s",
+    docSnippetsReport := println(
+      DocSnippets.report(
+        (ThisBuild / baseDirectory).value / "docs",
+        baseDirectory.value / "src" / "test" / "docs-snippets" / "skip.txt"
+      )
+    )
   )
 
 lazy val configPolicy = (project in file("modules/config-policy"))
@@ -860,7 +1201,7 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   // registered" before any policy runs. It must accept whatever a user's config names, not
   // just what CI's smoke config (ollama) happens to exercise. A provider carve adds itself
   // here; `CheckPoliciesProvidersSpec` checks each one resolves.
-  .dependsOn(core, ollama, gemini, anthropic, openai, openaiCompatible)
+  .dependsOn(core, ollama, gemini, anthropic, openai, openaiCompatible, bedrock, watsonx)
   .settings(
     name := "llm4s-config-policy",
     commonSettings,
@@ -970,8 +1311,8 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   )
 
 // ---- slice 7 of the modularisation programme (#1242) ----
-// `llm4s-agent` is the agent runtime: `org.llm4s.agent` (the `Agent`, `AgentState`, guardrails,
-// handoffs, orchestration and streaming events) and `org.llm4s.assistant` (the console
+// `llm4s-agent` is the agent runtime: `org.llm4s.agent` (the `Agent`, guardrails, handoffs, the
+// typed graph runtime and streaming events) and `org.llm4s.assistant` (the console
 // assistant, tiered Beta, and the only user of fansi). `agent.memory` was already carved into
 // `llm4s-memory`, which does not depend on this module. Package names are unchanged.
 //
@@ -986,6 +1327,7 @@ lazy val agent = (project in file("modules/agent"))
   .settings(
     name := "llm4s-agent",
     commonSettings,
+    mimaFrozen("llm4s-agent"),
     // Measured 80.80% statement coverage (`sbt coverage agent/test agent/coverageReport`) on the
     // code as carved out of core. Floor is the measured value rounded down to the nearest 5.
     // Never lower it.
@@ -1076,6 +1418,10 @@ lazy val it = (project in file("modules/it"))
     openai,
     openaiCompatible,
     voyage,
+    bedrock,
+    jina,
+    cohere,
+    watsonx,
     knowledgegraphNeo4j,
     workspaceClient,
     observability,
@@ -1150,6 +1496,10 @@ lazy val docs = (project in file("modules/docs"))
     openai,
     openaiCompatible,
     voyage,
+    bedrock,
+    jina,
+    cohere,
+    watsonx,
     providerTestkit,
     workspaceShared,
     workspaceClient,
@@ -1158,12 +1508,18 @@ lazy val docs = (project in file("modules/docs"))
     traceOpentelemetry,
     agent,
     agentTools,
-    knowledgegraphNeo4j
+    knowledgegraphNeo4j,
+    llm4sEffect,
+    llm4sZio,
+    javaApi,
+    springBootStarter
   )
   .settings(
     name := "llm4s-docs",
     commonSettings,
     publish / skip := true,
+    // Provided-scope in spring-boot-starter, so not on the classpath it exports.
+    libraryDependencies += Deps.springBootActuator,
     // Not measured: no sources of its own - it exists only to host the aggregate `doc` task.
     coverageDisabled,
     Compile / sources := {
@@ -1182,6 +1538,10 @@ lazy val docs = (project in file("modules/docs"))
         (openai / Compile / sources).value ++
         (openaiCompatible / Compile / sources).value ++
         (voyage / Compile / sources).value ++
+        (bedrock / Compile / sources).value ++
+        (jina / Compile / sources).value ++
+        (cohere / Compile / sources).value ++
+        (watsonx / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
@@ -1190,10 +1550,46 @@ lazy val docs = (project in file("modules/docs"))
         (traceOpentelemetry / Compile / sources).value ++
         (agent / Compile / sources).value ++
         (agentTools / Compile / sources).value ++
-        (knowledgegraphNeo4j / Compile / sources).value
+        (knowledgegraphNeo4j / Compile / sources).value ++
+        (llm4sEffect / Compile / sources).value ++
+        (llm4sZio / Compile / sources).value ++
+        (javaApi / Compile / sources).value ++
+        (springBootStarter / Compile / sources).value
     },
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty
+  )
+
+lazy val javaApi = (project in file("modules/java-api"))
+  .dependsOn(core % "compile->compile;test->test", agent, openai, anthropic, ollama, gemini, openaiCompatible)
+  .settings(
+    name := "llm4s-java-api",
+    commonSettings,
+    // Measured 100.00% statement coverage (with the integration spec) (`sbt coverage javaApi/test javaApi/coverageReport`);
+    // floor is the measured value rounded down to the nearest 5.
+    coverageFloor(100),
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
+  )
+
+lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
+  .dependsOn(javaApi)
+  .settings(
+    name := "llm4s-spring-boot-starter",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage springBootStarter/test
+    // springBootStarter/coverageReport`); floor is the measured value rounded down to the
+    // nearest 5.
+    coverageFloor(100),
+    libraryDependencies ++= Seq(
+      Deps.springBootAutoConfigure,
+      Deps.springBootActuator          % Provided,
+      Deps.scalatest                   % Test,
+      Deps.springBootStarterTest       % Test,
+      Deps.springBootTestAutoConfigure % Test,
+      Deps.springBootActuator          % Test
+    )
   )
 
 lazy val benchmarks = (project in file("modules/benchmarks"))
@@ -1215,10 +1611,24 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
     )
   )
 
+lazy val gradleDemo = (project in file("modules/gradle-demo"))
+  .dependsOn(core)
+  .settings(
+    name := "gradle-demo",
+    commonSettings,
+    publish / skip := true,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    ),
+    // Measured 100.00% statement coverage (`sbt coverage gradleDemo/test
+    // gradleDemo/coverageReport`); floor is the measured value rounded down to the nearest 5.
+    coverageFloor(100)
+  )
+
 // ---- relocation stubs for the 0.4.0 artifact rename ----
 // Each project below publishes ONLY a POM at the retired coordinate, carrying a Maven
 // `<relocation>` that points at its replacement. They deliberately carry no sources, no
-// `commonSettings` and no Scala library, so they compile nothing; see project/Relocation.scala
+// `commonSettings` and no Scala library, so they compile nothing (and have no MiMa baseline); see project/Relocation.scala
 // for what a relocation POM does and does not achieve.
 //
 // Only coordinates with real published history on Maven Central get a stub - publishing a
@@ -1230,16 +1640,16 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
 // no Central history, so they need no stub.
 
 lazy val relocationCore = (project in file("modules/relocations/core"))
-  .settings(Relocation.settings("core", "llm4s-core_3"))
+  .settings(Relocation.settings("core", "llm4s-core_3"), mimaFailOnNoPrevious := false)
 
 lazy val relocationWorkspaceClient = (project in file("modules/relocations/workspaceclient"))
-  .settings(Relocation.settings("workspaceclient", "llm4s-workspace-client_3"))
+  .settings(Relocation.settings("workspaceclient", "llm4s-workspace-client_3"), mimaFailOnNoPrevious := false)
 
 lazy val relocationWorkspaceShared = (project in file("modules/relocations/workspaceshared"))
-  .settings(Relocation.settings("workspaceshared", "llm4s-workspace-shared_3"))
+  .settings(Relocation.settings("workspaceshared", "llm4s-workspace-shared_3"), mimaFailOnNoPrevious := false)
 
 lazy val relocationTraceOpentelemetry = (project in file("modules/relocations/trace-opentelemetry"))
-  .settings(Relocation.settings("trace-opentelemetry", "llm4s-observability-otel_3"))
+  .settings(Relocation.settings("trace-opentelemetry", "llm4s-observability-otel_3"), mimaFailOnNoPrevious := false)
 
 lazy val relocationKnowledgegraphNeo4j = (project in file("modules/relocations/knowledgegraph-neo4j"))
-  .settings(Relocation.settings("knowledgegraph-neo4j", "llm4s-knowledgegraph-neo4j_3"))
+  .settings(Relocation.settings("knowledgegraph-neo4j", "llm4s-knowledgegraph-neo4j_3"), mimaFailOnNoPrevious := false)

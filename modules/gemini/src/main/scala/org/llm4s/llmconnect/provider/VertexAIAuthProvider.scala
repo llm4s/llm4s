@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoSystemGetenv
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{ AuthenticationError, NetworkError }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.Llm4sHttpClient
@@ -16,6 +17,7 @@ import java.security.spec.PKCS8EncodedKeySpec
 import java.util.Base64
 import scala.concurrent.duration.*
 import scala.util.Try
+import org.llm4s.util.Redaction
 
 /**
  * Provides Google Cloud OAuth2 access tokens for Vertex AI via ADC.
@@ -48,6 +50,7 @@ import scala.util.Try
  * @param envReader          Environment variable reader; injectable for testing.
  * @param fileReader         File reader; injectable for testing.
  */
+@Stable
 class VertexAIAuthProvider(
   credentialFilePath: Option[String],
   httpClient: Llm4sHttpClient,
@@ -141,7 +144,7 @@ class VertexAIAuthProvider(
           Left(
             AuthenticationError(
               "vertexai",
-              s"Token refresh failed (HTTP ${response.statusCode}): ${response.body}"
+              s"Token refresh failed (HTTP ${response.statusCode}): ${Redaction.safeBody(response.body)}"
             )
           )
         }
@@ -223,7 +226,7 @@ class VertexAIAuthProvider(
           Left(
             AuthenticationError(
               "vertexai",
-              s"JWT token exchange failed (HTTP ${response.statusCode}): ${response.body}"
+              s"JWT token exchange failed (HTTP ${response.statusCode}): ${Redaction.safeBody(response.body)}"
             )
           )
         }

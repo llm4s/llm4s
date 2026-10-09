@@ -64,6 +64,14 @@ flags:
     paths:
       - modules/speech/src/main/scala
     carryforward: true
+  llm4s-effect:
+    paths:
+      - modules/llm4s-effect/src/main/scala
+    carryforward: true
+  llm4s-zio:
+    paths:
+      - modules/llm4s-zio/src/main/scala
+    carryforward: true
   ollama:
     paths:
       - modules/ollama/src/main/scala
@@ -87,6 +95,19 @@ flags:
   voyage:
     paths:
       - modules/providers/voyage/src/main/scala
+    carryforward: true
+  bedrock:
+    paths:
+      - modules/providers/bedrock/src/main/scala
+  jina:
+    paths:
+      - modules/providers/jina/src/main/scala
+  cohere:
+    paths:
+      - modules/providers/cohere/src/main/scala
+  watsonx:
+    paths:
+      - modules/providers/watsonx/src/main/scala
     carryforward: true
   provider-testkit:
     paths:
@@ -112,6 +133,18 @@ flags:
     paths:
       - modules/agent/src/main/scala
     carryforward: true
+  java-api:
+    paths:
+      - modules/java-api/src/main/scala
+    carryforward: true
+  deploy-service:
+    paths:
+      - modules/deploy-service/src/main/scala
+    carryforward: true
+  spring-boot-starter:
+    paths:
+      - modules/spring-boot-starter/src/main/scala
+    carryforward: true
   trace-opentelemetry:
     paths:
       - modules/trace-opentelemetry/src/main/scala
@@ -122,6 +155,10 @@ flags:
   config-policy:
     paths:
       - modules/config-policy/src/main/scala
+    carryforward: true
+  gradle-demo:
+    paths:
+      - modules/gradle-demo/src/main/scala
     carryforward: true
   samples:
     paths:

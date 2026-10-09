@@ -1,8 +1,11 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.annotation.Stable
+
 import com.typesafe.config.ConfigUtil
 import org.llm4s.config.SharedCredentials
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -18,11 +21,16 @@ import scala.jdk.CollectionConverters._
  * @param apiKey  `llm4s.embeddings.<id>.apiKey`.
  * @param baseUrl `llm4s.embeddings.<id>.baseUrl`.
  * @param model   `llm4s.embeddings.<id>.model`.
+ * @param timeouts `llm4s.embeddings.<id>.timeouts`: how long an embedding request may take, as the same
+ *                 `timeouts` block a chat section has. Only `request` applies, since an embedding call
+ *                 does not stream. Absent means the provider's own default.
  */
+@Stable
 final case class EmbeddingProviderSection(
   apiKey: Option[String] = None,
   baseUrl: Option[String] = None,
-  model: Option[String] = None
+  model: Option[String] = None,
+  timeouts: ProviderTimeouts = ProviderTimeouts.default
 )
 
 /**
@@ -63,6 +71,7 @@ final case class EmbeddingProviderSection(
  *                       shared key, and the error then names the shared path instead.
  * @param modelEnv       the variable the module binds to the model, named likewise.
  */
+@Stable
 final case class EmbeddingConfigSpec private (
   requiresApiKey: Boolean,
   defaultBaseUrl: Option[String],

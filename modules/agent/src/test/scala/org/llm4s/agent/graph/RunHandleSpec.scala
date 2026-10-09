@@ -144,6 +144,69 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     handle.status shouldBe RunStatus.Completed
   }
 
+  /**
+   * A store whose commit of the run's closing `RunCancelled` opens `closing`, then waits until
+   * `stopped` opens, and fails that commit if the run thread was interrupted meanwhile - as a JDBC
+   * driver might. Every other commit goes straight to an in-memory store.
+   */
+  final private class ClosingStore(closing: CountDownLatch, stopped: CountDownLatch) extends Checkpointer {
+    val underlying = InMemoryCheckpointer()
+    def commit(threadId: ThreadId, commit: Commit) =
+      if commit.events.exists(_.event == RunEvent.RunCancelled) then {
+        closing.countDown()
+        val waited      = CancelledError.catchInterrupt(stopped.await(5, TimeUnit.SECONDS))
+        val interrupted = waited.isLeft || Thread.interrupted()
+        if interrupted then Left(org.llm4s.error.ValidationError("store", "interrupted"))
+        else underlying.commit(threadId, commit)
+      } else underlying.commit(threadId, commit)
+    def latest(threadId: ThreadId) = underlying.latest(threadId)
+    def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
+      underlying.eventsAfter(threadId, afterSeq, limit)
+    def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
+  }
+
+  "A stop" should "never interrupt the closing commit of a run that has acknowledged it" in {
+    // a cancel records its cause, then is held before it interrupts. The run then reaches
+    // `cancelled()` by each path that can follow a recorded stop - a node that interrupts itself,
+    // a run that completes, a run that fails - and commits RunCancelled while the cancel finishes.
+    val endings: Seq[(String, () => NodeResult)] = Seq(
+      "a node interrupting itself" -> { () =>
+        Thread.currentThread().interrupt()
+        continue(Command.empty.update(out, "x"))
+      },
+      "a run completing" -> (() => continue(Command.empty.update(out, "x"))),
+      "a run failing"    -> (() => NodeResult.Fail(org.llm4s.error.ValidationError("work", "boom")))
+    )
+    for (label, ending) <- endings do
+      withClue(s"$label: ") {
+        val go = new CountDownLatch(1)
+        val b  = GraphBuilder("stop-race", "v1")
+        val node = b.node[String]("n", writes = Set(out)) { (_, _, _) =>
+          go.await(5, TimeUnit.SECONDS); ending()
+        }
+        val g       = b.compile(node)(_.get(out).map(_.mkString)).value
+        val closing = new CountDownLatch(1)
+        val stopped = new CountDownLatch(1)
+        val store   = ClosingStore(closing, stopped)
+        val handle  = GraphRuntime(store).start(thread, g, "in").value.asInstanceOf[DefaultRunHandle[String]]
+        val atHook  = new CountDownLatch(1)
+        handle.beforeInterrupt = () => {
+          atHook.countDown()
+          closing.await(5, TimeUnit.SECONDS): Unit // until the run is committing RunCancelled
+        }
+        Thread.ofVirtual().start { () =>
+          handle.cancel()
+          stopped.countDown()
+        }
+        atHook.await(5, TimeUnit.SECONDS) shouldBe true // the cancel is recorded, not yet delivered
+        go.countDown()
+        val error = awaitResult(handle).value.failed._2
+        error shouldBe GraphError.Cancelled(Some(thread.value), store.latest(thread).value.map(_.checkpoint.id))
+        store.eventsAfter(thread, 0L, 100).value.last.event shouldBe RunEvent.RunCancelled
+      }
+  }
+
   "await" should "return CancelledError when the awaiting thread is interrupted, without cancelling the run" in {
     val runtime = GraphRuntime.inMemory()
     val started = new CountDownLatch(1)
@@ -236,6 +299,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
       underlying.eventsAfter(threadId, afterSeq, limit)
     def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+    def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
   }
 
   /** A clock that throws while `failing` says so for the read numbered by its argument (from 1). */
@@ -303,6 +367,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
     }
     (store, armed)
   }
@@ -352,6 +417,7 @@ class RunHandleSpec extends AnyFlatSpec with Matchers with EitherValues {
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int) =
         underlying.eventsAfter(threadId, afterSeq, limit)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = underlying.compactEvents(threadId, beforeSeq)
+      def deleteThread(threadId: ThreadId)                   = underlying.deleteThread(threadId)
     }
     val runtime = GraphRuntime(store)
     runtime.start(thread, instant, "x").left.value match {

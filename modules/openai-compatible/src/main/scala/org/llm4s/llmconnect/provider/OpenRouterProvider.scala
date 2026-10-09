@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenRouterModelLister, ProviderModelLister }
@@ -17,6 +18,7 @@ import org.llm4s.types.Result
  * it has its own client: `OpenRouterClient` adds the referer/title headers
  * the service expects, reasoning parameters and its own tool-call parsing.
  */
+@Stable
 object OpenRouterProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("openrouter")
 

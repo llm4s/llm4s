@@ -1,10 +1,12 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.{ SessionId, FilePath }
 
 /**
  * Assistant-specific error types with rich context and formatting
  */
+@Stable
 sealed abstract class AssistantError extends Product with Serializable {
 
   /** Human-readable error message */
@@ -135,10 +137,10 @@ object AssistantError {
 
   // Console-specific constructors
   def consoleInputFailed(cause: Throwable): AssistantError =
-    IOError(s"Failed to read user input: ${cause.getMessage}", "read", Some(cause))
+    IOError(s"Failed to read user input: ${LLMError.describeCause(cause)}", "read", Some(cause))
 
   def consoleOutputFailed(displayType: String, cause: Throwable): AssistantError =
-    DisplayError(s"Failed to display $displayType: ${cause.getMessage}", displayType, Some(cause))
+    DisplayError(s"Failed to display $displayType: ${LLMError.describeCause(cause)}", displayType, Some(cause))
 
   // Command parsing constructors
   def emptyCommandTitle(command: String): AssistantError =

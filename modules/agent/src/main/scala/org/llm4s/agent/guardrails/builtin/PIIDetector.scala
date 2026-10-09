@@ -5,6 +5,7 @@ import org.llm4s.agent.guardrails.patterns.PIIPatterns
 import org.llm4s.agent.guardrails.patterns.PIIPatterns.{ PIIMatch, PIIType }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 /**
  * Detects Personally Identifiable Information (PII) in text.
@@ -21,7 +22,8 @@ import org.llm4s.types.Result
  * Can be configured to:
  * - Block: Return error when PII is detected (default)
  * - Fix: Automatically mask PII and continue
- * - Warn: Log warning and allow processing to continue
+ * - Warn: Log a warning and allow processing to continue. The warning names the PII types found and
+ *   how many of each, never the matched text.
  *
  * Example usage:
  * {{{
@@ -46,6 +48,8 @@ class PIIDetector(
 ) extends InputGuardrail
     with OutputGuardrail {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def validate(value: String): Result[String] = {
     val matches = PIIPatterns.detect(value, piiTypes)
 
@@ -54,12 +58,10 @@ class PIIDetector(
     } else {
       onFail match {
         case GuardrailAction.Block =>
-          val summary  = summarizeMatches(matches)
-          val piiTypes = matches.map(_.piiType.name).distinct.mkString(", ")
           Left(
             ValidationError.invalid(
               "input",
-              s"PII detected: $summary. Found types: [$piiTypes]. " +
+              s"PII detected: ${describe(matches)} " +
                 "Remove or mask sensitive information before processing."
             )
           )
@@ -70,8 +72,7 @@ class PIIDetector(
           Right(masked)
 
         case GuardrailAction.Warn =>
-          // Log warning but allow processing
-          // In a real implementation, this would log to the trace system
+          logger.warn(s"PII detected and allowed in warn mode: ${describe(matches)}")
           Right(value)
       }
     }
@@ -92,6 +93,15 @@ class PIIDetector(
   override val description: Option[String] = Some(
     s"Detects PII in text: ${piiTypes.map(_.name).mkString(", ")}"
   )
+
+  /**
+   * What was found, as `"SSN (1), Email (2). Found types: [SSN, Email]."`: type names and counts only,
+   * so the text is safe to put in a log line or an error.
+   */
+  private def describe(matches: Seq[PIIMatch]): String = {
+    val typeNames = matches.map(_.piiType.name).distinct.mkString(", ")
+    s"${summarizeMatches(matches)}. Found types: [$typeNames]."
+  }
 
   private def summarizeMatches(matches: Seq[PIIMatch]): String = {
     val grouped = matches.groupBy(_.piiType.name)

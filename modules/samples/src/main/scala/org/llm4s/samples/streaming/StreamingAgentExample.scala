@@ -1,136 +1,36 @@
 package org.llm4s.samples.streaming
 
 import org.llm4s.agent.Agent
-import org.llm4s.agent.streaming.AgentEvent
-import org.llm4s.agent.streaming.AgentEvent._
+import org.llm4s.agent.events.AgentEvents
+import org.llm4s.agent.graph.ThreadId
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
 import org.slf4j.LoggerFactory
 
 /**
- * Example demonstrating streaming events during agent execution.
+ * An agent whose answer streams as it is generated: `withStreaming()` makes each model call stream,
+ * and `agent.stream` hands every event of the turn to a listener - text deltas live, model and tool
+ * events as they commit.
  *
- * This example shows how to:
- * - Use `runWithEvents` for real-time streaming
- * - Handle different event types (text, tool, lifecycle)
- * - Display progress to users during long operations
- *
- * Run with: sbt "samples/runMain org.llm4s.samples.streaming.StreamingAgentExample"
- *
- * Runs against the samples' default provider, the `ollama-local` section of
- * `modules/samples/src/main/resources/application.conf`. For another provider, add a
- * section to `application.local.conf` beside it and select it with `LLM4S_PROVIDER`
- * (docs/getting-started/configuration.md#running-the-samples).
+ * To run: sbt "samples/runMain org.llm4s.samples.streaming.StreamingAgentExample"
  */
-object StreamingAgentExample extends App {
+object StreamingAgentExample:
   private val logger = LoggerFactory.getLogger(getClass)
 
-  logger.info("=" * 60)
-  logger.info("Streaming Agent Example")
-  logger.info("=" * 60)
-
-  // Create a simple weather tool for demonstration
-  case class WeatherInput(city: String)
-  case class WeatherOutput(city: String, temperature: Int, conditions: String)
-
-  object WeatherInput {
-    import upickle.default._
-    implicit val rw: ReadWriter[WeatherInput] = macroRW
-  }
-
-  object WeatherOutput {
-    import upickle.default._
-    implicit val rw: ReadWriter[WeatherOutput] = macroRW
-  }
-
-  val weatherToolResult = ToolBuilder[WeatherInput, WeatherOutput](
-    name = "get_weather",
-    description = "Get current weather for a city",
-    schema = Schema.`object`[WeatherInput]("Weather query").withRequiredField("city", Schema.string("City name"))
-  ).withHandler { extractor =>
-    extractor.getString("city").map { city =>
-      // Simulate API call delay
-      Thread.sleep(500)
-      val temps = Map("London" -> 15, "Paris" -> 18, "Tokyo" -> 22, "New York" -> 12)
-      val temp  = temps.getOrElse(city, 20)
-      WeatherOutput(city, temp, "Partly cloudy")
-    }
-  }.buildSafe()
-
-  // Event handler that provides real-time feedback
-  def handleEvent(event: AgentEvent): Unit = event match {
-    case AgentStarted(query, toolCount, _) =>
-      logger.info("[Agent] Starting with query: '{}'", query)
-      logger.info("[Agent] Tools available: {}", toolCount)
-
-    case StepStarted(stepNumber, _) =>
-      logger.info("[Step {}] Starting...", stepNumber)
-
-    case TextDelta(delta, _) =>
-      // Print text as it streams (no newline) - Keep print for UI effect
-      print(delta)
-
-    case TextComplete(_, _) =>
-      // Add newline after streaming completes - Keep println for UI line termination
-      println()
-
-    case ToolCallStarted(_, toolName, arguments, _) =>
-      logger.info("[Tool] Calling '{}' with: {}", toolName, arguments)
-
-    case ToolCallCompleted(_, toolName, result, success, duration, _) =>
-      val status = if (success) "SUCCESS" else "FAILED"
-      logger.info("[Tool] '{}' {} in {}ms", toolName, status, duration.toMillis)
-      logger.info("[Tool] Result: {}", result)
-
-    case ToolCallFailed(_, toolName, error, _) =>
-      logger.error("[Tool] '{}' FAILED: {}", toolName, error)
-
-    case StepCompleted(stepNumber, hasToolCalls, _) =>
-      if (hasToolCalls) {
-        logger.info("[Step {}] Completed (tool calls processed)", stepNumber)
+  def main(args: Array[String]): Unit =
+    val result = for
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
+      agent  <- Agent.builder("assistant", client).withSystemPrompt("You are concise.").withStreaming().build()
+      run <- agent.stream(ThreadId("streaming-sample"), "Explain monads in three sentences.") {
+        case AgentEvents.ModelCallStarted(s) if s.attempt > 1 => print("\n[retrying]\n")
+        case AgentEvents.TextDelta(d)                         => print(d.text)
+        case AgentEvents.ModelCallCompleted(m) =>
+          println(s"\n\n[${m.model}: ${m.usage.map(u => s"${u.totalTokens} tokens").getOrElse("no usage")}]")
+        case _ => ()
       }
-
-    case AgentCompleted(state, totalSteps, duration, _) =>
-      logger.info("=" * 60)
-      logger.info("[Agent] Completed in {} steps, {}ms", totalSteps, duration.toMillis)
-      logger.info("[Agent] Final status: {}", state.status)
-      logger.info("=" * 60)
-
-    case AgentFailed(error, stepNumber, _) =>
-      logger.error("[Agent] FAILED at step {}: {}", stepNumber.getOrElse("unknown"), error.message)
-
-    case _ =>
-    // Ignore other events (guardrails, handoffs)
-  }
-
-  // Run the example
-  val result = for {
-    weatherTool     <- weatherToolResult
-    providerCfg     <- Llm4sConfig.defaultProvider()
-    registryService <- Llm4sConfig.modelRegistryService()
-    given org.llm4s.model.ModelRegistryService = registryService
-    client <- LLMConnect.getClient(providerCfg)
-    agent = new Agent(client)
-    tools = new ToolRegistry(Seq(weatherTool))
-
-    // Run with streaming events
-    finalState <- agent.runWithEvents(
-      query = "What's the weather like in London and Paris? Compare them.",
-      tools = tools,
-      onEvent = handleEvent,
-      maxSteps = Some(5)
-    )
-  } yield finalState
-
-  result match {
-    case Right(state) =>
-      logger.info("Final Response:")
-      logger.info("-" * 40)
-      state.conversation.messages.lastOption.foreach(msg => logger.info("{}", msg.content))
-
-    case Left(error) =>
-      logger.error("Error: {}", error.message)
-      System.exit(1)
-  }
-}
+      done <- run.await()
+    yield done
+    result.fold(e => logger.error("Failed: {}", e.formatted), r => logger.info("Status: {}", r.status))

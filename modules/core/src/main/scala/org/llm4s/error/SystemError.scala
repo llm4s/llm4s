@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * System-level errors for unexpected exceptions that may be transient.
  *
@@ -16,6 +18,7 @@ package org.llm4s.error
  * error.context  // Map("exceptionType" -> "OutOfMemoryError")
  * }}}
  */
+@Stable
 final case class SystemError private (
   override val message: String,
   cause: Option[Throwable]

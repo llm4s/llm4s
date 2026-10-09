@@ -185,7 +185,7 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.AgentStateUpdated(status, messageCount, logCount, _, ts) =>
+      case TraceEvent.AgentRunEnded(threadId, runId, agent, status, messages, usage, ts) =>
         Span(
           spanId = spanId,
           traceId = traceId,
@@ -196,9 +196,13 @@ class TraceCollectorTracing[F[_]](
           endTime = Some(ts),
           status = SpanStatus.Ok,
           attributes = Map(
+            "thread_id"     -> SpanValue.StringValue(threadId),
+            "run_id"        -> SpanValue.StringValue(runId),
+            "agent"         -> SpanValue.StringValue(agent),
             "status"        -> SpanValue.StringValue(status),
-            "message_count" -> SpanValue.LongValue(messageCount.toLong),
-            "log_count"     -> SpanValue.LongValue(logCount.toLong)
+            "message_count" -> SpanValue.LongValue(messages.size.toLong),
+            "input_tokens"  -> SpanValue.LongValue(usage.inputTokens),
+            "output_tokens" -> SpanValue.LongValue(usage.outputTokens)
           )
         )
 

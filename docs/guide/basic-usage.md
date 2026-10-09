@@ -177,21 +177,30 @@ result match {
 
 ### LLM Errors
 
-All LLM operations return `LLMError` on failure:
+All LLM operations return an `LLMError` on failure. It is an open trait in `org.llm4s.error`
+with a `message`, an optional `code` and a `context` map, and each subtype is either
+recoverable (worth retrying) or not:
 
 ```scala
-sealed trait LLMError {
-  def message: String
+import org.llm4s.error._
+
+error match {
+  case _: AuthenticationError => // the key was rejected: fix the credentials
+  case _: RateLimitError      => // wait, then retry
+  case _: NetworkError        => // transient: retry
+  case _: ConfigurationError  => // missing or invalid configuration
+  case other                  => println(other.formatted)
 }
 
-// Subtypes:
-case class ProviderConnectionError(message: String) extends LLMError
-case class InvalidApiKeyError(message: String) extends LLMError
-case class RateLimitError(message: String) extends LLMError
-case class ParseError(message: String) extends LLMError
-case class ModelNotFoundError(message: String) extends LLMError
-case class GeneralLLMError(message: String) extends LLMError
+// true for a RecoverableError (RateLimitError, NetworkError, TimeoutError, ...), false otherwise
+val retryable = LLMError.isRecoverable(error)
 ```
+
+`isRecoverable` answers for every error. One that carries neither marker (`EmbeddingError`, `RerankError`,
+a custom `LLMError` that does not say) is not recoverable.
+
+See the [Error Handling guide](error-handling.md) for every error type, when it is raised, and how
+to handle, convert and test them.
 
 ### Using For-Comprehensions
 
@@ -421,5 +430,5 @@ response match {
 - Verify internet connectivity
 - Check if the provider's service is operational
 - Try using a different network or VPN
-- Increase the timeout in configuration if needed
+- Raise the provider's timeout in configuration if needed: a section's `timeouts { request = 5m }` block (see [Timeouts](../getting-started/configuration#timeouts))
 

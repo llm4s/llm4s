@@ -1,6 +1,8 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAIConfigKeys
+import org.llm4s.error.CancelledError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
@@ -37,6 +39,7 @@ import scala.util.Try
  * @see [[EmbeddingProvider]] for the provider interface
  * @see [[org.llm4s.llmconnect.config.EmbeddingProviderConfig]] for configuration
  */
+@Stable
 object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   val id: ProviderId = ProviderId("openai")
@@ -72,7 +75,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     private val httpClient = Llm4sHttpClient.create()
     private val logger     = LoggerFactory.getLogger(getClass)
 
-    override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] = {
+    override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = CancelledError.attempt("openai.embed") {
       val model = request.model.name
       val input = request.input
       val payload = Obj(
@@ -85,12 +88,17 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
       val headers = Map("Authorization" -> s"Bearer ${cfg.apiKey}", "Content-Type" -> "application/json")
 
-      // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left
-      val respEither: Either[EmbeddingError, org.llm4s.http.HttpResponse] =
+      // The client never throws: a timeout, I/O failure or interruption (flag restored) is a Left.
+      // A cancellation passes through as it is (design section 4.4); any other failure is an EmbeddingError.
+      val respEither: Result[org.llm4s.http.HttpResponse] =
         httpClient
-          .post(url, headers, payload.render(), timeout = 2.minutes)
+          .post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
           .left
-          .map(e => EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "openai"))
+          .map {
+            case cancelled: CancelledError => cancelled
+            case e =>
+              EmbeddingError(code = None, message = s"HTTP request failed: ${e.message}", provider = "openai")
+          }
 
       respEither.flatMap { response =>
         response.statusCode match {
@@ -116,7 +124,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
                 EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "openai")
               }
           case status =>
-            val body = Redaction.truncateForLog(response.body)
+            val body = Redaction.safeBody(response.body)
             logger.error(s"[OpenAIEmbeddingProvider] HTTP error: $body")
             Left(EmbeddingError(code = Some(status.toString), message = body, provider = "openai"))
         }

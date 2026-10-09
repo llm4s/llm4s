@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * Raised when there is an issue with the client or operation configuration.
  *
@@ -10,6 +12,7 @@ package org.llm4s.error
  * @param message human-readable description of the configuration error
  * @param missingKeys list of configuration keys that were missing or invalid
  */
+@Stable
 final case class ConfigurationError private (
   override val message: String,
   missingKeys: List[String]

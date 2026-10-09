@@ -1,8 +1,11 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * Context management related errors for token windows and conversation handling
  */
+@Stable
 final case class ContextError private (
   override val message: String,
   contextType: String,

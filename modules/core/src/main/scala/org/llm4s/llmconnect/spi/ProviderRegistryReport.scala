@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.annotation.Stable
+
 /**
  * One [[Llm4sProviderModule]] that classpath discovery loaded.
  *
@@ -10,6 +12,7 @@ package org.llm4s.llmconnect.spi
  *                             when the JVM can say. `None` for a class with no code source,
  *                             which is normal under some class loaders.
  */
+@Stable
 final case class ProviderModuleReport(
   moduleClass: String,
   providerIds: Seq[String],
@@ -35,6 +38,7 @@ final case class ProviderModuleReport(
  *                `java.util.ServiceLoader` reported one.
  * @param failure the throwable, kept for logging rather than for control flow.
  */
+@Stable
 final case class ProviderDiscoveryFailure(
   detail: String,
   failure: Option[Throwable] = None
@@ -54,6 +58,7 @@ final case class ProviderDiscoveryFailure(
  *                       descriptor won.
  * @param droppedModule the module that lost, when discovery can name it.
  */
+@Stable
 final case class ProviderIdCollision(
   kind: String,
   id: String,
@@ -76,6 +81,7 @@ final case class ProviderIdCollision(
  * @param failures   the service entries it could not use.
  * @param collisions the ids two descriptors both registered.
  */
+@Stable
 final case class ProviderRegistryReport(
   discovered: Boolean,
   modules: Seq[ProviderModuleReport] = Nil,

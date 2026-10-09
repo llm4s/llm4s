@@ -21,27 +21,41 @@ case class ShellConfig(
 ) {
 
   /**
-   * Check if a command is allowed.
+   * Check if a program is allowed.
+   *
+   * `command` is the program name - the first token of a tokenized command line, which is how
+   * [[ShellTool]] calls this - not a whole command line: `"ls"` is allowed when `ls` is, `"ls -la"`
+   * is not a program name and is not.
    */
-  def isCommandAllowed(command: String): Boolean = {
-    val baseCommand = command.trim.split("\\s+").headOption.getOrElse("")
-    allowedCommands.contains(baseCommand)
-  }
+  def isCommandAllowed(command: String): Boolean =
+    allowedCommands.contains(command.trim)
 }
 
 object ShellConfig {
 
   /**
    * Create a read-only shell configuration that allows common read-only commands.
+   *
+   * The programs on this list are ones whose ordinary use only reads, but this is an allowlist of program
+   * names, not read-only execution: their options pass through unchecked, so `date -s` sets the clock when
+   * the process may, and `file -C` writes a compiled magic file. `env` is deliberately absent: with arguments it runs the
+   * program that follows it (`env sh -c ...`), so allowing it allows every program, and without them
+   * it prints the process environment, which is where API keys live. The allowlist checks the program
+   * a command starts with, not the programs that program starts - keep that in mind before adding a
+   * launcher such as `env`, `xargs`, `nice`, `timeout` or `nohup`.
    */
   def readOnly(workingDirectory: Option[String] = None): ShellConfig =
     ShellConfig(
-      allowedCommands = Seq("ls", "cat", "head", "tail", "pwd", "echo", "wc", "date", "whoami", "env", "which", "file"),
+      allowedCommands = Seq("ls", "cat", "head", "tail", "pwd", "echo", "wc", "date", "whoami", "which", "file"),
       workingDirectory = workingDirectory
     )
 
   /**
    * Create a development shell configuration with common dev tools.
+   *
+   * '''This is not a sandbox.''' Build tools (`sbt`, `make`, `npm`, `gradle`, ...), `git`, `find -exec` and
+   * `env` run arbitrary programs by design, so a model given this configuration can run anything the
+   * process can. Use [[readOnly]], or a list of your own, for anything less trusted.
    */
   def development(workingDirectory: Option[String] = None): ShellConfig =
     ShellConfig(

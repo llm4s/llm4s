@@ -1,8 +1,9 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
-import org.llm4s.llmconnect.config.OpenAICompatibleConfig
+import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
@@ -12,7 +13,7 @@ import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ Result, TryOps }
-import org.llm4s.util.Redaction
+import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.io.{ BufferedReader, InputStream, InputStreamReader }
 import java.nio.charset.StandardCharsets
@@ -46,6 +47,7 @@ import scala.util.{ Try, Using }
  * @param metrics         receives per-call latency and token-usage events.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere.
  */
+@Stable
 class OpenAICompatibleClient(
   settings: OpenAICompatibleClient.Settings,
   dialect: OpenAICompatibleDialect,
@@ -63,6 +65,10 @@ class OpenAICompatibleClient(
   protected def providerName: String      = settings.providerName
   protected def modelName: String         = settings.model
 
+  // sealed thinking is replayed only to the provider and model that produced it (see ReplayOrigin);
+  // this is the origin a request is about to be sent to
+  private val replayOrigin = ReplayOrigin(settings.providerName, settings.model)
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
@@ -78,7 +84,7 @@ class OpenAICompatibleClient(
           logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
           val result =
             if (response.statusCode >= 200 && response.statusCode < 300)
-              Try(parseCompletion(ujson.read(body))).toResult
+              Try(parseCompletion(readReply(body))).toResult.map(bindThinking(_, conversation, options))
             else HttpErrorMapper.mapHttpError(response.statusCode, body, providerName, response.headers)
           recordExchange(startedAt, requestText, Some(body), result)
           result
@@ -98,6 +104,7 @@ class OpenAICompatibleClient(
         httpClient
           .postStream(endpoint, requestHeaders, requestText, streamTimeout)
           .flatMap(response => consumeStream(response.statusCode, response.body, rawStream, onChunk, response.headers))
+          .map(bindThinking(_, conversation, options))
       recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), result)
       result
     }
@@ -136,20 +143,25 @@ class OpenAICompatibleClient(
   ): Result[Completion] = {
     val accumulator = StreamingAccumulator.create()
     val toolCalls   = new StreamToolCalls
+    val details     = Vector.newBuilder[ujson.Value]
     val sseParser   = SSEParser.createStreamingParser()
     val reader      = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))
     var usage       = Option.empty[TokenUsage]
+    var servedModel = Option.empty[String]
     Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
       rawStream.append(line).append('\n')
       sseParser.addChunk(line + "\n")
       while (sseParser.hasEvents)
         sseParser.nextEvent().foreach { event =>
           event.data.filter(_ != "[DONE]").foreach { data =>
-            val json = ujson.read(data)
+            val json = readReply(data)
             // Usage arrives on the last event, alongside the final delta or on an event of its
             // own with no choices. A later report replaces an earlier one; one without both
             // counts is ignored rather than failing the stream.
             streamedUsage(json).foreach(u => usage = Some(u))
+            // the model that served the request, which a router may choose; reported as `Completion.model`
+            json.obj.get("model").flatMap(_.strOpt).filter(_.nonEmpty).foreach(m => servedModel = Some(m))
+            details ++= streamedThinkingDetails(json)
             parseStreamingEvent(json, toolCalls).foreach { (chunk, rawArguments) =>
               // The accumulator concatenates argument fragments, so it gets each fragment
               // verbatim. The parsed form handed to `onChunk` cannot be concatenated safely:
@@ -165,14 +177,55 @@ class OpenAICompatibleClient(
     }
     // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
     // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
+    val opaqueThinking = dialect.decodeThinkingDetails(details.result())
     accumulator.toCompletion.map { c =>
       val finalUsage = usage.orElse(c.usage)
-      c.withModel(settings.model)
+      val message =
+        if (opaqueThinking.isEmpty) c.message else c.message.withThinking(c.message.thinking ++ opaqueThinking)
+      c.withMessage(message)
+        .withModel(servedModel.getOrElse(settings.model))
         .withToolCalls(c.message.toolCalls.toList)
         .withUsage(finalUsage)
         .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
     }
   }
+
+  /**
+   * Parses a reply body or a stream event, throwing on one nested more than `BoundedJson`'s limit
+   * as on malformed JSON; the caller turns either into a `Left`. Every reader of the value, and
+   * `ujson.Value.InvalidData`'s message when a reader meets an unexpected shape, recurses once per
+   * nesting level, so a 100,000-deep array overflowed the stack, and `Try` does not catch a
+   * `StackOverflowError` ([[https://github.com/llm4s/llm4s/issues/1658 #1658]]).
+   */
+  private def readReply(text: String): ujson.Value =
+    if (BoundedJson.exceedsDepth(text)) throw new IllegalArgumentException(BoundedJson.tooDeep().message)
+    else ujson.read(text)
+
+  /** The replay data on a streamed event's delta, if it has one. */
+  private def streamedThinkingDetails(json: ujson.Value): Seq[ujson.Value] =
+    json.obj
+      .get("choices")
+      .flatMap(_.arrOpt)
+      .flatMap(_.headOption)
+      .flatMap(_.obj.get("delta"))
+      .toSeq
+      .flatMap(dialect.thinkingDetails)
+
+  /**
+   * `completion` with any sealed thinking on its message bound to the request it answered, so that
+   * it is replayed only while that request is unchanged (see [[ThinkingReplay]]). A completion with
+   * no sealed thinking is returned as it is.
+   *
+   * The origin is the configured model, the one the next request is checked against, not the model
+   * the response reports: a router (OpenRouter's `openrouter/auto`, model fallbacks) chooses the
+   * serving model per request and reports it in `completion.model`, and OpenRouter requires the
+   * complete `reasoning_details` sequence on a tool-call continuation, so binding to the served
+   * model would unseal every routed turn and drop that sequence. Changing the configured model
+   * still unseals every earlier turn.
+   */
+  private def bindThinking(completion: Completion, conversation: Conversation, options: CompletionOptions): Completion =
+    if (!completion.message.hasSealedThinking) completion
+    else completion.withMessage(ThinkingReplay.bind(replayOrigin, completion.message, conversation.messages, options))
 
   private def renderRequest(conversation: Conversation, options: CompletionOptions, stream: Boolean): Result[String] =
     // An empty `messages` array is rejected by every chat-completions endpoint; saying so here
@@ -181,7 +234,7 @@ class OpenAICompatibleClient(
     // reduce a non-empty conversation to nothing.
     Either
       .cond(
-        sendableMessages(conversation).nonEmpty,
+        sendableMessages(conversation, options).nonEmpty,
         (),
         ValidationError("conversation", s"${settings.displayName} requires at least one message")
       )
@@ -207,10 +260,12 @@ class OpenAICompatibleClient(
    * `OpenRouterClient` had not (#912), so an endpoint that accepted the connection and never
    * answered hung the caller. Scoped to the provider package so specs can shorten it.
    */
-  protected[provider] def requestTimeout: FiniteDuration = OpenAICompatibleClient.RequestTimeout
+  protected[provider] def requestTimeout: FiniteDuration =
+    settings.timeouts.requestOr(OpenAICompatibleClient.RequestTimeout)
 
   /** The timeout `streamComplete` sends with its request. See [[requestTimeout]]. */
-  protected[provider] def streamTimeout: FiniteDuration = OpenAICompatibleClient.StreamTimeout
+  protected[provider] def streamTimeout: FiniteDuration =
+    settings.timeouts.streamOr(OpenAICompatibleClient.StreamTimeout)
 
   /**
    * The headers every request carries. A header the dialect repeats is sent once, its values
@@ -223,16 +278,33 @@ class OpenAICompatibleClient(
       OpenAICompatibleClient.combineRepeated(dialect.headers)
 
   /**
-   * The messages of `conversation` that go into a request: all of them, except an assistant
-   * turn with neither text nor tool calls when the dialect does not send those
-   * ([[OpenAICompatibleDialect.sendEmptyAssistantTurns]]). Both the request body and the
-   * empty-conversation check use this, so they cannot disagree.
+   * The messages of `conversation` that go into a request, as they may be replayed: every assistant
+   * turn whose sealed thinking no longer matches the conversation before it unsealed
+   * ([[ThinkingReplay.replayable]]), and then all of them, except an assistant
+   * turn with no text, no tool calls and no thinking the dialect encodes, when the dialect does
+   * not send empty turns ([[OpenAICompatibleDialect.sendEmptyAssistantTurns]]). Both the request
+   * body and the empty-conversation check use this, so they cannot disagree.
+   *
+   * A thinking-only turn - a generation that hit its token limit while still reasoning - is not
+   * empty for a dialect that encodes thinking: Mistral asks for the full assistant message,
+   * thinking chunks included, to be replayed, and its thinking chunk is `content`. For a dialect
+   * that drops thinking ([[OpenAICompatibleDialect.encodeThinking]] adds nothing) the turn is
+   * still empty and still left out.
    */
-  private def sendableMessages(conversation: Conversation): Seq[Message] =
-    conversation.messages.filterNot {
-      case AssistantMessage(content, toolCalls) =>
-        content.forall(_.isEmpty) && toolCalls.isEmpty && !dialect.sendEmptyAssistantTurns
+  private def sendableMessages(conversation: Conversation, options: CompletionOptions): Seq[Message] =
+    ThinkingReplay.replayable(replayOrigin, conversation.messages, options).filterNot {
+      case am: AssistantMessage =>
+        !dialect.sendEmptyAssistantTurns && am.contentOpt.forall(_.isEmpty) && am.toolCalls.isEmpty &&
+        !encodesThinking(am)
       case _ => false
+    }
+
+  /** Whether the dialect adds anything to an assistant message for `am`'s thinking. */
+  private def encodesThinking(am: AssistantMessage): Boolean =
+    am.hasThinking && {
+      val probe = ujson.Obj("role" -> "assistant")
+      dialect.encodeThinking(probe, am.thinking)
+      probe.value.keySet != Set("role")
     }
 
   /**
@@ -240,13 +312,15 @@ class OpenAICompatibleClient(
    * Scoped to the provider package so specs can inspect it.
    */
   protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
-    val messages = sendableMessages(conversation).map {
+    val messages = sendableMessages(conversation, options).map {
       case UserMessage(content) =>
         ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(content))
       case SystemMessage(content) =>
         ujson.Obj("role" -> dialect.systemRole, "content" -> dialect.encodeContent(content))
-      case AssistantMessage(content, toolCalls) =>
-        val message = ujson.Obj("role" -> "assistant")
+      case am: AssistantMessage =>
+        val content   = am.contentOpt
+        val toolCalls = am.toolCalls
+        val message   = ujson.Obj("role" -> "assistant")
         content.filter(_.nonEmpty) match {
           case Some(text) => message("content") = dialect.encodeContent(text)
           case None if dialect.alwaysSendAssistantContent =>
@@ -262,6 +336,7 @@ class OpenAICompatibleClient(
             )
           })
         }
+        if (am.hasThinking) dialect.encodeThinking(message, am.thinking)
         message
       case ToolMessage(content, toolCallId) =>
         ujson.Obj(
@@ -296,19 +371,57 @@ class OpenAICompatibleClient(
     val toolCalls = message.obj.get("tool_calls").filterNot(_.isNull).map(dialect.parseToolCalls).getOrElse(Seq.empty)
     val content   = message.obj.get("content").flatMap(dialect.decodeContent)
     val usage     = json.obj.get("usage").flatMap(parseUsage)
+    val thinkingText = dialect.thinking(message).orElse(dialect.thinking(choice)).filter(_.nonEmpty)
+    val thinking =
+      thinkingText.map(ThinkingBlock.Text(_)).toSeq ++
+        dialect.decodeThinkingDetails(dialect.thinkingDetails(message))
 
     Completion(
       id = json.obj.get("id").flatMap(_.strOpt).getOrElse(""),
       created = json.obj.get("created").flatMap(_.numOpt).map(_.toLong).getOrElse(0L),
       content = content.getOrElse(""),
       model = json.obj.get("model").flatMap(_.strOpt).getOrElse(settings.model),
-      message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList),
+      message = AssistantMessage(contentOpt = content, toolCalls = toolCalls.toList, thinking = thinking),
       toolCalls = toolCalls.toList,
       usage = usage,
-      thinking = dialect.thinking(message).orElse(dialect.thinking(choice)),
-      estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u))
+      estimatedCost = usage.flatMap(u => CostEstimator.estimate(settings.model, u)),
+      citations = parseCitations(message)
     )
   }
+
+  /**
+   * The sources a reply cites: the `url_citation` entries of the message's `annotations`, in the
+   * order sent, in the shape OpenAI documents for its search models and OpenRouter for `:online`
+   * models, `{"type":"url_citation","url_citation":{"url","title","content","start_index","end_index"}}`.
+   *
+   * Lenient on purpose: a citation never fails a completion whose answer arrived. An entry of another
+   * type, or without a non-empty `url`, is dropped (one is never made up), and a field of the wrong
+   * type, or an index that is not a whole number of at least zero, is read as absent. Streamed events
+   * are not read: neither provider documents where a stream carries them (#1216).
+   */
+  protected[provider] def parseCitations(message: ujson.Value): List[Citation] =
+    message.objOpt
+      .flatMap(_.get("annotations"))
+      .flatMap(_.arrOpt)
+      .map(_.toList.flatMap(parseCitation))
+      .getOrElse(List.empty)
+
+  private def parseCitation(annotation: ujson.Value): Option[Citation] =
+    for {
+      entry <- annotation.objOpt
+      if entry.get("type").flatMap(_.strOpt).contains("url_citation")
+      cited <- entry.get("url_citation").flatMap(_.objOpt)
+      url   <- cited.get("url").flatMap(_.strOpt).filter(_.nonEmpty)
+    } yield Citation(
+      url = url,
+      title = cited.get("title").flatMap(_.strOpt),
+      citedText = cited.get("content").flatMap(_.strOpt),
+      startIndex = citationIndex(cited, "start_index"),
+      endIndex = citationIndex(cited, "end_index")
+    )
+
+  private def citationIndex(cited: collection.Map[String, ujson.Value], key: String): Option[Int] =
+    cited.get(key).flatMap(_.numOpt).filter(n => n.isWhole && n >= 0 && n <= Int.MaxValue).map(_.toInt)
 
   /** Token usage from a `usage` object, or from the first element of a `usage` array. */
   private def parseUsage(usage: ujson.Value): Option[TokenUsage] =
@@ -413,13 +526,16 @@ object OpenAICompatibleClient {
 
   /**
    * The timeout on `complete`'s request: two minutes, what the old `MistralClient` and
-   * `CohereClient` used, and what `OllamaClient`, `GeminiClient` and `VertexAIClient` use. A
-   * single internal default for now; configurable timeouts are
-   * [[https://github.com/llm4s/llm4s/issues/712 #712]].
+   * `CohereClient` used, and what `OllamaClient`, `GeminiClient` and `VertexAIClient` use. This is
+   * the default: a section's `timeouts.request` replaces it
+   * ([[https://github.com/llm4s/llm4s/issues/712 #712]]).
    */
   val RequestTimeout: FiniteDuration = 2.minutes
 
-  /** The timeout on `streamComplete`'s request: five minutes, as in the clients this one replaced. */
+  /**
+   * The timeout on `streamComplete`'s request: five minutes, as in the clients this one replaced. A
+   * section's `timeouts.stream` replaces it.
+   */
   val StreamTimeout: FiniteDuration = 5.minutes
 
   /**
@@ -463,7 +579,8 @@ object OpenAICompatibleClient {
     baseUrl: String,
     apiKey: Option[String],
     contextWindow: Int,
-    reserveCompletion: Int
+    reserveCompletion: Int,
+    timeouts: ProviderTimeouts = ProviderTimeouts.default
   ) {
     override def toString: String =
       s"Settings(providerName=$providerName, displayName=$displayName, model=$model, baseUrl=$baseUrl, " +
@@ -479,7 +596,8 @@ object OpenAICompatibleClient {
       baseUrl = config.baseUrl,
       apiKey = config.apiKey,
       contextWindow = config.contextWindow,
-      reserveCompletion = config.reserveCompletion
+      reserveCompletion = config.reserveCompletion,
+      timeouts = config.timeouts
     )
 
   /**

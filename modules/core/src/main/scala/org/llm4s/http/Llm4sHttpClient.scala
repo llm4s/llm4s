@@ -1,5 +1,6 @@
 package org.llm4s.http
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.{
   CancelledError,
   LLMError,
@@ -10,6 +11,7 @@ import org.llm4s.error.{
   ValidationError
 }
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.Redaction
 
 import java.io.IOException
 import java.net.URI
@@ -35,6 +37,7 @@ import scala.util.control.NonFatal
  * Case-insensitive lookup over a multi-valued header map, as carried by every response type
  * in this package.
  */
+@Stable
 object HttpHeaders {
 
   /**
@@ -57,6 +60,7 @@ object HttpHeaders {
  * @param body       Response body as a string
  * @param headers    Response headers as a multi-valued map (lowercase keys)
  */
+@Stable
 case class HttpResponse(
   statusCode: Int,
   body: String,
@@ -67,6 +71,7 @@ case class HttpResponse(
   def header(name: String): Option[String] = HttpHeaders.first(headers, name)
 }
 
+@Stable
 final case class JsonHttpResponse(
   statusCode: Int,
   body: ujson.Value,
@@ -79,9 +84,14 @@ final case class JsonHttpResponse(
 
 object HttpResponse:
   extension (response: HttpResponse)
+    /**
+     * The response when its status is 2xx, else a `ServiceError` carrying the status and the body. The body in the
+     * error is redacted and capped (`Redaction.safeBody`, 2048 characters), since a provider's error body can echo
+     * the request's credentials.
+     */
     def ensureSuccess(provider: String): Result[HttpResponse] =
       if response.statusCode >= 200 && response.statusCode < 300 then Right(response)
-      else Left(ServiceError(response.statusCode, provider, response.body))
+      else Left(ServiceError(response.statusCode, provider, Redaction.safeBody(response.body)))
 
     def toJson(fieldName: String = "responseBody"): Result[JsonHttpResponse] =
       Try(ujson.read(response.body)).toResult.left
@@ -109,6 +119,7 @@ object HttpResponse:
  * @param body       Raw response bytes — exact wire representation, no charset conversion
  * @param headers    Response headers as a multi-valued map (lowercase keys)
  */
+@Stable
 case class HttpRawResponse(
   statusCode: Int,
   body: Array[Byte],
@@ -130,6 +141,7 @@ case class HttpRawResponse(
  *                   on error statuses too
  * @param headers    Response headers as a multi-valued map (lowercase keys)
  */
+@Stable
 case class StreamingHttpResponse(
   statusCode: Int,
   body: java.io.InputStream,
@@ -143,6 +155,7 @@ case class StreamingHttpResponse(
 /**
  * Represents a single part in a multipart/form-data request.
  */
+@Stable
 sealed trait MultipartPart {
   def name: String
 }
@@ -179,6 +192,7 @@ object MultipartPart {
  * The trait is deliberately not sealed, so tests can implement it. Methods added to it
  * after 1.0 will have default implementations, so a test double keeps compiling.
  */
+@Stable
 trait Llm4sHttpClient extends AutoCloseable {
 
   def get(

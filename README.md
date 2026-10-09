@@ -398,7 +398,7 @@ val tracer: Tracing = Llm4sConfig
 tracer.traceEvent("Starting LLM operation")
 tracer.traceCompletion(completion, completion.model) // prefer the model reported by the API
 tracer.traceTokenUsage(tokenUsage, completion.model, "chat-completion")
-tracer.traceEvent(agentState.toTraceEvent)           // agent state is an ordinary TraceEvent
+// An agent built withTracing(tracer) ends each run with a TraceEvent.AgentRunEnded
 ```
 
 ### Usage using starter kit `llm4s.g8`
@@ -462,7 +462,7 @@ Recommended usage patterns:
 - Model name for display: `Llm4sConfig.defaultProvider().map(_.model)` or prefer `completion.model` from API responses.
 - Tracing:
   - `Llm4sConfig.tracing().flatMap(Tracing.fromSettings)`, or `.map(Tracing.create)` to fall back to no tracing.
-- Workspace (samples): `WorkspaceConfigSupport.load()` to get `workspaceDir`, `imageName`, `hostPort`, `traceLogPath`.
+- Workspace (samples): `WorkspaceConfigSupport.load()` to get `workspaceDir`, `imageName`, `hostPort`.
 - Embeddings sample (samples): `EmbeddingUiSettings.loadFromEnv`, `EmbeddingTargets.loadFromEnv`, `EmbeddingQuery.loadFromEnv` (sample helpers backed by `Llm4sConfig`).
 
 ### Config Keys → Typed Settings
@@ -481,7 +481,7 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
   - Loader: `Llm4sConfig.tracing()` → then `Tracing.fromSettings` or `Tracing.create`
 
 - Workspace settings (samples)
-  - Keys: `llm4s.workspace.dir` | `WORKSPACE_DIR`, `llm4s.workspace.image` | `WORKSPACE_IMAGE`, `llm4s.workspace.port` | `WORKSPACE_PORT`, `llm4s.workspace.traceLogPath` | `WORKSPACE_TRACE_LOG`
+  - Keys: `llm4s.workspace.dir` | `WORKSPACE_DIR`, `llm4s.workspace.image` | `WORKSPACE_IMAGE`, `llm4s.workspace.port` | `WORKSPACE_PORT`
   - Type: `WorkspaceSettings`
   - Loader: `WorkspaceConfigSupport.load()`
 
@@ -598,14 +598,22 @@ Stay hands-on with **LLM4S**! Join us for interactive **mob programming** sessio
 <p align="center">
   <img src="docs/image_assets/llm4s_dev_hour/banner/llm4s-dev-hour-banner.png" alt="LLM4S Dev Hour Banner" width="800"/>
   <br>
-  <em>🗓️ Weekly live coding and collaboration during LLM4S Dev Hour, join us every Sunday on Discord!</em>
+  <em>🗓️ Weekly live coding and collaboration during LLM4S Dev Hour, join us every Sunday at 09:00 London time on Discord!</em>
 </p>
 
 <br>
 
 | Date                                           | Session Title                                             | Description                                                                                                                                                                                                                                                                                                                                               | Location                            | Hosts                         | Details URL                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Featured In                                                 |
 | ---------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| **20-Jul-2025 onwards (Weekly Sundays)** | 🗓️ LLM4S Dev Hour - Weekly Live Coding & Collaboration | A weekly **mob programming** session where we code, debug, and learn together - open to all! <br><br> 📌 *Updates are shared by the host in the `#llm4s-dev-hour` Discord channel after each session.  [Weekly changing Luma invite link](https://luma.com/calendar/cal-Zd9BLb5jbZewxLA) (for scheduling in your calender)* | Online, London, UK (9am local time) | Kannupriya Kalra, Rory Graves | [LinkedIn](https://www.linkedin.com/posts/kannupriyakalra_ai-llms-scala-activity-7352669046288384000-av_n) <br><br> [Reddit1](https://www.reddit.com/r/scala/comments/1m4oxf6/llm4s_dev_hour_sundays_9am_london_time) <br><br> [Reddit2](https://www.reddit.com/r/scala/comments/1o6mkol/llm4s_dev_hour_weekly_live_coding_collaboration/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button) <br><br> [Bluesky](https://bsky.app/profile/kannupriyakalra.bsky.social/post/3lufjgszijk2o) <br><br> [Mastodon](https://functional.cafe/@kannupriyakalra/114885664201722837) <br><br> [X/Twitter](https://x.com/KannupriyaKalra/status/1946915693644890537) | [Scala Times – Issue #537](https://scalatimes.com/15edab7583) |
+| **20-Jul-2025 onwards (Weekly Sundays, 09:00 London time)** | 🗓️ LLM4S Dev Hour - Weekly Live Coding & Collaboration | A weekly **mob programming** session where we code, debug, and learn together - open to all! <br><br> 📌 *Updates are shared by the host in the `#llm4s-dev-hour` Discord channel after each session.  [Weekly changing Luma invite link](https://luma.com/calendar/cal-Zd9BLb5jbZewxLA) (for scheduling in your calendar)* | Online, London, UK (9am local time) | Kannupriya Kalra, Rory Graves | [LinkedIn](https://www.linkedin.com/posts/kannupriyakalra_ai-llms-scala-activity-7352669046288384000-av_n) <br><br> [Reddit1](https://www.reddit.com/r/scala/comments/1m4oxf6/llm4s_dev_hour_sundays_9am_london_time) <br><br> [Reddit2](https://www.reddit.com/r/scala/comments/1o6mkol/llm4s_dev_hour_weekly_live_coding_collaboration/?utm_source=share&utm_medium=web3x&utm_name=web3xcss&utm_term=1&utm_content=share_button) <br><br> [Bluesky](https://bsky.app/profile/kannupriyakalra.bsky.social/post/3lufjgszijk2o) <br><br> [Mastodon](https://functional.cafe/@kannupriyakalra/114885664201722837) <br><br> [X/Twitter](https://x.com/KannupriyaKalra/status/1946915693644890537) | [Scala Times – Issue #537](https://scalatimes.com/15edab7583) |
+
+**When is Dev Hour in your time zone?** LLM4S is a global community: the maintainers and contributors are spread across the world, and everyone joins from where they are. Dev Hour is every **Sunday at 09:00 London time**:
+
+| London | Italy, Germany | India | Singapore | New York | San Francisco |
+| ------ | -------------- | ----- | --------- | -------- | ------------- |
+| 09:00 | 10:00 | 13:30 (summer) / 14:30 (winter) | 16:00 (summer) / 17:00 (winter) | 04:00 | 01:00 |
+
+"Summer" is while the UK is on British Summer Time (late March to late October). The time follows London's clocks, so it can move by an hour elsewhere when clocks change; see the [full schedule](docs/community/index.md#llm4s-dev-hours) and the [Luma calendar](https://luma.com/calendar/cal-Zd9BLb5jbZewxLA) for details.
 
 ## 📢 Talks & Presentations
 
@@ -681,11 +689,15 @@ Interested in contributing? Start here:
 
  **LLM4S GitHub Issues:** https://lnkd.in/eXrhwgWY
 
+ **Security:** to report a vulnerability, follow [SECURITY.md](SECURITY.md); please do not use a public issue.
+
 ## Join the Community
 
 Want to be part of developing this and interact with other developers? Join our Discord community!
 
 Please review our [Code of Conduct](https://github.com/llm4s/llm4s/blob/main/CODE_OF_CONDUCT.md) to understand our community guidelines and expectations.
+
+ **Help and adopters:** see [SUPPORT.md](SUPPORT.md) for where to ask what, and add your organisation to [ADOPTERS.md](ADOPTERS.md) if you use LLM4S.
 
  **LLM4S Discord:** https://lnkd.in/eb4ZFdtG
 
@@ -898,4 +910,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 [llm4s]: https://github.com/llm4s/llm4s
 [Scala 3]: https://dotty.epfl.ch/
-[Scala 2]: https://www.scala-lang.org/

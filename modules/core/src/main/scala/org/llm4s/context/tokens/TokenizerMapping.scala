@@ -1,5 +1,6 @@
 package org.llm4s.context.tokens
 
+import org.llm4s.annotation.Stable
 import org.llm4s.identity.TokenizerId
 import org.slf4j.LoggerFactory
 
@@ -29,8 +30,13 @@ import org.slf4j.LoggerFactory
  * The mapper accepts various model name formats:
  *  - Plain: `gpt-4o`, `claude-3-sonnet`
  *  - Provider-prefixed: `openai/gpt-4o`, `anthropic/claude-3-sonnet`
- *  - Azure: `azure/my-gpt4o-deployment`
+ *  - Azure: `azure/my-gpt-4o-deployment`
  *  - Ollama: `ollama/llama2`
+ *
+ * An Azure deployment is matched on the OpenAI model name its text contains, spelled as OpenAI
+ * spells it (`gpt-4o`, `gpt-4`, `gpt-3.5`, `gpt-3`, `o1-`): `azure/my-gpt-4o-deployment` selects
+ * `o200k_base`, while `azure/my-gpt4o-deployment` and any other name that does not contain such
+ * text selects `cl100k_base`. Every Azure deployment is reported as exact.
  *
  * ==Accuracy Considerations==
  *
@@ -41,6 +47,7 @@ import org.slf4j.LoggerFactory
  * @see [[ConversationTokenCounter.forModel]] for the recommended entry point
  * @see [[TokenizerAccuracy]] for accuracy information
  */
+@Stable
 object TokenizerMapping {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -57,9 +64,10 @@ object TokenizerMapping {
       case name if isOpenAIGPT3_5(name) => TokenizerId.CL100K_BASE
       case name if isOpenAIGPT3(name)   => TokenizerId.R50K_BASE
       case name if isAnthropic(name)    => TokenizerId.CL100K_BASE
-      case name if isAzureOpenAI(name)  => getAzureTokenizerId(name)
-      case name if isOllama(name)       => TokenizerId.CL100K_BASE
-      case _                            => getDefaultTokenizerId(modelName)
+      // A deployment name containing an OpenAI model name was already mapped by the guards above
+      case name if isAzureOpenAI(name) => TokenizerId.CL100K_BASE
+      case name if isOllama(name)      => TokenizerId.CL100K_BASE
+      case _                           => getDefaultTokenizerId(modelName)
     }
 
     logger.debug(s"Mapped model '$modelName' to tokenizer '$tokenizerId'")
@@ -76,7 +84,8 @@ object TokenizerMapping {
     modelName.contains("gpt-3.5")
 
   private def isOpenAIGPT3(modelName: String): Boolean =
-    modelName.contains("gpt-3") && !modelName.contains("gpt-3.5")
+    modelName.contains("gpt-3") && !modelName.contains("gpt-3.5") &&
+      (!modelName.contains("/") || modelName.startsWith("openai/") || modelName.startsWith("azure/"))
 
   private def isAnthropic(modelName: String): Boolean =
     modelName.startsWith("anthropic/") || modelName.contains("claude")
@@ -86,15 +95,6 @@ object TokenizerMapping {
 
   private def isOllama(modelName: String): Boolean =
     modelName.startsWith("ollama/")
-
-  private def getAzureTokenizerId(modelName: String): TokenizerId = {
-    // Azure uses same tokenizers as OpenAI, extract model from deployment name
-    val deploymentModel = modelName.toLowerCase
-    if (deploymentModel.contains("gpt-4o")) TokenizerId.O200K_BASE
-    else if (deploymentModel.contains("gpt-4")) TokenizerId.CL100K_BASE
-    else if (deploymentModel.contains("gpt-3")) TokenizerId.CL100K_BASE
-    else TokenizerId.CL100K_BASE // Default for Azure
-  }
 
   private def getDefaultTokenizerId(modelName: String): TokenizerId = {
     logger.warn(s"Unknown model '$modelName', using cl100k_base as fallback")
@@ -113,17 +113,19 @@ object TokenizerMapping {
    */
   def getAccuracyInfo(modelName: String): TokenizerAccuracy =
     modelName.toLowerCase match {
-      case name if isOpenAIGPT4o(name) || isOpenAIGPT4(name) || isOpenAIGPT3_5(name) =>
+      case name if isOpenAIGPT4o(name) || isOpenAIGPT4(name) || isOpenAIGPT3_5(name) || isOpenAIGPT3(name) =>
         TokenizerAccuracy.Exact("Native OpenAI tokenizer")
 
-      case name if isAzureOpenAI(name) =>
-        TokenizerAccuracy.Exact("Azure uses OpenAI tokenizers")
-
+      // Same guard order as `getTokenizerId`: a Claude model under the azure/ prefix is tokenized
+      // as Claude there, so it is approximate here, not "Azure uses OpenAI tokenizers"
       case name if isAnthropic(name) =>
         TokenizerAccuracy.Approximate(
           "Claude uses proprietary tokenizer. cl100k_base approximation may be 20-30% off.",
           accuracy = 0.75
         )
+
+      case name if isAzureOpenAI(name) =>
+        TokenizerAccuracy.Exact("Azure uses OpenAI tokenizers")
 
       case name if isOllama(name) =>
         TokenizerAccuracy.Approximate(
@@ -139,7 +141,8 @@ object TokenizerMapping {
    * Check if the tokenizer mapping is exact or approximate for a model.
    *
    * Exact mappings are available for OpenAI and Azure OpenAI models.
-   * Other providers use approximations.
+   * Other providers use approximations: a Claude model is approximate under
+   * any prefix, including `azure/`, since it is tokenized as Claude.
    *
    * @param modelName The model identifier
    * @return True if token counts will be exact, false if approximate
@@ -159,6 +162,7 @@ object TokenizerMapping {
  *
  * @see [[TokenizerMapping.getAccuracyInfo]]
  */
+@Stable
 sealed trait TokenizerAccuracy {
 
   /** True if token counts will match actual API usage. */

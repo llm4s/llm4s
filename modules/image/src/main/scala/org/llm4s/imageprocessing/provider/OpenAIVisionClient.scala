@@ -3,14 +3,16 @@ package org.llm4s.imageprocessing.provider
 import org.llm4s.imageprocessing._
 import org.llm4s.imageprocessing.config.OpenAIVisionConfig
 import org.llm4s.media.{ ImageMediaType, MediaType }
-import org.llm4s.error.LLMError
+import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.types.Result
 import ujson.read
 
 import java.nio.file.{ Files, Paths }
 import java.time.Instant
 import java.util.Base64
 import scala.util.Try
+import org.llm4s.util.Redaction
 
 /**
  * OpenAI Vision client for AI-powered image analysis using GPT-4 Vision.
@@ -36,22 +38,23 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
     imagePath: String,
     prompt: Option[String] = None
   ): Either[LLMError, ImageAnalysisResult] =
-    for {
-      // basic metadata via local processor (already Either)
-      basic <- localProcessor.analyzeImage(imagePath, None)
-      metadata = basic.metadata
-      base64Image <- encodeImageToBase64(imagePath).toEither.left
-        .map(e => LLMError.processingFailed("process", s"Failed to encode image: ${e.getMessage}"))
-      analysisPrompt = prompt.getOrElse(
-        "Analyze this image in detail. Describe what you see, identify any objects, text, or people present. " +
-          "Provide tags that categorize the image content."
-      )
-      // An extension that names nothing is sent as JPEG, the API's own assumption for an
-      // unlabelled image; refusing to guess would cost the call entirely.
-      mediaType = MediaType.imageFromPath(imagePath).getOrElse(MediaType.Jpeg)
-      visionResponse <- callOpenAIVisionAPI(base64Image, analysisPrompt, mediaType).toEither.left
-        .map(e => LLMError.apiCallFailed("OpenAI", s"OpenAI Vision API call failed: ${e.getMessage}"))
-    } yield parseVisionResponse(visionResponse, metadata)
+    CancelledError.attempt("openai-vision.analyzeImage") {
+      for {
+        // basic metadata via local processor (already Either)
+        basic <- localProcessor.analyzeImage(imagePath, None)
+        metadata = basic.metadata
+        base64Image <- encodeImageToBase64(imagePath).toEither.left
+          .map(e => LLMError.processingFailed("process", s"Failed to encode image: ${e.getMessage}"))
+        analysisPrompt = prompt.getOrElse(
+          "Analyze this image in detail. Describe what you see, identify any objects, text, or people present. " +
+            "Provide tags that categorize the image content."
+        )
+        // An extension that names nothing is sent as JPEG, the API's own assumption for an
+        // unlabelled image; refusing to guess would cost the call entirely.
+        mediaType = MediaType.imageFromPath(imagePath).getOrElse(MediaType.Jpeg)
+        visionResponse <- callOpenAIVisionAPI(base64Image, analysisPrompt, mediaType)
+      } yield parseVisionResponse(visionResponse, metadata)
+    }
 
   /**
    * Preprocesses an image by applying a sequence of operations.
@@ -163,7 +166,7 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
       Base64.getEncoder.encodeToString(imageBytes)
     }
 
-  private def callOpenAIVisionAPI(base64Image: String, prompt: String, mediaType: ImageMediaType): Try[String] =
+  private def callOpenAIVisionAPI(base64Image: String, prompt: String, mediaType: ImageMediaType): Result[String] =
     // Serializing is the only step that can throw; the HTTP client returns failures as a Left
     Try(
       OpenAIRequestBody.serialize(
@@ -173,15 +176,18 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
         base64Image = base64Image,
         mediaType = mediaType
       )
-    ).flatMap { requestBody =>
+    ).toEither.left.map(e => visionFailed(e.getMessage)).flatMap { requestBody =>
       val headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer ${config.apiKey}")
       httpClient.post(s"${config.baseUrl}/chat/completions", headers, requestBody, config.requestTimeout) match {
+        case Left(cancelled: CancelledError) => Left(cancelled)
         case Left(error) =>
-          scala.util.Failure(new RuntimeException(s"OpenAI API call failed - ${error.message}"))
+          Left(visionFailed(s"OpenAI API call failed - ${error.message}"))
         case Right(response) =>
-          response.statusCode match {
+          // As the `Try(...).flatMap` this replaced did: an exception while reading the reply (a 200
+          // without `choices`, an error body that is not an object) is a failed call, not a throw.
+          Try(response.statusCode match {
             case 200 =>
-              scala.util.Success(extractContentFromResponse(response.body))
+              Right(extractContentFromResponse(response.body))
             case statusCode =>
               val responseBody = response.body
               val errorMessage =
@@ -195,22 +201,25 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
                       case (Some(msg), _, Some(code)) => s"$code: $msg"
                       case (Some(msg), Some(typ), _)  => s"$typ: $msg"
                       case (Some(msg), _, _)          => msg
-                      case _                          => org.llm4s.util.Redaction.truncateForLog(responseBody)
+                      case _                          => responseBody
                     }
                   }
-                  .map(d => s"Status $statusCode: $d")
-                  .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.truncateForLog(responseBody)}")
+                  .map(d => s"Status $statusCode: ${Redaction.safeBody(d)}")
+                  .getOrElse(s"Status $statusCode: ${Redaction.safeBody(responseBody)}")
 
-              // Log a truncated version to avoid leaking very large or sensitive payloads
+              // Log a redacted, truncated version to avoid leaking very large or sensitive payloads
               logger.error(
                 "[OpenAIVisionClient] HTTP error {}: {}",
                 statusCode.asInstanceOf[AnyRef],
-                org.llm4s.util.Redaction.truncateForLog(responseBody)
+                Redaction.safeBody(responseBody)
               )
-              scala.util.Failure(new RuntimeException(s"OpenAI API call failed - $errorMessage"))
-          }
+              Left(visionFailed(s"OpenAI API call failed - $errorMessage"))
+          }).fold(e => Left(visionFailed(e.getMessage)), identity)
       }
     }
+
+  private def visionFailed(detail: String): LLMError =
+    LLMError.apiCallFailed("OpenAI", s"OpenAI Vision API call failed: $detail")
 
   private def extractContentFromResponse(jsonResponse: String): String =
     Try(read(jsonResponse)).toOption

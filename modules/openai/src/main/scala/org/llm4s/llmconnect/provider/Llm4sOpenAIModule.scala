@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModule, ProviderDescriptor }
 
 /**
@@ -28,6 +29,7 @@ import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModu
  * instantiates the class named in the services file through its public no-arg
  * constructor.
  */
+@Stable
 final class Llm4sOpenAIModule extends Llm4sProviderModule:
   override def chatProviders: Seq[ProviderDescriptor] = Seq(OpenAIProvider, AzureProvider, RequestyProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(OpenAIEmbeddingProvider)

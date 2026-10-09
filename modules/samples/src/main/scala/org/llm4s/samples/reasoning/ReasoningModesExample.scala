@@ -135,7 +135,7 @@ object ReasoningModesExample {
         // Check for thinking content
         if (completion.hasThinking) {
           logger.info("\n--- Thinking Content ---")
-          logger.info("{}", completion.thinking.getOrElse(""))
+          logger.info("{}", completion.thinking.getOrElse("(redacted)"))
         } else {
           logger.info("\nNo thinking content in response (model may not support extended thinking)")
         }

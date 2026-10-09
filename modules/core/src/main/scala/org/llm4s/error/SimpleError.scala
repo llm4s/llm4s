@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * A simple error with just a message and no additional context.
  *
@@ -16,6 +18,7 @@ package org.llm4s.error
  * error.context  // Map.empty
  * }}}
  */
+@Stable
 final case class SimpleError private (
   override val message: String
 ) extends LLMError

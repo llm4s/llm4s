@@ -14,11 +14,14 @@ import scala.concurrent.duration.*
  * and checks the content: each event's header and fields, and truncation (#1003). Based on the
  * console suite in #1035 by @kannupriyakalra, deduplicated against the cases above.
  *
- * What an agent run prints - `AgentState#toTraceEvent`, and the order of the events a whole run
+ * What an agent run prints - its `AgentRunEnded`, and the order of the events a whole run
  * with a tool call produces - is in `llm4s-agent`'s `AgentRunTracingSpec`, with the agent
  * runtime (#1242).
  */
 class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
+
+  private def ended(status: String, messages: Seq[Message]): TraceEvent.AgentRunEnded =
+    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", status, messages, UsageSummary())
 
   // ==========================================================================
   // Basic Trace Operations
@@ -56,12 +59,12 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   // ==========================================================================
-  // Agent State Tracing
+  // Agent Run Tracing
   // ==========================================================================
 
   it should "trace agent state with minimal configuration" in {
     val tracing = new ConsoleTracing()
-    val event   = TraceEvent.AgentStateUpdated("InProgress", messageCount = 0, logCount = 0)
+    val event   = ended("completed", Seq.empty)
 
     noException should be thrownBy tracing.traceEvent(event)
   }
@@ -73,7 +76,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
       AssistantMessage(Some("I'm doing well, thanks!"), Seq.empty),
       UserMessage("Great to hear!")
     )
-    val event = TraceEvent.AgentStateUpdated("Complete", messages.size, logCount = 2, messages)
+    val event = ended("completed", messages)
 
     noException should be thrownBy tracing.traceEvent(event)
   }
@@ -81,7 +84,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
   it should "trace agent state with system message" in {
     val tracing  = new ConsoleTracing()
     val messages = Seq(SystemMessage("You are a helpful assistant"), UserMessage("Hello"))
-    val event    = TraceEvent.AgentStateUpdated("InProgress", messages.size, logCount = 0, messages)
+    val event    = ended("suspended", messages)
 
     noException should be thrownBy tracing.traceEvent(event)
   }
@@ -94,15 +97,14 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
       AssistantMessage(Some("Let me calculate that."), Seq(toolCall)),
       ToolMessage("3", "call-123")
     )
-    val event = TraceEvent.AgentStateUpdated("Complete", messages.size, logCount = 0, messages)
+    val event = ended("completed", messages)
 
     noException should be thrownBy tracing.traceEvent(event)
   }
 
-  it should "trace agent state with various log types" in {
+  it should "trace an agent run that ended with usage" in {
     val tracing = new ConsoleTracing()
-    // `AgentStateUpdated` carries the number of log lines, not the lines themselves.
-    val event = TraceEvent.AgentStateUpdated("InProgress", messageCount = 0, logCount = 5)
+    val event   = ended("failed", Seq.empty).copy(usage = UsageSummary().add("m", TokenUsage(1, 2, 3), None))
 
     noException should be thrownBy tracing.traceEvent(event)
   }

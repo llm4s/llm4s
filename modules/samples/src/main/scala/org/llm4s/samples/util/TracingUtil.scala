@@ -1,6 +1,6 @@
 package org.llm4s.samples.util
 
-import org.llm4s.agent.AgentState
+import org.llm4s.agent.{ AgentResult, AgentStatus }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.trace.{ Tracing, TraceEvent }
 
@@ -36,9 +36,23 @@ object TracingUtil {
       )
     )
 
-  /** Trace agent state updates */
-  def traceAgentStateUpdate(tracing: Tracing, agentState: AgentState): Unit =
-    tracing.traceEvent(agentState.toTraceEvent)
+  /** Trace the state an agent run ended in */
+  def traceAgentStateUpdate(tracing: Tracing, result: AgentResult): Unit =
+    tracing.traceEvent(
+      TraceEvent.AgentRunEnded(
+        threadId = result.threadId.value,
+        runId = result.runId.value,
+        agent = result.activeAgent.value,
+        status = result.status match {
+          case AgentStatus.Completed(_)     => "completed"
+          case AgentStatus.Blocked(g, _)    => s"blocked:$g"
+          case AgentStatus.StepLimitReached => "step_limit_reached"
+          case AgentStatus.Suspended(_, _)  => "suspended"
+        },
+        messages = result.messages,
+        usage = result.usage
+      )
+    )
 
   /** Trace successful tool execution with detailed results */
   def traceToolExecution(

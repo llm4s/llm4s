@@ -144,6 +144,39 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
     filter.validate("bAdWoRd here").isLeft shouldBe true
   }
 
+  it should "detect upper-case bad words under a Turkish default locale" in {
+    TurkishLocale {
+      // the default-locale toLowerCase would fold "I" to the dotless "ı" and miss both words
+      val filter = ProfanityFilter.withCustomWords(Set("idiot"))
+      filter.validate("INAPPROPRIATE behavior").isLeft shouldBe true
+      filter.validate("what an IDIOT").isLeft shouldBe true
+    }
+  }
+
+  it should "detect dotted and dotless Turkish I, fullwidth, accented and zero-width-split spellings" in {
+    val filter = new ProfanityFilter()
+    filter.validate("İNAPPROPRIATE behavior").isLeft shouldBe true
+    filter.validate("ınappropriate behavior").isLeft shouldBe true
+    filter.validate("ｂａｄｗｏｒｄ here").isLeft shouldBe true
+    filter.validate("bädwörd here").isLeft shouldBe true
+    filter.validate("bad​word here").isLeft shouldBe true
+    filter.validate("well badword").isLeft shouldBe true
+  }
+
+  it should "match accented custom words against unaccented text and vice versa" in {
+    val filter = ProfanityFilter.withCustomWords(Set("crème"))
+    filter.validate("CRÈME") shouldBe a[Left[?, ?]]
+    filter.validate("creme") shouldBe a[Left[?, ?]]
+    filter.validate("crema") shouldBe Right("crema")
+  }
+
+  it should "normalise but not case-fold in case-sensitive mode" in {
+    val filter = ProfanityFilter.caseSensitive()
+    filter.validate("bad​word here").isLeft shouldBe true
+    filter.validate("ｂａｄｗｏｒｄ").isLeft shouldBe true
+    filter.validate("BAD​WORD") shouldBe Right("BAD​WORD")
+  }
+
   it should "NOT detect wrong-case words in case-sensitive mode" in {
     val filter = ProfanityFilter.caseSensitive()
     // Default words are lowercase; uppercase should pass in case-sensitive mode
@@ -166,6 +199,38 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
   it should "handle custom words case-insensitively by default" in {
     val filter = ProfanityFilter.withCustomWords(Set("ForbiddenWord"))
     filter.validate("this is forbiddenword").isLeft shouldBe true
+  }
+
+  it should "detect custom bad words in case-sensitive mode" in {
+    val filter = ProfanityFilter.caseSensitive(Set("Forbidden"))
+    filter.validate("this is Forbidden").isLeft shouldBe true
+    filter.validate("this is forbidden") shouldBe Right("this is forbidden")
+  }
+
+  it should "behave like the default filter when given an empty custom set" in {
+    val filter = ProfanityFilter.withCustomWords(Set.empty)
+    filter.validate("badword here").isLeft shouldBe true
+    filter.validate("clean text here") shouldBe Right("clean text here")
+  }
+
+  it should "split on tabs and newlines as well as spaces" in {
+    val filter = new ProfanityFilter()
+    filter.validate("first\tbadword\tsecond").isLeft shouldBe true
+    filter.validate("first\nbadword\nsecond").isLeft shouldBe true
+  }
+
+  it should "detect a bad word after leading whitespace" in {
+    val filter = new ProfanityFilter()
+    // split("\\s+") yields an empty leading token; matching must still work
+    filter.validate("   badword").isLeft shouldBe true
+  }
+
+  it should "NOT detect bad words attached to punctuation (known limitation)" in {
+    val filter = new ProfanityFilter()
+    // Tokens are split on whitespace only, so trailing punctuation makes the
+    // token "badword." which is not an exact match against the word list.
+    filter.validate("that is a badword.") shouldBe Right("that is a badword.")
+    filter.validate("badword, indeed") shouldBe Right("badword, indeed")
   }
 
   // -- Clean text --

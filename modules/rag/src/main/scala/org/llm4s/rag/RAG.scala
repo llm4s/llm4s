@@ -22,6 +22,7 @@ import org.slf4j.LoggerFactory
 
 import java.io.{ Closeable, File }
 import java.nio.file.Path
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ ExecutionContext, Future }
 
 /**
@@ -70,9 +71,9 @@ final class RAG private (
   private val graphRAG: Option[GraphRAG]
 ) extends Closeable {
 
-  // Statistics tracking
-  @volatile private var _documentCount: Int = 0
-  @volatile private var _chunkCount: Int    = 0
+  // Statistics tracking: the chunk count of each document this instance has indexed. Keyed by
+  // document so that re-ingesting one replaces its count rather than adding to it.
+  private val indexedChunkCounts = TrieMap.empty[String, Int]
 
   // Traced embedding client
   private lazy val tracedEmbeddingClient: EmbeddingClient = tracer match {
@@ -114,6 +115,10 @@ final class RAG private (
 
   /**
    * Ingest raw text content.
+   *
+   * Ingesting an id that is already indexed replaces what is indexed under it. Replacing one document is not
+   * atomic across the two stores, so concurrent re-ingests of the SAME document id are not supported: serialise
+   * them in the caller. Different documents may be ingested concurrently.
    *
    * @param content The text content to ingest
    * @param documentId Unique identifier for this document
@@ -356,8 +361,8 @@ final class RAG private (
               }
 
             case Right(Some(existingVersion)) if existingVersion.contentHash != docVersion.contentHash =>
-              // Changed document - delete old chunks, re-ingest
-              deleteDocumentChunks(doc.id)
+              // Changed document - re-ingest, which replaces its chunks. No delete first: a document
+              // that fails to re-ingest keeps its previous version.
               ingestDocument(doc) match {
                 case Right(_) =>
                   registry.register(doc.id, docVersion)
@@ -499,6 +504,11 @@ final class RAG private (
 
   /**
    * Delete a specific document and its chunks.
+   *
+   * Limitation: a document's chunks are named `<docId>-chunk-<n>` and the stores delete by prefix, so deleting
+   * `a` also deletes the chunks of a document whose id itself looks like `a-chunk-<n>` (for example `a-chunk-1`,
+   * whose chunks are `a-chunk-1-chunk-0`, ...). Avoid document ids of that shape. Re-ingesting a document is not
+   * affected: it replaces chunks by their exact ids.
    *
    * @param docId Document ID to delete
    * @return Unit on success
@@ -724,7 +734,7 @@ final class RAG private (
           case ProcessDoc(doc, UpdatedDoc) =>
             seenIds += doc.id
             val docVersion = doc.version.getOrElse(DocumentVersion.fromContent(doc.content))
-            deleteDocumentChunks(doc.id)
+            // Re-ingesting replaces the chunks; a failure keeps the previous version, as in sync.
             ingestDocument(doc) match {
               case Right(_) =>
                 registry.register(doc.id, docVersion)
@@ -779,8 +789,9 @@ final class RAG private (
     val chunks = effectiveChunker.chunk(doc.content, effectiveConfig)
     val result = indexChunks(doc.id, chunks, doc.metadata)
 
-    // Register version if enabled
-    if (config.loadingConfig.enableVersioning) {
+    // Register version if enabled - only once it is indexed: a document that failed keeps its previous
+    // version, and registering the new one would make the next sync skip it as unchanged.
+    if (config.loadingConfig.enableVersioning && result.isRight) {
       val version = doc.version.getOrElse(DocumentVersion.fromContent(doc.content))
       registry.register(doc.id, version)
     }
@@ -789,12 +800,18 @@ final class RAG private (
   }
 
   private def deleteDocumentChunks(docId: String): Result[Unit] =
-    // Delete from vector store - find all chunks with this docId
-    // For now, use pattern-based deletion (chunks are named "docId-chunk-N")
+    // Chunks are named "docId-chunk-N". The prefix must include the "-chunk-" separator: a bare
+    // docId prefix would also match every other document whose id merely starts with it
+    // ("doc-1" would take "doc-10" and "doc-1-appendix" with it).
     for {
-      _ <- hybridSearcher.vectorStore.deleteByPrefix(docId)
-      _ <- hybridSearcher.keywordIndex.deleteByPrefix(docId)
-    } yield ()
+      _ <- hybridSearcher.vectorStore.deleteByPrefix(s"$docId-chunk-")
+      _ <- hybridSearcher.keywordIndex.deleteByPrefix(s"$docId-chunk-")
+    } yield {
+      indexedChunkCounts.remove(docId)
+      ()
+    }
+
+  private def chunkId(docId: String, index: Int): String = s"$docId-chunk-$index"
 
   // ========== Query API ==========
 
@@ -1073,19 +1090,22 @@ final class RAG private (
 
   // ========== Statistics API ==========
 
-  /** Number of documents ingested */
-  def documentCount: Int = _documentCount
+  /**
+   * Number of documents this instance has indexed and not since deleted. A re-ingested document
+   * counts once; one that was re-ingested with no chunks does not count.
+   */
+  def documentCount: Int = indexedChunkCounts.size
 
-  /** Number of chunks indexed */
-  def chunkCount: Int = _chunkCount
+  /** Number of chunks this instance has indexed and not since deleted: a re-ingest replaces a document's count. */
+  def chunkCount: Int = indexedChunkCounts.values.sum
 
   /** Get store statistics */
   def stats: Result[RAGStats] =
     for {
       vectorCount <- hybridSearcher.vectorStore.count()
     } yield RAGStats(
-      documentCount = _documentCount,
-      chunkCount = _chunkCount,
+      documentCount = documentCount,
+      chunkCount = chunkCount,
       vectorCount = vectorCount
     )
 
@@ -1098,10 +1118,7 @@ final class RAG private (
     for {
       _ <- hybridSearcher.vectorStore.clear()
       _ <- hybridSearcher.keywordIndex.clear()
-    } yield {
-      _documentCount = 0
-      _chunkCount = 0
-    }
+    } yield indexedChunkCounts.clear()
 
   /**
    * Close resources.
@@ -1153,42 +1170,146 @@ final class RAG private (
     chunks: Seq[DocumentChunk],
     metadata: Map[String, String]
   ): Result[Int] = {
-    if (chunks.isEmpty) return Right(0)
-
-    val contents = chunks.map(_.content)
+    // Replace, don't merge (#1318): the stores upsert by chunk id, so a document that now has fewer
+    // chunks would otherwise keep its old tail and keep matching queries. Embed, read the previous
+    // version, write the new chunks over it, then remove its tail. Nothing is deleted before the write,
+    // and the two stores share no transaction, so a write that fails part way is rolled back to the
+    // previous version. An empty chunk list still replaces: a document that became empty must not
+    // leave its old chunks behind.
+    val newIds = chunks.map(chunk => chunkId(docId, chunk.index))
 
     for {
-      embeddings <- embedBatch(contents)
-      _ <- {
-        val vectorRecords = chunks.zip(embeddings).map { case (chunk, embedding) =>
-          VectorRecord(
-            id = s"$docId-chunk-${chunk.index}",
-            embedding = embedding,
-            content = Some(chunk.content),
-            metadata = metadata + ("docId" -> docId) + ("chunkIndex" -> chunk.index.toString)
-          )
-        }
-        hybridSearcher.vectorStore.upsertBatch(vectorRecords)
+      embeddings <- if (chunks.isEmpty) Right(Seq.empty[Array[Float]]) else embedBatch(chunks.map(_.content))
+      previous   <- storedVersion(docId)
+      vectorRecords = chunks.zip(embeddings).map { case (chunk, embedding) =>
+        VectorRecord(
+          id = chunkId(docId, chunk.index),
+          embedding = embedding,
+          content = Some(chunk.content),
+          metadata = metadata + ("docId" -> docId) + ("chunkIndex" -> chunk.index.toString)
+        )
       }
-      _ <- {
-        val keywordDocs = chunks.map { chunk =>
-          KeywordDocument(
-            id = s"$docId-chunk-${chunk.index}",
-            content = chunk.content,
-            metadata = metadata + ("docId" -> docId) + ("chunkIndex" -> chunk.index.toString)
-          )
-        }
-        hybridSearcher.keywordIndex.indexBatch(keywordDocs)
+      keywordDocs = chunks.map { chunk =>
+        KeywordDocument(
+          id = chunkId(docId, chunk.index),
+          content = chunk.content,
+          metadata = metadata + ("docId" -> docId) + ("chunkIndex" -> chunk.index.toString)
+        )
       }
+      _ <- replaceVersion(docId, previous, vectorRecords, keywordDocs, newIds)
     } yield {
-      _chunkCount += chunks.size
-      _documentCount += 1
+      if (chunks.isEmpty) indexedChunkCounts.remove(docId) else indexedChunkCounts.update(docId, chunks.size)
       chunks.size
     }
   }
 
+  /**
+   * What the stores hold for `docId` before it is re-ingested, kept so a failed write can be undone.
+   *
+   * Chunk indices run `0 until n` with no gaps, so a document is stored exactly when its chunk 0 is:
+   * one lookup by id is all a document that was never indexed costs, rather than a scan of the store
+   * by prefix. Only a document that is stored is counted, by `docId`, and read back.
+   */
+  private def storedVersion(docId: String): Result[RAG.StoredVersion] =
+    hybridSearcher.vectorStore.get(chunkId(docId, 0)).flatMap {
+      case None => Right(RAG.StoredVersion.empty)
+      case Some(_) =>
+        for {
+          stored <- hybridSearcher.vectorStore.count(Some(MetadataFilter.Equals("docId", docId)))
+          ids = (0 until math.max(stored, 1L).toInt).map(chunkId(docId, _))
+          vectors  <- hybridSearcher.vectorStore.getBatch(ids)
+          keywords <- org.llm4s.Result.traverse(ids.toList)(hybridSearcher.keywordIndex.get)
+        } yield RAG.StoredVersion(vectors, keywords.flatten)
+    }
+
+  /**
+   * Write a document's new chunks over `previous`, then remove the previous version's tail, in both
+   * stores. Each step comes with the one that undoes it. When a step fails, its own undo runs first,
+   * then the undos of the steps before it, newest first, so both stores go back to `previous` rather
+   * than describing different versions.
+   *
+   * The failing step is undone too because a failure does not mean nothing was written: an
+   * HTTP-backed store (Qdrant's `wait=true` upsert, say) can commit a batch and lose the response,
+   * and a store without transactions can apply part of one. Every undo is therefore idempotent and
+   * correct whatever its step did - nothing, part or all of it: it deletes the ids the step could
+   * have added and rewrites the `previous` entries the step could have overwritten or deleted.
+   *
+   * The guarantee is best-effort: undoing writes to the same stores. If an undo fails as well - the
+   * stores are likely still failing - the document may mix versions until it is next ingested; that
+   * is logged at ERROR and the returned error names both the original failure and the undo failures.
+   * Otherwise the step's own error is returned unchanged.
+   */
+  private def replaceVersion(
+    docId: String,
+    previous: RAG.StoredVersion,
+    vectorRecords: Seq[VectorRecord],
+    keywordDocs: Seq[KeywordDocument],
+    newIds: Seq[String]
+  ): Result[Unit] = {
+    val vectors  = hybridSearcher.vectorStore
+    val keywords = hybridSearcher.keywordIndex
+    val added    = newIds.filterNot(previous.ids.contains)
+    val stale    = (previous.ids -- newIds).toSeq
+
+    def unless(skip: Boolean)(op: => Result[Unit]): Result[Unit] = if (skip) Right(()) else op
+
+    val steps: List[(() => Result[Unit], () => Result[Unit])] = List(
+      (
+        () => unless(vectorRecords.isEmpty)(vectors.upsertBatch(vectorRecords)),
+        () =>
+          unless(added.isEmpty)(vectors.deleteBatch(added))
+            .flatMap(_ => unless(previous.vectors.isEmpty)(vectors.upsertBatch(previous.vectors)))
+      ),
+      (
+        () => unless(keywordDocs.isEmpty)(keywords.indexBatch(keywordDocs)),
+        () =>
+          unless(added.isEmpty)(keywords.deleteBatch(added))
+            .flatMap(_ => unless(previous.keywords.isEmpty)(keywords.indexBatch(previous.keywords)))
+      ),
+      (
+        () => unless(stale.isEmpty)(keywords.deleteBatch(stale)),
+        () => {
+          val tail = previous.keywords.filter(doc => stale.contains(doc.id))
+          unless(tail.isEmpty)(keywords.indexBatch(tail))
+        }
+      ),
+      (
+        () => unless(stale.isEmpty)(vectors.deleteBatch(stale)),
+        () => {
+          val tail = previous.vectors.filter(record => stale.contains(record.id))
+          unless(tail.isEmpty)(vectors.upsertBatch(tail))
+        }
+      )
+    )
+
+    @scala.annotation.tailrec
+    def run(remaining: List[(() => Result[Unit], () => Result[Unit])], undos: List[() => Result[Unit]]): Result[Unit] =
+      remaining match {
+        case Nil => Right(())
+        case (step, undo) :: rest =>
+          step() match {
+            case Right(_)    => run(rest, undo :: undos)
+            case Left(error) =>
+              // The failing step may have applied (a lost response) or partly applied, so its own undo
+              // runs first, then the earlier steps', newest first. Each runs even if one before it fails.
+              val undoFailures = (undo :: undos).flatMap(undo => undo().left.toOption)
+              if (undoFailures.isEmpty) Left(error)
+              else {
+                val detail =
+                  s"re-ingesting '$docId' failed (${error.message}) and its previous version could not be restored " +
+                    s"(${undoFailures.map(_.message).mkString("; ")}); its chunks may mix versions until it is ingested again"
+                RAG.logger.error(detail.capitalize)
+                Left(ProcessingError("ingest", detail))
+              }
+          }
+      }
+
+    run(steps, Nil)
+  }
+
   private def embedQuery(query: String): Result[Array[Float]] = {
-    val request = EmbeddingRequest(Seq(query), embeddingModelConfig)
+    // A query, not a document: models that embed the two differently need to be told which this is.
+    val request = EmbeddingRequest(Seq(query), embeddingModelConfig, InputPurpose.Query)
     tracedEmbeddingClient
       .embed(request)
       .flatMap(
@@ -1301,6 +1422,15 @@ object RAG {
 
   private val logger = LoggerFactory.getLogger(classOf[RAG])
 
+  /** A document's chunks as both stores held them before a re-ingest. */
+  final private case class StoredVersion(vectors: Seq[VectorRecord], keywords: Seq[KeywordDocument]) {
+    val ids: Set[String] = vectors.map(_.id).toSet ++ keywords.map(_.id)
+  }
+
+  private object StoredVersion {
+    val empty: StoredVersion = StoredVersion(Seq.empty, Seq.empty)
+  }
+
   /** The first few failures, as `source: message`, for a log line. */
   private def describeFailures(failures: Seq[LoadResult.Failure]): String = {
     val shown = failures.take(5).map(f => s"${f.source}: ${f.error.message}")
@@ -1336,30 +1466,39 @@ object RAG {
     resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig] = missingEmbeddingProviderConfig,
     resolveRerankerConfig: () => Result[Option[RerankProviderConfig]] = () => Right(None)
   )(using ModelRegistryService, ProviderRegistry): Result[RAG] =
-    build(config, None, resolveEmbeddingProvider, resolveRerankerConfig)
+    build(config, None, resolveEmbeddingProvider, resolveRerankerConfig, None)
 
   /**
    * Package-private build method for testing with injected embedding client.
-   * This allows tests to use mock embedding providers without needing real HTTP services.
+   * This allows tests to use mock embedding providers without needing real HTTP services,
+   * and - with `hybridSearcher` - stores of their own instead of the ones `config` describes.
    */
   private[rag] def buildWithClient(
     config: RAGConfig,
     embeddingClient: EmbeddingClient,
-    resolveRerankerConfig: () => Result[Option[RerankProviderConfig]] = () => Right(None)
+    resolveRerankerConfig: () => Result[Option[RerankProviderConfig]] = () => Right(None),
+    hybridSearcher: Option[HybridSearcher] = None
   )(using ModelRegistryService, ProviderRegistry): Result[RAG] =
-    build(config, Some(embeddingClient), _ => Right(EmbeddingProviderConfig("", "", "")), resolveRerankerConfig)
+    build(
+      config,
+      Some(embeddingClient),
+      _ => Right(EmbeddingProviderConfig("", "", "")),
+      resolveRerankerConfig,
+      hybridSearcher
+    )
 
   private def build(
     config: RAGConfig,
     existingClient: Option[EmbeddingClient],
     resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
-    resolveRerankerConfig: () => Result[Option[RerankProviderConfig]]
+    resolveRerankerConfig: () => Result[Option[RerankProviderConfig]],
+    existingSearcher: Option[HybridSearcher]
   )(using ModelRegistryService, ProviderRegistry): Result[RAG] =
     for {
       embeddings <- createEmbeddings(config, existingClient, resolveEmbeddingProvider)
       (embeddingClient, embeddingModelConfig) = embeddings
       chunker                                 = createChunker(config, embeddingClient, embeddingModelConfig)
-      hybridSearcher <- createHybridSearcher(config)
+      hybridSearcher <- existingSearcher.fold(createHybridSearcher(config))(Right(_))
       reranker       <- createReranker(config, resolveRerankerConfig)
       registry       <- createRegistry(config)
       graphRAG       <- createGraphRAG(config)

@@ -42,6 +42,31 @@ object GraphError:
       with NonRecoverableError:
     override val message: String = s"Node '${nodeId.value}' (task ${taskId.value}) failed: ${cause.message}"
 
+  /**
+   * A tool call failed the run: the tool returned `Fatal`, or broke its contract (an update to a key
+   * it does not declare, a question it does not declare). `cause` says which.
+   */
+  final case class ToolFailed private (tool: ToolName, toolCallId: ToolCallId, cause: LLMError)
+      extends GraphError
+      with NonRecoverableError:
+    override val message: String          = s"Tool '${tool.value}' (call ${toolCallId.value}) failed: ${cause.message}"
+    def withTool(t: ToolName): ToolFailed = copy(tool = t)
+    def withToolCallId(id: ToolCallId): ToolFailed = copy(toolCallId = id)
+    def withCause(c: LLMError): ToolFailed         = copy(cause = c)
+
+  object ToolFailed:
+    def apply(tool: ToolName, toolCallId: ToolCallId, cause: LLMError): ToolFailed =
+      new ToolFailed(tool, toolCallId, cause)
+
+  /**
+   * A middleware hook threw: the run fails, the checkpoint stays `Running`, and `recover` re-runs
+   * only that task. `middleware` is the middleware's id.
+   */
+  final case class MiddlewareFailed(middleware: String, cause: Throwable) extends GraphError with NonRecoverableError:
+    override val message: String = s"Middleware '$middleware' failed: ${describe(cause)}"
+
+  private def describe(thrown: Throwable): String = Option(thrown.getMessage).getOrElse(thrown.toString)
+
   /** The graph went quiescent while a join still waited for arrivals that nothing can produce. */
   final case class UnsatisfiedJoin(joinId: JoinId, missing: List[String]) extends GraphError with NonRecoverableError:
     override val message: String =

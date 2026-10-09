@@ -7,6 +7,7 @@ import java.nio.file.Path
 import scala.util.Try
 import scala.concurrent.duration.*
 import scala.concurrent.{ Future, ExecutionContext, blocking }
+import org.llm4s.error.LLMError
 
 /**
  * Stability AI API client for image generation.
@@ -50,10 +51,10 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
   override def generateImage(
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, GeneratedImage] =
+  ): Either[LLMError, GeneratedImage] =
     generateImages(prompt, 1, options).flatMap(
       _.headOption.toRight(
-        ValidationError("No images were generated")
+        ImageValidationError("No images were generated")
       )
     )
 
@@ -69,7 +70,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Either[LLMError, Seq[GeneratedImage]] = {
     logger.info(s"Generating $count image(s) with prompt: ${prompt.take(100)}...")
 
     val result = for {
@@ -90,7 +91,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
     prompt: String,
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+  ): Either[LLMError, Seq[GeneratedImage]] =
     Left(UnsupportedOperation("Image editing is not yet supported for Stability AI provider"))
 
   /**
@@ -99,12 +100,12 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
   override def generateImageAsync(
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, GeneratedImage]] =
     Future {
       blocking {
         generateImage(prompt, options)
       }
-    }.recover { case ex => Left(UnknownError(ex)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "stability-ai.request")(ImageUnknownError.apply)) }
 
   /**
    * Generate multiple images asynchronously
@@ -113,12 +114,12 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
     Future {
       blocking {
         generateImages(prompt, count, options)
       }
-    }.recover { case ex => Left(UnknownError(ex)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "stability-ai.request")(ImageUnknownError.apply)) }
 
   /**
    * Edit an existing image asynchronously
@@ -128,12 +129,12 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
     prompt: String,
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
     Future {
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }.recover { case ex => Left(UnknownError(ex)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "stability-ai.request")(ImageUnknownError.apply)) }
 
   /**
    * Check the health/status of the Stability AI API service.
@@ -141,7 +142,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
    * Note: Stability AI doesn't provide a dedicated health endpoint,
    * so we use a minimal user account request as a health check.
    */
-  override def health(): Either[ImageGenerationError, ServiceStatus] = {
+  override def health(): Either[LLMError, ServiceStatus] = {
     val healthUrl = s"${config.baseUrl}/v1/user/account"
 
     httpClient
@@ -152,7 +153,11 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       )
       .toEither
       .left
-      .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))
+      .map(e =>
+        ImageErrors.fromThrowable(e, "stability-ai.health")(ex =>
+          ImageServiceError(s"Health check failed: ${ex.getMessage}", 0)
+        )
+      )
       .map { response =>
         if (response.statusCode == 200) {
           ServiceStatus(
@@ -181,11 +186,11 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
   /**
    * Validate the prompt to ensure it meets Stability AI's requirements.
    */
-  private def validatePrompt(prompt: String): Either[ImageGenerationError, String] =
+  private def validatePrompt(prompt: String): Either[LLMError, String] =
     if (prompt.trim.isEmpty) {
-      Left(ValidationError("Prompt cannot be empty"))
+      Left(ImageValidationError("Prompt cannot be empty"))
     } else if (prompt.length > 10000) {
-      Left(ValidationError("Prompt cannot exceed 10000 characters"))
+      Left(ImageValidationError("Prompt cannot exceed 10000 characters"))
     } else {
       Right(prompt)
     }
@@ -193,9 +198,9 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
   /**
    * Validate the count based on Stability AI's limits.
    */
-  private def validateCount(count: Int): Either[ImageGenerationError, Int] =
+  private def validateCount(count: Int): Either[LLMError, Int] =
     if (count < 1 || count > 10) {
-      Left(ValidationError("Count must be between 1 and 10 for Stability AI"))
+      Left(ImageValidationError("Count must be between 1 and 10 for Stability AI"))
     } else {
       Right(count)
     }
@@ -223,7 +228,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
     prompt: String,
     count: Int,
     options: ImageGenerationOptions
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Either[LLMError, Seq[GeneratedImage]] = {
     val (width, height) = sizeToApiFormat(options.size)
 
     // Immutable build - no ArrayBuffer needed
@@ -258,7 +263,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       )
       .toEither
       .left
-      .map(e => UnknownError(e))
+      .map(e => ImageErrors.fromThrowable(e, "stability-ai.request")(ImageUnknownError.apply))
       .flatMap { response => // type of response in inferred - no import needed
         if (response.statusCode == 200) {
           parseResponseBody(response.body, prompt, options)
@@ -271,14 +276,14 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
   /**
    * Take Int, not Response - no requests.Response in signature
    */
-  private def handleErrorStatus(statusCode: Int): Either[ImageGenerationError, Nothing] =
+  private def handleErrorStatus(statusCode: Int): Either[LLMError, Nothing] =
     statusCode match {
-      case 401 => Left(AuthenticationError("Invalid API key"))
-      case 429 => Left(RateLimitError("Rate limit exceeded"))
-      case 400 => Left(ValidationError("Invalid request"))
+      case 401 => Left(ImageAuthenticationError("Invalid API key"))
+      case 429 => Left(ImageRateLimitError("Rate limit exceeded"))
+      case 400 => Left(ImageValidationError("Invalid request"))
       case 402 => Left(InsufficientResourcesError("Payment required or insufficient credits"))
       case code =>
-        Left(ServiceError(s"API error (status $code)", code))
+        Left(ImageServiceError(s"API error (status $code)", code))
     }
 
   // Take String, not Response - no requests.Response in signature
@@ -286,7 +291,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
     body: String,
     prompt: String,
     options: ImageGenerationOptions
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+  ): Either[LLMError, Seq[GeneratedImage]] =
     Try {
       val json      = ujson.read(body)
       val artifacts = json("artifacts").arr
@@ -309,5 +314,5 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
 
       logger.info(s"Successfully generated ${images.length} image(s)")
       images
-    }.toEither.left.map(e => UnknownError(e))
+    }.toEither.left.map(e => ImageErrors.fromThrowable(e, "stability-ai.request")(ImageUnknownError.apply))
 }

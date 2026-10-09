@@ -1,5 +1,6 @@
 package org.llm4s
 
+import org.llm4s.annotation.Stable
 import org.llm4s.core.safety.{ DefaultErrorMapper, ErrorMapper, Safety }
 import org.llm4s.types.TryOps
 import org.llm4s.types.{ AsyncResult, Result }
@@ -60,23 +61,6 @@ package object types {
   object DirectoryPath {
     implicit val rw: RW[DirectoryPath] =
       readwriter[String].bimap[DirectoryPath](_.value, DirectoryPath.apply)
-  }
-
-  /** Type-safe wrappers for agent and plan IDs, used by `llm4s-agent` */
-  final case class AgentId(value: String) extends AnyVal {
-    override def toString: String = value
-  }
-
-  object AgentId {
-    def generate(): AgentId = AgentId(java.util.UUID.randomUUID().toString)
-  }
-
-  final case class PlanId(value: String) extends AnyVal {
-    override def toString: String = value
-  }
-
-  object PlanId {
-    def generate(): PlanId = PlanId(java.util.UUID.randomUUID().toString)
   }
 
   // Context Management Types (for conversation context handling)
@@ -196,6 +180,7 @@ package object types {
  * It provides a consistent and type-safe way to handle results and errors in the LLM4S.
  */
 
+@Stable
 object Result {
   def success[A](value: A): Result[A]                        = Right(value)
   def failure[A](error: org.llm4s.error.LLMError): Result[A] = Left(error)
@@ -203,16 +188,31 @@ object Result {
   def fromOption[A](opt: Option[A], error: => org.llm4s.error.LLMError): Result[A] =
     opt.toRight(error)
 
+  /**
+   * Collects a list of results into a result of a list: the values in order, or the first
+   * `Left` in the list.
+   */
   def sequence[A](results: List[Result[A]]): Result[List[A]] =
-    results.foldRight(success(List.empty[A])) { (result, acc) =>
-      for {
-        value <- result
-        list  <- acc
-      } yield value :: list
-    }
+    traverse(results)(result => result)
 
-  def traverse[A, B](list: List[A])(f: A => Result[B]): Result[List[B]] =
-    sequence(list.map(f))
+  /**
+   * Applies `f` to each element in order and collects the values, stopping at the first `Left`:
+   * `f` is not called on any element after the first failure, so side effects and expensive work
+   * in `f` stop there too.
+   */
+  def traverse[A, B](list: List[A])(f: A => Result[B]): Result[List[B]] = {
+    @scala.annotation.tailrec
+    def loop(remaining: List[A], acc: List[B]): Result[List[B]] =
+      remaining match {
+        case Nil => Right(acc.reverse)
+        case head :: tail =>
+          f(head) match {
+            case Right(value) => loop(tail, value :: acc)
+            case Left(error)  => Left(error)
+          }
+      }
+    loop(list, Nil)
+  }
 
   // Combinators for multiple Results
   def combine[A, B](ra: Result[A], rb: Result[B]): Result[(A, B)] =
@@ -257,6 +257,7 @@ object Result {
   // Resource management: use scala.util.Using + types.TryOps#toResult
 }
 
+@Stable
 object AsyncResult {
   import scala.concurrent.ExecutionContext
 

@@ -85,10 +85,63 @@ jobs:
           cache: 'sbt'
       
       - uses: sbt/setup-sbt@v1
-      
+
+      # Fails when a docs page pins a literal llm4s version in an install snippet: the docs site fills in
+      # `latest_release` from the latest GitHub Release, so a literal one lags the release by design.
+      - name: Check install snippets do not pin a literal version
+        run: scripts/check-doc-versions.sh
+
+      # Fails when two docs pages under the same parent declare the same `nav_order`: the site then orders them by
+      # title instead, so the number stops meaning anything and nothing reports it (#1623).
+      - name: Check docs nav_order is unique within each parent
+        run: scripts/check-doc-nav-order.sh
+
+      # The release's docs deploy: release.yml dispatches pages.yml on `main` (the github-pages environment rejects a
+      # tag ref, #1152) and waits for it. This runs the dispatcher against a fake `gh`, with no network, and checks that
+      # pages.yml, release.yml and the script agree on the run's title and the tag pattern, and that no workflow input
+      # reaches a shell. It needs jq and ruby, both on the runner.
+      - name: Test the release docs-deploy dispatcher
+        run: scripts/test-dispatch-docs-deploy.sh
+
+      # Fails on a broken internal link in docs/ that scripts/docs-link-baseline.txt does not list, and on a
+      # listed link that no longer breaks (the baseline only shrinks). Links are resolved the way llm4s.org serves
+      # them; see the header of the script. The test runs the check against fixture trees, with no network.
+      - name: Check internal docs links
+        run: |
+          scripts/test-check-docs-site-links.sh
+          scripts/check-docs-site-links.sh
+
+      # Fails when the docs state a Scala or JDK version, a module or an sbt command the build does not have.
+      # The Scala 2.13 thread began with exactly that kind of claim (#874, #1134); this keeps it corrected.
+      # The build's side is what sbt loaded (project/BuildModel.scala), not a reading of build.sbt's text.
+      - name: Write the build model
+        run: sbt -batch "dumpBuildModel target/build-model.json"
+
+      - name: Check the documented support matrix matches the build
+        run: |
+          scripts/test-check-doc-support.sh target/build-model.json
+          scripts/check-doc-support.sh --model target/build-model.json
+
+      # The wrapper below re-runs a step only when its `[error]` output shows a transient download failure and
+      # never otherwise; this runs it against a fake command, with no network, to keep that true.
+      - name: Test the transient-network retry wrapper
+        run: scripts/test-retry-on-transient-network.sh
+
+      # The frozen set is written down in build.sbt (`mimaFrozen`), in three tier lists beside it, in
+      # docs/reference/v1-scope.md's Package Map and in two prose lists. This keeps them in step; it reads
+      # text only, so it needs no sbt.
+      - name: Check the documented stability tiers match the build
+        run: |
+          scripts/test-check-tier-drift.sh
+          scripts/check-tier-drift.sh
+
       # scalafmtCheckAll covers sources only; scalafmtSbtCheck covers build.sbt and project/*.scala.
+      # scalafmt downloads scalafmt-core at run time, and a network hiccup used to fail this step in about five
+      # seconds ("scalafmt: [v3.7.14] failed to download [.scalafmt.conf]", 2 of 267 runs in three days, both
+      # with a warm 450 MB sbt cache restored, so a cache would not have prevented them). The wrapper re-runs it,
+      # at most twice, on exactly that kind of error; a real formatting failure still fails on the first attempt.
       - name: Check formatting
-        run: sbt scalafmtCheckAll scalafmtSbtCheck
+        run: scripts/retry-on-transient-network.sh sbt scalafmtCheckAll scalafmtSbtCheck
 
       - name: Run Scalafix
         run: sbt scalafixAll
@@ -99,13 +152,41 @@ jobs:
       - name: Check coverage policy is declared for every module
         run: sbt coveragePolicyCheck
 
+      # Fails when a published llm4s-* artifact has no tier row in v1-scope.md or no install line in
+      # installation.md. A release cannot be amended, so a module that ships undocumented stays so.
+      - name: Check every published artifact is documented
+        run: sbt publishedArtifactsCheck
+
       - name: Compile
         run: sbt compile
+
+      # Fails when a frozen module resolves a document-parsing, speech, cloud-storage, database,
+      # observability-backend or foreign vendor-SDK dependency, so the programme's definition of done
+      # (#1126) stays true until the 1.0 freeze.
+      - name: Check no frozen module resolves a dependency the modularisation moved out
+        run: sbt frozenDependencyCheck
 
       # Fails when an integration suite in modules/it declares no tier, i.e. when no command
       # and no CI job below would run it. Eleven of eighteen suites were in that state.
       - name: Check every integration suite declares a test tier
         run: sbt it/itTierCheck
+
+      # Fails when a top-level public type of a frozen module is not marked @Stable or @Experimental,
+      # so the tier lives in the code and cannot drift from docs/reference/v1-scope.md.
+      - name: Check every frozen type declares a stability tier
+        run: sbt stabilityTierCheck
+
+      # The staged-deployment template (deploy/, .github/workflows/deploy-staged.yml) is never run by CI, so
+      # these keep it from rotting: every overlay must render with the image, namespace, replica count and
+      # pod hardening it promises (kubectl is on the GitHub-hosted runners), and the image definition must
+      # still stage without a Docker daemon and run as a numeric non-root user.
+      - name: Check the deployment manifests render
+        run: deploy/scripts/deploy.sh check
+
+      - name: Check the deploy-service image definition
+        run: |
+          sbt deployService/Docker/stage
+          grep -qx 'USER 1001:0' modules/deploy-service/target/docker/stage/Dockerfile
 
   scaladoc:
     name: ScalaDoc
@@ -137,6 +218,8 @@ jobs:
     name: Code Coverage
     needs: [quick-checks]
     runs-on: ubuntu-latest
+    # Healthy runs take about 40 minutes; the default limit is 360, so a hung run would hold the PR for six hours.
+    timeout-minutes: 90
     permissions:
       contents: read
 
@@ -193,12 +276,22 @@ jobs:
           openai/test openai/coverageReport
           openaiCompatible/test openaiCompatible/coverageReport
           voyage/test voyage/coverageReport
+          bedrock/test bedrock/coverageReport
+          jina/test jina/coverageReport
+          cohere/test cohere/coverageReport
+          watsonx/test watsonx/coverageReport
           providerTestkit/test providerTestkit/coverageReport
           observability/test observability/coverageReport
           observabilityPrometheus/test observabilityPrometheus/coverageReport
           agentTools/test agentTools/coverageReport
           agent/test agent/coverageReport
           traceOpentelemetry/test traceOpentelemetry/coverageReport
+          gradleDemo/test gradleDemo/coverageReport
+          javaApi/test javaApi/coverageReport
+          springBootStarter/test springBootStarter/coverageReport
+          deployService/test deployService/coverageReport
+          llm4sEffect/test llm4sEffect/coverageReport
+          llm4sZio/test llm4sZio/coverageReport
           coverageAggregate
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes
@@ -354,6 +447,34 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload bedrock coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/bedrock/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: bedrock
+      - name: Upload jina coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/jina/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: jina
+      - name: Upload cohere coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/cohere/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: cohere
+      - name: Upload watsonx coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/providers/watsonx/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: watsonx
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload provider-testkit coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -414,6 +535,66 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+      - name: Upload gradle-demo coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/gradle-demo/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: gradle-demo
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload java-api coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/java-api/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: java-api
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload spring-boot-starter coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/spring-boot-starter/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: spring-boot-starter
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload deploy-service coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/deploy-service/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: deploy-service
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload llm4s-effect coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/llm4s-effect/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: llm4s-effect
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload llm4s-zio coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/llm4s-zio/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: llm4s-zio
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
       - name: Upload coverage report artifact
         uses: actions/upload-artifact@v7
         with:
@@ -436,6 +617,9 @@ jobs:
         java: [21]
 
     runs-on: ${{ matrix.os }}
+    # Healthy runs take up to about 50 minutes on Windows; the default limit is 360, so a hung run would hold
+    # the PR for six hours.
+    timeout-minutes: 90
     
     steps:
       - uses: actions/checkout@v7
@@ -556,11 +740,87 @@ jobs:
             modules/it/target/**/test-reports/
           retention-days: 5
 
+  # Binary compatibility (MiMa). Only the frozen modules have a baseline (see `mimaFrozen` in
+  # build.sbt), and none until 0.5.0 is published (#1281), so this checks nothing yet. The build
+  # is Scala 3 only, with no `crossScalaVersions`, so a bare `mimaReportBinaryIssues` covers every
+  # artifact; use `+mimaReportBinaryIssues` if a second Scala version returns (#1126).
+  mima-check:
+    name: Binary Compatibility (MiMa)
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      # Resolving the baseline and the build's artifacts from Maven Central can hit a connection reset (seen once,
+      # run 37316745524: "download error: Caught java.net.SocketException (Connection reset)"); the wrapper
+      # re-runs the step on that kind of error only. A binary-compatibility failure is never retried.
+      - name: Check binary compatibility
+        run: scripts/retry-on-transient-network.sh sbt mimaReportBinaryIssues
+
+  # Kotlin coroutine API and the Java sample (modules/samples/gradle-java): separate Gradle builds that consume
+  # llm4s-java-api from local Maven, so they share one publish of the library.
+  kotlin-api:
+    name: Kotlin API
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Publish the library modules to local Maven
+        # Pin to 0.1.0-SNAPSHOT so build.gradle.kts can reference a stable coordinate without
+        # chasing dynver-generated versions. llm4s-java-api's POM depends on core, agent and the
+        # provider modules, so all of them must be in the local repository, not just llm4s-java-api.
+        run: sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build and test Kotlin API with coverage check
+        working-directory: modules/kotlin-api
+        run: gradle check
+
+      # Compiles the Java sample against the library just published, so it cannot drift from the API it shows.
+      - name: Build the Java sample
+        working-directory: modules/samples/gradle-java
+        run: gradle build installDist
+
+      - name: Upload Kotlin coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: kotlin-coverage-report
+          path: modules/kotlin-api/build/reports/jacoco/
+          retention-days: 14
+
   # All tests must pass
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage, config-policy-check, scaladoc, integration-tests]
+    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -588,10 +848,23 @@ jobs:
             echo "Integration tests failed"
             exit 1
           fi
+          if [[ "${{ needs.mima-check.result }}" != "success" ]]; then
+            echo "Binary compatibility check failed"
+            exit 1
+          fi
+          if [[ "${{ needs.kotlin-api.result }}" != "success" ]]; then
+            echo "Kotlin API tests failed"
+            exit 1
+          fi
           echo "All tests passed!"
 
   # Tier 3: Ollama integration tests — verifies full round-trip against a real
   # local LLM. Only runs on pushes to main to avoid slowing down PR builds.
+  #
+  # Carries a pgvector service as well as Ollama, because the RAG pipeline suite needs both:
+  # real embeddings are the whole point of it, and pgvector is where the hybrid-search half
+  # stores them. A suite declares exactly one tier, so the tier its scarcer dependency
+  # belongs to has to supply the rest.
   ollama-integration:
     name: Ollama Integration
     needs: quick-checks
@@ -599,6 +872,20 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
 
     steps:
       - uses: actions/checkout@v7
@@ -626,19 +913,27 @@ jobs:
             sleep 1
           done
 
-      - name: Pull test model
-        run: ollama pull qwen2.5:0.5b
+      # Two models: one to answer with, one to embed with. RAGPipelineOllamaIntegrationSpec
+      # is the only suite in the repo that exercises retrieval against a real embedding
+      # model, so leaving nomic-embed-text out would make it fail rather than skip here.
+      - name: Pull test models
+        run: |
+          ollama pull qwen2.5:0.5b
+          ollama pull nomic-embed-text
 
       - name: Run Ollama integration tests
         env:
-          # This job installs Ollama and pulls the model, so "Ollama not available" here is a
-          # failure, not a reason to skip.
+          # This job installs Ollama, pulls the models and runs pgvector, so "not available"
+          # here is a failure, not a reason to skip.
           LLM4S_IT_STRICT: "true"
+          PGVECTOR_TEST_URL: jdbc:postgresql://localhost:5432/postgres
+          PGVECTOR_USER: postgres
+          PGVECTOR_PASSWORD: postgres
         run: sbt testOllama
 
   # Tier 2: containerised workspace tests. Split from the `integration-tests` job because
-  # this one has to build the workspace-runner image first (apt + sdkman + two Scala
-  # versions), which is far too slow for every PR. The image tag comes from the build
+  # this one has to build the workspace-runner image first (apt + sdkman + the Scala 3
+  # toolchain), which is far too slow for every PR. The image tag comes from the build
   # itself — `it / Test / envVars` passes `workspaceRunner / Docker / version` to the suite.
   workspace-integration:
     name: Workspace Integration
@@ -715,9 +1010,30 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
+          # Speech smoke suites (modules/it, org.llm4s.speech): OpenAI TTS/STT reuse OPENAI_API_KEY.
+          # With LLM4S_IT_STRICT=true each of these must be a repository secret, or its suite fails.
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          AZURE_SPEECH_KEY: ${{ secrets.AZURE_SPEECH_KEY }}
+          AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
           # LangfuseSmokeSpec (llm4s-observability). LANGFUSE_URL is optional: unset, it is
           # Langfuse Cloud. The LLM in that suite is a mock, so it costs only a trace.
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           LANGFUSE_URL: ${{ secrets.LANGFUSE_URL }}
+          # Keys for the smoke suites added with the new providers. With LLM4S_IT_STRICT=true each
+          # one that is missing from the repository secrets makes its suite FAIL (not skip).
+          # MistralSmokeSpec, ZaiSmokeSpec, JinaEmbeddingsSmokeSpec, StableDiffusionSmokeSpec.
+          # (CohereEmbeddingsSmokeSpec reads COHERE_API_KEY, set above for CohereSmokeSpec.)
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          STABILITY_API_KEY: ${{ secrets.STABILITY_API_KEY }}
+          # BedrockSmokeSpec: AWS_REGION plus credentials the default chain finds
+          # (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, optionally AWS_SESSION_TOKEN).
+          # BEDROCK_MODEL_ID is optional; unset, the suite uses its built-in default model.
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+          BEDROCK_MODEL_ID: ${{ secrets.BEDROCK_MODEL_ID }}
         run: sbt testSmoke

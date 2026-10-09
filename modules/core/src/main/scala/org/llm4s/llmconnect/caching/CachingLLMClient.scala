@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoKeywordCatch
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
@@ -53,6 +54,7 @@ import org.slf4j.LoggerFactory
  * @param tracing Tracing instance for observability.
  * @param clock Clock for TTL verification (defaults to UTC).
  */
+@Stable
 class CachingLLMClient(
   baseClient: LLMClient,
   embeddingClient: EmbeddingClient,
@@ -163,7 +165,8 @@ class CachingLLMClient(
   }
 
   /**
-   * Returns `true` when `timestamp + ttlNanos` is still in the future.
+   * Returns `true` unless `now` is past `timestamp + ttlNanos`: an entry exactly `ttl` old is still
+   * valid, as in [[InMemoryEmbeddingCache]].
    *
    * If the addition overflows (e.g. for very large TTL values),
    * `ArithmeticException` is caught and the entry is treated as permanently
@@ -173,7 +176,7 @@ class CachingLLMClient(
   private def isWithinTtl(timestamp: Instant, ttlNanos: Long, now: Instant): Boolean =
     try
       // Safe check for overflow issues with large TTLs
-      timestamp.plusNanos(ttlNanos).isAfter(now)
+      !timestamp.plusNanos(ttlNanos).isBefore(now)
     catch {
       case _: ArithmeticException => true // Treated as infinite TTL if overflow matches logic
     }

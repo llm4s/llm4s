@@ -1,5 +1,6 @@
 package org.llm4s.toolapi
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 import upickle.default._
@@ -21,6 +22,7 @@ import upickle.default._
  * @tparam T Phantom type for the parameter schema (unused at runtime)
  * @tparam R Return type, must have a uPickle `ReadWriter`
  */
+@Stable
 case class ToolFunction[T, R: ReadWriter](
   name: String,
   description: String,
@@ -125,6 +127,7 @@ case class ToolFunction[T, R: ReadWriter](
  * @param schema      Parameter schema
  * @param handler     Optional handler; must be set before calling [[buildSafe]]
  */
+@Stable
 class ToolBuilder[T, R: ReadWriter] private (
   name: String,
   description: String,

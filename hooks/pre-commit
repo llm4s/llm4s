@@ -95,12 +95,22 @@ map_file_to_project() {
     modules/workspace/workspaceShared/*)  echo "workspaceShared" ;;
     modules/workspace/workspaceClient/*)  echo "workspaceClient" ;;
     modules/workspace/workspaceRunner/*)  echo "workspaceRunner" ;;
+    modules/spring-boot-starter/*)        echo "springBootStarter" ;;
+    modules/deploy-service/*)             echo "deployService" ;;
+    modules/llm4s-effect/*)               echo "llm4sEffect" ;;
+    modules/llm4s-zio/*)                  echo "llm4sZio" ;;
+    modules/java-api/*)                   echo "javaApi" ;;
     modules/observability-prometheus/*)   echo "observabilityPrometheus" ;;
     modules/knowledgegraph-neo4j/*)       echo "knowledgegraphNeo4j" ;;
     modules/trace-opentelemetry/*)        echo "traceOpentelemetry" ;;
     modules/openai-compatible/*)          echo "openaiCompatible" ;;
     modules/provider-testkit/*)           echo "providerTestkit" ;;
+    modules/providers/bedrock/*)          echo "bedrock" ;;
+    modules/providers/watsonx/*)          echo "watsonx" ;;
+    modules/providers/jina/*)             echo "jina" ;;
+    modules/providers/cohere/*)           echo "cohere" ;;
     modules/providers/voyage/*)           echo "voyage" ;;
+    modules/gradle-demo/*)                echo "gradleDemo" ;;
     modules/memory-postgres/*)            echo "memoryPostgres" ;;
     modules/knowledgegraph/*)             echo "knowledgegraph" ;;
     modules/config-policy/*)              echo "configPolicy" ;;
@@ -179,6 +189,17 @@ DOWNSTREAM_COMPILE=""
 propagate_downstream() {
   local proj="$1"
   case "$proj" in
+    javaApi)
+      set_add DOWNSTREAM_COMPILE springBootStarter
+      ;;
+    llm4sEffect)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
+    llm4sZio)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
     media)
       set_add DOWNSTREAM_COMPILE rag
       set_add DOWNSTREAM_COMPILE image
@@ -200,6 +221,10 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE anthropic
       set_add DOWNSTREAM_COMPILE openaiCompatible
       set_add DOWNSTREAM_COMPILE voyage
+      set_add DOWNSTREAM_COMPILE bedrock
+      set_add DOWNSTREAM_COMPILE watsonx
+      set_add DOWNSTREAM_COMPILE jina
+      set_add DOWNSTREAM_COMPILE cohere
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE workspaceClient
       set_add DOWNSTREAM_COMPILE samples
@@ -211,9 +236,15 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE agent
       set_add DOWNSTREAM_COMPILE agentTools
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
+      set_add DOWNSTREAM_COMPILE gradleDemo
       set_add DOWNSTREAM_COMPILE providerTestkit
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
+      set_add DOWNSTREAM_COMPILE javaApi
+      set_add DOWNSTREAM_COMPILE llm4sEffect
+      set_add DOWNSTREAM_COMPILE llm4sZio
+      set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     knowledgegraph)
       set_add DOWNSTREAM_COMPILE rag
@@ -260,18 +291,27 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE configPolicy
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
+      set_add DOWNSTREAM_COMPILE javaApi
+      set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     gemini)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE configPolicy
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
+      set_add DOWNSTREAM_COMPILE javaApi
+      set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     anthropic)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE configPolicy
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
+      set_add DOWNSTREAM_COMPILE javaApi
+      set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     openaiCompatible)
       set_add DOWNSTREAM_COMPILE rag
@@ -281,8 +321,33 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
+      set_add DOWNSTREAM_COMPILE javaApi
+      set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
+      ;;
+    bedrock)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    watsonx)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
       ;;
     voyage)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    jina)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    cohere)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
@@ -294,6 +359,9 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
+      set_add DOWNSTREAM_COMPILE javaApi
+      set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     workspaceShared)
       set_add DOWNSTREAM_COMPILE workspaceClient
@@ -335,6 +403,10 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE observability
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
+      set_add DOWNSTREAM_COMPILE javaApi
+      set_add DOWNSTREAM_COMPILE llm4sEffect
+      set_add DOWNSTREAM_COMPILE llm4sZio
+      set_add DOWNSTREAM_COMPILE springBootStarter
       ;;
     agentTools)
       set_add DOWNSTREAM_COMPILE samples
@@ -353,6 +425,13 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE openaiCompatible
       set_add DOWNSTREAM_COMPILE openai
       set_add DOWNSTREAM_COMPILE voyage
+      set_add DOWNSTREAM_COMPILE bedrock
+      set_add DOWNSTREAM_COMPILE watsonx
+      set_add DOWNSTREAM_COMPILE jina
+      set_add DOWNSTREAM_COMPILE cohere
+      set_add DOWNSTREAM_COMPILE javaApi
+      set_add DOWNSTREAM_COMPILE springBootStarter
+      set_add DOWNSTREAM_COMPILE deployService
       ;;
     knowledgegraphNeo4j)
       set_add DOWNSTREAM_COMPILE samples

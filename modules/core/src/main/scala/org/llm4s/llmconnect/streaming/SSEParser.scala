@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.streaming
 
+import org.llm4s.annotation.Stable
+
 import scala.collection.mutable
 import scala.util.Try
 
@@ -14,6 +16,7 @@ import scala.util.Try
  * - retry: <retry time>
  * - : <comment>
  */
+@Stable
 object SSEParser {
 
   /**

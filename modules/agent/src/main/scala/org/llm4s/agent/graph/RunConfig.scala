@@ -88,7 +88,7 @@ final case class RunPosition(
  * `emit` records a durable custom event: it is committed with this task's result, given a
  * per-thread sequence number in that commit, delivered only after the commit and replayed to
  * later subscribers. It is discarded if the task fails. `progress` is live-only, for token deltas
- * and similar high-volume progress: delivered at once to current subscribers, never persisted or
+ * and similar high-volume progress, and carries a name and version like `emit`: delivered at once to current subscribers, never persisted or
  * replayed. Outside a [[GraphRuntime]] both are no-ops.
  */
 final class RunContext private[graph] (
@@ -99,8 +99,11 @@ final class RunContext private[graph] (
   /** Records a durable custom event; `payload` is snapshotted at the call, so the node may reuse it. */
   def emit(name: String, version: Int, payload: ujson.Value): Unit = sink.custom(name, version, payload)
 
-  /** Offers live progress; `payload` is snapshotted at the call, so the node may reuse it. */
-  def progress(payload: ujson.Value): Unit = sink.progress(payload)
+  /** Offers live progress named `name`, version `version`; `payload` is snapshotted at the call. */
+  def progress(name: String, version: Int, payload: ujson.Value): Unit = sink.progress(name, version, payload)
 
   /** The task thread's interrupt flag, read without clearing it. */
   def isCancelled: Boolean = Thread.currentThread().isInterrupted
+
+  /** Forgets the durable events a failed attempt emitted, before the node is run again. */
+  private[graph] def discardAttempt(): Unit = sink.discardCustom()

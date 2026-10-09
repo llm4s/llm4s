@@ -1,5 +1,6 @@
 package org.llm4s.context
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.{ Result, TokenBudget }
@@ -9,6 +10,7 @@ import org.slf4j.LoggerFactory
  * Manages conversation token windows by trimming conversations to fit within token budgets.
  * Always preserves system messages and applies configurable headroom for safety.
  */
+@Stable
 object TokenWindow {
   private val logger                 = LoggerFactory.getLogger(getClass)
   private val DefaultHeadroomPercent = 0.08 // 8% headroom by default
@@ -191,6 +193,7 @@ object TokenWindow {
 /**
  * Result of token window processing
  */
+@Stable
 case class ConversationWindow(
   conversation: Conversation,
   usage: TokenUsageInfo,
@@ -209,6 +212,7 @@ object ConversationWindow {
 /**
  * Token usage information for monitoring and debugging
  */
+@Stable
 case class TokenUsageInfo(
   currentTokens: Int,
   budgetLimit: TokenBudget,

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -19,17 +20,22 @@ import org.llm4s.util.Redaction
  *                      `<baseUrl>/v1/chat/completions` - see [[MistralConfig.apiBaseUrl]].
  * @param contextWindow Model's total token capacity (prompt + completion combined).
  * @param reserveCompletion Tokens held back from prompt history for the completion.
+ * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
+ *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
+@Experimental
 case class MistralConfig(
   apiKey: String,
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
-  override val providerId: ProviderId                  = ProviderId("mistral")
-  override def endpointUrl: Option[String]             = Some(baseUrl)
-  override def withModel(model: String): MistralConfig = copy(model = model)
+  override val providerId: ProviderId                                  = ProviderId("mistral")
+  override def endpointUrl: Option[String]                             = Some(baseUrl)
+  override def withModel(model: String): MistralConfig                 = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): MistralConfig = copy(timeouts = timeouts)
   override def toString: String =
     s"MistralConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"

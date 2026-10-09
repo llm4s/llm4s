@@ -10,6 +10,8 @@ import java.util.Base64
 import scala.util.Try
 import scala.concurrent.duration.*
 import scala.concurrent.{ Future, ExecutionContext, blocking }
+import org.llm4s.error.LLMError
+import org.llm4s.util.Redaction
 
 /**
  * Represents the JSON payload for the Stable Diffusion WebUI API's text-to-image endpoint.
@@ -88,16 +90,16 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
   override def generateImage(
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, GeneratedImage] =
+  ): Either[LLMError, GeneratedImage] =
     generateImages(prompt, 1, options).flatMap(
-      _.headOption.toRight(ValidationError("No images returned from Stable Diffusion"))
+      _.headOption.toRight(ImageValidationError("No images returned from Stable Diffusion"))
     )
 
   override def generateImages(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+  ): Either[LLMError, Seq[GeneratedImage]] =
     for {
       _        <- Right(logger.info(s"Generating $count image(s) with prompt: $prompt"))
       payload  <- Right(buildPayload(prompt, count, options))
@@ -108,55 +110,55 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
   override def generateImageAsync(
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, GeneratedImage]] =
     Future {
       blocking {
         generateImage(prompt, options)
       }
-    }.recover { case ex => Left(UnknownError(ex)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "stable-diffusion.request")(ImageUnknownError.apply)) }
 
   override def generateImagesAsync(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
     Future {
       blocking {
         generateImages(prompt, count, options)
       }
-    }.recover { case ex => Left(UnknownError(ex)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "stable-diffusion.request")(ImageUnknownError.apply)) }
 
   override def editImageAsync(
     imagePath: Path,
     prompt: String,
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
     Future {
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }.recover { case ex => Left(UnknownError(ex)) }
+    }.recover { case ex => Left(ImageErrors.fromThrowable(ex, "stable-diffusion.request")(ImageUnknownError.apply)) }
 
   override def editImage(
     imagePath: Path,
     prompt: String,
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Either[LLMError, Seq[GeneratedImage]] = {
     val providerOptions = options.providerOptions match {
       case None                                               => Right(ProviderImageEditOptions.StableDiffusion())
       case Some(sd: ProviderImageEditOptions.StableDiffusion) => Right(sd)
       case Some(_) =>
-        Left(ValidationError("Unsupported provider-specific edit options for Stable Diffusion image client"))
+        Left(ImageValidationError("Unsupported provider-specific edit options for Stable Diffusion image client"))
     }
 
-    def validateDenoisingStrength(value: Option[Double]): Either[ImageGenerationError, Double] = {
+    def validateDenoisingStrength(value: Option[Double]): Either[LLMError, Double] = {
       val resolved = value.getOrElse(0.75)
       Either.cond(
         resolved >= 0.0 && resolved <= 1.0,
         resolved,
-        ValidationError(s"denoisingStrength must be between 0.0 and 1.0, got: $resolved")
+        ImageValidationError(s"denoisingStrength must be between 0.0 and 1.0, got: $resolved")
       )
     }
 
@@ -201,7 +203,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
 
   private def makeImg2ImgRequest(
     payload: StableDiffusionImg2ImgPayload
-  ): Either[ImageGenerationError, HttpResponse] = {
+  ): Either[LLMError, HttpResponse] = {
     val url = s"${config.baseUrl}/sdapi/v1/img2img"
     val headers = Map(
       "Content-Type" -> "application/json"
@@ -219,16 +221,20 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
       )
       .toEither
       .left
-      .map(e => UnknownError(e))
+      .map(e => ImageErrors.fromThrowable(e, "stable-diffusion.request")(ImageUnknownError.apply))
   }
 
-  override def health(): Either[ImageGenerationError, ServiceStatus] = {
+  override def health(): Either[LLMError, ServiceStatus] = {
     val url = s"${config.baseUrl}/sdapi/v1/options"
     httpClient
       .get(url, Map.empty, 5.seconds)
       .toEither
       .left
-      .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))
+      .map(e =>
+        ImageErrors.fromThrowable(e, "stable-diffusion.health")(ex =>
+          ImageServiceError(s"Health check failed: ${ex.getMessage}", 0)
+        )
+      )
       .map { response =>
         if (response.statusCode == 200)
           ServiceStatus(HealthStatus.Healthy, "Stable Diffusion service is responding")
@@ -256,7 +262,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
     writeJs(payload)
   }
 
-  private def makeHttpRequest(payload: ujson.Value): Either[ImageGenerationError, HttpResponse] = {
+  private def makeHttpRequest(payload: ujson.Value): Either[LLMError, HttpResponse] = {
     val url = s"${config.baseUrl}/sdapi/v1/txt2img"
     val headers = Map(
       "Content-Type" -> "application/json"
@@ -274,23 +280,24 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
       )
       .toEither
       .left
-      .map(e => UnknownError(e))
+      .map(e => ImageErrors.fromThrowable(e, "stable-diffusion.request")(ImageUnknownError.apply))
   }
 
   private def parseResponse(
     response: HttpResponse,
     prompt: String,
     options: ImageGenerationOptions
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Either[LLMError, Seq[GeneratedImage]] = {
 
     response.statusCode match {
       case 200 => // succeed
-      case 401 => return Left(AuthenticationError("API request failed with status 401: Unauthorized"))
-      case 429 => return Left(RateLimitError("API request failed with status 429: Rate limit"))
+      case 401 => return Left(ImageAuthenticationError("API request failed with status 401: Unauthorized"))
+      case 429 => return Left(ImageRateLimitError("API request failed with status 429: Rate limit"))
       case _ =>
-        val errorMsg = s"API request failed with status ${response.statusCode}: ${response.body}"
+        val errorMsg =
+          s"API request failed with status ${response.statusCode}: ${Redaction.safeBody(response.body)}"
         logger.error(errorMsg)
-        return Left(ServiceError(errorMsg, response.statusCode))
+        return Left(ImageServiceError(errorMsg, response.statusCode))
     }
 
     Try {
@@ -298,9 +305,9 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
       val images       = responseJson("images").arr
       images
     }.toEither.left
-      .map(e => UnknownError(e))
+      .map(e => ImageErrors.fromThrowable(e, "stable-diffusion.request")(ImageUnknownError.apply))
       .flatMap { images =>
-        if (images.isEmpty) Left(ValidationError("No images returned from the API"))
+        if (images.isEmpty) Left(ImageValidationError("No images returned from the API"))
         else {
           val generatedImages = images.map { imageData =>
             GeneratedImage(

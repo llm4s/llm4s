@@ -1,5 +1,7 @@
 package org.llm4s.toolapi
 
+import org.llm4s.annotation.Stable
+
 /**
  * Schema builder — fluent API for creating JSON Schema [[SchemaDefinition]] values.
  *
@@ -11,6 +13,7 @@ package org.llm4s.toolapi
  *   .withProperty(Schema.property("limit", Schema.integer("Max results"), required = false))
  * }}}
  */
+@Stable
 object Schema {
 
   // ---- Primitive schemas -------------------------------------------------

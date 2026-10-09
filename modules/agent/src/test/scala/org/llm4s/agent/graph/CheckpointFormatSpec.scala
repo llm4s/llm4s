@@ -135,15 +135,51 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
     val formatTwo = ujson.copy(Checkpoint.toJson(current))
     formatTwo.obj.remove("tenantId")
     val migrated = Checkpoint.fromJson(formatTwo).value
-    migrated.formatVersion shouldBe 3
+    migrated.formatVersion shouldBe Checkpoint.CurrentFormat
     migrated.tenantId shouldBe None
-    migrated shouldBe current.copy(formatVersion = 3)
-    Checkpoint.CurrentFormat shouldBe 3
+    migrated shouldBe current.copy(formatVersion = Checkpoint.CurrentFormat)
+  }
+
+  it should "migrate a format-3 checkpoint, written before the Failed status existed" in {
+    val b     = GraphBuilder("g", "v1")
+    val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty))
+    val graph = b.compile(start)(_ => Right(())).value
+    val current = Checkpoint(
+      3,
+      "run-1/1",
+      None,
+      "thread",
+      "run-1",
+      CheckpointStatus.Completed,
+      Instant.parse("2026-10-02T12:00:00Z"),
+      graph.snapshot(graph.start(())).value
+    )
+    val migrated = Checkpoint.fromJson(Checkpoint.toJson(current)).value
+    migrated shouldBe current.copy(formatVersion = 4)
+    Checkpoint.CurrentFormat shouldBe 4
+  }
+
+  it should "round-trip the terminal Failed status" in {
+    val b     = GraphBuilder("g", "v1")
+    val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty))
+    val graph = b.compile(start)(_ => Right(())).value
+    val failed = Checkpoint(
+      Checkpoint.CurrentFormat,
+      "run-1/2",
+      Some("run-1/1"),
+      "thread",
+      "run-1",
+      CheckpointStatus.Failed,
+      Instant.parse("2026-10-02T12:00:00Z"),
+      graph.snapshot(graph.start(())).value
+    )
+    Checkpoint.toJson(failed)("status") shouldBe upickle.default.writeJs[CheckpointStatus](CheckpointStatus.Failed)
+    Checkpoint.fromJson(Checkpoint.toJson(failed)).value shouldBe failed
   }
 
   it should "refuse a format it does not know" in {
-    val newer = ujson.Obj("formatVersion" -> 4, "id" -> "x")
-    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(4, Checkpoint.CurrentFormat)
+    val newer = ujson.Obj("formatVersion" -> 5, "id" -> "x")
+    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(5, Checkpoint.CurrentFormat)
     Checkpoint.fromJson(ujson.Obj("id" -> "x")).left.value shouldBe
       GraphError.UnsupportedCheckpointFormat(0, Checkpoint.CurrentFormat)
   }

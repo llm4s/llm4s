@@ -63,3 +63,17 @@ opaque type Principal = String
 object Principal:
   def apply(value: String): Principal         = value
   extension (id: Principal) def value: String = id
+
+/** The provider's identifier of one tool call; unique within a conversation. */
+opaque type ToolCallId = String
+
+object ToolCallId:
+  def apply(value: String): ToolCallId         = value
+  extension (id: ToolCallId) def value: String = id
+
+/** The name of a tool, as the model calls it. */
+opaque type ToolName = String
+
+object ToolName:
+  def apply(value: String): ToolName           = value
+  extension (name: ToolName) def value: String = name

@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm4s-deploy-service
+  labels:
+    app.kubernetes.io/name: llm4s-deploy-service
+    app.kubernetes.io/part-of: llm4s
+spec:
+  replicas: 1
+  # Never drop below the desired capacity during a rollout: add a pod, wait for it to be ready, then retire one.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: llm4s-deploy-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: llm4s-deploy-service
+        app.kubernetes.io/part-of: llm4s
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: service
+          # The tag is deliberately absent. The pipeline (.github/workflows/deploy-staged.yml) sets the
+          # registry, the name and an immutable tag (the commit SHA) when it deploys, so every environment
+          # runs exactly the image that was built and tested, and a rollback names a tag that still exists.
+          image: llm4s/deploy-service
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # The service listens on PORT (default 8080). /health is the process; /llm-check is NOT a probe,
+          # so a missing provider key does not take the pods out of rotation.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          volumeMounts:
+            # The root filesystem is read-only; the JVM needs somewhere to write temporary files.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

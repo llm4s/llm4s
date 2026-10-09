@@ -1,8 +1,11 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * API errors for external service calls
  */
+@Stable
 final case class APIError private (
   override val message: String,
   provider: String,

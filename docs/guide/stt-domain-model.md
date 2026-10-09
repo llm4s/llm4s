@@ -177,6 +177,11 @@ STTError.InvalidInput(
 - `userFriendly: String` - End-user friendly error message
 - `context: Map[String, String]` - Structured error context
 
+**Recoverability markers:** `EngineNotAvailable` is a `RecoverableError`; `UnsupportedFormat` and `InvalidInput`
+are `NonRecoverableError`s. `ProcessingFailed` carries neither, so `LLMError.isRecoverable` and the library's
+automatic retries treat it as not recoverable, although its `retryable` flag is `true`: the clients raise it for
+an empty transcription, audio with no recognisable speech and an unparseable response.
+
 ## Typed Validation (Result-based)
 
 ### STTOptions.validate Factory

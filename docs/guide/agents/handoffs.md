@@ -24,6 +24,8 @@ Delegate queries to specialist agents for domain expertise.
 
 Handoffs enable LLM-driven agent-to-agent delegation. When a primary agent determines that a query requires specialist expertise, it can hand off the conversation to another agent.
 
+A handoff is a route inside one graph. The root agent and every agent reachable through its handoffs are compiled together, by agent id, and one thread runs across them: the thread records which agent is active, and the next turn starts with that agent.
+
 **Key Benefits:**
 
 - **Specialization** - Route queries to domain experts
@@ -39,33 +41,25 @@ Handoffs enable LLM-driven agent-to-agent delegation. When a primary agent deter
 import org.llm4s.agent.{Agent, Handoff}
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.SystemMessage
 
 val result = for {
   providerConfig <- Llm4sConfig.provider()
   client <- LLMConnect.getClient(providerConfig)
 
-  // Create specialist agent
-  mathAgent = new Agent(
-    client = client,
-    systemMessage = Some(SystemMessage(
-      "You are a math expert. Solve problems step-by-step."
-    ))
-  )
+  // The specialist is a builder, not yet a built agent
+  mathAgent = Agent.builder("math", client)
+    .withSystemPrompt("You are a math expert. Solve problems step-by-step.")
 
-  // Create main agent with handoffs
-  mainAgent = new Agent(client)
+  // The main agent lists it as a handoff target
+  mainAgent <- Agent.builder("main", client)
+    .withHandoffs(Handoff.to("math", mathAgent, "Math expertise required"))
+    .build()
 
-  // Run with handoff capability
-  state <- mainAgent.run(
-    query = "What is the integral of x^2?",
-    tools = ToolRegistry.empty,
-    handoffs = Seq(
-      Handoff.to(mathAgent, "Math expertise required")
-    )
-  )
-} yield state
+  result <- mainAgent.run("What is the integral of x^2?")
+} yield result
 ```
+
+The handoff id must equal the target builder's agent id (`"math"` above): the graph is keyed by agent id.
 
 ---
 
@@ -77,46 +71,41 @@ val result = for {
 import org.llm4s.agent.Handoff
 
 val handoff = Handoff.to(
-  targetAgent = specialistAgent,
-  transferReason = "Domain expertise required"
+  "specialist",          // equals the target builder's id
+  specialistBuilder,
+  "Domain expertise required"
 )
 ```
 
-### With Context Preservation
+`Handoff.of(id, builder, reason)` returns a `Result[Handoff]` instead of throwing for an invalid id
+(`[a-zA-Z0-9_-]{1,52}`).
+
+### Handing Back (Cycles)
+
+A target that must hand back to an agent that is already in the graph names it by id, with
+`Handoff.toId`, because two builders cannot each hold the other:
 
 ```scala
-// Preserve full conversation history
-val handoff = Handoff(
-  targetAgent = specialistAgent,
-  transferReason = Some("Specialist needed"),
-  preserveContext = true,        // Keep conversation history
-  transferSystemMessage = false  // Use target's system message
-)
+val specialist = Agent.builder("specialist", client)
+  .withHandoffs(Handoff.toId("triage", "Not a specialist question"))
+
+val triage = Agent.builder("triage", client)
+  .withHandoffs(Handoff.to("specialist", specialist, "Needs the specialist"))
+  .build()
 ```
 
-### Fresh Start (No Context)
+`build()` refuses an id that no builder in the family defines, and one id reached with two
+different builders. A self-handoff is refused too.
+
+### Without Context
 
 ```scala
-// Start fresh with specialist
-val handoff = Handoff(
-  targetAgent = specialistAgent,
-  transferReason = Some("Fresh analysis needed"),
-  preserveContext = false,        // Don't transfer history
-  transferSystemMessage = false   // Use target's system message
-)
+// The specialist is sent the user's last question, then the transfer onwards
+val handoff = Handoff.to("specialist", specialistBuilder, "Fresh analysis needed", preserveContext = false)
 ```
 
-### Transfer System Message
-
-```scala
-// Transfer original instructions to specialist
-val handoff = Handoff(
-  targetAgent = specialistAgent,
-  transferReason = Some("Continue with same instructions"),
-  preserveContext = true,
-  transferSystemMessage = true  // Keep original system message
-)
-```
+`Handoff.of(id, builder, reason, preserveContext = false)` takes it too, and, for an agent defined
+elsewhere in the family, `Handoff.toId("specialist", Some("Fresh analysis needed"), preserveContext = false)`.
 
 ---
 
@@ -124,10 +113,13 @@ val handoff = Handoff(
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `targetAgent` | Required | The agent to hand off to |
-| `transferReason` | `None` | Description shown to LLM for routing |
-| `preserveContext` | `true` | Transfer conversation history |
-| `transferSystemMessage` | `false` | Transfer original system message |
+| `id` | Required | The target agent's id; the tool is `handoff_to_<id>` |
+| `target` | by `to`/`of`: the builder | The target's builder; `None` (`toId`) names an agent defined elsewhere in the family |
+| `transferReason` | `None` | Description shown to the LLM for routing |
+| `preserveContext` | `true` | `false` sends the target only the last user message before the transfer, then the transfer onwards |
+
+`transferSystemMessage` no longer exists: each agent sends its own system prompt, and a prompt is
+never stored in the thread.
 
 ---
 
@@ -136,16 +128,14 @@ val handoff = Handoff(
 Provide multiple specialists for intelligent routing:
 
 ```scala
-val result = mainAgent.run(
-  query = userQuery,
-  tools = tools,
-  handoffs = Seq(
-    Handoff.to(mathAgent, "Mathematical calculations and proofs"),
-    Handoff.to(codeAgent, "Programming and code review"),
-    Handoff.to(legalAgent, "Legal questions and contracts"),
-    Handoff.to(medicalAgent, "Health and medical information")
+val mainAgent = Agent.builder("main", client)
+  .withHandoffs(
+    Handoff.to("math", mathAgent, "Mathematical calculations and proofs"),
+    Handoff.to("code", codeAgent, "Programming and code review"),
+    Handoff.to("legal", legalAgent, "Legal questions and contracts"),
+    Handoff.to("medical", medicalAgent, "Health and medical information")
   )
-)
+  .build()
 ```
 
 The LLM sees descriptions and chooses the appropriate specialist.
@@ -156,35 +146,24 @@ The LLM sees descriptions and chooses the appropriate specialist.
 
 ### 1. Tools are Generated
 
-When handoffs are provided, the agent generates handoff tools:
-
-```scala
-// Internal tool generated for each handoff
-ToolFunction(
-  name = "handoff_to_math_expert",
-  description = "Transfer to specialist: Mathematical calculations and proofs",
-  function = () => RequestHandoff(targetAgent, transferReason, ...)
-)
-```
+Each handoff target is offered to the model as a tool named `handoff_to_<id>`, described by the transfer reason.
 
 ### 2. LLM Decides
 
 The LLM can choose to:
 - Answer directly (no handoff)
 - Call a regular tool
-- Request a handoff by calling the handoff tool
+- Hand off by calling a handoff tool
 
-### 3. Handoff Executes
+A handoff must be the **only** tool call in its message. A handoff mixed with other tool calls, or two handoffs in one message, is refused: every call in the message gets an error result explaining the rule, and the same agent's model is asked again.
 
-When handoff is requested:
-1. Agent status changes to `HandoffRequested`
-2. Context is prepared based on settings
-3. Target agent receives the query
-4. Target agent processes and returns response
+### 3. The Transfer
+
+The loop stores the assistant message, appends a tool result `Transferred to <target>`, makes the target the active agent and continues in the target's model node. The target sends its own system prompt and offers its own tools and handoffs. The handoff counts as a step, and the step limit is shared by the whole turn: it is the current agent's `maxSteps` against the turn's total step count.
 
 ### 4. Response Returns
 
-The target agent's response becomes part of the conversation.
+The target's answer is the run's result. `AgentResult.activeAgent` names the agent that answered, and the next turn starts with it, so a conversation that moved to a specialist stays there until the specialist hands it back.
 
 ---
 
@@ -193,9 +172,8 @@ The target agent's response becomes part of the conversation.
 ### Domain Expert
 
 ```scala
-val physicsAgent = new Agent(
-  client = client,
-  systemMessage = Some(SystemMessage(
+val physicsAgent = Agent.builder("physics", client)
+  .withSystemPrompt(
     """You are a physics expert with deep knowledge of:
       |- Classical mechanics
       |- Quantum mechanics
@@ -203,125 +181,106 @@ val physicsAgent = new Agent(
       |- Electromagnetism
       |
       |Provide detailed explanations with equations when helpful.""".stripMargin
-  ))
-)
-
-mainAgent.run(
-  query = "Explain quantum entanglement",
-  tools = tools,
-  handoffs = Seq(
-    Handoff.to(physicsAgent, "Physics questions requiring expert explanation")
   )
-)
+
+val mainAgent = Agent.builder("main", client)
+  .withHandoffs(Handoff.to("physics", physicsAgent, "Physics questions requiring expert explanation"))
+  .build()
+
+mainAgent.run("Explain quantum entanglement")
 ```
 
 ### Tool Specialist
 
+Tools belong to the agent that uses them:
+
 ```scala
-// Agent with specialized tools
-val dataAgent = new Agent(
-  client = client,
-  systemMessage = Some(SystemMessage("You are a data analysis specialist."))
-)
+val dataAgent = Agent.builder("data", client)
+  .withSystemPrompt("You are a data analysis specialist.")
+  .withTools(new ToolRegistry(Seq(queryDatabaseTool, generateChartTool, exportCSVTool)))
 
-val dataTools = new ToolRegistry(Seq(
-  queryDatabaseTool,
-  generateChartTool,
-  exportCSVTool
-))
+val mainAgent = Agent.builder("main", client)
+  .withTools(new ToolRegistry(basicTools))
+  .withHandoffs(Handoff.to("data", dataAgent, "Data analysis with database access"))
+  .build()
 
-// Main agent can hand off data queries
-mainAgent.run(
-  query = "Analyze our Q4 sales data",
-  tools = basicTools,
-  handoffs = Seq(
-    Handoff(
-      targetAgent = dataAgent,
-      transferReason = Some("Data analysis with database access")
-    )
-  )
-)
+mainAgent.flatMap(_.run("Analyze our Q4 sales data"))
 ```
 
 ### Customer Support Triage
 
 ```scala
-// Specialist agents
-val billingAgent = new Agent(
-  client = client,
-  systemMessage = Some(SystemMessage("You handle billing and payment issues."))
-)
+val billingAgent = Agent.builder("billing", client)
+  .withSystemPrompt("You handle billing and payment issues.")
 
-val technicalAgent = new Agent(
-  client = client,
-  systemMessage = Some(SystemMessage("You solve technical problems."))
-)
+val technicalAgent = Agent.builder("technical", client)
+  .withSystemPrompt("You solve technical problems.")
 
-val salesAgent = new Agent(
-  client = client,
-  systemMessage = Some(SystemMessage("You help with purchases and upgrades."))
-)
+val salesAgent = Agent.builder("sales", client)
+  .withSystemPrompt("You help with purchases and upgrades.")
 
-// Triage agent
-val triageAgent = new Agent(
-  client = client,
-  systemMessage = Some(SystemMessage(
-    "You are a customer support triage agent. Route queries to the appropriate specialist."
-  ))
-)
-
-triageAgent.run(
-  query = "I can't log into my account and my payment failed",
-  tools = ToolRegistry.empty,
-  handoffs = Seq(
-    Handoff.to(billingAgent, "Billing, payments, and subscription issues"),
-    Handoff.to(technicalAgent, "Technical problems and account access"),
-    Handoff.to(salesAgent, "Purchases, upgrades, and pricing questions")
+val triageAgent = Agent.builder("triage", client)
+  .withSystemPrompt("You are a customer support triage agent. Route queries to the appropriate specialist.")
+  .withHandoffs(
+    Handoff.to("billing", billingAgent, "Billing, payments, and subscription issues"),
+    Handoff.to("technical", technicalAgent, "Technical problems and account access"),
+    Handoff.to("sales", salesAgent, "Purchases, upgrades, and pricing questions")
   )
-)
+  .build()
+
+triageAgent.flatMap(_.run("I can't log into my account and my payment failed"))
 ```
+
+---
+
+## Guardrails and Middleware Across Handoffs
+
+The root agent's run-boundary middleware guards the whole family. Its `beforeAgent` hooks - input
+guardrails among them - run on every turn's query, even when a specialist is active, before the
+specialist's own; its `afterAgent` hooks - output guardrails - run on every final answer, after the
+answering specialist's own. So guardrails given to the root keep applying after a handoff:
+
+```scala
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.guardrails.builtin.{ PIIMasker, ProfanityFilter }
+
+val triage = Agent.builder("triage", client)
+  .withMiddleware(GuardrailMiddleware(input = Seq(new ProfanityFilter()), output = Seq(new PIIMasker())))
+  .withHandoffs(Handoff.to("billing", billingAgent, "Billing questions"))
+  .build()
+// a query to billing two turns later still passes ProfanityFilter; billing's answers still pass PIIMasker
+```
+
+A specialist's own boundary middleware applies only while it is active, inside the root's. A block
+from either ends the turn `Blocked`; an output block removes the whole turn, a handoff made in it
+included, so the next turn starts with the agent that was active before it. Model and tool wrappers (`wrapModelCall`, `wrapToolCall`, such as
+`ContextWindowMiddleware` and `ApprovalMiddleware`) are per agent: give them to each agent that
+needs them. Do not give the root's guardrails to its specialists too: they would run twice.
 
 ---
 
 ## Handling Handoff Results
 
-### Check for Handoff Status
-
 ```scala
-val result = mainAgent.run(query, tools, handoffs)
-
-result match {
-  case Right(state) if state.status == AgentStatus.Complete =>
-    println(s"Completed: ${state.lastAssistantMessage}")
-
-  case Right(state) if state.status == AgentStatus.HandoffRequested =>
-    // Handoff was requested but you're handling manually
-    val handoffInfo = state.requestedHandoff
-    println(s"Handoff to: ${handoffInfo.targetAgentName}")
+mainAgent.run(query) match {
+  case Right(result) =>
+    result.status match {
+      case AgentStatus.Completed(answer) =>
+        println(s"${result.activeAgent} answered: $answer")
+      case AgentStatus.StepLimitReached =>
+        println("Hit the step limit")
+      case other =>
+        println(s"Run ended: $other")
+    }
 
   case Left(error) =>
     println(s"Error: $error")
 }
 ```
 
-### With Streaming Events
-
-```scala
-import org.llm4s.agent.streaming._
-
-mainAgent.runWithEvents(query, tools, handoffs) {
-  case HandoffStarted(targetName, reason, preserveContext, _) =>
-    println(s"Handing off to $targetName: $reason")
-
-  case HandoffCompleted(targetName, success, _) =>
-    println(s"Handoff to $targetName: ${if (success) "success" else "failed"}")
-
-  case AgentCompleted(state, _, _, _) =>
-    println(s"Final: ${state.lastAssistantMessage}")
-
-  case _ => ()
-}
-```
+A handoff is not a status: the run continues in the target and ends as any run does.
+A handoff is reported by the durable `AgentEvents.HandedOff(from, to)` event on the agent's event
+stream (the old `HandoffStarted` / `HandoffCompleted`); see [Streaming Events](streaming).
 
 ---
 
@@ -330,64 +289,45 @@ mainAgent.runWithEvents(query, tools, handoffs) {
 ### Full Context (Default)
 
 ```scala
-// Specialist sees entire conversation
-val handoff = Handoff(
-  targetAgent = specialist,
-  preserveContext = true,
-  transferSystemMessage = false
-)
+// Specialist sees the entire conversation
+Handoff.to("specialist", specialist, "Needs the specialist")
 
 // User: "I'm building a Scala app"
 // Assistant: "Great! What kind of app?"
 // User: "A REST API with database access"
 // <handoff to database specialist>
-// Specialist sees all messages above
+// Specialist sees all messages above, then its own reply
 ```
 
 ### Fresh Context
 
 ```scala
-// Specialist starts fresh
-val handoff = Handoff(
-  targetAgent = specialist,
-  preserveContext = false,
-  transferSystemMessage = false
-)
+// Specialist starts from the last question
+Handoff.toId("specialist", Some("Independent review"), preserveContext = false)
 
 // User: "I'm building a Scala app"
 // Assistant: "Great! What kind of app?"
 // User: "A REST API with database access"
 // <handoff to database specialist>
-// Specialist only sees: "A REST API with database access"
+// Specialist is sent: "A REST API with database access", then the transfer
 ```
 
-### With System Message
-
-```scala
-// Specialist inherits original instructions
-val handoff = Handoff(
-  targetAgent = specialist,
-  preserveContext = true,
-  transferSystemMessage = true
-)
-
-// Original agent's system message is prepended to specialist's
-```
+The stored history is the same either way: `preserveContext = false` changes only what the target is sent, and the transfers are recorded by the loop, so a non-root agent is never sent the full history by mistake.
 
 ---
 
-## Handoffs vs Orchestration
+## Handoffs vs Graphs
 
 | Use Case | Approach |
 |----------|----------|
 | 2-3 specialists, LLM-driven routing | **Handoffs** |
-| Complex multi-agent workflows | **Orchestration (DAGs)** |
+| Complex multi-agent workflows | **Graph (`GraphBuilder`)** |
 | Dynamic specialist selection | **Handoffs** |
-| Parallel agent execution | **Orchestration** |
+| Parallel agent execution | **Graph** |
 | Simple delegation | **Handoffs** |
-| Type-safe data flow | **Orchestration** |
+| Type-safe data flow | **Graph** |
 
-For complex workflows, see [Orchestration documentation](/design/agent-framework-roadmap#orchestration).
+For complex workflows, see the [multi-agent graph recipe](../../examples/cookbook.html#6-several-agents-in-one-graph): agents as nodes of a typed graph, run in parallel and joined.
 
 ---
 
@@ -397,55 +337,43 @@ For complex workflows, see [Orchestration documentation](/design/agent-framework
 
 ```scala
 // Good - specific and actionable
-Handoff.to(agent, "Database queries and SQL optimization")
+Handoff.to("db", agent, "Database queries and SQL optimization")
 
 // Bad - vague
-Handoff.to(agent, "Technical stuff")
+Handoff.to("db", agent, "Technical stuff")
 ```
 
 ### 2. Focused Specialists
 
 ```scala
 // Good - focused specialist
-val sqlAgent = new Agent(
-  systemMessage = Some(SystemMessage(
-    "You are a SQL expert. Optimize queries and explain execution plans."
-  ))
-)
+val sqlAgent = Agent.builder("sql", client)
+  .withSystemPrompt("You are a SQL expert. Optimize queries and explain execution plans.")
 
 // Bad - too broad
-val everythingAgent = new Agent(
-  systemMessage = Some(SystemMessage(
-    "You know everything about databases, APIs, UI, and infrastructure."
-  ))
-)
+val everythingAgent = Agent.builder("everything", client)
+  .withSystemPrompt("You know everything about databases, APIs, UI, and infrastructure.")
 ```
 
-### 3. Appropriate Context Decisions
+### 3. Changing a Family Changes Its Threads
 
-```scala
-// Preserve context when history matters
-Handoff(targetAgent = followUpAgent, preserveContext = true)
-
-// Fresh start for independent analysis
-Handoff(targetAgent = reviewAgent, preserveContext = false)
-```
+The graph's version covers each agent's id, tools, middleware, handoffs and system prompt. If you
+rebuild the root without a handoff that a stored thread's active agent was, `run` refuses that
+thread rather than routing to a missing node.
 
 ### 4. Don't Overuse Handoffs
 
 ```scala
 // Good - meaningful specialization
-handoffs = Seq(
-  Handoff.to(mathAgent, "Complex mathematical calculations"),
-  Handoff.to(legalAgent, "Legal analysis and compliance")
+.withHandoffs(
+  Handoff.to("math", mathAgent, "Complex mathematical calculations"),
+  Handoff.to("legal", legalAgent, "Legal analysis and compliance")
 )
 
 // Bad - too granular
-handoffs = Seq(
-  Handoff.to(additionAgent, "Adding numbers"),
-  Handoff.to(subtractionAgent, "Subtracting numbers"),
-  Handoff.to(multiplicationAgent, "Multiplying numbers"),
-  // ...
+.withHandoffs(
+  Handoff.to("addition", additionAgent, "Adding numbers"),
+  Handoff.to("subtraction", subtractionAgent, "Subtracting numbers")
 )
 ```
 

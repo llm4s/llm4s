@@ -1,5 +1,7 @@
 package org.llm4s.toolapi
 
+import org.llm4s.annotation.Stable
+
 import scala.annotation.tailrec
 
 /**
@@ -11,6 +13,7 @@ import scala.annotation.tailrec
  *
  * @param params The JSON parameters to extract from
  */
+@Stable
 case class SafeParameterExtractor(params: ujson.Value) {
   // Helper case class to return both the value and available keys from parent
   private case class NavigationResult(value: Option[ujson.Value], availableKeys: List[String])
@@ -28,11 +31,16 @@ case class SafeParameterExtractor(params: ujson.Value) {
   /**
    * Extract a required integer parameter from the JSON params.
    *
+   * JSON numbers reach this class as doubles, so an integer is a number with no fractional part that fits in an
+   * `Int`: `3`, `3.0`, `1e2` and `-0.0` are accepted; `3.14`, `2147483648`, `1e10` and anything too large are
+   * refused as a type mismatch instead of being truncated or wrapped around, so a model that sends one gets an
+   * error it can correct.
+   *
    * @param path Dot-separated path to the parameter
    * @return `Right(value)` on success, `Left(errorMessage)` on failure
    */
   def getInt(path: String): Either[String, Int] =
-    extract(path, _.numOpt.map(_.toInt), "integer")
+    extract(path, SafeParameterExtractor.intOpt, "integer")
 
   /**
    * Extract a required double (number) parameter from the JSON params.
@@ -88,7 +96,7 @@ case class SafeParameterExtractor(params: ujson.Value) {
    * @return `Right(value)` on success, `Left(ToolParameterError)` on failure
    */
   def getIntEnhanced(path: String): Either[ToolParameterError, Int] =
-    extractEnhanced(path, _.numOpt.map(_.toInt), "integer")
+    extractEnhanced(path, SafeParameterExtractor.intOpt, "integer")
 
   /**
    * Extract a required double (number) parameter with structured error reporting.
@@ -144,7 +152,7 @@ case class SafeParameterExtractor(params: ujson.Value) {
    * @return `Right(Some(value))` if present, `Right(None)` if absent, `Left` on type mismatch
    */
   def getOptionalInt(path: String): Either[ToolParameterError, Option[Int]] =
-    extractOptional(path, _.numOpt.map(_.toInt), "integer")
+    extractOptional(path, SafeParameterExtractor.intOpt, "integer")
 
   /**
    * Extract an optional double (number) parameter. Returns `Right(None)` when the parameter is absent.
@@ -308,6 +316,10 @@ case class SafeParameterExtractor(params: ujson.Value) {
    *
    * Useful for upfront validation before any business logic runs.
    *
+   * `expectedType` is one of `string`, `integer`, `number`, `boolean`, `array` or `object`, checked with the same
+   * rules as the typed getters (`integer` is a whole number in the `Int` range). A type name this method does
+   * not know is checked for presence only.
+   *
    * @param requirements Pairs of `(path, expectedType)` to validate
    * @return `Right(())` if all parameters are present and have the correct types,
    *         `Left(errors)` with the full list of validation failures otherwise
@@ -318,7 +330,7 @@ case class SafeParameterExtractor(params: ujson.Value) {
     requirements: (String, String)*
   ): Either[List[ToolParameterError], Unit] = {
     val errors = requirements.flatMap { case (path, expectedType) =>
-      extractEnhanced(path, _ => Some(()), expectedType) match {
+      extractEnhanced(path, SafeParameterExtractor.typeCheck(expectedType), expectedType) match {
         case Left(error) => Some(error)
         case Right(_)    => None
       }
@@ -330,6 +342,24 @@ case class SafeParameterExtractor(params: ujson.Value) {
 }
 
 object SafeParameterExtractor {
+
+  /** A whole number that fits in an `Int`; `None` for a fraction, NaN, an infinity or a value out of range. */
+  private[toolapi] def intOpt(value: ujson.Value): Option[Int] =
+    value.numOpt.filter(d => d >= Int.MinValue && d <= Int.MaxValue && d == Math.rint(d)).map(_.toInt)
+
+  /** What `validateRequired` checks for a declared type name; an unknown name checks presence only. */
+  private[toolapi] def typeCheck(expectedType: String): ujson.Value => Option[Unit] = {
+    val check: ujson.Value => Boolean = expectedType match {
+      case "string"  => _.strOpt.isDefined
+      case "integer" => intOpt(_).isDefined
+      case "number"  => _.numOpt.isDefined
+      case "boolean" => _.boolOpt.isDefined
+      case "array"   => _.arrOpt.isDefined
+      case "object"  => _.objOpt.isDefined
+      case _         => _ => true
+    }
+    value => if (check(value)) Some(()) else None
+  }
 
   /**
    * Create an extractor that uses enhanced error reporting by default.

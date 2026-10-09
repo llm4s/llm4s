@@ -16,10 +16,16 @@ final case class TTSOptions(
   outputFormat: AudioFormat = AudioFormat.WavPcm16
 )
 
+/**
+ * Errors from text-to-speech synthesis. `EngineNotAvailable` is a [[org.llm4s.error.RecoverableError]], as
+ * `STTError.EngineNotAvailable` is. `SynthesisFailed` carries no marker, so `LLMError.isRecoverable` treats it as not
+ * recoverable: the clients raise it for an empty audio body, which nothing says a retry fixes.
+ */
 sealed trait TTSError extends LLMError
 object TTSError {
   final case class EngineNotAvailable(message: String, override val context: Map[String, String] = Map.empty)
       extends TTSError
+      with org.llm4s.error.RecoverableError
   final case class SynthesisFailed(message: String, override val context: Map[String, String] = Map.empty)
       extends TTSError
 }

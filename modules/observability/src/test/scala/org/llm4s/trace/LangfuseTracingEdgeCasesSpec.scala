@@ -1,15 +1,16 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.{ AgentState, AgentStatus }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.LangfuseConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.ToolRegistry
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import scala.concurrent.duration.*
 
 class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
+
+  private def ended(status: String, messages: Seq[Message]): TraceEvent.AgentRunEnded =
+    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", status, messages, UsageSummary())
 
   private def makeTracing(mockClient: MockHttpClient) = new LangfuseTracing(
     langfuseUrl = "https://cloud.langfuse.com",
@@ -105,20 +106,33 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   // =========================================================================
-  // traceEvent - AgentStateUpdated
+  // traceEvent - AgentRunEnded
   // =========================================================================
 
-  it should "handle AgentStateUpdated event" in {
+  it should "handle AgentRunEnded event" in {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val result = tracing.traceEvent(TraceEvent.AgentStateUpdated("InProgress", 5, 3))
+    val result = tracing.traceEvent(ended("failed", Seq.empty))
 
     result.isRight shouldBe true
     val body  = ujson.read(mock.lastBody.get)
     val event = body("batch")(0)
     event("type").str shouldBe "trace-create"
-    event("body")("metadata")("status").str shouldBe "InProgress"
+    event("body")("metadata")("status").str shouldBe "failed"
+  }
+
+  it should "carry the run's usage in the AgentRunEnded trace's metadata" in {
+    val mock    = new MockHttpClient(HttpResponse(200, ""))
+    val tracing = makeTracing(mock)
+    val usage   = UsageSummary().add("m", TokenUsage(10, 5, 15), Some(0.5)).add("m", TokenUsage(2, 1, 3), None)
+    val event   = TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("hi")), usage)
+
+    tracing.traceEvent(event).isRight shouldBe true
+    val metadata = ujson.read(mock.lastBody.get)("batch")(0)("body")("metadata")
+    metadata("input_tokens").num shouldBe 12
+    metadata("output_tokens").num shouldBe 6
+    metadata("total_cost").num shouldBe 0.5
   }
 
   // =========================================================================
@@ -253,28 +267,23 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   // =========================================================================
-  // AgentStateUpdated carrying the conversation (hierarchical trace).
-  // This was traceAgentState(AgentState) until D5 (#1133) made it an ordinary event.
+  // AgentRunEnded carrying the conversation (hierarchical trace): trace id = run, session = thread.
   // =========================================================================
 
   it should "create hierarchical trace for agent state with messages" in {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val state = AgentState(
-      conversation = Conversation(
-        Seq(
-          SystemMessage("You are helpful"),
-          UserMessage("Hello"),
-          AssistantMessage(Some("Hi there!"), Seq.empty)
-        )
-      ),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.Complete,
-      logs = Vector("log1")
+    val event = ended(
+      "completed",
+      Seq(
+        SystemMessage("You are helpful"),
+        UserMessage("Hello"),
+        AssistantMessage(Some("Hi there!"), Seq.empty)
+      )
     )
 
-    val result = tracing.traceEvent(state.toTraceEvent)
+    val result = tracing.traceEvent(event)
 
     result.isRight shouldBe true
     mock.postCallCount shouldBe 1
@@ -288,9 +297,11 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     batch(0)("type").str shouldBe "trace-create"
     batch(0)("body")("input").str shouldBe "Hello"
     batch(0)("body")("output").str shouldBe "Hi there!"
-    batch(0)("body")("metadata")("status").str shouldBe AgentStatus.Complete.toString
+    batch(0)("body")("id").str shouldBe "run-1"
+    batch(0)("body")("sessionId").str shouldBe "thread-1"
+    batch(0)("body")("metadata")("status").str shouldBe "completed"
+    batch(0)("body")("metadata")("agent").str shouldBe "assistant"
     batch(0)("body")("metadata")("message_count").num shouldBe 3
-    batch(0)("body")("metadata")("log_count").num shouldBe 1
 
     // Child spans
     batch(1)("type").str shouldBe "span-create"
@@ -309,15 +320,12 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracing = makeTracing(mock)
     val call    = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
 
-    val state = AgentState(
-      conversation = Conversation(
-        Seq(UserMessage("1 + 2?"), AssistantMessage(None, Seq(call)), ToolMessage("3", "call-1"), AssistantMessage("3"))
-      ),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.Complete
+    val event = ended(
+      "completed",
+      Seq(UserMessage("1 + 2?"), AssistantMessage(None, Seq(call)), ToolMessage("3", "call-1"), AssistantMessage("3"))
     )
 
-    tracing.traceEvent(state.toTraceEvent) shouldBe Right(())
+    tracing.traceEvent(event) shouldBe Right(())
 
     val batch   = ujson.read(mock.lastBody.get)("batch").arr
     val traceId = batch(0)("body")("id").str
@@ -333,35 +341,28 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     (spans.map(_("id").str) ++ spans.map(_("body")("id").str)).distinct should have size 8
   }
 
-  it should "send the summary trace when the state event carries no messages" in {
+  it should "send the summary trace when the run carries no messages" in {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
-    val state = AgentState(
-      conversation = Conversation(Seq.empty),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.InProgress
-    )
+    val event = ended("blocked:profanity", Seq.empty)
 
-    val result = tracing.traceEvent(state.toTraceEvent)
+    val result = tracing.traceEvent(event)
 
     result.isRight shouldBe true
     mock.postCallCount shouldBe 1
     val batch = ujson.read(mock.lastBody.get)("batch").arr
     batch should have size 1
     batch(0)("body")("metadata")("message_count").num shouldBe 0
+    batch(0)("body")("input").str shouldBe ""
+    batch(0)("body")("output").str shouldBe ""
   }
 
   it should "report a failed export of the conversation trace" in {
     val mock    = new MockHttpClient(HttpResponse(500, "boom"))
     val tracing = makeTracing(mock)
 
-    val event = TraceEvent.AgentStateUpdated(
-      status = "Complete",
-      messageCount = 1,
-      logCount = 0,
-      messages = Seq(UserMessage("Hello"))
-    )
+    val event = ended("completed", Seq(UserMessage("Hello")))
 
     tracing.traceEvent(event).isLeft shouldBe true
   }

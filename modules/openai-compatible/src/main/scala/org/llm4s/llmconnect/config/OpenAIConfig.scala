@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.spi.ProviderConfigKey
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -19,8 +20,12 @@ import org.llm4s.util.Redaction
  * that module for it ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  * Its package is unchanged from when it was in `llm4s-core`.
  *
- * Prefer [[OpenAIConfig.fromValues]] over the primary constructor; it resolves
- * `contextWindow` and `reserveCompletion` from the model name automatically.
+ * Prefer [[OpenAIConfig.fromValues]], which validates the values and resolves
+ * `contextWindow` and `reserveCompletion` from the bundled model catalogue.
+ * The constructor is private: build one with the companion `apply` and adjust
+ * it with the `with*` setters. Java and Kotlin, which cannot see Scala default
+ * arguments, use `OpenAIConfig.apply(apiKey, model)` and the setters, so adding
+ * a field never breaks them.
  *
  * @param apiKey        OpenAI API key; redacted in `toString`.
  * @param model         Model identifier, e.g. `"gpt-4o"`.
@@ -32,15 +37,19 @@ import org.llm4s.util.Redaction
  * @param explicitProviderId the provider this config belongs to, when a descriptor says so:
  *                      `requesty` for Requesty and `openrouter` for OpenRouter. `None` - what a
  *                      config built by hand gets - infers it from `baseUrl`; see [[providerId]].
+ * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
+ *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
-case class OpenAIConfig(
+@Stable
+final case class OpenAIConfig private (
   apiKey: String,
   model: String,
   organization: Option[String],
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int,
-  explicitProviderId: Option[ProviderId] = None
+  explicitProviderId: Option[ProviderId],
+  override val timeouts: ProviderTimeouts
 ) extends ProviderConfig:
   /**
    * The provider this config belongs to: [[explicitProviderId]] when set, otherwise `openai`,
@@ -59,14 +68,64 @@ case class OpenAIConfig(
       if baseUrl.contains("openrouter.ai") then ProviderId("openrouter") else ProviderId("openai")
     )
 
-  override def endpointUrl: Option[String]            = Some(baseUrl)
-  override def withModel(model: String): OpenAIConfig = copy(model = model)
+  override def endpointUrl: Option[String]                            = Some(baseUrl)
+  override def withModel(model: String): OpenAIConfig                 = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): OpenAIConfig = copy(timeouts = timeouts)
+
+  def withApiKey(apiKey: String): OpenAIConfig                     = copy(apiKey = apiKey)
+  def withOrganization(organization: String): OpenAIConfig         = copy(organization = Some(organization))
+  def withOrganization(organization: Option[String]): OpenAIConfig = copy(organization = organization)
+  def withBaseUrl(baseUrl: String): OpenAIConfig                   = copy(baseUrl = baseUrl)
+  def withContextWindow(contextWindow: Int): OpenAIConfig          = copy(contextWindow = contextWindow)
+  def withReserveCompletion(reserveCompletion: Int): OpenAIConfig  = copy(reserveCompletion = reserveCompletion)
+  def withExplicitProviderId(providerId: ProviderId): OpenAIConfig = copy(explicitProviderId = Some(providerId))
+  def withExplicitProviderId(providerId: Option[ProviderId]): OpenAIConfig =
+    copy(explicitProviderId = providerId)
   override def toString: String =
     s"OpenAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, organization=$organization, baseUrl=$baseUrl, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, providerId=${providerId.asString})"
 
 object OpenAIConfig {
   private val standardReserve = 4096
+
+  /** The OpenAI API base URL, used by the short `apply(apiKey, model)`. */
+  val DEFAULT_BASE_URL: String = "https://api.openai.com/v1"
+
+  /**
+   * Builds a config without validating it; [[fromValues]] validates. `explicitProviderId`
+   * defaults to `None`, which infers the provider from `baseUrl`.
+   */
+  def apply(
+    apiKey: String,
+    model: String,
+    organization: Option[String],
+    baseUrl: String,
+    contextWindow: Int,
+    reserveCompletion: Int,
+    explicitProviderId: Option[ProviderId] = None
+  ): OpenAIConfig =
+    new OpenAIConfig(
+      apiKey,
+      model,
+      organization,
+      baseUrl,
+      contextWindow,
+      reserveCompletion,
+      explicitProviderId,
+      ProviderTimeouts.default
+    )
+
+  /**
+   * The API key and model, every other field at its default: the entry point for Java and Kotlin,
+   * which do not see Scala default arguments. The base URL is [[DEFAULT_BASE_URL]], there is no
+   * organisation, and `contextWindow` and `reserveCompletion` come from the model name alone
+   * (`gpt-4o` is 128k, an unknown model 8192); set them, and the rest, with the `with*` setters,
+   * or use [[fromValues]] to consult the bundled model catalogue.
+   */
+  def apply(apiKey: String, model: String): OpenAIConfig = {
+    val (cw, rc) = openAIFallback(model)
+    apply(apiKey, model, None, DEFAULT_BASE_URL, cw, rc)
+  }
 
   /**
    * The provider-specific key naming the OpenAI organisation ID, `organization`.

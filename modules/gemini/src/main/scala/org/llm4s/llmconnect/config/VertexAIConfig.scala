@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
@@ -18,17 +19,22 @@ import org.llm4s.types.Result
  *                           then the GCE metadata server.
  * @param contextWindow      Maximum token capacity for prompt + completion combined.
  * @param reserveCompletion  Tokens reserved for the completion response.
+ * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
+ *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
+@Stable
 case class VertexAIConfig(
   projectId: String,
   location: String,
   model: String,
   credentialFilePath: Option[String],
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
-  override val providerId: ProviderId                   = ProviderId("vertexai")
-  override def withModel(model: String): VertexAIConfig = copy(model = model)
+  override val providerId: ProviderId                                   = ProviderId("vertexai")
+  override def withModel(model: String): VertexAIConfig                 = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): VertexAIConfig = copy(timeouts = timeouts)
 
   /** Base URL derived from the location, e.g. `"https://us-central1-aiplatform.googleapis.com/v1"`. */
   def computedBaseUrl: String = s"https://$location-aiplatform.googleapis.com/v1"

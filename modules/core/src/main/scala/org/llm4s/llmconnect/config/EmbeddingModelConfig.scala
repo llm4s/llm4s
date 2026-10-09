@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
+
 /**
  * Configuration for a text embedding model, pairing a model identifier with its output vector size.
  *
@@ -9,6 +11,7 @@ package org.llm4s.llmconnect.config
  * @param name       Model identifier (e.g. "text-embedding-3-small", "voyage-3-large").
  * @param dimensions Number of dimensions in the embedding vectors produced by this model.
  */
+@Stable
 case class EmbeddingModelConfig(
   name: String,
   dimensions: Int

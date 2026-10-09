@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.annotation.Stable
+
 import java.time.Instant
 import scala.concurrent.duration.FiniteDuration
 
@@ -10,6 +12,7 @@ import scala.concurrent.duration.FiniteDuration
  * a [[ProviderExchangeSink]] through [[ProviderExchangeLogging.Enabled]] when
  * constructing a client.
  */
+@Stable
 enum ProviderExchangeLogging:
   case Disabled
   case Enabled(sink: ProviderExchangeSink)
@@ -18,6 +21,7 @@ object ProviderExchangeLogging:
   def enabled(sink: ProviderExchangeSink): ProviderExchangeLogging =
     Enabled(sink)
 
+@Stable
 enum ProviderExchangeOutcome:
   case Success
   case Error
@@ -30,6 +34,7 @@ enum ProviderExchangeOutcome:
  * correlation metadata to serve as a low-level debugging record that higher
  * level tracing or tooling can reference later.
  */
+@Stable
 final case class ProviderExchange(
   exchangeId: String,
   provider: String,

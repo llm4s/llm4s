@@ -1,9 +1,11 @@
 package org.llm4s.mcp
 
 import cats.implicits._
+import org.llm4s.error.{ CancelledError, LLMError, SimpleError }
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
-import ujson.{ Value, read => ujsonRead }
+import ujson.Value
 
 import java.util.concurrent.atomic.AtomicLong
 import scala.util.{ Failure, Success, Try }
@@ -18,11 +20,11 @@ import scala.util.{ Failure, Success, Try }
  * back to the older 2024-11-05 HTTP+SSE protocol.  Stdio servers always use the
  * 2024-11-05 protocol.
  *
- * == Error swallowing in `getTools` ==
- * `getTools()` never returns a `Left`: any failure during tool discovery (network
- * error, parse error, missing transport) is logged and an empty sequence is
- * returned instead. Callers cannot distinguish "server has no tools" from
- * "server could not be reached".
+ * == Failures in `getTools` ==
+ * `getTools()` returns a `Left` for any failure during tool discovery (network error, JSON-RPC error,
+ * unreadable listing, missing transport), so "the server has no tools" (`Right(Seq.empty)`) is distinct from
+ * "the server could not be reached". An interrupted call returns `Left(CancelledError)` with the thread's
+ * interrupt flag still set (design section 4.4).
  *
  * == Thread safety ==
  * This class is not thread-safe. Concurrent calls to `initialize`, `getTools`,
@@ -31,16 +33,17 @@ import scala.util.{ Failure, Success, Try }
  * @param config Server configuration including transport type, URL/command, and timeout.
  */
 class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
-  private val logger                                   = LoggerFactory.getLogger(getClass)
-  private[mcp] var transport: Option[MCPTransportImpl] = None
-  private val requestId                                = new AtomicLong(0)
-  private var initialized                              = false
-  private var protocolVersion                          = "2025-06-18" // Updated to latest version
+  private val logger                                      = LoggerFactory.getLogger(getClass)
+  private[mcp] var transport: Option[MCPTransportImpl]    = None
+  private val requestId                                   = new AtomicLong(0)
+  private var initialized                                 = false
+  @volatile private var toolHints: Map[String, ToolHints] = Map.empty
+  private var protocolVersion                             = "2025-06-18" // Updated to latest version
 
   logger.info(s"MCPClientImpl created for server: ${config.name}")
 
   // Initialize transport with backward compatibility detection
-  private def initializeTransport(): Either[String, MCPTransportImpl] =
+  private def initializeTransport(): Result[MCPTransportImpl] =
     transport match {
       case Some(t) => Right(t)
       case None =>
@@ -59,7 +62,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
     }
 
   // Unified HTTP transport logic: try Streamable HTTP first, fallback to SSE
-  private def tryHttpTransportWithFallback(url: String, name: String): Either[String, MCPTransportImpl] = {
+  private def tryHttpTransportWithFallback(url: String, name: String): Result[MCPTransportImpl] = {
     // Try new 2025-06-18 Streamable HTTP transport first
     logger.info(s"Attempting to connect using Streamable HTTP transport (2025-06-18) to $url")
     val newTransport = new StreamableHTTPTransportImpl(url, name, config.timeout)
@@ -73,7 +76,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
         protocolVersion = "2025-06-18"
         isTransportInitialized = true // Mark as initialized during testing
         Right(newTransport)
-      case Left(error) if error.contains("405") || error.contains("404") || error.contains("Method Not Allowed") =>
+      case Left(error) if MCPClientImpl.isUnsupportedTransport(error.message) =>
         // Server doesn't support new transport, try fallback
         logger.info(s"Server doesn't support Streamable HTTP, attempting fallback to HTTP+SSE (2024-11-05)")
         newTransport.close()
@@ -88,13 +91,16 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
             protocolVersion = "2024-11-05"
             isTransportInitialized = true // Mark as initialized during testing
             Right(oldTransport)
-          case Left(fallbackError) =>
-            logger.error(s"Both transport methods failed. New: $error, Old: $fallbackError")
+          case Left(cancelled: CancelledError) =>
             oldTransport.close()
-            Left(s"Failed to connect with both transports. Latest error: $fallbackError")
+            Left(cancelled)
+          case Left(fallbackError) =>
+            logger.error(s"Both transport methods failed. New: ${error.message}, Old: ${fallbackError.message}")
+            oldTransport.close()
+            Left(SimpleError(s"Failed to connect with both transports. Latest error: ${fallbackError.message}"))
         }
       case Left(error) =>
-        logger.error(s"Failed to connect using Streamable HTTP transport: $error")
+        logger.error(s"Failed to connect using Streamable HTTP transport: ${error.message}")
         newTransport.close()
         Left(error)
     }
@@ -126,7 +132,7 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
     )
 
   // Performs MCP protocol handshake with the server
-  override def initialize(): Either[String, Unit] =
+  override def initialize(): Result[Unit] =
     if (initialized) {
       Right(())
     } else {
@@ -145,8 +151,11 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
               initialized = true
               logger.info(s"Completed MCP client initialization for ${config.name} with existing connection")
               Right(())
+            case Left(cancelled: CancelledError) => Left(cancelled)
             case Left(notificationError) =>
-              logger.warn(s"Failed to send initialized notification: $notificationError, but continuing anyway")
+              logger.warn(
+                s"Failed to send initialized notification: ${notificationError.message}, but continuing anyway"
+              )
               // Some servers might not require the initialized notification
               initialized = true
               Right(())
@@ -179,23 +188,25 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
                             s"Successfully initialized MCP client for ${config.name} with protocol $serverProtocolVersion"
                           )
                           Right(())
+                        case Left(cancelled: CancelledError) => Left(cancelled)
                         case Left(notificationError) =>
                           logger.warn(
-                            s"Failed to send initialized notification: $notificationError, but continuing anyway"
+                            s"Failed to send initialized notification: ${notificationError.message}, but continuing anyway"
                           )
                           // Some servers might not require the initialized notification
                           initialized = true
                           Right(())
                       }
                     } else {
-                      Left(s"Unsupported protocol version: $serverProtocolVersion")
+                      Left(SimpleError(s"Unsupported protocol version: $serverProtocolVersion"))
                     }
-                  }.getOrElse(Left("Invalid initialization response format"))
+                  }.getOrElse(Left(SimpleError("Invalid initialization response format")))
                 case None =>
-                  Left("Initialize request failed: no result in response")
+                  Left(SimpleError("Initialize request failed: no result in response"))
               }
-            case Left(errorMsg) =>
-              Left(s"Initialize request failed: $errorMsg")
+            case Left(cancelled: CancelledError) => Left(cancelled)
+            case Left(error) =>
+              Left(SimpleError(s"Initialize request failed: ${error.message}"))
           }
         }
       }
@@ -209,53 +220,96 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
    * `ToolFunction` instances that the agent framework can invoke.
    *
    * Calls `initialize()` automatically if not already connected.  Any error
-   * during transport initialisation, tool listing, or JSON parsing is logged
-   * and swallowed: this method always returns `Right(tools)` where `tools` is
-   * the (possibly empty) sequence of successfully parsed tool definitions.
+   * during transport initialisation, tool listing, or JSON parsing is logged and returned as a `Left`;
+   * `Right(Seq.empty)` means the server advertises no tools. A call that is interrupted returns
+   * `Left(CancelledError)`, with the thread's interrupt flag still set.
    *
-   * @return always `Right`; `Right(Seq.empty)` on any communication or parse failure
+   * A tool entry that cannot be read is skipped and logged, and the tools that can be read are returned; a
+   * listing that cannot be read at all, or none of whose entries can, is a `Left`.
+   *
+   * A listing that fails clears the hints recorded by the last one (see
+   * [[getToolHints]]), so a server that is down or sends a list that cannot be
+   * read leaves no stale hints behind.
+   *
+   * @return the tools the server advertises, or the `Left` that stopped the listing
    */
-  override def getTools(): Either[String, Seq[ToolFunction[_, _]]] = {
+  override def getTools(): Result[Seq[ToolFunction[_, _]]] = {
     val result = for {
       _             <- initialize() // Ensure we're initialized
-      transportImpl <- transport.toRight(s"No transport available for ${config.name}")
+      transportImpl <- transport.toRight(SimpleError(s"No transport available for ${config.name}"): LLMError)
       tools         <- trySendingRequest(transportImpl)
     } yield tools
-    result.leftFlatMap { errMsg =>
-      logger.error(errMsg)
-      Seq.empty.asRight[String]
+    result.left.foreach {
+      case _: CancelledError => ()
+      case error =>
+        logger.error(error.message)
+        toolHints = Map.empty
     }
+    result
   }
 
-  def trySendingRequest(transportImpl: MCPTransportImpl): Either[String, Seq[ToolFunction[_, _]]] = {
+  def trySendingRequest(transportImpl: MCPTransportImpl): Result[Seq[ToolFunction[_, _]]] = {
     val result = for {
-      request    <- MCPClientImpl.listRequest.copy(id = generateId()).asRight[String]
+      request    <- MCPClientImpl.listRequest.copy(id = generateId()).asRight[LLMError]
       response   <- transportImpl.sendRequest(request)
-      toolsValue <- response.result.toRight(s"No tools result from ${config.name}")
+      toolsValue <- response.result.toRight(SimpleError(s"No tools result from ${config.name}"): LLMError)
       tools      <- parseTools(toolsValue)
     } yield tools
 
-    result.left.foreach(errMsg => logger.warn(errMsg))
-    result.leftFlatMap(_ => Seq.empty.asRight[String])
+    result.left.foreach {
+      case _: CancelledError => ()
+      case error =>
+        logger.warn(error.message)
+        toolHints = Map.empty
+    }
+    result
   }
 
-  private def parseTools(value: Value): Either[String, Seq[ToolFunction[_, _]]] = {
+  private def parseTools(value: Value): Result[Seq[ToolFunction[_, _]]] = {
     val result = Try {
-      val toolsData = value("tools").arr
-      toolsData.map(convertMCPToolToToolFunction).toSeq
+      // One malformed entry must not hide the tools that are fine: it is skipped and named in the log (its
+      // name or position, and the kind of fault: never the payload, which is the server's text).
+      val entries = value("tools").arr.toSeq
+      val parsed = entries.zipWithIndex.flatMap { case (toolJson, index) =>
+        Try((convertMCPToolToToolFunction(toolJson), MCPClientImpl.hintsOf(toolJson))) match {
+          case Success(tool) => Some(tool)
+          case Failure(ex) =>
+            val label = toolJson.objOpt.flatMap(_.get("name")).flatMap(_.strOpt).getOrElse(s"#$index")
+            logger.warn("Skipping a malformed tool ({}) from {}: {}", label, config.name, ex.getClass.getSimpleName)
+            None
+        }
+      }
+      // A listing none of whose entries can be read is a failure, not a server with no tools.
+      if (entries.nonEmpty && parsed.isEmpty) {
+        throw new IllegalArgumentException(s"none of the ${entries.size} tool entries could be read")
+      }
+      (parsed.map(_._1), parsed.map(_._2).toMap)
     }
     result.fold(
-      ex => logger.error("Failed to parse tools from {}: {}", config.name, ex.getMessage),
-      tools => logger.info("Successfully retrieved from {} {} tools", config.name, tools.size)
+      ex => {
+        logger.error("Failed to parse tools from {}: {}", config.name, ex.getMessage)
+        toolHints = Map.empty
+      },
+      { case (tools, hints) =>
+        // Annotations are the server's own claim about its tools: only a server the caller has chosen to
+        // trust may relax how they are treated (see MCPServerConfig.trustAnnotations).
+        toolHints = if (config.trustAnnotations) hints else Map.empty
+        logger.info("Successfully retrieved from {} {} tools", config.name, tools.size)
+      }
     )
-    result.getOrElse(Seq.empty).asRight[String]
+    result.toEither
+      .map(_._1)
+      .leftMap(ex => SimpleError(s"Failed to parse tools from ${config.name}: ${ex.getMessage}"): LLMError)
   }
+
+  override def getToolHints(): Map[String, ToolHints] = toolHints
 
   // Closes the transport connection and resets initialization state
   override def close(): Unit = {
     transport.foreach(_.close())
     transport = None
     initialized = false
+    toolHints = Map.empty
   }
 
   // Generates unique request IDs for JSON-RPC protocol
@@ -357,27 +411,37 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
           case Right(response) =>
             response.result match {
               case Some(result) =>
+                // Per the MCP spec a tool-level failure is a normal result flagged `isError: true`
+                val isToolError = result.objOpt.flatMap(_.get("isError")).flatMap(_.boolOpt).contains(true)
                 Try {
-                  // MCP returns content array with text results
-                  val content = result("content").arr
-                  if (content.nonEmpty) {
-                    val firstContent = content(0)
-                    val text         = firstContent("text").str
-
-                    // Try to parse as JSON, fallback to string result
-                    Try(ujsonRead(text)).getOrElse(ujson.Str(text))
+                  // A server's structured result is delivered as the JSON value it is; text stays text, so a tool
+                  // that returned the string "24" is not handed back as the number 24.
+                  val structured = if (isToolError) None else result.objOpt.flatMap(_.get("structuredContent"))
+                  // `content` is read only when it is needed: a result that is only `structuredContent` has none.
+                  def content = result("content").arr
+                  if (structured.exists(_ != ujson.Null)) {
+                    structured.getOrElse(ujson.Null)
+                  } else if (content.nonEmpty) {
+                    ujson.Str(content(0)("text").str)
+                  } else if (isToolError) {
+                    ujson.Str("server reported an error")
                   } else {
                     ujson.Obj("result" -> ujson.Str("No content returned"))
                   }
                 } match {
+                  case Success(parsed) if isToolError =>
+                    Left(s"Tool call failed: ${parsed.str}")
                   case Success(parsed) => Right(parsed)
-                  case Failure(e)      => Left(s"Failed to parse tool result: ${e.getMessage}")
+                  case Failure(_) if isToolError =>
+                    Left("Tool call failed: server reported an error")
+                  case Failure(e) => Left(s"Failed to parse tool result: ${e.getMessage}")
                 }
               case None =>
                 Left("Tool call failed: no result")
             }
-          case Left(errorMsg) =>
-            Left(s"Tool call failed: $errorMsg")
+          // The flag a cancelled call leaves set is how ToolRegistry knows to report it cancelled
+          case Left(error) =>
+            Left(s"Tool call failed: ${error.message}")
         }
       case None =>
         Left("No transport available")
@@ -386,6 +450,27 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 }
 
 object MCPClientImpl {
+
+  /**
+   * What `StreamableHTTPTransportImpl` says when the server answered 404 or 405, the replies of a server that does
+   * not speak Streamable HTTP: `Transport error: HTTP error 404: ...`, and for 405 `Transport error: Server does
+   * not support Streamable HTTP transport (405 Method Not Allowed)`. It is anchored to the start of the message on
+   * purpose: the text of any other failure carries a URL and a response body, and `404` or `405` appears in a port
+   * number (`:40413`) or a body without being the status.
+   */
+  private val UnsupportedTransportMessage =
+    """^Transport error: (?:HTTP error (?:404|405)\b|Server does not support Streamable HTTP transport)""".r
+
+  /** Whether `message` reports a 404 or 405 from the server, so the client should try HTTP+SSE instead. */
+  private[mcp] def isUnsupportedTransport(message: String): Boolean =
+    UnsupportedTransportMessage.findFirstIn(message).isDefined
+
+  /** A tool's name and the hints its MCP annotations declare (the specification's defaults when it has none). */
+  private[mcp] def hintsOf(toolJson: Value): (String, ToolHints) =
+    toolJson("name").str -> MCPToolAnnotations
+      .fromJson(toolJson.objOpt.flatMap(_.get("annotations")).getOrElse(ujson.Null))
+      .toToolHints
+
   val listRequest: JsonRpcRequest = JsonRpcRequest(
     jsonrpc = "2.0",
     id = "",

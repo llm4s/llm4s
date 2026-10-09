@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Agents
-nav_order: 1
+nav_order: 12
 parent: User Guide
 has_children: true
 ---
@@ -28,8 +28,8 @@ The LLM4S Agent Framework provides a production-ready foundation for building LL
 - **Guardrails** - Input/output validation for safety and quality
 - **Memory** - Short and long-term context with semantic search
 - **Handoffs** - Agent-to-agent delegation for specialist routing
-- **Streaming** - Real-time events for responsive UIs
-- **Orchestration** - Multi-agent workflows with DAG execution
+- **Streaming** - Real-time events for responsive UIs (`agent.stream`, [streaming guide](streaming))
+- **Graphs** - Typed multi-agent workflows on `GraphBuilder`: parallel nodes, joins and checkpoints ([recipe](../../examples/cookbook.html#6-several-agents-in-one-graph))
 
 ## Quick Start
 
@@ -41,28 +41,30 @@ libraryDependencies += "org.llm4s" %% "llm4s-agent" % llm4sVersion
 
 ### Basic Agent
 
+An agent is built once - tools, guardrails, handoffs and middleware belong to it - and run by thread.
+
 ```scala
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.agent.Agent
-import org.llm4s.toolapi.ToolRegistry
 
 // Create an agent and run a query
 val result = for {
   providerConfig <- Llm4sConfig.provider()
   client <- LLMConnect.getClient(providerConfig)
-  agent = new Agent(client)
-  state <- agent.run(
-    query = "What is the capital of France?",
-    tools = ToolRegistry.empty
-  )
-} yield state
+  agent <- Agent.builder("assistant", client).build()
+  result <- agent.run("What is the capital of France?")
+} yield result
 
 result match {
-  case Right(state) => println(state.lastAssistantMessage)
+  case Right(r) => println(r.answer.getOrElse(s"Run ended: ${r.status}"))
   case Left(error) => println(s"Error: $error")
 }
 ```
+
+`Agent.builder(id, client)` takes the agent's id (letters, digits, `_` and `-`, up to 52) and an
+`LLMClient`. `build()` returns a `Result[Agent]` and refuses an invalid agent: clashing tool names,
+a bad or duplicate handoff id, or `withMaxSteps` below 1.
 
 ### Agent with Tools
 
@@ -80,98 +82,190 @@ val weatherTool = ToolFunction(
   function = getWeather _
 )
 
-// Run agent with tools
+// Give the agent its tools when you build it
 val result = for {
   providerConfig <- Llm4sConfig.provider()
   client <- LLMConnect.getClient(providerConfig)
-  agent = new Agent(client)
-  tools = new ToolRegistry(Seq(weatherTool))
-  state <- agent.run("What's the weather in Paris?", tools)
-} yield state
+  agent <- Agent.builder("assistant", client)
+    .withTools(new ToolRegistry(Seq(weatherTool)))
+    .build()
+  result <- agent.run("What's the weather in Paris?")
+} yield result
 ```
+
+`withTools` takes a `ToolRegistry` (an `MCPToolRegistry` too) or a `ToolSet` of `AgentTool`s.
 
 ### Multi-Turn Conversations
 
+A conversation is carried by its thread. `continueConversation` runs the next turn on the thread
+of a previous result:
+
 ```scala
-// Functional multi-turn pattern
 val result = for {
   providerConfig <- Llm4sConfig.provider()
   client <- LLMConnect.getClient(providerConfig)
-  agent = new Agent(client)
-  tools = ToolRegistry.empty
+  agent <- Agent.builder("assistant", client).build()
 
   // First turn
-  state1 <- agent.run("Tell me about Scala", tools)
+  result1 <- agent.run("Tell me about Scala")
 
   // Follow-up (preserves context)
-  state2 <- agent.continueConversation(state1, "How does it compare to Java?")
+  result2 <- agent.continueConversation(result1, "How does it compare to Java?")
 
   // Another follow-up
-  state3 <- agent.continueConversation(state2, "What about performance?")
-} yield state3
+  result3 <- agent.continueConversation(result2, "What about performance?")
+} yield result3
 ```
+
+To name the thread yourself, use `agent.run(threadId, query)`; `agent.runMultiTurn(first, followUps)`
+runs several turns on one thread and stops at the first result that is not `Completed`. A `Left` carries no
+thread id, so when a turn of `run(query)` or `runMultiTurn` fails or is cancelled, its thread is forgotten once
+the turn has ended; name the thread to recover such a turn.
+
+### Handling the Result
+
+`run` returns `Result[AgentResult]`. `Left` is a failure: a provider, tool or middleware error is a
+`GraphError`, and a thread that is busy or still has pending work is refused. A run that ended in a
+defined way is `Right`, with a status:
+
+```scala
+result.map { r =>
+  r.status match {
+    case AgentStatus.Completed(answer)         => println(answer)
+    case AgentStatus.Blocked(guardrail, why)   => println(s"Blocked by $guardrail: $why")
+    case AgentStatus.StepLimitReached          => println("Hit the step limit")
+    case AgentStatus.Suspended(approvals, qs)  => println("Waiting for a person")
+  }
+}
+```
+
+`AgentResult` also carries `threadId`, `runId`, `activeAgent`, `messages` (the thread's full
+history, never a system prompt) and `usage`.
 
 ---
 
 ## Safety Defaults
 
-- **Agent step limit**: `Agent.run(...)` defaults to `maxSteps = Some(50)` to prevent infinite loops. Pass `maxSteps = None` to allow unlimited steps.
+- **Agent step limit**: an agent makes at most `maxSteps` model calls per turn, `Agent.DefaultMaxSteps` (50) unless you call `withMaxSteps(n)`. The count is shared by every agent a turn hands off to; at the limit the result is `AgentStatus.StepLimitReached`. The limit means the same through `run`, `start`, `stream`, `continueConversation` and `runMultiTurn`: each turn gets its own `maxSteps` model calls.
 - **HTTPTool methods**: `HttpConfig()` defaults to `GET` and `HEAD` only. Use `HttpConfig.withWriteMethods()` or `HttpConfig().withAllMethods` to allow write methods.
 
 ---
 
 ## Core Concepts
 
-### Agent State
+### Threads and Results
 
-The `AgentState` is an immutable container that tracks:
+A conversation lives in a thread on a `GraphRuntime` (in memory unless you call `withRuntime`). The
+thread holds the messages, the active agent and the usage; it holds no tools, guardrails or agents,
+which belong to the `Agent`. `AgentResult` is a value to read, not something to pass back in.
 
-- **Conversation history** - All messages exchanged
-- **Available tools** - Tools the agent can call
-- **Status** - `InProgress`, `WaitingForTools`, `Complete`, `Failed`, or `HandoffRequested`
-- **System message** - Instructions for the LLM
-- **Completion options** - Temperature, max tokens, etc.
+- `agent.start(threadId, query)` returns an `AgentRun` at once, with `await()` and `cancel()`;
+  `run` is `start` followed by `await`.
+- A run that failed or was cancelled leaves its thread recoverable: `agent.recover(threadId)`
+  re-runs only the work that did not finish.
+- A run that suspended for approval (`AgentStatus.Suspended`) continues with
+  `agent.resume(threadId, answers)`, building each answer with `result.approve(id)`,
+  `result.reject(id, reason)`, `result.edit(id, arguments)` or `result.reply(id, value)`.
+- A thread stays in the runtime until `agent.forget(threadId)` removes it - one-shot
+  `agent.run(query)` threads too, which on the default in-memory runtime means they stay in memory.
+  Forget a conversation you will not continue: `agent.run(query).flatMap(r => agent.forget(r.threadId).map(_ => r))`.
+  `forget` refuses a thread whose run is still active (`ThreadBusy`) or that belongs to another
+  tenant (`TenantMismatch`); an unknown thread is `Right(())`.
 
-```scala
-// Agent state is immutable - operations return new states
-val newState = state.addMessage(UserMessage("Follow-up question"))
+### Suspended turns from Java and Kotlin
+
+The Java facade (`llm4s-java-api`) returns every turn as a `JAgentResult`, read without Scala types:
+`answer()` is an `Optional<String>`, `messages()` a `java.util.List<JMessage>`, `usage()` a
+`JUsageSummary`, and `status()` a `JAgentStatus` whose `kind()` is the Java enum `AgentStatusKind` -
+`COMPLETED`, `BLOCKED`, `STEP_LIMIT_REACHED` or `SUSPENDED` - with `answer()`, `guardrail()` and
+`reason()` as `Optional<String>`s (see the [Java guide](../java#an-agent-turn)). A `SUSPENDED`
+status's `pending()` is a `java.util.List<PendingInterrupt>`: the turn's approvals, then its
+questions; it is empty for any other status, and `JAgent.pending(result)` is a shortcut for it. Each `PendingInterrupt` has
+`id()`, `kind()` (the Java enum `InterruptKind`, `APPROVAL` or `QUESTION`), `toolName()` and
+`argumentsJson()`. An approval also has `reason()`, and a question has `questionJson()`, the tool's
+question as JSON. Both are `Optional<String>`, empty for the other kind. Answer each pending item
+with `Answer.approve(id)`, `reject(id, reason)`, `edit(id, argumentsJson)` or `reply(id, json)`, then
+call `agent.resume(threadId, answers)`, which blocks like `run` and returns an `LlmResult<JAgentResult>`.
+You can answer only some of them: the result is `SUSPENDED` again, with the rest still pending.
+
+```java
+LlmResult<JAgentResult> turn = agent.run("Deploy the release");
+while (turn.get().status().kind() == AgentStatusKind.SUSPENDED) {
+    List<Answer> answers = new ArrayList<>();
+    for (PendingInterrupt p : turn.get().status().pending()) {
+        switch (p.kind()) {
+            case APPROVAL -> answers.add(Answer.approve(p.id()));        // or reject / edit
+            case QUESTION -> answers.add(Answer.reply(p.id(), "{\"ok\":true}"));
+        }
+    }
+    turn = agent.resume(turn.get().threadId(), answers);
+}
+System.out.println(turn.get().answer().orElse("(" + turn.get().status().kind() + ")"));
+```
+
+`agent.recover(threadId)` continues a turn that failed or was cancelled, and also returns an
+`LlmResult<JAgentResult>`. A failed result means one of these: a malformed answer, an empty answers
+list (`InvalidResume`), an answer to an id the thread is not waiting for, a thread that is not suspended (`resume`), or a thread with nothing to
+recover. `resume` and `recover` handle an interrupt the way `run` and `continueConversation` do: interrupting the
+thread blocked in the call cancels the turn, and the call returns a `CancelledError` with the interrupt flag still
+set once the turn has ended, leaving the thread for `recover` (see
+[Java Threading and Cancellation](../java-threading-and-cancellation#interrupting-the-caller-cancels-an-agent-turn)).
+To cancel a turn without interrupting a thread, use `streamResume` or `streamRecover` and cancel the stream (see
+[Streaming Events](streaming#java-and-kotlin)).
+
+The Kotlin API reuses these types: every `AgentKt` turn returns a `JAgentResult`, and `when` over
+`status().kind()` covers it. `AgentKt.pending(result)` is the same `List<PendingInterrupt>`.
+`agent.resume(threadId, answers)` and `agent.recover(threadId)` are `suspend` functions that return
+the `JAgentResult` or throw `LLMException`. Every `AgentKt` suspend function that runs a turn - `run`,
+`continueConversation`, `resume` and `recover` - runs it as the matching flow does (`stream`,
+`streamResume`, `streamRecover`), so cancelling the caller - a cancelled scope, `withTimeout` -
+cancels the turn. The call throws `CancellationException` once the turn has ended, and the
+conversation thread is no longer busy: it is left for `recover`, which finishes the cancelled turn.
+If the turn had already completed when the cancellation arrived, the call still throws
+`CancellationException`, but the turn's result is committed to the thread: `recover` then has nothing to
+recover and throws `LLMException` ("no incomplete execution"), and the next turn continues from that result.
+The one-shot `run(query)` is the exception, as in Java and Scala: nothing it throws carries its random thread
+id, so once a failed or cancelled turn has ended it forgets the thread. A cancelled call waits up to 5 seconds
+for the turn to end; a provider that ignores the interrupt for longer is left to finish on its own, and the
+thread stays busy (`ThreadBusy`) until it does.
+
+```kotlin
+var turn = agent.run("Deploy the release")
+while (turn.status().kind() == AgentStatusKind.SUSPENDED) {
+    val answers = turn.status().pending().map { p ->
+        when (p.kind()) {
+            InterruptKind.APPROVAL -> Answer.approve(p.id())
+            InterruptKind.QUESTION -> Answer.reply(p.id(), """{"ok":true}""")
+        }
+    }
+    turn = agent.resume(turn.threadId(), answers)
+}
 ```
 
 ### Agent Lifecycle
 
 ```
-Initial Query
-     |
-     v
-+----------+     LLM Call      +------------------+
-| InProgress| --------------> | WaitingForTools  |
-+----------+                  +------------------+
-     ^                               |
-     |        Tool Execution         |
-     +-------------------------------+
-     |
-     v (no more tool calls)
-+----------+
-| Complete |
-+----------+
+Query
+  |
+  v
+input node (input guardrails) ---> Blocked (nothing stored)
+  |
+  v
+model <---------- tool results
+  |
+  +-- tool calls --> call-tool (parallel, bounded) --> collect --> model
+  +-- handoff -----> the target agent's model
+  |
+  v
+finish node (output guardrails) ---> Completed | Blocked (turn removed)
 ```
 
-### Tool Execution Strategies
+### Parallel Tool Calls
 
-Control how multiple tool calls are executed:
+The tool calls of one model message run in parallel, bounded by `RunBudgets.maxConcurrency`,
+which you set through the `RunConfig` you pass to `run`.
 
-```scala
-import org.llm4s.agent.ToolExecutionStrategy
-
-// Sequential (default) - one at a time, safest
-agent.run(query, tools)
-
-// Parallel - all at once, fastest
-agent.runWithStrategy(query, tools, ToolExecutionStrategy.Parallel)
-
-// Parallel with limit - balance speed and resources
-agent.runWithStrategy(query, tools, ToolExecutionStrategy.ParallelWithLimit(3))
-```
+`ToolExecutionStrategy` remains in core as a `ToolRegistry` feature; the agent no longer takes one.
 
 ---
 
@@ -179,23 +273,23 @@ agent.runWithStrategy(query, tools, ToolExecutionStrategy.ParallelWithLimit(3))
 
 ### [Guardrails](guardrails)
 
-Validate inputs and outputs for safety:
+Validate inputs and outputs for safety. Guardrails are middleware on the agent:
 
 ```scala
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 
-agent.run(
-  query = "Generate JSON data",
-  tools = tools,
-  inputGuardrails = Seq(
-    new LengthCheck(1, 10000),
-    new ProfanityFilter()
-  ),
-  outputGuardrails = Seq(
-    new JSONValidator()
+val agent = Agent.builder("assistant", client)
+  .withMiddleware(
+    new GuardrailMiddleware(
+      input = Seq(new LengthCheck(1, 10000), new ProfanityFilter()),
+      output = Seq(new JSONValidator())
+    )
   )
-)
+  .build()
 ```
+
+A blocked run ends `AgentStatus.Blocked(guardrail, reason)`, the blocked turn removed from the thread, which stays usable.
 
 [Learn more about guardrails →](guardrails)
 
@@ -222,32 +316,23 @@ Delegate to specialist agents:
 ```scala
 import org.llm4s.agent.Handoff
 
-agent.run(
-  query = "Complex physics question",
-  tools = tools,
-  handoffs = Seq(
-    Handoff.to(physicsAgent, "Physics expertise required")
-  )
-)
+val physics = Agent.builder("physics", client)
+  .withSystemPrompt("You are a physicist")
+
+val agent = Agent.builder("triage", client)
+  .withHandoffs(Handoff.to("physics", physics, "Physics expertise required"))
+  .build()
 ```
 
 [Learn more about handoffs →](handoffs)
 
 ### [Streaming Events](streaming)
 
-Real-time execution feedback:
-
-```scala
-import org.llm4s.agent.streaming._
-
-agent.runWithEvents(query, tools) {
-  case TextDelta(text, _) => print(text)
-  case ToolCallStarted(_, name, _, _) => println(s"Calling $name...")
-  case ToolCallCompleted(_, name, result, _, _, _) => println(s"$name: $result")
-  case AgentCompleted(state, steps, ms, _) => println(s"Done in $steps steps")
-  case _ => ()
-}
-```
+`Agent.builder(...).withStreaming()` streams the model's answer, and
+`agent.stream(threadId, query)(listener)` delivers every event of the turn - text deltas, tool
+calls, model calls, handoffs, guardrail blocks - as a `StreamEvent`, matched with `AgentEvents`.
+Durable events carry no message content; content is live-only. `AgentIO.stream` and `AgentZ.stream`
+give the same events as fs2 and ZIO streams.
 
 [Learn more about streaming →](streaming)
 
@@ -255,54 +340,39 @@ agent.runWithEvents(query, tools) {
 
 ## Built-in Tools
 
-LLM4S provides pre-built tools for common tasks, in the `llm4s-agent-tools` module (they work with
-plain tool calling through `ToolRegistry` too, without an `Agent`):
+The `llm4s-agent-tools` module ships ready-made tools - a calculator, the date and time, UUIDs, JSON, files, HTTP, a
+shell and web search - in bundles you register with an agent. They work with plain tool calling through
+`ToolRegistry` too, without an `Agent`. The [Built-in Tools guide](/guide/builtin-tools) lists every tool and its
+parameters, and says what each bundle lets a model do: read its safety section before you give a model files, the
+network or a shell. For the module itself, see
+[installation](/getting-started/installation#for-built-in-tools-web-search-http-filesystem-shell).
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-agent-tools" % llm4sVersion
-```
-
-The search tools read their settings with `ToolsConfigLoader` - for example
-`ToolsConfigLoader.loadBraveSearchTool()` - from `llm4s.tools.*`, whose `BRAVE_SEARCH_*` and
-`EXA_*` bindings ship in that module.
-
-```scala
+import org.llm4s.agent.Agent
+import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.builtin.BuiltinTools
 
-// Core tools (always safe)
-BuiltinTools.core          // DateTime, Calculator, UUID, JSON
-
-// Safe for most use cases
-BuiltinTools.safe()        // + web search, HTTP
-
-// With file access (read-only)
-BuiltinTools.withFiles()   // + read-only file access
-
-// All tools (use with caution)
-BuiltinTools.development() // All tools including write access
+val result = for {
+  tools <- BuiltinTools.coreSafe // date/time, calculator, UUID, JSON: no files, network or processes
+  agent <- Agent.builder("assistant", client).withTools(new ToolRegistry(tools)).build()
+  state <- agent.run("What is 15% of 850?")
+} yield state
 ```
 
-**Available tools:**
-
-| Tool | Description |
-|------|-------------|
-| `DateTimeTool` | Current date/time, timezone conversion |
-| `CalculatorTool` | Mathematical calculations |
-| `UUIDTool` | Generate unique identifiers |
-| `JSONTool` | Parse and format JSON |
-| `HTTPTool` | Make HTTP requests |
-| `WebSearchTool` | Search the web |
-| `FileReadTool` | Read files (with restrictions) |
-| `ShellTool` | Execute shell commands (development only) |
+The bundles, smallest to largest: `coreSafe`, `withHttpSafe()` (adds read-only HTTP), `withFilesSafe()` (adds
+read-only files) and `developmentSafe()` (adds file writing and a shell). `customSafe(...)` builds exactly the tools
+whose configuration you pass.
 
 ---
 
 ## Context Window Management
 
-Handle long conversations automatically:
+Handle long conversations with `ContextWindowMiddleware`. It prunes what is sent to the model on
+each call; the thread keeps its full history:
 
 ```scala
 import org.llm4s.agent.{ContextWindowConfig, PruningStrategy}
+import org.llm4s.agent.graph.middleware.ContextWindowMiddleware
 
 val config = ContextWindowConfig(
   maxMessages = Some(20),
@@ -311,10 +381,14 @@ val config = ContextWindowConfig(
   pruningStrategy = PruningStrategy.OldestFirst
 )
 
-// Use with runMultiTurn for automatic pruning
-val queries = Seq("Question 1", "Question 2", "Question 3")
-agent.runMultiTurn(queries, tools, contextConfig = Some(config))
+val agent = Agent.builder("assistant", client)
+  .withMiddleware(new ContextWindowMiddleware(config))
+  .build()
 ```
+
+The current turn (the latest user message onward) is never pruned, a tool call is never separated
+from its result, and the request always starts with a user message - so a request may exceed the
+budget. The system prompt is outside the budget.
 
 **Pruning Strategies:**
 
@@ -329,18 +403,23 @@ agent.runMultiTurn(queries, tools, contextConfig = Some(config))
 
 ## Conversation Persistence
 
-Save and resume conversations:
+A thread lives in the runtime. To keep a conversation across processes, save the result's messages
+and import them as the `history` of a new thread:
 
 ```scala
-// Save state to disk
-AgentState.saveToFile(state, "/tmp/conversation.json")
+import upickle.default.{read, write}
 
-// Load and resume
-val result = for {
-  loadedState <- AgentState.loadFromFile("/tmp/conversation.json", tools)
-  resumedState <- agent.continueConversation(loadedState, "Continue our conversation")
-} yield resumedState
+// Save the messages of a completed run
+Files.writeString(path, write(result.messages))
+
+// Later: load them and continue on a new thread
+val saved = read[Vector[Message]](Files.readString(path))
+val next = agent.run(ThreadId(java.util.UUID.randomUUID().toString), "Continue our conversation", RunConfig(), saved)
 ```
+
+`history` is accepted only on a thread that does not exist yet, and may not contain system messages
+(prompts belong to the agents). Save only runs that completed; `history` that ends mid tool call is
+refused.
 
 ---
 
@@ -356,7 +435,7 @@ val options = CompletionOptions()
   .withMaxTokens(4096)
 
 // Use with agent
-agent.run(query, tools, completionOptions = Some(options))
+Agent.builder("assistant", client).withCompletionOptions(options).build()
 ```
 
 Supported by OpenAI o1/o3 and Anthropic Claude models.
@@ -367,12 +446,11 @@ Supported by OpenAI o1/o3 and Anthropic Claude models.
 
 | Example | Description |
 |---------|-------------|
-| [SingleStepAgentExample](/examples/#single-step) | Step-by-step debugging |
+| [SingleStepAgentExample](/examples/#single-step) | A run with one tool call |
 | [MultiStepAgentExample](/examples/#multi-step) | Complete execution flow |
 | [MultiTurnConversationExample](/examples/#multi-turn) | Functional multi-turn API |
 | [LongConversationExample](/examples/#long-conversation) | Context window pruning |
 | [ConversationPersistenceExample](/examples/#persistence) | Save and resume |
-| [AsyncToolAgentExample](/examples/#agent-examples) | Parallel tool execution |
 | [BuiltinToolsAgentExample](/examples/#agent-examples) | Built-in tools |
 
 [Browse all examples →](/examples/)
@@ -388,6 +466,7 @@ For in-depth technical details:
 - [Phase 1.2: Guardrails](/design/phase-1.2-guardrails-framework) - Validation framework
 - [Phase 1.3: Handoffs](/design/phase-1.3-handoff-mechanism) - Agent delegation
 - [Phase 1.4: Memory](/design/phase-1.4-memory-system) - Memory architecture
+- [Typed Agent Runtime §4.13](/design/typed-agent-runtime-design) - How `Agent` runs on the graph runtime
 - [Phase 2.1: Streaming](/design/phase-2.1-streaming-events) - Event system
 
 ---

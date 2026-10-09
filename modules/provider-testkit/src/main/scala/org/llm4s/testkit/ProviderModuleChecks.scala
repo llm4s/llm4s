@@ -2,8 +2,13 @@ package org.llm4s.testkit
 
 import org.llm4s.error.CancelledError
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, EmbeddingProviderConfig, ProviderConfig }
-import org.llm4s.llmconnect.model.{ Conversation, StreamedChunk, UserMessage }
+import org.llm4s.llmconnect.config.{
+  ContextWindowResolver,
+  EmbeddingModelConfig,
+  EmbeddingProviderConfig,
+  ProviderConfig
+}
+import org.llm4s.llmconnect.model.{ Conversation, EmbeddingRequest, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{
   EmbeddingProviderDescriptor,
@@ -52,6 +57,8 @@ import scala.collection.mutable.ListBuffer
  *
  * Chat providers also run [[assertCancelsWhenInterrupted]] and [[assertCancelsStreamWhenInterrupted]]
  * against [[LocalProviderTestServer.holdOpen]] and [[LocalProviderTestServer.streamThenHold]].
+ * Those checks run the call on a virtual thread, and the server answers on one, so the testkit
+ * needs JDK 21 whatever the provider module itself targets.
  *
  * Modules are compared by class and descriptors by equality (normally reference equality on an
  * `object`), so pass the same descriptor instances your module lists.
@@ -229,11 +236,48 @@ trait ProviderModuleChecks extends Assertions:
    * set. Every chat provider must pass; see `docs/guide/writing-a-provider.md`.
    */
   def assertCancelsWhenInterrupted(client: LLMClient)(using pos: Position): Assertion =
+    assertCallCancelsWhenInterrupted("complete")(client.complete(Conversation(Seq(UserMessage("Hello")))))
+
+  /**
+   * `embed` honours interruption, as [[assertCancelsWhenInterrupted]] does for `complete`: against
+   * a server that never answers - [[LocalProviderTestServer.holdOpen]] - and interrupted, it returns
+   * `Left(CancelledError)` promptly with the thread's interrupt flag still set. Every embedding
+   * provider must pass.
+   */
+  def assertEmbeddingCancelsWhenInterrupted(provider: EmbeddingProvider)(using pos: Position): Assertion =
+    assertCallCancelsWhenInterrupted("embed")(
+      provider.embed(EmbeddingRequest(Seq("Hello"), EmbeddingModelConfig("test-model", 8)))
+    )
+
+  /**
+   * Any client call that returns a `Result` honours interruption: `call` runs on a virtual thread
+   * (as the agent runtime runs calls) against a server that never answers, is interrupted, and
+   * returns `Left(CancelledError)` within 10 seconds with the thread's interrupt flag still set.
+   *
+   * For a call the specific checks do not cover - a reranker, a speech or image client, an MCP
+   * client. Point the client at [[LocalProviderTestServer.holdOpen]].
+   *
+   * @param what names the call in the failure message
+   */
+  def assertCallCancelsWhenInterrupted(what: String)(call: => Result[?])(using pos: Position): Assertion =
     val started = new CountDownLatch(1)
-    interrupted("complete") {
+    interrupted(what) {
       started.countDown()
-      client.complete(Conversation(Seq(UserMessage("Hello"))))
+      call
     }(started.await(5, TimeUnit.SECONDS): Unit)
+
+  /**
+   * As [[assertCallCancelsWhenInterrupted]], but the interrupt waits until `ready` returns, instead of
+   * a fixed 100 ms after the call starts: for a call whose blocked state can be observed, such as one that
+   * starts a program and waits for it, where an interrupt that lands before the program has run would
+   * test nothing. `ready` runs on the calling thread and should fail (not return) if the state never comes.
+   *
+   * @param what  names the call in the failure message
+   * @param call  the call; it runs on a virtual thread
+   * @param ready returns once `call` is blocked
+   */
+  def assertCallCancelsOnceReady(what: String)(call: => Result[?])(ready: => Unit)(using pos: Position): Assertion =
+    interrupted(what)(call)(ready)
 
   /**
    * `client.streamComplete` honours interruption mid-stream: against a server that sends one

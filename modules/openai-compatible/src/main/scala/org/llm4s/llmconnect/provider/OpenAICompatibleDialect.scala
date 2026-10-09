@@ -1,8 +1,8 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.model.{ CompletionOptions, ResponseFormat, ResponseFormatMapper, ToolCall }
-
-import scala.util.Try
+import org.llm4s.annotation.Stable
+import org.llm4s.llmconnect.model.{ CompletionOptions, ResponseFormat, ResponseFormatMapper, ThinkingBlock, ToolCall }
+import org.llm4s.util.BoundedJson
 
 /**
  * The places where an OpenAI-compatible provider departs from the plain
@@ -20,9 +20,11 @@ import scala.util.Try
  *    ([[sendEmptyAssistantTurns]]); the tool-call ids the provider
  *    accepts ([[encodeToolCallId]]); the `response_format` shape
  *    ([[encodeResponseFormat]]); whether a stream asks for usage
- *    ([[streamUsageOption]]); and any reasoning fields ([[addReasoning]]).
+ *    ([[streamUsageOption]]); any reasoning fields ([[addReasoning]]); and whether, and
+ *    where, an assistant turn's earlier thinking goes back ([[encodeThinking]]).
  *  - '''Response:''' how `content` is read back ([[decodeContent]]); where the
- *    model's thinking is ([[thinking]]); where its reasoning-token count is
+ *    model's thinking is ([[thinking]]), and any provider-specific replay data beside it
+ *    ([[thinkingDetails]], [[decodeThinkingDetails]]); where its reasoning-token count is
  *    ([[reasoningTokens]]); and how a non-streaming `tool_calls` array is
  *    parsed ([[parseToolCalls]]).
  *
@@ -33,6 +35,7 @@ import scala.util.Try
  * one whose differences do not should extend this trait rather than fork
  * [[OpenAICompatibleClient]] ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */
+@Stable
 trait OpenAICompatibleDialect:
 
   /**
@@ -62,6 +65,7 @@ trait OpenAICompatibleDialect:
    * `true` - it goes out as `{"role": "assistant"}` (with `content` if
    * [[alwaysSendAssistantContent]]). A provider that rejects a message carrying neither
    * `content` nor `tool_calls`, as Mistral does, answers `false` and the turn is left out.
+   * A turn with thinking that [[encodeThinking]] encodes is not empty, and is sent either way.
    */
   def sendEmptyAssistantTurns: Boolean = true
 
@@ -103,6 +107,26 @@ trait OpenAICompatibleDialect:
   def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): Unit = ()
 
   /**
+   * Adds an assistant turn's thinking - its
+   * [[org.llm4s.llmconnect.model.AssistantMessage.thinking]] blocks, as they may be replayed - to
+   * that turn's encoded `message`, after its `content` and `tool_calls` are set. Called only when
+   * the turn has thinking. The blocks' text is `ThinkingBlock.text(thinking)`.
+   *
+   * By the time this is called the client has unsealed any turn whose sealed thinking no longer
+   * matches the conversation before it (see `ThinkingReplay`), so sealed blocks here - such as the
+   * [[org.llm4s.llmconnect.model.ThinkingBlock.Opaque]] blocks [[decodeThinkingDetails]] produced -
+   * can be sent back as they are. A dialect sends only the blocks that are its own and ignores the
+   * rest, which may have come from another provider.
+   *
+   * Standard: adds nothing, so the thinking is dropped. The OpenAI format has no field for it, and
+   * an unknown field can fail a request. A provider that documents a field for a model's earlier
+   * reasoning overrides this: DeepSeek and Z.ai (`reasoning_content`, which both require back
+   * across a tool-calling turn), OpenRouter (`reasoning`, and its `reasoning_details` unchanged)
+   * and Mistral (a thinking chunk in `content`).
+   */
+  def encodeThinking(message: ujson.Obj, thinking: Seq[ThinkingBlock]): Unit = ()
+
+  /**
    * Reads the text of a reply's `content` value - on a completion's `message`
    * or a stream's `delta`. Standard: a JSON string, anything else is no text.
    */
@@ -114,6 +138,25 @@ trait OpenAICompatibleDialect:
    * Standard: none.
    */
   def thinking(obj: ujson.Value): Option[String] = None
+
+  /**
+   * The provider-specific replay data on a JSON object - a completion's `message` or a stream's
+   * `delta` - as raw items, for [[decodeThinkingDetails]]. Standard: none.
+   *
+   * For a provider that returns more than reasoning text and needs it back unchanged, as OpenRouter
+   * does with `reasoning_details`.
+   */
+  def thinkingDetails(obj: ujson.Value): Seq[ujson.Value] = Nil
+
+  /**
+   * The thinking blocks for one reply's replay data: the items [[thinkingDetails]] read from its
+   * `message`, or from each of its stream's deltas concatenated in order - so a dialect whose
+   * provider streams an item in fragments joins them here. They follow the reply's [[thinking]]
+   * text on the returned message, and the client binds them to the request it answered (see
+   * `ThinkingReplay`), so they should be sealed - normally
+   * [[org.llm4s.llmconnect.model.ThinkingBlock.Opaque]]. Standard: none.
+   */
+  def decodeThinkingDetails(details: Seq[ujson.Value]): Seq[ThinkingBlock] = Nil
 
   /** Reads the reasoning-token count from a `usage` object. Standard: none. */
   def reasoningTokens(usage: ujson.Value): Option[Int] = None
@@ -146,7 +189,9 @@ object OpenAICompatibleDialect:
 
   /**
    * Parses a `tool_calls` array without failing: a missing `id` or `name`
-   * becomes `""`, and missing or unparseable `arguments` become `{}`.
+   * becomes `""`, and missing or unparseable `arguments` become `{}`, as do
+   * arguments nested more than 512 levels deep - they are model output, and a
+   * value that deep overflows the stack of whatever renders it next (#1562).
    */
   def lenientToolCalls(toolCalls: ujson.Value): Seq[ToolCall] =
     toolCalls.arrOpt.toSeq.flatten.map { call =>
@@ -155,7 +200,7 @@ object OpenAICompatibleDialect:
       ToolCall(
         id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
         name = function.flatMap(_.get("name")).flatMap(_.strOpt).getOrElse(""),
-        arguments = Try(ujson.read(argsStr)).getOrElse(ujson.Obj())
+        arguments = BoundedJson.read(argsStr).getOrElse(ujson.Obj())
       )
     }
 

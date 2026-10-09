@@ -17,6 +17,13 @@ enum CheckpointStatus derives ReadWriter:
   /** The run completed; a new `start` applies its input to this state. */
   case Completed
 
+  /**
+   * The run ended in a failure that is its outcome, not an interruption (a node returned
+   * [[NodeResult.Block]], as a guardrail does): the thread is usable, `start` applies a new input to
+   * this state exactly as after `Completed`, and `recover` has nothing to continue.
+   */
+  case Failed
+
 /**
  * One durable point in a thread's execution - data only. Closures, codecs and update functions
  * are rebound from the compiled graph on restore; every value inside carries the version of the
@@ -44,14 +51,17 @@ final case class Checkpoint(
 object Checkpoint:
 
   /** The format this build writes. */
-  val CurrentFormat: Int = 3
+  val CurrentFormat: Int = 4
 
   /**
    * Migrations of the checkpoint format itself, keyed by the version they upgrade from.
    * 1 -> 2: suspension (#1269) added parked continuations, the paused flag and task origins.
    * 2 -> 3: the tenant (#1277) became part of a thread's identity; earlier checkpoints have none.
+   * 3 -> 4: the terminal `Failed` status (#1328); nothing to rewrite, but a build that predates it refuses format 4
+   * rather than misread the status.
    */
-  private val formatVersion: SchemaVersion = SchemaVersion(3)(1 -> addSuspension, 2 -> addTenant)
+  private val formatVersion: SchemaVersion =
+    SchemaVersion(4)(1 -> addSuspension, 2 -> addTenant, 3 -> addFailedStatus)
 
   private def addSuspension(json: ujson.Value): Result[ujson.Value] =
     Try {
@@ -72,6 +82,13 @@ object Checkpoint:
       val upgraded = ujson.copy(json)
       upgraded("tenantId") = upickle.default.writeJs(Option.empty[String])
       upgraded("formatVersion") = 3
+      upgraded
+    }.toResult
+
+  private def addFailedStatus(json: ujson.Value): Result[ujson.Value] =
+    Try {
+      val upgraded = ujson.copy(json)
+      upgraded("formatVersion") = 4
       upgraded
     }.toResult
 

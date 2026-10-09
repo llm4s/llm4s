@@ -63,21 +63,26 @@ This guide documents the correct event sequences for common LLM application patt
 }
 ```
 
+> An `Agent` built `withTracing` emits the runtime's `graph.*` and the agent's `agent.*` events, then
+> one `TraceEvent.AgentRunEnded` per run. In Langfuse the trace id is the run id and the session id
+> is the thread id, so a conversation's turns group; the event sequences below describe the Langfuse
+> model. See the [observability guide](guide/observability/).
+
 ### **LLM4S Implementation:**
 
 ```scala
 // This is automatically handled by the fixed LangfuseTracing.scala
 // When you run an agent with RAG capabilities:
 
-val agent = new Agent(client)
+// Attach the tracing backend to the agent with withTracing (Langfuse via TRACING_MODE=langfuse)
+val agent = Agent.builder("rag-agent", client)
+  .withTools(ragToolRegistry)
+  .withTracing(tracing)
+  .build()
 val query = "What is the capital of France?"
 
-agent.run(
-  query = query,
-  tools = ragToolRegistry,
-  traceLogPath = Some("rag-example.md")
-) match {
-  case Right(finalState) =>
+agent.flatMap(_.run(query)) match {
+  case Right(result) =>
     // The fixed tracing will automatically create:
     // 1. Trace with query as input and final answer as output
     // 2. Generation events with proper conversation context
@@ -263,15 +268,14 @@ val conversation = Conversation(Seq(
 ```scala
 // The fixed implementation automatically handles this complex flow
 val toolRegistry = new ToolRegistry(Seq(WeatherTool.tool, FlightTool.tool))
-val agent = new Agent(client)
+val agent = Agent.builder("travel-agent", client)
+  .withTools(toolRegistry)
+  .withMaxSteps(5)
+  .withTracing(tracing)
+  .build()
 
-agent.run(
-  query = "Book a flight to Paris and check weather",
-  tools = toolRegistry,
-  maxSteps = Some(5),
-  traceLogPath = Some("agent-example.md")
-) match {
-  case Right(finalState) =>
+agent.flatMap(_.run("Book a flight to Paris and check weather")) match {
+  case Right(result) =>
     // Automatically creates:
     // 1. Trace with initial query and final response
     // 2. Generation for initial planning with tool_calls in output

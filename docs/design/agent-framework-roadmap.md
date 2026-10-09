@@ -1,5 +1,7 @@
 # llm4s Agent Framework Roadmap
 
+> **Superseded in part:** this document describes the pre-#1328 agent API (`new Agent(client)`, `AgentState`, per-run tools and guardrails). `Agent` now runs on the graph runtime and is built with `Agent.builder(...)`; see [typed-agent-runtime-design.md §4.13](typed-agent-runtime-design.md) and the [Stage 1 migration note](../reference/migration.md#stage-1-migration-agent-runtime). Kept as history.
+
 > **Date:** 2025-11-26 (Updated)
 > **Purpose:** Strategic roadmap for enhancing llm4s agent capabilities while maintaining functional programming principles
 > **Status:** Analysis Complete - Roadmap Updated
@@ -27,7 +29,7 @@
 
 **llm4s** provides a solid foundation for agent-based workflows with:
 - ✅ Single-agent execution with tool calling
-- ✅ Multi-agent orchestration via DAG-based plans
+- ✅ Multi-agent orchestration via DAG-based plans (Superseded by [#1330](https://github.com/llm4s/llm4s/issues/1330): DAG orchestration, `PlanRunner` and `TypedAgent` are removed; multi-agent workflows are graphs, see the [multi-agent graph recipe](../examples/cookbook.md#6-several-agents-in-one-graph).)
 - ✅ Type-safe agent composition
 - ✅ Parallel and sequential execution
 - ✅ Result-based error handling
@@ -129,7 +131,7 @@ To properly position llm4s, we compare it against three leading Python agent fra
 |---------|-------|------------|------------|--------|
 | **Core Features** |
 | Single-agent execution | ✅ | ✅ | ✅ | ✅ |
-| Multi-agent orchestration | ✅ DAG | ✅ Handoffs | ✅ Graphs | ✅ Crews |
+| Multi-agent orchestration | ✅ DAG (superseded by #1330: graphs) | ✅ Handoffs | ✅ Graphs | ✅ Crews |
 | Tool calling | ✅ | ✅ | ✅ | ✅ |
 | Streaming | ⚠️ Basic | ✅ Advanced | ✅ Validated | ⚠️ Limited |
 | **Type Safety** |
@@ -238,8 +240,8 @@ To properly position llm4s, we compare it against three leading Python agent fra
 **llm4s Advantages:**
 - ✅ Fine-grained control over agent flow
 - ✅ Type-safe agent composition (compile-time)
-- ✅ Concurrency control (maxConcurrentNodes)
-- ✅ Cancellation support (CancellationToken)
+- ✅ Concurrency control (`RunBudgets.maxConcurrency`; `PlanRunner` removed in #1330)
+- ✅ Cancellation support (`RunHandle.cancel`, thread interruption; `CancellationToken` removed in #1330)
 - ✅ Predictable execution (no hidden manager logic)
 
 **CrewAI Quote:** "Easily orchestrate autonomous agents through intuitive Crews"
@@ -493,13 +495,13 @@ state2.conversation.messageCount  // 2 ✓ As expected
 
 | Feature | llm4s | OpenAI Agents SDK | Notes |
 |---------|-------|-------------------|-------|
-| **Orchestration Pattern** | ✅ DAG-based with `PlanRunner` | ✅ Handoffs + Agent-as-Tool | Different paradigms |
+| **Orchestration Pattern** | ✅ Typed graph runtime (`GraphBuilder`) | ✅ Handoffs + Agent-as-Tool | Different paradigms |
 | **Type Safety** | ✅ Compile-time type checking | ⚠️ Runtime validation | llm4s advantage |
 | **Parallel Execution** | ✅ Batch-based parallelism | ✅ asyncio.gather support | Similar |
 | **Sequential Execution** | ✅ Topological ordering | ✅ Control flow in code | Similar |
 | **Agent Delegation** | ⚠️ Manual via DAG edges | ✅ Native handoffs | OpenAI cleaner API |
-| **Concurrency Control** | ✅ `maxConcurrentNodes` | ⚠️ Manual with asyncio | llm4s advantage |
-| **Cancellation** | ✅ `CancellationToken` | ⚠️ Not documented | llm4s advantage |
+| **Concurrency Control** | ✅ `RunBudgets.maxConcurrency` | ⚠️ Manual with asyncio | llm4s advantage |
+| **Cancellation** | ✅ `RunHandle.cancel` | ⚠️ Not documented | llm4s advantage |
 
 ### 3. Session & State Management
 
@@ -1925,7 +1927,7 @@ modules/core/src/main/scala/org/llm4s/
 │   │   ├── WorkflowEngine.scala
 │   │   ├── CamundaWorkflowEngine.scala
 │   │   └── HumanTask.scala
-│   └── orchestration/                 # Existing multi-agent
+│   └── orchestration/                 # Existing multi-agent (removed by #1330; use graphs)
 │       ├── Agent.scala
 │       ├── DAG.scala
 │       └── PlanRunner.scala

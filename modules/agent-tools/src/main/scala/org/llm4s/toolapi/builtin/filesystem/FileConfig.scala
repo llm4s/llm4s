@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.filesystem
 
-import java.nio.file.Path
+import java.nio.file.{ Path, Paths }
+import scala.util.Try
 
 /**
  * Configuration for file system tools.
@@ -19,22 +20,14 @@ case class FileConfig(
 
   /**
    * Check if a path is allowed based on configuration.
+   *
+   * A path is inside a configured path when it is that path or below it, compared by path component after
+   * normalisation: `/srv/data` contains `/srv/data/a.txt` but not `/srv/data-secret`.
    */
   def isPathAllowed(path: Path): Boolean = {
-    val normalizedPath = path.toAbsolutePath.normalize().toString
-
-    // Check blocked paths first
-    val isBlocked = blockedPaths.exists(blocked => normalizedPath.startsWith(blocked) || normalizedPath == blocked)
-
-    if (isBlocked) return false
-
-    // Check allowed paths if specified
-    allowedPaths match {
-      case Some(allowed) =>
-        allowed.exists(allowedPath => normalizedPath.startsWith(allowedPath) || normalizedPath == allowedPath)
-      case None =>
-        true // All non-blocked paths allowed
-    }
+    val normalizedPath = PathContainment.normalize(path)
+    val isBlocked      = PathContainment.isInsideAny(normalizedPath, blockedPaths)
+    !isBlocked && allowedPaths.forall(allowed => PathContainment.isInsideAny(normalizedPath, allowed))
   }
 }
 
@@ -54,10 +47,19 @@ case class WriteConfig(
 ) {
 
   /**
-   * Check if a path is allowed for writing.
+   * Check if a path is allowed for writing: it must be one of `allowedPaths` or below one, compared by path
+   * component (`/srv/out` does not contain `/srv/out-other`).
    */
-  def isPathAllowed(path: Path): Boolean = {
-    val normalizedPath = path.toAbsolutePath.normalize().toString
-    allowedPaths.exists(allowedPath => normalizedPath.startsWith(allowedPath) || normalizedPath == allowedPath)
-  }
+  def isPathAllowed(path: Path): Boolean =
+    PathContainment.isInsideAny(PathContainment.normalize(path), allowedPaths)
+}
+
+/** Component-wise path containment shared by [[FileConfig]] and [[WriteConfig]]. */
+private[filesystem] object PathContainment {
+
+  def normalize(path: Path): Path = path.toAbsolutePath.normalize()
+
+  /** True when `path` (already normalised) equals or lies below one of `roots`; an unparseable root matches nothing. */
+  def isInsideAny(path: Path, roots: Seq[String]): Boolean =
+    roots.exists(root => Try(normalize(Paths.get(root))).toOption.exists(path.startsWith))
 }

@@ -1,8 +1,9 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.OpenAIConfig
-import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, ToolCall }
+import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, ThinkingBlock, ToolCall }
 import org.llm4s.llmconnect.serialization.StandardToolCallDeserializer
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
@@ -45,12 +46,21 @@ import scala.util.Try
  * populates: `message.thinking`, `message.reasoning`, or
  * `choice.thinking` (checked in that order).
  *
+ * When the underlying model returns signed, summarised or encrypted reasoning (Claude, Gemini,
+ * OpenAI reasoning models), OpenRouter also returns it as `message.reasoning_details`, and
+ * requires the whole sequence back unchanged when a conversation continues after tool calls. Each
+ * item is kept as a sealed [[org.llm4s.llmconnect.model.ThinkingBlock.Opaque]] block beside the
+ * reasoning text, bound to the request it answered, and sent back as `reasoning_details` with the
+ * same order and fields while the conversation before it is unchanged; once it changes (pruned,
+ * compressed, edited) the details are dropped and only the `reasoning` text is sent.
+ *
  * @param config  `OpenAIConfig` whose `baseUrl` must contain `"openrouter.ai"`;
  *                carries the API key and model name.
  * @param metrics Receives per-call latency and token-usage events.
  *                Defaults to `MetricsCollector.noop`.
  * @param exchangeLogging where raw request/response exchanges are recorded, if anywhere
  */
+@Stable
 class OpenRouterClient(
   config: OpenAIConfig,
   metrics: MetricsCollector = MetricsCollector.noop,
@@ -64,7 +74,8 @@ class OpenRouterClient(
         baseUrl = config.baseUrl,
         apiKey = Some(config.apiKey),
         contextWindow = config.contextWindow,
-        reserveCompletion = config.reserveCompletion
+        reserveCompletion = config.reserveCompletion,
+        timeouts = config.timeouts
       ),
       OpenRouterDialect,
       metrics,
@@ -104,11 +115,18 @@ object OpenRouterClient {
  *  - an assistant turn always carries `content`, `""` or `null` when it has no text;
  *  - reasoning requested per underlying model family (see [[addReasoning]]);
  *  - thinking read from `thinking` or `reasoning` (on the message, then the
- *    choice, and on a streamed delta), and `usage.reasoning_tokens`;
+ *    choice, and on a streamed delta), and `usage.reasoning_tokens`; an assistant turn's
+ *    thinking sent back as its `reasoning`, which OpenRouter documents for preserving reasoning;
+ *  - `reasoning_details` read whole or streamed into opaque blocks and sent back unchanged (see
+ *    [[decodeThinkingDetails]] and [[encodeThinking]]);
  *  - strict tool-call parsing: a call missing its `id` or `name`, or with
  *    unparseable arguments, fails the completion rather than being defaulted.
  */
 private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
+
+  /** The provider id on the [[ThinkingBlock.Opaque]] blocks that hold OpenRouter's `reasoning_details`. */
+  val ProviderId: String = "openrouter"
+
   override val headers: Seq[(String, String)] =
     Seq("HTTP-Referer" -> "https://github.com/llm4s/llm4s", "X-Title" -> "LLM4S")
 
@@ -154,6 +172,55 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
 
   override def thinking(obj: ujson.Value): Option[String] =
     OpenAICompatibleDialect.firstString(obj, "thinking", "reasoning")
+
+  /**
+   * The turn's thinking text as `reasoning`, and its `reasoning_details` - the [[ThinkingBlock.Opaque]]
+   * blocks this dialect read, in order and exactly as received - when it still has them. A turn
+   * unsealed since (its history or content changed) has only its text, and sends only `reasoning`.
+   * Opaque blocks from any other provider are ignored.
+   */
+  override def encodeThinking(message: ujson.Obj, thinking: Seq[ThinkingBlock]): Unit = {
+    ThinkingBlock.text(thinking).foreach(text => message("reasoning") = text)
+    val details = thinking.collect { case ThinkingBlock.Opaque(OpenRouterDialect.ProviderId, data) => ujson.read(data) }
+    if (details.nonEmpty) message("reasoning_details") = ujson.Arr.from(details)
+  }
+
+  override def thinkingDetails(obj: ujson.Value): Seq[ujson.Value] =
+    obj.objOpt.flatMap(_.get("reasoning_details")).flatMap(_.arrOpt).toSeq.flatten.filter(_.objOpt.isDefined)
+
+  /**
+   * One [[ThinkingBlock.Opaque]] per `reasoning_details` item, holding the item's JSON with every
+   * field (`type`, `text`, `summary`, `data`, `signature`, `id`, `format`, `index` and any other).
+   *
+   * A stream sends an item in fragments that share its `index` and `type`: the `text` and `summary`
+   * fragments are concatenated, and any other field takes the latest non-null value it is sent
+   * with (a signature, say, arrives on a later fragment than the text). An item with no `index`, or
+   * whose `type` differs from the item before at that index, starts a new item. A non-streaming
+   * reply's items, each with its own index, come through unchanged.
+   */
+  override def decodeThinkingDetails(details: Seq[ujson.Value]): Seq[ThinkingBlock] = {
+    val items = scala.collection.mutable.ArrayBuffer.empty[ujson.Obj]
+    // the position in `items` of the latest item at each index
+    val byIndex = scala.collection.mutable.Map.empty[Int, Int]
+    details.flatMap(_.objOpt).foreach { fragment =>
+      val index = fragment.get("index").flatMap(_.numOpt).map(_.toInt)
+      val kind  = fragment.get("type").flatMap(_.strOpt)
+      index.flatMap(byIndex.get).filter(i => items(i).value.get("type").flatMap(_.strOpt) == kind) match {
+        case Some(position) =>
+          val item = items(position)
+          fragment.foreach {
+            case (key @ ("text" | "summary"), ujson.Str(more)) =>
+              item(key) = item.value.get(key).flatMap(_.strOpt).getOrElse("") + more
+            case (_, ujson.Null) => ()
+            case (key, value)    => item(key) = value
+          }
+        case None =>
+          items += ujson.Obj.from(fragment)
+          index.foreach(byIndex(_) = items.length - 1)
+      }
+    }
+    items.toSeq.map(item => ThinkingBlock.Opaque(OpenRouterDialect.ProviderId, item.render()))
+  }
 
   override def reasoningTokens(usage: ujson.Value): Option[Int] =
     usage.obj.get("reasoning_tokens").flatMap(_.numOpt).map(_.toInt)

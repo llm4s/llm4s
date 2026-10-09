@@ -1,5 +1,6 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
 import org.llm4s.core.safety.{ DefaultErrorMapper, ErrorMapper }
 
 /**
@@ -20,6 +21,7 @@ import org.llm4s.core.safety.{ DefaultErrorMapper, ErrorMapper }
  * val customError = exception.toLLMError
  * }}}
  */
+@Stable
 object ThrowableOps {
 
   /**

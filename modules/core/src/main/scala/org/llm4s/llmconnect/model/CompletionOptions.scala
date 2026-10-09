@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.annotation.Stable
 import org.llm4s.toolapi.ToolFunction
 
 /**
@@ -36,6 +37,7 @@ import org.llm4s.toolapi.ToolFunction
  * val jsonOptions = CompletionOptions().withResponseFormat(ResponseFormat.Json)
  * }}}
  */
+@Stable
 final case class CompletionOptions private (
   temperature: Double,
   topP: Double,

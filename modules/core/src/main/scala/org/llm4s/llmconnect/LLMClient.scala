@@ -1,7 +1,13 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.annotation.Stable
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
-import org.llm4s.types.{ Result, TokenBudget, HeadroomPercent }
+import org.llm4s.toolapi.ObjectSchema
+import org.llm4s.types.{ HeadroomPercent, Result, TokenBudget }
+import org.llm4s.util.BoundedJson
+
+import scala.util.Try
 
 /**
  * Core interface for interacting with Large Language Model providers.
@@ -10,6 +16,7 @@ import org.llm4s.types.{ Result, TokenBudget, HeadroomPercent }
  * providing a unified interface for completion requests, streaming responses, and token management.
  * Implementations handle provider-specific authentication, message formatting, and tool calling.
  */
+@Stable
 trait LLMClient extends AutoCloseable {
 
   /**
@@ -43,6 +50,70 @@ trait LLMClient extends AutoCloseable {
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion]
+
+  /**
+   * Sends the conversation and parses the response into a typed value using the provided schema.
+   *
+   * Sets `ResponseFormat.JsonSchema` on the options. OpenAI, Azure OpenAI and Gemini enforce the
+   * schema at generation time, as does Ollama 0.5 or later through its `format` field. Requesty and
+   * the OpenAI-compatible providers (including Cohere) send it as `response_format`, but whether it
+   * is enforced is up to the server - for Requesty, a router, the backend model it routes to: one
+   * that ignores the field returns unconstrained text.
+   * Anthropic falls back to a best-effort system-prompt instruction, which is not schema-enforced.
+   * Clients that do not read `responseFormat` (watsonx, Bedrock) send no schema at all. Because models may wrap
+   * JSON in markdown code fences or surround it with prose, the response is normalised
+   * (fence stripped, first balanced `{...}` or `[...]` extracted) before being deserialised with
+   * uPickle into the expected type `A`.
+   *
+   * The reply is '''not''' validated against the schema: it is only deserialised. A constraint the
+   * reader does not check - an enum, a numeric or string bound, `additionalProperties = false` (extra
+   * keys are ignored) - can be violated by a reply that still returns `Right(A)`. Check such
+   * constraints on the result yourself.
+   *
+   * The schema is derived with `strict = true`, which lists '''every''' property as required,
+   * including a property declared optional with `required = false`. Only `responseFormat` is
+   * overridden: every other option you pass is forwarded unchanged to `complete`, where the
+   * provider client may adjust or drop options the model does not support, as for any other
+   * `complete` call. `name` and `strict` on the
+   * format are left at their defaults (`"response"` and `true`); call `complete` with your own
+   * `ResponseFormat.JsonSchema` to set them.
+   *
+   * @param conversation conversation history
+   * @param schema       JSON-Schema description of the expected response object
+   * @param options      additional completion options (default: CompletionOptions())
+   * @param reader       implicit uPickle reader for deserialising the JSON into `A`
+   * @tparam A target type; must have a corresponding `upickle.default.Reader[A]`
+   * @return Right(A) on success. Left(ValidationError) with field `structured_output` when the
+   *         reply is not JSON, is JSON `null`, or cannot be deserialised as `A`; any other Left is
+   *         the provider call's own error, returned unchanged
+   */
+  def completeStructured[A](
+    conversation: Conversation,
+    schema: ObjectSchema[A],
+    options: CompletionOptions = CompletionOptions()
+  )(implicit reader: upickle.default.Reader[A]): Result[A] = {
+    val jsonSchema = ResponseFormat.JsonSchema(schema.toJsonSchema(strict = true))
+    val opts       = options.withResponseFormat(jsonSchema)
+    for {
+      completion <- complete(conversation, opts)
+      // The reply is model output: `BoundedJson` refuses a document nested more than 512 levels
+      // deep before it is parsed, since reading it into `A` below would overflow the stack (#1562)
+      parsed <- BoundedJson
+        .read(LLMClient.extractJson(completion.content))
+        .left
+        .map(e => ValidationError("structured_output", s"Response is not valid JSON: ${e.message}"))
+      // uPickle reads a JSON null into a null reference for case classes; the schema is an object
+      // schema so a null document is never a valid answer and must not reach callers as Right(null)
+      _ <- Either.cond(
+        parsed != ujson.Null,
+        (),
+        ValidationError("structured_output", "Response does not match expected schema: got JSON null")
+      )
+      result <- Try(upickle.default.read[A](parsed)).toEither.left.map(e =>
+        ValidationError("structured_output", s"Response does not match expected schema: ${e.getMessage}")
+      )
+    } yield result
+  }
 
   /**
    * Returns the maximum context window size supported by this model in tokens.
@@ -96,4 +167,72 @@ trait LLMClient extends AutoCloseable {
    * Default implementation is a no-op; override if managing resources like connections or thread pools.
    */
   def close(): Unit = ()
+}
+
+object LLMClient {
+
+  private val FencePattern = """(?s)^```[A-Za-z0-9_-]*[ \t]*\r?\n?(.*?)\r?\n?```\s*$""".r
+
+  /** Upper bound on how many `{`/`[` start positions are tried, keeping extraction linear in practice. */
+  private val MaxCandidateStarts = 16
+
+  /**
+   * Best-effort normalisation of model output that should contain a JSON value.
+   *
+   * Strips a surrounding markdown code fence and, if the remainder is not itself valid JSON,
+   * extracts the first balanced `{...}` or `[...]` block that parses as JSON (string and escape
+   * aware). Trailing prose after the JSON, and earlier non-JSON brace pairs in the prose, are
+   * skipped; at most `MaxCandidateStarts` candidate start positions are tried. Plain JSON is
+   * returned trimmed; if nothing is found the trimmed text is returned unchanged so the caller
+   * reports the parse error.
+   */
+  private[llmconnect] def extractJson(raw: String): String = {
+    val trimmed = raw.trim
+    val unfenced = trimmed match {
+      case FencePattern(inner) => inner.trim
+      case _                   => trimmed
+    }
+    if (isJson(unfenced)) unfenced
+    else firstJsonBlock(unfenced).getOrElse(unfenced)
+  }
+
+  // bounded, so a candidate too deep to be read is not "JSON" and is not parsed at all
+  private def isJson(text: String): Boolean = BoundedJson.read(text).isRight
+
+  private def firstJsonBlock(text: String): Option[String] = {
+    @scala.annotation.tailrec
+    def tryFrom(from: Int, attempts: Int): Option[String] =
+      if (attempts >= MaxCandidateStarts) None
+      else {
+        val start = text.indexWhere(c => c == '{' || c == '[', from)
+        if (start < 0) None
+        else
+          balancedFrom(text, start).filter(isJson) match {
+            case found @ Some(_) => found
+            case None            => tryFrom(start + 1, attempts + 1)
+          }
+      }
+    tryFrom(0, 0)
+  }
+
+  private def balancedFrom(text: String, start: Int): Option[String] = {
+    @scala.annotation.tailrec
+    def loop(i: Int, depth: Int, inString: Boolean, escaped: Boolean): Option[String] =
+      if (i >= text.length) None
+      else {
+        val c = text.charAt(i)
+        if (inString) {
+          if (escaped) loop(i + 1, depth, inString = true, escaped = false)
+          else if (c == '\\') loop(i + 1, depth, inString = true, escaped = true)
+          else if (c == '"') loop(i + 1, depth, inString = false, escaped = false)
+          else loop(i + 1, depth, inString = true, escaped = false)
+        } else if (c == '"') loop(i + 1, depth, inString = true, escaped = false)
+        else if (c == '{' || c == '[') loop(i + 1, depth + 1, inString = false, escaped = false)
+        else if (c == '}' || c == ']') {
+          if (depth == 1) Some(text.substring(start, i + 1))
+          else loop(i + 1, depth - 1, inString = false, escaped = false)
+        } else loop(i + 1, depth, inString = false, escaped = false)
+      }
+    loop(start, 0, inString = false, escaped = false)
+  }
 }

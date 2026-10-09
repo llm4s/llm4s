@@ -107,7 +107,8 @@ object FileEmbedder {
    * @param config Model, chunking and media settings; see [[FileEmbeddingConfig]].
    * @return `Right(vectors)` — one vector per text chunk, or one vector per non-text file.
    *         `Left(EmbeddingError)` when the file does not exist, the MIME type is unsupported,
-   *         or the media file exceeds `config.maxMediaFileSize`.
+   *         or the media file exceeds `config.maxMediaFileSize`; `Left(ValidationError)` when text chunking is
+   *         enabled with a non-positive `size` or an `overlap` that is not smaller than `size`.
    */
   def encodeFromPath(
     path: Path,
@@ -137,33 +138,44 @@ object FileEmbedder {
       case Left(e) => Left(EmbeddingError(None, e.message, "extractor"))
       case Right(document) =>
         val chunking = config.chunking
-        val inputs =
+        val chunked: Result[Seq[String]] =
           if (chunking.enabled) {
             logger.debug(s"[FileEmbedder] Chunking text: size=${chunking.size} overlap=${chunking.overlap}")
-            ChunkingUtils.chunkText(document.text, chunking.size, chunking.overlap)
-          } else Seq(document.text)
+            // `size` and `overlap` come from the caller's configuration: an unusable pair is a Left, not a throw.
+            ChunkingUtils.chunkTextValidated(document.text, chunking.size, chunking.overlap)
+          } else Right(Seq(document.text))
 
-        val textModel = config.textModel
-        val req       = EmbeddingRequest(input = inputs, model = textModel)
-
-        client.embed(req).map { resp =>
-          val dim = textModel.dimensions
-          resp.embeddings.zipWithIndex.map { case (vec, i) =>
-            EmbeddingVector(
-              id = s"${file.getName}#chunk_$i",
-              modality = Text,
-              model = textModel.name,
-              dim = dim,
-              values = l2(vec.map(_.toFloat).toArray),
-              meta = Map(
-                "provider" -> resp.metadata.getOrElse("provider", "unknown"),
-                "mime"     -> mime,
-                "count"    -> resp.metadata.getOrElse("count", inputs.size.toString)
-              )
-            )
-          }
-        }
+        chunked.flatMap(inputs => embedChunks(file, mime, client, config, inputs))
     }
+
+  private def embedChunks(
+    file: File,
+    mime: String,
+    client: EmbeddingClient,
+    config: FileEmbeddingConfig,
+    inputs: Seq[String]
+  ): Result[Seq[EmbeddingVector]] = {
+    val textModel = config.textModel
+    val req       = EmbeddingRequest(input = inputs, model = textModel)
+
+    client.embed(req).map { resp =>
+      val dim = textModel.dimensions
+      resp.embeddings.zipWithIndex.map { case (vec, i) =>
+        EmbeddingVector(
+          id = s"${file.getName}#chunk_$i",
+          modality = Text,
+          model = textModel.name,
+          dim = dim,
+          values = l2(vec.map(_.toFloat).toArray),
+          meta = Map(
+            "provider" -> resp.metadata.getOrElse("provider", "unknown"),
+            "mime"     -> mime,
+            "count"    -> resp.metadata.getOrElse("count", inputs.size.toString)
+          )
+        )
+      }
+    }
+  }
 
   private def encodeMediaFile(
     file: File,

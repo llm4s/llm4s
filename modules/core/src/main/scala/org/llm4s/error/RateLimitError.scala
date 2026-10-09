@@ -1,5 +1,6 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
 import org.llm4s.util.DurationText
 
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
@@ -10,6 +11,7 @@ import scala.concurrent.duration.{ DurationInt, FiniteDuration }
  * an HTTP 429 - the two need different treatment when a caller has already recorded a
  * metrics event for the local case, e.g. `org.llm4s.reliability.ReliableClient`'s rate limit.
  */
+@Stable
 enum RateLimitOrigin {
   case LocalThrottle, UpstreamProvider
 }
@@ -29,6 +31,7 @@ enum RateLimitOrigin {
  *               provider itself; defaults to [[RateLimitOrigin.UpstreamProvider]] since every
  *               existing constructor call maps a provider-side rejection
  */
+@Stable
 final case class RateLimitError private (
   override val message: String,
   retryAfter: Option[FiniteDuration],

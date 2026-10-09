@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ DeepSeekModelLister, ProviderModelLister }
@@ -11,6 +12,7 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 /** Registration for the DeepSeek API. */
+@Stable
 object DeepSeekProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("deepseek")
 

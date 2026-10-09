@@ -1,5 +1,6 @@
 package org.llm4s.mcp
 
+import org.llm4s.toolapi.ToolHints
 import upickle.default._
 
 /**
@@ -145,8 +146,42 @@ case class InitializeResponse(
 case class MCPTool(
   name: String,
   description: String,
-  inputSchema: ujson.Value
+  inputSchema: ujson.Value,
+  annotations: Option[MCPToolAnnotations] = None
 )
+
+/**
+ * The annotations an MCP server attaches to a tool in `tools/list` (MCP specification, "Tool
+ * Annotations"): hints about what the tool does, which a client may use to decide, for example, whether to
+ * ask for approval before calling it. They are hints, not guarantees.
+ *
+ * Every field is optional in the protocol, so an absent one is `None`; [[toToolHints]] fills it in with
+ * the specification's conservative default.
+ *
+ * @param title a human-readable title for the tool
+ * @param readOnlyHint the tool does not modify its environment (default `false`)
+ * @param destructiveHint the tool may perform destructive updates (default `true`; meaningful only when not read-only)
+ * @param idempotentHint calling it again with the same arguments has no further effect (default `false`;
+ *                       meaningful only when not read-only)
+ * @param openWorldHint the tool may interact with an open world of external entities (default `true`)
+ */
+final case class MCPToolAnnotations(
+  title: Option[String] = None,
+  readOnlyHint: Option[Boolean] = None,
+  destructiveHint: Option[Boolean] = None,
+  idempotentHint: Option[Boolean] = None,
+  openWorldHint: Option[Boolean] = None
+) {
+
+  /** The hints a middleware reads, with the specification's default for each one the server left out. */
+  def toToolHints: ToolHints =
+    ToolHints(
+      readOnly = readOnlyHint.getOrElse(false),
+      destructive = destructiveHint.getOrElse(true),
+      idempotent = idempotentHint.getOrElse(false),
+      openWorld = openWorldHint.getOrElse(true)
+    )
+}
 
 /**
  * Response from tools/list request containing available tools.
@@ -297,6 +332,39 @@ object InitializeRequest {
 
 object InitializeResponse {
   implicit val rw: ReadWriter[InitializeResponse] = macroRW
+}
+
+object MCPToolAnnotations {
+
+  /**
+   * Reads a tool's `annotations` value. Lenient on purpose: a server's annotations are advisory, so a
+   * missing value, a value that is not an object, an unknown key, or a hint of the wrong type is
+   * ignored (that field is `None`) rather than failing the whole tool list.
+   */
+  def fromJson(value: ujson.Value): MCPToolAnnotations =
+    value.objOpt.fold(MCPToolAnnotations()) { fields =>
+      MCPToolAnnotations(
+        title = fields.get("title").flatMap(_.strOpt),
+        readOnlyHint = fields.get("readOnlyHint").flatMap(_.boolOpt),
+        destructiveHint = fields.get("destructiveHint").flatMap(_.boolOpt),
+        idempotentHint = fields.get("idempotentHint").flatMap(_.boolOpt),
+        openWorldHint = fields.get("openWorldHint").flatMap(_.boolOpt)
+      )
+    }
+
+  /** The wire form: only the fields that are set. */
+  def toJson(annotations: MCPToolAnnotations): ujson.Value = {
+    val fields = Seq(
+      annotations.title.map("title" -> ujson.Str(_)),
+      annotations.readOnlyHint.map("readOnlyHint" -> ujson.Bool(_)),
+      annotations.destructiveHint.map("destructiveHint" -> ujson.Bool(_)),
+      annotations.idempotentHint.map("idempotentHint" -> ujson.Bool(_)),
+      annotations.openWorldHint.map("openWorldHint" -> ujson.Bool(_))
+    ).flatten
+    ujson.Obj.from(fields)
+  }
+
+  implicit val rw: ReadWriter[MCPToolAnnotations] = readwriter[ujson.Value].bimap(toJson, fromJson)
 }
 
 object MCPTool {

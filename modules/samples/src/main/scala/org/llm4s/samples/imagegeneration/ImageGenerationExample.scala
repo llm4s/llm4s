@@ -120,9 +120,9 @@ object ImageGenerationExample {
 
       case Left(error) =>
         error match {
-          case ServiceError(msg, code) =>
+          case ImageServiceError(msg, code) =>
             logger.info(s"Expected service error: $msg (code: $code)")
-          case UnknownError(throwable) =>
+          case ImageUnknownError(throwable) =>
             logger.info(s"Expected connection error: ${throwable.getMessage}")
           case _ =>
             logger.info(s"Other expected error: ${error.message}")

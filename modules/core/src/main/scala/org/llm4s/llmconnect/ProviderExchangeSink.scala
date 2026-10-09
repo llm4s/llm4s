@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 import org.llm4s.types.TryOps
@@ -24,6 +25,7 @@ import scala.annotation.unused
  * enabled. Sinks are deliberately simple and synchronous in the first version;
  * callers can always wrap them later if they want batching or async behavior.
  */
+@Stable
 trait ProviderExchangeSink:
   def record(exchange: ProviderExchange): Unit
 
@@ -84,6 +86,7 @@ object ProviderExchangeSink:
  * creates parent directories on demand and writes one redacted JSON object per
  * line.
  */
+@Stable
 final case class JsonlProviderExchangeSink(path: Path) extends ProviderExchangeSink:
   override def record(exchange: ProviderExchange): Unit =
     val parent = path.getParent

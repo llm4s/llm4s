@@ -1,0 +1,96 @@
+{
+  "groups": [
+    {
+      "name": "llm4s",
+      "type": "org.llm4s.spring.Llm4sProperties",
+      "description": "LLM4S Spring Boot starter settings."
+    },
+    {
+      "name": "llm4s.async",
+      "type": "org.llm4s.spring.AsyncProperties",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "Executor behind LLM4STemplate.completeAsync."
+    },
+    {
+      "name": "llm4s.health",
+      "type": "org.llm4s.spring.HealthProperties",
+      "sourceType": "org.llm4s.spring.Llm4sProperties",
+      "description": "Health indicator settings."
+    }
+  ],
+  "properties": [
+    {
+      "name": "llm4s.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the LLM4S auto-configuration is active. Set to false to switch off the JLlmClient, LLM4STemplate and health indicator beans without excluding the starter.",
+      "defaultValue": true
+    },
+    {
+      "name": "llm4s.provider",
+      "type": "java.lang.String",
+      "description": "LLM provider to use. Supported: openai, anthropic, ollama. Required."
+    },
+    {
+      "name": "llm4s.model",
+      "type": "java.lang.String",
+      "description": "Model name passed to the provider, for example gpt-4o. Required."
+    },
+    {
+      "name": "llm4s.api-key",
+      "type": "java.lang.String",
+      "description": "API key for the provider. Required for openai and anthropic; never logged."
+    },
+    {
+      "name": "llm4s.base-url",
+      "type": "java.lang.String",
+      "description": "Override the provider's base URL. Defaults: openai https://api.openai.com/v1, anthropic https://api.anthropic.com, ollama http://localhost:11434."
+    },
+    {
+      "name": "llm4s.organization",
+      "type": "java.lang.String",
+      "description": "OpenAI organization id (openai only)."
+    },
+    {
+      "name": "llm4s.context-window",
+      "type": "java.lang.Integer",
+      "description": "Total token capacity of the model (prompt plus completion). Must be positive.",
+      "defaultValue": 128000
+    },
+    {
+      "name": "llm4s.reserve-completion",
+      "type": "java.lang.Integer",
+      "description": "Tokens held back from the prompt for the completion. Must be non-negative and smaller than llm4s.context-window.",
+      "defaultValue": 4096
+    },
+    {
+      "name": "llm4s.async.max-threads",
+      "type": "java.lang.Integer",
+      "description": "Maximum worker threads of the default llm4sTaskExecutor bean (idle threads time out). Define your own bean named llm4sTaskExecutor to replace the executor. Must be at least 1.",
+      "defaultValue": 16
+    },
+    {
+      "name": "llm4s.async.queue-capacity",
+      "type": "java.lang.Integer",
+      "description": "Queued completeAsync calls the default executor accepts before rejecting new ones (the returned future then fails). Must be at least 1.",
+      "defaultValue": 1000
+    },
+    {
+      "name": "llm4s.health.probe",
+      "type": "java.lang.Boolean",
+      "description": "Make the health indicator send a one-token completion to the provider. Off by default because it is a billed call; when off the indicator reports probe=disabled and only that the client is configured.",
+      "defaultValue": false
+    },
+    {
+      "name": "llm4s.health.probe-ttl",
+      "type": "java.time.Duration",
+      "description": "How long a probe result is reused, so frequent health polling does not call the provider each time. Must not be negative.",
+      "defaultValue": "60s"
+    },
+    {
+      "name": "llm4s.health.probe-timeout",
+      "type": "java.time.Duration",
+      "description": "A probe taking longer than this is cancelled (interrupting the provider call) and reports DOWN. Must be positive.",
+      "defaultValue": "10s"
+    }
+  ]
+}

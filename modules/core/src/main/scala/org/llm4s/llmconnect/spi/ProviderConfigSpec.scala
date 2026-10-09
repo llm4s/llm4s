@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.annotation.Stable
+
 /**
  * A provider-specific key in a named provider section: one the fixed fields of
  * `NamedProviderConfig` do not cover.
@@ -33,6 +35,7 @@ package org.llm4s.llmconnect.spi
  *                          [[ProviderConfigSpec.BuiltinAliasKeys]]. `provider`, `model` and
  *                          `headers` cannot be aliases, and a spec naming one fails validation.
  */
+@Stable
 final case class ProviderConfigKey(
   name: String,
   description: String,
@@ -110,6 +113,7 @@ object ProviderConfigKey:
  * know, unlike the instance name. So with `OPENAI_API_KEY` set, a section needs only
  * `provider` and `model`; a section for a second account sets `apiKey` itself.
  */
+@Stable
 final case class ProviderConfigSpec private (
   requiresApiKey: Boolean,
   requiresBaseUrl: Boolean,
@@ -162,7 +166,7 @@ object ProviderConfigSpec:
    * generic `openai-compatible` provider's `contextWindow` - is a [[ProviderConfigKey]] its
    * provider declares, not a built-in, and is unknown to every provider that does not declare it.
    */
-  val BuiltinKeys: Set[String] = Set("provider", "model", "baseUrl", "apiKey", "headers")
+  val BuiltinKeys: Set[String] = Set("provider", "model", "baseUrl", "apiKey", "headers", "timeouts")
 
   /**
    * The built-in fields that can be a deprecated alias (`ProviderConfigKey.deprecatedAliases`):

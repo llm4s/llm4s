@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.utils
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, LocalEmbeddingModels, ModelDimensionRegistry }
 import org.llm4s.llmconnect.model.{ Audio, Image, Modality, Text, Video }
 import org.llm4s.error.ConfigurationError
@@ -13,6 +14,7 @@ import org.slf4j.LoggerFactory
  * load text embedding models through their typed config layer. Image, audio,
  * and video modalities are resolved from the supplied [[LocalEmbeddingModels]] config.
  */
+@Stable
 object ModelSelector {
 
   private val logger = LoggerFactory.getLogger(getClass)

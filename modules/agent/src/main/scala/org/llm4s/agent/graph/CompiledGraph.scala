@@ -1,8 +1,11 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.error.CancelledError
+import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.types.{ Result, TryOps }
 
+import java.util.concurrent.TimeUnit
+import scala.annotation.tailrec
+import scala.concurrent.duration.FiniteDuration
 import scala.util.Try
 
 /**
@@ -44,8 +47,14 @@ final class CompiledGraph[I, O] private[graph] (
   resumes: Map[NodeId, ResumeRef[?, ?]],
   keys: Map[StateKeyId, StateKey[?, ?]],
   output: ThreadState => Result[O],
-  executorOverride: Option[TaskExecutor]
+  executorOverride: Option[TaskExecutor],
+  sleeper: FiniteDuration => Unit = CompiledGraph.sleepThread,
+  ticker: () => Long = () => System.nanoTime()
 ):
+
+  /** One result cache per node that declared a [[CachePolicy]]; process-local and never checkpointed. */
+  private val caches: Map[NodeId, NodeCache] =
+    nodes.collect { case (nodeId, node) if node.cache.isDefined => nodeId -> new NodeCache(node.cache.get, ticker) }
 
   /** An execution with only the entry task ready, before any superstep has run. */
   def start(input: I): Execution = startAt(0, ThreadState.empty(keys), input)
@@ -65,7 +74,9 @@ final class CompiledGraph[I, O] private[graph] (
         case Left(_)                        => Step.Done(cancelled(execution))
         case Right(Left(_: CancelledError)) => Step.Done(cancelled(execution))
         case Right(Left(error))             => Step.Done(RunResult.Failed(execution.state, error))
-        case Right(Right(next))             => Step.Next(next)
+        case Right(Right((next, None)))     => Step.Next(next)
+        // a blocked task ends the run once the superstep is committed: the state keeps its update
+        case Right(Right((next, Some(error)))) => Step.Done(RunResult.Failed(next.state, error))
 
   /** A run cancelled during a superstep: nothing from it commits, and the interrupt flag is set. */
   private def cancelled(execution: Execution): RunResult[O] =
@@ -236,8 +247,59 @@ final class CompiledGraph[I, O] private[graph] (
       resumes,
       keys,
       output,
-      Some(next)
+      Some(next),
+      sleeper,
+      ticker
     )
+
+  /** A copy that waits between a node's attempts with `next`, so a spec need not sleep. */
+  private[graph] def withSleeper(next: FiniteDuration => Unit): CompiledGraph[I, O] =
+    new CompiledGraph(
+      id,
+      version,
+      fingerprint,
+      owner,
+      entry,
+      nodes,
+      edges,
+      staticJoins,
+      dynamicJoins,
+      resumes,
+      keys,
+      output,
+      executorOverride,
+      next,
+      ticker
+    )
+
+  /** A copy, with empty caches, that reads time from `next` (monotonic nanoseconds), so a spec can expire entries. */
+  private[graph] def withTicker(next: () => Long): CompiledGraph[I, O] =
+    new CompiledGraph(
+      id,
+      version,
+      fingerprint,
+      owner,
+      entry,
+      nodes,
+      edges,
+      staticJoins,
+      dynamicJoins,
+      resumes,
+      keys,
+      output,
+      executorOverride,
+      sleeper,
+      next
+    )
+
+  /**
+   * The graph's declared structure as a Mermaid flowchart. Nodes and joins are ordered by id and a
+   * node's edges by declaration, so the text does not depend on the order nodes were declared in.
+   * Routes a node returns at run time are values, not declarations, and are not drawn; see
+   * [[MermaidExport]].
+   */
+  def toMermaid: String =
+    MermaidExport.render(entry.id, nodes, edges, staticJoins, dynamicJoins.values.toVector, resumes.keySet)
 
   /** The executor a run with `budgets` uses: a test override, else bounded by `maxConcurrency`. */
   private[graph] def executorFor(budgets: RunBudgets): TaskExecutor =
@@ -256,7 +318,11 @@ final class CompiledGraph[I, O] private[graph] (
       paused = false
     )
 
-  private def superstep(threadId: ThreadId, execution: Execution, config: RunConfig): Result[Execution] =
+  private def superstep(
+    threadId: ThreadId,
+    execution: Execution,
+    config: RunConfig
+  ): Result[(Execution, Option[LLMError])] =
     val outcomes = executorFor(config.budgets).runAll(execution.frontier.map { task => () =>
       val position = RunPosition(threadId, config.runId, "", task.id, task.node, execution.superstep)
       executeTask(task, execution, new RunContext(config, position, NodeEventSink.none)).map(task -> _)
@@ -264,33 +330,97 @@ final class CompiledGraph[I, O] private[graph] (
     // A cancelled task wins over an earlier task's failure: the run was cancelled, not failed.
     outcomes
       .collectFirst { case Left(c: CancelledError) => c }
-      .fold(sequence(outcomes).flatMap(commitSuperstep(execution, _)))(Left(_))
+      .fold(
+        sequence(outcomes).flatMap(done => commitSuperstep(execution, done).map(next => next -> blockedBy(done)))
+      )(Left(_))
+
+  /**
+   * The error of the first blocked task in `completed`, in frontier order: the run ends once the superstep is
+   * committed, and the caller receives this error.
+   */
+  private[graph] def blockedBy(completed: Vector[(Task, TaskResult)]): Option[LLMError] =
+    completed.collectFirst { case (_, TaskResult.Blocked(_, error)) => error }
 
   /**
    * Runs one task against the committed snapshot and checks what it returned. A task whose node
    * throws `InterruptedException`, or whose thread is interrupted when its node returns, is
    * cancelled: `Left(CancelledError)` with the flag set, whatever the node returned.
+   *
+   * A node with a [[RetryPolicy]] is run again after its own failure; a node with a [[CachePolicy]]
+   * is not run at all when its input was answered before. Only the result of an attempt that
+   * succeeded and passed the kernel's checks is returned, or stored.
    */
   private[graph] def executeTask(task: Task, execution: Execution, context: RunContext): Result[TaskResult] =
     nodes.get(task.node) match
       case None => Left(GraphError.InvalidRoute(task.node, task.id, "node is not part of this graph"))
       case Some(node) =>
-        val operation = s"task ${task.id.value}"
-        CancelledError.attempt(operation)(Try(node.run(task.input, execution.state, context)).toResult) match
-          case Left(cancelled: CancelledError)                  => Left(cancelled)
-          case Right(_) if Thread.currentThread().isInterrupted => Left(CancelledError(operation))
-          case Left(thrown)                  => Left(GraphError.NodeFailed(task.node, task.id, thrown))
-          case Right(NodeResult.Fail(error)) => Left(GraphError.NodeFailed(task.node, task.id, error))
-          case Right(NodeResult.Continue(command)) =>
-            validate(task, command).map(_ => TaskResult.Done(command))
-          case Right(NodeResult.Suspend(update, question, resumeAt)) =>
-            validateSuspension(task, update, resumeAt).map(_ => TaskResult.Parked(update, question, resumeAt))
+        val cacheKey = caches.get(task.node).flatMap(store => NodeCache.key(node, task.input).map(store -> _))
+        cacheKey.flatMap((store, key) => store.get(key)) match
+          case Some(command) => Right(TaskResult.Done(command))
+          case None =>
+            val operation = s"task ${task.id.value}"
+            attempts(node, task, execution, context, operation, failed = 0) match
+              case Left(cancelled: CancelledError) => Left(cancelled)
+              case Left(failure)                   => Left(GraphError.NodeFailed(task.node, task.id, failure))
+              case Right(NodeResult.Continue(command)) =>
+                validate(task, command).map { _ =>
+                  cacheKey.foreach((store, key) => store.put(key, command))
+                  TaskResult.Done(command)
+                }
+              case Right(NodeResult.Block(update, error)) =>
+                undeclaredWrite(task, update).toLeft(TaskResult.Blocked(update, error))
+              case Right(NodeResult.Suspend(update, question, resumeAt)) =>
+                validateSuspension(task, update, resumeAt).map(_ => TaskResult.Parked(update, question, resumeAt))
+              case Right(NodeResult.Fail(error)) => Left(GraphError.NodeFailed(task.node, task.id, error))
+
+  /**
+   * Runs the node, and again after a failure its policy retries, waiting between attempts. The wait
+   * is interruptible: a cancel or the run's deadline returns `Left(CancelledError)` and no further
+   * attempt starts. A failed attempt's durable events are discarded before the next one.
+   */
+  @tailrec
+  private def attempts(
+    node: NodeDef[?],
+    task: Task,
+    execution: Execution,
+    context: RunContext,
+    operation: String,
+    failed: Int
+  ): Result[NodeResult] =
+    runOnce(node, task, execution, context, operation) match
+      case Left(error) if node.retry.retries(error, failed + 1) =>
+        pause(node.retry.backoffAfter(failed + 1), operation) match
+          case Left(cancelled) => Left(cancelled)
+          case Right(_) =>
+            context.discardAttempt()
+            attempts(node, task, execution, context, operation, failed + 1)
+      case other => other
+
+  /** One attempt, with a failure - thrown, or returned as [[NodeResult.Fail]] - as a `Left`. */
+  private def runOnce(
+    node: NodeDef[?],
+    task: Task,
+    execution: Execution,
+    context: RunContext,
+    operation: String
+  ): Result[NodeResult] =
+    CancelledError.attempt(operation)(Try(node.run(task.input, execution.state, context)).toResult) match
+      case Left(cancelled: CancelledError)                  => Left(cancelled)
+      case Right(_) if Thread.currentThread().isInterrupted => Left(CancelledError(operation))
+      case Left(thrown)                                     => Left(thrown)
+      case Right(NodeResult.Fail(error))                    => Left(error)
+      case Right(result)                                    => Right(result)
+
+  /** Waits `delay`; an interrupt ends the wait as `Left(CancelledError)` with the flag set. */
+  private def pause(delay: FiniteDuration, operation: String): Result[Unit] =
+    CancelledError.attempt(operation)(Right(sleeper(delay)))
 
   /** Checks a result - such as one decoded from a pending write - as if `task` had just returned it. */
   private[graph] def checkResult(task: Task, result: TaskResult): Result[Unit] =
     result match
       case TaskResult.Done(command)               => validate(task, command)
       case TaskResult.Parked(update, _, resumeAt) => validateSuspension(task, update, resumeAt)
+      case TaskResult.Blocked(update, _)          => undeclaredWrite(task, update).toLeft(())
 
   /**
    * Applies every task's checked result in frontier order and schedules the next frontier.
@@ -337,6 +467,9 @@ final class CompiledGraph[I, O] private[graph] (
             Vector.empty,
             Some(EncodedSuspension(resume.node.id.value, resume.encodeQuestion(question)))
           )
+        // a blocked task is never written: the runtime ends the run, and recovery runs the task again
+        case TaskResult.Blocked(_, _) =>
+          throw new IllegalStateException(s"task ${task.id.value} is blocked and has no pending write")
     }.toResult
 
   /** Rebinds a pending write to this graph's keys, nodes and joins, migrating encoded values. */
@@ -616,11 +749,17 @@ final class CompiledGraph[I, O] private[graph] (
         )
       else Right(activation)
 
-/** What a task produced, once checked: a command, or a suspension with its update. */
+/** What a task produced, once checked: a command, a suspension with its update, or a block that ends the run. */
 private[graph] enum TaskResult:
   case Done(command: Command)
   case Parked(suspendedUpdate: StateUpdate, question: Any, resume: ResumeRef[?, ?])
+  case Blocked(blockedUpdate: StateUpdate, error: LLMError)
 
   def update: StateUpdate = this match
     case Done(command)        => command.update
     case Parked(update, _, _) => update
+    case Blocked(update, _)   => update
+
+private[graph] object CompiledGraph:
+  /** Sleeps the calling thread; an interrupt throws `InterruptedException`, as `Thread.sleep` does. */
+  def sleepThread(delay: FiniteDuration): Unit = TimeUnit.NANOSECONDS.sleep(delay.toNanos)

@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.annotation.Stable
+
 /**
  * Requested format for LLM completion output (structured output).
  *
@@ -11,6 +13,7 @@ package org.llm4s.llmconnect.model
  * - '''JsonSchema(schema)''': Provider-specific JSON schema; the model's output is
  *   constrained to match the given schema where supported.
  */
+@Stable
 sealed trait ResponseFormat
 
 object ResponseFormat {

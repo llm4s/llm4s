@@ -1,5 +1,6 @@
 package org.llm4s.trace.spi
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.trace.{ Tracing, TracingMode }
 import org.llm4s.types.Result
@@ -35,6 +36,7 @@ import org.llm4s.types.Result
  * and passed to `Tracing.fromSettings`, which is the answer for a shaded fat jar
  * whose services files did not survive.
  */
+@Stable
 trait TracingBackend:
 
   /**

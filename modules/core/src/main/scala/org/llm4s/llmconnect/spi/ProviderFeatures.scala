@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.annotation.Stable
+
 /**
  * What a provider implementation can actually do, declared by the provider itself.
  *
@@ -17,6 +19,7 @@ package org.llm4s.llmconnect.spi
  * @param streaming   whether `LLMClient.streamComplete` is implemented.
  * @param toolCalling whether the provider accepts tool/function definitions.
  */
+@Stable
 final case class ProviderFeatures private (
   streaming: Boolean,
   toolCalling: Boolean

@@ -1,10 +1,10 @@
 package org.llm4s.llmconnect.streaming
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
 import scala.collection.mutable
-import scala.util.Try
 
 /**
  * Accumulates streaming chunks into a complete response.
@@ -15,6 +15,7 @@ import scala.util.Try
  * included - must carry its call's id; a tool-call chunk with an empty id is ignored. Clients
  * whose wire format identifies continuations only by index must map them back to the id first.
  */
+@Stable
 final class StreamingAccumulator private () {
 
   private val contentBuilder               = new StringBuilder()
@@ -100,16 +101,11 @@ final class StreamingAccumulator private () {
   def currentToolCalls: Seq[ToolCall] = {
     val completed = toolCalls.toSeq
     val partial = partialToolCalls.values.map { p =>
-      val args =
-        if (p.argumentsBuilder.isEmpty) ujson.Obj()
-        else {
-          val raw = p.argumentsBuilder.toString
-          Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
-        }
+      // the one boundary parser: empty -> {}, unparseable or nested too deeply -> the raw Str (#1562)
       ToolCall(
         id = p.id,
         name = p.name,
-        arguments = args
+        arguments = StreamingToolArgumentParser.parse(p.argumentsBuilder.toString)
       )
     }.toSeq
     completed ++ partial
@@ -138,10 +134,12 @@ final class StreamingAccumulator private () {
   def toCompletion(created: Long): Result[Completion] = {
     val finalToolCalls = currentToolCalls
 
+    // the streamed thinking is unsigned text; a client whose provider signs its thinking blocks
+    // replaces it on the message with the blocks it tracked
     val message = AssistantMessage(
       contentOpt = if (contentBuilder.isEmpty) None else Some(contentBuilder.toString),
       toolCalls = finalToolCalls
-    )
+    ).withThinking(thinkingBuilder.toString)
 
     val thinkingTokensOpt = if (thinkingTokens > 0) Some(thinkingTokens) else None
     val usage = if (promptTokens > 0 || completionTokens > 0 || thinkingTokens > 0) {
@@ -150,8 +148,6 @@ final class StreamingAccumulator private () {
       )
     } else None
 
-    val thinking = currentThinking
-
     Right(
       Completion(
         id = messageId.getOrElse(""),
@@ -159,8 +155,7 @@ final class StreamingAccumulator private () {
         content = contentBuilder.toString(),
         model = "unknown",
         message = message,
-        usage = usage,
-        thinking = thinking
+        usage = usage
       )
     )
   }

@@ -1,5 +1,7 @@
 package org.llm4s.util
 
+import org.llm4s.annotation.Stable
+
 import scala.util.matching.Regex
 
 /**
@@ -10,6 +12,7 @@ import scala.util.matching.Regex
  * knows its own pattern, human-readable name, and the placeholder text to use
  * when redacting.
  */
+@Stable
 object SecretPatterns {
 
   /**
@@ -188,7 +191,7 @@ object SecretPatterns {
     text: String,
     types: Seq[SecretType] = SecretType.default
   ): String =
-    types.foldLeft(text)((acc, t) => t.pattern.replaceAllIn(acc, _ => t.placeholder))
+    types.foldLeft(text)((acc, t) => t.pattern.replaceAllIn(acc, _ => Regex.quoteReplacement(t.placeholder)))
 
   /**
    * Replace every matched secret with the supplied uniform `placeholder`
@@ -200,8 +203,11 @@ object SecretPatterns {
     text: String,
     placeholder: String,
     types: Seq[SecretType] = SecretType.default
-  ): String =
-    types.foldLeft(text)((acc, t) => t.pattern.replaceAllIn(acc, _ => placeholder))
+  ): String = {
+    // Quoted, so a `$` or `\` in the caller's placeholder is written as it is, not read as a group reference.
+    val quoted = Regex.quoteReplacement(placeholder)
+    types.foldLeft(text)((acc, t) => t.pattern.replaceAllIn(acc, _ => quoted))
+  }
 
   /**
    * Count occurrences of each credential type in `text`.

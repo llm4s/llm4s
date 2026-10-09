@@ -1,6 +1,8 @@
 package org.llm4s.llmconnect.serialization
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.ToolCall
+import org.llm4s.util.BoundedJson
 import ujson._
 
 /**
@@ -10,6 +12,7 @@ import ujson._
  * Implementations convert the provider-specific JSON structure into a
  * uniform `Vector[ToolCall]`.
  */
+@Stable
 trait ToolCallDeserializer {
 
   /**
@@ -25,8 +28,14 @@ trait ToolCallDeserializer {
  * Standard tool call deserializer for most LLM providers (OpenAI, Anthropic, etc.).
  *
  * Expects a flat JSON array of tool call objects, each containing an `id` and
- * a `function` object with `name` and `arguments` fields.
+ * a `function` object with `name` and `arguments` fields. It is strict: a call that
+ * does not have that shape, or whose `arguments` are not JSON, fails with an
+ * exception, which the client's `Try` around its response parsing turns into a
+ * `Left`. Arguments nested more than 512 levels deep fail the same way, before
+ * they are parsed: they are model output, and a value that deep overflows the
+ * stack of whatever renders it next (#1562).
  */
+@Stable
 object StandardToolCallDeserializer extends ToolCallDeserializer {
 
   def deserializeToolCalls(toolCallsJson: Value): Vector[ToolCall] =
@@ -34,7 +43,12 @@ object StandardToolCallDeserializer extends ToolCallDeserializer {
       ToolCall(
         id = call("id").str,
         name = call("function")("name").str,
-        arguments = ujson.read(call("function")("arguments").str)
+        arguments = parseArguments(call("function")("arguments").str)
       )
     }.toVector
+
+  private def parseArguments(raw: String): Value =
+    if (BoundedJson.exceedsDepth(raw))
+      throw new IllegalArgumentException(BoundedJson.tooDeep().message)
+    else ujson.read(raw)
 }

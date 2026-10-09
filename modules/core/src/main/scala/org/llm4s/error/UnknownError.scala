@@ -1,8 +1,11 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * Unknown/unexpected errors with full exception context
  */
+@Stable
 final case class UnknownError private (
   override val message: String,
   cause: Throwable

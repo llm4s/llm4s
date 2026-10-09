@@ -1,12 +1,12 @@
 package org.llm4s.context
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ContextError
 import org.llm4s.llmconnect.model.{ Message, ToolMessage }
 import org.llm4s.types.{ ArtifactKey, ContentSize, ExternalizationThreshold, ExternalizedContent, Result }
+import org.llm4s.util.BoundedJson
 import org.slf4j.LoggerFactory
 import ujson._
-
-import scala.util.Try
 
 /**
  * Handles intelligent compression and externalization of tool outputs.
@@ -44,6 +44,7 @@ import scala.util.Try
  * @see [[ArtifactStore]] for content storage interface
  * @see [[DeterministicCompressor]] which uses this for the tool compaction phase
  */
+@Stable
 object ToolOutputCompressor {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -160,8 +161,13 @@ object ToolOutputCompressor {
         compressGenericText(content)
     }
 
+  // A tool result is untrusted: one nested more than 512 levels deep is refused before it is parsed,
+  // as `compressJsonRecursively` and `ujson.write` recurse once per level (#1562), and is then
+  // compressed as text like any other content that is not JSON
   private def parseJsonSafely(content: String): Result[Value] =
-    Try(ujson.read(content)).toEither.left
+    BoundedJson
+      .read(content)
+      .left
       .map(_ => ContextError.schemaCompressionFailed("ToolOutputCompressor", "Failed to parse JSON content"))
 
   private def compressJsonRecursively(value: Value): Value = value match {
@@ -321,6 +327,7 @@ object ToolOutputCompressor {
  * Use [[ArtifactStore.inMemory]] for testing and short-lived sessions.
  * For production, implement with persistent storage (database, S3, etc.).
  */
+@Stable
 trait ArtifactStore {
 
   /** Store content under the given key. */

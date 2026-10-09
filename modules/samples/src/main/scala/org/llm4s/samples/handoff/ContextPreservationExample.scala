@@ -1,22 +1,25 @@
 package org.llm4s.samples.handoff
 
-import org.llm4s.agent.{ Agent, AgentContext, Handoff }
+import org.llm4s.agent.Agent
+import org.llm4s.agent.graph.{ RunConfig, ThreadId }
+import org.llm4s.llmconnect.model.MessageRole
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.samples.util.AgentResults
 import org.slf4j.LoggerFactory
 
 /**
  * Context Preservation Example
  *
- * Demonstrates how conversation context is preserved across handoffs.
- * The specialist agent receives the full conversation history.
+ * Demonstrates handing a conversation over to a specialist agent: the general agent's messages
+ * (without its system prompt) become the `history` of a run on a new thread, so the specialist
+ * sees the full context. For model-initiated handoffs, see `SimpleTriageHandoffExample`.
  */
 object ContextPreservationExample extends App {
   private val logger = LoggerFactory.getLogger(getClass)
 
   logger.info("=" * 80)
-  logger.info("Context Preservation Handoff Example")
+  logger.info("Context Preservation (history hand-over) Example")
   logger.info("=" * 80)
 
   val result = for {
@@ -25,44 +28,33 @@ object ContextPreservationExample extends App {
     given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerCfg)
 
-    generalAgent    = new Agent(client)
-    specialistAgent = new Agent(client)
+    generalAgent <- Agent.builder("general", client).build()
+    specialistAgent <- Agent
+      .builder("physics", client)
+      .withSystemPrompt("You are a quantum physics specialist. Use the conversation so far.")
+      .build()
 
     // Multi-turn conversation with context
     _ = logger.info("Turn 1: 'I'm working on a quantum computing project'")
 
-    state1 <- generalAgent.run(
-      query = "I'm working on a quantum computing project",
-      tools = ToolRegistry.empty
-    )
+    state1 <- generalAgent.run("I'm working on a quantum computing project")
 
-    _ = logger.info("Response: {}", state1.conversation.messages.last.content)
+    _ = logger.info("Response: {}", AgentResults.answerOrStatus(state1))
     _ = logger.info("Turn 2: 'Can you explain quantum entanglement in detail?'")
-    _ = logger.info("(This should trigger a handoff to the specialist)")
 
-    state2 <- generalAgent.continueConversation(
-      previousState = state1,
-      newUserMessage = "Can you explain quantum entanglement in detail?"
-    )
+    state2 <- generalAgent.continueConversation(state1, "Can you explain quantum entanglement in detail?")
 
-    // For this example, we'll manually demonstrate handoff with context
-    // In a real scenario, the general agent would decide to hand off
-    _ = logger.info("Manually handing off to specialist with full context...")
+    // Hand the conversation to the specialist on a new thread, with the general agent's
+    // messages as its history. System prompts belong to agents and are not imported.
+    _ = logger.info("Handing off to specialist with full context as history...")
 
-    handoff = Handoff(
-      targetAgent = specialistAgent,
-      transferReason = Some("Quantum physics expertise required"),
-      preserveContext = true, // Transfer full conversation history
-      transferSystemMessage = false
-    )
-
-    // Build handoff state manually for demonstration
-    handoffState = buildDemoHandoffState(state2, handoff)
+    history = state2.messages.filterNot(_.role == MessageRole.System)
 
     finalState <- specialistAgent.run(
-      handoffState,
-      maxSteps = Some(10),
-      context = AgentContext.Default
+      ThreadId(java.util.UUID.randomUUID().toString),
+      "Please continue, going deeper on the mathematics.",
+      RunConfig(),
+      history
     )
 
   } yield (state2, finalState)
@@ -72,13 +64,13 @@ object ContextPreservationExample extends App {
       logger.info("=" * 80)
       logger.info("Context preservation demonstration complete")
       logger.info("=" * 80)
-      logger.info("Original conversation messages: {}", state2.conversation.messages.length)
-      logger.info("Specialist received messages: {}", finalState.conversation.messages.length)
+      logger.info("Original conversation messages: {}", state2.messages.length)
+      logger.info("Specialist received messages: {}", finalState.messages.length)
       logger.info("Specialist's response:")
-      logger.info("{}", finalState.conversation.messages.last.content)
+      logger.info("{}", AgentResults.answerOrStatus(finalState))
 
       logger.info("Full conversation flow:")
-      state2.conversation.messages.zipWithIndex.foreach { case (msg, idx) =>
+      state2.messages.zipWithIndex.foreach { case (msg, idx) =>
         val preview = msg.content.take(80) + "..."
         logger.info("  {}. [{}] {}", idx + 1, msg.role, preview)
       }
@@ -88,34 +80,5 @@ object ContextPreservationExample extends App {
       logger.error("Error occurred")
       logger.error("=" * 80)
       logger.error("Error: {}", error.formatted)
-  }
-
-  // Helper method to demonstrate handoff state building
-  def buildDemoHandoffState(
-    sourceState: org.llm4s.agent.AgentState,
-    handoff: Handoff
-  ): org.llm4s.agent.AgentState = {
-    import org.llm4s.agent.AgentState
-    import org.llm4s.agent.AgentStatus
-    import org.llm4s.llmconnect.model.Conversation
-
-    val transferredMessages = if (handoff.preserveContext) {
-      sourceState.conversation.messages
-    } else {
-      import org.llm4s.llmconnect.model.MessageRole
-      sourceState.conversation.messages
-        .findLast(_.role == MessageRole.User)
-        .toVector
-    }
-
-    AgentState(
-      conversation = Conversation(transferredMessages),
-      tools = ToolRegistry.empty,
-      initialQuery = sourceState.initialQuery,
-      status = AgentStatus.InProgress,
-      logs = Vector("[handoff] Received handoff with full context"),
-      systemMessage = if (handoff.transferSystemMessage) sourceState.systemMessage else None,
-      availableHandoffs = Seq.empty
-    )
   }
 }

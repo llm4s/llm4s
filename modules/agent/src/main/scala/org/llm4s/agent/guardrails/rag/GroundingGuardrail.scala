@@ -5,8 +5,12 @@ import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
+
+import java.util.Locale
 
 import scala.util.Try
+import org.llm4s.util.Redaction
 
 /**
  * Result of a grounding evaluation.
@@ -69,6 +73,8 @@ class GroundingGuardrail(
   val strictMode: Boolean = false
 ) extends RAGGuardrail {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   val name: String = "GroundingGuardrail"
 
   override val description: Option[String] = Some(
@@ -82,8 +88,10 @@ class GroundingGuardrail(
     if (context.retrievedChunks.isEmpty) {
       // No context to ground against - pass through with warning
       onFail match {
-        case GuardrailAction.Warn => Right(output)
-        case GuardrailAction.Fix  => Right(output) // Can't fix without context
+        case GuardrailAction.Warn =>
+          logger.warn(s"$name: no retrieved chunks to ground against - passing through in warn mode")
+          Right(output)
+        case GuardrailAction.Fix => Right(output) // Can't fix without context
         case GuardrailAction.Block =>
           Left(
             ValidationError.invalid(
@@ -128,7 +136,12 @@ class GroundingGuardrail(
         )
 
       case GuardrailAction.Warn =>
-        // Log would happen here in production
+        // The score, the threshold and how many claims - not the claims, which quote the response
+        logger.warn(
+          s"$name: response not sufficiently grounded (score ${"%.2f".format(result.score)}, " +
+            s"threshold ${"%.2f".format(threshold)}, strict mode: $strictMode, " +
+            s"${result.ungroundedClaims.size} ungrounded claim(s)) - passing through in warn mode"
+        )
         Right(output)
 
       case GuardrailAction.Fix =>
@@ -220,14 +233,14 @@ class GroundingGuardrail(
     }
 
     val groundedOpt = lines.find(_.startsWith("GROUNDED:")).map { line =>
-      line.stripPrefix("GROUNDED:").trim.toUpperCase.startsWith("YES")
+      line.stripPrefix("GROUNDED:").trim.toUpperCase(Locale.ROOT).startsWith("YES")
     }
 
     val ungroundedClaims = lines
       .find(_.startsWith("UNGROUNDED_CLAIMS:"))
       .map { line =>
         val claims = line.stripPrefix("UNGROUNDED_CLAIMS:").trim
-        if (claims.toUpperCase == "NONE" || claims.isEmpty) Seq.empty
+        if (claims.toUpperCase(Locale.ROOT) == "NONE" || claims.isEmpty) Seq.empty
         else claims.split(",").map(_.trim).filter(_.nonEmpty).toSeq
       }
       .getOrElse(Seq.empty)
@@ -272,7 +285,7 @@ class GroundingGuardrail(
             Left(
               ValidationError.invalid(
                 "grounding_parse",
-                s"Could not parse grounding evaluation from LLM response: ${response.take(200)}"
+                s"Could not parse grounding evaluation from LLM response: ${Redaction.safeBody(response, 200)}"
               )
             )
         }

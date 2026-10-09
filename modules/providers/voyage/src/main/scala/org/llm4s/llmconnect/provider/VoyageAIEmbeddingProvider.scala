@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.VoyageConfigKeys
+import org.llm4s.error.CancelledError
 import org.llm4s.http.{ HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
@@ -67,6 +68,15 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     "voyage-context-3" -> 1024
   )
 
+  /**
+   * The `input_type` Voyage is sent for a request's purpose. Voyage's models are trained to embed a query and a
+   * document differently, and prepend a different prompt for each, so the request says which it is.
+   */
+  private[provider] def inputTypeFor(purpose: InputPurpose): String = purpose match {
+    case InputPurpose.Document => "document"
+    case InputPurpose.Query    => "query"
+  }
+
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
 
@@ -81,47 +91,53 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     new EmbeddingProvider {
       private val logger = LoggerFactory.getLogger(getClass)
 
-      override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] = {
-        val model = request.model.name
-        val input = request.input
-        val payload = Obj(
-          "input" -> Arr.from(input),
-          "model" -> model
-        )
+      override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
+        CancelledError.attempt("voyage.embed") {
+          val model = request.model.name
+          val input = request.input
+          val payload = Obj(
+            "input"      -> Arr.from(input),
+            "model"      -> model,
+            "input_type" -> inputTypeFor(request.purpose)
+          )
 
-        val url = s"${cfg.baseUrl.stripSuffix("/")}/embeddings"
-        logger.debug(s"[VoyageAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
+          val url = s"${cfg.baseUrl.stripSuffix("/")}/embeddings"
+          logger.debug(s"[VoyageAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
 
-        val headers = Map(
-          "Authorization" -> s"Bearer ${cfg.apiKey}",
-          "Content-Type"  -> "application/json"
-        )
+          val headers = Map(
+            "Authorization" -> s"Bearer ${cfg.apiKey}",
+            "Content-Type"  -> "application/json"
+          )
 
-        val respEither: Either[EmbeddingError, Llm4sHttpResponse] =
-          httpClient.post(url, headers, payload.render(), timeout = 120.seconds).left.map { err =>
-            EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "voyage")
-          }
+          // A cancellation is not a failed request: it passes through, as the contract in
+          // docs/design/typed-agent-runtime-design.md section 4.4 requires.
+          val respEither: Result[Llm4sHttpResponse] =
+            httpClient.post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(120.seconds)).left.map {
+              case cancelled: CancelledError => cancelled
+              case err =>
+                EmbeddingError(code = None, message = s"HTTP request failed: ${err.message}", provider = "voyage")
+            }
 
-        respEither.flatMap { response =>
-          response.statusCode match {
-            case 200 =>
-              Try {
-                val json    = ujson.read(response.body)
-                val vectors = json("data").arr.map(r => r("embedding").arr.map(_.num).toVector).toSeq
-                val metadata =
-                  Map("provider" -> "voyage", "model" -> model, "count" -> input.size.toString)
-                EmbeddingResponse(embeddings = vectors, metadata = metadata)
-              }.toEither.left
-                .map { ex =>
-                  logger.error(s"[VoyageAIEmbeddingProvider] Parse error: ${ex.getMessage}")
-                  EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "voyage")
-                }
-            case status =>
-              val body = Redaction.truncateForLog(response.body)
-              logger.error(s"[VoyageAIEmbeddingProvider] HTTP error: $body")
-              Left(EmbeddingError(code = Some(status.toString), message = body, provider = "voyage"))
+          respEither.flatMap { response =>
+            response.statusCode match {
+              case 200 =>
+                Try {
+                  val json    = ujson.read(response.body)
+                  val vectors = json("data").arr.map(r => r("embedding").arr.map(_.num).toVector).toSeq
+                  val metadata =
+                    Map("provider" -> "voyage", "model" -> model, "count" -> input.size.toString)
+                  EmbeddingResponse(embeddings = vectors, metadata = metadata)
+                }.toEither.left
+                  .map { ex =>
+                    logger.error(s"[VoyageAIEmbeddingProvider] Parse error: ${ex.getMessage}")
+                    EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "voyage")
+                  }
+              case status =>
+                val body = Redaction.safeBody(response.body)
+                logger.error(s"[VoyageAIEmbeddingProvider] HTTP error: $body")
+                Left(EmbeddingError(code = Some(status.toString), message = body, provider = "voyage"))
+            }
           }
         }
-      }
     }
 }

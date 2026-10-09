@@ -99,6 +99,120 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     callCount shouldBe 3
   }
 
+  it should "return a non-retried error unchanged when maxAttempts is 1" in {
+    var callCount  = 0
+    val validation = ValidationError("model", "must not be empty")
+    val result = ErrorRecovery.recoverWithBackoff[String](
+      () => { callCount += 1; Left(validation) },
+      maxAttempts = 1,
+      baseDelay = 10.millis,
+      sleepFn = _ => ()
+    )
+
+    result shouldBe Left(validation)
+    callCount shouldBe 1
+  }
+
+  it should "return a non-retried error unchanged when it follows a transient failure on the final attempt" in {
+    var callCount  = 0
+    val validation = ValidationError("model", "must not be empty")
+    val result = ErrorRecovery.recoverWithBackoff[String](
+      () => {
+        callCount += 1
+        if (callCount < 2) Left(TimeoutError("t", 1.second, "op")) else Left(validation)
+      },
+      maxAttempts = 2,
+      baseDelay = 10.millis,
+      sleepFn = _ => ()
+    )
+
+    result shouldBe Left(validation)
+    callCount shouldBe 2
+  }
+
+  it should "wrap a retried error that exhausts the attempts, even with maxAttempts below 1" in {
+    var callCount = 0
+    val result = ErrorRecovery.recoverWithBackoff[String](
+      () => { callCount += 1; Left(TimeoutError("t", 1.second, "op")) },
+      maxAttempts = 0,
+      baseDelay = 10.millis,
+      sleepFn = _ => ()
+    )
+
+    result.left.toOption.get shouldBe a[ExecutionError]
+    result.left.toOption.get.message should include("failed after 1 attempts")
+    callCount shouldBe 1
+  }
+
+  it should "wait each retried type's own schedule" in {
+    def delays(error: LLMError): List[FiniteDuration] = {
+      var observed = List.empty[FiniteDuration]
+      ErrorRecovery.recoverWithBackoff[String](
+        () => Left(error),
+        maxAttempts = 4,
+        baseDelay = 100.millis,
+        sleepFn = d => observed = observed :+ d
+      )
+      observed
+    }
+
+    // An unhinted rate limit waits its 30-second default every time, ignoring baseDelay
+    delays(RateLimitError("p")) shouldBe List.fill(3)(RateLimitError.DefaultRetryDelay)
+    // A hinted one waits the hint
+    delays(RateLimitError("p", 7.millis)) shouldBe List.fill(3)(7.millis)
+    // An unhinted service error waits baseDelay * attempt number (linear)
+    delays(ServiceError(503, "p", "down")) shouldBe List(100.millis, 200.millis, 300.millis)
+    // A hinted one waits the hint
+    delays(ServiceError(503, "p", "down").withRetryAfter(5.millis)) shouldBe List.fill(3)(5.millis)
+    // A timeout waits baseDelay every time
+    delays(TimeoutError("t", 1.second, "op")) shouldBe List.fill(3)(100.millis)
+    // A service error whose status will not fix itself is not retried
+    delays(ServiceError(404, "p", "no such model")) shouldBe Nil
+    // Any other error RetryPolicy.isRetryable retries waits baseDelay * attempt number (linear)
+    delays(NetworkError("down", None, "https://x")) shouldBe List(100.millis, 200.millis, 300.millis)
+    delays(ExecutionError("m", "op", None, None)) shouldBe List(100.millis, 200.millis, 300.millis)
+    delays(SystemError("m", None)) shouldBe List(100.millis, 200.millis, 300.millis)
+    delays(APIError("p", "m", Some(502), None)) shouldBe List(100.millis, 200.millis, 300.millis)
+    // The rule's two exceptions are not retried, so there is no wait
+    delays(APIError("p", "m", Some(400), None)) shouldBe Nil
+    delays(OptimisticLockFailure("m", "id", 1L)) shouldBe Nil
+    // A non-recoverable error is not retried
+    delays(ValidationError("f", "r")) shouldBe Nil
+  }
+
+  it should "retry exactly what RetryPolicy.isRetryable retries" in {
+    val policy = org.llm4s.reliability.RetryPolicy.exponentialBackoff()
+    val errors: List[LLMError] = List(
+      RateLimitError("p"),
+      TimeoutError("t", 1.second, "op"),
+      NetworkError("down", None, "u"),
+      ServiceError(503, "p", "d"),
+      ServiceError(404, "p", "d"),
+      ServiceError(408, "p", "d"),
+      APIError("p", "m", None, None),
+      APIError("p", "m", Some(500), None),
+      APIError("p", "m", Some(404), None),
+      ExecutionError("m", "op", None, None),
+      SystemError("m", None),
+      OptimisticLockFailure("m", "id", 1L),
+      ValidationError("f", "r"),
+      AuthenticationError("p", "d"),
+      CancelledError("op")
+    )
+    errors.foreach { error =>
+      var calls = 0
+      ErrorRecovery.recoverWithBackoff[String](
+        () => { calls += 1; Left(error) },
+        maxAttempts = 2,
+        baseDelay = 1.millis,
+        sleepFn = _ => ()
+      )
+      withClue(s"$error: ") {
+        (calls == 2) shouldBe policy.isRetryable(error)
+      }
+    }
+  }
+
   it should "retry on TimeoutError" in {
     var callCount = 0
     val operation = () => {

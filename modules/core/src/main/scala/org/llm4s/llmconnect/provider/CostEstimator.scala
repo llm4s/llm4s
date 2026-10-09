@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.model.{ ModelMetadata, ModelRegistryService }
 
@@ -23,6 +24,7 @@ import org.llm4s.model.{ ModelMetadata, ModelRegistryService }
  *   // cost: Some(0.0015) for gpt-4o pricing
  * }}}
  */
+@Stable
 object CostEstimator {
 
   /**

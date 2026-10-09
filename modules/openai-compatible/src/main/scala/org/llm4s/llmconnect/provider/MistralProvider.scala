@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.annotation.Experimental
 import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ MistralModelLister, ProviderModelLister }
@@ -17,6 +18,7 @@ import org.llm4s.types.Result
  * Mistral moved onto the shared OpenAI-compatible client
  * ([[https://github.com/llm4s/llm4s/issues/925 #925]], [[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */
+@Experimental
 object MistralProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("mistral")
 

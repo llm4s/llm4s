@@ -80,6 +80,11 @@ final case class DocumentChunk(
 /**
  * Configuration for document chunking.
  *
+ * An invalid combination (a non-positive size, a `maxSize` below `targetSize`, an `overlap` that is negative or not
+ * smaller than `targetSize`) is a programming error: the constructor throws `IllegalArgumentException`, as
+ * `RAGConfig.withChunking` is a chainable builder and cannot return a `Left`. Code that chunks with sizes from
+ * user input should call `ChunkingUtils.chunkTextValidated`, which reports them as a `Left` (#1318, item 4).
+ *
  * @param targetSize Target chunk size in characters (soft limit)
  * @param maxSize Maximum chunk size (hard limit, will force split)
  * @param overlap Characters to overlap between chunks

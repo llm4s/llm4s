@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.error.{ CancelledError, LLMError }
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.media.MediaType
 import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
@@ -30,7 +31,7 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
     prompt = "a cat"
   )
 
-  private val failure = ServiceError("provider is down", 503)
+  private val failure = ImageServiceError("provider is down", 503)
 
   private val healthy = ServiceStatus(HealthStatus.Healthy, "ok")
 
@@ -66,39 +67,39 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
   }
 
   private class StubDelegate(
-    imageResult: Either[ImageGenerationError, GeneratedImage] = Right(image),
-    imagesResult: Either[ImageGenerationError, Seq[GeneratedImage]] = Right(Seq(image)),
-    healthResult: Either[ImageGenerationError, ServiceStatus] = Right(healthy)
+    imageResult: Either[LLMError, GeneratedImage] = Right(image),
+    imagesResult: Either[LLMError, Seq[GeneratedImage]] = Right(Seq(image)),
+    healthResult: Either[LLMError, ServiceStatus] = Right(healthy)
   ) extends ImageGenerationClient {
     override def generateImage(
       prompt: String,
       options: ImageGenerationOptions
-    ): Either[ImageGenerationError, GeneratedImage] = imageResult
+    ): Either[LLMError, GeneratedImage] = imageResult
 
     override def generateImages(
       prompt: String,
       count: Int,
       options: ImageGenerationOptions
-    ): Either[ImageGenerationError, Seq[GeneratedImage]] = imagesResult
+    ): Either[LLMError, Seq[GeneratedImage]] = imagesResult
 
     override def editImage(
       imagePath: Path,
       prompt: String,
       maskPath: Option[Path],
       options: ImageEditOptions
-    ): Either[ImageGenerationError, Seq[GeneratedImage]] = imagesResult
+    ): Either[LLMError, Seq[GeneratedImage]] = imagesResult
 
     override def generateImageAsync(
       prompt: String,
       options: ImageGenerationOptions
-    )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+    )(implicit ec: ExecutionContext): Future[Either[LLMError, GeneratedImage]] =
       Future.successful(imageResult)
 
     override def generateImagesAsync(
       prompt: String,
       count: Int,
       options: ImageGenerationOptions
-    )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    )(implicit ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
       Future.successful(imagesResult)
 
     override def editImageAsync(
@@ -106,10 +107,10 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
       prompt: String,
       maskPath: Option[Path],
       options: ImageEditOptions
-    )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    )(implicit ec: ExecutionContext): Future[Either[LLMError, Seq[GeneratedImage]]] =
       Future.successful(imagesResult)
 
-    override def health(): Either[ImageGenerationError, ServiceStatus] = healthResult
+    override def health(): Either[LLMError, ServiceStatus] = healthResult
   }
 
   test("generateImage delegates, records success metrics and a trace event") {
@@ -144,6 +145,36 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
     val event = tracing.events.head.asInstanceOf[TraceEvent.ImageGenerationCompleted]
     event.success shouldBe false
     event.errorMessage.value shouldBe failure.message
+  }
+
+  test("generateImage records a cancelled call as cancelled, not as an unknown failure") {
+    val metrics   = new RecordingMetricsCollector()
+    val tracing   = new RecordingTracing()
+    val cancelled = CancelledError("test.generate")
+    val client =
+      new InstrumentedImageGenerationClient(
+        new StubDelegate(imageResult = Left(cancelled)),
+        testConfig,
+        metrics,
+        tracing
+      )
+
+    client.generateImage("a cat", ImageGenerationOptions()) shouldBe Left(cancelled)
+
+    metrics.imageGenerationCalls.head._4 shouldBe Outcome.Error(ErrorKind.Cancelled)
+  }
+
+  test("generateImage records an error of another kind under that error's own kind") {
+    val metrics = new RecordingMetricsCollector()
+    val tracing = new RecordingTracing()
+    val other   = org.llm4s.error.ConfigurationError("no API key is configured")
+    val client =
+      new InstrumentedImageGenerationClient(new StubDelegate(imageResult = Left(other)), testConfig, metrics, tracing)
+
+    client.generateImage("a cat", ImageGenerationOptions()) shouldBe Left(other)
+
+    metrics.imageGenerationCalls.head._4 shouldBe Outcome.Error(ErrorKind.fromLLMError(other))
+    metrics.imageGenerationCalls.head._4 should not be Outcome.Error(ErrorKind.Unknown)
   }
 
   test("generateImages delegates and records metrics for every generated image") {
@@ -218,6 +249,53 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
 
     result shouldBe Left(failure)
     metrics.imageGenerationCalls.head._4 shouldBe Outcome.Error(ErrorKind.ServiceError)
+  }
+
+  test("maps each provider config to its metrics provider name") {
+    val cases: Seq[(ImageGenerationConfig, String)] = Seq(
+      StableDiffusionConfig()                  -> "stable-diffusion",
+      StabilityAIConfig(apiKey = "test-key")   -> "stability-ai",
+      HuggingFaceConfig(apiKey = "test-token") -> "huggingface",
+      testConfig                               -> "openai"
+    )
+
+    cases.foreach { case (config, expected) =>
+      val metrics = new RecordingMetricsCollector()
+      val client  = new InstrumentedImageGenerationClient(new StubDelegate(), config, metrics, new RecordingTracing())
+
+      client.generateImage("a red square", ImageGenerationOptions())
+
+      metrics.imageGenerationCalls.map(_._1) shouldBe Seq(expected)
+    }
+  }
+
+  test("records each image error case under its metrics error kind") {
+    val cases: Seq[(LLMError, ErrorKind)] = Seq(
+      ImageAuthenticationError("bad key")                 -> ErrorKind.Authentication,
+      ImageRateLimitError("slow down")                    -> ErrorKind.RateLimit,
+      ImageServiceError("rejected", 403)                  -> ErrorKind.ServiceError,
+      ImageValidationError("bad size")                    -> ErrorKind.Validation,
+      InvalidPromptError("bad prompt")                    -> ErrorKind.Validation,
+      InsufficientResourcesError("no credits")            -> ErrorKind.ServiceError,
+      UnsupportedOperation("no edits")                    -> ErrorKind.Validation,
+      ImageUnknownError(new RuntimeException("surprise")) -> ErrorKind.Unknown
+    )
+
+    cases.foreach { case (error, expected) =>
+      val metrics = new RecordingMetricsCollector()
+      val client = new InstrumentedImageGenerationClient(
+        new StubDelegate(imageResult = Left(error)),
+        testConfig,
+        metrics,
+        new RecordingTracing()
+      )
+
+      client.generateImage("a cat", ImageGenerationOptions()) shouldBe Left(error)
+
+      withClue(s"$error: ") {
+        metrics.imageGenerationCalls.map(_._4) shouldBe Seq(Outcome.Error(expected))
+      }
+    }
   }
 
   test("health delegates directly without recording metrics or trace events") {

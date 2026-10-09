@@ -5,8 +5,10 @@ import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 import scala.util.Try
+import org.llm4s.util.Redaction
 
 /**
  * Result of context relevance evaluation.
@@ -82,6 +84,8 @@ class ContextRelevanceGuardrail(
   val onFail: GuardrailAction = GuardrailAction.Block
 ) extends RAGGuardrail {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   val name: String = "ContextRelevanceGuardrail"
 
   override val description: Option[String] = Some(
@@ -96,8 +100,10 @@ class ContextRelevanceGuardrail(
 
     if (context.retrievedChunks.isEmpty) {
       onFail match {
-        case GuardrailAction.Warn => Right(output)
-        case GuardrailAction.Fix  => Right(output)
+        case GuardrailAction.Warn =>
+          logger.warn(s"$name: no retrieved chunks to evaluate - passing through in warn mode")
+          Right(output)
+        case GuardrailAction.Fix => Right(output)
         case GuardrailAction.Block =>
           Left(
             ValidationError.invalid(
@@ -145,12 +151,22 @@ class ContextRelevanceGuardrail(
         )
 
       case GuardrailAction.Warn =>
+        warnNotRelevant(result, relevantRatio, "passing through in warn mode")
         Right(output)
 
       case GuardrailAction.Fix =>
         // For context relevance, we can't auto-fix - fall back to warn
+        warnNotRelevant(result, relevantRatio, "fix is not possible here, passing through as in warn mode")
         Right(output)
     }
+
+  // The scores and counts only: what the chunks say is not logged
+  private def warnNotRelevant(result: ContextRelevanceResult, relevantRatio: Double, outcome: String): Unit =
+    logger.warn(
+      s"$name: retrieved context not sufficiently relevant (overall score ${"%.2f".format(result.overallScore)}, " +
+        s"relevant chunks ${result.relevantChunkCount}/${result.chunkScores.size}, " +
+        s"${"%.0f".format(relevantRatio * 100)}% < ${"%.0f".format(minRelevantRatio * 100)}% required) - $outcome"
+    )
 
   /**
    * Evaluate the relevance of each chunk to the query.
@@ -291,7 +307,7 @@ class ContextRelevanceGuardrail(
               Left(
                 ValidationError.invalid(
                   "context_relevance_parse",
-                  s"Could not parse context relevance from LLM response: ${response.take(200)}"
+                  s"Could not parse context relevance from LLM response: ${Redaction.safeBody(response, 200)}"
                 )
               )
           }

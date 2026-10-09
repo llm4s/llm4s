@@ -4,6 +4,8 @@ import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
+import scala.util.matching.Regex
+
 /**
  * Tone categories for content validation.
  *
@@ -11,6 +13,8 @@ import org.llm4s.types.Result
  * Used by [[ToneValidator]] to enforce tone requirements on LLM output.
  */
 sealed trait Tone {
+
+  /** The tone's display name, as it appears in [[ToneValidator]]'s error and description text. */
   def name: String
 }
 
@@ -39,15 +43,74 @@ object Tone {
 }
 
 /**
- * Validates that output matches one of the allowed tones.
+ * Rejects LLM output whose detected [[Tone]] is not in an allowed set.
  *
- * This is a simple keyword-based implementation.
- * For production, consider using sentiment analysis APIs or ML models.
+ * An [[OutputGuardrail]] only: it checks what the model says, not what the user sends. Detection is a fixed
+ * keyword heuristic with no model call, so it is fast and deterministic, and it is crude. For a judgement that
+ * understands context, use [[LLMToneGuardrail]] instead.
  *
- * @param allowedTones The set of acceptable tones
+ * The heuristic runs over a normalised copy of the text: Unicode NFKD (fullwidth letters and punctuation
+ * become ASCII, compatibility spaces such as a non-breaking space become an ASCII space), with every combining
+ * mark and every format character (zero-width space and joiners, byte-order mark, soft hyphen) removed, then
+ * lower-cased with `Locale.ROOT` (so the JVM's default locale has no effect) and the Turkish dotless `ı` read
+ * as `i`. So `HI`, `Hİ`, `ＨＩ` and `h<U+200B>i` are all `hi`; an accented spelling such as `hí` is too.
+ *
+ * Detection looks at the whole text, line breaks included, and takes the first rule that applies, in this
+ * order:
+ *  1. [[Tone.Excited]]: the text contains `!` somewhere and some piece of it is "short". This is a rough
+ *     token-count heuristic, not sentence detection: the text is cut at every `.`, `!` and `?`, each piece is
+ *     split on ASCII whitespace, and a piece that yields fewer than five tokens is short. The token count
+ *     depends on spacing as well as on words: whitespace at the start of a piece (such as the space after a
+ *     delimiter) adds an empty token, a space that normalisation does not turn into an ASCII space (such as
+ *     the line separator U+2028) does not separate tokens, and a piece with no words at all (the gap inside a run such as `...` or `?!`, or a space or line
+ *     break after the final `!`) is short, though completely empty pieces at the very end of the text are
+ *     dropped. The outcome therefore follows no fixed word count: whether a sentence of four or so words
+ *     counts as short depends on the punctuation and spacing around it, and text made only of long sentences
+ *     can still come out Excited. Treat the rule as a coarse signal. It wins over every keyword below.
+ *  1. [[Tone.Professional]]: contains `please`, `thank you`, `kindly`, `regards` or `sincerely`.
+ *  1. [[Tone.Casual]]: contains `hey`, `cool`, `awesome`, `yeah` or `nah`.
+ *  1. [[Tone.Friendly]]: contains `hi`, `hello`, `thanks` or `appreciate`.
+ *  1. [[Tone.Formal]]: contains `furthermore`, `moreover`, `consequently` or `therefore`.
+ *  1. [[Tone.Neutral]]: none of the above, including empty text.
+ *
+ * Keywords are matched at regular-expression word boundaries (`\b`), so `pleased` is not `please`, though
+ * `hi-fi` does contain `hi`. A text with keywords of several tones is classified by the earliest rule above,
+ * not by how many keywords it has. Because the lists are short and in English, text in another language, or
+ * in none of these registers, usually comes out Neutral; allow [[Tone.Neutral]] (or use `allowAll`) if that
+ * should pass.
+ *
+ * On a mismatch `validate` returns a [[org.llm4s.error.ValidationError]] for the field `output`, whose detail
+ * names the detected tone and the allowed ones, for example
+ * `Output tone (Casual) not allowed. Allowed tones: Professional`.
+ *
+ * @example
+ * {{{
+ * import org.llm4s.agent.guardrails.builtin.{ Tone, ToneValidator }
+ *
+ * // ready-made sets
+ * val customerFacing = ToneValidator.professionalOrFriendly
+ *
+ * // or choose the allowed tones yourself
+ * val calm = ToneValidator(Set(Tone.Professional, Tone.Formal, Tone.Neutral))
+ *
+ * calm.validate("Please find the report attached.") // Right(...): Professional
+ * calm.validate("Hey, that is cool.")               // Left(ValidationError): Casual is not allowed
+ *
+ * agent.run(query, tools, outputGuardrails = Seq(customerFacing))
+ * }}}
+ *
+ * @param allowedTones The tones that pass. An empty set rejects everything; `Tone.all` accepts everything.
  */
 class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
 
+  /**
+   * Detect the tone of `value` and check it is allowed.
+   *
+   * @param value the output text to check; empty text is Neutral
+   * @return `Right(value)` unchanged when the detected tone is in the allowed set, otherwise `Left` with a
+   *         [[org.llm4s.error.ValidationError]] for the field `output` naming the detected and the allowed
+   *         tones
+   */
   def validate(value: String): Result[String] = {
     val detectedTone = detectTone(value)
 
@@ -72,26 +135,26 @@ class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
    * - More sophisticated linguistic analysis
    */
   private def detectTone(text: String): Tone = {
-    val lower = text.toLowerCase
+    val lower = MatchText.folded(text)
 
     // Check for excitement indicators (short sentences with exclamation marks)
     if (lower.contains("!") && lower.split("[.!?]").exists(_.split("\\s+").length < 5)) {
       Tone.Excited
     }
     // Check for professional language
-    else if (lower.matches(".*\\b(please|thank you|kindly|regards|sincerely)\\b.*")) {
+    else if (mentions(ToneValidator.ProfessionalWords, lower)) {
       Tone.Professional
     }
     // Check for casual language
-    else if (lower.matches(".*\\b(hey|cool|awesome|yeah|nah)\\b.*")) {
+    else if (mentions(ToneValidator.CasualWords, lower)) {
       Tone.Casual
     }
     // Check for friendly language
-    else if (lower.matches(".*\\b(hi|hello|thanks|appreciate)\\b.*")) {
+    else if (mentions(ToneValidator.FriendlyWords, lower)) {
       Tone.Friendly
     }
     // Check for formal language
-    else if (lower.matches(".*\\b(furthermore|moreover|consequently|therefore)\\b.*")) {
+    else if (mentions(ToneValidator.FormalWords, lower)) {
       Tone.Formal
     }
     // Default to neutral
@@ -99,6 +162,11 @@ class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
       Tone.Neutral
     }
   }
+
+  // `find`, not `matches(".*kw.*")`: `.` stops at a line break, so a newline anywhere made every keyword check
+  // fail and multi-line text always came out Neutral.
+  private def mentions(words: Regex, text: String): Boolean =
+    words.findFirstIn(text).isDefined
 
   val name: String = "ToneValidator"
 
@@ -109,33 +177,40 @@ class ToneValidator(allowedTones: Set[Tone]) extends OutputGuardrail {
 
 object ToneValidator {
 
+  private def wholeWords(words: String*): Regex = s"\\b(${words.mkString("|")})\\b".r
+
+  private val ProfessionalWords: Regex = wholeWords("please", "thank you", "kindly", "regards", "sincerely")
+  private val CasualWords: Regex       = wholeWords("hey", "cool", "awesome", "yeah", "nah")
+  private val FriendlyWords: Regex     = wholeWords("hi", "hello", "thanks", "appreciate")
+  private val FormalWords: Regex       = wholeWords("furthermore", "moreover", "consequently", "therefore")
+
   /**
-   * Create a tone validator with specified allowed tones.
+   * Create a tone validator that accepts the given tones.
+   *
+   * @param allowedTones the tones that pass; see [[ToneValidator]] for how a text's tone is detected
+   * @return a validator equivalent to `new ToneValidator(allowedTones)`
    */
   def apply(allowedTones: Set[Tone]): ToneValidator =
     new ToneValidator(allowedTones)
 
   /**
-   * Create a tone validator allowing only professional tone.
+   * A validator that accepts only [[Tone.Professional]] output.
+   *
+   * Output with no professional keyword, such as plain factual text, is Neutral and is rejected; add
+   * [[Tone.Neutral]] through `ToneValidator(Set(Tone.Professional, Tone.Neutral))` to let it through.
    */
   def professionalOnly: ToneValidator =
     new ToneValidator(Set(Tone.Professional))
 
-  /**
-   * Create a tone validator allowing professional or friendly tones.
-   */
+  /** A validator that accepts [[Tone.Professional]] or [[Tone.Friendly]] output, and rejects the rest. */
   def professionalOrFriendly: ToneValidator =
     new ToneValidator(Set(Tone.Professional, Tone.Friendly))
 
-  /**
-   * Create a tone validator allowing casual or friendly tones.
-   */
+  /** A validator that accepts [[Tone.Casual]] or [[Tone.Friendly]] output, and rejects the rest. */
   def casualOrFriendly: ToneValidator =
     new ToneValidator(Set(Tone.Casual, Tone.Friendly))
 
-  /**
-   * Create a tone validator allowing all tones (effectively no validation).
-   */
+  /** A validator that accepts every tone in `Tone.all`, so `validate` always returns `Right`. */
   def allowAll: ToneValidator =
     new ToneValidator(Tone.all)
 }

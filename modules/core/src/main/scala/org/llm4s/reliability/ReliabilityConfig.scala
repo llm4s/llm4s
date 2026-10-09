@@ -1,5 +1,7 @@
 package org.llm4s.reliability
 
+import org.llm4s.annotation.Stable
+
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
 
 /**
@@ -14,6 +16,7 @@ import scala.concurrent.duration.{ DurationInt, FiniteDuration }
  * @param deadline Maximum time to wait for operation completion
  * @param enabled Whether reliability features are enabled (for opt-out)
  */
+@Stable
 final case class ReliabilityConfig private (
   retryPolicy: RetryPolicy,
   circuitBreaker: CircuitBreakerConfig,
@@ -99,6 +102,7 @@ object ReliabilityConfig {
  * @param recoveryTimeout Time to wait before attempting recovery (half-open state)
  * @param successThreshold Number of successes in half-open state to close circuit
  */
+@Stable
 final case class CircuitBreakerConfig private (
   failureThreshold: Int,
   recoveryTimeout: FiniteDuration,
@@ -158,6 +162,7 @@ object CircuitBreakerConfig {
  * @param requestsPerMinute Sustained request rate once the bucket is empty
  * @param burstCapacity Maximum tokens the bucket can hold, i.e. the largest burst allowed
  */
+@Stable
 final case class RateLimitConfig private (
   enabled: Boolean,
   requestsPerMinute: Int,

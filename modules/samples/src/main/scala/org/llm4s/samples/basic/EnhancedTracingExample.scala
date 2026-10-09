@@ -1,11 +1,9 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.agent.{ AgentState, AgentStatus }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.trace.Tracing
+import org.llm4s.trace.{ TraceEvent, Tracing }
 import org.slf4j.LoggerFactory
 
 /**
@@ -66,15 +64,17 @@ object EnhancedTracingExample {
         tracer.traceCompletion(completion, completion.model)
 
         // Trace a simple agent state snapshot
-        val finalConversation = conversation.copy(messages = conversation.messages :+ completion.message)
-        val agentState = AgentState(
-          conversation = finalConversation,
-          tools = new ToolRegistry(Seq.empty),
-          initialQuery = conversation.messages.collectFirst { case UserMessage(content) => content },
-          status = AgentStatus.Complete,
-          logs = Seq(s"Completion id=${completion.id}", s"Model=${completion.model}")
+        val finalMessages = conversation.messages :+ completion.message
+        tracer.traceEvent(
+          TraceEvent.AgentRunEnded(
+            threadId = "sample-thread",
+            runId = java.util.UUID.randomUUID().toString,
+            agent = "sample-agent",
+            status = "completed",
+            messages = finalMessages,
+            usage = UsageSummary()
+          )
         )
-        tracer.traceEvent(agentState.toTraceEvent)
 
       case Left(error) =>
         // Trace error and log it

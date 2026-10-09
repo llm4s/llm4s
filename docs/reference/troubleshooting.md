@@ -39,7 +39,7 @@ A: Check your API key is correct. OpenAI keys start with `sk-`, Anthropic with `
 ## Scala Version Issues
 
 **Q: I get a binary incompatibility error when adding llm4s to my project**
-A: Use the `_3` artifact for Scala 3 projects, `_2.13` for Scala 2.13 projects. SBT usually handles this if you use `%%`, e.g., `"org.llm4s" %% "llm4s-core" % "0.4.0"`.
+A: LLM4S is published for Scala 3 only, as `_3` artifacts; there is no Scala 2.13 build. SBT usually handles this if you use `%%`, e.g., `"org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"`.
 
 ## Agent & Tool Errors
 

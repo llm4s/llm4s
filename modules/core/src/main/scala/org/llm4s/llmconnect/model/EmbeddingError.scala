@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.LLMError
 
 /**
@@ -10,6 +11,7 @@ import org.llm4s.error.LLMError
  * @param message Human-readable error message from the provider or client.
  * @param provider Source component ("openai", "voyage", "encoder", "extractor", etc.)
  */
+@Stable
 final case class EmbeddingError private (
   override val code: Option[String],
   override val message: String,

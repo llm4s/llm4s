@@ -58,9 +58,9 @@ def setModel(model: String): Unit
 All data structures are **immutable**:
 
 ```scala
-// Conversation state is immutable
-val state2 = agent.continueConversation(state1, "Next question")
-// state1 is unchanged, state2 is a new instance
+// A result is an immutable value
+val result2 = agent.continueConversation(result1, "Next question")
+// result1 is unchanged; result2 is a new instance from the next turn on the same thread
 ```
 
 ### 4. Explicit Configuration

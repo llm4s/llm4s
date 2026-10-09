@@ -39,6 +39,19 @@ object Versions {
   // NOTE: cask 0.11.x is available but 0.x minor bumps can be breaking; held for review.
   val cask = "0.10.2"
 
+  // cats-effect + fs2
+  val catsEffect = "3.5.7"
+  val fs2        = "3.11.0"
+
+  // ZIO
+  val zio = "2.1.16"
+
+  // Other JSON libraries, test-only: `docs/guide/json-libraries.md` shows how to use them with llm4s and
+  // `JsonLibrariesGuideSpec` (llm4s-samples, unpublished) runs those recipes. No published module depends on them.
+  val circe    = "0.14.17"
+  val playJson = "3.0.6"
+  val zioJson  = "1.0.0" // 1.1.0 is built with Scala 3.9: its stdlib TASTy is unreadable to the 3.7.1 compiler
+
   // AWS SDK
   val awsSdk        = "2.46.14"
   val opentelemetry = "1.63.0"
@@ -50,6 +63,9 @@ object Versions {
   // NOTE: neo4j-java-driver 6.x is available but is a major bump; held for separate
   // review alongside the existing neo4j-harness/Netty compatibility constraint.
   val neo4j = "5.27.0"
+
+  // Spring Boot
+  val springBoot = "3.3.6"
 }
 
 object Deps {
@@ -85,9 +101,27 @@ object Deps {
 
   val cask = "com.lihaoyi" %% "cask" % Versions.cask
 
+  // cats-effect + fs2
+  val catsEffect = "org.typelevel" %% "cats-effect" % Versions.catsEffect
+  val fs2        = "co.fs2"        %% "fs2-core"    % Versions.fs2
+
+  // Other JSON libraries (test-only; see Versions). `ujson-circe` is the uPickle project's own circe bridge, built for
+  // Scala 3; there is no Scala 3 build of `ujson-play`, so play-json and zio-json are reached through a string.
+  val circeCore  = "io.circe"          %% "circe-core"  % Versions.circe
+  val ujsonCirce = "com.lihaoyi"       %% "ujson-circe" % Versions.ujson
+  val playJson   = "org.playframework" %% "play-json"   % Versions.playJson
+  val zioJson    = "dev.zio"           %% "zio-json"    % Versions.zioJson
+
+  // ZIO
+  val zio        = "dev.zio" %% "zio"          % Versions.zio
+  val zioStreams = "dev.zio" %% "zio-streams"  % Versions.zio
+  val zioTest    = "dev.zio" %% "zio-test"     % Versions.zio
+  val zioTestSbt = "dev.zio" %% "zio-test-sbt" % Versions.zio
+
   // AWS SDK
-  val awsS3  = "software.amazon.awssdk" % "s3"  % Versions.awsSdk
-  val awsSts = "software.amazon.awssdk" % "sts" % Versions.awsSdk
+  val awsS3             = "software.amazon.awssdk" % "s3"             % Versions.awsSdk
+  val awsSts            = "software.amazon.awssdk" % "sts"            % Versions.awsSdk
+  val awsBedrockRuntime = "software.amazon.awssdk" % "bedrockruntime" % Versions.awsSdk
 
   val opentelemetryApi          = "io.opentelemetry" % "opentelemetry-api"           % Versions.opentelemetry
   val opentelemetrySdk          = "io.opentelemetry" % "opentelemetry-sdk"           % Versions.opentelemetry
@@ -98,6 +132,12 @@ object Deps {
 
   // Neo4j
   val neo4jDriver = "org.neo4j.driver" % "neo4j-java-driver" % Versions.neo4j
+
+  // Spring Boot
+  val springBootAutoConfigure     = "org.springframework.boot" % "spring-boot-autoconfigure"      % Versions.springBoot
+  val springBootActuator          = "org.springframework.boot" % "spring-boot-actuator"           % Versions.springBoot
+  val springBootStarterTest       = "org.springframework.boot" % "spring-boot-starter-test"       % Versions.springBoot
+  val springBootTestAutoConfigure = "org.springframework.boot" % "spring-boot-test-autoconfigure" % Versions.springBoot
   // Note: neo4j-harness is not included as a dependency because neo4j-harness 5.26.x
   // has a hard-coded incompatibility with Netty 4.1.115.Final on modern JVMs.
   // Integration tests use a real Neo4j instance via Neo4jGraphStore.local().

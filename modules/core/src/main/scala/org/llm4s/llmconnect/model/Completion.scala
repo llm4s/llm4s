@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.annotation.Stable
+
 /**
  * Represents a completion response from an LLM.
  * This includes the ID, creation timestamp, the assistant's message, and optional token usage statistics.
@@ -11,11 +13,13 @@ package org.llm4s.llmconnect.model
  * @param message The assistant's message in response to the user's input.
  * @param toolCalls List of tool calls made by the assistant.
  * @param usage Optional token usage statistics for the completion.
- * @param thinking Optional thinking/reasoning content from extended thinking models.
- *                 Present when using reasoning modes with Claude or o1/o3 models.
  * @param estimatedCost Optional estimated cost of this completion in USD.
  *                      Computed from token usage and model pricing when available.
+ * @param citations The sources the model cited in its answer, when the provider reports them
+ *                  (see [[Citation]]); empty for a model that does not search or does not cite,
+ *                  and for a completion assembled from streamed chunks, which carry none.
  */
+@Stable
 final case class Completion private (
   id: String,
   created: Long,
@@ -24,8 +28,8 @@ final case class Completion private (
   message: AssistantMessage,
   toolCalls: List[ToolCall],
   usage: Option[TokenUsage],
-  thinking: Option[String],
-  estimatedCost: Option[Double]
+  estimatedCost: Option[Double],
+  citations: List[Citation]
 ) {
   def withId(id: String): Completion                               = copy(id = id)
   def withCreated(created: Long): Completion                       = copy(created = created)
@@ -35,10 +39,9 @@ final case class Completion private (
   def withToolCalls(toolCalls: List[ToolCall]): Completion         = copy(toolCalls = toolCalls)
   def withUsage(usage: TokenUsage): Completion                     = copy(usage = Some(usage))
   def withUsage(usage: Option[TokenUsage]): Completion             = copy(usage = usage)
-  def withThinking(thinking: String): Completion                   = copy(thinking = Some(thinking))
-  def withThinking(thinking: Option[String]): Completion           = copy(thinking = thinking)
   def withEstimatedCost(estimatedCost: Double): Completion         = copy(estimatedCost = Some(estimatedCost))
   def withEstimatedCost(estimatedCost: Option[Double]): Completion = copy(estimatedCost = estimatedCost)
+  def withCitations(citations: List[Citation]): Completion         = copy(citations = citations)
 
   /**
    * Extract content as text (for compatibility)
@@ -51,9 +54,22 @@ final case class Completion private (
   def hasToolCalls: Boolean = toolCalls.nonEmpty
 
   /**
-   * Check if completion includes thinking/reasoning content.
+   * Check if the provider reported any [[Citation]] for this completion
    */
-  def hasThinking: Boolean = thinking.exists(_.nonEmpty)
+  def hasCitations: Boolean = citations.nonEmpty
+
+  /**
+   * The text of the model's thinking/reasoning, when the provider reports it: the thinking
+   * text of [[message]] (see [[AssistantMessage.thinking]]), which is where clients put it so
+   * that it stays in the conversation history. Set it with `withMessage(message.withThinking(...))`.
+   */
+  def thinking: Option[String] = message.thinkingText
+
+  /**
+   * Whether the completion carries thinking, text or redacted (see [[AssistantMessage.hasThinking]]).
+   * A completion whose only reasoning is redacted has thinking but no [[thinking]] text.
+   */
+  def hasThinking: Boolean = message.hasThinking
 
   /**
    * Get the full response including thinking content (if available).
@@ -78,10 +94,10 @@ object Completion {
     message: AssistantMessage,
     toolCalls: List[ToolCall] = List.empty,
     usage: Option[TokenUsage] = None,
-    thinking: Option[String] = None,
-    estimatedCost: Option[Double] = None
+    estimatedCost: Option[Double] = None,
+    citations: List[Citation] = List.empty
   ): Completion =
-    new Completion(id, created, content, model, message, toolCalls, usage, thinking, estimatedCost)
+    new Completion(id, created, content, model, message, toolCalls, usage, estimatedCost, citations)
 }
 
 /**
@@ -99,6 +115,7 @@ object Completion {
  *                            When present, these tokens are billed at the cache-creation rate,
  *                            which is typically higher than the normal input rate.
  */
+@Stable
 final case class TokenUsage private (
   promptTokens: Int,
   completionTokens: Int,
@@ -152,6 +169,7 @@ object TokenUsage {
  * @param promptTokens Number of tokens in the input text(s).
  * @param totalTokens Total tokens used (same as promptTokens for embeddings).
  */
+@Stable
 case class EmbeddingUsage(
   promptTokens: Int,
   totalTokens: Int
@@ -167,6 +185,7 @@ case class EmbeddingUsage(
  * @param thinkingDelta Optional thinking/reasoning content delta.
  *                      Present when streaming extended thinking content.
  */
+@Stable
 final case class StreamedChunk private (
   id: String,
   content: Option[String],
@@ -211,6 +230,7 @@ object StreamedChunk {
 /**
  * Represents a streaming chunk of completion data
  */
+@Stable
 final case class CompletionChunk(
   id: String,
   content: Option[String] = None,
@@ -233,6 +253,7 @@ final case class CompletionChunk(
 /**
  * Delta information for streaming chunks
  */
+@Stable
 final case class ChunkDelta(
   content: Option[String] = None,
   role: Option[String] = None,

@@ -2,13 +2,14 @@ package org.llm4s.mcp
 
 import cats.data.ValidatedNel
 import cats.implicits._
+import org.llm4s.error.{ CancelledError, LLMError, SimpleError }
 import org.llm4s.toolapi._
 import org.slf4j.LoggerFactory
 
 import java.util.concurrent.ConcurrentHashMap
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
-import scala.util.Try
+import scala.util.{ Failure, Success, Try }
 
 import scala.util.chaining.scalaUtilChainingOps
 
@@ -34,9 +35,11 @@ import scala.util.chaining.scalaUtilChainingOps
  *
  * == Error handling ==
  * If an MCP server cannot be reached or returns an error, the failure is
- * logged and that server's tools are omitted from the response — the registry
- * never throws during tool lookup.  A failed client is evicted from the
- * internal client map so the next call attempts a fresh connection.
+ * logged and that server contributes no tools — the registry never throws during tool lookup.  Its
+ * client is closed and evicted, and its cached tools and hints are dropped with it, because those
+ * tools call through that client: the model is never offered a tool that cannot be called.  The next
+ * lookup attempts a fresh connection.  A refresh that is only cancelled (the thread was interrupted)
+ * keeps the client and the tools already fetched.
  *
  * == Lifecycle ==
  * Implements `AutoCloseable`; call `close()` (or use `Using.resource`) to
@@ -83,16 +86,55 @@ class MCPToolRegistry(
         findMCPTool(request.functionName) match {
           case Some(tool) =>
             logger.debug(s"Executing MCP tool: ${request.functionName}")
-            Try(tool.execute(request.arguments)).toEither.left.map { e =>
-              logger.error(s"MCP tool ${request.functionName} execution failed", e)
-              ToolCallError.ExecutionError(request.functionName, e)
-            }.flatten
+            // The same rule as ToolRegistry.execute applies to local tools (design section 4.4): a call
+            // that ends while its thread is interrupted is cancelled, whatever it returned, and is
+            // never reported as a failed tool.
+            CancelledError.catchInterrupt(Try(tool.execute(request.arguments))) match {
+              case Left(_) =>
+                Thread.currentThread().interrupt()
+                Left(ToolCallError.Cancelled(request.functionName))
+              case Right(_) if Thread.currentThread().isInterrupted =>
+                Left(ToolCallError.Cancelled(request.functionName))
+              case Right(Failure(e)) if CancelledError.isCancellation(e) =>
+                // A tool that wrapped the InterruptedException has cleared the flag; restore it so the
+                // caller still sees the cancellation (design section 4.4).
+                Thread.currentThread().interrupt()
+                Left(ToolCallError.Cancelled(request.functionName))
+              case Right(Failure(e)) =>
+                logger.error(s"MCP tool ${request.functionName} execution failed", e)
+                Left(ToolCallError.ExecutionError(request.functionName, e))
+              case Right(Success(outcome)) => outcome
+            }
+          case None if Thread.currentThread().isInterrupted =>
+            // Finding the tool meant asking a server, and that was interrupted: not "no such tool".
+            Left(ToolCallError.Cancelled(request.functionName))
           case None =>
             logger.warn(s"Tool ${request.functionName} not found in any registry (local or MCP)")
             Left(ToolCallError.UnknownFunction(request.functionName, getAllTools.map(_.name)))
         }
     }
   }
+
+  /**
+   * The hints the MCP server declares for the tool `name` through its tool annotations, as of the last
+   * discovery of that server's tools (`tools`, `getAllTools` or `execute` trigger it); `None` for a tool no
+   * MCP server advertises, for one a local tool shadows, and for any tool of a server whose last discovery
+   * failed.
+   *
+   * '''Only a trusted server has hints.''' The MCP specification requires annotations from an untrusted
+   * server to be treated as untrusted, and `ApprovalMiddleware.unlessReadOnly` skips approval for a tool
+   * whose hints say read-only, so a server's own claim must not relax approval by default. A server
+   * configured with `trustAnnotations = false` (the default, see [[MCPServerConfig]]) yields `None` for
+   * every one of its tools; pass `registry.toolHints(name).getOrElse(ToolHints.default)` to
+   * `AgentTool.fromToolFunction` and an untrusted tool keeps the conservative defaults, which require
+   * approval. See [[MCPClient.getToolHints]].
+   */
+  def toolHints(name: String): Option[ToolHints] =
+    if (localTools.exists(_.name == name)) None
+    else
+      mcpServers.view
+        .flatMap(server => Option(mcpClients.get(server.name)).flatMap(_.getToolHints().get(name)))
+        .headOption
 
   // Get tools in OpenAI format
   override def getOpenAITools(strict: Boolean = true): ujson.Arr =
@@ -141,7 +183,7 @@ class MCPToolRegistry(
     val result = for {
       client <- Try(getOrCreateClient(server)).toEither.leftMap { ex =>
         logger.trace("{}", ex.getStackTrace)
-        ex.getMessage
+        SimpleError(ex.getMessage): LLMError
       }
       tools <- client.getTools()
     } yield {
@@ -149,11 +191,19 @@ class MCPToolRegistry(
       toolCache.put(server.name, CachedTools(tools, timestamp))
       tools
     }
-    result.left.foreach { errMsg =>
-      logger.error("Failed to refresh tools from ${}: {}", server.name, errMsg)
-      removeServerFromCache(server) // Clean up failed client
+    result.left.foreach {
+      // An interrupted refresh is not a failed server: keep the client, cache nothing, report nothing.
+      case _: CancelledError => logger.debug("Refreshing tools from {} was cancelled", server.name)
+      case error =>
+        logger.error("Failed to refresh tools from ${}: {}", server.name, error.message)
+        // Closing the failed client ends the connection the cached tools call through, so those tools can no
+        // longer be called: drop them with the client. Advertising them would have the model call tools that
+        // are certain to fail. The next lookup reconnects and fetches the list again.
+        toolCache.remove(server.name)
+        removeServerFromCache(server)
     }
-    result.getOrElse(Seq.empty)
+    // A cancelled refresh leaves the client open, so the tools fetched before it are still callable.
+    result.getOrElse(Option(toolCache.get(server.name)).map(_.tools).getOrElse(Seq.empty))
   }
 
   private def removeServerFromCache(server: MCPServerConfig): Unit =
@@ -163,7 +213,8 @@ class MCPToolRegistry(
       }
     }
 
-  private def createMCPClient(server: MCPServerConfig): MCPClient = {
+  // `private[mcp]` so a spec in this package can hand the registry a stub client.
+  private[mcp] def createMCPClient(server: MCPServerConfig): MCPClient = {
     logger.info(s"Creating new MCP client for server: ${server.name}")
     val client = new MCPClientImpl(server)
     logger.debug(s"MCP client created successfully for server: ${server.name}")
@@ -215,7 +266,7 @@ class MCPToolRegistry(
   private[mcp] def createAndInitializeClient(server: MCPServerConfig): ValidatedNel[String, MCPServerConfig] = {
     val status: Either[String, MCPServerConfig] = for {
       mcpClient <- Try(getOrCreateClient(server)).toEither.leftMap(_.getMessage)
-      _         <- mcpClient.initialize()
+      _         <- mcpClient.initialize().left.map(_.message)
     } yield server
     status.tap { x =>
       x.fold(

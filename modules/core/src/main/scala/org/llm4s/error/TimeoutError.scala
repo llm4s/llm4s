@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 import scala.concurrent.duration.FiniteDuration
 
 /**
@@ -23,6 +25,7 @@ import scala.concurrent.duration.FiniteDuration
  *   .withContext("endpoint", "https://api.openai.com")
  * }}}
  */
+@Stable
 final case class TimeoutError private (
   message: String,
   timeoutDuration: FiniteDuration,

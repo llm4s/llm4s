@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * Raised when a network-level failure occurs during communication with the LLM provider.
  *
@@ -11,6 +13,7 @@ package org.llm4s.error
  * @param cause optional underlying exception that caused the failure (e.g., java.net.ConnectException)
  * @param endpoint the URL or endpoint that was being accessed
  */
+@Stable
 final case class NetworkError private (
   override val message: String,
   cause: Option[Throwable],

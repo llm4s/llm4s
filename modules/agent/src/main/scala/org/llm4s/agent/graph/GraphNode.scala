@@ -83,7 +83,19 @@ enum NodeResult:
    * join arrival, so a barrier this task belongs to stays closed until the continuation completes.
    */
   case Suspend[Q, A](update: StateUpdate, question: Q, resumeAt: ResumeRef[Q, A]) extends NodeResult
+
+  /** Fails the run, leaving its checkpoint `Running`, so `recover` runs this task again. */
   case Fail(error: LLMError)
+
+  /**
+   * Ends the run as a finished failure with `error`, which is what a guardrail's Block is. `update`
+   * commits with the superstep like any other, together with every sibling's result, and the run's
+   * closing checkpoint is [[CheckpointStatus.Failed]]: the thread is usable afterwards and `recover`
+   * refuses it. The caller receives `error` itself, not a [[GraphError.NodeFailed]] around it. A
+   * blocked task records no pending write, so a process that dies before the closing commit runs
+   * the task again.
+   */
+  case Block(update: StateUpdate, error: LLMError)
 
 object NodeResult:
   def fromResult(result: Result[Command]): NodeResult = result.fold(Fail(_), Continue(_))
@@ -91,12 +103,16 @@ object NodeResult:
 /** Where a task's events go; the runtime gives each task its own. */
 private[graph] trait NodeEventSink:
   def custom(name: String, version: Int, payload: ujson.Value): Unit
-  def progress(payload: ujson.Value): Unit
+  def progress(name: String, version: Int, payload: ujson.Value): Unit
+
+  /** Drops the custom events buffered so far: the attempt that emitted them failed and is retried. */
+  def discardCustom(): Unit
 
 private[graph] object NodeEventSink:
   val none: NodeEventSink = new NodeEventSink:
-    def custom(name: String, version: Int, payload: ujson.Value): Unit = ()
-    def progress(payload: ujson.Value): Unit                           = ()
+    def custom(name: String, version: Int, payload: ujson.Value): Unit   = ()
+    def progress(name: String, version: Int, payload: ujson.Value): Unit = ()
+    def discardCustom(): Unit                                            = ()
 
 /**
  * A node's behaviour. It reads the superstep's committed snapshot - never another task's

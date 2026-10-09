@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.spi
 
+import org.llm4s.annotation.Stable
+
 /**
  * A unit of provider registration: everything one module contributes.
  *
@@ -26,6 +28,7 @@ package org.llm4s.llmconnect.spi
  * `ProviderRegistry.withModule`, which is the answer for a shaded fat jar whose
  * services files did not survive.
  */
+@Stable
 trait Llm4sProviderModule:
 
   /** The chat providers this module supplies. */

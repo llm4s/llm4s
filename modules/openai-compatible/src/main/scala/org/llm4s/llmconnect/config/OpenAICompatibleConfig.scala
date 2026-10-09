@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -33,7 +34,10 @@ import org.llm4s.util.Redaction
  *                          OpenAI (vLLM, Ollama's `/v1`) stream no usage without it; turn it
  *                          off for an endpoint that rejects the field. A named section sets it
  *                          with the `streamUsage` key.
+ * @param timeouts how long a request and a stream may take: the section's `timeouts` block. An absent
+ *                 value keeps the client's own default ([[ProviderTimeouts]])
  */
+@Stable
 final case class OpenAICompatibleConfig(
   model: String,
   baseUrl: String,
@@ -41,11 +45,13 @@ final case class OpenAICompatibleConfig(
   contextWindow: Int = OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW,
   reserveCompletion: Int = OpenAICompatibleConfig.DEFAULT_RESERVE_COMPLETION,
   headers: Map[String, String] = Map.empty,
-  streamUsage: Boolean = true
+  streamUsage: Boolean = true,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
   override def providerId: ProviderId                           = ProviderId(OpenAICompatibleConfig.ProviderIdName)
   override def endpointUrl: Option[String]                      = Some(baseUrl)
   override def withModel(model: String): OpenAICompatibleConfig = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): OpenAICompatibleConfig = copy(timeouts = timeouts)
   override def toString: String =
     s"OpenAICompatibleConfig(model=$model, baseUrl=$baseUrl, apiKey=${Redaction.secretOpt(apiKey)}, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, " +

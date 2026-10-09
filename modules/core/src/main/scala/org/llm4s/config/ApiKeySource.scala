@@ -1,5 +1,7 @@
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
+
 /**
  * Where a named chat section's API key comes from.
  *
@@ -9,6 +11,7 @@ package org.llm4s.config
  * second account, missing its key, silently bills the first. [[Llm4sConfig.apiKeySources]]
  * reports which sections do which, so a policy can insist on explicit keys in production.
  */
+@Stable
 enum ApiKeySource:
 
   /**

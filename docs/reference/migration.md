@@ -1,5 +1,230 @@
 # Migration Guide
 
+## Stage 1 migration: agent runtime
+
+Not in a release yet ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime-design.md` §4.13. #1329 (events and tracing) and #1330 (orchestration, below) extend this note.
+
+```scala
+// before
+val agent = new Agent(client)
+val state = agent.run("query", tools, inputGuardrails = in, outputGuardrails = out, maxSteps = Some(10))
+
+// after
+val result = for {
+  agent  <- Agent.builder("assistant", client)
+              .withTools(tools)
+              .withMiddleware(new GuardrailMiddleware(in, out))
+              .withMaxSteps(10)
+              .build()
+  result <- agent.run("query")
+} yield result
+```
+
+- **`new Agent(client).run(q, tools, ...)` is `Agent.builder(id, client)...build()` then `run(q)`.** `tools`, `systemMessage`, `completionOptions`, `maxSteps` and `handoffs` move to `withTools` (a `ToolRegistry`, `MCPToolRegistry` included, or a `ToolSet`), `withSystemPrompt`, `withCompletionOptions`, `withMaxSteps` and `withHandoffs`. `build()` returns `Result[Agent]` and refuses clashing tool names, an invalid or duplicate handoff id, and `maxSteps < 1`. `run` has the overloads `run(query, config)`, `run(threadId, query)`, `run(threadId, query, config)` and `run(threadId, query, config, history)`; `config` is a `RunConfig` (budgets, deadline).
+- **Per-run guardrails are middleware.** `inputGuardrails`/`outputGuardrails` arguments become `.withMiddleware(new GuardrailMiddleware(input, output))` on the builder. A block is no longer an error: the run returns `Right` with `AgentStatus.Blocked(guardrail, reason)` and the thread stays usable (its checkpoint is `Failed`, which `recover` has nothing to continue and the next `run` accepts). An input block stores nothing of that turn's query (a new thread still keeps its imported `history`); an output block removes the whole turn - query, tool calls and results, answer, and any handoff made in it - so `result.messages` is the history from before the turn; `usage` keeps the turn's model calls. Another middleware's `beforeAgent`/`afterAgent` `Left` ends the run the same way but is returned as that `Left`, and a blank query - given, or produced by a `beforeAgent` - is a `ValidationError` with nothing stored. A guardrail that transforms (`PIIMasker`) now applies its transformation. Guardrails - and any run-boundary middleware (`beforeAgent`, `afterAgent`) - on the root agent guard the whole handoff family: they apply to every turn's query and final answer, whichever agent is active, outside the active agent's own. Give them to the root only; model and tool wrappers stay per agent.
+- **`continueConversation(state, ...)` is `continueConversation(result, ...)`.** It reads only `result.threadId`; `run(threadId, query)` is the same call by thread. A turn on a `Suspended` result is refused, not layered on parked work.
+- **Threads are kept until forgotten.** An `AgentState` was garbage once dropped; a thread lives in the agent's runtime, and one-shot `run` threads stay in the runtime until `forget`. Call `agent.forget(threadId)` (or `GraphRuntime.deleteThread(threadId, config)`) for a conversation you will not continue. `Checkpointer` implementations gain `deleteThread(threadId)`.
+- **`runMultiTurn` with `contextWindowConfig` is `runMultiTurn(first, followUps, config)` on an agent built with `new ContextWindowMiddleware(config)`.** Pruning trims what is sent to the model and never what the thread stores; the current turn (latest user message onward) is never pruned - the strategy, `Custom` included, runs only on the history before it, with the budget the turn leaves - the request always starts with a user message (so it may exceed the budget), and the system prompt is outside the budget. `runMultiTurn` stops at the first status that is not `Completed`.
+- **`AgentState` fields move to `AgentResult`.**
+
+  | `AgentState` | Now |
+  |---|---|
+  | `conversation` | `result.messages` (the thread's full history, never a system prompt) |
+  | `status` | `result.status` (below) |
+  | `logs` | removed; use `withTracing` and the `graph.*` events |
+  | `usageSummary` | `result.usage` (accumulated over the thread) |
+  | `tools`, `systemMessage`, `completionOptions`, `availableHandoffs`, `initialQuery` | the builder; `activeAgent` is on the result |
+
+- **`AgentStatus` cases are replaced.** `Complete` is `Completed(answer)`; `Failed(error)` is `Left(GraphError...)` (provider errors as `GraphError.NodeFailed(cause)`; the thread stays recoverable with `recover`); `InProgress` and `WaitingForTools` are not exposed; `HandoffRequested` is gone, because a handoff runs inside the same run. New: `Blocked(guardrail, reason)`, `StepLimitReached` and `Suspended(approvals, questions)`, continued with `resume(threadId, answers)` and `result.approve`/`reject`/`edit`/`reply`.
+- **`AgentContext` is removed.** `tracing` becomes `Agent.builder(...).withTracing(tracing)`, which emits the runtime's `graph.*` custom events for each run; `debug` and `traceLogPath` are gone. `TraceEvent.AgentStateUpdated` is no longer emitted by the agent; #1329 then replaced it with `TraceEvent.AgentRunEnded`.
+- **`Handoff(agent)` is `Handoff(id, builder)`, and `transferSystemMessage` is removed.** The target is an `AgentBuilder`, not a built agent, and its id must equal the handoff id: `Handoff.to("physics", physicsBuilder, "reason")`. A target that must hand back to an agent already in the graph is named by id, `Handoff.toId("triage", "reason")`, so cycles compile. Each agent sends its own system prompt, which is never stored. A self-handoff is refused at build, and a handoff mixed with other tool calls in one message is refused at run time with an error result for every call. `preserveContext = false` (a parameter of `Handoff.to`, `Handoff.of` and `Handoff.toId`) sends the target the last user message before the transfer, then the transfer onwards.
+- **`runStep`, `initializeSafe`, `runWithStrategy` and `ToolExecutionStrategy` (on the agent) are removed.** `agent.start(threadId, query)` returns an `AgentRun` (`threadId`, `runId`, `status`, `await()`, `cancel()`) at once; `run` is `start` then `await`; `startRecover` and `startResume` are the same for `recover` and `resume`. The parallel tool calls of one message are bounded by `RunBudgets.maxConcurrency`. `ToolExecutionStrategy` stays in core as a `ToolRegistry` feature; only the agent's use of it is gone. Step-by-step observation is `Agent.stream` or `AgentRun.subscribe` (#1329, below).
+- **`runWithEvents`, `continueConversationWithEvents`, `runCollectingEvents`, `AgentEvent` and `AgentStreamingExecutor` are removed** (#1329 replaces them with `Agent.stream`, below). `TraceEvent.AgentStateUpdated` is replaced by `TraceEvent.AgentRunEnded`, and `AgentState#toTraceEvent` is gone.
+
+  | Before | After |
+  |---|---|
+  | `agent.runWithEvents(query)(onEvent)` | `agent.stream(threadId, query)(listener).flatMap(_.await())` |
+  | `runCollectingEvents` | collect in the listener, or replay with `GraphRuntime.subscribe(threadId, afterSeq = 0)` |
+  | `AgentEvent.TextDelta(delta)` | `AgentEvents.TextDelta(d)` (`d.text`, `d.attempt`) with `withStreaming()` |
+  | `ToolCallStarted`/`ToolCallCompleted`/`ToolCallFailed` | `AgentEvents.ToolCallStarted`, `ToolCallResult` (live), `ToolExecuted` (durable, with outcome) |
+  | `HandoffStarted`/`HandoffCompleted` | `AgentEvents.HandedOff` |
+  | `InputGuardrail*`/`OutputGuardrail*` | `AgentEvents.GuardrailBlocked` (on a block); the outcome on `AgentStatus.Blocked` |
+  | `AgentStarted`/`AgentCompleted`/`AgentFailed`, `StepStarted`/`StepCompleted` | kernel events: `RunStarted`, `RunCompleted`, `RunFailed`; `ModelCallStarted`/`ModelCallCompleted` |
+  | `TraceEvent.AgentStateUpdated` | `TraceEvent.AgentRunEnded` |
+  | `context.progress(payload)` | `context.progress(name, version, payload)`, or an `EventType` |
+  | `ModelStep.next(messages, tools)` | `next(messages, tools, call)` |
+
+  Also: `AgentBuilder.withStreaming()`, `AgentRun.subscribe`, `AgentIO.stream*` and `AgentZ.stream*` are new. Langfuse traces now use the run id as the trace id and the thread id as the session id. `await()` returns once the listener has returned from the run's last event, so whatever it collected is complete. `AgentRunEnded.usage` is the run's own usage, not the thread's: a dashboard that summed the old cumulative figure per run double counted. A slow `AgentIO.stream`/`AgentZ.stream` consumer loses live events and gets a `StreamEvent.LiveGap` with their count; it no longer cancels the run. See the [streaming guide](../guide/agents/streaming.html).
+- **Session files: `AgentState.saveToFile`/`loadFromFile` become saved messages plus `history`.** Save `result.messages` (a `Vector[Message]` has a `ReadWriter`) from a completed run, and later `agent.run(newThreadId, query, RunConfig(), history = saved)` on a thread that does not exist. `history` is refused on an existing thread, with a system message in it (prompts belong to the agents), or if it ends mid tool call. `ConversationPersistenceExample` shows it. Old session JSON files are not read.
+- **`AgentIO` and `AgentZ` wrap the new `Agent`.** `LLMClientIO.agent(id)(configure)` and `LLMClientZ.agent(id)(configure)` take a function over the `AgentBuilder` (tools now belong to the agent); `run`, `continueConversation`, `recover` and `resume` take a `RunConfig` and return the `AgentResult`. Cancelling the fiber cancels the run. A thrown exception arrives as `GraphError.NodeFailed` carrying the original.
+- **`CodeWorker`.** `executeTask` loses `traceLogPath` and returns `Result[AgentResult]`; `WorkspaceSettings.traceLogPath` and `WORKSPACE_TRACE_LOG` are removed. `AssistantAgent` builds its agent once and keeps a thread id; `SessionState` holds the thread id and the last result, and its `consoleConfig` parameter is gone.
+- **Graph loop API.** `ToolLoop.build(id, version, root, agents: Vector[LoopAgent])` builds a family of agents (the earlier `ToolLoop.build(id, version, model, tools, middleware)` is gone; `LoopAgent(id, model, tools)` with `withSystemPrompt`, `withMaxSteps`, `withMiddleware` and `withHandoffs` replaces its arguments), and `ModelStep.next` returns a `Completion`, so a `wrapModelCall` middleware's `next` returns `Result[Completion]`.
+- **Errors.** Provider, tool and middleware failures are `Left(GraphError...)`; the error content a tool failure gives the model is `{"error": ...}`. A guardrail block, the step limit and a suspension are `Right`.
+- **Samples.** `AsyncToolAgentExample` is deleted; `StreamingAgentExample`, `StreamingWithToolsExample` and `EventCollectionExample` are rewritten on `Agent.stream` (#1329); the other agent samples use the builder.
+
+### Orchestration removed (#1330)
+
+`org.llm4s.agent.orchestration` is deleted: `PlanRunner`, `Plan`, `Node`, `Edge`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`, with `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (the agent's id is `org.llm4s.agent.AgentId`). `PlanRunner` passed `Map[String, Any]` between nodes and cast each node to `TypedAgent[Any, Any]`. A typed graph does the same job with checked handles, checkpoints and recovery. The [multi-agent graph recipe](../examples/cookbook.md#6-several-agents-in-one-graph) is a worked replacement.
+
+| Removed | Use instead |
+|---|---|
+| `TypedAgent[I, O]`, `TypedAgent.fromFunction` and the other factories | a `GraphNode[I]` given to `GraphBuilder.node`; call an `Agent` inside the node for an LLM step |
+| `Node`, `Edge`, `Plan`, `Plan.builder` | `GraphBuilder.node` / `edge` / `staticJoin` / `dynamicJoin`, then `compile(entry)(output)` |
+| `PlanRunner.execute(plan, inputs, token)` | `GraphRuntime.start(threadId, graph, input).flatMap(_.await())` |
+| `PlanRunner(maxConcurrentNodes)` | `RunConfig` with `RunBudgets(maxConcurrency = n)` |
+| `Policies.withRetry` | `retry = RetryPolicy(...)` on `GraphBuilder.node` / `implement` |
+| `Policies.withTimeout` | `RunBudgets.withTimeout` (the whole run); a node bounds its own calls |
+| `Policies.withFallback` | ordinary `Result` code in the node (`primary.orElse(fallback)`) |
+| `OrchestrationError` | `GraphError` |
+| `CancellationToken` | `RunHandle.cancel()` / `AgentRun.cancel()`, or interrupting the calling thread |
+| `org.llm4s.types.PlanId` | `RunId` |
+| `org.llm4s.types.AgentId` | `org.llm4s.agent.AgentId` |
+
+```scala
+// before
+val plan   = Plan.builder.addNode(research).addNode(summary).addEdge(Edge("e", research, summary)).build
+val result = PlanRunner().execute(plan, Map("research" -> question), token)   // Future[Result[Map[String, Any]]]
+
+// after
+val b        = GraphBuilder("research", "v1")
+val findings = StateKey.replace[String]("findings", "")
+val digest   = StateKey.replace[String]("digest", "")
+val summary = b.node[Unit]("summary", writes = Set(digest)) { (_, state, _) =>
+  NodeResult.fromResult(for {
+    f    <- state.get(findings)
+    turn <- summariser.run(s"Summarise: $f")
+    text <- turn.answer.toRight(ValidationError("summary", "no answer"))
+  } yield Command.empty.update(digest, text))
+}
+val research = b.node[String]("research", writes = Set(findings)) { (q, _, _) =>
+  NodeResult.fromResult(
+    researcher.run(q)
+      .flatMap(_.answer.toRight(ValidationError("research", "no answer")))
+      .map(f => Command.empty.update(findings, f).goto(summary))
+  )
+}
+val handle = b.compile(research)(_.get(digest)).flatMap(GraphRuntime.inMemory().start(ThreadId("t-1"), _, question))
+handle.foreach(_.cancel())   // instead of token.cancel()
+```
+
+`Agent.run`, `continueConversation`, `runMultiTurn`, `recover` and `resume` now cancel their turn when the calling thread is interrupted, and return once it has ended (waiting up to 5 seconds for the turn to end), so `recover` can follow at once; a caller already interrupted starts no turn. Cancelling a graph run therefore also cancels the agent turns its nodes are waiting on. Before, the turn kept running after `run` returned `Left(CancelledError)`. A caller that wants the turn to outlive an interrupt uses `start`, `startRecover` or `startResume`, and awaits the `AgentRun` itself. With tracing, the cancelled turn's trace is complete when the call returns. A turn that had already begun committing its outcome when the interrupt came cannot be cancelled: the call returns that outcome (`Right`, `Completed` or `Suspended`), with the interrupt flag still set - test the flag, not only the result, if an interrupt must stop your own code. `run(query)`, whose random thread id a `Left` does not carry, forgets the thread of a turn that failed or was cancelled once it has ended; name the thread (`run(threadId, query)`) to recover such a turn. The Java facade's `JAgent.run`, `continueConversation`, `resume` and `recover` go through these calls, so an interrupted Java caller cancels its turn too; they used to stop only the wait.
+
+## Agent middleware
+
+Not in a release yet ([#1279](https://github.com/llm4s/llm4s/issues/1279)). The graph tool loop
+takes a stack of `AgentMiddleware` in place of a `ToolCallPolicy`: one ordered extension point with
+`beforeAgent`, `afterAgent`, `wrapModelCall` and `wrapToolCall` hooks, for approval, guardrails,
+logging, retry and rate limits. The graph runtime is Experimental, so these are source breaks with
+no shims. Design: `docs/design/typed-agent-runtime-design.md` §4.8. (The `ToolLoop.build` signature shown below was generalised by #1328: see [Stage 1 migration](#stage-1-migration-agent-runtime).)
+
+- **`ToolCallPolicy` and `PolicyDecision` are removed, and `ToolLoop.build` loses `policy`.** It
+  takes `middleware: Seq[AgentMiddleware] = Nil` instead. A policy becomes an `AgentMiddleware`
+  overriding `wrapToolCall`: `Allow` is `next()`, `Deny(reason)` is
+  `ToolOutcome.Error(s"Denied: $reason")`, and `RequireApproval(reason)` is
+  `if context.approved then next() else ToolOutcome.NeedsApproval(reason)` - or use
+  `ApprovalMiddleware`:
+
+  ```scala
+  // before
+  val policy: ToolCallPolicy = call =>
+    call.name match
+      case "drop_table" => PolicyDecision.Deny("never allowed")
+      case "deploy"     => PolicyDecision.RequireApproval("deploys are irreversible")
+      case _            => PolicyDecision.Allow
+  ToolLoop.build("assistant", "v1", model, tools, policy)
+
+  // after
+  val guard = new AgentMiddleware:
+    val id = MiddlewareId("guard")
+    override def wrapToolCall(request: ToolCallRequest, context: ToolContext)(next: () => ToolOutcome): ToolOutcome =
+      request.call.name match
+        case "drop_table"                  => ToolOutcome.Error("Denied: never allowed")
+        case "deploy" if !context.approved => ToolOutcome.NeedsApproval("deploys are irreversible")
+        case _                             => next()
+  ToolLoop.build("assistant", "v1", model, tools, Seq(guard))
+
+  // or, for approval alone
+  ToolLoop.build("assistant", "v1", model, tools, Seq(ApprovalMiddleware.unlessReadOnly))
+  ```
+
+- **`ApprovalSource.Policy` becomes `ApprovalSource.Middleware(id)`**, naming the middleware that
+  asked; a tool's own request is still `ApprovalSource.Tool`.
+- **`Approve` now re-runs the chain.** It used to skip the policy and run the tool; it now runs the
+  whole middleware chain again, from the outermost wrapper, with `ToolContext.approved = true`, as
+  `Edit` does with the new arguments. A deny rule that depends only on the call refuses the same
+  calls as before; a wrapper that asks for approval must pass when `context.approved` is set, or
+  the call becomes an error result (`asked for approval again`).
+- **Guardrails in the graph loop apply their transformations.** `GuardrailMiddleware(input, output)`
+  runs input guardrails in `beforeAgent` and output guardrails in `afterAgent`, each on the value the
+  previous one returned, so a guardrail that rewrites its input (`PIIMasker`, say) changes what the
+  model sees and what the run answers. The legacy `Agent` validates every guardrail against the
+  original value and keeps it, so it never applied a transformation; it is unchanged. A `Block`
+  fails the run with the error `CompositeGuardrail.all` reports.
+
+## Agent tool contract and handoff ids
+
+Not in a release yet ([#1278](https://github.com/llm4s/llm4s/issues/1278)). The graph tool loop
+runs `AgentTool`s, whose arguments are validated against their schema (rendered non-strict, so
+optional fields may be omitted) before any middleware or the tool runs, and legacy handoffs take an explicit id. The graph runtime is
+Experimental, so these are source breaks with no shims. Design:
+`docs/design/typed-agent-runtime-design.md` §4.7.
+
+(Since #1328, `Handoff` targets are builders and `ToolLoop.build` takes a family of `LoopAgent`s: see
+[Stage 1 migration](#stage-1-migration-agent-runtime).)
+
+- **`LoopTool` is `AgentTool[A]`.** A tool now has an `AgentToolSpec[A]` - name, description and
+  a core `SchemaDefinition[A]`, with a `ReadWriter[A]` for the arguments - and receives them
+  decoded, with a `ToolContext` (run, call id, thread state, `approved`):
+
+  ```scala
+  // before
+  val search = LoopTool("search")((call, approved) => ToolOutcome.Completed(run(call.arguments)))
+
+  // after
+  final case class SearchArgs(query: String) derives ReadWriter
+  val schema = Schema.`object`[SearchArgs]("Search arguments").withRequiredField("query", Schema.string("Query"))
+  val spec   = AgentToolSpec[SearchArgs]("search", "Search the index", schema)
+  val search = AgentTool(spec)((args, context) => ToolOutcome.Success(ujson.Str(run(args.query))))
+  ```
+
+  `LoopTool.fromToolFunction(f)` becomes `AgentTool.fromToolFunction(f)`; its arguments are now
+  validated against the function's schema too.
+- **`toolloop.ToolOutcome` is `tool.ToolOutcome`.** `Completed(content: String)` becomes
+  `Success(content: ujson.Value, update)` (a `ujson.Str` is recorded as the string itself);
+  `Failed(message)` becomes `Error(message)`; `NeedsApproval` is unchanged. `Ask` and `Fatal` are
+  new: `Fatal(error)` fails the run with `GraphError.ToolFailed`, reported inside
+  `GraphError.NodeFailed`, and the run is recoverable. A thrown exception is still an error result.
+- **Approval now arrives in the context.** `LoopTool`'s `approved` parameter is
+  `context.approved`.
+- **State updates are declared.** A tool's `Success` update may touch only the keys in its
+  `writes`; anything else fails the run. `ToolLoop.build` refuses a tool that declares
+  `ToolLoop.results` or `Messages.key`.
+- **`ToolLoop.build` takes a `ToolSet`.** Build it with `ToolSet.of(tools*)`, which returns
+  `Left(ValidationError)` for an invalid name (`[a-zA-Z0-9_-]{1,64}`), a duplicate name, an
+  argument schema that is not an object, or a schema keyword the validator cannot check. `AgentToolSpec.apply` throws
+  `IllegalArgumentException` for an invalid name.
+- **`ModelStep.next` takes the tool set.** `next(messages)` becomes `next(messages, tools)`, and
+  `ModelStep.fromClient(client, options)` replaces `options.tools` with `tools.toolFunctions`, so
+  pass the tools to `ToolLoop.build`, not in `CompletionOptions`.
+- **Invalid arguments never reach the tool.** Arguments that break the schema, fail to decode or
+  fail `withValidation` become the error result `Invalid arguments for '<tool>': ...`. Edited
+  approval arguments are checked again, and a middleware's tool wrapper can still deny them.
+- **Handoffs take an id.** `Handoff(agent, ...)` becomes `Handoff(id, agent, ...)`, and
+  `Handoff.to(agent)` / `Handoff.to(agent, reason)` become `Handoff.to(id, agent)` /
+  `Handoff.to(id, agent, reason)`, which throw `IllegalArgumentException` for an invalid id;
+  `Handoff.of(id, agent, reason)` returns a `Result`. An id matches `[a-zA-Z0-9_-]{1,52}` and is
+  unique within one run's handoffs; an agent run given an invalid or duplicate id fails with
+  `ValidationError` before any model call. The handoff tool is `handoff_to_<id>` rather than
+  `handoff_to_agent_<hash>`, so a conversation stored with the old name does not match a handoff.
+
+  ```scala
+  // before
+  agent.run(query, tools, handoffs = Seq(Handoff.to(physicsAgent, "Physics expertise required")))
+
+  // after
+  agent.run(query, tools, handoffs = Seq(Handoff.to("physics", physicsAgent, "Physics expertise required")))
+  ```
+
 ## Run API for graph runs
 
 Not in a release yet ([#1277](https://github.com/llm4s/llm4s/issues/1277)). `GraphRuntime.start`,
@@ -52,6 +277,45 @@ shims. Design: `docs/design/typed-agent-runtime-design.md` §4.6.
   `RunCrashed`, `RunEvent.RunTimedOut`, and `StreamEvent.LiveGap` and `Disconnected` are new.
   `RunStarted` is now a case class, and it, `RunRecovered` and `RunResumed` gain `tenantId` and
   `principal`; events in the old encoding still read.
+
+## Provider configs: build with `apply`, change with `with*`
+
+Not in a release yet ([#1388](https://github.com/llm4s/llm4s/issues/1388)). `OpenAIConfig`,
+`AnthropicConfig` and `OllamaConfig` follow the growth-prone pattern (pass 5 below), so a new field
+no longer breaks Java and Kotlin callers. The constructor and `copy` are private:
+
+- **Scala**: `OpenAIConfig(...)` with the full field list, positional or named, still compiles.
+  Replace `config.copy(baseUrl = url)` with `config.withBaseUrl(url)`; each field has a setter
+  (`withApiKey`, `withModel`, `withOrganization`, `withContextWindow`, ...), and `OpenAIConfig`'s
+  `Option` fields take the value or an `Option`.
+- **Java and Kotlin**: call the companion's short `apply` and chain setters instead of the
+  constructor - `OpenAIConfig.apply(apiKey, "gpt-4o").withOrganization("org-1")`,
+  `AnthropicConfig.apply(apiKey, model)`, `OllamaConfig.apply(model, baseUrl)`. It takes the default
+  base URL and a context window from the model name; `fromValues` still consults the bundled model
+  catalogue.
+
+## Image generation errors are `LLMError`s
+
+Not in a release yet ([#1331](https://github.com/llm4s/llm4s/issues/1331)). `llm4s-image`'s
+generation clients return `Either[LLMError, _]`, so an interrupted call can return
+`CancelledError`, and `ImageGenerationError` extends `LLMError`. Source breaks, with no shims:
+
+- **Five cases are renamed** so they no longer share a name with an `org.llm4s.error` type. Both are
+  `LLMError`s, so a `match` that imported the wrong one would compile and never fire:
+
+  | Before (`org.llm4s.imagegeneration`) | After |
+  |---|---|
+  | `AuthenticationError` | `ImageAuthenticationError` |
+  | `RateLimitError` | `ImageRateLimitError` |
+  | `ServiceError` | `ImageServiceError` |
+  | `ValidationError` | `ImageValidationError` |
+  | `UnknownError` | `ImageUnknownError` |
+
+- **`ImageServiceError(message, statusCode)`**: the second field was `code: Int`, which clashed with
+  `LLMError.code: Option[String]`. It is a sealed type now (`TransientImageServiceError` for `0`, `408`,
+  `429` and `5xx`, `RejectedImageServiceError` otherwise); build and match it through
+  `ImageServiceError(message, status)` as before.
+- **A match on a client's result** needs a case for other `LLMError`s, `CancelledError` among them.
 
 ## Cancellation by interrupt
 
@@ -436,7 +700,7 @@ LLM step); the custom prompt has no counterpart.
 
 `org.llm4s.types` keeps `Result`, `AsyncResult`, `TryOps` / `OptionOps` / `FutureOps`, and the
 newtypes the library's APIs take: `SessionId`, `TraceId`, `FilePath`, `DirectoryPath`, `AgentId`,
-`PlanId`, `SemanticBlockId`, `ArtifactKey`, `ExternalizedContent`, `ContentSize`,
+`PlanId` (both removed later with orchestration, #1330), `SemanticBlockId`, `ArtifactKey`, `ExternalizedContent`, `ContentSize`,
 `HeadroomPercent` and the `TokenBudget`, `ContextWindowSize`, `ByteCount` and
 `ExternalizationThreshold` aliases.
 

@@ -1,5 +1,6 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
 import org.llm4s.util.DurationText
 
 import scala.concurrent.duration.{ DurationInt, FiniteDuration }
@@ -10,6 +11,7 @@ import scala.concurrent.duration.{ DurationInt, FiniteDuration }
  * @param retryAfter the delay the provider asked for before retrying (an HTTP `Retry-After`
  *                   header, usually on a 503), if it gave one
  */
+@Stable
 final case class ServiceError private (
   override val message: String,
   httpStatus: Int,
@@ -56,6 +58,6 @@ object ServiceError {
 
   // Make ServiceError recoverable or non-recoverable based on HTTP status
   implicit class ServiceErrorOps(error: ServiceError) {
-    def isRecoverableStatus: Boolean = error.httpStatus >= 500 || error.httpStatus == 429 || error.httpStatus == 408
+    def isRecoverableStatus: Boolean = org.llm4s.reliability.RetryPolicy.isRetryableStatus(error.httpStatus)
   }
 }

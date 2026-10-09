@@ -1,5 +1,6 @@
 package org.llm4s.context
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Conversation, Message }
 import org.llm4s.types.{ Result, TokenBudget, HeadroomPercent, ContextWindowSize }
@@ -70,6 +71,7 @@ import org.slf4j.LoggerFactory
  * @see [[TokenWindow]] for Step 4 implementation
  * @see [[ContextConfig]] for all configuration options
  */
+@Stable
 class ContextManager(
   tokenCounter: ConversationTokenCounter,
   config: ContextConfig,
@@ -212,6 +214,7 @@ class ContextManager(
 /**
  * Represents a single step in the new 4-stage context management pipeline
  */
+@Stable
 case class PipelineStep(
   name: String,
   messages: Seq[Message],
@@ -269,6 +272,7 @@ object ContextManager {
 /**
  * Configuration for context management pipeline
  */
+@Stable
 final case class ContextConfig private (
   headroomPercent: HeadroomPercent,
   maxSemanticBlocks: ContextWindowSize,
@@ -322,6 +326,7 @@ object ContextConfig {
 /**
  * Represents a single step in the context management pipeline
  */
+@Stable
 case class ContextStep(
   name: String,
   conversation: Conversation,
@@ -345,6 +350,7 @@ object ContextStep {
 /**
  * Final result of context management pipeline
  */
+@Stable
 case class ManagedConversation(
   conversation: Conversation,
   originalTokens: Int,

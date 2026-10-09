@@ -1,5 +1,6 @@
 package org.llm4s.context
 
+import org.llm4s.annotation.Stable
 import org.llm4s.context.tokens.{ TokenizerMapping, Tokenizer }
 import org.llm4s.error.TokenizerError
 import org.llm4s.identity.TokenizerId
@@ -40,6 +41,7 @@ import org.slf4j.LoggerFactory
  * @see [[ConversationTokenCounter.forModel]] for model-aware counter creation
  * @see [[TokenBreakdown]] for detailed per-message token analysis
  */
+@Stable
 class ConversationTokenCounter private (tokenizer: org.llm4s.context.tokens.StringTokenizer) {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -72,11 +74,22 @@ class ConversationTokenCounter private (tokenizer: org.llm4s.context.tokens.Stri
     case msg                   => countTextContent(msg.content)
   }
 
+  // Thinking counts too: Anthropic, Bedrock, Ollama, DeepSeek, Z.ai, OpenRouter and Mistral send it
+  // back, and a short answer can carry thousands of reasoning tokens. Providers that drop it
+  // (OpenAI, Gemini) are over-counted, which only trims early; under-counting overflows the window.
   private def countAssistantMessage(message: AssistantMessage): Int = {
     val contentTokens  = countTextContent(message.content)
     val toolCallTokens = message.toolCalls.map(countToolCall).sum
-    contentTokens + toolCallTokens
+    contentTokens + toolCallTokens + countThinking(message.thinking)
   }
+
+  private def countThinking(thinking: Seq[ThinkingBlock]): Int =
+    thinking.map {
+      case ThinkingBlock.Text(text, _) => countTextContent(text)
+      // opaque encrypted data, not text the tokenizer can measure: estimate from its size
+      case ThinkingBlock.Redacted(data)  => ConversationTokenCounter.estimateOpaqueTokens(data)
+      case ThinkingBlock.Opaque(_, data) => ConversationTokenCounter.estimateOpaqueTokens(data)
+    }.sum
 
   private def countToolMessage(message: ToolMessage): Int =
     countTextContent(message.content) + countTextContent(s"tool_call_id:${message.toolCallId}")
@@ -128,6 +141,9 @@ class ConversationTokenCounter private (tokenizer: org.llm4s.context.tokens.Stri
  */
 object ConversationTokenCounter {
   private val logger = LoggerFactory.getLogger(getClass)
+
+  /** A token estimate for opaque data (redacted thinking): one token per four characters, rounded up. */
+  private[llm4s] def estimateOpaqueTokens(data: String): Int = (data.length + 3) / 4
 
   /**
    * Test-only factory to avoid reflection in tests.
@@ -205,6 +221,7 @@ object ConversationTokenCounter {
 /**
  * Detailed breakdown of token usage in a conversation
  */
+@Stable
 case class TokenBreakdown(
   totalTokens: Int,
   messages: Seq[MessageTokenInfo],
@@ -226,6 +243,7 @@ case class TokenBreakdown(
 /**
  * Token information for a single message
  */
+@Stable
 case class MessageTokenInfo(
   role: String,
   tokens: Int,

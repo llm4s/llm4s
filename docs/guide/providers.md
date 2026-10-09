@@ -37,6 +37,7 @@ LLM4S supports these LLM providers, plus any endpoint that speaks the OpenAI cha
 | **Mistral** | Cloud | Mistral and Magistral models | Easy |
 | **Cohere** | Cloud | Command models, RAG | Easy |
 | **Ollama** | Local | Private, no API key, offline | Easy |
+| **IBM watsonx.ai** | Cloud Enterprise | Granite, Llama and Mistral models under IBM governance | Medium |
 
 Missing a vendor? See [Writing a Provider](writing-a-provider.md) to publish your own provider module.
 
@@ -407,7 +408,7 @@ Every named section shares the built-in fields - `provider`, `model`, `baseUrl`,
 | OpenAI, Requesty, OpenRouter | `organization` |
 | Azure OpenAI | `endpoint` (required), `apiVersion` |
 | Vertex AI | `project` (required), `location` |
-| Generic `openai-compatible` | `contextWindow`, `reserveCompletion`, `streamUsage` |
+| Generic `openai-compatible` | `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` |
 
 A required one that is missing fails the config with its name, the section and what it means; a
 key that is neither built-in nor declared by the section's provider is ignored with a warning
@@ -416,6 +417,61 @@ rather than silently doing nothing. `organization`, `endpoint`, `apiVersion`, `c
 `reserveCompletion` were built-in fields that every section carried until
 [#1133](https://github.com/llm4s/llm4s/issues/1133); the HOCON for the providers that use them is
 unchanged.
+
+---
+
+## IBM watsonx.ai
+
+> **Beta, built on deprecated endpoints.** `llm4s-watsonx` uses the watsonx.ai "Infer text" and
+> "Infer text event stream" endpoints (`/ml/v1/text/generation` and `/generation_stream`), which IBM
+> deprecated in its [February 2026 release notes](https://www.ibm.com/docs/en/software-hub/5.3.x?topic=new-watsonxai)
+> and will remove in the future; IBM points to the chat API. The module has never been run against
+> the live service (there is no watsonx account to test with), it is Beta and its API is not frozen,
+> and tools are unsupported because of this API. Migration to the chat API is tracked in
+> [#1314](https://github.com/llm4s/llm4s/issues/1314).
+
+IBM's enterprise AI platform, serving Granite, Llama and Mistral models. It lives in its own module,
+`llm4s-watsonx`; adding the dependency registers the `watsonx` provider.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-watsonx" % llm4sVersion
+```
+
+```hocon
+llm4s.providers.watsonx-main {
+  provider  = "watsonx"
+  model     = "ibm/granite-13b-instruct-v2"   # or meta-llama/llama-3-8b-instruct, mistralai/mistral-large
+  projectId = ${?WATSONX_PROJECT_ID}          # or spaceId for a deployment space
+  # baseUrl = "https://eu-de.ml.cloud.ibm.com" # default https://us-south.ml.cloud.ibm.com
+}
+```
+
+`WATSONX_API_KEY` supplies the IBM Cloud API key, which the client exchanges for an IAM bearer token
+and refreshes before it expires. The text-generation API takes one prompt string, so the
+conversation is flattened with `[SYSTEM]:`/`[USER]:`/`[ASSISTANT]:` prefixes.
+
+Behaviour to know about:
+
+- **Tools are rejected.** text-generation has no tool calling, so `complete` and `streamComplete`
+  return a `Left(ValidationError("tools", ...))` when `CompletionOptions.tools` is non-empty, before
+  any HTTP call.
+- **Ignored options.** `presencePenalty`, `frequencyPenalty`, `responseFormat`, `reasoning` and
+  `budgetTokens` have no equivalent and are dropped without error. Only `temperature`, `maxTokens`
+  and `topP` (when not 1.0) are sent.
+- **Forgeable markers.** Content is not escaped, so user content can contain `[SYSTEM]:` or
+  `[USER]:` lines that look like real turns to the model. Do not rely on the system prompt as a
+  security boundary against untrusted input. Requests send `stop_sequences` for `\n[USER]:`,
+  `\n[SYSTEM]:` and `\n[TOOL_RESULT:`, so a model cannot write the following turn itself.
+- **Abnormal stream endings.** A stream that ends without a terminal event, or whose `stop_reason`
+  is `error`, `cancelled` or `time_limit`, returns `Left(ServiceError)` naming the reason, not the
+  partial text (chunks already passed to `onChunk` were delivered). `eos_token`, `stop_sequence`,
+  `max_tokens`, `token_limit` and unknown reasons are normal stops. `complete` applies the same
+  rule to `results[0].stop_reason`.
+- **URLs and ids.** `baseUrl` and `iamUrl` must be `https` (plain `http` only for `localhost`,
+  `127.0.0.1` and `::1`), because the IAM request carries the API key. The API key is trimmed. Set
+  `projectId` or `spaceId`, not both.
+- **Environment variables.** Only `WATSONX_API_KEY` is bound automatically. `WATSONX_PROJECT_ID` and
+  the other variables in the example are just `${?VAR}` substitutions you write in your own config.
 
 ---
 
@@ -555,7 +611,10 @@ llm4s {
 
 - **Chat:** `deepseek-chat` (best for general use)
 - **Reasoning:** `deepseek-reasoner` (extended thinking). Its chain of thought
-  (`reasoning_content`) is returned as `Completion.thinking`, and streamed as thinking deltas.
+  (`reasoning_content`) is returned on the message as `AssistantMessage.thinking` (and so
+  `Completion.thinking`), streamed as thinking deltas, and sent back as `reasoning_content` in later
+  requests, which DeepSeek's thinking mode requires once tools are involved
+  (see [Thinking in conversation history](#thinking-in-conversation-history)).
 
 ### Costs
 
@@ -600,6 +659,27 @@ its key - `OPENROUTER_API_KEY` or `ZAI_API_KEY` - needs to be set.
 OpenRouter maps `CompletionOptions.reasoning` onto the underlying model: a thinking budget for
 Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest.
 
+Z.ai maps it onto what the configured GLM model documents. Thinking is on by default, and
+`reasoning_effort` defaults to `max` on the models that accept it. The mapping only ever rises with
+the effort, and `High` sends `max`, Z.ai's maximum and its default, so no level reasons more than
+`High`:
+
+| Model | `ReasoningEffort.None` | `Low` | `Medium` | `High` |
+|---|---|---|---|---|
+| GLM-5.3, GLM-5.3-Flash, GLM-5.3-FlashX | `reasoning_effort: low` | `low` | `high` | `max` |
+| GLM-5.2 | `reasoning_effort: none` | `low` | `medium` | `max` |
+| GLM-5.1, GLM-5, GLM-4.7, GLM-4.6, GLM-4.5 (and variants) | `thinking.type: disabled` | not sent | not sent | not sent |
+| any other model | not sent | not sent | not sent | not sent |
+
+GLM-5.3 always thinks and rejects `thinking.type: disabled`, so `None` gets the lowest effort it
+accepts, as Z.ai advises; it still produces, and bills, thinking tokens, and the first such request
+in a process logs a warning naming the model. GLM-5.3 accepts only `low`, `high` and `max`. GLM-5.2
+accepts `none`, `low`, `medium`, `high` and `max`, but Z.ai currently runs `low` and `medium` as
+`high` on it; llm4s still sends the level requested. The GLM-4.x and earlier GLM-5 models document
+no `reasoning_effort`. With `reasoning` unset, neither field is sent. A GLM thinking
+model's `reasoning_content` on Z.ai, and a model's `reasoning` and `reasoning_details` on OpenRouter,
+are returned on the message and sent back (see [Thinking in conversation history](#thinking-in-conversation-history)).
+
 ---
 
 ## OpenAI-compatible endpoints
@@ -625,16 +705,60 @@ Each named section is one endpoint, so several can sit side by side. The
 | `baseUrl` | yes | Requests go to `<baseUrl>/chat/completions`, and model listing to `<baseUrl>/models`. A trailing `/` is dropped |
 | `model` | yes | Sent as-is in every request |
 | `apiKey` | no | Sent as `Authorization: Bearer <key>`; with none, no `Authorization` header is sent |
-| `contextWindow` | no | The model's context window. Default 8192, which is deliberately small: set the real value |
+| `contextWindow` | no | The model's context window; overrides the model registry. With none, the registry's window for `model` when it has one of at least 8192 (see [where the context window comes from](#where-the-context-window-comes-from)), else 8192, which is deliberately small |
 | `reserveCompletion` | no | Tokens held back for the reply. Default 2048, or a quarter of a smaller window |
+| `registryProvider` | no | The [model registry](../MODEL_METADATA.md) provider whose entry for `model` gives the context window when `contextWindow` is not set: `groq`, `together_ai`, `fireworks_ai`, `xai`, `perplexity`, ... Inferred from the `baseUrl` host for those five hosted APIs; naming one here switches the inference off |
 | `headers` | no | Extra headers sent on every request; values are redacted when the config is printed |
 | `streamUsage` | no | Whether a streaming request asks for token usage with `stream_options.include_usage`. Default `true`; set `false` for an endpoint that rejects the field (see [streamed token usage](#what-the-generic-path-does-and-does-not-do)) |
 
 `baseUrl` is everything before `/chat/completions` in the vendor's endpoint URL. For most vendors
 that is the host plus `/v1`, but some add a prefix - Groq's is `/openai/v1`, Fireworks'
-`/inference/v1` - and Perplexity's Sonar API has no `/v1` at all. Nothing is
-known about the model up front, so set `contextWindow` from the vendor's model page; the recipes
-set it only where the vendor publishes one.
+`/inference/v1` - and Perplexity's Sonar API has no `/v1` at all.
+
+
+
+### Where the context window comes from
+
+The generic provider cannot ask an arbitrary endpoint how large the model's window is, so it takes it from
+the first of these that has an answer:
+
+1. the section's `contextWindow`;
+2. the [model registry](../MODEL_METADATA.md)'s entry for `model` under the `registryProvider` the section names;
+3. when the section names none, the registry's entry under the provider inferred from the `baseUrl` host, for
+   exactly these hosts: `api.groq.com` (`groq`), `api.together.xyz` and `api.together.ai` (`together_ai`),
+   `api.fireworks.ai` (`fireworks_ai`), `api.x.ai` (`xai`) and `api.perplexity.ai` (`perplexity`);
+4. 8192.
+
+```hocon
+internal-gateway {
+  provider = "openai-compatible"
+  baseUrl = "https://llm-gateway.internal.example/v1"   # not a known host, so name the registry provider
+  model = "llama-3.1-8b-instant"
+  registryProvider = "groq"                             # the window comes from groq/llama-3.1-8b-instant
+}
+```
+
+- **An explicit `registryProvider` is an instruction, not a hint.** It switches the host inference off, so a
+  `registryProvider = "perplexity"` on a Groq URL looks in Perplexity's entries only.
+- **The lookup is strict.** Only the named provider's own entry for exactly that model id counts. A partial
+  name does not match, and neither does another provider's entry for the same name, so a model the registry
+  does not list under that provider gets the default, never a neighbour's window.
+- **The host is matched exactly, never by substring.** `https://api.groq.com.evil.example/v1`,
+  `https://api.groq.com@evil.example/v1` and `https://evil.example/api.groq.com` all get no registry window.
+  NVIDIA NIM is not in the table because the registry's three `nvidia_nim` entries carry no chat model with a
+  window; `registryProvider = "nvidia_nim"` is still accepted.
+- **The registry can only enlarge the window.** A registry window below 8192 is ignored and the default used:
+  many entries, most of Fireworks' and Perplexity's older ones among them, carry a 4096 placeholder for input,
+  output and total alike (`fireworks_ai/.../minimax-m1-80k` is one), which would cut an 80k-context model's prompt
+  budget in half and reject a `reserveCompletion` that fits 8192. A model whose window really is smaller sets
+  `contextWindow`. The skipped entry is logged like a miss.
+- **Only the window is taken.** `reserveCompletion` keeps its own rule, a quarter of the window up to 2048,
+  because a registry entry's output limit can be as large as the whole window.
+- **The registry does not know every model.** It has no input limit for the Together recipe's model, and does
+  not list xAI's `grok-4.7` or the NVIDIA NIM model at all, so those recipes keep their `contextWindow`. A miss
+  under an explicit `registryProvider` is logged as a warning, and under an inferred one at info; a hit is
+  logged at info with the entry it used.
+
 
 ### Selecting it, and environment variables
 
@@ -657,7 +781,6 @@ llm4s {
       model = "openai/gpt-oss-120b"
       model = ${?GROQ_MODEL}          # optional override
       apiKey = ${?GROQ_API_KEY}
-      contextWindow = 131072
     }
   }
 }
@@ -769,11 +892,12 @@ groq-main {
   baseUrl = "https://api.groq.com/openai/v1"
   model = "openai/gpt-oss-120b"
   apiKey = ${?GROQ_API_KEY}
-  contextWindow = 131072
   reserveCompletion = 8192
 }
 ```
 
+- The context window, 131072 for this model, comes from the model registry, because `api.groq.com` is
+  a known host. Set `contextWindow` to override it, or for a model the registry does not list.
 - Model ids are Groq's own, including the `openai/` prefix here. `llama-3.3-70b-versatile`,
   which earlier versions of this guide used, was shut down for free and developer tiers on
   16 August 2026.
@@ -794,6 +918,8 @@ together-main {
 }
 ```
 
+- Keep `contextWindow`: the registry lists this model with no input limit, so without it the provider would
+  use 8192. (For a Together model the registry does give a limit for, it is taken automatically.)
 - Model ids are the `<organisation>/<model>` API strings from Together's serverless model list.
 - For a reasoning model on Together, the same reasoning limits apply as for Groq above.
 
@@ -805,10 +931,11 @@ fireworks-main {
   baseUrl = "https://api.fireworks.ai/inference/v1"
   model = "accounts/fireworks/models/gpt-oss-120b"
   apiKey = ${?FIREWORKS_API_KEY}
-  contextWindow = 131072
 }
 ```
 
+- The context window, 131072 for this model, comes from the model registry. Set `contextWindow` to
+  override it, or for a model the registry does not list.
 - Model ids are full paths, `accounts/fireworks/models/<name>`. Not every model in the catalogue
   is available serverless: check its model page before using it with a plain API key.
 - If the prompt plus `max_tokens` exceeds the model's window, Fireworks lowers `max_tokens`
@@ -828,6 +955,8 @@ xai-main {
 }
 ```
 
+- Keep `contextWindow`: the model registry does not list `grok-4.7`, so without it the provider would use
+  8192. (For an xAI model the registry does list, such as `grok-2`, it is taken automatically.)
 - xAI offers Chat Completions as a **legacy** endpoint; its new features ship on the Responses
   API, which the generic path does not speak. Chat, streaming and tools work.
 - `grok-4.7` is a reasoning model (default effort `high`). Its reasoning output is not read, and
@@ -850,6 +979,8 @@ nim-cloud {
 }
 ```
 
+- Keep `contextWindow`: the model registry has no usable chat entry for NVIDIA NIM, and
+  `integrate.api.nvidia.com` is not one of the hosts the registry provider is inferred from.
 - Model ids are `<publisher>/<model>`, as in NVIDIA's API catalogue. For a NIM you run
   yourself, see [NVIDIA NIM (self-hosted)](#nvidia-nim-self-hosted).
 
@@ -869,10 +1000,10 @@ perplexity-sonar {
   baseUrl = "https://api.perplexity.ai"    # no /v1: requests go to /chat/completions
   model = "sonar-pro"
   apiKey = ${?PERPLEXITY_API_KEY}
-  contextWindow = 200000
 }
 ```
 
+- The context window, 200000 for `sonar-pro`, comes from the model registry.
 - **Citations and search results are not surfaced.** Sonar returns them in top-level
   `citations` and `search_results` fields, and `Completion` has no field for them, so you get
   the answer text - with its `[1]`-style markers - and not the sources they point to.
@@ -997,10 +1128,13 @@ nim-local {
 #### Ollama (`/v1`)
 
 [`llm4s-ollama`](#ollama-local-models) (`provider = "ollama"`) is the first-class route to
-Ollama: it uses Ollama's native `/api/chat` API and also provides Ollama embeddings. Use the
-generic provider on Ollama's OpenAI-compatible `/v1` endpoint instead when you need **tool
-calling** - `llm4s-ollama`'s chat client sends no tools and drops tool messages - or when Ollama
-is behind a gateway that exposes only the OpenAI API:
+Ollama: it uses Ollama's native `/api/chat` API, supports **tool calling** (tools are sent, tool
+calls are read - whole or streamed - and tool results go back as `role: tool`) and also provides
+Ollama embeddings. Tool calling needs a model whose Ollama page lists the **tools** capability: for any
+other model Ollama answers HTTP 400 (`... does not support tools`), which the client reports as an
+`Invalid tools: Ollama model '<model>' does not support tool calling ...` validation error rather than
+sending the request again without the tools. Use the generic provider on Ollama's OpenAI-compatible `/v1` endpoint instead
+when Ollama is behind a gateway that exposes only the OpenAI API, or when you prefer that wire format:
 
 ```hocon
 ollama-openai {
@@ -1053,8 +1187,10 @@ val policy = ConfigPolicy.prodSafeDefaults
   )
   .withRequiredBaseUrlPattern(
     CatalogEnvironment.Prod,
-    "^https://(api\\.openai\\.com/v1|api\\.groq\\.com/openai/v1)$"
+    "openai-compatible",
+    "https://api\\.groq\\.com/openai/v1"
   )
+  .withMaxContextWindow(CatalogEnvironment.Prod, "openai-compatible", 131072)
 ```
 
 - `withAllowedProviders` and `withAllowedModelPatterns` **replace** the preset's lists; repeat
@@ -1064,14 +1200,27 @@ val policy = ConfigPolicy.prodSafeDefaults
   optional, so it is not checked; the rule is about sections that would otherwise inherit a
   vendor's shared key.
 - Model patterns match `<provider>/<model>`, so a Groq model is
-  `openai-compatible/openai/gpt-oss-120b`. Patterns are unanchored regular expressions: anchor
-  them with `^` and `$`, or `openai-compatible/.*` slips through under a looser one.
-- The base-URL pattern is **one per environment, checked against every provider's config** in
-  that environment, not only `openai-compatible`'s. Name every endpoint you use in it, as the
-  alternation above does.
-- Both presets cap `contextWindow` at 128000. A recipe above that - Groq, Together or Fireworks
-  at 131072, xAI at 500000 - fails the check with `contextWindow ... exceeds 128000`: lower the
-  section's `contextWindow`, or raise the cap with `withMaxContextWindow`.
+  `openai-compatible/openai/gpt-oss-120b`. Model and base-URL patterns are regular expressions
+  that must match the **whole** value, so `^` and `$` are optional: `openai/gpt-4o` allows
+  neither `openai/gpt-4o-mini` nor a dated snapshot such as `openai/gpt-4o-2024-08-06` (write
+  `openai/gpt-4o(-.*)?` for those). End a base-URL pin that allows paths with `/.*`, never a
+  bare `.*`: `https://api\.groq\.com.*` also accepts `https://api.groq.com.evil.example/v1`.
+- `withRequiredBaseUrlPattern(env, provider, pattern)` pins one provider's endpoint and
+  **replaces** the environment-wide pin for that provider. The environment-wide form,
+  `withRequiredBaseUrlPattern(env, pattern)`, is checked against every provider without a pin of
+  its own, not only `openai-compatible`; if you use it, name every endpoint in it (for example
+  `https://(api\.openai\.com|api\.groq\.com/openai)/v1`).
+- Context caps work the same way. The `prod` preset caps each of its providers at its current
+  models' window (openai and azure 128000, anthropic 200000, gemini 1048576, deepseek 131072) and
+  any other provider, `openai-compatible` included, at an environment-wide 1048576; `dev` caps
+  everything at 1048576. So Groq, Together or Fireworks at 131072 and xAI at 500000 pass as they
+  are. Set a per-provider cap with `withMaxContextWindow(env, provider, max)`, as above, to hold a
+  provider tighter, or to allow a model above 1048576. A section over its cap fails with
+  `contextWindow ... exceeds <max>`. A window taken from the model registry counts too: a Groq
+  section that sets no `contextWindow` resolves to 131072 and is checked at that.
+- Provider names in a per-provider pin or cap are canonicalised like provider ids (`google` is
+  `gemini`). One that names no registered provider and is not in `allowedProviders` is an
+  `[unknownProvider]` violation, so a typo cannot leave a provider unpinned.
 
 See `modules/config-policy/README.md` for the rest of the module.
 
@@ -1120,7 +1269,9 @@ endpoint rejects fields it does not know. Set `streamUsage = false` in the secti
 [streamed token usage](#what-the-generic-path-does-and-does-not-do)); the stream then carries
 usage only if the server sends it unasked.
 
-**Replies cut short, or context errors.** `contextWindow` defaults to 8192. Set it to the
+**Replies cut short, or context errors.** Without a `contextWindow`, the generic provider uses the model
+registry's window when it knows the model (see
+[where the context window comes from](#where-the-context-window-comes-from)), and otherwise 8192. Set it to the
 model's real window, or the server's configured context for a local server.
 
 ### Provider docs
@@ -1319,6 +1470,14 @@ llm4s {
 }
 ```
 
+### Structured output
+
+`llm4s-ollama` honours `CompletionOptions.responseFormat` (and so `completeStructured`) through
+the `format` field of `/api/chat`, for streaming and non-streaming calls alike:
+`ResponseFormat.Json` sends `"format": "json"`, and `ResponseFormat.JsonSchema` sends the schema
+object, which needs Ollama 0.5 or later. `JsonSchema.name` and `strict` have no Ollama equivalent
+and are ignored. With no `responseFormat`, no `format` field is sent.
+
 ### Available Models
 
 100+ models available:
@@ -1340,6 +1499,205 @@ Free! Just compute (CPU or GPU needed).
 - Works offline (no internet needed)
 - Use GPU for faster inference
 - Ideal for sensitive data (runs locally)
+
+---
+
+## Thinking in conversation history
+
+A model's reasoning is returned on the message it produced, as `AssistantMessage.thinking` - a
+sequence of `ThinkingBlock`s - and `Completion.thinking` is that message's thinking text. Because it
+lives on the message, it stays in the conversation (and in an agent's thread) like the content and
+tool calls do, and each client sends it back where its provider takes it:
+
+| Provider | Read from | Sent back as |
+|---|---|---|
+| Anthropic | `thinking` blocks (each with its `signature`) and `redacted_thinking` | the same blocks, unchanged and first in the assistant turn |
+| Bedrock (Converse) | `reasoningContent` (text with `signature`, or `redactedContent`) | the same blocks, unchanged and first in the assistant turn |
+| Ollama | `message.thinking` | `thinking` on the assistant message |
+| DeepSeek, Z.ai | `reasoning_content` | `reasoning_content` |
+| OpenRouter | `reasoning` / `thinking`, and `reasoning_details` | `reasoning`, and `reasoning_details` unchanged (same items, order and fields) |
+| Mistral (Magistral) | thinking chunks in `content` | a thinking chunk before the text chunk |
+| Gemini API, Vertex AI | a `thoughtSignature` on a part: the `functionCall` part, or the last text part (and thought summaries, `thought: true`, as text) | the signature, on the same part ([below](#gemini-and-vertex-ai-thought-signatures)) |
+| OpenAI, Azure, Cohere, generic `openai-compatible` | - | not sent: the API has no field for it |
+
+Anthropic and Bedrock require the signed blocks back when a thinking model's turn ends in tool
+calls, and reject a thinking block without a signature, so unsigned thinking - from another
+provider earlier in the conversation, or set by hand with `withThinking(text)` - is left out of
+their requests. The Anthropic client sends tool calls and their results as `tool_use` and
+`tool_result` blocks for the same reason: the thinking has to sit in the turn that made the calls.
+Both clients send a call only when its result is in the run of tool messages straight after it, as
+those APIs require; a result anywhere else (after a user message, say) goes as
+`[Tool result for <id>]: ...` text, and its call is left out.
+
+OpenRouter returns `reasoning_details` when the underlying model's reasoning is signed, summarised
+or encrypted (Claude, Gemini, OpenAI reasoning models), and
+[requires the whole sequence back unchanged](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#preserving-reasoning)
+when a conversation continues after tool calls. Each item is kept, with every field, as a
+`ThinkingBlock.Opaque("openrouter", json)` block after the reasoning text - streamed items are
+joined by `index` first - and only the OpenRouter client sends them back; every other client ignores
+opaque blocks that are not its own.
+
+### Gemini and Vertex AI thought signatures
+
+A thinking Gemini model attaches an opaque, base64 `thoughtSignature` to a part of its turn and expects it
+back on the same part. Google's
+[Vertex AI guide](https://cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures) states the rules
+these clients follow:
+
+- A response with `functionCall` parts needs its signature back: Gemini 3 models answer HTTP 400 when a
+  required signature is missing. With parallel calls only the first `functionCall` part carries one; across
+  sequential steps each step's first call does. The part goes back "exactly as it was returned".
+- A response without function calls may carry a signature on its last part (streaming can deliver it on a part
+  with empty text). Sending it back is recommended, and leaving it out is not an error.
+- A part with a signature is never merged with one without.
+
+Each signature is kept as a sealed `ThinkingBlock.Opaque` block of the client's provider id (`gemini` or
+`vertexai`) and goes back only to the provider and model that produced it. Unlike Anthropic's prefix rule,
+the binding is to that origin alone: Google asks for signatures to be preserved when history is modified or
+trimmed, and Gemini 3 answers HTTP 400 when the current turn's function-call signature is missing, so
+pruning or compressing earlier turns leaves them in place. What unseals one is a change of provider or
+model, or an edit to the message that carries it. A function call's signature is stored against the tool
+call's id with the `functionCall` payload exactly as Gemini returned it, and the part is replayed verbatim
+(its optional `id` kept, `args` present or absent as received); a populated `functionCall.id` becomes the
+tool call's own id and the matching `functionResponse` echoes it. A text part's signature records its
+character offset in the message content, and the content is split there when the turn is sent, so a signed
+part is never merged with an unsigned one (if the content no longer fits, the text signature is left out).
+Parts are rebuilt as text first, then function calls, as these clients have always sent them.
+
+Google's documentation does not say whether a signature from the Gemini API validates on Vertex AI, so the two
+clients are separate signing authorities: a conversation moved from one to the other keeps its text and
+drops the signatures, never sending a foreign one. A signature on an image part, or on a thought-summary
+part, is not kept, since these clients neither request nor send those parts.
+
+Signed, redacted and opaque thinking is *sealed*: it is valid only in the conversation it was produced in.
+[Anthropic](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking) validates a
+thinking block against everything sent before it - the top-level system prompt, the tools and every
+earlier message - and rejects it (400) once any of those changes; a block must also come back
+unchanged, beside the content and tool calls it came with. Bedrock documents its reasoning signature
+as a hash of all the messages in the conversation. llm4s enforces both halves with two rules
+(`hasSealedThinking` reports which state a message is in):
+
+- **The message itself.** `withContent` and `withToolCalls`, given a changed value, *unseal* the
+  thinking: they drop redacted and opaque blocks and signatures and keep the reasoning text. An agent's
+  `afterAgent` answer rewrite and a tool-call edit go through those setters, and so do the
+  Anthropic and Bedrock clients when they leave out an unpaired call.
+- **Everything before it.** When Anthropic, Bedrock or OpenRouter returns sealed thinking, the client records a
+  fingerprint of the request on the message (`AssistantMessage.thinkingBinding`): every system
+  message, the tools, the response format and every earlier message in order, system messages in
+  their positions (OpenRouter sends them inline, so moving one changes what came before), as sent.
+  When the message is
+  sent again, the client replays its sealed thinking only if the conversation before it still has
+  that fingerprint, and sends it unsealed otherwise. The check runs at the point of sending, so it
+  covers every rewrite of the history - `ContextPruning` and the agent's context-window middleware,
+  `TokenWindow` trimming, the context compressors (`DeterministicCompressor`, `LLMCompressor`,
+  `HistoryCompressor`, `ToolOutputCompressor`, `ContextManager`), a handoff's view of the thread,
+  memory or RAG context inserted before existing turns, a changed system prompt or tool set, or a
+  hand edit - without any of them having to know about thinking.
+- **Who produced it.** The fingerprint also covers the provider id and model that produced the
+  thinking, and the client checks it against the provider and model it is about to call. A
+  signature or reasoning item belongs to its producer, so a conversation produced by one client
+  and continued with another - Bedrock then Anthropic, or one OpenRouter model then another - is
+  sent unsealed, never with a foreign signature. Every client binds to the provider and model it is
+  configured with, never the model a response reports: Anthropic and Bedrock may report an alias's
+  resolved snapshot, and a router such as `openrouter/auto` (or OpenRouter's model fallbacks)
+  reports the model it chose for that request. The provider that resolved the alias or chose the
+  route is the one the thinking goes back to, and OpenRouter
+  [requires](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#preserving-reasoning-blocks)
+  the complete `reasoning_details` sequence on a tool-call continuation, so routed turns keep it.
+  Changing the configured model unseals every earlier turn. The endpoint is not part of it: a proxy or regional endpoint in
+  front of the same provider changes nothing the provider checks.
+
+### Moving between Anthropic and Bedrock
+
+A conversation that moves between the Anthropic API and Bedrock (a failover, say) has its signed thinking
+unsealed: the text is kept, the signatures and redacted blocks are dropped, and nothing is rejected. Anthropic
+[documents](https://platform.claude.com/docs/en/build-with-claude/thinking#thinking-encryption) that signature
+values are compatible across platforms (the Claude API, Amazon Bedrock and Google Cloud), but that is only one
+of the conditions for a replayed block to be accepted. The API also checks the model that produced it
+(each model reads its own thinking blocks and those of a fixed set of other models) and that everything sent
+before it is unchanged, and rejects the request with a 400 or drops the block when either fails. The two
+clients name the same model differently (`claude-sonnet-4-5-20250929` against
+`anthropic.claude-sonnet-4-5-20250929-v1:0`) and serialise the system prompt and tools through different
+APIs, so this library cannot show that the prefix a block was signed over is the prefix the other platform
+sees. Losing the reasoning context on a failover is safe; a rejected request is not, so each remains its own
+signing authority. Treating them as one would need a mapping between the two model ids and a live check that
+a signature survives the move.
+
+### Limits that remain
+
+- **OpenRouter routers and fallbacks.** OpenRouter's documentation says dynamic routers (`openrouter/auto`,
+  `openrouter/free`) omit the reasoning field, so there is nothing to replay for them, and that the
+  `reasoning_details` sequence must match the original output with nothing rearranged or modified. It does
+  not say what happens to the details when a fallback sends the request to a different model, so they are
+  sent back unchanged, as its documentation asks.
+- **Editing a tool call on a turn that is still in progress** (a human-in-the-loop edit) unseals that turn's
+  thinking, because the signature covers the tool call. Anthropic's manual extended thinking requires the
+  final assistant turn of a thinking-enabled request to begin with a thinking block, so such a request can be
+  rejected; adaptive thinking drops that requirement. Gemini 3 answers 400 for a missing function-call
+  signature in the current turn.
+
+Earlier turns whose history is unchanged keep their sealed thinking: Anthropic recommends passing
+all thinking blocks back, keeps them in context on newer models, and accepts any unbroken run of the
+original blocks. A change unseals every turn after it and none before it, so the replayed blocks never
+have a gap. Unsealed thinking keeps its text, which Anthropic and Bedrock leave out and other
+providers still receive. Sealed thinking with no binding - built by hand with `withThinking` - is
+not replayed. To keep signed thinking, append to the conversation and leave what is already there as
+it is. Thinking also counts toward token estimates (`ConversationTokenCounter`), since most providers
+resend it.
+
+```scala
+for {
+  first <- client.complete(conversation, options)     // a tool-call turn, with thinking
+  results = runTools(first.message.toolCalls)          // your tool execution: Seq[ToolMessage]
+  next    = conversation.addMessage(first.message).addMessages(results) // keeps the thinking
+  answer <- client.complete(next, options)             // the provider gets it back
+} yield answer
+```
+
+---
+
+## Citations and grounding sources
+
+A model that searches the web by itself reports the sources behind its answer. llm4s returns them on
+`Completion.citations`, a `List[Citation]` that is empty for every completion that has none:
+
+```scala
+import org.llm4s.llmconnect.model.Completion
+
+def sources(completion: Completion): List[String] =
+  completion.citations.map(c => s"${c.title.getOrElse(c.url)} <${c.url}>")
+```
+
+A `Citation` has a `url`, always, and these fields, each `None` when the provider did not send it:
+
+| Field | Meaning |
+|---|---|
+| `title` | the source's title |
+| `citedText` | a passage of the source that came with the citation (OpenRouter's `content`); it describes the source, not the answer |
+| `startIndex`, `endIndex` | where the inline citation sits, as the provider reports it: positions in `Completion.content`. OpenAI documents them as the first and last character "of the URL citation in the message"; no provider documents them as the span of prose the source supports |
+
+Take the two indices as the location of the citation, not of the supported claim, and check the
+provider's convention before cutting `content` with them (whether `end_index` is inclusive is the
+provider's call). `hasSpan` says whether both are present.
+
+| Provider | Citations |
+|---|---|
+| OpenAI (search models for Chat Completions), Azure, Requesty | Read from the message's `url_citation` annotations (`url`, `title`, `start_index`, `end_index`). Search models (`gpt-5-search-api`; the `*-search-preview` models were retired on 2026-07-23) return them with no request option; Azure and Requesty return them only if the deployment does. |
+| OpenRouter (`:online` models, or the web plugin) | The same annotations, plus `content` as `citedText`. |
+| DeepSeek, Z.ai, Mistral, Cohere, a generic `openai-compatible` endpoint | Read if the reply carries standard `url_citation` annotations; none of them is documented to. |
+| Anthropic, Gemini, Vertex AI, Ollama, Bedrock, watsonx | Empty. Anthropic's citations come from document inputs and its web search tool, and Gemini's `groundingMetadata` from its Google Search tool; llm4s cannot yet request either, so no response can carry them. |
+
+Things to know:
+
+- **Streaming.** A completion assembled from streamed chunks has no citations: neither OpenAI nor
+  OpenRouter documents where a stream carries them, so streamed chunks are not read. (A model that does not
+  stream natively is answered with one ordinary call, and that completion keeps its citations.)
+- **A citation never fails a reply.** One without a `url` is dropped, a field of the wrong type is read as
+  absent, and the answer is returned either way. The OpenAI client treats an `annotations` list the SDK
+  cannot parse at all as no citations; the OpenAI-compatible client keeps the entries it can read.
+- **Not read:** Perplexity's top-level `citations` list (its provider is tracked in #1026).
+- The shapes come from the OpenAI Java SDK's `url_citation` types and OpenRouter's documentation. No live
+  provider was called while writing this.
 
 ---
 
@@ -1463,7 +1821,7 @@ place. Defaults when `baseUrl` is omitted:
 | **Local Option** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ vLLM, LM Studio, llama.cpp |
 | **Context Window** | 128K | 200K | 1M | 128K | 4K-32K | 8K | Model-specific | Set in config (default 8K) |
 | **Vision Support** | ✅ | ✅ | ✅ | ✅ | ⚠️ Limited | ❌ | Model-specific | ❌ Text only |
-| **Function Calling** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ Limited | ✅ If the endpoint supports it |
+| **Function Calling** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ If the model supports it | ✅ If the endpoint supports it |
 | **Reasoning Models** | ✅ o1 | ❌ | ❌ | ✅ (via OpenAI) | ✅ deepseek-reasoner | ❌ | ❌ | ⚠️ Run, but reasoning not configured or read |
 | **Enterprise Support** | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | N/A | Endpoint-specific |
 | **Cost (Budget)** | Medium | Medium | 🏆 Low | High | 🏆 Very Low | Low | Free | Endpoint-specific |

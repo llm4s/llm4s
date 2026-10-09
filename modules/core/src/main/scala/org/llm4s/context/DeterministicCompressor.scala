@@ -1,5 +1,6 @@
 package org.llm4s.context
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -46,6 +47,7 @@ import org.slf4j.LoggerFactory
  * @see [[ToolOutputCompressor]] for the tool compaction implementation
  * @see [[CompressionRule]] for individual compression rules
  */
+@Stable
 object DeterministicCompressor {
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -159,6 +161,7 @@ object DeterministicCompressor {
  * @param name Identifier for logging and debugging
  * @param apply The transformation function
  */
+@Stable
 case class CompressionRule(name: String, apply: Seq[Message] => Seq[Message])
 
 /**
@@ -209,14 +212,14 @@ object CompressionRule {
   private def compressRedundantPhrases(message: Message): Message =
     message match {
       case msg: UserMessage      => msg.copy(content = cleanupRedundancy(msg.content))
-      case msg: AssistantMessage => msg.copy(contentOpt = Some(cleanupRedundancy(msg.content)))
+      case msg: AssistantMessage => msg.withContent(cleanupRedundancy(msg.content))
       case other                 => other
     }
 
   private def compressRepetitiveText(message: Message): Message =
     message match {
       case msg: UserMessage      => msg.copy(content = reduceRepetition(msg.content))
-      case msg: AssistantMessage => msg.copy(contentOpt = Some(reduceRepetition(msg.content)))
+      case msg: AssistantMessage => msg.withContent(reduceRepetition(msg.content))
       case other                 => other
     }
 
@@ -244,7 +247,7 @@ object CompressionRule {
     if (estimatedTokens <= maxTokens || estimatedTokens < minTokens * 2) message
     else {
       val summarized = summarizeContent(content, maxTokens)
-      message.copy(contentOpt = Some(summarized))
+      message.withContent(summarized)
     }
   }
 
@@ -283,7 +286,7 @@ object CompressionRule {
       case msg: AssistantMessage if isPreciseContent(msg.content) => msg
       case msg: AssistantMessage if isTranscriptLike(msg.content) =>
         val cleaned = cleanFillerWords(msg.content, fillerWords)
-        msg.copy(contentOpt = Some(cleaned))
+        msg.withContent(cleaned)
       case other => other
     }
   }
@@ -376,7 +379,7 @@ object CompressionRule {
 
       examples.head match {
         case _: UserMessage        => UserMessage(consolidatedContent)
-        case msg: AssistantMessage => msg.copy(contentOpt = Some(consolidatedContent))
+        case msg: AssistantMessage => msg.withContent(consolidatedContent)
         case tool: ToolMessage     => tool.copy(content = consolidatedContent)
         case _                     => UserMessage(consolidatedContent)
       }

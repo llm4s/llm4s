@@ -4,21 +4,52 @@ import org.llm4s.agent.guardrails.LLMGuardrail
 import org.llm4s.llmconnect.LLMClient
 
 /**
- * LLM-based factual accuracy validation guardrail.
+ * An LLM-as-Judge guardrail that rates whether content is supported by a reference text, typically the
+ * documents a RAG answer was built from.
  *
- * Uses an LLM to evaluate whether content is factually accurate
- * given a reference context. Useful for RAG applications where
- * you want to ensure the model's response aligns with retrieved documents.
+ * **What it evaluates:** the judge is given `referenceContext` and asked to rate the content's factual claims
+ * against it: 1.0 when all claims are supported by the context, 0.5 when some are supported and others cannot be
+ * verified, 0.0 when claims directly contradict it. It is told to evaluate factual claims only and to ignore
+ * stylistic differences. It checks the content against the text you supply, not against the world: by the
+ * prompt's rubric a claim the context does not mention is one that "cannot be verified", not one that
+ * contradicts it. The rubric gives such claims the middle score only beside supported ones; for content none of
+ * whose claims the context supports it names no score, so the judge may rate it anywhere below 1.0, and a lenient
+ * threshold such as 0.5 does not reliably pass it.
  *
- * @param llmClient The LLM client to use for evaluation
- * @param referenceContext The reference text to fact-check against
- * @param threshold Minimum score to pass (default: 0.7)
+ * **When to use it:** to catch answers that drift from retrieved documents. No rule-based guardrail can compare
+ * meaning with a source text. The RAG-specific guardrails in `org.llm4s.agent.guardrails.rag` are the alternative
+ * to look at first for retrieval pipelines.
+ *
+ * **Cost and side:** every validation makes one extra `llmClient.complete` call whose prompt contains the whole of
+ * `referenceContext` as well as the content, so cost and latency grow with the context size, and both go to the
+ * provider of `llmClient`. It is an output guardrail only. The scoring rules and the other limits are described on
+ * [[org.llm4s.agent.guardrails.LLMGuardrail]].
+ *
+ * **One context per instance:** `referenceContext` is fixed when the guardrail is built. A guardrail built once for
+ * an agent judges every later answer against that same text, so build a new one when the context changes (for
+ * example per retrieval). Its `description` embeds the first 50 characters of the context followed by `...`, so
+ * keep secrets out of the start of the context.
+ *
+ * **Failure:** `Left` with a [[org.llm4s.error.ValidationError]] on field `output`, for example
+ * `LLM judge score (0.40) below threshold (0.70) for LLMFactualityGuardrail`. It does not quote the unsupported
+ * claim. An unreadable reply or a failing `llmClient` is a `Left` too, never a pass.
+ *
+ * @param llmClient the client that makes the judge call; it can be the agent's own or a separate model
+ * @param referenceContext the text the content is checked against; it is inserted into the prompt as is
+ * @param threshold the lowest score that passes (a score equal to it passes); default 0.7
  *
  * @example
  * {{{
+ * import org.llm4s.agent.Agent
+ * import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+ * import org.llm4s.agent.guardrails.builtin.LLMFactualityGuardrail
+ *
  * val context = "Paris is the capital of France. It has a population of 2.1 million."
  * val guardrail = LLMFactualityGuardrail(client, context, threshold = 0.8)
- * agent.run(query, tools, outputGuardrails = Seq(guardrail))
+ * val agent = Agent
+ *   .builder("assistant", client)
+ *   .withMiddleware(new GuardrailMiddleware(Nil, Seq(guardrail)))
+ *   .build()
  * }}}
  */
 class LLMFactualityGuardrail(
@@ -52,7 +83,11 @@ class LLMFactualityGuardrail(
 object LLMFactualityGuardrail {
 
   /**
-   * Create an LLM factuality guardrail with reference context.
+   * Builds a factuality guardrail for a reference text.
+   *
+   * @param client the client that makes the judge call
+   * @param referenceContext the text the content is checked against
+   * @param threshold the lowest score that passes (default 0.7)
    */
   def apply(
     client: LLMClient,
@@ -62,13 +97,23 @@ object LLMFactualityGuardrail {
     new LLMFactualityGuardrail(client, referenceContext, threshold)
 
   /**
-   * Create a strict factuality guardrail (higher threshold).
+   * Builds a factuality guardrail with a threshold of 0.9.
+   *
+   * @param client the client that makes the judge call
+   * @param referenceContext the text the content is checked against
    */
   def strict(client: LLMClient, referenceContext: String): LLMFactualityGuardrail =
     new LLMFactualityGuardrail(client, referenceContext, threshold = 0.9)
 
   /**
-   * Create a lenient factuality guardrail (lower threshold).
+   * Builds a factuality guardrail with a threshold of 0.5.
+   *
+   * The lower threshold is the only difference from `apply`; it does not guarantee that claims the context does
+   * not cover pass. The rubric scores 0.5 only for content that mixes supported and unverifiable claims, so content
+   * none of whose claims the context supports may still score below 0.5 and fail (see the class documentation).
+   *
+   * @param client the client that makes the judge call
+   * @param referenceContext the text the content is checked against
    */
   def lenient(client: LLMClient, referenceContext: String): LLMFactualityGuardrail =
     new LLMFactualityGuardrail(client, referenceContext, threshold = 0.5)

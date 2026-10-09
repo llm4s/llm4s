@@ -1,0 +1,24 @@
+# Scala blocks of the documentation that cannot compile as written. One per line: page | block hash | action | detail
+#   skip | reason   : the block is left out
+#   with | imports  : the block is compiled after these imports (separate with `;`)
+# The hash is printed by `sbt docSnippetsReport`; editing a skipped block makes its entry stale and fails the build.
+getting-started/configuration.md | a87b6dca4f | skip | sbt build definition, not Scala source
+getting-started/configuration.md | 710572c7c5 | skip | sbt build definition, not Scala source
+getting-started/ollama-quickstart.md | 7eb63d2dc1 | skip | sbt build definition, not Scala source
+getting-started/ollama-quickstart.md | b523e171b9 | skip | sbt build definition, not Scala source
+getting-started/first-example.md | a984c0ef30 | skip | three lines of a for-comprehension shown on their own: they are the generators of the full example above
+getting-started/configuration.md | c54b304c14 | with | import org.llm4s.config.Llm4sConfig
+getting-started/configuration.md | 7b6f72222c | with | import org.llm4s.llmconnect.model._
+getting-started/configuration.md | 85fecd44b4 | with | import org.llm4s.llmconnect.model._
+getting-started/first-example.md | 89f9b90d1e | with | import org.llm4s.types.Result
+getting-started/first-example.md | 6cfa524a1f | with | import org.llm4s.llmconnect.model._
+getting-started/first-example.md | f69eeea180 | with | import org.llm4s.llmconnect.model._
+getting-started/first-example.md | 755ae2a95f | with | import org.llm4s.llmconnect.model._
+getting-started/first-example.md | 943f967995 | with | import org.llm4s.agent.Agent; import org.llm4s.toolapi.ToolRegistry
+getting-started/first-example.md | 14b2aad038 | with | import org.llm4s.llmconnect.model._
+getting-started/first-example.md | 3efbf67f4d | with | import org.llm4s.config.Llm4sConfig; import org.llm4s.llmconnect.LLMConnect; import org.llm4s.llmconnect.model._; import org.llm4s.model.ModelRegistryService
+getting-started/first-example.md | 7cb679647e | with | import org.llm4s.llmconnect.model._
+getting-started/first-example.md | 5a602dab3e | with | import org.llm4s.llmconnect.model._
+getting-started/ollama-quickstart.md | 36e396831d | with | import org.llm4s.llmconnect.model.CompletionOptions
+getting-started/testing-guide.md | 982ea603dd | skip | conceptual pseudocode by its own comment: InMemoryVectorStore, embedder and RAGPipeline are stand-ins, not llm4s classes
+getting-started/first-example.md | dc23df3294 | with | import org.llm4s.llmconnect.model._

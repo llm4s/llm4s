@@ -86,8 +86,8 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
     events1 should have size 1
     events2 should have size 1
-    events1.head shouldBe a[TraceEvent.AgentStateUpdated]
-    events1.head.asInstanceOf[TraceEvent.AgentStateUpdated].messages shouldBe event.messages
+    events1.head shouldBe a[TraceEvent.AgentRunEnded]
+    events1.head.asInstanceOf[TraceEvent.AgentRunEnded].messages shouldBe event.messages
   }
 
   it should "delegate traceToolCall to all tracers" in {
@@ -155,10 +155,10 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // FilteredTracing - delegate methods
   // =========================================================================
 
-  "FilteredTracing" should "apply its predicate to agent state events like any other" in {
+  "FilteredTracing" should "apply its predicate to agent run events like any other" in {
     val events   = mutable.Buffer.empty[TraceEvent]
     val tracer   = new RecordingTracing(events)
-    val filtered = TracingComposer.filter(tracer)(_.eventType != "agent_state_updated")
+    val filtered = TracingComposer.filter(tracer)(_.eventType != "agent_run_ended")
 
     filtered.traceEvent(agentStateEvent()) shouldBe Right(())
     events shouldBe empty
@@ -195,17 +195,17 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // TransformedTracing - delegate methods
   // =========================================================================
 
-  "TransformedTracing" should "transform agent state events like any other" in {
+  "TransformedTracing" should "transform agent run events like any other" in {
     val events = mutable.Buffer.empty[TraceEvent]
     val tracer = new RecordingTracing(events)
     val transformed = TracingComposer.transform(tracer) {
-      case e: TraceEvent.AgentStateUpdated => e.copy(messages = Seq.empty)
-      case other                           => other
+      case e: TraceEvent.AgentRunEnded => e.copy(messages = Seq.empty)
+      case other                       => other
     }
 
     transformed.traceEvent(agentStateEvent()) shouldBe Right(())
     events should have size 1
-    events.head.asInstanceOf[TraceEvent.AgentStateUpdated].messages shouldBe empty
+    events.head.asInstanceOf[TraceEvent.AgentRunEnded].messages shouldBe empty
   }
 
   it should "delegate traceToolCall to underlying" in {
@@ -296,11 +296,11 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // =========================================================================
 
   /**
-   * The event an in-progress agent's `AgentState#toTraceEvent` produces, built directly: these
+   * The event an ended agent run carries, built directly: these
    * specs are about the composers, and the agent runtime is in `llm4s-agent` (#1242).
    */
-  private def agentStateEvent(): TraceEvent.AgentStateUpdated =
-    TraceEvent.AgentStateUpdated("InProgress", messageCount = 1, logCount = 1, messages = Seq(UserMessage("Hello")))
+  private def agentStateEvent(): TraceEvent.AgentRunEnded =
+    TraceEvent.AgentRunEnded("thread-1", "run-1", "assistant", "completed", Seq(UserMessage("Hello")), UsageSummary())
 
   private def createCompletion(): Completion =
     Completion(

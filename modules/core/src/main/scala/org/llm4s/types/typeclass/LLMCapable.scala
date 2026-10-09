@@ -1,5 +1,6 @@
 package org.llm4s.types.typeclass
 
+import org.llm4s.annotation.Stable
 import org.llm4s.Result
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, Conversation, UserMessage }
@@ -11,6 +12,7 @@ import org.llm4s.types._
  * Provides a unified interface for different types to be processed by LLMs,
  * enabling generic algorithms that work across various input types.
  */
+@Stable
 trait LLMCapable[A] {
 
   /** Convert value to conversation format */

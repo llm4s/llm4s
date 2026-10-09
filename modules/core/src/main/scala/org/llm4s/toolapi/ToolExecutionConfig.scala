@@ -1,5 +1,7 @@
 package org.llm4s.toolapi
 
+import org.llm4s.annotation.Stable
+
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.duration.DurationLong
 
@@ -34,6 +36,7 @@ import scala.concurrent.duration.DurationLong
  * registry.executeAll(requests, ToolExecutionStrategy.ParallelWithLimit(2), config)
  * }}}
  */
+@Stable
 case class ToolExecutionConfig(
   timeout: Option[FiniteDuration] = None,
   retryPolicy: Option[ToolRetryPolicy] = None
@@ -46,6 +49,7 @@ case class ToolExecutionConfig(
  * @param baseDelay    Delay after first failure before first retry.
  * @param backoffFactor Multiplier for each subsequent delay (e.g. 2.0 => baseDelay, 2*baseDelay, 4*baseDelay).
  */
+@Stable
 case class ToolRetryPolicy(
   maxAttempts: Int,
   baseDelay: FiniteDuration,

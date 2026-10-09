@@ -1,10 +1,13 @@
 package org.llm4s.types.typeclass
 
+import org.llm4s.annotation.Stable
+
 import ujson.{ Value => JsonValue }
 
 /**
  * Encoder type class for JSON serialization.
  */
+@Stable
 trait Encoder[A] {
   def encode(a: A): JsonValue
 }

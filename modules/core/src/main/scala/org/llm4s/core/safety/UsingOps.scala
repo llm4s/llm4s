@@ -1,10 +1,13 @@
 // scalafix:off DisableSyntax.NoKeywordFinally
 package org.llm4s.core.safety
 
+import org.llm4s.annotation.Stable
+
 /**
  * Resource management helpers for automatic cleanup
  * This file legitimately needs try-finally for low-level resource management
  */
+@Stable
 object UsingOps {
 
   /**

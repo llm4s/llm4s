@@ -1,11 +1,12 @@
 package org.llm4s.samples.guardrails
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails._
 import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.samples.util.AgentResults
 import org.slf4j.LoggerFactory
 
 /**
@@ -24,6 +25,20 @@ object CompositeGuardrailExample extends App {
 
   logger.info("=== Composite Guardrail Example ===")
 
+  // A composite is a `Guardrail[String]`, not an `InputGuardrail`, and `GuardrailMiddleware` takes input
+  // guardrails: wrap the composite (a cast would throw a ClassCastException when the agent is built).
+  private def asInput(guardrail: Guardrail[String]): InputGuardrail = new InputGuardrail {
+    val name: String                                            = guardrail.name
+    def validate(value: String): org.llm4s.types.Result[String] = guardrail.validate(value)
+  }
+
+  // A blocked input is a successful run whose status is Blocked, not a Left; so is any run that
+  // did not reach an answer.
+  private def blocked(result: org.llm4s.agent.AgentResult): Boolean =
+    !result.status.isInstanceOf[AgentStatus.Completed]
+
+  private def reason(result: org.llm4s.agent.AgentResult): String = AgentResults.describe(result.status)
+
   // Example 1: All guardrails must pass (AND logic)
   logger.info("Example 1: All guardrails must pass")
 
@@ -39,16 +54,16 @@ object CompositeGuardrailExample extends App {
     registryService <- Llm4sConfig.modelRegistryService()
     given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerCfg)
-    agent = new Agent(client)
-
-    state <- agent.run(
-      query = "Tell me about Scala programming",
-      tools = new ToolRegistry(Seq.empty),
-      inputGuardrails = Seq(safetyChecks.asInstanceOf[InputGuardrail])
-    )
+    agent <- Agent
+      .builder("composite-guardrail-1", client)
+      .withMiddleware(GuardrailMiddleware(Seq(asInput(safetyChecks)), Seq.empty))
+      .build()
+    state <- agent.run("Tell me about Scala programming")
   } yield state
 
   result1 match {
+    case Right(state) if blocked(state) =>
+      logger.error("✗ Validation failed: {}", reason(state))
     case Right(_) =>
       logger.info("✓ All safety checks passed!")
       logger.info("  Length check: PASS")
@@ -74,16 +89,16 @@ object CompositeGuardrailExample extends App {
     registryService <- Llm4sConfig.modelRegistryService()
     given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerCfg)
-    agent = new Agent(client)
-
-    state <- agent.run(
-      query = "Tell me about Scala programming",
-      tools = new ToolRegistry(Seq.empty),
-      inputGuardrails = Seq(languageDetection.asInstanceOf[InputGuardrail])
-    )
+    agent <- Agent
+      .builder("composite-guardrail-2", client)
+      .withMiddleware(GuardrailMiddleware(Seq(asInput(languageDetection)), Seq.empty))
+      .build()
+    state <- agent.run("Tell me about Scala programming")
   } yield state
 
   result2 match {
+    case Right(state) if blocked(state) =>
+      logger.error("✗ No language patterns matched: {}", reason(state))
     case Right(_) =>
       logger.info("✓ Query matched at least one language pattern!")
       logger.info("  (Contains: scala, functional, java, python, etc.)")
@@ -107,16 +122,16 @@ object CompositeGuardrailExample extends App {
     registryService <- Llm4sConfig.modelRegistryService()
     given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerCfg)
-    agent = new Agent(client)
-
-    state <- agent.run(
-      query = "What is functional programming?",
-      tools = new ToolRegistry(Seq.empty),
-      inputGuardrails = Seq(sequentialChecks.asInstanceOf[InputGuardrail])
-    )
+    agent <- Agent
+      .builder("composite-guardrail-3", client)
+      .withMiddleware(GuardrailMiddleware(Seq(asInput(sequentialChecks)), Seq.empty))
+      .build()
+    state <- agent.run("What is functional programming?")
   } yield state
 
   result3 match {
+    case Right(state) if blocked(state) =>
+      logger.error("✗ Validation failed at some step: {}", reason(state))
     case Right(_) =>
       logger.info("✓ All sequential checks passed!")
       logger.info("  Step 1 (Length): PASS")
@@ -158,22 +173,22 @@ object CompositeGuardrailExample extends App {
     registryService <- Llm4sConfig.modelRegistryService()
     given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(providerCfg)
-    agent = new Agent(client)
-
-    state <- agent.run(
-      query = "Tell me about Scala programming best practices",
-      tools = new ToolRegistry(Seq.empty),
-      inputGuardrails = Seq(combinedValidation)
-    )
+    agent <- Agent
+      .builder("composite-guardrail-4", client)
+      .withMiddleware(GuardrailMiddleware(Seq(combinedValidation), Seq.empty))
+      .build()
+    state <- agent.run("Tell me about Scala programming best practices")
   } yield state
 
   result4 match {
+    case Right(state) if blocked(state) =>
+      logger.error("✗ Combined validation failed: {}", reason(state))
     case Right(state) =>
       logger.info("✓ Combined validation passed!")
       logger.info("  Safety layer: PASS")
       logger.info("  Business layer: PASS")
       logger.info("Response preview:")
-      state.conversation.messages.last.content.split("\n").take(3).foreach(line => logger.info("  {}", line))
+      AgentResults.answerOrStatus(state).split("\n").take(3).foreach(line => logger.info("  {}", line))
 
     case Left(error) =>
       logger.error("✗ Combined validation failed: {}", error.formatted)

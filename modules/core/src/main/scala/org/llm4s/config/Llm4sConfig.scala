@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoConfigFactory, DisableSyntax.NoSysEnv, DisableSyntax.NoSystemGetenv, DisableSyntax.NoPureConfigDefault
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.spi.ProviderRegistry
@@ -59,14 +60,15 @@ import pureconfig.ConfigSource
  *   registry <- Llm4sConfig.modelRegistryService()
  *   cfg      <- Llm4sConfig.defaultProvider()
  *   client   <- LLMConnect.getClient(cfg)(using registry)
- *   agent     = new Agent(client)
- *   state    <- agent.run("Hello", ToolRegistry.empty)
- * } yield state
+ *   agent    <- Agent.builder("assistant", client).build()   // llm4s-agent
+ *   result   <- agent.run("Hello")
+ * } yield result.answer
  * }}}
  *
  * @see [[org.llm4s.config.ConfigKeys]] for the environment variables core's
  *      `reference.conf` binds.
  */
+@Stable
 object Llm4sConfig {
 
   def modelRegistryConfig(): Result[ModelRegistryConfig] =

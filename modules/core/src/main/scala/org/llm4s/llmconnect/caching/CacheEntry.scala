@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions }
 import java.time.Instant
 
@@ -23,6 +24,7 @@ import java.time.Instant
  *                   options (e.g. different temperature or tool set) result in a
  *                   `OptionsMismatch` miss and bypass the cache.
  */
+@Stable
 case class CacheEntry(
   embedding: Seq[Double],
   response: Completion,

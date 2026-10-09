@@ -15,9 +15,17 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
     val config = ShellConfig(allowedCommands = Seq("ls", "cat", "echo"))
 
     config.isCommandAllowed("ls") shouldBe true
-    config.isCommandAllowed("ls -la") shouldBe true
-    config.isCommandAllowed("cat file.txt") shouldBe true
-    config.isCommandAllowed("echo hello") shouldBe true
+    config.isCommandAllowed("cat") shouldBe true
+    config.isCommandAllowed("echo") shouldBe true
+    config.isCommandAllowed("  ls  ") shouldBe true
+  }
+
+  it should "take a program name, not a command line" in {
+    val config = ShellConfig(allowedCommands = Seq("ls", "cat", "echo"))
+
+    config.isCommandAllowed("ls -la") shouldBe false
+    config.isCommandAllowed("cat file.txt") shouldBe false
+    config.isCommandAllowed("") shouldBe false
   }
 
   it should "reject non-allowed commands" in {
@@ -46,6 +54,29 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
     config.isCommandAllowed("wc") shouldBe true
     config.isCommandAllowed("date") shouldBe true
     config.isCommandAllowed("whoami") shouldBe true
+  }
+
+  it should "not allow a launcher that runs any other program" in {
+    val config = ShellConfig.readOnly()
+
+    // `env sh -c ...` runs `sh`; bare `env` prints the environment, API keys included.
+    Seq("env", "xargs", "nice", "nohup", "timeout", "sh", "bash", "find").foreach { launcher =>
+      withClue(launcher)(config.isCommandAllowed(launcher) shouldBe false)
+    }
+  }
+
+  it should "refuse `env` running another program, without starting a process" in {
+    val tool = ShellTool.createSafe(ShellConfig.readOnly()).getOrElse(fail("could not build the tool"))
+
+    Seq("env sh -c 'echo ran'", "env", "env echo hi").foreach { command =>
+      val result = tool.handler(SafeParameterExtractor(ujson.Obj("command" -> command)))
+
+      withClue(command) {
+        result.left.map(_.toLowerCase) shouldBe Left(
+          "command 'env' is not allowed. allowed: " + ShellConfig.readOnly().allowedCommands.mkString(", ")
+        )
+      }
+    }
   }
 
   it should "not allow write commands" in {

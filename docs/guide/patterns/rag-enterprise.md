@@ -7,7 +7,7 @@ nav_order: 2
 
 # RAG for Enterprise
 
-> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](https://github.com/llm4s/llm4s/tree/main/modules/samples).
 
 Learn production-ready strategies for building Retrieval-Augmented Generation (RAG) systems at scale. This guide covers document ingestion, hybrid search, cost optimization, and quality assurance.
 
@@ -686,7 +686,7 @@ object ProductionRAG {
       context = searchResults.map(_.content).mkString("\n\n")
       
       // Step 2: Generate answer with context
-      answer <- agent.run(
+      result <- agent.run(
         s"""Answer this question using the provided context.
           |If the answer is not in the context, say "I don't have enough information".
           |
@@ -695,12 +695,13 @@ object ProductionRAG {
           |Context:
           |$context""".stripMargin
       )
+      answer <- result.answer.toRight(ValidationError("rag", s"the agent ended with ${result.status}"))
       
       // Step 3: Check grounding
-      groundingScore <- groundingChecker.check(answer.message, context)
+      groundingScore <- groundingChecker.check(answer, context)
       
       finalAnswer <- if (groundingScore.score >= config.groundingThreshold) {
-        Result.success(answer.message)
+        Result.success(answer)
       } else {
         Result.failure(
           s"Answer not sufficiently grounded (score: ${groundingScore.score}). " +

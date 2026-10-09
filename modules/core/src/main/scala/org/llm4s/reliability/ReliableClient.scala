@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoKeywordCatch
 package org.llm4s.reliability
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Conversation, Completion, CompletionOptions, StreamedChunk }
 import org.llm4s.types.Result
@@ -33,6 +34,7 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference 
  * @param sleep how the client waits between attempts; injectable so a test can record the
  *              delays chosen, or throw `InterruptedException` to simulate an interrupted wait
  */
+@Stable
 final class ReliableClient(
   underlying: LLMClient,
   providerName: String,
@@ -494,6 +496,7 @@ final class ReliableClient(
 /**
  * Circuit breaker state.
  */
+@Stable
 sealed trait CircuitState
 object CircuitState {
   case object Closed   extends CircuitState // Normal operation

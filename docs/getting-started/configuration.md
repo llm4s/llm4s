@@ -70,6 +70,7 @@ libraryDependencies ++= Seq(
 | `anthropic` | `llm4s-anthropic` |
 | `gemini`, `vertexai` | `llm4s-gemini` |
 | `ollama` | `llm4s-ollama` |
+| `bedrock` | `llm4s-bedrock` |
 | `deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `openai-compatible` | `llm4s-openai-compatible` |
 
 The provider modules are on `main` but not yet published: `0.4.1` ships every provider inside
@@ -159,12 +160,14 @@ the value.
 | `zai` | `ZAI_API_KEY` | `llm4s-openai-compatible` |
 | `openrouter` | `OPENROUTER_API_KEY` | `llm4s-openai-compatible` |
 | `mistral` | `MISTRAL_API_KEY` | `llm4s-openai-compatible` |
-| `cohere` | `COHERE_API_KEY` (chat and reranker) | `llm4s-openai-compatible`, `llm4s-rag` |
+| `cohere` | `COHERE_API_KEY` (chat, reranker and embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `voyage` | `VOYAGE_API_KEY` | `llm4s-voyage` |
+| `jina` | `JINA_API_KEY` | `llm4s-jina` |
 
-`ollama` takes no key, the generic `openai-compatible` provider has no vendor, and `vertexai`
+`ollama` takes no key, the generic `openai-compatible` provider has no vendor, `vertexai`
 authenticates with OAuth2 (Application Default Credentials, or a service-account file named by
-its `apiKey`), so none of them has a shared key.
+its `apiKey`), and `bedrock` authenticates with AWS credentials (the AWS default credential chain,
+a `profile`, or explicit keys), so none of them has a shared key.
 
 A section for a **second account** sets its own key, which wins over the shared one:
 
@@ -198,17 +201,70 @@ config-policy `prod` preset flags any section that does not (see
 | `apiKey` | The API key; required by every cloud provider. Optional in the section when the vendor's shared key is set ([API keys](#api-keys)) |
 | `baseUrl` | Overrides the provider's default endpoint; **required** for `ollama` and `openai-compatible` |
 | `headers` | Extra HTTP headers; sent by generic `openai-compatible` endpoints and by model listing |
+| `timeouts` | How long a request and a stream may take: `timeouts { request = 3m, stream = 15m }`. Every provider that makes HTTP calls reads it; see [Timeouts](#timeouts) |
 | `organization` | OpenAI, Requesty and OpenRouter: the OpenAI organisation id, sent as `OpenAI-Organization` |
 | `endpoint`, `apiVersion` | Azure OpenAI: the resource endpoint (required) and API version |
 | `project`, `location` | Vertex AI: the GCP project id (required) and region (default `us-central1`) |
-| `contextWindow`, `reserveCompletion`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
+| `region`, `profile`, `accessKeyId`, `secretAccessKey`, `sessionToken` | AWS Bedrock: the AWS region (required, never defaulted); a shared-config profile; or explicit credentials, with a session token for temporary ones. With none of the credential keys the AWS default credential chain is used. `baseUrl` overrides the endpoint |
+| `contextWindow`, `reserveCompletion`, `registryProvider`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
 
-The first five keys are shared by every provider. The rest belong to the providers named, which
+The first six keys are shared by every provider. The rest belong to the providers named, which
 declare them ([provider-specific keys](../guide/providers#provider-specific-keys)); in a section for
 any other provider such a key is ignored with a warning naming it, as a misspelt key is.
 
 Each provider module's `reference.conf` has a commented example section, and the
 [provider guide](../guide/providers) covers each provider in detail.
+
+### Timeouts
+
+Every provider section, and every embedding section, accepts an optional `timeouts` block:
+
+```hocon
+llm4s.providers.my-openai {
+  provider = "openai"
+  model    = "gpt-4o"
+  timeouts {
+    request = 3m      # a call that returns one response: a completion, an embedding
+    stream  = 15m     # a streamed completion
+  }
+}
+
+llm4s.embeddings.openai.timeouts.request = 30s
+```
+
+Each value is a duration (`30s`, `2m`, `1500ms`, `1h`) and is optional: **a value you leave out keeps
+that client's own default, so a section without the block behaves exactly as it did before.** A value
+must be positive and finite; `0s`, a negative value, `Inf` and anything that is not a duration are
+refused when the section is loaded, naming the key (`llm4s.providers.my-openai.timeouts.request`). A
+misspelt key inside the block (`reqest = 3m`) is refused too, rather than silently leaving the default
+in force. In an embedding section only `request` has a meaning, since an embedding call does not stream.
+The usual precedence applies: `-D` system properties, then `application.conf`, then a module's
+`reference.conf`; to take a value from the environment, bind it yourself with
+`timeouts.request = ${?MY_REQUEST_TIMEOUT}`, which leaves the default in force while the variable is unset.
+
+| Provider | `request` default | `stream` default | What the timeout bounds |
+|---|---|---|---|
+| `openai-compatible`, `deepseek`, `zai`, `openrouter`, `mistral`, `cohere` (chat) | 2 minutes | 5 minutes | the wait for the response to begin |
+| `gemini`, `vertexai`, `ollama`, `watsonx` (chat) | 2 minutes | 10 minutes | the wait for the response to begin |
+| `openai`, `azure`, `requesty`, `anthropic` | the SDK's own default | the SDK's own default | the whole call, including a streamed body |
+| `bedrock` | the AWS SDK's own default | no limit | the whole call, including retries and a streamed body |
+| Embeddings: `openai`, `ollama` | 2 minutes | n/a | the wait for the response to begin |
+| Embeddings: `voyage`, `jina`, `cohere` | 2 minutes | n/a | the wait for the response to begin |
+
+Four things to know:
+
+- **The HTTP-based clients bound the wait for the response to begin**, not the time a stream may then
+  run. A stream whose server has begun answering is not cut by `stream`.
+- **The OpenAI, Azure, Requesty and Anthropic clients use their vendor's SDK**, which bounds the whole
+  call and retries a call that fails or times out **twice** by default (llm4s does not change that). A
+  `request = 30s` there can therefore take up to three attempts and their backoff before the call
+  fails. `request` and `stream` are independent: a short `request` does not cut a stream.
+- **Bedrock uses the AWS SDK.** `request` becomes the SDK's API-call timeout, which covers its retries,
+  so a `request = 30s` call fails within 30 seconds; `stream` is a deadline on the whole `ConverseStream`
+  call, so unlike the HTTP-based clients it does cut a stream that is still running. Either expiry is a
+  `TimeoutError`.
+- **Model listing, the Vertex AI token request and the watsonx IAM token exchange keep their own fixed
+  timeouts**, which the block does not change.
 
 ### Examples for other providers
 
@@ -346,6 +402,14 @@ OPENAI_API_KEY=sk-...
 EMBEDDING_MODEL=voyage/voyage-3
 VOYAGE_API_KEY=pa-...
 
+# Jina AI embeddings
+EMBEDDING_MODEL=jina/jina-embeddings-v3
+JINA_API_KEY=jina_...
+
+# Cohere embeddings
+EMBEDDING_MODEL=cohere/embed-english-v3.0
+COHERE_API_KEY=...
+
 # Ollama embeddings (local, no API key needed)
 EMBEDDING_MODEL=ollama/nomic-embed-text
 ```
@@ -360,19 +424,23 @@ llm4s.embeddings.openai.apiKey = ${?OPENAI_EMBEDDINGS_API_KEY}
 ```
 
 Each embedding provider comes from its module: `openai` from `llm4s-openai`, `voyage` from
-`llm4s-voyage` and `ollama` from `llm4s-ollama` (in `0.4.1` and earlier, `openai` and `voyage` are
+`llm4s-voyage`, `jina` from `llm4s-jina`, `cohere` from `llm4s-cohere` and `ollama` from `llm4s-ollama` (in `0.4.1` and earlier, `openai` and `voyage` are
 inside `llm4s-core`). Without the module, the provider id fails with an error naming the
 registered embedding providers.
 
 Default base URLs are used automatically:
 - OpenAI: `https://api.openai.com/v1`
 - Voyage: `https://api.voyageai.com/v1`
+- Jina: `https://api.jina.ai/v1`
+- Cohere: `https://api.cohere.com` (the API root; the provider posts to `/v2/embed`)
 - Ollama: `http://localhost:11434`
 
 Override base URLs if needed - each module's `reference.conf` binds a variable for it:
 ```bash
 OPENAI_EMBEDDING_BASE_URL=https://custom.openai.com/v1   # llm4s-openai
 VOYAGE_EMBEDDING_BASE_URL=https://custom.voyage.ai/v1    # llm4s-voyage
+JINA_EMBEDDING_BASE_URL=https://custom.jina.ai/v1        # llm4s-jina
+COHERE_EMBEDDING_BASE_URL=https://custom.cohere.com      # llm4s-cohere
 OLLAMA_EMBEDDING_BASE_URL=http://embeddings-host:11434   # llm4s-ollama
 ```
 
@@ -387,6 +455,33 @@ OLLAMA_EMBEDDING_BASE_URL=http://embeddings-host:11434   # llm4s-ollama
 - `voyage-3` - General purpose
 - `voyage-3-large` - Higher quality
 - `voyage-code-2` - Code-optimized
+
+Voyage embeds queries and documents differently. Every request is sent with an `input_type` of `document`
+or `query`, taken from the request's `purpose` (see [Queries and documents](#queries-and-documents) below).
+Requests that do not say get `document`.
+
+**Jina AI:**
+- `jina-embeddings-v3` - Multilingual, 8192-token context (1024 dimensions)
+- `jina-embeddings-v4` - (2048 dimensions)
+
+Jina embeds queries and documents differently. The provider built from `EMBEDDING_MODEL` follows each
+request's `purpose` (see [Queries and documents](#queries-and-documents) below): a document is sent with the
+`retrieval.passage` task and a query with `retrieval.query`. To send one task whatever the request says, for
+example `text-matching`, build the provider with the typed `JinaTask` setting:
+`JinaEmbeddingProvider.fromConfig(config, JinaTask.TextMatching)`. An explicit task wins over the purpose.
+
+**Cohere:**
+- `embed-v4.0` - (1536 dimensions)
+- `embed-english-v3.0`, `embed-multilingual-v3.0` - (1024 dimensions)
+- `embed-english-light-v3.0`, `embed-multilingual-light-v3.0` - (384 dimensions)
+
+Cohere embeds queries and documents differently. The provider built from `EMBEDDING_MODEL` follows each
+request's `purpose` (see [Queries and documents](#queries-and-documents) below): a document is sent with
+`input_type` `search_document` and a query with `search_query`. To send one input type whatever the request
+says, for example `classification`, build the provider with the typed `CohereInputType` setting:
+`CohereEmbeddingProvider.fromConfig(config, CohereInputType.Classification)`. An explicit input type wins over
+the purpose. Texts are sent in requests of at most 96, Cohere's limit, and the vectors keep the model's default
+size.
 
 **Ollama (local):**
 - `nomic-embed-text` - General purpose (768 dimensions)
@@ -429,6 +524,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.agent.memory.LLMEmbeddingService
+import org.llm4s.model.ModelRegistryService
 
 // Core logic depends on injected service
 class RAGService(embeddingService: LLMEmbeddingService) {
@@ -441,9 +537,12 @@ class RAGService(embeddingService: LLMEmbeddingService) {
 object RAGApplication extends App {
   val startup = for {
     // 1. Load config
-    (provider, cfg) <- Llm4sConfig.embeddings()
-    model <- Llm4sConfig.textEmbeddingModel()
-    
+    embeddingConfig <- Llm4sConfig.embeddings()
+    (provider, cfg) = embeddingConfig
+    model    <- Llm4sConfig.textEmbeddingModel()
+    registry <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
+
     // 2. Build dependencies
     client <- EmbeddingClient.from(provider, cfg)
     
@@ -460,6 +559,39 @@ object RAGApplication extends App {
   )
 }
 ```
+
+### Queries and documents
+
+Several embedding models embed a search query differently from a document, so a query only finds what was
+indexed if the two were embedded on matching sides. An `EmbeddingRequest` says which it is with its `purpose`:
+
+```scala
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, InputPurpose }
+
+val indexing  = EmbeddingRequest(chunks, model)                            // a document: the default
+val searching = EmbeddingRequest(Seq(question), model, InputPurpose.Query) // a query
+```
+
+Each provider maps the purpose onto its own parameter:
+
+| Provider | `Document` | `Query` |
+|---|---|---|
+| Voyage | `input_type` `document` | `input_type` `query` |
+| Jina | `task` `retrieval.passage` | `task` `retrieval.query` |
+| Cohere | `input_type` `search_document` | `input_type` `search_query` |
+| OpenAI, Ollama | nothing sent: these models embed both alike | nothing sent |
+
+`RAG` and the benchmark `RAGPipeline` already do this: what they ingest is embedded as documents and the
+question they answer as a query. Code that does not say keeps embedding documents.
+
+- **An explicit setting wins.** A Jina task or a Cohere input type passed to the provider's `fromConfig` is
+  sent for every request, whatever its purpose, because it can be one the purpose cannot express
+  (`text-matching`, `classification`, `clustering`).
+- **Voyage now sends `input_type`.** Before, it sent none, which Voyage treats as a plain embedding. Documents
+  indexed before this change were embedded that way; they still work against queries, and re-indexing makes
+  the two sides match exactly.
+- **Caching keeps the two apart.** `CachedEmbeddingClient`'s key includes the request's purpose, so a
+  query and a document with the same text never share an entry (see the [caching guide](../guide/caching)).
 
 ### System Properties (Alternative)
 
@@ -679,7 +811,7 @@ also set in `application.conf` or with `-D`.
 | `CHUNK_SIZE`, `CHUNK_OVERLAP`, `CHUNKING_ENABLED` | `llm4s.embeddings.chunking.*` | `llm4s-core` |
 | `LLM4S_EXCHANGE_LOGGING_ENABLED`, `LLM4S_EXCHANGE_LOGGING_DIR` | `llm4s.exchangeLogging.*` | `llm4s-core` |
 | `LLM4S_MODEL_REGISTRY_RESOURCE`, `LLM4S_MODEL_REGISTRY_FILE`, `LLM4S_MODEL_REGISTRY_URL` | `llm4s.modelRegistry.*` | `llm4s-core` |
-| `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT`, `WORKSPACE_TRACE_LOG` | `llm4s.workspace.*` | `llm4s-core` |
+| `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT` | `llm4s.workspace.*` | `llm4s-core` |
 | `BRAVE_SEARCH_API_KEY`, `EXA_API_KEY` and the other `BRAVE_*`, `EXA_*` variables, `DUCK_DUCK_GO_SEARCH_API_URL` | `llm4s.tools.*` | `llm4s-core` |
 | `OPENAI_API_KEY` | `llm4s.credentials.openai.apiKey` (OpenAI chat sections and embeddings) | `llm4s-openai` |
 | `AZURE_OPENAI_API_KEY` | `llm4s.credentials.azure.apiKey` | `llm4s-openai` |
@@ -687,10 +819,13 @@ also set in `application.conf` or with `-D`.
 | `ANTHROPIC_API_KEY` | `llm4s.credentials.anthropic.apiKey` | `llm4s-anthropic` |
 | `GOOGLE_API_KEY`, else `GEMINI_API_KEY` | `llm4s.credentials.gemini.apiKey` | `llm4s-gemini` |
 | `DEEPSEEK_API_KEY`, `ZAI_API_KEY`, `OPENROUTER_API_KEY`, `MISTRAL_API_KEY` | `llm4s.credentials.<provider>.apiKey` | `llm4s-openai-compatible` |
-| `COHERE_API_KEY` | `llm4s.credentials.cohere.apiKey` (Cohere chat and the Cohere reranker) | `llm4s-openai-compatible`, `llm4s-rag` |
+| `COHERE_API_KEY` | `llm4s.credentials.cohere.apiKey` (Cohere chat, the Cohere reranker and Cohere embeddings) | `llm4s-openai-compatible`, `llm4s-rag`, `llm4s-cohere` |
 | `VOYAGE_API_KEY` | `llm4s.credentials.voyage.apiKey` | `llm4s-voyage` |
+| `JINA_API_KEY` | `llm4s.credentials.jina.apiKey` | `llm4s-jina` |
 | `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` | `llm4s.embeddings.openai.*` | `llm4s-openai` |
 | `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL` | `llm4s.embeddings.voyage.*` | `llm4s-voyage` |
+| `JINA_EMBEDDING_BASE_URL`, `JINA_EMBEDDING_MODEL` | `llm4s.embeddings.jina.*` | `llm4s-jina` |
+| `COHERE_EMBEDDING_BASE_URL`, `COHERE_EMBEDDING_MODEL` | `llm4s.embeddings.cohere.*` | `llm4s-cohere` |
 | `OLLAMA_EMBEDDING_BASE_URL`, `OLLAMA_EMBEDDING_MODEL` | `llm4s.embeddings.ollama.*` | `llm4s-ollama` |
 | `RERANK_PROVIDER`, `COHERE_RERANK_BASE_URL`, `COHERE_RERANK_MODEL` | `llm4s.rerank.*`, read by `RerankerConfigLoader` | `llm4s-rag` |
 | `PGVECTOR_HOST`, `PGVECTOR_PORT`, `PGVECTOR_DATABASE`, `PGVECTOR_USER`, `PGVECTOR_PASSWORD`, `PGVECTOR_TABLE`, ... | `llm4s.rag.permissions.pg.*` | `llm4s-rag` |
@@ -971,9 +1106,9 @@ openai-main {
 
 **Solutions:**
 
-1. **Request timeouts are not configurable yet.** Each client uses an internal default
-   (two minutes for a completion, five for a stream in the OpenAI-compatible clients);
-   configurable timeouts are tracked in [#712](https://github.com/llm4s/llm4s/issues/712).
+1. **Raise (or lower) the timeouts.** Each client has a default (see [Timeouts](#timeouts)):
+   two minutes for a completion, and five or ten minutes for a stream. A section's
+   `timeouts { request = 5m, stream = 20m }` block changes them per provider.
 
 2. **Use streaming for long responses:**
 ```scala
@@ -982,10 +1117,9 @@ client.complete(Conversation(Seq(UserMessage("Your query"))))
 
 // Streaming: get tokens as they arrive
 client.streamComplete(
-  Conversation(Seq(UserMessage("Your query")))
-) { chunk =>
-  chunk.content.foreach(print)
-}
+  Conversation(Seq(UserMessage("Your query"))),
+  onChunk = chunk => chunk.content.foreach(print)
+)
 ```
 
 3. **Reduce response length:**
@@ -1004,13 +1138,15 @@ client.complete(
 
 1. **Batch embeddings instead of loading all at once:**
 ```scala
+import org.llm4s.llmconnect.model.EmbeddingRequest
+
 val documents: List[String] = loadDocuments()
 val batchSize = 100
 
 val embeddings = documents.grouped(batchSize).flatMap { batch =>
-  embedder.embed(batch) match {
-    case Right(emb) => emb
-    case Left(err) => 
+  embedder.embed(EmbeddingRequest(batch, embeddingModel)) match {
+    case Right(response) => response.embeddings
+    case Left(err) =>
       println(s"Batch failed: $err")
       List.empty
   }

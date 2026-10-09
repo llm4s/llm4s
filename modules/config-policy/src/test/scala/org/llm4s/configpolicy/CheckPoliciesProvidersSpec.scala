@@ -77,6 +77,13 @@ class CheckPoliciesProvidersSpec extends AnyWordSpec with Matchers {
         Right(ProviderId("openai-compatible"))
     }
 
+    "resolve a bedrock config, which needs a region and no API key" in {
+      providerIdFor(
+        """provider = "bedrock", model = "anthropic.claude-3-5-sonnet-20241022-v2:0", region = "us-east-1""""
+      ) shouldBe
+        Right(ProviderId("bedrock"))
+    }
+
     "resolve a vertexai config" in {
       providerIdFor("""provider = "vertexai", model = "gemini-2.0-flash", project = "my-project"""") shouldBe
         Right(ProviderId("vertexai"))

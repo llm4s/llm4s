@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.annotation.Stable
+
 import upickle.default.{ ReadWriter => RW, readwriter }
 
 /**
@@ -22,6 +24,7 @@ import upickle.default.{ ReadWriter => RW, readwriter }
  * val effort = ReasoningEffort.fromString("medium")
  * }}}
  */
+@Stable
 sealed trait ReasoningEffort {
 
   /** The string representation used in API calls */

@@ -32,8 +32,9 @@ agent execution completes.
 val store = InMemoryTraceStore()
 val spans: Result[List[Span]] = for {
   tracer <- TraceCollectorTracing(store)
-  _      <- agent.run("query", tools, tracing = tracer)
-} yield store.getSpans(tracer.traceId)
+  agent  <- Agent.builder("assistant", client).withTools(tools).withTracing(tracer).build()
+  _      <- agent.run("query")
+} yield store.getSpans(tracer.traceId) // the run's `graph.*` events, as `custom:graph.*` spans
 ```
 
 ### 2. Deterministic Agent Testing
@@ -44,11 +45,16 @@ spans — no mocking of external systems, no console output parsing.
 ```scala
 val store  = InMemoryTraceStore()
 val tracer = TraceCollectorTracing(store).getOrElse(fail("tracing init failed"))
-agent.run("query", tools, tracing = tracer)
+val agent  = Agent.builder("assistant", client).withTools(tools).withTracing(tracer).build()
+  .getOrElse(fail("agent build failed"))
+agent.run("query") shouldBe a[Right[_, _]]
 
-val toolSpans = store.getSpans(tracer.traceId).filter(_.kind == SpanKind.ToolCall)
-toolSpans should have size 2
-toolSpans.head.attributes("tool_name").asString shouldBe Some("calculator")
+// one completed `call-tool` task per tool call the model made
+val toolCalls = store.getSpans(tracer.traceId).filter { s =>
+  s.name == "custom:graph.task_completed" &&
+  s.attributes.get("nodeId").flatMap(_.asString).exists(_.endsWith("/call-tool"))
+}
+toolCalls should have size 2
 ```
 
 ### 3. Time-Range Queries

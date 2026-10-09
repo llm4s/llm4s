@@ -1,5 +1,7 @@
 package org.llm4s.config
 
+import org.llm4s.annotation.Stable
+
 /**
  * Environment-variable names recognised by `llm4s-gemini`.
  *
@@ -11,6 +13,7 @@ package org.llm4s.config
  * Vertex AI has no entry: it authenticates with OAuth2 - Application Default Credentials, or a
  * service-account file named by a section's `apiKey` - not with an API key.
  */
+@Stable
 object GeminiConfigKeys {
 
   /** Gemini API key; wins over [[GEMINI_API_KEY]] when both are set, as in Google's SDKs. */

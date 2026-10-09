@@ -1,5 +1,6 @@
 package org.llm4s.vectorstore
 
+import org.llm4s.annotation.Stable
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 import scala.util.{ Failure, Success, Try }
@@ -21,6 +22,7 @@ import scala.util.{ Failure, Success, Try }
  * cheaper answer, and it retires the temporary duplicate slice 1 left in
  * `org.llm4s.agent.memory` (llm4s/llm4s#1128).
  */
+@Stable
 object PostgresVectorHelpers {
 
   def embeddingToString(embedding: Array[Float]): String =

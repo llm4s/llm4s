@@ -1,7 +1,9 @@
 package org.llm4s.agent.guardrails
 
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ LLMError, ValidationError }
 import org.llm4s.types.Result
+
+import scala.annotation.tailrec
 
 /**
  * Combines multiple guardrails with configurable validation mode.
@@ -39,38 +41,33 @@ class CompositeGuardrail[A](
     val results = guardrails.map(_.validate(value))
     val errors  = results.collect { case Left(err) => err }
 
-    if (errors.isEmpty) {
-      Right(value)
-    } else {
-      // Aggregate all errors
-      Left(
-        ValidationError.invalid(
-          "composite",
-          s"Multiple validation failures: ${errors.map(_.formatted).mkString("; ")}"
-        )
-      )
-    }
+    if (errors.isEmpty) Right(value) else Left(CompositeGuardrail.multipleFailures(errors))
   }
 
   /**
    * At least one guardrail must pass.
-   * Returns on first success.
+   * Stops at the first guardrail that passes and returns its result, so a guardrail after it does not
+   * run (an LLM judge costs a call). When none passes, every guardrail has run and their errors are
+   * reported together.
    */
   private def validateAny(value: A): Result[A] = {
-    val results   = guardrails.map(_.validate(value))
-    val successes = results.collect { case Right(v) => v }
+    @tailrec def next(remaining: List[Guardrail[A]], errors: Vector[LLMError]): Result[A] =
+      remaining match {
+        case Nil =>
+          Left(
+            ValidationError.invalid(
+              "composite",
+              s"All validations failed: ${errors.map(_.formatted).mkString("; ")}"
+            )
+          )
+        case guardrail :: rest =>
+          guardrail.validate(value) match {
+            case passed @ Right(_) => passed
+            case Left(err)         => next(rest, errors :+ err)
+          }
+      }
 
-    if (successes.nonEmpty) {
-      Right(successes.head)
-    } else {
-      val errors = results.collect { case Left(err) => err }
-      Left(
-        ValidationError.invalid(
-          "composite",
-          s"All validations failed: ${errors.map(_.formatted).mkString("; ")}"
-        )
-      )
-    }
+    next(guardrails.toList, Vector.empty)
   }
 
   /**
@@ -93,6 +90,13 @@ class CompositeGuardrail[A](
 object CompositeGuardrail {
 
   /**
+   * The error `All` mode reports for `errors`, one or more: every failure, formatted, in one
+   * `ValidationError`. Shared with `GuardrailMiddleware`, so the two report failures alike.
+   */
+  private[agent] def multipleFailures(errors: Seq[LLMError]): ValidationError =
+    ValidationError.invalid("composite", s"Multiple validation failures: ${errors.map(_.formatted).mkString("; ")}")
+
+  /**
    * Create a composite guardrail that validates all guardrails.
    * All must pass for validation to succeed.
    */
@@ -101,7 +105,7 @@ object CompositeGuardrail {
 
   /**
    * Create a composite guardrail where at least one must pass.
-   * Returns success on first passing guardrail.
+   * Stops at the first passing guardrail: those after it do not run.
    */
   def any[A](guardrails: Seq[Guardrail[A]]): CompositeGuardrail[A] =
     new CompositeGuardrail(guardrails, ValidationMode.Any)

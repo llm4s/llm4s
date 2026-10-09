@@ -1,7 +1,8 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.EmbeddingClient
-import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
+import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse, InputPurpose }
 import org.llm4s.types.Result
 
 /**
@@ -22,12 +23,15 @@ import org.llm4s.types.Result
  *
  * @param baseClient   The underlying client used to generate embeddings on cache misses.
  * @param cache        The storage backend for the embedding vectors.
- * @param keyGenerator Function that maps (text, modelName) to a cache key (defaults to SHA-256).
+ * @param keyGenerator Function that maps (text, model name, purpose) to a cache key; defaults to
+ *                     [[CacheKeyGenerator.embeddingKey]]. The purpose is an argument so that a query and a
+ *                     document with the same text never share an entry.
  */
+@Stable
 class CachedEmbeddingClient(
   baseClient: EmbeddingClient,
   cache: EmbeddingCache[Seq[Double]],
-  keyGenerator: (String, String) => String = CacheKeyGenerator.sha256
+  keyGenerator: (String, String, InputPurpose) => String = CacheKeyGenerator.embeddingKey
 ) {
 
   /**
@@ -39,12 +43,12 @@ class CachedEmbeddingClient(
    *         in the same order as [[EmbeddingRequest.input]].
    */
   def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
-    val modelName = request.model.name
-
+    // A query and a document with the same text are different vectors for the models that embed
+    // them differently, so the purpose is part of the key.
     // Pair each input with its cache key and cached value (if any).
     val keysAndHits: Seq[(String, Option[Seq[Double]])] =
       request.input.map { text =>
-        val key = keyGenerator(text, modelName)
+        val key = keyGenerator(text, request.model.name, request.purpose)
         (key, cache.get(key))
       }
 
@@ -57,7 +61,7 @@ class CachedEmbeddingClient(
       Right(EmbeddingResponse(keysAndHits.flatMap(_._2)))
     } else {
       val missTexts = missesWithIndex.map(_._2).distinct
-      baseClient.embed(request.copy(input = missTexts)).flatMap { response =>
+      baseClient.embed(request.withInput(missTexts)).flatMap { response =>
         if (response.embeddings.size != missTexts.size) {
           Left(
             EmbeddingError(
@@ -94,6 +98,9 @@ class CachedEmbeddingClient(
   /** Returns cache hit/miss statistics for this client. */
   def cacheStats: CacheStats = cache.stats()
 
-  /** Clears all cached vectors and resets statistics. */
+  /**
+   * Calls the backend's `clear()`. With `InMemoryEmbeddingCache` this empties the cache and resets the
+   * statistics; a custom `EmbeddingCache` decides for itself, and the trait default does nothing.
+   */
   def clearCache(): Unit = cache.clear()
 }

@@ -3,7 +3,7 @@
 ## Project Overview
 
 **LLM4S** (Large Language Models for Scala) is a framework for building LLM-powered applications in Scala with:
-- Multi-provider support (OpenAI, Anthropic, Azure, Ollama, Google Gemini)
+- Multi-provider support (OpenAI, Anthropic, Azure, Ollama, Google Gemini, IBM watsonx.ai)
 - Type-safe design with `Result[A]` error handling
 - Agent framework with tools, guardrails, handoffs, and memory
 - Scala 3 only (3.7.1). Scala 2.13 support is deferred to post-1.0 — see [#1126](https://github.com/llm4s/llm4s/issues/1126)
@@ -33,7 +33,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 5 ✅ | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (incl. Mistral, Cohere), `llm4s-voyage`; core holds no client |
 | 6 ✅ | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `TracingBackend` SPI; `llm4s-observability` (Langfuse, trace collector/model/store, `CostTracker`); `llm4s-observability-prometheus`; pre-baseline API cleanup (passes 1-8) |
 | 7 ✅ | [#1242](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (built-in tools + their config); `llm4s-agent` (`agent`, `assistant`); spine re-audit (core 20.7k lines) |
-| 8 ⏳ | [#1281](https://github.com/llm4s/llm4s/issues/1281) | release, not a carve: publish 0.5.0, MiMa baseline on the frozen modules, `@Stable` / `@Experimental`, compatibility policy, g8 template; then 1.0 |
+| 8 ⏳ | [#1281](https://github.com/llm4s/llm4s/issues/1281) | release, not a carve: publish 0.5.0, MiMa baseline on the Frozen-at-1.0 modules, `@Stable` / `@Experimental`, compatibility policy, g8 template; then 1.0 |
 
 **Invariants for every carve:**
 
@@ -98,18 +98,29 @@ llm4s/
 │   ├── openai/                # OpenAI, Azure, Requesty chat + OpenAI embeddings + openai-java SDK (published)
 │   ├── openai-compatible/     # One SDK-free chat-completions client: DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, generic (published)
 │   ├── providers/             # Community provider modules, one `llm4s-<name>` each (published)
-│   │   └── voyage/            # Voyage AI embedding provider
+│   │   ├── voyage/            # Voyage AI embedding provider
+│   │   ├── bedrock/           # AWS Bedrock chat provider + AWS SDK bedrockruntime (Converse, ConverseStream)
+│   │   ├── jina/              # Jina AI embedding provider (typed JinaTask)
+│   │   ├── cohere/            # Cohere embedding provider, native /v2/embed (typed CohereInputType)
+│   │   └── watsonx/           # IBM watsonx.ai chat provider (Beta; IBM has deprecated the endpoints it uses)
 │   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
-│   ├── agent/                 # Agent runtime: Agent, guardrails, handoffs, orchestration, streaming; assistant (published)
+│   ├── agent/                 # Agent runtime: Agent, graph runtime, guardrails, handoffs, streaming; assistant (published)
 │   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
+│   ├── llm4s-effect/          # cats-effect IO / fs2 wrappers over LLMClient and Agent (published)
+│   ├── llm4s-zio/             # ZIO 2 / ZIO Streams wrappers over LLMClient and Agent (published)
+│   ├── java-api/              # Java facade over the client and agent (published)
+│   ├── spring-boot-starter/   # Spring Boot auto-configuration on java-api (published)
+│   ├── kotlin-api/            # Kotlin coroutine API: a separate Gradle build, not published yet
 │   ├── samples/               # Usage examples
+│   ├── deploy-service/        # /health and /llm-check service + image for the staged-deployment template (unpublished)
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
 │   ├── knowledgegraph-neo4j/  # Neo4j graph store
 │   ├── trace-opentelemetry/   # OpenTelemetry tracing backend, `llm4s-observability-otel` (published)
 │   ├── benchmarks/            # JMH benchmarks
+│   ├── gradle-demo/           # Gradle consumer of llm4s, kept buildable (not published)
 │   └── it/                    # Integration tests
 ├── docs/                # Documentation
 ├── project/             # SBT config
@@ -228,22 +239,31 @@ calling too. Core keeps the tool API (`ToolFunction`, `ToolRegistry`, schemas, e
 `UsageSummary`/`ModelUsage` moved to `org.llm4s.llmconnect.model` so `llm4s-observability` need not
 depend on `llm4s-agent`. `modules/agent` (`llm4s-agent`) then took `org.llm4s.agent` (bar
 `agent.memory`, already in `llm4s-memory`, which does not depend on it) and `org.llm4s.assistant`,
-with fansi. **Nothing in core may import either package** - the tracing contract takes a
-`TraceEvent.AgentStateUpdated`, which `AgentState#toTraceEvent` builds, so core's trace specs
-build that event directly and `AgentRunTracingSpec` in the agent module covers `toTraceEvent`.
+with fansi. **Nothing in core may import either package** - the tracing contract's
+agent event is `TraceEvent.AgentRunEnded` (built from core types; it replaced `AgentStateUpdated`
+in #1329), so core's trace specs build it directly.
 `workspaceClient` depends on `llm4s-agent` for `codegen`; `observability` only in Test scope.
 
 With slice 7, `llm4s-core` is the spine: 20.7k lines at the re-audit, 19.1k after the cleanup passes (`types`, `error`, `config`, `model`,
 `toolapi`, `context`, `llmconnect`, the `trace`/`metrics` contracts, `util`, `http`, `reliability`,
 `core/safety`, `security`, `resource`, `syntax`, `identity`), on cats, upickle, slf4j-api, Typesafe
 Config, pureconfig and jtokkit only ([re-audit](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540)).
-Before slice 8 ([#1281](https://github.com/llm4s/llm4s/issues/1281)) publishes 0.5.0 and sets the
+**Nothing is frozen until 0.5.0 is published and the MiMa baseline is set** (slice 8,
+[#1281](https://github.com/llm4s/llm4s/issues/1281)). Until then "frozen module" below means a module in
+1.0 Scope's *Frozen at 1.0* tier - the ones calling `mimaFrozen` in `build.sbt` - and is a target, not a
+constraint: never argue for or against a design from "frozen", "the baseline" or "can be added later
+without breaking". Fix a bad API outright, record the break in the CHANGELOG and migration guide, and
+add no shim or `@deprecated` overload. The rules below shape what those modules will freeze, which is
+why they apply now.
+Before slice 8 publishes 0.5.0 and sets the
 MiMa baseline, **pre-baseline cleanup passes** (slice 6, done) removed what should not be frozen. Pass 1 removed the unused `org.llm4s.types` vocabulary (it keeps `Result`, its syntax and
 the newtypes the library takes), every `@deprecated` member of core and `Agent`, `ContextConfig`'s
 legacy field, `ClientStatus`, `StreamingOptions`, `RuntimeId`/`ModelId`, and cats `Show`/`Validated`
 on the API. Do not add them back: **a frozen module gains no speculative public types and no
 `@deprecated` members before the baseline** - delete instead, with a migration note - and a
-helper only llm4s modules use is `private[llm4s]`. Pass 2 removed `ToolRegistry`'s provider switch
+helper only llm4s modules use is `private[llm4s]`. **A new top-level public type in a frozen module
+needs `@Stable` (or `@Experimental` for a Beta one)** from `org.llm4s.annotation`; `sbt
+stabilityTierCheck` fails the build otherwise, and a companion object is covered by its class. Pass 2 removed `ToolRegistry`'s provider switch
 (`getToolDefinitionsSafe`; tool definitions are `getOpenAITools()`, the format every client
 takes), replaced `CancellationToken`'s exception-throwing members with `whenCancelled:
 Future[Unit]`, and moved single-consumer utilities to their consumer, keeping packages:
@@ -255,7 +275,7 @@ and it applies `rateLimit` itself through a private `TokenBucket`); moved OpenAI
 `max_completion_tokens` rules out of core's `RequestTransformer` into `llm4s-openai`'s
 `OpenAIModelRules` - **vendor model rules live in the vendor's module**, layered on with
 `RequestTransformer.adjusted`, as Anthropic's temperature rule already did; and settled the
-provider plumbing as a **public, frozen provider-author SPI** (`docs/guide/writing-a-provider.md`),
+provider plumbing as a **public provider-author SPI, Frozen at 1.0** (`docs/guide/writing-a-provider.md`),
 with `ResponseFormatMapper` and `ToolCallDeserializer` moved to `llm4s-openai-compatible` and
 `ProviderResultOps` made `private[llm4s]`. Pass 4 moved `NamedProviderConfig`'s vendor fields
 into descriptor-declared extras with unchanged HOCON names - `endpoint` (required) and
@@ -321,11 +341,13 @@ sbt buildAll           # Clean, compile, test
 sbt test               # Run tests
 sbt scalafmtAll        # Format code
 sbt cov                # Run coverage
+sbt frozenDependencyCheck # no frozen module resolves a parsing, speech, cloud-storage, database, backend or foreign-SDK dependency
 sbt testIntegration    # modules/it @Docker tier (Postgres/pgvector, Qdrant, Neo4j)
 sbt testWorkspace      # modules/it @Workspace tier (needs a built workspace-runner image)
 sbt testOllama         # modules/it @Ollama tier
 sbt testSmoke          # modules/it @Cloud tier (live API keys)
 sbt it/itTierCheck     # every suite in modules/it must declare exactly one tier
+sbt stabilityTierCheck # every top-level public type of a frozen module is @Stable or @Experimental
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
@@ -410,12 +432,19 @@ OPENAI_API_KEY=sk-...                # llm4s-openai (openai); also REQUESTY_API_
 ANTHROPIC_API_KEY=sk-ant-...         # llm4s-anthropic
 GOOGLE_API_KEY=...                   # llm4s-gemini (gemini); GEMINI_API_KEY when GOOGLE_API_KEY is unset
 DEEPSEEK_API_KEY=...                 # llm4s-openai-compatible; also ZAI_API_KEY, OPENROUTER_API_KEY, MISTRAL_API_KEY
-COHERE_API_KEY=...                   # llm4s-openai-compatible and llm4s-rag (Cohere chat + reranker)
+COHERE_API_KEY=...                   # llm4s-openai-compatible, llm4s-rag and llm4s-cohere (Cohere chat, reranker, embeddings)
 VOYAGE_API_KEY=pa-...                # llm4s-voyage
 
 # Embeddings (llm4s-core selects; each provider module binds its own block)
 EMBEDDING_MODEL=openai/text-embedding-3-small  # provider/model
 # OPENAI_EMBEDDING_BASE_URL / VOYAGE_EMBEDDING_BASE_URL / OLLAMA_EMBEDDING_BASE_URL override base URLs
+
+# Speech (llm4s-speech): cloud TTS/STT, "provider/model" like LLM_MODEL
+SPEECH_TTS_MODEL=openai/tts-1                  # or openai/tts-1-hd, elevenlabs/<voice-id>, azure/<voice-name>
+SPEECH_STT_MODEL=openai/whisper-1              # or azure/en-US
+# SPEECH_TTS_VOICE=alloy                       # optional voice override
+# Credentials, only for the selected provider: OPENAI_API_KEY, ELEVENLABS_API_KEY,
+# AZURE_SPEECH_KEY + AZURE_SPEECH_REGION (see modules/speech reference.conf, docs/guide/speech.md)
 ```
 
 The full list is in `docs/getting-started/configuration.md#environment-variables-llm4s-reads`.
@@ -465,26 +494,40 @@ val apiKey = sys.env.get("OPENAI_API_KEY")
 
 ### Basic Agent Usage
 
+An `Agent` is built once, with its tools, guardrails, handoffs and middleware, and run by `ThreadId`.
+
 ```scala
 for {
   providerConfig  <- Llm4sConfig.defaultProvider()   // llm4s.providers.<default> in application.conf
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client <- LLMConnect.getClient(providerConfig)
-  agent = new Agent(client)
-  tools = new ToolRegistry(Seq(myTool))
-  state <- agent.run("Query here", tools)
-} yield state
+  agent  <- Agent.builder("assistant", client)       // the id is an AgentId
+              .withTools(new ToolRegistry(Seq(myTool)))
+              .withSystemPrompt("You are a helpful assistant")
+              .build()
+  result <- agent.run("Query here")                  // Result[AgentResult]
+} yield result.answer                                // Some(answer) when status is Completed
 ```
+
+`AgentResult` carries `threadId`, `runId`, `activeAgent`, `status`, `messages` and `usage`.
+`AgentStatus` is `Completed(answer)`, `Blocked(guardrail, reason)`, `StepLimitReached` or
+`Suspended(approvals, questions)`; a guardrail block is an outcome, not a `Left`. Provider, tool and
+middleware failures are `Left(GraphError...)`. `agent.start(...)` returns an `AgentRun` with
+`await()` and `cancel()`; `recover(threadId)` and `resume(threadId, answers)` continue a thread
+that failed or suspended.
 
 ### Multi-Turn Conversations
 
 ```scala
 for {
-  state1 <- agent.run("First query", tools)
-  state2 <- agent.continueConversation(state1, "Follow-up")
-} yield state2
+  result1 <- agent.run("First query")
+  result2 <- agent.continueConversation(result1, "Follow-up")   // same thread: run(result1.threadId, ...)
+} yield result2
 ```
+
+To restore a saved conversation, `agent.run(ThreadId("saved-1"), query, RunConfig(), history = saved)`
+imports the messages into a new thread (no system messages in `history`).
 
 ### Built-in Tools
 
@@ -502,35 +545,47 @@ BuiltinTools.development() // All tools (use with caution)
 
 ### Guardrails
 
+Guardrails are middleware on the agent, not per-run arguments.
+
 ```scala
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
 import org.llm4s.agent.guardrails.builtin._
 
-agent.run(
-  query = "Generate JSON",
-  tools = tools,
-  inputGuardrails = Seq(new LengthCheck(1, 10000), new ProfanityFilter()),
-  outputGuardrails = Seq(new JSONValidator())
-)
+val agent = Agent.builder("assistant", client)
+  .withMiddleware(
+    new GuardrailMiddleware(
+      input = Seq(new LengthCheck(1, 10000), new ProfanityFilter()),
+      output = Seq(new JSONValidator())
+    )
+  )
+  .build()
 ```
+
+A block ends the run `AgentStatus.Blocked(guardrail, reason)`; an output block replaces the stored
+answer with a refusal. `new ContextWindowMiddleware(config)` prunes what is sent to the model, never
+what the thread stores.
 
 Built-in guardrails:
 - **Simple validators**: `LengthCheck`, `ProfanityFilter`, `JSONValidator`, `RegexValidator`, `ToneValidator`
 - **LLM-as-Judge**: `LLMSafetyGuardrail`, `LLMFactualityGuardrail`, `LLMQualityGuardrail`, `LLMToneGuardrail`
-- **Composition**: `CompositeGuardrail.all()`, `CompositeGuardrail.any()`, `CompositeGuardrail.sequence()`
+- **Composition**: `CompositeGuardrail.all()`, `CompositeGuardrail.any()`, `CompositeGuardrail.sequential()`
 
 ### Handoffs
+
+Handoffs are routes inside one graph, by agent id; the handoff id must equal the target builder's id.
 
 ```scala
 import org.llm4s.agent.Handoff
 
-agent.run(
-  query = "Complex physics question",
-  tools = ToolRegistry.empty,
-  handoffs = Seq(Handoff.to(specialistAgent, "Physics expertise required"))
-)
+val physics = Agent.builder("physics", client).withSystemPrompt("You are a physicist")
+val agent = Agent.builder("triage", client)
+  .withHandoffs(Handoff.to("physics", physics, "Physics expertise required"))
+  .build()
+// A cycle back to the root: physics.withHandoffs(Handoff.toId("triage", "Not a physics question"))
 ```
 
-Use handoffs for simple 2-3 agent delegation. Use DAGs for complex parallel workflows.
+A handoff must be the only tool call in its message. Use handoffs for simple 2-3 agent
+delegation. Use a graph (`GraphBuilder`; the `multi-agent-graph` cookbook recipe) for complex parallel workflows.
 
 ### Memory
 
@@ -556,22 +611,11 @@ client.complete(conversation, options)
 
 ### Streaming Events
 
-```scala
-import org.llm4s.agent.streaming._
-
-// Get real-time agent execution events
-agent.runWithEvents("Query here", tools) { event =>
-  event match {
-    case TextDelta(text) => print(text)
-    case ToolCallStarted(name, _) => println(s"Calling $name...")
-    case ToolCallCompleted(name, result, _) => println(s"$name returned: $result")
-    case AgentCompleted(state) => println("Done!")
-    case _ => ()
-  }
-}
-```
-
-Event types: `TextDelta`, `TextComplete`, `ToolCallStarted`, `ToolCallCompleted`, `ToolCallFailed`, `AgentStarted`, `StepStarted`, `StepCompleted`, `AgentCompleted`, `AgentFailed`, `InputGuardrailStarted`, `InputGuardrailCompleted`, `OutputGuardrailStarted`, `OutputGuardrailCompleted`, `HandoffStarted`, `HandoffCompleted`
+`AgentBuilder.withStreaming()` streams the model's answer; `agent.stream(threadId, query)(listener)`
+delivers every event of the turn as a `StreamEvent`, matched with `AgentEvents` (`TextDelta`,
+`ToolCallStarted`, `ToolExecuted`, `ModelCallCompleted`, ...). Durable events carry no message
+content; content is live-only. `AgentRun.subscribe` is run-scoped; `AgentIO.stream`/`AgentZ.stream`
+wrap it as fs2/ZIO streams. Tracing ends each run with `TraceEvent.AgentRunEnded` (#1329).
 
 ## Testing
 

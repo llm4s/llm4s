@@ -1,10 +1,13 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.annotation.Stable
+
 /**
  * Maps [[ResponseFormat]] to provider-specific request payloads.
  *
  * Used internally by provider clients; no provider names leak in the public API.
  */
+@Stable
 object ResponseFormatMapper {
 
   /**

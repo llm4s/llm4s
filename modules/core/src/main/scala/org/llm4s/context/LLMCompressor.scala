@@ -1,5 +1,6 @@
 package org.llm4s.context
 
+import org.llm4s.annotation.Stable
 import org.llm4s.error.ContextError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -49,6 +50,7 @@ import org.slf4j.LoggerFactory
  * @see [[DeterministicCompressor]] for the cheaper alternative with no API calls
  * @see [[ContextManager]] for the orchestrator that chooses when to invoke each step
  */
+@Stable
 object LLMCompressor {
   private val logger = LoggerFactory.getLogger(getClass)
 

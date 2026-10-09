@@ -1,0 +1,239 @@
+# Staged deployment template: build the deploy-service image, smoke-test it, then roll it out
+# dev -> staging -> prod. Issue #846. See deploy/README.md.
+#
+# It is opt-in: it runs only when started by hand (workflow_dispatch) or called from another workflow
+# (workflow_call), never on a push or a pull request. Copy it, deploy/ and modules/deploy-service/ into a
+# project to use it as a starting point.
+#
+#  - Without `deploy`, it builds the image and smoke-tests it, and pushes nothing.
+#  - With `deploy`, it pushes the image tagged with the commit SHA (immutable, so a rollback names a tag that
+#    still exists) and deploys it to each environment up to and including `target`, one after another.
+#  - Promotion is gated by GitHub Environments: give `staging` and `prod` required reviewers, and the job for
+#    that environment waits for an approval before it starts. Store each cluster's kubeconfig as the
+#    KUBE_CONFIG secret of its environment.
+#  - A rollout that does not finish is rolled back (kubectl rollout undo) and fails the job.
+
+name: Deploy Staged
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deploy up to and including this environment"
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+        default: dev
+      deploy:
+        description: "Push the image and deploy it (off: build and smoke-test only)"
+        type: boolean
+        default: false
+      registry:
+        description: "Container registry (the login step uses GITHUB_TOKEN, which GHCR accepts)"
+        type: string
+        default: ghcr.io
+      image_name:
+        description: "Image repository without the registry (empty: <repository owner>/deploy-service)"
+        type: string
+        default: ""
+      namespace_prefix:
+        description: "Namespaces are <prefix>-dev, <prefix>-staging and <prefix>-prod"
+        type: string
+        default: llm4s
+      replicas:
+        description: "Replica count for every environment (empty: each overlay's own)"
+        type: string
+        default: ""
+      require_llm:
+        description: "Fail the smoke test when /llm-check is not 200 (needs a provider configured in the image)"
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      target:
+        description: "Deploy up to and including this environment: dev, staging or prod"
+        type: string
+        default: dev
+      deploy:
+        description: "Push the image and deploy it (off: build and smoke-test only)"
+        type: boolean
+        default: false
+      registry:
+        type: string
+        default: ghcr.io
+      image_name:
+        type: string
+        default: ""
+      namespace_prefix:
+        type: string
+        default: llm4s
+      replicas:
+        type: string
+        default: ""
+      require_llm:
+        type: boolean
+        default: false
+    secrets:
+      KUBE_CONFIG:
+        description: "A kubeconfig for the cluster; an environment's own KUBE_CONFIG secret takes precedence"
+        required: false
+
+permissions:
+  contents: read
+
+# One rollout at a time per ref; a second run waits for the first instead of racing it.
+concurrency:
+  group: deploy-staged-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and smoke-test the image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # sbt-dynver reads the tags
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: sbt
+
+      - uses: sbt/setup-sbt@v1
+
+      # Inputs reach the shell through env, never interpolated into the script text.
+      - name: Work out the image reference
+        id: image
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image_name }}
+          OWNER: ${{ github.repository_owner }}
+          SHA: ${{ github.sha }}
+        run: |
+          name="${IMAGE_NAME:-$OWNER/deploy-service}"
+          echo "image=$(echo "$REGISTRY/$name:$SHA" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Build the image
+        run: sbt deployService/Docker/publishLocal
+
+      - name: Tag the image with the commit SHA
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          built="$(sbt -error "print deployService/Docker/version" | tail -1)"
+          docker tag "llm4s/deploy-service:$built" "$IMAGE"
+
+      - name: Check the image does not run as root
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          user="$(docker inspect --format '{{.Config.User}}' "$IMAGE")"
+          uid="${user%%:*}"
+          echo "The image runs as user '$user'"
+          # The pod is marked runAsNonRoot, which Kubernetes only accepts for a numeric, non-zero user.
+          [[ "$uid" =~ ^[0-9]+$ ]] && [ "$uid" -ne 0 ] || { echo "::error::the image's user '$user' is not a numeric non-root user"; exit 1; }
+
+      - name: Smoke-test the image
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          REQUIRE_LLM: ${{ inputs.require_llm }}
+        run: |
+          docker run -d --name smoke -p 8080:8080 "$IMAGE"
+          for attempt in $(seq 1 60); do
+            curl -fsS --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1 && break
+            if [ "$attempt" -eq 60 ]; then docker logs smoke; echo "::error::GET /health did not answer within 60 seconds"; exit 1; fi
+            sleep 1
+          done
+          echo "GET /health: $(curl -fsS http://127.0.0.1:8080/health)"
+          code="$(curl -s -o /tmp/llm-check.json -w '%{http_code}' http://127.0.0.1:8080/llm-check)"
+          echo "GET /llm-check: HTTP $code $(cat /tmp/llm-check.json)"
+          if [ "$REQUIRE_LLM" = true ] && [ "$code" != 200 ]; then
+            docker logs smoke
+            echo "::error::require_llm is set but /llm-check answered HTTP $code"
+            exit 1
+          fi
+
+      - name: Stop the smoke-test container
+        if: always()
+        run: docker rm -f smoke || true
+
+      # Third-party action, pinned to a commit: it handles registry credentials.
+      - name: Log in to the registry
+        if: ${{ inputs.deploy }}
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the image
+        if: ${{ inputs.deploy }}
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: docker push "$IMAGE"
+
+  deploy-dev:
+    name: Deploy to dev
+    needs: build
+    if: ${{ inputs.deploy }}
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Deploy and smoke-check
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+          NAMESPACE_PREFIX: ${{ inputs.namespace_prefix }}
+          REPLICAS: ${{ inputs.replicas }}
+        run: deploy/scripts/deploy.sh deploy dev
+
+  deploy-staging:
+    name: Deploy to staging
+    # `build` is listed too: a job sees the outputs only of the jobs it names itself.
+    needs: [build, deploy-dev]
+    if: ${{ inputs.deploy && (inputs.target == 'staging' || inputs.target == 'prod') }}
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Deploy and smoke-check
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+          NAMESPACE_PREFIX: ${{ inputs.namespace_prefix }}
+          REPLICAS: ${{ inputs.replicas }}
+        run: deploy/scripts/deploy.sh deploy staging
+
+  deploy-prod:
+    name: Deploy to prod
+    needs: [build, deploy-staging]
+    if: ${{ inputs.deploy && inputs.target == 'prod' }}
+    runs-on: ubuntu-latest
+    # Add required reviewers to this environment: the job then waits for an approval before it starts.
+    environment: prod
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Deploy and smoke-check
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+          NAMESPACE_PREFIX: ${{ inputs.namespace_prefix }}
+          REPLICAS: ${{ inputs.replicas }}
+        run: deploy/scripts/deploy.sh deploy prod

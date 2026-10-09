@@ -58,7 +58,7 @@ Add LLM4S to your `build.sbt`:
 
 ```scala
 // Scala 3
-libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.4.0"
+libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
 ThisBuild / scalaVersion := "3.7.1"
 ```
 
@@ -69,10 +69,56 @@ ThisBuild / scalaVersion := "3.7.1"
 <dependency>
     <groupId>org.llm4s</groupId>
     <artifactId>llm4s-core_3</artifactId>
-    <version>0.4.0</version>
+    <version>{{ site.data.project.latest_release }}</version>
 </dependency>
 
 ```
+
+### Gradle (Kotlin DSL)
+
+Gradle does **not** resolve Scala cross-version suffixes automatically — you must append the `_3` suffix explicitly (LLM4S is Scala 3 only):
+
+```kotlin
+// build.gradle.kts
+repositories { mavenCentral() }
+
+dependencies {
+    implementation("org.llm4s:llm4s-core_3:{{ site.data.project.latest_release }}")
+}
+
+// Pin the Scala 3 library (scala3-library_3 only; scala-library stays at 2.13.x)
+configurations.all {
+    resolutionStrategy.eachDependency {
+        if (requested.group == "org.scala-lang" && requested.name == "scala3-library_3") {
+            useVersion("3.7.1")
+        }
+    }
+}
+```
+
+### Gradle (Groovy DSL)
+
+```groovy
+// build.gradle
+repositories { mavenCentral() }
+
+dependencies {
+    implementation 'org.llm4s:llm4s-core_3:{{ site.data.project.latest_release }}'
+}
+
+configurations.all {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == 'org.scala-lang' && details.requested.name == 'scala3-library_3') {
+            details.useVersion '3.7.1'
+        }
+    }
+}
+```
+
+> **Using Spring Boot, Ktor, or encountering dependency conflicts?**
+> See the full [Gradle integration guide](gradle) for dependency exclusion recipes
+> and the [dependency conflicts reference](/reference/dependency-conflicts).
+
 
 ### Multi-Module Project
 
@@ -84,19 +130,26 @@ lazy val myProject = (project in file("."))
     name := "my-llm-project",
     scalaVersion := "3.7.1",
     libraryDependencies ++= Seq(
-      "org.llm4s" %% "llm4s-core" % "0.4.0"
+      "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
     )
   )
 ```
 
-### Snapshot Versions
+### Unreleased changes (`main`)
 
-To use the latest development snapshot:
+No snapshots are published: releases are cut from tags only, and nothing publishes between them. To try
+what is on `main`, build it and publish it to your local repository:
 
-```scala
-resolvers += Resolver.sonatypeRepo("snapshots")
-libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.4.0-SNAPSHOT"
+```bash
+git clone https://github.com/llm4s/llm4s && cd llm4s
+sbt publishLocal   # for sbt; use `sbt publishM2` for Maven or Gradle (mavenLocal())
+sbt version        # prints the version it published, for example 0.4.1+165-b455b8ea-SNAPSHOT
 ```
+
+Then depend on that version, for example
+`libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.4.1+165-b455b8ea-SNAPSHOT"` (use the one `sbt version`
+printed). `main` describes modules and configuration that the latest release does not have yet, so the
+rest of this guide matches `main`, not the released artifact, wherever it says a module is not yet published.
 
 ---
 
@@ -326,6 +379,34 @@ are unchanged; see the
 [migration note](../reference/migration.md#slice-5-llm4s-openai-compatible), and for Mistral and
 Cohere [this one](../reference/migration.md#slice-5-mistral-cohere-and-voyage-leave-core-core-ships-no-provider).
 
+### For AWS Bedrock
+
+{: .note }
+> Not yet published. `llm4s-bedrock` exists in the build as of
+> [#1008](https://github.com/llm4s/llm4s/issues/1008) but ships in the next release.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-bedrock" % llm4sVersion
+```
+
+The AWS Bedrock chat provider (`provider = "bedrock"`), over the Converse and ConverseStream APIs,
+so one client reaches Claude, Llama, Mistral, Nova and Titan models. It brings the AWS SDK for
+Java v2 `bedrockruntime` artifact (Apache-2.0, the same SDK release train `llm4s-rag` uses for S3);
+`llm4s-core` gains no dependency. A section needs a `region` and a `model`:
+
+```hocon
+llm4s.providers.claude-bedrock {
+  provider = "bedrock"
+  model    = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  region   = ${?AWS_REGION}
+}
+```
+
+Credentials come from the AWS default credential chain (environment variables, `~/.aws`, an
+instance or task role), or from a `profile`, or from explicit `accessKeyId` / `secretAccessKey`
+(plus `sessionToken` for temporary credentials).
+
 ### For Voyage AI embeddings
 
 {: .note }
@@ -341,6 +422,67 @@ libraryDependencies += "org.llm4s" %% "llm4s-voyage" % llm4sVersion
 The Voyage AI embedding provider (`EMBEDDING_MODEL=voyage/<model>`), with its
 `llm4s.embeddings.voyage` config block. It is the first community provider module under
 `modules/providers/`, and brings no dependency beyond `llm4s-core`.
+
+### For Jina AI embeddings
+
+{: .note }
+> Not yet published. `llm4s-jina` exists in the build as of
+> [#1028](https://github.com/llm4s/llm4s/issues/1028) but ships in the next release.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-jina" % llm4sVersion
+```
+
+The Jina AI embedding provider (`EMBEDDING_MODEL=jina/<model>`), with its
+`llm4s.embeddings.jina` config block and a typed `JinaTask` (`retrieval.query`,
+`retrieval.passage`, ...). A community provider module under `modules/providers/`; it brings no
+dependency beyond `llm4s-core`.
+
+### For Cohere embeddings
+
+{: .note }
+> Not yet published. `llm4s-cohere` exists in the build but ships in the next release.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-cohere" % llm4sVersion
+```
+
+The Cohere embedding provider (`EMBEDDING_MODEL=cohere/<model>`), on Cohere's native `/v2/embed`,
+with its `llm4s.embeddings.cohere` config block and a typed `CohereInputType` (`search_document`,
+`search_query`, ...). Cohere chat is a different module: `llm4s-openai-compatible`. A community
+provider module under `modules/providers/`; it brings no dependency beyond `llm4s-core`.
+### For IBM watsonx.ai
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-watsonx" % llm4sVersion
+```
+
+The IBM watsonx.ai chat provider (`provider = "watsonx"`), brings no dependency beyond
+`llm4s-core`. See [IBM watsonx.ai](../guide/providers.md#ibm-watsonxai).
+
+### For Java, Spring Boot, cats-effect and ZIO
+
+{: .note }
+> Not yet published. These modules exist in the build as of
+> [#934](https://github.com/llm4s/llm4s/issues/934), [#935](https://github.com/llm4s/llm4s/issues/935)
+> and [#936](https://github.com/llm4s/llm4s/issues/936) but ship in the next release.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-java-api"             % llm4sVersion  // Java facade
+libraryDependencies += "org.llm4s" %% "llm4s-spring-boot-starter"  % llm4sVersion  // Spring Boot auto-configuration
+libraryDependencies += "org.llm4s" %% "llm4s-effect"               % llm4sVersion  // cats-effect 3 / fs2
+libraryDependencies += "org.llm4s" %% "llm4s-zio"                  % llm4sVersion  // ZIO 2 / ZIO Streams
+```
+
+`llm4s-java-api` is the Java-friendly facade (a runnable Gradle sample is in
+[`modules/samples/gradle-java`](https://github.com/llm4s/llm4s/tree/main/modules/samples/gradle-java)) and the base of the Spring starter, which adds the
+`llm4s.*` properties, an `LLM4STemplate` and an Actuator health indicator. `llm4s-effect` and
+`llm4s-zio` wrap `LLMClient` and `Agent` for their effect systems. There is also a Kotlin coroutine
+API, `modules/kotlin-api`, a separate Gradle build that is not published yet.
 
 ### For image generation and vision
 
@@ -384,7 +526,7 @@ only if you name these types in your own signatures. It replaces three overlappi
 types that used to ship in `llm4s-core`, which is a source break — see the
 [migration note](../reference/migration.md#slice-3-llm4s-media).
 
-### For agents (`Agent`, guardrails, handoffs, orchestration)
+### For agents (`Agent`, guardrails, handoffs, graphs)
 
 {: .note }
 > Not yet published. `llm4s-agent` exists in the build as of
@@ -395,8 +537,8 @@ types that used to ship in `llm4s-core`, which is a source break — see the
 libraryDependencies += "org.llm4s" %% "llm4s-agent" % llm4sVersion // same version as llm4s-core
 ```
 
-The agent runtime - `org.llm4s.agent` (`Agent`, `AgentState`, guardrails, handoffs,
-orchestration, streaming events) and the console assistant, `org.llm4s.assistant` - lives here.
+The agent runtime - `org.llm4s.agent` (`Agent`, `AgentResult`, guardrails, handoffs,
+the graph runtime) and the console assistant, `org.llm4s.assistant` - lives here.
 Agent memory is the separate `llm4s-memory`; the ready-made tools are `llm4s-agent-tools`.
 `llm4s-core` keeps what the agent is built on: `LLMClient`, the tool API and the tracing
 contract. Package names are unchanged. See the
@@ -447,10 +589,36 @@ names are unchanged. See the migration notes for
 [Langfuse and the collector](../reference/migration.md#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core)
 and for [Prometheus](../reference/migration.md#slice-6-llm4s-observability-prometheus---prometheus-leaves-core).
 
+### For Neo4j (knowledge graph store)
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-knowledgegraph-neo4j" % llm4sVersion
+```
+
+`Neo4jGraphStore`, a graph store for `llm4s-knowledgegraph` backed by Neo4j. It depends on `llm4s-core`
+and `llm4s-knowledgegraph` and brings the Neo4j driver.
+
+### For provider authors (testing a provider module)
+
+{: .note }
+> Not yet published. `llm4s-provider-testkit` exists in the build as of
+> [#1133](https://github.com/llm4s/llm4s/issues/1133) but ships in the next release.
+
+```scala
+// same version as llm4s-core; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-provider-testkit" % llm4sVersion % Test
+```
+
+The checks a provider module's own `Llm4s<Name>ModuleSpec` makes: discovery, sole ownership of its ids,
+explicit registration and the config-to-client round trip. It requires JDK 21: its interruption checks
+and its local test server run on virtual threads. See
+[Writing a provider](../guide/writing-a-provider#testing).
+
 ### For Workspace (Containerized Execution)
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-workspace-client" % "0.4.0"
+libraryDependencies += "org.llm4s" %% "llm4s-workspace-client" % "{{ site.data.project.latest_release }}"
 ```
 
 And install Docker:
@@ -465,6 +633,9 @@ sudo apt-get install docker.io
 # Verify
 docker --version
 ```
+
+`llm4s-workspace-client` brings `llm4s-workspace-shared`, the wire protocol the client and the runner image
+speak, so you depend on it directly only if you implement the runner side.
 
 ---
 

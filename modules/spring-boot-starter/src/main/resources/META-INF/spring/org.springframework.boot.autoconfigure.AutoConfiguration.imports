@@ -1,0 +1,2 @@
+org.llm4s.spring.Llm4sAutoConfiguration
+org.llm4s.spring.LlmActuatorAutoConfiguration

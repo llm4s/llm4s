@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import org.llm4s.annotation.Stable
+
 /**
  * Marker trait for errors that cannot be recovered through retries.
  *
@@ -10,11 +12,12 @@ package org.llm4s.error
  * Use pattern matching or [[LLMError.isRecoverable]] to check recoverability:
  * {{{
  * error match {
- *   case _: RecoverableError => // Apply retry logic
- *   case _: NonRecoverableError => // Report failure to user
+ *   case _: RecoverableError    => // Apply retry logic
+ *   case _                      => // Report failure to user: a NonRecoverableError, or an error with no marker
  * }
  * }}}
  *
  * @see [[RecoverableError]] for errors that may succeed on retry
  */
+@Stable
 trait NonRecoverableError extends LLMError

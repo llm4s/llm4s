@@ -1,5 +1,7 @@
 package org.llm4s.metrics
 
+import org.llm4s.annotation.Stable
+
 import scala.concurrent.duration.FiniteDuration
 
 /**
@@ -30,6 +32,7 @@ import scala.concurrent.duration.FiniteDuration
  * }
  * }}}
  */
+@Stable
 trait MetricsCollector {
 
   /**
@@ -173,6 +176,10 @@ object MetricsCollector {
   /**
    * Combine multiple collectors into one that fans out every call to all of them.
    *
+   * Every method of the trait is forwarded, the image-generation ones included; a
+   * collector that throws does not stop the others. A method added to the trait must
+   * be forwarded here too - `MetricsCollectorComposeSpec` fails otherwise.
+   *
    * Useful for running a `CostTracker` (in `llm4s-observability`) alongside `PrometheusMetrics` (in `llm4s-observability-prometheus`):
    * {{{
    * val combined = MetricsCollector.compose(prometheusMetrics, costTracker)
@@ -217,6 +224,22 @@ object MetricsCollector {
       errorKind: ErrorKind,
       provider: String
     ): Unit = safeForEach(_.recordError(errorKind, provider))
+
+    override def observeImageGeneration(
+      provider: String,
+      model: String,
+      operation: String,
+      outcome: Outcome,
+      duration: FiniteDuration,
+      imageCount: Int
+    ): Unit = safeForEach(_.observeImageGeneration(provider, model, operation, outcome, duration, imageCount))
+
+    override def recordImageGenerationCost(
+      provider: String,
+      model: String,
+      costUsd: Double,
+      imageCount: Int
+    ): Unit = safeForEach(_.recordImageGenerationCost(provider, model, costUsd, imageCount))
   }
 
   /**
@@ -253,6 +276,7 @@ object MetricsCollector {
  * Use [[Outcome.Success]] when the operation completed normally and
  * [[Outcome.Error]] when it failed with a categorized [[ErrorKind]].
  */
+@Stable
 sealed trait Outcome
 
 object Outcome {
@@ -274,6 +298,7 @@ object Outcome {
  * These are stable labels safe for use in metrics dimensions.
  * Do not use exception class names as they may change.
  */
+@Stable
 sealed trait ErrorKind
 
 object ErrorKind {

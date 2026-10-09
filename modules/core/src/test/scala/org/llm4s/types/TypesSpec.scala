@@ -141,28 +141,6 @@ class TypesSpec extends AnyFlatSpec with Matchers {
   }
 
   // ==========================================================================
-  // AgentId Tests
-  // ==========================================================================
-
-  "AgentId" should "generate unique IDs" in {
-    val id1 = AgentId.generate()
-    val id2 = AgentId.generate()
-
-    id1.value should not be id2.value
-  }
-
-  // ==========================================================================
-  // PlanId Tests
-  // ==========================================================================
-
-  "PlanId" should "generate unique IDs" in {
-    val id1 = PlanId.generate()
-    val id2 = PlanId.generate()
-
-    id1.value should not be id2.value
-  }
-
-  // ==========================================================================
   // Result Companion Object Tests
   // ==========================================================================
 
@@ -206,6 +184,28 @@ class TypesSpec extends AnyFlatSpec with Matchers {
     val list   = List(1, 2, 3)
     val result = Result.traverse(list)(n => Right(n * 2))
     result shouldBe Right(List(2, 4, 6))
+  }
+
+  it should "stop calling f after the first failure" in {
+    val error = ValidationError("test", "error")
+    var calls = List.empty[Int]
+    val result = Result.traverse(List(1, 2, 3, 4)) { n =>
+      calls = calls :+ n
+      if (n == 2) Left(error) else Right(n)
+    }
+    result shouldBe Left(error)
+    calls shouldBe List(1, 2)
+  }
+
+  it should "return the first of several failures" in {
+    val first  = ValidationError("first", "error")
+    val second = ValidationError("second", "error")
+    Result.traverse(List(1, 2, 3))(n => if (n == 1) Right(n) else if (n == 2) Left(first) else Left(second)) shouldBe
+      Left(first)
+  }
+
+  it should "handle a large list without overflowing the stack" in {
+    Result.traverse((1 to 100000).toList)(n => Right(n)).map(_.size) shouldBe Right(100000)
   }
 
   "Result.combine" should "combine two results into tuple" in {

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.annotation.Stable
 import org.llm4s.metrics.MetricsCollector
 
 /**
@@ -9,6 +10,7 @@ import org.llm4s.metrics.MetricsCollector
  * provider exchange logging without folding those concerns into
  * [[org.llm4s.llmconnect.config.ProviderConfig]].
  */
+@Stable
 final case class LlmClientOptions(
   metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled

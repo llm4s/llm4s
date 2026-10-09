@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.annotation.Stable
+
 import java.util.concurrent.atomic.AtomicLong
 import java.util.Collections
 import java.util.LinkedHashMap
@@ -11,6 +13,7 @@ import scala.concurrent.duration.FiniteDuration
  * @param ttl     Optional Time-To-Live for cache entries. Expired entries are lazily evicted on access.
  * @tparam Embedding The embedding type (usually Seq[Double]).
  */
+@Stable
 class InMemoryEmbeddingCache[Embedding](
   maxSize: Int = 10000,
   ttl: Option[FiniteDuration] = None,

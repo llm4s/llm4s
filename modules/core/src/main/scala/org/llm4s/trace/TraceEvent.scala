@@ -1,6 +1,7 @@
 package org.llm4s.trace
 
-import org.llm4s.llmconnect.model.{ EmbeddingUsage, Message, TokenUsage }
+import org.llm4s.annotation.Stable
+import org.llm4s.llmconnect.model.{ EmbeddingUsage, Message, TokenUsage, UsageSummary }
 
 import java.time.Instant
 import scala.concurrent.duration.FiniteDuration
@@ -24,6 +25,7 @@ import scala.concurrent.duration.FiniteDuration
  *
  * @see [[Tracing]] for the interface that consumes these events
  */
+@Stable
 sealed trait TraceEvent {
   def timestamp: Instant
   def eventType: String
@@ -119,35 +121,43 @@ object TraceEvent {
   }
 
   /**
-   * A snapshot of an agent run, emitted after each step.
+   * An agent run ended. Emitted once per run, from the run's own final state, by the agent's
+   * tracing; it carries the turn's conversation for backends that record it (Langfuse turns it into
+   * a trace with one span per message). A blocked turn has been removed from the thread by then, so
+   * a blocked run carries no messages.
    *
-   * This replaced `Tracing.traceAgentState(AgentState)` (D5, #1133), which tied
-   * the tracing contract to the agent runtime. The agent builds it with
-   * `AgentState#toTraceEvent`; it carries plain values and conversation
-   * [[org.llm4s.llmconnect.model.Message]]s, never `AgentState` itself.
-   *
-   * @param status       the agent status, as `AgentStatus#toString`
-   * @param messageCount the number of messages in the conversation
-   * @param logCount     the number of agent log entries
-   * @param messages     the conversation at this point, for backends that record it
-   *                     (Langfuse turns it into one span per message). Empty when the
-   *                     emitter has only the counts. Not included in [[toJson]], which
-   *                     stays a flat summary.
+   * @param threadId the conversation's thread; backends use it as the session
+   * @param runId    this run
+   * @param agent    the agent active when the run ended
+   * @param status   `completed`, `suspended`, `step_limit_reached`, `blocked:<guardrail>`,
+   *                 `cancelled`, `timed_out` or `failed`
+   * @param messages this turn's messages, from its user message on; empty when blocked, cancelled,
+   *                 timed out or failed. Not included in [[toJson]], which stays a flat summary.
+   * @param usage    this run's own token usage and cost, per model: the model calls the run made,
+   *                 never the thread's earlier runs, so a backend can report it per run (as
+   *                 OpenTelemetry's per-operation `gen_ai.usage.*`) without double counting
    */
-  case class AgentStateUpdated(
+  case class AgentRunEnded(
+    threadId: String,
+    runId: String,
+    agent: String,
     status: String,
-    messageCount: Int,
-    logCount: Int,
-    messages: Seq[Message] = Seq.empty,
+    messages: Seq[Message],
+    usage: UsageSummary,
     timestamp: Instant = Instant.now()
   ) extends TraceEvent {
-    def eventType: String = "agent_state_updated"
+    def eventType: String = "agent_run_ended"
     def toJson: ujson.Value = ujson.Obj(
       "event_type"    -> eventType,
       "timestamp"     -> timestamp.toString,
+      "thread_id"     -> threadId,
+      "run_id"        -> runId,
+      "agent"         -> agent,
       "status"        -> status,
-      "message_count" -> messageCount,
-      "log_count"     -> logCount
+      "message_count" -> messages.size,
+      "input_tokens"  -> usage.inputTokens.toDouble,
+      "output_tokens" -> usage.outputTokens.toDouble,
+      "total_cost"    -> usage.totalCost.toDouble
     )
   }
 

@@ -1,5 +1,7 @@
 package org.llm4s.identity
 
+import org.llm4s.annotation.Stable
+
 /**
  * Identifies a BPE tokenizer vocabulary by its canonical name.
  *
@@ -12,6 +14,7 @@ package org.llm4s.identity
  * @param name Tokenizer vocabulary name as used by tiktoken and related
  *             libraries (e.g. `"cl100k_base"` for GPT-4 / GPT-3.5).
  */
+@Stable
 case class TokenizerId(name: String)
 
 //noinspection TypeAnnotation,ScalaUnusedSymbol
