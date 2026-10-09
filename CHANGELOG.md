@@ -1996,6 +1996,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-agent`: the PII Email pattern runs in linear time; an SSN stays within a line**
+  ([#1713](https://github.com/llm4s/llm4s/issues/1713)):
+  - `PIIType.Email`, in the default type set of `PIIMasker` and `PIIDetector`, began a match attempt at every
+    character of a run of letters, digits or `._%+-` and scanned to the end of the run each time, so it took
+    quadratic time: 10.9 s on 20,000 `a`s, and hours on a million-character base64 blob or minified line - a
+    denial-of-service risk in a guardrail that runs on every message. An attempt now starts only at the start of
+    such a run or where the previous match ended (`\G`), and a million-character run takes milliseconds. An attempt
+    inside a run succeeds exactly when one at its start does, so the matches are unchanged, back-to-back addresses
+    such as `a@b.com_x@y.org` included. The other PII patterns were measured on million-character adversarial runs
+    and are linear.
+  - `PIIType.SSN` separated its digit groups with `\s`, so `123\n45\n6789` was masked as one SSN. It now takes a
+    dash or horizontal whitespace (`\h`), as the phone and card patterns do: groups split by LF, CR, a vertical tab
+    or a form feed are no longer joined, and groups split by a no-break space or another Unicode horizontal space
+    now are.
 - **`llm4s-openai-compatible`: Z.ai honours `CompletionOptions.reasoning`** ([#1681](https://github.com/llm4s/llm4s/issues/1681)):
   it used to be ignored, so `ReasoningEffort.None` still thought (Z.ai's `thinking.type` defaults to `enabled`) and
   effort levels never reached a model that takes `reasoning_effort`. Each effort now goes out in the form the
