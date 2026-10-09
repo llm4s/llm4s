@@ -44,6 +44,10 @@ environment:
 | `llm4s.embeddings.ollama.baseUrl` | `OLLAMA_EMBEDDING_BASE_URL` |
 | `llm4s.embeddings.ollama.model` | `OLLAMA_EMBEDDING_MODEL` |
 
+Chat sections, and the embeddings block, also accept an optional `timeouts { request = 3m, stream = 15m }`
+block; this module defaults to 2 minutes and 10 minutes for the wait for a response to begin (see
+[Timeouts](../../docs/getting-started/configuration.md#timeouts)).
+
 Pick Ollama for embeddings with `llm4s.embeddings.model` (environment variable
 `EMBEDDING_MODEL`, in `provider/model` form, e.g. `ollama/nomic-embed-text`).
 
@@ -73,6 +77,8 @@ Pull the model first (`ollama pull llama3.2`); see the
 - **Tool calling:** tools go to Ollama's native `tools` field. A model without the tools capability
   makes Ollama answer HTTP 400 (`... does not support tools`); the client reports that as a
   validation error naming the model instead of retrying without the tools.
+- **Thinking:** a thinking model's `thinking` comes back on the message (streamed as thinking deltas)
+  and is sent back on later turns, as Ollama's tool-calling guide asks.
 - **Structured output:** `ResponseFormat.Json` sends `"format": "json"` and
   `ResponseFormat.JsonSchema` sends the schema as `format` (structured outputs, which need
   Ollama 0.5 or later; `name` and `strict` have no Ollama equivalent and are ignored).

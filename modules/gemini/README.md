@@ -54,6 +54,10 @@ llm4s.providers.vertexai-main {
 The earlier keys `endpoint` and `organization` are still read as deprecated aliases of `project` and
 `location`, with a warning; use the new names.
 
+Every section also accepts an optional `timeouts { request = 3m, stream = 15m }` block; both clients
+default to 2 minutes and 10 minutes for the wait for a response to begin (see
+[Timeouts](../../docs/getting-started/configuration.md#timeouts)).
+
 ## Minimal example
 
 ```scala

@@ -50,7 +50,10 @@ llm4s.providers {
 }
 ```
 
-A section for a second account sets its own `apiKey`, which wins over the shared one.
+A section for a second account sets its own `apiKey`, which wins over the shared one. Every section
+also accepts an optional `timeouts { request = 3m, stream = 15m }` block; without it these clients
+keep the `openai-java` SDK's own timeouts, which bound the whole call, retries included (see
+[Timeouts](../../docs/getting-started/configuration.md#timeouts)).
 
 **Embeddings** read `llm4s.embeddings.openai`, bound by this module to the environment:
 
@@ -59,7 +62,10 @@ A section for a second account sets its own `apiKey`, which wins over the shared
 | `llm4s.embeddings.openai.baseUrl` | `OPENAI_EMBEDDING_BASE_URL` |
 | `llm4s.embeddings.openai.model` | `OPENAI_EMBEDDING_MODEL` |
 
-The key is `llm4s.credentials.openai.apiKey` unless that block sets an `apiKey` of its own. Select
+The base URL defaults to `https://api.openai.com/v1`, the same root as the chat provider; requests go
+to `<baseUrl>/embeddings`, and a base URL without the `/v1` (a proxy root, say) gets
+`<baseUrl>/v1/embeddings`. The key is `llm4s.credentials.openai.apiKey` unless that block sets an
+`apiKey` of its own; its `timeouts.request` defaults to 2 minutes. Select
 OpenAI with `llm4s.embeddings.model` (environment variable `EMBEDDING_MODEL`, in `provider/model`
 form, e.g. `openai/text-embedding-3-small`).
 
@@ -85,6 +91,9 @@ val reply = for {
 - **Streaming and tool calling**, through the `openai-java` SDK.
 - **Structured output:** `ResponseFormat.Json` maps to the SDK's `json_object` response format and
   `ResponseFormat.JsonSchema` to `json_schema`.
+- **Reasoning:** `CompletionOptions.reasoning` is sent as `reasoning_effort` to a reasoning model
+  (`ReasoningEffort.None` sends nothing) and never to a model known not to reason. On Azure, a
+  deployment name the model registry cannot resolve gets it whenever reasoning is asked for.
 - **OpenAI model rules:** the o-series and `max_completion_tokens` handling live in this module
   (`OpenAIModelRules`), not in core.
 - **Embeddings ignore `EmbeddingRequest.purpose`:** OpenAI's embedding models embed a query and a

@@ -53,8 +53,8 @@ servers need no key). It also accepts four provider-specific keys:
 
 | Key | Meaning | Default |
 |---|---|---|
-| `contextWindow` | the model's window in tokens, a positive whole number | the model registry's, when at least the built-in default, else the default |
-| `reserveCompletion` | tokens held back for the reply, a whole number below `contextWindow` | a quarter of the window, up to a cap |
+| `contextWindow` | the model's window in tokens, a positive whole number | the model registry's window for the model, when it is at least 8192; else 8192 |
+| `reserveCompletion` | tokens held back for the reply, a whole number below `contextWindow` | a quarter of the window, at most 2048 |
 | `registryProvider` | the model-registry provider (e.g. `groq`, `together_ai`, `fireworks_ai`, `xai`, `perplexity`) whose entry gives the window | inferred from the `baseUrl` host for Groq, Together, Fireworks, xAI and Perplexity |
 | `streamUsage` | whether a streaming request asks for token usage (`stream_options.include_usage`) | `true`; set `false` for a server that rejects it |
 
@@ -75,6 +75,10 @@ llm4s.providers {
   }
 }
 ```
+
+Every section also accepts an optional `timeouts { request = 3m, stream = 15m }` block; these clients
+default to 2 minutes and 5 minutes for the wait for a response to begin (see
+[Timeouts](../../docs/getting-started/configuration.md#timeouts)).
 
 ## Minimal example
 
@@ -101,6 +105,11 @@ val reply = for {
   `{"type": "json_schema", "json_schema": {name, strict, schema}}` for a schema. Cohere's dialect
   sends `json_object` with the schema alongside. A server that rejects `json_schema` will reject the
   request.
+- **Reasoning and thinking:** DeepSeek, Z.ai, OpenRouter and Mistral return the model's reasoning on
+  the message's `thinking` and send it back on later turns. `CompletionOptions.reasoning` is sent by
+  OpenRouter (`reasoning_effort` for OpenAI reasoning models, a `thinking` budget for Anthropic ones)
+  and Z.ai (`reasoning_effort` or `thinking.type`, by GLM model family; GLM-5.3 cannot disable
+  thinking, so `ReasoningEffort.None` sends `low` and logs a warning once).
 - **Model listing:** the generic provider, `deepseek`, `openrouter` and `mistral` can list models;
   `zai` and `cohere` cannot.
 

@@ -47,6 +47,10 @@ llm4s.providers.anthropic-team {
 }
 ```
 
+Every section also accepts an optional `timeouts { request = 3m, stream = 15m }` block; without it the
+client keeps the Anthropic SDK's own timeouts, which bound the whole call, retries included (see
+[Timeouts](../../docs/getting-started/configuration.md#timeouts)).
+
 ## Minimal example
 
 ```scala
@@ -71,6 +75,10 @@ val reply = for {
 - **Structured output is a prompt instruction, not an API guarantee.** For `ResponseFormat.Json` or
   `JsonSchema` the client appends "respond with valid JSON only" (and the schema) to the system
   prompt; nothing in the request enforces it, so validate what comes back.
+- **Extended thinking:** `CompletionOptions.reasoning` adds a `thinking` block with a token budget
+  clamped to `[1024, maxTokens - 1]` (`maxTokens` defaults to 2048, since the API requires it). The
+  reply's thinking and redacted-thinking blocks, with their signatures, come back on the message's
+  `thinking` and are replayed on later turns.
 - **A system prompt is always sent.** If the conversation has no system message the client adds
   `You are Claude, a helpful AI assistant.`
 - **Model listing:** the provider can list the models your key can use.
