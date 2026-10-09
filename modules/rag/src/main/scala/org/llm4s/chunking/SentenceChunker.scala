@@ -14,6 +14,14 @@ import scala.util.matching.Regex
  * This chunker produces higher quality chunks than simple character-based
  * splitting because it never breaks in the middle of a sentence.
  *
+ * A sentence ends at `.`, `!` or `?`, optionally followed by closing quotes or
+ * brackets, when whitespace and then an uppercase letter (optionally after opening
+ * quotes or brackets) follow: `He said "Hi." Then` is two sentences, `He said "Hi."`
+ * and `Then`. Abbreviations such as `Dr.` and `e.g.` (as whole words) and decimal
+ * numbers such as `3.14` do not end a sentence. Sentences in a chunk keep the
+ * whitespace that separated them in the input, so with no overlap and no sentence
+ * longer than `maxSize`, every chunk is a slice of the input.
+ *
  * A sentence longer than `maxSize` is split at whitespace. A single word (a run
  * without whitespace) longer than `maxSize` is kept whole as its own chunk, so such
  * a chunk can exceed `maxSize`: the chunker never cuts inside a word, and so never
@@ -66,9 +74,12 @@ class SentenceChunker extends DocumentChunker {
     "U.N."
   ).map(_.toLowerCase)
 
-  // Pattern for sentence boundaries
-  // Looks for sentence-ending punctuation followed by space and uppercase letter
-  private val sentenceEndPattern: Regex = """([.!?])(\s+)([A-Z])""".r
+  // Sentence boundary: the whitespace after sentence-ending punctuation (optionally followed by
+  // closing quotes or brackets) when the next sentence starts with an uppercase letter (optionally
+  // after opening quotes or brackets). Lookarounds keep the punctuation and the next sentence's first
+  // letter out of the match, so only the whitespace is consumed (#1718).
+  private val sentenceBoundary: Regex =
+    """(?<=[.!?]["'\u201D\u2019)\]]{0,3})\s+(?=["'\u201C\u2018(\[]{0,3}[A-Z])""".r
 
   override def chunk(text: String, config: ChunkingConfig): Seq[DocumentChunk] = {
     if (text.isEmpty) {
@@ -94,66 +105,51 @@ class SentenceChunker extends DocumentChunker {
   }
 
   /**
-   * Split text into sentences.
+   * Split text into sentences, keeping every character of the input.
+   *
+   * Each sentence is a slice of `text` with no leading or trailing whitespace, paired with the
+   * whitespace that preceded it in `text` (for the first sentence, the text's leading whitespace).
+   * Concatenating `separator + text` over all sentences gives back `text` without its trailing
+   * whitespace.
+   *
+   * Periods of abbreviations (`Dr.`, `e.g.`, matched as whole words) and of decimal numbers (`3.14`)
+   * are masked before boundaries are searched. Masking replaces one character with one character,
+   * so boundary offsets found in the masked text are offsets in `text`, and sentences are cut from
+   * `text` itself.
    */
-  private def splitIntoSentences(text: String): Seq[String] = {
-    // First, protect abbreviations by replacing their periods with a placeholder
-    var processedText = text
+  private[chunking] def splitIntoSentences(text: String): Seq[SentenceChunker.Sentence] = {
+    var masked = text
     abbreviations.foreach { abbr =>
-      // Use regex with case-insensitive matching that preserves original case
-      val pattern = new Regex(s"(?i)(${Regex.quote(abbr.dropRight(1))})(\\.)")
-      processedText = pattern.replaceAllIn(processedText, m => m.group(1) + "\u0000")
+      val pattern = new Regex(s"(?i)\\b(${Regex.quote(abbr.dropRight(1))})(\\.)")
+      masked = pattern.replaceAllIn(masked, m => Regex.quoteReplacement(m.group(1)) + "\u0000")
     }
+    masked = masked.replaceAll("""(\d)\.(\d)""", "$1\u0000$2")
 
-    // Also protect decimal numbers (e.g., "3.14")
-    processedText = processedText.replaceAll("""(\d)\.(\d)""", "$1\u0000$2")
-
-    // Split on sentence boundaries
-    val parts = sentenceEndPattern.split(processedText)
-
-    // Reconstruct sentences by combining parts with their punctuation
-    val sentences = new scala.collection.mutable.ArrayBuffer[String]()
-    var current   = new StringBuilder()
-
-    for (part <- parts) {
-      current.append(part)
-      val trimmed = current.toString.trim
-
-      // Check if this looks like a complete sentence
-      if (trimmed.nonEmpty && endsWithSentencePunctuation(trimmed)) {
-        // Restore protected periods
-        sentences += trimmed.replace('\u0000', '.')
-        current = new StringBuilder()
+    val sentences = scala.collection.mutable.ArrayBuffer[SentenceChunker.Sentence]()
+    var sepStart  = 0
+    var start     = 0
+    def add(end: Int): Unit = {
+      val slice   = text.substring(start, end)
+      val content = slice.stripTrailing()
+      val lead    = content.length - content.stripLeading().length
+      if (content.nonEmpty) {
+        sentences += SentenceChunker.Sentence(text.substring(sepStart, start + lead), content.substring(lead))
       }
     }
-
-    // Add any remaining content
-    val remaining = current.toString.trim.replace('\u0000', '.')
-    if (remaining.nonEmpty) {
-      sentences += remaining
+    sentenceBoundary.findAllMatchIn(masked).foreach { m =>
+      add(m.start)
+      sepStart = m.start
+      start = m.end
     }
-
-    // If no sentences found, return the original text as a single sentence
-    if (sentences.isEmpty) {
-      Seq(text.trim)
-    } else {
-      sentences.toSeq
-    }
-  }
-
-  /**
-   * Check if text ends with sentence punctuation.
-   */
-  private def endsWithSentencePunctuation(text: String): Boolean = {
-    val trimmed = text.trim
-    trimmed.endsWith(".") || trimmed.endsWith("!") || trimmed.endsWith("?")
+    add(text.length)
+    sentences.toSeq
   }
 
   /**
    * Group sentences into chunks respecting target size.
    */
   private def groupSentencesIntoChunks(
-    sentences: Seq[String],
+    sentences: Seq[SentenceChunker.Sentence],
     config: ChunkingConfig
   ): Seq[String] = {
     if (sentences.isEmpty) {
@@ -163,8 +159,9 @@ class SentenceChunker extends DocumentChunker {
     val chunks       = new scala.collection.mutable.ArrayBuffer[String]()
     var currentChunk = new StringBuilder()
 
-    for (sentence <- sentences) {
-      val sentenceWithSpace = if (currentChunk.isEmpty) sentence else " " + sentence
+    for (SentenceChunker.Sentence(separator, sentence) <- sentences) {
+      // Sentences within a chunk keep the whitespace that separated them in the input
+      val sentenceWithSpace = if (currentChunk.isEmpty) sentence else separator + sentence
 
       if (currentChunk.length + sentenceWithSpace.length <= config.targetSize) {
         // Fits in current chunk
@@ -293,4 +290,7 @@ object SentenceChunker {
    * Create a new sentence chunker.
    */
   def apply(): SentenceChunker = new SentenceChunker()
+
+  /** A sentence cut from the input, and the whitespace that preceded it there. */
+  final private[chunking] case class Sentence(separator: String, text: String)
 }
