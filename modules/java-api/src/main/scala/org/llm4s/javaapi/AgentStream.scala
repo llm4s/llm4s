@@ -30,7 +30,8 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
     Thread.ofVirtual().name(s"llm4s-java-stream-${run.runId.value}").unstarted(() => deliver())
 
   /**
-   * Cancels the turn and returns once it has ended; the thread is left for [[JAgent.streamRecover]].
+   * Cancels the turn and returns once it has ended or a 5-second bound has passed (see below); the
+   * thread is left for [[JAgent.streamRecover]].
    * The listener receives at most the event already being delivered, then
    * [[AgentStreamListener.onError]] with the cancellation - or `onComplete`, for a turn that had
    * already ended. Safe to call more than once, from any thread, the listener's included. An

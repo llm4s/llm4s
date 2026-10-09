@@ -141,9 +141,9 @@ whose id a failed result does not carry, so a turn of it that fails or is cancel
 A conversation you named, for `stream` say, is forgotten with `forget(threadId)`, which needs no result.
 
 To cancel a turn without interrupting any thread, start it with `JAgent.stream`, `streamResume` or `streamRecover`
-and call `cancel()` on the returned `AgentStream`. `cancel()` stops the turn and returns once it has ended, and
-leaves the thread for `streamRecover` or `recover`. Like the blocking calls, it waits up to 5 seconds for the turn to
-end, then logs a WARN and returns, leaving a turn whose provider ignores the interrupt to finish on its own.
+and call `cancel()` on the returned `AgentStream`. `cancel()` stops the turn and leaves the thread for `streamRecover`
+or `recover`. Like the blocking calls, it waits up to 5 seconds for the turn to end; if the turn has not ended by then
+(a provider that ignores the interrupt), it logs a WARN and returns, leaving that turn to finish on its own.
 
 Kotlin matches Java: every `AgentKt` suspend function that runs a turn - `run`, `continueConversation`, `resume` and
 `recover` - cancels the turn when the calling coroutine is cancelled (see
