@@ -2023,6 +2023,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on GLM-5.3 logs a one-time warning that thinking tokens are still produced. `High` is Z.ai's maximum, its default,
   so no level reasons more than `High`. Other models are sent nothing. With replayed reasoning, `thinking`
   carries both `type` and `clear_thinking`. Without a `reasoning` option the request is unchanged.
+- **`llm4s-rag`: chunkers never split a surrogate pair** ([#1711](https://github.com/llm4s/llm4s/issues/1711)):
+  `SimpleChunker` and `ChunkingUtils.chunkText` cut by UTF-16 index, so a window end or an overlap start could fall
+  between the two halves of an astral character (emoji, CJK Extension B), leaving a lone surrogate in each chunk; an
+  embedding API rejects that or replaces it with U+FFFD. `SentenceChunker` could do the same at the start of its
+  overlap. Such a cut now moves back by one unit (forward only for `targetSize = 1` at an astral character, the one
+  case where a chunk is two units long), so chunks stay within their size and, with no overlap, still concatenate
+  back to the input. The reranker prompt, the RAGAS Langfuse observer and `BenchmarkConfig.shortName` truncate the
+  same way. Text without astral characters is chunked exactly as before. `SentenceChunker`, `MarkdownChunker` and
+  `SemanticChunker` keep a single word longer than `maxSize` whole, as before; this is now documented on
+  `ChunkingConfig.maxSize`.
 - **Cancelled and failed agent turns no longer leave threads nobody can name, and every cancel wait is bounded**
   ([#1682](https://github.com/llm4s/llm4s/issues/1682), [#1688](https://github.com/llm4s/llm4s/issues/1688);
   follow-ups to [#1330](https://github.com/llm4s/llm4s/issues/1330)'s cancellation):
@@ -2834,6 +2844,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lower-cased with `Locale.ROOT`, so a Turkish default locale no longer stops `API_KEY` from being recognised. Redaction
   is still pattern-based and best effort: it does not detect a secret that is not under a key, and JSON escaped twice
   is not recognised.
+- **Docs: the Reference section's Migration Guide, Release Process, Scalafix Rules and Test Coverage pages no longer
+  404** ([#444](https://github.com/llm4s/llm4s/issues/444)): `migration.md`, `release.md`, `scalafix.md` and
+  `test-coverage.md` (and `security.md`, `workspace-sandbox.md` and `benchmarks.md`) had no front matter, so Jekyll
+  served them as raw files and their links on llm4s.org returned 404. They now have a title, `parent: Reference` and a
+  `nav_order`, and are listed in the Reference index. `test-coverage.md` described a single 50% threshold that no
+  longer exists; it now describes the per-module `coverageFloor`, `coveragePolicyCheck` and the Codecov statuses.
+  Links inside the Reference pages that ended in `.md`, or pointed at repository-root files, now use the form the
+  site serves. Links to the newly rendered pages from `installation.md`, `providers.md`, `0x-to-1x.md` and
+  `migration.md` itself were changed from `.md` to the page URL in the same change, since a `.md` URL is a 404 once
+  its page is rendered, and the 55 entries `scripts/docs-link-baseline.txt` held for the links this fixes are removed.
 - **`AudioPreprocessing.resamplePcm16` could hang, and its output length was wrong**
   ([#1308](https://github.com/llm4s/llm4s/issues/1308)): a target rate of `-8000`, or a source rate of `-1`, sent
   Java Sound's converter into a loop that never ended (a test JVM spun at 100% CPU for twenty minutes), a target

@@ -32,6 +32,7 @@ import org.llm4s.agent.graph.EventRecord
 import org.llm4s.agent.graph.GraphRuntime
 import org.llm4s.agent.graph.InMemoryCheckpointer
 import java.time.Clock
+import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.test.assertFalse
 import org.llm4s.agent.graph.StateUpdate
@@ -66,10 +67,12 @@ import scala.util.Either
 import scala.util.Left
 import scala.util.Right
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.LockSupport
+import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -538,10 +541,35 @@ class AgentKtPendingTest {
      * [listener], but its `onEvent` - or, when [atEnd], only its `onComplete` - first throws a fatal error, one
      * the facade's `Safety` does not capture: the facade's delivery thread dies of it and skips the terminal callback.
      */
-    private class FailsFatally(private val listener: AgentStreamListener, private val atEnd: Boolean) : AgentStreamListener {
-        override fun onEvent(event: StreamEvent) = if (atEnd) listener.onEvent(event) else throw StackOverflowError("listener")
-        override fun onComplete(result: JAgentResult) = throw StackOverflowError("listener")
+    private inner class FailsFatally(private val listener: AgentStreamListener, private val atEnd: Boolean) : AgentStreamListener {
+        override fun onEvent(event: StreamEvent) = if (atEnd) listener.onEvent(event) else raiseFatal()
+        override fun onComplete(result: JAgentResult) = raiseFatal()
         override fun onError(error: LlmException) = listener.onError(error)
+    }
+
+    /** Each delivery thread a [FailsFatally] listener ended, with the error its own handler recorded it dying of. */
+    private val fatallyEnded = ConcurrentLinkedQueue<Pair<Thread, AtomicReference<Throwable>>>()
+
+    /**
+     * Throws the fatal error from the delivery thread, which it ends uncaught - after the facade's call has already
+     * returned. The thread's own handler records it, so the default one does not print it to whatever `System.err`
+     * is then (#1719).
+     */
+    private fun raiseFatal(): Nothing {
+        val died = AtomicReference<Throwable>()
+        val current = Thread.currentThread()
+        current.setUncaughtExceptionHandler { _, e -> died.set(e) }
+        fatallyEnded.add(current to died)
+        throw StackOverflowError("listener")
+    }
+
+    /** No delivery thread a test ended fatally outlives it, and each died of the listener's error, not swallowed. */
+    @AfterTest
+    fun awaitFatallyEndedThreads() {
+        for ((thread, died) in fatallyEnded) {
+            assertTrue(thread.join(Duration.ofSeconds(seconds)), "the delivery thread ${thread.name} ended")
+            assertIs<StackOverflowError>(died.get(), "what ${thread.name} died of")
+        }
     }
 
     /** [real], every stream's listener wrapped in [FailsFatally]. */
