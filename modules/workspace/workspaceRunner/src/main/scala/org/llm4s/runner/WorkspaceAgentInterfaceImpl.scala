@@ -873,6 +873,7 @@ class WorkspaceAgentInterfaceImpl(
     val builder = new java.lang.ProcessBuilder(finalArgv.asJava)
     builder.directory(workDir)
     env.foreach { case (k, v) => builder.environment().put(k, v) }
+    if (execLower == "git") CommandPolicy.confineGit(builder.environment(), realRoot)
 
     val stdout    = new StringBuilder
     val stderr    = new StringBuilder

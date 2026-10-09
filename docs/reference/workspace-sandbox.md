@@ -79,7 +79,9 @@ example below). An unknown profile name makes `loadSandboxConfig` return a `Left
 | An argument longer than 4096 characters, or paths that need more than 20000 lookups to check | `ARGUMENT_NOT_ALLOWED` |
 | An argument holding a NUL character, on Windows one holding `"`, or one whose check fails with an error | `ARGUMENT_NOT_ALLOWED` |
 | On Windows, a cmd.exe built-in's argument holding a character cmd.exe splits or parses (`,` `=` `(` `)` `@` `!`, a control character, a non-ASCII space) | `ARGUMENT_NOT_ALLOWED` |
+| `git` with a `.git` file or link between the working directory and the workspace root | `PATH_ESCAPE_ATTEMPT` |
 | An argument that names a location outside the workspace | `PATH_ESCAPE_ATTEMPT` |
+| On Windows, a form listed under [On Windows](#on-windows) (a device name, a trailing `.` or space, `@`, `~`, glob syntax) | `ARGUMENT_NOT_ALLOWED` |
 | `cp` only: a name it would write leads outside, or a recursive copy's destination holds a link that does | `PATH_ESCAPE_ATTEMPT` |
 
 An allowlist names programs; these rules stop a listed program from writing, deleting, running another program or
@@ -88,8 +90,9 @@ following links out of the workspace through its own options:
 | Program | Refused |
 |---------|---------|
 | `find` | `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprint0`, `-fprintf`, `-fls`, `-files0-from`, `-follow`, `-L` (also in `-HL`) |
-| `git` | any subcommand but `status`, `log`, `show`, `diff`, `ls-files`, `ls-tree`, `grep`, `blame`, `rev-parse`, `branch`; any global option but `--version`, `--no-pager`, `--no-optional-locks`, `--literal-pathspecs`, `--no-replace-objects` (so `-c`, `-C`, `--exec-path`, `--git-dir`, `--work-tree`, `-p`); `--output`, `--ext-diff`, `--textconv`, `--show-signature` on `log`/`show`/`diff`; `-O`, `--open-files-in-pager`, `--textconv` on `grep`; `--textconv` on `blame`; `branch` with anything but listing options, or with a name unless `--list`/`-l` makes it a pattern (the values of `--merged`, `--no-merged`, `--contains`, `--no-contains`, `--points-at`, `--sort` and `--format` are values, not names) |
-| `sort` | `-o`, `--output`, `--compress-program`, `--files0-from`; `/O` on Windows |
+| `git` | any subcommand but `status`, `log`, `show`, `diff`, `ls-files`, `ls-tree`, `grep`, `blame`, `rev-parse`, `branch`; any global option but `--version`, `--no-pager`, `--no-optional-locks`, `--literal-pathspecs`, `--no-replace-objects` (so `-c`, `-C`, `--exec-path`, `--git-dir`, `--work-tree`, `-p`); `--output`, `--ext-diff`, `--textconv`, `--show-signature` on `log`/`show`/`diff`; `-O`, `--open-files-in-pager`, `--textconv` on `grep`; `--textconv` on `blame`; an argument starting with `:` (pathspec magic, index paths); `branch` with anything but listing options, or with a name unless `--list`/`-l` makes it a pattern (the values of `--merged`, `--no-merged`, `--contains`, `--no-contains`, `--points-at`, `--sort` and `--format` are values, not names) |
+| `sort` | `-o`, `--output`, `--compress-program`, `--files0-from`; on Windows also `/O`, `/T`, `-O`, `-T`, `-t`, `--temporary-directory` |
+| `findstr` (Windows) | a switch with `F` among its letters (`/F:list`), a `/D:` value holding `,` or `;` |
 | `uniq` | a second operand (the output file); every argument after the first operand counts as one, as BSD `uniq` does not reorder its arguments, so write options before the file (`uniq -c a.txt`, not `uniq a.txt -c`) |
 | `wc` | `--files0-from` |
 | `ls` | `-L`, `--dereference` |
@@ -166,6 +169,61 @@ What these checks do not cover:
   outside. Paths through it are refused, and so is a recursive `cp` into its directory, but the link is not removed.
 - The checks run before the program starts, so a link made at a checked name by a concurrent command is not seen.
   Windows `copy` gets the path rule but not `cp`'s destination checks.
+
+### On Windows
+
+On Windows the policy refuses (`ARGUMENT_NOT_ALLOWED`) every form below rather than reasoning about what Win32, cmd.exe
+or a program's runtime makes of it. Over-blocking is accepted there: only the forms the rest of this section allows
+are supported. Each rule runs after the path rule, so an argument that leads outside is still `PATH_ESCAPE_ATTEMPT`.
+
+- **Device names**, for every program but `echo`, `pwd`, `whoami` and `hostname`: a path component that is `CON`,
+  `PRN`, `AUX`, `NUL`, `COM0`-`COM9`, `LPT0`-`LPT9`, `COM¹²³`, `LPT¹²³`, `CONIN$` or `CONOUT$`, in any case, with
+  any extension and ignoring trailing dots and spaces (`nul`, `sub\con`, `NUL.txt`, `aux .txt`, `aux:s`). A device
+  is opened whatever directory precedes it, so it bypasses the path rule; `copy a.txt nul` is refused too.
+- **Trailing dots and spaces**, for the same programs: a component, other than `.` and `..`, that ends in `.` or a
+  space (`outside.`, `a.txt `). Win32 strips them, so `outside.` opens `outside`. This also refuses git's open
+  range `HEAD..` (write `HEAD..HEAD`) and a `findstr` pattern ending in `.`.
+- **Programs that are not cmd.exe built-ins** (`findstr`, `sort`, `git`, `grep`, ...), which may run under a
+  runtime that re-parses the command line itself (MSYS2, Cygwin, Git for Windows):
+  - an argument starting with `@` (a response file whose lines become arguments: `grep x @args.txt`, `git log @{1}`)
+    or `~` (a home directory);
+  - an argument holding `{`, `}`, `[`, `]`, `'`, `(` or `)` (glob and quoting syntax): `grep [ab] a.txt` is refused
+    on Windows, so the `[/]api` form suggested below for a pattern starting with `/` is not available there;
+  - a string the program might open as a path that starts with `/` (`/sub/a.txt`, `-f/x`, `--file=/x`), which such a
+    runtime reads from its own root rather than the workspace's drive; `findstr` and `sort` keep their `/X` switches;
+  - a wildcard (`*`, `?`) anywhere but the last component (`*/a.txt`, `--exclude=*/target/*`), in an absolute string
+    or one with a `..` component, or in a last component with no literal character other than `.` (`*`, `.*`, `??`,
+    `*.*`), which can match `..`. `grep x *.txt`, `grep x sub/*.scala` and `findstr /S /I x *.txt` run. The
+    built-ins `dir` and `type` keep the wildcard rule above (`dir *` runs).
+- **`findstr`**: a switch with `F` among its letters (`/F:list`, `-F:list`, `/SIF:list`; `/OFF[LINE]` is allowed),
+  which reads the names of the files to search from a file the path rule cannot see into; and a `/D:` value holding
+  `,` or `;` (a directory list). `/D:dir` with a single directory is held to the workspace like any path.
+- **`sort`**: `/O[UTPUT]`, `/T[EMPORARY]` (any switch whose letter is `O` or `T`), a short-option cluster holding `o`,
+  `O`, `t` or `T`, and `--temporary-directory`, which write the output or temporary files (a GNU `sort` earlier on
+  the `PATH` takes `-t` as its field separator; it is refused rather than guessed).
+- **Not refused, by reasoning**:
+  - *8.3 short names* (`PROGRA~1`). A short name aliases an entry of the directory it is in, so it cannot climb out
+    of that directory, and the path rule's final step resolves the existing part of a path with `toRealPath`, which
+    expands short names before the comparison with the real root. A short name that does not exist names nothing,
+    and refusing `~` followed by a digit would refuse `HEAD~1`.
+  - *Alternate data streams* (`file:stream`). The part before the `:` is judged, so `..\outside\f:s` is refused and
+    `a.txt:s` runs.
+
+### git's repository
+
+git looks for its repository in the working directory and then in each directory above it, so a workspace that is a
+subdirectory of a larger repository ran git on that repository: `git show HEAD:secret`, `git diff`, `git log -p`
+and `git status` read files outside the workspace. The runner therefore starts `git` with `GIT_CEILING_DIRECTORIES`
+set to the workspace root's parent and without the `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`,
+`GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_NAMESPACE` and `GIT_DISCOVERY_ACROSS_FILESYSTEM`
+variables the runner's own environment may carry: a workspace without a repository of its own gets
+`not a git repository`. On every platform, `git` is also refused (`PATH_ESCAPE_ATTEMPT`) when the nearest `.git`
+between the working directory and the workspace root is not a directory (a `gitdir:` file or a link points git at a
+repository elsewhere), and an argument starting with `:` is refused (`ARGUMENT_NOT_ALLOWED`): pathspec magic
+(`:/`, `:(top)`, `:!x`) and index paths (`:a.txt`) are resolved from the repository's top level, not the working
+directory. A repository inside the workspace whose `.git` directory points elsewhere through files git reads
+(`commondir`, `objects/info/alternates`), or a bare repository written into the workspace, is the same class of
+gap as [#1721](https://github.com/llm4s/llm4s/issues/1721): it needs the agent to write files.
 
 ## Security Gaps Addressed
 

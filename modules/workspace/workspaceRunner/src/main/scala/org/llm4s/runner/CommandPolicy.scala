@@ -55,6 +55,16 @@ import scala.util.{ Try, Using }
  * with `/` or has a `..` component is refused too (write `[/]api` for `/api`). A relative value without `..` can only
  * leave the workspace through a link, so `--since=2024/01/01` and `--grep=feat/x` run.
  *
+ * '''Windows.''' The policy refuses what it cannot reason about rather than modelling it (see [[windowsFormRefusal]],
+ * [[findstrRefusal]], [[windowsSortRefusal]]): device names and components with a trailing `.` or space; for
+ * programs that are not built-ins, a leading `@` or `~`, the characters `{ } [ ] ' ( )`, a leading `/`, and wildcards
+ * anywhere but in a last component with a literal character; `findstr /F` and a `/D:` list; `sort` `/O`, `/T`,
+ * `-o`, `-T`. Over-blocking there is accepted.
+ *
+ * '''git.''' git searches upwards for its repository, so the runner confines it to the workspace
+ * ([[confineGit]]), a `.git` that is not a directory is refused ([[gitRepositoryRefusal]]), and so is an argument
+ * starting with `:` (pathspec magic, index paths), on every platform.
+ *
  * '''Limits.''' The checks cover what a command is given, not what a program reads by itself. A recursive walk
  * (`ls -R`, `grep -r`, `find`, `diff -r`) is checked where it starts; `ls -L`, `grep -R`/`-S`, `find -L`,
  * `cp -L`/`-H` and `chmod -L`/`-H`, which follow links they meet, are refused, but `diff -r` follows links inside the
@@ -229,7 +239,9 @@ private[runner] object CommandPolicy {
         .orElse(if (isWindows) quoteRefusal(program, args) else None)
         .orElse(if (isWindows && WindowsBuiltins.contains(program)) cmdSyntaxRefusal(program, args) else None)
         .orElse(optionRefusal(program, args, isWindows))
+        .orElse(if (program == "git") gitRepositoryRefusal(workDir, realRoot) else None)
         .orElse(pathRefusal(program, args, isWindows, Bases(workDir, spelledWorkDir.getOrElse(workDir)), realRoot))
+        .orElse(if (isWindows) windowsFormRefusal(program, args) else None)
     }.fold(
       e =>
         Some(
@@ -320,6 +332,128 @@ private[runner] object CommandPolicy {
       }
   }
 
+  // ---- Windows: forms the policy cannot reason about are refused
+
+  /**
+   * Win32 device names. A path component naming one opens the device, not a file, whatever directory precedes it and
+   * whatever extension follows (`sub\nul.txt`), so it bypasses the path rule.
+   */
+  private val WindowsDevices: Set[String] =
+    Set("CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$") ++
+      (for {
+        prefix <- Seq("COM", "LPT")
+        digit  <- ('0' to '9') ++ Seq('¹', '²', '³')
+      } yield s"$prefix$digit")
+
+  /** `name` with the trailing dots and spaces Win32 strips removed. */
+  private def win32Trimmed(name: String): String = {
+    val end = name.lastIndexWhere(c => c != '.' && c != ' ')
+    name.substring(0, end + 1)
+  }
+
+  private def isWindowsDevice(component: String): Boolean = {
+    val base = win32Trimmed(win32Trimmed(component).takeWhile(_ != '.'))
+    WindowsDevices.contains(base.toUpperCase(java.util.Locale.ROOT))
+  }
+
+  /** A component Win32 would open under another name, its trailing dots or spaces removed (`outside.` is `outside`). */
+  private def hasTrailingDotOrSpace(component: String): Boolean =
+    component.nonEmpty && component != "." && component != ".." && (component.endsWith(".") || component.endsWith(" "))
+
+  /**
+   * Characters a program that is not a cmd.exe built-in may expand, under the MSYS2 / Cygwin / Git-for-Windows
+   * runtime that parses a Windows command line itself: braces and brackets (glob), `'` and parentheses (its quoting
+   * and glob syntax). A leading `@` names a response file whose lines become arguments, and a leading `~` a home
+   * directory.
+   */
+  private val RuntimeExpanded: Set[Char] = Set('{', '}', '[', ']', '\'', '(', ')')
+
+  private def isWildcard(c: Char): Boolean = c == '*' || c == '?'
+
+  /**
+   * On Windows, an argument whose meaning depends on what the program or its runtime does with it, which the path
+   * rule cannot follow (#1715). Applies to every program; the path checks still run afterwards.
+   *
+   *  - Every program but the print-only ones: a path component that is a device name ([[WindowsDevices]], any case,
+   *    any extension, trailing dots and spaces ignored), or that ends in `.` or a space other than `.` and `..`
+   *    (Win32 strips them, so `outside.` opens `outside`).
+   *  - Programs that are not built-ins, which may run under a runtime that expands their command line (MSYS2,
+   *    Cygwin, Git for Windows): a leading `@` (a response file) or `~` (a home directory); any of `{ } [ ] ' ( )`;
+   *    a string the program might open as a path starting with `/` (the runtime's own root, not the workspace
+   *    drive's), except for the `/X` switches of `findstr` and `sort`; and a wildcard anywhere but in the last
+   *    component, in an absolute string or one with a `..` component, or in a last component with no literal
+   *    character but `.` (`*`, `.*`, `??`, `*.*` can match `..`, which `FindFirstFile` and a runtime's glob may
+   *    return).
+   */
+  private def windowsFormRefusal(program: String, args: Seq[String]): Option[Refusal] = {
+    val builtin                              = WindowsBuiltins.contains(program)
+    val switches                             = WindowsSwitchPrograms.contains(program)
+    val options                              = ProgramOptions.getOrElse(program, Options())
+    def components(s: String): Array[String] = s.split(Array('/', '\\', ':'))
+
+    val runtimeForm: Option[Refusal] =
+      if (builtin) None
+      else
+        args.iterator
+          .flatMap { arg =>
+            if (arg.startsWith("@"))
+              Some(
+                notAllowed(program, arg, "on Windows a leading '@' can name a response file whose lines are arguments.")
+              )
+            else if (arg.startsWith("~"))
+              Some(notAllowed(program, arg, "on Windows a leading '~' can be expanded to a home directory."))
+            else
+              arg
+                .find(RuntimeExpanded.contains)
+                .map(c =>
+                  notAllowed(
+                    program,
+                    arg,
+                    s"on Windows the program's runtime may expand '$c' (glob or quoting) into names other than the one checked."
+                  )
+                )
+          }
+          .nextOption()
+
+    def candidateForm(candidate: String): Option[String] = {
+      val parts = components(candidate)
+      if (!PrintOnly.contains(program) && parts.exists(isWindowsDevice))
+        Some("it names a Windows device (CON, PRN, AUX, NUL, COM0-9, LPT0-9, CONIN$, CONOUT$), not a file.")
+      else if (!PrintOnly.contains(program) && parts.exists(hasTrailingDotOrSpace))
+        Some(
+          "Windows removes a trailing '.' or space from a name, so it would open a different name from the one checked."
+        )
+      else if (builtin) None
+      else if (!switches && candidate.startsWith("/"))
+        Some(
+          "on Windows a program's runtime (MSYS2, Cygwin) may read a leading '/' from its own root, not the workspace drive."
+        )
+      else if (!candidate.exists(isWildcard)) None
+      else {
+        val names = candidate.split(Array('/', '\\'))
+        val absolute =
+          candidate.startsWith("/") || candidate.startsWith("\\") ||
+            (candidate.length > 1 && candidate.charAt(1) == ':' && candidate.charAt(0).isLetter)
+        val wildEarly = names.dropRight(1).exists(_.exists(isWildcard))
+        val noLiteral = names.lastOption.forall(_.forall(c => isWildcard(c) || c == '.'))
+        if (absolute || wildEarly || noLiteral || names.exists(parentComponent))
+          Some(
+            "on Windows a wildcard is allowed only in the last component of a relative path without '..', with a " +
+              "literal character other than '.' (a wildcard can match '..')."
+          )
+        else None
+      }
+    }
+
+    runtimeForm.orElse(
+      candidates(args, options, switches)
+        .flatMap { case (arg, candidate) =>
+          candidateForm(candidate).map(notAllowed(program, arg, _))
+        }
+        .nextOption()
+    )
+  }
+
   private def environmentRefusal(environment: Map[String, String], isWindows: Boolean): Option[Refusal] =
     environment.keys.toSeq.sorted
       .find { name =>
@@ -338,12 +472,13 @@ private[runner] object CommandPolicy {
 
   private def optionRefusal(program: String, args: Seq[String], isWindows: Boolean): Option[Refusal] =
     program match {
-      case "git"               => gitRefusal(args)
-      case "uniq"              => uniqRefusal(args)
-      case "sort" if isWindows => windowsSortRefusal(args).orElse(refusedOption(program, args))
-      case "hostname"          => hostnameRefusal(args).orElse(refusedOption(program, args))
-      case "find"              => findFollowRefusal(args).orElse(refusedOption(program, args))
-      case _                   => refusedOption(program, args)
+      case "git"                  => gitRefusal(args)
+      case "uniq"                 => uniqRefusal(args)
+      case "sort" if isWindows    => windowsSortRefusal(args).orElse(refusedOption(program, args))
+      case "findstr" if isWindows => findstrRefusal(args)
+      case "hostname"             => hostnameRefusal(args).orElse(refusedOption(program, args))
+      case "find"                 => findFollowRefusal(args).orElse(refusedOption(program, args))
+      case _                      => refusedOption(program, args)
     }
 
   private def notAllowed(program: String, arg: String, why: String): Refusal =
@@ -376,10 +511,43 @@ private[runner] object CommandPolicy {
   private def findFollowRefusal(args: Seq[String]): Option[Refusal] =
     args.find(arg => FindFollowCluster.matches(arg)).map(notAllowed("find", _, "it follows every link it meets."))
 
+  /**
+   * Windows `sort.exe` writes its output with `/O[UTPUT] file` and its temporary files with `/T[EMPORARY] dir`;
+   * a GNU `sort` earlier on the `PATH` does so with `-o` and `-T` (and `-t`, its field separator, is refused here
+   * too rather than guessing which program runs). Any switch or cluster naming one is refused.
+   */
   private def windowsSortRefusal(args: Seq[String]): Option[Refusal] =
     args
-      .find(arg => arg.length > 1 && arg.startsWith("/") && arg.charAt(1).toLower == 'o')
-      .map(notAllowed("sort", _, "it writes the output to a file."))
+      .find { arg =>
+        val writes = (c: Char) => c.toLower == 'o' || c.toLower == 't'
+        (arg.length > 1 && arg.startsWith("/") && writes(arg.charAt(1))) ||
+        (arg.length > 1 && arg.startsWith("-") && !arg.startsWith("--") && arg.drop(1).exists(writes)) ||
+        (arg.length > 3 && arg.startsWith("--") && "--temporary-directory".startsWith(arg.takeWhile(_ != '=')))
+      }
+      .map(notAllowed("sort", _, "it writes the output or temporary files to a file or directory."))
+
+  /**
+   * Windows `findstr` takes switches after `/` or `-`, several letters to a switch (`/SIN`). `/F:file` reads the
+   * list of files to search from a file, which the path rule cannot see into, so a switch with `F` in its letters is
+   * refused (bar `/OFF[LINE]`). `/D:dir1;dir2` searches a list of directories, so a `/D:` value holding a list
+   * separator is refused; a single directory is held to the workspace by the path rule.
+   */
+  private def findstrRefusal(args: Seq[String]): Option[Refusal] =
+    args.iterator
+      .flatMap { arg =>
+        if (arg.length < 2 || !(arg.startsWith("/") || arg.startsWith("-"))) None
+        else {
+          val letters = arg.drop(1).takeWhile(_ != ':').toUpperCase(java.util.Locale.ROOT)
+          val value   = arg.dropWhile(_ != ':').drop(1)
+          val offline = letters == "OFF" || letters == "OFFLINE"
+          if (!offline && letters.contains('F'))
+            Some(notAllowed("findstr", arg, "/F reads the names of the files to search from a file."))
+          else if (letters.contains('D') && (value.contains(',') || value.contains(';')))
+            Some(notAllowed("findstr", arg, "/D takes a list of directories; give it a single directory."))
+          else None
+        }
+      }
+      .nextOption()
 
   private def hostnameRefusal(args: Seq[String]): Option[Refusal] =
     args.find(arg => !arg.startsWith("-")).map(notAllowed("hostname", _, "with an operand it sets the host name."))
@@ -445,6 +613,17 @@ private[runner] object CommandPolicy {
             )
           )
         else if (subcommand == "branch") gitBranchRefusal(subArgs)
+        else if (subArgs.exists(_.startsWith(":")))
+          subArgs
+            .find(_.startsWith(":"))
+            .map(
+              notAllowed(
+                s"git $subcommand",
+                _,
+                "an argument starting with ':' is pathspec magic (':/', ':(top)') or an index path, which git resolves " +
+                  "from the repository's top level rather than the working directory."
+              )
+            )
         else
           GitSubcommandOptions
             .get(subcommand)
@@ -452,6 +631,56 @@ private[runner] object CommandPolicy {
             .map(notAllowed(s"git $subcommand", _, "it writes a file or runs another program."))
     }
   }
+
+  /**
+   * The variables that tell git where its repository is. The caller may not set them (only locale variables are
+   * allowed), but the runner's own environment could carry them to the process.
+   */
+  private val GitRepositoryVariables: Seq[String] = Seq(
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_COMMON_DIR",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM"
+  )
+
+  /**
+   * Confines a `git` process to a repository inside the workspace: `GIT_CEILING_DIRECTORIES` is the real workspace
+   * root's parent, so git stops looking for a repository at the root, and the variables that point git at a
+   * repository elsewhere are removed. Without it, a workspace that is a subdirectory of a larger repository runs git
+   * on that repository, and `git show HEAD:secret`, `git diff` and `git status` read files outside the workspace.
+   */
+  def confineGit(environment: java.util.Map[String, String], realRoot: Path): Unit = {
+    val names = environment.keySet.asScala.toList
+    GitRepositoryVariables.foreach(v => names.filter(_.equalsIgnoreCase(v)).foreach(environment.remove))
+    names.filter(_.equalsIgnoreCase("GIT_CEILING_DIRECTORIES")).foreach(environment.remove)
+    Option(realRoot.getParent).foreach(parent => environment.put("GIT_CEILING_DIRECTORIES", parent.toString))
+  }
+
+  /**
+   * git looks for its repository in the working directory and then each directory above it. The runner sets
+   * `GIT_CEILING_DIRECTORIES` to the workspace root's parent, so git never uses a repository whose top level lies
+   * above the workspace (where `git show HEAD:secret` and `git diff` read files outside it). Inside the workspace, the
+   * nearest `.git` between the working directory and the root must be a directory: a `.git` file (`gitdir: path`) or
+   * link points git at a repository elsewhere, whose content and configuration it would then read.
+   */
+  private def gitRepositoryRefusal(workDir: Path, realRoot: Path): Option[Refusal] =
+    Iterator
+      .iterate(workDir)(_.getParent)
+      .takeWhile(dir => dir != null && dir.startsWith(realRoot))
+      .map(_.resolve(".git"))
+      .find(Files.exists(_, LinkOption.NOFOLLOW_LINKS))
+      .filterNot(Files.isDirectory(_, LinkOption.NOFOLLOW_LINKS))
+      .map { dotGit =>
+        Refusal(
+          PathEscapeAttempt,
+          s"'$dotGit' is not a directory: a .git file or link points git at a repository that may lie outside the " +
+            "workspace."
+        )
+      }
 
   /**
    * `git branch` creates, renames, copies or deletes a branch unless it is listing, so only listing options are

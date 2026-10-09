@@ -2052,6 +2052,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     only for a space, tab, `"`, `<` or `>`, and cmd.exe splits on `,`, `;`, `=`, VT, FF and 0xFF too, so
     `type a.txt,..\outside\f` typed `..\outside\f` after `a.txt`. A path must also stay inside under that lexical reading (`..` removed as text, then
     links resolved) as well as the kernel's, so `l/../../x` with `l` -> `a/b` is refused on every platform.
+  - *Windows* (`ARGUMENT_NOT_ALLOWED`): the policy refuses what it cannot reason about, and only the forms
+    `docs/reference/workspace-sandbox.md#on-windows` lists are supported. Refused: a device name as a path component
+    (`nul`, `sub\con`, `NUL.txt`, `COM1`, `LPT¹`, `CONIN$`), a component ending in `.` or a space (Win32 strips them,
+    so `outside.` opened `outside`; this refuses `git log HEAD..` too); for programs that are not cmd.exe built-ins,
+    which may run under a runtime that re-parses their command line (MSYS2, Cygwin, Git for Windows), an argument
+    starting with `@` (a response file) or `~`, one holding `{ } [ ] ' ( )`, a path starting with `/`, and a
+    wildcard outside a last component that has a literal character other than `.` (`*`, `.*`, `*/a.txt`);
+    `findstr /F:list` (any switch with `F`) and a `/D:` directory list; and `sort` `/O`, `/T`, `-O`, `-T`, `-t`,
+    `--temporary-directory`. 8.3 short names and alternate data streams (`a.txt:s`, judged by the file before the
+    `:`) are not refused.
+  - *git's repository* (every platform): git looks for its repository in the directories above the working
+    directory, so a workspace inside a larger repository ran `git show HEAD:secret`, `git diff` and `git status` on
+    that repository and read files outside the workspace. The runner now starts `git` with
+    `GIT_CEILING_DIRECTORIES` set to the workspace root's parent and without inherited `GIT_DIR`-style variables;
+    refuses `git` (`PATH_ESCAPE_ATTEMPT`) when the nearest `.git` inside the workspace is a `gitdir:` file or a
+    link; and refuses a git argument starting with `:` (`:/`, `:(top)`, `:a.txt`), which git resolves from the
+    repository's top level.
   - *Environment* (`ENVIRONMENT_NOT_ALLOWED`): `environment` may set only `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`,
     `COLUMNS`, `LINES` and `NO_COLOR`.
 
@@ -2070,7 +2087,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `chmod -L`/`-H`; `uniq` with an option after its file (write `uniq -c a.txt`); a link-preserving `cp` (`-R`, `-a`,
   `-P`, `-d`) of two sources with the same name, or of several sources one of which is `dir/` or `dir/.`;
   `git branch <name>` without `--list`;
-  `git` subcommands other than the read ones; and `environment` variables outside the list. Run writes through the
+  `git` subcommands other than the read ones; a `git` argument starting with `:`; `git` in a workspace that has no
+  repository of its own but lies inside one (it now reports `not a git repository`); on Windows, the forms listed
+  above; and `environment` variables outside the list. Run writes through the
   `writeFile` / `modifyFile` operations or the read-write allowlist's own programs instead.
 - **`llm4s-agent`: the PII Email pattern runs in linear time; an SSN stays within a line; `UTC+5` is not a phone number**
   ([#1713](https://github.com/llm4s/llm4s/issues/1713)):

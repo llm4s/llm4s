@@ -601,6 +601,242 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---------------------------------------------------------------------------------------------------------------
+  // Windows: forms the policy cannot reason about are refused (over-blocking is accepted there)
+
+  /** The policy's verdict code for `program args` as a Windows (or POSIX) runner would judge it in the workspace. */
+  private def policy(fx: Fixture, windows: Boolean, command: String*): Option[String] = {
+    val root = fx.root.toRealPath()
+    CommandPolicy.refusal(command.head, command.tail, windows, root, root, Map.empty).map(_.code)
+  }
+
+  /** Windows forms that each item refuses, as (program, arguments). */
+  private def windowsFormsRefused: Seq[Seq[String]] = Seq(
+    // findstr /F reads the list of files to search from a file; /D takes a directory list
+    Seq("findstr", "/F:list.txt", "x"),
+    Seq("findstr", "/f:list.txt", "x"),
+    Seq("findstr", "-F:list.txt", "x"),
+    Seq("findstr", "/SIF:list.txt", "x"),
+    Seq("findstr", "/F", "list.txt", "x"),
+    Seq("findstr", "/D:sub,other", "x", "*.txt"),
+    Seq("findstr", "/d:sub;other", "x", "*.txt"),
+    // A runtime that expands the command line (MSYS2, Cygwin): response files, tilde, glob and quoting syntax
+    Seq("grep", "x", "@args.txt"),
+    Seq("findstr", "x", "@args.txt"),
+    Seq("git", "log", "@{1}"),
+    Seq("cat", "~/secret.txt"),
+    Seq("cat", "~other"),
+    Seq("grep", "x", "a{b,c}.txt"),
+    Seq("grep", "[ab]", "a.txt"),
+    Seq("grep", "x", "a[0-9].txt"),
+    Seq("grep", "x(", "a.txt"),
+    Seq("grep", "x", "it's.txt"),
+    Seq("cat", "/sub/a.txt"),
+    Seq("grep", "-f/sub/a.txt", "x"),
+    Seq("grep", "--file=/sub/a.txt", "x"),
+    // Wildcards that can match `..`, sit in an earlier component, or start absolute or with `..`
+    Seq("grep", "x", "*"),
+    Seq("grep", "x", ".*"),
+    Seq("grep", "x", "*.*"),
+    Seq("grep", "x", "??"),
+    Seq("grep", "x", "*/a.txt"),
+    Seq("grep", "x", "sub/../*.txt"),
+    Seq("findstr", "x", "*"),
+    Seq("git", "ls-files", "--exclude=*/target/*"),
+    // Device names, any case, any extension, trailing dots and spaces ignored
+    Seq("type", "nul"),
+    Seq("type", "NUL.txt"),
+    Seq("type", "sub\\con"),
+    Seq("type", "aux .txt"),
+    Seq("type", "CONIN$"),
+    Seq("type", "conout$"),
+    Seq("type", "prn"),
+    Seq("dir", "com1"),
+    Seq("findstr", "x", "LPT9"),
+    Seq("findstr", "x", "com¹"),
+    Seq("findstr", "x", "lpt³.log"),
+    Seq("findstr", "/G:nul", "a.txt"),
+    Seq("copy", "a.txt", "nul"),
+    Seq("grep", "-fnul", "a.txt"),
+    Seq("grep", "--file=PRN", "a.txt"),
+    Seq("cat", "aux:stream"),
+    // A trailing dot or space, which Win32 strips
+    Seq("type", "outside."),
+    Seq("type", "a.txt."),
+    Seq("type", "a.txt "),
+    Seq("type", "sub.\\Main.scala"),
+    Seq("findstr", "x", "sub \\Main.scala"),
+    Seq("git", "log", "HEAD.."),
+    // sort.exe writes its output or temporary files
+    Seq("sort", "/O", "out.txt", "a.txt"),
+    Seq("sort", "/o", "out.txt", "a.txt"),
+    Seq("sort", "/OUTPUT", "out.txt", "a.txt"),
+    Seq("sort", "/T", "sub", "a.txt"),
+    Seq("sort", "/TEMPORARY", "sub", "a.txt"),
+    Seq("sort", "-O", "out.txt", "a.txt"),
+    Seq("sort", "-T", "sub", "a.txt"),
+    Seq("sort", "--temporary-directory=sub", "a.txt"),
+    Seq("sort", "--temp=sub", "a.txt"),
+    // git pathspec magic and index paths resolve from the repository's top level
+    Seq("git", "ls-files", ":/"),
+    Seq("git", "log", "--", ":(top)a.txt"),
+    Seq("git", "show", ":a.txt"),
+    Seq("git", "grep", "x", "--", ":!a.txt")
+  )
+
+  /** Ordinary Windows uses that every item leaves alone. */
+  private def windowsFormsAllowed: Seq[Seq[String]] = Seq(
+    Seq("dir", "*.txt"),
+    Seq("dir"),
+    Seq("dir", "/S", "/B"),
+    Seq("type", "a.txt"),
+    Seq("type", "sub\\Main.scala"),
+    Seq("type", ".\\a.txt"),
+    Seq("type", "console.txt"),
+    Seq("type", "nullable.txt"),
+    Seq("type", "a.b.txt"),
+    Seq("findstr", "x", "a.txt"),
+    Seq("findstr", "/S", "/I", "x", "*.txt"),
+    Seq("findstr", "/SIN", "x", "*.txt"),
+    Seq("findstr", "/OFFLINE", "x", "a.txt"),
+    Seq("findstr", "/D:sub", "x", "*.scala"),
+    Seq("findstr", "/C:x", "a.txt"),
+    Seq("findstr", "/G:a.txt", "b.txt"),
+    Seq("findstr", "x", "a?.txt"),
+    Seq("grep", "x", "*.txt"),
+    Seq("grep", "x", "sub/*.scala"),
+    Seq("grep", "-r", "--include=*.scala", "x", "."),
+    Seq("sort", "a.txt"),
+    Seq("sort", "/R", "a.txt"),
+    Seq("sort", "/+2", "a.txt"),
+    Seq("git", "status"),
+    Seq("git", "log", "--oneline"),
+    Seq("git", "log", "HEAD~1"),
+    Seq("git", "diff", "HEAD~1..HEAD"),
+    Seq("git", "show", "HEAD:a.txt"),
+    Seq("echo", "nul"),
+    Seq("echo", "Hello", "world."),
+    // A short name that does not exist is a name inside the working directory (see the docs)
+    Seq("type", "PROGRA~1\\x.txt"),
+    // An alternate data stream of a file inside
+    Seq("findstr", "x", "sub\\Main.scala:s")
+  )
+
+  "On Windows, the policy" should "refuse every form it cannot reason about" in inWorkspace { fx =>
+    def windows(command: String*) = policy(fx, true, command: _*)
+    windowsFormsRefused.foreach { command =>
+      withClue(s"${command.mkString(" ")}: ") {
+        windows(command: _*) shouldBe defined
+      }
+    }
+  }
+
+  it should "still allow the ordinary forms" in inWorkspace { fx =>
+    def windows(command: String*) = policy(fx, true, command: _*)
+    windowsFormsAllowed.foreach { command =>
+      withClue(s"${command.mkString(" ")}: ") {
+        windows(command: _*) shouldBe None
+      }
+    }
+  }
+
+  it should "refuse them through executeCommand too" in inWorkspace { fx =>
+    val ro = fx.interface(ReadOnly, windows = true)
+    Seq(
+      "findstr /F:a.txt x",
+      "grep x @a.txt",
+      "cat '~/secret.txt'",
+      "grep '[ab]' a.txt",
+      "grep x '*'",
+      "type nul",
+      "findstr x COM1",
+      "type 'a.txt.'",
+      "sort /T sub a.txt",
+      "git show :a.txt"
+    ).foreach(command => refuses(ro, command, ArgumentNotAllowed))
+    refuses(fx.interface(ReadWrite, windows = true), "copy a.txt nul", ArgumentNotAllowed)
+    passesPolicy(ro, "findstr /S /I x *.txt")
+    passesPolicy(ro, "dir *.txt")
+    passesPolicy(ro, "type a.txt")
+  }
+
+  it should "judge an alternate data stream by the file it belongs to" in inWorkspace { fx =>
+    def windows(command: String*) = policy(fx, true, command: _*)
+    windows("type", "..\\outside\\secret.txt:stream") shouldBe Some(PathEscape)
+    windows("findstr", "x", "..\\outside\\secret.txt:stream") shouldBe Some(PathEscape)
+    windows("type", "a.txt:stream") shouldBe None
+    windows("type", "sub\\Main.scala:stream:$DATA") shouldBe None
+  }
+
+  it should "leave POSIX runners' arguments to the existing rules" in inWorkspace { fx =>
+    // None of these forms is Windows syntax off Windows: each is a plain name inside the workspace
+    def posix(command: String*) = policy(fx, false, command: _*)
+    posix("cat", "@a.txt") shouldBe None
+    posix("cat", "~a.txt") shouldBe None
+    posix("grep", "[/]api", "a.txt") shouldBe None
+    posix("cat", "a.txt.") shouldBe None
+    posix("cat", "nul") shouldBe None
+    posix("grep", "x", "*") shouldBe None
+    posix("sort", "-T", "sub", "a.txt") shouldBe None
+    posix("sort", "-t", ",", "a.txt") shouldBe None
+    posix("git", "log", "HEAD..") shouldBe None
+    // git's ':' arguments are refused everywhere
+    posix("git", "ls-files", ":/") shouldBe Some(ArgumentNotAllowed)
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // git: a repository above the workspace, or one a .git file points to
+
+  "git" should "not use a repository whose top level is above the workspace" in inWorkspace { fx =>
+    assume(!isWindowsHost, "the git checks run on a Unix host")
+    // The workspace's parent is a repository holding a file outside the workspace; the workspace has none of its own
+    def git(dir: Path, args: String*): Unit = {
+      val p = new ProcessBuilder(("git" +: args).asJava).directory(dir.toFile).redirectErrorStream(true).start()
+      p.getInputStream.readAllBytes()
+      p.waitFor() shouldBe 0
+    }
+    git(fx.parent, "init", "-q")
+    git(fx.parent, "-c", "user.name=t", "-c", "user.email=t@example.com", "add", ".")
+    git(fx.parent, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
+    val ws = fx.interface(ReadOnly)
+    Seq("git show HEAD:outside/secret.txt", "git log -p", "git status", "git ls-files").foreach { command =>
+      val response = ws.executeCommand(command, None, Some(30.seconds), None)
+      withClue(s"$command: ${response.stdout} ${response.stderr}") {
+        response.exitCode should not be 0
+        (response.stdout should not).include("secret")
+        response.stderr should include("not a git repository")
+      }
+    }
+    // A repository of the workspace's own is still used, from any directory below it
+    git(fx.root, "init", "-q")
+    ws.executeCommand("git status", Some("sub"), Some(30.seconds), None).exitCode shouldBe 0
+  }
+
+  it should "refuse a .git file or link that points the repository elsewhere" in inWorkspace { fx =>
+    // `gitdir: <path>` makes git use that repository: its content and its configuration
+    write(fx.root.resolve(".git"), s"gitdir: ${fx.outside.resolve(".git")}\n")
+    Seq(false, true).foreach { windows =>
+      refuses(fx.interface(ReadOnly, windows), "git status", PathEscape)
+      refuses(fx.interface(ReadOnly, windows), "git log", PathEscape, workingDirectory = Some("sub"))
+    }
+    Files.delete(fx.root.resolve(".git"))
+    link(fx, ".git", fx.outside)
+    refuses(fx.interface(ReadOnly), "git status", PathEscape)
+  }
+
+  it should "confine git's repository search to the workspace" in {
+    val environment = new java.util.HashMap[String, String]()
+    environment.put("GIT_DIR", "/elsewhere/.git")
+    environment.put("git_work_tree", "/elsewhere")
+    environment.put("GIT_CEILING_DIRECTORIES", "")
+    environment.put("LANG", "C")
+    val root = Files.createTempDirectory("ws-git").toRealPath()
+    try {
+      CommandPolicy.confineGit(environment, root)
+      environment.asScala.toMap shouldBe Map("LANG" -> "C", "GIT_CEILING_DIRECTORIES" -> root.getParent.toString)
+    } finally Files.delete(root)
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
   // Strings that are not paths: refused or run, never a raw exception
 
   "Path checks" should "refuse an argument or working directory holding a NUL character" in inWorkspace { fx =>
