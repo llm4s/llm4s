@@ -2514,26 +2514,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - *File tools (`read_file`, `list_directory`, `file_info`, `write_file`).* `allowedPaths` and `blockedPaths` were
     compared as strings, so allowing `/srv/data` also allowed `/srv/data-secret`, and a symbolic link inside an
     allowed directory led out of it (reads, listings, `file_info` and writes, `followSymlinks = false` included).
-    A path is now made absolute, `..` is removed, every symbolic link is resolved, and the result is compared with
-    each entry - resolved the same way - one path component at a time; blocked entries are matched on the real
+    A path is now made absolute, every symbolic link is resolved, and the result is compared with each entry -
+    resolved the same way - one path component at a time (the tools remove `..` as text first and open the location
+    they judged; `isPathAllowed` applies `..` where the OS does, so `link/..` is the parent of the link's target); blocked entries are matched on the real
     location too. The tools open the resolved path, so a link swapped in after the check no longer redirects the
     open (a directory swapped for a link between the check and the open is a race that is narrowed, not closed).
-    A link that cannot be resolved (a dangling link) is refused. `FileConfig.isPathAllowed` and
+    A link that cannot be resolved (a dangling link) is refused. A hard link inside an allowed directory to a file
+    elsewhere is not contained: no path check can tell it from the file itself. `FileConfig.isPathAllowed` and
     `WriteConfig.isPathAllowed` keep their signatures and use the same rule.
   - *Shell tool.* A command no longer inherits the process environment, where provider API keys live: it receives
     only the variables in the new `ShellConfig.inheritedEnvironment` (default `PATH`, `LANG`, `LC_ALL`, `TERM`,
     `SystemRoot`) plus `environment`; `ShellConfig.development()` sets it to `None` and keeps inheriting everything.
     The new `ShellConfig.pathPolicy` (and the `ShellConfig.readOnlyWithin(policy, workingDirectory)` preset) holds
-    every file-like argument of a command, and its working directory, to a `FileConfig`; without it a command's file
-    arguments are not checked, as before. `file -C`/`-m`/`-f`, `date -f`/`-r` and `wc --files0-from`, which write a
-    file or read one the command does not name, are refused, by the program's file name (so `/usr/bin/file -C` too)
-    and in any abbreviated long form GNU accepts (`date --fil`).
-  - *HTTP tool.* A response body was read in full and then cut at `maxResponseSize`; reading now stops one character
+    every file-like argument of a command, and its working directory, to a `FileConfig`, resolved as the program
+    will resolve it (so `linksub/../secret` is judged at the link target's parent); `--` is not trusted to end the
+    options, because an option that takes an argument consumes it (`file -F -- -f list`), so every argument is
+    checked as a path and, when it starts with `-`, as a flag. Without a policy a command's file arguments are not
+    checked, as before. `file -C`/`-m`/`-M`/`-f`, `date -f`/`-r` and `wc --files0-from`, which write a file or read
+    one the command does not name, are refused, by the program's file name (so `/usr/bin/file -C` too), in any
+    abbreviated long form GNU accepts (`date --fil`), and after a `--` too.
+  - *HTTP tool.* A response body was read in full and then cut at `maxResponseSize`; reading now stops one byte
     past the cap, with the same result for any body.
   - **Migration.** A configuration that relied on a path prefix to cover sibling directories stops matching them
     (list each directory); a symbolic link inside an allowed directory works only if its real target is inside an
     allowed directory; a shell command that needs a process variable (for example `HOME`, `JAVA_HOME`) must be named
     in `inheritedEnvironment` or set in `environment`; `file -C` and friends no longer run in the read-only preset.
+    On macOS `/var` is a link to `/private/var`, so the default `blockedPaths` (which includes `/var`) now also
+    blocks the real-path per-user temporary directories under `/private/var/folders`, which `java.io.tmpdir` and
+    `Files.createTempDirectory` return there; a configuration that reads or writes there must set its own
+    `blockedPaths`.
 - **Guardrail case folding no longer depends on the JVM default locale**: `ProfanityFilter`, `ToneValidator`
   and `PromptInjectionDetector` lower-cased text with the default locale, so under a Turkish locale `HI`,
   `INAPPROPRIATE` and `IGNORE PREVIOUS INSTRUCTIONS` folded to a dotless `ı` and went undetected. They (and the

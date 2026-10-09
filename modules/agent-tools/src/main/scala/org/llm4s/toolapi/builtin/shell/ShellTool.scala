@@ -9,7 +9,6 @@ import upickle.default._
 import java.io.File
 import java.nio.file.{ Path, Paths }
 import java.util.concurrent.TimeUnit
-import scala.annotation.tailrec
 import scala.concurrent.duration.{ DurationLong, FiniteDuration }
 import scala.util.Try
 
@@ -58,9 +57,13 @@ object ShellResult {
  *
  * A command receives a scrubbed environment (see [[ShellConfig]]): only the variables named in
  * `inheritedEnvironment`, plus `environment`. The files a command names are not checked unless
- * [[ShellConfig.pathPolicy]] is set; then every file-like argument must pass the same containment rule as the
- * file tools. `file -C`, `-m` and `-f`, `date -f` and `-r`, and `wc --files0-from` (which write a file or read one
- * the command does not name) are refused whatever the policy, in any abbreviated long form too.
+ * [[ShellConfig.pathPolicy]] is set; then every file-like argument must pass that `FileConfig`'s
+ * `isPathAllowed`: the file tools' allowed and blocked entries and real-location rule, with the argument resolved
+ * the way the program will resolve it (`..` after a link goes to the link target's parent, where the file tools,
+ * which open the path themselves, remove `..` as text first).
+ * `file -C`, `-m`, `-M` and `-f`, `date -f` and `-r`, and `wc --files0-from` (which write a file or read one the
+ * command does not name) are refused whatever the policy, in any abbreviated long form too, and wherever they
+ * appear, `--` or not before them.
  *
  * == Features ==
  *
@@ -139,8 +142,11 @@ object ShellTool {
   /** Commands whose arguments are not file names, so the path policy does not look at them. */
   private val NoFileArguments = Set("echo", "pwd", "date", "whoami", "which")
 
-  /** Flags that make an otherwise read-only command write a file or read a list of files, by command. */
-  private val DeniedShortFlags = Map("file" -> Set('C', 'm', 'f'), "date" -> Set('f', 'r'))
+  /**
+   * Flags that make an otherwise read-only command write a file or read a file it does not name as an argument, by
+   * command. `file -M` is Apple's form of `-m` (magic files, whose lines it echoes in warnings).
+   */
+  private val DeniedShortFlags = Map("file" -> Set('C', 'm', 'M', 'f'), "date" -> Set('f', 'r'))
   private val DeniedLongFlags = Map(
     "file" -> Set("--compile", "--magic-file", "--files-from"),
     "date" -> Set("--file", "--reference"),
@@ -155,8 +161,14 @@ object ShellTool {
       .orElse(config.pathPolicy.flatMap(policy => pathRefusal(executable, args, config, policy)))
   }
 
+  /**
+   * Every argument that looks like a flag, `--` or not before it. A `--` does not reliably end the options: when it
+   * follows an option that takes an argument (`file -F -- -f list`), `getopt` reads it as that argument and goes on
+   * reading options. So a flag-looking argument is checked wherever it is, which also refuses a file whose name
+   * looks like a denied flag; that is the price of not modelling each program's options.
+   */
   private def flagsOf(args: Seq[String]): Seq[String] =
-    args.takeWhile(_ != "--").filter(arg => arg.startsWith("-") && arg.length > 1)
+    args.filter(arg => arg != "--" && arg.startsWith("-") && arg.length > 1)
 
   private def deniedFlag(command: String, args: Seq[String]): Option[String] = {
     val shortDenied = DeniedShortFlags.getOrElse(command, Set.empty[Char])
@@ -192,7 +204,8 @@ object ShellTool {
     config: ShellConfig,
     policy: FileConfig
   ): Option[String] = {
-    val base = Try(config.workingDirectory.fold(Paths.get(""))(Paths.get(_)).toAbsolutePath.normalize()).toOption
+    // Not normalised: `..` is applied after links are resolved, as the OS does when it changes into the directory
+    val base = Try(config.workingDirectory.fold(Paths.get(""))(Paths.get(_)).toAbsolutePath).toOption
     base match {
       case None =>
         Some("Invalid working directory")
@@ -200,26 +213,22 @@ object ShellTool {
         Some("The working directory is outside the allowed paths")
       case Some(_) if NoFileArguments.contains(command) => None
       case Some(dir) =>
-        argumentRefusal(command, args.toList, flagsEnded = false, dir, policy)
+        argumentRefusal(command, args.filter(_ != "--"), dir, policy)
     }
   }
 
-  @tailrec
-  private def argumentRefusal(
-    command: String,
-    args: List[String],
-    flagsEnded: Boolean,
-    base: Path,
-    policy: FileConfig
-  ): Option[String] =
-    args match {
-      case Nil                         => None
-      case "--" :: rest if !flagsEnded => argumentRefusal(command, rest, flagsEnded = true, base, policy)
-      case arg :: rest =>
-        val isFlag  = !flagsEnded && arg.startsWith("-") && arg.length > 1
-        val refused = if (isFlag) flagRefusal(command, arg) else pathArgumentRefusal(arg, base, policy)
-        if (refused.isDefined) refused else argumentRefusal(command, rest, flagsEnded, base, policy)
-    }
+  /**
+   * Every argument but `--` is checked both ways: as a flag when it looks like one, and as a path. A `--` may be
+   * consumed as an option's argument (see `flagsOf`), and an option's argument may itself be a file
+   * (`grep -f -x`), so neither its position nor its leading `-` settles which one the program will take it for.
+   */
+  private def argumentRefusal(command: String, args: Seq[String], base: Path, policy: FileConfig): Option[String] =
+    args.iterator
+      .flatMap { arg =>
+        val asFlag = if (arg.startsWith("-") && arg.length > 1) flagRefusal(command, arg) else None
+        asFlag.orElse(pathArgumentRefusal(arg, base, policy))
+      }
+      .nextOption()
 
   private def flagRefusal(command: String, flag: String): Option[String] =
     if (flag.contains("/") || flag.contains("\\"))

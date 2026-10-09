@@ -206,14 +206,18 @@ val tools = BuiltinTools.customSafe(
 )
 ```
 
-A path is judged by where it really is: `..` is removed and symbolic links are resolved, then that real location is
-compared with each allowed or blocked entry (resolved the same way), one path component at a time. `/srv/agent-data`
+A path is judged by where it really is: symbolic links are resolved, then that real location is compared with each
+allowed or blocked entry (resolved the same way), one path component at a time. The file tools remove `..` as text
+first and then open the location they judged; `FileConfig.isPathAllowed`, and the shell tool's path policy, apply `..`
+where the operating system does, so `link/..` is the parent of the link's target. `/srv/agent-data`
 covers `/srv/agent-data/notes.txt` but not `/srv/agent-data-secret`, and a link inside an allowed directory that leads
 outside it is refused, for reading, listing and writing alike. A link that cannot be resolved (a dangling link) is
 refused. `followSymlinks = false` (the default) additionally refuses a path that is itself a link when reading or
 listing; it does not decide whether a link may lead out of the allowed area, which is always refused. The tools open
 the resolved path; a directory swapped for a link between the check and the open is a race this narrows and does not
-close.
+close. A hard link inside an allowed directory to a file elsewhere is not contained: no path check can tell it from the
+file itself. On macOS `/var` is a link to `/private/var`, so the default blocklist's `/var` also blocks the temporary
+directories under `/private/var/folders`.
 
 `developmentSafe(workingDirectory, fileAllowedPaths)` reads only inside `workingDirectory` when you give one, and
 anywhere outside the blocklist when you do not. It writes inside `fileAllowedPaths` (default `/tmp`) and the working
@@ -252,7 +256,7 @@ sandbox.
 
 `ShellConfig.readOnly()` allows `ls`, `cat`, `head`, `tail`, `pwd`, `echo`, `wc`, `date`, `whoami`, `which` and
 `file`. `ShellConfig.readOnlyWithin(policy)` is the same list with the working directory and every file-like argument
-held to a `FileConfig` rule, the one the file tools use. `ShellConfig.development()` adds `git`, `sbt`, `make`, `npm`, `grep`, `find`, `cp`, `mv`, `rm` and more:
+held to a `FileConfig` by its `isPathAllowed` (the rule above, with `..` applied as the program applies it). `ShellConfig.development()` adds `git`, `sbt`, `make`, `npm`, `grep`, `find`, `cp`, `mv`, `rm` and more:
 read the next section before you use it.
 
 ## 6. Safety: what each tool can do
@@ -289,11 +293,13 @@ What the controls do, and where they stop:
   program does:
   - `readOnly()` is an allowlist of program names, not read-only execution. Its programs only read in ordinary use,
     but most options are passed through unchecked: `date -s` sets the clock when the process is allowed to. The
-    options that write a file or read one the command does not name are refused (`file -C`, `-m` and `-f`, `date -f`
-    and `-r`, and `wc --files0-from`, including abbreviated long forms such as `date --fil`).
+    options that write a file or read one the command does not name are refused (`file -C`, `-m`, `-M` and `-f`,
+    `date -f` and `-r`, and `wc --files0-from`, including abbreviated long forms such as `date --fil`, and after a
+    `--`, which an option taking an argument can consume).
     `cat`, `head` and `tail` can read any file the process can read, **so the file settings above do not apply to the
     shell** unless you use `ShellConfig.readOnlyWithin(policy)`, which holds the working directory and each file-like
-    argument to that rule. A command that walks directories itself (`ls -R`, `grep -r`, `find`) is checked only at the
+    argument to that rule, resolved as the program will resolve it (`..` after a link goes to the link target's
+    parent). A hard link to a file outside passes, as it does for the file tools. A command that walks directories itself (`ls -R`, `grep -r`, `find`) is checked only at the
     path it starts from.
   - `development()` is not a sandbox: `sbt`, `make`, `npm`, `git`, `find` and `env` can run arbitrary programs, so a
     model given it can do anything the process can.

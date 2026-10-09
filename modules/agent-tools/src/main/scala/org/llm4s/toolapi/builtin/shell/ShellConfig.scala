@@ -15,19 +15,24 @@ import scala.concurrent.duration.*
  *
  * == File arguments ==
  * Without `pathPolicy` the tool does not look at the files a command names: `cat` reads any file the process can
- * read, whatever the file tools are configured to allow. Set `pathPolicy` to apply the same containment rule as
- * the file tools to every file-like argument (see [[org.llm4s.toolapi.builtin.filesystem.FileConfig]]): each
- * argument that is not a flag is resolved against the working directory and must be allowed, the working
- * directory itself must be allowed, and a flag that carries a path (`-f/etc/passwd`) is refused. The working
- * directory is checked for every command. Arguments of `echo`, `pwd`, `date`, `whoami` and `which` are not
+ * read, whatever the file tools are configured to allow. Set `pathPolicy` to hold every file-like argument to the
+ * file tools' allowed and blocked entries and real-location rule (`FileConfig.isPathAllowed`) (see [[org.llm4s.toolapi.builtin.filesystem.FileConfig]]): each
+ * argument is resolved against the working directory the way the program will resolve it (`linksub/..` is the
+ * parent of the link's target, not the working directory) and must be allowed, the working directory itself must
+ * be allowed, and a flag that carries a path (`-f/etc/passwd`) is refused. `--` is not taken as the end of the
+ * options, since a program may read it as the argument of the option before it: every argument is checked as a
+ * path, and also as a flag when it starts with `-`. The working directory is checked for every command. A hard
+ * link inside an allowed directory to a file elsewhere passes, as it does for the file tools: no path check can
+ * see it. Arguments of `echo`, `pwd`, `date`, `whoami` and `which` are not
  * treated as paths. `ls -L` and `ls -H` (and `--dereference*`), which follow links while listing, are refused
  * when a policy is set.
  *
  * == Refused options ==
  * Whatever the policy, the options that make an otherwise read-only command write a file or read a file it does
- * not name as an argument are refused: `file -C`, `-m`, `-f` (`--compile`, `--magic-file`, `--files-from`),
+ * not name as an argument are refused: `file -C`, `-m`, `-M`, `-f` (`--compile`, `--magic-file`, `--files-from`),
  * `date -f`, `-r` (`--file`, `--reference`) and `wc --files0-from`. Long options are matched on any prefix of at
- * least one letter, since GNU programs accept an unambiguous abbreviation (`date --fil`). These rules match the
+ * least one letter, since GNU programs accept an unambiguous abbreviation (`date --fil`), and wherever they appear,
+ * after a `--` too (`file -F -- -f list` reads `-f list` as an option). These rules match the
  * program by its file name, so `/usr/bin/file -C` is refused as `file -C` is. A command that walks directories by itself (`ls -R`,
  * `grep -r`, `find`) is checked at its starting point only.
  *
@@ -68,8 +73,8 @@ object ShellConfig {
   val DefaultInheritedEnvironment: Seq[String] = Seq("PATH", "LANG", "LC_ALL", "TERM", "SystemRoot")
 
   /**
-   * Like [[readOnly]], with the file-like arguments of every command held to `policy`, the same containment rule
-   * the file tools use. This is the configuration to give a model that can read untrusted content: with plain
+   * Like [[readOnly]], with the file-like arguments of every command held to `policy` (its `isPathAllowed`, with
+   * `..` applied as the program applies it; see [[ShellConfig]]). This is the configuration to give a model that can read untrusted content: with plain
    * [[readOnly]], `cat` reads any file the process can read.
    */
   def readOnlyWithin(policy: FileConfig, workingDirectory: Option[String] = None): ShellConfig =
@@ -85,12 +90,12 @@ object ShellConfig {
    * The programs on this list are ones whose ordinary use only reads, but this is an allowlist of program
    * names, not read-only execution: most options pass through unchecked, so `date -s` sets the clock when
    * the process may. The options that write a file or read one the command does not name are refused (`file -C`,
-   * `-m`, `-f`, `date -f`, `-r` and `wc --files0-from`; see the class documentation). `env` is deliberately absent: with arguments it runs the
+   * `-m`, `-M`, `-f`, `date -f`, `-r` and `wc --files0-from`; see the class documentation). `env` is deliberately absent: with arguments it runs the
    * program that follows it (`env sh -c ...`), so allowing it allows every program, and without them
    * it prints the process environment, which is where API keys live. The allowlist checks the program
    * a command starts with, not the programs that program starts - keep that in mind before adding a
    * launcher such as `env`, `xargs`, `nice`, `timeout` or `nohup`. `file` runs with its flags that write a file
-   * or read a list of files (`-C`, `-m`, `-f`) refused.
+   * or read a list of files (`-C`, `-m`, `-M`, `-f`) refused.
    */
   def readOnly(workingDirectory: Option[String] = None): ShellConfig =
     ShellConfig(

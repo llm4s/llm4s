@@ -172,6 +172,51 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
     refused(run(withinRoot(root), "cat link/secret.txt")) should include("outside the allowed paths")
   }
 
+  /** A contains `linksub -> outside/sub`; `outside/secret.txt` exists. Returns (A, outside). */
+  private def linkThenDotDot(): (Path, Path) = {
+    val root    = newRoot()
+    val outside = newRoot()
+    Files.createDirectories(outside.resolve("sub"))
+    Files.writeString(outside.resolve("secret.txt"), "SECRET-OUT")
+    Try(Files.createSymbolicLink(root.resolve("linksub"), outside.resolve("sub"))) match {
+      case Success(_) => ()
+      case Failure(e) => cancel(s"symbolic links cannot be created here: ${e.getClass.getSimpleName}")
+    }
+    (root, outside)
+  }
+
+  it should "refuse .. after a link that leads out, which the OS applies after following the link" in {
+    posixOnly()
+    val (root, _) = linkThenDotDot()
+
+    refused(run(withinRoot(root), "cat linksub/../secret.txt")) should include("outside the allowed paths")
+    refused(run(withinRoot(root), "ls linksub/..")) should include("outside the allowed paths")
+  }
+
+  it should "refuse .. after a link that leads into a blocked directory" in {
+    posixOnly()
+    val (root, outside) = linkThenDotDot()
+    val config = ShellConfig.readOnlyWithin(
+      FileConfig(allowedPaths = None, blockedPaths = Seq(outside.toString)),
+      Some(root.toString)
+    )
+
+    refused(run(config, "cat linksub/../secret.txt")) should include("outside the allowed paths")
+  }
+
+  it should "still allow .. after a link that stays inside, judged at the link target's real parent" in {
+    posixOnly()
+    val root = newRoot()
+    Files.createDirectories(root.resolve("inner/deep"))
+    Files.writeString(root.resolve("inner/x.txt"), "physical-parent")
+    Try(Files.createSymbolicLink(root.resolve("l2"), root.resolve("inner/deep"))) match {
+      case Success(_) => ()
+      case Failure(e) => cancel(s"symbolic links cannot be created here: ${e.getClass.getSimpleName}")
+    }
+
+    run(withinRoot(root), "cat l2/../x.txt").map(_.stdout.trim) shouldBe Right("physical-parent")
+  }
+
   it should "refuse a command whose working directory is outside the allowed directory" in {
     posixOnly()
     val root    = newRoot()
@@ -261,6 +306,31 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
     run(config, "wc --words a.txt").isRight shouldBe true
     run(config, "ls --directory .").isRight shouldBe true
     run(config, "date --rfc-3339=date").isRight shouldBe true
+  }
+
+  it should "refuse a denied flag after a -- that an option consumed as its argument" in {
+    posixOnly()
+    val root = newRoot()
+    Files.writeString(root.resolve("list"), "/etc/hosts\n")
+    Files.writeString(root.resolve("x"), "x")
+    // getopt reads `--` as the argument of -F (or -e, -P), then reads what follows as options
+    Seq("file -F -- -f list", "file -F -- -C -m x", "file -e -- --files-from list", "file -P -- -M x")
+      .foreach(command => withClue(command)(refused(run(ShellConfig.readOnly(Some(root.toString)), command))))
+    Files.exists(root.resolve("x.mgc")) shouldBe false
+  }
+
+  it should "refuse a link-following ls flag after a consumed --, under a policy" in {
+    posixOnly()
+    val root = newRoot()
+    refused(run(withinRoot(root), "ls -I -- -L .")) should include("follows links")
+    refused(run(withinRoot(root), "ls -w -- -n1/etc")) should include("carries a path")
+  }
+
+  it should "refuse file -M, which reads magic files it does not name as arguments" in {
+    val root   = newRoot()
+    val config = ShellConfig.readOnly(Some(root.toString))
+    Seq("file -M magic x", "file -bM magic x", "file -Mmagic x")
+      .foreach(command => withClue(command)(refused(run(config, command)) should include("is not allowed for 'file'")))
   }
 
   it should "apply denied flags to absolute executable names" in {

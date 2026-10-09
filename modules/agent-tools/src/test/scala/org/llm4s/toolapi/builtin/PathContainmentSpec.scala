@@ -306,6 +306,49 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
     Files.readString(t.resolve("data/keep.txt")) shouldBe "original"
   }
 
+  // ---- .. after a link. The tools remove `..` as text and open the location they judged, so it cannot reach
+  // outside; isPathAllowed, whose caller may open the path as given, judges `..` where the OS applies it.
+
+  it should "never reach outside through .. after a link: the tools open the location they judged" in {
+    val t = newRoot()
+    file(t.resolve("outside/secret.txt"), "SECRET")
+    Files.createDirectories(t.resolve("outside/sub"))
+    file(t.resolve("data/secret.txt"), "inside")
+    link(t.resolve("data/linksub"), t.resolve("outside/sub"))
+    val config  = allowing(t.resolve("data"), followSymlinks = true)
+    val spelled = t.resolve("data/linksub/../secret.txt")
+
+    read(config, spelled).map(_.content) shouldBe Right("inside")
+    info(config, spelled).map(_.path) shouldBe Right(t.resolve("data/secret.txt").toString)
+    list(config, t.resolve("data/linksub/..")).map(_.entries.map(_.name).toSet) shouldBe
+      Right(Set("secret.txt", "linksub"))
+    write(WriteConfig(allowedPaths = Seq(t.resolve("data").toString)), t.resolve("data/linksub/../pwn.txt"), "x")
+      .map(_.path) shouldBe Right(t.resolve("data/pwn.txt").toString)
+    Files.exists(t.resolve("outside/pwn.txt")) shouldBe false
+  }
+
+  "FileConfig.isPathAllowed" should "judge .. after a link where the OS applies it, at the link target's parent" in {
+    val t = newRoot()
+    file(t.resolve("outside/secret.txt"), "SECRET")
+    Files.createDirectories(t.resolve("outside/sub"))
+    file(t.resolve("data/secret.txt"), "inside")
+    file(t.resolve("data/inner/x.txt"), "x")
+    Files.createDirectories(t.resolve("data/inner/deep"))
+    link(t.resolve("data/linksub"), t.resolve("outside/sub"))
+    link(t.resolve("data/l2"), t.resolve("data/inner/deep"))
+    val config = allowing(t.resolve("data"))
+
+    // Files.readString of this spelling reads outside/secret.txt
+    Files.readString(t.resolve("data/linksub/../secret.txt")) shouldBe "SECRET"
+    config.isPathAllowed(t.resolve("data/linksub/../secret.txt")) shouldBe false
+    FileConfig(allowedPaths = None, blockedPaths = Seq(t.resolve("outside").toString))
+      .isPathAllowed(t.resolve("data/linksub/../secret.txt")) shouldBe false
+    WriteConfig(allowedPaths = Seq(t.resolve("data").toString))
+      .isPathAllowed(t.resolve("data/linksub/../pwn.txt")) shouldBe false
+    config.isPathAllowed(t.resolve("data/l2/../x.txt")) shouldBe true
+    config.isPathAllowed(t.resolve("data/l2/../../secret.txt")) shouldBe true
+  }
+
   it should "report the path it was given, not the resolved one" in {
     val t = newRoot()
     file(t.resolve("data/ok.txt"), "x")

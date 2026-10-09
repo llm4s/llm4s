@@ -6,18 +6,25 @@ import java.nio.file.Path
  * Configuration for file system tools.
  *
  * == How a path is judged ==
- * By where it really is, not by how it is spelled: `..` is removed and every symbolic link is resolved, then the
- * result is compared with each entry, resolved the same way, one path component at a time. `/srv/data` allows
- * `/srv/data/x` and does not allow `/srv/data-secret/x`. A symbolic link that cannot be resolved (a dangling link)
- * is refused. The tools open the resolved path, so a link swapped in after the check does not redirect the open;
- * a directory swapped for a link between the resolution and the open is a race this narrows and does not close.
+ * By where it really is, not by how it is spelled: the path is resolved component by component the way the
+ * operating system resolves it - every symbolic link replaced by its real target, and `..` taken from the location
+ * resolved so far - then the result is compared with each entry, resolved the same way, one path component at a
+ * time. [[isPathAllowed]] judges the path as given, so `link/..` is the parent of the link's target, as it is when
+ * the path is opened. The tools first remove `.` and `..` from the path they are given as text (`data/link/../x`
+ * is `data/x` for them) and then judge and open that location, so what they open is what they checked. `/srv/data` allows `/srv/data/x` and does not allow
+ * `/srv/data-secret/x`. A symbolic link that cannot be resolved (a dangling link) is refused. The tools open the
+ * resolved path, so a link swapped in after the check does not redirect the open; a directory swapped for a link
+ * between the resolution and the open is a race this narrows and does not close. A hard link is not contained: a
+ * hard link inside an allowed directory to a file elsewhere is that file under an allowed name, and no path check
+ * can tell it apart, so do not let untrusted parties create files in an allowed directory.
  *
  * @param maxFileSize Maximum file size to read in bytes (default: 1MB)
  * @param allowedPaths Paths that are allowed to be accessed. None means any path. An entry that is itself reached
  *                     through a symbolic link (such as `/tmp` on macOS) is resolved, and so are the paths checked
  *                     against it.
  * @param blockedPaths Paths that are blocked from access (takes precedence over allowedPaths). Matched on the real
- *                     location too, so blocking `/etc` also blocks `/private/etc` on macOS.
+ *                     location too, so blocking `/etc` also blocks `/private/etc` on macOS, and the default `/var`
+ *                     also blocks `/private/var`, where macOS keeps per-user temporary directories.
  * @param followSymlinks Whether to follow a symbolic link that is the final component of the path (default: false
  *                       for security). When `false`, `read_file` reports such a link as not a regular file and
  *                       `file_info` and `list_directory` describe the link itself. This does not decide whether a
