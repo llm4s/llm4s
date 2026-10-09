@@ -1,5 +1,6 @@
 package org.llm4s.util
 
+import org.llm4s.testutil.LinearTime
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -880,21 +881,16 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
     // One forward scan decides which string, if any, encloses each container, so the cost does not grow with the
     // square of the length: a document four times as long takes about four times as long, never sixteen.
     val unit = s"""{"role": "user", "content": "see 'token': [ for details", "api_key": "$secretText"}, """
-    def time(repeats: Int): Long = {
-      val input = "[" + (unit * repeats) + "{}]"
-      Redaction.redact(input) // warm up
-      val start = System.nanoTime()
-      val out   = Redaction.redact(input)
-      val taken = System.nanoTime() - start
+    def document(repeats: Int): String = "[" + (unit * repeats) + "{}]"
+    Seq(500, 2000).foreach { repeats =>
+      val out = Redaction.redact(document(repeats))
       (out should not).include(secretText)
       ujson.read(out).arr.size shouldBe repeats + 1
-      taken
     }
-    val small = time(500)
-    val large = time(2000)
-    withClue(s"500 units took ${small / 1000000} ms, 2000 units took ${large / 1000000} ms: ") {
-      large should be < (small * 12 + 50000000L)
-    }
+    // the cheapest of several runs after a warm-up, in CPU time, not one run each in wall time (#1709)
+    LinearTime.assertLinear("500 vs 2000 units", document(500), document(2000))(
+      Redaction.redact(_)
+    )
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -1071,18 +1067,10 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
       ("", "'password': 1, ", "")
     )
     shapes.foreach { case (prefix, unit, suffix) =>
-      def time(repeats: Int): Long = {
-        val input = prefix + (unit * repeats) + suffix
-        Redaction.redact(input) // warm up
-        val start = System.nanoTime()
-        Redaction.redact(input)
-        System.nanoTime() - start
-      }
-      val small = time(5000)
-      val large = time(20000)
-      withClue(s"unit $unit: 5000 took ${small / 1000000} ms, 20000 took ${large / 1000000} ms: ") {
-        large should be < (small * 12 + 50000000L)
-      }
+      def input(repeats: Int): String = prefix + (unit * repeats) + suffix
+      LinearTime.assertLinear(s"unit $unit", input(5000), input(20000))(
+        Redaction.redact(_)
+      )
     }
   }
   it should "redact an entire embedded string containing escaped quotes" in {
