@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Agents
-nav_order: 1
+nav_order: 12
 parent: User Guide
 has_children: true
 ---
@@ -29,7 +29,7 @@ The LLM4S Agent Framework provides a production-ready foundation for building LL
 - **Memory** - Short and long-term context with semantic search
 - **Handoffs** - Agent-to-agent delegation for specialist routing
 - **Streaming** - Real-time events for responsive UIs (`agent.stream`, [streaming guide](streaming))
-- **Orchestration** - Multi-agent workflows with DAG execution
+- **Graphs** - Typed multi-agent workflows on `GraphBuilder`: parallel nodes, joins and checkpoints ([recipe](../../examples/cookbook.html#6-several-agents-in-one-graph))
 
 ## Quick Start
 
@@ -118,7 +118,9 @@ val result = for {
 ```
 
 To name the thread yourself, use `agent.run(threadId, query)`; `agent.runMultiTurn(first, followUps)`
-runs several turns on one thread and stops at the first result that is not `Completed`.
+runs several turns on one thread and stops at the first result that is not `Completed`. A `Left` carries no
+thread id, so when a turn of `run(query)` or `runMultiTurn` fails or is cancelled, its thread is forgotten once
+the turn has ended; name the thread to recover such a turn.
 
 ### Handling the Result
 
@@ -144,7 +146,7 @@ history, never a system prompt) and `usage`.
 
 ## Safety Defaults
 
-- **Agent step limit**: an agent makes at most `maxSteps` model calls per turn, `Agent.DefaultMaxSteps` (50) unless you call `withMaxSteps(n)`. The count is shared by every agent a turn hands off to; at the limit the result is `AgentStatus.StepLimitReached`.
+- **Agent step limit**: an agent makes at most `maxSteps` model calls per turn, `Agent.DefaultMaxSteps` (50) unless you call `withMaxSteps(n)`. The count is shared by every agent a turn hands off to; at the limit the result is `AgentStatus.StepLimitReached`. The limit means the same through `run`, `start`, `stream`, `continueConversation` and `runMultiTurn`: each turn gets its own `maxSteps` model calls.
 - **HTTPTool methods**: `HttpConfig()` defaults to `GET` and `HEAD` only. Use `HttpConfig.withWriteMethods()` or `HttpConfig().withAllMethods` to allow write methods.
 
 ---
@@ -169,6 +171,76 @@ which belong to the `Agent`. `AgentResult` is a value to read, not something to 
   Forget a conversation you will not continue: `agent.run(query).flatMap(r => agent.forget(r.threadId).map(_ => r))`.
   `forget` refuses a thread whose run is still active (`ThreadBusy`) or that belongs to another
   tenant (`TenantMismatch`); an unknown thread is `Right(())`.
+
+### Suspended turns from Java and Kotlin
+
+The Java facade (`llm4s-java-api`) returns every turn as a `JAgentResult`, read without Scala types:
+`answer()` is an `Optional<String>`, `messages()` a `java.util.List<JMessage>`, `usage()` a
+`JUsageSummary`, and `status()` a `JAgentStatus` whose `kind()` is the Java enum `AgentStatusKind` -
+`COMPLETED`, `BLOCKED`, `STEP_LIMIT_REACHED` or `SUSPENDED` - with `answer()`, `guardrail()` and
+`reason()` as `Optional<String>`s (see the [Java guide](../java#an-agent-turn)). A `SUSPENDED`
+status's `pending()` is a `java.util.List<PendingInterrupt>`: the turn's approvals, then its
+questions; it is empty for any other status, and `JAgent.pending(result)` is a shortcut for it. Each `PendingInterrupt` has
+`id()`, `kind()` (the Java enum `InterruptKind`, `APPROVAL` or `QUESTION`), `toolName()` and
+`argumentsJson()`. An approval also has `reason()`, and a question has `questionJson()`, the tool's
+question as JSON. Both are `Optional<String>`, empty for the other kind. Answer each pending item
+with `Answer.approve(id)`, `reject(id, reason)`, `edit(id, argumentsJson)` or `reply(id, json)`, then
+call `agent.resume(threadId, answers)`, which blocks like `run` and returns an `LlmResult<JAgentResult>`.
+You can answer only some of them: the result is `SUSPENDED` again, with the rest still pending.
+
+```java
+LlmResult<JAgentResult> turn = agent.run("Deploy the release");
+while (turn.get().status().kind() == AgentStatusKind.SUSPENDED) {
+    List<Answer> answers = new ArrayList<>();
+    for (PendingInterrupt p : turn.get().status().pending()) {
+        switch (p.kind()) {
+            case APPROVAL -> answers.add(Answer.approve(p.id()));        // or reject / edit
+            case QUESTION -> answers.add(Answer.reply(p.id(), "{\"ok\":true}"));
+        }
+    }
+    turn = agent.resume(turn.get().threadId(), answers);
+}
+System.out.println(turn.get().answer().orElse("(" + turn.get().status().kind() + ")"));
+```
+
+`agent.recover(threadId)` continues a turn that failed or was cancelled, and also returns an
+`LlmResult<JAgentResult>`. A failed result means one of these: a malformed answer, an empty answers
+list (`InvalidResume`), an answer to an id the thread is not waiting for, a thread that is not suspended (`resume`), or a thread with nothing to
+recover. `resume` and `recover` handle an interrupt the way `run` and `continueConversation` do: interrupting the
+thread blocked in the call cancels the turn, and the call returns a `CancelledError` with the interrupt flag still
+set once the turn has ended, leaving the thread for `recover` (see
+[Java Threading and Cancellation](../java-threading-and-cancellation#interrupting-the-caller-cancels-an-agent-turn)).
+To cancel a turn without interrupting a thread, use `streamResume` or `streamRecover` and cancel the stream (see
+[Streaming Events](streaming#java-and-kotlin)).
+
+The Kotlin API reuses these types: every `AgentKt` turn returns a `JAgentResult`, and `when` over
+`status().kind()` covers it. `AgentKt.pending(result)` is the same `List<PendingInterrupt>`.
+`agent.resume(threadId, answers)` and `agent.recover(threadId)` are `suspend` functions that return
+the `JAgentResult` or throw `LLMException`. Every `AgentKt` suspend function that runs a turn - `run`,
+`continueConversation`, `resume` and `recover` - runs it as the matching flow does (`stream`,
+`streamResume`, `streamRecover`), so cancelling the caller - a cancelled scope, `withTimeout` -
+cancels the turn. The call throws `CancellationException` once the turn has ended, and the
+conversation thread is no longer busy: it is left for `recover`, which finishes the cancelled turn.
+If the turn had already completed when the cancellation arrived, the call still throws
+`CancellationException`, but the turn's result is committed to the thread: `recover` then has nothing to
+recover and throws `LLMException` ("no incomplete execution"), and the next turn continues from that result.
+The one-shot `run(query)` is the exception, as in Java and Scala: nothing it throws carries its random thread
+id, so once a failed or cancelled turn has ended it forgets the thread. A cancelled call waits up to 5 seconds
+for the turn to end; a provider that ignores the interrupt for longer is left to finish on its own, and the
+thread stays busy (`ThreadBusy`) until it does.
+
+```kotlin
+var turn = agent.run("Deploy the release")
+while (turn.status().kind() == AgentStatusKind.SUSPENDED) {
+    val answers = turn.status().pending().map { p ->
+        when (p.kind()) {
+            InterruptKind.APPROVAL -> Answer.approve(p.id())
+            InterruptKind.QUESTION -> Answer.reply(p.id(), """{"ok":true}""")
+        }
+    }
+    turn = agent.resume(turn.threadId(), answers)
+}
+```
 
 ### Agent Lifecycle
 

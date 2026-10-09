@@ -216,6 +216,18 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
         fail(s"Expected failed response, got: $ok")
   }
 
+  it should "redact credentials echoed in the body it puts into the ServiceError (#1674)" in {
+    val message =
+      HttpResponse(401, org.llm4s.testutil.EchoedCredentials.Text)
+        .ensureSuccess("test-provider")
+        .left
+        .toOption
+        .get
+        .message
+    message should include("[REDACTED]")
+    org.llm4s.testutil.EchoedCredentials.leaked(message) shouldBe empty
+  }
+
   it should "store headers" in {
     val headers  = Map("content-type" -> Seq("application/json"))
     val response = HttpResponse(200, "{}", headers)

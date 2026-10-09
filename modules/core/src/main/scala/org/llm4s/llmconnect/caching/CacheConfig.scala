@@ -37,7 +37,7 @@ object CacheConfig {
    * All constraints are checked together before returning; the resulting
    * `Left` lists every violation separated by `"; "`.
    *
-   * @param similarityThreshold Must be in `[0.0, 1.0]` inclusive.
+   * @param similarityThreshold Must be in `[0.0, 1.0]` inclusive; `NaN` is rejected.
    * @param ttl                 Duration must be strictly positive.
    * @param maxSize             Must be strictly positive; defaults to 1 000.
    * @return `Right(config)` when all constraints pass; `Left(ValidationError)`
@@ -49,7 +49,8 @@ object CacheConfig {
     maxSize: Int = 1000
   ): Result[CacheConfig] = {
     val errors = List(
-      if (similarityThreshold < 0.0 || similarityThreshold > 1.0)
+      // Written as a negated range test so that NaN, for which every comparison is false, is rejected.
+      if (!(similarityThreshold >= 0.0 && similarityThreshold <= 1.0))
         Some("similarityThreshold must be between 0.0 and 1.0")
       else None,
       if (ttl.length <= 0) Some("ttl must be positive") else None,
