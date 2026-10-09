@@ -96,6 +96,7 @@ class CancellationAndThreadingTest {
             started.countDown()
             LlmResult.success(handle)
         }
+        every { mockJAgent.forget(any<String>()) } returns LlmResult.success<Void>(null)
 
         val job = launch(Dispatchers.Default) { agent.run("q") }
         assertTrue(started.await(seconds, TimeUnit.SECONDS))
@@ -103,6 +104,8 @@ class CancellationAndThreadingTest {
         job.join()
         assertTrue(cancelled.await(seconds, TimeUnit.SECONDS), "cancelling the coroutine did not cancel the turn")
         assertTrue(job.isCancelled)
+        // the one-shot run's thread, whose id nothing thrown carries, is forgotten
+        verify(exactly = 1) { mockJAgent.forget(any<String>()) }
     }
 
     @Test
@@ -235,6 +238,7 @@ class CancellationAndThreadingTest {
     fun `agent failures keep the message and the original error too`() = runBlocking {
         val scalaError = ValidationError.apply("query", "empty")
         every { mockJAgent.stream(any(), "q", any()) } returns LlmResult.failure<AgentStream>(scalaError)
+        every { mockJAgent.forget(any<String>()) } returns LlmResult.success<Void>(null)
 
         val ex = assertFailsWith<LLMException> { agent.run("q") }
         assertEquals(scalaError.message(), ex.message)

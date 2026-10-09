@@ -63,7 +63,15 @@ class WorkspaceAgentInterfaceImpl(
    * @throws IllegalArgumentException if the path attempts to escape the workspace
    */
   private def resolvePath(relativePath: String): Path = {
-    val normalized = rootPath.resolve(relativePath).normalize()
+    // A string the platform cannot parse as a path (a NUL character; on Windows `C:\x\f:s`, `x*`) is refused with
+    // the same code rather than escaping as InvalidPathException.
+    val normalized = Try(rootPath.resolve(relativePath).normalize()).getOrElse {
+      throw new WorkspaceAgentException(
+        s"Path '${relativePath.replace("\u0000", "\\0")}' is not a valid path in the workspace",
+        "PATH_ESCAPE_ATTEMPT",
+        None
+      )
+    }
 
     if (!normalized.startsWith(rootPath)) {
       throw new WorkspaceAgentException(
@@ -628,33 +636,14 @@ class WorkspaceAgentInterfaceImpl(
   /**
    * Windows `cmd.exe` built-in commands that have no standalone `.exe` on PATH.
    * When [[isWindows]] is `true` and the first argv token is one of these, we
-   * prepend `Seq("cmd.exe", "/c")` so the OS can locate the command.  The rest
-   * of the argument vector remains tokenized (not a raw string), so injection
-   * via `;` is harmless (cmd.exe does not treat `;` as a separator), though we
-   * note that `&&`, `||`, `|`, and `&` are still interpreted by cmd.exe when
-   * present as unquoted tokens.
+   * prepend `Seq("cmd.exe", "/c")` so the OS can locate the command.
+   * `ProcessBuilder` joins the vector into one command line that cmd.exe
+   * parses again, quoting an argument only for a space, tab, `"`, `<` or `>`:
+   * cmd.exe still splits on `,`, `;` and `=`, and interprets `&`, `|`, `<`,
+   * `>`, `^` and `%`. [[ForbiddenArgChars]] and [[CommandPolicy]] refuse those
+   * characters in a built-in's arguments (#1715).
    */
-  // All entries are explicitly lowercased so that future contributors cannot
-  // accidentally add mixed-case entries that would break execLower comparisons.
-  private val WindowsBuiltins: Set[String] = Set(
-    "echo",
-    "dir",
-    "type",
-    "copy",
-    "move",
-    "del",
-    "ren",
-    "md",
-    "rd",
-    "set",
-    "cls",
-    "ver",
-    "vol",
-    "date",
-    "time",
-    "pause",
-    "call"
-  ).map(_.toLowerCase)
+  private val WindowsBuiltins: Set[String] = CommandPolicy.WindowsBuiltins
 
   /**
    * Shell metacharacters that must be rejected in every argument token, even
@@ -742,6 +731,19 @@ class WorkspaceAgentInterfaceImpl(
    *  5. `FORBIDDEN_CHARACTERS`        – any token contains a character from
    *                                      [[ForbiddenArgChars]] (`&`, `|`, `<`,
    *                                      `>`, `^`, `;`, `` ` ``, `$`, `%`)
+   *  6. `PATH_ESCAPE_ATTEMPT`         – the working directory really lies outside
+   *                                      the workspace (a symbolic link out of it)
+   *  7. `ENVIRONMENT_NOT_ALLOWED`     – `environment` sets a variable other than
+   *                                      `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`,
+   *                                      `COLUMNS`, `LINES`, `NO_COLOR`
+   *  8. `ARGUMENT_NOT_ALLOWED`        – an option that writes, deletes, runs a
+   *                                      program or follows links (`find -exec`,
+   *                                      `sort -o`, `git -c`, a git subcommand that
+   *                                      is not a read, a second `uniq` operand)
+   *  9. `PATH_ESCAPE_ATTEMPT`         – an argument names a location outside the
+   *                                      workspace, links followed
+   *
+   * Layers 7-9 are [[CommandPolicy]], which documents each program's rules (#1715).
    *
    * On Windows, if the first token is a [[WindowsBuiltins]] built-in that has
    * no standalone `.exe`, `cmd.exe /c` is prepended to the already-tokenized
@@ -834,14 +836,30 @@ class WorkspaceAgentInterfaceImpl(
       }
     }
 
+    // Layers 6-8 (#1715): the allowlist names programs, but an allowed program can
+    // still write, delete or run another one through its own options (`find -exec`,
+    // `git -c`, `sort -o`), its environment (`GIT_EXTERNAL_DIFF`), or reach outside
+    // the workspace through a path argument (`cat /etc/passwd`). The working
+    // directory and every path argument are judged by where they really lead.
+    val realRoot    = Try(rootPath.toRealPath()).getOrElse(rootPath)
+    val realWorkDir = Try(workDir.toPath.toRealPath()).getOrElse(workDir.toPath)
+    if (!realWorkDir.startsWith(realRoot)) {
+      throw new WorkspaceAgentException(
+        s"Working directory '${workingDirectory.getOrElse(".")}' leads outside the workspace",
+        CommandPolicy.PathEscapeAttempt,
+        None
+      )
+    }
+    CommandPolicy
+      .refusal(execLower, argv.tail, isWindows, realWorkDir, realRoot, env, Some(workDir.toPath), Some(rootPath))
+      .foreach(refused => throw new WorkspaceAgentException(refused.message, refused.code, None))
+
     // On Windows, built-in commands (echo, dir, type, …) live inside cmd.exe
     // and cannot be launched as standalone processes.  We prepend "cmd.exe /c"
     // to the *already-tokenized* vector so each argument is still a separate
-    // string – cmd.exe receives them as distinct argv entries rather than as a
-    // raw command string, which means metacharacters like ';' are inert.
-    // Note: cmd.exe does still interpret '&&', '||', '|', and '&' as operators
-    // when they appear as unquoted tokens; callers should avoid passing these
-    // in arguments to built-in commands.
+    // string. ProcessBuilder still joins them into one command line that
+    // cmd.exe re-parses, so the characters it would split or interpret were
+    // refused above (ForbiddenArgChars and CommandPolicy, #1715).
     val finalArgv: Seq[String] =
       if (isWindows && WindowsBuiltins.contains(execLower))
         Seq("cmd.exe", "/c") ++ argv
@@ -855,6 +873,7 @@ class WorkspaceAgentInterfaceImpl(
     val builder = new java.lang.ProcessBuilder(finalArgv.asJava)
     builder.directory(workDir)
     env.foreach { case (k, v) => builder.environment().put(k, v) }
+    if (execLower == "git") CommandPolicy.confineGit(builder.environment(), realRoot)
 
     val stdout    = new StringBuilder
     val stderr    = new StringBuilder

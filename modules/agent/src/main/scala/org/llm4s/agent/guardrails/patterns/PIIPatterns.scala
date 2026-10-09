@@ -5,7 +5,8 @@ import scala.util.matching.Regex
 /**
  * Regex patterns for detecting Personally Identifiable Information (PII).
  *
- * These patterns are designed for common US formats and can detect:
+ * These patterns are designed for common US formats, plus international phone numbers written with a leading
+ * `+` and 15-digit American Express card numbers, and can detect:
  * - Social Security Numbers (SSN)
  * - Credit Card Numbers
  * - Email Addresses
@@ -56,41 +57,66 @@ object PIIPatterns {
     /**
      * Social Security Number (US format: XXX-XX-XXXX)
      * Validates against known invalid SSNs (000, 666, 9XX prefix)
+     *
+     * The groups may be separated by a dash or by horizontal whitespace (`\h`: a space, a tab, a no-break space),
+     * never by a line break, so digits on separate lines are not joined into one number.
      */
     case object SSN extends PIIType {
       val name                        = "SSN"
-      val pattern                     = """(?<!\d)(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}(?!\d)""".r
+      val pattern                     = """(?<!\d)(?!000|666|9\d{2})\d{3}[-\h]?(?!00)\d{2}[-\h]?(?!0000)\d{4}(?!\d)""".r
       def mask(value: String): String = "[REDACTED_SSN]"
     }
 
     /**
      * Credit Card Numbers (major providers: Visa, MasterCard, Amex, Discover)
-     * Supports common formats with spaces, dashes, or no separators
+     * Supports common formats with spaces, dashes, or no separators: 16 digits as 4-4-4-4, and the 15-digit
+     * American Express layout 4-6-5 (prefix 34 or 37).
+     *
+     * The check digit is not validated: a number shaped like a card is masked.
      */
     case object CreditCard extends PIIType {
       val name = "Credit Card"
-      // Visa: 4xxx, MC: 51-55xx/2221-2720, Amex: 34/37xx, Discover: 6011/65xx
+      // Visa: 4xxx, MC: 51-55xx/2221-2720, Amex: 34/37xx, Discover: 6011/65xx; then the 15-digit Amex layout
       val pattern =
-        """(?<!\d)(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}(?!\d)""".r
+        ("""(?<!\d)(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))[-\h]?\d{4}[-\h]?\d{4}[-\h]?\d{4}(?!\d)""" +
+          """|(?<!\d)3[47]\d{2}[-\h]?\d{6}[-\h]?\d{5}(?!\d)""").r
       def mask(value: String): String = "[REDACTED_CARD]"
     }
 
     /**
      * Email addresses (RFC 5322 simplified)
+     *
+     * A match attempt starts only where a run of local-part characters starts, or where the previous match ended
+     * (`\G`). Every attempt inside a run would scan to the same `@`, so this finds exactly the matches an
+     * unanchored local part would, and scans each run once: the time is linear in the length of the text, where
+     * an unanchored local part took quadratic time on a long run of letters or digits (#1713).
      */
     case object Email extends PIIType {
-      val name                        = "Email"
-      val pattern                     = """[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}""".r
+      val name = "Email"
+      val pattern =
+        """(?:\G|(?<![a-zA-Z0-9._%+\-]))[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}""".r
       def mask(value: String): String = "[REDACTED_EMAIL]"
     }
 
     /**
-     * Phone numbers (US formats: (XXX) XXX-XXXX, XXX-XXX-XXXX, XXX.XXX.XXXX)
+     * Phone numbers: US formats ((XXX) XXX-XXXX, XXX-XXX-XXXX, XXX.XXX.XXXX, with an optional +1 or 1 prefix) and
+     * international numbers written with a leading `+`: the country code and the rest, 8 to 15 digits in all (the
+     * E.164 maximum), with spaces, dashes, dots or parentheses between digits (`+44 20 7946 0958`,
+     * `+44 (0) 20 7946 0958`, `+81 3-1234-5678`).
+     *
+     * An international number needs its `+`: a plain run of digits is not treated as a phone number unless it has
+     * the US shape. A `+` followed by more than 15 contiguous digits is not matched. With separators, a match ends
+     * after at most 15 digits and leaves the rest: `+44 20 7946 0958 1234` masks `+44 20 7946 0958` and keeps
+     * ` 1234`.
+     *
+     * A `+` right after `UTC` or `GMT`, with or without a space between (`UTC+5`, `GMT +1`, any case), is a
+     * time-zone offset, not the start of an international number, so `UTC+5 2026-10-09 12:30` is left alone.
      */
     case object Phone extends PIIType {
       val name = "Phone"
       val pattern =
-        """(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)""".r
+        ("""(?<!\d)(?:\+?1[-.\h]?)?(?:\(\d{3}\)|\d{3})[-.\h]?\d{3}[-.\h]?\d{4}(?!\d)""" +
+          """|(?<!\d)(?<!(?i:UTC|GMT)\h?)\+\d(?:[-.\h()]{0,2}\d){7,14}(?!\d)""").r
       def mask(value: String): String = "[REDACTED_PHONE]"
     }
 
@@ -171,15 +197,36 @@ object PIIPatterns {
   /**
    * Mask all PII in text with redaction placeholders.
    *
+   * The types are matched independently, so two of them can match overlapping stretches of the text (a plain
+   * 15-digit card number is also a bank-account-shaped run of digits, and a phone number can run into the email
+   * address that follows it). Matches that overlap are merged into one stretch that is replaced once, so no
+   * character of either survives; it takes the placeholder of the match that starts first, the longest on a tie
+   * and the earlier of `types` after that.
+   *
    * @param text Text to scan and mask
    * @param types PII types to mask
    * @return Text with PII replaced by [REDACTED_*] placeholders
    */
   def maskAll(text: String, types: Seq[PIIType] = PIIType.default): String = {
-    val matches = detect(text, types).sortBy(-_.startIndex) // Sort descending to replace from end
-    matches.foldLeft(text) { (current, m) =>
-      current.substring(0, m.startIndex) + m.maskedValue + current.substring(m.endIndex)
+    // sortBy is stable, so equal starts and ends keep the order of `types`
+    val ordered = detect(text, types).sortBy(m => (m.startIndex, -m.endIndex))
+    val merged = ordered.foldLeft(Vector.empty[PIIMatch]) { (acc, m) =>
+      acc.lastOption match {
+        case Some(last) if m.startIndex < last.endIndex =>
+          if (m.endIndex > last.endIndex)
+            acc
+              .dropRight(1)
+              .appended(last.copy(value = text.substring(last.startIndex, m.endIndex), endIndex = m.endIndex))
+          else acc
+        case _ => acc.appended(m)
+      }
     }
+    val out = new java.lang.StringBuilder(text.length)
+    val end = merged.foldLeft(0) { (position, m) =>
+      out.append(text, position, m.startIndex).append(m.maskedValue)
+      m.endIndex
+    }
+    out.append(text, end, text.length).toString
   }
 
   /**

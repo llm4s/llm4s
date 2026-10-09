@@ -253,6 +253,7 @@ class JavaInteropSpec extends AnyFlatSpec with Matchers {
     turns.foreach(m => withClue(m.toString)(returns(m) shouldBe List(classOf[LlmResult[_]], classOf[JAgentResult])))
     classOf[AgentStreamListener].getMethod("onComplete", classOf[JAgentResult]) should not be null
     classOf[JAgent].getMethod("forget", classOf[JAgentResult]) should not be null
+    classOf[JAgent].getMethod("forget", classOf[String]) should not be null
     classOf[JAgent].getMethod("pending", classOf[JAgentResult]) should not be null
   }
 }

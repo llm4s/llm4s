@@ -144,7 +144,7 @@ sbt buildAll
 
 ## Code Standards
 
-For detailed conventions (naming, style, import organization), see [CONTRIBUTING.md](../../CONTRIBUTING.md#code-conventions).
+For detailed conventions (naming, style, import organization), see [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#code-conventions).
 
 **Core principles** - all code must follow:
 
@@ -153,13 +153,13 @@ For detailed conventions (naming, style, import organization), see [CONTRIBUTING
 3. **Type Safety**: Use newtypes for domain values (`ApiKey`, `ModelName`, `ConversationId`)
 4. **Immutability**: Prefer immutable data structures and functional updates
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md#code-conventions) for detailed code pattern examples.
+See [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#code-conventions) for detailed code pattern examples.
 
 ---
 
 ## Testing Standards
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md#testing) for testing requirements and examples.
+See [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#testing) for testing requirements and examples.
 
 **Quick checklist:**
 - ✅ Place tests in `modules/core/src/test/scala/org/llm4s/` (mirror source structure)
@@ -174,7 +174,7 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md#testing) for testing requirements an
 
 ## Documentation Standards
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md#documentation) for basic format guidelines.
+See [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#documentation) for basic format guidelines.
 
 **For advanced contributions:**
 
@@ -222,10 +222,10 @@ lazy val config = Llm4sConfig.provider()
 
 ## Getting Help
 
-- **[CONTRIBUTING.md](../../CONTRIBUTING.md)** - Complete contributor guide
-- **[AGENTS.md](../../AGENTS.md)** - Repository structure and build commands
-- **[CLAUDE.md](../../CLAUDE.md)** - Developer patterns and guidelines
+- **[CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md)** - Complete contributor guide
+- **[AGENTS.md](https://github.com/llm4s/llm4s/blob/main/AGENTS.md)** - Repository structure and build commands
+- **[CLAUDE.md](https://github.com/llm4s/llm4s/blob/main/CLAUDE.md)** - Developer patterns and guidelines
 - **Discord:** https://discord.gg/4uvTPn6qww
 - **GitHub Discussions:** https://github.com/llm4s/llm4s/discussions
 
-For help, common issues, and build problems, see [CONTRIBUTING.md](../../CONTRIBUTING.md#getting-help).
+For help, common issues, and build problems, see [CONTRIBUTING.md](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#getting-help).

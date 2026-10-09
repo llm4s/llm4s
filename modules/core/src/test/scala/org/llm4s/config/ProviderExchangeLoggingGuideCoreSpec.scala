@@ -260,8 +260,13 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
       """{"token": ['abc123456789']}""" -> """{"token": ['[REDACTED]']}""",
       // bare leaves are replaced too; the literals are kept
       """{"token": [abc123456789, 42, true, null]}""" -> """{"token": ["[REDACTED]", "[REDACTED]", true, null]}""",
+      // under a single-quoted key: a number in the key's quote, a double-quoted value as Python's repr writes one
+      // holding a `'`, and a single-quoted leaf whatever it holds
+      """{'password': 12345678}"""                    -> """{'password': '[REDACTED]'}""",
+      """{'password': "it's-hunter2", 'n': 1}"""      -> """{'password': "[REDACTED]", 'n': 1}""",
+      """{'token': ['postgres://u:pw123456@h/db']}""" -> """{'token': ['[REDACTED]']}""",
       // inside a string a single-quoted container ends where the string does, and a `\"`-quoted leaf under a
-      // single-quoted key there is left
+      // single-quoted key there is replaced where its own `\"` closes it as a value
       """{"content": "see 'token': [ for details", "api_key": "abc123456789"}""" ->
         """{"content": "see 'token': [ for details", "api_key": "[REDACTED]"}""",
       """{"content": "see 'token': [ for details, it's urgent"}""" ->
@@ -269,7 +274,7 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
       """{"content": "use 'password': ' carefully", "model": "gpt-4o"}""" ->
         """{"content": "use 'password': '[REDACTED]", "model": "gpt-4o"}""",
       "see 'token': [ for details" -> "see 'token': [ '[REDACTED]' '[REDACTED]'",
-      """{"content": "{'token': [\"abc123456789\"]}", "n": 1}""" -> """{"content": "{'token': [\"abc123456789\"]}", "n": 1}""",
+      """{"content": "{'token': [\"abc123456789\"]}", "n": 1}""" -> """{"content": "{'token': [\"[REDACTED]\"]}", "n": 1}""",
       """{"max_tokens": [1, 2], "messages": [{"role": "user", "content": "hi"}]}""" ->
         """{"max_tokens": [1, 2], "messages": [{"role": "user", "content": "hi"}]}""",
       // compound key names are sensitive by suffix; token-count fields are not

@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import scala.annotation.tailrec
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
+import scala.util.control.Exception.ultimately
 
 /**
  * A running agent turn, from [[Agent.start]]: cancel it, or await its [[AgentResult]]. The turn runs
@@ -45,7 +46,7 @@ final class AgentRun private[agent] (
    * provider ignored the interrupt - is logged at WARN and left to end on its own, and the thread is
    * `ThreadBusy` until it does. Returns whether the turn ended.
    */
-  private[agent] def cancelAndAwaitEnd(within: FiniteDuration = AgentRun.Drain): Boolean =
+  private[llm4s] def cancelAndAwaitEnd(within: FiniteDuration = AgentRun.Drain): Boolean =
     handle.cancel()
     val ended = DefaultRunHandle.awaitEnd(handle, within)
     if !ended then
@@ -61,7 +62,7 @@ final class AgentRun private[agent] (
    * turn's own outcome: `Left` for a cancelled turn, but a turn that began committing its outcome
    * before the cancel reached it ended as that outcome.
    */
-  private[agent] def awaitEnded(): Result[AgentResult] =
+  private[llm4s] def awaitEnded(): Result[AgentResult] =
     AgentRun.uninterrupted(await())
 
   /**
@@ -154,13 +155,11 @@ private[agent] object AgentRun:
 
   /**
    * `body`, run with the calling thread's interrupt flag cleared; a flag that was set is set again
-   * afterwards, so the caller still sees the interrupt.
+   * afterwards - also when `body` throws - so the caller still sees the interrupt.
    */
   def uninterrupted[A](body: => A): A =
     val wasInterrupted = Thread.interrupted()
-    val result         = body
-    if wasInterrupted then Thread.currentThread().interrupt()
-    result
+    ultimately(if wasInterrupted then Thread.currentThread().interrupt())(body)
 
   /** How long [[AgentRun.await]] waits, after the run ends, for its listeners to return from its last event. */
   val Drain: FiniteDuration = 5.seconds

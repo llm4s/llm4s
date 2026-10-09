@@ -3,10 +3,19 @@ package org.llm4s.llmconnect.smoke
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ZaiConfig }
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
+import org.llm4s.llmconnect.model.{
+  Completion,
+  CompletionOptions,
+  Conversation,
+  ReasoningEffort,
+  StreamedChunk,
+  UserMessage
+}
 import org.llm4s.llmconnect.provider.ZaiClient
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -25,7 +34,7 @@ import org.scalatest.matchers.should.Matchers
  * generated text is never compared.
  */
 @Cloud
-class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
+class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with ProviderSmokeContract {
 
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
@@ -79,4 +88,40 @@ class ZaiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
 
     result.swap.value shouldBe an[AuthenticationError]
   }
+
+  // ---- the shared capability contract (issue #1212): see ProviderSmokeContract ----
+
+  /**
+   * The contract's checks cap the reply at a few tens of tokens, which GLM-4.5's default thinking could spend
+   * entirely, so they run with thinking off: `ReasoningEffort.None` goes to GLM-4.5 as `thinking.type: disabled`
+   * (#1691). Everything else is the client's own request. The reasoning check below leaves thinking on.
+   */
+  final private class ThinkingOff(underlying: LLMClient) extends LLMClient {
+    private def off(options: CompletionOptions): CompletionOptions = options.withReasoning(ReasoningEffort.None)
+
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
+      underlying.complete(conversation, off(options))
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = underlying.streamComplete(conversation, off(options), onChunk)
+    override def getContextWindow(): Int     = underlying.getContextWindow()
+    override def getReserveCompletion(): Int = underlying.getReserveCompletion()
+    override def close(): Unit               = underlying.close()
+  }
+
+  override protected def providerLabel: String       = "Z.ai"
+  override protected def apiKeyEnvVar: String        = "ZAI_API_KEY"
+  override protected def contractKey: Option[String] = apiKey
+  override protected def contractClient(key: String): Result[LLMClient] =
+    ZaiClient(config(key)).map(client => new ThinkingOff(client))
+  // GLM-4.5 thinks by default and returns it as reasoning_content, which the client reads back as thinking.
+  override protected def reasoningSetup: Option[String => Result[ReasoningSetup]] = Some { key =>
+    ZaiClient(config(key)).map { client =>
+      ReasoningSetup(client, CompletionOptions(maxTokens = Some(1024)), expectsThinkingText = true)
+    }
+  }
+
+  registerCapabilityContract()
 }

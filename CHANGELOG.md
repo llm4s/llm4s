@@ -233,6 +233,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Handoff.of(id, agent, reason)` for a `Result`), and `handoffId` is `handoff_to_<id>` rather
   than `handoff_to_agent_<hash>`. Design: `docs/design/typed-agent-runtime-design.md` §4.7, with
   the Stage 0 carry-forward in §4.8.
+- **RAG chunking and fusion: what is validated, and how weighted scores are combined**
+  ([#1318](https://github.com/llm4s/llm4s/issues/1318), items 4 to 6; the validation shipped in #1358, and the one
+  fix this found is under Fixed): `docs/guide/vector-store.md` now states that an invalid `ChunkingConfig` or `WeightedScore` throws
+  `IllegalArgumentException` (decided, because the `RAGConfig` builders cannot return a `Left`), how to turn user
+  input into a `Left` (`ChunkingUtils.chunkTextValidated`, or `Try(...)` through `toResult`), that every
+  configuration that can be built is safe for every chunker, and that `WeightedScore` rescales each channel so its
+  weakest hit scores `0.1`, not the `0.0` of a miss. The snippets are compiled and run by `RagValidationGuideSpec`.
+  New property tests pin the guarantees: `ScoreNormalisationSpec` (the floor and the best hit, nothing scores like a
+  miss, the channel's order is kept, scale and offset do not matter) and `ChunkersAcceptValidConfigsSpec` (no
+  chunker throws for any valid config, and chunk indices run from 0 without gaps, which re-ingest relies on).
 - **Compatibility and Deprecation Policy** ([docs/reference/compatibility-policy.md](docs/reference/compatibility-policy.md),
   [#1281](https://github.com/llm4s/llm4s/issues/1281)): one page for what you can rely on when you upgrade, by
   tier; how versions are read (`early-semver`, 0.5.0 as the MiMa baseline); what the promise covers (public
@@ -516,6 +526,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   testing. Its snippets after the first section are compiled and run by `ErrorHandlingGuideSpec`. The Basic Usage
   guide listed error types that do not exist (`ProviderConnectionError`, `InvalidApiKeyError`, ...) and
   called `LLMError` sealed; it now shows the real ones and links to the guide.
+- **RAG query transformer guide** ([#1545](https://github.com/llm4s/llm4s/issues/1545)):
+  `docs/guide/rag-query-transformers.md` explains how a RAG pipeline rewrites the query before it is embedded:
+  the built-in `LLMQueryRewriter` (temperature 0, default or custom system prompt, a `ProcessingError` on
+  `query-rewrite` when the LLM call fails) and `IdentityTransformer`, adding them with `withQueryTransformer`
+  (appends) or `withQueryTransformers` (replaces the chain), how `QueryTransformer.applyChain` runs the chain in
+  order and stops at the first error, and how to write a custom transformer. Contributed by @wanjinhao1.
 - **Caching guide** ([#1297](https://github.com/llm4s/llm4s/issues/1297)): `docs/guide/caching.md` explains the embedding
   cache (`CachedEmbeddingClient`, `InMemoryEmbeddingCache`, custom keys and backends) and the semantic completion cache
   (`CachingLLMClient`, `CacheConfig`): what a hit needs, what the key and the prompt contain, TTL, eviction, the cases
@@ -780,7 +796,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **An interrupted `Agent.run`, `continueConversation`, `recover` or `resume` cancels its turn, from Java too** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   the call returns `Left(CancelledError)` with the interrupt flag set, as before, and now also cancels the turn it
-  was waiting on instead of leaving it running, returning once that turn has ended (within 5 seconds), so `recover`
+  was waiting on instead of leaving it running, returning once that turn has ended (waiting up to 5 seconds for the turn to end), so `recover`
   can follow at once; a caller already interrupted starts no turn. Cancelling a graph run therefore cancels the
   agent turns its nodes are waiting on. Use `start`/`startRecover`/`startResume` and await the `AgentRun` to keep a turn past an interrupt.
   With tracing, the cancelled turn's trace is complete (its last events delivered, its subscription detached) when
@@ -789,8 +805,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   forgets the thread of a turn that failed or was cancelled once it has ended.
   **Java-visible:** `llm4s-java-api`'s blocking `JAgent.run`, `continueConversation`, `resume` and `recover` go
   through these calls, so an interrupted Java caller now cancels its turn too (they used to stop only the wait and
-  leave the turn running); Java and Kotlin now behave the same. `AgentStream.cancel()` still cancels a streamed turn
-  without interrupting any thread.
+  leave the turn running), as Kotlin's suspend functions already did. `AgentStream.cancel()` still cancels a streamed
+  turn without interrupting any thread. Its bounded wait, which Kotlin's cancellation uses, and Kotlin's one-shot
+  `run(query)` forgetting a failed turn's thread came later ([#1682](https://github.com/llm4s/llm4s/issues/1682),
+  [#1688](https://github.com/llm4s/llm4s/issues/1688), under Fixed).
 - **Java and Kotlin agent results use Java types only** ([#1393](https://github.com/llm4s/llm4s/issues/1393),
   BREAKING, `llm4s-java-api`, Kotlin API). Every agent turn the Java facade returns - `JAgent.run`,
   `continueConversation`, `resume`, `recover`, `AgentStream.await()`, `AgentStreamListener.onComplete` - is now a
@@ -1834,8 +1852,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ToolRegistry` restores the interrupt flag when a tool throws an interruption wrapped in another exception (it
   already did for a bare `InterruptedException`), as `MCPToolRegistry` does; `MCPTransportImpl.sendRequest`, `sendNotification`,
   `MCPClient.initialize` and `getTools` return `Result` instead of `Either[String, _]` (read the old string as
-  `error.message`; the messages are unchanged); the concrete embedding providers' `embed` returns
-  `Result[EmbeddingResponse]`. `llm4s-provider-testkit` gains `assertCallCancelsWhenInterrupted` and
+  `error.message`; the messages are unchanged); an embedding provider's `embed` can return
+  `Left(CancelledError)` where it returned only an `EmbeddingError` (its declared type, `Result[EmbeddingResponse]`,
+  is unchanged). `llm4s-provider-testkit` gains `assertCallCancelsWhenInterrupted` and
   `assertEmbeddingCancelsWhenInterrupted`.
 - **`ToolHints` are read from MCP tool annotations** ([#1331](https://github.com/llm4s/llm4s/issues/1331); design
   §4.12): `llm4s-mcp` reads `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` and `title` from the
@@ -2000,11 +2019,267 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - workspace runner: allowlisted commands can no longer write, delete or run other programs through their
+  arguments** ([#1715](https://github.com/llm4s/llm4s/issues/1715)): `executeCommand` checked only the executable
+  name against `allowedCommands` and a set of shell metacharacters, so programs on `WorkspaceSandboxConfig.ReadOnlyCommands`
+  could delete files (`find -delete`, `git clean`, `git checkout -- .`, `git reset --hard`), write them (`find -fprint`,
+  `sort -o`, `uniq in out`, `git diff --output`), run programs that are not on the list (`find -exec`,
+  `git -c alias.x=!cmd x`, `git -c core.fsmonitor=cmd status`, `git grep -O`, `git diff --ext-diff`, or `GIT_EXTERNAL_DIFF` /
+  `PAGER` / `LD_PRELOAD` in `environment`), and read or write outside the workspace (`cat /etc/passwd`,
+  `grep -r x ..`, a symbolic link out of it). The runner now also checks, before the process starts:
+  - *Options* (`ARGUMENT_NOT_ALLOWED`): `find -delete -exec -execdir -ok -okdir -fprint -fprint0 -fprintf -fls
+    -files0-from -follow -L`; `sort -o --output --compress-program --files0-from` (and Windows `sort /O`);
+    `wc --files0-from`; `ls -L --dereference`; `grep -R --dereference-recursive -S`; `cp -L -H -s --dereference
+    --symbolic-link`; `chmod -L -H --dereference`; `hostname` with an operand, `-F` or `-b`; `uniq` with more than
+    one operand (every argument after the first operand counts, as BSD `uniq` does not reorder). `git` runs only `status`, `log`, `show`, `diff`, `ls-files`,
+    `ls-tree`, `grep`, `blame`, `rev-parse` and a listing `branch`; refuses every global option except `--version`,
+    `--no-pager`, `--no-optional-locks`, `--literal-pathspecs` and `--no-replace-objects` (so `-c`, `-C`,
+    `--exec-path`, `--git-dir`, `--work-tree`, `-p`); and refuses `--output`, `--ext-diff`, `--textconv`,
+    `--show-signature` and `git grep -O` / `--open-files-in-pager`; `git branch` takes the next argument as the
+    value of `--merged`, `--contains`, `--points-at`, `--sort` or `--format`. Every argument is scanned, after `--` too; a
+    short option is refused anywhere in a cluster (`-ro`) and a long one under any abbreviation (`--outp`), with or
+    without `=value`.
+  - *Paths* (`PATH_ESCAPE_ATTEMPT`, the code the file operations already use): each argument, the value of a
+    `--name=value` option, and each tail of a short option (`-f/x`) is resolved from the working directory as the
+    kernel resolves it - component by component, following symbolic links where they are met, so `link/..` is the
+    parent of the link's target - and must stay inside the real workspace root (`sort -t` and `--field-separator`
+    take a separator, not a path). The working directory is held to the same rule. `echo`, `pwd`, `whoami` and
+    `hostname` are not checked. `cp`, which writes through a link it finds at the name it writes, also has the
+    names it will write checked, and a recursive `cp` refuses a destination directory holding a link that leads
+    outside. An argument over 4096 characters, or paths needing more than 20000 lookups, is refused
+    (`ARGUMENT_NOT_ALLOWED`) rather than walked. A string that is not a valid path is refused, not thrown: an
+    argument with a NUL character, or whose check fails, gets `ARGUMENT_NOT_ALLOWED`, and a working directory or file
+    operation path the platform cannot parse gets `PATH_ESCAPE_ATTEMPT` (before, `InvalidPathException`, or on
+    Windows an `IOError` for a drive-relative path on a drive that does not exist, such as the `G:` of
+    `findstr /G:file`, escaped `executeCommand`).
+    On Windows, a device or NT-namespace path (`\\?\C:\x`, `\??\C:\x`), a drive-relative path on another drive
+    (`D:x`) and a wildcard argument leading outside (`..\*`) are refused, and so is an argument with a wildcard
+    or `:` followed by a `..` component, or that leads outside with those characters replaced by `_`: Win32 removes
+    `..` as text before it opens a name, so `type x*\..\..\outside\f` opened `..\outside\f` although the part
+    before the `*` is inside. An argument holding `"` is refused on Windows (`ARGUMENT_NOT_ALLOWED`): the C runtime's
+    argument parser and cmd.exe delete it as a quote, so `"..\outside\f` opened `..\outside\f` and a leading `"`
+    hid an absolute path. On Windows, the built-ins started through `cmd.exe /c` (`dir`, `type`, `copy`, `move`,
+    `echo`, ...) also refuse an argument holding `,`, `=`, `(`, `)`, `@`, `!`, a control character or a non-ASCII
+    space (`ARGUMENT_NOT_ALLOWED`; `echo` may print `,`, `=` and parentheses): `ProcessBuilder` quotes an argument
+    only for a space, tab, `"`, `<` or `>`, and cmd.exe splits on `,`, `;`, `=`, VT, FF and 0xFF too, so
+    `type a.txt,..\outside\f` typed `..\outside\f` after `a.txt`. A path must also stay inside under that lexical reading (`..` removed as text, then
+    links resolved) as well as the kernel's, so `l/../../x` with `l` -> `a/b` is refused on every platform.
+  - *Windows* (`ARGUMENT_NOT_ALLOWED`): the policy refuses what it cannot reason about, and only the forms
+    `docs/reference/workspace-sandbox.md#on-windows` lists are supported. Refused: a device name as a path component
+    (`nul`, `sub\con`, `NUL.txt`, `COM1`, `LPT¹`, `CONIN$`), a component ending in `.` or a space (Win32 strips them,
+    so `outside.` opened `outside`; this refuses `git log HEAD..` too); for programs that are not cmd.exe built-ins,
+    which may run under a runtime that re-parses their command line (MSYS2, Cygwin, Git for Windows), an argument
+    starting with `@` (a response file) or `~`, one holding `{ } [ ] ' ( )`, a path starting with `/`, and a
+    wildcard outside a last component that has a literal character other than `.` (`*`, `.*`, `*/a.txt`);
+    `findstr /F:list` (any switch with `F`) and a `/D:` directory list; and `sort` `/O`, `/T`, `-O`, `-T`, `-t`,
+    `--temporary-directory`. 8.3 short names and alternate data streams (`a.txt:s`, judged by the file before the
+    `:`) are not refused.
+  - *git's repository* (every platform): git looks for its repository in the directories above the working
+    directory, so a workspace inside a larger repository ran `git show HEAD:secret`, `git diff` and `git status` on
+    that repository and read files outside the workspace. The runner now starts `git` with
+    `GIT_CEILING_DIRECTORIES` set to the workspace root's parent and without any inherited `GIT_*` variable
+    (`GIT_DIR`-style locations, `GIT_CONFIG_*` / `GIT_CONFIG_PARAMETERS` / `GIT_CONFIG_COUNT` configuration,
+    `GIT_EXEC_PATH`, object directories); refuses `git` (`PATH_ESCAPE_ATTEMPT`) when the workspace root's parent
+    path holds the path-list separator (`:` on POSIX, `;` on Windows), which `GIT_CEILING_DIRECTORIES` cannot
+    escape, and when the nearest `.git` inside the workspace is a `gitdir:` file, a link, or a directory whose real
+    path lies outside the workspace (a Windows junction); and refuses a git argument starting with `:` (`:/`,
+    `:(top)`, `:a.txt`), which git resolves from the repository's top level.
+  - *Environment* (`ENVIRONMENT_NOT_ALLOWED`): `environment` may set only `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`,
+    `COLUMNS`, `LINES` and `NO_COLOR`.
+
+  The checks apply to every allowlist, `ReadWriteCommands` and custom ones included (a custom program gets the path
+  and environment rules). Still open: `git` reads the repository's own `.git/config` and runs its hooks, so where
+  the agent can write files it can set `core.fsmonitor`, `diff.external` or a filter, or add a hook such as
+  `.git/hooks/post-index-change`, that `git status` / `git diff` then runs, or point git at files outside through
+  `core.worktree`, `.git/commondir` or `.git/objects/info/alternates`
+  ([#1721](https://github.com/llm4s/llm4s/issues/1721)); `diff -r` follows links inside the tree it walks; a relative
+  link moved to another depth by the read-write list can come to point outside (paths through it are refused); and
+  the checks do not see a link made by a concurrent command.
+
+  **Migration.** The new error codes are plain strings in the existing `WorkspaceAgentErrorResponse`, so the protocol
+  is unchanged. Commands that worked before and are now refused: the forms above; any argument that is, or
+  resolves to, a location outside the workspace, including a `grep` pattern or option value that starts with `/` or
+  has a `..` component (write `[/]api` for `/api`); `ls -L`, `grep -R`/`-S`, `find -L`, `cp -L`/`-H`/`-s` and
+  `chmod -L`/`-H`; `uniq` with an option after its file (write `uniq -c a.txt`); a link-preserving `cp` (`-R`, `-a`,
+  `-P`, `-d`) of two sources with the same name, or of several sources one of which is `dir/` or `dir/.`;
+  `git branch <name>` without `--list`;
+  `git` subcommands other than the read ones; a `git` argument starting with `:`; `git` in a workspace that has no
+  repository of its own but lies inside one (it now reports `not a git repository`); `git` in a workspace whose
+  parent path holds `:` (POSIX) or `;` (Windows); on Windows, the forms listed
+  above; and `environment` variables outside the list. Run writes through the
+  `writeFile` / `modifyFile` operations or the read-write allowlist's own programs instead.
+- **A subscription receives every live event sent after `subscribe` returns** ([#1731](https://github.com/llm4s/llm4s/issues/1731)):
+  `GraphRuntime.subscribe` returned before its dispatcher joined the event hub's live set, which it
+  did only after replaying the log, so live events (`RunContext.progress`, `StreamEvent.Live`) sent in
+  between were silently lost - subscribing and then calling `start` lost the run's progress whenever
+  the store's first read was slow or the dispatcher thread started late. The subscription now joins
+  the live set before `subscribe` returns. Live events sent while it replays are held, up to its
+  `capacity` (the rest dropped and reported as a `StreamEvent.LiveGap`, as for a full queue), and
+  delivered in their place among the durable events: after those committed before them, before
+  those committed after. Durable delivery is unchanged. No API change.
+- **Security - `llm4s-core`, `llm4s-agent-tools`: the SSRF guard blocks IPv6 private ranges, redirect header
+  stripping is sticky, and the HTTP tool's `timeout` bounds the whole call** ([#1408](https://github.com/llm4s/llm4s/issues/1408),
+  findings F5, F7 and F8; F6 remains open):
+  - *F5, SSRF guard (`NetworkSecurity.isBlockedIP`).* It relied on the JDK's `isSiteLocalAddress`, which for IPv6
+    matches only the deprecated `fec0::/10`, so unique-local `fc00::/7` (`fd00::1`) passed, as did IPv6 forms that
+    carry a blocked IPv4 address: IPv4-compatible `::127.0.0.1`, NAT64 `64:ff9b::7f00:1` and 6to4 `2002:7f00:1::1`.
+    It now also refuses `fc00::/7`, the whole IPv4-compatible `::/96`, local-use NAT64 `64:ff9b:1::/48`, Teredo
+    `2001::/32`, `2001:db8::/32` and `3fff::/20` (documentation), `2001:2::/48` (benchmarking), `100::/64` (discard)
+    and `0.0.0.0/8`, and judges an IPv4-mapped (`::ffff:0:0/96`), NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`)
+    address by the IPv4 address it carries, against every blocked IPv4 range. No public signature changed.
+  - *F7, redirect headers (`HTTPTool`).* With `followRedirects`, `Authorization`, `Cookie` and
+    `Proxy-Authorization` were stripped only on a hop whose host differed from the previous hop's, and the next hop
+    was sent the original headers again, so `127.0.0.1` -> `localhost` -> `localhost` delivered `Authorization` to
+    the third hop; a hop to another port, or from `https` to `http`, on the same host kept them. They are now
+    stripped from the first hop whose origin (scheme, host and port) differs from the original request's, and stay
+    stripped for every later hop, including one back to the original origin.
+  - *F8, timeout (`HTTPTool`).* `HttpConfig.timeout` was set as the connect and the per-read timeout, so a server that
+    sent a byte every 100 ms held a 500 ms call for as long as it kept sending (and each redirect hop got a fresh
+    timeout). It is now one deadline for the whole call: name resolution, connecting, every redirect hop and reading
+    the body. The caller gets `TIMEOUT: HTTP request did not complete within <n> ms ...` at the deadline, and the
+    abandoned connection is closed. The field keeps its name and `FiniteDuration` type.
+  - **Migration.** A request to a host that resolves into one of the newly blocked ranges is now refused with
+    `SSRF_BLOCKED` (use `HttpConfig.withInternalIPsAllowed` deliberately if you need one; `allowedDomains` does not lift the check). A
+    redirect chain that relied on credentials surviving a change of host, port or scheme, or a return to the original
+    host, no longer sends them. A `timeout` sized for a slow single read may now be too short for a whole download or
+    a redirect chain: size it for the entire call. A zero `timeout` used to mean "no timeout" (`HttpURLConnection`'s
+    `0`); it now fails every call at once - set a large one instead.
+- **`llm4s-agent`: the PII Email pattern runs in linear time; an SSN stays within a line; `UTC+5` is not a phone number**
+  ([#1713](https://github.com/llm4s/llm4s/issues/1713)):
+  - `PIIType.Email`, in the default type set of `PIIMasker` and `PIIDetector`, began a match attempt at every
+    character of a run of letters, digits or `._%+-` and scanned to the end of the run each time, so it took
+    quadratic time: 10.9 s on 20,000 `a`s, and hours on a million-character base64 blob or minified line - a
+    denial-of-service risk in a guardrail that runs on every message. An attempt now starts only at the start of
+    such a run or where the previous match ended (`\G`), and a million-character run takes milliseconds. An attempt
+    inside a run succeeds exactly when one at its start does, so the matches are unchanged, back-to-back addresses
+    such as `a@b.com_x@y.org` included. The other PII patterns were measured on million-character adversarial runs
+    and are linear.
+  - `PIIType.SSN` separated its digit groups with `\s`, so `123\n45\n6789` was masked as one SSN. It now takes a
+    dash or horizontal whitespace (`\h`), as the phone and card patterns do: groups split by LF, CR, a vertical tab
+    or a form feed are no longer joined, and groups split by a no-break space or another Unicode horizontal space
+    now are.
+  - `PIIType.Phone` read a time-zone offset and the date after it as an international number, so
+    `UTC+5 2026-10-09 12:30` became `UTC[REDACTED_PHONE]:30`. A `+` right after `UTC` or `GMT` (any case, with or
+    without one space between) no longer starts an international number; a `+` after any other word still does, so
+    `a@b.com+44 20 7946 0958` and `Phone+44 20 7946 0958` are still masked. The Scaladoc now says that a separated
+    number longer than 15 digits is masked up to its 15th digit and the rest kept, which is what the pattern does.
+- **Streamed tool-call arguments reach `onChunk` verbatim** ([#1212](https://github.com/llm4s/llm4s/issues/1212)):
+  `OpenAICompatibleClient` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, generic) and `OpenAIClient` (OpenAI,
+  Azure, Requesty) used to hand `onChunk` each tool-call argument fragment already parsed, so a fragment that was
+  valid JSON on its own (`":"`, `"Paris"`) lost its quotes and a consumer concatenating the fragments got corrupt
+  arguments. Each fragment now arrives as a `ujson.Str` (an empty one as `{}`), as the Anthropic and Bedrock clients
+  already did; reassemble them with a `StreamingAccumulator`. The returned `Completion` was not affected. The chat
+  TUI sample now reassembles them that way before tool approval and execution.
+- **`llm4s-anthropic`: extended thinking with the default temperature** ([#1212](https://github.com/llm4s/llm4s/issues/1212)):
+  Anthropic accepts no temperature but 1 with thinking enabled, and the default `CompletionOptions` temperature of
+  0.7 made every request with a thinking budget fail with HTTP 400. `AnthropicClient` now omits `temperature` when
+  a thinking budget is set.
+- **`llm4s-rag`: `SentenceChunker` keeps every character of the input** ([#1718](https://github.com/llm4s/llm4s/issues/1718)):
+  it split with `Regex.split` on `([.!?])(\s+)([A-Z])`, which deleted the punctuation, the whitespace and the next
+  sentence's first letter at every boundary and glued the parts back together, so
+  `"Hello world. Next one. Third."` became the single sentence `"Hello worldext onehird."`. Boundaries are now
+  found with lookarounds, so only the whitespace between sentences is matched, and sentences are cut from the input
+  itself. Sentences in a chunk keep the whitespace that separated them (it used to be one space), so with no overlap
+  and no force-split sentence every chunk is a slice of the input. Abbreviations (`Dr.`, `e.g.`) only match as whole
+  words, so `summr.` or `first.` no longer hide a boundary, and a closing quote or bracket after the punctuation stays
+  with its sentence: `He said "Hi." Then` is `He said "Hi."` and `Then`. `ChunkerFactory.default`, `"sentence"` and
+  the semantic fallback all use this chunker. **Migration:** chunk text changes for any input with a sentence
+  boundary, and chunk sizes with it; indexes built with `SentenceChunker` hold corrupted text and should be
+  re-chunked and re-embedded.
+- **`llm4s-openai`: OpenAI embeddings reach `/v1/embeddings` with the default base URL**
+  ([#1413](https://github.com/llm4s/llm4s/pull/1413)): the default `llm4s.embeddings.openai.baseUrl` is
+  `https://api.openai.com/v1`, the versioned root the chat provider uses too, but `OpenAIEmbeddingProvider`
+  appended `/v1/embeddings` to it and posted to `https://api.openai.com/v1/v1/embeddings`. A base URL ending in
+  `/v1` now gets `/embeddings`; one without it (`https://api.openai.com`, a proxy root) still gets
+  `/v1/embeddings`, so a base URL that worked before is unchanged.
+- **`llm4s-rag`: `SimpleChunker` and `ChunkingUtils.chunkText` no longer throw for a very large window**
+  ([#1424](https://github.com/llm4s/llm4s/pull/1424)): the window end and the next start were computed in `Int`, so
+  a valid configuration such as `ChunkingConfig(targetSize = Int.MaxValue, maxSize = Int.MaxValue,
+  overlap = Int.MaxValue - 1)` overflowed on the second window and `substring` threw
+  `StringIndexOutOfBoundsException`. Both are now computed in `Long` and clamped to the text length; the chunks
+  produced for every other configuration are unchanged.
+- **`llm4s-openai-compatible`: Z.ai honours `CompletionOptions.reasoning`** ([#1681](https://github.com/llm4s/llm4s/issues/1681)):
+  it used to be ignored, so `ReasoningEffort.None` still thought (Z.ai's `thinking.type` defaults to `enabled`) and
+  effort levels never reached a model that takes `reasoning_effort`. Each effort now goes out in the form the
+  configured GLM model documents. On GLM-5.1, GLM-5 and GLM-4.5 to 4.7, `None` sends `"thinking": {"type": "disabled"}`
+  and the other levels send nothing. GLM-5.2 is sent `reasoning_effort` `none`, `low`, `medium` or, for `High`, `max`
+  (Z.ai currently runs `low` and `medium` as `high` on it). GLM-5.3 always thinks and rejects `disabled`, and accepts
+  only `low`, `high` and `max`, so `None` and `Low` send `low`, `Medium` sends `high` and `High` sends `max`; `None`
+  on GLM-5.3 logs a one-time warning that thinking tokens are still produced. `High` is Z.ai's maximum, its default,
+  so no level reasons more than `High`. Other models are sent nothing. With replayed reasoning, `thinking`
+  carries both `type` and `clear_thinking`. Without a `reasoning` option the request is unchanged.
+- **`llm4s-rag`: chunkers never split a surrogate pair** ([#1711](https://github.com/llm4s/llm4s/issues/1711)):
+  `SimpleChunker` and `ChunkingUtils.chunkText` cut by UTF-16 index, so a window end or an overlap start could fall
+  between the two halves of an astral character (emoji, CJK Extension B), leaving a lone surrogate in each chunk; an
+  embedding API rejects that or replaces it with U+FFFD. `SentenceChunker` could do the same at the start of its
+  overlap. Such a cut now moves back by one unit (forward only for `targetSize = 1` at an astral character, the one
+  case where a chunk is two units long), so chunks stay within their size and, with no overlap, still concatenate
+  back to the input. The reranker prompt, the RAGAS Langfuse observer and `BenchmarkConfig.shortName` truncate the
+  same way. Text without astral characters is chunked exactly as before. `SentenceChunker`, `MarkdownChunker` and
+  `SemanticChunker` keep a single word longer than `maxSize` whole, as before; this is now documented on
+  `ChunkingConfig.maxSize`.
+- **Cancelled and failed agent turns no longer leave threads nobody can name, and every cancel wait is bounded**
+  ([#1682](https://github.com/llm4s/llm4s/issues/1682), [#1688](https://github.com/llm4s/llm4s/issues/1688);
+  follow-ups to [#1330](https://github.com/llm4s/llm4s/issues/1330)'s cancellation):
+  - Kotlin `AgentKt.run(query)` runs its turn on a random thread id that nothing it throws carries. Once a failed or
+    cancelled turn has ended it now forgets that thread, as Scala `Agent.run(query)` and Java `JAgent.run(query)`
+    do; before, the thread stayed in the agent's runtime for the agent's lifetime. A forget that is refused - the
+    turn of a provider that ignores its interrupt is still running - is added to the thrown exception as a
+    suppressed one. `continueConversation`, `resume` and `recover` are unchanged: their thread is the caller's.
+  - `AgentStream.cancel()`, through which a cancelled Kotlin coroutine cancels its turn, waited for the turn's end
+    without a bound, so a provider that ignored its interrupt hung it. It now waits up to 5 seconds for the turn to
+    end, as the blocking `JAgent` calls do, then logs a WARN and returns, the thread busy (`ThreadBusy`) until the
+    turn ends. Java and Kotlin cancellation now behave the same.
+  - `JAgent.forget(threadId)` (`llm4s-java-api`) forgets a conversation by its thread id - one named for `stream`,
+    say, whose turn failed - as Scala `Agent.forget(threadId)` does; `forget(previous)` needed a result.
+  - `Agent.runMultiTurn` forgets its random thread when a follow-up turn fails or is cancelled: the `Left` it
+    returns carries no thread id, so the thread could be neither recovered nor forgotten.
+  - The interrupt flag a cancelled blocking call keeps is no longer lost when forgetting the one-shot turn's thread
+    throws (a `Checkpointer` whose `deleteThread` throws a fatal error the runtime does not turn into a `Left`).
+  - Scaladoc, the Java threading guide and the #1330 entry say the calls wait "up to 5 seconds for the turn to end":
+    with tracing, delivering the ended turn's last trace events can add to that.
 - **`llm4s-openai-compatible`: Z.ai keeps replayed reasoning** ([#1384](https://github.com/llm4s/llm4s/pull/1384),
   [#1411](https://github.com/llm4s/llm4s/pull/1411)):
   a request that sends an earlier turn's `reasoning_content` back now also sets `"thinking": {"clear_thinking": false}`,
   merged into any existing `thinking` object. Z.ai's standard endpoint has preserved thinking off by default
   (`clear_thinking` defaults to `true`) and drops replayed reasoning without it; `thinking.type` is left unset.
+- **Redaction redacts a JSON `Authorization` value containing an escaped quote in full**
+  ([#1672](https://github.com/llm4s/llm4s/issues/1672)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, took the value of a JSON `"Authorization"` field to end at the first `"`, including the `"` of
+  an escaped `\"` inside it. Only the text before the escaped quote was replaced, and the rest of the credential was
+  written in the clear: `{"authorization": "6FPVKYYYKXQ\"]WGMW"}` became `{"authorization": "[REDACTED]"]WGMW"}`.
+  The value is now read as the body of a JSON string, in which `\"` is part of the value and a quote after an
+  escaped backslash (`"abc\\"`) ends it, so the whole value is replaced: `{"authorization": "[REDACTED]"}`. A value
+  with no closing quote, as in a payload cut off in the middle of it, is redacted to the end of the input, as other
+  credential values already were. The `Authorization: ...` header line, an empty value and JSON inside a string are
+  redacted as before. No signature changes.
+- **Redaction keeps the escape on a quote after a redacted `key=value`, so nested JSON still parses**
+  ([#1677](https://github.com/llm4s/llm4s/issues/1677)): the `key=value` pass of `Redaction.redact` and
+  `redactForLogging`, and so of the exchange-log sink, took the backslash of an escaped closing quote as part of the
+  value. Inside JSON that sits in a string, `{"c": "{\"note\": \"token=abc\", \"x\": \"y\"}"}` became
+  `{"c": "{\"note\": \"token=[REDACTED]", \"x\": ...`: the bare `"` ended the outer string, the document no longer
+  parsed, and the passes after it paired its quotes the wrong way round. Of the backslashes before the quote a value
+  stops at, the pass now keeps those that escape it, at any depth of nesting (one for `\"`, three for `\\\"`), and
+  replaces the rest with the value; the output is `{"c": "{\"note\": \"token=[REDACTED]\", \"x\": \"y\"}"}`. A value
+  in plain JSON, and one ending in backslashes before anything but a quote, is redacted as before, and no text other
+  than those backslashes is kept that was replaced before.
+- **Redaction covers Python-repr credentials: single-quoted values with `:` or `=`, numbers, and double-quoted
+  values under single-quoted keys** ([#1675](https://github.com/llm4s/llm4s/issues/1675),
+  [#1687](https://github.com/llm4s/llm4s/issues/1687)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, left three shapes of a credential in a Python dict (or a JavaScript literal) readable that the
+  double-quoted forms redact. A single-quoted leaf holding a `:` or `=` under a single-quoted credential key was taken
+  for a field, not a value, so `{'credentials': {'pass': 'SECRETX:SECRETY'}}` became
+  `{'credentials': {'pass': 'SECRETX:'[REDACTED]''[REDACTED]`, `{'token': ['postgres://u:SECRETPW@h/db']}` kept the
+  user, and inside a JSON string the whole value stayed; such a leaf is now replaced where it stands as a value (after
+  `:` in a dict, after `[` or `,` in a list), `{'credentials': {'pass': '[REDACTED]'}}`, while an apostrophe of prose
+  that a mentioned `'token': [` runs into is still not taken for one. A number under a single-quoted credential key,
+  `{'password': 123456}`, was left as it was, also inside a string; it is now written back in the key's quote,
+  `{'password': '[REDACTED]'}`. A double-quoted value under a single-quoted key, which `repr` writes for a string that
+  holds a `'`, was not read at all: `{'Authorization': "Bearer x'y"}` kept `'y` and `{'password': "it's-secret"}`
+  was unchanged. It is now redacted to its closing quote, honouring escapes, where it reads as a value of the dict
+  (followed by `,` and the next key, by `}`, or cut off): `{'Authorization': "[REDACTED]"}`; the same holds inside a
+  JSON string (`\"it's\"`), and for such a leaf of a single-quoted container there, which used to end the container.
+  Double-quoted JSON is redacted as before. No signature changes.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the
   exchange-log sink, read a query parameter as `[?&]`, a key of any characters up to the next `=`, and a value up
@@ -2273,6 +2548,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   admitted `/srv/agent-data-secret`, and `developmentSafe(workingDirectory)` could read and write a sibling
   directory whose name began with the working directory's. Both now use `Path.startsWith` on normalised absolute
   paths; blocked paths are matched the same way (`/var` no longer blocks `/variable`).
+- **`llm4s-agent-tools`: `get_current_datetime` reads the same on every host and checks its parameters**
+  ([#1512](https://github.com/llm4s/llm4s/issues/1512), [#1513](https://github.com/llm4s/llm4s/issues/1513),
+  [#1511](https://github.com/llm4s/llm4s/issues/1511)): the `human` format used the JVM's default locale, so the
+  same call wrote localised month and weekday names (and a lower-case `am` under `en_GB`); it is now always English
+  (`Locale.US`, so the text under `en_US` is unchanged). `timezone` and `format` were marked required in the tool
+  schema although the handler defaults both, so a call with null arguments was refused with `NullArguments`; both
+  are optional now, as the guide already said. **Behaviour changes:** an unsupported `format` is now an error that
+  names the supported formats, where it used to answer in ISO; a `format` or `timezone` that is not a string is an
+  error naming the parameter, where it used to be ignored (the answer came in UTC / ISO). A JSON `null` still counts
+  as absent.
 - **`llm4s-knowledgegraph`: a failed graph extraction logs a preview of the reply, not the whole reply**
   ([#1635](https://github.com/llm4s/llm4s/issues/1635)): `GraphJsonParser` used to put the entire model reply on
   the ERROR line when it did not parse, or parsed but was not a graph - the second site re-rendering the whole
@@ -2399,6 +2684,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   judge score`: make it answer with only a number between 0 and 1, as the fixed system message already asks. A
   subclass that calls or overrides `evaluateWithLLM` takes a `BigDecimal` (`.toDouble` where a `Double` is
   needed). The score-reading rules are documented on `LLMGuardrail`.
+- **`llm4s-agent`: a judge guardrail with a threshold outside 0.0 to 1.0 fails with a clear error, instead of silently
+  blocking everything or passing everything** ([#1520](https://github.com/llm4s/llm4s/issues/1520)): the threshold of
+  `LLMGuardrail` (and so of `LLMSafetyGuardrail`, `LLMFactualityGuardrail`, `LLMQualityGuardrail`,
+  `LLMToneGuardrail` and `LLMGuardrail(...)`) was not validated: above 1.0 (or `+Infinity`), or NaN, nothing could
+  pass, and below 0.0 (or `-Infinity`) everything that parsed passed. `validate` now returns a `ValidationError` on
+  field `threshold` for a value below 0.0, above 1.0 (an infinity too) or NaN, **before** calling the judge, so no
+  call is spent on a guardrail that cannot work. 0.0 and 1.0 are accepted, and a valid threshold is still compared
+  as the decimal it is written as (#1405). The check runs when `validate` runs, not when the guardrail is built, so
+  no constructor or factory signature changed and a subclass that overrides `threshold` is checked too.
+  **Migration:** a guardrail whose threshold was out of range, and so was blocking everything or approving
+  everything, now fails every `validate` with that error: correct the threshold.
 - **`llm4s-gemini`: a signed function call with an empty `id` is replayed with its thought signature**
   ([#1615](https://github.com/llm4s/llm4s/issues/1615)): a `functionCall` returned with `"id": ""` got a generated
   tool-call id at parse, but the signed part was kept verbatim, so on the next turn its stored `""` was compared with
@@ -2445,6 +2741,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.toOption` (`UUIDTool`'s `count`, `ListDirectoryTool`'s `max_entries`, `ReadFileTool`'s `max_lines`, the
   workspace and knowledge-graph tools) fall back to their default for such a value instead of using the truncated
   one. No public signature changed.
+- **`llm4s-agent-tools`: file paths are judged by where they really are, a shell command gets a scrubbed
+  environment, and the HTTP tool stops reading at its cap** ([#1408](https://github.com/llm4s/llm4s/issues/1408),
+  findings F1 to F4; F5 to F9 remain open):
+  - *File tools (`read_file`, `list_directory`, `file_info`, `write_file`).* `allowedPaths` and `blockedPaths` were
+    compared as strings, so allowing `/srv/data` also allowed `/srv/data-secret`, and a symbolic link inside an
+    allowed directory led out of it (reads, listings, `file_info` and writes, `followSymlinks = false` included).
+    A path is now made absolute, every symbolic link is resolved, and the result is compared with each entry -
+    resolved the same way - one path component at a time (the tools remove `..` as text first and open the location
+    they judged; `isPathAllowed` reads a `..` after a link both as POSIX applies it, at the link target's parent,
+    and as Windows does, removing it as text first, and allows the path only when both locations are allowed, on
+    every OS);
+    blocked entries are matched on the real location too. The tools open the resolved path, so a link swapped in after the check no longer redirects the
+    open (a directory swapped for a link between the check and the open is a race that is narrowed, not closed).
+    A link that cannot be resolved (a dangling link) is refused. A hard link inside an allowed directory to a file
+    elsewhere is not contained: no path check can tell it from the file itself. `FileConfig.isPathAllowed` and
+    `WriteConfig.isPathAllowed` keep their signatures and use the same rule.
+  - *Shell tool.* A command no longer inherits the process environment, where provider API keys live: it receives
+    only the variables in the new `ShellConfig.inheritedEnvironment` (default `PATH`, `LANG`, `LC_ALL`, `TERM`,
+    `SystemRoot`) plus `environment`; `ShellConfig.development()` sets it to `None` and keeps inheriting everything.
+    The new `ShellConfig.pathPolicy` (and the `ShellConfig.readOnlyWithin(policy, workingDirectory)` preset) holds
+    every file-like argument of a command, and its working directory, to a `FileConfig`, judged as the program
+    will hand it to the OS (so `linksub/../secret` is judged both at the link target's parent and, as Windows reads
+    it, beside the link); `--` is not trusted to end the
+    options, because an option that takes an argument consumes it (`file -F -- -f list`), so every argument is
+    checked as a path and, when it starts with `-`, as a flag. Without a policy a command's file arguments are not
+    checked, as before. `file -C`/`-m`/`-M`/`-f`, `date -f`/`-r` and `wc --files0-from`, which write a file or read
+    one the command does not name, are refused, by the program's file name (so `/usr/bin/file -C` too), in any
+    abbreviated long form GNU accepts (`date --fil`), and after a `--` too.
+  - *HTTP tool.* A response body was read in full and then cut at `maxResponseSize`; reading now stops one byte
+    past the cap, with the same result for any body.
+  - **Migration.** A configuration that relied on a path prefix to cover sibling directories stops matching them
+    (list each directory); a symbolic link inside an allowed directory works only if its real target is inside an
+    allowed directory; a shell command that needs a process variable (for example `HOME`, `JAVA_HOME`) must be named
+    in `inheritedEnvironment` or set in `environment`; `file -C` and friends no longer run in the read-only preset.
+    On macOS `/var` is a link to `/private/var`, so the default `blockedPaths` (which includes `/var`) now also
+    blocks the real-path per-user temporary directories under `/private/var/folders`, which `java.io.tmpdir` and
+    `Files.createTempDirectory` return there; a configuration that reads or writes there must set its own
+    `blockedPaths`. A path with a `..` after a symbolic link whose POSIX and Windows readings disagree, one inside
+    and one outside, is refused on every OS (with `data/l -> data/a/b`, `data/l/../../x` is refused on Linux too);
+    spell it without the `..`.
+- **`llm4s-agent`: `PIIMasker` masks international phone numbers and 15-digit card numbers, and `PIIPatterns.maskAll`
+  no longer corrupts or fails on overlapping matches** ([#1517](https://github.com/llm4s/llm4s/issues/1517),
+  [#1568](https://github.com/llm4s/llm4s/issues/1568)): the
+  phone pattern only knew US numbers and the card pattern only the 16-digit layout, so `+44 20 7946 0958` and the
+  American Express number `3782 822463 10005` were passed through unmasked. `PIIType.Phone` now also matches a `+`
+  followed by 8 to 15 digits with spaces, dashes, dots or parentheses between them (a digit run without the `+` is
+  not treated as an international number), and `PIIType.CreditCard` the 4-6-5 layout with prefix 34 or 37, written
+  with or without separators. Separately, `maskAll` replaced each match by its original indices, so when two types
+  matched overlapping text it cut the wrong characters or threw: `PIIMasker.sensitive` and `PIIMasker.financial`
+  failed with a `StringIndexOutOfBoundsException` on a plain 16-digit card number (a card is also account-shaped),
+  and `PIIMasker.all` turned `123456789` into `[REDACTED_PASSPORT]_SSN]`. Overlapping matches are now merged into one
+  stretch that is replaced once, under the type whose match starts first (the longest, then the type listed first,
+  on a tie), so a plain 15- or 16-digit card number under those presets is `[REDACTED_CARD]`. No signature
+  changes. The separators inside a phone or card number are now horizontal whitespace, dashes and (for phones) dots
+  and parentheses only, so a line break no longer joins digit groups on separate lines into one number: before,
+  `555`, `123` and `4567` on three lines were masked together, and the line breaks with them. The guide's table
+  named the card placeholder `[REDACTED_CC]`; it is `[REDACTED_CARD]`.
 - **Guardrail case folding no longer depends on the JVM default locale**: `ProfanityFilter`, `ToneValidator`
   and `PromptInjectionDetector` lower-cased text with the default locale, so under a Turkish locale `HI`,
   `INAPPROPRIATE` and `IGNORE PREVIOUS INSTRUCTIONS` folded to a dotless `ı` and went undetected. They (and the
@@ -2676,6 +3029,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lower-cased with `Locale.ROOT`, so a Turkish default locale no longer stops `API_KEY` from being recognised. Redaction
   is still pattern-based and best effort: it does not detect a secret that is not under a key, and JSON escaped twice
   is not recognised.
+- **Docs: the Reference section's Migration Guide, Release Process, Scalafix Rules and Test Coverage pages no longer
+  404** ([#444](https://github.com/llm4s/llm4s/issues/444)): `migration.md`, `release.md`, `scalafix.md` and
+  `test-coverage.md` (and `security.md`, `workspace-sandbox.md` and `benchmarks.md`) had no front matter, so Jekyll
+  served them as raw files and their links on llm4s.org returned 404. They now have a title, `parent: Reference` and a
+  `nav_order`, and are listed in the Reference index. `test-coverage.md` described a single 50% threshold that no
+  longer exists; it now describes the per-module `coverageFloor`, `coveragePolicyCheck` and the Codecov statuses.
+  Links inside the Reference pages that ended in `.md`, or pointed at repository-root files, now use the form the
+  site serves. Links to the newly rendered pages from `installation.md`, `providers.md`, `0x-to-1x.md` and
+  `migration.md` itself were changed from `.md` to the page URL in the same change, since a `.md` URL is a 404 once
+  its page is rendered, and the 55 entries `scripts/docs-link-baseline.txt` held for the links this fixes are removed.
 - **`AudioPreprocessing.resamplePcm16` could hang, and its output length was wrong**
   ([#1308](https://github.com/llm4s/llm4s/issues/1308)): a target rate of `-8000`, or a source rate of `-1`, sent
   Java Sound's converter into a loop that never ended (a test JVM spun at 100% CPU for twenty minutes), a target

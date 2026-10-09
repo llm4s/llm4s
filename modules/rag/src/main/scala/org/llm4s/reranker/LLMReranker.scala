@@ -2,6 +2,7 @@ package org.llm4s.reranker
 
 import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.utils.CodePointBoundary
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.util.BoundedJson
@@ -135,7 +136,7 @@ Do not include any explanation or text outside the JSON array."""
   private def buildUserPrompt(query: String, documents: Seq[String]): String = {
     val docsSection = documents.zipWithIndex
       .map { case (doc, idx) =>
-        s"Document ${idx + 1}:\n${doc.take(1000)}" // Truncate long documents
+        s"Document ${idx + 1}:\n${CodePointBoundary.take(doc, 1000)}" // Truncate long documents, never inside a surrogate pair
       }
       .mkString("\n\n")
 
