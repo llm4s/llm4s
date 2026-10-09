@@ -8,6 +8,7 @@ import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
 
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
@@ -106,13 +107,17 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
    * `reasoning_content`, keeping any other field of the `thinking` object.
    *
    * The reasoning mapping follows Z.ai's chat-completion reference and thinking-mode guide, in
-   * which thinking is on by default and `reasoning_effort`, where accepted, defaults to `max`:
+   * which thinking is on by default and `reasoning_effort`, where accepted, defaults to `max`. The
+   * mapping is monotonic and `High` is Z.ai's maximum, so it never reasons less than the default:
    *  - GLM-5.3 and its Flash variants always think, and reject `thinking.type: disabled`. They
    *    accept `reasoning_effort` `low`, `high` or `max` only. `None` and `Low` send `low`, the least
-   *    they allow, which is Z.ai's own advice for a caller that disabled thinking; `Medium` and
-   *    `High` send `high`.
-   *  - GLM-5.2 accepts every `reasoning_effort` level (`none` skips thinking), so the effort's name
-   *    is sent.
+   *    they allow, which is Z.ai's own advice for a caller that disabled thinking; `Medium` sends
+   *    `high` and `High` sends `max`. Because `None` still thinks, and thinking tokens are still
+   *    billed, the first such request in the process logs a warning naming the model.
+   *  - GLM-5.2 accepts `none`, `low`, `medium`, `high` and `max` (`none` skips thinking). `None`,
+   *    `Low` and `Medium` send their own name and `High` sends `max`. Z.ai currently treats `low`
+   *    and `medium` as `high` on this model; the requested level is still sent, so a later change
+   *    on Z.ai's side takes effect without a change here.
    *  - GLM-5.1, GLM-5, GLM-4.7, GLM-4.6 and GLM-4.5 (with their variants) document no
    *    `reasoning_effort`. `None` sends `thinking.type: disabled`; the other levels send nothing and
    *    leave the model's default.
@@ -129,11 +134,17 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
     options.reasoning.foreach { effort =>
       ZaiDialect.family(model) match {
         case ZaiDialect.Family.ForcedThinking =>
+          if (effort == ReasoningEffort.None) warnThinkingNotDisabled(model)
           body("reasoning_effort") = effort match {
-            case ReasoningEffort.None | ReasoningEffort.Low    => "low"
-            case ReasoningEffort.Medium | ReasoningEffort.High => "high"
+            case ReasoningEffort.None | ReasoningEffort.Low => "low"
+            case ReasoningEffort.Medium                     => "high"
+            case ReasoningEffort.High                       => "max"
           }
-        case ZaiDialect.Family.Effort => body("reasoning_effort") = effort.name
+        case ZaiDialect.Family.Effort =>
+          body("reasoning_effort") = effort match {
+            case ReasoningEffort.High => "max"
+            case other                => other.name
+          }
         case ZaiDialect.Family.Toggle =>
           if (effort == ReasoningEffort.None) mergeThinking(body, "type", ujson.Str("disabled"))
         case ZaiDialect.Family.Unknown => ()
@@ -141,6 +152,18 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
     }
     if (replaysReasoning(body)) mergeThinking(body, "clear_thinking", ujson.False)
   }
+
+  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+
+  /** Whether the GLM-5.3 `ReasoningEffort.None` warning has been logged in this process. */
+  private[provider] val warnedThinkingNotDisabled = new AtomicBoolean(false)
+
+  private def warnThinkingNotDisabled(model: String): Unit =
+    if (warnedThinkingNotDisabled.compareAndSet(false, true))
+      logger.warn(
+        s"Z.ai model $model cannot disable thinking: ReasoningEffort.None is sent as reasoning_effort=low, " +
+          "and thinking tokens are still generated and billed. Logged once per process."
+      )
 
   /** Sets one field of the request's `thinking` object, creating it if absent and keeping its other fields. */
   private def mergeThinking(body: ujson.Obj, field: String, value: ujson.Value): Unit = {

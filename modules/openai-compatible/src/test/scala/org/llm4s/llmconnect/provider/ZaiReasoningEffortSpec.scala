@@ -1,14 +1,20 @@
 package org.llm4s.llmconnect.provider
 
+import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.slf4j.LoggerFactory
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
+import scala.jdk.CollectionConverters._
+import scala.util.Try
 
 /**
  * `CompletionOptions.reasoning` on Z.ai (#1681): sent as `thinking.type` or `reasoning_effort`,
@@ -90,10 +96,16 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  "Z.ai on GLM-5.2" should "send each effort's name as `reasoning_effort`, `none` skipping thinking" in {
+  "Z.ai on GLM-5.2" should "send each effort's name as `reasoning_effort`, `none` skipping thinking, and `max` for High" in {
+    val expected = Map[ReasoningEffort, String](
+      ReasoningEffort.None   -> "none",
+      ReasoningEffort.Low    -> "low",
+      ReasoningEffort.Medium -> "medium",
+      ReasoningEffort.High   -> "max"
+    )
     efforts.foreach { effort =>
       sentBodies("glm-5.2", plain, CompletionOptions().withReasoning(effort)).foreach { body =>
-        reasoningFields(body) shouldBe Map("reasoning_effort" -> ujson.Str(effort.name))
+        reasoningFields(body) shouldBe Map("reasoning_effort" -> ujson.Str(expected(effort)))
       }
     }
   }
@@ -107,12 +119,12 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  "Z.ai on GLM-5.3" should "never disable thinking, which it rejects, and send only `low` or `high`" in {
+  "Z.ai on GLM-5.3" should "never disable thinking, which it rejects, and send `low`, `high` or `max`" in {
     val expected = Map[ReasoningEffort, String](
       ReasoningEffort.None   -> "low",
       ReasoningEffort.Low    -> "low",
       ReasoningEffort.Medium -> "high",
-      ReasoningEffort.High   -> "high"
+      ReasoningEffort.High   -> "max"
     )
     Seq("glm-5.3", "GLM-5.3-Flash").foreach { model =>
       efforts.foreach { effort =>
@@ -121,6 +133,37 @@ class ZaiReasoningEffortSpec extends AnyFlatSpec with Matchers {
         }
       }
     }
+  }
+
+  it should "send both `reasoning_effort` and `thinking.clear_thinking` when it also replays reasoning" in {
+    sentBodies("glm-5.3", replaying, CompletionOptions().withReasoning(ReasoningEffort.High)).foreach { body =>
+      reasoningFields(body) shouldBe Map(
+        "reasoning_effort" -> ujson.Str("max"),
+        "thinking"         -> ujson.Obj("clear_thinking" -> false)
+      )
+    }
+  }
+
+  it should "warn once, naming the model, that ReasoningEffort.None still thinks" in {
+    val logger   = LoggerFactory.getLogger(ZaiDialect.getClass).asInstanceOf[LogbackLogger]
+    val appender = new ListAppender[ILoggingEvent]()
+    val previous = logger.getLevel
+    appender.start()
+    logger.addAppender(appender)
+    logger.setLevel(Level.WARN)
+    ZaiDialect.warnedThinkingNotDisabled.set(false)
+    val outcome = Try {
+      sentBodies("glm-5.3", plain, CompletionOptions().withReasoning(ReasoningEffort.None))
+      sentBodies("glm-5.3-flash", plain, CompletionOptions().withReasoning(ReasoningEffort.None))
+      sentBodies("glm-5.3", plain, CompletionOptions().withReasoning(ReasoningEffort.Low))
+    }
+    logger.detachAppender(appender)
+    logger.setLevel(previous)
+    outcome.get
+    val warnings = appender.list.asScala.toList.filter(_.getLevel == Level.WARN)
+    warnings should have size 1
+    warnings.head.getFormattedMessage should include("glm-5.3")
+    warnings.head.getFormattedMessage should include("cannot disable thinking")
   }
 
   "Z.ai on a model without documented thinking" should "send nothing for any effort" in {

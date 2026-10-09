@@ -1998,9 +1998,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it used to be ignored, so `ReasoningEffort.None` still thought (Z.ai's `thinking.type` defaults to `enabled`) and
   effort levels never reached a model that takes `reasoning_effort`. Each effort now goes out in the form the
   configured GLM model documents. On GLM-5.1, GLM-5 and GLM-4.5 to 4.7, `None` sends `"thinking": {"type": "disabled"}`
-  and the other levels send nothing. GLM-5.2 is sent `reasoning_effort` with the effort's name, so `none` skips thinking.
-  GLM-5.3 always thinks and rejects `disabled`, and accepts only `low`, `high` and `max`, so `None` and `Low` send
-  `low` while `Medium` and `High` send `high`. Other models are sent nothing. With replayed reasoning, `thinking`
+  and the other levels send nothing. GLM-5.2 is sent `reasoning_effort` `none`, `low`, `medium` or, for `High`, `max`
+  (Z.ai currently runs `low` and `medium` as `high` on it). GLM-5.3 always thinks and rejects `disabled`, and accepts
+  only `low`, `high` and `max`, so `None` and `Low` send `low`, `Medium` sends `high` and `High` sends `max`; `None`
+  on GLM-5.3 logs a one-time warning that thinking tokens are still produced. `High` is Z.ai's maximum, its default,
+  so no level reasons more than `High`. Other models are sent nothing. With replayed reasoning, `thinking`
   carries both `type` and `clear_thinking`. Without a `reasoning` option the request is unchanged.
 - **`llm4s-openai-compatible`: Z.ai keeps replayed reasoning** ([#1384](https://github.com/llm4s/llm4s/pull/1384),
   [#1411](https://github.com/llm4s/llm4s/pull/1411)):
