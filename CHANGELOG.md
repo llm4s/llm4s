@@ -233,6 +233,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Handoff.of(id, agent, reason)` for a `Result`), and `handoffId` is `handoff_to_<id>` rather
   than `handoff_to_agent_<hash>`. Design: `docs/design/typed-agent-runtime-design.md` §4.7, with
   the Stage 0 carry-forward in §4.8.
+- **RAG chunking and fusion: what is validated, and how weighted scores are combined**
+  ([#1318](https://github.com/llm4s/llm4s/issues/1318), items 4 to 6; the validation shipped in #1358, and the one
+  fix this found is under Fixed): `docs/guide/vector-store.md` now states that an invalid `ChunkingConfig` or `WeightedScore` throws
+  `IllegalArgumentException` (decided, because the `RAGConfig` builders cannot return a `Left`), how to turn user
+  input into a `Left` (`ChunkingUtils.chunkTextValidated`, or `Try(...)` through `toResult`), that every
+  configuration that can be built is safe for every chunker, and that `WeightedScore` rescales each channel so its
+  weakest hit scores `0.1`, not the `0.0` of a miss. The snippets are compiled and run by `RagValidationGuideSpec`.
+  New property tests pin the guarantees: `ScoreNormalisationSpec` (the floor and the best hit, nothing scores like a
+  miss, the channel's order is kept, scale and offset do not matter) and `ChunkersAcceptValidConfigsSpec` (no
+  chunker throws for any valid config, and chunk indices run from 0 without gaps, which re-ingest relies on).
 - **Compatibility and Deprecation Policy** ([docs/reference/compatibility-policy.md](docs/reference/compatibility-policy.md),
   [#1281](https://github.com/llm4s/llm4s/issues/1281)): one page for what you can rely on when you upgrade, by
   tier; how versions are read (`early-semver`, 0.5.0 as the MiMa baseline); what the promise covers (public
@@ -1830,8 +1840,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ToolRegistry` restores the interrupt flag when a tool throws an interruption wrapped in another exception (it
   already did for a bare `InterruptedException`), as `MCPToolRegistry` does; `MCPTransportImpl.sendRequest`, `sendNotification`,
   `MCPClient.initialize` and `getTools` return `Result` instead of `Either[String, _]` (read the old string as
-  `error.message`; the messages are unchanged); the concrete embedding providers' `embed` returns
-  `Result[EmbeddingResponse]`. `llm4s-provider-testkit` gains `assertCallCancelsWhenInterrupted` and
+  `error.message`; the messages are unchanged); an embedding provider's `embed` can return
+  `Left(CancelledError)` where it returned only an `EmbeddingError` (its declared type, `Result[EmbeddingResponse]`,
+  is unchanged). `llm4s-provider-testkit` gains `assertCallCancelsWhenInterrupted` and
   `assertEmbeddingCancelsWhenInterrupted`.
 - **`ToolHints` are read from MCP tool annotations** ([#1331](https://github.com/llm4s/llm4s/issues/1331); design
   §4.12): `llm4s-mcp` reads `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` and `title` from the
@@ -2002,6 +2013,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   appended `/v1/embeddings` to it and posted to `https://api.openai.com/v1/v1/embeddings`. A base URL ending in
   `/v1` now gets `/embeddings`; one without it (`https://api.openai.com`, a proxy root) still gets
   `/v1/embeddings`, so a base URL that worked before is unchanged.
+- **`llm4s-rag`: `SimpleChunker` and `ChunkingUtils.chunkText` no longer throw for a very large window**
+  ([#1424](https://github.com/llm4s/llm4s/pull/1424)): the window end and the next start were computed in `Int`, so
+  a valid configuration such as `ChunkingConfig(targetSize = Int.MaxValue, maxSize = Int.MaxValue,
+  overlap = Int.MaxValue - 1)` overflowed on the second window and `substring` threw
+  `StringIndexOutOfBoundsException`. Both are now computed in `Long` and clamped to the text length; the chunks
+  produced for every other configuration are unchanged.
 - **`llm4s-openai-compatible`: Z.ai honours `CompletionOptions.reasoning`** ([#1681](https://github.com/llm4s/llm4s/issues/1681)):
   it used to be ignored, so `ReasoningEffort.None` still thought (Z.ai's `thinking.type` defaults to `enabled`) and
   effort levels never reached a model that takes `reasoning_effort`. Each effort now goes out in the form the
@@ -2012,6 +2029,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on GLM-5.3 logs a one-time warning that thinking tokens are still produced. `High` is Z.ai's maximum, its default,
   so no level reasons more than `High`. Other models are sent nothing. With replayed reasoning, `thinking`
   carries both `type` and `clear_thinking`. Without a `reasoning` option the request is unchanged.
+- **`llm4s-rag`: chunkers never split a surrogate pair** ([#1711](https://github.com/llm4s/llm4s/issues/1711)):
+  `SimpleChunker` and `ChunkingUtils.chunkText` cut by UTF-16 index, so a window end or an overlap start could fall
+  between the two halves of an astral character (emoji, CJK Extension B), leaving a lone surrogate in each chunk; an
+  embedding API rejects that or replaces it with U+FFFD. `SentenceChunker` could do the same at the start of its
+  overlap. Such a cut now moves back by one unit (forward only for `targetSize = 1` at an astral character, the one
+  case where a chunk is two units long), so chunks stay within their size and, with no overlap, still concatenate
+  back to the input. The reranker prompt, the RAGAS Langfuse observer and `BenchmarkConfig.shortName` truncate the
+  same way. Text without astral characters is chunked exactly as before. `SentenceChunker`, `MarkdownChunker` and
+  `SemanticChunker` keep a single word longer than `maxSize` whole, as before; this is now documented on
+  `ChunkingConfig.maxSize`.
 - **Cancelled and failed agent turns no longer leave threads nobody can name, and every cancel wait is bounded**
   ([#1682](https://github.com/llm4s/llm4s/issues/1682), [#1688](https://github.com/llm4s/llm4s/issues/1688);
   follow-ups to [#1330](https://github.com/llm4s/llm4s/issues/1330)'s cancellation):
@@ -2342,6 +2369,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   admitted `/srv/agent-data-secret`, and `developmentSafe(workingDirectory)` could read and write a sibling
   directory whose name began with the working directory's. Both now use `Path.startsWith` on normalised absolute
   paths; blocked paths are matched the same way (`/var` no longer blocks `/variable`).
+- **`llm4s-agent-tools`: `get_current_datetime` reads the same on every host and checks its parameters**
+  ([#1512](https://github.com/llm4s/llm4s/issues/1512), [#1513](https://github.com/llm4s/llm4s/issues/1513),
+  [#1511](https://github.com/llm4s/llm4s/issues/1511)): the `human` format used the JVM's default locale, so the
+  same call wrote localised month and weekday names (and a lower-case `am` under `en_GB`); it is now always English
+  (`Locale.US`, so the text under `en_US` is unchanged). `timezone` and `format` were marked required in the tool
+  schema although the handler defaults both, so a call with null arguments was refused with `NullArguments`; both
+  are optional now, as the guide already said. **Behaviour changes:** an unsupported `format` is now an error that
+  names the supported formats, where it used to answer in ISO; a `format` or `timezone` that is not a string is an
+  error naming the parameter, where it used to be ignored (the answer came in UTC / ISO). A JSON `null` still counts
+  as absent.
 - **`llm4s-knowledgegraph`: a failed graph extraction logs a preview of the reply, not the whole reply**
   ([#1635](https://github.com/llm4s/llm4s/issues/1635)): `GraphJsonParser` used to put the entire model reply on
   the ERROR line when it did not parse, or parsed but was not a graph - the second site re-rendering the whole
@@ -2468,6 +2505,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   judge score`: make it answer with only a number between 0 and 1, as the fixed system message already asks. A
   subclass that calls or overrides `evaluateWithLLM` takes a `BigDecimal` (`.toDouble` where a `Double` is
   needed). The score-reading rules are documented on `LLMGuardrail`.
+- **`llm4s-agent`: a judge guardrail with a threshold outside 0.0 to 1.0 fails with a clear error, instead of silently
+  blocking everything or passing everything** ([#1520](https://github.com/llm4s/llm4s/issues/1520)): the threshold of
+  `LLMGuardrail` (and so of `LLMSafetyGuardrail`, `LLMFactualityGuardrail`, `LLMQualityGuardrail`,
+  `LLMToneGuardrail` and `LLMGuardrail(...)`) was not validated: above 1.0 (or `+Infinity`), or NaN, nothing could
+  pass, and below 0.0 (or `-Infinity`) everything that parsed passed. `validate` now returns a `ValidationError` on
+  field `threshold` for a value below 0.0, above 1.0 (an infinity too) or NaN, **before** calling the judge, so no
+  call is spent on a guardrail that cannot work. 0.0 and 1.0 are accepted, and a valid threshold is still compared
+  as the decimal it is written as (#1405). The check runs when `validate` runs, not when the guardrail is built, so
+  no constructor or factory signature changed and a subclass that overrides `threshold` is checked too.
+  **Migration:** a guardrail whose threshold was out of range, and so was blocking everything or approving
+  everything, now fails every `validate` with that error: correct the threshold.
 - **`llm4s-gemini`: a signed function call with an empty `id` is replayed with its thought signature**
   ([#1615](https://github.com/llm4s/llm4s/issues/1615)): a `functionCall` returned with `"id": ""` got a generated
   tool-call id at parse, but the signed part was kept verbatim, so on the next turn its stored `""` was compared with
@@ -2514,6 +2562,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.toOption` (`UUIDTool`'s `count`, `ListDirectoryTool`'s `max_entries`, `ReadFileTool`'s `max_lines`, the
   workspace and knowledge-graph tools) fall back to their default for such a value instead of using the truncated
   one. No public signature changed.
+- **`llm4s-agent`: `PIIMasker` masks international phone numbers and 15-digit card numbers, and `PIIPatterns.maskAll`
+  no longer corrupts or fails on overlapping matches** ([#1517](https://github.com/llm4s/llm4s/issues/1517),
+  [#1568](https://github.com/llm4s/llm4s/issues/1568)): the
+  phone pattern only knew US numbers and the card pattern only the 16-digit layout, so `+44 20 7946 0958` and the
+  American Express number `3782 822463 10005` were passed through unmasked. `PIIType.Phone` now also matches a `+`
+  followed by 8 to 15 digits with spaces, dashes, dots or parentheses between them (a digit run without the `+` is
+  not treated as an international number), and `PIIType.CreditCard` the 4-6-5 layout with prefix 34 or 37, written
+  with or without separators. Separately, `maskAll` replaced each match by its original indices, so when two types
+  matched overlapping text it cut the wrong characters or threw: `PIIMasker.sensitive` and `PIIMasker.financial`
+  failed with a `StringIndexOutOfBoundsException` on a plain 16-digit card number (a card is also account-shaped),
+  and `PIIMasker.all` turned `123456789` into `[REDACTED_PASSPORT]_SSN]`. Overlapping matches are now merged into one
+  stretch that is replaced once, under the type whose match starts first (the longest, then the type listed first,
+  on a tie), so a plain 15- or 16-digit card number under those presets is `[REDACTED_CARD]`. No signature
+  changes. The separators inside a phone or card number are now horizontal whitespace, dashes and (for phones) dots
+  and parentheses only, so a line break no longer joins digit groups on separate lines into one number: before,
+  `555`, `123` and `4567` on three lines were masked together, and the line breaks with them. The guide's table
+  named the card placeholder `[REDACTED_CC]`; it is `[REDACTED_CARD]`.
 - **Guardrail case folding no longer depends on the JVM default locale**: `ProfanityFilter`, `ToneValidator`
   and `PromptInjectionDetector` lower-cased text with the default locale, so under a Turkish locale `HI`,
   `INAPPROPRIATE` and `IGNORE PREVIOUS INSTRUCTIONS` folded to a dotless `ı` and went undetected. They (and the
@@ -2745,6 +2810,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lower-cased with `Locale.ROOT`, so a Turkish default locale no longer stops `API_KEY` from being recognised. Redaction
   is still pattern-based and best effort: it does not detect a secret that is not under a key, and JSON escaped twice
   is not recognised.
+- **Docs: the Reference section's Migration Guide, Release Process, Scalafix Rules and Test Coverage pages no longer
+  404** ([#444](https://github.com/llm4s/llm4s/issues/444)): `migration.md`, `release.md`, `scalafix.md` and
+  `test-coverage.md` (and `security.md`, `workspace-sandbox.md` and `benchmarks.md`) had no front matter, so Jekyll
+  served them as raw files and their links on llm4s.org returned 404. They now have a title, `parent: Reference` and a
+  `nav_order`, and are listed in the Reference index. `test-coverage.md` described a single 50% threshold that no
+  longer exists; it now describes the per-module `coverageFloor`, `coveragePolicyCheck` and the Codecov statuses.
+  Links inside the Reference pages that ended in `.md`, or pointed at repository-root files, now use the form the
+  site serves. Links to the newly rendered pages from `installation.md`, `providers.md`, `0x-to-1x.md` and
+  `migration.md` itself were changed from `.md` to the page URL in the same change, since a `.md` URL is a 404 once
+  its page is rendered, and the 55 entries `scripts/docs-link-baseline.txt` held for the links this fixes are removed.
 - **`AudioPreprocessing.resamplePcm16` could hang, and its output length was wrong**
   ([#1308](https://github.com/llm4s/llm4s/issues/1308)): a target rate of `-8000`, or a source rate of `-1`, sent
   Java Sound's converter into a loop that never ended (a test JVM spun at 100% CPU for twenty minutes), a target

@@ -1,5 +1,7 @@
 package org.llm4s.chunking
 
+import org.llm4s.llmconnect.utils.CodePointBoundary
+
 import scala.util.matching.Regex
 
 /**
@@ -11,6 +13,13 @@ import scala.util.matching.Regex
  *
  * This chunker produces higher quality chunks than simple character-based
  * splitting because it never breaks in the middle of a sentence.
+ *
+ * A sentence longer than `maxSize` is split at whitespace. A single word (a run
+ * without whitespace) longer than `maxSize` is kept whole as its own chunk, so such
+ * a chunk can exceed `maxSize`: the chunker never cuts inside a word, and so never
+ * between the two halves of a surrogate pair (#1711). For text that may contain
+ * long unbroken runs, such as URLs, base64 or CJK without spaces, use
+ * [[SimpleChunker]], which cuts at a fixed size.
  *
  * Usage:
  * {{{
@@ -209,7 +218,7 @@ class SentenceChunker extends DocumentChunker {
       if (current.length + wordWithSpace.length <= maxSize) {
         current.append(wordWithSpace)
       } else if (current.isEmpty) {
-        // Single word exceeds max - just add it
+        // Single word exceeds max - kept whole, never cut inside (see the class Scaladoc)
         chunks += word
       } else {
         chunks += current.toString
@@ -256,8 +265,8 @@ class SentenceChunker extends DocumentChunker {
       return ""
     }
 
-    // Get approximately targetSize characters from the end
-    val approxStart = Math.max(0, text.length - targetSize - 50)
+    // Get approximately targetSize characters from the end, never starting on the low half of a surrogate pair
+    val approxStart = CodePointBoundary.floor(text, Math.max(0, text.length - targetSize - 50))
     val endPortion  = text.substring(approxStart)
 
     // Find word boundary near the target size from the end
