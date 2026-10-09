@@ -120,8 +120,17 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be enabled when llm4s.enabled is true or absent" in {
-    runner.withUserConfiguration(classOf[UserBeans]).withPropertyValues("llm4s.enabled=true").run { ctx =>
-      ctx.getBeansOfType(classOf[LLM4STemplate]).size shouldBe 1
+    // Without UserBeans: that configuration supplies a template of its own, so counting templates
+    // under it passed whether or not the auto-configurations fired, and pinned nothing about the
+    // havingValue = "true" literal. Only the auto-configurations can register beans by these names.
+    val autoConfigured = Set("llm4sClient", "llm4sTemplate", "llmHealthIndicator")
+    Seq(Seq("llm4s.enabled=true"), Seq.empty[String]).foreach { enabled =>
+      runner.withPropertyValues(enabled ++ Seq("llm4s.provider=ollama", "llm4s.model=llama3"): _*).run { ctx =>
+        withClue(enabled.mkString(", ")) {
+          ctx.getStartupFailure shouldBe null
+          ctx.getBeanDefinitionNames.toSet.intersect(autoConfigured) shouldBe autoConfigured
+        }
+      }
     }
   }
 

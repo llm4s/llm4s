@@ -77,6 +77,13 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
     toolChunks should have size 4
     toolChunks.map(_.id).distinct shouldBe Seq("call_1")
     toolChunks.map(_.name).distinct shouldBe Seq("get_weather")
+
+    // The caller's chunks reassemble too: each fragment reaches it verbatim, so `"Paris"` keeps
+    // its quotes (#1212, PR #1406 review).
+    toolChunks.map(_.arguments).collect { case ujson.Str(s) => s }.mkString shouldBe """{"city":"Paris"}"""
+    val accumulator = org.llm4s.llmconnect.streaming.StreamingAccumulator.create()
+    chunks.foreach(accumulator.addChunk)
+    accumulator.currentToolCalls shouldBe completion.toolCalls
   }
 
   it should "keep two interleaved tool calls apart by index" in {

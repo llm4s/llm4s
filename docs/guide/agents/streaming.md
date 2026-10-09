@@ -115,7 +115,10 @@ start again. A task that `recover` runs again starts at attempt 1 under a new ta
   claim on.
 - `AgentRun.subscribe(capacity = 1024)(listener)` attaches later, to a run you started with
   `start`. It replays the run's durable events from its start, then delivers new ones, but it
-  misses live events sent before it attached.
+  misses live events sent before it attached. Live events sent after it returns are not lost
+  while it replays: they are held and delivered in their place among the durable events. Up to
+  `capacity` are held; beyond that they are dropped and counted, as for a full queue, and the
+  listener gets a `LiveGap(dropped)` where they would have been.
 
 Both are run-scoped: a listener sees only this run's events, even when other runs share the thread,
 and ends after the run's terminal event (`RunCompleted`, `RunSuspended`, `RunFailed`,
@@ -178,6 +181,69 @@ are always kept; live events beyond the buffer's 256 are dropped, and the consum
 `Done`. Only a `Disconnected` from the runtime fails the stream. Samples: `AgentStreamIOExample`,
 `AgentStreamZIOExample`.
 
+## Java and Kotlin
+
+The Java facade (`llm4s-java-api`) and the Kotlin API (`modules/kotlin-api`) stream a turn the same
+way, with the same buffer and the same rules: a slow consumer loses live events and gets one
+`StreamEvent.LiveGap(n)`, never cancels the run; a run that ends without a terminal event still
+ends the stream with the run's error; and cancelling the stream cancels the run and returns once it
+has ended, so the thread can be recovered at once. Both take the thread id as a `String`, as fs2 and
+ZIO take a `ThreadId`; `streamResume` and `streamRecover` exist on both. To read what a suspended
+turn waits for (`result.status().pending()`, or `JAgent.pending` and `AgentKt.pending`), or to resume or recover without a stream, see
+[Suspended turns from Java and Kotlin](index#suspended-turns-from-java-and-kotlin).
+
+**Java.** `JAgent.stream(threadId, query, listener)` returns an `LlmResult<AgentStream>` at once - a
+failed result for a refused start, and the listener hears nothing. An `AgentStreamListener` gets
+each event through `onEvent`, then exactly one of `onComplete(JAgentResult)` or
+`onError(LlmException)`, all on the stream's own thread. Only `onEvent` is abstract, so a lambda is
+a listener; `StreamEvents.decode` reads an event as an `Optional`:
+
+```java
+// streaming = true: the agent's model calls stream, so the turn carries text deltas
+JAgent agent = Llm4s.createAgent(client, ToolRegistry.empty(), true);
+LlmResult<AgentStream> started = agent.stream(threadId, "Explain monads", event -> {
+    StreamEvents.decode(AgentEvents.TextDelta(), event).ifPresent(d -> System.out.print(d.text()));
+    if (event instanceof StreamEvent.LiveGap) System.out.print("[...]");
+});
+LlmResult<JAgentResult> result = started.get().await();   // or started.get().cancel()
+```
+
+`AgentStream.await()` returns once the listener has returned from its last call, with the same
+outcome. `cancel()` cancels the turn and returns once it has ended, or after 5 seconds with a WARN if it
+has not (see [Threading and cancellation](../java-threading-and-cancellation)); the listener receives at most
+the event already being delivered, then `onError` with the cancellation - or `onComplete`, when the
+turn had already ended; an interrupt of the thread calling `cancel()` does not cut that wait short,
+and is kept. A listener that throws from `onEvent` - or sets its own thread's interrupt flag -
+cancels the turn, and `onError` receives what it threw, or a `CancelledError`. `Llm4s.createAgent(client)` and `createAgent(client, tools)` build an agent
+that calls the model's `complete`, so its stream carries no text deltas; pass `streaming = true`
+for them. `Llm4s.wrapAgent(agent)` takes an agent built with `Agent.builder`, for middleware, a
+system prompt or a runtime. `streamResume` takes a `List<Answer>`, built with `Answer.approve(id)`,
+`reject(id, reason)`, `edit(id, argumentsJson)` or `reply(id, json)`. The Java sample in
+`modules/samples/gradle-java` streams a turn's text.
+
+**Kotlin.** `AgentKt.stream(threadId, query)` is a cold `Flow<AgentStreamItem>`: each collection
+runs the turn, emitting `AgentStreamItem.Event(event)` for each event, then
+`AgentStreamItem.Done(result)`, a `JAgentResult`. A refused start or a failed run throws `LLMException`. Cancelling
+the collection - its scope, `take(n)`, `withTimeout` - cancels the turn; starting and cancelling it
+run on `Dispatchers.IO`. A turn cancelled by anything but the collection fails it with
+`LLMException`, as in fs2 and ZIO. So does a delivery that dies of a fatal error (an
+`OutOfMemoryError`, a `LinkageError`): the Java listener then hears no terminal callback, and the flow -
+or `run`, `continueConversation`, `resume` or `recover` - ends with the facade's report of it instead of
+suspending.
+
+```kotlin
+val agent = Llm4s.createAgent(client, ToolRegistry.empty(), streaming = true)
+agent.stream(threadId, "Explain monads").collect { item ->
+    when (item) {
+        is AgentStreamItem.Event -> StreamEvents.decode(AgentEvents.TextDelta(), item.event).ifPresent { print(it.text()) }
+        is AgentStreamItem.Done  -> println("\n${item.result.status().kind()}")
+    }
+}
+```
+
+The flow's channel holds 64 items; past that, the stream's 256-event buffer fills and live events
+are dropped.
+
 ## Your own graphs
 
 The same machinery serves graphs that are not agents. An `EventType[A]` names a payload once:
@@ -195,12 +261,13 @@ listener { case Checked(v) => ... } // None for another name, version or an unde
 
 ## Limits
 
-- **Java and Kotlin streams** are not yet available. [#1377](https://github.com/llm4s/llm4s/issues/1377) covers a listener stream for
-  `JAgent` and a `Flow` for `AgentKt`.
 - **Kernel failure messages.** `TaskFailed` and `RunFailed` store an error message. If a guardrail's
   or tool's error quotes content (a guardrail reason that echoes the user's text), that text reaches
   the log through the kernel event, not through an `agent.*` event.
-- **Live events are not replayed**, and a late `subscribe` misses earlier ones.
+- **Live events are not replayed**, and a late `subscribe` misses earlier ones. A subscription
+  receives every live event sent after `subscribe` returns, so `GraphRuntime.subscribe` followed by
+  `start` sees all of the run's - unless more arrive than its `capacity` holds, while it replays or
+  before its listener drains them: those are dropped and reported as a `LiveGap` with their count.
 
 See also the [observability guide](../observability/), the
 [migration note](../../reference/migration.html), and

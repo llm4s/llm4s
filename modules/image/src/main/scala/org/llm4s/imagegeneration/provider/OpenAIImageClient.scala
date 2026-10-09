@@ -12,6 +12,7 @@ import scala.concurrent.{ ExecutionContext, Future, blocking }
 import scala.util.Try
 import scala.concurrent.duration.*
 import org.llm4s.error.LLMError
+import org.llm4s.util.Redaction
 
 /**
  * OpenAI Images API client for image generation.
@@ -359,11 +360,13 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       }
   }
 
+  // The provider's message, or the whole body when it has none, redacted and capped: either can echo the request's
+  // credentials (#1674).
   private def handleErrorResponse(response: HttpResponse): Either[LLMError, Nothing] = {
-    val errorMessage = Try {
+    val errorMessage = Redaction.safeBody(Try {
       val json = read(response.body)
       json("error")("message").str
-    }.toEither.fold(_ => response.body, identity)
+    }.toEither.fold(_ => response.body, identity))
 
     response.statusCode match {
       case 401  => Left(ImageAuthenticationError("Invalid API key"))

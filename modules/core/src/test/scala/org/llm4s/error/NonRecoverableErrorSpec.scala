@@ -193,6 +193,31 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
 
     error.cause shouldBe Some(cause)
     error.context should contain("cause" -> "Invalid dimensions")
+    error.formatted should include("cause=Invalid dimensions")
+  }
+
+  it should "name the cause's class in the context when the cause has no message" in {
+    // Throwable#getMessage is null for an exception built without one (#1556)
+    val error = ProcessingError("op", "msg", Some(new RuntimeException()))
+
+    error.context should contain("cause" -> "java.lang.RuntimeException")
+    error.context.values.foreach(v => v should not be null)
+    error.context.values should not contain "null"
+    (error.formatted should not).include("cause=null")
+    error.formatted should include("cause=java.lang.RuntimeException")
+  }
+
+  it should "name the cause's class in the context when the cause's message is empty" in {
+    val error = ProcessingError("op", "msg", Some(new IllegalStateException("")))
+
+    error.context should contain("cause" -> "java.lang.IllegalStateException")
+  }
+
+  it should "hold no cause entry in the context when there is no cause" in {
+    val error = ProcessingError("op", "msg", None)
+
+    error.context shouldBe Map("operation" -> "op")
+    (error.formatted should not).include("cause=")
   }
 
   it should "be a NonRecoverableError" in {

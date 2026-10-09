@@ -197,6 +197,36 @@ class BedrockErrorsAndSecretsSpec extends AnyWordSpec with Matchers with BeforeA
       }
     }
 
+    "redact credentials that the service's error message echoes, for every exception it maps (#1674)" in {
+      import org.llm4s.testutil.EchoedCredentials
+      val errors  = ListBuffer.empty[LLMError]
+      val current = new AtomicReference[(Int, String)]((500, "InternalServerException"))
+      withServer("/") { ex =>
+        val (status, errorType) = current.get
+        sendJsonResponse(ex, status, errorBody(errorType, EchoedCredentials.Text))
+      } { url =>
+        // Synchronous path only: a client that has not streamed closes at once.
+        val client = new BedrockClient(config(url))
+        Seq(
+          (403, "AccessDeniedException"),
+          (401, "SomethingUnauthorized"),
+          (400, "ValidationException"),
+          (500, "InternalServerException")
+        ).foreach { error =>
+          current.set(error)
+          client.complete(conv, CompletionOptions()).left.foreach(errors += _)
+        }
+        client.close()
+      }
+      errors.size shouldBe 4
+      errors.foreach { e =>
+        withClue(e.getClass.getSimpleName) {
+          e.message should include("[REDACTED]")
+          EchoedCredentials.leaked(e.message) shouldBe empty
+        }
+      }
+    }
+
     "send the secret key only as a SigV4 signature, never in a header or body" in {
       val seen = new AtomicReference[String]("")
       withServer("/") { ex =>

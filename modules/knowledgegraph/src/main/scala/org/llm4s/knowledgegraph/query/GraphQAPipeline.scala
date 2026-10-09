@@ -5,6 +5,7 @@ import org.llm4s.knowledgegraph.storage.GraphStore
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.types.Result
+import org.llm4s.util.BoundedJson
 
 import scala.util.Try
 
@@ -306,15 +307,19 @@ class GraphQAPipeline(
       .stripSuffix("```")
       .trim
 
-    // If entity extraction fails, continue with empty entities rather than failing
-    Try {
-      val arr = ujson.read(cleaned).arr
-      arr.map { item =>
-        val mention = item("mention").str
-        val label   = item("label").str
-        (mention, label)
-      }.toSeq
-    }.fold(_ => Right(Seq.empty), Right(_))
+    // If entity extraction fails, continue with empty entities rather than failing. The reply is
+    // model output: nested more than 512 levels deep it is refused before it is parsed, since a
+    // value that deep overflows the stack of whatever renders it (#1562), and counts as a failure.
+    val entities = BoundedJson.read(cleaned).toOption.flatMap { json =>
+      Try {
+        json.arr.map { item =>
+          val mention = item("mention").str
+          val label   = item("label").str
+          (mention, label)
+        }.toSeq
+      }.toOption
+    }
+    Right(entities.getOrElse(Seq.empty))
   }
 
   /**

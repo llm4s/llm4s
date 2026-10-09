@@ -15,8 +15,13 @@ Comprehensive guides for LLM4S features.
 
 - **[Basic Usage](basic-usage)** - Get started with LLM calls, client creation, and error handling
 - **[Providers](providers)** - Overview of supported providers and how to configure them
+- **[Java](java)** - Call a model from Java with `llm4s-java-api`: a client, a conversation and failures you can read without Scala
+- **[Spring Boot](spring-boot)** - `llm4s-spring-boot-starter`: properties, an `LLM4STemplate` bean, asynchronous calls and a health indicator
 - **[Error Handling](error-handling)** - Work with `Result[A]` and `LLMError`: pattern matching, for-comprehensions, every error type, recovery and testing
+- **[Structured Output](structured-output)** - `completeStructured`: typed replies from a schema, which providers enforce it, and what a bad reply looks like
 - **[Writing a Provider](writing-a-provider)** - Publish your own provider module against the `llm4s-core` SPI
+- **[Caching](caching)** - Cache embeddings (exact) and model responses (semantic): configuration, keys, TTL, eviction and what the cache reports
+- **[JSON Libraries](json-libraries)** - Use circe, play-json or zio-json with LLM4S: converting at the boundary, structured output and tools
 
 ### Agent Framework
 
@@ -35,6 +40,8 @@ Comprehensive guides for LLM4S features.
   - **Hybrid Search**: BM25 keyword + vector fusion with RRF strategy
   - **Reranking**: Cohere cross-encoder for result refinement
   - **Document Chunking**: Sentence-aware + simple chunking strategies
+
+- **[Query Transformers](rag-query-transformers)** - Rewrite the user's query before retrieval: `LLMQueryRewriter`, `IdentityTransformer`, chaining, error behaviour and custom transformers
 
 - **[RAG Evaluation](rag-evaluation)** - Measure and improve RAG quality
   - **RAGAS Metrics**: Faithfulness, answer relevancy, context precision/recall
@@ -57,11 +64,16 @@ Comprehensive guides for LLM4S features.
 - **[cats-effect](cats-effect)** - `LLMClientIO` and `AgentIO` for cats-effect `IO` and fs2 streaming
 - **[ZIO](zio)** - `LLMClientZ` and `AgentZ` for ZIO 2 and ZIO Streams
 
+### Java
+
+- **[Java Threading and Cancellation](java-threading-and-cancellation)** - Which thread a call blocks, sharing one client, virtual threads, interrupts and timeouts for `llm4s-java-api`
+
 ### Observability
 
 - **[Monitoring](observability/)** - Production monitoring for LLM4S applications
   - **Tracing**: Langfuse and OpenTelemetry integration
   - **Logging**: Structured JSON logging with SLF4J/Logback
+  - **[Provider Exchange Logging](observability/provider-exchange-logging)**: Capture raw provider requests and responses for debugging
   - **Health Checks**: Startup validation and readiness probes
   - **Cost Monitoring**: Token usage tracking and budget awareness
 

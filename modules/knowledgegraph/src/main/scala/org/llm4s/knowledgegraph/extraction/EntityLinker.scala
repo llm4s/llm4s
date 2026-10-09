@@ -3,7 +3,8 @@ package org.llm4s.knowledgegraph.extraction
 import org.llm4s.knowledgegraph.{ Graph, Node }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
-import org.llm4s.types.Result
+import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.BoundedJson
 import org.slf4j.LoggerFactory
 
 import scala.util.Try
@@ -262,30 +263,33 @@ ${pairs.mkString("\n\n")}"""
       .stripSuffix("```")
       .trim
 
-    Try {
-      val json   = ujson.read(cleanJson)
-      val merges = json("merges").arr
+    // The reply is model output: a document nested more than 512 levels deep is refused before it
+    // is parsed, since a value that deep overflows the stack of whatever renders it (#1562)
+    val merged = BoundedJson.read(cleanJson).flatMap { json =>
+      Try {
+        val merges = json("merges").arr
 
-      // Collect pairs to merge
-      val pairsToMerge = merges.flatMap { m =>
-        val pairIdx = m("pair").num.toInt - 1
-        val doMerge = m("merge").bool
-        if (doMerge && pairIdx >= 0 && pairIdx < candidates.size) {
-          Some(candidates(pairIdx))
-        } else None
-      }.toList
+        // Collect pairs to merge
+        val pairsToMerge = merges.flatMap { m =>
+          val pairIdx = m("pair").num.toInt - 1
+          val doMerge = m("merge").bool
+          if (doMerge && pairIdx >= 0 && pairIdx < candidates.size) {
+            Some(candidates(pairIdx))
+          } else None
+        }.toList
 
-      // Apply merges: for each pair, keep the node with the longer name as canonical
-      pairsToMerge.foldLeft(graph) { case (g, (a, b)) =>
-        val (keep, remove) = if (nodeName(a).length >= nodeName(b).length) (a, b) else (b, a)
-        mergeNodePair(g, keep, remove)
-      }
-    } match {
-      case scala.util.Success(updatedGraph) => Right(updatedGraph)
-      case scala.util.Failure(ex) =>
+        // Apply merges: for each pair, keep the node with the longer name as canonical
+        pairsToMerge.foldLeft(graph) { case (g, (a, b)) =>
+          val (keep, remove) = if (nodeName(a).length >= nodeName(b).length) (a, b) else (b, a)
+          mergeNodePair(g, keep, remove)
+        }
+      }.toResult
+    }
+    merged match {
+      case Right(updatedGraph) => Right(updatedGraph)
+      case Left(error) =>
         logger.warn(
-          s"Failed to parse disambiguation response, falling back to pre-disambiguation graph: ${Option(ex.getMessage)
-              .getOrElse(ex.toString)}"
+          s"Failed to parse disambiguation response, falling back to pre-disambiguation graph: ${error.message}"
         )
         Right(graph)
     }
