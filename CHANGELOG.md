@@ -1996,6 +1996,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-rag`: `SentenceChunker` keeps every character of the input** ([#1718](https://github.com/llm4s/llm4s/issues/1718)):
+  it split with `Regex.split` on `([.!?])(\s+)([A-Z])`, which deleted the punctuation, the whitespace and the next
+  sentence's first letter at every boundary and glued the parts back together, so
+  `"Hello world. Next one. Third."` became the single sentence `"Hello worldext onehird."`. Boundaries are now
+  found with lookarounds, so only the whitespace between sentences is matched, and sentences are cut from the input
+  itself. Sentences in a chunk keep the whitespace that separated them (it used to be one space), so with no overlap
+  and no force-split sentence every chunk is a slice of the input. Abbreviations (`Dr.`, `e.g.`) only match as whole
+  words, so `summr.` or `first.` no longer hide a boundary, and a closing quote or bracket after the punctuation stays
+  with its sentence: `He said "Hi." Then` is `He said "Hi."` and `Then`. `ChunkerFactory.default`, `"sentence"` and
+  the semantic fallback all use this chunker. **Migration:** chunk text changes for any input with a sentence
+  boundary, and chunk sizes with it; indexes built with `SentenceChunker` hold corrupted text and should be
+  re-chunked and re-embedded.
 - **`llm4s-openai-compatible`: Z.ai honours `CompletionOptions.reasoning`** ([#1681](https://github.com/llm4s/llm4s/issues/1681)):
   it used to be ignored, so `ReasoningEffort.None` still thought (Z.ai's `thinking.type` defaults to `enabled`) and
   effort levels never reached a model that takes `reasoning_effort`. Each effort now goes out in the form the
