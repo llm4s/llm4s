@@ -256,8 +256,15 @@ final class GraphRuntime(
                   Some(stored.checkpoint.id),
                   RunEvent
                     .RunRecovered(stored.checkpoint.id, config.tenantId.map(_.value), config.principal.map(_.value)),
-                  stored.pendingWrites,
-                  reused
+                  // read again under the claim: a holder whose claim expired but was not yet replaced
+                  // could still add pending writes after the read above, and only the claim stops it
+                  () =>
+                    checkpointer.latest(threadId).flatMap {
+                      case Some(now) if now.checkpoint.id == stored.checkpoint.id =>
+                        reusableWrites(graph, execution, now).map(now.pendingWrites -> _)
+                      // the thread moved on: the claim commit's parent no longer matches, so it conflicts
+                      case _ => Right(stored.pendingWrites -> reused)
+                    }
                 )
               yield run
             case CheckpointStatus.Suspended => Left(pendingInterrupts(threadId, stored))
@@ -320,6 +327,8 @@ final class GraphRuntime(
    * The thread is held exclusively, and claimed in the store under `config.runId`, while it is
    * deleted, so no run starts on it meanwhile. An unknown thread is `Right(())`. Cancel any
    * [[subscribe]] to the thread first: a new thread of the same id numbers its events from 1 again.
+   * The tenant is checked once more after the store claim is granted, so a thread another runtime
+   * created for another tenant in between is `TenantMismatch`, not deleted.
    */
   def deleteThread(threadId: ThreadId, config: RunConfig = RunConfig()): Result[Unit] = admission(threadId) {
     val holder = withLock(activeLock) {
@@ -342,9 +351,17 @@ final class GraphRuntime(
               Using.resource(new AutoCloseable {
                 def close(): Unit = if !deleted then releaseClaim(threadId, claim.token)
               }) { _ =>
-                val outcome = checkpointer.deleteThread(threadId)
-                deleted = outcome.isRight
-                outcome
+                // checked again under the claim: another runtime may have created the thread, for
+                // another tenant, between the read above and the claim, and nothing else stops it
+                // before the delete (the delete, unlike a commit, names no parent checkpoint)
+                checkpointer
+                  .latest(threadId)
+                  .flatMap(_.fold[Result[Unit]](Right(()))(checkTenant(threadId, _, config)))
+                  .flatMap { _ =>
+                    val outcome = checkpointer.deleteThread(threadId)
+                    deleted = outcome.isRight
+                    outcome
+                  }
               }
             }
         }
@@ -700,19 +717,21 @@ final class GraphRuntime(
      * to it, fenced by the claim's token; [[execute]] then runs from there. A live claim of another
      * run, or a conflicting commit - another run advanced the thread first - is `ThreadBusy`. If the
      * commit does not land, or anything throws, the store claim is given back before this returns.
+     * `carry` is called once the store claim is granted, and returns the pending writes to carry over
+     * and the task results `execute` reuses: read under the claim, nothing a fenced holder writes
+     * can be missed.
      */
     def admit(
       execution: Execution,
       parent: Option[String],
       event: RunEvent,
-      carried: Vector[PendingWrite] = Vector.empty,
-      reused: Map[TaskId, TaskResult] = Map.empty
+      carry: () => Result[(Vector[PendingWrite], Map[TaskId, TaskResult])] = () => Right(Vector.empty -> Map.empty)
     ): Result[Run[I, O]] =
       claimThread(threadId, config).flatMap { granted =>
         claim = Some(granted)
         var admitted = false
         Using.resource(new AutoCloseable { def close(): Unit = if !admitted then releaseClaim() }) { _ =>
-          val outcome = committed(execution, parent, event, carried, reused)
+          val outcome = carry().flatMap((carried, reused) => committed(execution, parent, event, carried, reused))
           admitted = outcome.isRight
           outcome
         }
@@ -768,6 +787,13 @@ final class GraphRuntime(
     @volatile private var claim: Option[RunClaim] = None
     private val claimReleased                     = new java.util.concurrent.atomic.AtomicBoolean(false)
 
+    /**
+     * Set by [[renewClaim]] when the store reports the claim taken over. The run checks it at the
+     * start of each superstep, so a run whose commits are deferred (Async, OnExit) stops there
+     * rather than executing more tasks whose results the store would refuse.
+     */
+    @volatile private var lostClaim: Option[GraphError.StaleClaim] = None
+
     /** The token every commit of this run carries; set by [[admit]] before its first commit. */
     private def token: FencingToken = claim.map(_.token).getOrElse(FencingToken(0L))
 
@@ -792,6 +818,7 @@ final class GraphRuntime(
             case Right(Right(_)) => true
             case Right(Left(lost: GraphError.StaleClaim)) =>
               if !claimReleased.get then
+                lostClaim = Some(lost)
                 GraphRuntime.logger.warn(
                   s"Run '${runId.value}' lost its claim on thread '${threadId.value}': ${lost.message}; its commits will be refused"
                 )
@@ -837,7 +864,10 @@ final class GraphRuntime(
         case Some(error)             => stop(execution, GraphError.CheckpointWriteFailed(threadId.value, error))
         case None =>
           position = execution -> checkpointId
-          if execution.paused || execution.isQuiescent then end(execution, checkpointId)
+          // the claim was taken over: nothing more this run commits would land
+          val lost = lostClaim
+          if lost.nonEmpty then stop(execution, GraphError.CheckpointWriteFailed(threadId.value, lost.get))
+          else if execution.paused || execution.isQuiescent then end(execution, checkpointId)
           else if execution.superstep - firstSuperstep >= config.budgets.maxSupersteps then
             fail(execution, GraphError.SuperstepLimitExceeded(config.budgets.maxSupersteps))
           else if Thread.currentThread().isInterrupted || overdue() then cancelled()

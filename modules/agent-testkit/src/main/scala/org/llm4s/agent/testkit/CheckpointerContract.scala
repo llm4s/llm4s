@@ -8,6 +8,7 @@ import org.scalatest.flatspec.AnyFlatSpecLike
 import org.scalatest.matchers.should.Matchers
 
 import java.time.{ Clock, Instant }
+import scala.annotation.unused
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, CyclicBarrier, LinkedBlockingQueue, TimeUnit }
 import scala.concurrent.duration.*
@@ -40,10 +41,19 @@ import scala.concurrent.duration.*
  *    with [[GraphError.CheckpointWriteFailed]] and leaves nothing in the thread; and of several
  *    runtimes recovering one thread at once, exactly one is admitted.
  *
- * Claim expiry is judged by the store's clock, so the store under test must use the `clock` it is
- * given for that (and may use it for nothing else). The suite moves a [[ManualClock]]; it never
- * waits for real time to pass a claim's `ttl`. Each case gets a new store from [[newCheckpointer]]
- * and uses its own thread ids; the store need not be empty of other threads.
+ * Claim expiry is judged by the store's clock. By default the store under test must use the `clock`
+ * it is given for that (and may use it for nothing else), and the suite moves a [[ManualClock]]; it
+ * never waits for real time to pass a claim's `ttl`. A store that judges expiry by a clock it cannot
+ * be handed - a database server's `now()` - overrides [[advanceStoreClock]] to make claims expire
+ * as if that clock had moved (for example by moving every stored expiry back), and sets
+ * [[exactExpiry]] to `false`, so that the cases check expiry by its effect only.
+ *
+ * A durable store also overrides [[reopen]], so that the cases about claims and tokens surviving a
+ * restart - a process that closes the store and opens the same storage again - run against storage
+ * that was really closed. The default reopens nothing and hands the same instance back.
+ *
+ * Each case gets a new store from [[newCheckpointer]] and uses its own thread ids; the store need
+ * not be empty of other threads.
  */
 trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValues with OptionValues:
 
@@ -56,6 +66,28 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
   /** How long a case waits for a run or a background step before it fails rather than hangs. */
   protected def contractWait: FiniteDuration = 10.seconds
 
+  /**
+   * Closes `store` and opens the storage behind it again, as a restarted process would; the store
+   * returned must judge claims by the same `clock`. The default hands `store` back unchanged, which
+   * is right for a store that keeps nothing beyond its instance, such as `InMemoryCheckpointer`.
+   */
+  protected def reopen(store: Checkpointer, @unused clock: ManualClock): Checkpointer = store
+
+  /**
+   * Makes the store's claims expire as if its clock had moved forward by `by`. The default moves
+   * `clock`, the clock [[newCheckpointer]] was given; a store that judges expiry by a clock of its
+   * own, such as a database server's, overrides this.
+   */
+  protected def advanceStoreClock(@unused store: Checkpointer, clock: ManualClock, by: FiniteDuration): Unit =
+    clock.advance(by)
+
+  /**
+   * Whether a claim's `expiresAt` is exactly the injected clock's time plus its `ttl`, as it is when
+   * the store reads `clock`. A store that overrides [[advanceStoreClock]] because it reads a clock of
+   * its own sets this to `false`, and the cases then check only that `expiresAt` moves forward.
+   */
+  protected def exactExpiry: Boolean = true
+
   private val start     = Instant.parse("2026-10-09T12:00:00Z")
   private val ttl       = 30.seconds
   private val threadIds = new AtomicInteger()
@@ -64,9 +96,25 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
   )
 
   final private class Store:
-    val clock: ManualClock  = ManualClock(start)
-    val store: Checkpointer = newCheckpointer(clock)
-    val thread: ThreadId    = newThread()
+    val clock: ManualClock                      = ManualClock(start)
+    @volatile private var current: Checkpointer = newCheckpointer(clock)
+    val thread: ThreadId                        = newThread()
+
+    /** The store; another instance over the same storage after [[reopened]]. */
+    def store: Checkpointer = current
+
+    /** Closes the store and opens its storage again; see [[CheckpointerContract.reopen]]. */
+    def reopened(): Checkpointer =
+      current = reopen(current, clock)
+      current
+
+    /** Moves the store's clock; see [[CheckpointerContract.advanceStoreClock]]. */
+    def advance(by: FiniteDuration): Unit = advanceStoreClock(current, clock, by)
+
+    /** `actual` is `start` plus `offset`, checked as far as [[exactExpiry]] allows. */
+    def expiresAt(actual: Instant, offset: FiniteDuration, previous: Option[Instant] = None): Assertion =
+      if exactExpiry then actual shouldBe start.plusNanos(offset.toNanos)
+      else previous.fold(succeed)(before => actual.isAfter(before) shouldBe true)
 
     def claim(holder: String, on: ThreadId = thread): Result[RunClaim] =
       store.claim(on, ClaimRequest(RunId(holder), ttl))
@@ -323,11 +371,11 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val granted = s.claim("first").value
     granted.threadId shouldBe s.thread
     granted.holder shouldBe RunId("first")
-    granted.expiresAt shouldBe start.plusSeconds(30)
+    s.expiresAt(granted.expiresAt, 30.seconds)
     s.claim("second").refused shouldBe GraphError.ThreadBusy(s.thread.value, None, Some("first"))
     // the same holder is refused too: a claim is not re-entrant
     s.claim("first").refused shouldBe GraphError.ThreadBusy(s.thread.value, None, Some("first"))
-    s.clock.advance(ttl - 1.milli)
+    s.advance(ttl - 1.milli)
     s.claim("second").refused shouldBe a[GraphError.ThreadBusy]
     s.commit(granted.token, Some(s.checkpoint("c1", None))).value
     s.claim("second").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some("first"))
@@ -338,11 +386,11 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val s     = Store()
     val first = s.claim("first").value
     s.commit(first.token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"))).value
-    s.clock.advance(ttl)
+    s.advance(ttl)
     val taken = s.claim("second").value
     taken.holder shouldBe RunId("second")
     taken.token.value should be > first.token.value
-    taken.expiresAt shouldBe start.plusSeconds(60)
+    s.expiresAt(taken.expiresAt, 60.seconds, Some(first.expiresAt))
 
     s.commit(
       first.token,
@@ -366,7 +414,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val s     = Store()
     val first = s.claim("first").value
     s.commit(first.token, Some(s.checkpoint("c1", None))).value
-    s.clock.advance(ttl)
+    s.advance(ttl)
     val taken = s.claim("second").value
     s.commit(taken.token, Some(s.checkpoint("c2", Some("c1")))).value
     s.commit(first.token, Some(s.checkpoint("x", Some("c1")))).refused shouldBe a[GraphError.StaleClaim]
@@ -387,24 +435,24 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
   it should "let the holder commit and renew after expiry for as long as nobody took the claim over" in {
     val s     = Store()
     val first = s.claim("first").value
-    s.clock.advance(ttl + 5.seconds)
+    s.advance(ttl + 5.seconds)
     s.commit(first.token, Some(s.checkpoint("c1", None)), events = Vector(s.event("late"))).value.map(_.seq) shouldBe
       Vector(1L)
     val renewed = s.store.renew(s.thread, first.token, ttl).value
     renewed.token shouldBe first.token
     renewed.holder shouldBe RunId("first")
-    renewed.expiresAt shouldBe start.plusSeconds(65)
+    s.expiresAt(renewed.expiresAt, 65.seconds, Some(first.expiresAt))
     s.claim("second").refused shouldBe a[GraphError.ThreadBusy]
   }
 
   it should "extend a claim on renewal, by the store's clock" in {
     val s     = Store()
     val first = s.claim("first").value
-    s.clock.advance(20.seconds)
-    s.store.renew(s.thread, first.token, ttl).value.expiresAt shouldBe start.plusSeconds(50)
-    s.clock.advance(20.seconds) // 40s after the claim, 20s after the renewal
+    s.advance(20.seconds)
+    s.expiresAt(s.store.renew(s.thread, first.token, ttl).value.expiresAt, 50.seconds, Some(first.expiresAt))
+    s.advance(20.seconds) // 40s after the claim, 20s after the renewal
     s.claim("second").refused shouldBe GraphError.ThreadBusy(s.thread.value, None, Some("first"))
-    s.clock.advance(10.seconds)
+    s.advance(10.seconds)
     s.claim("second").value.token.value should be > first.token.value
   }
 
@@ -434,7 +482,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
       i % 3 match
         case 0 => s.store.deleteThread(s.thread).value
         case 1 => s.store.release(s.thread, granted.token).value
-        case _ => s.clock.advance(ttl)
+        case _ => s.advance(ttl)
       granted.token.value
     }
     tokens shouldBe tokens.sorted
@@ -462,6 +510,100 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     all.collect { case (_, Left(error)) => error }.foreach {
       _ shouldBe GraphError.ThreadBusy(s.thread.value, None, Some(s"run-$winner"))
     }
+  }
+
+  it should "grant exactly one of many concurrent takeovers of an expired claim" in {
+    val s        = Store()
+    val first    = s.claim("first").value
+    val claimers = 16
+    s.commit(first.token, Some(s.checkpoint("c1", None))).value
+    s.advance(ttl)
+    val barrier = new CyclicBarrier(claimers)
+    val results = new LinkedBlockingQueue[(Int, Result[RunClaim])]()
+    val threads = (1 to claimers).map { i =>
+      Thread.ofVirtual().start { () =>
+        barrier.await(contractWait.toMillis, TimeUnit.MILLISECONDS): Unit
+        results.put(i -> s.claim(s"run-$i"))
+      }
+    }
+    threads.foreach(_.join(contractWait.toMillis))
+    val all     = Iterator.continually(results.poll()).takeWhile(_ != null).toVector
+    val granted = all.collect { case (i, Right(claim)) => i -> claim }
+    all should have size claimers.toLong
+    granted should have size 1
+    val (winner, claim) = granted.head
+    claim.holder shouldBe RunId(s"run-$winner")
+    claim.token.value should be > first.token.value
+    all.collect { case (_, Left(error)) => error }.foreach {
+      _ shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some(s"run-$winner"))
+    }
+    // the old holder is fenced off, and the winner alone can commit
+    s.commit(first.token, events = Vector(s.event("stale"))).refused shouldBe
+      GraphError.StaleClaim(s.thread.value, first.token.value, Some(claim.token.value))
+    s.commit(claim.token, events = Vector(s.event("won"))).value.map(_.seq) shouldBe Vector(1L)
+  }
+
+  // ---- reopening the store ----
+
+  it should "keep a live claim, its holder and its token across a close and reopen" in {
+    val s     = Store()
+    val first = s.claim("first").value
+    s.commit(first.token, Some(s.checkpoint("c1", None)), events = Vector(s.event("a"))).value
+    s.reopened()
+    s.claim("second").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some("first"))
+    s.commit(first.token, events = Vector(s.event("b"))).value.map(_.seq) shouldBe Vector(2L)
+    s.store.renew(s.thread, first.token, ttl).value.token shouldBe first.token
+    s.store.release(s.thread, first.token).value shouldBe (())
+    s.reopened()
+    val second = s.claim("second").value
+    second.token.value should be > first.token.value
+    s.seqs() shouldBe Vector(1L, 2L)
+  }
+
+  it should "keep fencing off a stale holder, and keep tokens increasing, across a close and reopen" in {
+    val s     = Store()
+    val first = s.claim("first").value
+    s.commit(first.token, Some(s.checkpoint("c1", None))).value
+    s.advance(ttl)
+    val taken = s.claim("second").value
+    s.reopened()
+    s.commit(first.token, Some(s.checkpoint("stale", Some("c1"))), events = Vector(s.event("x"))).refused shouldBe
+      GraphError.StaleClaim(s.thread.value, first.token.value, Some(taken.token.value))
+    s.store.renew(s.thread, first.token, ttl).refused shouldBe a[GraphError.StaleClaim]
+    s.store.release(s.thread, first.token).value shouldBe (())
+    s.claim("third").refused shouldBe GraphError.ThreadBusy(s.thread.value, Some("c1"), Some("second"))
+    s.commit(taken.token, events = Vector(s.event("ok"))).value.map(_.seq) shouldBe Vector(1L)
+
+    // a token issued after a reopen is greater than every token before it, on this thread and after a delete
+    s.store.deleteThread(s.thread).value shouldBe (())
+    s.reopened()
+    val again = s.claim("again").value
+    again.token.value should be > taken.token.value
+    s.claim("fresh", newThread()).value.token.value should be > again.token.value
+  }
+
+  // ---- compaction and deletion together ----
+
+  it should "start a deleted thread's replay floor afresh, so a new thread of the same id replays from 1" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, Some(s.checkpoint("c1", None)), events = (1 to 5).map(i => s.event(s"e$i")).toVector).value
+    s.store.compactEvents(s.thread, 4L).value shouldBe (())
+    s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 4L)
+
+    s.store.deleteThread(s.thread).value shouldBe (())
+    s.store.eventsAfter(s.thread, 0L, 10).value shouldBe empty
+    val again = s.claim("again").value.token
+    s.commit(again, Some(s.checkpoint("n1", None)), events = Vector(s.event("n1"), s.event("n2")))
+      .value
+      .map(
+        _.seq
+      ) shouldBe Vector(1L, 2L)
+    s.store.eventsAfter(s.thread, 0L, 10).value.map(_.seq) shouldBe Vector(1L, 2L)
+    // and compaction on the new thread starts from its own floor
+    s.store.compactEvents(s.thread, 2L).value shouldBe (())
+    s.store.eventsAfter(s.thread, 0L, 10).refused shouldBe GraphError.ReplayUnavailable(s.thread.value, 2L)
+    s.store.eventsAfter(s.thread, 1L, 10).value.map(_.seq) shouldBe Vector(2L)
   }
 
   // ---- two runtimes over one store ----
@@ -574,10 +716,10 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     val running = first.start(s.thread, w.graph, Vector("a"), config("first")).value
     w.awaitEntered("a")
 
-    s.clock.advance(20.seconds)
+    s.advance(20.seconds)
     val before = renewed.get
     eventually(renewed.get > before)
-    s.clock.advance(20.seconds) // past the first claim's expiry, not the renewed one's
+    s.advance(20.seconds) // past the first claim's expiry, not the renewed one's
     second.recover(s.thread, w.graph, config("second")).refused shouldBe a[GraphError.ThreadBusy]
 
     gate.countDown()
@@ -596,7 +738,7 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     eventually(s.store.latest(s.thread).value.exists(_.pendingWrites.exists(_.nodeId == "worker")))
 
     second.recover(s.thread, w.graph, config("second")).refused shouldBe a[GraphError.ThreadBusy]
-    s.clock.advance(neverRenewed.ttl)
+    s.advance(neverRenewed.ttl)
     completed(second.recover(s.thread, w.graph, config("second")).value) shouldBe Vector("A", "B")
     w.callsOf("a") shouldBe 1
     w.callsOf("b") shouldBe 2

@@ -211,8 +211,11 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     Thread.sleep(100)
     lost.get shouldBe 1
 
+    // and the run stops at its next superstep, as it would have at its next commit
     held.gate.countDown()
-    await(handle).completed._2 shouldBe Vector("x")
+    await(handle).failed._2 should matchPattern {
+      case GraphError.CheckpointWriteFailed("t", GraphError.StaleClaim("t", 1L, Some(2L)), None) =>
+    }
   }
 
   it should "survive a renew that throws" in {
@@ -224,6 +227,146 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     eventually(store.renewals.get > 1)
     held.gate.countDown()
     await(handle).completed._2 shouldBe Vector("x")
+  }
+
+  "A run that lost its claim" should "stop at its next superstep, running nothing more, even with deferred commits" in {
+    val clock   = MovingClock()
+    val store   = Hooked(InMemoryCheckpointer(clock))
+    val gate    = new CountDownLatch(1)
+    val entered = new CountDownLatch(1)
+    val later   = new AtomicInteger()
+    val log     = StateKey.appending[String]("log")
+    val b       = GraphBuilder("lost", "v1")
+    val second = b.node[Unit]("second", writes = Set(log)) { (_, _, _) =>
+      later.incrementAndGet()
+      continue(Command.empty.update(log, "second"))
+    }
+    val first = b.node[String]("first", writes = Set(log)) { (input, _, _) =>
+      entered.countDown()
+      gate.await(5, TimeUnit.SECONDS)
+      continue(Command.empty.update(log, input).goto(second))
+    }
+    val graph = b.compile(first)(_.get(log)).value
+    // the store cannot be reached for renewal until another run has taken the thread over
+    store.onRenew = () => Some(Left(ProcessingError("store", "unreachable")))
+    val handle = GraphRuntime(store, claims = ClaimPolicy(30.seconds, 10.millis))
+      .start(thread, graph, "x", run("first"), Durability.OnExit)
+      .value
+    entered.await(5, TimeUnit.SECONDS) shouldBe true
+    val claimCheckpoint = store.latest(thread).value.value.checkpoint
+    clock.advance(30.seconds)
+    store.underlying.claim(thread, ClaimRequest(RunId("thief"), 1.hour)).value
+    val renewed = new CountDownLatch(1)
+    store.onRenew = () => {
+      renewed.countDown()
+      None
+    }
+    renewed.await(5, TimeUnit.SECONDS) shouldBe true
+    Thread.sleep(100) // the renewal's StaleClaim is recorded just after the store answers
+
+    gate.countDown()
+    await(handle).failed._2 should matchPattern {
+      case GraphError.CheckpointWriteFailed("t", _: GraphError.StaleClaim, None) =>
+    }
+    // superstep 2 never ran: under OnExit, nothing would have stopped it before the exit commit
+    later.get shouldBe 0
+    store.latest(thread).value.value.checkpoint shouldBe claimCheckpoint
+  }
+
+  "Recovery" should "carry over pending writes an expired, unreplaced holder made before the claim" in {
+    val clock   = MovingClock()
+    val store   = InMemoryCheckpointer(clock)
+    val calls   = new java.util.concurrent.ConcurrentHashMap[String, AtomicInteger]()
+    val entered = new CountDownLatch(1)
+    val gate    = new CountDownLatch(1)
+    val results = StateKey.appending[String]("results")
+    val graph = {
+      val b = GraphBuilder("workers", "v1")
+      val worker = b.node[String]("worker", writes = Set(results)) { (item, _, _) =>
+        val n = calls.computeIfAbsent(item, _ => new AtomicInteger()).incrementAndGet()
+        if item == "b" && n == 1 then {
+          entered.countDown()
+          gate.await(5, TimeUnit.SECONDS): Unit
+        }
+        continue(Command.empty.update(results, item))
+      }
+      val collect = b.node[Unit]("collect")((_, _, _) => continue(Command.empty))
+      val join    = b.dynamicJoin("workers", collect)
+      val plan    = b.node[Vector[String]]("plan")((items, _, _) => continue(Command.empty.fanOut(join, worker, items)))
+      b.compile(plan)(_.get(results)).value
+    }
+    def writes = store.latest(thread).value.value.pendingWrites.size
+    // the first run's superstep checkpoints wait, so it stays at the checkpoint the recovery reads
+    val hold = new CountDownLatch(1)
+    val holding = new Hooked(store) {
+      override def commit(threadId: ThreadId, commit: Commit) = {
+        if commit.checkpoint.exists(_.snapshot.superstep > 1) then hold.await(5, TimeUnit.SECONDS): Unit
+        underlying.commit(threadId, commit)
+      }
+    }
+    val handle = GraphRuntime(holding, claims = slow).start(thread, graph, Vector("a", "b"), run("first")).value
+    entered.await(5, TimeUnit.SECONDS) shouldBe true
+    eventually(writes == 1) // `a` is durable; `b` is running
+    clock.advance(slow.ttl)
+
+    // between the recovery's read and its claim, the expired holder - not yet replaced - writes `b`
+    val raced      = new AtomicBoolean(false)
+    val recovering = Hooked(store)
+    recovering.onClaim = () => {
+      if raced.compareAndSet(false, true) then {
+        gate.countDown()
+        eventually(writes == 2)
+      }
+      None
+    }
+    await(
+      GraphRuntime(recovering, claims = slow).recover(thread, graph, run("second")).value
+    ).completed._2.sorted shouldBe
+      Vector("a", "b")
+    calls.get("a").get shouldBe 1
+    calls.get("b").get shouldBe 1
+
+    hold.countDown()
+    await(handle).failed._2 should matchPattern {
+      case GraphError.CheckpointWriteFailed("t", _: GraphError.StaleClaim, None) =>
+    }
+  }
+
+  "resume" should "be refused while another runtime is admitting on the thread, naming its run" in {
+    val store   = InMemoryCheckpointer()
+    val log     = StateKey.appending[String]("log")
+    val b       = GraphBuilder("ask", "v1")
+    val approve = b.declareResume[String, String]("approve")
+    b.implement(approve.node, writes = Set(log))((resumed, _, _) => continue(Command.empty.update(log, resumed.answer)))
+    val ask       = b.node[String]("ask")((_, _, _) => NodeResult.Suspend(StateUpdate.empty, "ok?", approve))
+    val graph     = b.compile(ask)(_.get(log)).value
+    val parked    = await(GraphRuntime(store).start(thread, graph, "x").value).suspended
+    val answers   = Map(parked.interrupts.head.id -> approve.answer("yes"))
+    val suspended = store.latest(thread).value.value
+
+    // the first runtime holds the store claim and has not committed yet
+    val claimed = new CountDownLatch(1)
+    val proceed = new CountDownLatch(1)
+    val admitting = new Hooked(store) {
+      override def claim(threadId: ThreadId, request: ClaimRequest) = {
+        val granted = underlying.claim(threadId, request)
+        claimed.countDown()
+        proceed.await(5, TimeUnit.SECONDS): Unit
+        granted
+      }
+    }
+    val first = new java.util.concurrent.LinkedBlockingQueue[Result[RunHandle[Vector[String]]]]()
+    Thread
+      .ofVirtual()
+      .start(() => first.put(GraphRuntime(admitting).resume(thread, graph, answers, run("first")))): Unit
+    claimed.await(5, TimeUnit.SECONDS) shouldBe true
+
+    GraphRuntime(store).resume(thread, graph, answers, run("second")).left.value shouldBe
+      GraphError.ThreadBusy("t", Some(suspended.checkpoint.id), Some("first"))
+    store.latest(thread).value.value shouldBe suspended
+
+    proceed.countDown()
+    await(first.poll(5, TimeUnit.SECONDS).value).completed._2 shouldBe Vector("yes")
   }
 
   "Release" should "leave the thread busy until the claim lapses when the store cannot release it" in {
@@ -256,6 +399,28 @@ class RunClaimSpec extends AnyFlatSpec with Matchers with EitherValues with Opti
     runtime.deleteThread(thread).value shouldBe (())
     store.latest(thread).value shouldBe None
     store.releases.get shouldBe 2 // the deletion took the claim with the thread
+  }
+
+  it should "not delete a thread another tenant created between its read and its claim" in {
+    val underlying = InMemoryCheckpointer()
+    val held       = Held()
+    held.gate.countDown()
+    val other  = GraphRuntime(underlying)
+    val racing = Hooked(underlying)
+    val raced  = new AtomicBoolean(false)
+    // after this runtime read the thread (and found nothing), another runtime runs a tenant-b run on it
+    racing.onClaim = () => {
+      if raced.compareAndSet(false, true) then
+        await(other.start(thread, held.graph, "b", run("b").withTenantId(TenantId("tenant-b"))).value).completed: Unit
+      None
+    }
+    GraphRuntime(racing).deleteThread(thread, run("a").withTenantId(TenantId("tenant-a"))).left.value shouldBe
+      GraphError.TenantMismatch("t", Some("tenant-a"))
+    raced.get shouldBe true
+    underlying.latest(thread).value.value.checkpoint.tenantId shouldBe Some("tenant-b")
+    underlying.eventsAfter(thread, 0L, 100).value should not be empty
+    // the refused deletion gave its claim back
+    underlying.claim(thread, ClaimRequest(RunId("next"), 1.second)).value.holder shouldBe RunId("next")
   }
 
   "ClaimPolicy" should "default to a 30 second claim renewed every 10 seconds, and refuse an invalid one" in {

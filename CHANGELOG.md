@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`llm4s-agent-testkit`** publishes `CheckpointerContract`, the contract every store must pass as a ScalaTest
   suite (atomic commits, conflicts, event numbering, compaction and `ReplayUnavailable`, `deleteThread`, claims and
   fencing, and two or more `GraphRuntime`s contending over one store), with the `ManualClock` it drives expiry with;
-  `InMemoryCheckpointer` passes it. See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md) and the
+  `InMemoryCheckpointer` passes it. A durable store overrides `reopen`, so that claims, tokens and fencing are checked
+  across a close and reopen, and a store that judges expiry by a clock of its own (a database server's) overrides
+  `advanceStoreClock` and `exactExpiry`. See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md) and the
   [Stage 2 migration note](docs/reference/migration.md#stage-2-migration-durable-execution).
 - **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
