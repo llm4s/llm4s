@@ -7,7 +7,7 @@ nav_order: 1
 
 # Multi-Agent Orchestration Patterns
 
-> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](https://github.com/llm4s/llm4s/tree/main/modules/samples).
 
 Learn how to design systems where multiple agents collaborate, delegate tasks, and handle complex workflows. This guide covers agent communication patterns, handoff mechanisms, and failure recovery strategies.
 
@@ -92,6 +92,10 @@ object SequentialDelegation {
 
 ### Use Case
 When multiple independent tasks can run in parallel, then results are combined.
+
+The [multi-agent graph recipe](../../examples/cookbook.html#6-several-agents-in-one-graph) is a worked, tested version of
+this pattern: two specialist agents run in one superstep of a graph, and an editor agent combines their views behind a
+static join; cancelling the graph run cancels the agent turns it is waiting on.
 
 ### Implementation
 

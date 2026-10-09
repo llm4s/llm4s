@@ -13,8 +13,9 @@ Report it privately:
 
 1. **GitHub private vulnerability reporting (preferred).** Open the repository's
    [Security tab](https://github.com/llm4s/llm4s/security) and choose **Report a vulnerability**.
-2. **If that option is not available**, ask a maintainer (listed in [MAINTAINERS.md](MAINTAINERS.md)) for a private
-   channel on the [LLM4S Discord](https://discord.gg/4uvTPn6qww). Say only that you have a security report and
+2. **If that option is not available**, ask a member of the
+   [Security Committee](docs/people.md#security-committee) for a private channel on the
+   [LLM4S Discord](https://discord.gg/4uvTPn6qww). Say only that you have a security report and
    keep the details out of the public channels until a private one is open.
 
 Useful details:

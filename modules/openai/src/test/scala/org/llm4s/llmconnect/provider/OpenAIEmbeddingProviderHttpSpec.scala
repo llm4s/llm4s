@@ -9,6 +9,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
+import org.llm4s.testutil.EchoedCredentials
 
 /** `OpenAIEmbeddingProvider` against a local server: the request it sends and every way the reply can go. */
 class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
@@ -51,7 +52,25 @@ class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
     body("input").arr.map(_.str) shouldBe Seq("a", "b")
   }
 
-  it should "leave usage empty when the reply has none" in {
+  it should "post to <baseUrl>/embeddings when the base URL is the versioned root, as the default is" in {
+    OpenAIEmbeddingProvider.configSpec.defaultBaseUrl shouldBe Some("https://api.openai.com/v1")
+    val reply = """{"data":[{"embedding":[1.0]}]}"""
+    Seq("/v1", "/v1/").foreach { suffix =>
+      withServer("/v1/embeddings")(ex => sendJsonResponse(ex, 200, reply)) { baseUrl =>
+        provider(baseUrl + suffix).embed(request).map(_.embeddings) shouldBe Right(Seq(Vector(1.0)))
+      }
+    }
+  }
+
+  "OpenAIEmbeddingProvider.embeddingsUrl" should "add /v1 only to a base URL without it" in {
+    OpenAIEmbeddingProvider.embeddingsUrl("https://api.openai.com/v1") shouldBe "https://api.openai.com/v1/embeddings"
+    OpenAIEmbeddingProvider.embeddingsUrl("https://api.openai.com/v1/") shouldBe "https://api.openai.com/v1/embeddings"
+    OpenAIEmbeddingProvider.embeddingsUrl("https://api.openai.com") shouldBe "https://api.openai.com/v1/embeddings"
+    OpenAIEmbeddingProvider.embeddingsUrl("https://proxy.example/openai/") shouldBe
+      "https://proxy.example/openai/v1/embeddings"
+  }
+
+  "OpenAIEmbeddingProvider" should "leave usage empty when the reply has none" in {
     withServer("/v1/embeddings")(ex => sendJsonResponse(ex, 200, """{"data":[{"embedding":[1.0]}]}""")) { baseUrl =>
       provider(baseUrl).embed(request).map(_.usage) shouldBe Right(None)
     }
@@ -86,5 +105,20 @@ class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
     val result = p.embed(request)
     Thread.interrupted() shouldBe true
     result.isLeft shouldBe true
+  }
+
+  "OpenAIEmbeddingProvider" should "redact credentials echoed in an error body before truncating it, in its error and its log (#1674)" in {
+    Seq(EchoedCredentials.Text, EchoedCredentials.JsonError).foreach { reply =>
+      withServer("/v1/embeddings")(ex => sendJsonResponse(ex, 500, reply)) { baseUrl =>
+        val (result, lines) = EchoedCredentials.logged(provider(baseUrl).embed(request))
+        val error           = embeddingError(result)
+        error.message should include("[REDACTED]")
+        EchoedCredentials.leaked(error.message) shouldBe empty
+        val errorLines = lines.filter(_.contains("[OpenAIEmbeddingProvider] HTTP error"))
+        errorLines should not be empty
+        errorLines.foreach(_ should include("[REDACTED]"))
+        lines.flatMap(EchoedCredentials.leaked) shouldBe empty
+      }
+    }
   }
 }

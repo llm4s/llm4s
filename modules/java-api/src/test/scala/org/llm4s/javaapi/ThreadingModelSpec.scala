@@ -9,6 +9,8 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import scala.jdk.CollectionConverters.*
+
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.{ CountDownLatch, Executors, TimeUnit }
@@ -32,6 +34,12 @@ import scala.util.Using
 class ThreadingModelSpec extends AnyFlatSpec with Matchers {
 
   private def waitSeconds: Long = 20L
+
+  /**
+   * How many virtual threads the concurrency test puts inside a provider call at once: more than
+   * there are cores, so more than there are carrier threads.
+   */
+  private def concurrentCallers: Int = math.max(64, 4 * Runtime.getRuntime.availableProcessors())
 
   private def completion(text: String): Completion =
     Completion("id", 0L, text, "test-model", AssistantMessage(text))
@@ -86,11 +94,17 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
   /**
    * A local HTTP server (handlers on virtual threads). `release` is opened when the server closes,
    * so a handler that holds a request open is let go and the server can stop.
+   *
+   * The listen backlog is sized for [[concurrentCallers]] connections arriving at once. The JDK's
+   * default is 50, and the server's dispatcher thread accepts one connection per selector pass, so
+   * on a loaded runner more than 50 can be queued. Linux and macOS then drop the extra SYNs and the
+   * client retransmits them a second later, unseen; Windows refuses them, which the JDK HttpClient
+   * retries once, at once, and then reports as a `ConnectException` - a flake seen only on `windows-latest`.
    */
   final private class TestServer(handler: (HttpExchange, CountDownLatch) => Unit) extends AutoCloseable {
     private val release  = new CountDownLatch(1)
     private val handlers = Executors.newVirtualThreadPerTaskExecutor()
-    private val server   = HttpServer.create(new InetSocketAddress("localhost", 0), 0)
+    private val server   = HttpServer.create(new InetSocketAddress("localhost", 0), 2 * concurrentCallers)
     server.createContext("/", exchange => handler(exchange, release))
     server.setExecutor(handlers)
     server.start()
@@ -126,18 +140,38 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
   private def virtualThread(body: Runnable): Thread = Thread.ofVirtual().start(body)
 
   /**
+   * Runs `body` on a platform thread of its own and returns what it gave and whether that thread's
+   * interrupt flag was set when it returned - checked on a thread of its own so the flag does not
+   * leak into other tests. A `body` that throws leaves the value `null`, and the throwable is
+   * reported, since the facade's contract is that it never throws.
+   */
+  private def onOwnThread[A <: AnyRef](body: () => A): (A, Boolean) = {
+    val value   = new AtomicReference[A]()
+    val thrown  = new AtomicReference[Throwable]()
+    val flagSet = new AtomicReference[java.lang.Boolean](java.lang.Boolean.FALSE)
+    val thread = platformThread { () =>
+      scala.util.Try(body()).fold(thrown.set, value.set)
+      flagSet.set(java.lang.Boolean.valueOf(Thread.currentThread().isInterrupted))
+    }
+    thread.join(waitSeconds * 1000)
+    thread.isAlive shouldBe false
+    withClue("the call threw instead of returning a result: ")(thrown.get() shouldBe null)
+    (value.get(), flagSet.get().booleanValue())
+  }
+
+  /**
    * Runs `call` on a thread made by `start`, interrupts that thread once the server holds its
    * request, and returns the call's result and whether the thread's interrupt flag was still set
    * when the call returned.
    */
-  private def interruptedWhileBlocked(start: Runnable => Thread): (LlmResult[String], Boolean) = {
+  private def interruptedWhileBlocked[A <: AnyRef](start: Runnable => Thread)(call: JLlmClient => A): (A, Boolean) = {
     val entered = new CountDownLatch(1)
-    val result  = new AtomicReference[LlmResult[String]]()
+    val result  = new AtomicReference[A]()
     val flagSet = new AtomicReference[java.lang.Boolean](java.lang.Boolean.FALSE)
     Using.resource(new TestServer((_, release) => { entered.countDown(); release.await() })) { server =>
       val client = server.client()
       val caller = start { () =>
-        result.set(client.complete("hi"))
+        result.set(call(client))
         flagSet.set(java.lang.Boolean.valueOf(Thread.currentThread().isInterrupted))
       }
       entered.await(waitSeconds, TimeUnit.SECONDS) shouldBe true
@@ -147,6 +181,9 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
     }
     (result.get(), flagSet.get().booleanValue())
   }
+
+  /** A client that throws `InterruptedException` from every call, as a custom `LLMClient` might. */
+  private def interruptingClient: JLlmClient = new JLlmClient(fake(_ => throw new InterruptedException("stop")))
 
   // ---- which thread runs a call ----
 
@@ -176,7 +213,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
     }))
     val caller = Thread.currentThread()
 
-    agent.run("hi").get().messages.last.content shouldBe "x"
+    agent.run("hi").get().messages.asScala.last.content shouldBe "x"
 
     (seen.get() should not).be(theSameInstanceAs(caller))
     seen.get().isVirtual shouldBe true
@@ -200,7 +237,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
     val agent = Llm4s.createAgent(echoClientAfter(n))
     val answers = Using.resource(new Pool(Executors.newVirtualThreadPerTaskExecutor())) { pool =>
       val futures =
-        (0 until n).map(i => pool.executor.submit(() => agent.run("a" + i).get().messages.last.content))
+        (0 until n).map(i => pool.executor.submit(() => agent.run("a" + i).get().messages.asScala.last.content))
       futures.map(_.get(waitSeconds, TimeUnit.SECONDS))
     }
     answers shouldBe (0 until n).map(i => "echo:a" + i)
@@ -210,7 +247,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
 
   "a real provider client reached through JLlmClient" should
     "serve more virtual threads at once than there are cores, so a call does not hold a carrier thread" in {
-      val n        = math.max(64, 4 * Runtime.getRuntime.availableProcessors())
+      val n        = concurrentCallers
       val arrived  = new CountDownLatch(n)
       val inside   = new AtomicInteger(0)
       val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(waitSeconds)
@@ -225,11 +262,16 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
       }
       Using.resource(new TestServer(handler)) { server =>
         val client = server.client()
-        val outcomes = Using.resource(new Pool(Executors.newVirtualThreadPerTaskExecutor())) { pool =>
-          val futures = (0 until n).map(_ => pool.executor.submit(() => client.complete("hi").isSuccess))
+        val results = Using.resource(new Pool(Executors.newVirtualThreadPerTaskExecutor())) { pool =>
+          val futures = (0 until n).map(_ => pool.executor.submit(() => client.complete("hi")))
           futures.map(_.get(waitSeconds + 10, TimeUnit.SECONDS))
         }
-        outcomes.forall(identity) shouldBe true
+        // a failure names the calls that failed and how many requests the server saw, so a flake
+        // is told apart from a facade that serialised its callers
+        val failed = results.filter(_.isFailure).map(_.getError().error)
+        withClue(s"${n - arrived.getCount} of $n requests reached the server; failed calls: $failed:") {
+          failed shouldBe empty
+        }
         inside.get() shouldBe n
       }
     }
@@ -238,7 +280,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
 
   "interrupting a platform thread blocked in a provider call" should
     "return a CancelledError with the thread's interrupt flag still set" in {
-      val (result, flagSet) = interruptedWhileBlocked(platformThread)
+      val (result, flagSet) = interruptedWhileBlocked(platformThread)(_.complete("hi"))
       result.isFailure shouldBe true
       result.getError().error shouldBe a[CancelledError]
       flagSet shouldBe true
@@ -246,7 +288,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
 
   "interrupting a virtual thread blocked in a provider call" should
     "return a CancelledError with the thread's interrupt flag still set" in {
-      val (result, flagSet) = interruptedWhileBlocked(virtualThread)
+      val (result, flagSet) = interruptedWhileBlocked(virtualThread)(_.complete("hi"))
       result.isFailure shouldBe true
       result.getError().error shouldBe a[CancelledError]
       flagSet shouldBe true
@@ -272,37 +314,66 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
       result.get().getError().error shouldBe a[CancelledError]
     }
 
-  "a custom client that lets InterruptedException escape" should
-    "have it propagate out of JLlmClient.complete, as its Scaladoc says" in {
-      val client = new JLlmClient(fake(_ => throw new InterruptedException("stop")))
-      an[InterruptedException] should be thrownBy client.complete("hi")
+  // #1591: the facade never throws InterruptedException, not even for a custom client that does
+
+  "a custom client that throws InterruptedException" should
+    "have JLlmClient.complete return a CancelledError with the interrupt flag restored, never throw" in {
+      val client            = interruptingClient
+      val (result, flagSet) = onOwnThread(() => client.complete("hi"))
+      result.isFailure shouldBe true
+      result.getError().error shouldBe a[CancelledError]
+      result.getError().getCause shouldBe an[InterruptedException]
+      flagSet shouldBe true
     }
+
+  it should "have every complete overload answer the same way" in {
+    val client       = interruptingClient
+    val conversation = Conversation(Seq(UserMessage("hi")))
+    val (results, flagSet) = onOwnThread { () =>
+      List(client.complete(conversation), client.complete(conversation, CompletionOptions()))
+    }
+    results.foreach(_.getError().error shouldBe a[CancelledError])
+    flagSet shouldBe true
+  }
+
+  it should "have JAgent.run return a failed result, never throw, and leave the caller's flag alone" in {
+    // the model call runs on a library thread, so the interrupt is that thread's, not the caller's
+    val agent             = Llm4s.createAgent(interruptingClient)
+    val (result, flagSet) = onOwnThread(() => agent.run("hi"))
+    result.isFailure shouldBe true
+    flagSet shouldBe false
+  }
 
   "the blocking facade methods" should
     "declare no checked exception, so Java rejects a catch of InterruptedException around them" in {
-      val complete = classOf[JLlmClient].getMethod("complete", classOf[String])
-      val inChat   = classOf[JLlmClient].getMethod("complete", classOf[Conversation])
-      val run      = classOf[JAgent].getMethod("run", classOf[String])
-      complete.getExceptionTypes shouldBe empty
-      inChat.getExceptionTypes shouldBe empty
-      run.getExceptionTypes shouldBe empty
+      val methods = Seq(
+        classOf[JLlmClient].getMethod("complete", classOf[String]),
+        classOf[JLlmClient].getMethod("complete", classOf[Conversation]),
+        classOf[JLlmClient].getMethod("complete", classOf[Conversation], classOf[CompletionOptions]),
+        classOf[JAgent].getMethod("run", classOf[String]),
+        classOf[JAgent].getMethod("continueConversation", classOf[JAgentResult], classOf[String])
+      )
+      methods.foreach(m => withClue(m.toString)(m.getExceptionTypes shouldBe empty))
     }
 
   "interrupting the thread that called JAgent.run" should
-    "return a CancelledError while the run, and its model call, carry on" in {
+    "return a CancelledError and cancel the run, interrupting its model call" in {
       val entered         = new CountDownLatch(1)
-      val release         = new CountDownLatch(1)
       val modelDone       = new CountDownLatch(1)
       val modelInterrupts = new AtomicInteger(0)
       val agent = Llm4s.createAgent(new JLlmClient(fake { _ =>
         entered.countDown()
-        CancelledError.catchInterrupt(release.await(waitSeconds, TimeUnit.SECONDS)).left.foreach { _ =>
-          modelInterrupts.incrementAndGet(): Unit
-        }
+        val outcome = CancelledError.catchInterrupt(Thread.sleep(waitSeconds * 1000L))
+        outcome.left.foreach(_ => modelInterrupts.incrementAndGet(): Unit)
         modelDone.countDown()
-        Right(completion("done"))
+        outcome match {
+          case Left(e) =>
+            Thread.currentThread().interrupt()
+            Left(CancelledError("model call", Some(e)))
+          case Right(_) => Right(completion("done"))
+        }
       }))
-      val result  = new AtomicReference[LlmResult[org.llm4s.agent.AgentResult]]()
+      val result  = new AtomicReference[LlmResult[JAgentResult]]()
       val flagSet = new AtomicReference[java.lang.Boolean](java.lang.Boolean.FALSE)
 
       val caller = platformThread { () =>
@@ -316,13 +387,9 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
       caller.isAlive shouldBe false
       result.get().getError().error shouldBe a[CancelledError]
       flagSet.get().booleanValue() shouldBe true
-      // the run did not stop: its model call is still waiting and was never interrupted
-      modelDone.getCount shouldBe 1L
-      modelInterrupts.get() shouldBe 0
-
-      release.countDown()
+      // the run stopped too: its model call was interrupted rather than left waiting
       modelDone.await(waitSeconds, TimeUnit.SECONDS) shouldBe true
-      modelInterrupts.get() shouldBe 0
+      modelInterrupts.get() shouldBe 1
     }
 
   // ---- the guide's Java snippets ----
@@ -336,19 +403,24 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
     ThreadingGuideSnippets.wasCancelled(LlmResult.success("x")) shouldBe false
 
     ThreadingGuideSnippets.completeOrNull(ok) shouldBe "x"
+    ThreadingGuideSnippets.wasInterrupted(LlmResult.failure(CancelledError("test", None))) shouldBe false
 
-    // an escaping InterruptedException is caught, and the thread's flag is restored (checked on a
-    // thread of its own so the flag does not leak into other tests)
-    val interrupting = new JLlmClient(fake(_ => throw new InterruptedException("stop")))
-    val returned     = new AtomicReference[String]("not run")
-    val flagSet      = new AtomicReference[java.lang.Boolean](java.lang.Boolean.FALSE)
-    val thread = platformThread { () =>
-      returned.set(ThreadingGuideSnippets.completeOrNull(interrupting))
-      flagSet.set(java.lang.Boolean.valueOf(Thread.currentThread().isInterrupted))
+    // "InterruptedException is never thrown": the snippet sees an interrupt while blocked in a real
+    // provider call as null, with the thread's flag still set (#1591)
+    val (blocked, blockedFlag) = interruptedWhileBlocked(platformThread)(ThreadingGuideSnippets.completeOrNull)
+    blocked shouldBe null
+    blockedFlag shouldBe true
+
+    // and sees a custom client's escaping InterruptedException the same way, flag restored
+    val interrupting        = interruptingClient
+    val (returned, flagSet) = onOwnThread(() => ThreadingGuideSnippets.completeOrNull(interrupting))
+    returned shouldBe null
+    flagSet shouldBe true
+    val (bothSignals, stillSet) = onOwnThread { () =>
+      java.lang.Boolean.valueOf(ThreadingGuideSnippets.wasInterrupted(interrupting.complete("hi")))
     }
-    thread.join(waitSeconds * 1000)
-    returned.get() shouldBe null
-    flagSet.get().booleanValue() shouldBe true
+    bothSignals.booleanValue() shouldBe true
+    stillSet shouldBe true
   }
 
   "LlmResult.toCompletableFuture" should "return a future that is already complete, so cancel has nothing to stop" in {

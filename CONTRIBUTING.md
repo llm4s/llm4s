@@ -96,7 +96,8 @@ and [API keys](docs/getting-started/configuration.md#api-keys).
 ### 7. Where to ask for help
 - **Discord:** [Join the community](https://discord.gg/4uvTPn6qww)
 - **Issues:** [Open an issue](https://github.com/llm4s/llm4s/issues) for bugs, questions, or feature requests
-- **Dev Hour:** We host a contributor dev hour on Discord every Tuesday at 17:00 UTC.
+- **Dev Hour:** We host a contributor dev hour on Discord every Sunday at 09:00 London time (10:00 in Italy and Germany, 13:30 or 14:30 in India, 16:00 or 17:00 in Singapore, 04:00 in New York, 01:00 in San Francisco; the [full schedule](docs/community/index.md#llm4s-dev-hours) shows summer and winter times).
+- **Support guide:** [SUPPORT.md](SUPPORT.md) lists where to ask questions, report bugs and report vulnerabilities.
 
 ## Pull Request Workflow
 
@@ -387,6 +388,12 @@ sbt scalafmtAll       # Format code
 - **Guides:** Add to `docs/guide/` for new features
 - **Examples:** Add to `modules/samples/` with runnable code
 - **API:** Generated from Scaladoc automatically
+- **Links:** CI fails on a broken internal link in `docs/` (`scripts/check-docs-site-links.sh`). Links are
+  checked the way llm4s.org serves them: write `[x](../guide/foo)` or `[x](/guide/foo)`, not `foo.md` (the site
+  404s a `.md` link to a rendered page), and give every page front matter or it is served as raw text. Known
+  breakage is listed in `scripts/docs-link-baseline.txt`; when you fix a listed link the check asks you to delete
+  its line, and a new broken link is never added to that file. `scripts/check-docs-site-links.sh --print` shows what
+  is broken now.
 
 ## Commit Messages
 

@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect
 
 import org.llm4s.llmconnect.model._
+import org.llm4s.testutil.SmallStack
 import org.llm4s.toolapi.{ ObjectSchema, Schema }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -134,5 +135,23 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
     val stub   = new StubClient(Right(makeCompletion(json)))
     val result = stub.completeStructured[Invoice](conversation, invoiceSchema)
     result shouldBe Right(Invoice("Acme", 5.0))
+  }
+
+  // The reply is model output: nested too deeply to parse, it is a Left naming the problem, not a
+  // StackOverflowError escaping the Result (#1562). On a 1 MB stack, so the outcome is deterministic.
+  it should "return ValidationError, not overflow the stack, when the reply is nested too deeply to parse" in {
+    val inputs = Seq("[" * 100000, "[" * 100000 + "]" * 100000, "```json\n" + "{\"a\":" * 100000 + "\n```")
+    inputs.foreach { deep =>
+      val stub = new StubClient(Right(makeCompletion(deep)))
+      withClue(s"input starting ${deep.take(12)}: ") {
+        SmallStack.run(stub.completeStructured[Invoice](conversation, invoiceSchema)) match {
+          case Right(Left(err: org.llm4s.error.ValidationError)) =>
+            err.field shouldBe "structured_output"
+            err.message should include("not valid JSON")
+            err.message should include("512")
+          case other => fail(s"expected Right(Left(ValidationError)), got $other")
+        }
+      }
+    }
   }
 }

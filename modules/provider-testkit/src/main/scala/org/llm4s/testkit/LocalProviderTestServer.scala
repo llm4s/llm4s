@@ -23,7 +23,7 @@ import scala.util.Try
  *
  * [[holdOpen]] and [[streamThenHold]] are handlers that never finish answering, for checking that
  * a client's call can be interrupted (see `ProviderModuleChecks.assertCancelsWhenInterrupted`).
- * Handlers run on virtual threads.
+ * Handlers run on virtual threads, so this needs JDK 21 (see `docs/guide/writing-a-provider.md`).
  */
 object LocalProviderTestServer {
 

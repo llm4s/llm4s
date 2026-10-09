@@ -6,10 +6,10 @@ import org.llm4s.error.ValidationError
 import org.llm4s.http.HttpResponse.*
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.ProviderModelTypes.ModelName
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.types.Result
+import org.llm4s.util.BoundedJson
 
 import scala.concurrent.duration.*
-import scala.util.Try
 
 /**
  * Model lister for the Ollama provider, using the local `/api/tags` endpoint.
@@ -36,50 +36,58 @@ object OllamaModelLister extends ProviderModelLister:
       response <- httpClient
         .get(s"${baseUrl.asUrl}/api/tags", timeout = 10.seconds)
         .mapServiceError("ollama", "Failed to discover models")
-      okResponse   <- response.ensureSuccess("ollama")
-      jsonResponse <- okResponse.toJson("responseBody")
-      models       <- parseOllamaModels(jsonResponse.body)
+      okResponse <- response.ensureSuccess("ollama")
+      json       <- readBody(okResponse.body)
+      models     <- parseOllamaModels(json)
     yield models
 
+  /**
+   * The listing's body, read with `BoundedJson` so that one nested too deeply is refused before it is
+   * parsed ([[https://github.com/llm4s/llm4s/issues/1660 #1660]]).
+   */
+  private def readBody(body: String): Result[ujson.Value] =
+    BoundedJson
+      .read(body)
+      .left
+      .map(err => ValidationError("responseBody", s"Failed to parse JSON response: ${err.message}"))
+
+  /**
+   * The `models` array's entries. Every step uses an accessor that returns an `Option`: `json("models")`
+   * or `.obj` on an unexpected shape throws `ujson.Value.InvalidData`, whose message renders the
+   * whole value recursively (#1660). An entry that is not an object is skipped, as one without a
+   * `name` always was.
+   */
   private def parseOllamaModels(json: ujson.Value): Result[List[DiscoveredModel]] =
-    val modelsResult =
-      Try(json("models").arr.toList).toResult.left
-        .map(err => ValidationError("models", s"Missing or invalid Ollama models payload: ${err.message}"))
+    json.objOpt
+      .flatMap(_.get("models"))
+      .flatMap(_.arrOpt)
+      .toRight(
+        ValidationError("models", "Missing or invalid Ollama models payload: expected an object with a `models` array")
+      )
+      .map(_.toList.flatMap(parseOllamaModel))
 
-    modelsResult.flatMap: models =>
-      models.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)):
-        case (accResult, modelJson) =>
-          for
-            acc    <- accResult
-            parsed <- parseOllamaModel(modelJson)
-          yield parsed match
-            case Some(model) => acc :+ model
-            case None        => acc
+  private def parseOllamaModel(json: ujson.Value): Option[DiscoveredModel] =
+    json.objOpt.flatMap: obj =>
+      obj
+        .get("name")
+        .flatMap(_.strOpt)
+        .filter(_.nonEmpty)
+        .map: name =>
+          val details = obj.get("details").flatMap(_.objOpt).map(_.toMap).getOrElse(Map.empty)
 
-  private def parseOllamaModel(json: ujson.Value): Result[Option[DiscoveredModel]] =
-    val obj = json.obj
-    obj.get("name").flatMap(_.strOpt).filter(_.nonEmpty) match
-      case None =>
-        Right(None)
-      case Some(name) =>
-        val details = obj.get("details").flatMap(_.objOpt).map(_.toMap).getOrElse(Map.empty)
+          val metadata =
+            List(
+              obj.get("modified_at").flatMap(_.strOpt).map("modifiedAt" -> _),
+              obj.get("size").flatMap(_.numOpt).map(n => "size" -> n.toLong.toString),
+              obj.get("digest").flatMap(_.strOpt).map("digest" -> _),
+              details.get("format").flatMap(_.strOpt).map("format" -> _),
+              details.get("family").flatMap(_.strOpt).map("family" -> _),
+              details.get("parameter_size").flatMap(_.strOpt).map("parameterSize" -> _),
+              details.get("quantization_level").flatMap(_.strOpt).map("quantizationLevel" -> _),
+            ).flatten.toMap
 
-        val metadata =
-          List(
-            obj.get("modified_at").flatMap(_.strOpt).map("modifiedAt" -> _),
-            obj.get("size").flatMap(_.numOpt).map(n => "size" -> n.toLong.toString),
-            obj.get("digest").flatMap(_.strOpt).map("digest" -> _),
-            details.get("format").flatMap(_.strOpt).map("format" -> _),
-            details.get("family").flatMap(_.strOpt).map("family" -> _),
-            details.get("parameter_size").flatMap(_.strOpt).map("parameterSize" -> _),
-            details.get("quantization_level").flatMap(_.strOpt).map("quantizationLevel" -> _),
-          ).flatten.toMap
-
-        Right(ModelName(name)).map: modelName =>
-          Some(
-            DiscoveredModel(
-              name = modelName,
-              provider = ProviderId("ollama"),
-              metadata = metadata
-            )
+          DiscoveredModel(
+            name = ModelName(name),
+            provider = ProviderId("ollama"),
+            metadata = metadata
           )

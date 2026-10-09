@@ -2,7 +2,7 @@
 layout: page
 title: JSON Libraries
 parent: User Guide
-nav_order: 16
+nav_order: 17
 ---
 
 # Using LLM4S with circe, play-json and zio-json
@@ -220,7 +220,7 @@ val big = 9007199254740993L // 2^53 + 1: the first integer a double cannot hold
 val parsed: Long = ujson.read(s"""{"id":$big}""")("id").num.toLong
 ```
 
-The first integer a double cannot hold, 2^53 + 1 (9007199254740993), comes back as 9007199254740992, and a circe `Decoder[Long]` then reads the rounded value. If a model has to return or receive large identifiers (snowflake ids, database keys above 9 quadrillion), make them strings in the schema and the case class, and convert in your own code.
+The first integer a double cannot hold, 2^53 + 1 (9007199254740993), comes back as 9007199254740992, and a circe `Decoder[Long]` then reads the rounded value. If a model has to return or receive large identifiers (snowflake ids, database keys above 9 quadrillion), make them strings in the schema and the case class, and convert in your own code. This rounding is a known limitation, tracked in [#1597](https://github.com/llm4s/llm4s/issues/1597).
 
 ## What this page does not cover
 

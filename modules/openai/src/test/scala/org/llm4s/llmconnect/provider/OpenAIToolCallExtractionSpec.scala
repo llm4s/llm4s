@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ completion => completionOf, transport }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.testutil.SmallStack
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -135,5 +136,47 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with 
     completion.toolCalls should have size 1
     completion.toolCalls(0).id shouldBe "call-valid"
     completion.toolCalls(0).name shouldBe "valid_func"
+  }
+
+  // The arguments string is model output: nested too deeply it is dropped like any other unparseable
+  // arguments, before it becomes a value that overflows the stack of whatever renders it next (#1562).
+  // On a 1 MB stack, so deterministic; the ids are extracted inside it so no deep value is rendered.
+  it should "drop a tool call whose arguments are nested too deeply instead of parsing them" in {
+    val model = "gpt-4"
+
+    val config = OpenAIConfig
+      .fromValues(
+        modelName = model,
+        apiKey = "test-api-key",
+        organization = None,
+        baseUrl = "https://example.invalid/v1"
+      )
+      .value
+
+    val completions = completionOf(
+      s"""{
+         |"id":"chatcmpl-4",
+         |"created":0,
+         |"choices":[{
+         |  "index":0,
+         |  "message":{
+         |    "role":"assistant",
+         |    "content":"deep call",
+         |    "tool_calls":[
+         |      {"id":"call-valid","type":"function","function":{"name":"valid_func","arguments":"{\\"x\\":1}"}},
+         |      {"id":"call-deep","type":"function","function":{"name":"deep_func","arguments":"${"[" * 100000 + "]" * 100000}"}}
+         |    ]
+         |  }
+         |}],
+         |"usage":{"completion_tokens":1,"prompt_tokens":1,"total_tokens":2}
+         |}""".stripMargin
+    )
+
+    val client = OpenAIClient.forTest(model, transport(complete = _ => completions), config)
+
+    val ids = SmallStack.run(
+      client.complete(Conversation(Seq(UserMessage("test"))), CompletionOptions()).map(_.toolCalls.map(_.id))
+    )
+    ids shouldBe Right(Right(Seq("call-valid")))
   }
 }

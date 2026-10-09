@@ -71,7 +71,8 @@ What it does **not** cover:
   Experimental. Such a type inside a Frozen module gets a documented MiMa filter when the baseline is set.
 - Anything `private` or `private[llm4s]`. The latter is internal, may change in any release, and cannot be
   reached from your package; do not declare your code in `org.llm4s` to get around that.
-- `llm4s-provider-testkit` and `llm4s-testkit` (both Beta), the samples, the workspace runner, `modules/it` and the benchmarks.
+- `llm4s-provider-testkit` (Beta; it requires JDK 21, see below) and `llm4s-testkit` (Beta), the samples, the
+  workspace runner, `modules/it` and the benchmarks.
 - Bug fixes. A fix that changes behaviour to match what the documentation or the types already promised is
   not a compatibility break; it is listed under *Fixed* in the CHANGELOG.
 
@@ -123,7 +124,10 @@ The [migration guide](migration) records each such removal.
 ## Supported platforms
 
 1.0 targets **Scala 3 only (3.7.1)**; Scala 2.13 support is deferred to after 1.0 and, if it happens,
-will target the frozen spine rather than the full tree. CI runs JDK 21.
+will target the frozen spine rather than the full tree. CI runs JDK 21. `llm4s-provider-testkit`
+requires JDK 21: its interruption checks and `LocalProviderTestServer` run on virtual threads
+([#1582](https://github.com/llm4s/llm4s/issues/1582)); the minimum JDK for the other artifacts is
+decided in [#1493](https://github.com/llm4s/llm4s/issues/1493).
 
 Both are part of what you build against: an older Scala 3 compiler cannot read the TASTy of a library
 built with a newer one, and a newer JDK's class files do not load on an older JVM. So the Scala 3 minor
