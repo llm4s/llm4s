@@ -2,7 +2,7 @@
 layout: page
 title: Testing Guide
 parent: Getting Started
-nav_order: 5
+nav_order: 7
 ---
 
 # Testing LLM4S Applications
@@ -48,6 +48,9 @@ class WeatherAgentSpec extends AnyFlatSpec with Matchers {
 
   // Mock client that returns canned responses
   class MockLLMClient extends LLMClient {
+    override def getContextWindow(): Int     = 128000
+    override def getReserveCompletion(): Int = 4096
+
     override def complete(
       conversation: Conversation,
       options: CompletionOptions = CompletionOptions()
@@ -68,8 +71,8 @@ class WeatherAgentSpec extends AnyFlatSpec with Matchers {
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = {
       val chunks = List(
-        StreamedChunk(content = Some("The weather"), finishReason = None),
-        StreamedChunk(content = Some(" is sunny"), finishReason = Some("stop"))
+        StreamedChunk(id = "mock-1", content = Some("The weather"), finishReason = None),
+        StreamedChunk(id = "mock-1", content = Some(" is sunny"), finishReason = Some("stop"))
       )
       chunks.foreach(onChunk)
       Right(Completion(
@@ -104,18 +107,21 @@ class WeatherAgentSpec extends AnyFlatSpec with Matchers {
 
   it should "handle errors gracefully" in {
     class FailingMockClient extends LLMClient {
+      override def getContextWindow(): Int     = 128000
+      override def getReserveCompletion(): Int = 4096
+
       override def complete(
         conversation: Conversation,
         options: CompletionOptions = CompletionOptions()
       ): Result[Completion] = {
-        Left(NetworkError("Connection timeout"))
+        Left(NetworkError("Connection timeout", None, "https://api.example.com"))
       }
       override def streamComplete(
         conversation: Conversation,
         options: CompletionOptions = CompletionOptions(),
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = {
-        Left(NetworkError("Connection timeout"))
+        Left(NetworkError("Connection timeout", None, "https://api.example.com"))
       }
     }
 
@@ -135,9 +141,15 @@ class WeatherAgentSpec extends AnyFlatSpec with Matchers {
 For more complex scenarios:
 
 ```scala
-import org.llm4s.error.InvalidRequestError
+import org.llm4s.error.ValidationError
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model._
+import org.llm4s.types.Result
 
 class ConfigurableMockClient(responses: Map[String, String]) extends LLMClient {
+  override def getContextWindow(): Int     = 128000
+  override def getReserveCompletion(): Int = 4096
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions()
@@ -156,7 +168,7 @@ class ConfigurableMockClient(responses: Map[String, String]) extends LLMClient {
           message = AssistantMessage(responseText)
         ))
       case None =>
-        Left(InvalidRequestError(s"No mock response for: $userMessage"))
+        Left(ValidationError("prompt", s"No mock response for: $userMessage"))
     }
   }
 
@@ -166,7 +178,7 @@ class ConfigurableMockClient(responses: Map[String, String]) extends LLMClient {
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     complete(conversation, options).map { completion =>
-      onChunk(StreamedChunk(content = Some(completion.content), finishReason = Some("stop")))
+      onChunk(StreamedChunk(id = "mock-1", content = Some(completion.content), finishReason = Some("stop")))
       completion
     }
   }
@@ -277,10 +289,9 @@ class LLMIntegrationSpec extends AnyFlatSpec with Matchers {
       given ModelRegistryService = registry
       client <- LLMConnect.getClient(config)
       completion <- client.streamComplete(
-        Conversation(Seq(UserMessage("Count: 1, 2, 3")))
-      ) { chunk =>
-        chunks = chunks :+ chunk
-      }
+        Conversation(Seq(UserMessage("Count: 1, 2, 3"))),
+        onChunk = chunk => chunks = chunks :+ chunk
+      )
     } yield completion
 
     result match {
@@ -304,11 +315,19 @@ Always test error paths:
 import org.llm4s.agent.Agent
 import org.llm4s.agent.graph.GraphError
 import org.llm4s.error.{RateLimitError, AuthenticationError, NetworkError}
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model._
+import org.llm4s.types.Result
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
 
   "Agent" should "handle rate limiting" in {
     class RateLimitedClient extends LLMClient {
+      override def getContextWindow(): Int     = 128000
+      override def getReserveCompletion(): Int = 4096
+
       override def complete(
         conversation: Conversation,
         options: CompletionOptions = CompletionOptions()
@@ -335,18 +354,21 @@ class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
 
   it should "handle authentication errors" in {
     class UnauthorizedClient extends LLMClient {
+      override def getContextWindow(): Int     = 128000
+      override def getReserveCompletion(): Int = 4096
+
       override def complete(
         conversation: Conversation,
         options: CompletionOptions = CompletionOptions()
       ): Result[Completion] = {
-        Left(AuthenticationError("Invalid API key"))
+        Left(AuthenticationError("openai", "Invalid API key", "401"))
       }
       override def streamComplete(
         conversation: Conversation,
         options: CompletionOptions = CompletionOptions(),
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = {
-        Left(AuthenticationError("Invalid API key"))
+        Left(AuthenticationError("openai", "Invalid API key", "401"))
       }
     }
 
@@ -357,19 +379,22 @@ class ErrorHandlingSpec extends AnyFlatSpec with Matchers {
 
   it should "handle network timeouts" in {
     class TimeoutClient extends LLMClient {
+      override def getContextWindow(): Int     = 128000
+      override def getReserveCompletion(): Int = 4096
+
       override def complete(
         conversation: Conversation,
         options: CompletionOptions = CompletionOptions()
       ): Result[Completion] = {
         Thread.sleep(5000)  // Simulate timeout
-        Left(NetworkError("Request timeout"))
+        Left(NetworkError("Request timeout", None, "https://api.example.com"))
       }
       override def streamComplete(
         conversation: Conversation,
         options: CompletionOptions = CompletionOptions(),
         onChunk: StreamedChunk => Unit
       ): Result[Completion] = {
-        Left(NetworkError("Request timeout"))
+        Left(NetworkError("Request timeout", None, "https://api.example.com"))
       }
     }
 
@@ -392,45 +417,59 @@ Test that tools are invoked correctly.
 > **Note**: This example uses simplified Tool API for clarity. In production, use `ToolBuilder` and `ToolFunction` from the `org.llm4s.toolapi` package. See the [Tools documentation](../agents/tools.md) for actual API.
 
 ```scala
+import org.llm4s.agent.Agent
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model._
+import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
+import org.llm4s.types.Result
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+
 class ToolCallingSpec extends AnyFlatSpec with Matchers {
 
   "Agent" should "invoke weather tool" in {
     var toolWasCalled = false
     var capturedCity: Option[String] = None
 
-    // Simplified tool example for testing concepts
-    val weatherTool = new Tool {
-      override def name: String = "get_weather"
-      override def description: String = "Get weather for a city"
-      override def parameters: ToolParameters = ToolParameters(
-        properties = Map("city" -> Property("string", "City name"))
-      )
-      override def execute(args: Map[String, Any]): Result[String] = {
-        toolWasCalled = true
-        capturedCity = args.get("city").map(_.toString)
-        Right(s"Weather in ${capturedCity.getOrElse("unknown")}: 20°C")
+    // A tool that records the arguments it was called with
+    val weatherTool = ToolBuilder[Map[String, Any], String](
+      "get_weather",
+      "Get weather for a city",
+      Schema
+        .`object`[Map[String, Any]]("Weather query parameters")
+        .withProperty(Schema.property("city", Schema.string("City name")))
+    ).withHandler { extractor =>
+      toolWasCalled = true
+      extractor.getString("city").map { city =>
+        capturedCity = Some(city)
+        s"Weather in $city: 20°C"
       }
-    }
+    }.buildSafe()
 
     // Mock client that calls the tool
     class ToolCallingMock extends LLMClient {
+      override def getContextWindow(): Int     = 128000
+      override def getReserveCompletion(): Int = 4096
+
       override def complete(
         conversation: Conversation,
         options: CompletionOptions = CompletionOptions()
       ): Result[Completion] = {
+        val message = if (conversation.messages.exists(_.isInstanceOf[ToolMessage])) {
+          AssistantMessage("Weather in London: 20°C")
+        } else {
+          AssistantMessage(
+            contentOpt = None,
+            toolCalls = Seq(ToolCall("call_1", "get_weather", ujson.Obj("city" -> "London")))
+          )
+        }
         Right(Completion(
           id = "mock-1",
           created = System.currentTimeMillis(),
-          content = "",
+          content = message.content,
           model = "mock-model",
-          message = AssistantMessage(""),
-          toolCalls = List(
-            ToolCall(
-              id = "call_1",
-              name = "get_weather",
-              arguments = Map("city" -> "London")
-            )
-          )
+          message = message,
+          toolCalls = message.toolCalls.toList
         ))
       }
       override def streamComplete(
@@ -442,12 +481,13 @@ class ToolCallingSpec extends AnyFlatSpec with Matchers {
       }
     }
 
-    Agent
-      .builder("test-agent", new ToolCallingMock)
-      .withTools(new ToolRegistry(List(weatherTool)))
-      .build()
-      .flatMap(_.run("What's the weather in London?"))
+    val outcome = for {
+      tool  <- weatherTool
+      agent <- Agent.builder("test-agent", new ToolCallingMock).withTools(new ToolRegistry(Seq(tool))).build()
+      _     <- agent.run("What's the weather in London?")
+    } yield ()
 
+    outcome.isRight shouldBe true
     toolWasCalled shouldBe true
     capturedCity shouldBe Some("London")
   }
@@ -461,6 +501,9 @@ class ToolCallingSpec extends AnyFlatSpec with Matchers {
 Test document retrieval and answer generation separately:
 
 ```scala
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+
 class RAGSpec extends AnyFlatSpec with Matchers {
 
   "VectorStore" should "retrieve relevant documents" in {
@@ -470,9 +513,9 @@ class RAGSpec extends AnyFlatSpec with Matchers {
       "Java runs on the JVM"
     )
 
-    // Note: This is conceptual pseudocode showing testing patterns.
-    // LLM4S does not currently include vector store implementations.
-    // Use your preferred vector store library (e.g., Pinecone, Milvus, ChromaDB).
+    // Note: This is conceptual pseudocode showing testing patterns. `InMemoryVectorStore`, `embedder` and
+    // `RAGPipeline` below are illustrative stand-ins, not llm4s classes with these signatures. The llm4s-rag
+    // module has real stores (SQLiteVectorStore, PgVectorStore, QdrantVectorStore).
     val vectorStore = new InMemoryVectorStore()  // Pseudocode - use your vector store
     documents.foreach(doc => vectorStore.add(doc, embedder.embed(doc)))  // embedder is conceptual
 
@@ -483,6 +526,9 @@ class RAGSpec extends AnyFlatSpec with Matchers {
 
   "RAG pipeline" should "include context in LLM prompt" in {
     class RAGMockClient extends LLMClient {
+      override def getContextWindow(): Int     = 128000
+      override def getReserveCompletion(): Int = 4096
+
       var lastPrompt: Option[String] = None
 
       override def complete(
@@ -568,6 +614,7 @@ jobs:
 ```scala
 // Tag tests by speed/cost
 import org.scalatest.Tag
+import org.scalatest.flatspec.AnyFlatSpec
 
 object UnitTest extends Tag("UnitTest")
 object IntegrationTest extends Tag("IntegrationTest")

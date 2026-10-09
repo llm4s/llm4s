@@ -1,6 +1,5 @@
 package org.llm4s.javaapi
 
-import org.llm4s.agent.AgentStatus
 import org.llm4s.error.APIError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -9,6 +8,8 @@ import org.llm4s.testutil.MockLLMClients
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import scala.jdk.CollectionConverters.*
 import upickle.default._
 
 class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
@@ -67,7 +68,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val agent  = Llm4s.createAgent(client)
     val result = agent.run("What is 6*7?")
     result.isSuccess shouldBe true
-    result.get().status shouldBe a[AgentStatus.Completed]
+    result.get().status.kind shouldBe AgentStatusKind.COMPLETED
   }
 
   it should "surface the LLM response in the final conversation" in {
@@ -75,7 +76,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val agent  = Llm4s.createAgent(client)
     val result = agent.run("Capital of France?")
     result.isSuccess shouldBe true
-    result.get().messages.last.content shouldBe "Paris"
+    result.get().messages.asScala.last.content shouldBe "Paris"
   }
 
   // ── 2. LlmResult<String> mapping from Right and Left Either values ──
@@ -191,14 +192,14 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val agent  = Llm4s.createAgent(client, tools)
     val result = agent.run("Echo 'world'")
     result.isSuccess shouldBe true
-    result.get().status shouldBe a[AgentStatus.Completed]
+    result.get().status.kind shouldBe AgentStatusKind.COMPLETED
   }
 
   it should "actually execute the tool and feed its output back into the conversation" in {
     val mock        = toolCallingClient("echo_tool", ujson.Obj("input" -> ujson.Str("world")), "Done!")
     val agent       = Llm4s.createAgent(new JLlmClient(mock), echoToolRegistry())
     val result      = agent.run("Echo 'world'")
-    val toolOutputs = result.get().messages.collect { case t: ToolMessage => t.content }
+    val toolOutputs = result.get().messages.asScala.collect { case t if t.role == JMessageRole.TOOL => t.content }
     toolOutputs should have size 1
     toolOutputs.head should include("echoed: world")
   }
@@ -207,7 +208,7 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val mock        = toolCallingClient("echo_tool", ujson.Obj("input" -> ujson.Str("world")), "Done!")
     val agent       = Llm4s.createAgent(new JLlmClient(mock))
     val result      = agent.run("Echo 'world'")
-    val toolOutputs = result.get().messages.collect { case t: ToolMessage => t.content }
+    val toolOutputs = result.get().messages.asScala.collect { case t if t.role == JMessageRole.TOOL => t.content }
     toolOutputs.exists(_.contains("echoed: world")) shouldBe false
   }
 
@@ -221,7 +222,8 @@ class JavaApiIntegrationSpec extends AnyFlatSpec with Matchers {
     val lastAssistantText = result
       .get()
       .messages
-      .collect { case m: AssistantMessage if m.toolCalls.isEmpty => m.content }
+      .asScala
+      .collect { case m if m.role == JMessageRole.ASSISTANT && m.toolCalls.isEmpty => m.content }
       .lastOption
     lastAssistantText shouldBe Some("All done")
   }

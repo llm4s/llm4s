@@ -79,7 +79,7 @@ object ModelUsage {
  * `totalCost` uses [[BigDecimal]] rather than `Double` to keep cumulative sums
  * deterministic regardless of the number of requests.
  *
- * The agent runtime's `AgentState` carries one for a whole run; `CostTracker`
+ * `AgentResult.usage` (`llm4s-agent`) carries one for its thread; `CostTracker`
  * (`llm4s-observability`) builds one from recorded metrics. It lives here, beside
  * [[TokenUsage]], so that neither needs the other (#1242).
  *

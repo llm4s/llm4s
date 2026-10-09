@@ -106,6 +106,19 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     }
   }
 
+  it should "redact credentials echoed in an error body (#1674)" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+
+    (mockClient.get _)
+      .when(testPointUrl, *, *, *)
+      .returns(Right(httpResponse(500, org.llm4s.testutil.EchoedCredentials.Text)))
+
+    val error = store.get("test-1").left.toOption.get.formatted
+    error should include("[REDACTED]")
+    org.llm4s.testutil.EchoedCredentials.leaked(error) shouldBe empty
+  }
+
   it should "handle other HTTP errors (403 Forbidden)" in {
     val mockClient = createMockClient()
     val store      = createStore(mockClient)

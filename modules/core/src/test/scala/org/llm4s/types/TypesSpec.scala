@@ -141,28 +141,6 @@ class TypesSpec extends AnyFlatSpec with Matchers {
   }
 
   // ==========================================================================
-  // AgentId Tests
-  // ==========================================================================
-
-  "AgentId" should "generate unique IDs" in {
-    val id1 = AgentId.generate()
-    val id2 = AgentId.generate()
-
-    id1.value should not be id2.value
-  }
-
-  // ==========================================================================
-  // PlanId Tests
-  // ==========================================================================
-
-  "PlanId" should "generate unique IDs" in {
-    val id1 = PlanId.generate()
-    val id2 = PlanId.generate()
-
-    id1.value should not be id2.value
-  }
-
-  // ==========================================================================
   // Result Companion Object Tests
   // ==========================================================================
 
