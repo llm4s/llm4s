@@ -185,11 +185,13 @@ way, with the same buffer and the same rules: a slow consumer loses live events 
 `StreamEvent.LiveGap(n)`, never cancels the run; a run that ends without a terminal event still
 ends the stream with the run's error; and cancelling the stream cancels the run and returns once it
 has ended, so the thread can be recovered at once. Both take the thread id as a `String`, as fs2 and
-ZIO take a `ThreadId`; `streamResume` and `streamRecover` exist on both.
+ZIO take a `ThreadId`; `streamResume` and `streamRecover` exist on both. To read what a suspended
+turn waits for (`result.status().pending()`, or `JAgent.pending` and `AgentKt.pending`), or to resume or recover without a stream, see
+[Suspended turns from Java and Kotlin](index#suspended-turns-from-java-and-kotlin).
 
 **Java.** `JAgent.stream(threadId, query, listener)` returns an `LlmResult<AgentStream>` at once - a
 failed result for a refused start, and the listener hears nothing. An `AgentStreamListener` gets
-each event through `onEvent`, then exactly one of `onComplete(AgentResult)` or
+each event through `onEvent`, then exactly one of `onComplete(JAgentResult)` or
 `onError(LlmException)`, all on the stream's own thread. Only `onEvent` is abstract, so a lambda is
 a listener; `StreamEvents.decode` reads an event as an `Optional`:
 
@@ -200,7 +202,7 @@ LlmResult<AgentStream> started = agent.stream(threadId, "Explain monads", event 
     StreamEvents.decode(AgentEvents.TextDelta(), event).ifPresent(d -> System.out.print(d.text()));
     if (event instanceof StreamEvent.LiveGap) System.out.print("[...]");
 });
-LlmResult<AgentResult> result = started.get().await();   // or started.get().cancel()
+LlmResult<JAgentResult> result = started.get().await();   // or started.get().cancel()
 ```
 
 `AgentStream.await()` returns once the listener has returned from its last call, with the same
@@ -217,17 +219,20 @@ system prompt or a runtime. `streamResume` takes a `List<Answer>`, built with `A
 
 **Kotlin.** `AgentKt.stream(threadId, query)` is a cold `Flow<AgentStreamItem>`: each collection
 runs the turn, emitting `AgentStreamItem.Event(event)` for each event, then
-`AgentStreamItem.Done(result)`. A refused start or a failed run throws `LLMException`. Cancelling
+`AgentStreamItem.Done(result)`, a `JAgentResult`. A refused start or a failed run throws `LLMException`. Cancelling
 the collection - its scope, `take(n)`, `withTimeout` - cancels the turn; starting and cancelling it
 run on `Dispatchers.IO`. A turn cancelled by anything but the collection fails it with
-`LLMException`, as in fs2 and ZIO.
+`LLMException`, as in fs2 and ZIO. So does a delivery that dies of a fatal error (an
+`OutOfMemoryError`, a `LinkageError`): the Java listener then hears no terminal callback, and the flow -
+or `run`, `continueConversation`, `resume` or `recover` - ends with the facade's report of it instead of
+suspending.
 
 ```kotlin
 val agent = Llm4s.createAgent(client, ToolRegistry.empty(), streaming = true)
 agent.stream(threadId, "Explain monads").collect { item ->
     when (item) {
         is AgentStreamItem.Event -> StreamEvents.decode(AgentEvents.TextDelta(), item.event).ifPresent { print(it.text()) }
-        is AgentStreamItem.Done  -> println("\n${item.result.status()}")
+        is AgentStreamItem.Done  -> println("\n${item.result.status().kind()}")
     }
 }
 ```

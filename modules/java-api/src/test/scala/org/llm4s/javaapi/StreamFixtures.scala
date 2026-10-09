@@ -1,6 +1,6 @@
 package org.llm4s.javaapi
 
-import org.llm4s.agent.{ Agent, AgentBuilder, AgentResult }
+import org.llm4s.agent.{ Agent, AgentBuilder }
 import org.llm4s.agent.graph.{
   Checkpointer,
   Commit,
@@ -131,7 +131,7 @@ private[javaapi] object StreamFixtures {
   final class Recorder(onEach: StreamEvent => Unit = _ => ()) extends AgentStreamListener {
     private val received = new CopyOnWriteArrayList[StreamEvent]()
     val threads          = new CopyOnWriteArrayList[Thread]()
-    val completed        = new AtomicReference[AgentResult](null)
+    val completed        = new AtomicReference[JAgentResult](null)
     val failed           = new AtomicReference[LlmException](null)
     val terminals        = new AtomicInteger(0)
     val ended            = new CountDownLatch(1)
@@ -141,8 +141,8 @@ private[javaapi] object StreamFixtures {
       received.add(event)
       onEach(event)
     }
-    override def onComplete(result: AgentResult): Unit = terminal(completed.set(result))
-    override def onError(error: LlmException): Unit    = terminal(failed.set(error))
+    override def onComplete(result: JAgentResult): Unit = terminal(completed.set(result))
+    override def onError(error: LlmException): Unit     = terminal(failed.set(error))
 
     private def terminal(record: => Unit): Unit = {
       threads.add(Thread.currentThread())

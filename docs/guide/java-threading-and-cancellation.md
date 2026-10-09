@@ -28,8 +28,9 @@ The Java snippets below are compiled by
 
 ## Which calls block
 
-`JLlmClient.complete(...)` and `JAgent.run(...)` block the calling thread until the answer is back. There is no
-asynchronous variant in the Java API. `LlmResult.toCompletableFuture()` does not make a call asynchronous: it
+`JLlmClient.complete(...)`, `JAgent.run(...)`, `JAgent.continueConversation(...)`, `JAgent.resume(...)` and
+`JAgent.recover(...)` block the calling thread until the answer is back. The only asynchronous variants in the
+Java API are `JAgent.stream`, `streamResume` and `streamRecover`, which return an `AgentStream` at once. `LlmResult.toCompletableFuture()` does not make a call asynchronous: it
 returns a future that is already complete, so `cancel(true)` on it returns `false` and changes nothing.
 
 To run a call off your own thread, submit it to an executor:
@@ -126,7 +127,17 @@ path and against a custom client that throws `InterruptedException`, and checks 
 If the thread blocked in `JAgent.run` is interrupted, `run` returns a failed result with a `CancelledError` and the
 interrupt flag set, but the run itself carries on: its model call is neither interrupted nor stopped, and it
 finishes in the background. This is the documented behaviour of the runtime's `RunHandle.await`: "only `cancel`
-stops a run". `JAgent` has no method that cancels a run, so from Java there is no way to stop one in this release.
+stops a run". `continueConversation`, `resume` and `recover` behave the same way: interrupting the caller stops
+only the wait.
+
+To stop a turn from Java, start it with `JAgent.stream`, `streamResume` or `streamRecover` instead and call
+`cancel()` on the returned `AgentStream`. `cancel()` stops the turn and returns once it has ended, and leaves the
+thread for `streamRecover` or `recover`. This is checked by `JAgentStreamSpec` and `JAgentPendingSpec`, not by
+`ThreadingModelSpec`.
+
+The Kotlin API differs here: every `AgentKt` suspend function that runs a turn - `run`, `continueConversation`,
+`resume` and `recover` - runs it on these streams, so cancelling the calling coroutine cancels the turn (see
+[Suspended turns from Java and Kotlin](agents/#suspended-turns-from-java-and-kotlin)).
 
 ## Timeouts
 

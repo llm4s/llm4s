@@ -28,6 +28,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.llm4s.javaapi.Llm4s as JLlm4s
+import java.util.Optional
 
 private const val RegistryResource = "llm4s.modelRegistry.resourcePath"
 private const val RegistryFile = "llm4s.modelRegistry.filePath"
@@ -143,7 +144,7 @@ class KotlinApiIntegrationTest {
         Llm4s.createDefaultClient().use { client ->
             val result = Llm4s.createAgent(client).run("a question")
 
-            assertEquals(scala.Option.apply("the answer"), result.answer())
+            assertEquals(Optional.of("the answer"), result.answer())
             assertEquals("the answer", result.messages().last().content())
         }
     }

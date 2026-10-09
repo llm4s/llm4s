@@ -170,6 +170,69 @@ which belong to the `Agent`. `AgentResult` is a value to read, not something to 
   `forget` refuses a thread whose run is still active (`ThreadBusy`) or that belongs to another
   tenant (`TenantMismatch`); an unknown thread is `Right(())`.
 
+### Suspended turns from Java and Kotlin
+
+The Java facade (`llm4s-java-api`) returns every turn as a `JAgentResult`, read without Scala types:
+`answer()` is an `Optional<String>`, `messages()` a `java.util.List<JMessage>`, `usage()` a
+`JUsageSummary`, and `status()` a `JAgentStatus` whose `kind()` is the Java enum `AgentStatusKind` -
+`COMPLETED`, `BLOCKED`, `STEP_LIMIT_REACHED` or `SUSPENDED` - with `answer()`, `guardrail()` and
+`reason()` as `Optional<String>`s (see the [Java guide](../java#an-agent-turn)). A `SUSPENDED`
+status's `pending()` is a `java.util.List<PendingInterrupt>`: the turn's approvals, then its
+questions; it is empty for any other status, and `JAgent.pending(result)` is a shortcut for it. Each `PendingInterrupt` has
+`id()`, `kind()` (the Java enum `InterruptKind`, `APPROVAL` or `QUESTION`), `toolName()` and
+`argumentsJson()`. An approval also has `reason()`, and a question has `questionJson()`, the tool's
+question as JSON. Both are `Optional<String>`, empty for the other kind. Answer each pending item
+with `Answer.approve(id)`, `reject(id, reason)`, `edit(id, argumentsJson)` or `reply(id, json)`, then
+call `agent.resume(threadId, answers)`, which blocks like `run` and returns an `LlmResult<JAgentResult>`.
+You can answer only some of them: the result is `SUSPENDED` again, with the rest still pending.
+
+```java
+LlmResult<JAgentResult> turn = agent.run("Deploy the release");
+while (turn.get().status().kind() == AgentStatusKind.SUSPENDED) {
+    List<Answer> answers = new ArrayList<>();
+    for (PendingInterrupt p : turn.get().status().pending()) {
+        switch (p.kind()) {
+            case APPROVAL -> answers.add(Answer.approve(p.id()));        // or reject / edit
+            case QUESTION -> answers.add(Answer.reply(p.id(), "{\"ok\":true}"));
+        }
+    }
+    turn = agent.resume(turn.get().threadId(), answers);
+}
+System.out.println(turn.get().answer().orElse("(" + turn.get().status().kind() + ")"));
+```
+
+`agent.recover(threadId)` continues a turn that failed or was cancelled, and also returns an
+`LlmResult<JAgentResult>`. A failed result means one of these: a malformed answer, an empty answers
+list (`InvalidResume`), an answer to an id the thread is not waiting for, a thread that is not suspended (`resume`), or a thread with nothing to
+recover. `resume` and `recover` handle an interrupt the way `run` does: the call returns a
+`CancelledError`, but the turn keeps running. To cancel a turn, use `streamResume` or `streamRecover`
+and cancel the stream (see [Streaming Events](streaming#java-and-kotlin)).
+
+The Kotlin API reuses these types: every `AgentKt` turn returns a `JAgentResult`, and `when` over
+`status().kind()` covers it. `AgentKt.pending(result)` is the same `List<PendingInterrupt>`.
+`agent.resume(threadId, answers)` and `agent.recover(threadId)` are `suspend` functions that return
+the `JAgentResult` or throw `LLMException`. Every `AgentKt` suspend function that runs a turn - `run`,
+`continueConversation`, `resume` and `recover` - runs it as the matching flow does (`stream`,
+`streamResume`, `streamRecover`), so cancelling the caller - a cancelled scope, `withTimeout` -
+cancels the turn. The call throws `CancellationException` once the turn has ended, and the
+conversation thread is no longer busy: it is left for `recover`, which finishes the cancelled turn.
+If the turn had already completed when the cancellation arrived, the call still throws
+`CancellationException`, but the turn's result is committed to the thread: `recover` then has nothing to
+recover and throws `LLMException` ("no incomplete execution"), and the next turn continues from that result.
+
+```kotlin
+var turn = agent.run("Deploy the release")
+while (turn.status().kind() == AgentStatusKind.SUSPENDED) {
+    val answers = turn.status().pending().map { p ->
+        when (p.kind()) {
+            InterruptKind.APPROVAL -> Answer.approve(p.id())
+            InterruptKind.QUESTION -> Answer.reply(p.id(), """{"ok":true}""")
+        }
+    }
+    turn = agent.resume(turn.threadId(), answers)
+}
+```
+
 ### Agent Lifecycle
 
 ```

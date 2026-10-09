@@ -278,6 +278,44 @@ with the thread's interrupt flag still set. `InterruptedException` is never thro
 and Java will not let you write `catch (InterruptedException e)` around the call; test the result for a
 `CancelledError` instead. The [threading and cancellation guide](java-threading-and-cancellation) has the details.
 
+## An agent turn
+
+`Llm4s.createAgent(client)` wraps a client in a `JAgent`. `run` and `continueConversation` block, like `complete`, and
+return an `LlmResult<JAgentResult>`. A `JAgentResult` is read with JDK types and this module's own: `answer()` is an
+`Optional<String>`, `messages()` a `java.util.List<JMessage>`, and `status().kind()` the Java enum `AgentStatusKind`, so
+a `switch` covers every way a turn ends:
+
+```java
+JAgent agent = Llm4s.createAgent(client);
+JAgentResult result = agent.run("What is 2+2?").get();
+
+switch (result.status().kind()) {
+    case COMPLETED -> System.out.println(result.answer().orElseThrow());
+    case BLOCKED -> System.out.println("Blocked by " + result.status().guardrail().orElseThrow());
+    case STEP_LIMIT_REACHED -> System.out.println("Hit the step limit");
+    case SUSPENDED -> System.out.println("Waiting for " + result.status().pending().size() + " answers");
+}
+for (JMessage message : result.messages()) {
+    System.out.println(message.role() + ": " + message.content());
+}
+JUsageSummary usage = result.usage();
+System.out.println(usage.inputTokens() + " tokens in, " + usage.outputTokens() + " out");
+
+JAgentResult next = agent.continueConversation(result, "And 3+3?").get();
+```
+
+Each status's data has its own accessor, empty for the other kinds: `answer()` for `COMPLETED`, `guardrail()` and
+`reason()` for `BLOCKED`, and `pending()` for `SUSPENDED` - the approvals and questions the turn waits for, which the
+agent guide's [suspended turns](agents/#suspended-turns-from-java-and-kotlin) section answers. A `JMessage` has a
+`role()` (the Java enum `JMessageRole`), its `content()`, the `toolCalls()` an assistant message asked for, with their
+arguments as JSON text (an object, as a model sends them; a call built with a `ujson.Str` renders as a JSON string
+literal), and the `toolCallId()` a tool message answers. `usage()` counts tokens as `long`s, the cost as a
+`java.math.BigDecimal` (two usages are equal when their costs are numerically equal, whatever the scale), and
+`byModel()` breaks both down per model. No accessor returns a Scala or `ujson` type.
+
+These types are values, but not `Serializable`. Their `toString` prints the full text - a message's content, a tool
+call's arguments, an answer or a guardrail's reason - as the Scala types do, so mind what you log.
+
 ## What is not here yet
 
 `llm4s-java-api` covers a client and a conversation. These are not available from Java yet, each with the issue that
@@ -290,7 +328,7 @@ tracks it:
 | An asynchronous call | none; wrap `complete` yourself, or use the [Spring Boot starter](spring-boot)'s `completeAsync`. Threading and cancellation are being documented in [#1500](https://github.com/llm4s/llm4s/issues/1500) |
 | Structured output into a Java record | [#1486](https://github.com/llm4s/llm4s/issues/1486) |
 | Defining tools | an agent takes a Scala `ToolRegistry`: [#1484](https://github.com/llm4s/llm4s/issues/1484) |
-| Agents | `Llm4s.createAgent` and `JAgent` exist, but the Java agent API is being reworked ([#1386](https://github.com/llm4s/llm4s/pull/1386), [#1392](https://github.com/llm4s/llm4s/issues/1392), [#1393](https://github.com/llm4s/llm4s/issues/1393)), so this guide does not cover it yet |
+| Agents beyond a turn | [An agent turn](#an-agent-turn) reads a result; the agent guide covers [streaming a turn](agents/streaming#java-and-kotlin) and [suspended turns](agents/#suspended-turns-from-java-and-kotlin) from Java. Tools still need a Scala `ToolRegistry` (row above) |
 | Embeddings and RAG | [#1490](https://github.com/llm4s/llm4s/issues/1490), [#1491](https://github.com/llm4s/llm4s/issues/1491) |
 | A fake client for your own tests | [#1497](https://github.com/llm4s/llm4s/issues/1497) |
 

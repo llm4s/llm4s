@@ -43,8 +43,18 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
   /** What a snippet printed. System.out and System.err are process-wide, so the capture is serialised. */
   final private case class Printed(out: String, err: String)
 
-  /** What a stream received, with Windows line endings read as `\n`, since `println` writes the platform's separator. */
-  private def text(stream: ByteArrayOutputStream): String = stream.toString("UTF-8").replace("\r\n", "\n")
+  /**
+   * What a stream received, with Windows line endings read as `\n`, since `println` writes the platform's separator.
+   * The console log lines of other suites running at the same time (`HH:mm:ss.SSS [thread] LEVEL ...`) are dropped:
+   * the redirect is process-wide, so they land here too.
+   */
+  private def text(stream: ByteArrayOutputStream): String =
+    stream
+      .toString("UTF-8")
+      .replace("\r\n", "\n")
+      .split("(?<=\n)")
+      .filterNot(_.matches("(?s)\\d{2}:\\d{2}:\\d{2}\\.\\d{3} \\[.*"))
+      .mkString
 
   private def captured(body: => Unit): Printed = JavaGuideSpec.synchronized {
     val out = new ByteArrayOutputStream
@@ -119,6 +129,16 @@ class JavaGuideSpec extends AnyWordSpec with Matchers {
     "throw LlmException from get when the call failed" in {
       val thrown = intercept[LlmException](GuideSnippets.readingAResult(client(new FailingMock("network down"))))
       thrown.getMessage should include("network down")
+    }
+  }
+
+  "The agent-turn block" should {
+
+    "switch over the status, print the history and usage, and continue the conversation" in {
+      var next: JAgentResult = null
+      val printed            = captured { next = GuideSnippets.agentTurn(client(new SimpleMock("4"))) }
+      printed shouldBe Printed("4\nUSER: What is 2+2?\nASSISTANT: 4\n100 tokens in, 50 out\n", "")
+      next.messages.asScala.map(_.content) shouldBe Seq("What is 2+2?", "4", "And 3+3?", "4")
     }
   }
 

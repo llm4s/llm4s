@@ -1,6 +1,5 @@
 package org.llm4s.javaapi
 
-import org.llm4s.agent.AgentResult
 import org.llm4s.agent.graph.StreamEvent
 
 /**
@@ -13,7 +12,7 @@ import org.llm4s.agent.graph.StreamEvent
  * {{{
  * LlmResult<AgentStream> started = agent.stream(threadId, "Explain monads", event ->
  *     StreamEvents.decode(AgentEvents.TextDelta(), event).ifPresent(d -> System.out.print(d.text())));
- * LlmResult<AgentResult> result = started.get().await();
+ * LlmResult<JAgentResult> result = started.get().await();
  * }}}
  *
  * A listener slower than the stream never holds the turn up: live events (text deltas, tool
@@ -28,7 +27,7 @@ trait AgentStreamListener {
   def onEvent(event: StreamEvent): Unit
 
   /** The turn's result, after its last event. Called at most once, and never together with [[onError]]. */
-  def onComplete(result: AgentResult): Unit = ()
+  def onComplete(result: JAgentResult): Unit = ()
 
   /**
    * The error the turn failed with - or, after [[AgentStream.cancel]], the cancellation - after its
