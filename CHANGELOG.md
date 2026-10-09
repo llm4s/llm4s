@@ -2029,7 +2029,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the body. The caller gets `TIMEOUT: HTTP request did not complete within <n> ms ...` at the deadline, and the
     abandoned connection is closed. The field keeps its name and `FiniteDuration` type.
   - **Migration.** A request to a host that resolves into one of the newly blocked ranges is now refused with
-    `SSRF_BLOCKED` (use `HttpConfig.withInternalIPsAllowed` or `allowedDomains` deliberately if you need one). A
+    `SSRF_BLOCKED` (use `HttpConfig.withInternalIPsAllowed` deliberately if you need one; `allowedDomains` does not lift the check). A
     redirect chain that relied on credentials surviving a change of host, port or scheme, or a return to the original
     host, no longer sends them. A `timeout` sized for a slow single read may now be too short for a whole download or
     a redirect chain: size it for the entire call. A zero `timeout` used to mean "no timeout" (`HttpURLConnection`'s

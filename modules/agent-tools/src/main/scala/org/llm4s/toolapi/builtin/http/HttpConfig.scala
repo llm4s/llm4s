@@ -22,7 +22,10 @@ import scala.concurrent.duration.*
  * @param timeout Deadline for the whole call: connecting, every redirect hop and reading the body must all finish
  *                within it (the SSRF check's name resolution too), so a server that sends slowly cannot hold the
  *                call longer. A call that runs out of time fails with a `TIMEOUT:` error. A zero or negative timeout
- *                fails every call.
+ *                fails every call; one beyond 100 years is treated as 100 years. A `TIMEOUT:` releases the caller,
+ *                not the request: one already sent may still be delivered and acted on by the server (a write is
+ *                not rolled back), and a DNS lookup cannot be interrupted, so the worker thread may outlive the
+ *                deadline by up to the resolver's own timeout ([[https://github.com/llm4s/llm4s/issues/1734 #1734]]).
  * @param followRedirects Whether to follow HTTP redirects.  Defaults to `false`; when
  *                        `true` each redirect hop is re-validated against the SSRF filter
  *                        before the next request is issued (open-redirect bypass prevention).

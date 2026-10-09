@@ -9,10 +9,11 @@ import upickle.default._
 import java.io.InputStream
 import java.net.{ HttpURLConnection, SocketTimeoutException, URI }
 import java.nio.charset.StandardCharsets
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.{ Executors, ScheduledThreadPoolExecutor, ThreadFactory, TimeUnit, TimeoutException }
 import scala.annotation.tailrec
-import scala.concurrent.duration.{ Deadline, DurationLong, FiniteDuration }
+import scala.concurrent.duration.{ Deadline, Duration, DurationInt, DurationLong, FiniteDuration }
 import scala.concurrent.{ Await, ExecutionContext, Future }
 import scala.util.Try
 
@@ -185,7 +186,7 @@ object HTTPTool {
   private[http] object Origin {
     def of(url: java.net.URL): Origin = {
       val port = if (url.getPort == -1) url.getDefaultPort else url.getPort
-      Origin(url.getProtocol.toLowerCase, Option(url.getHost).getOrElse("").toLowerCase, port)
+      Origin(url.getProtocol.toLowerCase(Locale.ROOT), Option(url.getHost).getOrElse("").toLowerCase(Locale.ROOT), port)
     }
   }
 
@@ -204,7 +205,7 @@ object HTTPTool {
   ): (Option[Map[String, String]], Boolean) = {
     val strip = alreadyStripped || hop != initial
     val sent =
-      if (strip) headers.map(_.filterNot { case (k, _) => SensitiveHeaders.contains(k.toLowerCase) })
+      if (strip) headers.map(_.filterNot { case (k, _) => SensitiveHeaders.contains(k.toLowerCase(Locale.ROOT)) })
       else headers
     (sent, strip)
   }
@@ -244,6 +245,20 @@ object HTTPTool {
     s"TIMEOUT: HTTP request did not complete within ${DurationRounding.ceilMillis(config.timeout)} ms " +
       "(connect, redirects and body read)"
 
+  /**
+   * The longest timeout honoured. `Deadline.now + d` throws once the sum passes `Long.MaxValue` nanoseconds, so a
+   * larger timeout (up to `FiniteDuration`'s own limit of about 292 years) is treated as this one, which is still
+   * effectively "never".
+   */
+  private val MaxTimeout: FiniteDuration = 36500.days
+
+  /** `timeout` from now, capped so that building the deadline can never overflow. */
+  private[http] def deadlineAfter(timeout: FiniteDuration): Deadline = {
+    val now  = Deadline.now
+    val room = (Long.MaxValue - math.max(now.time.toNanos, 0L)).nanos
+    now + timeout.min(MaxTimeout).min(room)
+  }
+
   private def makeRequest(
     urlStr: String,
     method: String,
@@ -256,10 +271,11 @@ object HTTPTool {
     if (!config.isMethodAllowed(method)) {
       Left(s"HTTP method '$method' is not allowed. Allowed: ${config.allowedMethods.mkString(", ")}")
     } else {
-      // One deadline for the whole call: name resolution, every connect, every redirect hop and every body read.
-      val deadline = Deadline.now + config.timeout
-      if (deadline.isOverdue()) Left(timeoutMessage(config))
+      if (config.timeout <= Duration.Zero)
+        Left(s"TIMEOUT: HttpConfig.timeout must be positive (got ${config.timeout}), so no request was sent")
       else {
+        // One deadline for the whole call: name resolution, every connect, every redirect hop and every body read.
+        val deadline = deadlineAfter(config.timeout)
         val call = Future(followRedirects(urlStr, method, headers, body, contentType, config, deadline))(callThreads)
         Try(Await.result(call, deadline.timeLeft)).toEither.left.map {
           case _: TimeoutException => timeoutMessage(config)
@@ -306,7 +322,7 @@ object HTTPTool {
       Try(URI.create(currentUrlStr).toURL).toEither.left
         .map(e => s"Invalid URL: ${e.getMessage}")
         .flatMap { url =>
-          val scheme = url.getProtocol.toLowerCase
+          val scheme = url.getProtocol.toLowerCase(Locale.ROOT)
           if (scheme != "http" && scheme != "https")
             Left(
               s"UNSUPPORTED_PROTOCOL: Only http and https are allowed (got: '$scheme')"

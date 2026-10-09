@@ -285,7 +285,10 @@ What the controls do, and where they stop:
   IPv4 address), all before sending a request. Redirects are not followed unless you turn that on; when they are,
   each hop is checked again, and `Authorization`, `Cookie` and `Proxy-Authorization` are dropped from the first hop
   that leaves the original scheme, host and port, and from every hop after it. `timeout` bounds the whole call, so a
-  server that answers a byte at a time cannot hold the tool past it. The address check resolves the host name, and
+  server that answers a byte at a time cannot hold the tool past it. A `TIMEOUT` releases the caller, not the
+  request: one already sent may still be delivered and acted on (a `POST` is not rolled back), and a DNS lookup cannot
+  be interrupted, so the tool's worker thread may outlive the deadline by up to the resolver's own timeout
+  ([#1734](https://github.com/llm4s/llm4s/issues/1734)). The address check resolves the host name, and
   the connection then resolves it again, so a domain whose DNS answer changes in between (DNS rebinding) can pass the check with a public address and connect to a private one. The request still
   goes out from your network, so do not give it to a model that handles untrusted text next to credentials or
   internal services the server can reach; where that matters, also block private ranges at the network level, for

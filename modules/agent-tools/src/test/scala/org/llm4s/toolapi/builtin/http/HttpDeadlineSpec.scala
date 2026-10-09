@@ -198,4 +198,37 @@ class HttpDeadlineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     result.swap.toOption.get should startWith("TIMEOUT")
     took should be < Slack
   }
+
+  it should "fail a negative timeout at once, saying the timeout must be positive" in {
+    val (result, took) = timed(s"http://127.0.0.1:$port/fast", config(-500.millis))
+    val message        = result.swap.toOption.get
+    message should startWith("TIMEOUT")
+    message should include("must be positive")
+    message should include("-500 milliseconds")
+    took should be < Slack
+  }
+
+  it should "accept a timeout too large to add to the current time (it used to overflow)" in {
+    val huge = Seq(
+      FiniteDuration(Long.MaxValue, NANOSECONDS),
+      FiniteDuration(Long.MaxValue / 1000, MICROSECONDS),
+      FiniteDuration(Long.MaxValue / 1000000, MILLISECONDS),
+      106751.days,
+      100000.days
+    )
+    huge.foreach { timeout =>
+      withClue(s"timeout $timeout: ") {
+        val (result, took) = timed(s"http://127.0.0.1:$port/fast", config(timeout))
+        result.map(r => (r.statusCode, r.body)) shouldBe Right((200, "fast"))
+        took should be < Slack
+      }
+    }
+  }
+
+  it should "build a deadline for any timeout without overflowing" in {
+    val deadline = HTTPTool.deadlineAfter(FiniteDuration(Long.MaxValue, NANOSECONDS))
+    deadline.isOverdue() shouldBe false
+    deadline.timeLeft should be > 36000.days
+    HTTPTool.deadlineAfter(2.seconds).timeLeft should be <= 2.seconds
+  }
 }
