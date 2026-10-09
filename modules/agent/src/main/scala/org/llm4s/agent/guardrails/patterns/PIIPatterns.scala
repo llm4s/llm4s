@@ -57,10 +57,13 @@ object PIIPatterns {
     /**
      * Social Security Number (US format: XXX-XX-XXXX)
      * Validates against known invalid SSNs (000, 666, 9XX prefix)
+     *
+     * The groups may be separated by a dash or by horizontal whitespace (`\h`: a space, a tab, a no-break space),
+     * never by a line break, so digits on separate lines are not joined into one number.
      */
     case object SSN extends PIIType {
       val name                        = "SSN"
-      val pattern                     = """(?<!\d)(?!000|666|9\d{2})\d{3}[-\s]?(?!00)\d{2}[-\s]?(?!0000)\d{4}(?!\d)""".r
+      val pattern                     = """(?<!\d)(?!000|666|9\d{2})\d{3}[-\h]?(?!00)\d{2}[-\h]?(?!0000)\d{4}(?!\d)""".r
       def mask(value: String): String = "[REDACTED_SSN]"
     }
 
@@ -82,10 +85,16 @@ object PIIPatterns {
 
     /**
      * Email addresses (RFC 5322 simplified)
+     *
+     * A match attempt starts only where a run of local-part characters starts, or where the previous match ended
+     * (`\G`). Every attempt inside a run would scan to the same `@`, so this finds exactly the matches an
+     * unanchored local part would, and scans each run once: the time is linear in the length of the text, where
+     * an unanchored local part took quadratic time on a long run of letters or digits (#1713).
      */
     case object Email extends PIIType {
-      val name                        = "Email"
-      val pattern                     = """[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}""".r
+      val name = "Email"
+      val pattern =
+        """(?:\G|(?<![a-zA-Z0-9._%+\-]))[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}""".r
       def mask(value: String): String = "[REDACTED_EMAIL]"
     }
 
@@ -96,13 +105,18 @@ object PIIPatterns {
      * `+44 (0) 20 7946 0958`, `+81 3-1234-5678`).
      *
      * An international number needs its `+`: a plain run of digits is not treated as a phone number unless it has
-     * the US shape. A `+` followed by more than 15 digits is not matched.
+     * the US shape. A `+` followed by more than 15 contiguous digits is not matched. With separators, a match ends
+     * after at most 15 digits and leaves the rest: `+44 20 7946 0958 1234` masks `+44 20 7946 0958` and keeps
+     * ` 1234`.
+     *
+     * A `+` right after `UTC` or `GMT`, with or without a space between (`UTC+5`, `GMT +1`, any case), is a
+     * time-zone offset, not the start of an international number, so `UTC+5 2026-10-09 12:30` is left alone.
      */
     case object Phone extends PIIType {
       val name = "Phone"
       val pattern =
         ("""(?<!\d)(?:\+?1[-.\h]?)?(?:\(\d{3}\)|\d{3})[-.\h]?\d{3}[-.\h]?\d{4}(?!\d)""" +
-          """|(?<!\d)\+\d(?:[-.\h()]{0,2}\d){7,14}(?!\d)""").r
+          """|(?<!\d)(?<!(?i:UTC|GMT)\h?)\+\d(?:[-.\h()]{0,2}\d){7,14}(?!\d)""").r
       def mask(value: String): String = "[REDACTED_PHONE]"
     }
 

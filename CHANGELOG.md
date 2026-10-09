@@ -2016,6 +2016,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `capacity` (the rest dropped and reported as a `StreamEvent.LiveGap`, as for a full queue), and
   delivered in their place among the durable events: after those committed before them, before
   those committed after. Durable delivery is unchanged. No API change.
+- **`llm4s-agent`: the PII Email pattern runs in linear time; an SSN stays within a line; `UTC+5` is not a phone number**
+  ([#1713](https://github.com/llm4s/llm4s/issues/1713)):
+  - `PIIType.Email`, in the default type set of `PIIMasker` and `PIIDetector`, began a match attempt at every
+    character of a run of letters, digits or `._%+-` and scanned to the end of the run each time, so it took
+    quadratic time: 10.9 s on 20,000 `a`s, and hours on a million-character base64 blob or minified line - a
+    denial-of-service risk in a guardrail that runs on every message. An attempt now starts only at the start of
+    such a run or where the previous match ended (`\G`), and a million-character run takes milliseconds. An attempt
+    inside a run succeeds exactly when one at its start does, so the matches are unchanged, back-to-back addresses
+    such as `a@b.com_x@y.org` included. The other PII patterns were measured on million-character adversarial runs
+    and are linear.
+  - `PIIType.SSN` separated its digit groups with `\s`, so `123\n45\n6789` was masked as one SSN. It now takes a
+    dash or horizontal whitespace (`\h`), as the phone and card patterns do: groups split by LF, CR, a vertical tab
+    or a form feed are no longer joined, and groups split by a no-break space or another Unicode horizontal space
+    now are.
+  - `PIIType.Phone` read a time-zone offset and the date after it as an international number, so
+    `UTC+5 2026-10-09 12:30` became `UTC[REDACTED_PHONE]:30`. A `+` right after `UTC` or `GMT` (any case, with or
+    without one space between) no longer starts an international number; a `+` after any other word still does, so
+    `a@b.com+44 20 7946 0958` and `Phone+44 20 7946 0958` are still masked. The Scaladoc now says that a separated
+    number longer than 15 digits is masked up to its 15th digit and the rest kept, which is what the pattern does.
 - **Streamed tool-call arguments reach `onChunk` verbatim** ([#1212](https://github.com/llm4s/llm4s/issues/1212)):
   `OpenAICompatibleClient` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, generic) and `OpenAIClient` (OpenAI,
   Azure, Requesty) used to hand `onChunk` each tool-call argument fragment already parsed, so a fragment that was
