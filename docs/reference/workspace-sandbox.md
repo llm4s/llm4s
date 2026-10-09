@@ -106,6 +106,11 @@ Over the WebSocket protocol a refused command gets a `WorkspaceAgentErrorRespons
 throws it as a `WorkspaceAgentException` whose message begins with the code. A command that runs streams its output
 as before, and is stopped at its timeout, or at the sandbox's `defaultCommandTimeout` when the request sets none.
 
+A command that passes every check runs with its standard input read from the null device (`/dev/null`, or `NUL`
+on Windows), as nothing can write to it: a program that reads standard input when given no file (`cat`, `cat -`,
+`sort`, `wc`, `grep x`, `findstr x`) sees an empty input and finishes at once instead of waiting until the command
+timeout ([#1728](https://github.com/llm4s/llm4s/issues/1728)).
+
 An allowlist names programs; these rules stop a listed program from writing, deleting, running another program or
 following links out of the workspace through its own options:
 

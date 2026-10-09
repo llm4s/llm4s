@@ -25,6 +25,26 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
   private def newInterface(config: WorkspaceSandboxConfig) =
     new WorkspaceAgentInterfaceImpl(workspacePath, isWindowsHost, Some(config))
 
+  // #1728: the command's standard input is the null device, so a program that reads it gets end-of-file at once.
+  // Before the fix stdin was an open pipe nobody wrote to or closed, and each of these ran until the timeout.
+  private val stdinTimeout = 20.seconds
+
+  private def runReadingStdin(command: String): ExecuteCommandResponse = {
+    val stdinInterface = newInterface(WorkspaceSandboxConfig(defaultCommandTimeout = stdinTimeout))
+    val started        = System.nanoTime()
+    val response =
+      try stdinInterface.executeCommand(command)
+      catch {
+        case e: WorkspaceAgentException =>
+          fail(s"'$command' failed with ${e.code}: ${e.error}")
+      }
+    val elapsed = (System.nanoTime() - started).nanos
+    withClue(s"'$command' took $elapsed against a $stdinTimeout timeout: ") {
+      elapsed should be < 5.seconds
+    }
+    response
+  }
+
   // Create some test files
   val testFile1 = tempDir.resolve("test1.txt")
   val testFile2 = tempDir.resolve("test2.txt")
@@ -381,6 +401,55 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
       ex.code shouldBe "TIMEOUT"
       ex.error should include("timed out")
     }
+  }
+
+  it should "give a command with no operands end-of-file on stdin instead of hanging (cat)" in {
+    assume(!isWindowsHost, "POSIX cat")
+    val response = runReadingStdin("cat")
+    response.exitCode shouldBe 0
+    response.stdout shouldBe empty
+  }
+
+  it should "give `cat -` end-of-file on stdin instead of hanging" in {
+    assume(!isWindowsHost, "POSIX cat")
+    val response = runReadingStdin("cat -")
+    response.exitCode shouldBe 0
+    response.stdout shouldBe empty
+  }
+
+  it should "give sort, uniq and head with no file end-of-file on stdin" in {
+    assume(!isWindowsHost, "POSIX sort, uniq and head")
+    Seq("sort", "uniq", "head", "tail").foreach { command =>
+      val response = runReadingStdin(command)
+      withClue(s"$command: ") {
+        response.exitCode shouldBe 0
+        response.stdout shouldBe empty
+      }
+    }
+  }
+
+  it should "give wc with no file end-of-file on stdin, counting nothing" in {
+    assume(!isWindowsHost, "POSIX wc")
+    val response = runReadingStdin("wc")
+    response.exitCode shouldBe 0
+    response.stdout.trim.split("\\s+").toSeq shouldBe Seq("0", "0", "0")
+  }
+
+  it should "give grep with no file end-of-file on stdin, finding no match" in {
+    assume(!isWindowsHost, "POSIX grep")
+    val response = runReadingStdin("grep x")
+    response.exitCode shouldBe 1
+    response.stdout shouldBe empty
+  }
+
+  it should "give Windows sort and findstr with no file end-of-file on stdin" in {
+    assume(isWindowsHost, "Windows sort.exe and findstr.exe")
+    val sorted = runReadingStdin("sort")
+    sorted.exitCode shouldBe 0
+    sorted.stdout.trim shouldBe empty
+    val found = runReadingStdin("findstr x")
+    found.exitCode shouldBe 1
+    found.stdout.trim shouldBe empty
   }
 
   it should "reject destructive commands under a read-only sandbox configuration" in {
