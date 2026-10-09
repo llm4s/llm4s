@@ -216,6 +216,29 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     refuses(fx.interface(ReadOnly), "cat deep/../secret.txt", PathEscape)
   }
 
+  it should "refuse a '..' after a link that leaves the workspace when '..' is removed as text, as Windows does" in
+    inWorkspace { fx =>
+      // `l` -> a/b/c. Physically `l/../../outside` is a/outside, inside; Win32 removes `..` as text first, so
+      // there `l/..` is the workspace and `l/../../outside/secret.txt` the file outside.
+      Files.createDirectories(fx.root.resolve("a").resolve("b").resolve("c"))
+      link(fx, "l", fx.root.resolve("a").resolve("b").resolve("c"))
+      Seq(false, true).foreach { windows =>
+        val ws = fx.interface(ReadOnly, windows)
+        refuses(ws, "cat l/../../outside/secret.txt", PathEscape)
+        refuses(ws, "cat l/../../../outside", PathEscape)
+        refuses(ws, "grep -r secret l/../..", PathEscape)
+        if (isWindowsHost) { // `\` separates components only on Windows
+          refuses(ws, "type 'l\\..\\..\\outside\\secret.txt'", PathEscape)
+          refuses(ws, "type 'l\\..\\..\\..\\outside'", PathEscape)
+        }
+      }
+      refuses(fx.interface(ReadWrite), "cp a.txt l/../../outside/c.txt", PathEscape)
+      Files.exists(fx.outside.resolve("c.txt")) shouldBe false
+      // Both readings inside: physically a/b, textually the workspace.
+      passesPolicy(fx.interface(ReadOnly), "ls l/..")
+      passesPolicy(fx.interface(ReadOnly), "ls l/../c")
+    }
+
   it should "refuse a working directory that is a link out of the workspace" in inWorkspace { fx =>
     link(fx, "escape", fx.outside)
     refuses(fx.interface(ReadOnly), "ls", PathEscape, workingDirectory = Some("escape"))
@@ -462,6 +485,26 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     refuses(ws, s"findstr /G:${other}secret.txt a.txt", PathEscape)
   }
 
+  it should "refuse a wildcard, '\"' or ':' argument whose '..' after that character climbs out" in inWorkspace { fx =>
+    // Win32 removes `..` as text before it opens a name or matches a wildcard, so `x*\..\..\outside\secret.txt`
+    // opens `..\outside\secret.txt`; the part before the `*` (`x`) is inside.
+    val ro = fx.interface(ReadOnly, windows = true)
+    val rw = fx.interface(ReadWrite, windows = true)
+    unparseableEscapes.foreach(command => refuses(ro, command, PathEscape))
+    refuses(rw, "copy 'x*\\..\\..\\outside\\secret.txt' c.txt", PathEscape)
+    refuses(rw, "copy a.txt 'x?\\..\\..\\outside\\c.txt'", PathEscape)
+    refuses(rw, "move a.txt 'ab:c\\..\\..\\outside\\m.txt'", PathEscape)
+    unparseableControls.foreach(command => passesPolicy(ro, command))
+  }
+
+  it should "refuse those arguments where the platform itself cannot parse them" in inWorkspace { fx =>
+    assume(isWindowsHost, "these strings are unparseable paths only on Windows")
+    val ws = fx.interface(ReadOnly, windows = true)
+    unparseableEscapes.foreach(command => refuses(ws, command, PathEscape))
+    refuses(fx.interface(ReadWrite, windows = true), "copy 'x*\\..\\..\\outside\\secret.txt' c.txt", PathEscape)
+    unparseableControls.foreach(command => passesPolicy(ws, command))
+  }
+
   it should "match variable names without regard to case" in inWorkspace { fx =>
     val ws = fx.interface(ReadOnly, windows = true)
     refuses(ws, "dir", EnvironmentNotAllowed, environment = Some(Map("git_external_diff" -> "x")))
@@ -689,6 +732,36 @@ object WorkspaceCommandArgumentsSpec {
     "git diff --no-index a.txt ../outside/secret.txt",
     "git log -- ../outside",
     "git grep --no-index secret -- ../outside"
+  )
+
+  /**
+   * Arguments Windows cannot parse as a path, whose part before the first such character is inside but whose `..`
+   * after it climbs out once Win32 removes it as text.
+   */
+  val unparseableEscapes: Seq[String] = Seq(
+    "type 'x*\\..\\..\\outside\\secret.txt'",
+    "type 'x?\\..\\..\\outside\\secret.txt'",
+    "type 'ab:c\\..\\..\\outside\\secret.txt'",
+    "type 'x\"\\..\\..\\outside\\secret.txt'",
+    "type 'x*\\..\\.. \\outside\\secret.txt'",
+    "findstr secret 'x*\\..\\..\\outside\\secret.txt'",
+    "findstr /G:'x?\\..\\..\\outside\\secret.txt' a.txt",
+    "findstr secret 'ab:c\\..\\..\\outside\\secret.txt'",
+    "dir 'x*\\..\\..\\outside'",
+    "dir 'x?\\..\\..\\outside\\*'",
+    "dir 'ab:c\\..\\..\\outside'",
+    "git diff --no-index a.txt 'x*\\..\\..\\outside\\secret.txt'",
+    "git log -- 'x?\\..\\..\\outside'"
+  )
+
+  /** Wildcards, switches and `:` values that stay inside: not refused. */
+  val unparseableControls: Seq[String] = Seq(
+    "dir *.txt",
+    "dir 'sub\\*.scala'",
+    "findstr /C:x a.txt",
+    "findstr /S /I x *.txt",
+    "type a?.txt",
+    "git show HEAD:a.txt"
   )
 
   val refusedEnvironment: Seq[(String, String)] = Seq(

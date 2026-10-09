@@ -107,7 +107,10 @@ abbreviation of at least one letter (`sort --outp=out`), as GNU programs and git
 Every argument of every program except `echo`, `pwd`, `whoami` and `hostname` is then held to the workspace. Each
 candidate path is resolved from the real working directory the way the kernel resolves it, one component at a time,
 following each symbolic link where it is met (so `link/..` is the parent of the link's target), and must stay inside
-the real workspace root. That applies to programs added to a custom allowlist too. The candidates are:
+the real workspace root. It must also stay inside under the reading Windows uses, which removes `.` and `..` as text
+before following any link (so `link/..` is the directory holding the link): a path is refused on every platform
+unless both readings are inside, so with `l` -> `a/b`, `l/../../x` (`a/x` on POSIX, `x` beside the workspace on
+Windows) is refused. Only a `..` after a symbolic link makes the two differ. That applies to programs added to a custom allowlist too. The candidates are:
 
 - a positional argument, or an option's value given as the next argument: the whole argument;
 - a long option `--name=value`: the whole argument and the value, so `git log --since=2024/01/01`, `--grep=feat/x`,
@@ -120,7 +123,11 @@ the real workspace root. That applies to programs added to a custom allowlist to
 - on Windows, a string the platform cannot parse as a path is judged by the part before the first character a path
   cannot hold (`HEAD:src/x` by `HEAD`, `..\*` by `..\`); one that starts with `\` or `/` and has no such part
   (`\\?\C:\x`, `\??\C:\x`) is refused, and so is a drive-relative path on a drive other than the workspace's
-  (`D:x`, which the program would resolve from that drive's own working directory).
+  (`D:x`, which the program would resolve from that drive's own working directory). Windows removes `..` as text
+  before it opens a name or matches a wildcard, so such a string is also refused when it has a `..` component after
+  that character (`x*\..\..\outside\f`, `x?\..\..`, `ab:c\..\..`, which open `..\outside\f` although their
+  prefix is inside), or when, with each such character replaced by `_`, it leads outside; `dir *.txt`,
+  `type a?.txt` and `findstr /C:x a.txt` run.
 
 A working directory, or a file operation's path, that is not a valid path (a NUL character, or on Windows a `:` or
 wildcard in it) is refused with `PATH_ESCAPE_ATTEMPT` rather than failing with an exception.

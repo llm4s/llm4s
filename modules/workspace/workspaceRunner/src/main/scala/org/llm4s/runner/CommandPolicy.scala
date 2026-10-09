@@ -30,15 +30,20 @@ import scala.util.{ Try, Using }
  *     `--name=value` option and every tail of a short option, so the `/etc/x` in `--file=/etc/x` and `-f/etc/x` -
  *     is resolved the way the kernel would resolve it from the real working directory: component by component,
  *     following each symbolic link where it is met, so `link/..` goes to the parent of the link's target, not back
- *     to the directory holding the link. The result must lie inside the real workspace root. An argument that does not name an existing file is
- *     judged the same way, so `../x` and `/tmp/x` are refused even when they do not exist yet. Programs that only
+ *     to the directory holding the link. The result must lie inside the real workspace root, and so must the lexical
+ *     reading Win32 uses - `.` and `..` removed as text first, then the links of the result resolved - so with
+ *     `l` -> `a/b`, `l/../../x` (`a/x` physically, `../x` textually) is refused on every platform. An argument that
+ *     does not name an existing file is judged the same way, so `../x` and `/tmp/x` are refused even when they do not
+ *     exist yet. Programs that only
  *     print their arguments (`echo`, `pwd`, `whoami`, `hostname`) are not checked. For `cp`, which writes through
  *     a link it finds at the name it writes, the names it will write are checked too (see [[cpDestinationRefusal]]).
  *     An argument over [[MaxArgumentLength]] characters, or paths costing more than [[MaxPathSteps]] lookups, are
  *     refused with `ARGUMENT_NOT_ALLOWED` rather than walked. Where the platform cannot parse an argument as a path
  *     (Windows: `HEAD:src/x`, `..\*`), the part before the first character a path cannot hold is judged; one that
  *     starts with a separator but has no such part (`\\?\C:\x`) is refused, as is, on Windows, a drive-relative
- *     path on another drive (`D:x`). An argument holding a NUL character is refused (`ARGUMENT_NOT_ALLOWED`), and a
+ *     path on another drive (`D:x`). Because Win32 removes `..` as text before it opens a name or matches a wildcard,
+ *     such an argument is also refused when it has a `..` component after that character (`x*\..\..\f`), or when,
+ *     with each such character replaced by `_`, it leads outside. An argument holding a NUL character is refused (`ARGUMENT_NOT_ALLOWED`), and a
  *     check that fails with an exception refuses the command rather than throwing it.
  *
  * The path rule cannot tell a path from text that looks like one: a `grep` pattern or an option value that starts
@@ -199,6 +204,8 @@ private[runner] object CommandPolicy {
    * @param workDir     the real path of the working directory
    * @param realRoot    the real path of the workspace root
    * @param environment the variables the caller asked to set
+   * @param spelledWorkDir the working directory as the process is given it (absolute, links not resolved), from
+   *                    which the lexical reading applies `..` as text; `workDir` when not given
    */
   def refusal(
     program: String,
@@ -206,7 +213,8 @@ private[runner] object CommandPolicy {
     isWindows: Boolean,
     workDir: Path,
     realRoot: Path,
-    environment: Map[String, String]
+    environment: Map[String, String],
+    spelledWorkDir: Option[Path] = None
   ): Option[Refusal] =
     // Fails closed: a file-system call that throws (a path the platform cannot resolve) refuses the command
     // rather than escaping `executeCommand` as a raw exception.
@@ -214,7 +222,7 @@ private[runner] object CommandPolicy {
       environmentRefusal(environment, isWindows)
         .orElse(nulRefusal(program, args))
         .orElse(optionRefusal(program, args, isWindows))
-        .orElse(pathRefusal(program, args, isWindows, workDir, realRoot))
+        .orElse(pathRefusal(program, args, isWindows, Bases(workDir, spelledWorkDir.getOrElse(workDir)), realRoot))
     }.fold(
       e =>
         Some(
@@ -439,11 +447,17 @@ private[runner] object CommandPolicy {
         s"(at most $MaxArgumentLength characters an argument and $MaxPathSteps path lookups a command)."
     )
 
+  /**
+   * Where a relative path starts: `physical`, the real working directory, for the kernel's reading, and `lexical`,
+   * the working directory as the process is given it, for the reading that removes `..` as text (Windows).
+   */
+  final private case class Bases(physical: Path, lexical: Path)
+
   private def pathRefusal(
     program: String,
     args: Seq[String],
     isWindows: Boolean,
-    workDir: Path,
+    workDir: Bases,
     realRoot: Path
   ): Option[Refusal] =
     if (PrintOnly.contains(program)) None
@@ -453,7 +467,12 @@ private[runner] object CommandPolicy {
       val options  = ProgramOptions.getOrElse(program, Options())
       val switches = isWindows && WindowsSwitchPrograms.contains(program)
       candidates(args, options, switches)
-        .map { case (arg, candidate) => (arg, candidate, verdict(workDir, candidate, realRoot, budget)) }
+        .map { case (arg, candidate) =>
+          val judged =
+            verdict(workDir, candidate, realRoot, budget)
+              .orElse(unparseableVerdict(workDir, candidate, isWindows, realRoot, budget))
+          (arg, candidate, judged)
+        }
         .collectFirst {
           case (arg, candidate, Some(Outside)) => escape(program, arg, candidate)
           case (_, _, Some(TooCostly))         => tooCostly(program)
@@ -522,13 +541,54 @@ private[runner] object CommandPolicy {
     }
   }
 
-  /** `None` when `arg`, resolved from `workDir` as the kernel would, stays inside `realRoot`. */
-  private def verdict(workDir: Path, arg: String, realRoot: Path, budget: Budget): Option[Verdict] =
-    physicalPath(workDir, arg, budget) match {
+  /**
+   * `None` when `arg` stays inside `realRoot` under both readings: physical, resolved from `workDir.physical` as the
+   * kernel would, following each link where it is met; and lexical, its `.` and `..` removed as text from
+   * `workDir.lexical` first and the links of the result then resolved, as Win32 does. The two differ only for a `..`
+   * after a link (`l/../..` with `l` -> a deeper directory), and such a path is refused unless both are inside.
+   */
+  private def verdict(workDir: Bases, arg: String, realRoot: Path, budget: Budget): Option[Verdict] =
+    judge(physicalPath(workDir.physical, arg, budget), realRoot, budget)
+      .orElse(judge(lexicalPath(workDir.lexical, arg), realRoot, budget))
+
+  private def judge(reading: Option[Either[Verdict, Path]], realRoot: Path, budget: Budget): Option[Verdict] =
+    reading match {
       case None                  => None // not a path on this platform (e.g. a ':' on Windows): nothing can be opened
       case Some(Left(refused))   => Some(refused)
       case Some(Right(resolved)) => outsideOf(resolved, realRoot, budget)
     }
+
+  /**
+   * An argument a Windows program is given whole although the platform cannot parse it as a path (a wildcard, a `"`
+   * or a `:` past the drive letter in it). [[parse]] judges the part before the first such character, but Win32
+   * removes `.` and `..` as text before it opens a name or matches a wildcard, so `x*\..\..\outside` opens
+   * `..\outside` while its prefix `x` is inside. Such an argument is refused when it has a `..` component after that
+   * character, or when, with each such character replaced by `_`, it leads outside. Applies on Windows, and anywhere
+   * the platform rejects the argument.
+   */
+  private def unparseableVerdict(
+    workDir: Bases,
+    arg: String,
+    isWindows: Boolean,
+    realRoot: Path,
+    budget: Budget
+  ): Option[Verdict] = {
+    val cut = arg.indices.find(i => notInPath(arg.charAt(i), i))
+    if (!((isWindows && cut.nonEmpty) || Try(Paths.get(arg)).isFailure)) None
+    else {
+      val after = arg.substring(cut.getOrElse(0))
+      if (after.split(Array('/', '\\')).exists(parentComponent)) Some(Outside)
+      else {
+        val replaced  = arg.zipWithIndex.map { case (c, i) => if (notInPath(c, i)) '_' else c }.mkString
+        val sanitised = if (isWindows) replaced.replace('\\', '/') else replaced
+        verdict(workDir, sanitised, realRoot, budget)
+      }
+    }
+  }
+
+  /** `..`, or a component Win32 may trim to it (trailing dots and spaces: `.. `, `...`). */
+  private def parentComponent(name: String): Boolean =
+    name.forall(c => c == '.' || c == ' ') && name.count(_ == '.') >= 2
 
   /** `None` when the walked path `resolved`, canonicalised, lies inside `realRoot`. */
   private def outsideOf(resolved: Path, realRoot: Path, budget: Budget): Option[Verdict] =
@@ -550,6 +610,21 @@ private[runner] object CommandPolicy {
         Some(split(base, path).flatMap { case (start, names) => walk(start, names, hops = 0, missing = false, budget) })
       // Starts like an absolute path, but the platform cannot parse even its leading part: a Windows device or
       // NT-namespace name (`\\?\C:\x`, `\??\C:\x`) that a program would still open.
+      case None if arg.startsWith("/") || arg.startsWith("\\") => Some(Left(Outside))
+      case None                                                => None
+    }
+
+  /** [[physicalPath]]'s lexical counterpart: `.` and `..` removed as text from `base`, no link followed. */
+  private def lexicalPath(base: Path, arg: String): Option[Either[Verdict, Path]] =
+    parse(arg) match {
+      case Some(path) =>
+        Some(split(base, path).map { case (start, names) =>
+          names.foldLeft(start) {
+            case (current, "" | ".") => current
+            case (current, "..")     => Option(current.getParent).getOrElse(current)
+            case (current, name)     => current.resolve(name)
+          }
+        })
       case None if arg.startsWith("/") || arg.startsWith("\\") => Some(Left(Outside))
       case None                                                => None
     }
@@ -718,7 +793,7 @@ private[runner] object CommandPolicy {
    */
   private def cpDestinationRefusal(
     args: Seq[String],
-    workDir: Path,
+    workDir: Bases,
     realRoot: Path,
     budget: Budget
   ): Option[Refusal] = {
@@ -752,13 +827,14 @@ private[runner] object CommandPolicy {
       )
     else
       destinations.iterator
-        .map(d => d -> physicalPath(workDir, d, budget))
+        .map(d => d -> physicalPath(workDir.physical, d, budget))
         .flatMap {
           case (_, None)                  => None
           case (_, Some(Left(TooCostly))) => Some(tooCostly("cp"))
           case (d, Some(Left(Outside)))   => Some(destinationEscape(d, None))
           case (d, Some(Right(resolved))) =>
-            val outside = outsideOf(resolved, realRoot, budget)
+            val outside =
+              outsideOf(resolved, realRoot, budget).orElse(judge(lexicalPath(workDir.lexical, d), realRoot, budget))
             if (outside.contains(TooCostly)) Some(tooCostly("cp"))
             else if (outside.nonEmpty) Some(destinationEscape(d, None))
             else if (command.recursive && Files.isDirectory(resolved))
@@ -805,7 +881,8 @@ private[runner] object CommandPolicy {
               val outbound = entries.find { entry =>
                 Files.isSymbolicLink(entry) &&
                 Try(Files.readSymbolicLink(entry)).toOption.forall { target =>
-                  verdict(entry.getParent, target.toString, realRoot, budget).nonEmpty
+                  val dir = entry.getParent
+                  verdict(Bases(dir, dir), target.toString, realRoot, budget).nonEmpty
                 }
               }
               outbound match {

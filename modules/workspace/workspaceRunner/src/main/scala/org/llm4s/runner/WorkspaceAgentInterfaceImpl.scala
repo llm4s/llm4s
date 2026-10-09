@@ -869,9 +869,9 @@ class WorkspaceAgentInterfaceImpl(
         None
       )
     }
-    CommandPolicy.refusal(execLower, argv.tail, isWindows, realWorkDir, realRoot, env).foreach { refused =>
-      throw new WorkspaceAgentException(refused.message, refused.code, None)
-    }
+    CommandPolicy
+      .refusal(execLower, argv.tail, isWindows, realWorkDir, realRoot, env, Some(workDir.toPath))
+      .foreach(refused => throw new WorkspaceAgentException(refused.message, refused.code, None))
 
     // On Windows, built-in commands (echo, dir, type, …) live inside cmd.exe
     // and cannot be launched as standalone processes.  We prepend "cmd.exe /c"
