@@ -37,7 +37,10 @@ typed question from middleware. Both are interrupts like approvals and tool ques
   does not declare"); before, the question was attributed to the tool. A wrapper that retries on `Left` should pass a
   `Left(MiddlewareAsked)` through, as it passes a cancellation.
 - **`ApprovalRequest` and `ToolQuestionRequest` gain `answered: Vector[GivenAnswer]`** (default empty), the
-  middleware answers a call carries through an approval or a tool question.
+  middleware answers a call carries through an approval or a tool question. Both now have a private constructor, as
+  the new `MiddlewareQuestionRequest`, `BreakpointRequest`, `GivenAnswer` and `GuardrailReview` do: `apply` still
+  builds them and a pattern still matches them, but `copy` is private - `request.copy(approved = true)` becomes
+  `request.withApproved(true)`.
 - **Java and Kotlin: `PendingInterrupt.toolName()` and `argumentsJson()` return `Optional<String>`.** They were
   `String`s; a breakpoint on a model call, or a middleware question about an answer, has no tool call. They are present
   for every `APPROVAL` and `QUESTION`, so `p.toolName()` becomes `p.toolName().get()` (or `orElse`) there.

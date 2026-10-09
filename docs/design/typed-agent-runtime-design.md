@@ -1070,8 +1070,15 @@ Agent decisions:
 - **Agent breakpoints are named by `AgentNode`**: `Model` (`<id>/model`), `Tool` (`<id>/call-tool`, one interrupt
   per call) and `Finish` (`<id>/finish`), set with `AgentBuilder.withInterruptBefore` / `withInterruptAfter` and
   added to every run's own; a handoff target's apply to its nodes. Like streaming they are not part of the graph
-  version, so a thread held by one agent is continued by one built without them. A call continued after an approval
-  or a question runs at the approval or question node, which `Tool` does not hold. `AgentStatus.Suspended` gains
+  version, so a thread held by one agent is continued by one built without them. A step continued after a review
+  runs at another node: a model call after a `wrapModelCall` question at `<id>/asked/<mw>/wrapModelCall`, a tool
+  call after an approval or a question at `<id>/approval`, `<id>/ask/<tool>` or `<id>/asked/<mw>/wrapToolCall`, an
+  answer after an `afterAgent` question at `<id>/asked/<mw>/afterAgent` (the root's, for a root middleware asking
+  about a handoff target's answer). A breakpoint *after* `Model`, `Tool` or `Finish` holds those nodes too
+  (`ToolLoop.breakpointNodes`), so a gated model call's tool calls, or a result recorded after an approval, cannot
+  slip past it; a breakpoint *before* holds only the step's own node, since a continued step was just reviewed.
+  Each release of an after-hold replays in a superstep of its own, which counts against `maxSupersteps`.
+  `AgentStatus.Suspended` gains
   `breakpoints: Vector[(InterruptId, BreakpointRequest)]` - the node, the phase and, for a call held before it runs,
   the call - and `AgentResult.proceed(id)`.
 - **A middleware asks as a tool does.** `AgentMiddleware.Asking[Q: ReadWriter, Ans: ReadWriter]` declares the
@@ -1090,15 +1097,18 @@ Agent decisions:
   question. They are keyed by the asking middleware's agent and id, so a root's and a handoff target's middleware of
   the same id do not see each other's. What runs again is the task: `beforeAgent` re-runs the turn's input, storing
   nothing while it waits (a new thread's imported history is imported then); `wrapModelCall` re-runs the model step
-  (a wrapper that asked after calling `next` calls the model again, unless it returns a completion of its own, and
-  a model call before the question is not counted in usage); `wrapToolCall` re-runs the call, its arguments checked
+  (a wrapper that asked after calling `next` calls the model again, unless it returns a completion of its own; the
+  model calls it made before asking are counted - their usage is committed with the suspension, and each is
+  announced with `ModelCallCompleted` - so usage and tracing agree); `wrapToolCall` re-runs the call, its arguments checked
   again, with the approval it had; `afterAgent` guards the stored answer again - a root middleware's question about
   a handoff target's answer finishes as the target. A question from a tool wrapper while the tool continues after its
   own question is the call's error result, because running the chain again would lose the tool's answer.
 - **Guardrails suspend through a middleware.** `GuardrailReviewMiddleware(input, output)` runs guardrails as
   `GuardrailMiddleware` does, and a refusal asks a `GuardrailReview(phase, guardrail, reason, text)`, answered with
   `GuardrailVerdict.Allow`, `Edit(text)` (not re-checked: the reviewer wrote it) or `Block` (the §4.13 Block). A
-  verdict applies only to the refusal it was asked about. `GuardrailMiddleware` itself is unchanged.
+  verdict applies to the text and phase it was asked about, whatever the refusal's reason, and once given the
+  guardrails do not run on that text again, so an LLM judge whose wording varies is asked about once and not called
+  again. `GuardrailMiddleware` itself is unchanged.
 - **`AgentStatus.Suspended` gains `middlewareQuestions: Vector[(InterruptId, MiddlewareQuestionRequest)]`**: the
   agent and middleware that asked, the hook, the question as JSON (`ToolLoop.middlewareQuestion[Q]` reads it), and
   what the hook runs again with. `AgentResult.reply` answers it.
@@ -1118,9 +1128,9 @@ and `ToolQuestionRequest` gain `answered`; a non-asking wrapper's `ToolOutcome.A
 Limits:
 
 - A breakpoint takes only `proceed`: skipping a held task or editing what it holds needs `updateState` (#1702).
-- `AgentNode.Tool` does not hold a call continued at its approval or question node.
+- A breakpoint before a node does not hold a step continued after a review at another node.
 - A middleware question re-runs the asking task, so a model wrapper that asks after calling the model pays for that
-  call twice unless it returns its own completion, and that first call's usage is not recorded.
+  call twice unless it returns its own completion; both calls are counted in usage.
 - `AgentNode` is a Scala 3 enum: from Java or Kotlin its cases are read with `AgentNode.valueOf("Tool")`.
 
 ## 5. Harness capabilities

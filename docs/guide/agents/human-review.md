@@ -35,8 +35,11 @@ A turn that waits for a person ends `AgentStatus.Suspended`. Everything it waits
 
 `agent.resume(threadId, answers)` takes any non-empty subset of them. The ones you do not answer stay
 pending, so the result can be `Suspended` again with what is left: this is incremental approval. An
-unknown id, or an answer that does not decode as the asker's answer type, is refused and the thread
-is unchanged. While a thread waits, `run` and `recover` on it are refused with `PendingInterrupts`.
+unknown id is refused and the thread is unchanged, as is an approval decision, a middleware answer or a
+breakpoint answer that does not decode as the asker's type. A tool question's answer is different: the
+tool decodes it, so one that does not decode as the tool's `Ans` is accepted, and becomes that call's
+error result (`Invalid answer for '<tool>': ...`), which the model sees. While a thread waits, `run` and
+`recover` on it are refused with `PendingInterrupts`.
 
 ```scala
 agent.run(threadId, "Deploy the release").flatMap { result =>
@@ -77,8 +80,19 @@ reviewer can let them through one at a time. `AgentStatus.Suspended.breakpoints`
 hold it again; a task held after it ran is not run again - what follows it is released. A breakpoint
 takes no other answer.
 
-A call continued after an approval or a question runs at the agent's approval or question node, which
-the `Tool` breakpoint does not hold: the reviewer has just seen it.
+A step continued after a review runs at another node than the step itself: a model call after a
+`wrapModelCall` question at `<id>/asked/<middleware>/wrapModelCall`; a tool call after an approval or a
+question at `<id>/approval`, `<id>/ask/<tool>` or `<id>/asked/<middleware>/wrapToolCall`; an answer
+guarded again after an `afterAgent` question at `<id>/asked/<middleware>/afterAgent` (the root's, for a
+root middleware asking about a handoff target's answer). A breakpoint *after* `Model`, `Tool` or
+`Finish` holds those nodes too, so nothing the step does escapes it: a model message the gate let
+through still waits before its tool calls run, and a result recorded after an approval still waits
+before the model sees it. `BreakpointRequest.node` names the node the step ran at. A breakpoint
+*before* holds only the step's own node: a continued step was just reviewed.
+
+Each task held after it ran is released in a superstep of its own, which replays its routes without
+running the node again. That superstep counts against the run's `RunBudgets.maxSupersteps`, so a run
+with many held steps may need a larger budget.
 
 Breakpoints are not part of the agent's graph version, like streaming: a thread an agent holds can be
 continued by the same agent built without them. A run can add its own with a `RunConfig`, naming the
@@ -136,7 +150,7 @@ runs again depends on the hook:
 | Hook | While it waits | Once answered |
 |---|---|---|
 | `beforeAgent` | nothing of the turn is stored | the turn's input runs again |
-| `wrapModelCall` | nothing of the model call is stored | the model step runs again: a wrapper that asked after calling `next` calls the model again, unless it returns a completion of its own |
+| `wrapModelCall` | nothing of the model call is stored, but a call the wrapper made before asking is counted in usage | the model step runs again: a wrapper that asked after calling `next` calls the model again, unless it returns a completion of its own |
 | `wrapToolCall` | the call has no result | the call runs again: its arguments are checked again, with the approval it had |
 | `afterAgent` | the answer is stored, the turn has no outcome yet | the answer is guarded again |
 
@@ -152,7 +166,10 @@ result instead, since running the call again would lose the tool's answer.
 `GuardrailReviewMiddleware(input, output)` runs guardrails as `GuardrailMiddleware` does, but a refusal
 asks a reviewer instead of blocking. The question is a `GuardrailReview(phase, guardrail, reason,
 text)`; the answer a `GuardrailVerdict`: `Allow` lets the text through, `Edit(text)` replaces it, and
-`Block` blocks the turn as `GuardrailMiddleware` would have (`AgentStatus.Blocked`).
+`Block` blocks the turn as `GuardrailMiddleware` would have (`AgentStatus.Blocked`). A verdict holds for
+the text and phase it was given for, whatever the refusal's wording: once given, the guardrails do not
+run on that text again, so an LLM judge whose reason varies from call to call is asked about once and is
+not called again.
 
 ## From Java and Kotlin
 

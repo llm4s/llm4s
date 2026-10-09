@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph.toolloop
 
-import org.llm4s.agent.AgentId
+import org.llm4s.agent.{ AgentId, AgentNode }
 import org.llm4s.agent.events
 import org.llm4s.agent.events.{ AgentEvents, GuardrailBlock, GuardrailPhase, ToolExecutionOutcome }
 import org.llm4s.agent.graph.*
@@ -33,13 +33,30 @@ enum ApprovalSource derives ReadWriter:
  * the answers middleware questions of the call were given before it asked, so its chain runs again
  * with them once it is approved.
  */
-final case class ApprovalRequest(
+final case class ApprovalRequest private (
   assistantMessageId: String,
   call: ToolCall,
   reason: String,
   source: ApprovalSource,
   answered: Vector[GivenAnswer] = Vector.empty
-) derives ReadWriter
+) derives ReadWriter:
+  def withAssistantMessageId(id: String): ApprovalRequest =
+    ApprovalRequest(id, call, reason, source, answered)
+  def withCall(c: ToolCall): ApprovalRequest = ApprovalRequest(assistantMessageId, c, reason, source, answered)
+  def withReason(r: String): ApprovalRequest = ApprovalRequest(assistantMessageId, call, r, source, answered)
+  def withSource(s: ApprovalSource): ApprovalRequest =
+    ApprovalRequest(assistantMessageId, call, reason, s, answered)
+  def withAnswered(a: Vector[GivenAnswer]): ApprovalRequest =
+    ApprovalRequest(assistantMessageId, call, reason, source, a)
+
+object ApprovalRequest:
+  def apply(
+    assistantMessageId: String,
+    call: ToolCall,
+    reason: String,
+    source: ApprovalSource,
+    answered: Vector[GivenAnswer] = Vector.empty
+  ): ApprovalRequest = new ApprovalRequest(assistantMessageId, call, reason, source, answered)
 
 /** A reviewer's answer. `Edit` runs the call with new arguments, recording them in the assistant message first. */
 enum ApprovalDecision derives ReadWriter:
@@ -57,13 +74,32 @@ final case class ToolTask(assistantMessageId: String, call: ToolCall) derives Re
  * [[ToolLoop.questions]], read its question as the tool's type with [[ToolLoop.question]], and
  * answer it with [[ToolLoop.answer]].
  */
-final case class ToolQuestionRequest(
+final case class ToolQuestionRequest private (
   assistantMessageId: String,
   call: ToolCall,
   question: ujson.Value,
   approved: Boolean = false,
   answered: Vector[GivenAnswer] = Vector.empty
-) derives ReadWriter
+) derives ReadWriter:
+  def withAssistantMessageId(id: String): ToolQuestionRequest =
+    ToolQuestionRequest(id, call, question, approved, answered)
+  def withCall(c: ToolCall): ToolQuestionRequest =
+    ToolQuestionRequest(assistantMessageId, c, question, approved, answered)
+  def withQuestion(q: ujson.Value): ToolQuestionRequest =
+    ToolQuestionRequest(assistantMessageId, call, q, approved, answered)
+  def withApproved(a: Boolean): ToolQuestionRequest =
+    ToolQuestionRequest(assistantMessageId, call, question, a, answered)
+  def withAnswered(a: Vector[GivenAnswer]): ToolQuestionRequest =
+    ToolQuestionRequest(assistantMessageId, call, question, approved, a)
+
+object ToolQuestionRequest:
+  def apply(
+    assistantMessageId: String,
+    call: ToolCall,
+    question: ujson.Value,
+    approved: Boolean = false,
+    answered: Vector[GivenAnswer] = Vector.empty
+  ): ToolQuestionRequest = new ToolQuestionRequest(assistantMessageId, call, question, approved, answered)
 
 /** The hook a middleware asked its question from. */
 enum MiddlewareHook derives ReadWriter:
@@ -73,8 +109,20 @@ enum MiddlewareHook derives ReadWriter:
  * The answer a middleware question was given: kept while the hook's stack runs again, so that the
  * middleware - `middleware` of agent `agent`'s stack - finds it with `AgentMiddleware.Asking.answered`.
  */
-final case class GivenAnswer(agent: AgentId, middleware: MiddlewareId, question: ujson.Value, answer: ujson.Value)
-    derives ReadWriter
+final case class GivenAnswer private (
+  agent: AgentId,
+  middleware: MiddlewareId,
+  question: ujson.Value,
+  answer: ujson.Value
+) derives ReadWriter:
+  def withAgent(a: AgentId): GivenAnswer           = GivenAnswer(a, middleware, question, answer)
+  def withMiddleware(m: MiddlewareId): GivenAnswer = GivenAnswer(agent, m, question, answer)
+  def withQuestion(q: ujson.Value): GivenAnswer    = GivenAnswer(agent, middleware, q, answer)
+  def withAnswer(a: ujson.Value): GivenAnswer      = GivenAnswer(agent, middleware, question, a)
+
+object GivenAnswer:
+  def apply(agent: AgentId, middleware: MiddlewareId, question: ujson.Value, answer: ujson.Value): GivenAnswer =
+    new GivenAnswer(agent, middleware, question, answer)
 
 /**
  * The question a middleware interrupt asks ([[org.llm4s.agent.graph.middleware.AgentMiddleware.Asking]]):
@@ -86,7 +134,7 @@ final case class GivenAnswer(agent: AgentId, middleware: MiddlewareId, question:
  * `call` and whether it was `approved` (`WrapToolCall`); and the answers other questions of the same
  * hook run were `answered` with.
  */
-final case class MiddlewareQuestionRequest(
+final case class MiddlewareQuestionRequest private (
   agent: AgentId,
   middleware: MiddlewareId,
   hook: MiddlewareHook,
@@ -95,14 +143,54 @@ final case class MiddlewareQuestionRequest(
   call: Option[ToolTask] = None,
   approved: Boolean = false,
   answered: Vector[GivenAnswer] = Vector.empty
-) derives ReadWriter
+) derives ReadWriter:
+  def withAgent(a: AgentId): MiddlewareQuestionRequest =
+    MiddlewareQuestionRequest(a, middleware, hook, question, input, call, approved, answered)
+  def withMiddleware(m: MiddlewareId): MiddlewareQuestionRequest =
+    MiddlewareQuestionRequest(agent, m, hook, question, input, call, approved, answered)
+  def withHook(h: MiddlewareHook): MiddlewareQuestionRequest =
+    MiddlewareQuestionRequest(agent, middleware, h, question, input, call, approved, answered)
+  def withQuestion(q: ujson.Value): MiddlewareQuestionRequest =
+    MiddlewareQuestionRequest(agent, middleware, hook, q, input, call, approved, answered)
+  def withInput(i: AgentInput): MiddlewareQuestionRequest = withInput(Some(i))
+  def withInput(i: Option[AgentInput]): MiddlewareQuestionRequest =
+    MiddlewareQuestionRequest(agent, middleware, hook, question, i, call, approved, answered)
+  def withCall(c: ToolTask): MiddlewareQuestionRequest = withCall(Some(c))
+  def withCall(c: Option[ToolTask]): MiddlewareQuestionRequest =
+    MiddlewareQuestionRequest(agent, middleware, hook, question, input, c, approved, answered)
+  def withApproved(a: Boolean): MiddlewareQuestionRequest =
+    MiddlewareQuestionRequest(agent, middleware, hook, question, input, call, a, answered)
+  def withAnswered(a: Vector[GivenAnswer]): MiddlewareQuestionRequest =
+    MiddlewareQuestionRequest(agent, middleware, hook, question, input, call, approved, a)
+
+object MiddlewareQuestionRequest:
+  def apply(
+    agent: AgentId,
+    middleware: MiddlewareId,
+    hook: MiddlewareHook,
+    question: ujson.Value,
+    input: Option[AgentInput] = None,
+    call: Option[ToolTask] = None,
+    approved: Boolean = false,
+    answered: Vector[GivenAnswer] = Vector.empty
+  ): MiddlewareQuestionRequest =
+    new MiddlewareQuestionRequest(agent, middleware, hook, question, input, call, approved, answered)
 
 /**
  * A task a static breakpoint holds, as an agent reports it: its `node` (`<agent>/model`,
- * `<agent>/call-tool`, `<agent>/finish`, or any other a run's `RunConfig` names), the `phase`, and - for a
- * tool call held before it runs - the `call`. Answer it with `org.llm4s.agent.graph.Breakpoint.proceed`.
+ * `<agent>/call-tool`, `<agent>/finish`; after it ran, also the approval, question and middleware-question
+ * nodes that continue those steps; or any other a run's `RunConfig` names), the `phase`, and - for a tool
+ * call held before it runs - the `call`. Answer it with `org.llm4s.agent.graph.Breakpoint.proceed`.
  */
-final case class BreakpointRequest(node: NodeId, phase: BreakpointPhase, call: Option[ToolCall])
+final case class BreakpointRequest private (node: NodeId, phase: BreakpointPhase, call: Option[ToolCall]):
+  def withNode(n: NodeId): BreakpointRequest           = BreakpointRequest(n, phase, call)
+  def withPhase(p: BreakpointPhase): BreakpointRequest = BreakpointRequest(node, p, call)
+  def withCall(c: ToolCall): BreakpointRequest         = withCall(Some(c))
+  def withCall(c: Option[ToolCall]): BreakpointRequest = BreakpointRequest(node, phase, c)
+
+object BreakpointRequest:
+  def apply(node: NodeId, phase: BreakpointPhase, call: Option[ToolCall] = None): BreakpointRequest =
+    new BreakpointRequest(node, phase, call)
 
 /** The result the loop wrote for one call, waiting for the batch barrier. */
 final case class ToolResult(assistantMessageId: String, toolCallId: String, content: String, isError: Boolean)
@@ -193,9 +281,10 @@ object ModelStep:
  *    same chain, with the approval the call asked with.
  *  - A middleware extending `AgentMiddleware.Asking` asks a typed question (#1704): from `beforeAgent` (the
  *    `input` node), `wrapModelCall` (`<id>/model`), `afterAgent` (`<id>/finish`) or `wrapToolCall` (each call).
- *    The asking task suspends, storing nothing, at `<id>/asked/<middleware>/<hook>` with a
- *    [[MiddlewareQuestionRequest]]; once answered, it runs again with every answer given so far, so the hook's
- *    stack runs again from the outermost middleware and the asking one continues ([[GivenAnswer]]).
+ *    The asking task suspends, storing nothing but the usage of model calls a wrapper made before asking, at
+ *    `<id>/asked/<middleware>/<hook>` with a [[MiddlewareQuestionRequest]]; once answered, it runs again with
+ *    every answer given so far, so the hook's stack runs again from the outermost middleware and the asking one
+ *    continues ([[GivenAnswer]]).
  *  - The loop, not the tool, records exactly one [[ToolResult]] per call - for success, failure,
  *    denial, rejection and unknown tools alike, however often a wrapper ran the tool; the results key
  *    refuses a second one. A tool's thrown exception is that call's error result. `Fatal`, an update
@@ -226,8 +315,26 @@ final class ToolLoop private (
   approvalNodes: Set[NodeId],
   askNodes: Set[NodeId],
   askedNodes: Set[NodeId],
-  callToolNodes: Set[NodeId]
+  callToolNodes: Set[NodeId],
+  continuations: Map[(AgentId, AgentNode), Set[NodeId]]
 ):
+
+  /**
+   * The nodes a breakpoint on `node` of agent `agent` holds in `phase`. Before, only the node itself: a
+   * task continued after an approval or a question was just reviewed. After, every node whose task does
+   * what the node does - so a step continued after a review is held after it ran, as the step is: `Model`
+   * adds the agent's `wrapModelCall` question nodes; `Tool` its approval, tool-question and `wrapToolCall`
+   * question nodes, which record a call's result; `Finish` its `afterAgent` question nodes and, for a
+   * handoff target, the root's, where a root middleware's question about the target's answer continues.
+   */
+  private[agent] def breakpointNodes(agent: AgentId, node: AgentNode, phase: BreakpointPhase): Set[NodeId] =
+    val own = node match
+      case AgentNode.Model  => ToolLoop.modelNode(agent)
+      case AgentNode.Tool   => ToolLoop.callToolNode(agent)
+      case AgentNode.Finish => ToolLoop.finishNode(agent)
+    phase match
+      case BreakpointPhase.Before => Set(own)
+      case BreakpointPhase.After  => continuations.getOrElse((agent, node), Set.empty) + own
 
   /** The approval requests a suspended run is waiting on, at any agent's approval node. */
   def requests(suspended: RunResult.Suspended): Result[Vector[(InterruptId, ApprovalRequest)]] =
@@ -429,8 +536,9 @@ object ToolLoop:
    * for the stack.
    */
   final private class AskedRef[A](val ref: ResumeRef[MiddlewareQuestionRequest, A], answerCodec: ReadWriter[A]):
-    def answerJson(answer: A): ujson.Value                      = upickle.default.writeJs(answer)(using answerCodec)
-    def suspend(request: MiddlewareQuestionRequest): NodeResult = NodeResult.Suspend(StateUpdate.empty, request, ref)
+    def answerJson(answer: A): ujson.Value = upickle.default.writeJs(answer)(using answerCodec)
+    def suspend(request: MiddlewareQuestionRequest, update: StateUpdate = StateUpdate.empty): NodeResult =
+      NodeResult.Suspend(update, request, ref)
 
   /** What a node writes when it runs a middleware hook again: the model's and the finish's write sets. */
   private val modelWrites: Set[StateKey[?, ?]] =
@@ -499,21 +607,33 @@ object ToolLoop:
     }
 
   /**
-   * Suspends the asking task at the resume node of `owner`'s middleware that asked, for `hook`. Nothing
-   * is committed: the task runs again from the start once answered. A question from a middleware the
-   * stack does not hold as asking - one asked through another middleware's instance - fails the run.
+   * Suspends the asking task at the resume node of `owner`'s middleware that asked, for `hook`. Nothing of
+   * the step is committed - only `update`, the usage of model calls made before the question - and the
+   * task runs again from the start once answered. A question from a middleware the stack does not hold
+   * as asking - one asked through another middleware's instance - fails the run.
    */
   private def askedSuspend(
     owner: AgentNodes,
     asked: MiddlewareAsked,
     hook: MiddlewareHook,
     answers: Vector[GivenAnswer],
-    input: Option[AgentInput] = None
+    input: Option[AgentInput] = None,
+    update: StateUpdate = StateUpdate.empty
   ): NodeResult =
     owner.askedRefs.get((asked.middleware, hook)) match
       case Some(ref) =>
         ref.suspend(
-          MiddlewareQuestionRequest(owner.agent.id, asked.middleware, hook, asked.question, input, None, false, answers)
+          MiddlewareQuestionRequest(
+            owner.agent.id,
+            asked.middleware,
+            hook,
+            asked.question,
+            input,
+            None,
+            false,
+            answers
+          ),
+          update
         )
       case None =>
         NodeResult.Fail(
@@ -616,13 +736,28 @@ object ToolLoop:
       yield TurnOutput(outcome, active.getOrElse(root))
     }.map { graph =>
       val all = agents.values.toVector
+      def asked(owner: AgentNodes, hook: MiddlewareHook): Set[NodeId] =
+        owner.askedRefs.collect { case ((_, h), ref) if h == hook => ref.ref.node.id }.toSet
+      // the nodes that continue each agent's model, tool and finish steps after a review
+      val continuations = all.flatMap { owner =>
+        val agent = owner.agent.id
+        val rootsAfterAgent =
+          if agent == root then Set.empty[NodeId] else asked(agents(root), MiddlewareHook.AfterAgent)
+        Vector(
+          (agent, AgentNode.Model) -> asked(owner, MiddlewareHook.WrapModelCall),
+          (agent, AgentNode.Tool) -> (asked(owner, MiddlewareHook.WrapToolCall) ++
+            owner.askRefs.values.map(_.node.id) + owner.approval.node.id),
+          (agent, AgentNode.Finish) -> (asked(owner, MiddlewareHook.AfterAgent) ++ rootsAfterAgent)
+        )
+      }.toMap
       new ToolLoop(
         graph,
         agents(root).approval,
         all.map(_.approval.node.id).toSet,
         all.flatMap(_.askRefs.values.map(_.node.id)).toSet,
         all.flatMap(_.askedRefs.values.map(_.ref.node.id)).toSet,
-        all.map(_.callTool.id).toSet
+        all.map(_.callTool.id).toSet,
+        continuations
       )
     }
 
@@ -693,26 +828,32 @@ object ToolLoop:
     val handoffs: Map[String, AgentNodes] =
       agent.handoffs.map(h => HandoffTools.toolName(h.target) -> family(h.target)).toMap
 
-    /** The model's answer stored, its usage recorded, and routed: to finish, to its tool calls, or to a handoff. */
-    def stored(turn: TurnState, completion: Completion, attempts: Int, context: RunContext): Command =
-      val assistant = completion.message
-      // every successful call, whatever it routes to; counts and usage only, never content
+    /**
+     * A completed model call, announced durably with `ModelCallCompleted` (counts and usage only, never
+     * content), and its usage, for [[LoopKeys.usage]]. AgentTracing builds a run's usage from its
+     * `ModelCallCompleted` events the same way, so the two agree.
+     */
+    def completed(completion: Completion, attempts: Int, context: RunContext): UsageSummary =
       AgentEvents.ModelCallCompleted.emit(
         context,
         events.ModelCallCompleted(
           agent.id.value,
           completion.model,
           attempts,
-          assistant.toolCalls.size,
+          completion.message.toolCalls.size,
           completion.usage.map(events.CallUsage.fromTokenUsage),
           completion.estimatedCost
         )
       )
+      UsageSummary().add(completion.model, completion.usage.getOrElse(TokenUsage(0, 0, 0)), completion.estimatedCost)
+
+    /** The model's answer stored, its usage recorded, and routed: to finish, to its tool calls, or to a handoff. */
+    def stored(turn: TurnState, completion: Completion, attempts: Int, context: RunContext): Command =
+      val assistant = completion.message
+      // every successful call, whatever it routes to
+      val call   = completed(completion, attempts, context)
       val taskId = context.position.taskId.value
       val stored = StoredMessage(s"$taskId/assistant", assistant)
-      val call = UsageSummary()
-        .add(completion.model, completion.usage.getOrElse(TokenUsage(0, 0, 0)), completion.estimatedCost)
-      // AgentTracing builds a run's usage from its ModelCallCompleted events the same way
       val appended = Command.empty
         .update(messages, MessageUpdate.Append(stored))
         .update(LoopKeys.usage, call)
@@ -758,12 +899,22 @@ object ToolLoop:
           yield
             val request  = ModelRequest(prompt ++ view, nodes.offered)
             val attempts = AtomicInteger(0)
-            stack.wrapModelCall(request, answering(agent.id, context, answers))(
-              callModel(agent.model, agent.id, context, attempts)
-            ) match
-              // nothing is stored while the question waits: the model step runs again once it is answered
-              case Left(asked: MiddlewareAsked) => askedSuspend(nodes, asked, MiddlewareHook.WrapModelCall, answers)
-              case Left(error)                  => NodeResult.Fail(error)
+            // every completion the model returned in this step, with its attempt number
+            val returned = AtomicReference(Vector.empty[(Completion, Int)])
+            stack.wrapModelCall(request, answering(agent.id, context, answers)) { req =>
+              val result = callModel(agent.model, agent.id, context, attempts)(req)
+              result.foreach(c => returned.updateAndGet(_ :+ (c -> attempts.get)))
+              result
+            } match
+              // nothing of the step is stored while the question waits - it runs again once answered - but
+              // the model calls a wrapper made before asking were made, and are counted
+              case Left(asked: MiddlewareAsked) =>
+                val usage = returned.get.map((c, n) => completed(c, n, context))
+                val update =
+                  if usage.isEmpty then StateUpdate.empty
+                  else StateUpdate.update(LoopKeys.usage, usage.reduce(_.merge(_)))
+                askedSuspend(nodes, asked, MiddlewareHook.WrapModelCall, answers, update = update)
+              case Left(error) => NodeResult.Fail(error)
               // a blank answer without tool calls is refused before it is stored, so the history stays valid
               // and recover asks the model again
               case Right(completion) =>

@@ -3,10 +3,30 @@ package org.llm4s.agent
 import org.llm4s.agent.AgentFixture._
 import org.llm4s.agent.SpecTools.{ call, calling, Text }
 import org.llm4s.agent.events.GuardrailPhase
-import org.llm4s.agent.graph.{ GraphError, InterruptId, RunContext, ThreadId }
+import org.llm4s.agent.events.{ AgentEvents, ModelCallCompleted }
+import org.llm4s.agent.graph.{
+  EventRecord,
+  GraphError,
+  GraphRuntime,
+  InMemoryCheckpointer,
+  InterruptId,
+  RunContext,
+  RunEvent,
+  ThreadId
+}
 import org.llm4s.agent.graph.middleware._
 import org.llm4s.agent.graph.tool.{ AgentTool, ToolContext, ToolOutcome }
-import org.llm4s.agent.graph.toolloop.{ GivenAnswer, MiddlewareHook, MiddlewareQuestionRequest, ToolLoop }
+import org.llm4s.agent.graph.toolloop.{
+  AgentInput,
+  ApprovalRequest,
+  ApprovalSource,
+  GivenAnswer,
+  MiddlewareHook,
+  MiddlewareQuestionRequest,
+  ToolLoop,
+  ToolQuestionRequest,
+  ToolTask
+}
 import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.agent.guardrails.builtin.LengthCheck
 import org.llm4s.error.ValidationError
@@ -29,6 +49,16 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
     deployed.add(a.text)
     ToolOutcome.Success(ujson.Str(s"deployed ${a.text}"))
   }
+
+  /** The durable `ModelCallCompleted` events of `threadId`, in order. */
+  private def modelCallsCompleted(store: InMemoryCheckpointer, threadId: ThreadId): Vector[ModelCallCompleted] =
+    store
+      .eventsAfter(threadId, 0L, 1000)
+      .fold(e => fail(e.message), identity)
+      .collect {
+        case EventRecord(_, _, _, _, _, _, _, RunEvent.Custom(AgentEvents.ModelCallCompleted.name, _, payload)) =>
+          AgentEvents.ModelCallCompleted.decode(payload).getOrElse(fail(s"undecodable payload $payload"))
+      }
 
   private def askedOf(result: AgentResult): Vector[(InterruptId, MiddlewareQuestionRequest)] = result.status match {
     case AgentStatus.Suspended(_, _, asked, _) => asked
@@ -131,24 +161,44 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
 
   it should "review the model's output, returning the reviewed completion without calling the model again" in {
     val client = ScriptedLLMClient.of(CompletionFixture.simple("raw output"))
-    val reviewer = new AgentMiddleware.Asking[Need, Info] {
-      val id: MiddlewareId = MiddlewareId("output-review")
+    val store  = new InMemoryCheckpointer
+    val agent =
+      built(Agent.builder("assistant", client).withMiddleware(new OutputReview).withRuntime(new GraphRuntime(store)))
+    val parked = agent.run(ThreadId("reviewed"), "q").value
+    ToolLoop.middlewareQuestion[Need](askedOf(parked).head._2) shouldBe Right(Need("raw output"))
+    parked.messages.collect { case a: AssistantMessage => a } shouldBe empty
+    // the model call made before the question is counted while it waits, and announced once
+    parked.usage.requestCount shouldBe 1
+    (parked.usage.inputTokens, parked.usage.outputTokens) shouldBe ((10L, 20L))
+    modelCallsCompleted(store, parked.threadId).map(_.usage.map(_.promptTokens)) shouldBe Vector(Some(10))
+
+    val done = agent.resume(parked.threadId, Map(parked.reply(askedOf(parked).head._1, Info("reviewed output")))).value
+    done.answer shouldBe Some("reviewed output")
+    client.callCount shouldBe 1
+    // the reviewed completion carries no usage: the thread's usage is the one real call's, counted once
+    done.usage.requestCount shouldBe 2
+    (done.usage.inputTokens, done.usage.outputTokens) shouldBe ((10L, 20L))
+    modelCallsCompleted(store, parked.threadId).map(_.usage.map(_.promptTokens)) shouldBe Vector(Some(10), None)
+  }
+
+  it should "count every model call a wrapper made before asking, each announced with its attempt" in {
+    val client = ScriptedLLMClient.of(CompletionFixture.simple("first"), CompletionFixture.simple("second"))
+    val store  = new InMemoryCheckpointer
+    val twice = new AgentMiddleware.Asking[Need, Info] {
+      val id: MiddlewareId = MiddlewareId("twice")
       override def wrapModelCall(request: ModelRequest, context: RunContext)(
         next: ModelRequest => Result[Completion]
       ): Result[Completion] =
         answered(context) match {
-          case Some(resumed) =>
-            Right(CompletionFixture.simple(resumed.answer.value))
-          case None => next(request).flatMap(c => ask(Need(c.message.content)))
+          case Some(resumed) => Right(CompletionFixture.simple(resumed.answer.value).withUsage(None))
+          case None          => next(request).flatMap(_ => next(request)).flatMap(c => ask(Need(c.message.content)))
         }
     }
-    val agent  = built(Agent.builder("assistant", client).withMiddleware(reviewer))
-    val parked = agent.run("q").value
-    ToolLoop.middlewareQuestion[Need](askedOf(parked).head._2) shouldBe Right(Need("raw output"))
-    parked.messages.collect { case a: AssistantMessage => a } shouldBe empty
-    val done = agent.resume(parked.threadId, Map(parked.reply(askedOf(parked).head._1, Info("reviewed output")))).value
-    done.answer shouldBe Some("reviewed output")
-    client.callCount shouldBe 1
+    val agent  = built(Agent.builder("assistant", client).withMiddleware(twice).withRuntime(new GraphRuntime(store)))
+    val parked = agent.run(ThreadId("twice"), "q").value
+    parked.usage.requestCount shouldBe 2
+    parked.usage.inputTokens shouldBe 20L
+    modelCallsCompleted(store, parked.threadId).map(_.attempts) shouldBe Vector(1, 2)
   }
 
   "A tool wrapper's questions" should "be pending one per call, and be answered one at a time" in {
@@ -389,9 +439,120 @@ class AgentMiddlewareQuestionSpec extends AnyFlatSpec with Matchers {
       .answer shouldBe Some("ok")
     agent.run(parked.threadId, "hi").value.answer shouldBe Some("fine")
   }
+
+  it should "end the review with the verdict when the guardrail's reason varies, without calling it again" in {
+    val calls = new AtomicInteger
+    // an LLM judge: refuses every time, worded differently each time
+    val judge: OutputGuardrail = new OutputGuardrail {
+      def validate(value: String): Result[String] =
+        Left(ValidationError("judge", s"unsafe (score ${calls.incrementAndGet()})"))
+      val name: String = "judge"
+    }
+    val agentOver = (verdict: GuardrailVerdict) => {
+      calls.set(0)
+      val client = ScriptedLLMClient.of(CompletionFixture.simple("answer"))
+      val agent =
+        built(Agent.builder("assistant", client).withMiddleware(new GuardrailReviewMiddleware(Nil, Seq(judge))))
+      val parked        = agent.run("q").value
+      val (id, request) = askedOf(parked).head
+      ToolLoop.middlewareQuestion[GuardrailReview](request).map(_.reason.contains("score 1")) shouldBe Right(true)
+      agent.resume(parked.threadId, Map(parked.reply[GuardrailVerdict](id, verdict))).value
+    }
+
+    agentOver(GuardrailVerdict.Allow).answer shouldBe Some("answer")
+    calls.get shouldBe 1
+    agentOver(GuardrailVerdict.Edit("edited")).answer shouldBe Some("edited")
+    calls.get shouldBe 1
+    agentOver(GuardrailVerdict.Block).status match {
+      case AgentStatus.Blocked(guardrail, reason) =>
+        guardrail shouldBe "judge"
+        reason should include("score 1")
+      case other => fail(s"expected Blocked, got $other")
+    }
+    calls.get shouldBe 1
+  }
+
+  it should "run the guardrails again, and ask again, when the hook runs on different text" in {
+    val tooLong: OutputGuardrail = new LengthCheck(1, 5)
+    val review                   = new GuardrailReviewMiddleware(Nil, Seq(tooLong))
+    val verdict                  = upickle.default.writeJs[GuardrailVerdict](GuardrailVerdict.Allow)
+    val asked = upickle.default.writeJs(GuardrailReview(GuardrailPhase.Output, tooLong.name, "r", "far too long"))
+    val context = org.llm4s.agent.graph.GraphTestSupport
+      .testRunContext()
+      .withAnswers(Map(review.id.value -> (asked, verdict)))
+    review.afterAgent("far too long", context) shouldBe Right("far too long")
+    review.afterAgent("also far too long", context) match {
+      case Left(again: MiddlewareAsked) =>
+        upickle.default.read[GuardrailReview](again.question).text shouldBe "also far too long"
+      case other => fail(s"expected a new question, got $other")
+    }
+    review.beforeAgent("far too long", context) shouldBe Right("far too long") // no input guardrails
+  }
+
+  "The interrupt request types" should "be built with apply and changed with their with* setters" in {
+    val c      = call("c1", "deploy", "one")
+    val agent  = AgentId.unsafe("a")
+    val mw     = MiddlewareId("m")
+    val given1 = GivenAnswer(agent, mw, ujson.Str("q"), ujson.Str("a"))
+    given1.withAgent(AgentId.unsafe("b")).agent shouldBe AgentId.unsafe("b")
+    given1.withMiddleware(MiddlewareId("n")).middleware shouldBe MiddlewareId("n")
+    given1.withQuestion(ujson.Num(1)).question shouldBe ujson.Num(1)
+    given1.withAnswer(ujson.Num(2)).answer shouldBe ujson.Num(2)
+
+    val approval = ApprovalRequest("m1", c, "why", ApprovalSource.Tool)
+    approval.answered shouldBe empty
+    approval.withAssistantMessageId("m2").assistantMessageId shouldBe "m2"
+    approval.withCall(call("c2", "deploy")).call.id shouldBe "c2"
+    approval.withReason("because").reason shouldBe "because"
+    approval.withSource(ApprovalSource.Middleware(mw)).source shouldBe ApprovalSource.Middleware(mw)
+    approval.withAnswered(Vector(given1)).answered shouldBe Vector(given1)
+
+    val question = ToolQuestionRequest("m1", c, ujson.Str("q"))
+    (question.approved, question.answered) shouldBe ((false, Vector.empty))
+    question.withAssistantMessageId("m2").assistantMessageId shouldBe "m2"
+    question.withCall(call("c2", "deploy")).call.id shouldBe "c2"
+    question.withQuestion(ujson.Num(3)).question shouldBe ujson.Num(3)
+    question.withApproved(true).approved shouldBe true
+    question.withAnswered(Vector(given1)).answered shouldBe Vector(given1)
+
+    val asked = MiddlewareQuestionRequest(agent, mw, MiddlewareHook.BeforeAgent, ujson.Str("q"))
+    (asked.input, asked.call, asked.approved, asked.answered) shouldBe ((None, None, false, Vector.empty))
+    asked.withAgent(AgentId.unsafe("b")).agent shouldBe AgentId.unsafe("b")
+    asked.withMiddleware(MiddlewareId("n")).middleware shouldBe MiddlewareId("n")
+    asked.withHook(MiddlewareHook.AfterAgent).hook shouldBe MiddlewareHook.AfterAgent
+    asked.withQuestion(ujson.Num(4)).question shouldBe ujson.Num(4)
+    asked.withInput(AgentInput("go")).input.map(_.query) shouldBe Some("go")
+    asked.withInput(AgentInput("go")).withInput(None).input shouldBe None
+    asked.withCall(ToolTask("m1", c)).call shouldBe Some(ToolTask("m1", c))
+    asked.withCall(ToolTask("m1", c)).withCall(None).call shouldBe None
+    asked.withApproved(true).approved shouldBe true
+    asked.withAnswered(Vector(given1)).answered shouldBe Vector(given1)
+    upickle.default.read[MiddlewareQuestionRequest](upickle.default.write(asked)) shouldBe asked
+  }
+
+  "GuardrailReview" should "be built with apply and changed with its with* setters" in {
+    val review = GuardrailReview(GuardrailPhase.Input, "g", "r", "t")
+    review.withPhase(GuardrailPhase.Output).phase shouldBe GuardrailPhase.Output
+    review.withGuardrail("h").guardrail shouldBe "h"
+    review.withReason("s").reason shouldBe "s"
+    review.withText("u").text shouldBe "u"
+    upickle.default.read[GuardrailReview](upickle.default.write(review)) shouldBe review
+  }
 }
 
 object AgentMiddlewareQuestionSpec {
+
+  /** Reviews the model's output: asks about it, then returns the reviewer's text as a completion without usage. */
+  final class OutputReview extends AgentMiddleware.Asking[Need, Info] {
+    val id: MiddlewareId = MiddlewareId("output-review")
+    override def wrapModelCall(request: ModelRequest, context: RunContext)(
+      next: ModelRequest => Result[Completion]
+    ): Result[Completion] =
+      answered(context) match {
+        case Some(resumed) => Right(CompletionFixture.simple(resumed.answer.value).withUsage(None))
+        case None          => next(request).flatMap(c => ask(Need(c.message.content)))
+      }
+  }
   final case class Need(what: String) derives ReadWriter
   final case class Info(value: String) derives ReadWriter
 

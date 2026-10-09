@@ -124,7 +124,7 @@ class AgentKtHumanReviewTest {
     @Test
     fun `a breakpoint is pending as BREAKPOINT, each held call on its own, and proceed continues it`() = runBlocking {
         ran.clear()
-        val agent = agentOf { it.withInterruptBefore(seq(AgentNode.valueOf("Tool"))) }
+        val agent = agentOf { it.withInterruptBefore(AgentNode.valueOf("Tool")) }
         val first = agent.run("deploy")
         val pending = AgentKt.pending(first)
         assertEquals(listOf(InterruptKind.BREAKPOINT, InterruptKind.BREAKPOINT), pending.map { it.kind() })

@@ -4,6 +4,12 @@ package org.llm4s.agent
  * A node of an agent's loop that a static breakpoint can hold: see [[AgentBuilder.withInterruptBefore]]
  * and [[AgentBuilder.withInterruptAfter]]. Each task the breakpoint holds is an interrupt of its own,
  * reported in `AgentStatus.Suspended.breakpoints` and continued with `AgentResult.proceed`.
+ *
+ * A step continued after a review runs at another node: a model call after a `wrapModelCall` question at
+ * `<id>/asked/<middleware>/wrapModelCall`, a tool call after an approval or a question at `<id>/approval`,
+ * `<id>/ask/<tool>` or `<id>/asked/<middleware>/wrapToolCall`, and an answer after an `afterAgent` question
+ * at `<id>/asked/<middleware>/afterAgent`. A breakpoint after a node holds these too, so nothing the step
+ * does escapes it; a breakpoint before one does not, since the reviewer has just seen the step.
  */
 enum AgentNode:
   /**
@@ -15,8 +21,8 @@ enum AgentNode:
   /**
    * Each tool call (`<id>/call-tool`), one interrupt per call, so the calls of one message are held and
    * continued one at a time. Held before, the call has not run; held after, its result is recorded, but
-   * the next model call waits for it. A call continued after an approval or a question runs at the
-   * agent's approval or question node, which this breakpoint does not hold: the reviewer has just seen it.
+   * the next model call waits for it - also a result recorded once an approval or a question about the
+   * call was answered.
    */
   case Tool
 

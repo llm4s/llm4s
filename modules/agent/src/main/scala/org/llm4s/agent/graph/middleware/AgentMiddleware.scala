@@ -148,7 +148,8 @@ object AgentMiddleware:
    * What runs again is the asking task: `beforeAgent` re-runs the turn's input (nothing of the turn
    * is stored while it waits), `afterAgent` the final answer, `wrapToolCall` the tool call (its
    * arguments checked again), and `wrapModelCall` the model call - so a model wrapper that asks after
-   * calling `next` calls the model again once answered, unless it returns a completion of its own. A
+   * calling `next` calls the model again once answered, unless it returns a completion of its own (the
+   * calls made before asking are counted in the thread's usage, and announced, while the question waits). A
    * question from a tool wrapper while the tool continues after its own question is refused, as the
    * call's error result.
    */
