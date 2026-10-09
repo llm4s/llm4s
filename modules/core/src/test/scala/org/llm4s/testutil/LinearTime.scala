@@ -9,69 +9,217 @@ import scala.concurrent.duration.*
  * Checks that an operation's cost grows linearly with its input, without an absolute wall-clock bound
  * that a slow or loaded runner - Windows, coverage instrumentation, a busy CI host - can exceed (#1709).
  *
- * The operation is timed on a small and a large input (typically four times the size) after a JIT
- * warm-up, alternating between the two, and each input's cost is the cheapest of several runs.
+ * The operation is timed on a small and a large input (typically four times the size), alternating
+ * between the two, and each input's cost is the cheapest of several samples.
  *
- * The cost is the calling thread's CPU time where the JVM measures it, else wall time. Wall time is
- * not linear in the work on a loaded host: a run shorter than the scheduler's time slice often
- * finishes inside one, while a longer run is descheduled, waits behind the other runnable threads and
- * is charged for it, and so is a pause for a collection that a starved GC thread is slow to finish.
- * CPU time counts only the thread's own work. Noise only ever adds cost, so the cheapest run is the
- * closest to the operation's own.
+ * The cost is the calling thread's CPU time where the JVM measures it, else wall time (also on a
+ * virtual thread, for which the JVM reports no CPU time). Wall time is not linear in the work on a
+ * loaded host: a run shorter than the scheduler's time slice often finishes inside one, while a longer
+ * run is descheduled, waits behind the other runnable threads and is charged for it, and so is a pause
+ * for a collection that a starved GC thread is slow to finish. CPU time counts only the thread's own
+ * work. Noise only ever adds cost, so the cheapest sample is the closest to the operation's own.
+ *
+ * A clock is only as fine as its ticks: thread CPU time on Windows advances in steps of about 15.6 ms,
+ * so a microsecond-scale input reads 0 and its 4x input a few ticks (#1735). Each sample therefore
+ * repeats the operation a calibrated number of times: the repeat count doubles until one sample of the
+ * small input reads at least [[targetFor]] - five ticks of the clock - and the large input's samples
+ * repeat it as often. On a nanosecond clock the floor is a few milliseconds.
  *
  * A linear operation costs about `large / small` times as much on the large input; a quadratic one,
  * its square. With a 4x input the default bound of 8x sits halfway between linear (4x) and quadratic
- * (16x). `slack` is added to the bound so that a small input that costs microseconds - where the
- * timer's resolution dominates, about 15 ms for thread CPU time on Windows - does not fail a linear
- * operation; it is far below what a quadratic operation costs at the sizes the specs use. Every run is
- * also held to `hangGuard` in wall time, so a catastrophic regression fails even where the ratio
- * would not show it.
+ * (16x). The default `slack` added to the bound is two ticks of the clock.
+ *
+ * Why five ticks: a sample read on a clock of tick `T` is within one tick of its true cost `s` (small)
+ * or `l` (large), either way. Quantisation can therefore cost the check far more than the two-tick
+ * slack: the small reading, one tick low, is multiplied by the 8x bound, so together with the large
+ * reading one tick high the worst case is nine ticks. The sample size, not the slack, absorbs that. A
+ * linear operation (`l = 4s`) fails only if `4s + T > 8(s - T) + 2T`, that is `s < 1.75T`; a quadratic
+ * one (`l = 16s`) escapes only if `16s - T <= 8(s + T) + 2T`, that is `s <= 1.375T`. Calibration stops
+ * at a reading of at least five ticks, so the true small sample is at least four: more than twice the
+ * linear failure point and nearly three times the quadratic escape point. Each sample being a few ticks,
+ * on Windows's 15.6 ms clock the suites that use this stay within seconds of their run on a fine clock.
+ *
+ * Every single run of the operation is also held to `hangGuard` in wall time, so a catastrophic
+ * regression fails even where the ratio would not show it; calibration stops at `maxRepeats`, or once
+ * a sample takes `hangGuard` in wall time, and a large input's sample stops at the first of its
+ * `StopChecks` clock reads to exceed the bound. Both inputs' samples read the clock at the same
+ * points, so neither pays an overhead the other does not.
  */
 object LinearTime {
 
+  /** A monotonic reading in nanoseconds of the cost a sample is charged. */
+  private[testutil] trait Clock {
+    def name: String
+    def nanos(): Long
+
+    /** The size of the clock's step, as observed: the largest of a few successive changes in its reading. */
+    lazy val granularity: FiniteDuration = observedGranularity(this)
+  }
+
   private val threads = ManagementFactory.getThreadMXBean
 
-  private val cpuTime: Boolean =
-    threads.isCurrentThreadCpuTimeSupported && threads.isThreadCpuTimeEnabled
+  private[testutil] object CpuClock extends Clock {
+    val name          = "CPU"
+    def nanos(): Long = threads.getCurrentThreadCpuTime
+  }
 
-  /** The cheapest run on the small and on the large input, and their ratio. */
-  final case class Scaling(small: FiniteDuration, large: FiniteDuration) {
+  private[testutil] object WallClock extends Clock {
+    val name          = "wall"
+    def nanos(): Long = System.nanoTime()
+  }
+
+  /** The calling thread's CPU time where the JVM measures it for this thread, else wall time. */
+  private[testutil] def currentClock(): Clock =
+    if (threads.isCurrentThreadCpuTimeSupported && threads.isThreadCpuTimeEnabled && CpuClock.nanos() >= 0) CpuClock
+    else WallClock
+
+  private val GranularitySteps  = 3
+  private val GranularityBudget = 1.second
+  private val MinTarget         = 5.millis
+  private val TicksPerSample    = 5
+  private val MaxTarget         = 1.second
+  private val StopChecks        = 16L
+
+  private[testutil] def observedGranularity(clock: Clock): FiniteDuration = {
+    val deadline = System.nanoTime() + GranularityBudget.toNanos
+    var largest  = 1L
+    var steps    = 0
+    var last     = clock.nanos()
+    while (steps < GranularitySteps && System.nanoTime() < deadline) {
+      val now = clock.nanos()
+      if (now != last) {
+        largest = math.max(largest, now - last)
+        last = now
+        steps += 1
+      }
+    }
+    // a clock that never moved within the budget is at least that coarse
+    if (steps == 0) GranularityBudget else largest.nanos
+  }
+
+  /** The least a sample of the small input should cost on `clock`: five of its ticks, at least 5 ms. */
+  private[testutil] def targetFor(clock: Clock): FiniteDuration =
+    (clock.granularity * TicksPerSample.toLong).max(MinTarget).min(MaxTarget)
+
+  /**
+   * The cheapest sample on the small and on the large input, each `repeats` runs of the operation on
+   * `clock`. A large input's sample stopped once past the bound (`largeStopped`) reads as what it had
+   * cost by then, which is less than the whole sample would have.
+   */
+  final case class Scaling(
+    small: FiniteDuration,
+    large: FiniteDuration,
+    repeats: Long,
+    clock: String,
+    largeStopped: Boolean = false
+  ) {
     def ratio: Double = large.toNanos.toDouble / math.max(small.toNanos, 1L).toDouble
 
+    /** The cost of one run of the operation on each input. */
+    def smallPerRun: FiniteDuration = (small.toNanos / repeats).nanos
+    def largePerRun: FiniteDuration = (large.toNanos / repeats).nanos
+
     override def toString: String = {
-      val clock = if (cpuTime) "CPU" else "wall"
-      f"small ${small.toNanos / 1e6}%.2f ms, large ${large.toNanos / 1e6}%.2f ms ($clock time), ratio $ratio%.1f"
+      val atLeast = if (largeStopped) "at least " else ""
+      f"small ${small.toNanos / 1e6}%.2f ms, large $atLeast${large.toNanos / 1e6}%.2f ms ($clock time, $repeats " +
+        f"runs a sample: ${smallPerRun.toNanos / 1e3}%.1f vs $atLeast${largePerRun.toNanos / 1e3}%.1f us a run), " +
+        f"ratio $atLeast$ratio%.1f"
     }
   }
 
   /**
-   * Times `op` on `small` and `large` and fails unless the large input's cheapest run cost at most
-   * `maxRatio` times the small one's plus `slack`, and no run took `hangGuard` or longer. Returns the
-   * measurement, for a clue.
+   * Times `op` on `small` and `large` and fails unless the large input's cheapest sample cost at most
+   * `maxRatio` times the small one's plus `slack` (by default two ticks of the clock), and no run took
+   * `hangGuard` or longer. Returns the measurement, for a clue.
    */
   def assertLinear[A](
     label: String,
     small: A,
     large: A,
     maxRatio: Double = 8.0,
-    slack: FiniteDuration = 50.millis,
+    slack: Option[FiniteDuration] = None,
     hangGuard: FiniteDuration = 10.seconds,
     warmups: Int = 3,
-    runs: Int = 5
+    runs: Int = 3
+  )(op: A => Any): Scaling =
+    assertLinearOn(currentClock(), label, small, large, maxRatio, slack, hangGuard, warmups, runs)(op)
+
+  private[testutil] val DefaultMaxRepeats = 1L << 20
+
+  /** [[assertLinear]] on a given clock: the seam that lets a spec simulate a coarse one. */
+  private[testutil] def assertLinearOn[A](
+    clock: Clock,
+    label: String,
+    small: A,
+    large: A,
+    maxRatio: Double = 8.0,
+    slack: Option[FiniteDuration] = None,
+    hangGuard: FiniteDuration = 10.seconds,
+    warmups: Int = 3,
+    runs: Int = 3,
+    maxRepeats: Long = DefaultMaxRepeats
   )(op: A => Any): Scaling = {
-    def cost(input: A): FiniteDuration = {
-      val start = if (cpuTime) threads.getCurrentThreadCpuTime else 0L
-      val wall  = timed(label, hangGuard)(op(input))
-      if (cpuTime) (threads.getCurrentThreadCpuTime - start).nanos else wall
+    val allowance = slack.getOrElse(clock.granularity * 2L).toNanos
+
+    /**
+     * `repeats` runs of `op` on `input`: their cost on `clock`, their wall time, and whether the sample
+     * stopped early, once past `stopAbove` nanoseconds.
+     *
+     * The runs go in `StopChecks` batches, and the clock is read once after each batch whether or not
+     * the sample has a bound to stop at, so a sample of either input pays the same overhead a run. Reading
+     * it after every run of the large input only - a thread-CPU-time read costs about half a microsecond -
+     * made a sub-microsecond operation read several times its own ratio.
+     */
+    def sample(input: A, repeats: Long, stopAbove: Long = Long.MaxValue): (Long, FiniteDuration, Boolean) = {
+      val batch     = math.max(1L, repeats / StopChecks)
+      val start     = clock.nanos()
+      val wallStart = System.nanoTime()
+      var done      = 0L
+      var cost      = 0L
+      while (done < repeats && cost <= stopAbove) {
+        val end = math.min(repeats, done + batch)
+        while (done < end) {
+          timed(label, hangGuard)(op(input))
+          done += 1
+        }
+        cost = clock.nanos() - start
+      }
+      (cost, (System.nanoTime() - wallStart).nanos, done < repeats)
     }
+
+    // JIT warm-up, alternating
     (1 to warmups).foreach { _ =>
-      cost(small)
-      cost(large)
+      timed(label, hangGuard)(op(small))
+      timed(label, hangGuard)(op(large))
     }
-    val (smalls, larges) = (1 to runs).map(_ => (cost(small), cost(large))).unzip
-    val scaling          = Scaling(smalls.min, larges.min)
-    if (scaling.large.toNanos > scaling.small.toNanos * maxRatio + slack.toNanos)
-      fail(s"$label: not linear: $scaling, more than ${maxRatio}x the small input's cost plus $slack")
+
+    // calibrate: double the repeats until a sample of the small input costs the target on this clock
+    val target                                          = targetFor(clock).toNanos
+    var repeats                                         = 1L
+    var calibration                                     = sample(small, repeats)
+    def short(sampled: (Long, FiniteDuration, Boolean)) = sampled._1 < target && sampled._2 < hangGuard
+    while (short(calibration) && repeats < maxRepeats) {
+      repeats = math.min(repeats * 2, maxRepeats)
+      calibration = sample(small, repeats)
+    }
+
+    var smallest = Long.MaxValue
+    var largest  = Long.MaxValue
+    var stopped  = false
+    (1 to runs).foreach { _ =>
+      smallest = math.min(smallest, sample(small, repeats)._1)
+      val bound               = (smallest * maxRatio).toLong + allowance
+      val (cost, _, cutShort) = sample(large, repeats, stopAbove = bound)
+      if (cost < largest) {
+        largest = cost
+        stopped = cutShort
+      }
+    }
+    val scaling = Scaling(smallest.nanos, largest.nanos, repeats, clock.name, stopped)
+    if (scaling.large.toNanos > scaling.small.toNanos * maxRatio + allowance)
+      fail(
+        f"$label: not linear: $scaling, more than ${maxRatio}x the small input's cost plus ${allowance / 1e6}%.3f ms"
+      )
     scaling
   }
 

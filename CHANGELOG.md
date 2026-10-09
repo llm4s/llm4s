@@ -2091,6 +2091,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository of its own but lies inside one (it now reports `not a git repository`); on Windows, the forms listed
   above; and `environment` variables outside the list. Run writes through the
   `writeFile` / `modifyFile` operations or the read-write allowlist's own programs instead.
+- **Security - `llm4s-core`, `llm4s-agent-tools`: the SSRF guard blocks IPv6 private ranges, redirect header
+  stripping is sticky, and the HTTP tool's `timeout` bounds the whole call** ([#1408](https://github.com/llm4s/llm4s/issues/1408),
+  findings F5, F7 and F8; F6 remains open):
+  - *F5, SSRF guard (`NetworkSecurity.isBlockedIP`).* It relied on the JDK's `isSiteLocalAddress`, which for IPv6
+    matches only the deprecated `fec0::/10`, so unique-local `fc00::/7` (`fd00::1`) passed, as did IPv6 forms that
+    carry a blocked IPv4 address: IPv4-compatible `::127.0.0.1`, NAT64 `64:ff9b::7f00:1` and 6to4 `2002:7f00:1::1`.
+    It now also refuses `fc00::/7`, the whole IPv4-compatible `::/96`, local-use NAT64 `64:ff9b:1::/48`, Teredo
+    `2001::/32`, `2001:db8::/32` and `3fff::/20` (documentation), `2001:2::/48` (benchmarking), `100::/64` (discard)
+    and `0.0.0.0/8`, and judges an IPv4-mapped (`::ffff:0:0/96`), NAT64 (`64:ff9b::/96`) or 6to4 (`2002::/16`)
+    address by the IPv4 address it carries, against every blocked IPv4 range. No public signature changed.
+  - *F7, redirect headers (`HTTPTool`).* With `followRedirects`, `Authorization`, `Cookie` and
+    `Proxy-Authorization` were stripped only on a hop whose host differed from the previous hop's, and the next hop
+    was sent the original headers again, so `127.0.0.1` -> `localhost` -> `localhost` delivered `Authorization` to
+    the third hop; a hop to another port, or from `https` to `http`, on the same host kept them. They are now
+    stripped from the first hop whose origin (scheme, host and port) differs from the original request's, and stay
+    stripped for every later hop, including one back to the original origin.
+  - *F8, timeout (`HTTPTool`).* `HttpConfig.timeout` was set as the connect and the per-read timeout, so a server that
+    sent a byte every 100 ms held a 500 ms call for as long as it kept sending (and each redirect hop got a fresh
+    timeout). It is now one deadline for the whole call: name resolution, connecting, every redirect hop and reading
+    the body. The caller gets `TIMEOUT: HTTP request did not complete within <n> ms ...` at the deadline, and the
+    abandoned connection is closed. The field keeps its name and `FiniteDuration` type.
+  - **Migration.** A request to a host that resolves into one of the newly blocked ranges is now refused with
+    `SSRF_BLOCKED` (use `HttpConfig.withInternalIPsAllowed` deliberately if you need one; `allowedDomains` does not lift the check). A
+    redirect chain that relied on credentials surviving a change of host, port or scheme, or a return to the original
+    host, no longer sends them. A `timeout` sized for a slow single read may now be too short for a whole download or
+    a redirect chain: size it for the entire call. A zero `timeout` used to mean "no timeout" (`HttpURLConnection`'s
+    `0`); it now fails every call at once - set a large one instead.
 - **`llm4s-agent`: the PII Email pattern runs in linear time; an SSN stays within a line; `UTC+5` is not a phone number**
   ([#1713](https://github.com/llm4s/llm4s/issues/1713)):
   - `PIIType.Email`, in the default type set of `PIIMasker` and `PIIDetector`, began a match attempt at every
