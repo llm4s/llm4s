@@ -62,6 +62,19 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     "text-embedding-ada-002" -> 1536
   )
 
+  /**
+   * The embeddings endpoint for a base URL.
+   *
+   * The default base URL, like the chat providers', is the versioned API root
+   * (`https://api.openai.com/v1`), so a base URL ending in `/v1` gets `/embeddings`. One without it
+   * (`https://api.openai.com`, a proxy root) gets `/v1/embeddings`, as before; appending that to the
+   * default produced `/v1/v1/embeddings`.
+   */
+  private[provider] def embeddingsUrl(baseUrl: String): String = {
+    val root = baseUrl.trim.stripSuffix("/")
+    if (root.endsWith("/v1")) s"$root/embeddings" else s"$root/v1/embeddings"
+  }
+
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
 
@@ -83,7 +96,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
         "model" -> model
       )
 
-      val url = s"${cfg.baseUrl}/v1/embeddings"
+      val url = embeddingsUrl(cfg.baseUrl)
       logger.debug(s"[OpenAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
 
       val headers = Map("Authorization" -> s"Bearer ${cfg.apiKey}", "Content-Type" -> "application/json")
@@ -92,7 +105,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
       // A cancellation passes through as it is (design section 4.4); any other failure is an EmbeddingError.
       val respEither: Result[org.llm4s.http.HttpResponse] =
         httpClient
-          .post(url, headers, payload.render(), timeout = 2.minutes)
+          .post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
           .left
           .map {
             case cancelled: CancelledError => cancelled
@@ -124,7 +137,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
                 EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "openai")
               }
           case status =>
-            val body = Redaction.truncateForLog(response.body)
+            val body = Redaction.safeBody(response.body)
             logger.error(s"[OpenAIEmbeddingProvider] HTTP error: $body")
             Left(EmbeddingError(code = Some(status.toString), message = body, provider = "openai"))
         }

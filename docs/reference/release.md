@@ -1,9 +1,18 @@
+---
+layout: page
+title: Release Process
+parent: Reference
+nav_order: 3
+---
+
 # Release Process
 
 ## Creating a New Release
 
 ### 1. Tag Format
-All release tags MUST use the `v` prefix format: `v0.3.2`, `v1.0.0`, etc.
+All release tags MUST use the `v` prefix format: `v0.3.2`, `v1.0.0`, etc. Use three numeric parts, optionally followed by a suffix such as `-RC1`
+(`vMAJOR.MINOR.PATCH[-suffix]`). The release workflow runs for any `v[0-9]*` tag, but the docs deploy accepts only that form: a tag such as
+`v1.0` would publish to Maven Central and then fail the `docs` job, with the artifacts already out.
 
 ### 2. Release Steps
 
@@ -31,8 +40,32 @@ ci → publish → github-release → docs
 | `ci` | Full CI on the tagged commit |
 | `publish` | Signs and publishes artifacts to Maven Central |
 | `github-release` | Creates the GitHub Release for the tag |
-| `docs` | Deploys llm4s.org with the new version in the install snippets |
+| `docs` | Deploys llm4s.org with the new version in the install snippets: dispatches the docs workflow on `main`, built from the tag, and waits for it |
 | `docker` | Builds and pushes the container image |
+
+### The docs deploy runs from `main`, built from the tag
+
+The `github-pages` environment only accepts deployments from the `main` branch. A job that ran on the tag
+would be rejected before it started (that is what failed v0.4.1, the first release to run it: [#1152](https://github.com/llm4s/llm4s/issues/1152)),
+so the `docs` job does not deploy from the tag: it **dispatches** `pages.yml` on `main` with the tag as its `ref`
+input (`scripts/dispatch-docs-deploy.sh`). The dispatched run is on `main`, so the environment accepts it, and its
+build checks out the tag, so the version and the install snippets are the release's. The `docs` job waits for that run and
+fails if the deploy fails; it still runs only after `github-release`, so the docs never advertise a version that is not on
+Maven Central.
+
+An environment rule for `v*` tags (Settings, Environments, `github-pages`, Deployment branches and tags) would also let a
+tag-triggered deploy through, and is an equally valid alternative if a maintainer prefers it; the workflow does not need it.
+
+To deploy the docs for a tag by hand, for example to re-run a deploy that failed, or to try the path before a release,
+dispatch the workflow on `main`:
+
+```bash
+gh workflow run pages.yml --ref main -f ref=v0.5.0   # the ref must be a release tag, vX.Y.Z or vX.Y.Z-RC1
+```
+
+That redeploys the site from that tag's content, so use the **latest** release's tag unless you mean to roll the site
+back. The tag must exist, and `latest_release` in the install snippets always comes from the newest published GitHub
+Release, whichever tag is built.
 
 ### 3. What gets published is whatever the tagged commit aggregates
 
@@ -135,7 +168,9 @@ help.
 
 - **Failed after `publish`** (`github-release`, `docs` or `docker`) — the artifacts are live
   and the release is real. Do **not** re-tag. Re-run the failed job from the Actions UI, or
-  cut the next patch version if the failure needs a code change.
+  cut the next patch version if the failure needs a code change. Re-running `docs` dispatches a
+  fresh docs deploy. If `docs` ended "cancelled", a newer deploy usually replaced it (the workflow
+  keeps one pending run): check that llm4s.org shows the new version before re-running.
 
 ## Version Numbering
 
