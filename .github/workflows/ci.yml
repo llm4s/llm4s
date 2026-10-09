@@ -135,6 +135,12 @@ jobs:
           scripts/test-check-tier-drift.sh
           scripts/check-tier-drift.sh
 
+      # scripts/mima-dry-run.sh is a manual release-readiness script (it publishes the whole build, minutes). Its
+      # tests run it against a fixture repository and a fake `sbt`, with no network, in about ten seconds, so the
+      # script's checks stay able to fail between releases.
+      - name: Test the MiMa dry-run script
+        run: scripts/test-mima-dry-run.sh
+
       # scalafmtCheckAll covers sources only; scalafmtSbtCheck covers build.sbt and project/*.scala.
       # scalafmt downloads scalafmt-core at run time, and a network hiccup used to fail this step in about five
       # seconds ("scalafmt: [v3.7.14] failed to download [.scalafmt.conf]", 2 of 267 runs in three days, both
