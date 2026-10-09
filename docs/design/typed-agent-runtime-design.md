@@ -469,7 +469,7 @@ Limits (owners in §4.9):
 - Embedding, reranker, MCP, image and speech clients follow the contract since §4.12.
 - On a platform thread, cancelling an SDK client call is not prompt.
 - Cancellation, the concurrency limit and deadlines have no public API until `RunHandle`, `RunConfig` and `RunBudgets`, which §4.6 added.
-- `CancellationToken` remains for `PlanRunner` until it is rebuilt.
+- `CancellationToken` was deleted with `PlanRunner` (#1330, §4.15).
 
 ### 4.5 Stage 0 prototype: resumable approval and tool-call barriers ([#1269](https://github.com/llm4s/llm4s/issues/1269))
 
@@ -656,11 +656,11 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 
 | Item | Left by | Owner |
 |---|---|---|
-| Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only) | #1279 | Stage 1, if the agent loop needs it |
+| Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only) | #1279 | Stage 2, with output review and missing-information interrupts (§5.3). Not needed in Stage 1: the loop's approvals come from tools and tool wrappers (`ToolOutcome.NeedsApproval`) and its questions from tools (`ToolOutcome.Ask`), while guardrails and model wrappers block or fail |
 | ~~A guardrail Block (any run-boundary `Left`) leaves the thread `Running` with no way forward, and an output Block leaves the blocked answer in state~~ **closed by #1350 and #1328** (§4.13: `CheckpointStatus.Failed`, the blocked turn removed, `AgentStatus.Blocked`) | #1279 | Stage 1 |
 | Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6 | #1279 | Stage 3 |
-| `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool` (**closed by #1328**); `ModelStep` streaming through live progress, `AgentEvent` replaced (**closed by #1329**); `PlanRunner` rebuilt or removed (#1330) | #1269 | Stage 1 |
-| Delete `CancellationToken` with the `PlanRunner` rebuild | #1270 | Stage 1 |
+| `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool` (**closed by #1328**); `ModelStep` streaming through live progress, `AgentEvent` replaced (**closed by #1329**); `PlanRunner` rebuilt or removed (**closed by #1330**: removed, §4.15) | #1269 | Stage 1 |
+| ~~Delete `CancellationToken` with the `PlanRunner` rebuild~~ **closed by #1330** (§4.15) | #1270 | Stage 1 |
 | Prompt cancellation of SDK client calls on platform threads (today: prompt on virtual threads, where the runtime runs tasks) | #1270 | - |
 | Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
 | Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit and in `RunPosition` (today: the optimistic parent check, and `ThreadBusy` for a run still executing in the same runtime) | #1268, #1269, #1277 | Stage 2 |
@@ -903,7 +903,7 @@ Source breaks, with no shims (the CHANGELOG lists the same): `AgentState`, `Agen
 Limits (owners in §4.9):
 
 - Agent-level event subscription, model token streaming and `AgentEvent`'s replacement: closed by #1329 (§4.14).
-- `PlanRunner`, `DAG`, `TypedAgent` and `CancellationToken` are #1330.
+- `PlanRunner`, `DAG`, `TypedAgent` and `CancellationToken`: removed by #1330 (§4.15).
 - `ToolLoop` sets no retry or cache policy (#1327) on its nodes: a failed model step or tool call is continued by `recover`. Durable checkpointers are Stage 2.
 
 ### 4.14 Stage 1 slice 3: events and tracing ([#1329](https://github.com/llm4s/llm4s/issues/1329))
@@ -1018,6 +1018,16 @@ Limits:
 - Live events are not replayed, and a late `AgentRun.subscribe` misses earlier ones.
 - An approved or edited tool call yields two `agent.tool_executed` events for one call id across runs.
 - `agent.guardrail_blocked` is a guardrail's block only; other middleware refusals emit no agent event.
+
+
+### 4.15 Stage 1 slice 4: orchestration removed ([#1330](https://github.com/llm4s/llm4s/issues/1330))
+
+`org.llm4s.agent.orchestration` is deleted rather than rebuilt: `PlanRunner`, `Plan`/`Node`/`Edge`, `TypedAgent`, `Policies`, `OrchestrationError`, `MDCContext` and `CancellationToken`, with core's `PlanId` and `AgentId`, which only the package used (the agent's id is `org.llm4s.agent.AgentId`). `PlanRunner.execute` took and returned `Map[String, Any]` and cast every node to `TypedAgent[Any, Any]`; that boundary was its contract, and §7 and §8 say to remove it rather than preserve it. `GraphBuilder` already gives typed nodes, edges, static and dynamic joins, parallel supersteps, per-node retry and cache, `RunBudgets.maxConcurrency` and `timeout`, and cancellation through `RunHandle`. A typed DSL over it would be a second public way to build the same graphs, and would overlap Stage 4's typed delegation. Nothing outside the package used it.
+
+- **A blocking agent call cancels its turn when interrupted.** `Agent.run` (and with it `continueConversation` and `runMultiTurn`), `recover` and `resume` await their `AgentRun`. When the wait is interrupted they cancel the turn, wait (uninterruptibly, within 5 seconds, `RunHandle.awaitEnd`) for it to end so the thread is free for `recover` - a turn whose provider ignores its interrupt for longer is logged at WARN and left to end on its own, the thread `ThreadBusy` until it does, because an unbounded wait would let such a provider hang a cancelled graph run - and return `Left(CancelledError)` with the flag still set; a caller already interrupted starts no turn. An agent called inside a graph node is therefore cancelled with the graph run. This is the synchronous case of "cancelling a run cancels the child runs it started" (§4.9); a node that `start`s a turn without awaiting it, and child runs on another runtime, remain Stage 3. `start`/`AgentRun.await` are unchanged.
+- **`multi-agent-graph` cookbook recipe.** Two specialist agents in one superstep append to one key, and a static join releases an editor agent. Its spec checks deterministic update order with the first task finishing last, the barrier, one checkpoint per superstep, failure before the join, and cancellation reaching the specialists' agent turns. It is the parallel update sample of Stage 1's exit criteria (§6).
+
+The specs are `AgentRunCancellationSpec` and `MultiAgentGraphRecipeSpec`.
 
 ## 5. Harness capabilities
 
@@ -1137,7 +1147,7 @@ The migration note should give direct replacements for existing state/event/Plan
 | Runtime semantics: update functions/supersteps/pending writes/dynamic Send/Command | **Accepted.** `StateKey[A,U]` applies each update to current state in deterministic task/update order. Commands combine updates with typed routes; each tool call is a separately checkpointable task. |
 | Typed continuation resume and suspension scope | **Accepted.** A suspension records a typed question/answer interrupt and `resumeAt: NodeRef[Resumed[Q,A]]`. It pauses the whole run at the superstep boundary; resume may answer a subset, and unanswered continuations stay pending. |
 | Typed graph sketch and write validation | **Accepted.** Nodes declare input types and write sets; `Goto` targets `NodeRef[Unit]`, `Send` carries the destination's input type, and compile-time checks are reinforced at runtime for dynamic/restored graphs. |
-| Tool loop and PlanRunner migration | **Accepted.** Implement the loop directly on the new runtime. Rebuild PlanRunner using typed graph APIs or remove it; no compatibility compilation of `Map[String, Any]` into the new runtime and no side-by-side engines. |
+| Tool loop and PlanRunner migration | **Accepted.** Implement the loop directly on the new runtime. Rebuild PlanRunner using typed graph APIs or remove it; no compatibility compilation of `Map[String, Any]` into the new runtime and no side-by-side engines. **Decided by #1330: removed** (§4.15). |
 | Workflow/comprehension API | **Accepted as an exploration, not a second engine.** A named-step `Workflow[A]` may compile to the same kernel after runtime semantics are proven; arbitrary closures cannot be replayed safely. |
 | Deep Agents default tool suite and middleware | **Accepted.** Tool suite/default prompt, allow/exclude profile, state-contributing and `wrap*` middleware semantics are specified. |
 | Typed state key map vs tuples/intersections | **Choose typed keys with operation-valued updates.** `StateKey[A,U]` carries codecs and an `(A,U) => Result[A]` application function. Scala 3 tuple/intersection composition remains appropriate for statically composed application input/output types, not the mutable capability registry. |

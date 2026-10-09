@@ -53,6 +53,7 @@ class AgentKtTest {
         every { result.getError() } returns err
         every { err.message } returns "agent failed"
         every { mockJAgent.stream(any(), "query", any()) } returns result
+        every { mockJAgent.forget(any<String>()) } returns LlmResult.success<Void>(null)
 
         assertEquals("agent failed", assertFailsWith<LLMException> { agent.run("query") }.message)
     }
@@ -62,8 +63,44 @@ class AgentKtTest {
         val err = mockk<LlmException>(relaxed = true)
         every { err.message } returns null
         every { mockJAgent.stream(any(), "query", any()) } answers { started { it.onError(err) }(thirdArg()) }
+        every { mockJAgent.forget(any<String>()) } returns LlmResult.success<Void>(null)
 
         assertEquals("Agent run failed", assertFailsWith<LLMException> { agent.run("query") }.message)
+    }
+
+    @Test
+    fun `a failed run forgets the thread it ran on, and only then throws`() = runTest {
+        val err = mockk<LlmException>(relaxed = true)
+        every { err.message } returns "agent failed"
+        val ranOn = mutableListOf<String>()
+        every { mockJAgent.stream(any(), "query", any()) } answers {
+            ranOn.add(firstArg())
+            started { it.onError(err) }(thirdArg())
+        }
+        every { mockJAgent.forget(any<String>()) } returns LlmResult.success<Void>(null)
+
+        val thrown = assertFailsWith<LLMException> { agent.run("query") }
+        verify(exactly = 1) { mockJAgent.forget(ranOn.single()) }
+        assertEquals(0, thrown.suppressed.size)
+    }
+
+    @Test
+    fun `a forget that fails, or throws, is suppressed in what the failed run throws`() = runTest {
+        val err = mockk<LlmException>(relaxed = true)
+        every { err.message } returns "agent failed"
+        every { mockJAgent.stream(any(), "query", any()) } answers { started { it.onError(err) }(thirdArg()) }
+        val busy = org.llm4s.error.ValidationError.apply("thread", "busy")
+        every { mockJAgent.forget(any<String>()) } returns LlmResult.failure<Void>(busy)
+
+        val refused = assertFailsWith<LLMException> { agent.run("query") }
+        assertEquals("agent failed", refused.message)
+        assertEquals(busy, (refused.suppressed.single() as LlmException).error())
+
+        val broken = IllegalStateException("store down")
+        every { mockJAgent.forget(any<String>()) } throws broken
+        val thrown = assertFailsWith<LLMException> { agent.run("query") }
+        assertEquals("agent failed", thrown.message)
+        assertEquals(broken, thrown.suppressed.single())
     }
 
     @Test

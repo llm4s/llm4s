@@ -67,7 +67,25 @@ class OpenAIEmbeddingProviderHttpSpec extends AnyFlatSpec with Matchers {
     requests.get shouldBe 0
   }
 
-  it should "leave usage empty when the reply has none" in {
+  it should "post to <baseUrl>/embeddings when the base URL is the versioned root, as the default is" in {
+    OpenAIEmbeddingProvider.configSpec.defaultBaseUrl shouldBe Some("https://api.openai.com/v1")
+    val reply = """{"data":[{"embedding":[1.0]}]}"""
+    Seq("/v1", "/v1/").foreach { suffix =>
+      withServer("/v1/embeddings")(ex => sendJsonResponse(ex, 200, reply)) { baseUrl =>
+        provider(baseUrl + suffix).embed(request).map(_.embeddings) shouldBe Right(Seq(Vector(1.0)))
+      }
+    }
+  }
+
+  "OpenAIEmbeddingProvider.embeddingsUrl" should "add /v1 only to a base URL without it" in {
+    OpenAIEmbeddingProvider.embeddingsUrl("https://api.openai.com/v1") shouldBe "https://api.openai.com/v1/embeddings"
+    OpenAIEmbeddingProvider.embeddingsUrl("https://api.openai.com/v1/") shouldBe "https://api.openai.com/v1/embeddings"
+    OpenAIEmbeddingProvider.embeddingsUrl("https://api.openai.com") shouldBe "https://api.openai.com/v1/embeddings"
+    OpenAIEmbeddingProvider.embeddingsUrl("https://proxy.example/openai/") shouldBe
+      "https://proxy.example/openai/v1/embeddings"
+  }
+
+  "OpenAIEmbeddingProvider" should "leave usage empty when the reply has none" in {
     withServer("/v1/embeddings")(ex => sendJsonResponse(ex, 200, """{"data":[{"embedding":[1.0]}]}""")) { baseUrl =>
       provider(baseUrl).embed(request).map(_.usage) shouldBe Right(None)
     }

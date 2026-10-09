@@ -63,23 +63,6 @@ package object types {
       readwriter[String].bimap[DirectoryPath](_.value, DirectoryPath.apply)
   }
 
-  /** Type-safe wrappers for agent and plan IDs, used by `llm4s-agent` */
-  final case class AgentId(value: String) extends AnyVal {
-    override def toString: String = value
-  }
-
-  object AgentId {
-    def generate(): AgentId = AgentId(java.util.UUID.randomUUID().toString)
-  }
-
-  final case class PlanId(value: String) extends AnyVal {
-    override def toString: String = value
-  }
-
-  object PlanId {
-    def generate(): PlanId = PlanId(java.util.UUID.randomUUID().toString)
-  }
-
   // Context Management Types (for conversation context handling)
   final case class SemanticBlockId(value: String) extends AnyVal {
     override def toString: String = value

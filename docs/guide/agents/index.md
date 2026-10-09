@@ -29,7 +29,7 @@ The LLM4S Agent Framework provides a production-ready foundation for building LL
 - **Memory** - Short and long-term context with semantic search
 - **Handoffs** - Agent-to-agent delegation for specialist routing
 - **Streaming** - Real-time events for responsive UIs (`agent.stream`, [streaming guide](streaming))
-- **Orchestration** - Multi-agent workflows with DAG execution
+- **Graphs** - Typed multi-agent workflows on `GraphBuilder`: parallel nodes, joins and checkpoints ([recipe](../../examples/cookbook.html#6-several-agents-in-one-graph))
 
 ## Quick Start
 
@@ -118,7 +118,9 @@ val result = for {
 ```
 
 To name the thread yourself, use `agent.run(threadId, query)`; `agent.runMultiTurn(first, followUps)`
-runs several turns on one thread and stops at the first result that is not `Completed`.
+runs several turns on one thread and stops at the first result that is not `Completed`. A `Left` carries no
+thread id, so when a turn of `run(query)` or `runMultiTurn` fails or is cancelled, its thread is forgotten once
+the turn has ended; name the thread to recover such a turn.
 
 ### Handling the Result
 
@@ -204,9 +206,12 @@ System.out.println(turn.get().answer().orElse("(" + turn.get().status().kind() +
 `agent.recover(threadId)` continues a turn that failed or was cancelled, and also returns an
 `LlmResult<JAgentResult>`. A failed result means one of these: a malformed answer, an empty answers
 list (`InvalidResume`), an answer to an id the thread is not waiting for, a thread that is not suspended (`resume`), or a thread with nothing to
-recover. `resume` and `recover` handle an interrupt the way `run` does: the call returns a
-`CancelledError`, but the turn keeps running. To cancel a turn, use `streamResume` or `streamRecover`
-and cancel the stream (see [Streaming Events](streaming#java-and-kotlin)).
+recover. `resume` and `recover` handle an interrupt the way `run` and `continueConversation` do: interrupting the
+thread blocked in the call cancels the turn, and the call returns a `CancelledError` with the interrupt flag still
+set once the turn has ended, leaving the thread for `recover` (see
+[Java Threading and Cancellation](../java-threading-and-cancellation#interrupting-the-caller-cancels-an-agent-turn)).
+To cancel a turn without interrupting a thread, use `streamResume` or `streamRecover` and cancel the stream (see
+[Streaming Events](streaming#java-and-kotlin)).
 
 The Kotlin API reuses these types: every `AgentKt` turn returns a `JAgentResult`, and `when` over
 `status().kind()` covers it. `AgentKt.pending(result)` is the same `List<PendingInterrupt>`.
@@ -219,6 +224,10 @@ conversation thread is no longer busy: it is left for `recover`, which finishes 
 If the turn had already completed when the cancellation arrived, the call still throws
 `CancellationException`, but the turn's result is committed to the thread: `recover` then has nothing to
 recover and throws `LLMException` ("no incomplete execution"), and the next turn continues from that result.
+The one-shot `run(query)` is the exception, as in Java and Scala: nothing it throws carries its random thread
+id, so once a failed or cancelled turn has ended it forgets the thread. A cancelled call waits up to 5 seconds
+for the turn to end; a provider that ignores the interrupt for longer is left to finish on its own, and the
+thread stays busy (`ThreadBusy`) until it does.
 
 ```kotlin
 var turn = agent.run("Deploy the release")

@@ -14,7 +14,7 @@ import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
-import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
+import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
@@ -212,14 +212,8 @@ class OpenAICompatibleClient(
             // the model that served the request, which a router may choose; reported as `Completion.model`
             json.obj.get("model").flatMap(_.strOpt).filter(_.nonEmpty).foreach(m => servedModel = Some(m))
             details ++= streamedThinkingDetails(json)
-            parseStreamingEvent(json, toolCalls).foreach { (chunk, rawArguments) =>
-              // The accumulator concatenates argument fragments, so it gets each fragment
-              // verbatim. The parsed form handed to `onChunk` cannot be concatenated safely:
-              // a fragment that is itself valid JSON, such as `"Paris"`, parses to the bare
-              // string and would lose its quotes.
-              accumulator.addChunk(
-                chunk.withToolCall(chunk.toolCall.map(_.copy(arguments = ujson.Str(rawArguments))))
-              )
+            parseStreamingChunks(json, toolCalls).foreach { chunk =>
+              accumulator.addChunk(chunk)
               onChunk(chunk)
             }
           }
@@ -567,15 +561,16 @@ class OpenAICompatibleClient(
    *
    * `toolCalls` is the state of the stream this event belongs to - see [[StreamToolCalls]]. The
    * default, a fresh one, is right only for an event read on its own.
+   *
+   * A tool call's arguments are its fragment verbatim, as a string (an empty fragment is the
+   * empty-object sentinel), for the accumulator and `onChunk` alike: fragments are concatenated
+   * to rebuild the arguments, and one that is itself valid JSON, such as `":"` or `"Paris"`,
+   * would lose its quotes if parsed.
    */
   protected[provider] def parseStreamingChunks(
     json: ujson.Value,
     toolCalls: StreamToolCalls = new StreamToolCalls
   ): Seq[StreamedChunk] =
-    parseStreamingEvent(json, toolCalls).map(_._1)
-
-  /** As [[parseStreamingChunks]], pairing each chunk with its raw argument fragment. */
-  private def parseStreamingEvent(json: ujson.Value, toolCalls: StreamToolCalls): Seq[(StreamedChunk, String)] =
     json.obj.get("choices").flatMap(_.arrOpt).flatMap(_.headOption) match {
       case None => Seq.empty
       case Some(choice) =>
@@ -594,14 +589,11 @@ class OpenAICompatibleClient(
               id = call.obj.get("id").flatMap(_.strOpt).filter(_.nonEmpty),
               name = function.obj.get("name").flatMap(_.strOpt).filter(_.nonEmpty)
             )
-            (ToolCall(id, name, StreamingToolArgumentParser.parse(raw)), raw)
+            ToolCall(id, name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
         }
 
-        val first = (
-          StreamedChunk(chunkId, content, calls.headOption.map(_._1), finishReason, thinking),
-          calls.headOption.fold("")(_._2)
-        )
-        first +: calls.drop(1).map((tc, raw) => (StreamedChunk(chunkId, None, Some(tc), None, None), raw))
+        StreamedChunk(chunkId, content, calls.headOption, finishReason, thinking) +:
+          calls.drop(1).map(tc => StreamedChunk(chunkId, None, Some(tc), None, None))
     }
 
   private def recordExchange(
