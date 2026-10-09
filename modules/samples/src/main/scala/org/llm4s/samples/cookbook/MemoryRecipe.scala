@@ -12,10 +12,9 @@ final case class Remembered(reply: String, context: String)
  * Recipe: remember what the user told you, and use it on a later turn.
  *
  * Facts are recorded in a memory manager, and when the next question arrives the relevant ones are retrieved and put
- * in the system prompt. The in-memory store matches words as substrings of the memory text, so a short word such as
- * "I" or "or" matches almost anything, and "Java?" with its question mark matches nothing. The recipe therefore
- * searches with the question's content words only. The question still has to share a word with the fact:
- * "Which language do I prefer, Scala or Java?" finds "Prefers Scala over Java", but "What do I like?" would not.
+ * in the system prompt. The in-memory store matches whole words, ignoring case and punctuation, so the question has to
+ * share a word with the fact: "Which language do I prefer, Scala or Java?" finds "Prefers Scala over Java", but
+ * "What do I like?" does not, and neither would "What do I prefer?" ("prefer" is not "Prefers").
  * {{{
  *   sbt "samples/runMain org.llm4s.samples.cookbook.MemoryRecipe"          # scripted client, no API key
  *   sbt "samples/runMain org.llm4s.samples.cookbook.MemoryRecipe --live"   # your configured provider
@@ -35,16 +34,12 @@ object MemoryRecipe extends RecipeApp {
   val question: String = "Which language do I prefer, Scala or Java?"
 
   // snippet:start
-  /** The store matches words as substrings, so give it the content words, without punctuation or short words. */
-  def contentWords(question: String): String =
-    question.toLowerCase.split("[^a-z0-9]+").filter(_.length > 3).distinct.mkString(" ")
-
   def recall(client: LLMClient, facts: Seq[String], question: String): Result[Remembered] =
     for {
       manager <- facts.foldLeft[Result[MemoryManager]](Right(SimpleMemoryManager.empty)) { (manager, fact) =>
         manager.flatMap(_.recordUserFact(fact, Some("user-1"), Some(0.9)))
       }
-      context <- manager.getRelevantContext(contentWords(question))
+      context <- manager.getRelevantContext(question)
       reply <- client.complete(
         Conversation(Seq(SystemMessage(s"What you know about the user:\n$context"), UserMessage(question)))
       )

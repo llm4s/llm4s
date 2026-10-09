@@ -222,16 +222,12 @@ sbt "samples/runMain org.llm4s.samples.cookbook.MemoryRecipe --live"
 The core of the recipe:
 
 ```scala
-/** The store matches words as substrings, so give it the content words, without punctuation or short words. */
-def contentWords(question: String): String =
-  question.toLowerCase.split("[^a-z0-9]+").filter(_.length > 3).distinct.mkString(" ")
-
 def recall(client: LLMClient, facts: Seq[String], question: String): Result[Remembered] =
   for {
     manager <- facts.foldLeft[Result[MemoryManager]](Right(SimpleMemoryManager.empty)) { (manager, fact) =>
       manager.flatMap(_.recordUserFact(fact, Some("user-1"), Some(0.9)))
     }
-    context <- manager.getRelevantContext(contentWords(question))
+    context <- manager.getRelevantContext(question)
     reply <- client.complete(
       Conversation(Seq(SystemMessage(s"What you know about the user:\n$context"), UserMessage(question)))
     )
@@ -245,7 +241,7 @@ What the spec checks:
 - a recorded fact is shown to the model and changes its answer; with nothing recorded it does not know
 - a fact that has nothing to do with the question is left out of the prompt
 
-**Watch out:** The in-memory store counts a query word as a match when the memory text contains it as a substring, so a short word such as "I" or "or" matches almost anything, and "Java?" with its question mark matches nothing ([#1594](https://github.com/llm4s/llm4s/issues/1594)). The recipe searches with the question's content words only. The question still has to share a word with the fact: "Which language do I prefer, Scala or Java?" finds "Prefers Scala over Java", but "What do I like?" finds nothing.
+**Watch out:** The in-memory store matches whole words, ignoring case and punctuation, so the question has to share a word with the fact: "Which language do I prefer, Scala or Java?" finds "Prefers Scala over Java", but "What do I like?" finds nothing, and neither does "What do I prefer?", because there is no stemming and "prefer" is not "Prefers" ([#1594](https://github.com/llm4s/llm4s/issues/1594)). For retrieval by meaning, use a store with embeddings.
 
 <!-- recipe: multi-agent-graph -->
 ## 6. Several agents in one graph

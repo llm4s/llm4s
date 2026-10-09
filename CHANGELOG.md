@@ -2023,7 +2023,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new spec checks query by query. **Behaviour change:** `InMemoryStore.search`, `EmbeddingMemoryStore`'s keyword
   fallback and `SimpleMemoryManager.getRelevantContext` return fewer memories: a query word must now be a whole word
   of the memory, so `scala` no longer matches "scalability" and `prefer` no longer matches "Prefers" (there is no
-  stemming). Case folding no longer depends on the JVM's default locale.
+  stemming). Case folding no longer depends on the JVM's default locale. The cookbook's `MemoryRecipe` no longer strips
+  short words and punctuation from the question (`contentWords` is gone); it passes the question as it is.
 - **Security - workspace runner: allowlisted commands can no longer write, delete or run other programs through their
   arguments** ([#1715](https://github.com/llm4s/llm4s/issues/1715)): `executeCommand` checked only the executable
   name against `allowedCommands` and a set of shell metacharacters, so programs on `WorkspaceSandboxConfig.ReadOnlyCommands`
