@@ -1,10 +1,14 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.config.OpenAICompatibleConfig
+import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ZaiConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.testkit.LocalProviderTestServer._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * An assistant turn's thinking in the shared client (#1381): read onto the returned message, and
@@ -59,6 +63,42 @@ class OpenAICompatibleThinkingReplaySpec extends AnyFlatSpec with Matchers {
   it should "set `thinking.clear_thinking` to false when it replays reasoning, which the standard endpoint otherwise clears" in {
     val body = client(ZaiDialect).createRequestBody(history, CompletionOptions())
     body("thinking") shouldBe ujson.Obj("clear_thinking" -> false)
+  }
+
+  it should "set it on the streamed request too, which `streamComplete` renders with `stream = true`" in {
+    val sent = new AtomicReference[String]()
+    withServer("/chat/completions") { exchange =>
+      sent.set(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))
+      sendSseResponse(exchange, openAISseBody(Seq("Sunny."), "glm-4.7"))
+    } { baseUrl =>
+      val zai = new ZaiClient(
+        ZaiConfig(
+          apiKey = "test-key",
+          model = "glm-4.7",
+          baseUrl = baseUrl,
+          contextWindow = 128000,
+          reserveCompletion = 4096
+        )
+      )
+      zai.streamComplete(history, CompletionOptions(), _ => ()).isRight shouldBe true
+    }
+    val body = ujson.read(sent.get)
+    body("stream").bool shouldBe true
+    body("thinking") shouldBe ujson.Obj("clear_thinking" -> false)
+  }
+
+  it should "send no `thinking` field when replay drops the only reasoning, sealed by another provider" in {
+    val foreign = AssistantMessage(None, Seq(call))
+      .withThinking(Seq(ThinkingBlock.Text("", Some("sig-abc")), ThinkingBlock.Redacted("encrypted")))
+    val asked = history.messages.take(1)
+    val bound =
+      ThinkingReplay.bind(ReplayOrigin("anthropic", "claude-sonnet"), foreign, asked, CompletionOptions())
+    val body = client(ZaiDialect).createRequestBody(
+      Conversation(asked ++ Seq(bound, ToolMessage("sunny", call.id))),
+      CompletionOptions()
+    )
+    body("messages")(1).obj.keySet should not contain "reasoning_content"
+    body.obj.keySet should not contain "thinking"
   }
 
   it should "send no `thinking` field when no turn replays reasoning" in {

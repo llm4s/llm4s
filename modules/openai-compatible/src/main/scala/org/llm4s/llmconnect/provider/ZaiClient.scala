@@ -109,6 +109,8 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
    */
   override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): Unit =
     if (replaysReasoning(body)) {
+      // Nothing sets `thinking` before this today; merging into an existing object is for a future
+      // mapping of `CompletionOptions.reasoning` to `thinking.type`, which must survive this.
       val thinking = body.value.get("thinking").flatMap(_.objOpt).fold(ujson.Obj())(ujson.Obj.from(_))
       thinking("clear_thinking") = false
       body("thinking") = thinking
