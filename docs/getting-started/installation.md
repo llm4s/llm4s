@@ -453,6 +453,23 @@ The Cohere embedding provider (`EMBEDDING_MODEL=cohere/<model>`), on Cohere's na
 with its `llm4s.embeddings.cohere` config block and a typed `CohereInputType` (`search_document`,
 `search_query`, ...). Cohere chat is a different module: `llm4s-openai-compatible`. A community
 provider module under `modules/providers/`; it brings no dependency beyond `llm4s-core`.
+
+### For the Jev decision model
+
+{: .note }
+> Not yet published. `llm4s-jev` exists in the build as of [#1265](https://github.com/llm4s/llm4s/issues/1265) but ships in
+> the next release.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-jev" % llm4sVersion
+```
+
+A typed client for TypeSafe's Jev decision model: send a state and typed questions (Noul, Choice, Score), get typed answers.
+It is not a chat provider and returns no `Completion`. Configured under `llm4s.jev`, with the key in `TYPESAFE_API_KEY`. A
+community module under `modules/providers/`; it brings no dependency beyond `llm4s-core`. See
+[Jev decision model](../guide/jev).
+
 ### For IBM watsonx.ai
 
 ```scala

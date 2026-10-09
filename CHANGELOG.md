@@ -389,6 +389,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SpeechConfigLoader`. TTS output is raw 24 kHz 16-bit mono PCM in `GeneratedAudio`, not MP3. HTTP
   failures map as the chat providers' do (`AuthenticationError`, `RateLimitError`, `ValidationError`,
   `ServiceError`). See [docs/guide/speech.md](docs/guide/speech.md#cloud-providers).
+- **`llm4s-jev`: a typed client for TypeSafe's Jev decision model** ([#1265](https://github.com/llm4s/llm4s/issues/1265)):
+  Jev takes a state and named, typed questions and answers each with a typed answer, so it is not a chat model and
+  this is neither an `LLMClient` nor a provider: `JevClient.evaluate(JevRequest(state, questions))` returns a
+  `Result[JevResponse]`. Questions are `JevQuestion.Noul` (probability of yes), `Choice` (the selected option, a
+  distribution and a confidence) and `Score` (a probability-weighted score over 2 to 10 ordered levels, with a
+  confidence); answers are `NoulAnswer`, `ChoiceAnswer` and `ScoreAnswer`, read with `response.noul(id)`,
+  `.choice(id)` and `.score(id)`, with the resolved model, token usage and the request id. A response is checked against
+  its request: one answer per question asked, each of its question's type, a Choice's selected option among the
+  options asked with the highest probability and a probability for every option, a Score with every level asked,
+  each numbered once (canonical level keys) and a score within the levels (a score a rounding error outside them,
+  within 1e-9, is clamped in); a body nested more than 64 levels deep is refused unparsed (so a Score level
+  description, which the API echoes back, nested more than 60 levels deep is refused before the request is sent), and an error body nested
+  more than 32 levels deep is not read, so neither can overflow a small thread stack;
+  a Score level's legend entry keeps the string, object or array the question gave. Configuration is the
+  `llm4s.jev` block and `TYPESAFE_API_KEY` (bound to `llm4s.credentials.jev.apiKey`), `TYPESAFE_BASE_URL` and
+  `TYPESAFE_DEFAULT_MODEL`. Failures map onto LLM4S's errors (401/403 `AuthenticationError`, 400/422
+  `ValidationError`, 429 `RateLimitError` with the server's `Retry-After` or `retry-after-ms`, 5xx including 529
+  `ServiceError`) and transient ones are retried as TypeSafe's SDKs do (two retries, 0.5 s doubling to 5 s with
+  jitter, a 30 s budget, `RetryPolicy.isTransient` as the rule). The key is sent only as a bearer token over https
+  (plain http only for a loopback host) and never reaches a log line or `toString`; an error masks it where a
+  server echoed it as written, JSON-escaped or URL-encoded (a partial echo is not recognised). **No idempotency
+  key:** TypeSafe documents none, so none is invented and each retry is a separate billable call; a header the
+  caller adds with `JevRequest.withHeader` is sent unchanged on every attempt. A Beta module under
+  `modules/providers/jev`, no dependency beyond `llm4s-core`; tested against a local fake server built from the
+  published API reference and not yet run against the live API. A `JevTicketTriageExample` sample and
+  `docs/guide/jev.md`.
 - **`scripts/verify-release.sh`: check that a release is on Maven Central** ([#1281](https://github.com/llm4s/llm4s/issues/1281)):
   `scripts/verify-release.sh 0.5.0` asks the build which artifacts it publishes (the new
   `sbt -error listPublishedArtifacts`: 31 artifacts and 5 relocation stubs today) and checks that each

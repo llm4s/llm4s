@@ -102,6 +102,9 @@ flags:
   jina:
     paths:
       - modules/providers/jina/src/main/scala
+  jev:
+    paths:
+      - modules/providers/jev/src/main/scala
   cohere:
     paths:
       - modules/providers/cohere/src/main/scala
