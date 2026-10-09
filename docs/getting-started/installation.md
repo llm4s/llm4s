@@ -599,6 +599,21 @@ libraryDependencies += "org.llm4s" %% "llm4s-knowledgegraph-neo4j" % llm4sVersio
 `Neo4jGraphStore`, a graph store for `llm4s-knowledgegraph` backed by Neo4j. It depends on `llm4s-core`
 and `llm4s-knowledgegraph` and brings the Neo4j driver.
 
+### Testing your own code (the testkit)
+
+{: .note }
+> Not yet published. `llm4s-testkit` exists in the build as of
+> [#1475](https://github.com/llm4s/llm4s/issues/1475) but ships in the next release.
+
+```scala
+// same version as llm4s-core; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-testkit" % llm4sVersion % Test
+```
+
+A scriptable fake `LLMClient` for the tests of code that calls llm4s: canned replies, scripted tool calls,
+injected errors and recorded requests, with no network and no API key. It depends on `llm4s-core` only. See
+[Testing with the Testkit](../guide/testing-with-the-testkit).
+
 ### For provider authors (testing a provider module)
 
 {: .note }
