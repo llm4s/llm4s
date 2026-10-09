@@ -2,7 +2,7 @@ package org.llm4s.agent.graph.sqlite
 
 import org.llm4s.agent.graph.*
 import org.llm4s.agent.testkit.ManualClock
-import org.llm4s.error.{ ProcessingError, ValidationError }
+import org.llm4s.error.{ CancelledError, LLMError, ProcessingError, ValidationError }
 import org.scalatest.{ EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -161,6 +161,50 @@ class SqliteCheckpointerSpec extends AnyFlatSpec with Matchers with EitherValues
     val again = SqliteFiles.opened(db, Clock.systemUTC())
     again.latest(thread).value shouldBe None
     again.close()
+  }
+
+  it should "return CancelledError, with the flag set and the connection closed, when interrupted waiting for a busy file" in {
+    // another connection holds the write lock of a new file, still in rollback-journal mode: switching it to WAL
+    // fails at once with SQLITE_BUSY, so `open` waits between retries, in `Thread.sleep`, for the busy timeout
+    val db      = SqliteFiles.fresh()
+    val blocker = jdbc(db)
+    Using.resource(blocker.createStatement()) { s =>
+      s.executeUpdate("CREATE TABLE other_app (x)"): Unit
+      s.execute("BEGIN IMMEDIATE"): Unit
+      s.executeUpdate("INSERT INTO other_app VALUES (1)"): Unit
+    }
+    val opened  = new LinkedBlockingQueue[Connection]()
+    val outcome = new LinkedBlockingQueue[(Either[LLMError, SqliteCheckpointer], Boolean)]()
+    val opener = Thread.ofPlatform().start { () =>
+      val result = SqliteCheckpointer.openWith(
+        db,
+        Clock.systemUTC(),
+        SqliteCheckpointerConfig(1.minute),
+        url => {
+          val c = DriverManager.getConnection(url)
+          opened.add(c)
+          c
+        }
+      )
+      // `add`, not `put`: the interrupt flag is set, and `put` would throw
+      outcome.add(result -> Thread.currentThread().isInterrupted): Unit
+    }
+    // interrupted only once it is waiting between retries, not inside a native call, which no interrupt reaches
+    val deadline = System.nanoTime() + 10.seconds.toNanos
+    def retrying = opener.getState == Thread.State.TIMED_WAITING &&
+      opener.getStackTrace.exists(_.getMethodName.contains("retryingBusy"))
+    while !retrying && System.nanoTime() < deadline do Thread.sleep(5)
+    retrying shouldBe true
+    opener.interrupt()
+    val (result, flagged) = Option(outcome.poll(10, TimeUnit.SECONDS)).value
+    val cancelled         = result.left.value
+    cancelled shouldBe a[CancelledError]
+    cancelled.context("operation") shouldBe "sqlite-checkpointer.open"
+    flagged shouldBe true
+    opened.peek().isClosed shouldBe true
+    // nothing of the interrupted open holds the file: once the other connection is done, it opens
+    blocker.close()
+    SqliteCheckpointer.open(db).value.close()
   }
 
   // ---- claims ----

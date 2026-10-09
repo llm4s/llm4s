@@ -68,13 +68,15 @@ object SqliteRestartRecoveryExample {
 
   def main(args: Array[String]): Unit =
     database(args.toVector) match {
-      case Left(problem) => println(problem)
-      case Right(db) =>
-        val fetches = new Fetches
-        // whatever happens, the held fetch is released, so a failure never leaves it waiting out its 30 s
-        val result = Using.resource(Release(fetches.processDied))(_ => demo(db.path, fetches))
-        result.left.foreach(e => println(s"Failed: ${e.message}"))
-        db.cleanUp()
+      case Left(problem)   => println(problem)
+      case Right(database) =>
+        // the temporary directory is removed even if the demonstration throws
+        Using.resource(database) { db =>
+          val fetches = new Fetches
+          // whatever happens, the held fetch is released, so a failure never leaves it waiting out its 30 s
+          val result = Using.resource(Release(fetches.processDied))(_ => demo(db.path, fetches))
+          result.left.foreach(e => println(s"Failed: ${e.message}"))
+        }
     }
 
   /** The demonstration proper, on the file at `db`; every store it opens is closed, whatever the outcome. */
@@ -143,8 +145,12 @@ object SqliteRestartRecoveryExample {
     }
   }
 
-  /** The file in use, and the temporary directory holding it, if it is one this example made. */
-  final private case class Database(path: Path, temporaryDirectory: Option[Path]) {
+  /**
+   * The file in use, and the temporary directory holding it, if it is one this example made; closing it removes that
+   * directory.
+   */
+  final private case class Database(path: Path, temporaryDirectory: Option[Path]) extends AutoCloseable {
+    def close(): Unit = cleanUp()
     def cleanUp(): Unit = temporaryDirectory.foreach { dir =>
       deleteDatabase(path)
       Files.deleteIfExists(dir): Unit

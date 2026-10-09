@@ -1,7 +1,7 @@
 package org.llm4s.agent.graph.sqlite
 
 import org.llm4s.agent.graph.*
-import org.llm4s.error.{ LLMError, ProcessingError }
+import org.llm4s.error.{ CancelledError, LLMError, ProcessingError }
 import org.llm4s.types.Result
 import org.llm4s.util.DurationRounding
 
@@ -278,7 +278,9 @@ object SqliteCheckpointer:
    * one transaction. Any number of stores may open one file at once, a new one too: an opener that finds the file
    * busy with another's switch or migration retries until the busy timeout has passed. A file at a newer
    * schema version than this build knows, a file that is not a SQLite database, or one whose journal cannot be
-   * switched to WAL is refused with a `ProcessingError`, and the connection is closed.
+   * switched to WAL is refused with a `ProcessingError`, and the connection is closed. An opener interrupted while
+   * it waits for a busy file returns a `CancelledError`, with its thread's interrupt flag set, and closes the
+   * connection too.
    */
   def open(path: Path, clock: Clock, config: SqliteCheckpointerConfig): Result[SqliteCheckpointer] =
     openWith(path, clock, config, url => DriverManager.getConnection(url))
@@ -297,20 +299,25 @@ object SqliteCheckpointer:
     }.toEither.left.map(e => failure("open", Option(e.getMessage).getOrElse(e.getClass.getName), Some(e))).flatMap {
       connection =>
         val deadline = System.nanoTime() + config.busyTimeout.toNanos
-        val prepared = Try {
-          prepare(connection, config, deadline)
-          retryingBusy(deadline) {
-            transaction(connection, "BEGIN IMMEDIATE") { guard =>
-              val migrated = SqliteSchema.migrate(connection)
-              if migrated.isRight then
-                execute(connection, "COMMIT")
-                guard.committed = true
-              migrated
-            }
+        // an interrupt while waiting out a busy file is not NonFatal, so `Try` would let it escape and leak the
+        // connection: `attempt` returns it as a CancelledError, with the thread's interrupt flag set again
+        val prepared = CancelledError
+          .attempt("sqlite-checkpointer.open") {
+            Try {
+              prepare(connection, config, deadline)
+              retryingBusy(deadline) {
+                transaction(connection, "BEGIN IMMEDIATE") { guard =>
+                  val migrated = SqliteSchema.migrate(connection)
+                  if migrated.isRight then
+                    execute(connection, "COMMIT")
+                    guard.committed = true
+                  migrated
+                }
+              }
+            }.toEither.left
+              .map(e => failure("open", Option(e.getMessage).getOrElse(e.getClass.getName), Some(e)))
+              .flatMap(_.left.map(problem => failure("open", problem, None)))
           }
-        }.toEither.left
-          .map(e => failure("open", Option(e.getMessage).getOrElse(e.getClass.getName), Some(e)))
-          .flatMap(_.left.map(problem => failure("open", problem, None)))
           .map(_ => new SqliteCheckpointer(path, clock, connection))
         // a connection that is not handed out must not leak: an open handle keeps the file locked
         if prepared.isLeft then Try(connection.close()): Unit

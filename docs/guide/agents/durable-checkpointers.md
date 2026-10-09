@@ -161,7 +161,11 @@ yield result
 
 `open` creates the file if it does not exist (its directory must), and brings it to the current schema version.
 Any number of stores may open one file at the same moment, also a new one: each waits up to `busyTimeout` for the
-others. The path may hold any character the file system allows, `?` and spaces included.
+others. The path may hold any character the file system allows, `?` and spaces included. It must be on a local
+disk: a Windows UNC path (`\\server\share\runs.db`) becomes a `file://server/share/runs.db` URI, which the
+native libraries bundled with sqlite-jdbc refuse (they are built without `SQLITE_ALLOW_URI_AUTHORITY`), and WAL
+does not work on a network file system anyway (see [Sharing one file between processes](#sharing-one-file-between-processes)).
+An open interrupted while it waits for a busy file returns a `CancelledError` and closes its connection.
 `SqliteCheckpointer.open(path, clock)` and `open(path, clock, config)` take the clock claims expire by and a
 `SqliteCheckpointerConfig`.
 
