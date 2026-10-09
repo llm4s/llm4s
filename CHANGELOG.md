@@ -774,7 +774,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **An interrupted `Agent.run`, `continueConversation`, `recover` or `resume` cancels its turn, from Java too** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   the call returns `Left(CancelledError)` with the interrupt flag set, as before, and now also cancels the turn it
-  was waiting on instead of leaving it running, returning once that turn has ended (within 5 seconds), so `recover`
+  was waiting on instead of leaving it running, returning once that turn has ended (waiting up to 5 seconds for the turn to end), so `recover`
   can follow at once; a caller already interrupted starts no turn. Cancelling a graph run therefore cancels the
   agent turns its nodes are waiting on. Use `start`/`startRecover`/`startResume` and await the `AgentRun` to keep a turn past an interrupt.
   With tracing, the cancelled turn's trace is complete (its last events delivered, its subscription detached) when
@@ -783,8 +783,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   forgets the thread of a turn that failed or was cancelled once it has ended.
   **Java-visible:** `llm4s-java-api`'s blocking `JAgent.run`, `continueConversation`, `resume` and `recover` go
   through these calls, so an interrupted Java caller now cancels its turn too (they used to stop only the wait and
-  leave the turn running); Java and Kotlin now behave the same. `AgentStream.cancel()` still cancels a streamed turn
-  without interrupting any thread.
+  leave the turn running), as Kotlin's suspend functions already did. `AgentStream.cancel()` still cancels a streamed
+  turn without interrupting any thread. Its bounded wait, which Kotlin's cancellation uses, and Kotlin's one-shot
+  `run(query)` forgetting a failed turn's thread came later ([#1682](https://github.com/llm4s/llm4s/issues/1682),
+  [#1688](https://github.com/llm4s/llm4s/issues/1688), under Fixed).
 - **Java and Kotlin agent results use Java types only** ([#1393](https://github.com/llm4s/llm4s/issues/1393),
   BREAKING, `llm4s-java-api`, Kotlin API). Every agent turn the Java facade returns - `JAgent.run`,
   `continueConversation`, `resume`, `recover`, `AgentStream.await()`, `AgentStreamListener.onComplete` - is now a
@@ -2004,6 +2006,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on GLM-5.3 logs a one-time warning that thinking tokens are still produced. `High` is Z.ai's maximum, its default,
   so no level reasons more than `High`. Other models are sent nothing. With replayed reasoning, `thinking`
   carries both `type` and `clear_thinking`. Without a `reasoning` option the request is unchanged.
+- **Cancelled and failed agent turns no longer leave threads nobody can name, and every cancel wait is bounded**
+  ([#1682](https://github.com/llm4s/llm4s/issues/1682), [#1688](https://github.com/llm4s/llm4s/issues/1688);
+  follow-ups to [#1330](https://github.com/llm4s/llm4s/issues/1330)'s cancellation):
+  - Kotlin `AgentKt.run(query)` runs its turn on a random thread id that nothing it throws carries. Once a failed or
+    cancelled turn has ended it now forgets that thread, as Scala `Agent.run(query)` and Java `JAgent.run(query)`
+    do; before, the thread stayed in the agent's runtime for the agent's lifetime. A forget that is refused - the
+    turn of a provider that ignores its interrupt is still running - is added to the thrown exception as a
+    suppressed one. `continueConversation`, `resume` and `recover` are unchanged: their thread is the caller's.
+  - `AgentStream.cancel()`, through which a cancelled Kotlin coroutine cancels its turn, waited for the turn's end
+    without a bound, so a provider that ignored its interrupt hung it. It now waits up to 5 seconds for the turn to
+    end, as the blocking `JAgent` calls do, then logs a WARN and returns, the thread busy (`ThreadBusy`) until the
+    turn ends. Java and Kotlin cancellation now behave the same.
+  - `JAgent.forget(threadId)` (`llm4s-java-api`) forgets a conversation by its thread id - one named for `stream`,
+    say, whose turn failed - as Scala `Agent.forget(threadId)` does; `forget(previous)` needed a result.
+  - `Agent.runMultiTurn` forgets its random thread when a follow-up turn fails or is cancelled: the `Left` it
+    returns carries no thread id, so the thread could be neither recovered nor forgotten.
+  - The interrupt flag a cancelled blocking call keeps is no longer lost when forgetting the one-shot turn's thread
+    throws (a `Checkpointer` whose `deleteThread` throws a fatal error the runtime does not turn into a `Left`).
+  - Scaladoc, the Java threading guide and the #1330 entry say the calls wait "up to 5 seconds for the turn to end":
+    with tracing, delivering the ended turn's last trace events can add to that.
 - **`llm4s-openai-compatible`: Z.ai keeps replayed reasoning** ([#1384](https://github.com/llm4s/llm4s/pull/1384),
   [#1411](https://github.com/llm4s/llm4s/pull/1411)):
   a request that sends an earlier turn's `reasoning_content` back now also sets `"thinking": {"clear_thinking": false}`,
