@@ -28,8 +28,9 @@ The Java snippets below are compiled by
 
 ## Which calls block
 
-`JLlmClient.complete(...)` and `JAgent.run(...)` block the calling thread until the answer is back. There is no
-asynchronous variant in the Java API. `LlmResult.toCompletableFuture()` does not make a call asynchronous: it
+`JLlmClient.complete(...)`, `JAgent.run(...)`, `JAgent.continueConversation(...)`, `JAgent.resume(...)` and
+`JAgent.recover(...)` block the calling thread until the answer is back. The only asynchronous variants in the
+Java API are `JAgent.stream`, `streamResume` and `streamRecover`, which return an `AgentStream` at once. `LlmResult.toCompletableFuture()` does not make a call asynchronous: it
 returns a future that is already complete, so `cancel(true)` on it returns `false` and changes nothing.
 
 To run a call off your own thread, submit it to an executor:
@@ -121,12 +122,41 @@ The flag is still set when the result comes back, so there is nothing to restore
 only if you mean to carry on. The test runs this snippet against a call interrupted on a real provider's request
 path and against a custom client that throws `InterruptedException`, and checks the flag in both cases.
 
-### An agent run is not cancelled by interrupting its caller
+### Interrupting the caller cancels an agent turn
 
-If the thread blocked in `JAgent.run` is interrupted, `run` returns a failed result with a `CancelledError` and the
-interrupt flag set, but the run itself carries on: its model call is neither interrupted nor stopped, and it
-finishes in the background. This is the documented behaviour of the runtime's `RunHandle.await`: "only `cancel`
-stops a run". `JAgent` has no method that cancels a run, so from Java there is no way to stop one in this release.
+All four blocking `JAgent` calls - `run`, `continueConversation`, `resume` and `recover` - cancel the turn they are
+waiting on when the thread blocked in them is interrupted (since [#1330](https://github.com/llm4s/llm4s/issues/1330);
+before, they stopped only the wait and the turn carried on in the background). The call returns a failed result
+whose error is a `CancelledError`, with the interrupt flag still set; the turn's model call is interrupted, and the
+conversation's thread is left for `recover`. The call returns once the cancelled turn has ended, so `recover` can
+follow at once. It waits up to 5 seconds for the turn to end (with tracing, delivering the ended turn's last trace
+events can add to that): a provider that ignores the interrupt for longer is logged at WARN and left to finish on its
+own, and until it does the thread is busy (`ThreadBusy`). A thread that is already
+interrupted when it calls one of them starts no turn. To stop a turn from Java, interrupt the thread that called it -
+for example `Future.cancel(true)` on the task that called it.
+
+A turn that had already begun committing its outcome when the interrupt came cannot be cancelled: the call returns
+that outcome - a completed or suspended turn - with the interrupt flag still set. `run(query)` starts a conversation
+whose id a failed result does not carry, so a turn of it that fails or is cancelled is forgotten once it has ended.
+A conversation you named, for `stream` say, is forgotten with `forget(threadId)`, which needs no result.
+
+To cancel a turn without interrupting any thread, start it with `JAgent.stream`, `streamResume` or `streamRecover`
+and call `cancel()` on the returned `AgentStream`. `cancel()` stops the turn and leaves the thread for `streamRecover`
+or `recover`. Like the blocking calls, it waits up to 5 seconds for the turn to end; if the turn has not ended by then
+(a provider that ignores the interrupt), it logs a WARN and returns, leaving that turn to finish on its own.
+
+Kotlin matches Java: every `AgentKt` suspend function that runs a turn - `run`, `continueConversation`, `resume` and
+`recover` - cancels the turn when the calling coroutine is cancelled (see
+[Suspended turns from Java and Kotlin](agents/#suspended-turns-from-java-and-kotlin)), waiting up to 5 seconds for the
+turn to end through `AgentStream.cancel()`, and the one-shot `run(query)` forgets the thread of a turn that failed or
+was cancelled once it has ended. One difference remains, as coroutine cancellation requires: a Kotlin cancellation
+that loses the race to a turn's commit still throws, though the turn's result is committed.
+
+`ThreadingModelSpec` checks `run`; `JAgentPendingSpec` checks `continueConversation`, `resume`, `recover` and an
+already-interrupted caller; `JAgentStreamSpec` checks `AgentStream.cancel()` and its 5-second bound; the blocking
+calls' 5-second bound, the commit that beats a cancel and the forgotten one-shot and `runMultiTurn` threads are
+checked by `AgentRunCancellationSpec` in `llm4s-agent`, and the Kotlin functions - their bound and `run`'s forgotten
+thread included - by `AgentKtStreamTest`, `AgentKtPendingTest` and `AgentKtTest`.
 
 ## Timeouts
 

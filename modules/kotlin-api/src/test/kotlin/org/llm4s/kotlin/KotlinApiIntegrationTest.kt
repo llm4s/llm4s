@@ -30,6 +30,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.llm4s.javaapi.Llm4s as JLlm4s
 import scala.collection.immutable.`Map$` as ScalaMap
+import java.util.Optional
 
 private val NoHeaders = ScalaMap.`MODULE$`
 
@@ -147,7 +148,7 @@ class KotlinApiIntegrationTest {
         Llm4s.createDefaultClient().use { client ->
             val result = Llm4s.createAgent(client).run("a question")
 
-            assertEquals(scala.Option.apply("the answer"), result.answer())
+            assertEquals(Optional.of("the answer"), result.answer())
             assertEquals("the answer", result.messages().last().content())
         }
     }

@@ -9,6 +9,8 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import scala.jdk.CollectionConverters.*
+
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.{ CountDownLatch, Executors, TimeUnit }
@@ -211,7 +213,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
     }))
     val caller = Thread.currentThread()
 
-    agent.run("hi").get().messages.last.content shouldBe "x"
+    agent.run("hi").get().messages.asScala.last.content shouldBe "x"
 
     (seen.get() should not).be(theSameInstanceAs(caller))
     seen.get().isVirtual shouldBe true
@@ -235,7 +237,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
     val agent = Llm4s.createAgent(echoClientAfter(n))
     val answers = Using.resource(new Pool(Executors.newVirtualThreadPerTaskExecutor())) { pool =>
       val futures =
-        (0 until n).map(i => pool.executor.submit(() => agent.run("a" + i).get().messages.last.content))
+        (0 until n).map(i => pool.executor.submit(() => agent.run("a" + i).get().messages.asScala.last.content))
       futures.map(_.get(waitSeconds, TimeUnit.SECONDS))
     }
     answers shouldBe (0 until n).map(i => "echo:a" + i)
@@ -349,26 +351,29 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
         classOf[JLlmClient].getMethod("complete", classOf[Conversation]),
         classOf[JLlmClient].getMethod("complete", classOf[Conversation], classOf[CompletionOptions]),
         classOf[JAgent].getMethod("run", classOf[String]),
-        classOf[JAgent].getMethod("continueConversation", classOf[org.llm4s.agent.AgentResult], classOf[String])
+        classOf[JAgent].getMethod("continueConversation", classOf[JAgentResult], classOf[String])
       )
       methods.foreach(m => withClue(m.toString)(m.getExceptionTypes shouldBe empty))
     }
 
   "interrupting the thread that called JAgent.run" should
-    "return a CancelledError while the run, and its model call, carry on" in {
+    "return a CancelledError and cancel the run, interrupting its model call" in {
       val entered         = new CountDownLatch(1)
-      val release         = new CountDownLatch(1)
       val modelDone       = new CountDownLatch(1)
       val modelInterrupts = new AtomicInteger(0)
       val agent = Llm4s.createAgent(new JLlmClient(fake { _ =>
         entered.countDown()
-        CancelledError.catchInterrupt(release.await(waitSeconds, TimeUnit.SECONDS)).left.foreach { _ =>
-          modelInterrupts.incrementAndGet(): Unit
-        }
+        val outcome = CancelledError.catchInterrupt(Thread.sleep(waitSeconds * 1000L))
+        outcome.left.foreach(_ => modelInterrupts.incrementAndGet(): Unit)
         modelDone.countDown()
-        Right(completion("done"))
+        outcome match {
+          case Left(e) =>
+            Thread.currentThread().interrupt()
+            Left(CancelledError("model call", Some(e)))
+          case Right(_) => Right(completion("done"))
+        }
       }))
-      val result  = new AtomicReference[LlmResult[org.llm4s.agent.AgentResult]]()
+      val result  = new AtomicReference[LlmResult[JAgentResult]]()
       val flagSet = new AtomicReference[java.lang.Boolean](java.lang.Boolean.FALSE)
 
       val caller = platformThread { () =>
@@ -382,13 +387,9 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
       caller.isAlive shouldBe false
       result.get().getError().error shouldBe a[CancelledError]
       flagSet.get().booleanValue() shouldBe true
-      // the run did not stop: its model call is still waiting and was never interrupted
-      modelDone.getCount shouldBe 1L
-      modelInterrupts.get() shouldBe 0
-
-      release.countDown()
+      // the run stopped too: its model call was interrupted rather than left waiting
       modelDone.await(waitSeconds, TimeUnit.SECONDS) shouldBe true
-      modelInterrupts.get() shouldBe 0
+      modelInterrupts.get() shouldBe 1
     }
 
   // ---- the guide's Java snippets ----

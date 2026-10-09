@@ -1337,8 +1337,8 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   )
 
 // ---- slice 7 of the modularisation programme (#1242) ----
-// `llm4s-agent` is the agent runtime: `org.llm4s.agent` (the `Agent`, `AgentState`, guardrails,
-// handoffs, orchestration and streaming events) and `org.llm4s.assistant` (the console
+// `llm4s-agent` is the agent runtime: `org.llm4s.agent` (the `Agent`, guardrails, handoffs, the
+// typed graph runtime and streaming events) and `org.llm4s.assistant` (the console
 // assistant, tiered Beta, and the only user of fansi). `agent.memory` was already carved into
 // `llm4s-memory`, which does not depend on this module. Package names are unchanged.
 //

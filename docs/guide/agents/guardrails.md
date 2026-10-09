@@ -106,6 +106,8 @@ These use an LLM to evaluate subjective qualities:
 | `LLMQualityGuardrail` | Assess response quality | `new LLMQualityGuardrail(client)` |
 | `LLMToneGuardrail` | Validate tone compliance | `new LLMToneGuardrail(client, "professional")` |
 
+Each judge scores the content and passes it when the score reaches its `threshold`. The threshold must be between 0.0 and 1.0: for any other value, or NaN, `validate` returns a `ValidationError` on the field `threshold` without calling the judge.
+
 ### RAG-Specific Guardrails
 
 For retrieval-augmented generation:
@@ -489,9 +491,16 @@ agent.flatMap(_.run("Get user details"))
 |------|---------|-----------|
 | Email | `user@domain.com` | `[REDACTED_EMAIL]` |
 | SSN | `123-45-6789` | `[REDACTED_SSN]` |
-| Credit Card | `4111-1111-1111-1111` | `[REDACTED_CC]` |
-| Phone | `(555) 123-4567` | `[REDACTED_PHONE]` |
+| Credit Card | `4111-1111-1111-1111`, `3782 822463 10005` (15-digit American Express) | `[REDACTED_CARD]` |
+| Phone | `(555) 123-4567`, `+44 20 7946 0958` | `[REDACTED_PHONE]` |
 | IP Address | `192.168.1.1` | `[REDACTED_IP]` |
+
+A phone number is a US number (with an optional `+1` or `1` prefix) or an international number that starts with `+`
+and has 8 to 15 digits, with spaces, dashes, dots or parentheses between them. Digits without a `+` are not treated
+as an international number. A card number is recognised by its shape (a Visa, MasterCard, Amex or Discover prefix and
+the right number of digits); the check digit is not validated. When two types match overlapping text (a plain card
+number is also account-shaped, and a phone number can run into the email address after it), the overlapping text is
+masked once, under the type whose match starts first.
 
 ---
 

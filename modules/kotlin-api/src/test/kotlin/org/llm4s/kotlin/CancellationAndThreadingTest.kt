@@ -12,7 +12,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import org.llm4s.agent.AgentResult
+import org.llm4s.javaapi.AgentStream
 import org.llm4s.error.CancelledError
 import org.llm4s.error.ValidationError
 import org.llm4s.javaapi.JAgent
@@ -81,22 +81,31 @@ class CancellationAndThreadingTest {
     }
 
     @Test
-    fun `cancelling an agent run interrupts the blocking agent call`() = runBlocking {
+    fun `cancelling an agent run cancels its turn`() = runBlocking {
         val started = CountDownLatch(1)
-        val interrupted = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        every { mockJAgent.run("q") } answers {
-            blockUntilInterrupted(started, interrupted, release)
-            LlmResult.success(mockk<AgentResult>())
+        val cancelled = CountDownLatch(1)
+        val handle = mockk<AgentStream>()
+        every { handle.cancel() } answers { cancelled.countDown() }
+        // as the facade's: returns once delivery ends, which here only cancelling the turn does
+        every { handle.await() } answers {
+            cancelled.await(seconds, TimeUnit.SECONDS)
+            LlmResult.failure(org.llm4s.error.CancelledError.apply("run", scala.Option.empty()))
         }
+        // the turn never ends on its own: only cancelling it does
+        every { mockJAgent.stream(any(), "q", any()) } answers {
+            started.countDown()
+            LlmResult.success(handle)
+        }
+        every { mockJAgent.forget(any<String>()) } returns LlmResult.success<Void>(null)
 
         val job = launch(Dispatchers.Default) { agent.run("q") }
         assertTrue(started.await(seconds, TimeUnit.SECONDS))
         job.cancel()
-        val reached = interrupted.await(seconds, TimeUnit.SECONDS)
-        release.countDown()
         job.join()
-        assertTrue(reached, "cancelling the coroutine did not interrupt the blocking agent call")
+        assertTrue(cancelled.await(seconds, TimeUnit.SECONDS), "cancelling the coroutine did not cancel the turn")
+        assertTrue(job.isCancelled)
+        // the one-shot run's thread, whose id nothing thrown carries, is forgotten
+        verify(exactly = 1) { mockJAgent.forget(any<String>()) }
     }
 
     @Test
@@ -228,7 +237,8 @@ class CancellationAndThreadingTest {
     @Test
     fun `agent failures keep the message and the original error too`() = runBlocking {
         val scalaError = ValidationError.apply("query", "empty")
-        every { mockJAgent.run("q") } returns LlmResult.failure<AgentResult>(scalaError)
+        every { mockJAgent.stream(any(), "q", any()) } returns LlmResult.failure<AgentStream>(scalaError)
+        every { mockJAgent.forget(any<String>()) } returns LlmResult.success<Void>(null)
 
         val ex = assertFailsWith<LLMException> { agent.run("q") }
         assertEquals(scalaError.message(), ex.message)

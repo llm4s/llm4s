@@ -1,6 +1,7 @@
 package org.llm4s.rag.evaluation
 
 import org.llm4s.llmconnect.config.LangfuseConfig
+import org.llm4s.llmconnect.utils.CodePointBoundary
 import org.llm4s.trace.{ LangfuseBatchSender, LangfuseHttpApiCaller }
 import org.slf4j.LoggerFactory
 
@@ -167,7 +168,7 @@ class RAGASLangfuseObserver(
     val commentDetails = metric.details
       .take(3)
       .map { case (k, v) =>
-        s"$k: ${v.toString.take(50)}"
+        s"$k: ${CodePointBoundary.take(v.toString, 50)}"
       }
       .mkString(", ")
 
@@ -216,7 +217,7 @@ class RAGASLangfuseObserver(
         "endTime"   -> now,
         "input" -> ujson.Obj(
           "question"       -> result.sample.question,
-          "answer"         -> result.sample.answer.take(500),
+          "answer"         -> CodePointBoundary.take(result.sample.answer, 500),
           "contextCount"   -> result.sample.contexts.size,
           "hasGroundTruth" -> result.sample.groundTruth.isDefined
         ),

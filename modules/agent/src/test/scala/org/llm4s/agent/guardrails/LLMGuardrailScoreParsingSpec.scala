@@ -200,10 +200,12 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     judge("0.69999999999999999", threshold = 0.7).isLeft shouldBe true
   }
 
-  it should "pass nothing at a NaN threshold and everything readable at a negative infinite one" in {
-    judge("1", threshold = Double.NaN).isLeft shouldBe true
-    judge("0", threshold = Double.NegativeInfinity) shouldBe Right("content")
-    judge("1", threshold = Double.PositiveInfinity).isLeft shouldBe true
+  it should "compare against a NaN or infinite threshold without a pass slipping through (validate refuses them first)" in {
+    // validate refuses these thresholds on field `threshold` before the judge is called (#1520,
+    // LLMGuardrailThresholdSpec); the comparison itself still passes nothing at NaN or +Infinity.
+    LLMGuardrail.reaches(BigDecimal(1), Double.NaN) shouldBe false
+    LLMGuardrail.reaches(BigDecimal(0), Double.NegativeInfinity) shouldBe true
+    LLMGuardrail.reaches(BigDecimal(1), Double.PositiveInfinity) shouldBe false
   }
 
   accepted.foreach { case (reply, score) =>
@@ -278,5 +280,16 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
 
     message should include("'85'")
     message should include("0 to 1")
+  }
+
+  it should "quote a refused reply redacted and cut to 200 characters (#1674)" in {
+    val reply   = "I cannot score this.\n" + org.llm4s.testutil.EchoedCredentials.Text + "\n" + "x" * 1000
+    val message = judge(reply, threshold = 0.0).swap.toOption.get.message
+
+    message should include("Could not parse LLM judge score")
+    message should include("[REDACTED]")
+    org.llm4s.testutil.EchoedCredentials.leaked(message) shouldBe empty
+    message should include(s"(truncated, original length: ")
+    (message should not).include("x" * 201)
   }
 }

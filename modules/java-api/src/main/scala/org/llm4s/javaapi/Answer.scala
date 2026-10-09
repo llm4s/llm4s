@@ -7,16 +7,16 @@ import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
 /**
- * An answer to one pending approval or question of a suspended turn, for [[JAgent.streamResume]]:
- * built with [[Answer.approve]], [[Answer.reject]], [[Answer.edit]] or [[Answer.reply]], with JSON as
- * a `String`.
+ * An answer to one pending approval or question of a suspended turn, for [[JAgent.resume]] or
+ * [[JAgent.streamResume]]: built with [[Answer.approve]], [[Answer.reject]], [[Answer.edit]] or
+ * [[Answer.reply]], with JSON as a `String`. The id is a [[PendingInterrupt]]'s, from [[JAgent.pending]].
  *
  * {{{
- * agent.streamResume(threadId, List.of(Answer.approve(id)), listener);
+ * agent.resume(threadId, List.of(Answer.approve(pending.id())));
  * }}}
  *
- * A `null` argument or malformed JSON is reported when the answer is used: `streamResume` returns a
- * failed result.
+ * A `null` argument or malformed JSON is reported when the answer is used: `resume` and `streamResume`
+ * return a failed result.
  */
 final class Answer private (val interruptId: String, encoded: () => Result[ujson.Value]) {
 

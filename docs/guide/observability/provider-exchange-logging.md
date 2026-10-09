@@ -162,11 +162,27 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   names (also when the JSON sits inside a prompt or response string with escaped quotes,
   `\"api_key\": \"...\"`, or is single-quoted, or is cut off before its closing quote, as a truncated
   payload leaves it), numbers under such a key (including exponent forms such as `1e10`, and inside a
-  string too; the number is written back as the string `"[REDACTED]"`, so the JSON still parses), arrays
+  string too; the number is written back as the string `"[REDACTED]"`, so the JSON still parses, or as
+  `'[REDACTED]'` under a single-quoted key), a double-quoted value under a single-quoted key, as Python's
+  `repr` writes a string that holds a `'` (`{'password': "it's"}`, and `\"it's\"` inside a string), where
+  it reads as a value of the dict (followed by `,` and the next key, by `}`, or cut off), arrays
   and objects under such a key (`{"token": ["..."]}`, `{"credentials": {"user": "...", "pass": "..."}}`:
-  every string and number leaf under the key is replaced, however deep, also inside a string; the
-  brackets, the keys of nested objects, `true`, `false` and `null` are kept, so the JSON still parses and
-  keeps its shape), `key=value` pairs and quoted
+  every leaf under the key is replaced, however deep - strings, numbers and, outside a string, bare
+  words - also inside a string and when the key or the leaves are single-quoted, as a Python dict is,
+  `{'token': ['...']}`; the brackets, the keys of nested objects, `true`, `false` and `null` are kept, so
+  the JSON still parses and keeps its shape; inside a string a single-quoted container ends where the
+  string does, so a `'token': [` that a message merely mentions does not take the fields after it, nor
+  the prose after an apostrophe in it (`it's`) unless escaped JSON (`\"`) follows it, and an unclosed
+  `'password': '` there ends where the string ends rather than taking the rest of the document - but only
+  where no `'` that could close it follows anywhere in the input, and not where that end would leave the
+  value empty (`'password': '",`); otherwise it runs to the next `'`, or to the end of the input, as it
+  does outside a string, so a credential that holds a `"` (`'Qx"]]9secret'`) is redacted whole; outside
+  any string, the bare words after an unclosed `'token': [` are replaced to the end of the input, since nothing tells them from leaves; under
+  a single-quoted key a single-quoted leaf that stands where a value does is replaced whatever it holds,
+  a connection string `'postgres://u:...@h/db'` or a `'k=v'` token included, and so is a `\"`-quoted leaf
+  there, `\"{'token': [\\\"...\\\"]}\"`, when its own `\"` closes it where a value does; any other `"`
+  under a single-quoted key inside a string ends the container, since it may be the end of a string
+  inside it), `key=value` pairs and quoted
   `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,
   `spring.datasource.password=...`, `PASSWORD="..."`), `key: value` header lines (for example
   `x-api-key: ...`), and strings shaped like known provider API keys (for example `sk-` keys). A quoted
@@ -177,7 +193,13 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   redacted; `max_tokens`, `prompt_tokens`, `token_count` and `next_page_token` are not, because the match
   is never on a substring.
 - **Truncation.** It keeps the first 1000 characters, after redaction, and appends
-  `... [truncated, N chars omitted]` with the count it dropped.
+  `... [truncated, N chars omitted]` with the count it dropped. Redact the full text before you cut it, as
+  this sink and every other llm4s call site do: redaction of text that is already cut off is weaker. An
+  unclosed single-quoted value inside a raw (unescaped) double-quoted string, holding a `"` followed by what
+  follows a string's end and with no `'` after it that could close it, ends at that `"`, so the part after
+  it is shown - `msg="{'password': 'Qx"]]9secretPW` cut off there becomes
+  `msg="{'password': '[REDACTED]"]]9secretPW`. A closing `'` with a letter or digit on both sides
+  (`'Qx"]]9SECRETPW'it"`) reads as an apostrophe, not as the end of the value, so the same happens there.
 
 Both are limits you should know about:
 
@@ -188,7 +210,9 @@ Both are limits you should know about:
   body, and a credential there is not guaranteed to match a pattern: a secret that is not under a key (a
   key pasted into a prompt as prose), and JSON escaped twice (JSON inside a string inside a string,
   `\\\"api_key\\\": ...`) are not redacted, by decision ([#1576](https://github.com/llm4s/llm4s/issues/1576)):
-  a pattern cannot know what a secret is, and only one level of escaping is recognised. Do not rely on
+  a pattern cannot know what a secret is, and only one level of escaping is recognised. A URL query value
+  that holds a `'` before `,`, `)`, `;` or `:` (`?token=ab',cd`) is redacted only up to that quote, since it
+  cannot be told from the quote that ends a string, as in `fetch('...?token=ab')`. Do not rely on
   redaction to make the file safe to share.
 
 A sink you write is **not** redacted or truncated: it is handed the exchange exactly as the client built

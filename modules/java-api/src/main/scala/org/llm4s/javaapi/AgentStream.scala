@@ -1,6 +1,6 @@
 package org.llm4s.javaapi
 
-import org.llm4s.agent.{ AgentEventBuffer, AgentResult, AgentRun }
+import org.llm4s.agent.{ AgentEventBuffer, AgentRun }
 import org.llm4s.core.safety.Safety
 import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.Result
@@ -17,7 +17,7 @@ import scala.util.Using
  *
  * {{{
  * AgentStream stream = agent.stream(threadId, "Explain monads", listener).get();
- * LlmResult<AgentResult> result = stream.await();   // or stream.cancel()
+ * LlmResult<JAgentResult> result = stream.await();   // or stream.cancel()
  * }}}
  */
 final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listener: AgentStreamListener) {
@@ -25,34 +25,29 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
   private val cancelled = new AtomicBoolean(false)
   private val delivered = new CountDownLatch(1)
   // set once the listener's events end; empty if the listener threw a fatal error
-  private val outcome = new AtomicReference[Option[Result[AgentResult]]](None)
+  private val outcome = new AtomicReference[Option[Result[JAgentResult]]](None)
   private val deliverer: Thread =
     Thread.ofVirtual().name(s"llm4s-java-stream-${run.runId.value}").unstarted(() => deliver())
 
   /**
-   * Cancels the turn and returns once it has ended; the thread is left for [[JAgent.streamRecover]].
+   * Cancels the turn and returns once it has ended or a 5-second bound has passed (see below); the
+   * thread is left for [[JAgent.streamRecover]].
    * The listener receives at most the event already being delivered, then
    * [[AgentStreamListener.onError]] with the cancellation - or `onComplete`, for a turn that had
    * already ended. Safe to call more than once, from any thread, the listener's included. An
    * interrupt does not cut the wait short: it is kept, and the thread's flag is set again on return.
+   *
+   * It waits up to 5 seconds for the turn to end, as the blocking [[JAgent]] calls do; with tracing,
+   * delivering the ended turn's last trace events can add to that. A turn whose provider ignores its
+   * interrupt for longer is logged at WARN and left to end on its own: `cancel` returns without it,
+   * and until it ends the thread is busy (`GraphError.ThreadBusy`), while [[await]] and the listener's
+   * terminal callback wait for it.
    */
   def cancel(): Unit = {
     cancelled.set(true)
-    run.cancel()
-    val interrupted = awaitEnd(false)
+    // a turn that ended is awaited once more, the interrupt flag kept, so its tracing detaches
+    if (run.cancelAndAwaitEnd()) run.awaitEnded(): Unit
     buffer.close()
-    if (interrupted) Thread.currentThread().interrupt()
-  }
-
-  /**
-   * Waits for the run's end, whatever interrupts the waiting thread: `run.await()` returns early, with
-   * the flag set, when interrupted, so the flag is cleared and the wait repeated. Returns whether the
-   * thread was interrupted, before or during the wait.
-   */
-  @tailrec private def awaitEnd(interrupted: Boolean): Boolean = {
-    val cleared = Thread.interrupted()
-    run.await(): Unit
-    if (Thread.currentThread().isInterrupted) awaitEnd(true) else interrupted || cleared
   }
 
   /**
@@ -62,7 +57,7 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
    * and the turn carries on: only [[cancel]] stops it. A call from the listener itself, which would
    * wait on itself, returns a failed result at once.
    */
-  def await(): LlmResult[AgentResult] =
+  def await(): LlmResult[JAgentResult] =
     if (Thread.currentThread() eq deliverer)
       LlmResult.failure(ValidationError("await", "called from the stream's own listener, which it would wait on"))
     else
@@ -100,9 +95,10 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
   /**
    * Delivers events until the buffer ends - or the turn is cancelled - then returns the turn's
    * outcome. A consumer that stops (a disconnected subscription, or a listener that throws or
-   * interrupts its own thread) cancels the turn and fails with why it stopped.
+   * interrupts its own thread) cancels the turn and fails with why it stopped. A turn's result that
+   * does not convert to a [[JAgentResult]] fails too, so the listener still hears `onError`.
    */
-  @tailrec private def events(): Result[AgentResult] = {
+  @tailrec private def events(): Result[JAgentResult] = {
     val step = for {
       taken <- guarded(buffer.take()).flatten
       more <- taken.filterNot(_ => cancelled.get) match {
@@ -112,7 +108,7 @@ final class AgentStream private (run: AgentRun, buffer: AgentEventBuffer, listen
     } yield more
     step match {
       case Right(true)  => events()
-      case Right(false) => run.await()
+      case Right(false) => run.await().flatMap(result => Safety.safely(JAgentResult.of(result)))
       case Left(error) =>
         cancel()
         Left(error)

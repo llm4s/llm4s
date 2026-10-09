@@ -16,7 +16,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.llm4s.agent.Agent
-import org.llm4s.agent.AgentResult
+import org.llm4s.javaapi.JAgentResult
 import org.llm4s.agent.graph.GraphError
 import org.llm4s.agent.graph.GraphRuntime
 import org.llm4s.agent.graph.RunEvent
@@ -63,6 +63,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNotSame
 import kotlin.test.assertTrue
+import java.util.Optional
 
 /**
  * [AgentKt]'s flows over the real agent runtime, behind the real Java facade: only the model is
@@ -159,7 +160,7 @@ class AgentKtStreamTest {
 
     private suspend fun assertRecovers(agent: AgentKt, threadId: String) {
         val done = agent.streamRecover(threadId).toList().last()
-        assertEquals(Option.apply("recovered"), assertIs<AgentStreamItem.Done>(done).result.answer())
+        assertEquals(Optional.of("recovered"), assertIs<AgentStreamItem.Done>(done).result.answer())
     }
 
     // ---- the turn's events, then its result -----------------------------------------------
@@ -168,7 +169,7 @@ class AgentKtStreamTest {
     fun `stream emits the turn's events, then Done with its result`() = runBlocking {
         val items = agentOf(Scripted({ onChunk -> onChunk(chunk(0)); completion("hello") })).stream("k1", "hi").toList()
         val done = assertIs<AgentStreamItem.Done>(items.last())
-        assertEquals(Option.apply("hello"), done.result.answer())
+        assertEquals(Optional.of("hello"), done.result.answer())
         assertTrue(items.dropLast(1).all { it is AgentStreamItem.Event })
         assertIs<RunEvent.RunStarted>(durable(items).first())
         assertEquals("RunCompleted", durable(items).last().toString())
@@ -220,7 +221,7 @@ class AgentKtStreamTest {
         }.toList()
         val gaps = items.sumOf { ((it as? AgentStreamItem.Event)?.event as? StreamEvent.LiveGap)?.dropped() ?: 0 }
         assertTrue(gaps > 0, "the slow collector was told of the dropped deltas")
-        assertEquals(Option.apply("done"), assertIs<AgentStreamItem.Done>(items.last()).result.answer())
+        assertEquals(Optional.of("done"), assertIs<AgentStreamItem.Done>(items.last()).result.answer())
         assertEquals("RunCompleted", durable(items).last().toString())
     }
 
@@ -279,10 +280,14 @@ class AgentKtStreamTest {
     private val mockJAgent = mockk<JAgent>()
     private val mocked = AgentKt(mockJAgent)
 
-    /** A started stream whose listener is driven by [drive] on a thread of its own, as the facade's is. */
+    /**
+     * A started stream whose listener is driven by [drive] on a thread of its own, as the facade's is; its
+     * `await()` returns once [drive] has, as the facade's does.
+     */
     private fun started(handle: AgentStream, drive: (AgentStreamListener) -> Unit): (AgentStreamListener) -> LlmResult<AgentStream> =
         { listener ->
-            thread { drive(listener) }
+            val driver = thread { drive(listener) }
+            every { handle.await() } answers { driver.join(); LlmResult.success(mockk()) }
             LlmResult.success(handle)
         }
 
@@ -316,7 +321,7 @@ class AgentKtStreamTest {
     @Test
     fun `streamResume passes the answers through and ends with Done`() = runBlocking {
         val handle = mockk<AgentStream>(relaxed = true)
-        val result = mockk<AgentResult>()
+        val result = mockk<JAgentResult>()
         val answers = listOf(Answer.approve("i1"), Answer.reply("i2", "\"yes\""))
         every { mockJAgent.streamResume("t", answers, any()) } answers {
             started(handle) { l -> l.onComplete(result) }(thirdArg())
@@ -348,6 +353,7 @@ class AgentKtStreamTest {
         val delivered = CountDownLatch(1)
         val handle = mockk<AgentStream>()
         every { handle.cancel() } answers { cancelled.countDown() }
+        every { handle.await() } answers { delivered.await(seconds, TimeUnit.SECONDS); LlmResult.success(mockk()) }
         every { mockJAgent.stream("t", "q", any()) } answers {
             val listener = thirdArg<AgentStreamListener>()
             entered.countDown()

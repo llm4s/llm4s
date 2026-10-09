@@ -119,9 +119,19 @@ class PIIPatternsSpec extends AnyFlatSpec with Matchers {
     PIIType.CreditCard.findAll("941111111111111119") shouldBe empty
   }
 
-  // Known limitation: Amex uses 15-digit format (4-6-5), regex expects 16-digit (4-4-4-4)
-  it should "not match Amex 15-digit format (known limitation)" in {
-    PIIType.CreditCard.findAll("3782 822463 10005") shouldBe empty
+  // Amex uses a 15-digit format (4-6-5); the 16-digit layout (4-4-4-4) is matched separately
+  it should "detect the Amex 15-digit format" in {
+    PIIType.CreditCard.findAll("3782 822463 10005") should have size 1
+  }
+
+  it should "preserve line breaks between card-shaped digit groups" in {
+    for (separator <- Seq("\n", "\r", "\r\n", "\u0085", "\u2028", "\u2029"))
+      for (groups <- Seq(Seq("3782", "822463", "10005"), Seq("4111", "1111", "1111", "1111"))) {
+        val text = groups.mkString(separator)
+        PIIType.CreditCard.findAll(text) shouldBe empty
+        PIIPatterns.maskAll(text, Seq(PIIType.CreditCard)) shouldBe text
+      }
+    PIIType.CreditCard.findAll("3782\t822463\t10005") should have size 1
   }
 
   // ==========================================================================
@@ -214,6 +224,15 @@ class PIIPatternsSpec extends AnyFlatSpec with Matchers {
 
   it should "reject partial number" in {
     PIIType.Phone.findAll("555-12") shouldBe empty
+  }
+
+  it should "keep a US number within one line" in {
+    for (separator <- Seq("\n", "\r", "\r\n", "\u0085", " ", " ")) {
+      val text = Seq("555", "123", "4567").mkString(separator)
+      PIIType.Phone.findAll(text) shouldBe empty
+      PIIType.Phone.findAll(s"+1${separator}555-123-4567").map(_.value) shouldBe Seq("555-123-4567")
+    }
+    PIIType.Phone.findAll("555\t123\t4567") should have size 1
   }
 
   it should "reject phone embedded in longer digit sequence" in {

@@ -75,4 +75,26 @@ final class GuideSnippets {
             }
         }
     }
+
+    /** The "An agent turn" block: a turn's result read with Java types only. */
+    static JAgentResult agentTurn(JLlmClient client) {
+        JAgent agent = Llm4s.createAgent(client);
+        JAgentResult result = agent.run("What is 2+2?").get();
+
+        switch (result.status().kind()) {
+            case COMPLETED -> System.out.println(result.answer().orElseThrow());
+            case BLOCKED -> System.out.println("Blocked by " + result.status().guardrail().orElseThrow());
+            case STEP_LIMIT_REACHED -> System.out.println("Hit the step limit");
+            case SUSPENDED -> System.out.println("Waiting for " + result.status().pending().size() + " answers");
+        }
+        for (JMessage message : result.messages()) {
+            System.out.println(message.role() + ": " + message.content());
+        }
+        JUsageSummary usage = result.usage();
+        System.out.println(usage.inputTokens() + " tokens in, " + usage.outputTokens() + " out");
+
+        JAgentResult next = agent.continueConversation(result, "And 3+3?").get();
+
+        return next;
+    }
 }

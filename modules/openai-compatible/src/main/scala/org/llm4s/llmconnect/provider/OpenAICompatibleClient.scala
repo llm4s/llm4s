@@ -7,13 +7,13 @@ import org.llm4s.llmconnect.config.{ OpenAICompatibleConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
-import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
+import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.llmconnect.{ BaseLifecycleLLMClient, ProviderExchangeLogging }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ Result, TryOps }
-import org.llm4s.util.Redaction
+import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.io.{ BufferedReader, InputStream, InputStreamReader }
 import java.nio.charset.StandardCharsets
@@ -84,7 +84,7 @@ class OpenAICompatibleClient(
           logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
           val result =
             if (response.statusCode >= 200 && response.statusCode < 300)
-              Try(parseCompletion(ujson.read(body))).toResult.map(bindThinking(_, conversation, options))
+              Try(parseCompletion(readReply(body))).toResult.map(bindThinking(_, conversation, options))
             else HttpErrorMapper.mapHttpError(response.statusCode, body, providerName, response.headers)
           recordExchange(startedAt, requestText, Some(body), result)
           result
@@ -154,7 +154,7 @@ class OpenAICompatibleClient(
       while (sseParser.hasEvents)
         sseParser.nextEvent().foreach { event =>
           event.data.filter(_ != "[DONE]").foreach { data =>
-            val json = ujson.read(data)
+            val json = readReply(data)
             // Usage arrives on the last event, alongside the final delta or on an event of its
             // own with no choices. A later report replaces an earlier one; one without both
             // counts is ignored rather than failing the stream.
@@ -162,14 +162,8 @@ class OpenAICompatibleClient(
             // the model that served the request, which a router may choose; reported as `Completion.model`
             json.obj.get("model").flatMap(_.strOpt).filter(_.nonEmpty).foreach(m => servedModel = Some(m))
             details ++= streamedThinkingDetails(json)
-            parseStreamingEvent(json, toolCalls).foreach { (chunk, rawArguments) =>
-              // The accumulator concatenates argument fragments, so it gets each fragment
-              // verbatim. The parsed form handed to `onChunk` cannot be concatenated safely:
-              // a fragment that is itself valid JSON, such as `"Paris"`, parses to the bare
-              // string and would lose its quotes.
-              accumulator.addChunk(
-                chunk.withToolCall(chunk.toolCall.map(_.copy(arguments = ujson.Str(rawArguments))))
-              )
+            parseStreamingChunks(json, toolCalls).foreach { chunk =>
+              accumulator.addChunk(chunk)
               onChunk(chunk)
             }
           }
@@ -189,6 +183,17 @@ class OpenAICompatibleClient(
         .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
     }
   }
+
+  /**
+   * Parses a reply body or a stream event, throwing on one nested more than `BoundedJson`'s limit
+   * as on malformed JSON; the caller turns either into a `Left`. Every reader of the value, and
+   * `ujson.Value.InvalidData`'s message when a reader meets an unexpected shape, recurses once per
+   * nesting level, so a 100,000-deep array overflowed the stack, and `Try` does not catch a
+   * `StackOverflowError` ([[https://github.com/llm4s/llm4s/issues/1658 #1658]]).
+   */
+  private def readReply(text: String): ujson.Value =
+    if (BoundedJson.exceedsDepth(text)) throw new IllegalArgumentException(BoundedJson.tooDeep().message)
+    else ujson.read(text)
 
   /** The replay data on a streamed event's delta, if it has one. */
   private def streamedThinkingDetails(json: ujson.Value): Seq[ujson.Value] =
@@ -443,15 +448,16 @@ class OpenAICompatibleClient(
    *
    * `toolCalls` is the state of the stream this event belongs to - see [[StreamToolCalls]]. The
    * default, a fresh one, is right only for an event read on its own.
+   *
+   * A tool call's arguments are its fragment verbatim, as a string (an empty fragment is the
+   * empty-object sentinel), for the accumulator and `onChunk` alike: fragments are concatenated
+   * to rebuild the arguments, and one that is itself valid JSON, such as `":"` or `"Paris"`,
+   * would lose its quotes if parsed.
    */
   protected[provider] def parseStreamingChunks(
     json: ujson.Value,
     toolCalls: StreamToolCalls = new StreamToolCalls
   ): Seq[StreamedChunk] =
-    parseStreamingEvent(json, toolCalls).map(_._1)
-
-  /** As [[parseStreamingChunks]], pairing each chunk with its raw argument fragment. */
-  private def parseStreamingEvent(json: ujson.Value, toolCalls: StreamToolCalls): Seq[(StreamedChunk, String)] =
     json.obj.get("choices").flatMap(_.arrOpt).flatMap(_.headOption) match {
       case None => Seq.empty
       case Some(choice) =>
@@ -470,14 +476,11 @@ class OpenAICompatibleClient(
               id = call.obj.get("id").flatMap(_.strOpt).filter(_.nonEmpty),
               name = function.obj.get("name").flatMap(_.strOpt).filter(_.nonEmpty)
             )
-            (ToolCall(id, name, StreamingToolArgumentParser.parse(raw)), raw)
+            ToolCall(id, name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
         }
 
-        val first = (
-          StreamedChunk(chunkId, content, calls.headOption.map(_._1), finishReason, thinking),
-          calls.headOption.fold("")(_._2)
-        )
-        first +: calls.drop(1).map((tc, raw) => (StreamedChunk(chunkId, None, Some(tc), None, None), raw))
+        StreamedChunk(chunkId, content, calls.headOption, finishReason, thinking) +:
+          calls.drop(1).map(tc => StreamedChunk(chunkId, None, Some(tc), None, None))
     }
 
   private def recordExchange(
