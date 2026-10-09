@@ -8,14 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
+  `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
+  and its spec checks update order, the barrier, step boundaries and cancellation with no API key.
 - **Suspended agent turns from Java and Kotlin** ([#1392](https://github.com/llm4s/llm4s/issues/1392)):
   `llm4s-java-api`'s `JAgent.pending(result)` returns a `java.util.List<PendingInterrupt>`. For a
   `Suspended` turn it lists the approvals, then the questions. For any other turn the list is empty.
   Each `PendingInterrupt` has `id()`, `kind()` (the Java enum `InterruptKind`, `APPROVAL` or `QUESTION`),
   `toolName()`, `argumentsJson()`, and `reason()` or `questionJson()` as an `Optional<String>`. No Scala
   or ujson type is involved. `JAgent.resume(threadId, List<Answer>)` and `JAgent.recover(threadId)` are
-  blocking versions of `streamResume` and `streamRecover`. They return `LlmResult<JAgentResult>` (#1393) and
-  handle an interrupt as `run` does. A partial resume returns `Suspended` again, with the unanswered
+  blocking versions of `streamResume` and `streamRecover`. They return `LlmResult<JAgentResult>` (#1393); an
+  interrupted caller gets a `CancelledError` and the turn is cancelled, leaving the thread for `recover`
+  (#1330). A partial resume returns `Suspended` again, with the unanswered
   items still pending. The Kotlin API adds `AgentKt.pending(result)` and the `suspend` functions
   `resume(threadId, answers)` and `recover(threadId)`. These run the turn as the streams do, so
   cancelling the caller cancels the turn and leaves the thread for `recover`. The Java sample approves
@@ -774,6 +778,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **An interrupted `Agent.run`, `continueConversation`, `recover` or `resume` cancels its turn, from Java too** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
+  the call returns `Left(CancelledError)` with the interrupt flag set, as before, and now also cancels the turn it
+  was waiting on instead of leaving it running, returning once that turn has ended (within 5 seconds), so `recover`
+  can follow at once; a caller already interrupted starts no turn. Cancelling a graph run therefore cancels the
+  agent turns its nodes are waiting on. Use `start`/`startRecover`/`startResume` and await the `AgentRun` to keep a turn past an interrupt.
+  With tracing, the cancelled turn's trace is complete (its last events delivered, its subscription detached) when
+  the call returns. A turn that had already begun committing its outcome cannot be cancelled: the call then returns
+  that outcome, with the interrupt flag still set. `run(query)`, whose random thread id a `Left` does not carry,
+  forgets the thread of a turn that failed or was cancelled once it has ended.
+  **Java-visible:** `llm4s-java-api`'s blocking `JAgent.run`, `continueConversation`, `resume` and `recover` go
+  through these calls, so an interrupted Java caller now cancels its turn too (they used to stop only the wait and
+  leave the turn running); Java and Kotlin now behave the same. `AgentStream.cancel()` still cancels a streamed turn
+  without interrupting any thread.
 - **Java and Kotlin agent results use Java types only** ([#1393](https://github.com/llm4s/llm4s/issues/1393),
   BREAKING, `llm4s-java-api`, Kotlin API). Every agent turn the Java facade returns - `JAgent.run`,
   `continueConversation`, `resume`, `recover`, `AgentStream.await()`, `AgentStreamListener.onComplete` - is now a
@@ -1834,6 +1851,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `org.llm4s.toolapi.ToolHints` in `llm4s-core` (`@Experimental`), because `llm4s-mcp` cannot depend on the agent runtime.
 
 ### Removed
+- **Orchestration: `PlanRunner`, `DAG`, `TypedAgent`, `Policies`, `OrchestrationError` and `CancellationToken`**
+  ([#1330](https://github.com/llm4s/llm4s/issues/1330)): `org.llm4s.agent.orchestration` is deleted, with
+  `org.llm4s.types.PlanId` and `org.llm4s.types.AgentId` from `llm4s-core` (`org.llm4s.agent.AgentId` is the agent's
+  id). Build the same flows with `GraphBuilder` and run them on `GraphRuntime`; cancel with `RunHandle.cancel()`.
+  See the migration guide's "Orchestration removed (#1330)" and the `multi-agent-graph` cookbook recipe.
 - **`ToolCallPolicy` and `PolicyDecision`** ([#1279](https://github.com/llm4s/llm4s/issues/1279)),
   with `ApprovalSource.Policy` and `ToolLoop.build`'s `policy` parameter, replaced by
   `AgentMiddleware`. Migration: a policy becomes an `AgentMiddleware` overriding `wrapToolCall`:
@@ -1978,6 +2000,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`llm4s-openai-compatible`: Z.ai keeps replayed reasoning** ([#1384](https://github.com/llm4s/llm4s/pull/1384),
+  [#1411](https://github.com/llm4s/llm4s/pull/1411)):
+  a request that sends an earlier turn's `reasoning_content` back now also sets `"thinking": {"clear_thinking": false}`,
+  merged into any existing `thinking` object. Z.ai's standard endpoint has preserved thinking off by default
+  (`clear_thinking` defaults to `true`) and drops replayed reasoning without it; `thinking.type` is left unset.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the
   exchange-log sink, read a query parameter as `[?&]`, a key of any characters up to the next `=`, and a value up
@@ -1999,6 +2026,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was written in the clear, is redacted. The sensitive parameter names are unchanged; `?api_key=`, `&token=`,
   `?access_token=` and `?filter[api_key]=` are still redacted, and redacted JSON keeps its structure and still
   parses. No signature changes.
+- **Provider response bodies are redacted before they are truncated for a log line or an error**
+  ([#1674](https://github.com/llm4s/llm4s/issues/1674)). Many clients put a provider's error body into a log line
+  or an error message through `Redaction.truncateForLog` alone, or not even that, so a body that echoed a request
+  header, an API key or a token - `Authorization: Bearer ...`, `"api_key": "..."`, `?key=AIza...` - was written in
+  the clear. Every such site now goes through one internal helper that redacts the whole text and then truncates
+  it, as Cohere's and Jina's embedding providers already did: the OpenAI, Anthropic and Gemini vision clients, the
+  OpenAI (DALL-E) image client's error message, raw body or JSON `message` alike, and the Stable Diffusion and
+  Hugging Face image clients (`llm4s-image`); the Streamable HTTP and SSE MCP transports' HTTP error bodies, the
+  message of a JSON-RPC error from any transport, and the DEBUG line for an unrecognised SSE line, now built only
+  when DEBUG is on (`llm4s-mcp`); the Langfuse batch
+  sender's and tracer's error-body log lines and the per-event rejection summary (`llm4s-observability`); the
+  Ollama, OpenAI and Voyage embedding providers; Cohere's reranker and Qdrant's error messages (`llm4s-rag`);
+  `GraphJsonParser`'s preview of a reply it could not parse (`llm4s-knowledgegraph`); Vertex AI's token
+  refresh and JWT exchange errors (`llm4s-gemini`); watsonx's IAM exchange error, which removed only the
+  configured key; the grounding, context-relevance and every `LLMGuardrail` judge's quote of a reply they could not
+  parse, cut to 200 characters (`llm4s-agent`); and `HttpResponse.ensureSuccess`'s `ServiceError`, which the model
+  listers use (`llm4s-core`). An SDK exception's message carries the response body too (anthropic-java writes
+  `401: <body>`), so the same applies to the messages taken from one: Anthropic's `AuthenticationError` and
+  `ValidationError` on both paths (`llm4s-anthropic`); every error Bedrock maps from an AWS exception
+  (`llm4s-bedrock`); and `DefaultErrorMapper`'s `AuthenticationError` and `UnknownError`, which every client and
+  `Safety.safely`, `Safety.fromTry`, `toResult` and `toLLMError` fall back on (`llm4s-core`). The `UnknownError`
+  keeps the original exception as its cause, unredacted: a logger that prints the cause prints its message.
+  `OllamaClient`'s "does not support tools" error cut the server's decoded message to 200 characters and never
+  redacted it; it now redacts the whole message first. Redacting before the cut matters: a key that straddles the
+  cut point leaves a fragment too short for its pattern to recognise, which the old order let through. A truncated
+  body's `original length` now counts the redacted text. No public signature changes.
 - **`DefaultErrorMapper` classifies 401 and 429 only when the message names an HTTP status, and keeps the
   cause otherwise** ([#1668](https://github.com/llm4s/llm4s/issues/1668)). The mapper behind `Safety.safely`,
   `Safety.fromTry`, `toResult` and `toLLMError` turned any exception whose message *contained* `401` into

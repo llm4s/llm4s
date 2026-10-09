@@ -29,7 +29,7 @@ The LLM4S Agent Framework provides a production-ready foundation for building LL
 - **Memory** - Short and long-term context with semantic search
 - **Handoffs** - Agent-to-agent delegation for specialist routing
 - **Streaming** - Real-time events for responsive UIs (`agent.stream`, [streaming guide](streaming))
-- **Orchestration** - Multi-agent workflows with DAG execution
+- **Graphs** - Typed multi-agent workflows on `GraphBuilder`: parallel nodes, joins and checkpoints ([recipe](../../examples/cookbook.html#6-several-agents-in-one-graph))
 
 ## Quick Start
 
@@ -204,9 +204,12 @@ System.out.println(turn.get().answer().orElse("(" + turn.get().status().kind() +
 `agent.recover(threadId)` continues a turn that failed or was cancelled, and also returns an
 `LlmResult<JAgentResult>`. A failed result means one of these: a malformed answer, an empty answers
 list (`InvalidResume`), an answer to an id the thread is not waiting for, a thread that is not suspended (`resume`), or a thread with nothing to
-recover. `resume` and `recover` handle an interrupt the way `run` does: the call returns a
-`CancelledError`, but the turn keeps running. To cancel a turn, use `streamResume` or `streamRecover`
-and cancel the stream (see [Streaming Events](streaming#java-and-kotlin)).
+recover. `resume` and `recover` handle an interrupt the way `run` and `continueConversation` do: interrupting the
+thread blocked in the call cancels the turn, and the call returns a `CancelledError` with the interrupt flag still
+set once the turn has ended, leaving the thread for `recover` (see
+[Java Threading and Cancellation](../java-threading-and-cancellation#interrupting-the-caller-cancels-an-agent-turn)).
+To cancel a turn without interrupting a thread, use `streamResume` or `streamRecover` and cancel the stream (see
+[Streaming Events](streaming#java-and-kotlin)).
 
 The Kotlin API reuses these types: every `AgentKt` turn returns a `JAgentResult`, and `when` over
 `status().kind()` covers it. `AgentKt.pending(result)` is the same `List<PendingInterrupt>`.

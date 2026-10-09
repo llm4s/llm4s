@@ -279,4 +279,15 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     message should include("'85'")
     message should include("0 to 1")
   }
+
+  it should "quote a refused reply redacted and cut to 200 characters (#1674)" in {
+    val reply   = "I cannot score this.\n" + org.llm4s.testutil.EchoedCredentials.Text + "\n" + "x" * 1000
+    val message = judge(reply, threshold = 0.0).swap.toOption.get.message
+
+    message should include("Could not parse LLM judge score")
+    message should include("[REDACTED]")
+    org.llm4s.testutil.EchoedCredentials.leaked(message) shouldBe empty
+    message should include(s"(truncated, original length: ")
+    (message should not).include("x" * 201)
+  }
 }

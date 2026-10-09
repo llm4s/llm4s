@@ -40,6 +40,31 @@ final class AgentRun private[agent] (
   def cancel(): Unit = handle.cancel()
 
   /**
+   * Cancels the turn and waits, within `within` and whatever interrupts the waiting thread, for it to
+   * end, so the thread is free for `recover` when this returns. A turn still running then - its
+   * provider ignored the interrupt - is logged at WARN and left to end on its own, and the thread is
+   * `ThreadBusy` until it does. Returns whether the turn ended.
+   */
+  private[agent] def cancelAndAwaitEnd(within: FiniteDuration = AgentRun.Drain): Boolean =
+    handle.cancel()
+    val ended = DefaultRunHandle.awaitEnd(handle, within)
+    if !ended then
+      AgentRun.logger.warn(
+        s"Run ${runId.value} on ${threadId.value} did not end within $within of being cancelled; returning without it"
+      )
+    ended
+
+  /**
+   * [[await]] for a turn that has ended - after [[cancelAndAwaitEnd]] returned `true` - from a thread
+   * that may be interrupted: the flag is cleared while it waits, so `await` drains the turn's listeners
+   * and lets its tracing deliver the turn's last events and detach, and is set again on return. The
+   * turn's own outcome: `Left` for a cancelled turn, but a turn that began committing its outcome
+   * before the cancel reached it ended as that outcome.
+   */
+  private[agent] def awaitEnded(): Result[AgentResult] =
+    AgentRun.uninterrupted(await())
+
+  /**
    * Subscribes `listener` to this turn's events: its durable events replayed from the turn's start,
    * then live; its live events from now on (a live event sent before this call is missed - use
    * [[Agent.stream]] to receive every one). Run-scoped: nothing of another run on the thread is
@@ -67,7 +92,8 @@ final class AgentRun private[agent] (
    * failed with; the outcome is retained, so every call made once the turn has ended returns the
    * same value. A call whose awaiting thread is interrupted before then returns
    * `Left(CancelledError)` instead, with the interrupt flag still set, and the turn keeps running: a
-   * later call returns its outcome, and only [[cancel]] stops it. With tracing, the turn's trace is
+   * later call returns its outcome, and only [[cancel]] stops it ([[Agent.run]], [[Agent.recover]]
+   * and [[Agent.resume]] cancel it, then await its end). With tracing, the turn's trace is
    * complete when a call returns the turn's outcome.
    *
    * With a listener - from [[Agent.stream]], [[Agent.streamResume]], [[Agent.streamRecover]] or
@@ -125,6 +151,16 @@ final class AgentRun private[agent] (
 
 private[agent] object AgentRun:
   private val logger = LoggerFactory.getLogger(classOf[AgentRun])
+
+  /**
+   * `body`, run with the calling thread's interrupt flag cleared; a flag that was set is set again
+   * afterwards, so the caller still sees the interrupt.
+   */
+  def uninterrupted[A](body: => A): A =
+    val wasInterrupted = Thread.interrupted()
+    val result         = body
+    if wasInterrupted then Thread.currentThread().interrupt()
+    result
 
   /** How long [[AgentRun.await]] waits, after the run ends, for its listeners to return from its last event. */
   val Drain: FiniteDuration = 5.seconds

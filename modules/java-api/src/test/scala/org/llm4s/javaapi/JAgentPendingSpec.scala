@@ -5,10 +5,11 @@ import org.llm4s.agent.AgentStatus
 import org.llm4s.agent.graph.{ GraphError, InterruptId }
 import org.llm4s.agent.graph.toolloop.{ ApprovalRequest, ApprovalSource, ToolQuestionRequest }
 import org.llm4s.error.{ CancelledError, NetworkError, ValidationError }
+import org.llm4s.llmconnect.model.Completion
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.util.concurrent.{ CopyOnWriteArrayList, CountDownLatch, TimeUnit }
+import java.util.concurrent.{ CopyOnWriteArrayList, LinkedBlockingQueue, Semaphore, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 
@@ -220,27 +221,105 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     agent.recover(null).getError().error shouldBe a[ValidationError]
   }
 
-  "JAgent.resume and recover" should "return a CancelledError to an interrupted caller, leaving the turn going" in {
-    val release = new CountDownLatch(1)
-    val calls   = new AtomicInteger(0)
-    val slow = new Scripted(
-      _ => Right(completion("x")),
+  /**
+   * A model that answers call N (0-based) with `script(N)`, where `Block` parks until interrupted - opening
+   * `entered` as it parks and `interrupted` once its interrupt arrives - and then fails as cancelled.
+   */
+  final private class Blocking(script: PartialFunction[Int, Option[Completion]]) {
+    val entered       = new Semaphore(0)
+    val interrupted   = new Semaphore(0)
+    private val calls = new AtomicInteger(0)
+    val client: Scripted = new Scripted(
+      _ => Right(completion("unused")),
       () =>
-        if (calls.getAndIncrement() == 0) Right(calling(call("c1", "deploy", "x")))
-        else {
-          release.await(DeadlineSeconds, TimeUnit.SECONDS)
-          Right(completion("late"))
+        script.lift(calls.getAndIncrement()).flatten match {
+          case Some(reply) => Right(reply)
+          case None =>
+            entered.release()
+            if (parkUntilInterrupted()) {
+              interrupted.release()
+              Thread.currentThread().interrupt()
+              Left(CancelledError("model call"))
+            } else Right(completion("never interrupted"))
         }
     )
-    val agent = agentOver(slow)
+  }
+
+  /** Runs `call` on a new thread, interrupts it once `entered` is released; its result and whether its flag was set. */
+  private def interruptedCall(
+    entered: Semaphore
+  )(call: => LlmResult[JAgentResult]): (LlmResult[JAgentResult], Boolean) = {
+    val outcome = new LinkedBlockingQueue[(LlmResult[JAgentResult], Boolean)]()
+    val caller  = Thread.ofVirtual().start(() => outcome.offer(call -> Thread.currentThread().isInterrupted): Unit)
+    entered.tryAcquire(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    caller.interrupt()
+    Option(outcome.poll(DeadlineSeconds, TimeUnit.SECONDS)).getOrElse(fail("the interrupted call did not return"))
+  }
+
+  "JAgent.resume and recover" should "cancel the turn when the caller is interrupted, leaving the thread for recover" in {
+    ran.clear()
+    // call 0 suspends on deploy; the resumed turn's model call (1) and the first recovery's (2) block
+    val model = new Blocking({
+      case 0     => Some(calling(call("c1", "deploy", "x")))
+      case 1 | 2 => None
+      case _     => Some(completion("recovered"))
+    })
+    val agent = agentOver(model.client)
     val first = agent.run("go").get()
+    val id    = JAgent.pending(first).get(0).id
+
+    val (resumed, resumeFlag) =
+      interruptedCall(model.entered)(agent.resume(first.threadId, java.util.List.of(Answer.approve(id))))
+    resumed.getError().error shouldBe a[CancelledError]
+    resumeFlag shouldBe true
+    // the turn itself was cancelled - its model call saw the interrupt - and ended before resume returned
+    model.interrupted.tryAcquire(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    agent.continueConversation(first, "again").getError().error shouldBe a[GraphError.IncompleteRun]
+    ran.asScala.toList shouldBe List("x")
+
+    val (recovering, recoverFlag) = interruptedCall(model.entered)(agent.recover(first.threadId))
+    recovering.getError().error shouldBe a[CancelledError]
+    recoverFlag shouldBe true
+    model.interrupted.tryAcquire(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+
+    agent.recover(first.threadId).get().answer() shouldBe Optional.of("recovered")
+    ran.asScala.toList shouldBe List("x") // the approved call is not run again
+  }
+
+  "JAgent.continueConversation" should "cancel the turn when the caller is interrupted, leaving the thread for recover" in {
+    val model = new Blocking({
+      case 0 => Some(completion("hello"))
+      case 1 => None
+      case _ => Some(completion("recovered"))
+    })
+    val agent = agentOver(model.client)
+    val first = agent.run("hi").get()
+
+    val (continued, flag) = interruptedCall(model.entered)(agent.continueConversation(first, "more"))
+    continued.getError().error shouldBe a[CancelledError]
+    flag shouldBe true
+    model.interrupted.tryAcquire(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    agent.recover(first.threadId).get().answer() shouldBe Optional.of("recovered")
+  }
+
+  "A caller already interrupted" should "start no turn from resume, recover or continueConversation" in {
+    ran.clear()
+    val agent = agentOver(scripted(Right(calling(call("c1", "deploy", "prod"))), Right(completion("shipped"))))
+    val first = agent.run("deploy").get()
+    val id    = JAgent.pending(first).get(0).id
+
     Thread.currentThread().interrupt()
-    val interrupted = agent.resume(first.threadId, java.util.List.of(Answer.approve(JAgent.pending(first).get(0).id)))
+    val resumed   = agent.resume(first.threadId, java.util.List.of(Answer.approve(id)))
+    val recovered = agent.recover(first.threadId)
+    val continued = agent.continueConversation(first, "more")
     Thread.interrupted() shouldBe true // the flag is still set, and cleared here
-    interrupted.getError().error shouldBe a[CancelledError]
-    release.countDown()
-    // the turn carried on and completed: once it has, the thread has nothing to recover
-    awaitCondition(agent.recover(first.threadId).getError().error.isInstanceOf[GraphError.NothingToRecover]) shouldBe
-      true
+
+    resumed.getError().error shouldBe a[CancelledError]
+    recovered.getError().error shouldBe a[CancelledError]
+    continued.getError().error shouldBe a[CancelledError]
+    ran.asScala shouldBe empty
+    // the thread is still suspended on the same approval: answering it now completes the turn
+    agent.resume(first.threadId, java.util.List.of(Answer.approve(id))).get().answer() shouldBe Optional.of("shipped")
+    ran.asScala.toList shouldBe List("prod")
   }
 }

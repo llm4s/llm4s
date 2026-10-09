@@ -133,7 +133,7 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
                     EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "voyage")
                   }
               case status =>
-                val body = Redaction.truncateForLog(response.body)
+                val body = Redaction.safeBody(response.body)
                 logger.error(s"[VoyageAIEmbeddingProvider] HTTP error: $body")
                 Left(EmbeddingError(code = Some(status.toString), message = body, provider = "voyage"))
             }

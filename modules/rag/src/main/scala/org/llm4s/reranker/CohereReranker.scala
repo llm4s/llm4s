@@ -89,7 +89,7 @@ class CohereReranker(config: RerankProviderConfig) extends Reranker {
               )
             }
         case status =>
-          val body = Redaction.truncateForLog(response.body)
+          val body = Redaction.safeBody(response.body)
           logger.error(s"[CohereReranker] HTTP error: $body")
           Left(
             RerankError(

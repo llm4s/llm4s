@@ -124,7 +124,7 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
                 EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "openai")
               }
           case status =>
-            val body = Redaction.truncateForLog(response.body)
+            val body = Redaction.safeBody(response.body)
             logger.error(s"[OpenAIEmbeddingProvider] HTTP error: $body")
             Left(EmbeddingError(code = Some(status.toString), message = body, provider = "openai"))
         }

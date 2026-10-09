@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testkit.LocalProviderTestServer.{ sendJsonResponse, withServer }
-import org.llm4s.testutil.SmallStack
+import org.llm4s.testutil.{ EchoedCredentials, SmallStack }
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -506,6 +506,26 @@ class OllamaToolCallingSpec extends AnyWordSpec with Matchers {
 
     "leave the same message alone on any other status" in {
       withStatus(500, unsupported)(client => ask(client).left.toOption.get shouldBe a[ServiceError])
+    }
+
+    "redact credentials the server echoes in its message (#1674)" in {
+      val echoing = ujson.Obj("error" -> s"${EchoedCredentials.Text} does not support tools").render()
+      withStatus(400, echoing) { client =>
+        val error = validation(ask(client))
+        error.field shouldBe "tools"
+        error.message should include("[REDACTED]")
+        EchoedCredentials.leaked(error.message) shouldBe empty
+      }
+    }
+
+    "redact the server's whole message before cutting it to 200 characters (#1674)" in {
+      // The decoded message carries a key that the 200-character cut would split, leaving a fragment
+      // too short for the key pattern to recognise.
+      val key     = "sk-proj-" + ("abc123def456ghi789jk" * 2)
+      val lead    = "x" * (200 - "sk-proj-".length - 10)
+      val message = OllamaClient.serverMessage(ujson.Obj("error" -> s"$lead$key does not support tools").render())
+      (message should not).include("sk-proj-abc123def4")
+      message should include("[REDACTED]")
     }
   }
 

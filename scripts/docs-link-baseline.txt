@@ -52,7 +52,6 @@ docs/getting-started/ollama-quickstart.md -> installation.md#for-ollama-local-mo
 docs/getting-started/testing-guide.md -> ../agents/tools.md
 docs/getting-started/testing-guide.md -> /advanced/ci-cd
 docs/gsoc/resources.md -> /contributing
-docs/guide/agents/handoffs.md -> /design/agent-framework-roadmap#orchestration
 docs/guide/agents/index.md -> /design/agent-framework-roadmap
 docs/guide/agents/index.md -> /design/phase-1.1-functional-conversation-management
 docs/guide/agents/index.md -> /design/phase-1.2-guardrails-framework
