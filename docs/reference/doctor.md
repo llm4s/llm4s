@@ -2,7 +2,7 @@
 layout: page
 title: Doctor (setup check)
 parent: Reference
-nav_order: 15
+nav_order: 19
 ---
 
 # Doctor: check your whole setup in one run
