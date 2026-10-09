@@ -331,9 +331,10 @@ private[llm4s] object Redaction {
       .replaceAllIn(step1, m => Regex.quoteReplacement(s"${m.group(1)}$placeholder"))
     // Handle standalone Bearer tokens, also right after the JSON escape of `&`, `=` or `?`, which ends in a word
     // character but stands for a separator (#1676)
-    val step3 = """(?i)(?:\b|(?<=\\[u]00(?:26|3[dDfF])))Bearer\s+([a-zA-Z0-9\-_\.]+)""".r.replaceAllIn(step2, quoted)
+    val step3 =
+      """(?i)(?:\b|(?<=\\(?-i:u)00(?:26|3[dD]|3[fF])))Bearer\s+([a-zA-Z0-9\-_\.]+)""".r.replaceAllIn(step2, quoted)
     // Handle standalone Basic auth tokens
-    """(?i)(?:\b|(?<=\\[u]00(?:26|3[dDfF])))Basic\s+([a-zA-Z0-9+/=]+)""".r.replaceAllIn(step3, quoted)
+    """(?i)(?:\b|(?<=\\(?-i:u)00(?:26|3[dD]|3[fF])))Basic\s+([a-zA-Z0-9+/=]+)""".r.replaceAllIn(step3, quoted)
   }
 
   private def isSensitiveQueryKey(key: String): Boolean = {
@@ -1330,6 +1331,13 @@ private[llm4s] object Redaction {
    * JSON that Go's `encoding/json` wrote has every `&` escaped (#1676). The text after the escape is read for pairs
    * again, as the text after `&` is. A loop that reads each character of a value once.
    *
+   * The value of a sensitive key ends at an escaped `&` only where another pair, `key=` or `key` and the escape of
+   * `=`, follows it. A credential may hold an `&` (`password=p&ssW0rd`), which the same serialisers escape, and the
+   * value of a sensitive key ran over a literal `&` before: cut at every escape, the rest of the credential was
+   * written in the clear. Nor does it end at one inside quotes that are escaped too (a backslash and `u0027` or
+   * `u0022`, which System.Text.Json writes for `'` and `"`): such a value is one credential, as `password='p&user=x'`
+   * is. Only the escapes of `&` are read differently: the value still ends where it ended before.
+   *
    * The backslashes that escape the quote the value stops at are kept. Inside JSON that sits in a string,
    * `\"note\": \"token=abc\"`, the value runs up to the `"` of the escaped closing quote and so holds its `\`:
    * written over with the placeholder, the `"` left bare ended the enclosing string there, the document no longer
@@ -1351,18 +1359,31 @@ private[llm4s] object Redaction {
         copiedTo
       } else {
         val valueStart = matcher.end
+        val sensitive  = isSensitiveKey(matcher.group(2))
         var valueEnd   = valueStart
         var escapeEnd  = -1
+        // The last hex digit of the escaped quote the value opened with and has not closed yet, or `NotAQuote`.
+        var openQuote = NotAQuote
         while (escapeEnd < 0 && valueEnd < input.length && !endsEqualsValue(input.charAt(valueEnd)))
           if (input.charAt(valueEnd) == '\\') {
             val end = separatorEscapeEnd(input, valueEnd)
-            if (end >= 0 && escapedSeparator(input, end) == '&') escapeEnd = end
-            else valueEnd = afterBackslashes(input, valueEnd)
+            if (end >= 0 && escapedSeparator(input, end) == '&') {
+              if (!sensitive || (openQuote == NotAQuote && startsPair(input, end))) escapeEnd = end
+              else valueEnd = end
+            } else {
+              val quoteEnd = quoteEscapeEnd(input, valueEnd)
+              if (quoteEnd >= 0) {
+                val quote = input.charAt(quoteEnd - 1)
+                if (valueEnd == valueStart) openQuote = quote
+                else if (quote == openQuote) openQuote = NotAQuote
+                valueEnd = quoteEnd
+              } else valueEnd = afterBackslashes(input, valueEnd)
+            }
           } else {
             valueEnd += 1
           }
         val copied =
-          if (isSensitiveKey(matcher.group(2)) && valueEnd > valueStart) {
+          if (sensitive && valueEnd > valueStart) {
             out.append(input, copiedTo, valueStart).append(placeholder).append(quoteEscape(input, valueStart, valueEnd))
             valueEnd
           } else copiedTo
@@ -1372,6 +1393,27 @@ private[llm4s] object Redaction {
     val copiedTo = loop(0, 0)
     out.append(input, copiedTo, input.length).toString
   }
+
+  /** `key=`, or `key` and the JSON escape of `=`: the start of the next pair, read where an escaped `&` ends. */
+  private val PairAhead: java.util.regex.Pattern = java.util.regex.Pattern.compile(s"""$Key(?:=|\\\\+[u]003[dD])""")
+
+  /** Whether a `key=value` pair starts at `at`. Reads at most a key and an escape, so a bounded number of characters. */
+  private def startsPair(input: String, at: Int): Boolean =
+    PairAhead.matcher(input).region(at, input.length).lookingAt()
+
+  /**
+   * The index after the JSON escape of `'` or `"` that the run of backslashes at `i` starts - `u0027` or `u0022` -
+   * or -1 if it starts none. The last character before that index tells which quote it writes.
+   */
+  private def quoteEscapeEnd(input: String, i: Int): Int = {
+    val u = afterBackslashes(input, i)
+    val escapes =
+      u > i && u + 5 <= input.length && input.charAt(u) == 'u' && input.charAt(u + 1) == '0' &&
+        input.charAt(u + 2) == '0' && input.charAt(u + 3) == '2' && "27".indexOf(input.charAt(u + 4).toInt) >= 0
+    if (escapes) u + 5 else -1
+  }
+
+  private val NotAQuote: Char = ' '
 
   /** The characters that end the value of a `key=value` pair: whitespace and `&"',;<>`. */
   private def endsEqualsValue(c: Char): Boolean = isRegexSpace(c) || "&\"',;<>".indexOf(c.toInt) >= 0

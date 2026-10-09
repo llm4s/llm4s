@@ -2077,8 +2077,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in either case. The output keeps the escapes as they were written: `{"url":"https://h/x?a=1\u0026token=[REDACTED]"}`.
   A query value now ends at `\u0026` as it ends at `&`, so the parameters after a sensitive one stay readable. The
   `key=value`, `key="..."` and `key='...'` field passes read a key that follows one of these escapes as they read
-  `&key=`. So do the `Bearer` and `Basic` token patterns after an escape. An input that holds none of these escapes
-  is redacted exactly as before.
+  `&key=`. So do the `Bearer` and `Basic` token patterns after an escape, written with a lower-case `u` as JSON
+  writes it. The value of a sensitive `key=value` pair ends at `\u0026` only where another pair, `key=` or
+  `key\u003d`, follows it, and never inside escaped quotes (`\u0027`, `\u0022`): a credential that holds an `&`,
+  which these serialisers escape too, is redacted in full, as it was before, so
+  `{"dsn":"host=db password=p\u0026ssW0rd dbname=x"}` becomes `{"dsn":"host=db password=[REDACTED] dbname=x"}`.
+  An input that holds none of these escapes is redacted exactly as before.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the
   exchange-log sink, read a query parameter as `[?&]`, a key of any characters up to the next `=`, and a value up

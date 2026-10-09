@@ -291,4 +291,44 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
   it should "read a backslash that starts no separator escape as part of a sensitive value" in {
     Redaction.redact(u("""?token=ab~41cd\\xy&n=1""")) shouldBe s"?token=$R&n=1"
   }
+
+  // ---------------------------------------------------------------------------------------------
+  // A credential that holds '&': Go's encoding/json, logrus and System.Text.Json escape it too, and the value of a
+  // sensitive key=value pair ends at the escape only where another pair follows it (#1676)
+  // ---------------------------------------------------------------------------------------------
+
+  it should "redact a key=value credential holding an escaped '&' in full, in a DSN, a sentence, an env line and a command" in {
+    Redaction.redact(u("""{"dsn":"host=db user=app password=p~26ssW0rdQZXJ dbname=x"}""")) shouldBe
+      s"""{"dsn":"host=db user=app password=$R dbname=x"}"""
+    Redaction.redact(u("""{"msg":"connecting with password=Tr0ub~264dorQZXJ to db"}""")) shouldBe
+      s"""{"msg":"connecting with password=$R to db"}"""
+    Redaction.redact(u("""{"env":"DB_PASSWORD=ab~26cdQZXJ"}""")) shouldBe s"""{"env":"DB_PASSWORD=$R"}"""
+    Redaction.redact(u("""{"cmd":"psql 'host=db password=p~26ssQZXJ'"}""")) shouldBe
+      s"""{"cmd":"psql 'host=db password=$R'"}"""
+  }
+
+  it should "end a sensitive key=value value at an escaped '&' that another pair follows, with '=' or its escape" in {
+    Redaction.redact(u("""{"form":"password=SECRETQZ~26user=bob"}""")) shouldBe
+      u(raw"""{"form":"password=$R~26user=bob"}""")
+    Redaction.redact(u("""{"form":"password=SECRETQZ~26user~3dbob"}""")) shouldBe
+      u(raw"""{"form":"password=$R~26user~3dbob"}""")
+  }
+
+  it should "redact a key=value credential in escaped quotes in full, whatever pairs it seems to hold" in {
+    Redaction.redact(u("""{"msg":"login DB_PASSWORD=~27aUFQs~26$n~26ZScH85~27 user=bob"}""")) shouldBe
+      s"""{"msg":"login DB_PASSWORD=$R user=bob"}"""
+    Redaction.redact(u("""{"msg":"login password=~27p~26user=x~27 n=1"}""")) shouldBe
+      s"""{"msg":"login password=$R n=1"}"""
+    Redaction.redact(u("""{"msg":"login password=~22p~26user=x~22 n=1"}""")) shouldBe
+      s"""{"msg":"login password=$R n=1"}"""
+    Redaction.redact(u("""{"msg":"login password=~27pQZXJ~27~26user=bob"}""")) shouldBe
+      u(raw"""{"msg":"login password=$R~26user=bob"}""")
+  }
+
+  it should "read a Bearer token only after the escape of a separator, whose 'u' is lower-case in JSON" in {
+    Redaction.redact(u("~26Bearer zqxjv")) shouldBe u(s"~26$R")
+    Redaction.redact(u("x~26Basic zqxjv")) shouldBe u(s"x~26$R")
+    Redaction.redact("\\U0026Bearer zqxjv") shouldBe "\\U0026Bearer zqxjv"
+    Redaction.redact("\\U0026Bearer password=zqxjv") shouldBe s"\\U0026Bearer password=$R"
+  }
 }
