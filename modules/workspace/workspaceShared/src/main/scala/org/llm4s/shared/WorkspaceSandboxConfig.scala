@@ -44,6 +44,11 @@ object WorkspaceSandboxConfig {
   /**
    * Read-only command allowlist: safe, non-destructive commands suitable for
    * inspection and navigation. This is the default for new sandbox configs.
+   *
+   * The list names programs; the runner also refuses the options through which some of them would write, delete
+   * or run another program (`find -exec`, `git -c`, `sort -o`, a second `uniq` operand, git subcommands other than
+   * reads), path arguments that lead outside the workspace, and environment variables other than locale ones.
+   * See `docs/reference/workspace-sandbox.md#command-policy`.
    */
   val ReadOnlyCommands: Set[String] = Set(
     // POSIX / common Unix

@@ -3,7 +3,8 @@ package org.llm4s.knowledgegraph.query
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
-import org.llm4s.types.Result
+import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.BoundedJson
 
 import scala.util.Try
 
@@ -159,14 +160,16 @@ class NativeQueryGenerator(llmClient: LLMClient) {
       .stripSuffix("```")
       .trim
 
-    Try {
-      val json        = ujson.read(cleaned)
-      val queryString = json("query").str
-      val explanation = json.obj.get("explanation").map(_.str).getOrElse("")
-      NativeQuery(language = language, queryString = queryString, explanation = explanation)
-    }.fold(
-      e => Left(ProcessingError("native_query_parse", s"Failed to parse native query response: ${e.getMessage}")),
-      Right(_)
-    )
+    // The reply is model output: a document nested more than 512 levels deep is refused before it
+    // is parsed, since a value that deep overflows the stack of whatever renders it (#1562)
+    val parsed = for {
+      json <- BoundedJson.read(cleaned)
+      query <- Try {
+        val queryString = json("query").str
+        val explanation = json.obj.get("explanation").map(_.str).getOrElse("")
+        NativeQuery(language = language, queryString = queryString, explanation = explanation)
+      }.toResult
+    } yield query
+    parsed.left.map(e => ProcessingError("native_query_parse", s"Failed to parse native query response: ${e.message}"))
   }
 }

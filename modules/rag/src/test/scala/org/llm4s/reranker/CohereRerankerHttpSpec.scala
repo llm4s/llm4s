@@ -9,6 +9,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
+import org.llm4s.testutil.EchoedCredentials
 
 /** `CohereReranker` against a local server: the request it sends and every way the reply can go. */
 class CohereRerankerHttpSpec extends AnyFlatSpec with Matchers {
@@ -92,6 +93,21 @@ class CohereRerankerHttpSpec extends AnyFlatSpec with Matchers {
     withServer("/v1/rerank")(holdOpen) { baseUrl =>
       val reranker = CohereReranker(apiKey = "k", baseUrl = baseUrl)
       ProviderModuleChecks.assertCallCancelsWhenInterrupted("rerank")(reranker.rerank(request))
+    }
+  }
+
+  "CohereReranker" should "redact credentials echoed in an error body before truncating it, in its error and its log (#1674)" in {
+    Seq(EchoedCredentials.Text, EchoedCredentials.JsonError).foreach { reply =>
+      withServer("/v1/rerank")(ex => sendJsonResponse(ex, 500, reply)) { baseUrl =>
+        val (result, lines) = EchoedCredentials.logged(CohereReranker(apiKey = "k", baseUrl = baseUrl).rerank(request))
+        val error           = rerankError(result)
+        error.message should include("[REDACTED]")
+        EchoedCredentials.leaked(error.message) shouldBe empty
+        val errorLines = lines.filter(_.contains("[CohereReranker] HTTP error"))
+        errorLines should not be empty
+        errorLines.foreach(_ should include("[REDACTED]"))
+        lines.flatMap(EchoedCredentials.leaked) shouldBe empty
+      }
     }
   }
 }

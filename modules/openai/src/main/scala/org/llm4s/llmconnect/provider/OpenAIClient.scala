@@ -6,7 +6,7 @@ import com.openai.azure.credential.AzureApiKeyCredential
 import com.openai.azure.{ AzureOpenAIServiceVersion, AzureUrlPathMode }
 import com.openai.client.okhttp.OpenAIOkHttpClient
 import com.openai.client.{ OpenAIClient => SdkClient }
-import com.openai.core.{ JsonField, ObjectMappers }
+import com.openai.core.{ JsonField, ObjectMappers, RequestOptions }
 import com.openai.core.http.StreamResponse
 import com.openai.errors.{ OpenAIIoException, OpenAIServiceException }
 import com.openai.models.chat.completions.{
@@ -28,7 +28,7 @@ import org.llm4s.error.LLMError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig, ProviderTimeouts }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
@@ -37,6 +37,7 @@ import org.llm4s.model.{ ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
+import org.llm4s.util.BoundedJson
 import org.slf4j.{ Logger, LoggerFactory }
 
 import java.time.Instant
@@ -343,7 +344,7 @@ class OpenAIClient private[provider] (
   }
 
   /**
-   * The tool-call deltas in one streamed chunk, each paired with its raw argument fragment.
+   * The tool-call deltas in one streamed chunk.
    *
    * A streamed tool call is split across deltas: the first carries its `id`, `name` and the
    * start of its arguments; each continuation carries only its `index` and the next fragment,
@@ -351,11 +352,16 @@ class OpenAIClient private[provider] (
    * [[OpenAICompatibleClient.StreamToolCalls]], so every chunk names its call. (On the Azure
    * SDK they were keyed by `id`, which a continuation does not carry, and their arguments were
    * lost.)
+   *
+   * Each call's arguments are its fragment verbatim, as a string (an empty fragment is the
+   * empty-object sentinel), for the accumulator and `onChunk` alike: fragments are concatenated
+   * to rebuild the arguments, and one that is itself valid JSON, such as `":"` or `"Paris"`,
+   * would lose its quotes if parsed.
    */
   private def streamingToolCalls(
     delta: ChatCompletionChunk.Choice.Delta,
     state: StreamToolCalls
-  ): Seq[(ToolCall, String)] =
+  ): Seq[ToolCall] =
     known(delta._toolCalls()).map(_.asScala.toSeq).getOrElse(Seq.empty).zipWithIndex.map { (call, position) =>
       val function = known(call._function())
       val raw      = function.flatMap(f => known(f._arguments())).getOrElse("")
@@ -364,37 +370,30 @@ class OpenAIClient private[provider] (
         id = known(call._id()).filter(_.nonEmpty),
         name = function.flatMap(f => known(f._name())).filter(_.nonEmpty)
       )
-      (ToolCall(id, name, StreamingToolArgumentParser.parse(raw)), raw)
+      ToolCall(id, name, if (raw.isEmpty) ujson.Obj() else ujson.Str(raw))
     }
 
   /**
    * Emits streaming chunks for content and tool calls: one per tool call, the first also
-   * carrying the text and finish reason.
-   *
-   * The accumulator gets each argument fragment verbatim, because it concatenates them; the
-   * parsed form handed to `onChunk` cannot be concatenated safely (a fragment that is itself
-   * valid JSON, such as `"Paris"`, parses to the bare string and would lose its quotes).
+   * carrying the text and finish reason. The accumulator and `onChunk` get the same chunks.
    */
   private def emitStreamingChunks(
     chunkId: String,
     contentOpt: Option[String],
-    toolCalls: Seq[(ToolCall, String)],
+    toolCalls: Seq[ToolCall],
     finishReason: Option[String],
     accumulator: StreamingAccumulator,
     onChunk: StreamedChunk => Unit
   ): Unit = {
-    def emit(chunk: StreamedChunk, raw: String): Unit = {
-      accumulator.addChunk(chunk.withToolCall(chunk.toolCall.map(_.copy(arguments = ujson.Str(raw)))))
+    def emit(chunk: StreamedChunk): Unit = {
+      accumulator.addChunk(chunk)
       onChunk(chunk)
     }
 
-    emit(
-      StreamedChunk(id = chunkId, content = contentOpt, toolCall = toolCalls.headOption.map(_._1), finishReason),
-      toolCalls.headOption.fold("")(_._2)
-    )
-    toolCalls.drop(1).foreach { (tc, raw) =>
-      emit(StreamedChunk(id = chunkId, content = None, toolCall = Some(tc), finishReason = None), raw)
-    }
+    emit(StreamedChunk(id = chunkId, content = contentOpt, toolCall = toolCalls.headOption, finishReason))
+    toolCalls
+      .drop(1)
+      .foreach(tc => emit(StreamedChunk(id = chunkId, content = None, toolCall = Some(tc), finishReason = None)))
   }
 
   /**
@@ -580,9 +579,37 @@ class OpenAIClient private[provider] (
       message = assistantMessage,
       toolCalls = toolCalls.toList,
       usage = usage,
-      estimatedCost = cost
+      estimatedCost = cost,
+      citations = message.map(extractCitations).getOrElse(List.empty)
     )
   }
+
+  /**
+   * The sources the model cited: the `url_citation` annotations of the message, in the order sent
+   * (OpenAI's Chat Completions search models return them with no request option: `gpt-5-search-api`
+   * today, the retired `*-search-preview` models before 2026-07-23). Read as leniently as
+   * the rest of the response: an annotation without a non-empty `url` is dropped (one is never
+   * made up), and an index that is not at least zero and within `Int` is read as absent. If the
+   * SDK cannot parse the `annotations` list at all (an element that is not an annotation object),
+   * it reports the whole field as unknown and no citation is returned, but the answer is. OpenAI
+   * does not return a passage with a citation, so `citedText` stays unset.
+   * Streamed chunks are not read: the SDK's `Delta` has no annotations (#1216).
+   */
+  private def extractCitations(message: ChatCompletionMessage): List[Citation] =
+    known(message._annotations()).map(_.asScala.toList).getOrElse(List.empty).flatMap { annotation =>
+      for {
+        cited <- known(annotation._urlCitation())
+        url   <- known(cited._url()).filter(_.nonEmpty)
+      } yield Citation(
+        url = url,
+        title = known(cited._title()),
+        startIndex = known(cited._startIndex()).flatMap(citationIndex),
+        endIndex = known(cited._endIndex()).flatMap(citationIndex)
+      )
+    }
+
+  private def citationIndex(index: java.lang.Long): Option[Int] =
+    Option(index).map(_.longValue).filter(i => i >= 0 && i <= Int.MaxValue).map(_.toInt)
 
   private def toTokenUsage(u: CompletionUsage): TokenUsage = {
     val promptTokens     = known(u._promptTokens()).fold(0)(_.intValue)
@@ -598,7 +625,9 @@ class OpenAIClient private[provider] (
 
   /**
    * Extracts function tool calls from a response message, parsing each one's arguments once.
-   * A call whose arguments are not valid JSON is dropped.
+   * A call whose arguments are not valid JSON is dropped, as is one whose arguments are nested
+   * more than 512 levels deep: they are model output, and a value that deep overflows the stack
+   * of whatever renders it next (#1562).
    */
   private def extractToolCalls(message: ChatCompletionMessage): Seq[ToolCall] =
     known(message._toolCalls())
@@ -608,7 +637,7 @@ class OpenAIClient private[provider] (
       .map(_.asFunction())
       .flatMap { ftc =>
         val function = known(ftc._function())
-        function.flatMap(f => known(f._arguments())).flatMap(raw => Try(ujson.read(raw)).toOption).map { args =>
+        function.flatMap(f => known(f._arguments())).flatMap(raw => BoundedJson.read(raw).toOption).map { args =>
           ToolCall(
             id = known(ftc._id()).getOrElse(""),
             name = function.flatMap(f => known(f._name())).getOrElse(""),
@@ -787,16 +816,38 @@ object OpenAIClient {
 
 private[provider] object OpenAIClientTransport {
 
-  /** A transport over an `openai-java` client, closing it with the transport. */
-  def sdk(client: SdkClient): OpenAIClientTransport =
+  /**
+   * The SDK options carrying `timeout`, or none when the section sets no value, in which case the
+   * SDK's own default applies, as before the `timeouts` block existed.
+   *
+   * The timeout goes on each call rather than on the SDK client, because the client's timeout is one
+   * value for every call and covers a streamed response in full: a short `request` timeout set there
+   * would also cut every stream, and `request` and `stream` are separate settings.
+   */
+  private[provider] def requestOptions(
+    timeout: Option[scala.concurrent.duration.FiniteDuration]
+  ): Option[RequestOptions] =
+    timeout.map(t => RequestOptions.builder().timeout(java.time.Duration.ofNanos(t.toNanos)).build())
+
+  /**
+   * A transport over an `openai-java` client, closing it with the transport.
+   *
+   * @param timeouts the section's `timeouts`: `request` bounds a completion, `stream` a streamed one
+   */
+  def sdk(client: SdkClient, timeouts: ProviderTimeouts = ProviderTimeouts.default): OpenAIClientTransport =
     new OpenAIClientTransport {
+      private val requestOpts = requestOptions(timeouts.request)
+      private val streamOpts  = requestOptions(timeouts.stream)
+
       override def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion =
-        client.chat().completions().create(params)
+        requestOpts.fold(client.chat().completions().create(params))(o => client.chat().completions().create(params, o))
 
       override def createChatCompletionStream(
         params: ChatCompletionCreateParams
       ): StreamResponse[ChatCompletionChunk] =
-        client.chat().completions().createStreaming(params)
+        streamOpts.fold(client.chat().completions().createStreaming(params))(o =>
+          client.chat().completions().createStreaming(params, o)
+        )
 
       override def close(): Unit = client.close()
     }
@@ -812,7 +863,8 @@ private[provider] object OpenAIClientTransport {
         .apiKey(config.apiKey)
         .baseUrl(config.baseUrl)
         .organization(config.organization.orNull)
-        .build()
+        .build(),
+      config.timeouts
     )
 
   /**
@@ -837,7 +889,7 @@ private[provider] object OpenAIClientTransport {
       .azureUrlPathMode(pathMode)
     if (pathMode == AzureUrlPathMode.LEGACY || config.apiVersion != AzureConfig.DEFAULT_API_VERSION)
       builder.azureServiceVersion(azureServiceVersion(config.apiVersion))
-    sdk(builder.build())
+    sdk(builder.build(), config.timeouts)
   }
 
   private[provider] def azureUrlPathMode(endpoint: String): AzureUrlPathMode =

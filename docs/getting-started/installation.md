@@ -204,7 +204,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-rag" % llm4sVersion
 Brings `llm4s-knowledgegraph` with it, along with Tika, POI, PDFBox, jsoup and the AWS S3
 client — the document-extraction and loader dependencies that `llm4s-core` no longer carries.
 Package names are unchanged, so existing `org.llm4s.rag.*` imports keep working; see the
-[migration note](../reference/migration.md#slice-1-llm4s-rag-and-llm4s-knowledgegraph).
+[migration note](../reference/migration#slice-1-llm4s-rag-and-llm4s-knowledgegraph).
 
 ### For agent memory
 
@@ -226,7 +226,7 @@ stores; it adds sqlite-jdbc to your classpath and nothing else. `PostgresMemoryS
 `llm4s-memory-postgres`, which brings HikariCP and the Postgres JDBC driver — the two
 dependencies `llm4s-core` no longer carries. Package names are unchanged, so existing
 `org.llm4s.agent.memory.*` imports keep working; see the
-[migration note](../reference/migration.md#slice-2-llm4s-memory-and-llm4s-memory-postgres).
+[migration note](../reference/migration#slice-2-llm4s-memory-and-llm4s-memory-postgres).
 
 ### For MCP (Model Context Protocol)
 
@@ -243,7 +243,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-mcp" % llm4sVersion
 Carries the MCP client, server, transports (stdio, HTTP, SSE) and `MCPToolRegistry`. It adds no
 third-party dependency of its own. Package names are unchanged, so existing `org.llm4s.mcp.*`
 imports keep working; see the
-[migration note](../reference/migration.md#slice-3-llm4s-mcp).
+[migration note](../reference/migration#slice-3-llm4s-mcp).
 
 ### For speech (STT / TTS)
 
@@ -261,7 +261,7 @@ Carries speech-to-text (Vosk for offline recognition, Whisper), text-to-speech (
 and the audio IO, conversion and validation helpers. **This is the module that brings Vosk**,
 a 25 MB dependency that used to sit on every `llm4s-core` user's classpath — which is much of
 the point of the split. Package names are unchanged; see the
-[migration note](../reference/migration.md#slice-3-llm4s-speech).
+[migration note](../reference/migration#slice-3-llm4s-speech).
 
 ### For Ollama (local models)
 
@@ -281,7 +281,7 @@ declares itself to the provider registry, so `provider = "ollama"` and
 `EMBEDDING_MODEL=ollama/<model>` resolve with no code change. Without it, both fail with an error
 saying `ollama` is not registered and naming the providers that are. Package names are
 unchanged; see the
-[migration note](../reference/migration.md#slice-5-llm4s-ollama).
+[migration note](../reference/migration#slice-5-llm4s-ollama).
 
 ### For Gemini and Vertex AI
 
@@ -302,7 +302,7 @@ there is: the module declares itself to the provider registry, so `provider = "g
 `"google"`) and `provider = "vertexai"` (or `"vertex"`) resolve with no code change. Without it,
 they fail with an error saying the provider is not registered and naming the providers that
 are. Package names are unchanged; see the
-[migration note](../reference/migration.md#slice-5-llm4s-gemini).
+[migration note](../reference/migration#slice-5-llm4s-gemini).
 
 ### For Anthropic
 
@@ -322,7 +322,7 @@ brings the Anthropic Java SDK** (`com.anthropic:anthropic-java`), which used to 
 itself to the provider registry, so `provider = "anthropic"` resolves with no code change.
 Without it, it fails with an error saying the provider is not registered and naming the
 providers that are. Package names are unchanged; see the
-[migration note](../reference/migration.md#slice-5-llm4s-anthropic).
+[migration note](../reference/migration#slice-5-llm4s-anthropic).
 
 ### For OpenAI, Azure OpenAI and Requesty
 
@@ -351,7 +351,7 @@ OpenRouter, DeepSeek and Z.ai speak the OpenAI wire format with no SDK, and are 
 `llm4s-openai-compatible` (below), which this module depends on for `OpenAIConfig`.
 `llm4s-rag`'s `RAGConfig.default` embeds with `openai`, so a RAG pipeline built from the default
 needs this module too, or `.withEmbeddings(...)` naming a provider you do ship. Package names are
-unchanged; see the [migration note](../reference/migration.md#slice-5-llm4s-openai).
+unchanged; see the [migration note](../reference/migration#slice-5-llm4s-openai).
 
 ### For DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint
 
@@ -376,8 +376,8 @@ gateway - configured with a `baseUrl` and a `model`, and no code. See
 configuration recipe per provider. The module
 brings no dependency beyond `llm4s-core`, and adding it registers the providers. Package names
 are unchanged; see the
-[migration note](../reference/migration.md#slice-5-llm4s-openai-compatible), and for Mistral and
-Cohere [this one](../reference/migration.md#slice-5-mistral-cohere-and-voyage-leave-core-core-ships-no-provider).
+[migration note](../reference/migration#slice-5-llm4s-openai-compatible), and for Mistral and
+Cohere [this one](../reference/migration#slice-5-mistral-cohere-and-voyage-leave-core-core-ships-no-provider).
 
 ### For AWS Bedrock
 
@@ -503,7 +503,7 @@ dependency of its own, and brings `llm4s-media` with it.
 
 Package names are unchanged, so existing `org.llm4s.imagegeneration.*` and
 `org.llm4s.imageprocessing.*` imports keep working — but note that image *formats* did change,
-in `llm4s-media`. See the [migration note](../reference/migration.md#slice-3-llm4s-image).
+in `llm4s-media`. See the [migration note](../reference/migration#slice-3-llm4s-image).
 
 ### For media types (`MediaType`, `MediaCategory`)
 
@@ -524,9 +524,9 @@ lives in `llm4s-rag`.
 You will usually get it transitively, from `llm4s-core` or `llm4s-rag`; declare it directly
 only if you name these types in your own signatures. It replaces three overlapping image-format
 types that used to ship in `llm4s-core`, which is a source break — see the
-[migration note](../reference/migration.md#slice-3-llm4s-media).
+[migration note](../reference/migration#slice-3-llm4s-media).
 
-### For agents (`Agent`, guardrails, handoffs, orchestration)
+### For agents (`Agent`, guardrails, handoffs, graphs)
 
 {: .note }
 > Not yet published. `llm4s-agent` exists in the build as of
@@ -538,11 +538,11 @@ libraryDependencies += "org.llm4s" %% "llm4s-agent" % llm4sVersion // same versi
 ```
 
 The agent runtime - `org.llm4s.agent` (`Agent`, `AgentResult`, guardrails, handoffs,
-orchestration) and the console assistant, `org.llm4s.assistant` - lives here.
+the graph runtime) and the console assistant, `org.llm4s.assistant` - lives here.
 Agent memory is the separate `llm4s-memory`; the ready-made tools are `llm4s-agent-tools`.
 `llm4s-core` keeps what the agent is built on: `LLMClient`, the tool API and the tracing
 contract. Package names are unchanged. See the
-[migration note](../reference/migration.md#slice-7-llm4s-agent---the-agent-runtime-leaves-core).
+[migration note](../reference/migration#slice-7-llm4s-agent---the-agent-runtime-leaves-core).
 
 ### For built-in tools (web search, HTTP, filesystem, shell)
 
@@ -559,7 +559,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-agent-tools" % llm4sVersion // same
 JSON, file access, HTTP, shell, and the Brave, DuckDuckGo and Exa search tools - live here, with
 `ToolsConfigLoader` and the `llm4s.tools` settings the search tools read. `llm4s-core` keeps the
 tool API they implement (`ToolFunction`, `ToolRegistry`). Package names are unchanged. See the
-[migration note](../reference/migration.md#slice-7-llm4s-agent-tools---the-built-in-tools-leave-core).
+[migration note](../reference/migration#slice-7-llm4s-agent-tools---the-built-in-tools-leave-core).
 
 ### For tracing and metrics (Langfuse, OpenTelemetry, in-process trace store, Prometheus)
 
@@ -587,8 +587,8 @@ OpenTelemetry SDK. Adding the dependency is all the registration there is, and t
 `PrometheusMetrics`, the `/metrics` endpoint and `MetricsConfigLoader`, with the Prometheus client
 and HTTP server; core keeps only the `MetricsCollector` interface every client accepts. Package
 names are unchanged. See the migration notes for
-[Langfuse and the collector](../reference/migration.md#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core)
-and for [Prometheus](../reference/migration.md#slice-6-llm4s-observability-prometheus---prometheus-leaves-core).
+[Langfuse and the collector](../reference/migration#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core)
+and for [Prometheus](../reference/migration#slice-6-llm4s-observability-prometheus---prometheus-leaves-core).
 
 `llm4s-observability-micrometer` is the Micrometer counterpart: a `MetricsCollector` that records into a `MeterRegistry`
 you already have, with the same series names as the Prometheus module. It depends on `llm4s-core` and `micrometer-core`.
@@ -616,7 +616,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-provider-testkit" % llm4sVersion % 
 ```
 
 The checks a provider module's own `Llm4s<Name>ModuleSpec` makes: discovery, sole ownership of its ids,
-explicit registration and the config-to-client round trip. See
+explicit registration and the config-to-client round trip. It requires JDK 21: its interruption checks
+and its local test server run on virtual threads. See
 [Writing a provider](../guide/writing-a-provider#testing).
 
 ### For Workspace (Containerized Execution)
