@@ -1,7 +1,7 @@
 package org.llm4s.agent
 
 import org.llm4s.agent.AgentFixture._
-import org.llm4s.agent.graph.{ GraphError, RunContext }
+import org.llm4s.agent.graph.{ Checkpoint, GraphError, GraphRuntime, RunContext }
 import org.llm4s.agent.graph.middleware.{
   AgentMiddleware,
   GuardrailBlocked,
@@ -138,6 +138,29 @@ class AgentGuardrailSpec extends AnyFlatSpec with Matchers {
     followUp.threadId shouldBe blocked.threadId
     client.sent(2) shouldBe Vector(UserMessage("Hello"), AssistantMessage("first"), UserMessage("Try again"))
     Message.validateConversation(followUp.messages.toList) shouldBe Right(())
+  }
+
+  it should "leave nothing of the blocked turn in the thread's checkpoint history (design 9, 4.17)" in {
+    val runtime = GraphRuntime.inMemory()
+    val client  = answers("first", "leaks the secret", "a safe answer")
+    val agent = built(
+      Agent
+        .builder("assistant", client)
+        .withMiddleware(new GuardrailMiddleware(Seq(new LengthCheck(min = 3, max = 100)), Seq(secretFree)))
+        .withRuntime(runtime)
+    )
+    val first   = agent.run("Hello").value
+    val blocked = agent.continueConversation(first, "Tell me").value
+    agent.continueConversation(blocked, "No").value.status shouldBe a[AgentStatus.Blocked]
+    agent.continueConversation(blocked, "Try again").value.answer shouldBe Some("a safe answer")
+
+    val history = runtime.history(first.threadId, limit = 1000).fold(e => fail(e.message), identity)
+    val stored  = history.map(c => Checkpoint.toJson(c).toString)
+    stored.exists(_.contains("leaks the secret")) shouldBe false
+    stored.exists(_.contains("Tell me")) shouldBe false
+    stored.exists(_.contains("\"No\"")) shouldBe false
+    stored.exists(_.contains("a safe answer")) shouldBe true
+    history.map(_.id).distinct shouldBe history.map(_.id)
   }
 
   it should "apply after a successful tool round, having called the model twice" in {
