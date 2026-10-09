@@ -2009,6 +2009,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with no closing quote, as in a payload cut off in the middle of it, is redacted to the end of the input, as other
   credential values already were. The `Authorization: ...` header line, an empty value and JSON inside a string are
   redacted as before. No signature changes.
+- **Redaction keeps the escape on a quote after a redacted `key=value`, so nested JSON still parses**
+  ([#1677](https://github.com/llm4s/llm4s/issues/1677)): the `key=value` pass of `Redaction.redact` and
+  `redactForLogging`, and so of the exchange-log sink, took the backslash of an escaped closing quote as part of the
+  value. Inside JSON that sits in a string, `{"c": "{\"note\": \"token=abc\", \"x\": \"y\"}"}` became
+  `{"c": "{\"note\": \"token=[REDACTED]", \"x\": ...`: the bare `"` ended the outer string, the document no longer
+  parsed, and the passes after it paired its quotes the wrong way round. Of the backslashes before the quote a value
+  stops at, the pass now keeps those that escape it, at any depth of nesting (one for `\"`, three for `\\\"`), and
+  replaces the rest with the value; the output is `{"c": "{\"note\": \"token=[REDACTED]\", \"x\": \"y\"}"}`. A value
+  in plain JSON, and one ending in backslashes before anything but a quote, is redacted as before, and no text other
+  than those backslashes is kept that was replaced before.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the
   exchange-log sink, read a query parameter as `[?&]`, a key of any characters up to the next `=`, and a value up

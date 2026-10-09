@@ -443,8 +443,42 @@ private[llm4s] object Redaction {
       )
     val escapedNumbers = redactPairs(EscapedJsonNumberField, allQuoted, placeholder, wrap = "\\\"")
     val numbers        = redactPairs(JsonNumberField, escapedNumbers, placeholder, wrap = "\"")
-    Seq(EqualsPair, HeaderLine).foldLeft(numbers)((acc, pattern) => redactPairs(pattern, acc, placeholder))
+    redactPairs(HeaderLine, redactEqualsPairs(numbers, placeholder), placeholder)
   }
+
+  /**
+   * Replaces the value of every `key=value` whose key is sensitive, as `redactPairs` does, but keeps the backslashes
+   * that escape the quote the value stops at. Inside JSON that sits in a string, `\"note\": \"token=abc\"`, the value
+   * runs up to the `"` of the escaped closing quote and so holds its `\`: written over with the placeholder, the `"`
+   * left bare ended the enclosing string there, the document no longer parsed, and the passes after this one paired
+   * its quotes the wrong way round (#1677).
+   *
+   * Of a run of `n` backslashes before the quote, `2^t - 1` are kept, where `t` is the number of trailing one bits
+   * of `n`. A quote escaped `d` strings deep follows `2^d - 1` backslashes, and each backslash of the value before it
+   * adds `2^(d+1)` more, so what is kept is the escape and what is replaced is the value's: the quote is escaped at
+   * every depth as it was, and the document parses at every depth as it did. Only backslashes are kept, never a
+   * character of the value that is not one. A run before anything but a quote, and an even run, which escapes
+   * nothing, are replaced whole, as they were.
+   */
+  private def redactEqualsPairs(input: String, placeholder: String): String =
+    EqualsPair.replaceAllIn(
+      input,
+      m =>
+        Regex.quoteReplacement(
+          if (isSensitiveKey(m.group(2))) m.group(1) + placeholder + quoteEscape(input, m.start(3), m.end(3))
+          else m.matched
+        )
+    )
+
+  /** The backslashes at the end of `input(from until to)` that escape a quote right after it, or "" if none do. */
+  private def quoteEscape(input: String, from: Int, to: Int): String =
+    if (to >= input.length || (input.charAt(to) != '"' && input.charAt(to) != '\'')) ""
+    else {
+      var i = to
+      while (i > from && input.charAt(i - 1) == '\\') i -= 1
+      val slashes = to - i
+      "\\" * (slashes & ~(slashes + 1))
+    }
 
   /**
    * Every leaf of a container under a sensitive key that the passes before left: a string in the other quote than
