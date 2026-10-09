@@ -209,7 +209,7 @@ object LinearTime {
     }
 
     // a sample of the small input under the target, unless a cap stops the doubling
-    val target = targetFor(clock).toNanos
+    val target                                          = targetFor(clock).toNanos
     def short(sampled: (Long, FiniteDuration, Boolean)) = sampled._1 < target && sampled._2 < hangGuard
 
     // calibrate: double the repeats until a sample of the small input costs the target on this clock

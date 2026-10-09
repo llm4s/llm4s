@@ -23,7 +23,7 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
    * A clock that only the operation advances, by the cost it charges, read in whole steps of `tick` from
    * `start`: a measurement on it is exact and repeatable.
    */
-  private final class SimulatedClock(tick: FiniteDuration, start: FiniteDuration) extends LinearTime.Clock {
+  final private class SimulatedClock(tick: FiniteDuration, start: FiniteDuration) extends LinearTime.Clock {
     private var elapsed                           = start.toNanos
     val name                                      = s"simulated, ${tick.toMicros} us ticks"
     override lazy val granularity: FiniteDuration = tick
@@ -94,8 +94,8 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
     // costs 7x - linear, with more overhead than 4x. Calibrated at five ticks, as before, this stopped at 2 runs a
     // sample, which then read 3 ticks against 27 - 46.88 ms vs 421.88 ms, ratio 9.0 - and failed. Now a warm
     // sample under the eight-tick target is measured again at twice the repeats, and passes.
-    val clock = new SimulatedClock(SimulatedTick, start = Duration.Zero)
-    val op    = cooling(clock, cold = 40.millis, warm = 30.millis, coldRuns = 6)(largeRatio = 7.0)
+    val clock   = new SimulatedClock(SimulatedTick, start = Duration.Zero)
+    val op      = cooling(clock, cold = 40.millis, warm = 30.millis, coldRuns = 6)(largeRatio = 7.0)
     val scaling = LinearTime.assertLinearOn(clock, "cheaper after calibration", 1L, 4L)(op)
     withClue(scaling.toString) {
       scaling.remeasures should be >= 1
