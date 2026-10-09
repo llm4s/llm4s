@@ -46,6 +46,12 @@ object Versions {
   // ZIO
   val zio = "2.1.16"
 
+  // Other JSON libraries, test-only: `docs/guide/json-libraries.md` shows how to use them with llm4s and
+  // `JsonLibrariesGuideSpec` (llm4s-samples, unpublished) runs those recipes. No published module depends on them.
+  val circe    = "0.14.17"
+  val playJson = "3.0.6"
+  val zioJson  = "1.0.0" // 1.1.0 is built with Scala 3.9: its stdlib TASTy is unreadable to the 3.7.1 compiler
+
   // AWS SDK
   val awsSdk        = "2.46.14"
   val opentelemetry = "1.63.0"
@@ -98,6 +104,13 @@ object Deps {
   // cats-effect + fs2
   val catsEffect = "org.typelevel" %% "cats-effect" % Versions.catsEffect
   val fs2        = "co.fs2"        %% "fs2-core"    % Versions.fs2
+
+  // Other JSON libraries (test-only; see Versions). `ujson-circe` is the uPickle project's own circe bridge, built for
+  // Scala 3; there is no Scala 3 build of `ujson-play`, so play-json and zio-json are reached through a string.
+  val circeCore  = "io.circe"          %% "circe-core"  % Versions.circe
+  val ujsonCirce = "com.lihaoyi"       %% "ujson-circe" % Versions.ujson
+  val playJson   = "org.playframework" %% "play-json"   % Versions.playJson
+  val zioJson    = "dev.zio"           %% "zio-json"    % Versions.zioJson
 
   // ZIO
   val zio        = "dev.zio" %% "zio"          % Versions.zio

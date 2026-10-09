@@ -183,6 +183,28 @@ See the [streaming guide](../guide/agents/streaming.md).
 
 ---
 
+## Provider and embedding configs gain `timeouts` (#712)
+
+The provider config case classes (`OpenAIConfig`, `AzureConfig`, `AnthropicConfig`, `GeminiConfig`,
+`VertexAIConfig`, `OllamaConfig`, `DeepSeekConfig`, `ZaiConfig`, `MistralConfig`, `CohereConfig`,
+`OpenAICompatibleConfig`, `BedrockConfig`, `WatsonXConfig`) and `EmbeddingProviderConfig` take a trailing
+`timeouts: ProviderTimeouts`, defaulting to `ProviderTimeouts.default` (each client's own defaults). There is
+no overload with the old arity.
+
+| Caller | Change |
+|---|---|
+| Scala source, `new X(...)` or `X(...)` | none - the default fills `timeouts`; recompile |
+| Scala binaries compiled against the old constructor | recompile (the old signature is gone: `NoSuchMethodError`) |
+| Kotlin | pass `ProviderTimeouts.default()` last, e.g. `EmbeddingProviderConfig(baseUrl, model, apiKey, ProviderTimeouts.default())` |
+| Java | pass the default timeouts last; `default` is a Java keyword, so build them with `ProviderTimeouts.apply(scala.Option.empty(), scala.Option.empty())` |
+| Pattern match `case X(a, b, c) =>` | add the field, or match `X(a, b, c, _)` |
+
+To set timeouts from code, use `withTimeouts(ProviderTimeouts(...))`; from config, the section's
+`timeouts { request = 3m, stream = 15m }` block (see
+[Timeouts](../getting-started/configuration#timeouts)).
+
+---
+
 ## Towards v1.0
 
 > **Note:** v1.0 has not shipped yet. This section will be completed when the 1.0 release is cut.

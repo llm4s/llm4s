@@ -512,31 +512,96 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     mockClient.callCount.get() shouldBe 2 // Retried once
   }
 
-  test("Deadline enforcement stops retries when time limit exceeded") {
-    val mockClient = new MockClient(() => {
-      Thread.sleep(100) // Simulate slow operation
+  // The deadline tests drive time themselves. The clock is a fake that the "slow" operation and the injected
+  // sleeper advance, so the deadline arithmetic is exercised exactly and nothing depends on how fast, or how
+  // contended, the machine running the suite is.
+  final private class FakeTime(startMillis: Long = 1000000L) {
+    @volatile var nowMillis: Long         = startMillis
+    val begin: Long                       = startMillis
+    def clock: () => Instant              = () => Instant.ofEpochMilli(nowMillis)
+    def advance(by: FiniteDuration): Unit = nowMillis += by.toMillis
+    def sinceStart: Long                  = nowMillis - begin
+  }
+
+  // A client whose every attempt takes `attemptTakes` of fake time and fails with a retryable error, and a reliable
+  // client over it whose waits advance the fake clock by the delay plus `waitOvershoot`, recording each delay.
+  final private class DeadlineHarness(
+    deadline: FiniteDuration,
+    attemptTakes: FiniteDuration = 100.millis,
+    waitOvershoot: FiniteDuration = Duration.Zero
+  ) {
+    val time             = new FakeTime()
+    val waits            = scala.collection.mutable.ListBuffer.empty[FiniteDuration]
+    val attemptStartedAt = scala.collection.mutable.ListBuffer.empty[Long]
+    val mockClient: MockClient = new MockClient(() => {
+      attemptStartedAt += time.sinceStart
+      time.advance(attemptTakes)
       Left(TimeoutError("timeout", 1.second, "test"))
     })
-
-    val config = ReliabilityConfig(
+    private val config = ReliabilityConfig(
       retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 10, baseDelay = 50.millis),
       circuitBreaker = CircuitBreakerConfig(failureThreshold = 10, recoveryTimeout = 1.minute, successThreshold = 2),
-      deadline = Some(300.millis)
+      deadline = Some(deadline)
     )
+    val client = new ReliableClient(
+      mockClient,
+      "test",
+      config,
+      None,
+      clock = time.clock,
+      sleep = delay => {
+        waits += delay
+        time.advance(delay + waitOvershoot)
+      }
+    )
+    def run(): Result[Completion] = client.complete(testConversation)
+  }
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+  test("Deadline enforcement stops retries when time limit exceeded") {
+    val h = new DeadlineHarness(deadline = 300.millis)
 
-    val startTime = System.currentTimeMillis()
-    val result    = reliableClient.complete(testConversation)
-    val duration  = System.currentTimeMillis() - startTime
+    val result = h.run()
 
     result match {
       case Left(_: TimeoutError) => succeed
-      case _                     => fail("Expected TimeoutError due to deadline")
+      case other                 => fail(s"Expected TimeoutError due to deadline, got $other")
     }
+    // Attempt 1 runs from 0 to 100ms and its backoff is 50ms, so the wait ends at 150ms. Attempt 2 runs from
+    // 150 to 250ms, and its backoff (100ms) would end at 350ms, past the 300ms deadline, so there is no third.
+    h.mockClient.callCount.get() shouldBe 2
+    h.waits.toList shouldBe List(50.millis)
+    h.attemptStartedAt.toList shouldBe List(0L, 150L)
+  }
 
-    duration should be < 500L // Should stop before trying all 10 attempts (with some tolerance)
-    mockClient.callCount.get() should be < 10
+  test("Deadline enforcement does not wait for a retry that would use up the whole deadline") {
+    // After attempt 1 (0 to 100ms) the 50ms backoff would end exactly at the 150ms deadline: no time is left
+    // for an attempt, so the client gives up at once instead of sleeping first.
+    val h = new DeadlineHarness(deadline = 150.millis)
+
+    val result = h.run()
+
+    result match {
+      case Left(_: TimeoutError) => succeed
+      case other                 => fail(s"Expected TimeoutError due to deadline, got $other")
+    }
+    h.mockClient.callCount.get() shouldBe 1
+    h.waits.toList shouldBe Nil
+  }
+
+  test("Deadline enforcement starts no attempt after the deadline, even when a wait overshoots") {
+    // The 50ms wait really takes 350ms (a descheduled thread, a paused JVM): the deadline has passed when it
+    // ends, so the client must not start another attempt.
+    val h = new DeadlineHarness(deadline = 300.millis, waitOvershoot = 300.millis)
+
+    val result = h.run()
+
+    result match {
+      case Left(_: TimeoutError) => succeed
+      case other                 => fail(s"Expected TimeoutError due to deadline, got $other")
+    }
+    h.mockClient.callCount.get() shouldBe 1
+    h.waits.toList shouldBe List(50.millis)
+    h.time.sinceStart shouldBe 450L // 100ms attempt + 350ms wait: nothing ran after that
   }
 
   test("Circuit breaker is thread-safe under concurrent failures") {

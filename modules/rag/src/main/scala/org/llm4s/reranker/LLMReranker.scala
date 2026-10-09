@@ -4,6 +4,7 @@ import org.llm4s.error.CancelledError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.BoundedJson
 import ujson._
 
 import scala.util.Try
@@ -153,33 +154,38 @@ Rate the relevance of each document to the query. Respond with ONLY a JSON array
     expectedCount: Int,
     startIndex: Int
   ): Result[Seq[(Int, Double)]] =
-    Try {
-      // Extract JSON array from response (handle markdown code blocks)
-      val jsonStr = extractJsonArray(response)
+    // Extract JSON array from response (handle markdown code blocks). The text is the model's: a
+    // document nested more than 512 levels deep is refused before it is parsed (#1562).
+    Try(extractJsonArray(response)).toResult
+      .flatMap(jsonStr => BoundedJson.read(jsonStr))
+      .flatMap { json =>
+        Try {
+          val arr = json.arr
+          val scores = arr.zipWithIndex.map { case (v, idx) =>
+            val score = v match {
+              case Num(n) => math.max(0.0, math.min(1.0, n))
+              case Str(s) => math.max(0.0, math.min(1.0, s.toDouble))
+              case _      => 0.5
+            }
+            (startIndex + idx, score)
+          }.toSeq
 
-      val arr = ujson.read(jsonStr).arr
-      val scores = arr.zipWithIndex.map { case (v, idx) =>
-        val score = v match {
-          case Num(n) => math.max(0.0, math.min(1.0, n))
-          case Str(s) => math.max(0.0, math.min(1.0, s.toDouble))
-          case _      => 0.5
-        }
-        (startIndex + idx, score)
-      }.toSeq
-
-      // Pad with neutral scores if LLM returned fewer than expected
-      if (scores.length < expectedCount) {
-        scores ++ (scores.length until expectedCount).map(i => (startIndex + i, 0.5))
-      } else {
-        scores.take(expectedCount)
+          // Pad with neutral scores if LLM returned fewer than expected
+          if (scores.length < expectedCount) {
+            scores ++ (scores.length until expectedCount).map(i => (startIndex + i, 0.5))
+          } else {
+            scores.take(expectedCount)
+          }
+        }.toResult
       }
-    }.toResult.left.map { e =>
-      RerankError(
-        code = Some("PARSE_ERROR"),
-        message = s"Failed to parse LLM response: ${e.message}",
-        provider = "llm"
-      )
-    }
+      .left
+      .map { e =>
+        RerankError(
+          code = Some("PARSE_ERROR"),
+          message = s"Failed to parse LLM response: ${e.message}",
+          provider = "llm"
+        )
+      }
 
   /**
    * Extract JSON array from potentially markdown-wrapped response.

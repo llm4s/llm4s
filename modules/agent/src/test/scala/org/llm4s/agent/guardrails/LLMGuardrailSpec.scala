@@ -130,7 +130,8 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
     result shouldBe Right("Test content")
   }
 
-  it should "clamp scores above 1.0 to 1.0" in {
+  it should "refuse a score above 1.0 instead of clamping it into range" in {
+    // A clamped 1.5 would read as 1.0 and pass any threshold; see LLMGuardrailScoreParsingSpec for the full rules.
     val mockClient = new MockLLMClient("1.5")
     val guardrail = LLMGuardrail(
       client = mockClient,
@@ -140,12 +141,12 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
     )
 
     val result = guardrail.validate("Test content")
-    result shouldBe Right("Test content")
+    result.isLeft shouldBe true
+    result.swap.toOption.get.formatted should include("Could not parse")
   }
 
-  it should "handle negative scores by stripping non-numeric chars" in {
-    // Note: The current implementation strips non-numeric chars like "-"
-    // So "-0.5" becomes "0.5" which is clamped to valid range
+  it should "refuse a negative score instead of dropping its sign" in {
+    // The sign used to be stripped, so "-0.5" read as 0.5 and passed a threshold of 0.4.
     val mockClient = new MockLLMClient("-0.5")
     val guardrail = LLMGuardrail(
       client = mockClient,
@@ -154,9 +155,9 @@ class LLMGuardrailSpec extends AnyFlatSpec with Matchers {
       guardrailName = "TestGuardrail"
     )
 
-    // "-0.5" parses as "0.5" after stripping "-"
     val result = guardrail.validate("Test content")
-    result shouldBe Right("Test content") // 0.5 >= 0.4
+    result.isLeft shouldBe true
+    result.swap.toOption.get.formatted should include("Could not parse")
   }
 
   it should "fail gracefully when LLM returns unparseable response" in {

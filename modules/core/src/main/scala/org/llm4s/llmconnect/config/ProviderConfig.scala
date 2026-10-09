@@ -62,6 +62,26 @@ trait ProviderConfig {
 
   /** The same provider and credentials, pointed at a different model. */
   def withModel(model: String): ProviderConfig
+
+  /**
+   * How long this provider's HTTP calls may take: the `timeouts` block of its section.
+   *
+   * The default is [[ProviderTimeouts.default]], which leaves every client on its own default, so a
+   * config that predates the block, or a provider supplied by another module that does not read it,
+   * behaves as before. A config that carries the setting overrides this and its client reads it with
+   * [[ProviderTimeouts.requestOr]] / [[ProviderTimeouts.streamOr]].
+   */
+  def timeouts: ProviderTimeouts = ProviderTimeouts.default
+
+  /**
+   * The same config with the given timeouts.
+   *
+   * The loader calls this on every config a descriptor builds, passing the section's `timeouts`
+   * block, so a descriptor does not read the block itself. The default returns `this`: a config that
+   * does not carry timeouts, such as one supplied by another module, ignores them. A config that does
+   * overrides this with its own return type.
+   */
+  def withTimeouts(timeouts: ProviderTimeouts): ProviderConfig = this
 }
 
 object ProviderConfig {
