@@ -99,6 +99,7 @@ map_file_to_project() {
     modules/deploy-service/*)             echo "deployService" ;;
     modules/llm4s-effect/*)               echo "llm4sEffect" ;;
     modules/llm4s-zio/*)                  echo "llm4sZio" ;;
+    modules/llm4s-pekko/*)                echo "llm4sPekko" ;;
     modules/java-api/*)                   echo "javaApi" ;;
     modules/observability-prometheus/*)   echo "observabilityPrometheus" ;;
     modules/knowledgegraph-neo4j/*)       echo "knowledgegraphNeo4j" ;;
@@ -200,6 +201,10 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
+    llm4sPekko)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
     media)
       set_add DOWNSTREAM_COMPILE rag
       set_add DOWNSTREAM_COMPILE image
@@ -243,6 +248,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE llm4sEffect
       set_add DOWNSTREAM_COMPILE llm4sZio
+      set_add DOWNSTREAM_COMPILE llm4sPekko
       set_add DOWNSTREAM_COMPILE springBootStarter
       set_add DOWNSTREAM_COMPILE deployService
       ;;
@@ -406,6 +412,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE javaApi
       set_add DOWNSTREAM_COMPILE llm4sEffect
       set_add DOWNSTREAM_COMPILE llm4sZio
+      set_add DOWNSTREAM_COMPILE llm4sPekko
       set_add DOWNSTREAM_COMPILE springBootStarter
       ;;
     agentTools)

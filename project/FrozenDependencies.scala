@@ -35,7 +35,9 @@ object FrozenDependencies {
     Ban("io.opentelemetry", "tracing backend; belongs to llm4s-observability-otel"),
     Ban("org.java-websocket", "WebSocket transport; belongs to llm4s-mcp"),
     Ban("org.neo4j", "graph database driver; belongs to llm4s-knowledgegraph-neo4j"),
-    Ban("com.azure", "Azure SDK; llm4s-openai reaches Azure through openai-java")
+    Ban("com.azure", "Azure SDK; llm4s-openai reaches Azure through openai-java"),
+    Ban("org.apache.pekko", "streaming runtime; belongs to llm4s-pekko"),
+    Ban("com.typesafe.akka", "Akka is not Apache-2.0 licensed; llm4s-pekko uses Apache Pekko instead")
   )
 
   /** Vendor SDKs: each belongs to exactly one provider module and to no other frozen module. */

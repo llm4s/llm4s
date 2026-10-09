@@ -63,6 +63,7 @@ Comprehensive guides for LLM4S features.
 
 - **[cats-effect](cats-effect)** - `LLMClientIO` and `AgentIO` for cats-effect `IO` and fs2 streaming
 - **[ZIO](zio)** - `LLMClientZ` and `AgentZ` for ZIO 2 and ZIO Streams
+- **[Apache Pekko](pekko)** - `LLMClientPekko` and `AgentPekko` for Pekko Streams
 
 ### Java
 
