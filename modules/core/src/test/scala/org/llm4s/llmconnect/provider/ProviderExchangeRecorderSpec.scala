@@ -1,11 +1,18 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ ProcessingError, ServiceError }
-import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeOutcome, ProviderExchangeSink }
+import org.llm4s.llmconnect.{
+  JsonlProviderExchangeSink,
+  ProviderExchange,
+  ProviderExchangeLogging,
+  ProviderExchangeOutcome,
+  ProviderExchangeSink
+}
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.nio.file.Files
 import java.time.{ Duration => JDuration, Instant }
 import java.util.UUID
 import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, Executors, TimeUnit }
@@ -270,6 +277,56 @@ class ProviderExchangeRecorderSpec extends AnyFlatSpec with Matchers {
     ProviderExchangeRecorder.record(logging, "p", None, Instant.now(), "two", None, success)
 
     kept.asScala.toList.map(_.requestBody) shouldBe List("two")
+  }
+
+  it should "swallow the I/O failure of the built-in JSONL sink when its file cannot be written" in {
+    // the path is an existing directory, so the sink's append throws an IOException
+    val unwritable = Files.createTempDirectory("provider-exchange-unwritable")
+    try {
+      val outcome = Try(
+        ProviderExchangeRecorder.record(
+          ProviderExchangeLogging.enabled(JsonlProviderExchangeSink(unwritable)),
+          "openai",
+          Some("gpt-4o"),
+          Instant.now(),
+          "req",
+          Some("resp"),
+          success
+        )
+      )
+
+      outcome.isSuccess shouldBe true
+      Files.isDirectory(unwritable) shouldBe true
+    } finally Files.deleteIfExists(unwritable)
+  }
+
+  // ---- end to end with the built-in sink
+
+  it should "leave no credential in the request body, response body or error message the JSONL sink writes" in {
+    val file = Files.createTempFile("provider-exchange-recorder", ".jsonl")
+    try {
+      ProviderExchangeRecorder.record(
+        ProviderExchangeLogging.enabled(JsonlProviderExchangeSink(file)),
+        "openai",
+        Some("gpt-4o"),
+        Instant.now(),
+        """{"api_key":"sk-request-secret-123","prompt":"hello"}""",
+        Some("""{"token":"response-secret-456"}"""),
+        Left(ServiceError(401, "openai", "Authorization: Bearer error-secret-789"))
+      )
+
+      val lines = Files.readAllLines(file).asScala.toList
+      lines.size shouldBe 1
+      val row = ujson.read(lines.head)
+      row("outcome").str shouldBe "Error"
+      row("request_body").str should include("[REDACTED]")
+      row("request_body").str should include("hello")
+      row("response_body").str should include("[REDACTED]")
+      row("error_message").str should include("[REDACTED]")
+      List("sk-request-secret-123", "response-secret-456", "error-secret-789").foreach { secret =>
+        withClue(s"secret $secret: ")((lines.head should not).include(secret))
+      }
+    } finally Files.deleteIfExists(file)
   }
 
   // ---- ordering and concurrency
