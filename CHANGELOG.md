@@ -2051,6 +2051,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replaces the rest with the value; the output is `{"c": "{\"note\": \"token=[REDACTED]\", \"x\": \"y\"}"}`. A value
   in plain JSON, and one ending in backslashes before anything but a quote, is redacted as before, and no text other
   than those backslashes is kept that was replaced before.
+- **Redaction covers Python-repr credentials: single-quoted values with `:` or `=`, numbers, and double-quoted
+  values under single-quoted keys** ([#1675](https://github.com/llm4s/llm4s/issues/1675),
+  [#1687](https://github.com/llm4s/llm4s/issues/1687)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, left three shapes of a credential in a Python dict (or a JavaScript literal) readable that the
+  double-quoted forms redact. A single-quoted leaf holding a `:` or `=` under a single-quoted credential key was taken
+  for a field, not a value, so `{'credentials': {'pass': 'SECRETX:SECRETY'}}` became
+  `{'credentials': {'pass': 'SECRETX:'[REDACTED]''[REDACTED]`, `{'token': ['postgres://u:SECRETPW@h/db']}` kept the
+  user, and inside a JSON string the whole value stayed; such a leaf is now replaced where it stands as a value (after
+  `:` in a dict, after `[` or `,` in a list), `{'credentials': {'pass': '[REDACTED]'}}`, while an apostrophe of prose
+  that a mentioned `'token': [` runs into is still not taken for one. A number under a single-quoted credential key,
+  `{'password': 123456}`, was left as it was, also inside a string; it is now written back in the key's quote,
+  `{'password': '[REDACTED]'}`. A double-quoted value under a single-quoted key, which `repr` writes for a string that
+  holds a `'`, was not read at all: `{'Authorization': "Bearer x'y"}` kept `'y` and `{'password': "it's-secret"}`
+  was unchanged. It is now redacted to its closing quote, honouring escapes, where it reads as a value of the dict
+  (followed by `,` and the next key, by `}`, or cut off): `{'Authorization': "[REDACTED]"}`; the same holds inside a
+  JSON string (`\"it's\"`), and for such a leaf of a single-quoted container there, which used to end the container.
+  Double-quoted JSON is redacted as before. No signature changes.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the
   exchange-log sink, read a query parameter as `[?&]`, a key of any characters up to the next `=`, and a value up

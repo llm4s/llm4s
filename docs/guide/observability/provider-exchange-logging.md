@@ -162,7 +162,10 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   names (also when the JSON sits inside a prompt or response string with escaped quotes,
   `\"api_key\": \"...\"`, or is single-quoted, or is cut off before its closing quote, as a truncated
   payload leaves it), numbers under such a key (including exponent forms such as `1e10`, and inside a
-  string too; the number is written back as the string `"[REDACTED]"`, so the JSON still parses), arrays
+  string too; the number is written back as the string `"[REDACTED]"`, so the JSON still parses, or as
+  `'[REDACTED]'` under a single-quoted key), a double-quoted value under a single-quoted key, as Python's
+  `repr` writes a string that holds a `'` (`{'password': "it's"}`, and `\"it's\"` inside a string), where
+  it reads as a value of the dict (followed by `,` and the next key, by `}`, or cut off), arrays
   and objects under such a key (`{"token": ["..."]}`, `{"credentials": {"user": "...", "pass": "..."}}`:
   every leaf under the key is replaced, however deep - strings, numbers and, outside a string, bare
   words - also inside a string and when the key or the leaves are single-quoted, as a Python dict is,
@@ -174,9 +177,12 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   where no `'` that could close it follows anywhere in the input, and not where that end would leave the
   value empty (`'password': '",`); otherwise it runs to the next `'`, or to the end of the input, as it
   does outside a string, so a credential that holds a `"` (`'Qx"]]9secret'`) is redacted whole; outside
-  any string, the bare words after an unclosed `'token': [` are replaced to the end of the input, since nothing tells them from leaves; and
-  a `\"`-quoted leaf under a single-quoted key there, `\"{'token': [\\\"...\\\"]}\"`, is left, since a
-  `"` inside a string may be the end of a string inside it), `key=value` pairs and quoted
+  any string, the bare words after an unclosed `'token': [` are replaced to the end of the input, since nothing tells them from leaves; under
+  a single-quoted key a single-quoted leaf that stands where a value does is replaced whatever it holds,
+  a connection string `'postgres://u:...@h/db'` or a `'k=v'` token included, and so is a `\"`-quoted leaf
+  there, `\"{'token': [\\\"...\\\"]}\"`, when its own `\"` closes it where a value does; any other `"`
+  under a single-quoted key inside a string ends the container, since it may be the end of a string
+  inside it), `key=value` pairs and quoted
   `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,
   `spring.datasource.password=...`, `PASSWORD="..."`), `key: value` header lines (for example
   `x-api-key: ...`), and strings shaped like known provider API keys (for example `sk-` keys). A quoted

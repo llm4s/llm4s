@@ -465,6 +465,90 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---------------------------------------------------------------------------------------------
+  // Python reprs: a single-quoted leaf with a `:` or `=`, a number under a single-quoted key (#1675), and a
+  // double-quoted value under a single-quoted key, which repr writes for a value holding a `'` (#1687)
+  // ---------------------------------------------------------------------------------------------
+
+  /** Redacts `input`, checks that redacting the result again changes nothing, and returns the result. */
+  private def redactedIdempotent(input: String): String = {
+    val once = Redaction.redact(input)
+    withClue(s"redacting the output for $input a second time: ")(Redaction.redact(once) shouldBe once)
+    once
+  }
+
+  it should "redact a single-quoted leaf with a ':' or '=' under a single-quoted credential key (#1675)" in {
+    // Was `{'credentials': {'pass': 'SECRETX:'[REDACTED]''[REDACTED]`: the leaf was taken for a field, `SECRETX`
+    // for its key, and the quotes after it were paired the wrong way round.
+    redactedIdempotent("{'credentials': {'pass': 'SECRETX:SECRETY'}}") shouldBe s"{'credentials': {'pass': '$R'}}"
+    redactedIdempotent("{'token': ['postgres://u:SECRETPW@h/db']}") shouldBe s"{'token': ['$R']}"
+    redactedIdempotent("{'token': ['a=b', 'c:d'], 'user': 'ann'}") shouldBe s"{'token': ['$R', '$R'], 'user': 'ann'}"
+  }
+
+  it should "redact a single-quoted leaf with a ':' inside a JSON string, and keep the JSON valid (#1675)" in {
+    // Was `{'pass': 'SECRETX:SECRETY'[REDACTED]"}`: the whole secret readable.
+    val out = redactedIdempotent("""{"c": "{'credentials': {'pass': 'SECRETX:SECRETY'}}"}""")
+    out shouldBe s"""{"c": "{'credentials': {'pass': '$R'}}"}"""
+    ujson.read(out)("c").str shouldBe s"{'credentials': {'pass': '$R'}}"
+  }
+
+  it should "redact a number under a single-quoted credential key, in the key's quote (#1675)" in {
+    redactedIdempotent("{'password': 123456}") shouldBe s"{'password': '$R'}"
+    redactedIdempotent("{'pin': 0, 'password': -12.5e3, 'n': 1}") shouldBe s"{'pin': 0, 'password': '$R', 'n': 1}"
+    val out = redactedIdempotent("""{"p": "{'password': 123456}"}""")
+    out shouldBe s"""{"p": "{'password': '$R'}"}"""
+    ujson.read(out)("p").str shouldBe s"{'password': '$R'}"
+    // A number under a key that is not a credential is kept.
+    redactedIdempotent("{'max_tokens': 1024, 'prompt_tokens': 7}") shouldBe "{'max_tokens': 1024, 'prompt_tokens': 7}"
+  }
+
+  it should "redact a double-quoted value under a single-quoted credential key in full (#1687)" in {
+    // Was `{'Authorization': "[REDACTED]'y"}` (only the Bearer token caught) and `{'password': "it's-secret"}`.
+    redactedIdempotent("""{'Authorization': "Bearer x'y"}""") shouldBe s"""{'Authorization': "$R"}"""
+    redactedIdempotent("""{'password': "it's-secret"}""") shouldBe s"""{'password': "$R"}"""
+    redactedIdempotent("""{'password': "it's \"quoted\" too", 'user': 'bob'}""") shouldBe
+      s"""{'password': "$R", 'user': 'bob'}"""
+    redactedIdempotent("""{'credentials': {'pass': "it's", 'u': 'x'}}""") shouldBe
+      s"""{'credentials': {'pass': "$R", 'u': '$R'}}"""
+  }
+
+  it should "redact a double-quoted value under a single-quoted credential key inside a JSON string (#1687)" in {
+    val field = redactedIdempotent("""{"c": "{'password': \"it's-secret\", 'n': 1}"}""")
+    field shouldBe s"""{"c": "{'password': \\"$R\\", 'n': 1}"}"""
+    ujson.read(field)("c").str shouldBe s"""{'password': "$R", 'n': 1}"""
+    // And as a leaf of a container, after a leaf with a `:` that used to pair the quotes the wrong way round.
+    val leaf = redactedIdempotent("""{"c": "{'token': ['a:b', \"it's\"], 'n': 1}", "model": "gpt-4o"}""")
+    leaf shouldBe s"""{"c": "{'token': ['$R', \\"$R\\"], 'n': 1}", "model": "gpt-4o"}"""
+    ujson.read(leaf)("model").str shouldBe "gpt-4o"
+  }
+
+  it should "leave a double-quoted text after a single-quoted credential key that is not a value of a dict" in {
+    // The `"` after the key opens no value unless the value it closes is followed by `,` and a key, or by `}`, or is
+    // cut off: prose that mentions the key, and a key that follows it, are not taken for one.
+    Seq(
+      """say 'password': "abc" to log in""",
+      """{"content": "set 'password': \"abc\" here", "n": 1}""",
+      """{"content": "the 'password': ", "user": "ann"}"""
+    ).foreach(input => withClue(s"input $input: ")(redactedIdempotent(input) shouldBe input))
+  }
+
+  it should "leave the double-quoted equivalents as they were" in {
+    redactedIdempotent("""{"credentials": {"pass": "x:y"}}""") shouldBe s"""{"credentials": {"pass": "$R"}}"""
+    redactedIdempotent("""{"token": ["a=b"]}""") shouldBe s"""{"token": ["$R"]}"""
+    redactedIdempotent("""{"password": 123456}""") shouldBe s"""{"password": "$R"}"""
+    redactedIdempotent("""{"p": "{\"password\": 123456}"}""") shouldBe s"""{"p": "{\\"password\\": \\"$R\\"}"}"""
+    redactedIdempotent("""{"password": "it's-secret"}""") shouldBe s"""{"password": "$R"}"""
+  }
+
+  it should "keep prose whose apostrophe a mentioned 'token': [ runs into, though it holds a ':' or '='" in {
+    // A single-quoted string with a `:` or `=` is a leaf only where a value stands: after `[`, `,` or `:`. An
+    // apostrophe of prose has a letter before it.
+    redactedIdempotent("""{"content": "see 'token': [ for details, it's password='hunter2' ok"}""") shouldBe
+      s"""{"content": "see 'token': [ for details, it's password='$R' ok"}"""
+    redactedIdempotent("""{"content": "see 'token': [ so it's a: b, isn't it", "n": 1}""") shouldBe
+      """{"content": "see 'token': [ so it's a: b, isn't it", "n": 1}"""
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // A single-quoted key inside a double-quoted string. `'token': [` can sit inside a JSON string value, where `'` is
   // not escaped, so the walk must end where that string does: taking its closing `"` for a leaf opener desynchronised
   // the quotes and wrote a credential of a later field, which the string pass then could not match, out mangled but
@@ -490,12 +574,18 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "leave the fields after a single-quoted key whose leaves are escaped double-quoted strings" in {
-    // Inside a string the container's own syntax has no `"`, so a `"`, escaped or not, is foreign and ends the walk:
-    // the leaf is left to the other passes, and `model` and `n` keep their values.
+    // An escaped double-quoted leaf that its own `\"` closes, where a value stands, is redacted (#1687): Python's
+    // repr writes a value holding a `'` in double quotes. `model` and `n` keep their values.
     val input = """{"content": "{'token': [\"abc\"]}", "model": "gpt-4o", "n": 1}"""
     val out   = Redaction.redact(input)
-    out shouldBe input
+    out shouldBe s"""{"content": "{'token': [\\"$R\\"]}", "model": "gpt-4o", "n": 1}"""
     ujson.read(out)("model").str shouldBe "gpt-4o"
+    // Any other `"` is foreign to the container's syntax and ends the walk: the end of a string escaped inside the
+    // string that mentions the key, and a quote that does not close a leaf where a value stands.
+    Seq(
+      """{"content": "x \"see 'token': [\", 'user': 'ann'", "n": 1}""",
+      """{"content": "{'token': [\"abc\" and more", "n": 1}"""
+    ).foreach(other => withClue(s"input $other: ")(Redaction.redact(other) shouldBe other))
   }
 
   it should "redact a closed single-quoted dict inside a JSON string, and the field after it" in {
@@ -953,6 +1043,46 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   it should "leave a megabyte of word characters, of spaces and of newlines unchanged" in {
     Seq("x" * MegaChars, " " * MegaChars, "a\n" * (MegaChars / 2), "api_key" * (MegaChars / 7)).foreach { input =>
       withClue(s"input starting ${input.take(8)}: ")(onSmallStack(input) shouldBe input)
+    }
+  }
+
+  it should "redact megabyte-long Python repr values on a small stack (#1675, #1687)" in {
+    onSmallStack("{'token': ['" + ("a:" * (MegaChars / 2)) + "']}") shouldBe s"{'token': ['$R']}"
+    onSmallStack("{'password': \"" + ("it's " * (MegaChars / 5)) + "\", 'n': 1}") shouldBe
+      s"""{'password': "$R", 'n': 1}"""
+    onSmallStack("{\"c\": \"{'token': [\\\"" + ("a'" * (MegaChars / 2)) + "\\\"]}\"}") shouldBe
+      s"""{"c": "{'token': [\\"$R\\"]}"}"""
+    onSmallStack("{'password': " + ("1" * MegaChars) + "}") shouldBe s"{'password': '$R'}"
+  }
+
+  it should "redact quote-heavy Python repr shapes in time linear in their length (#1675, #1687)" in {
+    // Each shape repeats a unit that asks a value, leaf or key check of its own: a growth with the square of the
+    // length would make four times the input take sixteen times as long.
+    val shapes = Seq(
+      ("", "'password': \"", ""),
+      ("", "'password': \\\"", ""),
+      ("", "'password': \"x\" ", ""),
+      ("", "'p': \"x\", 'password': \"y\", ", "}"),
+      ("{'token': [", "'a:b', ", "]}"),
+      ("{'token': [", "', '", "]}"),
+      ("{'credentials': {", "'k': 'a=b', ", "}}"),
+      ("{\"c\": \"{'token': [", "\\\"x'\\\", ", "]}\"}"),
+      ("{\"c\": \"", "\\\"'token': [\\\", ", "\"}"),
+      ("", "'password': 1, ", "")
+    )
+    shapes.foreach { case (prefix, unit, suffix) =>
+      def time(repeats: Int): Long = {
+        val input = prefix + (unit * repeats) + suffix
+        Redaction.redact(input) // warm up
+        val start = System.nanoTime()
+        Redaction.redact(input)
+        System.nanoTime() - start
+      }
+      val small = time(5000)
+      val large = time(20000)
+      withClue(s"unit $unit: 5000 took ${small / 1000000} ms, 20000 took ${large / 1000000} ms: ") {
+        large should be < (small * 12 + 50000000L)
+      }
     }
   }
   it should "redact an entire embedded string containing escaped quotes" in {
