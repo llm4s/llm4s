@@ -60,6 +60,7 @@ class PIIPatternsScalingSpec extends AnyFlatSpec with Matchers {
         e => fail(s"${piiType.name} on a run of '$unit': ${e.getMessage}"),
         identity
       )
+      info(f"run of '$unit': time(4n) / time(n) = $ratio%.2f")
       withClue(s"${piiType.name} on a run of '$unit', time(4n) / time(n) with n = $n: ") {
         ratio should be <= 8.0
       }
@@ -100,6 +101,6 @@ object PIIPatternsScalingSpec {
       text.charAt(index)
     }
     def subSequence(start: Int, end: Int): CharSequence = text.subSequence(start, end)
-    override def toString: String = text
+    override def toString: String                       = text
   }
 }

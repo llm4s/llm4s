@@ -2007,7 +2007,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
-- **`llm4s-agent`: the PII Email pattern runs in linear time; an SSN stays within a line**
+- **`llm4s-agent`: the PII Email pattern runs in linear time; an SSN stays within a line; `UTC+5` is not a phone number**
   ([#1713](https://github.com/llm4s/llm4s/issues/1713)):
   - `PIIType.Email`, in the default type set of `PIIMasker` and `PIIDetector`, began a match attempt at every
     character of a run of letters, digits or `._%+-` and scanned to the end of the run each time, so it took
@@ -2021,6 +2021,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     dash or horizontal whitespace (`\h`), as the phone and card patterns do: groups split by LF, CR, a vertical tab
     or a form feed are no longer joined, and groups split by a no-break space or another Unicode horizontal space
     now are.
+  - `PIIType.Phone` read a time-zone offset and the date after it as an international number, so
+    `UTC+5 2026-10-09 12:30` became `UTC[REDACTED_PHONE]:30`. A `+` right after `UTC` or `GMT` (any case, with or
+    without one space between) no longer starts an international number; a `+` after any other word still does, so
+    `a@b.com+44 20 7946 0958` and `Phone+44 20 7946 0958` are still masked. The Scaladoc now says that a separated
+    number longer than 15 digits is masked up to its 15th digit and the rest kept, which is what the pattern does.
 - **`llm4s-rag`: `SimpleChunker` and `ChunkingUtils.chunkText` no longer throw for a very large window**
   ([#1424](https://github.com/llm4s/llm4s/pull/1424)): the window end and the next start were computed in `Int`, so
   a valid configuration such as `ChunkingConfig(targetSize = Int.MaxValue, maxSize = Int.MaxValue,

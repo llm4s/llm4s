@@ -105,13 +105,18 @@ object PIIPatterns {
      * `+44 (0) 20 7946 0958`, `+81 3-1234-5678`).
      *
      * An international number needs its `+`: a plain run of digits is not treated as a phone number unless it has
-     * the US shape. A `+` followed by more than 15 digits is not matched.
+     * the US shape. A `+` followed by more than 15 contiguous digits is not matched. With separators, a match ends
+     * after at most 15 digits and leaves the rest: `+44 20 7946 0958 1234` masks `+44 20 7946 0958` and keeps
+     * ` 1234`.
+     *
+     * A `+` right after `UTC` or `GMT`, with or without a space between (`UTC+5`, `GMT +1`, any case), is a
+     * time-zone offset, not the start of an international number, so `UTC+5 2026-10-09 12:30` is left alone.
      */
     case object Phone extends PIIType {
       val name = "Phone"
       val pattern =
         ("""(?<!\d)(?:\+?1[-.\h]?)?(?:\(\d{3}\)|\d{3})[-.\h]?\d{3}[-.\h]?\d{4}(?!\d)""" +
-          """|(?<!\d)\+\d(?:[-.\h()]{0,2}\d){7,14}(?!\d)""").r
+          """|(?<!\d)(?<!(?i:UTC|GMT)\h?)\+\d(?:[-.\h()]{0,2}\d){7,14}(?!\d)""").r
       def mask(value: String): String = "[REDACTED_PHONE]"
     }
 

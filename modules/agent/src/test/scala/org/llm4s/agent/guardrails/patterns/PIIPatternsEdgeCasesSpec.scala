@@ -8,11 +8,12 @@ import scala.util.Random
 import scala.util.matching.Regex
 
 /**
- * Pins the matches of the Email and SSN patterns at the edges #1713 touched: the Email pattern now starts a match
- * attempt only at the start of a run of local-part characters or where the previous match ended, and the SSN
- * pattern no longer joins digit groups across a line break.
+ * Pins the matches of the PII patterns at the edges #1713 touched: the Email pattern now starts a match attempt only
+ * at the start of a run of local-part characters or where the previous match ended, the SSN pattern no longer joins
+ * digit groups across a line break, and the Phone pattern does not read a `UTC`/`GMT` offset as an international
+ * number.
  */
-class PIIPatternsEmailSsnSpec extends AnyFlatSpec with Matchers {
+class PIIPatternsEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   // The patterns as they were before #1713, the reference for "nothing else changed".
   private val emailBefore: Regex = """[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}""".r
@@ -32,6 +33,7 @@ class PIIPatternsEmailSsnSpec extends AnyFlatSpec with Matchers {
 
   private def emails(text: String): Seq[String] = PIIType.Email.findAll(text).map(_.value)
   private def ssns(text: String): Seq[String]   = PIIType.SSN.findAll(text).map(_.value)
+  private def phones(text: String): Seq[String] = PIIType.Phone.findAll(text).map(_.value)
 
   private def spans(pattern: Regex, text: String): List[(Int, Int)] =
     pattern.findAllMatchIn(text).map(m => (m.start, m.end)).toList
@@ -147,5 +149,33 @@ class PIIPatternsEmailSsnSpec extends AnyFlatSpec with Matchers {
       val text = Seq.fill(random.nextInt(30))(alphabet(random.nextInt(alphabet.size))).mkString
       spans(PIIType.SSN.pattern, text) shouldBe spans(ssnBefore, text)
     }
+  }
+
+  // ==========================================================================
+  // Phone: time-zone offsets and numbers longer than E.164
+  // ==========================================================================
+
+  "Phone pattern" should "not read a UTC or GMT offset and the date after it as an international number" in {
+    phones("UTC+5 2026-10-09 12:30") shouldBe empty
+    phones("GMT+1 2026-10-09 12:30") shouldBe empty
+    phones("utc +5 2026-10-09 12:30") shouldBe empty
+    phones("GMT\t+12 34 5678 9012") shouldBe empty
+    PIIPatterns.maskAll("UTC+5 2026-10-09 12:30") shouldBe "UTC+5 2026-10-09 12:30"
+  }
+
+  it should "still find a number after a word that is not a time zone" in {
+    phones("Phone+44 20 7946 0958") shouldBe Seq("+44 20 7946 0958")
+    phones("tel:+44 20 7946 0958") shouldBe Seq("+44 20 7946 0958")
+    PIIPatterns.maskAll("a@b.com+44 20 7946 0958", Seq(PIIType.Email, PIIType.Phone)) shouldBe
+      "[REDACTED_EMAIL][REDACTED_PHONE]"
+  }
+
+  it should "still find a US number written after a time zone" in {
+    phones("UTC+1 555 123 4567") shouldBe Seq("+1 555 123 4567")
+  }
+
+  it should "mask at most 15 digits of a separated number and leave the rest, as its Scaladoc says" in {
+    phones("+44 20 7946 0958 1234 5678") shouldBe Seq("+44 20 7946 0958")
+    phones("+44123456789012345") shouldBe empty
   }
 }
