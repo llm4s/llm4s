@@ -3,9 +3,11 @@ package org.llm4s.llmconnect.smoke
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig }
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.DeepSeekClient
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.it.Tier
@@ -21,17 +23,20 @@ import org.llm4s.it.tags.Cloud
  * Requires: `DEEPSEEK_API_KEY` environment variable.
  */
 @Cloud
-class DeepSeekSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
+class DeepSeekSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with ProviderSmokeContract {
 
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
   private val apiKey: Option[String] = Option(System.getenv("DEEPSEEK_API_KEY")).filter(_.nonEmpty)
 
-  private def config(key: String): DeepSeekConfig =
+  /** The reasoning model, for the contract's reasoning check. */
+  private val ReasonerModel = "deepseek-reasoner"
+
+  private def config(key: String, model: String = "deepseek-chat"): DeepSeekConfig =
     DeepSeekConfig
       .fromValues(
-        modelName = "deepseek-chat",
+        modelName = model,
         apiKey = key,
         baseUrl = "https://api.deepseek.com"
       )
@@ -77,4 +82,19 @@ class DeepSeekSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
     result.isLeft shouldBe true
     result.swap.toOption.get shouldBe an[AuthenticationError]
   }
+
+  // ---- the shared capability contract (issue #1212): see ProviderSmokeContract ----
+
+  override protected def providerLabel: String                          = "DeepSeek"
+  override protected def apiKeyEnvVar: String                           = "DEEPSEEK_API_KEY"
+  override protected def contractKey: Option[String]                    = apiKey
+  override protected def contractClient(key: String): Result[LLMClient] = DeepSeekClient(config(key))
+  // deepseek-reasoner returns its chain of thought as reasoning_content, which the client reads back as thinking.
+  override protected def reasoningSetup: Option[String => Result[ReasoningSetup]] = Some { key =>
+    DeepSeekClient(config(key, ReasonerModel)).map { client =>
+      ReasoningSetup(client, CompletionOptions(maxTokens = Some(1024)), expectsThinkingText = true)
+    }
+  }
+
+  registerCapabilityContract()
 }

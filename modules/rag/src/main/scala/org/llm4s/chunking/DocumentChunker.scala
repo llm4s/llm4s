@@ -86,7 +86,9 @@ final case class DocumentChunk(
  * user input should call `ChunkingUtils.chunkTextValidated`, which reports them as a `Left` (#1318, item 4).
  *
  * @param targetSize Target chunk size in characters (soft limit)
- * @param maxSize Maximum chunk size (hard limit, will force split)
+ * @param maxSize Maximum chunk size: a longer sentence or section is force-split at whitespace or line breaks. A single
+ *                word longer than `maxSize` is kept whole, so its chunk can exceed it; [[SimpleChunker]] uses
+ *                `targetSize` only. Sizes are UTF-16 units, and no chunker cuts inside a surrogate pair (#1711).
  * @param overlap Characters to overlap between chunks
  * @param minChunkSize Minimum size for a chunk (smaller chunks are merged)
  * @param preserveCodeBlocks Keep code blocks intact if possible

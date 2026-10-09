@@ -17,6 +17,7 @@ import java.security.spec.PKCS8EncodedKeySpec
 import java.util.Base64
 import scala.concurrent.duration.*
 import scala.util.Try
+import org.llm4s.util.Redaction
 
 /**
  * Provides Google Cloud OAuth2 access tokens for Vertex AI via ADC.
@@ -143,7 +144,7 @@ class VertexAIAuthProvider(
           Left(
             AuthenticationError(
               "vertexai",
-              s"Token refresh failed (HTTP ${response.statusCode}): ${response.body}"
+              s"Token refresh failed (HTTP ${response.statusCode}): ${Redaction.safeBody(response.body)}"
             )
           )
         }
@@ -225,7 +226,7 @@ class VertexAIAuthProvider(
           Left(
             AuthenticationError(
               "vertexai",
-              s"JWT token exchange failed (HTTP ${response.statusCode}): ${response.body}"
+              s"JWT token exchange failed (HTTP ${response.statusCode}): ${Redaction.safeBody(response.body)}"
             )
           )
         }

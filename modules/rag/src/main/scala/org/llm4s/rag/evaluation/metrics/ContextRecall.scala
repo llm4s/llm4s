@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.rag.evaluation._
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.BoundedJson
 
 import scala.util.Try
 
@@ -185,28 +186,39 @@ For each fact, determine if it is covered by any of the contexts. Respond with O
    * Parse extracted facts from LLM response.
    */
   private def parseFacts(response: String): Result[Seq[String]] =
-    Try {
-      val jsonStr = extractJsonArray(response)
-      val arr     = ujson.read(jsonStr).arr
-      arr.map(_.str).toSeq
-    }.toResult.left.map(e => EvaluationError.parseError(s"Failed to parse facts: ${e.message}"))
+    readArray(response)
+      .flatMap(arr => Try(arr.map(_.str)).toResult)
+      .left
+      .map(e => EvaluationError.parseError(s"Failed to parse facts: ${e.message}"))
 
   /**
    * Parse fact attributions from LLM response.
    */
   private def parseAttributions(response: String, originalFacts: Seq[String]): Result[Seq[FactAttribution]] =
-    Try {
-      val jsonStr = extractJsonArray(response)
-      val arr     = ujson.read(jsonStr).arr
+    readArray(response)
+      .flatMap { arr =>
+        Try {
+          arr.zipWithIndex.map { case (v, idx) =>
+            val obj     = v.obj
+            val fact    = obj.get("fact").map(_.str).getOrElse(originalFacts.lift(idx).getOrElse(""))
+            val covered = obj.get("covered").exists(_.bool)
+            val source  = obj.get("source").flatMap(s => if (s.isNull) None else Some(s.num.toInt))
+            FactAttribution(fact, covered, source)
+          }
+        }.toResult
+      }
+      .left
+      .map(e => EvaluationError.parseError(s"Failed to parse attributions: ${e.message}"))
 
-      arr.zipWithIndex.map { case (v, idx) =>
-        val obj     = v.obj
-        val fact    = obj.get("fact").map(_.str).getOrElse(originalFacts.lift(idx).getOrElse(""))
-        val covered = obj.get("covered").exists(_.bool)
-        val source  = obj.get("source").flatMap(s => if (s.isNull) None else Some(s.num.toInt))
-        FactAttribution(fact, covered, source)
-      }.toSeq
-    }.toResult.left.map(e => EvaluationError.parseError(s"Failed to parse attributions: ${e.message}"))
+  /**
+   * The JSON array in a reply. The text is the model's: a document nested more than 512 levels deep is
+   * refused before it is parsed, since a value that deep overflows the stack of whatever renders it,
+   * an `InvalidData` message included (#1562).
+   */
+  private def readArray(response: String): Result[Seq[ujson.Value]] =
+    Try(extractJsonArray(response)).toResult
+      .flatMap(jsonStr => BoundedJson.read(jsonStr))
+      .flatMap(json => Try(json.arr.toSeq).toResult)
 
   /**
    * Extract JSON array from potentially markdown-wrapped response.

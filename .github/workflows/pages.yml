@@ -1,5 +1,9 @@
 name: Deploy Documentation
 
+# A release run is named after its tag so that release.yml can find, and wait for, the run it dispatched
+# (scripts/dispatch-docs-deploy.sh matches this exact title; scripts/test-dispatch-docs-deploy.sh checks the two agree).
+run-name: ${{ inputs.ref != '' && format('Deploy Documentation ({0})', inputs.ref) || 'Deploy Documentation' }}
+
 on:
   # Docs changes on main deploy directly.
   push:
@@ -13,19 +17,26 @@ on:
       - 'modules/workspace/*/src/**'
       - '.github/workflows/pages.yml'
 
-  # Releases deploy by calling this workflow from release.yml, gated on the Maven
-  # publish job alone. Two reasons it is a `workflow_call` rather than a trigger here:
+  # Releases deploy by DISPATCHING this workflow on `main` from release.yml (scripts/dispatch-docs-deploy.sh), gated on
+  # the Maven publish and the GitHub Release, with the release tag as `ref`.
   #
-  #  - Gating on the Release *workflow* would suppress the docs deploy when a step
-  #    after `sbt ci-release` fails (the container image push), even though the
-  #    artifacts are already live on Maven Central.
-  #  - A called workflow inherits the caller's ref, so `git describe` sees exactly
-  #    the tag being released. Deriving it from the default branch instead could
-  #    pick a newer tag that has not published yet, or miss a tag not reachable
-  #    from main.
-  workflow_call:
-
+  # It used to be a `workflow_call`, which inherits the caller's ref, so the deploy job ran on the tag and the
+  # `github-pages` environment, whose deployment rule allows only the `main` branch, rejected it before the job
+  # started (#1152). A dispatched run's ref is the ref it was dispatched on, so it deploys from `main`, while the
+  # build below still checks out the tag: `git describe` and sbt-dynver see exactly the release, as before.
+  #
+  # Gating on the Release *workflow* instead (a `workflow_run` trigger) would suppress the docs deploy when a step
+  # after `sbt ci-release` fails (the container image push), even though the artifacts are already live on Maven
+  # Central, which is why release.yml dispatches from its own `docs` job.
   workflow_dispatch:
+    inputs:
+      ref:
+        description: >-
+          Release tag to build the docs from (for example v0.5.0). Leave it empty to build the branch this run was
+          started on. Either way the deploy runs on the branch the run was started on, which must be `main`.
+        required: false
+        default: ''
+        type: string
 
 # Sets permissions of the GITHUB_TOKEN
 permissions:
@@ -42,9 +53,23 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # The input reaches the checkout's `ref`, not a shell, but it is still checked first: only a release tag
+      # (v1.2.3, v1.2.3-RC1) is accepted, and `refs/tags/` below stops a branch of the same name from being built.
+      - name: Validate the requested ref
+        if: ${{ inputs.ref != '' }}
+        env:
+          REQUESTED_REF: ${{ inputs.ref }}
+        run: |
+          if ! [[ "$REQUESTED_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::ref must be a release tag such as v0.5.0 or v1.0.0-RC1."
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          # The requested release tag, or else the ref this run was started on.
+          ref: ${{ inputs.ref != '' && format('refs/tags/{0}', inputs.ref) || github.ref }}
           fetch-depth: 0  # needed for `git describe` to see release tags
 
       - name: Setup Ruby

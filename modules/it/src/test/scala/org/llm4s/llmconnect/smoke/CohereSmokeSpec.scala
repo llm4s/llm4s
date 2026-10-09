@@ -3,9 +3,11 @@ package org.llm4s.llmconnect.smoke
 import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.{ CohereConfig, ContextWindowResolver }
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.llmconnect.provider.CohereClient
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.it.Tier
@@ -26,7 +28,7 @@ import org.llm4s.it.tags.Cloud
  * `Left(ConfigurationError)` (#925), and this suite checked that it did.
  */
 @Cloud
-class CohereSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
+class CohereSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with ProviderSmokeContract {
 
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
@@ -86,4 +88,13 @@ class CohereSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
     result.isLeft shouldBe true
     result.swap.toOption.get shouldBe an[AuthenticationError]
   }
+
+  // ---- the shared capability contract (issue #1212): see ProviderSmokeContract ----
+
+  override protected def providerLabel: String                          = "Cohere"
+  override protected def apiKeyEnvVar: String                           = "COHERE_API_KEY"
+  override protected def contractKey: Option[String]                    = apiKey
+  override protected def contractClient(key: String): Result[LLMClient] = CohereClient(config(key))
+
+  registerCapabilityContract()
 }

@@ -1,47 +1,107 @@
-Test Coverage (scoverage)
+---
+layout: page
+title: Test Coverage
+parent: Reference
+nav_order: 15
+---
 
-Overview
-- Uses `sbt-scoverage` to measure line and branch coverage for the current Scala 3.7.1 build.
-- CI enforces a minimum coverage threshold (currently 50%); builds fail if coverage drops below this.
-- Production target is 80% coverage for core library code.
+# Test Coverage
 
-How To Run Locally
-- Quick aliases:
-  - From sbt shell: `cov` (aggregate + single root HTML) or `covReport` (current module HTML).
-  - From terminal: `sbt cov` or `sbt covReport`.
+LLM4S measures **statement coverage** with [`sbt-scoverage`](https://github.com/scoverage/sbt-scoverage), one policy
+per module. There is no single project-wide threshold: each module declares its own policy, and the CI coverage
+job checks the floors of the modules it measures (with the exceptions below).
 
-- Per-module coverage report:
-  1) `sbt clean coverage test coverageReport`
-  2) Open `target/scala-*/scoverage-report/index.html` for the current module.
+## How coverage is enforced
 
-- Aggregate coverage across aggregated modules (root project):
-  1) `sbt clean coverage test coverageAggregate coverageReport`
-  2) The alias config avoids per-module HTML; open root `target/scala-*/scoverage-report/index.html` for the combined report.
+### Per-module floors
 
-CI Usage
-- Typical sequence: `clean; coverage; test; coverageAggregate`.
-- XML output (for CI tooling) is written to `target/scala-*/scoverage-report/scoverage.xml`.
+Every sbt project in `build.sbt` makes an explicit decision with one of two settings (defined in
+`project/Dependencies.scala`, object `Coverage`):
 
-Configuration
-- Defined in `build.sbt`:
-  - `coverageMinimumStmtTotal := 50` — current minimum statement coverage (will be raised incrementally toward 80%).
-  - `coverageFailOnMinimum := true` — CI fails if coverage drops below the minimum.
-  - `coverageHighlighting := true` — better highlighting for coverage in reports.
-  - `coverageExcludedPackages` — excludes runner and samples packages by default.
+| Setting | Meaning |
+|---------|---------|
+| `coverageFloor(n)` | Statement coverage must stay at or above `n` percent. It sets `coverageMinimumStmtTotal := n` and `coverageFailOnMinimum := true` for that module. |
+| `coverageDisabled` | The module is deliberately not measured. It carries a comment in `build.sbt` saying why. |
 
-On‑the‑fly Overrides
-- For a one-off run: `sbt "set coverageMinimumStmtTotal := 85" clean coverage test coverageReport`
-- To disable fail on minimum for local runs: `sbt "set coverageFailOnMinimum := false" coverage test`
+A floor is the measured statement coverage **rounded down to the nearest 5**, so a module has headroom for normal
+churn. Floors only ratchet up: raise one when a module's coverage grows, and never lower one to make a change pass.
 
-Expectations
-- Current coverage is approximately 60%, with a CI-enforced minimum of 50%.
-- Production target is 80% coverage for core library code; the threshold will be raised incrementally as coverage improves.
-- Generated/entrypoint code (e.g., runner, samples) is excluded to keep focus on library logic.
+A floor is never inherited. The build-wide default is `Coverage.Policy.Undeclared`, so a new module has to choose.
 
-Per‑module vs aggregate
-- By default, the setup generates a single HTML report at the root when using `cov`.
-- If you want individual project HTML reports, run `coverageReport` after switching to each project with `project <name>`.
+### The policy check
 
-Troubleshooting
-- If coverage is 0% across the board, ensure you ran `coverage` before `test`.
-- For multi-module runs, use `coverageAggregate` at the root project.
+`sbt coveragePolicyCheck` lists every module's policy and fails if any module has declared neither a floor nor an
+opt-out. It runs in CI as a quick check, and prints one line per module:
+
+```
+Coverage policy per module:
+  agent                          floor 80%
+  configPolicy                   disabled
+  ...
+```
+
+Run it to see the current floors. The numbers are deliberately not copied here, because they change.
+
+### What CI runs
+
+The `Code Coverage` job in `.github/workflows/ci.yml` runs `<module>/test <module>/coverageReport` for the modules
+listed in that job. `<module>/coverageReport` is the step that enforces that module's floor. `knowledgegraphNeo4j`
+and `benchmarks` declare floors but are not included in the job, so CI does not currently enforce their floors.
+The benchmark workflow runs tests without coverage. The aggregate report is
+informational only, because a build-wide average is not a meaningful gate.
+
+A new module has to be added to that job in the same change that adds it, or the code it holds drops out of
+measurement.
+
+### Codecov
+
+`codecov.yml` configures the pull-request statuses:
+
+- **`patch`**: new and changed lines must be covered at **90%**, with a **5%** threshold.
+- **`project`**: the target is `auto` (the base commit's coverage), with a **1%** threshold.
+- **Flags**: one flag per module, whose `paths` are that module's `src/main/scala`. Codecov only attributes a file
+  to a flag whose `paths` contain it, so a module with no flag silently disappears from per-module reporting
+  instead of failing. Every change that adds a module adds its flag to `codecov.yml`.
+
+Only main sources are tracked. `modules/benchmarks` is ignored.
+
+### Not measured
+
+`ThisBuild / coverageExcludedPackages` excludes these packages:
+
+- `org.llm4s.runner.*`
+- `org.llm4s.deploy.DeployServiceMain` (the deploy service's entry point; its routes and checks are measured)
+- `org.llm4s.samples.*`
+- `org.llm4s.workspace.*`
+
+## Running coverage locally
+
+Aliases from `build.sbt`:
+
+| Command | Does |
+|---------|------|
+| `sbt cov` | `clean; coverage; test; coverageAggregate; coverageReport; coverageOff`: the whole test suite with coverage, plus the aggregate report at the root. It is for looking at the combined picture and enforces no module floor, because the root project's own policy is `disabled`. |
+| `sbt covReport` | `clean; coverage; test; coverageReport; coverageOff`: the same for the current project only. |
+
+To check one module the way CI does, including its floor:
+
+```bash
+sbt coverage core/test core/coverageReport
+```
+
+Replace `core` with the module's sbt project name (the one `coveragePolicyCheck` prints). The report is written to
+`target/scala-3.7.1/scoverage-report/` inside the module's directory: `index.html` for reading, `scoverage.xml` for tooling.
+Run `sbt coverageOff` afterwards, or start a new sbt session, so later compiles are not instrumented.
+
+To see a module's report without failing on its floor, for a one-off run:
+
+```bash
+sbt "set core / coverageFailOnMinimum := false" coverage core/test core/coverageReport
+```
+
+## Troubleshooting
+
+- **Coverage is 0% everywhere.** Run `coverage` before `test` in the same sbt invocation.
+- **`coveragePolicyCheck` says a module is `UNDECLARED`.** Add `coverageFloor(<pct>)` or `coverageDisabled` (with a
+  comment) to the project in `build.sbt`, and add its flag to `codecov.yml` in the same change.
+- **A module's floor fails after your change.** Add tests for the new code. Do not lower the floor.

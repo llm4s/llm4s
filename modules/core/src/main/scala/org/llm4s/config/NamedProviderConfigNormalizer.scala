@@ -1,6 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
@@ -37,9 +38,16 @@ private[config] object NamedProviderConfigNormalizer:
         .filter(_.nonEmpty)
         .toRight(ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `model`"))
 
+    // The error names the key as the user wrote it: llm4s.providers.<name>.timeouts.request.
+    val timeouts =
+      section.timeouts.fold[Result[ProviderTimeouts]](Right(ProviderTimeouts.default)) { t =>
+        ProviderTimeouts.validatedAt(s"llm4s.providers.${providerName.asName}.timeouts", t.request, t.stream)
+      }
+
     for
-      id    <- providerType
-      model <- modelName
+      id       <- providerType
+      model    <- modelName
+      timeouts <- timeouts
     yield NamedProviderConfig(
       provider = id,
       model = ModelName(model),
@@ -48,5 +56,6 @@ private[config] object NamedProviderConfigNormalizer:
       headers = section.headers.getOrElse(Map.empty),
       // Trimmed and kept as read. Which of these the provider accepts is decided by
       // `NamedProviderSectionValidator`, which knows the descriptor; this does not.
-      extras = section.extras.collect { case (key, value) if value.trim.nonEmpty => key -> value.trim }
+      extras = section.extras.collect { case (key, value) if value.trim.nonEmpty => key -> value.trim },
+      timeouts = timeouts
     )

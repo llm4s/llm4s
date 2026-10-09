@@ -13,6 +13,7 @@ import java.time.Instant
 import java.util.Base64
 import scala.concurrent.duration._
 import scala.util.Try
+import org.llm4s.util.Redaction
 
 /**
  * Google Gemini Vision client for AI-powered image analysis.
@@ -140,7 +141,7 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
         logger.error(
           "[GeminiVisionClient] HTTP error {}: {}",
           response.statusCode.asInstanceOf[AnyRef],
-          org.llm4s.util.Redaction.truncateForLog(response.body)
+          Redaction.safeBody(response.body)
         )
         Left(
           LLMError.apiCallFailed(
@@ -167,7 +168,8 @@ class GeminiVisionClient(config: GeminiVisionConfig, httpClient: Llm4sHttpClient
           case _                     => None
         }
       }
-      .getOrElse(org.llm4s.util.Redaction.truncateForLog(responseBody, 512))
+      .map(Redaction.safeBody(_, 512))
+      .getOrElse(Redaction.safeBody(responseBody, 512))
     s"Status $statusCode: $detail"
   }
 
