@@ -19,6 +19,37 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
     def nanos(): Long      = underlying.nanos() / tick.toNanos * tick.toNanos
   }
 
+  /**
+   * A clock that only the operation advances, by the cost it charges, read in whole steps of `tick` from
+   * `start`: a measurement on it is exact and repeatable.
+   */
+  private final class SimulatedClock(tick: FiniteDuration, start: FiniteDuration) extends LinearTime.Clock {
+    private var elapsed                           = start.toNanos
+    val name                                      = s"simulated, ${tick.toMicros} us ticks"
+    override lazy val granularity: FiniteDuration = tick
+    def nanos(): Long                             = elapsed / tick.toNanos * tick.toNanos
+    def charge(cost: FiniteDuration): Unit        = elapsed += cost.toNanos
+  }
+
+  /** Windows's thread CPU clock: 15.625 ms ticks. */
+  private val SimulatedTick = 15625.micros
+
+  /**
+   * An operation on the simulated clock whose large input (4) costs `largeRatio` times the small one (1), and
+   * whose small input costs `cold` a run for its first `coldRuns` runs - warm-up and calibration - and `warm`
+   * after: the JIT has finished compiling, so the samples measured are cheaper than the one calibrated (#1745).
+   */
+  private def cooling(clock: SimulatedClock, cold: FiniteDuration, warm: FiniteDuration, coldRuns: Int)(
+    largeRatio: Double
+  ): Long => Unit = {
+    var smallRuns = 0
+    units =>
+      if (units == 1L) {
+        clock.charge(if (smallRuns < coldRuns) cold else warm)
+        smallRuns += 1
+      } else clock.charge((warm.toNanos * largeRatio).toLong.nanos)
+  }
+
   @volatile private var sink = 0L
 
   /** About `n` units of work. */
@@ -35,7 +66,7 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
   "LinearTime" should "observe the step of a coarse clock and sample well above it" in {
     val clock = quantised(WindowsTick)
     clock.granularity.toNanos shouldBe WindowsTick.toNanos +- 1.milli.toNanos
-    LinearTime.targetFor(clock) should be >= WindowsTick * 5L - 1.milli
+    LinearTime.targetFor(clock) should be >= WindowsTick * 8L - 1.milli
   }
 
   it should "pass a linear workload of microseconds a run on a clock with 15.6 ms ticks" in {
@@ -43,8 +74,8 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
     val clock   = quantised(WindowsTick)
     val scaling = LinearTime.assertLinearOn(clock, "linear", 20000L, 80000L)(work)
     scaling.repeats should be > 1L
-    // calibration read at least the target; a later sample of as many runs can read up to two ticks less
-    scaling.small should be >= LinearTime.targetFor(clock) - clock.granularity * 2L
+    // every small sample the bound was applied to read at least the target
+    scaling.small should be >= LinearTime.targetFor(clock)
     scaling.ratio should be < 8.0
   }
 
@@ -54,6 +85,33 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
       LinearTime.assertLinearOn(clock, "quadratic", 200L, 800L, runs = 2)(n => work(n * n))
     }
     failure.getMessage should include("quadratic: not linear")
+  }
+
+  it should "measure again, never judging a small sample under its target, when samples run cheaper than calibration's" in {
+    // #1745 on Windows: calibrated at five ticks, the small input's samples then read three - 46.88 ms against
+    // 484.38 ms, ratio 10.3 - and the 8x bound applied to a three-tick reading failed linear work. Here the small
+    // input costs 40 ms a run through warm-up and the first calibration samples and 30 ms after; the large input
+    // costs 7x - linear, with more overhead than 4x. Calibrated at five ticks, as before, this stopped at 2 runs a
+    // sample, which then read 3 ticks against 27 - 46.88 ms vs 421.88 ms, ratio 9.0 - and failed. Now a warm
+    // sample under the eight-tick target is measured again at twice the repeats, and passes.
+    val clock = new SimulatedClock(SimulatedTick, start = Duration.Zero)
+    val op    = cooling(clock, cold = 40.millis, warm = 30.millis, coldRuns = 6)(largeRatio = 7.0)
+    val scaling = LinearTime.assertLinearOn(clock, "cheaper after calibration", 1L, 4L)(op)
+    withClue(scaling.toString) {
+      scaling.remeasures should be >= 1
+      scaling.small should be >= LinearTime.targetFor(clock)
+      scaling.ratio should be < 8.0
+    }
+  }
+
+  it should "still fail a quadratic workload whose samples run cheaper than calibration's" in {
+    val clock = new SimulatedClock(SimulatedTick, start = Duration.Zero)
+    val op    = cooling(clock, cold = 40.millis, warm = 30.millis, coldRuns = 6)(largeRatio = 16.0)
+    val failure = intercept[TestFailedException] {
+      LinearTime.assertLinearOn(clock, "quadratic, cheaper after calibration", 1L, 4L)(op)
+    }
+    failure.getMessage should include("quadratic, cheaper after calibration: not linear")
+    failure.getMessage should include("re-measurements")
   }
 
   it should "charge the small and the large input the same overhead a run, so a sub-microsecond op reads its own ratio" in {
@@ -66,13 +124,14 @@ class LinearTimeSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "stop calibrating at the repeat cap on a clock that never moves" in {
+  it should "stop calibrating, and measuring again, at the repeat cap on a clock that never moves" in {
     val frozen = new LinearTime.Clock {
       val name          = "frozen"
       def nanos(): Long = 0L
     }
     val scaling = LinearTime.assertLinearOn(frozen, "frozen", 10L, 40L, maxRepeats = 64)(work)
     scaling.repeats shouldBe 64L
+    scaling.remeasures shouldBe 0
   }
 
   it should "fall back to wall time where the JVM reports no CPU time for the thread, as on a virtual thread" in {
