@@ -2108,6 +2108,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for: never at the `u` of an escape, and right after the escape of a character that ends a word (`'`, `<`,
   `é`, ...), as after the character. The escape itself was read as a key before, so after `'` and `=`
   the key `u0027` held `password=...` as its value and the credential was never read.
+  The value of a key that is not sensitive is not skipped where its `=` is `=`: the text after the escape is
+  read for pairs, so `password=password=...` (a key that starts at the escape of `p`) and
+  `abc=password=...` have the credential redacted, as when the `=` is not read as one. A query read through its
+  escapes ends at the escape of whitespace (` `, `\u000a`, ...) as at whitespace, so its key or value cannot run
+  into the field after it, and a `Basic` token runs over `=` as over its `=` padding.
   An input that holds none of these escapes is redacted exactly as before.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the

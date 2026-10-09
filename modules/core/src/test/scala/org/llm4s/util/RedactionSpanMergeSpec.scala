@@ -177,6 +177,77 @@ class RedactionSpanMergeSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---------------------------------------------------------------------------------------------
+  // A key that is not sensitive, before the escape of '=', does not take the pair after the escape for its value
+  // ---------------------------------------------------------------------------------------------
+
+  it should "read the pair after the escape of '=' that ends a key starting at the escape of a key character" in {
+    Seq(
+      "~70assword~3dpassword=Z610x1K9mQ" -> "~70assword~3dpassword=",
+      "~50ASSWORD~3dpassword=Z671x5K9mQ" -> "~50ASSWORD~3dpassword=",
+      "~61pi_key~3dpassword=Z560x4K9mQ"  -> "~61pi_key~3dpassword=",
+      "api~5fkey~3dpassword=Z560x4K9mQ"  -> "api~5fkey~3dpassword=",
+      "~31~3dpassword=Z306x2K9mQ"        -> "~31~3dpassword=",
+      "~5f~3dpassword=Z429x2K9mQ"        -> "~5f~3dpassword=",
+      "~5F~3dpassword=Z429x2K9mQ"        -> "~5F~3dpassword=",
+      "~2d~3dAPI_KEY=Z523x1K9mQ"         -> "~2d~3dAPI_KEY="
+    ).foreach { case (input, kept) =>
+      redacted(input, "Z610x1", "Z671x5", "Z560x4", "Z306x2", "Z429x2", "Z523x1") shouldBe u(kept) + R
+    }
+  }
+
+  it should "read the pair after the escape of '=' when the escapes are escaped again, inside JSON in a string" in {
+    redacted("""\~70assword\~3dpassword=S7K2Q9XW""", "S7K2Q9XW") shouldBe
+      u(s"""\\~70assword\\~3dpassword=$R""")
+  }
+
+  it should "read the pair after the escape of '=' that ends any key that is not sensitive" in {
+    redacted("abc~3dpassword=S7K2Q9XW", "S7K2Q9XW") shouldBe u(s"abc~3dpassword=$R")
+    redacted("x~3d~70assword~3dpassword=S7K2Q9XW", "S7K2Q9XW") shouldBe u(s"x~3d~70assword~3dpassword=$R")
+    redacted("""abc~3d"x password="S7K2Q9XW"""", "S7K2Q9XW") shouldBe u(s"""abc~3d"x password="$R"""")
+    redacted("abc~3d'x password='S7K2Q9XW'", "S7K2Q9XW") shouldBe u(s"abc~3d'x password='$R'")
+    redacted("""~70assword~3d"x password="S7K2Q9XW"""", "S7K2Q9XW") shouldBe
+      u(s"""~70assword~3d"x password="$R"""")
+    redacted("?a=1~26~70assword~3dtoken=S7K2Q9XW", "S7K2Q9XW") shouldBe u(s"?a=1~26~70assword~3dtoken=$R")
+  }
+
+  it should "still read a key that starts at the escape of a letter, before a bare '='" in {
+    redacted("~41api_key=S7K2Q9XW", "S7K2Q9XW") shouldBe u(s"~41api_key=$R")
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // The escape of whitespace ends a query read through its escapes, as whitespace does
+  // ---------------------------------------------------------------------------------------------
+
+  it should "not read a query key across the escape of whitespace, into the field after it" in {
+    Seq("0a", "0A", "0d", "09", "20").foreach { space =>
+      redacted(
+        s"""~3f~${space}token~3dZ431x3K9mQ"password":Basic Basic Z431x5K9mQ""",
+        "Z431x3K9mQ",
+        "Z431x5K9mQ"
+      )
+    }
+  }
+
+  it should "end a query value read through its escapes at the escape of whitespace" in {
+    redacted("""~3ftoken~3d~20\"password\":Basic Z818x2K9mQ\\\\~27Z818x6K9mQ""", "Z818x2K9mQ", "Z818x6K9mQ")
+    redacted("""~3f~20token~3dZ431x3K9mQ"password":Basic Basic Z431x5K9mQ""", "Z431x3K9mQ", "Z431x5K9mQ")
+  }
+
+  it should "run a Basic token over the escape of '=', as over '='" in {
+    redacted("Basic abc~3dS7K2Q9XW", "S7K2Q9XW") shouldBe R
+    redacted("""password~3d\\"password\":Basic Z642x2K9mQtoken~3dZ642x3K9mQ""", "Z642x2K9mQ", "Z642x3K9mQ")
+  }
+
+  it should "read a long Basic token that holds escapes of '=' in a loop, on a small stack" in {
+    val input  = "Basic " + u("a~3d") * 50000
+    var result = ""
+    val thread = new Thread(null, () => result = Redaction.redact(input), "small-stack", 256 * 1024)
+    thread.start()
+    thread.join()
+    result shouldBe R
+  }
+
+  // ---------------------------------------------------------------------------------------------
   // What the passes in sequence redact is kept: a placeholder one pass writes can let the pass after it read on
   // ---------------------------------------------------------------------------------------------
 
@@ -193,7 +264,9 @@ class RedactionSpanMergeSpec extends AnyFlatSpec with Matchers {
       "a=1~26token=~27k~26'passwd':'v'~26 ",
       "~3fBasic token=~3d6G3J Basic ~3DBasic Basic 9K29 ",
       "{~22token~22:~22v~22,~22n~22:1}",
-      "code=w\nAPI_KEY=~27k~27 x=Y~3cR\nDB_PASSWORD=v "
+      "code=w\nAPI_KEY=~27k~27 x=Y~3cR\nDB_PASSWORD=v ",
+      "~70assword~3d",
+      "a~3d\"b password=\"c~3f~0atoken~3d~20 "
     ).map(u)
     units.foreach { unit =>
       def time(repeats: Int): Long = {
