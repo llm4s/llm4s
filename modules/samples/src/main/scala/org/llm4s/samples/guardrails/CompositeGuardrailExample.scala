@@ -25,6 +25,13 @@ object CompositeGuardrailExample extends App {
 
   logger.info("=== Composite Guardrail Example ===")
 
+  // A composite is a `Guardrail[String]`, not an `InputGuardrail`, and `GuardrailMiddleware` takes input
+  // guardrails: wrap the composite (a cast would throw a ClassCastException when the agent is built).
+  private def asInput(guardrail: Guardrail[String]): InputGuardrail = new InputGuardrail {
+    val name: String                                            = guardrail.name
+    def validate(value: String): org.llm4s.types.Result[String] = guardrail.validate(value)
+  }
+
   // A blocked input is a successful run whose status is Blocked, not a Left; so is any run that
   // did not reach an answer.
   private def blocked(result: org.llm4s.agent.AgentResult): Boolean =
@@ -49,7 +56,7 @@ object CompositeGuardrailExample extends App {
     client <- LLMConnect.getClient(providerCfg)
     agent <- Agent
       .builder("composite-guardrail-1", client)
-      .withMiddleware(GuardrailMiddleware(Seq(safetyChecks.asInstanceOf[InputGuardrail]), Seq.empty))
+      .withMiddleware(GuardrailMiddleware(Seq(asInput(safetyChecks)), Seq.empty))
       .build()
     state <- agent.run("Tell me about Scala programming")
   } yield state
@@ -84,7 +91,7 @@ object CompositeGuardrailExample extends App {
     client <- LLMConnect.getClient(providerCfg)
     agent <- Agent
       .builder("composite-guardrail-2", client)
-      .withMiddleware(GuardrailMiddleware(Seq(languageDetection.asInstanceOf[InputGuardrail]), Seq.empty))
+      .withMiddleware(GuardrailMiddleware(Seq(asInput(languageDetection)), Seq.empty))
       .build()
     state <- agent.run("Tell me about Scala programming")
   } yield state
@@ -117,7 +124,7 @@ object CompositeGuardrailExample extends App {
     client <- LLMConnect.getClient(providerCfg)
     agent <- Agent
       .builder("composite-guardrail-3", client)
-      .withMiddleware(GuardrailMiddleware(Seq(sequentialChecks.asInstanceOf[InputGuardrail]), Seq.empty))
+      .withMiddleware(GuardrailMiddleware(Seq(asInput(sequentialChecks)), Seq.empty))
       .build()
     state <- agent.run("What is functional programming?")
   } yield state

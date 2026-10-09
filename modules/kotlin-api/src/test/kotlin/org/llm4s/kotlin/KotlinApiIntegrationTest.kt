@@ -14,6 +14,7 @@ import org.llm4s.javaapi.JAgent
 import org.llm4s.javaapi.JLlmClient
 import org.llm4s.javaapi.LlmResult
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
+import org.llm4s.llmconnect.config.ProviderTimeouts
 import org.llm4s.model.ModelRegistryConfig
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -29,6 +30,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import org.llm4s.javaapi.Llm4s as JLlm4s
 import scala.collection.immutable.`Map$` as ScalaMap
+import java.util.Optional
 
 private val NoHeaders = ScalaMap.`MODULE$`
 
@@ -146,7 +148,7 @@ class KotlinApiIntegrationTest {
         Llm4s.createDefaultClient().use { client ->
             val result = Llm4s.createAgent(client).run("a question")
 
-            assertEquals(scala.Option.apply("the answer"), result.answer())
+            assertEquals(Optional.of("the answer"), result.answer())
             assertEquals("the answer", result.messages().last().content())
         }
     }
@@ -209,7 +211,7 @@ class KotlinApiIntegrationTest {
 
     private class EndpointFactory(private val baseUrl: String) : ClientFactory {
         override fun createDefault(): LlmResult<JLlmClient> =
-            JLlm4s.createClient(OpenAICompatibleConfig("test-model", baseUrl, scala.Option.apply("test-key"), 8192, 2048, NoHeaders.empty<String, String>(), true))
+            JLlm4s.createClient(OpenAICompatibleConfig("test-model", baseUrl, scala.Option.apply("test-key"), 8192, 2048, NoHeaders.empty<String, String>(), true, ProviderTimeouts.default()))
 
         override fun createAgent(client: JLlmClient): JAgent = JLlm4s.createAgent(client)
     }
