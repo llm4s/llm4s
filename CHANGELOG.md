@@ -2026,6 +2026,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     without one space between) no longer starts an international number; a `+` after any other word still does, so
     `a@b.com+44 20 7946 0958` and `Phone+44 20 7946 0958` are still masked. The Scaladoc now says that a separated
     number longer than 15 digits is masked up to its 15th digit and the rest kept, which is what the pattern does.
+- **`llm4s-rag`: `SentenceChunker` keeps every character of the input** ([#1718](https://github.com/llm4s/llm4s/issues/1718)):
+  it split with `Regex.split` on `([.!?])(\s+)([A-Z])`, which deleted the punctuation, the whitespace and the next
+  sentence's first letter at every boundary and glued the parts back together, so
+  `"Hello world. Next one. Third."` became the single sentence `"Hello worldext onehird."`. Boundaries are now
+  found with lookarounds, so only the whitespace between sentences is matched, and sentences are cut from the input
+  itself. Sentences in a chunk keep the whitespace that separated them (it used to be one space), so with no overlap
+  and no force-split sentence every chunk is a slice of the input. Abbreviations (`Dr.`, `e.g.`) only match as whole
+  words, so `summr.` or `first.` no longer hide a boundary, and a closing quote or bracket after the punctuation stays
+  with its sentence: `He said "Hi." Then` is `He said "Hi."` and `Then`. `ChunkerFactory.default`, `"sentence"` and
+  the semantic fallback all use this chunker. **Migration:** chunk text changes for any input with a sentence
+  boundary, and chunk sizes with it; indexes built with `SentenceChunker` hold corrupted text and should be
+  re-chunked and re-embedded.
 - **`llm4s-openai`: OpenAI embeddings reach `/v1/embeddings` with the default base URL**
   ([#1413](https://github.com/llm4s/llm4s/pull/1413)): the default `llm4s.embeddings.openai.baseUrl` is
   `https://api.openai.com/v1`, the versioned root the chat provider uses too, but `OpenAIEmbeddingProvider`
