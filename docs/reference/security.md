@@ -1,3 +1,10 @@
+---
+layout: page
+title: Security Reference
+parent: Reference
+nav_order: 16
+---
+
 # Security Reference
 
 This document covers the threat model, trust boundaries, known risks, and mitigations for LLM4S.
@@ -71,10 +78,10 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 **Risk:** The built-in `HTTPTool` could be directed to internal network addresses, cloud metadata endpoints (169.254.169.254), or loopback addresses.
 
 **Mitigation (implemented):**
-- `HttpConfig.blockInternalIPs = true` by default; `NetworkSecurity.validateHostname()` resolves DNS and checks resolved IPs against private CIDR ranges (RFC 1918, RFC 5735, RFC 4193) and link-local ranges.
+- `HttpConfig.blockInternalIPs = true` by default; `NetworkSecurity.validateHostname()` resolves DNS and refuses a resolved IP that is loopback, link-local (including `169.254.0.0/16` and `fe80::/10`), IPv4 private (RFC 1918), multicast or unspecified, as well as the cloud metadata address and the IPv4 documentation (RFC 5737), carrier-grade NAT (`100.64.0.0/10`) and benchmarking (`198.18.0.0/15`) ranges. IPv6 unique-local addresses (`fc00::/7`, RFC 4193) are **not** blocked yet ([#1408](https://github.com/llm4s/llm4s/issues/1408), finding F5).
 - `HttpConfig.DefaultBlockedDomains` blocks `localhost`, `127.0.0.1`, `0.0.0.0`, `::1`, `metadata.google.internal`, `metadata.internal`, and `169.254.169.254` by hostname.
 - Redirects are NOT followed by default (`followRedirects = false`). When enabled, each redirect hop is individually re-validated against the SSRF filter.
-- Sensitive headers (`Authorization`, `Cookie`, `Proxy-Authorization`) are stripped on cross-origin redirect hops.
+- Sensitive headers (`Authorization`, `Cookie`, `Proxy-Authorization`) are stripped only on a hop whose host differs from the previous hop's. A same-host hop after the redirect has left the original host sends them again ([#1408](https://github.com/llm4s/llm4s/issues/1408), finding F7), so do not rely on this when `followRedirects` is enabled.
 - Only `GET` and `HEAD` methods are allowed by default (read-only).
 
 **Residual risk:** DNS rebinding attacks (where a hostname resolves to a public IP during validation but a private IP at connection time) are not explicitly mitigated at the Java `HttpURLConnection` level.
@@ -90,13 +97,16 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 
 ### 6. Workspace Sandbox Escapes
 
-**Risk:** `WorkspaceRegexSafetyManager` uses pattern matching to decide which shell commands are allowed inside the containerised workspace. A carefully crafted command string might bypass the regex checks.
+**Risk:** A command run inside the containerised workspace could read or change more than intended, or escape through an allowed program's own options.
 
 **Mitigation (implemented):**
-- The regex-based allowlist restricts commands to a known safe set.
+- `executeCommand` runs an argument vector directly, with no shell. Its first token must be a bare executable name in `WorkspaceSandboxConfig.allowedCommands`: `ReadWriteCommands` (which includes `rm`, `mv`, `cp`, `chmod`) under the permissive profile, which the runner and client use when no profile is set, and `ReadOnlyCommands` for a `WorkspaceSandboxConfig` constructed directly; a path to an executable is refused, and so is any argument containing `&`, `|`, `<`, `>`, `^`, `;`, `` ` ``, `$` or `%` (`WorkspaceAgentInterfaceImpl`).
+- `shellAllowed = false` (the locked profile) refuses every command.
 - The workspace module runs in a Docker container, providing an additional OS-level boundary.
 
-**Recommended practice:** Treat the regex layer as defence-in-depth only. Do not grant the workspace access to credentials or network resources that an escaped process could exploit.
+**Residual risk:** arguments are not checked against the workspace, so an allowed program's own options can still read, write or delete files anywhere in the container, or run programs that are not on the list. Even `ReadOnlyCommands` includes `find` (`-delete`, `-exec`), `git` (`clean`, `-c core.pager=…`), `sort -o` and `uniq <in> <out>` ([#1715](https://github.com/llm4s/llm4s/issues/1715)). On Windows, built-ins such as `echo`, `dir`, `type`, `copy` and `move` run through `cmd.exe /c`, after the forbidden-character check.
+
+**Recommended practice:** Use the locked profile (`shellAllowed = false`) for untrusted input, and treat the allowlist as defence-in-depth only. Do not grant the workspace access to credentials or network resources that an escaped process could exploit.
 
 ### 7. Dependency CVEs
 
@@ -107,7 +117,7 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 - Scala Steward (`.github/workflows/scala-steward.yml`, configured by `.scala-steward.conf`) opens weekly pull requests for outdated sbt dependencies, sbt plugins, sbt itself and the Scala version. Neither tool raises security alerts for sbt dependencies; they keep versions current, which is what keeps published fixes flowing in.
 - The `secret-scan.yml` workflow prevents committed secrets from reaching the repository.
 
-**Recommended practice:** Periodically run `sbt dependencyUpdates` locally and review the OWASP National Vulnerability Database for Scala ecosystem libraries.
+**Recommended practice:** Review the Scala Steward pull requests promptly, run `sbt dependencyUpdates` (from `sbt-dependency-updates`) to see what is behind, and check the National Vulnerability Database (NIST) for the libraries llm4s depends on.
 
 ## Security Checklist for PR Authors
 
