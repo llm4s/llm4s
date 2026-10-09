@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.ZaiConfig
-import org.llm4s.llmconnect.model.{ CompletionOptions, ThinkingBlock }
+import org.llm4s.llmconnect.model.{ CompletionOptions, ReasoningEffort, ThinkingBlock }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
@@ -74,7 +74,8 @@ object ZaiClient {
  * model's reasoning is its `reasoning_content`, read as thinking and sent back unchanged on the
  * assistant turn, as Z.ai's thinking-mode guide asks (preserved thinking, and tool calls). A
  * request that replays it also sets `thinking.clear_thinking` to `false`: the standard endpoint
- * otherwise drops earlier turns' `reasoning_content` (see [[addReasoning]]).
+ * otherwise drops earlier turns' `reasoning_content`. `CompletionOptions.reasoning` goes out as
+ * `thinking.type` or `reasoning_effort`, whichever the GLM model accepts (see [[addReasoning]]).
  */
 private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
   override val headers: Seq[(String, String)] = Seq("User-Agent" -> "llm4s-coding-assistant/1.0")
@@ -100,20 +101,69 @@ private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
     ThinkingBlock.text(thinking).foreach(text => message("reasoning_content") = text)
 
   /**
-   * Sets `thinking.clear_thinking` to `false` when an assistant turn in `body` carries
-   * `reasoning_content`, keeping any other field of an existing `thinking` object. Preserved
-   * thinking is disabled by default on Z.ai's standard endpoint (`clear_thinking` defaults to
-   * `true`, removing earlier turns' `reasoning_content`) and enabled on the Coding Plan endpoint;
-   * `false` is correct on both. `thinking.type` is left unset, so whether the model thinks stays
-   * its default. A request replaying no reasoning gets no `thinking` field.
+   * Maps `CompletionOptions.reasoning` onto what the configured GLM model accepts, then sets
+   * `thinking.clear_thinking` to `false` when an assistant turn in `body` carries
+   * `reasoning_content`, keeping any other field of the `thinking` object.
+   *
+   * The reasoning mapping follows Z.ai's chat-completion reference and thinking-mode guide, in
+   * which thinking is on by default and `reasoning_effort`, where accepted, defaults to `max`:
+   *  - GLM-5.3 and its Flash variants always think, and reject `thinking.type: disabled`. They
+   *    accept `reasoning_effort` `low`, `high` or `max` only. `None` and `Low` send `low`, the least
+   *    they allow, which is Z.ai's own advice for a caller that disabled thinking; `Medium` and
+   *    `High` send `high`.
+   *  - GLM-5.2 accepts every `reasoning_effort` level (`none` skips thinking), so the effort's name
+   *    is sent.
+   *  - GLM-5.1, GLM-5, GLM-4.7, GLM-4.6 and GLM-4.5 (with their variants) document no
+   *    `reasoning_effort`. `None` sends `thinking.type: disabled`; the other levels send nothing and
+   *    leave the model's default.
+   *  - Any other model is sent nothing: `thinking` is documented only for GLM-4.5 and later.
+   *
+   * With `reasoning` unset nothing is sent for it, as before.
+   *
+   * Preserved thinking is disabled by default on Z.ai's standard endpoint (`clear_thinking`
+   * defaults to `true`, removing earlier turns' `reasoning_content`) and enabled on the Coding Plan
+   * endpoint; `false` is correct on both. A request that neither replays reasoning nor disables
+   * thinking gets no `thinking` field.
    */
-  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): Unit =
-    if (replaysReasoning(body)) {
-      // Nothing sets `thinking` before this today; merging into an existing object is for a future
-      // mapping of `CompletionOptions.reasoning` to `thinking.type`, which must survive this.
-      val thinking = body.value.get("thinking").flatMap(_.objOpt).fold(ujson.Obj())(ujson.Obj.from(_))
-      thinking("clear_thinking") = false
-      body("thinking") = thinking
+  override def addReasoning(body: ujson.Obj, model: String, options: CompletionOptions): Unit = {
+    options.reasoning.foreach { effort =>
+      ZaiDialect.family(model) match {
+        case ZaiDialect.Family.ForcedThinking =>
+          body("reasoning_effort") = effort match {
+            case ReasoningEffort.None | ReasoningEffort.Low    => "low"
+            case ReasoningEffort.Medium | ReasoningEffort.High => "high"
+          }
+        case ZaiDialect.Family.Effort => body("reasoning_effort") = effort.name
+        case ZaiDialect.Family.Toggle =>
+          if (effort == ReasoningEffort.None) mergeThinking(body, "type", ujson.Str("disabled"))
+        case ZaiDialect.Family.Unknown => ()
+      }
+    }
+    if (replaysReasoning(body)) mergeThinking(body, "clear_thinking", ujson.False)
+  }
+
+  /** Sets one field of the request's `thinking` object, creating it if absent and keeping its other fields. */
+  private def mergeThinking(body: ujson.Obj, field: String, value: ujson.Value): Unit = {
+    val thinking = body.value.get("thinking").flatMap(_.objOpt).fold(ujson.Obj())(ujson.Obj.from(_))
+    thinking(field) = value
+    body("thinking") = thinking
+  }
+
+  /** How a GLM model takes a reasoning setting. */
+  private[provider] enum Family:
+    case ForcedThinking, Effort, Toggle, Unknown
+
+  private val ForcedThinkingModel = """glm-5\.3(?:-.*)?""".r
+  private val EffortModel         = """glm-5\.2(?:-.*)?""".r
+  private val ToggleModel         = """glm-(?:5|5\.1|4\.[567]v?)(?:-.*)?""".r
+
+  /** The family of a configured model id, matched case-insensitively. */
+  private[provider] def family(model: String): Family =
+    model.toLowerCase match {
+      case ForcedThinkingModel() => Family.ForcedThinking
+      case EffortModel()         => Family.Effort
+      case ToggleModel()         => Family.Toggle
+      case _                     => Family.Unknown
     }
 
   private def replaysReasoning(body: ujson.Obj): Boolean =
