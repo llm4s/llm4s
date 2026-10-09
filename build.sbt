@@ -1667,7 +1667,7 @@ lazy val bom = (project in file("modules/bom"))
   .settings(Bom.settings)
   .settings(
     // Named here, not in Bom.settings: scripts/check-tier-drift.sh reads project names from this file.
-    name := "llm4s-bom",
+    name                 := "llm4s-bom",
     mimaFailOnNoPrevious := false,
     makePom := {
       val pom      = makePom.value
