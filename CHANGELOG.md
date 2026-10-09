@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
   and its spec checks update order, the barrier, step boundaries and cancellation with no API key.
+- **Suspended agent turns from Java and Kotlin** ([#1392](https://github.com/llm4s/llm4s/issues/1392)):
+  `llm4s-java-api`'s `JAgent.pending(result)` returns a `java.util.List<PendingInterrupt>`. For a
+  `Suspended` turn it lists the approvals, then the questions. For any other turn the list is empty.
+  Each `PendingInterrupt` has `id()`, `kind()` (the Java enum `InterruptKind`, `APPROVAL` or `QUESTION`),
+  `toolName()`, `argumentsJson()`, and `reason()` or `questionJson()` as an `Optional<String>`. No Scala
+  or ujson type is involved. `JAgent.resume(threadId, List<Answer>)` and `JAgent.recover(threadId)` are
+  blocking versions of `streamResume` and `streamRecover`. They return `LlmResult<JAgentResult>` (#1393); an
+  interrupted caller gets a `CancelledError` and the turn is cancelled, leaving the thread for `recover`
+  (#1330). A partial resume returns `Suspended` again, with the unanswered
+  items still pending. The Kotlin API adds `AgentKt.pending(result)` and the `suspend` functions
+  `resume(threadId, answers)` and `recover(threadId)`. These run the turn as the streams do, so
+  cancelling the caller cancels the turn and leaves the thread for `recover`. The Java sample approves
+  what a suspended turn waits for. See
+  [Suspended turns from Java and Kotlin](docs/guide/agents/index.md#suspended-turns-from-java-and-kotlin).
 - **Thinking stays in the conversation and goes back to the provider** ([#1381](https://github.com/llm4s/llm4s/issues/1381)):
   `AssistantMessage` carries the model's reasoning as `thinking: Seq[ThinkingBlock]` - `ThinkingBlock.Text(text,
   signature)`, `ThinkingBlock.Redacted(data)` or `ThinkingBlock.Opaque(provider, data)` (provider-specific replay
@@ -287,7 +301,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over the purpose. `RAG` and `RAGPipeline` embed the question they answer as a query and what they index as
   documents, the memory stores embed the text they search with as a query (`EmbeddingService.embedQuery`,
   which delegates to `embed` by default, so existing implementations are unaffected), and `CachedEmbeddingClient`
-  keeps a query and a document with the same text in separate cache entries (document keys are unchanged). **Behaviour changes:** Voyage now sends `input_type` (`document` by
+  keeps a query and a document with the same text in separate cache entries. **Behaviour changes:** Voyage now sends `input_type` (`document` by
   default; it sent none before), so re-index for the best retrieval quality - older document vectors still
   work; and a Jina or Cohere provider built without an explicit task now follows each request's purpose
   instead of always sending the document type. `EmbeddingRequest` becomes a growth-prone type (private
@@ -502,6 +516,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   testing. Its snippets after the first section are compiled and run by `ErrorHandlingGuideSpec`. The Basic Usage
   guide listed error types that do not exist (`ProviderConnectionError`, `InvalidApiKeyError`, ...) and
   called `LLMError` sealed; it now shows the real ones and links to the guide.
+- **Caching guide** ([#1297](https://github.com/llm4s/llm4s/issues/1297)): `docs/guide/caching.md` explains the embedding
+  cache (`CachedEmbeddingClient`, `InMemoryEmbeddingCache`, custom keys and backends) and the semantic completion cache
+  (`CachingLLMClient`, `CacheConfig`): what a hit needs, what the key and the prompt contain, TTL, eviction, the cases
+  that bypass the cache, what it reports through tracing, and its limits. Its snippets are compiled and run by
+  `CachingGuideSpec`. The caching changes it brought with it are listed under Changed.
 - **Structured output guide** ([#1310](https://github.com/llm4s/llm4s/issues/1310)):
   `docs/guide/structured-output.md` explains `LLMClient.completeStructured[A]`: a minimal example, how the
   reply is recovered from a fence or prose, that the schema is derived with `strict = true` and so lists every
@@ -758,6 +777,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was waiting on instead of leaving it running, returning once that turn has ended (within 5 seconds), so `recover`
   can follow at once; a caller already interrupted starts no turn. Cancelling a graph run therefore cancels the
   agent turns its nodes are waiting on. Use `start`/`startRecover`/`startResume` and await the `AgentRun` to keep a turn past an interrupt.
+  **Java-visible:** `llm4s-java-api`'s blocking `JAgent.run`, `continueConversation`, `resume` and `recover` go
+  through these calls, so an interrupted Java caller now cancels its turn too (they used to stop only the wait and
+  leave the turn running); Java and Kotlin now behave the same. `AgentStream.cancel()` still cancels a streamed turn
+  without interrupting any thread.
+- **Java and Kotlin agent results use Java types only** ([#1393](https://github.com/llm4s/llm4s/issues/1393),
+  BREAKING, `llm4s-java-api`, Kotlin API). Every agent turn the Java facade returns - `JAgent.run`,
+  `continueConversation`, `resume`, `recover`, `AgentStream.await()`, `AgentStreamListener.onComplete` - is now a
+  `JAgentResult`, not the Scala `org.llm4s.agent.AgentResult`. `answer()` is an `Optional<String>`; `threadId()`,
+  `runId()` and `activeAgent()` are `String`s; `messages()` is an unmodifiable `java.util.List<JMessage>` (`role()`,
+  the Java enum `JMessageRole`, `content()`, `toolCalls()` as `JToolCall`s with `argumentsJson()`, `toolCallId()`,
+  `thinking()`); `usage()` is a `JUsageSummary` with `long` counts, a `java.math.BigDecimal` cost and a sorted
+  `java.util.Map<String, JModelUsage>` per model. `status()` is a `JAgentStatus`: `kind()` is the Java enum
+  `AgentStatusKind` (`COMPLETED`, `BLOCKED`, `STEP_LIMIT_REACHED`, `SUSPENDED`) for a `switch` or a Kotlin `when`, with
+  `answer()`, `guardrail()` and `reason()` as `Optional<String>` and `pending()` the `java.util.List<PendingInterrupt>`
+  that `JAgent.pending` (#1392) returned - built by the same `PendingInterrupt` factory, so `JAgent.pending(result)`
+  is now a shortcut for `result.status().pending()`. `JAgent.continueConversation`, `forget` and `pending`, and the
+  Kotlin `AgentKt` functions and `AgentStreamItem.Done`, take or carry a `JAgentResult`. `JAgent`'s thread-id
+  parameters are declared `String` (they already were in bytecode, so Java and Kotlin callers see no change).
+  `JavaInteropSpec` now walks every type reachable from a value the facade hands a caller and fails on any
+  `scala.*` or `ujson.*` type; three types are named boundaries it does not enter: `LLMError` behind
+  `LlmException.error()` ([#1487](https://github.com/llm4s/llm4s/issues/1487)), the `Conversation` that
+  `ConversationBuilder.build()` hands back to `complete` ([#1488](https://github.com/llm4s/llm4s/issues/1488)), and
+  the listener's `StreamEvent`s, read with `StreamEvents.decode`. The client facade's results were already Java
+  types (`LlmResult<String>`, `JLlmClient`, `JAgent`, `AgentStream`). No shims (pre-0.5.0). **Migration:** replace
+  `import org.llm4s.agent.AgentResult` with `org.llm4s.javaapi.JAgentResult`; `r.answer().get()` on a
+  `scala.Option` becomes `r.answer().orElseThrow()` (or `orElse`), `Option.apply(x)` comparisons become
+  `Optional.of(x)`; `r.status() instanceof AgentStatus.Completed` (or `getClass().getSimpleName()`) becomes
+  `r.status().kind() == AgentStatusKind.COMPLETED`, and `Blocked`'s fields are `status().guardrail()` / `reason()`;
+  iterate `r.messages()` directly instead of converting a Scala `Vector`, and branch on `m.role()` instead of
+  `instanceof ToolMessage`; read `usage().inputTokens()` and friends as `long`s and `totalCost()` as a
+  `BigDecimal`. Scala code that needs the Scala `AgentResult` uses `Agent` directly, not the Java facade. Scala callers
+  of `JAgent.stream`, `streamResume`, `resume`, `recover` and `streamRecover` that passed a `ThreadId` now pass its
+  `.value` (a `String`). `argumentsJson()` (on `JToolCall` and `PendingInterrupt`) is the arguments as JSON text: an
+  object as a model sends them, but a call built with a `ujson.Str` renders as a JSON string literal. A `JMessage`'s
+  `content()` is never `null` (a Scala message's `null` text reads as empty), and a `null` answer, guardrail, reason or
+  tool-call id reads as an empty `Optional`. A turn's result that does not convert fails the stream through `onError`
+  and `await()`. `JUsageSummary` and `JModelUsage` compare costs by numeric value (`1.0` equals `1.00`) and print them
+  in plain notation. The `J*` types are not `Serializable`, and their `toString` prints full content, as the Scala
+  types do.
+- **Embedding cache keys are unambiguous; the completion cache refuses a NaN threshold and serves an entry exactly
+  `ttl` old** ([#1297](https://github.com/llm4s/llm4s/issues/1297)). **Breaking:** `CacheKeyGenerator.sha256(parts*)`
+  length-prefixes every part instead of joining text and model with `:` (under which the text `a:b` with model `c`
+  and the text `a` with model `b:c` shared a key), and `CachedEmbeddingClient`'s key function takes
+  `(text, modelName, purpose: InputPurpose)` instead of a `#query`-suffixed model name (under which a query for model
+  `m` and a document for a model named `m#query` shared a key); the default is `CacheKeyGenerator.embeddingKey`.
+  `sha256` also hashes every UTF-16 code unit of the parts rather than their UTF-8 bytes, under which an isolated
+  surrogate (`"\uD800"`, `"\uD801"`) was replaced by `?` and distinct strings shared a key.
+  **Migration:** a custom key function gains the `InputPurpose` parameter and should include it in the key; vectors
+  stored under the old keys in a persistent `EmbeddingCache` are no longer found and are re-embedded on first use.
+  `CacheConfig.create` now refuses a `NaN` similarity threshold, which it accepted before (every similarity check
+  then failed, so nothing was ever served from the cache), and `CachingLLMClient` serves an entry
+  exactly `ttl` old instead of counting it as expired, matching `InMemoryEmbeddingCache`.
 - **`AssistantMessage` is a growth-prone data type; `Completion.thinking` comes from the message**
   ([#1381](https://github.com/llm4s/llm4s/issues/1381)): `AssistantMessage` is `final case class AssistantMessage
   private (contentOpt, toolCalls, thinking)` with a companion `apply` (named arguments, defaults as before, plus the
@@ -1919,6 +1990,169 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
+  ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, read a query parameter as `[?&]`, a key of any characters up to the next `=`, and a value up
+  to the next `&` or whitespace. A `?` in prose, such as a question in a chat message, started a "parameter" whose
+  key ran across quotes, braces and lines to the next `=` anywhere later in the document. When that span held a
+  sensitive word, its "value" replaced the closing quote and the fields after it. The field passes then read the
+  mangled text out of step and left credentials readable: in
+  `{"messages": [{"content": "Is this right?"}], "credentials": {"dsn": "postgres://u@h/db?sslmode=require",
+  "password": "hunter2}SECRET", "keys": ["SECRETBB"]}}` the tail of `password` and the whole of `keys` were
+  written in the clear. A key is now one run of the characters a query key can hold: no whitespace, quote, `?`,
+  `&` or `=`. A value ends at `&`, at whitespace, or at the quote that ends the string the URL sits in, which is kept
+  with the backslashes that escape it. RFC 3986 allows `'` unencoded in a query, so a run of `'` followed by a
+  letter, a digit, one of `._~%+/-` or one of `!$*(@=` is part of the value (`?key=ab'cd`, `pa'(ss)w0rd`,
+  `Xk9'!mQ2`, `ab''cd`, and `''Xk9` at its start); a `"` is part of it only before a letter, a digit or one of
+  `._~%+/-`. One exception: a value that holds `'` before `,`, `)`, `;` or `:` (`?token=ab',cd`) is redacted only
+  up to that quote, and the text after it is written, because such a quote cannot be told from the one that ends a
+  string, as in `fetch('...?token=ab')`. A quoted value (`?key='abc'`, or `\"abc\"` in JSON inside a string) is redacted inside its quotes, and an empty
+  value is left as it is. The value of a parameter that is kept is searched too, so `?next=/cb?token=...`, which
+  was written in the clear, is redacted. The sensitive parameter names are unchanged; `?api_key=`, `&token=`,
+  `?access_token=` and `?filter[api_key]=` are still redacted, and redacted JSON keeps its structure and still
+  parses. No signature changes.
+- **Provider response bodies are redacted before they are truncated for a log line or an error**
+  ([#1674](https://github.com/llm4s/llm4s/issues/1674)). Many clients put a provider's error body into a log line
+  or an error message through `Redaction.truncateForLog` alone, or not even that, so a body that echoed a request
+  header, an API key or a token - `Authorization: Bearer ...`, `"api_key": "..."`, `?key=AIza...` - was written in
+  the clear. Every such site now goes through one internal helper that redacts the whole text and then truncates
+  it, as Cohere's and Jina's embedding providers already did: the OpenAI, Anthropic and Gemini vision clients, the
+  OpenAI (DALL-E) image client's error message, raw body or JSON `message` alike, and the Stable Diffusion and
+  Hugging Face image clients (`llm4s-image`); the Streamable HTTP and SSE MCP transports' HTTP error bodies, the
+  message of a JSON-RPC error from any transport, and the DEBUG line for an unrecognised SSE line, now built only
+  when DEBUG is on (`llm4s-mcp`); the Langfuse batch
+  sender's and tracer's error-body log lines and the per-event rejection summary (`llm4s-observability`); the
+  Ollama, OpenAI and Voyage embedding providers; Cohere's reranker and Qdrant's error messages (`llm4s-rag`);
+  `GraphJsonParser`'s preview of a reply it could not parse (`llm4s-knowledgegraph`); Vertex AI's token
+  refresh and JWT exchange errors (`llm4s-gemini`); watsonx's IAM exchange error, which removed only the
+  configured key; the grounding, context-relevance and every `LLMGuardrail` judge's quote of a reply they could not
+  parse, cut to 200 characters (`llm4s-agent`); and `HttpResponse.ensureSuccess`'s `ServiceError`, which the model
+  listers use (`llm4s-core`). An SDK exception's message carries the response body too (anthropic-java writes
+  `401: <body>`), so the same applies to the messages taken from one: Anthropic's `AuthenticationError` and
+  `ValidationError` on both paths (`llm4s-anthropic`); every error Bedrock maps from an AWS exception
+  (`llm4s-bedrock`); and `DefaultErrorMapper`'s `AuthenticationError` and `UnknownError`, which every client and
+  `Safety.safely`, `Safety.fromTry`, `toResult` and `toLLMError` fall back on (`llm4s-core`). The `UnknownError`
+  keeps the original exception as its cause, unredacted: a logger that prints the cause prints its message.
+  `OllamaClient`'s "does not support tools" error cut the server's decoded message to 200 characters and never
+  redacted it; it now redacts the whole message first. Redacting before the cut matters: a key that straddles the
+  cut point leaves a fragment too short for its pattern to recognise, which the old order let through. A truncated
+  body's `original length` now counts the redacted text. No public signature changes.
+- **`DefaultErrorMapper` classifies 401 and 429 only when the message names an HTTP status, and keeps the
+  cause otherwise** ([#1668](https://github.com/llm4s/llm4s/issues/1668)). The mapper behind `Safety.safely`,
+  `Safety.fromTry`, `toResult` and `toLLMError` turned any exception whose message *contained* `401` into
+  `AuthenticationError("unknown", "Authentication failed")` and `429` into `RateLimitError("unknown")`, dropping
+  the exception. So `Index 4012 out of bounds for length 10`, `request 1700401234 timed out`, `port 14290` or
+  `wrote 1429 tokens` became a non-retryable "your credentials are wrong", or a retryable rate limit that retry
+  and circuit-breaker logic would repeat on a deterministic bug, with the stack trace lost. Behaviour change:
+  the mapper now classifies a status only at a word boundary in an HTTP context - after `HTTP`, `status`,
+  `status code`, `http status`, `error code` or `response code`, optionally as a quoted JSON key
+  (`HTTP 401`, `HTTP/1.1 429`, `Status Code: 429`, `statusCode=401`, `"status": 429`, `http_status=401`),
+  before its reason phrase (`401 Unauthorized`, `Error: 429 - Too Many Requests`), or leading the message
+  as `openai-java` and `anthropic-java` write their service exceptions (`401: <body>`, also behind up to
+  eight wrapping exceptions' `ClassName: `). Everything else is an `UnknownError` carrying the exception
+  as its cause. Known false positive: that SDK shape has no other HTTP marker, so any message that
+  *starts* with `401: ` or `429: ` is still classified. The mapper scans only a message's first 4 KiB and
+  last 1 KiB (a status leads the message, or, from the AWS SDK, ends it), with patterns that run in
+  linear time, so an exception carrying a large response body is cheap to map. An `AuthenticationError` from the mapper now has code `401` and keeps the
+  original message, redacted (`Authentication failed for unknown: HTTP 401 Unauthorized`), where it said
+  only `Authentication failed`; neither it nor `RateLimitError` has a field for a `Throwable`, so a
+  classified exception's stack trace is still not kept. No public signature changes.
+- **Kotlin: cancelling `AgentKt.run` or `continueConversation` cancels the turn, as `resume` and `recover` do**
+  ([#1663](https://github.com/llm4s/llm4s/issues/1663), Kotlin API). `run` and `continueConversation` wrapped the
+  blocking `JAgent` call in `runInterruptible`, so cancelling the caller - a cancelled scope, `withTimeout` -
+  interrupted only the wait: the call threw `CancellationException`, but the turn kept running in the background,
+  calling the model, and its conversation thread stayed busy, so a `recover` or a new turn on it failed with
+  `ThreadBusy` until the turn finished. Both now run the turn as `stream` does (`run` on a new thread with a random
+  id, as `JAgent.run` does; `continueConversation` on `previous.threadId()`), its events discarded: cancelling the
+  caller cancels the turn and returns once it has ended, leaving the thread for `recover`; if the turn had already
+  completed when the cancellation arrived, its result is committed to the thread and `recover` throws `LLMException`
+  (no incomplete execution). Every `AgentKt` suspend function that runs a turn now behaves the same way, and
+  collects the turn's discarded events on `Dispatchers.IO`, not the caller's dispatcher (`Dispatchers.Main`). Results and failures are otherwise unchanged - the same
+  `JAgentResult`, and `LLMException` with the same message and cause. No public signature changes; Java's
+  blocking `JAgent` methods are unchanged.
+- **Kotlin: a stream whose listener fails fatally ends the `AgentKt` call instead of suspending it forever**
+  ([#1671](https://github.com/llm4s/llm4s/issues/1671), Kotlin API). `stream`, `streamResume`, `streamRecover` -
+  and the `run`, `continueConversation`, `resume` and `recover` built on them - closed their channel only from
+  the Java facade listener's `onComplete` or `onError`. When delivery dies of a fatal error (one `Safety` does not
+  capture: a `VirtualMachineError` such as `OutOfMemoryError` or `StackOverflowError`, a `LinkageError`),
+  `AgentStream` skips that callback and `await()` reports "the stream's listener failed fatally", but nothing
+  closed the channel, so the collector suspended until something outside cancelled it. The Kotlin side now
+  closes the channel from `AgentStream.await()`'s outcome, on a virtual thread, once delivery ends; the call
+  throws `LLMException` with the facade's report (the fatal error itself ended the facade's delivery thread and
+  goes to its uncaught-exception handler). A normal end is unchanged. No public signature changes; the Java
+  facade is unchanged.
+- **`llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama`: a deep or malformed model listing is a `Left`, not an
+  exception** ([#1660](https://github.com/llm4s/llm4s/issues/1660)). `AnthropicModelLister`,
+  `GeminiModelLister` and `OllamaModelLister` read the listing with the unbounded `HttpResponse.toJson` and
+  then throwing accessors - `json("data")` / `json("models")` and `.arr` inside a `Try`, `.obj` on each entry
+  and on the page outside one. `ujson.Value.InvalidData`'s message renders the value recursively, so a
+  listing 10,000 levels deep - a top-level array, or one under `data` / `models` or as an entry of it -
+  overflowed a 1 MB thread stack with a `StackOverflowError`, which `Try` does not catch; and a two-level
+  `{"data":[[1]]}` or `{"models":["x"]}` threw `InvalidData` out of `listModels`. Each lister now reads the
+  body through the depth-bounded `BoundedJson`, as `ProviderModelListers` does since #1658, and uses `Option`
+  accessors only: a body that is not JSON, nested more than 512 levels deep, not an object, or without a
+  `data` / `models` array is a `Left`, and an entry that is not an object is skipped, as an entry without an
+  `id` / `name` always was. Ordinary listings, pagination and the `has_more` / `last_id` checks are
+  unchanged. No public signature changes.
+- **Redaction keeps the text after a merely mentioned credential key readable**
+  ([#1654](https://github.com/llm4s/llm4s/issues/1654), part of
+  [#1657](https://github.com/llm4s/llm4s/issues/1657)): three over-redactions in `Redaction.redact` and
+  `redactForLogging`, and so the exchange-log sink; none exposed a credential. An unclosed `'password': '`
+  inside a JSON string (`{"content": "use 'password': ' carefully", "model": "gpt-4o"}`) ran to the next `'`
+  or the end of the input and took every field after the string; a single-quoted value (and a `key='`
+  assignment) inside a double-quoted string now also ends at a `"` that ends that string - one followed, past
+  whitespace, by the end of the input, by a `,` and the next `"key":`, or by a `}` or `]` that is itself followed
+  by the end of the input, another `}` or `]`, or a `,` before a `"`, `{` or `[` - so the output is
+  `{"content": "use 'password': '[REDACTED]", "model": "gpt-4o"}`. It ends there only where no `'` that could
+  close the value (any `'` but the apostrophe between two letters or digits, as in `it's`) follows anywhere in the
+  input, where that `"` is not the first character of the value, and where the passes before have replaced no
+  `'`; otherwise it runs to the next `'` or the end of the input, as on main, so a credential holding a `"`
+  (`'Qx"]]9secret'`, `'Qx", "k": 9secret'`, or `'Bearer abc"]}secret'`, whose token the header pattern replaces
+  first) is still redacted whole. A `'token': [` mentioned inside a JSON string took the apostrophe of `it's` for a leaf
+  that the string's end closed (`... Thanks, it'[REDACTED]"}`); the apostrophe of a word of prose there - between
+  two letters, in a word after whitespace - is now kept when only the string's end would close it and no `\"`
+  (JSON escaped in the string) comes before that end, while a quote after a bracket, a comma, a space or a Python
+  prefix (`b'`, `rb'`) still opens a leaf. And a bare word after a
+  backslash under a credential key (`{"token": [\a1, "x"], "password": "..."}`) had its replacement quote written
+  straight after the backslash, which read as `\"` and lost the rest of the document; the escaped character is now
+  kept, as before #1647, and the rest of the word replaced. Each of these redacts to the same output when redacted
+  again. Left by decision: outside any string, the bare words after an unclosed `'token': [` are still replaced to
+  the end of the input (`note: see 'token': [ for details` -> `note: see 'token': [ '[REDACTED]' '[REDACTED]'`),
+  since they read as the leaves of a YAML flow sequence or a cut-off dict and nothing tells them from prose; and
+  redacting twice still changes some inputs with unbalanced quotes, which the `redact` Scaladoc now says, where
+  `redactPairs` had claimed redacting twice gives the same result. Two known trade-offs, pinned by tests: a
+  *truncated* input - an unclosed single-quoted value inside a raw (unescaped) double-quoted string, holding a `"`
+  followed by what follows a string's end, with no `'` that could close it after it (`msg="{'password': 'Qx"]]9secretPW`
+  cut off) - shows the part after that `"` (`'[REDACTED]"]]9secretPW`), where main hid it by running to the end of
+  the input; every llm4s call site (`redactForLogging`, the exchange-log sink, Cohere's and Jina's error bodies, the
+  MCP payload preview) redacts the full text before truncating it, and a caller must do the same. And a closing `'`
+  with a letter or digit on both sides (`'Qx"]]9SECRETPW'it"`) is read as an apostrophe, so it does not close the
+  value and the same applies. No signature changes.
+- **Redaction keeps a `$` or `\` in a query parameter, and writes a placeholder as it is**
+  ([#1655](https://github.com/llm4s/llm4s/issues/1655)): `Redaction.redact` and `redactForLogging`, and so the
+  exchange-log sink, returned a query parameter to `Regex.replaceAllIn` without `Regex.quoteReplacement`, so
+  a `$` or `\` in it was read as a group reference or an escape. `?q=\` threw `IllegalArgumentException`,
+  `?q=$5` threw `IndexOutOfBoundsException`, `?api$key=abc` threw `IllegalArgumentException` (illegal group
+  reference), `?q=$1` became `?q=?` and `?path=C:\dir` became `?path=C:dir`. A caller's `placeholder` reached
+  the Authorization, Bearer, Basic and API-key replacements unquoted too, so a placeholder of `$0` wrote back
+  the credential it replaced. Every replacement in `Redaction` and `SecretPatterns.redactAll` /
+  `redactAllWithPlaceholder` is now quoted: the parameters are kept exactly, a sensitive value is still
+  redacted, and the placeholder is written literally. No signature changes.
+- **A deeply nested provider error body falls back to the default message instead of overflowing the stack**
+  ([#1658](https://github.com/llm4s/llm4s/issues/1658)). `HttpErrorMapper` read a non-2xx body with
+  `ujson.read` and then `.obj`; parsing is iterative, but `.obj` on a top-level array throws
+  `ujson.Value.InvalidData`, whose message renders the whole value recursively, so an error body of 10,000
+  nested `[` (about 20 KB) overflowed a 1 MB thread stack - a `StackOverflowError`, which `Try` does not
+  catch, out of every provider's non-2xx path, including `OpenAICompatibleClient`'s `complete` and
+  `streamComplete` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and the generic `openai-compatible`
+  provider). The body is now read through the depth-bounded `BoundedJson` with `Option` accessors only, so
+  a body that is not JSON, not an object, or nested more than 512 levels deep yields `"<provider> API error
+  (HTTP <status>)"`; ordinary `{"message": ...}`, `{"error": {"message": ...}}` and `{"error": "..."}`
+  bodies read as before. The same hazard is closed in `llm4s-openai-compatible`: `OpenAICompatibleClient`
+  refuses a 2xx reply or a stream event nested more than 512 levels deep with a `Left`, as it does
+  malformed JSON, and `ProviderModelListers.openAICompatible` reads the listing through `BoundedJson` and
+  returns `Missing or invalid models payload` for a body that is not an object with a `data` array. No
+  public signature changes.
 - **`llm4s-bedrock`: a `toolUse` input nested more than 512 levels deep is refused as a malformed tool
   call, never converted or sent back** ([#1648](https://github.com/llm4s/llm4s/issues/1648)). #1630
   ([#1562](https://github.com/llm4s/llm4s/issues/1562)) bounded every place model-written JSON is parsed
@@ -1955,6 +2189,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were down. A cancellation is a fact about the interrupted thread, not the provider: `probeNow` now returns it apart
   from a provider outcome, it is reported to that caller only, and the next check probes again. A failed or timed-out
   probe is still cached. Found during review of #1640.
+- **Redaction covers a credential whose value is an array or an object**
+  ([#1576](https://github.com/llm4s/llm4s/issues/1576)): `Redaction.redact` and `redactForLogging` (and so the
+  exchange-log file sink) replaced only a string or a number under a sensitive key, so `{"token": ["abc"]}`
+  and `{"credentials": {"user": "u", "pass": "p"}}` were written in the clear. Every string and number leaf
+  under such a key is now replaced, however deep, in plain JSON and in JSON that sits inside a string; the
+  brackets, the keys of nested objects, `true`, `false` and `null` are kept, so the output still parses and
+  keeps its shape, and a payload cut off inside the value is redacted to the end. A number under a sensitive
+  key of JSON inside a string (`\"password\": 12345`) is redacted too. Keys that merely contain a credential
+  word (`max_tokens`, `messages`) still keep their arrays. The scanner counts brackets on an explicit stack
+  and visits each character once, so a megabyte-long array or one nested a hundred thousand levels deep
+  redacts on a small thread stack. Twice-escaped JSON and a secret that is not under any key remain
+  unredacted by decision; the exchange-logging guide says so.
+- **A too-deep refusal is recognised structurally, not by equality with a freshly built error**
+  ([#1651](https://github.com/llm4s/llm4s/issues/1651), found in review of #1644). The Ollama, Anthropic,
+  Gemini and Vertex AI clients told a document `BoundedJson` refused as too deep from one it could not parse
+  with `case Left(e) if e == BoundedJson.tooDeep()`, which holds only for the error of the default limit with
+  its exact wording: a read with another limit, or a reworded message, would have fallen through to each
+  site's generic arm - for the Gemini and Vertex AI streams, the arm that skips the chunk, which is the
+  silent drop #1643 fixed. The four sites now match `BoundedJson.TooDeep()`, an extractor that recognises
+  the error by the prefix `tooDeep` writes, whatever limit follows it; `BoundedJson` is `private[llm4s]`,
+  so no public signature changes. The Gemini and Vertex AI warning now reads `a chunk is nested more than
+  512 levels deep` rather than quoting the error's `Invalid json: ` message.
+- **Redaction covers a single-quoted key with an array or an object value**
+  ([#1647](https://github.com/llm4s/llm4s/issues/1647)): a single-quoted string value had been redacted
+  (`{'api_key': 'x'}`), but `{'token': ['abc']}` and `{'credentials': {'user': 'u', 'pass': 'p'}}` - a
+  Python dict or a JavaScript literal in a prompt - were written in the clear, and a single-quoted leaf under
+  a double-quoted key, `{"token": ['abc123']}`, was mangled rather than redacted (`['abc"[REDACTED]"']`,
+  the digits taken for a number). The leaves under a single-quoted credential key are now replaced like the
+  double-quoted ones, and a leaf may be double- or single-quoted whatever the key's quote. Inside a string a
+  single-quoted container ends where the string does, so a `'token': [` that a message merely mentions
+  (`{"content": "see 'token': [ for details", "api_key": "..."}`) does not take the fields after it; a
+  `\"`-quoted leaf under a single-quoted key inside a string is left, by decision, since a `"` there may be
+  the end of a string inside the string. Outside a string, a bare value under a credential key (`token:
+  [abc]`, an unquoted word as well as a number) is replaced too, so that a walk misled by a stray quote
+  before the document leaves nothing readable; `true`, `false`, `null`, Python's `True`, `False`, `None`
+  and an unquoted key are kept.
 - **`llm4s-java-api`: `InterruptedException` is never thrown, and the Javadoc says so**
   ([#1591](https://github.com/llm4s/llm4s/issues/1591)): `catch (InterruptedException e)` around
   `JLlmClient.complete` or `JAgent.run` does not compile ("never thrown in body of corresponding try statement"),
@@ -2094,6 +2364,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly and returns a `Left` (`Regex matching aborted: pattern recursed too deeply for the input (stack
   overflow)`), which `RegexValidator` reports as a `Regex security error` `ValidationError`. Other fatal errors
   still propagate. The workspace runner's `WorkspaceRegexSafetyManager` has the same fix.
+- **`llm4s-agent`: a judge guardrail refuses a reply that is not one number from 0 to 1, instead of clamping it into a pass**
+  ([#1405](https://github.com/llm4s/llm4s/issues/1405)): `LLMGuardrail` (and so `LLMSafetyGuardrail`,
+  `LLMFactualityGuardrail`, `LLMQualityGuardrail` and `LLMToneGuardrail`) reduced the judge's reply to its digits
+  and dots and clamped the number into 0.0 to 1.0, so `85`, `85%`, `8/10`, `1e-3` and `0,9` all read as 1.0 and
+  passed any threshold up to 1.0, `0.7 out of 1` read as 0.71, and `-0.5` read as 0.5. A judge that answered on a
+  0 to 100 scale approved everything. A reply is now a score only when the whole reply is one plain decimal
+  number from 0 to 1 (`0.9`, `.5`, `1`) of at most 64 characters, with whitespace, markdown emphasis, quotes,
+  brackets or bare code-fence backticks before or after it (not necessarily balanced) and optionally a `Score:`
+  label before it (`Score: 0.9`, `**Score:** 0.9`, but not `**Score**: 0.9`). Anything else is a
+  `ValidationError` on field `llm_response`, which fails the guardrail like an unreadable reply always did: a
+  sign glued or apart (`-0.5`, `- 1`, `negative 1`), a percentage or other scale as a sign or in words (`85%`,
+  `1 %`, `1 percent`, `1 per mille`, `1 per ten thousand`, `100 bps`), a fraction, an exponent, a decimal comma,
+  a trailing full stop, another label or a sentence (`Rating: 0.9`, `The score is 0.9`), a code fence with a
+  language tag, a number longer than 64 characters (refused before it is parsed), or more than one number. The score is compared at the precision the judge wrote it and the threshold as the decimal it is
+  written as, so `1.0000000000000001` is out of range and `0.79999999999999999` does not reach a threshold of
+  0.8. `LLMGuardrail.evaluateWithLLM` returns `Result[BigDecimal]` instead of `Result[Double]`. **Migration:** a
+  judge that passed because it answered on another scale, or in a sentence, now fails with `Could not parse LLM
+  judge score`: make it answer with only a number between 0 and 1, as the fixed system message already asks. A
+  subclass that calls or overrides `evaluateWithLLM` takes a `BigDecimal` (`.toDouble` where a `Double` is
+  needed). The score-reading rules are documented on `LLMGuardrail`.
 - **`llm4s-gemini`: a signed function call with an empty `id` is replayed with its thought signature**
   ([#1615](https://github.com/llm4s/llm4s/issues/1615)): a `functionCall` returned with `"id": ""` got a generated
   tool-call id at parse, but the signed part was kept verbatim, so on the next turn its stored `""` was compared with

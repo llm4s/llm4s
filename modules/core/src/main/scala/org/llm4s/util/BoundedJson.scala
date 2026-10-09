@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ LLMError, ValidationError }
 import org.llm4s.types.Result
 
 import scala.annotation.tailrec
@@ -39,9 +39,9 @@ private[llm4s] object BoundedJson {
    * Parses `text`, or returns a `Left`: a [[ValidationError]] on field `json` naming the limit when
    * `text` is nested more than `maxDepth` levels deep, otherwise a [[ValidationError]] on field `json`
    * carrying the parser's own message (why it stopped, and the JSON path where). The parser's exception
-   * is mapped here, never through `DefaultErrorMapper`: that mapper classifies any exception whose
-   * message contains `401` or `429`, and the parser's message is a JSON path such as `$[429]`, so a
-   * malformed reply used to come back as a `RateLimitError`.
+   * is mapped here, never through `DefaultErrorMapper`: a malformed reply is a validation failure, and
+   * that mapper used to classify any exception whose message contained `401` or `429` (#1668) - the
+   * parser's message is a JSON path such as `$[429]`, so a malformed reply came back as a `RateLimitError`.
    */
   def read(text: String, maxDepth: Int = MaxDepth): Result[ujson.Value] =
     if (exceedsDepth(text, maxDepth)) Left(tooDeep(maxDepth))
@@ -50,9 +50,36 @@ private[llm4s] object BoundedJson {
   /** Whether `text` is nested more than `maxDepth` levels deep (brackets inside strings not counted). */
   def exceedsDepth(text: String, maxDepth: Int = MaxDepth): Boolean = maxNesting(text, maxDepth) > maxDepth
 
-  /** The error [[read]] returns for a document nested more than `maxDepth` levels deep. */
+  /** The field every error of [[read]] is on. */
+  private val Field = "json"
+
+  /**
+   * What a too-deep error's violation starts with; the limit that refused the document follows. [[tooDeep]]
+   * writes it and [[TooDeep]] reads it, so the two cannot disagree on the wording, and the limit is the one
+   * thing the recognition ignores.
+   */
+  private val TooDeepPrefix = "JSON is nested more than"
+
+  /** The error [[read]] returns for a document nested more than `maxDepth` levels deep, naming that limit. */
   def tooDeep(maxDepth: Int = MaxDepth): ValidationError =
-    ValidationError("json", s"JSON is nested more than $maxDepth levels deep")
+    ValidationError(Field, s"$TooDeepPrefix $maxDepth levels deep")
+
+  /**
+   * Recognises an error [[read]] returned because the document was too deep, whatever limit refused it:
+   * `case Left(BoundedJson.TooDeep()) =>`. A site telling a too-deep refusal from a parse failure must use
+   * this, never `e == tooDeep()`: that equality holds only for the error of the default limit with its
+   * exact wording, and a read with another limit, or a reworded message, would then fall through to the
+   * site's generic arm - in a stream, the arm that skips the chunk (#1651). The recognition is structural:
+   * a [[ValidationError]] on the same field, with a violation that starts with the prefix [[tooDeep]]
+   * writes - the reason as given, not the message, so `ValidationError`'s own `Invalid <field>: ` framing
+   * is not relied on either.
+   */
+  object TooDeep {
+    def unapply(e: LLMError): Boolean = e match {
+      case v: ValidationError => v.field == Field && v.violations.exists(_.startsWith(TooDeepPrefix))
+      case _                  => false
+    }
+  }
 
   /**
    * The error [[read]] returns for text the parser rejects. upickle reports a failure as a
@@ -68,7 +95,7 @@ private[llm4s] object BoundedJson {
       case (None, Some(p))    => s"not valid JSON at $p"
       case (None, None)       => s"not valid JSON (${e.getClass.getSimpleName})"
     }
-    ValidationError("json", detail)
+    ValidationError(Field, detail)
   }
 
   /**

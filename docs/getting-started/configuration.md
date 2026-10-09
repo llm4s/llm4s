@@ -590,9 +590,8 @@ question they answer as a query. Code that does not say keeps embedding document
 - **Voyage now sends `input_type`.** Before, it sent none, which Voyage treats as a plain embedding. Documents
   indexed before this change were embedded that way; they still work against queries, and re-indexing makes
   the two sides match exactly.
-- **Caching keeps the two apart.** `CachedEmbeddingClient` keys a query by the model name plus `#query`, so a
-  query and a document with the same text never share an entry. A document keeps the plain model name, so
-  vectors cached before are still found.
+- **Caching keeps the two apart.** `CachedEmbeddingClient`'s key includes the request's purpose, so a
+  query and a document with the same text never share an entry (see the [caching guide](../guide/caching)).
 
 ### System Properties (Alternative)
 

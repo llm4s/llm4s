@@ -13,7 +13,7 @@ import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ Result, TryOps }
-import org.llm4s.util.Redaction
+import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.io.{ BufferedReader, InputStream, InputStreamReader }
 import java.nio.charset.StandardCharsets
@@ -84,7 +84,7 @@ class OpenAICompatibleClient(
           logger.debug(s"Response body: ${Redaction.redactForLogging(body)}")
           val result =
             if (response.statusCode >= 200 && response.statusCode < 300)
-              Try(parseCompletion(ujson.read(body))).toResult.map(bindThinking(_, conversation, options))
+              Try(parseCompletion(readReply(body))).toResult.map(bindThinking(_, conversation, options))
             else HttpErrorMapper.mapHttpError(response.statusCode, body, providerName, response.headers)
           recordExchange(startedAt, requestText, Some(body), result)
           result
@@ -154,7 +154,7 @@ class OpenAICompatibleClient(
       while (sseParser.hasEvents)
         sseParser.nextEvent().foreach { event =>
           event.data.filter(_ != "[DONE]").foreach { data =>
-            val json = ujson.read(data)
+            val json = readReply(data)
             // Usage arrives on the last event, alongside the final delta or on an event of its
             // own with no choices. A later report replaces an earlier one; one without both
             // counts is ignored rather than failing the stream.
@@ -189,6 +189,17 @@ class OpenAICompatibleClient(
         .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
     }
   }
+
+  /**
+   * Parses a reply body or a stream event, throwing on one nested more than `BoundedJson`'s limit
+   * as on malformed JSON; the caller turns either into a `Left`. Every reader of the value, and
+   * `ujson.Value.InvalidData`'s message when a reader meets an unexpected shape, recurses once per
+   * nesting level, so a 100,000-deep array overflowed the stack, and `Try` does not catch a
+   * `StackOverflowError` ([[https://github.com/llm4s/llm4s/issues/1658 #1658]]).
+   */
+  private def readReply(text: String): ujson.Value =
+    if (BoundedJson.exceedsDepth(text)) throw new IllegalArgumentException(BoundedJson.tooDeep().message)
+    else ujson.read(text)
 
   /** The replay data on a streamed event's delta, if it has one. */
   private def streamedThinkingDetails(json: ujson.Value): Seq[ujson.Value] =

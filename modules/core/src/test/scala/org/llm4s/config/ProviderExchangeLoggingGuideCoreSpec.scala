@@ -249,11 +249,39 @@ class ProviderExchangeLoggingGuideCoreSpec extends AnyFlatSpec with Matchers {
       "PASSWORD='hunter2value' NAME='keep'"     -> "PASSWORD='[REDACTED]' NAME='keep'",
       // a header-style line
       "x-api-key: abc123456789" -> "x-api-key: [REDACTED]",
+      // an array or an object under a sensitive key: every string and number leaf, the keys and brackets kept
+      """{"token": ["abc123456789", "def123456789"]}""" -> """{"token": ["[REDACTED]", "[REDACTED]"]}""",
+      """{"credentials": {"user": "ann", "pass": "abc123456789", "port": 5432}}""" ->
+        """{"credentials": {"user": "[REDACTED]", "pass": "[REDACTED]", "port": "[REDACTED]"}}""",
+      """{"content": "{\"token\": [\"abc123456789\"]}"}""" -> """{"content": "{\"token\": [\"[REDACTED]\"]}"}""",
+      // the key or the leaves single-quoted, as a Python dict is
+      "{'token': ['abc123456789'], 'credentials': {'user': 'ann', 'pass': 'abc123456789'}}" ->
+        "{'token': ['[REDACTED]'], 'credentials': {'user': '[REDACTED]', 'pass': '[REDACTED]'}}",
+      """{"token": ['abc123456789']}""" -> """{"token": ['[REDACTED]']}""",
+      // bare leaves are replaced too; the literals are kept
+      """{"token": [abc123456789, 42, true, null]}""" -> """{"token": ["[REDACTED]", "[REDACTED]", true, null]}""",
+      // inside a string a single-quoted container ends where the string does, and a `\"`-quoted leaf under a
+      // single-quoted key there is left
+      """{"content": "see 'token': [ for details", "api_key": "abc123456789"}""" ->
+        """{"content": "see 'token': [ for details", "api_key": "[REDACTED]"}""",
+      """{"content": "see 'token': [ for details, it's urgent"}""" ->
+        """{"content": "see 'token': [ for details, it's urgent"}""",
+      """{"content": "use 'password': ' carefully", "model": "gpt-4o"}""" ->
+        """{"content": "use 'password': '[REDACTED]", "model": "gpt-4o"}""",
+      "see 'token': [ for details" -> "see 'token': [ '[REDACTED]' '[REDACTED]'",
+      """{"content": "{'token': [\"abc123456789\"]}", "n": 1}""" -> """{"content": "{'token': [\"abc123456789\"]}", "n": 1}""",
+      """{"max_tokens": [1, 2], "messages": [{"role": "user", "content": "hi"}]}""" ->
+        """{"max_tokens": [1, 2], "messages": [{"role": "user", "content": "hi"}]}""",
       // compound key names are sensitive by suffix; token-count fields are not
       """{"client_secret": "abc123456789", "refresh_token": "abc123456789"}""" ->
         """{"client_secret": "[REDACTED]", "refresh_token": "[REDACTED]"}""",
       """{"max_tokens": 256, "prompt_tokens": 12, "token_count": 3, "next_page_token": "abc123456789"}""" ->
-        """{"max_tokens": 256, "prompt_tokens": 12, "token_count": 3, "next_page_token": "abc123456789"}"""
+        """{"max_tokens": 256, "prompt_tokens": 12, "token_count": 3, "next_page_token": "abc123456789"}""",
+      // the known trade-offs of text already cut off: a single-quoted value inside a raw double-quoted string ends at
+      // a `"` that reads as the string's end when no `'` that could close it follows, and a `'` between two letters
+      // or digits is an apostrophe
+      """msg="{'password': 'Qx"]]9secretPW"""     -> """msg="{'password': '[REDACTED]"]]9secretPW""",
+      """msg="{'password': 'Qx"]]9SECRETPW'it"""" -> """msg="{'password': '[REDACTED]"]]9SECRETPW'it""""
     )
 
     cases.foreach { case (raw, redacted) =>

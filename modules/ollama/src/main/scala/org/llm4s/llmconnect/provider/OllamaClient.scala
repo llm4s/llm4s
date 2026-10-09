@@ -10,7 +10,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
-import org.llm4s.util.BoundedJson
+import org.llm4s.util.{ BoundedJson, Redaction }
 import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedReader, InputStreamReader }
@@ -389,15 +389,21 @@ object OllamaClient {
   private[provider] def reportsNoToolSupport(body: String): Boolean =
     body.toLowerCase(java.util.Locale.ROOT).contains("does not support tools")
 
-  /** The `error` text of an Ollama error body, or the body itself when it is not that JSON; at most 200 characters. */
+  /**
+   * The `error` text of an Ollama error body, or the body itself when it is not that JSON, redacted and then cut to 200
+   * characters. Redaction runs on the whole decoded text before the cut, so a credential the server echoes cannot
+   * survive as a fragment the patterns no longer recognise (#1674).
+   */
   private[provider] def serverMessage(body: String): String =
-    Try(ujson.read(body)).toOption
-      .flatMap(_.objOpt)
-      .flatMap(_.get("error"))
-      .flatMap(_.strOpt)
-      .getOrElse(body)
-      .trim
-      .take(200)
+    Redaction.safeBody(
+      Try(ujson.read(body)).toOption
+        .flatMap(_.objOpt)
+        .flatMap(_.get("error"))
+        .flatMap(_.strOpt)
+        .getOrElse(body)
+        .trim,
+      200
+    )
 
   /**
    * The call ids of one reply. Synthesizes them for entries that carry none - older Ollama servers send
@@ -458,7 +464,7 @@ object OllamaClient {
       // object it would build overflows the stack of whatever renders it (#1562).
       BoundedJson.read(s) match {
         case Right(o: ujson.Obj) => Right(o)
-        case Left(e) if e == BoundedJson.tooDeep() =>
+        case Left(BoundedJson.TooDeep()) =>
           Left(malformed(s"arguments are nested more than ${BoundedJson.MaxDepth} levels deep"))
         case _ => Left(malformed("arguments are not a JSON object"))
       }

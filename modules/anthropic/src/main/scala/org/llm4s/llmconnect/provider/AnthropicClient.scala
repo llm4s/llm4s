@@ -30,7 +30,7 @@ import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, ProcessingError, RateLimitError, ValidationError }
 import org.llm4s.error.ThrowableOps.*
-import org.llm4s.util.BoundedJson
+import org.llm4s.util.{ BoundedJson, Redaction }
 
 import java.time.Instant
 import scala.jdk.CollectionConverters.*
@@ -178,10 +178,12 @@ class AnthropicClient(
         val attempt = Try(
           requestOptions.fold(messageService.create(messageParams))(messageService.create(messageParams, _))
         ).toEither.left.map {
-          case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
-          case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
-          case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
-          case e                                                     => e.toLLMError
+          case e: com.anthropic.errors.UnauthorizedException =>
+            AuthenticationError("anthropic", AnthropicClient.safeMessage(e))
+          case _: com.anthropic.errors.RateLimitException => RateLimitError("anthropic")
+          case e: com.anthropic.errors.AnthropicInvalidDataException =>
+            ValidationError("input", AnthropicClient.safeMessage(e))
+          case e => e.toLLMError
         }
         // sealed thinking is bound to the request it answers, so it is replayed only while that holds
         val result = attempt
@@ -425,10 +427,12 @@ curl https://api.anthropic.com/v1/messages \
           }
         }.toEither.left
           .map {
-            case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
-            case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
-            case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
-            case e                                                     => e.toLLMError
+            case e: com.anthropic.errors.UnauthorizedException =>
+              AuthenticationError("anthropic", AnthropicClient.safeMessage(e))
+            case _: com.anthropic.errors.RateLimitException => RateLimitError("anthropic")
+            case e: com.anthropic.errors.AnthropicInvalidDataException =>
+              ValidationError("input", AnthropicClient.safeMessage(e))
+            case e => e.toLLMError
           }
 
         // Return the accumulated completion
@@ -703,7 +707,7 @@ curl https://api.anthropic.com/v1/messages \
           BoundedJson.read(input) match {
             case Right(arguments) =>
               Right(taken :+ ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = arguments))
-            case Left(e) if e == BoundedJson.tooDeep() =>
+            case Left(BoundedJson.TooDeep()) =>
               Left(malformedToolCall(s"arguments are nested more than ${BoundedJson.MaxDepth} levels deep"))
             case Left(e) => Left(malformedToolCall(e.message))
           }
@@ -802,6 +806,12 @@ curl https://api.anthropic.com/v1/messages \
 
 object AnthropicClient {
   import org.llm4s.types.TryOps
+
+  /**
+   * An SDK exception's message, redacted and capped. anthropic-java writes the response body into it (`401: <body>`),
+   * and a body can echo the request's credentials (#1674).
+   */
+  private[provider] def safeMessage(e: Throwable): String = Option(e.getMessage).fold("")(Redaction.safeBody(_))
 
   /** A thinking or redacted-thinking block being assembled from a stream. */
   final private[provider] case class StreamedThinking(

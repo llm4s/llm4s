@@ -9,6 +9,8 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import scala.jdk.CollectionConverters.*
+
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.{ CountDownLatch, Executors, TimeUnit }
@@ -211,7 +213,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
     }))
     val caller = Thread.currentThread()
 
-    agent.run("hi").get().messages.last.content shouldBe "x"
+    agent.run("hi").get().messages.asScala.last.content shouldBe "x"
 
     (seen.get() should not).be(theSameInstanceAs(caller))
     seen.get().isVirtual shouldBe true
@@ -235,7 +237,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
     val agent = Llm4s.createAgent(echoClientAfter(n))
     val answers = Using.resource(new Pool(Executors.newVirtualThreadPerTaskExecutor())) { pool =>
       val futures =
-        (0 until n).map(i => pool.executor.submit(() => agent.run("a" + i).get().messages.last.content))
+        (0 until n).map(i => pool.executor.submit(() => agent.run("a" + i).get().messages.asScala.last.content))
       futures.map(_.get(waitSeconds, TimeUnit.SECONDS))
     }
     answers shouldBe (0 until n).map(i => "echo:a" + i)
@@ -349,7 +351,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
         classOf[JLlmClient].getMethod("complete", classOf[Conversation]),
         classOf[JLlmClient].getMethod("complete", classOf[Conversation], classOf[CompletionOptions]),
         classOf[JAgent].getMethod("run", classOf[String]),
-        classOf[JAgent].getMethod("continueConversation", classOf[org.llm4s.agent.AgentResult], classOf[String])
+        classOf[JAgent].getMethod("continueConversation", classOf[JAgentResult], classOf[String])
       )
       methods.foreach(m => withClue(m.toString)(m.getExceptionTypes shouldBe empty))
     }
@@ -371,7 +373,7 @@ class ThreadingModelSpec extends AnyFlatSpec with Matchers {
           case Right(_) => Right(completion("done"))
         }
       }))
-      val result  = new AtomicReference[LlmResult[org.llm4s.agent.AgentResult]]()
+      val result  = new AtomicReference[LlmResult[JAgentResult]]()
       val flagSet = new AtomicReference[java.lang.Boolean](java.lang.Boolean.FALSE)
 
       val caller = platformThread { () =>

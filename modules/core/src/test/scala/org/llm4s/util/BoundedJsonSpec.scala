@@ -1,6 +1,6 @@
 package org.llm4s.util
 
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ ProcessingError, ValidationError }
 import org.llm4s.testutil.SmallStack
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -30,7 +30,7 @@ final class BoundedJsonSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not mistake a parse error at index 429 or 401 for a rate limit or an authentication failure" in {
-    // `DefaultErrorMapper` classifies any exception whose message contains "429" or "401", and the
+    // `DefaultErrorMapper` used to classify any exception whose message contained "429" or "401" (#1668), and the
     // parser's exception names the JSON path it stopped at (`$[429]`) - so a reply that goes wrong at
     // that element used to come back as a RateLimitError or an AuthenticationError.
     Seq(429, 401).foreach { index =>
@@ -87,5 +87,35 @@ final class BoundedJsonSpec extends AnyFlatSpec with Matchers {
     BoundedJson.exceedsDepth(arrays(513)) shouldBe true
     BoundedJson.exceedsDepth("[\"" + "[" * 1000 + "\"]") shouldBe false
     BoundedJson.exceedsDepth(arrays(2), maxDepth = 1) shouldBe true
+  }
+
+  "BoundedJson.TooDeep" should "recognise a too-deep error whatever limit produced it, where equality with tooDeep() does not" in {
+    // A call site that matches `case Left(e) if e == BoundedJson.tooDeep()` recognises only the error of
+    // the default limit, byte for byte: one read with another limit falls through to the site's generic
+    // arm - in a Gemini stream, the arm that skips the chunk (#1651). The extractor goes by what `tooDeep`
+    // wrote, not by the number in it.
+    val error = BoundedJson.read(arrays(4), maxDepth = 3).swap.getOrElse(fail("expected a Left"))
+    (error == BoundedJson.tooDeep()) shouldBe false
+    BoundedJson.TooDeep.unapply(error) shouldBe true
+    (error match {
+      case BoundedJson.TooDeep() => true
+      case _                     => false
+    }) shouldBe true
+    BoundedJson.TooDeep.unapply(BoundedJson.tooDeep()) shouldBe true
+    BoundedJson.TooDeep.unapply(BoundedJson.read(arrays(513)).swap.getOrElse(fail("expected a Left"))) shouldBe true
+  }
+
+  it should "recognise nothing else: not a parse error on `json`, nor the same words on another field or type" in {
+    BoundedJson.TooDeep.unapply(BoundedJson.read("{not json").swap.getOrElse(fail("expected a Left"))) shouldBe false
+    BoundedJson.TooDeep.unapply(BoundedJson.read("[" * 3).swap.getOrElse(fail("expected a Left"))) shouldBe false
+    BoundedJson.TooDeep.unapply(ValidationError("json", "nested, but not by the scan")) shouldBe false
+    BoundedJson.TooDeep.unapply(ValidationError("other", BoundedJson.tooDeep().violations.head)) shouldBe false
+    BoundedJson.TooDeep.unapply(ProcessingError("json", BoundedJson.tooDeep().message)) shouldBe false
+  }
+
+  it should "name the limit that refused the document" in {
+    BoundedJson.tooDeep().message should include("512 levels deep")
+    BoundedJson.tooDeep(3).message should include("3 levels deep")
+    (BoundedJson.tooDeep(3).message should not).include("512")
   }
 }
