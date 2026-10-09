@@ -742,6 +742,19 @@ class WorkspaceAgentInterfaceImpl(
    *  5. `FORBIDDEN_CHARACTERS`        – any token contains a character from
    *                                      [[ForbiddenArgChars]] (`&`, `|`, `<`,
    *                                      `>`, `^`, `;`, `` ` ``, `$`, `%`)
+   *  6. `PATH_ESCAPE_ATTEMPT`         – the working directory really lies outside
+   *                                      the workspace (a symbolic link out of it)
+   *  7. `ENVIRONMENT_NOT_ALLOWED`     – `environment` sets a variable other than
+   *                                      `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`,
+   *                                      `COLUMNS`, `LINES`, `NO_COLOR`
+   *  8. `ARGUMENT_NOT_ALLOWED`        – an option that writes, deletes, runs a
+   *                                      program or follows links (`find -exec`,
+   *                                      `sort -o`, `git -c`, a git subcommand that
+   *                                      is not a read, a second `uniq` operand)
+   *  9. `PATH_ESCAPE_ATTEMPT`         – an argument names a location outside the
+   *                                      workspace, links followed
+   *
+   * Layers 7-9 are [[CommandPolicy]], which documents each program's rules (#1715).
    *
    * On Windows, if the first token is a [[WindowsBuiltins]] built-in that has
    * no standalone `.exe`, `cmd.exe /c` is prepended to the already-tokenized
@@ -832,6 +845,24 @@ class WorkspaceAgentInterfaceImpl(
           )
         case None =>
       }
+    }
+
+    // Layers 6-8 (#1715): the allowlist names programs, but an allowed program can
+    // still write, delete or run another one through its own options (`find -exec`,
+    // `git -c`, `sort -o`), its environment (`GIT_EXTERNAL_DIFF`), or reach outside
+    // the workspace through a path argument (`cat /etc/passwd`). The working
+    // directory and every path argument are judged by where they really lead.
+    val realRoot    = Try(rootPath.toRealPath()).getOrElse(rootPath)
+    val realWorkDir = Try(workDir.toPath.toRealPath()).getOrElse(workDir.toPath)
+    if (!realWorkDir.startsWith(realRoot)) {
+      throw new WorkspaceAgentException(
+        s"Working directory '${workingDirectory.getOrElse(".")}' leads outside the workspace",
+        CommandPolicy.PathEscapeAttempt,
+        None
+      )
+    }
+    CommandPolicy.refusal(execLower, argv.tail, isWindows, realWorkDir, realRoot, env).foreach { refused =>
+      throw new WorkspaceAgentException(refused.message, refused.code, None)
     }
 
     // On Windows, built-in commands (echo, dir, type, …) live inside cmd.exe

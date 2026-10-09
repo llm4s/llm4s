@@ -90,13 +90,39 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 
 ### 6. Workspace Sandbox Escapes
 
-**Risk:** `WorkspaceRegexSafetyManager` uses pattern matching to decide which shell commands are allowed inside the containerised workspace. A carefully crafted command string might bypass the regex checks.
+**Risk:** the workspace runner's `executeCommand` lets an agent run programs inside the workspace. A program on the
+allowlist can do more than its name suggests: `find -exec` and `git -c alias.x=!cmd` run other programs,
+`find -delete` and `git clean` delete files, `sort -o` and `uniq in out` write them, and any path argument can name
+a file outside the workspace (#1715).
 
 **Mitigation (implemented):**
-- The regex-based allowlist restricts commands to a known safe set.
-- The workspace module runs in a Docker container, providing an additional OS-level boundary.
+- The command is split into words and started directly, without a shell, and shell metacharacters (`&`, `|`, `<`, `>`,
+  `^`, `;`, `` ` ``, `$`, `%`) are refused in every word.
+- The executable must be a bare name in `WorkspaceSandboxConfig.allowedCommands`. `ReadOnlyCommands` is the
+  default; `ReadWriteCommands` (the `permissive` profile) adds `cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`, `copy`
+  and `move`. The `locked` profile turns the shell off.
+- Each program's arguments are checked (`ARGUMENT_NOT_ALLOWED`): options that delete, write, run another program,
+  read a list of file names or follow every symbolic link are refused (`find -delete`/`-exec`/`-fprint`/`-L`,
+  `sort -o`, `wc --files0-from`, `ls -L`, `grep -R`), `uniq` takes at most one operand, `hostname` none, and `git`
+  runs only read subcommands (`status`, `log`, `show`, `diff`, `ls-files`, `ls-tree`, `grep`, `blame`, `rev-parse`,
+  listing `branch`) with no global option bar `--version`, `--no-pager` and a few harmless ones, and without
+  `--output`, `--ext-diff`, `--textconv`, `--show-signature` or `grep -O`. Every argument is scanned, including
+  those after `--`; short options are matched inside clusters and long options under any abbreviation.
+- Every path argument, and the working directory, must really lie inside the workspace (`PATH_ESCAPE_ATTEMPT`):
+  it is resolved the way the kernel resolves it, following symbolic links component by component.
+- `environment` may set only locale and display variables (`ENVIRONMENT_NOT_ALLOWED`), so `GIT_*`, `PAGER`,
+  `LD_PRELOAD`, `PATH` and `HOME` cannot redirect a program.
+- The runner normally runs in a Docker container, an additional OS-level boundary.
 
-**Recommended practice:** Treat the regex layer as defence-in-depth only. Do not grant the workspace access to credentials or network resources that an escaped process could exploit.
+**Not covered:** `git` reads the repository's own `.git/config`; where the agent can write files (the `writeFile`
+operation, or the read-write allowlist) it can set `core.fsmonitor`, `diff.external` or a filter driver that a later
+`git status` or `git diff` runs. `diff -r` follows symbolic links met inside the tree it walks. A path rule cannot
+tell a path from text, so a `grep` pattern that starts with `/` is refused.
+
+**Recommended practice:** use the `locked` profile, or `ReadOnlyCommands`, unless the agent needs more. Leave `git`
+out of `allowedCommands` when the agent can also write files and the repository's configuration matters. Do not
+give the workspace credentials or network access that an escaped process could exploit. See
+[Workspace sandbox](workspace-sandbox.md#command-policy).
 
 ### 7. Dependency CVEs
 
