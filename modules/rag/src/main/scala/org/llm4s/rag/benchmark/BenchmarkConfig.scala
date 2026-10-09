@@ -1,6 +1,7 @@
 package org.llm4s.rag.benchmark
 
 import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
+import org.llm4s.llmconnect.utils.CodePointBoundary
 import org.llm4s.vectorstore.FusionStrategy
 
 /**
@@ -119,7 +120,7 @@ final case class RAGExperimentConfig(
   require(rerankTopK >= topK, "rerankTopK must be >= topK")
 
   /** Short identifier for display */
-  def shortName: String = name.take(30)
+  def shortName: String = CodePointBoundary.take(name, 30)
 
   /** Full description for reports */
   def fullDescription: String =

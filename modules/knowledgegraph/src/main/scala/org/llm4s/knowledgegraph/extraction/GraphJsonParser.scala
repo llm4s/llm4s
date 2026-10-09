@@ -24,7 +24,7 @@ private[extraction] object GraphJsonParser {
    * documents the graph was extracted from - so the log line carries its first [[MaxLoggedReplyChars]]
    * and the full length, never the whole reply (#1635).
    */
-  private def preview(reply: String): String = Redaction.truncateForLog(reply, MaxLoggedReplyChars)
+  private def preview(reply: String): String = Redaction.safeBody(reply, MaxLoggedReplyChars)
 
   /**
    * Parses a JSON string (optionally wrapped in a markdown code fence) into a [[Graph]].

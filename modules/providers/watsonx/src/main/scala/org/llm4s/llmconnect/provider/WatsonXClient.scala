@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.util.Redaction
 
 import java.io.{ BufferedReader, InputStreamReader }
 import java.net.URLEncoder
@@ -139,7 +140,7 @@ class WatsonXClient(
         Left(
           AuthenticationError(
             providerName,
-            s"IAM token exchange failed (HTTP ${response.statusCode}): ${scrub(response.body, "").take(256)}"
+            s"IAM token exchange failed (HTTP ${response.statusCode}): ${Redaction.safeBody(scrub(response.body, ""), 256)}"
           )
         )
     }

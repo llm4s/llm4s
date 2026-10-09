@@ -130,7 +130,7 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
                 EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "ollama")
               }
           case status =>
-            val body = Redaction.truncateForLog(response.body)
+            val body = Redaction.safeBody(response.body)
             logger.error(s"[OllamaEmbeddingProvider] HTTP error: $body")
             Left(
               EmbeddingError(

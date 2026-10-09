@@ -113,9 +113,6 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
   ): EmbeddingProvider =
     create(cfg, Some(task), httpClient)
 
-  /** An error body for logs and messages: truncated, with anything key-shaped (a reflected `Bearer ...`) redacted. */
-  private def safeBody(body: String): String = Redaction.truncateForLog(Redaction.redact(body))
-
   /**
    * The response vectors in input order. Jina tags each item with the `index` of the input it
    * answers and does not promise the array is sorted, so position in the array is not trusted
@@ -219,15 +216,15 @@ object JinaEmbeddingProvider extends EmbeddingProviderDescriptor {
                   EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "jina")
                 }
             case 401 =>
-              val body = safeBody(response.body)
+              val body = Redaction.safeBody(response.body)
               logger.error(s"[JinaEmbeddingProvider] Auth error (401): $body")
               Left(EmbeddingError(code = Some("401"), message = s"Authentication failed: $body", provider = "jina"))
             case 429 =>
-              val body = safeBody(response.body)
+              val body = Redaction.safeBody(response.body)
               logger.warn(s"[JinaEmbeddingProvider] Rate limit (429): $body")
               Left(EmbeddingError(code = Some("429"), message = s"Rate limit exceeded: $body", provider = "jina"))
             case status =>
-              val body = safeBody(response.body)
+              val body = Redaction.safeBody(response.body)
               logger.error(s"[JinaEmbeddingProvider] HTTP error $status: $body")
               Left(EmbeddingError(code = Some(status.toString), message = body, provider = "jina"))
           }

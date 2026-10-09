@@ -116,7 +116,7 @@ is not recoverable, since nothing says a retry can help.
 | `NetworkError` | yes | A connection fails, a host is unknown or I/O breaks, in llm4s's HTTP client or the Bedrock client; `DefaultErrorMapper`, which the OpenAI and Anthropic clients use for I/O failures, gives one for a socket timeout or a refused connection. Also a URL refused by the SSRF check, and a failed `llm4s-rag` URL, web-crawl or S3 load, including a non-2xx answer to `UrlLoader`. |
 | `TimeoutError` | yes | A connect, request or socket timeout elapses in llm4s's own HTTP client, or a `ReliableClient` deadline passes. The vendor-SDK clients map timeouts themselves: OpenAI and Bedrock report a `NetworkError`, and Anthropic maps its exceptions through `DefaultErrorMapper`. |
 | `APIError` | yes | Only `llm4s-image`'s vision clients (OpenAI, Anthropic, Gemini), through `LLMError.apiCallFailed`, when the vision API call fails or returns no text; it carries the provider and, optionally, a status code. Image generation has its own errors (see below). |
-| `ExecutionError` | yes | Only `ErrorRecovery.recoverWithBackoff`, when it runs out of attempts ([section 9](#9-recovering-from-failures)). Tool, MCP and orchestration failures are other types; see the note below. |
+| `ExecutionError` | yes | Only `ErrorRecovery.recoverWithBackoff`, when it runs out of attempts ([section 9](#9-recovering-from-failures)). Tool and MCP failures are other types; see the note below. |
 | `SystemError` | yes | Not raised by the library; available for your own code, for an unexpected failure that may be transient. |
 | `OptimisticLockFailure` | yes | Only `llm4s-memory-postgres`'s `PostgresMemoryStore`, when another writer updated the same memory record first; re-read it and try again. |
 | `CancelledError` | no | The thread was interrupted. Interruption is how llm4s cancels work, and a cancelled call is never retried. |
@@ -133,9 +133,8 @@ set. Other modules define errors of their own, below.
 **Same name, different type.** A failed tool call is not an `org.llm4s.error.ExecutionError`.
 `ToolRegistry.execute`, and the MCP tool registry, return a `ToolCallError` (`org.llm4s.toolapi`), whose
 case for a tool that threw is `ToolCallError.ExecutionError`. `ToolCallError` is not an `LLMError`, and the
-agent hands it back to the model as the tool's result instead of failing the run. Orchestration fails with
-`OrchestrationError.NodeExecutionError` or `PlanExecutionError`, and a graph's tool loop with
-`GraphError.ToolFailed`; both are described below.
+agent hands it back to the model as the tool's result instead of failing the run. A graph's tool loop fails
+with `GraphError.ToolFailed`, described below.
 
 **`ServiceError` and its status.** The marker says a `ServiceError` is recoverable, but a 404 is not
 going to fix itself. When it matters, look at `httpStatus`: `error.isRecoverableStatus` (from
@@ -173,7 +172,6 @@ cause, which of several failures it reports), so none carries a marker:
 | Module | Package | Errors |
 |---|---|---|
 | `llm4s-core` | `org.llm4s.llmconnect.model` | `EmbeddingError`: how `EmbeddingClient.embed` and the embedding providers (OpenAI, Ollama, Voyage, Cohere, Jina) report a failure other than cancellation, except that the Cohere provider reports a 429 as a `RateLimitError` |
-| `llm4s-agent` | `org.llm4s.agent.orchestration` | `OrchestrationError.PlanExecutionError` from `PlanRunner`; `NodeExecutionError` from `PlanRunner` and `TypedAgent`, which has its own `recoverable` flag (`Policies.withRetry` reads it) |
 | `llm4s-rag` | `org.llm4s.rag.evaluation`, `org.llm4s.reranker` | `EvaluationError` from RAGAS evaluation and the RAG benchmark tools; `RerankError` from the Cohere and LLM rerankers (`Reranker.rerank`) |
 | `llm4s-speech` | `org.llm4s.speech.stt`, `.tts` | `STTError.ProcessingFailed` from the speech-to-text clients (an empty transcription, no recognisable speech, an unparseable response; its `retryable` flag says `true`); `TTSError.SynthesisFailed` from the text-to-speech clients (an empty audio body) |
 
@@ -181,7 +179,6 @@ The rest of those families are marked:
 
 | Module | Recoverable | Non-recoverable |
 |---|---|---|
-| `llm4s-agent` (`org.llm4s.agent.orchestration`) | `OrchestrationError.AgentTimeoutError`, from `Policies.withTimeout` | `PlanValidationError` and `TypeMismatchError`, from `PlanRunner` |
 | `llm4s-speech` (`org.llm4s.speech.stt`, `.tts`, `.io`) | `STTError.EngineNotAvailable`, `TTSError.EngineNotAvailable` | `STTError.UnsupportedFormat`, `STTError.InvalidInput`, `WavFileGenerator.WavError`, `AudioIO.AudioIOError` |
 
 So are two whole families: `GraphError` in `llm4s-agent`

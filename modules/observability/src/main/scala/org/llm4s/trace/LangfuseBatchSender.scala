@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 import scala.concurrent.duration.*
+import org.llm4s.util.Redaction
 
 /**
  * Abstraction for sending trace events to Langfuse in batches.
@@ -107,7 +108,7 @@ class DefaultLangfuseBatchSender(
         logger.info(s"[Langfuse] Batch export successful: ${response.statusCode}")
       case Right(response) =>
         logger.error(s"[Langfuse] Batch export failed: ${response.statusCode}")
-        logger.error(s"[Langfuse] Response body: ${org.llm4s.util.Redaction.truncateForLog(response.body)}")
+        logger.error(s"[Langfuse] Response body: ${Redaction.safeBody(response.body)}")
         logger.error(s"[Langfuse] Request URL: $apiUrl")
         logger.error(s"[Langfuse] Request payload size: ${batchPayload.render().length} bytes")
     }

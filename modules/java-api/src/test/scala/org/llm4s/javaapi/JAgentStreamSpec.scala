@@ -18,6 +18,7 @@ import java.util.concurrent.{ CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicReference }
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
+import scala.concurrent.duration.*
 
 import StreamFixtures.*
 
@@ -324,9 +325,13 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     val runtime  = GraphRuntime.inMemory()
     val agent    = jAgentOf(model.client)(_.withRuntime(runtime).withStreaming())
     val threadId = "j20"
-    val recorder = Recorder(e => if (AgentEvents.TextDelta.unapply(e).isDefined) throw new LinkageError("fatal"))
+    val fatal    = new LinkageError("fatal")
+    val raising  = new FatalListenerError(fatal)
+    val recorder = Recorder(e => if (AgentEvents.TextDelta.unapply(e).isDefined) raising.raise())
     val outcome  = agent.stream(threadId, "hi", recorder).get().await()
     outcome.getError().getMessage should include("failed fatally")
+    // the error is not swallowed: it ends the stream's thread, which this test waits for (#1719)
+    (raising.awaitDeath() should be).theSameInstanceAs(fatal)
     recorder.terminals.get shouldBe 0
     model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
     eventually(runtime.liveSubscriptions(ThreadId(threadId)) shouldBe 0)
@@ -427,6 +432,29 @@ class JAgentStreamSpec extends AnyFlatSpec with Matchers with Eventually {
     canceller.join(DeadlineSeconds * 1000)
     flagKept.get shouldBe java.lang.Boolean.TRUE
     recovered.get shouldBe Some("recovered")
+  }
+
+  it should "give up after its bound on a run whose provider ignores the interrupt, leaving the thread busy until it ends" in {
+    val linger   = new CountDownLatch(1)
+    val model    = parksOnce(linger = linger)
+    val agent    = jAgentOf(model.client)(_.withStreaming())
+    val threadId = "j27"
+    val stream   = agent.stream(threadId, "hi", Recorder()).get()
+    model.parked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+
+    val began = System.nanoTime()
+    stream.cancel()
+    val waited = (System.nanoTime() - began).nanos
+    // the 5-second bound of the blocking JAgent calls, not the model's lingering (DeadlineSeconds)
+    waited should be >= 4500.millis
+    waited should be < DeadlineSeconds.seconds
+    // the model saw the interrupt but lingers: the run has not ended, so its thread is still busy
+    model.unparked.await(DeadlineSeconds, TimeUnit.SECONDS) shouldBe true
+    agent.streamRecover(threadId, Recorder()).getError().error shouldBe a[GraphError.ThreadBusy]
+
+    linger.countDown()
+    // once the provider returns, the cancelled run ends and its thread is left for recover
+    eventually(agent.streamRecover(threadId, Recorder()).isSuccess shouldBe true)
   }
 
   it should "survive a terminal callback that throws" in {

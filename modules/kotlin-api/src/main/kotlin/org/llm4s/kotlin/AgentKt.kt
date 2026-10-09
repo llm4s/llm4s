@@ -41,7 +41,10 @@ sealed interface AgentStreamItem {
  * Every suspend function that runs a turn - [run], [continueConversation], [resume] and [recover] -
  * cancels the turn when its caller is cancelled (a cancelled scope, a `withTimeout`): it throws
  * `CancellationException` once the turn has ended, and the conversation thread is no longer busy, left
- * for [recover] to finish the cancelled turn. If the turn had already completed when the cancellation
+ * for [recover] to finish the cancelled turn - but for [run]'s, whose random id nothing thrown carries, so
+ * it forgets the thread. The cancellation waits up to 5 seconds for the turn to end, as Java's blocking
+ * calls do: a turn whose provider ignores its interrupt for longer is left to end on its own, and its
+ * thread is busy until it does. If the turn had already completed when the cancellation
  * arrived, it still throws `CancellationException`, but the turn's result is committed to the thread:
  * [recover] then throws [LLMException] (no incomplete execution), and the next turn continues from it.
  * Each runs as the matching flow does - [stream], [streamResume] or [streamRecover] - its events
@@ -52,7 +55,7 @@ sealed interface AgentStreamItem {
  *
  * A turn whose tools need approval, or ask a question, ends `SUSPENDED`: `result.status().pending()` - or
  * [pending] - lists what it waits for, and [resume] answers some or all of it and continues. A turn that failed or was cancelled
- * continues with [recover].
+ * continues with [recover], but for [run]'s, whose thread is forgotten.
  *
  * [stream], [streamResume] and [streamRecover] run a turn on a thread you name as a cold [Flow] of its
  * events ([AgentStreamItem.Event]), then its result ([AgentStreamItem.Done]).
@@ -74,8 +77,32 @@ class AgentKt internal constructor(private val underlying: JAgent) {
      *
      * Cancelling the caller cancels the turn and returns once it has ended. The turn runs as [stream]
      * does, its events discarded.
+     *
+     * What it throws carries no thread id, so nothing could [recover] or [forget] the conversation: once a
+     * failed or cancelled turn has ended, its thread is forgotten, as Java's `JAgent.run(query)` does - also
+     * after a cancellation that lost the race to the turn's commit. A cancelled turn whose provider ignores
+     * its interrupt for longer than the 5 seconds the cancellation waits has not ended, and its thread is
+     * left in the runtime; the refused forget is added to the thrown exception as a suppressed one. For a
+     * turn to recover, name its thread with [stream].
      */
-    suspend fun run(query: String): JAgentResult = runTurn(UUID.randomUUID().toString(), query)
+    suspend fun run(query: String): JAgentResult {
+        val threadId = UUID.randomUUID().toString()
+        try {
+            return runTurn(threadId, query)
+        } catch (failure: Throwable) {
+            forgetFailed(threadId, failure)
+            throw failure
+        }
+    }
+
+    /**
+     * Forgets [threadId], whose turn threw [failure] and has ended, off the caller's dispatcher and whatever its
+     * cancellation; a forget that fails - or throws - is added to [failure] as a suppressed exception.
+     */
+    private suspend fun forgetFailed(threadId: String, failure: Throwable) {
+        val forgotten = withContext(NonCancellable + Dispatchers.IO) { runCatching { underlying.forget(threadId) } }
+        forgotten.fold({ if (!it.isSuccess) failure.addSuppressed(it.getError()) }, { failure.addSuppressed(it) })
+    }
 
     /**
      * Suspends until the agent completes [query] as the next turn of [previous]'s conversation - only its
@@ -132,8 +159,8 @@ class AgentKt internal constructor(private val underlying: JAgent) {
      * turn that ends without a terminal event (a crash), or whose delivery to the flow fails fatally (a
      * `VirtualMachineError` such as `OutOfMemoryError`): that error ends the facade's delivery thread, and the
      * flow ends with the facade's report of it rather than suspending. Cancelling the collection - its scope, a
-     * `take(n)`, a timeout - cancels the turn and returns once it has ended, leaving the thread for
-     * [streamRecover]. A collector too slow for the stream's buffer never holds the turn up: it loses
+     * `take(n)`, a timeout - cancels the turn and returns once it has ended (waiting up to 5 seconds for the
+     * turn to end, as [run] does), leaving the thread for [streamRecover]. A collector too slow for the stream's buffer never holds the turn up: it loses
      * live events (text deltas, tool progress) and receives one `StreamEvent.LiveGap` with their count
      * where they were dropped; durable events are never dropped. Starting and cancelling the turn run
      * on [Dispatchers.IO]; the events are handed over from the stream's own thread.

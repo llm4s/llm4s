@@ -37,7 +37,7 @@ The 0.x series established the core abstractions and steadily hardened the API s
 > **Superseded.** `ProviderKind` has itself been replaced, by the opaque type `ProviderId`, as
 > part of slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)). Coming from 0.2.x or
 > earlier, follow the steps below and then apply
-> [`ProviderKind` becomes `ProviderId`](../reference/migration.md); coming from 0.3.2 or later,
+> [`ProviderKind` becomes `ProviderId`](../reference/migration); coming from 0.3.2 or later,
 > go straight there.
 
 The `LLMProvider` sealed trait was removed and replaced with `ProviderKind`. Any exhaustive pattern match on `LLMProvider` fails to compile with a missing-case error.
@@ -134,7 +134,7 @@ All SBT modules moved from the repo root into the `modules/` subdirectory:
 | `samples/` | `modules/samples/` |
 | `workspace/` | `modules/workspace/` |
 
-If you reference source paths directly (e.g. in IDE imports or custom scripts) update them accordingly. SBT artifact coordinates (`groupId`, `artifactId`) did **not** change *in 0.1.13*. They did change in 0.4.0 — see [Artifact coordinate rename (v0.4.0)](../reference/migration.md#artifact-coordinate-rename-v040).
+If you reference source paths directly (e.g. in IDE imports or custom scripts) update them accordingly. SBT artifact coordinates (`groupId`, `artifactId`) did **not** change *in 0.1.13*. They did change in 0.4.0 — see [Artifact coordinate rename (v0.4.0)](../reference/migration#artifact-coordinate-rename-v040).
 
 ---
 
@@ -142,7 +142,7 @@ If you reference source paths directly (e.g. in IDE imports or custom scripts) u
 
 No environment variable was renamed in 0.x, but one set stopped being read. The unified `EMBEDDING_MODEL` format (`provider/model-name`) was *added* in 0.2.8 as the recommended form, and is still bound by llm4s-core's `reference.conf`.
 
-Since 0.3.2 ([#903](https://github.com/llm4s/llm4s/pull/903)) llm4s no longer reads `LLM_MODEL`. Chat providers are configured as named sections under `llm4s.providers` in your `application.conf`. Each provider module binds its vendor's API-key variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...) to a shared `llm4s.credentials.<provider>.apiKey`, which a section without its own `apiKey` uses ([#1132](https://github.com/llm4s/llm4s/issues/1132)); other variables, such as `OLLAMA_BASE_URL`, are read only where a section binds them with `${?VAR}`. See [From `LLM_MODEL` to named provider sections](../reference/migration.md#from-llm_model-to-named-provider-sections).
+Since 0.3.2 ([#903](https://github.com/llm4s/llm4s/pull/903)) llm4s no longer reads `LLM_MODEL`. Chat providers are configured as named sections under `llm4s.providers` in your `application.conf`. Each provider module binds its vendor's API-key variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...) to a shared `llm4s.credentials.<provider>.apiKey`, which a section without its own `apiKey` uses ([#1132](https://github.com/llm4s/llm4s/issues/1132)); other variables, such as `OLLAMA_BASE_URL`, are read only where a section binds them with `${?VAR}`. See [From `LLM_MODEL` to named provider sections](../reference/migration#from-llm_model-to-named-provider-sections).
 
 ---
 

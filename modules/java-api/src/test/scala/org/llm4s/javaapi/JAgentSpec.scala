@@ -107,6 +107,16 @@ class JAgentSpec extends AnyFlatSpec with Matchers {
     val first = agent.run("one").get()
     agent.forget(first).isSuccess shouldBe true
     agent.continueConversation(first, "two").get().messages.asScala.map(_.content) shouldBe Seq("two", "ok")
-    agent.forget(null).isFailure shouldBe true
+    agent.forget(null: JAgentResult).isFailure shouldBe true
+  }
+
+  it should "remove a conversation named by its thread id, one a failed result never carried included" in {
+    val agent = Llm4s.createAgent(new JLlmClient(completingClient("ok")))
+    agent.stream("named", "one", _ => ()).get().await().isSuccess shouldBe true
+    agent.forget("named").isSuccess shouldBe true
+    agent.stream("named", "two", _ => ()).get().await().get().messages.asScala.map(_.content) shouldBe Seq("two", "ok")
+    // an unknown thread is forgotten already
+    agent.forget("never-used").isSuccess shouldBe true
+    agent.forget(null: String).isFailure shouldBe true
   }
 }
