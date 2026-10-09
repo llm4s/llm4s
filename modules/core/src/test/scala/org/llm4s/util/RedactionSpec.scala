@@ -28,6 +28,44 @@ class RedactionSpec extends AnyFlatSpec with Matchers {
     result should include("truncated")
   }
 
+  // A provider error body that echoes the request's credentials back, in the three shapes #1674 lists.
+  private def echoedBody: String =
+    """{"error": {"message": "bad request", "request": {"headers": "Authorization: Bearer sk-proj-abc123def456ghi789jkl012mno345",""" +
+      """ "api_key": "s3cr3t-api-key-value", "url": "https://generativelanguage.googleapis.com/v1/models?key=AIzaSyA1234567890abcdefghijklmnopqrstu"}}}"""
+
+  "Redaction.safeBody" should "redact a bearer token, an api_key field and a key query parameter echoed in a body" in {
+    val result = Redaction.safeBody(echoedBody)
+    (result should not).include("sk-proj-abc123")
+    (result should not).include("s3cr3t-api-key-value")
+    (result should not).include("AIzaSyA1234567890")
+    result should include("[REDACTED]")
+    result should include("bad request")
+  }
+
+  it should "return a short clean body unchanged" in {
+    Redaction.safeBody("""{"error": "model not found"}""") shouldBe """{"error": "model not found"}"""
+  }
+
+  it should "redact the whole body before cutting it, so a secret straddling the cut point does not survive" in {
+    // OpenAI echoes a rejected key in full: "Incorrect API key provided: sk-proj-...".
+    val key    = "sk-proj-" + ("abc123def456ghi789jk" * 2)
+    val prefix = "Incorrect API key provided: "
+    val body =
+      prefix + key + ". You can find your API key at https://platform.openai.com/account/api-keys." + ("y" * 500)
+    val cut = prefix.length + "sk-proj-".length + 19
+
+    // Cutting first leaves 19 characters of the key, one short of what the key pattern needs, so they survive.
+    Redaction.redact(Redaction.truncateForLog(body, cut)) should include("sk-proj-abc123def456ghi789j")
+
+    val result = Redaction.safeBody(body, cut)
+    (result should not).include("abc123def456")
+    result should include("truncated")
+  }
+
+  it should "render a null body as null rather than throw" in {
+    Redaction.safeBody(null) shouldBe "null"
+  }
+
   "Redaction.redact" should "redact OpenAI API keys" in {
     val input    = "Key: sk-proj-abc123def456ghi789jkl012mno345"
     val redacted = Redaction.redact(input)

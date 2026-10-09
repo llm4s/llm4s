@@ -26,7 +26,14 @@ final case class RecipeInfo(id: String, title: String, summary: String, mainClas
 /** Every recipe of the cookbook, in the order the docs page lists them. */
 object Cookbook {
   val apps: Seq[RecipeApp] =
-    Seq(ToolCallingRecipe, StructuredOutputRecipe, GuardrailsRecipe, DocumentQaRecipe, MemoryRecipe)
+    Seq(
+      ToolCallingRecipe,
+      StructuredOutputRecipe,
+      GuardrailsRecipe,
+      DocumentQaRecipe,
+      MemoryRecipe,
+      MultiAgentGraphRecipe
+    )
 
   val recipes: Seq[RecipeInfo] = apps.map(_.info)
 }

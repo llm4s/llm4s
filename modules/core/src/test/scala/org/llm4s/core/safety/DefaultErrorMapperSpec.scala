@@ -1,7 +1,8 @@
 package org.llm4s.core.safety
 
 import org.llm4s.error.{ AuthenticationError, LLMError, RateLimitError, UnknownError }
-import org.llm4s.testutil.SmallStack
+import org.llm4s.testutil.{ EchoedCredentials, LinearTime, SmallStack }
+import org.llm4s.util.Redaction
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -10,13 +11,15 @@ import org.scalatest.matchers.should.Matchers
  * status, never on a bare substring (#1668).
  */
 class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
-  import DefaultErrorMapperSpec.Adversarial
+  import DefaultErrorMapperSpec.{ Adversarial, ScalingSize }
 
   private def unknownWithCause(t: Throwable): Unit =
     DefaultErrorMapper(t) match {
       case e: UnknownError =>
         (e.cause should be).theSameInstanceAs(t)
-        e.message shouldBe t.getMessage
+        // none of these messages holds a credential: a short one is kept as it is, a long one capped (#1674)
+        if (t.getMessage.length <= 2048) e.message shouldBe t.getMessage
+        else e.message shouldBe Redaction.safeBody(t.getMessage)
       case other => fail(s"expected an UnknownError for '${t.getMessage}', got $other")
     }
 
@@ -136,6 +139,26 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
     (leaked should not).include("sk-abcdefghijklmnopqrstuvwxyz123456")
   }
 
+  it should "redact and cap the message of an UnknownError and an AuthenticationError, keeping the cause as it is (#1674)" in {
+    val unknown = new IllegalStateException("upstream said: " + EchoedCredentials.Text + " " + "x" * 5000)
+    DefaultErrorMapper(unknown) match {
+      case e: UnknownError =>
+        e.message should include("[REDACTED]")
+        EchoedCredentials.leaked(e.message) shouldBe empty
+        e.message should include("(truncated, original length: ")
+        e.message.length should be < 2200
+        // the cause is the original exception, unredacted (documented on DefaultErrorMapper)
+        (e.cause should be).theSameInstanceAs(unknown)
+      case other => fail(s"expected an UnknownError, got $other")
+    }
+
+    // anthropic-java and openai-java write the body after the status: "401: <body>"
+    val auth = DefaultErrorMapper(new RuntimeException("401: " + EchoedCredentials.JsonError))
+    auth shouldBe an[AuthenticationError]
+    auth.message should include("[REDACTED]")
+    EchoedCredentials.leaked(auth.message) shouldBe empty
+  }
+
   it should "map a message naming HTTP status 429 to RateLimitError" in {
     rateLimited.foreach { message =>
       DefaultErrorMapper(new RuntimeException(message)) match {
@@ -160,44 +183,48 @@ class DefaultErrorMapperSpec extends AnyFlatSpec with Matchers {
   }
 
   // Inputs on which the patterns of d48da248 backtracked quadratically (#1669 review): seconds at 20k-40k.
-  private def adversarial: Seq[(String, String)] = Seq(
-    "status + spaces + x"   -> ("status" + " " * Adversarial + "x"),
-    "status + newlines"     -> ("status" + "\n" * Adversarial),
-    "http + spaces"         -> ("http" + " " * Adversarial),
-    "HTTP error + spaces"   -> ("HTTP error" + " " * Adversarial + "x"),
-    "status_ + separators"  -> ("status" + "_ -" * (Adversarial / 3) + "x"),
-    "401 + spaces"          -> ("401" + " " * Adversarial),
-    "429 + spaces + too"    -> ("429" + " " * Adversarial + "too"),
-    "repeated status words" -> ("status " * (Adversarial / 7)),
-    "Error: prefix"         -> ("Error: " * (Adversarial / 7) + "401")
+  private def adversarial(size: Int): Seq[(String, String)] = Seq(
+    "status + spaces + x"   -> ("status" + " " * size + "x"),
+    "status + newlines"     -> ("status" + "\n" * size),
+    "http + spaces"         -> ("http" + " " * size),
+    "HTTP error + spaces"   -> ("HTTP error" + " " * size + "x"),
+    "status_ + separators"  -> ("status" + "_ -" * (size / 3) + "x"),
+    "401 + spaces"          -> ("401" + " " * size),
+    "429 + spaces + too"    -> ("429" + " " * size + "too"),
+    "repeated status words" -> ("status " * (size / 7)),
+    "Error: prefix"         -> ("Error: " * (size / 7) + "401")
   )
 
-  private def millis[A](body: => A): Long = {
-    val start = System.nanoTime()
-    body
-    (System.nanoTime() - start) / 1000000L
-  }
-
+  // Timing asserts how the cost scales, not an absolute time a slow runner can exceed (#1709): see LinearTime.
   it should "map a message shaped to make the patterns backtrack in linear time" in {
-    adversarial.foreach { case (name, message) =>
-      val t       = new RuntimeException(message)
-      val elapsed = millis(DefaultErrorMapper(t) shouldBe an[UnknownError])
-      withClue(s"$name: ")(elapsed should be < 500L)
+    // The mapper runs the patterns over a message's head and tail only, which bounds even a quadratic
+    // pattern here, but it redacts the whole message, so its cost grows linearly with the message. The
+    // patterns' own linearity is checked over the whole input by the next test.
+    def mapped(t: Throwable): Unit = DefaultErrorMapper(t) shouldBe an[UnknownError]
+    adversarial(Adversarial / 8).zip(adversarial(Adversarial / 2)).foreach { case ((name, small), (_, large)) =>
+      LinearTime.assertLinear(name, new RuntimeException(small), new RuntimeException(large))(mapped)
+    }
+    // and at the full adversarial length, a generous hang guard
+    adversarial(Adversarial).foreach { case (name, message) =>
+      LinearTime.timed(name)(mapped(new RuntimeException(message)))
     }
   }
 
   it should "scan an entire adversarial message with each pattern in linear time, cap aside" in {
     // The mapper scans only a message's head and tail; this checks the patterns themselves, over the whole input.
-    for {
-      (name, message) <- adversarial
-      pattern         <- DefaultErrorMapper.StatusPatterns
-    } {
-      val elapsed = millis {
-        val matcher = pattern.matcher(message)
-        while (matcher.find()) ()
-      }
-      withClue(s"$name, ${pattern.pattern}: ")(elapsed should be < 500L)
+    def scan(pattern: java.util.regex.Pattern)(message: String): Unit = {
+      val matcher = pattern.matcher(message)
+      while (matcher.find()) ()
     }
+    for {
+      ((name, small), (_, large)) <- adversarial(ScalingSize).zip(adversarial(4 * ScalingSize))
+      pattern                     <- DefaultErrorMapper.StatusPatterns
+    } LinearTime.assertLinear(s"$name, ${pattern.pattern}", small, large)(scan(pattern))
+    // and at the full adversarial length, a generous hang guard
+    for {
+      (name, message) <- adversarial(Adversarial)
+      pattern         <- DefaultErrorMapper.StatusPatterns
+    } LinearTime.timed(s"$name, ${pattern.pattern}")(scan(pattern)(message))
   }
 
   it should "not overflow a small stack on a long run of exception-name prefixes" in {
@@ -252,4 +279,10 @@ object DefaultErrorMapperSpec {
 
   /** The length of each adversarial input: ten times the 20,000 characters that took seconds before. */
   val Adversarial = 200000
+
+  /**
+   * The smaller of the two lengths the patterns' scaling is measured at; the larger is four times it,
+   * the 20,000 characters that took seconds, so a quadratic pattern still finishes and fails the ratio.
+   */
+  val ScalingSize = 5000
 }

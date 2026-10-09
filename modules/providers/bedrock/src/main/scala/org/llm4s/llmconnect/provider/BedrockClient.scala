@@ -20,7 +20,7 @@ import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
-import org.llm4s.util.BoundedJson
+import org.llm4s.util.{ BoundedJson, Redaction }
 
 import software.amazon.awssdk.auth.credentials.{
   AwsBasicCredentials,
@@ -614,23 +614,29 @@ class BedrockClient(
   private def endpointLabel: String =
     config.endpointUrl.getOrElse(s"bedrock-runtime.${config.region}.amazonaws.com")
 
+  /**
+   * An AWS exception's message, redacted and capped: the service's message can echo request text, and the SDK
+   * appends it to whatever it read from the response body.
+   */
+  private def safeMessage(e: Throwable): String = Option(e.getMessage).fold("")(Redaction.safeBody(_))
+
   private def mapException(throwable: Throwable): LLMError =
     unwrap(throwable) match {
       case _: ThrottlingException           => RateLimitError("bedrock")
       case _: ServiceQuotaExceededException => RateLimitError("bedrock")
-      case e: ValidationException           => ValidationError("request", e.getMessage)
-      case e: AccessDeniedException         => AuthenticationError("bedrock", e.getMessage)
+      case e: ValidationException           => ValidationError("request", safeMessage(e))
+      case e: AccessDeniedException         => AuthenticationError("bedrock", safeMessage(e))
       case e: ApiCallTimeoutException =>
         val timeout = requestTimeout.getOrElse(FiniteDuration(0, TimeUnit.SECONDS))
-        TimeoutError(e.getMessage, timeout, "bedrock.complete", Some(e)).withContext("endpoint", endpointLabel)
+        TimeoutError(safeMessage(e), timeout, "bedrock.complete", Some(e)).withContext("endpoint", endpointLabel)
       case e: BedrockRuntimeException if e.statusCode() == 401 || e.statusCode() == 403 =>
-        AuthenticationError("bedrock", e.getMessage)
-      case e: BedrockRuntimeException => ServiceError(e.statusCode(), "bedrock", e.getMessage)
+        AuthenticationError("bedrock", safeMessage(e))
+      case e: BedrockRuntimeException => ServiceError(e.statusCode(), "bedrock", safeMessage(e))
       // The SDK reports "no credentials" as a client exception; retrying cannot fix it.
       case e: SdkClientException if Option(e.getMessage).exists(_.toLowerCase.contains("credentials")) =>
-        AuthenticationError("bedrock", e.getMessage)
+        AuthenticationError("bedrock", safeMessage(e))
       case e: SdkClientException =>
-        NetworkError(e.getMessage, Some(e), endpointLabel)
+        NetworkError(safeMessage(e), Some(e), endpointLabel)
       case e => e.toLLMError
     }
 

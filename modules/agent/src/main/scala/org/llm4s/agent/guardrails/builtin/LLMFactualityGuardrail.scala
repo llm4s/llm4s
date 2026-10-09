@@ -36,7 +36,8 @@ import org.llm4s.llmconnect.LLMClient
  *
  * @param llmClient the client that makes the judge call; it can be the agent's own or a separate model
  * @param referenceContext the text the content is checked against; it is inserted into the prompt as is
- * @param threshold the lowest score that passes (a score equal to it passes); default 0.7
+ * @param threshold the lowest score that passes (a score equal to it passes), between 0.0 and 1.0 or `validate`
+ *                  fails; default 0.7
  *
  * @example
  * {{{

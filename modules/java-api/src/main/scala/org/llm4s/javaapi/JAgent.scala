@@ -17,11 +17,15 @@ import scala.jdk.CollectionConverters.*
  * return `String`s, JDK types and this package's own types. A conversation is a thread of the
  * agent's in-memory runtime, kept until [[forget]] removes it.
  *
- * `run` and `continueConversation` block the calling thread and never throw. Interrupting that
- * thread returns a failed result whose error is a [[org.llm4s.error.CancelledError CancelledError]],
- * with the interrupt flag still set, while the run itself carries on; `InterruptedException` is
- * never thrown, so the methods declare no checked exception and `javac` rejects a
- * `catch (InterruptedException e)` around them - test the result for a `CancelledError` instead.
+ * `run`, `continueConversation`, `resume` and `recover` block the calling thread and never throw.
+ * Interrupting that thread cancels the turn: the call returns a failed result whose error is a
+ * [[org.llm4s.error.CancelledError CancelledError]], with the interrupt flag still set, once the
+ * turn has ended (it waits up to 5 seconds for the turn to end, for a provider that ignores its
+ * interrupt), and the
+ * conversation's thread is left for `recover`. A thread already interrupted starts no turn.
+ * `InterruptedException` is never thrown, so the methods declare no checked exception and `javac`
+ * rejects a `catch (InterruptedException e)` around them - test the result for a `CancelledError`
+ * instead. To cancel a turn without interrupting a thread, `stream` it and call [[AgentStream.cancel]].
  *
  * A turn whose tools need approval, or ask a question, ends `SUSPENDED`: its status's `pending()` - or
  * [[JAgent.pending]] - lists what it waits for, and `resume(threadId, answers)` answers some or all of it and continues. A turn that
@@ -53,9 +57,13 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
    * Runs `query` as the first turn of a new conversation. A `null` query yields a failed result.
    *
    * Blocks the calling thread until the turn ends. If that thread is interrupted while it waits, the
-   * result is a failure whose error is a [[org.llm4s.error.CancelledError CancelledError]] and the
-   * thread's interrupt flag is left set; the run itself is not stopped. `InterruptedException` is
-   * never thrown, and the method declares none.
+   * turn is cancelled: the result is a failure whose error is a
+   * [[org.llm4s.error.CancelledError CancelledError]], returned once the turn has ended (it waits up to
+   * 5 seconds for the turn to end), and the thread's interrupt flag is left set. A turn that had
+   * already begun committing its outcome is not cancelled, and that outcome is returned, the flag still
+   * set. A thread already interrupted starts no turn. The conversation's id is not in a failed result, so a failed or
+   * cancelled turn's conversation is forgotten. `InterruptedException` is never thrown, and the
+   * method declares none.
    */
   def run(query: String): LlmResult[JAgentResult] =
     if (query == null) LlmResult.failure(ValidationError.required("query"))
@@ -64,8 +72,9 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
   /**
    * Runs `query` as the next turn of `previous`'s conversation - only its `threadId()` is read. A `null`
    * argument yields a failed result.
-   * Blocks and reports an interrupt as [[run]] does: a `CancelledError` result, the interrupt flag
-   * left set, never an `InterruptedException`.
+   * Blocks and handles an interrupt as [[run]] does: the turn is cancelled and the result is a
+   * `CancelledError`, the interrupt flag left set, never an `InterruptedException`; the conversation's
+   * thread is left for [[recover]].
    */
   def continueConversation(previous: JAgentResult, query: String): LlmResult[JAgentResult] =
     if (previous == null) LlmResult.failure(ValidationError.required("previous"))
@@ -75,7 +84,20 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
   /** Removes `previous`'s conversation from the agent's runtime. A `null` argument yields a failed result. */
   def forget(previous: JAgentResult): LlmResult[Void] =
     if (previous == null) LlmResult.failure(ValidationError.required("previous"))
-    else call("JAgent.forget")(_.forget(ThreadId(previous.threadId)).map(_ => null))
+    else forgetThread(previous.threadId)
+
+  /**
+   * Removes the conversation on `threadId` from the agent's runtime - one you named for `stream`, say,
+   * whose turn failed, so no result carries its id. Forgetting an unknown thread succeeds; a thread
+   * whose turn is still running is refused (`GraphError.ThreadBusy`), and nothing is removed. A `null`
+   * argument yields a failed result.
+   */
+  def forget(threadId: String): LlmResult[Void] =
+    if (threadId == null) LlmResult.failure(ValidationError.required("threadId"))
+    else forgetThread(threadId)
+
+  private def forgetThread(threadId: String): LlmResult[Void] =
+    call("JAgent.forget")(_.forget(ThreadId(threadId)).map(_ => null))
 
   /**
    * Runs `query` as one turn on `threadId` - a new conversation, or the next turn of one - handing
@@ -120,8 +142,9 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
    * `Suspended` again. Build each answer with [[Answer.approve]], [[Answer.reject]], [[Answer.edit]] or
    * [[Answer.reply]]; for an id answered twice, the last answer counts. A `null` or malformed answer,
    * an empty answers list (`GraphError.InvalidResume`), an answer to an id the thread does not wait
-   * for, or a thread that is not suspended is a failed result. Blocks and reports an interrupt as [[run]] does: a `CancelledError` result, the interrupt
-   * flag left set, and the turn carries on.
+   * for, or a thread that is not suspended is a failed result. Blocks and handles an interrupt as [[run]] does: the
+   * turn is cancelled, the result is a `CancelledError` with the interrupt flag left set, and the
+   * thread is left for [[recover]].
    */
   def resume(threadId: String, answers: java.util.List[Answer]): LlmResult[JAgentResult] =
     if (threadId == null) LlmResult.failure(ValidationError.required("threadId"))
@@ -131,7 +154,8 @@ final class JAgent private[javaapi] (private val underlying: Result[Agent]) {
   /**
    * Continues `threadId`'s failed or cancelled turn - a `stream` that was cancelled, a run that failed
    * on a provider error - re-running only the work that did not finish, and returns its result. A
-   * thread with nothing to recover is a failed result. Blocks and reports an interrupt as [[run]] does.
+   * thread with nothing to recover is a failed result. Blocks and handles an interrupt as [[run]] does:
+   * the recovered turn is cancelled and the thread is left for another `recover`.
    */
   def recover(threadId: String): LlmResult[JAgentResult] =
     if (threadId == null) LlmResult.failure(ValidationError.required("threadId"))

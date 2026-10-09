@@ -3,10 +3,12 @@ package org.llm4s.llmconnect.smoke
 import org.llm4s.error.AuthenticationError
 import org.llm4s.it.Tier
 import org.llm4s.it.tags.Cloud
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ BedrockConfig, BedrockCredentials, ContextWindowResolver }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.BedrockClient
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.Result
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -26,7 +28,7 @@ import scala.collection.mutable.ListBuffer
  * The invalid-credentials test needs only network access.
  */
 @Cloud
-class BedrockSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
+class BedrockSmokeSpec extends AnyFlatSpec with Matchers with EitherValues with ProviderSmokeContract {
 
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
@@ -78,4 +80,19 @@ class BedrockSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
     result.isLeft shouldBe true
     result.swap.value shouldBe an[AuthenticationError]
   }
+
+  // ---- the shared capability contract (issue #1212): see ProviderSmokeContract ----
+
+  // Bedrock has no single key: the contract's "key" is the region, present only with credentials the default chain
+  // can find, which is what `requireAws()` asks for.
+  override protected def providerLabel: String       = "Bedrock"
+  override protected def apiKeyEnvVar: String        = "AWS_REGION and AWS credentials"
+  override protected def contractKey: Option[String] = region.filter(_ => hasCredentials)
+  override protected def contractClient(region: String): Result[LLMClient] =
+    BedrockConfig.fromValues(model, region, None).flatMap(config => BedrockClient(config))
+  override protected def notApplicable: Map[Capability, String] = Map(
+    Capability.StructuredOutput -> "BedrockClient does not send CompletionOptions.responseFormat"
+  )
+
+  registerCapabilityContract()
 }

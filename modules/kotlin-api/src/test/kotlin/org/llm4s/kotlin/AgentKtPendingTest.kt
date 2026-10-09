@@ -13,6 +13,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.asCoroutineDispatcher
 import java.util.concurrent.Executors
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -25,6 +26,15 @@ import kotlin.test.assertIs
 import org.llm4s.agent.Agent
 import org.llm4s.javaapi.JAgentResult
 import org.llm4s.agent.graph.GraphError
+import org.llm4s.agent.graph.Checkpointer
+import org.llm4s.agent.graph.Commit
+import org.llm4s.agent.graph.EventRecord
+import org.llm4s.agent.graph.GraphRuntime
+import org.llm4s.agent.graph.InMemoryCheckpointer
+import java.time.Clock
+import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.test.assertFalse
 import org.llm4s.agent.graph.StateUpdate
 import org.llm4s.agent.graph.middleware.AgentMiddleware
 import org.llm4s.agent.graph.middleware.ApprovalMiddleware
@@ -57,10 +67,12 @@ import scala.util.Either
 import scala.util.Left
 import scala.util.Right
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.LockSupport
+import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -144,16 +156,36 @@ class AgentKtPendingTest {
 
     private fun agentOf(vararg replies: () -> Either<LLMError, Completion>): AgentKt = Llm4s.wrapAgent(scalaAgentOf(*replies))
 
-    private fun scalaAgentOf(vararg replies: () -> Either<LLMError, Completion>): Agent {
+    /** [agentOf], its threads kept in [store]. */
+    private fun agentOn(store: Checkpointer, vararg replies: () -> Either<LLMError, Completion>): AgentKt =
+        Llm4s.wrapAgent(scalaAgentOf(*replies, runtime = GraphRuntime(store, Clock.systemUTC())))
+
+    private fun scalaAgentOf(vararg replies: () -> Either<LLMError, Completion>, runtime: GraphRuntime? = null): Agent {
         val approval: AgentMiddleware = ApprovalMiddleware(
             { request -> if (request.spec().name() == "deploy") Option.apply("deploying") else Option.empty() },
             "approval",
         )
         val tools = ToolSet.of(seq<AgentTool<*>>(deploy, confirm, whoami)).toOption().get() as ToolSet
-        return Agent.builder("test", Scripted(replies.toList(), completion("done")))
+        val builder = Agent.builder("test", Scripted(replies.toList(), completion("done")))
             .withTools(tools)
             .withMiddleware(seq(approval))
-            .build().toOption().get() as Agent
+        return (runtime?.let { builder.withRuntime(it) } ?: builder).build().toOption().get() as Agent
+    }
+
+    /** An in-memory store that records the threads it stores and the threads it deletes. */
+    private class WatchedStore(private val store: Checkpointer = InMemoryCheckpointer()) : Checkpointer by store {
+        val stored: MutableSet<String> = ConcurrentHashMap.newKeySet()
+        val deleted: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+        override fun commit(threadId: String, commit: Commit): Either<LLMError, scala.collection.immutable.Vector<EventRecord>> {
+            stored.add(threadId)
+            return store.commit(threadId, commit)
+        }
+
+        override fun deleteThread(threadId: String): Either<LLMError, BoxedUnit> {
+            deleted.add(threadId)
+            return store.deleteThread(threadId)
+        }
     }
 
     /** A model call that parks until the cancelled turn interrupts it, then reports the cancellation. */
@@ -311,10 +343,12 @@ class AgentKtPendingTest {
     // ---- cancelling run or continueConversation cancels the turn ---------------------------------
 
     @Test
-    fun `cancelling a run cancels the turn, freeing its thread for recover and the next turn`() = runBlocking {
+    fun `cancelling a run cancels the turn, and forgets its thread once the turn has ended`() = runBlocking {
         val parked = CountDownLatch(1)
         val unparked = CountDownLatch(1)
-        val agent = agentOf(
+        val store = WatchedStore()
+        val agent = agentOn(
+            store,
             { completion("", listOf(call("c1", "whoami", "x"))) },
             parking(parked, unparked),
             { completion("recovered") },
@@ -325,10 +359,63 @@ class AgentKtPendingTest {
         assertTrue(running.isCancelled)
         assertFailsWith<CancellationException> { running.await() }
         assertTrue(withContext(Dispatchers.IO) { unparked.await(seconds, TimeUnit.SECONDS) }, "the model call was interrupted")
-        // the turn has ended (cancelled): the thread is not busy, recover finishes it, and the conversation goes on
-        val recovered = agent.recover(threadOfTurn.get())
-        assertEquals(Optional.of("recovered"), recovered.answer())
-        assertEquals(Optional.of("done"), agent.continueConversation(recovered, "again").answer())
+        // the turn ended (cancelled), and its thread - whose id nothing thrown carries - is gone
+        assertEquals(setOf(threadOfTurn.get()), store.stored.toSet())
+        assertEquals(store.stored.toSet(), store.deleted.toSet())
+        val nothing = assertFailsWith<LLMException> { agent.recover(threadOfTurn.get()) }
+        assertTrue(nothing.message.orEmpty().contains("no incomplete execution"), nothing.message)
+    }
+
+    @Test
+    fun `a failed run forgets its thread, and a completed one keeps it`() = runBlocking {
+        val store = WatchedStore()
+        val down = NetworkError.apply("down", Option.empty(), "http://x")
+        val agent = agentOn(store, { Left(down) })
+        assertFailsWith<LLMException> { agent.run("go") }
+        assertEquals(1, store.stored.size)
+        assertEquals(store.stored.toSet(), store.deleted.toSet())
+
+        val kept = agent.run("again")
+        assertTrue(store.stored.contains(kept.threadId()))
+        assertFalse(store.deleted.contains(kept.threadId()))
+    }
+
+    @Test
+    fun `a cancelled run whose provider ignores the interrupt returns within the bound, its thread left busy until the turn ends`() = runBlocking {
+        val deaf = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val store = WatchedStore()
+        val agent = agentOn(
+            store,
+            { completion("", listOf(call("c1", "whoami", "x"))) },
+            {
+                // ignores its interrupt until released
+                deaf.countDown()
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds)
+                while (release.count > 0 && System.nanoTime() < deadline) LockSupport.parkNanos(10_000_000L)
+                Thread.interrupted()
+                completion("late")
+            },
+            { completion("recovered") },
+        )
+        val running = async(Dispatchers.Default) { agent.run("go") }
+        assertTrue(withContext(Dispatchers.IO) { deaf.await(seconds, TimeUnit.SECONDS) })
+        val began = System.nanoTime()
+        withTimeout(seconds * 1000) { running.cancelAndJoin() }
+        val waited = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - began)
+        assertTrue(running.isCancelled)
+        // it gave up after the 5-second bound, the turn still running: nothing was forgotten
+        assertTrue(waited in 4_500..(seconds * 1000 / 2), "waited $waited ms")
+        assertTrue(store.deleted.isEmpty())
+        release.countDown()
+        // once the provider returns, the cancelled turn ends, and its thread is left for recover
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds)
+        var recovered: JAgentResult? = null
+        while (recovered == null && System.nanoTime() < deadline) {
+            recovered = runCatching { agent.recover(threadOfTurn.get()) }.getOrNull()
+            if (recovered == null) delay(20)
+        }
+        assertTrue(recovered != null, "the thread was never free to recover")
     }
 
     @Test
@@ -454,10 +541,35 @@ class AgentKtPendingTest {
      * [listener], but its `onEvent` - or, when [atEnd], only its `onComplete` - first throws a fatal error, one
      * the facade's `Safety` does not capture: the facade's delivery thread dies of it and skips the terminal callback.
      */
-    private class FailsFatally(private val listener: AgentStreamListener, private val atEnd: Boolean) : AgentStreamListener {
-        override fun onEvent(event: StreamEvent) = if (atEnd) listener.onEvent(event) else throw StackOverflowError("listener")
-        override fun onComplete(result: JAgentResult) = throw StackOverflowError("listener")
+    private inner class FailsFatally(private val listener: AgentStreamListener, private val atEnd: Boolean) : AgentStreamListener {
+        override fun onEvent(event: StreamEvent) = if (atEnd) listener.onEvent(event) else raiseFatal()
+        override fun onComplete(result: JAgentResult) = raiseFatal()
         override fun onError(error: LlmException) = listener.onError(error)
+    }
+
+    /** Each delivery thread a [FailsFatally] listener ended, with the error its own handler recorded it dying of. */
+    private val fatallyEnded = ConcurrentLinkedQueue<Pair<Thread, AtomicReference<Throwable>>>()
+
+    /**
+     * Throws the fatal error from the delivery thread, which it ends uncaught - after the facade's call has already
+     * returned. The thread's own handler records it, so the default one does not print it to whatever `System.err`
+     * is then (#1719).
+     */
+    private fun raiseFatal(): Nothing {
+        val died = AtomicReference<Throwable>()
+        val current = Thread.currentThread()
+        current.setUncaughtExceptionHandler { _, e -> died.set(e) }
+        fatallyEnded.add(current to died)
+        throw StackOverflowError("listener")
+    }
+
+    /** No delivery thread a test ended fatally outlives it, and each died of the listener's error, not swallowed. */
+    @AfterTest
+    fun awaitFatallyEndedThreads() {
+        for ((thread, died) in fatallyEnded) {
+            assertTrue(thread.join(Duration.ofSeconds(seconds)), "the delivery thread ${thread.name} ended")
+            assertIs<StackOverflowError>(died.get(), "what ${thread.name} died of")
+        }
     }
 
     /** [real], every stream's listener wrapped in [FailsFatally]. */
@@ -466,6 +578,7 @@ class AgentKtPendingTest {
         every { facade.stream(any(), any(), any()) } answers { real.stream(firstArg(), secondArg(), FailsFatally(thirdArg(), atEnd)) }
         every { facade.streamResume(any(), any(), any()) } answers { real.streamResume(firstArg(), secondArg(), FailsFatally(thirdArg(), atEnd)) }
         every { facade.streamRecover(any(), any()) } answers { real.streamRecover(firstArg(), FailsFatally(secondArg(), atEnd)) }
+        every { facade.forget(any<String>()) } answers { real.forget(firstArg<String>()) }
         return AgentKt(facade)
     }
 
