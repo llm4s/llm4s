@@ -2,8 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.annotation.Stable
 import org.llm4s.llmconnect.model.{ CompletionOptions, ResponseFormat, ResponseFormatMapper, ThinkingBlock, ToolCall }
-
-import scala.util.Try
+import org.llm4s.util.BoundedJson
 
 /**
  * The places where an OpenAI-compatible provider departs from the plain
@@ -190,7 +189,9 @@ object OpenAICompatibleDialect:
 
   /**
    * Parses a `tool_calls` array without failing: a missing `id` or `name`
-   * becomes `""`, and missing or unparseable `arguments` become `{}`.
+   * becomes `""`, and missing or unparseable `arguments` become `{}`, as do
+   * arguments nested more than 512 levels deep - they are model output, and a
+   * value that deep overflows the stack of whatever renders it next (#1562).
    */
   def lenientToolCalls(toolCalls: ujson.Value): Seq[ToolCall] =
     toolCalls.arrOpt.toSeq.flatten.map { call =>
@@ -199,7 +200,7 @@ object OpenAICompatibleDialect:
       ToolCall(
         id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
         name = function.flatMap(_.get("name")).flatMap(_.strOpt).getOrElse(""),
-        arguments = Try(ujson.read(argsStr)).getOrElse(ujson.Obj())
+        arguments = BoundedJson.read(argsStr).getOrElse(ujson.Obj())
       )
     }
 

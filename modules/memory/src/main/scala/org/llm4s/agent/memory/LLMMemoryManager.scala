@@ -2,13 +2,12 @@ package org.llm4s.agent.memory
 
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
-import org.llm4s.types.TryOps
 import org.llm4s.types.Result
+import org.llm4s.util.BoundedJson
 import org.slf4j.LoggerFactory
 import ujson.{ Arr, Num, Obj, Str }
 
 import java.time.Instant
-import scala.util.Try
 
 /**
  * Memory manager with LLM-powered consolidation and entity extraction.
@@ -332,7 +331,11 @@ final case class LLMMemoryManager(
 
   private def parseEntityArray(raw: String): Result[Seq[Obj]] = {
     val payload = normalizeJsonPayload(raw)
-    Try(ujson.read(payload)).toResult.left
+    // The payload is model text: a document nested more than 512 levels deep is refused before it is
+    // parsed, since a value that deep overflows the stack of whatever renders it (#1562).
+    BoundedJson
+      .read(payload)
+      .left
       .map { err =>
         org.llm4s.error.ProcessingError(
           "entity_extraction_parse",

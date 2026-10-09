@@ -109,7 +109,7 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
       // A cancellation passes through as it is (design section 4.4); any other failure is an EmbeddingError.
       val respEither: Result[org.llm4s.http.HttpResponse] =
         httpClient
-          .post(url, headers, payload.render(), timeout = 2.minutes)
+          .post(url, headers, payload.render(), timeout = cfg.timeouts.requestOr(2.minutes))
           .left
           .map {
             case cancelled: CancelledError => cancelled
@@ -130,7 +130,7 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
                 EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "ollama")
               }
           case status =>
-            val body = Redaction.truncateForLog(response.body)
+            val body = Redaction.safeBody(response.body)
             logger.error(s"[OllamaEmbeddingProvider] HTTP error: $body")
             Left(
               EmbeddingError(

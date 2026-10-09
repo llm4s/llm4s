@@ -142,6 +142,35 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
     }
   }
 
+  test("an HTTP error whose body echoes credentials is redacted in the error message, on both paths (#1674)") {
+    import org.llm4s.testutil.EchoedCredentials
+    Seq(401, 400).foreach { status =>
+      withServer { exchange =>
+        val body =
+          ujson.Obj("type" -> "error", "error" -> ujson.Obj("type" -> "error", "message" -> EchoedCredentials.Text))
+        val bytes = body.render().getBytes(StandardCharsets.UTF_8)
+        exchange.getResponseHeaders.add("Content-Type", "application/json")
+        exchange.sendResponseHeaders(status, bytes.length)
+        val os = exchange.getResponseBody
+        os.write(bytes)
+        os.close()
+      } { baseUrl =>
+        val client = new AnthropicClient(testConfig.withBaseUrl(baseUrl))
+        val errors = Seq(
+          client.complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions()),
+          client.streamComplete(Conversation(Seq(UserMessage("hello"))), CompletionOptions(), _ => ())
+        ).map(_.left.toOption.value)
+        errors.foreach { e =>
+          withClue(s"$status ${e.getClass.getSimpleName}: ") {
+            e.message should include("[REDACTED]")
+            EchoedCredentials.leaked(e.message) shouldBe empty
+          }
+        }
+        if (status == 401) errors.foreach(_ shouldBe an[org.llm4s.error.AuthenticationError])
+      }
+    }
+  }
+
   test("streamComplete() maps a connection failure to an LLMError and records the exchange") {
     val exchanges = ListBuffer.empty[ProviderExchange]
     val sink = new ProviderExchangeSink {

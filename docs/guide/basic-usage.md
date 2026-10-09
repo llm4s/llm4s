@@ -430,5 +430,5 @@ response match {
 - Verify internet connectivity
 - Check if the provider's service is operational
 - Try using a different network or VPN
-- Increase the timeout in configuration if needed
+- Raise the provider's timeout in configuration if needed: a section's `timeouts { request = 5m }` block (see [Timeouts](../getting-started/configuration#timeouts))
 

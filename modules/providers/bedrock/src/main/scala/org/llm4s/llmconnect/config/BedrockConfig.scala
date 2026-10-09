@@ -40,6 +40,9 @@ final case class BedrockCredentials(
  * @param credentials       Explicit credentials; the default chain is used when absent.
  * @param profile           AWS shared-config profile name.
  * @param endpointUrl       Endpoint override, e.g. a VPC endpoint or a test server.
+ * @param timeouts          how long a `Converse` call and a `ConverseStream` call may take: the section's
+ *                          `timeouts` block. An absent value keeps the client's default: the AWS SDK's
+ *                          own for a request, and no limit for a stream ([[ProviderTimeouts]]).
  */
 final case class BedrockConfig(
   region: String,
@@ -48,16 +51,18 @@ final case class BedrockConfig(
   reserveCompletion: Int,
   credentials: Option[BedrockCredentials] = None,
   profile: Option[String] = None,
-  endpointUrl: Option[String] = None
+  endpointUrl: Option[String] = None,
+  override val timeouts: ProviderTimeouts = ProviderTimeouts.default
 ) extends ProviderConfig:
-  override val providerId: ProviderId                  = ProviderId("bedrock")
-  override def withModel(model: String): BedrockConfig = copy(model = model)
+  override val providerId: ProviderId                                  = ProviderId("bedrock")
+  override def withModel(model: String): BedrockConfig                 = copy(model = model)
+  override def withTimeouts(timeouts: ProviderTimeouts): BedrockConfig = copy(timeouts = timeouts)
 
   override def toString: String =
     s"BedrockConfig(region=$region, model=$model, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion, " +
       s"credentials=${credentials.map(_.toString).getOrElse("(default chain)")}, " +
-      s"profile=${profile.getOrElse("none")}, endpointUrl=${endpointUrl.getOrElse("default")})"
+      s"profile=${profile.getOrElse("none")}, endpointUrl=${endpointUrl.getOrElse("default")}, timeouts=$timeouts)"
 
 object BedrockConfig:
 

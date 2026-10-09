@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
 import scala.concurrent.duration.*
+import org.llm4s.testutil.EchoedCredentials
 
 /**
  * `CohereEmbeddingProvider` against Cohere's `/v2/embed` contract: the exact request body (including
@@ -465,5 +466,24 @@ class CohereEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
 
   it should "build a provider for the SPI" in {
     CohereEmbeddingProvider.build(cfg()).isRight shouldBe true
+  }
+
+  "an error body" should "be redacted before it reaches the error or the log, whatever the status (#1674)" in {
+    for {
+      status <- Seq(401, 500)
+      reply  <- Seq(EchoedCredentials.Text, EchoedCredentials.JsonError)
+    } withClue(s"HTTP $status: ") {
+      val (result, lines) =
+        EchoedCredentials.logged(embed(new MockHttpClient(HttpResponse(status, reply, Map.empty)), Seq("a")))
+      val err = result.left.toOption.get
+      err.message should include("[REDACTED]")
+      EchoedCredentials.leaked(err.message) shouldBe empty
+      val errorLines = lines.filter(l =>
+        l.contains("[CohereEmbeddingProvider] Auth error") || l.contains("[CohereEmbeddingProvider] HTTP error")
+      )
+      errorLines should not be empty
+      errorLines.foreach(_ should include("[REDACTED]"))
+      lines.flatMap(EchoedCredentials.leaked) shouldBe empty
+    }
   }
 }
