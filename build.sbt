@@ -1302,7 +1302,6 @@ lazy val observabilityMicrometer = (project in file("modules/observability-micro
   .dependsOn(core, observabilityPrometheus % Test)
   .settings(
     name := "llm4s-observability-micrometer",
-    description := "Micrometer metrics for LLM4S: a MetricsCollector that records requests, tokens, cost, errors and retries in a MeterRegistry.",
     commonSettings,
     // Measured 99.41% statement and 97.50% branch coverage (`sbt coverage observabilityMicrometer/test
     // observabilityMicrometer/coverageReport`). Floor is the measured value rounded down to the nearest 5.
