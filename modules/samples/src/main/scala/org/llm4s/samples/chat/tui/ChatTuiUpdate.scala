@@ -256,8 +256,7 @@ private[tui] object ChatTuiUpdate:
   private def applyChunks(model: Model, intoIdx: Int, chunks: Vector[StreamedChunk]): Model =
     // Capture tool-call deltas onto the session so handleStreamComplete
     // sees them even when they were drained mid-stream by a pump tick.
-    val toolCalls = chunks.flatMap(_.toolCall)
-    if toolCalls.nonEmpty then model.session.toolCalls = model.session.toolCalls ++ toolCalls
+    model.session.addChunks(chunks)
     val newText = chunks.flatMap(_.content).mkString
     if newText.isEmpty then model
     else

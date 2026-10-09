@@ -725,12 +725,16 @@ curl https://api.anthropic.com/v1/messages \
   //
   // Anthropic rejects some requests that specify both temperature and top_p, so we prefer
   // temperature as the single sampling control for our default path.
+  //
+  // Extended thinking accepts no temperature other than 1, so when a thinking budget is
+  // requested the parameter is omitted too (the API then uses its default, 1); otherwise
+  // the default `CompletionOptions()` temperature of 0.7 would make every thinking request a 400.
   @scala.annotation.nowarn("cat=deprecation")
   private def applySamplingParameters(
     builder: MessageCreateParams.Builder,
     options: CompletionOptions
   ): Unit =
-    if (modelSupportsTemperature)
+    if (modelSupportsTemperature && options.effectiveBudgetTokens.isEmpty)
       builder.temperature(options.temperature.doubleValue())
 
   /**
