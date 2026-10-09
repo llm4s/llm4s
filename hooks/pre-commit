@@ -128,6 +128,7 @@ map_file_to_project() {
     modules/image/*)                      echo "image" ;;
     modules/agent/*)                      echo "agent" ;;
     modules/core/*)                       echo "core" ;;
+    modules/bom/*)                        echo "bom" ;;
     modules/rag/*)                        echo "rag" ;;
     modules/mcp/*)                        echo "mcp" ;;
     modules/it/*)                         echo "it" ;;

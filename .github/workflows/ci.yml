@@ -157,6 +157,11 @@ jobs:
       - name: Check every published artifact is documented
         run: sbt publishedArtifactsCheck
 
+      # Fails when the generated llm4s-bom does not list exactly the artifacts the build publishes
+      # (project/Bom.scala). A release cannot be amended, so a BOM that omits a module stays that way.
+      - name: Check the BOM lists every published artifact
+        run: sbt bomCheck
+
       - name: Compile
         run: sbt compile
 
@@ -807,6 +812,13 @@ jobs:
       - name: Build the Java sample
         working-directory: modules/samples/gradle-java
         run: gradle build installDist
+
+      # A Gradle and a Maven project that import llm4s-bom and declare two modules with no version must build
+      # against the library just published, and a Gradle project without the BOM must not (#1462).
+      - name: Build a Gradle and a Maven project against llm4s-bom
+        env:
+          REQUIRE_MAVEN: '1'
+        run: scripts/check-bom-consumers.sh 0.1.0-SNAPSHOT
 
       - name: Upload Kotlin coverage report
         if: always()

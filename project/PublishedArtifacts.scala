@@ -19,6 +19,13 @@ import scala.util.Using
  */
 object PublishedArtifacts {
 
+  /**
+   * Published artifacts that contain no Scala code and so carry no Scala binary suffix: the BOM
+   * (`org.llm4s:llm4s-bom`). Every other `llm4s-*` project is a Scala 3 artifact published as `<name>_3`.
+   * The BOM is listed apart from them (`boms`), because a release must find its POM but no jar.
+   */
+  val Unsuffixed: Set[String] = Set("llm4s-bom")
+
   /** An artifact name followed by anything but a name character, so `llm4s-agent` does not match `llm4s-agent-tools`. */
   private def mentions(text: String, artifact: String): Boolean =
     ("(?<![A-Za-z0-9-])" + java.util.regex.Pattern.quote(artifact) + "(?![A-Za-z0-9-])").r.findFirstIn(text).isDefined
@@ -39,7 +46,70 @@ object PublishedArtifacts {
   def coordinates(projects: Seq[(String, Boolean)], scalaBinaryVersion: String): (Seq[String], Seq[String]) = {
     val published     = projects.collect { case (name, false) => name }.distinct.sorted
     val (real, stubs) = published.partition(_.startsWith("llm4s-"))
-    (real.map(n => s"${n}_$scalaBinaryVersion"), stubs.map(n => s"${n}_$scalaBinaryVersion"))
+    (
+      real.filterNot(Unsuffixed).map(n => s"${n}_$scalaBinaryVersion"),
+      stubs.map(n => s"${n}_$scalaBinaryVersion")
+    )
+  }
+
+  /** The published POM-only BOM artifacts, by Maven artifactId (they have no Scala suffix). */
+  def boms(projects: Seq[(String, Boolean)]): Seq[String] =
+    projects.collect { case (name, false) if Unsuffixed(name) => name }.distinct.sorted
+
+  /**
+   * What a BOM must manage: every real artifact of the release, as its full Maven artifactId. It is the
+   * `real` half of [[coordinates]], so a module added to the build is in the BOM the day it is added.
+   */
+  def managed(projects: Seq[(String, Boolean)], scalaBinaryVersion: String): Seq[String] =
+    coordinates(projects, scalaBinaryVersion)._1
+
+  /** The ways a generated BOM POM disagrees with what the release publishes, empty when it agrees. */
+  def bomProblems(expected: Seq[String], bom: scala.xml.Elem, version: String): Seq[String] = {
+    def text(n: scala.xml.NodeSeq): String = n.text.trim
+    val managedDeps = (bom \ "dependencyManagement" \ "dependencies" \ "dependency").map { d =>
+      (text(d \ "groupId"), text(d \ "artifactId"), text(d \ "version"))
+    }
+    val ids          = managedDeps.map(_._2)
+    val missing      = expected.filterNot(ids.contains).sorted
+    val extra        = ids.filterNot(expected.contains).sorted
+    val duplicated   = ids.diff(ids.distinct).distinct.sorted
+    val wrongGroup   = managedDeps.collect { case (g, a, _) if g != "org.llm4s" => s"$a (group $g)" }
+    val wrongVersion = managedDeps.collect { case (_, a, v) if v != version => s"$a ($v)" }
+    val ownDeps      = (bom \ "dependencies" \ "dependency").size
+
+    Seq(
+      if (text(bom \ "packaging") == "pom") None else Some(s"packaging is '${text(bom \ "packaging")}', not 'pom'"),
+      if (Unsuffixed(text(bom \ "artifactId"))) None
+      else Some(s"artifactId is '${text(bom \ "artifactId")}', expected one of ${Unsuffixed.mkString(", ")}"),
+      if (ownDeps == 0) None else Some("the BOM declares dependencies of its own; it must only manage versions"),
+      if (missing.isEmpty) None else Some(s"missing from the BOM: ${missing.mkString(", ")}"),
+      if (extra.isEmpty) None else Some(s"in the BOM but not published: ${extra.mkString(", ")}"),
+      if (duplicated.isEmpty) None else Some(s"listed more than once: ${duplicated.mkString(", ")}"),
+      if (wrongGroup.isEmpty) None else Some(s"not in group org.llm4s: ${wrongGroup.mkString(", ")}"),
+      if (wrongVersion.isEmpty) None else Some(s"not at version $version: ${wrongVersion.mkString(", ")}")
+    ).flatten
+  }
+
+  /** Fails the build when the generated BOM POM does not list exactly the artifacts the release publishes. */
+  def checkBom(
+    projects: Seq[(String, Boolean)],
+    scalaBinaryVersion: String,
+    pom: File,
+    version: String,
+    log: Logger
+  ): Unit = {
+    val expected = managed(projects, scalaBinaryVersion)
+    if (expected.isEmpty)
+      throw new MessageOnlyException("No published llm4s-* artifacts were found: the check read an empty project list.")
+    val problems = bomProblems(expected, scala.xml.XML.loadFile(pom), version)
+    log.info(s"BOM ${pom.getName}: ${expected.size} published artifacts expected, ${problems.size} problem(s)")
+    if (problems.nonEmpty)
+      throw new MessageOnlyException(
+        s"""The generated BOM (${pom.getPath}) disagrees with what the build publishes:
+           |${problems.map("  " + _).mkString("\n")}
+           |The BOM is generated from the same project list as `listPublishedArtifacts` (project/Bom.scala);
+           |a mismatch means that generator was changed or sbt stopped writing the managed block.""".stripMargin
+      )
   }
 
   /**
