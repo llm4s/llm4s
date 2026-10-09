@@ -2012,36 +2012,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name against `allowedCommands` and a set of shell metacharacters, so programs on `WorkspaceSandboxConfig.ReadOnlyCommands`
   could delete files (`find -delete`, `git clean`, `git checkout -- .`, `git reset --hard`), write them (`find -fprint`,
   `sort -o`, `uniq in out`, `git diff --output`), run programs that are not on the list (`find -exec`,
-  `git -c alias.x=!cmd x`, `git -c core.pager=cmd`, `git grep -O`, `git diff --ext-diff`, or `GIT_EXTERNAL_DIFF` /
+  `git -c alias.x=!cmd x`, `git -c core.fsmonitor=cmd status`, `git grep -O`, `git diff --ext-diff`, or `GIT_EXTERNAL_DIFF` /
   `PAGER` / `LD_PRELOAD` in `environment`), and read or write outside the workspace (`cat /etc/passwd`,
   `grep -r x ..`, a symbolic link out of it). The runner now also checks, before the process starts:
   - *Options* (`ARGUMENT_NOT_ALLOWED`): `find -delete -exec -execdir -ok -okdir -fprint -fprint0 -fprintf -fls
     -files0-from -follow -L`; `sort -o --output --compress-program --files0-from` (and Windows `sort /O`);
-    `wc --files0-from`; `ls -L --dereference`; `grep -R --dereference-recursive`; `hostname` with an operand, `-F`
-    or `-b`; `uniq` with more than one operand. `git` runs only `status`, `log`, `show`, `diff`, `ls-files`,
+    `wc --files0-from`; `ls -L --dereference`; `grep -R --dereference-recursive -S`; `cp -L -H -s --dereference
+    --symbolic-link`; `chmod -L -H --dereference`; `hostname` with an operand, `-F` or `-b`; `uniq` with more than
+    one operand (every argument after the first operand counts, as BSD `uniq` does not reorder). `git` runs only `status`, `log`, `show`, `diff`, `ls-files`,
     `ls-tree`, `grep`, `blame`, `rev-parse` and a listing `branch`; refuses every global option except `--version`,
     `--no-pager`, `--no-optional-locks`, `--literal-pathspecs` and `--no-replace-objects` (so `-c`, `-C`,
     `--exec-path`, `--git-dir`, `--work-tree`, `-p`); and refuses `--output`, `--ext-diff`, `--textconv`,
-    `--show-signature` and `git grep -O` / `--open-files-in-pager`. Every argument is scanned, after `--` too; a
+    `--show-signature` and `git grep -O` / `--open-files-in-pager`; `git branch` takes the next argument as the
+    value of `--merged`, `--contains`, `--points-at`, `--sort` or `--format`. Every argument is scanned, after `--` too; a
     short option is refused anywhere in a cluster (`-ro`) and a long one under any abbreviation (`--outp`), with or
     without `=value`.
-  - *Paths* (`PATH_ESCAPE_ATTEMPT`, the code the file operations already use): each argument, and each tail of an
-    option (`--file=/x`, `-f/x`), is resolved from the working directory as the kernel resolves it - component by
-    component, following symbolic links where they are met, so `link/..` is the parent of the link's target - and
-    must stay inside the real workspace root. The working directory is held to the same rule. `echo`, `pwd`,
-    `whoami` and `hostname` are not checked.
+  - *Paths* (`PATH_ESCAPE_ATTEMPT`, the code the file operations already use): each argument, the value of a
+    `--name=value` option, and each tail of a short option (`-f/x`) is resolved from the working directory as the
+    kernel resolves it - component by component, following symbolic links where they are met, so `link/..` is the
+    parent of the link's target - and must stay inside the real workspace root (`sort -t` and `--field-separator`
+    take a separator, not a path). The working directory is held to the same rule. `echo`, `pwd`, `whoami` and
+    `hostname` are not checked. `cp`, which writes through a link it finds at the name it writes, also has the
+    names it will write checked, and a recursive `cp` refuses a destination directory holding a link that leads
+    outside. An argument over 4096 characters, or paths needing more than 20000 lookups, is refused
+    (`ARGUMENT_NOT_ALLOWED`) rather than walked.
   - *Environment* (`ENVIRONMENT_NOT_ALLOWED`): `environment` may set only `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`,
     `COLUMNS`, `LINES` and `NO_COLOR`.
 
   The checks apply to every allowlist, `ReadWriteCommands` and custom ones included (a custom program gets the path
-  and environment rules). Still open: `git` reads the repository's own `.git/config`, so where the agent can write
-  files it can set `core.fsmonitor`, `diff.external` or a filter that `git status` / `git diff` then runs; and
-  `diff -r` follows links inside the tree it walks.
+  and environment rules). Still open: `git` reads the repository's own `.git/config` and runs its hooks, so where
+  the agent can write files it can set `core.fsmonitor`, `diff.external` or a filter, or add a hook such as
+  `.git/hooks/post-index-change`, that `git status` / `git diff` then runs
+  ([#1721](https://github.com/llm4s/llm4s/issues/1721)); `diff -r` follows links inside the tree it walks; a relative
+  link moved to another depth by the read-write list can come to point outside (paths through it are refused); and
+  the checks do not see a link made by a concurrent command.
 
   **Migration.** The new error codes are plain strings in the existing `WorkspaceAgentErrorResponse`, so the protocol
   is unchanged. Commands that worked before and are now refused: the forms above; any argument that is, or
-  resolves to, a location outside the workspace, including a `grep` pattern that starts with `/` or has a `..`
-  component (write `[/]api` for `/api`); `ls -L`, `grep -R` and `find -L`; `git branch <name>` without `--list`;
+  resolves to, a location outside the workspace, including a `grep` pattern or option value that starts with `/` or
+  has a `..` component (write `[/]api` for `/api`); `ls -L`, `grep -R`/`-S`, `find -L`, `cp -L`/`-H`/`-s` and
+  `chmod -L`/`-H`; `uniq` with an option after its file (write `uniq -c a.txt`); a link-preserving `cp` (`-R`, `-a`,
+  `-P`, `-d`) of two sources with the same name, or of several sources one of which is `dir/` or `dir/.`;
+  `git branch <name>` without `--list`;
   `git` subcommands other than the read ones; and `environment` variables outside the list. Run writes through the
   `writeFile` / `modifyFile` operations or the read-write allowlist's own programs instead.
 - **`llm4s-rag`: `SimpleChunker` and `ChunkingUtils.chunkText` no longer throw for a very large window**
