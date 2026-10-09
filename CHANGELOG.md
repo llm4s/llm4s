@@ -2081,11 +2081,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writes it. The value of a sensitive `key=value` pair ends at `\u0026` only where another pair, `key=` or
   `key\u003d`, follows it: a credential that holds an `&`, which these serialisers escape too, is redacted in full,
   as it was before, so `{"dsn":"host=db password=p\u0026ssW0rd dbname=x"}` becomes
-  `{"dsn":"host=db password=[REDACTED] dbname=x"}`. Inside escaped quotes (`\u0027`, `\u0022`) it does not end at
-  `\u0026` at all, unless the query pass reads the pair too. That pass reads a parameter after `?`, `&` or the
-  escape of either, with a key that runs to the next `=` over `;` and escaped quotes (`b;password` in
-  `a\u0026b;password=`), and it ends the value at `\u0026` without reading quotes:
-  `x=1\u0026password=\u0027p\u0026ss=QZXJ\u0027 n=1` becomes `x=1\u0026password=[REDACTED]\u0026ss=QZXJ\u0027 n=1`.
+  `{"dsn":"host=db password=[REDACTED] dbname=x"}`. A query value ends at `\u0026` only while it has held no
+  quote: once a quote has been read, bare or escaped (System.Text.Json writes `'` as `\u0027` and `"` as `\u0022`),
+  the value runs over `\u0026` as it did before, and after an escaped quote over `&` too. So
+  `GET https://h/x?password='p&ss=QZXJ'` as System.Text.Json writes it,
+  `{"msg":"GET https://h/x?password=\u0027p\u0026ss=QZXJ\u0027"}`, becomes
+  `{"msg":"GET https://h/x?password=[REDACTED]"}`, and `x=1\u0026password=\u0027p\u0026ss=QZXJ\u0027 n=1` becomes
+  `x=1\u0026password=[REDACTED] n=1`. A `key=value` value that opens with an escaped quote runs to the matching
+  escaped quote, over whitespace, `&`, `,` and `;` as `key='...'` does, so
+  `client_secret=\u0027a;b\u0027` is redacted whole, which it was not before; and the field passes read `\u003d`
+  as the `=` of a pair, as Gson writes it.
   An input that holds none of these escapes is redacted exactly as before.
 - **Redaction reads a query parameter only inside a URL, so a `?` in prose no longer mangles the document**
   ([#1667](https://github.com/llm4s/llm4s/issues/1667)): `Redaction.redact` and `redactForLogging`, and so the

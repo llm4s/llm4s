@@ -256,8 +256,9 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "read an escaped '=' after a quote inside a sensitive value as it reads '='" in {
+    // After the quote, an escaped '&' no longer ends the value either: the quotes of a value are not paired
     Redaction.redact(u("""{"url":"https://h/x?a=1~26password=ab'~3dcdSECRET~26b=2"}""")) shouldBe
-      u(raw"""{"url":"https://h/x?a=1~26password=$R~26b=2"}""")
+      u(raw"""{"url":"https://h/x?a=1~26password=$R"}""")
   }
 
   it should "read escaped '?' and '=' with upper-case hex digits, which JSON allows" in {
@@ -325,12 +326,85 @@ class RedactionQueryParamSpec extends AnyFlatSpec with Matchers {
       u(raw"""{"msg":"login password=$R~26user=bob"}""")
   }
 
-  it should "end a query parameter's value in escaped quotes at an escaped '&' that a pair follows" in {
-    Redaction.redact(u("x=1~26password=~27p~26ss=QZXJ~27 n=1")) shouldBe u(s"x=1~26password=$R~26ss=QZXJ~27 n=1")
-    Redaction.redact(u("https://h/p?password=~27p~26ss=QZXJ~27 n=1")) shouldBe
-      u(s"https://h/p?password=$R~26ss=QZXJ~27 n=1")
-    Redaction.redact(u("a~26b;password=~27p~26ss=QZXJ~27;n=1")) shouldBe u(s"a~26b;password=$R~26ss=QZXJ~27;n=1")
+  // ---------------------------------------------------------------------------------------------
+  // A query value that holds a quote: System.Text.Json escapes ', ", & (and + < >), so a credential written in quotes
+  // that holds '&' arrives with every one of them escaped. An escaped '&' after a quote does not end the value.
+  // ---------------------------------------------------------------------------------------------
+
+  it should "redact a quoted query credential that holds '&' in full, as System.Text.Json writes it" in {
+    // `GET https://h/x?password='p&ss=QZXJ'` serialised by System.Text.Json's default encoder
+    val out = Redaction.redact(u("""{"msg":"GET https://h/x?password=~27p~26ss=QZXJ~27"}"""))
+    out shouldBe s"""{"msg":"GET https://h/x?password=$R"}"""
+    parses(out) shouldBe true
+    Redaction.redact(u("""{"msg":"GET https://h/x?a=1~26password=~27p~26ss=QZXJ~27"}""")) shouldBe
+      u(raw"""{"msg":"GET https://h/x?a=1~26password=$R"}""")
+  }
+
+  it should "redact a quoted query credential that holds '&' in full, after '?', after '&' and with '\"'" in {
+    Redaction.redact(u("x=1~26password=~27p~26ss=QZXJ~27 n=1")) shouldBe u(s"x=1~26password=$R n=1")
+    Redaction.redact(u("x=1&password=~27p~26ss=QZXJ~27 n=1")) shouldBe s"x=1&password=$R n=1"
+    Redaction.redact(u("https://h/p?password=~27p~26ss=QZXJ~27 n=1")) shouldBe s"https://h/p?password=$R n=1"
+    Redaction.redact(u("q?password=~27p~26ss=QZXJ~27 n=1")) shouldBe s"q?password=$R n=1"
+    Redaction.redact(u("x=1~26password=~22p~26ss=QZXJ~22 n=1")) shouldBe u(s"x=1~26password=$R n=1")
+    Redaction.redact(u("a~26b;password=~27p~26ss=QZXJ~27;n=1")) shouldBe u(s"a~26b;password=$R")
     Redaction.redact(u("a;password=~27p~26ss=QZXJ~27;n=1")) shouldBe s"a;password=$R;n=1"
+  }
+
+  it should "redact a quoted query credential that holds several escaped '&' in full" in {
+    Redaction.redact(
+      u("""{"msg":"GET https://h/x?a=1~26password=~27p~26ss=QZXJ~26tt=WXYZ~26uu=KLMN~27 n=1"}""")
+    ) shouldBe
+      u(raw"""{"msg":"GET https://h/x?a=1~26password=$R n=1"}""")
+    Redaction.redact(u("""{"msg":"GET https://h/x?password=~22p~26ss=QZXJ~26tt=WXYZ~22"}""")) shouldBe
+      s"""{"msg":"GET https://h/x?password=$R"}"""
+  }
+
+  it should "run a query value over an escaped '&' after a bare quote, as before #1676" in {
+    Redaction.redact(u("""{"msg":"GET https://h/x?password='p~26ss=QZXJ'"}""")) shouldBe
+      s"""{"msg":"GET https://h/x?password='$R'"}"""
+    Redaction.redact(u("?password=ab'cd~26ss=QZXJ n=1")) shouldBe s"?password=$R n=1"
+  }
+
+  it should "redact a key=value credential in escaped quotes up to its closing quote, over ';' and spaces" in {
+    Redaction.redact(u("""{"msg":"GET https://h/x?a=1~26tt=2;client_secret=~27KZYZ;TTLGFR17504~27"}""")) shouldBe
+      u(raw"""{"msg":"GET https://h/x?a=1~26tt=2;client_secret=$R"}""")
+    Redaction.redact(u("""{"msg":"login password=~27pa ss,wo;rd~27 user=bob"}""")) shouldBe
+      s"""{"msg":"login password=$R user=bob"}"""
+    Redaction.redact(u("""{"msg":"note=~27hi there~27 password=SECRETQZ"}""")) shouldBe
+      u(raw"""{"msg":"note=~27hi there~27 password=$R"}""")
+  }
+
+  it should "read a key=value pair whose '=' is escaped, as Gson writes it" in {
+    Redaction.redact(u("""{"msg":"x;password~3dSECRETQZ n=1"}""")) shouldBe
+      u(raw"""{"msg":"x;password~3d$R n=1"}""")
+    Redaction.redact(u("x;password~3d'SECRET QZ' n=1")) shouldBe u(s"x;password~3d'$R' n=1")
+  }
+
+  it should "read a quoted credential holding escaped '&' in time linear in its length" in {
+    // Each value is read in one forward scan: no search for a matching quote starts again from each character, which
+    // would make four times the input take sixteen times as long.
+    val shapes = Seq(
+      ("?password=~27", "a~26b=1;c,d", ""),
+      ("x;password=~27", "a b;c,d&e~26f=", ""),
+      ("", "?token=~27a~26b~27", ""),
+      ("", "x;password=~27a;b~27 ", ""),
+      ("", "~26password~3d~22a~26b ", ""),
+      ("?token=ab'", "c~26d", "")
+    ).map { case (prefix, unit, suffix) => (u(prefix), u(unit), u(suffix)) }
+    shapes.foreach { case (prefix, unit, suffix) =>
+      def time(repeats: Int): Long = {
+        val input = prefix + (unit * repeats) + suffix
+        Redaction.redact(input) // warm up
+        val start = System.nanoTime()
+        Redaction.redact(input)
+        System.nanoTime() - start
+      }
+      val small = time(5000)
+      val large = time(20000)
+      withClue(s"unit $unit: 5000 took ${small / 1000000} ms, 20000 took ${large / 1000000} ms: ") {
+        large should be < (small * 12 + 50000000L)
+      }
+    }
   }
 
   it should "read a Bearer token only after the escape of a separator, whose 'u' is lower-case in JSON" in {

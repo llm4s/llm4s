@@ -219,13 +219,20 @@ private[llm4s] object Redaction {
     """(?:(?<![A-Za-z0-9_-])|(?<=\\[u]00(?:26|3[dDfF])))(?!(?<=\\)[u]00(?:26|3[dDfF]))"""
 
   /**
+   * The `=` between the key and the value of a `key=value` pair, or its JSON escape (backslashes and `u003d`, the hex
+   * digits in either case), which Gson and other HTML-safe serialisers write: `password`, the escape and a value is
+   * read as `password=...` is, as the query pass reads it (#1676).
+   */
+  private val PairEquals: String = """(?:=|\\+[u]003[dD])"""
+
+  /**
    * `key=` before the value of a pair outside a URL query string: form bodies, log lines, shell-style settings,
    * `a.b.password=...`. Group 2 is the key; the value, at least one character, is read by `redactEqualsPairs`.
    */
-  private val EqualsPairStart: Regex = s"""($PairKeyStart($Key)=)(?=[^\\s&"',;<>])""".r
+  private val EqualsPairStart: Regex = s"""($PairKeyStart($Key)$PairEquals)(?=[^\\s&"',;<>])""".r
 
-  private val DoubleQuotedEqualsStart: Regex = s"""($PairKeyStart($Key)=")""".r
-  private val SingleQuotedEqualsStart: Regex = s"""($PairKeyStart($Key)=')""".r
+  private val DoubleQuotedEqualsStart: Regex = s"""($PairKeyStart($Key)$PairEquals")""".r
+  private val SingleQuotedEqualsStart: Regex = s"""($PairKeyStart($Key)$PairEquals')""".r
 
   /** A header-style line, `x-api-key: value`, at the start of a line. */
   private val HeaderLine: Regex =
@@ -486,7 +493,7 @@ private[llm4s] object Redaction {
 
   /**
    * Where the query value that starts at `from` begins, and its length. A value ends where a query value does, at
-   * `&`, its JSON escape or whitespace, or at the quote that ends the string the URL sits in, which is kept with the
+   * `&`, its JSON escape (but see below) or whitespace, or at the quote that ends the string the URL sits in, which is kept with the
    * backslashes that escape it in JSON that sits inside a string.
    *
    * RFC 3986 allows `'` unencoded in a query, with `!$()*,;=:@`, and JavaScript's `encodeURIComponent` leaves
@@ -500,7 +507,15 @@ private[llm4s] object Redaction {
    *
    * A value written in quotes (`'abc'`, `"abc"`, or `\"abc\"` in JSON inside a string), as a query string in prose
    * or code may have it, starts after a single opening quote by the same rule, so the quote that ends the enclosing
-   * string, as in `"https://x.test/?token="}`, leaves the value empty. A loop that reads each character once.
+   * string, as in `"https://x.test/?token="}`, leaves the value empty.
+   *
+   * The JSON escape of `&` ends a value only while the value has held no quote. The quotes a value holds are not
+   * paired, so once one has been read - bare, after backslashes, or as the escape of `'` or `"` (a backslash and
+   * `u0027` or `u0022`, which System.Text.Json writes) - an escaped `&` may be inside a quoted credential
+   * (`password='p&ss=QZXJ'`, with `'` and `&` escaped), and the value runs over it, as it did before #1676. Once the
+   * escape of a quote has been read, a bare `&` is the value's too: a serialiser that escapes quotes escapes `&`, so a
+   * bare one there is the credential's (`secret='a&b'` with only its quotes escaped). The value then ends at
+   * whitespace or at a quote that ends a string. A loop that reads each character once.
    */
   private def queryValue(input: String, from: Int): (Int, Int) = {
     def isQuote(i: Int): Boolean = i < input.length && (input.charAt(i) == '"' || input.charAt(i) == '\'')
@@ -529,24 +544,40 @@ private[llm4s] object Redaction {
     val start = if (opens) quoteAt + 1 else from
     var end   = start
     var done  = false
+    // Whether the value has held a quote, bare or escaped: from there on, the escape of `&` is the value's. And whether
+    // it has held the escape of a quote: from there on, `&` is the value's too.
+    var quoted        = opens
+    var escapedQuoted = false
     while (!done && end < input.length) {
       val c = input.charAt(end)
       if (c == '\\') {
-        // A quote after backslashes ends the value as a bare quote does, and the escape of `&` as `&` does; other
-        // backslashes are the value's.
+        // A quote after backslashes ends the value as a bare quote does, and the escape of `&` as `&` does, unless a
+        // quote came before it; other backslashes are the value's.
         val next      = afterSlashes(end)
         val escapeEnd = separatorEscapeEnd(input, end)
-        if (escapeEnd >= 0 && escapedSeparator(input, escapeEnd) == '&') done = true
-        else if (!isQuote(next)) end = next
+        val quoteEnd  = quoteEscapeEnd(input, end)
+        if (escapeEnd >= 0 && escapedSeparator(input, escapeEnd) == '&' && !quoted) done = true
+        else if (escapeEnd >= 0) end = escapeEnd
+        else if (quoteEnd >= 0) {
+          quoted = true
+          escapedQuoted = true
+          end = quoteEnd
+        } else if (!isQuote(next)) end = next
         else {
           val after = afterInnerQuote(next)
-          if (after >= 0) end = after else done = true
+          if (after >= 0) {
+            quoted = true
+            end = after
+          } else done = true
         }
       } else if (c == '"' || c == '\'') {
         // A quote inside a token (`ab'cd`) is followed by more of it; the quote that ends a string is not.
         val after = afterInnerQuote(end)
-        if (after >= 0) end = after else done = true
-      } else if (c == '&' || isRegexSpace(c)) {
+        if (after >= 0) {
+          quoted = true
+          end = after
+        } else done = true
+      } else if ((c == '&' && !escapedQuoted) || isRegexSpace(c)) {
         done = true
       } else {
         end += 1
@@ -1334,18 +1365,14 @@ private[llm4s] object Redaction {
    * The value of a sensitive key ends at an escaped `&` only where another pair, `key=` or `key` and the escape of
    * `=`, follows it. A credential may hold an `&` (`password=p&ssW0rd`), which the same serialisers escape, and the
    * value of a sensitive key ran over a literal `&` before: cut at every escape, the rest of the credential was
-   * written in the clear. Nor does it end at one inside quotes that are escaped too (a backslash and `u0027` or
-   * `u0022`, which System.Text.Json writes for `'` and `"`): such a value is one credential, as `password='p&user=x'`
-   * is. Only the escapes of `&` are read differently: the value still ends where it ended before.
+   * written in the clear. The `=` may be escaped too (`PairEquals`), as Gson writes it.
    *
-   * The escaped quotes are read only in a pair that this pass alone reads. `redactQueryParams`, which runs first,
-   * reads a parameter after `?`, `&` or the escape of either, whose key runs to the next `=` or its escape over any
-   * character but whitespace, a bare quote, `?`, `&` and the escapes of those two, so over `;` and escaped quotes
-   * too: after an escaped `&`, `b;password=` is the key `b;password`. It ends such a value at the first escaped `&`
-   * without reading quotes. The
-   * placeholder then stands where the escaped opening quote was, so this pass sees no quote, and the value ends at an
-   * escaped `&` that another pair follows: of `x=1&password=` and the escaped value `'p&ss=QZXJ'`, the text from the
-   * escaped `&` on, `ss=QZXJ` and the escaped closing quote, is kept.
+   * A value that opens with an escaped quote (a backslash and `u0027` or `u0022`, which System.Text.Json and Gson
+   * write for `'` and `"`) is one credential up to the matching escaped quote, as `password='p&user=x y'` is between
+   * bare quotes: until it closes, the value ends neither at an escaped `&` nor at whitespace, `&`, `,` or `;`, only
+   * at a bare quote, which ends the string the pair sits in, at `<`, `>` or at a line break. After the closing escaped
+   * quote, the rules above apply again. A key that is not sensitive keeps them throughout, so the pairs inside its
+   * quotes are still read.
    *
    * The backslashes that escape the quote the value stops at are kept. Inside JSON that sits in a string,
    * `\"note\": \"token=abc\"`, the value runs up to the `"` of the escaped closing quote and so holds its `\`:
@@ -1373,7 +1400,9 @@ private[llm4s] object Redaction {
         var escapeEnd  = -1
         // The last hex digit of the escaped quote the value opened with and has not closed yet, or `NotAQuote`.
         var openQuote = NotAQuote
-        while (escapeEnd < 0 && valueEnd < input.length && !endsEqualsValue(input.charAt(valueEnd)))
+        def ends(c: Char): Boolean =
+          if (openQuote == NotAQuote || !sensitive) endsEqualsValue(c) else endsEscapedQuotedValue(c)
+        while (escapeEnd < 0 && valueEnd < input.length && !ends(input.charAt(valueEnd)))
           if (input.charAt(valueEnd) == '\\') {
             val end = separatorEscapeEnd(input, valueEnd)
             if (end >= 0 && escapedSeparator(input, end) == '&') {
@@ -1426,6 +1455,13 @@ private[llm4s] object Redaction {
 
   /** The characters that end the value of a `key=value` pair: whitespace and `&"',;<>`. */
   private def endsEqualsValue(c: Char): Boolean = isRegexSpace(c) || "&\"',;<>".indexOf(c.toInt) >= 0
+
+  /**
+   * The characters that end the value of a `key=value` pair inside escaped quotes that have not closed: a bare quote,
+   * which ends the string the pair sits in, `<`, `>` and a line break. Whitespace, `&`, `,` and `;` are the
+   * credential's, as they are between bare quotes in `key='...'`.
+   */
+  private def endsEscapedQuotedValue(c: Char): Boolean = c == '\n' || c == '\r' || "\"'<>".indexOf(c.toInt) >= 0
 
   private def redactApiKeys(input: String, placeholder: String): String =
     // Delegate to the canonical patterns in SecretPatterns so there is a
