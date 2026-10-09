@@ -662,7 +662,7 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 | `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool` (**closed by #1328**); `ModelStep` streaming through live progress, `AgentEvent` replaced (**closed by #1329**); `PlanRunner` rebuilt or removed (**closed by #1330**: removed, §4.15) | #1269 | Stage 1 |
 | ~~Delete `CancellationToken` with the `PlanRunner` rebuild~~ **closed by #1330** (§4.15) | #1270 | Stage 1 |
 | Prompt cancellation of SDK client calls on platform threads (today: prompt on virtual threads, where the runtime runs tasks) | #1270 | - |
-| Durable checkpointer backends (SQLite first) and a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
+| ~~Durable checkpointer backends (SQLite first)~~ **SQLite closed by #1701** (§4.17: `llm4s-agent-checkpoint-sqlite`; PostgreSQL is Stage 5); a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
 | ~~Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit and in `RunPosition`~~ **closed by #1700** (§4.16: `RunClaim`, `FencingToken`, `StaleClaim`, `llm4s-agent-testkit`) | #1268, #1269, #1277 | Stage 2 |
 | Cancelling a run cancels the child runs it started | #1277 | Stage 3 |
 | Store-level change notification (or polling), so a subscription sees live commits made by another `GraphRuntime` or process sharing the checkpointer (today: live delivery only for commits through the subscribing runtime; others by resubscribing and replaying) | #1277 | Stage 2 |
@@ -685,6 +685,8 @@ Closed by [#1331](https://github.com/llm4s/llm4s/issues/1331) (§4.12): embeddin
 Closed by [#1328](https://github.com/llm4s/llm4s/issues/1328) (§4.13): `Agent.run`, `continueConversation` and `runMultiTurn` on the runtime through `ToolLoop` and `AgentTool` (left by #1269), and, with #1350, a terminal outcome for a guardrail block - the thread `Failed` but usable, the blocked turn removed, `AgentStatus.Blocked` at the `Agent` (left by #1279).
 
 Closed by [#1329](https://github.com/llm4s/llm4s/issues/1329) (§4.14): `ModelStep` token streaming through live progress and the replacement of `AgentEvent` by `AgentEvents` run events (left by #1269).
+
+Closed by [#1701](https://github.com/llm4s/llm4s/issues/1701) (§4.17): the first durable checkpointer backend, SQLite, in its own module (left by #1268).
 
 Closed by [#1700](https://github.com/llm4s/llm4s/issues/1700) (§4.16): run-claim leases with expiry and renewal, so `recover` in another runtime or process refuses a live run and takes over a dead one, and fencing tokens on every commit and in `RunPosition` (left by #1268, #1269 and #1277), with the store contract suite in `llm4s-agent-testkit`.
 
@@ -1071,6 +1073,28 @@ Limits:
 - A process that stops renewing holds its threads for up to `ttl` after it dies; a store that fails to release does the same.
 - Subscriptions still see live only the commits made through their own runtime ([#1705](https://github.com/llm4s/llm4s/issues/1705)).
 - Renewal is timed by the runtime's wall time and expiry by the store's clock; a store whose clock runs much faster than the runtime's can expire a live run's claim between renewals. Keep `renewEvery` well inside `ttl`. An embedded store opened by several hosts has as many clocks as hosts, and their skew changes the effective `ttl` (see the first store decision).
+
+### 4.17 Stage 2 slice 2: the SQLite checkpointer ([#1701](https://github.com/llm4s/llm4s/issues/1701))
+
+The first durable `Checkpointer`: `SqliteCheckpointer` in the new published module `llm4s-agent-checkpoint-sqlite` (`modules/agent-checkpoint-sqlite`, package `org.llm4s.agent.graph.sqlite`), named as §3.1 names checkpoint adapters. It implements the §4.16 SPI unchanged; nothing in `llm4s-agent` changes. The specs are `SqliteCheckpointerContractSpec` and `SqliteTwoConnectionsContractSpec` (the `CheckpointerContract` of §4.16), `SqliteCheckpointerSpec`, `SqliteRestartSpec` and `SqliteCrossProcessSpec`; the sample is `SqliteRestartRecoveryExample`.
+
+Decisions:
+
+- **One file holds everything, one row per thread.** `llm4s_checkpoint_threads` keeps the latest checkpoint as JSON beside its id (the thread version, compared without decoding), the next event number, the replay floor and the claim; pending writes and events are rows of their own, keyed by thread and position or sequence number. Tables are prefixed `llm4s_checkpoint_`, so the file can be shared with other tables. A thread's row goes when it holds nothing a new thread of its id would not (no checkpoint, no claim, no event number spent), as `InMemoryCheckpointer` drops its record.
+- **Every write is one `BEGIN IMMEDIATE` transaction.** The claim's token, the thread's version and the pending writes' checkpoint are checked, and the commit applied, inside one transaction that takes the file's write lock before its first read, so two stores over one file cannot both pass the checks; a refused or failed commit rolls back whole. Transactions are plain SQL on an autocommit connection, as `llm4s-memory`'s SQLite store does, because sqlite-jdbc's own transaction handling misreports a `BEGIN` that timed out. Reads run in one deferred transaction, so `latest` sees a checkpoint and its pending writes from one snapshot.
+- **One store is one connection, its calls serialised.** Concurrency between stores - in one process or several - is SQLite's file locking. WAL mode, so readers never block the writer; `synchronous = FULL`, so a returned commit survives a power loss; `busy_timeout` from `SqliteCheckpointerConfig.busyTimeout` (default 5 s), after which a write fails with a `ProcessingError` and changes nothing. Journal mode and sync level are not configurable.
+- **Tokens come from one counter in the file** (`llm4s_checkpoint_meta.last_token`), incremented in the claim's transaction, so they increase across restarts, `deleteThread` and every store sharing the file, and are never issued twice.
+- **Claims expire by the store's injected `Clock`** (default `Clock.systemUTC()`), stored as epoch seconds and nanoseconds, so `expiresAt` reads back exactly. Every store sharing a file judges by its own clock; on one host that is one clock. The §4.16 skew caveat applies to hosts with different clocks, which WAL rules out sharing a file anyway (it needs shared memory).
+- **The schema is versioned** in `llm4s_checkpoint_schema`. Opening a file runs the steps `n -> n + 1` from its version to the current one (1) in the opening transaction, so stores opening one new file at once migrate it once; a file at a newer version is refused with a `ProcessingError`. The checkpoint's own format (§4.3) is versioned separately, inside its JSON.
+- **Errors.** A refusal the contract names is the contract's `GraphError`; a failure of the database itself, a row that does not decode, and any call after `close()` are a `ProcessingError` naming the operation and the file, never an exception.
+- **No `modules/it` suite.** SQLite needs no service, container or key, so every suite runs in the module's own tests under `sbt test`, including the one that kills a forked JVM mid-run (`SqliteCrossProcessSpec`); §3.1's IT-tier requirement is for a suite that needs one, as #1701 puts it.
+
+Limits:
+
+- One writer per file at a time: a throughput ceiling for many busy runtimes on one file, not a correctness one. PostgreSQL is Stage 5.
+- WAL needs the processes that share a file to share memory: one host, a local disk, not a network file system.
+- A store whose process is killed leaves its claims in the file until they expire (`ttl`), as §4.16 says for every store.
+- Latest checkpoint only, and events dropped only by `compactEvents`, as for every store until [#1702](https://github.com/llm4s/llm4s/issues/1702).
 
 ## 5. Harness capabilities
 

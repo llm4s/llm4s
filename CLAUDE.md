@@ -109,6 +109,7 @@ llm4s/
 │   ├── agent/                 # Agent runtime: Agent, graph runtime, guardrails, handoffs, streaming; assistant (published)
 │   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
 │   ├── agent-testkit/         # CheckpointerContract: the suite every Checkpointer store must pass (published)
+│   ├── agent-checkpoint-sqlite/ # SqliteCheckpointer: the first durable Checkpointer, one SQLite file (published)
 │   ├── llm4s-effect/          # cats-effect IO / fs2 wrappers over LLMClient and Agent (published)
 │   ├── llm4s-zio/             # ZIO 2 / ZIO Streams wrappers over LLMClient and Agent (published)
 │   ├── java-api/              # Java facade over the client and agent (published)

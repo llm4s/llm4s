@@ -137,6 +137,10 @@ flags:
     paths:
       - modules/agent-testkit/src/main/scala
     carryforward: true
+  agent-checkpoint-sqlite:
+    paths:
+      - modules/agent-checkpoint-sqlite/src/main/scala
+    carryforward: true
   java-api:
     paths:
       - modules/java-api/src/main/scala

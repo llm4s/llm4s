@@ -341,7 +341,9 @@ give the same events as fs2 and ZIO streams.
 Every run claims its thread in the `Checkpointer` before it starts, renews the claim while it runs, and fences
 every commit with the claim's token. Runtimes sharing one store - in one process or many - are refused a live
 run's thread with `ThreadBusy`, can `recover` a run whose process died once its claim has expired, and a run that
-lost its claim records nothing more. `CheckpointerContract` in `llm4s-agent-testkit` tests a store of your own.
+lost its claim records nothing more. `SqliteCheckpointer` (`llm4s-agent-checkpoint-sqlite`) keeps threads in a
+SQLite file, so a run survives a restart and `recover` continues it in the next process. `CheckpointerContract` in
+`llm4s-agent-testkit` tests a store of your own.
 
 [Learn more about durable checkpointers →](durable-checkpointers)
 
