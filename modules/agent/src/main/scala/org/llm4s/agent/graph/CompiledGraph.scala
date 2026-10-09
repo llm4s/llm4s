@@ -1,6 +1,6 @@
 package org.llm4s.agent.graph
 
-import org.llm4s.error.{ CancelledError, LLMError }
+import org.llm4s.error.{ CancelledError, LLMError, ValidationError }
 import org.llm4s.types.{ Result, TryOps }
 
 import java.util.concurrent.TimeUnit
@@ -29,6 +29,11 @@ import scala.util.Try
  * superstep, and the run pauses after that superstep ([[RunResult.Suspended]]). A continuation
  * stands in for the suspended task: when it completes it makes that task's join arrivals. The
  * suspended task itself makes no arrival and fires none of its node's static edges.
+ *
+ * A run's static breakpoints ([[RunConfig.interruptBefore]], [[RunConfig.interruptAfter]]) park a
+ * task the same way: before its node runs, it is parked instead of run; after it ran, its update
+ * commits and its routes, static edges and join arrivals wait in its continuation. Either way the run
+ * pauses after the superstep, and the task's interrupt is answered with [[Breakpoint.proceed]].
  *
  * When the frontier is empty the run completes - unless a join is still waiting. A join waiting
  * only for arrivals that parked continuations can make keeps the run suspended; a join waiting for
@@ -63,14 +68,15 @@ final class CompiledGraph[I, O] private[graph] (
    * Runs one superstep, or finishes or suspends the run if `execution` cannot advance. The superstep
    * runs at most `config.budgets.maxConcurrency` tasks at a time. No superstep limit is checked:
    * a caller driving `step` owns its loop. Outside a [[GraphRuntime]], `emit` and `progress` are
-   * no-ops and each task's `checkpointId` is `""`.
+   * no-ops and each task's `checkpointId` is `""`. `config`'s breakpoints hold tasks as in a runtime; one
+   * on a node this graph does not have fails the step with a `ValidationError`.
    */
   def step(threadId: ThreadId, execution: Execution, config: RunConfig): Step[O] =
     if execution.owner ne owner then Step.Done(RunResult.Failed(execution.state, GraphError.ForeignExecution(id)))
     else if execution.paused then Step.Done(suspended(execution))
     else if execution.isQuiescent then Step.Done(complete(execution))
     else
-      CancelledError.catchInterrupt(superstep(threadId, execution, config)) match
+      CancelledError.catchInterrupt(checkBreakpoints(config).flatMap(_ => superstep(threadId, execution, config))) match
         case Left(_)                        => Step.Done(cancelled(execution))
         case Right(Left(_: CancelledError)) => Step.Done(cancelled(execution))
         case Right(Left(error))             => Step.Done(RunResult.Failed(execution.state, error))
@@ -87,8 +93,10 @@ final class CompiledGraph[I, O] private[graph] (
    * Answers some of `execution`'s parked continuations. Each answer is decoded with its resume
    * node's answer codec; each answered continuation is scheduled after the ready frontier, in the
    * order it was parked, with its suspended task's join slot. Unanswered continuations stay
-   * parked. Fails without changing anything if `answers` is empty, names an interrupt that is not
-   * parked, or holds an answer that does not decode.
+   * parked. A task a breakpoint holds takes [[Breakpoint.proceed]] (JSON `null`): held before it ran,
+   * its continuation runs it; held after, its continuation makes its routes and arrivals. Fails
+   * without changing anything if `answers` is empty, names an interrupt that is not parked, or holds
+   * an answer that does not decode, or a breakpoint answer that is not `null`.
    */
   def resume(execution: Execution, answers: Map[InterruptId, ujson.Value]): Result[Execution] =
     if execution.owner ne owner then Left(GraphError.ForeignExecution(id))
@@ -97,24 +105,31 @@ final class CompiledGraph[I, O] private[graph] (
       val parkedIds = execution.parked.map(_.interrupt).toSet
       val unknown   = answers.keys.filterNot(parkedIds.contains).map(i => s"interrupt '${i.value}' is not pending")
       val decoded = execution.parked.filter(p => answers.contains(p.interrupt)).map { p =>
-        resumes(p.resumeNode)
-          .decodeAnswer(answers(p.interrupt))
-          .left
-          .map(e => s"the answer to interrupt '${p.interrupt.value}' does not decode: ${e.message}")
-          .map(answer => p -> answer)
+        if p.hold.isDefined then
+          Either.cond(
+            answers(p.interrupt) == Breakpoint.proceed,
+            p -> (),
+            s"the answer to breakpoint '${p.interrupt.value}' must be null (Breakpoint.proceed)"
+          )
+        else
+          resumes(p.resumeNode)
+            .decodeAnswer(answers(p.interrupt))
+            .left
+            .map(e => s"the answer to interrupt '${p.interrupt.value}' does not decode: ${e.message}")
+            .map(answer => p -> answer)
       }
       val problems = unknown.toVector.sorted ++ decoded.collect { case Left(problem) => problem }
       if problems.nonEmpty then Left(GraphError.InvalidResume(id, problems.toList))
       else
         val continuations =
           decoded.collect { case Right((p, answer)) => p -> answer }.zipWithIndex.map { case ((p, answer), i) =>
-            Task(
-              TaskId(s"${execution.superstep}.${execution.frontier.size + i}"),
-              p.resumeNode,
-              Resumed(p.question, answer),
-              p.slot,
-              Some(p.origin)
-            )
+            val taskId = TaskId(s"${execution.superstep}.${execution.frontier.size + i}")
+            p.hold match
+              case Some(Hold.Before(input)) =>
+                Task(taskId, p.resumeNode, input, p.slot, Some(p.origin), passedBefore = true)
+              case Some(Hold.After(routes)) =>
+                Task(taskId, p.resumeNode, (), p.slot, Some(p.origin), replay = Some(routes))
+              case None => Task(taskId, p.resumeNode, Resumed(p.question, answer), p.slot, Some(p.origin))
           }
         Right(
           execution.copy(
@@ -139,11 +154,13 @@ final class CompiledGraph[I, O] private[graph] (
             GraphSnapshot.PendingTask(
               task.id.value,
               task.node.value,
-              nodes(task.node).encode(task.input),
+              task.replay.fold(nodes(task.node).encode(task.input))(_ => VersionedJson(1, ujson.Null)),
               task.slot.map(_.join.value),
               task.slot.map(_.fanOutTask.value),
               task.origin.map(_.task.value),
-              task.origin.map(_.node.value)
+              task.origin.map(_.node.value),
+              task.passedBefore,
+              task.replay.map(_.toVector.map(encodeRoute))
             )
           },
           staticJoins = execution.staticArrivals.toVector
@@ -158,14 +175,20 @@ final class CompiledGraph[I, O] private[graph] (
             )
           },
           parked = execution.parked.map { p =>
+            val (question, held) = p.hold match
+              case Some(Hold.Before(input)) => (nodes(p.resumeNode).encode(input), Vector.empty)
+              case Some(Hold.After(routes)) => (VersionedJson(1, ujson.Null), routes.toVector.map(encodeRoute))
+              case None                     => (resumes(p.resumeNode).encodeQuestion(p.question), Vector.empty)
             GraphSnapshot.ParkedContinuation(
               p.interrupt.value,
               p.resumeNode.value,
-              resumes(p.resumeNode).encodeQuestion(p.question),
+              question,
               p.origin.task.value,
               p.origin.node.value,
               p.slot.map(_.join.value),
-              p.slot.map(_.fanOutTask.value)
+              p.slot.map(_.fanOutTask.value),
+              p.hold.map(_.phase),
+              held
             )
           },
           paused = execution.paused
@@ -206,12 +229,12 @@ final class CompiledGraph[I, O] private[graph] (
     }
     val savedSlots = snapshot.dynamicJoins.flatMap(a => a.expected.map((a.joinId, a.fanOutTask, _))).toSet
     val orphanTasks = tasks.collect {
-      case task @ Task(_, _, _, Some(slot), _)
+      case task @ Task(_, _, _, Some(slot), _, _, _)
           if !savedSlots.contains((slot.join.value, slot.fanOutTask.value, task.arrivalId.value)) =>
         s"pending task ${task.id.value} belongs to no open activation of dynamic join '${slot.join.value}'"
     }
     val orphanParked = parked.collect {
-      case p @ Parked(_, _, _, origin, Some(slot))
+      case p @ Parked(_, _, _, origin, Some(slot), _)
           if !savedSlots.contains((slot.join.value, slot.fanOutTask.value, origin.task.value)) =>
         s"interrupt ${p.interrupt.value} belongs to no open activation of dynamic join '${slot.join.value}'"
     }
@@ -301,6 +324,30 @@ final class CompiledGraph[I, O] private[graph] (
   def toMermaid: String =
     MermaidExport.render(entry.id, nodes, edges, staticJoins, dynamicJoins.values.toVector, resumes.keySet)
 
+  /**
+   * Refuses a breakpoint on a node this graph does not have: a `ValidationError` naming every one, so a
+   * mistyped node id is not a breakpoint that silently never holds.
+   */
+  private[graph] def checkBreakpoints(config: RunConfig): Result[Unit] =
+    def unknown(field: String, ids: Set[NodeId]) =
+      ids.toVector.map(_.value).sorted.filterNot(n => nodes.contains(NodeId(n))).map { n =>
+        s"$field names node '$n', which graph '$id' does not have"
+      }
+    (unknown("interruptBefore", config.interruptBefore) ++ unknown(
+      "interruptAfter",
+      config.interruptAfter
+    )).toList match
+      case Nil      => Right(())
+      case problems => Left(ValidationError("breakpoints", problems))
+
+  /** Whether an `interruptBefore` breakpoint of `config` holds `task` instead of running it. */
+  private[graph] def holdsBefore(task: Task, config: RunConfig): Boolean =
+    config.interruptBefore.contains(task.node) && !task.passedBefore && task.replay.isEmpty
+
+  /** Whether an `interruptAfter` breakpoint of `config` holds `task`'s routes once it completed. */
+  private def holdsAfter(task: Task, config: RunConfig): Boolean =
+    config.interruptAfter.contains(task.node) && task.replay.isEmpty
+
   /** The executor a run with `budgets` uses: a test override, else bounded by `maxConcurrency`. */
   private[graph] def executorFor(budgets: RunBudgets): TaskExecutor =
     executorOverride.getOrElse(TaskExecutor.bounded(budgets.maxConcurrency))
@@ -324,14 +371,17 @@ final class CompiledGraph[I, O] private[graph] (
     config: RunConfig
   ): Result[(Execution, Option[LLMError])] =
     val outcomes = executorFor(config.budgets).runAll(execution.frontier.map { task => () =>
-      val position = RunPosition(threadId, config.runId, "", task.id, task.node, execution.superstep)
-      executeTask(task, execution, new RunContext(config, position, NodeEventSink.none)).map(task -> _)
+      if holdsBefore(task, config) then Right(task -> TaskResult.Held)
+      else
+        val position = RunPosition(threadId, config.runId, "", task.id, task.node, execution.superstep)
+        executeTask(task, execution, new RunContext(config, position, NodeEventSink.none)).map(task -> _)
     })
     // A cancelled task wins over an earlier task's failure: the run was cancelled, not failed.
     outcomes
       .collectFirst { case Left(c: CancelledError) => c }
       .fold(
-        sequence(outcomes).flatMap(done => commitSuperstep(execution, done).map(next => next -> blockedBy(done)))
+        sequence(outcomes)
+          .flatMap(done => commitSuperstep(execution, done, config).map(next => next -> blockedBy(done)))
       )(Left(_))
 
   /**
@@ -353,6 +403,10 @@ final class CompiledGraph[I, O] private[graph] (
   private[graph] def executeTask(task: Task, execution: Execution, context: RunContext): Result[TaskResult] =
     nodes.get(task.node) match
       case None => Left(GraphError.InvalidRoute(task.node, task.id, "node is not part of this graph"))
+      // the continuation of a task held after it ran: the node does not run again
+      case Some(_) if task.replay.isDefined =>
+        val command = Command(StateUpdate.empty, task.replay.get)
+        validate(task, command).map(_ => TaskResult.Done(command))
       case Some(node) =>
         val cacheKey = caches.get(task.node).flatMap(store => NodeCache.key(node, task.input).map(store -> _))
         cacheKey.flatMap((store, key) => store.get(key)) match
@@ -421,15 +475,21 @@ final class CompiledGraph[I, O] private[graph] (
       case TaskResult.Done(command)               => validate(task, command)
       case TaskResult.Parked(update, _, resumeAt) => validateSuspension(task, update, resumeAt)
       case TaskResult.Blocked(update, _)          => undeclaredWrite(task, update).toLeft(())
+      case TaskResult.Held                        => Right(())
 
   /**
-   * Applies every task's checked result in frontier order and schedules the next frontier.
-   * `completed` holds a result for every frontier task, in frontier order.
+   * Applies every task's checked result in frontier order and schedules the next frontier, holding
+   * what `config`'s `interruptAfter` breakpoints hold. `completed` holds a result for every frontier
+   * task, in frontier order.
    */
-  private[graph] def commitSuperstep(execution: Execution, completed: Vector[(Task, TaskResult)]): Result[Execution] =
+  private[graph] def commitSuperstep(
+    execution: Execution,
+    completed: Vector[(Task, TaskResult)],
+    config: RunConfig
+  ): Result[Execution] =
     completed
       .foldLeft[Result[ThreadState]](Right(execution.state))((state, tr) => state.flatMap(_.applyUpdate(tr._2.update)))
-      .map(schedule(execution, completed, _))
+      .map(schedule(execution, completed, _, config))
 
   /** Completes, suspends or fails an execution with an empty frontier. */
   private[graph] def finish(execution: Execution): RunResult[O] =
@@ -437,9 +497,14 @@ final class CompiledGraph[I, O] private[graph] (
 
   /** The interrupts parked in `execution`, with their questions as JSON. */
   private[graph] def pendingInterrupts(execution: Execution): Vector[PendingInterrupt] =
-    execution.parked.map(p =>
-      PendingInterrupt(p.interrupt, p.resumeNode, resumes(p.resumeNode).encodeQuestion(p.question).value)
-    )
+    execution.parked.map { p =>
+      p.hold match
+        case Some(hold @ Hold.Before(input)) =>
+          PendingInterrupt(p.interrupt, p.resumeNode, nodes(p.resumeNode).encode(input).value, Some(hold.phase))
+        case Some(hold) => PendingInterrupt(p.interrupt, p.resumeNode, ujson.Null, Some(hold.phase))
+        case None =>
+          PendingInterrupt(p.interrupt, p.resumeNode, resumes(p.resumeNode).encodeQuestion(p.question).value)
+    }
 
   /** A completed or suspended task's result as data, for a checkpoint's pending writes. */
   private[graph] def encodeWrite(checkpointId: String, task: Task, result: TaskResult): Result[PendingWrite] =
@@ -451,13 +516,13 @@ final class CompiledGraph[I, O] private[graph] (
       }
       result match
         case TaskResult.Done(command) =>
-          val routes = command.routes.toVector.map {
-            case Route.Goto(to)       => EncodedRoute.Goto(to.id.value)
-            case Route.Send(to, data) => EncodedRoute.Send(to.id.value, nodes(to.id).encode(data))
-            case Route.FanOut(join, to, payloads) =>
-              EncodedRoute.FanOut(join.id.value, to.id.value, payloads.map(nodes(to.id).encode))
-          }
-          PendingWrite(checkpointId, task.id.value, task.node.value, operations, routes)
+          PendingWrite(
+            checkpointId,
+            task.id.value,
+            task.node.value,
+            operations,
+            command.routes.toVector.map(encodeRoute)
+          )
         case TaskResult.Parked(_, question, resume) =>
           PendingWrite(
             checkpointId,
@@ -470,14 +535,41 @@ final class CompiledGraph[I, O] private[graph] (
         // a blocked task is never written: the runtime ends the run, and recovery runs the task again
         case TaskResult.Blocked(_, _) =>
           throw new IllegalStateException(s"task ${task.id.value} is blocked and has no pending write")
+        // a task a breakpoint holds before it runs did nothing: recovery holds it again, or runs it
+        case TaskResult.Held =>
+          throw new IllegalStateException(s"task ${task.id.value} is held at a breakpoint and has no pending write")
     }.toResult
+
+  /** A route as data, its payloads encoded with the target node's input codec. */
+  private def encodeRoute(route: Route): EncodedRoute = route match
+    case Route.Goto(to)       => EncodedRoute.Goto(to.id.value)
+    case Route.Send(to, data) => EncodedRoute.Send(to.id.value, nodes(to.id).encode(data))
+    case Route.FanOut(join, to, payloads) =>
+      EncodedRoute.FanOut(join.id.value, to.id.value, payloads.map(nodes(to.id).encode))
+
+  /** A route rebound to this graph's nodes and joins, its payloads migrated and decoded; `Left` says why not. */
+  private def decodeRoute(route: EncodedRoute): Either[String, Route] =
+    def node(nodeId: String) = nodes.get(NodeId(nodeId)).toRight(s"unknown node '$nodeId'")
+    def payload(target: NodeDef[?], json: VersionedJson) =
+      target.decode(json).left.map(e => s"input for '${target.ref.id.value}' does not decode: ${e.message}")
+    route match
+      case EncodedRoute.Goto(to) => node(to).map(n => Route.Goto(n.ref.asInstanceOf[NodeRef[Unit]]))
+      case EncodedRoute.Send(to, data) =>
+        node(to).flatMap(n => payload(n, data).map(p => Route.Send(n.ref.asInstanceOf[NodeRef[Any]], p)))
+      case EncodedRoute.FanOut(joinId, to, payloads) =>
+        for
+          join <- dynamicJoins.get(JoinId(joinId)).toRight(s"unknown dynamic join '$joinId'")
+          n    <- node(to)
+          ps <- payloads.foldLeft[Either[String, Vector[Any]]](Right(Vector.empty))((acc, p) =>
+            acc.flatMap(done => payload(n, p).map(done :+ _))
+          )
+        yield Route.FanOut(join, n.ref.asInstanceOf[NodeRef[Any]], ps)
 
   /** Rebinds a pending write to this graph's keys, nodes and joins, migrating encoded values. */
   private[graph] def decodeWrite(write: PendingWrite): Result[TaskResult] =
     def problem(reason: String) =
       GraphError.RestoreRejected(id, List(s"pending write for task ${write.taskId}: $reason"))
-    def node(nodeId: String) = nodes.get(NodeId(nodeId)).toRight(problem(s"unknown node '$nodeId'"))
-    def key(keyId: String)   = keys.get(StateKeyId(keyId)).toRight(problem(s"unknown state key '$keyId'"))
+    def key(keyId: String) = keys.get(StateKeyId(keyId)).toRight(problem(s"unknown state key '$keyId'"))
     val operations = sequence(write.operations.map {
       case EncodedOperation.Update(keyId, update) =>
         key(keyId).flatMap { k =>
@@ -488,19 +580,7 @@ final class CompiledGraph[I, O] private[graph] (
         }
       case EncodedOperation.Remove(keyId) => key(keyId).map(StateOperation.Remove(_))
     })
-    def payload(target: NodeDef[?], json: VersionedJson) =
-      target.decode(json).left.map(e => problem(s"input for '${target.ref.id.value}' does not decode: ${e.message}"))
-    val routes = sequence(write.routes.map {
-      case EncodedRoute.Goto(to) => node(to).map(n => Route.Goto(n.ref.asInstanceOf[NodeRef[Unit]]): Route)
-      case EncodedRoute.Send(to, data) =>
-        node(to).flatMap(n => payload(n, data).map(p => Route.Send(n.ref.asInstanceOf[NodeRef[Any]], p)))
-      case EncodedRoute.FanOut(joinId, to, payloads) =>
-        for
-          join <- dynamicJoins.get(JoinId(joinId)).toRight(problem(s"unknown dynamic join '$joinId'"))
-          n    <- node(to)
-          ps   <- sequence(payloads.map(payload(n, _)))
-        yield Route.FanOut(join, n.ref.asInstanceOf[NodeRef[Any]], ps)
-    })
+    val routes = sequence(write.routes.map(route => decodeRoute(route).left.map(problem)))
     for
       ops <- operations
       rs  <- routes
@@ -553,9 +633,18 @@ final class CompiledGraph[I, O] private[graph] (
           Some(s"dynamic join '${join.id.value}' is not part of this graph")
         else target(to)
 
-  private def schedule(execution: Execution, results: Vector[(Task, TaskResult)], state: ThreadState): Execution =
-    val next      = execution.superstep + 1
-    val completed = results.collect { case (task, TaskResult.Done(command)) => task -> command }
+  private def schedule(
+    execution: Execution,
+    results: Vector[(Task, TaskResult)],
+    state: ThreadState,
+    config: RunConfig
+  ): Execution =
+    val next = execution.superstep + 1
+    // a task an interruptAfter breakpoint holds has committed its update, but makes no route, edge or arrival yet
+    val heldAfter = results.collect { case (task, TaskResult.Done(_)) if holdsAfter(task, config) => task.id }.toSet
+    val completed = results.collect {
+      case (task, TaskResult.Done(command)) if !heldAfter.contains(task.id) => task -> command
+    }
     val routed = completed.flatMap { (task, command) =>
       edges.getOrElse(task.node, Vector.empty).map(to => (to, (): Any, Option.empty[JoinSlot])) ++
         command.routes.flatMap {
@@ -593,14 +682,15 @@ final class CompiledGraph[I, O] private[graph] (
     val releasedTasks = (staticReleased ++ released.map(a => dynamicJoins(a.join).target.id)).zipWithIndex.map {
       (node, i) => Task(TaskId(s"$next.${routedTasks.size + i}"), node, (), None)
     }
-    val newlyParked = results.collect { case (task, TaskResult.Parked(_, question, resume)) =>
-      Parked(
-        InterruptId(task.id.value),
-        resume.node.id,
-        question,
-        task.origin.getOrElse(Origin(task.id, task.node)),
-        task.slot
-      )
+    def origin(task: Task) = task.origin.getOrElse(Origin(task.id, task.node))
+    // one interrupt per task, in frontier order, whatever parked it
+    val newlyParked = results.collect {
+      case (task, TaskResult.Parked(_, question, resume)) =>
+        Parked(InterruptId(task.id.value), resume.node.id, question, origin(task), task.slot)
+      case (task, TaskResult.Held) =>
+        Parked(InterruptId(task.id.value), task.node, (), origin(task), task.slot, Some(Hold.Before(task.input)))
+      case (task, TaskResult.Done(command)) if heldAfter.contains(task.id) =>
+        Parked(InterruptId(task.id.value), task.node, (), origin(task), task.slot, Some(Hold.After(command.routes)))
     }
     new Execution(
       owner,
@@ -665,9 +755,13 @@ final class CompiledGraph[I, O] private[graph] (
       node <- nodes
         .get(NodeId(pending.nodeId))
         .toRight(s"$owner targets unknown node '${pending.nodeId}'")
-      input <- node.decode(pending.input).left.map { e =>
-        s"$owner input does not decode for node '${pending.nodeId}': ${e.message}"
-      }
+      replay <- restoreRoutes(owner, pending.replay.getOrElse(Vector.empty)).map(rs => pending.replay.map(_ => rs))
+      input <-
+        if replay.isDefined then Right(())
+        else
+          node.decode(pending.input).left.map { e =>
+            s"$owner input does not decode for node '${pending.nodeId}': ${e.message}"
+          }
       slot <- restoreSlot(owner, pending.joinId, pending.fanOutTask)
       origin <- (pending.originTask, pending.originNode) match
         case (None, None) => Right(None)
@@ -675,10 +769,56 @@ final class CompiledGraph[I, O] private[graph] (
           Right(Some(Origin(TaskId(task), NodeId(originNode))))
         case (Some(_), Some(originNode)) => Left(s"$owner continues unknown node '$originNode'")
         case _                           => Left(s"$owner has half an origin")
-    yield Task(TaskId(pending.taskId), node.ref.id, input, slot, origin)
+    yield Task(TaskId(pending.taskId), node.ref.id, input, slot, origin, pending.passedBefore, replay)
+
+  /** Held or replayed routes, rebound to this graph; `Left` names the first that is not. */
+  private def restoreRoutes(owner: String, routes: Vector[EncodedRoute]): Either[String, List[Route]] =
+    routes
+      .foldLeft[Either[String, Vector[Route]]](Right(Vector.empty))((acc, r) =>
+        acc.flatMap(done => decodeRoute(r).map(done :+ _))
+      )
+      .left
+      .map(problem => s"$owner holds a route that does not restore: $problem")
+      .map(_.toList)
 
   private def restoreParked(saved: GraphSnapshot.ParkedContinuation): Either[String, Parked] =
     val owner = s"interrupt ${saved.interruptId}"
+    saved.breakpoint match
+      case Some(phase) => restoreHeld(saved, phase, owner)
+      case None        => restoreContinuation(saved, owner)
+
+  /** A task a breakpoint holds: its node, and its input (before) or held routes (after). */
+  private def restoreHeld(
+    saved: GraphSnapshot.ParkedContinuation,
+    phase: BreakpointPhase,
+    owner: String
+  ): Either[String, Parked] =
+    for
+      node <- nodes.get(NodeId(saved.resumeNode)).toRight(s"$owner holds unknown node '${saved.resumeNode}'")
+      hold <- phase match
+        case BreakpointPhase.Before =>
+          node
+            .decode(saved.question)
+            .left
+            .map(e => s"$owner input does not decode for node '${saved.resumeNode}': ${e.message}")
+            .map(Hold.Before(_))
+        case BreakpointPhase.After => restoreRoutes(owner, saved.heldRoutes).map(Hold.After(_))
+      _ <- Either.cond(
+        nodes.contains(NodeId(saved.originNode)),
+        (),
+        s"$owner continues unknown node '${saved.originNode}'"
+      )
+      slot <- restoreSlot(owner, saved.joinId, saved.fanOutTask)
+    yield Parked(
+      InterruptId(saved.interruptId),
+      node.ref.id,
+      (),
+      Origin(TaskId(saved.originTask), NodeId(saved.originNode)),
+      slot,
+      Some(hold)
+    )
+
+  private def restoreContinuation(saved: GraphSnapshot.ParkedContinuation, owner: String): Either[String, Parked] =
     for
       resume <- resumes
         .get(NodeId(saved.resumeNode))
@@ -755,10 +895,14 @@ private[graph] enum TaskResult:
   case Parked(suspendedUpdate: StateUpdate, question: Any, resume: ResumeRef[?, ?])
   case Blocked(blockedUpdate: StateUpdate, error: LLMError)
 
+  /** Held by an `interruptBefore` breakpoint: the node did not run. */
+  case Held
+
   def update: StateUpdate = this match
     case Done(command)        => command.update
     case Parked(update, _, _) => update
     case Blocked(update, _)   => update
+    case Held                 => StateUpdate.empty
 
 private[graph] object CompiledGraph:
   /** Sleeps the calling thread; an interrupt throws `InterruptedException`, as `Thread.sleep` does. */

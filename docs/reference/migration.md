@@ -7,6 +7,46 @@ nav_order: 2
 
 # Migration Guide
 
+## Stage 2 migration: durable execution and human review
+
+Not in a release yet. Stage 2 of the typed agent runtime ([#1699](https://github.com/llm4s/llm4s/issues/1699)) makes
+execution durable and adds human review. Design: `docs/design/typed-agent-runtime-design.md` §4.16 onwards. This note
+covers the whole stage, one section per slice as each lands.
+
+### Human-review interrupts (#1704)
+
+A turn can now wait for a person in two new ways: at a static breakpoint, before or after a node runs, and on a
+typed question from middleware. Both are interrupts like approvals and tool questions, answered through the same
+`resume`, any subset at a time. See [Human Review](../guide/agents/human-review.html).
+
+- **`AgentStatus.Suspended` has four lists.** `Suspended(approvals, questions)` is
+  `Suspended(approvals, questions, middlewareQuestions, breakpoints)`. The new fields default to empty, so
+  constructing one still compiles, but a pattern must name all four: `case AgentStatus.Suspended(approvals, _)`
+  becomes `case AgentStatus.Suspended(approvals, _, _, _)`, or match the type, `case _: AgentStatus.Suspended`.
+- **`PendingInterrupt` (graph kernel) has `breakpoint: Option[BreakpointPhase]`**, `None` for a task that suspended
+  itself. For a held task `resumeNode` is the held node and `question` its input (before) or `null` (after).
+- **`RunConfig` has `interruptBefore` and `interruptAfter`** (`Set[NodeId]`, empty by default), with
+  `withInterruptBefore` / `withInterruptAfter`. Admission refuses a node the graph does not have with a
+  `ValidationError`, before the thread is read. `AgentBuilder.withInterruptBefore(AgentNode*)` and
+  `withInterruptAfter(AgentNode*)` add breakpoints to every run of an agent; they are not part of its version.
+- **`CompiledGraph.resume` refuses a breakpoint answer that is not JSON `null`** (`Breakpoint.proceed`,
+  `AgentResult.proceed(id)`, Java `Answer.proceed(id)`) with `InvalidResume`.
+- **Middleware can ask.** `AgentMiddleware.Asking[Q, Ans]` declares a question; a hook asks with `ask(q)` (from
+  `beforeAgent`, `afterAgent`, `wrapModelCall`) or `askAbout(q)` (from `wrapToolCall`). A middleware that is not
+  `Asking` and returns `ToolOutcome.Ask` from `wrapToolCall` now fails the run with `ToolFailed` ("asked a question it
+  does not declare"); before, the question was attributed to the tool. A wrapper that retries on `Left` should pass a
+  `Left(MiddlewareAsked)` through, as it passes a cancellation.
+- **`ApprovalRequest` and `ToolQuestionRequest` gain `answered: Vector[GivenAnswer]`** (default empty), the
+  middleware answers a call carries through an approval or a tool question.
+- **Java and Kotlin: `PendingInterrupt.toolName()` and `argumentsJson()` return `Optional<String>`.** They were
+  `String`s; a breakpoint on a model call, or a middleware question about an answer, has no tool call. They are present
+  for every `APPROVAL` and `QUESTION`, so `p.toolName()` becomes `p.toolName().get()` (or `orElse`) there.
+  `InterruptKind` gains `MIDDLEWARE_QUESTION` and `BREAKPOINT`: a Kotlin `when` over it that is used as an expression
+  must cover them, and a Java `switch` expression too. `PendingInterrupt` gains `middleware()`, `node()` and `phase()`
+  (the Java enum `BreakpointPhase`); `Answer` gains `proceed(id)`.
+- **`Checkpoint.CurrentFormat` is 5**, with an identity migration from 4: a build that predates breakpoints refuses a
+  format-5 checkpoint rather than run a held task's continuation as an ordinary task.
+
 ## Stage 1 migration: agent runtime
 
 Not in a release yet ([#1328](https://github.com/llm4s/llm4s/issues/1328), with [#1329](https://github.com/llm4s/llm4s/issues/1329)'s events and tracing, which restore the agent event stream #1328 removed). `Agent` now runs on `GraphRuntime`: the graph is the only agent loop, `AgentState` and the legacy loop are deleted, and nothing runs the old loop beside the new one. Tools, guardrails, handoffs and context pruning belong to the agent, set when you build it, and a conversation is carried by its `ThreadId` instead of by a value you pass back in. Design: `docs/design/typed-agent-runtime-design.md` §4.13. This note covers the whole of Stage 1 ([#1326](https://github.com/llm4s/llm4s/issues/1326)), five slices:

@@ -14,5 +14,18 @@ public enum InterruptKind {
   APPROVAL,
 
   /** A question a tool asked. Answer it with {@link Answer#reply}. */
-  QUESTION
+  QUESTION,
+
+  /**
+   * A question a middleware asked - to review or edit an answer, or for missing information:
+   * {@link PendingInterrupt#middleware()} names it. Answer it with {@link Answer#reply}, as JSON of the
+   * middleware's answer type.
+   */
+  MIDDLEWARE_QUESTION,
+
+  /**
+   * A task a static breakpoint holds, before or after it ran: {@link PendingInterrupt#node()} and
+   * {@link PendingInterrupt#phase()} say where. Continue it with {@link Answer#proceed}.
+   */
+  BREAKPOINT
 }

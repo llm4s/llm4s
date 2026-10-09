@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Human-review interrupts: static breakpoints and typed middleware questions** ([#1704](https://github.com/llm4s/llm4s/issues/1704),
+  part of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `RunConfig.interruptBefore`/`interruptAfter` hold a
+  graph node's tasks before they run or after they ran, each as an interrupt of its own keyed by its task id, parked
+  and persisted like a node's own suspension and answered with `Breakpoint.proceed`; a held task's siblings run, a
+  held-after task's update commits while its routes, edges and join arrivals wait, and a continuation is not held
+  again by the breakpoint it passed - through `resume`, `recover` and cancellation. `AgentBuilder.withInterruptBefore`
+  / `withInterruptAfter` take `AgentNode.Model`, `Tool` (one interrupt per tool call) and `Finish`.
+  `AgentMiddleware.Asking[Q, Ans]` lets a middleware suspend a turn with a typed question - `ask(q)` from
+  `beforeAgent`, `afterAgent` or `wrapModelCall`, `askAbout(q)` from `wrapToolCall` - for review, an edit or missing
+  information; the answer is decoded as `Ans` at resume (a bad one is refused), and the hook's stack runs again with
+  `answered(context)`, keeping earlier answers of the same run, through approvals and tool questions too.
+  `GuardrailReviewMiddleware` asks a reviewer (`GuardrailReview`, answered with `GuardrailVerdict.Allow`, `Edit(text)`
+  or `Block`) instead of blocking. `AgentStatus.Suspended` lists `middlewareQuestions` and `breakpoints`;
+  `AgentResult.proceed(id)` continues a breakpoint. The Java and Kotlin facades list them as `PendingInterrupt`s of
+  kind `MIDDLEWARE_QUESTION` and `BREAKPOINT`, with `middleware()`, `node()` and `phase()` (Java enum
+  `BreakpointPhase`), and `Answer.proceed(id)`. Any subset of a turn's interrupts can be answered at a time. See
+  [Human Review](docs/guide/agents/human-review.md).
 - **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
   and its spec checks update order, the barrier, step boundaries and cancellation with no API key.
@@ -788,6 +805,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Breaking: human-review interrupts** ([#1704](https://github.com/llm4s/llm4s/issues/1704)): `AgentStatus.Suspended`
+  has four fields (`approvals`, `questions`, `middlewareQuestions`, `breakpoints`), so a pattern must name four; the
+  kernel's `PendingInterrupt` gains `breakpoint`; `RunConfig` gains `interruptBefore`/`interruptAfter`;
+  `ApprovalRequest` and `ToolQuestionRequest` gain `answered`. A tool wrapper that is not `AgentMiddleware.Asking`
+  and returns `ToolOutcome.Ask` fails the run (`ToolFailed`) instead of asking as the tool. Java/Kotlin:
+  `PendingInterrupt.toolName()` and `argumentsJson()` return `Optional<String>`, and `InterruptKind` has two more
+  values. `Checkpoint.CurrentFormat` is 5 (identity migration from 4). Migration:
+  [Human-review interrupts](docs/reference/migration.md#human-review-interrupts-1704).
 - **An interrupted `Agent.run`, `continueConversation`, `recover` or `resume` cancels its turn, from Java too** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   the call returns `Left(CancelledError)` with the interrupt flag set, as before, and now also cancels the turn it
   was waiting on instead of leaving it running, returning once that turn has ended (waiting up to 5 seconds for the turn to end), so `recover`

@@ -1,12 +1,14 @@
 package org.llm4s.agent.graph.middleware
 
-import org.llm4s.agent.graph.{ RunContext, StateKey, ToolCallId, ToolName }
-import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContext, ToolOutcome, ToolSet }
+import org.llm4s.agent.graph.{ Resumed, RunContext, StateKey, ToolCallId, ToolName }
+import org.llm4s.agent.graph.tool.{ AgentTool, AgentToolSpec, ToolContext, ToolOutcome, ToolQuestion, ToolSet }
+import org.llm4s.error.{ LLMError, NonRecoverableError }
 import org.llm4s.llmconnect.model.{ Completion, Message, ToolCall }
-import org.llm4s.types.Result
+import org.llm4s.types.{ Result, TryOps }
 import upickle.default.ReadWriter
 
 import scala.annotation.unused
+import scala.util.Try
 
 /**
  * Stable identifier of an [[AgentMiddleware]] in a [[MiddlewareStack]]; must match
@@ -68,7 +70,12 @@ object ToolCallRequest:
  * on task threads, so a middleware's own state must be thread-safe.
  *
  * A wrapper should pass `ToolOutcome.Fatal(CancelledError)` through and not retry it: the call
- * was cancelled, and a retry gets the same outcome without running the tool again.
+ * was cancelled, and a retry gets the same outcome without running the tool again. It should pass a
+ * question through too - a `Left(MiddlewareAsked)` from `next`, or a `ToolOutcome.Ask` - since asking
+ * again only asks again.
+ *
+ * A middleware that asks typed questions - for review, an edit, or missing information - extends
+ * [[AgentMiddleware.Asking]].
  */
 trait AgentMiddleware:
 
@@ -87,6 +94,9 @@ trait AgentMiddleware:
   /** Tools this middleware contributes; they join the loop's tool set and are validated like any other. */
   def tools: Vector[AgentTool[?]] = Vector.empty
 
+  /** The codecs of the question this middleware asks and the answer it takes; only [[AgentMiddleware.Asking]] declares one. */
+  private[graph] def declaredQuestion: Option[ToolQuestion[?, ?]] = None
+
   /** Sees the run's input before anything else runs: returns it, possibly changed, or `Left` to fail the run. */
   def beforeAgent(input: String, @unused context: RunContext): Result[String] = Right(input)
 
@@ -96,7 +106,7 @@ trait AgentMiddleware:
   /**
    * Wraps one model call. A wrapper may rewrite the request (inject a note, filter tools), call
    * `next` more than once (retry, fallback), transform its result, or return `Left`, which fails
-   * the run. A model wrapper cannot suspend.
+   * the run. Only an [[AgentMiddleware.Asking]] wrapper suspends, by asking its question.
    *
    * Filtering `ModelRequest.tools` shapes what the model is offered and is not a permission
    * control: a tool the model calls anyway still runs through `wrapToolCall`, where denial belongs.
@@ -114,3 +124,64 @@ trait AgentMiddleware:
   def wrapToolCall(@unused request: ToolCallRequest, @unused context: ToolContext)(
     next: () => ToolOutcome
   ): ToolOutcome = next()
+
+object AgentMiddleware:
+
+  /**
+   * A middleware that asks typed questions of type `Q` and takes answers of type `Ans`, as
+   * [[org.llm4s.agent.graph.tool.AgentTool.Asking]] does for a tool: it suspends the run for a
+   * reviewer - to approve or edit an answer, or to supply missing information - instead of only
+   * blocking or failing.
+   *
+   * A hook asks by returning [[ask]] - from `beforeAgent`, `afterAgent` or `wrapModelCall` - or
+   * [[askAbout]] from `wrapToolCall`. The run suspends at the end of the superstep with a question of
+   * its own, keyed by the asking task's interrupt id like any other, so several pending questions are
+   * answered together or one at a time. The answer is decoded as `Ans` when the run is resumed: one
+   * that does not decode is refused, the thread unchanged.
+   *
+   * Once answered, the hook's whole stack runs again from the outermost middleware - nothing about a
+   * stack's position is checkpointed, as for approvals - and [[answered]] gives this middleware its
+   * question and answer, so it continues instead of asking again. Answers given earlier in the same
+   * stack run are kept while it runs again, so two asking middleware in one stack each ask once. A
+   * middleware outside the asking one therefore runs twice, and must not depend on running once.
+   *
+   * What runs again is the asking task: `beforeAgent` re-runs the turn's input (nothing of the turn
+   * is stored while it waits), `afterAgent` the final answer, `wrapToolCall` the tool call (its
+   * arguments checked again), and `wrapModelCall` the model call - so a model wrapper that asks after
+   * calling `next` calls the model again once answered, unless it returns a completion of its own. A
+   * question from a tool wrapper while the tool continues after its own question is refused, as the
+   * call's error result.
+   */
+  abstract class Asking[Q: ReadWriter, Ans: ReadWriter] extends AgentMiddleware:
+
+    final override private[graph] def declaredQuestion: Option[ToolQuestion[?, ?]] =
+      Some(ToolQuestion(summon[ReadWriter[Q]], summon[ReadWriter[Ans]]))
+
+    /**
+     * Suspends the run with `question`; return it as the result of `beforeAgent`, `afterAgent` or
+     * `wrapModelCall`. A question that does not encode is that `Left` instead.
+     */
+    final protected def ask(question: Q): Result[Nothing] =
+      Try(upickle.default.writeJs(question)).toResult.flatMap(json => Left(MiddlewareAsked(id, json)))
+
+    /** Suspends the tool call with `question`; return it as the result of `wrapToolCall`. */
+    final protected def askAbout(question: Q): ToolOutcome = ToolOutcome.Ask(question)
+
+    /** This middleware's question and its answer, when its hook runs again after a resume; `None` before. */
+    final protected def answered(context: RunContext): Option[Resumed[Q, Ans]] =
+      context.answers.get(id.value).flatMap { (question, answer) =>
+        Try(Resumed(upickle.default.read[Q](question), upickle.default.read[Ans](answer))).toOption
+      }
+
+    /** [[answered]] for a tool call's context. */
+    final protected def answered(context: ToolContext): Option[Resumed[Q, Ans]] = answered(context.run)
+
+/**
+ * A middleware's question on its way out of a hook, from [[AgentMiddleware.Asking.ask]]: the agent loop
+ * suspends the run with it. A wrapper that sees it as `next`'s result passes it on. Outside the loop it
+ * is an error: a question nobody can answer.
+ */
+final case class MiddlewareAsked private[graph] (middleware: MiddlewareId, question: ujson.Value)
+    extends LLMError
+    with NonRecoverableError:
+  override val message: String = s"Middleware '${middleware.value}' asked a question"

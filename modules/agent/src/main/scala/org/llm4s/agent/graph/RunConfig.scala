@@ -47,13 +47,22 @@ object RunBudgets:
  * admission refuses a run whose `tenantId` differs from the latest checkpoint's
  * ([[GraphError.TenantMismatch]]; `None` and `Some` differ). The principal is recorded on the run's
  * `RunStarted`, `RunRecovered` and `RunResumed` events and is never checked.
+ *
+ * `interruptBefore` and `interruptAfter` are the run's static breakpoints ([[BreakpointPhase]]): a
+ * task of a node in `interruptBefore` is held before it runs, and one of a node in `interruptAfter`
+ * after it ran, each as an interrupt of its own that [[GraphRuntime.resume]] answers with
+ * [[Breakpoint.proceed]]. They belong to the run, like its budgets: a resume or recover brings its
+ * own, and a continuation already past a breakpoint is not held by it again. Admission refuses a
+ * node the graph does not have with a `ValidationError`.
  */
 final case class RunConfig private (
   runId: RunId,
   tenantId: Option[TenantId],
   principal: Option[Principal],
   budgets: RunBudgets,
-  metadata: Map[String, String]
+  metadata: Map[String, String],
+  interruptBefore: Set[NodeId],
+  interruptAfter: Set[NodeId]
 ):
   def withRunId(id: RunId): RunConfig                 = copy(runId = id)
   def withTenantId(t: TenantId): RunConfig            = copy(tenantId = Some(t))
@@ -63,14 +72,22 @@ final case class RunConfig private (
   def withBudgets(b: RunBudgets): RunConfig           = copy(budgets = b)
   def withMetadata(m: Map[String, String]): RunConfig = copy(metadata = m)
 
+  /** Holds every task of these nodes before it runs, replacing the nodes set before. */
+  def withInterruptBefore(nodes: Set[NodeId]): RunConfig = copy(interruptBefore = nodes)
+
+  /** Holds every task of these nodes after it ran, replacing the nodes set before. */
+  def withInterruptAfter(nodes: Set[NodeId]): RunConfig = copy(interruptAfter = nodes)
+
 object RunConfig:
   def apply(
     runId: RunId = RunId.random(),
     tenantId: Option[TenantId] = None,
     principal: Option[Principal] = None,
     budgets: RunBudgets = RunBudgets.default,
-    metadata: Map[String, String] = Map.empty
-  ): RunConfig = new RunConfig(runId, tenantId, principal, budgets, metadata)
+    metadata: Map[String, String] = Map.empty,
+    interruptBefore: Set[NodeId] = Set.empty,
+    interruptAfter: Set[NodeId] = Set.empty
+  ): RunConfig = new RunConfig(runId, tenantId, principal, budgets, metadata, interruptBefore, interruptAfter)
 
 /** Where a task runs. `checkpointId` is the checkpoint whose frontier it belongs to; `""` outside a [[GraphRuntime]]. */
 final case class RunPosition(
@@ -94,8 +111,17 @@ final case class RunPosition(
 final class RunContext private[graph] (
   val config: RunConfig,
   val position: RunPosition,
-  sink: NodeEventSink
+  sink: NodeEventSink,
+  /**
+   * Answers to middleware questions, by asking middleware id, as (question, answer) JSON: set when a
+   * hook runs again after its questions were answered; see `AgentMiddleware.Asking`.
+   */
+  private[agent] val answers: Map[String, (ujson.Value, ujson.Value)] = Map.empty
 ):
+  /** This context with `next` as the answers its hooks see. */
+  private[agent] def withAnswers(next: Map[String, (ujson.Value, ujson.Value)]): RunContext =
+    new RunContext(config, position, sink, next)
+
   /** Records a durable custom event; `payload` is snapshotted at the call, so the node may reuse it. */
   def emit(name: String, version: Int, payload: ujson.Value): Unit = sink.custom(name, version, payload)
 

@@ -615,7 +615,7 @@ Contract decisions:
 
 - **Four hooks, all pass-through by default.** `beforeAgent` sees the run's input, `afterAgent` its final answer, `wrapModelCall` each model call and `wrapToolCall` each tool call. §5.6's `beforeModel`, `afterModel` and `afterToolCall` are not separate hooks: each is a wrapper that does its work before or after `next`, so there is one way to write each concern and less API to freeze.
 - **A tool wrapper returns a `ToolOutcome`.** No new result type: a wrapper denies with `Error("Denied: ...")`, asks for approval with `NeedsApproval(reason)`, fails the run with `Fatal`, and short-circuits by not calling `next`. It may call `next` more than once (retry), and may transform the outcome `next` returns. `ToolCallRequest(spec, call)` is read-only: a wrapper cannot change a call's arguments, so none can get round argument validation; only an approval `Edit` changes arguments, and those are validated again.
-- **A model wrapper rewrites the request and cannot suspend.** `ModelRequest(messages, tools: ToolSet)`; a wrapper may change either (inject a system note, filter tools), call `next` again (retry, fallback), or return `Left`, which fails the run. Filtering `ModelRequest.tools` shapes what the model is offered and is not a permission control: a tool the model calls anyway still runs through `wrapToolCall`, where denial belongs. Model wrappers do not suspend: the only middleware suspension is approval of a tool call (below). This narrows §5.6 and the §9 entry "model wrappers can suspend"; typed middleware questions are carried forward (§4.9).
+- **A model wrapper rewrites the request and cannot suspend.** `ModelRequest(messages, tools: ToolSet)`; a wrapper may change either (inject a system note, filter tools), call `next` again (retry, fallback), or return `Left`, which fails the run. Filtering `ModelRequest.tools` shapes what the model is offered and is not a permission control: a tool the model calls anyway still runs through `wrapToolCall`, where denial belongs. Model wrappers do not suspend: the only middleware suspension is approval of a tool call (below). This narrows §5.6 and the §9 entry "model wrappers can suspend"; typed middleware questions are carried forward (§4.9). **Amended by #1704 (§4.16):** an `AgentMiddleware.Asking` wrapper suspends by asking its typed question.
 - **Run-boundary hooks transform or fail.** `beforeAgent` and `afterAgent` return the input or answer, possibly changed, or `Left`, which fails the run with that error.
 - **Middleware contributes tools and keys.** A middleware's `tools` join the loop's `ToolSet` and are validated like any other tool's; a name that clashes with another tool is refused. Its `writes` are the keys its `wrapToolCall` may add to a `Success` update. `ToolLoop.build` still refuses a declaration of `ToolLoop.results` or `Messages.key`, from a tool or a middleware.
 - **Tools carry MCP-style hints.** `AgentToolSpec.withHints(ToolHints(readOnly, destructive, idempotent, openWorld))`, with the meanings of MCP tool annotations and their conservative defaults: not read-only, destructive, not idempotent, open-world. `AgentTool.fromToolFunction` gets the defaults. Permissions and timeout are not added: nothing in this slice reads them (§4.9).
@@ -645,7 +645,7 @@ Source breaks, with no shims (the CHANGELOG lists the same):
 
 Limits (owners in §4.9):
 
-- Only tool-call approval suspends; model wrappers and guardrails cannot ask typed questions.
+- ~~Only tool-call approval suspends; model wrappers and guardrails cannot ask typed questions.~~ **Closed by #1704** (§4.16).
 - `llm4s-mcp` reads `ToolHints` from MCP tool annotations since §4.12.
 - The legacy `Agent` still runs guardrails through `GuardrailApplicator`; Stage 1 moves it onto `ToolLoop` and `GuardrailMiddleware`.
 - A guardrail `Block` - any `beforeAgent`/`afterAgent` `Left` - fails the run and leaves the checkpoint `Running`. `start` on the thread then returns `IncompleteRun`, and `recover` replays the same input or answer through the same guardrail, which refuses it again, so the thread cannot continue. An output `Block` also leaves the unguarded assistant answer committed, in thread state and in `RunResult.Failed`'s state. Decided: a `Block` becomes a terminal failure that leaves the thread usable (§9, "Guardrail Block outcome"); Stage 1 implements it.
@@ -656,7 +656,7 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 
 | Item | Left by | Owner |
 |---|---|---|
-| Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only) | #1279 | Stage 2, with output review and missing-information interrupts (§5.3). Not needed in Stage 1: the loop's approvals come from tools and tool wrappers (`ToolOutcome.NeedsApproval`) and its questions from tools (`ToolOutcome.Ask`), while guardrails and model wrappers block or fail |
+| ~~Typed middleware questions (a middleware declaring `Q`/`Ans` like `AgentTool.Asking`), suspension from model wrappers and guardrails (today: tool-call approval only)~~ **closed by #1704** (§4.16: `AgentMiddleware.Asking`, `GuardrailReviewMiddleware`) | #1279 | Stage 2, with output review and missing-information interrupts (§5.3). Not needed in Stage 1: the loop's approvals come from tools and tool wrappers (`ToolOutcome.NeedsApproval`) and its questions from tools (`ToolOutcome.Ask`), while guardrails and model wrappers block or fail |
 | ~~A guardrail Block (any run-boundary `Left`) leaves the thread `Running` with no way forward, and an output Block leaves the blocked answer in state~~ **closed by #1350 and #1328** (§4.13: `CheckpointStatus.Failed`, the blocked turn removed, `AgentStatus.Blocked`) | #1279 | Stage 1 |
 | Tool permissions and timeouts on `AgentToolSpec`, with the ordered deny-if-unmatched permission rules of §5.6 | #1279 | Stage 3 |
 | `Agent.run`/`continueConversation`/`runMultiTurn` on the runtime via `ToolLoop` and `AgentTool` (**closed by #1328**); `ModelStep` streaming through live progress, `AgentEvent` replaced (**closed by #1329**); `PlanRunner` rebuilt or removed (**closed by #1330**: removed, §4.15) | #1269 | Stage 1 |
@@ -667,7 +667,7 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 | Cancelling a run cancels the child runs it started | #1277 | Stage 3 |
 | Store-level change notification (or polling), so a subscription sees live commits made by another `GraphRuntime` or process sharing the checkpointer (today: live delivery only for commits through the subscribing runtime; others by resubscribing and replaying) | #1277 | Stage 2 |
 | Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction). History and fork must never keep or expose a snapshot whose turn a later guardrail `Block` removed (§9, "Guardrail Block outcome"), or the tool loop must guard the answer before its first commit | #1268 | Stage 2 |
-| Static `interruptBefore`/`interruptAfter` breakpoints | #1269 | Stage 2 |
+| ~~Static `interruptBefore`/`interruptAfter` breakpoints~~ **closed by #1704** (§4.16) | #1269 | Stage 2 |
 | Known limits, not planned: a `Subscription` dropped without `cancel()` keeps a parked virtual thread; `cancel()` blocks while a listener ignores its interrupt; the hub lock is runtime-wide; `RunContext` has no dependency accessor (by decision) | #1277 | - |
 | Known limit, not planned: tools reach the provider as core `ToolFunction`s (`ToolSet.toolFunctions`), stand-ins for agent tools, because core's clients take no other form | #1278 | - |
 | Known limit, not planned: the structural fingerprint does not cover node input types; a changed input type is caught when a pending input fails to decode | #1267 | - |
@@ -1029,6 +1029,100 @@ Limits:
 
 The specs are `AgentRunCancellationSpec` and `MultiAgentGraphRecipeSpec`.
 
+### 4.16 Stage 2 slice 5: human-review interrupts ([#1704](https://github.com/llm4s/llm4s/issues/1704))
+
+Slice 5 of [#1699](https://github.com/llm4s/llm4s/issues/1699): static breakpoints, and typed questions from
+middleware. Both are interrupts on the persisted pause/resume path of §4.5, keyed by `InterruptId` and answered with
+the other interrupts of a run, any non-empty subset at a time, which is the "incremental approval" of Stage 2's exit
+criteria (§6) for every kind of interrupt. Independent of the store slices. The specs are `BreakpointSpec` (kernel),
+`AgentBreakpointSpec`, `AgentMiddlewareQuestionSpec`, `JAgentHumanReviewSpec` and `AgentKtHumanReviewTest`.
+
+Breakpoint decisions (kernel):
+
+- **Breakpoints belong to the run.** `RunConfig.interruptBefore` and `interruptAfter` (`Set[NodeId]`) name nodes;
+  each `start`, `resume` and `recover` brings its own, as it brings its budgets, and `CompiledGraph.step` honours
+  them. Admission refuses a node the graph does not have with one `ValidationError` naming every one, before the
+  thread is read, so a mistyped id is not a breakpoint that silently never holds. They are not part of the graph's
+  structural fingerprint: they change when a run pauses, not the graph's shape.
+- **A held task is parked like a suspended one.** Its interrupt id is its task id; its continuation inherits its
+  join slot and origin, so a barrier it belongs to stays closed until the continuation completes, and the run pauses
+  at the end of the superstep while its siblings run and commit (§4.5). A task held *before* its node runs has done
+  nothing and records no pending write: `recover` decides again, under its own config. Its continuation runs the
+  node with the same input and is marked `passedBefore`, so the same breakpoint does not hold it again - also after
+  a crash, a cancel or a failure, since the mark is checkpointed. A task held *after* its node ran has its pending
+  write and its update committed, so the state shows what it did; its routes, static edges and join arrivals are
+  held, and its continuation *replays* them without running the node (`replay`), taking one superstep. A reused
+  pending write is held after again on `recover`, so a node is never run twice to be held. Holds apply to resume
+  nodes too, and a node in both lists is held before, then after.
+- **The answer is `Breakpoint.proceed` (JSON `null`), and only that.** A breakpoint has no question and nothing
+  to decide but to continue; any other answer is `InvalidResume`, the thread unchanged, which leaves room for a
+  typed answer later. A held thread is continued, or forgotten; skipping or editing a held task waits for
+  `updateState` (#1702).
+- **One event vocabulary.** A held task commits no event of its own: `RunSuspended` lists its interrupt and
+  `RunResumed` its answer, as for any interrupt. `PendingInterrupt.breakpoint` (`Before` or `After`) tells a held
+  task from a suspension; `question` is the held task's input (before) or `null` (after), and `resumeNode` its node.
+- **Checkpoint format 5**, an identity migration from 4: `PendingTask` gains `passedBefore` and `replay`,
+  `ParkedContinuation` gains `breakpoint` and `heldRoutes`, all defaulted, so a build that predates them refuses a
+  format-5 checkpoint rather than run a held task's continuation as an ordinary task.
+
+Agent decisions:
+
+- **Agent breakpoints are named by `AgentNode`**: `Model` (`<id>/model`), `Tool` (`<id>/call-tool`, one interrupt
+  per call) and `Finish` (`<id>/finish`), set with `AgentBuilder.withInterruptBefore` / `withInterruptAfter` and
+  added to every run's own; a handoff target's apply to its nodes. Like streaming they are not part of the graph
+  version, so a thread held by one agent is continued by one built without them. A call continued after an approval
+  or a question runs at the approval or question node, which `Tool` does not hold. `AgentStatus.Suspended` gains
+  `breakpoints: Vector[(InterruptId, BreakpointRequest)]` - the node, the phase and, for a call held before it runs,
+  the call - and `AgentResult.proceed(id)`.
+- **A middleware asks as a tool does.** `AgentMiddleware.Asking[Q: ReadWriter, Ans: ReadWriter]` declares the
+  codecs, as `AgentTool.Asking` does; only it can declare one. A hook asks by returning `ask(q)` - a
+  `Left(MiddlewareAsked)` from `beforeAgent`, `afterAgent` or `wrapModelCall` - or `askAbout(q)`, a `ToolOutcome.Ask`
+  from `wrapToolCall`, attributed to the wrapper that raised it as `NeedsApproval` is (§4.8); a wrapper that is not
+  `Asking` and asks fails the run with `ToolFailed`, as an undeclared tool question does. The question is encoded
+  when it is asked and suspends at a resume node of its own per (agent, middleware, hook),
+  `<agent>/asked/<middleware>/<hook>`, whose answer codec is the middleware's: an answer that does not decode is
+  refused at `resume` with the thread unchanged, unlike a tool's, which becomes the call's error result.
+- **Once answered, the asking task runs again, and the hook's whole stack with it.** Nothing about a stack's
+  position is checkpointed, as for approvals (§4.8), so a rebuilt stack resumes cleanly, and a middleware outside the
+  asking one runs twice. `answered(context)` gives the middleware its question and answer. Answers given earlier in
+  the same stack run are carried (`GivenAnswer`, on the question, `ApprovalRequest` and `ToolQuestionRequest`), so
+  two asking middleware of one stack each ask once, and a tool call's answer survives a later approval or tool
+  question. They are keyed by the asking middleware's agent and id, so a root's and a handoff target's middleware of
+  the same id do not see each other's. What runs again is the task: `beforeAgent` re-runs the turn's input, storing
+  nothing while it waits (a new thread's imported history is imported then); `wrapModelCall` re-runs the model step
+  (a wrapper that asked after calling `next` calls the model again, unless it returns a completion of its own, and
+  a model call before the question is not counted in usage); `wrapToolCall` re-runs the call, its arguments checked
+  again, with the approval it had; `afterAgent` guards the stored answer again - a root middleware's question about
+  a handoff target's answer finishes as the target. A question from a tool wrapper while the tool continues after its
+  own question is the call's error result, because running the chain again would lose the tool's answer.
+- **Guardrails suspend through a middleware.** `GuardrailReviewMiddleware(input, output)` runs guardrails as
+  `GuardrailMiddleware` does, and a refusal asks a `GuardrailReview(phase, guardrail, reason, text)`, answered with
+  `GuardrailVerdict.Allow`, `Edit(text)` (not re-checked: the reviewer wrote it) or `Block` (the §4.13 Block). A
+  verdict applies only to the refusal it was asked about. `GuardrailMiddleware` itself is unchanged.
+- **`AgentStatus.Suspended` gains `middlewareQuestions: Vector[(InterruptId, MiddlewareQuestionRequest)]`**: the
+  agent and middleware that asked, the hook, the question as JSON (`ToolLoop.middlewareQuestion[Q]` reads it), and
+  what the hook runs again with. `AgentResult.reply` answers it.
+
+Java and Kotlin ([#1662](https://github.com/llm4s/llm4s/pull/1662), [#1665](https://github.com/llm4s/llm4s/pull/1665)
+conventions): `InterruptKind` gains `MIDDLEWARE_QUESTION` and `BREAKPOINT`; `PendingInterrupt` lists them after the
+approvals and tool questions, with `middleware()`, `node()` and `phase()` (Java enum `BreakpointPhase`), and
+`toolName()`/`argumentsJson()` become `Optional`s, since a breakpoint on a model call or a question about an answer
+has no tool call; `Answer.proceed(id)` continues a breakpoint. `AgentKt.pending` reuses the list unchanged. An agent
+with breakpoints or asking middleware is built with `Agent.builder` and wrapped (`Llm4s.wrapAgent`).
+
+Source breaks, with no shims (the CHANGELOG and the Stage 2 migration note list the same): `AgentStatus.Suspended`
+has four fields; the kernel's `PendingInterrupt` gains `breakpoint`; `RunConfig` gains two fields; `ApprovalRequest`
+and `ToolQuestionRequest` gain `answered`; a non-asking wrapper's `ToolOutcome.Ask` fails the run; Java's
+`PendingInterrupt.toolName()`/`argumentsJson()` return `Optional<String>`; `Checkpoint.CurrentFormat` is 5.
+
+Limits:
+
+- A breakpoint takes only `proceed`: skipping a held task or editing what it holds needs `updateState` (#1702).
+- `AgentNode.Tool` does not hold a call continued at its approval or question node.
+- A middleware question re-runs the asking task, so a model wrapper that asks after calling the model pays for that
+  call twice unless it returns its own completion, and that first call's usage is not recorded.
+- `AgentNode` is a Scala 3 enum: from Java or Kotlin its cases are read with `AgentNode.valueOf("Tool")`.
+
 ## 5. Harness capabilities
 
 ### 5.1 Core runtime
@@ -1165,7 +1259,7 @@ The migration note should give direct replacements for existing state/event/Plan
 | Explicit joins and partial resume | **Accepted.** Static joins wait for declared arrivals; dynamic joins record expected fan-out task IDs. The tool-call batch feeds a barrier, so an approved branch cannot advance the model while other calls are unresolved. Quiescence with parked continuations reports `Suspended`; an impossible join fails explicitly. |
 | Tool-result ownership | **Accepted.** `AgentTool` returns content/effects/outcomes. The runtime creates the correlated provider-valid result message for success, failure, rejection, denial, and unknown tools, and the join enforces one result per call. Edited approvals replace the originating assistant message before execution. |
 | Durable event storage | **Accepted.** The thread checkpointer owns an atomic event log alongside snapshots and pending writes. Lifecycle and state/tool events are durable; token deltas are live-only. Replay has configurable retention/compaction and reports the earliest available sequence. |
-| Middleware and schema contract | **Accepted.** Middleware declares IDs, state keys, tools, and ordering constraints with pass-through hook defaults. Stage 0 has four hooks - `beforeAgent`, `afterAgent`, `wrapModelCall`, `wrapToolCall` - and only tool-call approval suspends; model wrappers rewrite, retry or fail (§4.8). Agent tool specs use core `SchemaDefinition[A]` plus a decoder for the same `A`, with no raw schema field. |
+| Middleware and schema contract | **Accepted.** Middleware declares IDs, state keys, tools, and ordering constraints with pass-through hook defaults. Stage 0 has four hooks - `beforeAgent`, `afterAgent`, `wrapModelCall`, `wrapToolCall` - and only tool-call approval suspends; model wrappers rewrite, retry or fail (§4.8). Agent tool specs use core `SchemaDefinition[A]` plus a decoder for the same `A`, with no raw schema field. **Amended by #1704:** an `AgentMiddleware.Asking[Q, Ans]` suspends from any of the four hooks with a typed question; the hook's stack runs again once it is answered (§4.16). |
 | Concurrent resume and state removal | **Accepted.** A resume against an actively claimed thread returns retryable `ThreadBusy` without consuming its answer. Removing a typed state key clears its stored entry, so reads return its initial value; collection element deletion remains a typed update operation. |
 | Recovery after task failure or process restart | **Accepted.** Add `recover(threadId, graph, config)` for incomplete execution checkpoints. It continues from durable pending writes without accepting a new turn input, retries only failed/unstarted tasks per policy, and rejects threads with pending interrupts (use `resume`). |
 | Tool argument validation | **Accepted.** Validate raw arguments against the exact provider-facing JSON Schema generated from core `SchemaDefinition` before decoding, policy, or side effects. Use an agent-local validator SPI that fails closed for unsupported constraints, then decode and run optional semantic validation; do not change core for this runtime requirement. |

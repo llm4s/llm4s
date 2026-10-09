@@ -149,14 +149,20 @@ public final class HelloLLM4S {
             for (PendingInterrupt pending : turn.get().status().pending()) {
                 switch (pending.kind()) {
                     case APPROVAL -> {
-                        System.out.println("Approving " + pending.toolName() + " " + pending.argumentsJson()
-                            + ": " + pending.reason().orElse(""));
+                        System.out.println("Approving " + pending.toolName().orElse("") + " "
+                            + pending.argumentsJson().orElse("") + ": " + pending.reason().orElse(""));
                         answers.add(Answer.approve(pending.id()));
                     }
-                    // the answer is JSON of the asking tool's answer type, Answer.reply(id, json), which only the
+                    // the answer is JSON of the asker's answer type, Answer.reply(id, json), which only the
                     // application knows; the sample leaves the question pending
-                    case QUESTION -> System.out.println(
-                        "Leaving pending: " + pending.toolName() + " asks " + pending.questionJson().orElse(""));
+                    case QUESTION, MIDDLEWARE_QUESTION -> System.out.println(
+                        "Leaving pending: " + pending.toolName().orElse(pending.middleware().orElse("")) + " asks "
+                            + pending.questionJson().orElse(""));
+                    // a static breakpoint holds a task for review: the sample continues it
+                    case BREAKPOINT -> {
+                        System.out.println("Continuing past the breakpoint at " + pending.node().orElse(""));
+                        answers.add(Answer.proceed(pending.id()));
+                    }
                 }
             }
             if (answers.isEmpty()) {

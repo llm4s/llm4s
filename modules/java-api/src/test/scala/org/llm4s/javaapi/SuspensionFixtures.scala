@@ -23,7 +23,7 @@ private[javaapi] object SuspensionFixtures {
   final case class Confirm(prompt: String) derives ReadWriter
   final case class Confirmed(ok: Boolean) derives ReadWriter
 
-  private def spec(name: String): AgentToolSpec[Text] =
+  def spec(name: String): AgentToolSpec[Text] =
     AgentToolSpec[Text](
       name,
       s"The $name tool",

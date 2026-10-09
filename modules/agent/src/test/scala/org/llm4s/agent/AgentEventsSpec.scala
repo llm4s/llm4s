@@ -200,8 +200,8 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     val ((first, second), c) = collecting(builder, 2) { (agent, threadId, listener) =>
       val first = ok(agent.stream(threadId, "go")(listener).flatMap(_.await()))
       val id = first.status match
-        case AgentStatus.Suspended(approvals, _) => approvals.head._1
-        case other                               => fail(s"expected a suspension, got $other")
+        case AgentStatus.Suspended(approvals, _, _, _) => approvals.head._1
+        case other                                     => fail(s"expected a suspension, got $other")
       val second = ok(agent.streamResume(threadId, Map(first.reject(id, "no thanks")))(listener).flatMap(_.await()))
       (first, second)
     }
@@ -228,8 +228,8 @@ class AgentEventsSpec extends AnyFlatSpec with Matchers:
     val ((first, second), c) = collecting(builder, 2) { (agent, threadId, listener) =>
       val first = ok(agent.stream(threadId, "go")(listener).flatMap(_.await()))
       val id = first.status match
-        case AgentStatus.Suspended(approvals, _) => approvals.head._1
-        case other                               => fail(s"expected a suspension, got $other")
+        case AgentStatus.Suspended(approvals, _, _, _) => approvals.head._1
+        case other                                     => fail(s"expected a suspension, got $other")
       (first, ok(agent.streamResume(threadId, Map(first.approve(id)))(listener).flatMap(_.await())))
     }
     second.answer shouldBe Some("fine")

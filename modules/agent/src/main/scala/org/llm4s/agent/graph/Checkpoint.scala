@@ -51,7 +51,7 @@ final case class Checkpoint(
 object Checkpoint:
 
   /** The format this build writes. */
-  val CurrentFormat: Int = 4
+  val CurrentFormat: Int = 5
 
   /**
    * Migrations of the checkpoint format itself, keyed by the version they upgrade from.
@@ -59,9 +59,12 @@ object Checkpoint:
    * 2 -> 3: the tenant (#1277) became part of a thread's identity; earlier checkpoints have none.
    * 3 -> 4: the terminal `Failed` status (#1328); nothing to rewrite, but a build that predates it refuses format 4
    * rather than misread the status.
+   * 4 -> 5: static breakpoints (#1704) park held tasks and mark their continuations; nothing to rewrite, as
+   * the new fields default to none, but a build that predates them refuses format 5 rather than run a held
+   * task's continuation as an ordinary task.
    */
   private val formatVersion: SchemaVersion =
-    SchemaVersion(4)(1 -> addSuspension, 2 -> addTenant, 3 -> addFailedStatus)
+    SchemaVersion(5)(1 -> addSuspension, 2 -> addTenant, 3 -> addFailedStatus, 4 -> addBreakpoints)
 
   private def addSuspension(json: ujson.Value): Result[ujson.Value] =
     Try {
@@ -89,6 +92,13 @@ object Checkpoint:
     Try {
       val upgraded = ujson.copy(json)
       upgraded("formatVersion") = 4
+      upgraded
+    }.toResult
+
+  private def addBreakpoints(json: ujson.Value): Result[ujson.Value] =
+    Try {
+      val upgraded = ujson.copy(json)
+      upgraded("formatVersion") = 5
       upgraded
     }.toResult
 

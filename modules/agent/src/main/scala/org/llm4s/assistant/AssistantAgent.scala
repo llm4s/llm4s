@@ -360,10 +360,10 @@ class AssistantAgent(
             "extract-response"
           )
         )
-      case Some(AgentStatus.Suspended(_, _)) =>
+      case Some(_: AgentStatus.Suspended) =>
         Left(
           AssistantError.SessionError(
-            "The agent is waiting for a tool approval, which the assistant cannot give",
+            "The agent is waiting for a tool approval or an answer, which the assistant cannot give",
             state.sessionId,
             "extract-response"
           )

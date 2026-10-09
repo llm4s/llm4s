@@ -91,7 +91,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `speech` - **carved** | `llm4s-speech` | Experimental |
 | `imagegeneration`, `imageprocessing` - **carved** | `llm4s-image` | Experimental |
 | `knowledgegraph` — **carved** (`knowledgegraph/graphrag` ships in `llm4s-rag`) | `llm4s-knowledgegraph` | Experimental |
-| `javaapi` — the Java facade (`Llm4s`, `JLlmClient`, `JAgent`, `AgentStream`, `AgentStreamListener`, `StreamEvents`, `Answer`, `PendingInterrupt`, `InterruptKind`, `ConversationBuilder`, `LlmResult`, `LlmException`) — **new** | `llm4s-java-api` (`modules/java-api`) | Beta |
+| `javaapi` — the Java facade (`Llm4s`, `JLlmClient`, `JAgent`, `AgentStream`, `AgentStreamListener`, `StreamEvents`, `Answer`, `PendingInterrupt`, `InterruptKind`, `BreakpointPhase`, `ConversationBuilder`, `LlmResult`, `LlmException`) — **new** | `llm4s-java-api` (`modules/java-api`) | Beta |
 | `spring` — Spring Boot auto-configuration (`Llm4sAutoConfiguration`, `Llm4sProperties`, `LLM4STemplate`, `LlmHealthIndicator`) — **new** | `llm4s-spring-boot-starter` (`modules/spring-boot-starter`) | Beta |
 | `effect.cats` — `LLMClientIO`, `AgentIO` (cats-effect 3, fs2) — **new** | `llm4s-effect` (`modules/llm4s-effect`) | Beta |
 | `zio` — `LLMClientZ`, `AgentZ` (ZIO 2, ZIO Streams) — **new** | `llm4s-zio` (`modules/llm4s-zio`) | Beta |

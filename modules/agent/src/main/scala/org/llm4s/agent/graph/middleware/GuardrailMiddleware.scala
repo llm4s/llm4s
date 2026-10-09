@@ -33,7 +33,7 @@ object GuardrailMiddleware:
    * Threads `value` through `guardrails`; a failing guardrail leaves it unchanged for the next.
    * The block names the first failing guardrail and joins every failure's formatted error.
    */
-  private def run(guardrails: Seq[Guardrail[String]], value: String): Result[String] =
+  private[middleware] def run(guardrails: Seq[Guardrail[String]], value: String): Result[String] =
     val (last, failures) = guardrails.foldLeft((value, Vector.empty[(String, LLMError)])) {
       case ((current, failed), guardrail) =>
         guardrail.validate(current) match
