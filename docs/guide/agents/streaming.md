@@ -206,7 +206,8 @@ LlmResult<JAgentResult> result = started.get().await();   // or started.get().ca
 ```
 
 `AgentStream.await()` returns once the listener has returned from its last call, with the same
-outcome. `cancel()` cancels the turn and returns once it has ended; the listener receives at most
+outcome. `cancel()` cancels the turn and returns once it has ended, or after 5 seconds with a WARN if it
+has not (see [Threading and cancellation](../java-threading-and-cancellation)); the listener receives at most
 the event already being delivered, then `onError` with the cancellation - or `onComplete`, when the
 turn had already ended; an interrupt of the thread calling `cancel()` does not cut that wait short,
 and is kept. A listener that throws from `onEvent` - or sets its own thread's interrupt flag -
