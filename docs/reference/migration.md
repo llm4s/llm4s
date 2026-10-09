@@ -78,7 +78,14 @@ val result = for {
 
 ### Cancellation for non-chat clients and MCP tool hints (#1331)
 
-Embedding, reranker, MCP, image and speech clients now return `Left(CancelledError)` when interrupted, with the thread's interrupt flag still set, and never retry it. Before, they reported an error of their own, and some reported a cancelled call as a success. Match `CancelledError` where you matched those errors. The image generation renames that come with this are in [Image generation errors are `LLMError`s](#image-generation-errors-are-llmerrors). `MCPTransportImpl.sendRequest`, `sendNotification`, `MCPClient.initialize` and `getTools` return `Result` instead of `Either[String, _]`: read the old string as `error.message`. `llm4s-mcp` also reads `ToolHints` from a server's tool annotations (`MCPClient.getToolHints`). The CHANGELOG entry for #1331 lists every client's change.
+Embedding, reranker, MCP, image and local speech (Whisper, Tacotron2) clients now return `Left(CancelledError)` when interrupted, as the cloud speech clients already did, with the thread's interrupt flag still set, and never retry it. Before, they reported an error of their own, and some reported a cancelled call as a success. Match `CancelledError` where you matched those errors. The CHANGELOG entry for #1331 lists every client's change. Source breaks, with no shims:
+
+- **Image generation errors** are `LLMError`s, with renamed cases: see [Image generation errors are `LLMError`s](#image-generation-errors-are-llmerrors).
+- **`MCPTransportImpl.sendRequest`, `sendNotification`, `MCPClient.initialize` and `getTools` return `Result`** instead of `Either[String, _]`: read the old string as `error.message`.
+- **The concrete embedding providers' `embed` returns `Result[EmbeddingResponse]`** instead of `Either[EmbeddingError, EmbeddingResponse]`, so a match on its `Left` needs a case for `CancelledError`.
+- **`ToolHints` moves to `llm4s-core`**: import `org.llm4s.toolapi.ToolHints`, not `org.llm4s.agent.graph.tool.ToolHints`.
+
+`llm4s-mcp` also reads `ToolHints` from a server's tool annotations (`MCPClient.getToolHints`, `MCPToolRegistry.toolHints(name)`), but only for a server configured with `trustAnnotations = true` on its `MCPServerConfig` (default `false`). Any other server reports no hints, so `ToolHints.default` (approval required) applies.
 
 ### Orchestration removed (#1330)
 
