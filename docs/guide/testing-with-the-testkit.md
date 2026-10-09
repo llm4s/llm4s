@@ -2,14 +2,14 @@
 layout: page
 title: Testing with the Testkit
 parent: User Guide
-nav_order: 16
+nav_order: 24
 ---
 
 # Testing with the Testkit
 
 `llm4s-testkit` is a scriptable fake `LLMClient` for the tests of **your** code. It answers from a script you write, records what your code sent, and never touches the network, so a test that calls an LLM is fast, free and the same on every run.
 
-It is for people who *use* llm4s. If you are writing a provider module, see [Writing a provider](writing-a-provider#testing) instead (`llm4s-provider-testkit`).
+It is for people who *use* llm4s. If you are writing a provider module, see [Writing a provider](writing-a-provider) instead (`llm4s-provider-testkit`).
 
 {: .note }
 > Not yet published. `llm4s-testkit` exists in the build as of [#1475](https://github.com/llm4s/llm4s/issues/1475) but ships in the next release.
@@ -201,4 +201,4 @@ A reply can report token usage and a model name (`Reply.text("hi").withModel("gp
 ## See also
 
 - [Error Handling](error-handling) for the error types a `Reply.failure` can carry.
-- [Reliability](../reliability-guide) for `ReliableClient`.
+- [Reliability Guide](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md) for `ReliableClient`.
