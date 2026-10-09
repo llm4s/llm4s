@@ -11,7 +11,7 @@ import java.util.concurrent.{ ConcurrentLinkedQueue, CountDownLatch, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
 
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Await
+import scala.concurrent.{ Await, ExecutionContext }
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 import scala.util.Try
@@ -231,20 +231,50 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers with Eventually {
     result.left.foreach(e => fail(s"Tool creation failed: ${e.formatted}"))
   }
 
+  /**
+   * Counts every Runnable handed to the wrapped context and every one that began running, so a test
+   * can wait until nothing it submitted is still queued. An `ExecutionContext` promises no ordering
+   * between unrelated tasks, so only observing the submitted work itself proves a queued task ran;
+   * a task parked inside its body (the held tool calls) counts as started.
+   */
+  final private class CountingExecutionContext(underlying: ExecutionContext) extends ExecutionContext {
+    private val submitted = new AtomicInteger(0)
+    private val started   = new AtomicInteger(0)
+    def execute(runnable: Runnable): Unit = {
+      submitted.incrementAndGet()
+      underlying.execute { () =>
+        started.incrementAndGet()
+        runnable.run()
+      }
+    }
+    def reportFailure(cause: Throwable): Unit = underlying.reportFailure(cause)
+
+    /** True while no task handed to this context is still waiting to run. */
+    def allStarted: Boolean = started.get() == submitted.get()
+  }
+
   it should "respect concurrency limit with ParallelWithLimit strategy" in {
     // The first two calls wait for each other, so a limit of 2 must really run two at once; they
     // then stay running until the gate opens, which gives a third call every chance to start early
     val gate  = new CountDownLatch(1)
     val probe = new ConcurrencyProbe(Some(new CountDownLatch(2)), Some(gate))
     val result = probe.tool("probe").map { tool =>
-      val registry = new ToolRegistry(Seq(tool))
+      val registry                             = new ToolRegistry(Seq(tool))
+      val tracked                              = new CountingExecutionContext(global)
+      implicit val trackedEc: ExecutionContext = tracked
       val future =
         registry.executeAll(requestsFor("probe", "a", "b", "c", "d"), ToolExecutionStrategy.ParallelWithLimit(2))
 
       implicit val patience: PatienceConfig = PatienceConfig(Span(10, Seconds), Span(10, Millis))
       eventually(probe.startCount shouldBe 2)
-      // Hold the two calls open for a moment: with the limit enforced nothing else may start
-      Thread.sleep(300)
+      // With the two calls held open, wait until every task handed to the executor has begun
+      // running (the held workers count: they started and are parked in the tool call). This
+      // observes the submitted work itself, so it assumes no ordering between unrelated tasks -
+      // an ExecutionContext promises none, which is why the completed canary futures this
+      // replaces proved nothing about a queued third worker (Codex review). A leaked worker must
+      // first run, tripping the count below; a loaded machine only lengthens the wait, it can
+      // never turn the assertion wrongly green.
+      eventually(tracked.allStarted shouldBe true)
       probe.startCount shouldBe 2
       probe.maxConcurrent shouldBe 2
 

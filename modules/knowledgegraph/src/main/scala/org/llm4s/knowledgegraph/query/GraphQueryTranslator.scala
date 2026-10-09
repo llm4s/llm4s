@@ -5,8 +5,7 @@ import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.types.Result
-
-import scala.util.Try
+import org.llm4s.util.BoundedJson
 
 /**
  * Translates natural language questions into structured [[GraphQuery]] operations using an LLM.
@@ -131,20 +130,24 @@ class GraphQueryTranslator(llmClient: LLMClient, graphStore: GraphStore) {
       .stripSuffix("```")
       .trim
 
-    Try(ujson.read(cleaned)).fold(
-      e => Left(ProcessingError("query_parse", s"Invalid JSON in LLM response: ${e.getMessage}")),
-      json => {
-        val queryType = json("type").str
-        queryType match {
-          case "find_nodes"     => parseFindNodes(json)
-          case "find_neighbors" => parseFindNeighbors(json)
-          case "find_path"      => parseFindPath(json)
-          case "describe_node"  => parseDescribeNode(json)
-          case "composite"      => parseComposite(json)
-          case other            => Left(ProcessingError("query_parse", s"Unknown query type: $other"))
+    // The reply is model output: a document nested more than 512 levels deep is refused before it
+    // is parsed, since a value that deep overflows the stack of whatever renders it (#1562)
+    BoundedJson
+      .read(cleaned)
+      .fold(
+        e => Left(ProcessingError("query_parse", s"Invalid JSON in LLM response: ${e.message}")),
+        json => {
+          val queryType = json("type").str
+          queryType match {
+            case "find_nodes"     => parseFindNodes(json)
+            case "find_neighbors" => parseFindNeighbors(json)
+            case "find_path"      => parseFindPath(json)
+            case "describe_node"  => parseDescribeNode(json)
+            case "composite"      => parseComposite(json)
+            case other            => Left(ProcessingError("query_parse", s"Unknown query type: $other"))
+          }
         }
-      }
-    )
+      )
   }
 
   private def parseFindNodes(json: ujson.Value): Result[GraphQuery] = {
