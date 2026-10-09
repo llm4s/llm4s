@@ -7,9 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Reassemble streamed tool-call argument fragments in the chat TUI before tool approval and execution.
-
-
 ### Added
 - **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
@@ -1999,6 +1996,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Streamed tool-call arguments reach `onChunk` verbatim** ([#1212](https://github.com/llm4s/llm4s/issues/1212)):
+  `OpenAICompatibleClient` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, generic) and `OpenAIClient` (OpenAI,
+  Azure, Requesty) used to hand `onChunk` each tool-call argument fragment already parsed, so a fragment that was
+  valid JSON on its own (`":"`, `"Paris"`) lost its quotes and a consumer concatenating the fragments got corrupt
+  arguments. Each fragment now arrives as a `ujson.Str` (an empty one as `{}`), as the Anthropic and Bedrock clients
+  already did; reassemble them with a `StreamingAccumulator`. The returned `Completion` was not affected. The chat
+  TUI sample now reassembles them that way before tool approval and execution.
+- **`llm4s-anthropic`: extended thinking with the default temperature** ([#1212](https://github.com/llm4s/llm4s/issues/1212)):
+  Anthropic accepts no temperature but 1 with thinking enabled, and the default `CompletionOptions` temperature of
+  0.7 made every request with a thinking budget fail with HTTP 400. `AnthropicClient` now omits `temperature` when
+  a thinking budget is set.
 - **`llm4s-openai-compatible`: Z.ai honours `CompletionOptions.reasoning`** ([#1681](https://github.com/llm4s/llm4s/issues/1681)):
   it used to be ignored, so `ReasoningEffort.None` still thought (Z.ai's `thinking.type` defaults to `enabled`) and
   effort levels never reached a model that takes `reasoning_effort`. Each effort now goes out in the form the

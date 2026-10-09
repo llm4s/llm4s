@@ -35,9 +35,13 @@ whatever tier it is in - the tier filter applies to `test`, not to `testOnly`.
 
 ## The `@Cloud` capability contract
 
-The OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter and Cohere smoke specs share one contract
-(`ProviderSmokeContract`, issue #1212), so every provider is held to the same capabilities and a
-maintainer can see at a glance what each one supports. The checks are in `SmokeChecks`.
+The OpenAI, Anthropic, Gemini, DeepSeek, OpenRouter, Cohere, Mistral, Z.ai and Bedrock smoke specs
+share one contract (`ProviderSmokeContract`, issue #1212), so every chat provider is held to the same
+capabilities and a maintainer can see at a glance what each one supports. The checks are in `SmokeChecks`.
+Reasoning is checked on OpenAI (`gpt-5-mini`, token count), Anthropic (`claude-haiku-4-5`, thinking text),
+DeepSeek (`deepseek-reasoner`) and Z.ai (`glm-4.5-flash`, which thinks by default; its other checks run with
+thinking disabled so the small token caps go to the answer). Bedrock declares structured output `n/a`:
+`BedrockClient` sends no response format.
 
 | Capability | What it checks |
 |---|---|
