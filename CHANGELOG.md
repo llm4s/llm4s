@@ -2567,6 +2567,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   appended `/v1/embeddings` to it and posted to `https://api.openai.com/v1/v1/embeddings`. A base URL ending in
   `/v1` now gets `/embeddings`; one without it (`https://api.openai.com`, a proxy root) still gets
   `/v1/embeddings`, so a base URL that worked before is unchanged.
+- **`llm4s-agent-tools`: `WriteFileTool` and `ReadFileTool` return an error for an unknown encoding instead of throwing**
+  ([#1710](https://github.com/llm4s/llm4s/issues/1710)): `WriteFileTool.writeFile` called
+  `Charset.forName(encodingStr)` outside any `Try`, so a model-supplied encoding such as `utf-9`
+  (`UnsupportedCharsetException`) or `bad name!` (`IllegalCharsetNameException`) escaped as an exception
+  instead of the `Left` error the other failures use. `ReadFileTool.readFile` did the lookup inside its
+  `Try` but reported it as a generic read failure. Both tools now look the charset up first and return
+  `Left("Unsupported encoding: <name>")` for either exception.
 - **`llm4s-rag`: `SimpleChunker` and `ChunkingUtils.chunkText` no longer throw for a very large window**
   ([#1424](https://github.com/llm4s/llm4s/pull/1424)): the window end and the next start were computed in `Int`, so
   a valid configuration such as `ChunkingConfig(targetSize = Int.MaxValue, maxSize = Int.MaxValue,
