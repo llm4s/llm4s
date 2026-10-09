@@ -2554,7 +2554,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     allowed directory led out of it (reads, listings, `file_info` and writes, `followSymlinks = false` included).
     A path is now made absolute, every symbolic link is resolved, and the result is compared with each entry -
     resolved the same way - one path component at a time (the tools remove `..` as text first and open the location
-    they judged; `isPathAllowed` applies `..` where the OS does, so `link/..` is the parent of the link's target);
+    they judged; `isPathAllowed` reads a `..` after a link both as POSIX applies it, at the link target's parent,
+    and as Windows does, removing it as text first, and allows the path only when both locations are allowed, on
+    every OS);
     blocked entries are matched on the real location too. The tools open the resolved path, so a link swapped in after the check no longer redirects the
     open (a directory swapped for a link between the check and the open is a race that is narrowed, not closed).
     A link that cannot be resolved (a dangling link) is refused. A hard link inside an allowed directory to a file
@@ -2564,8 +2566,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     only the variables in the new `ShellConfig.inheritedEnvironment` (default `PATH`, `LANG`, `LC_ALL`, `TERM`,
     `SystemRoot`) plus `environment`; `ShellConfig.development()` sets it to `None` and keeps inheriting everything.
     The new `ShellConfig.pathPolicy` (and the `ShellConfig.readOnlyWithin(policy, workingDirectory)` preset) holds
-    every file-like argument of a command, and its working directory, to a `FileConfig`, resolved as the program
-    will resolve it (so `linksub/../secret` is judged at the link target's parent); `--` is not trusted to end the
+    every file-like argument of a command, and its working directory, to a `FileConfig`, judged as the program
+    will hand it to the OS (so `linksub/../secret` is judged both at the link target's parent and, as Windows reads
+    it, beside the link); `--` is not trusted to end the
     options, because an option that takes an argument consumes it (`file -F -- -f list`), so every argument is
     checked as a path and, when it starts with `-`, as a flag. Without a policy a command's file arguments are not
     checked, as before. `file -C`/`-m`/`-M`/`-f`, `date -f`/`-r` and `wc --files0-from`, which write a file or read
@@ -2580,7 +2583,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     On macOS `/var` is a link to `/private/var`, so the default `blockedPaths` (which includes `/var`) now also
     blocks the real-path per-user temporary directories under `/private/var/folders`, which `java.io.tmpdir` and
     `Files.createTempDirectory` return there; a configuration that reads or writes there must set its own
-    `blockedPaths`.
+    `blockedPaths`. A path with a `..` after a symbolic link whose POSIX and Windows readings disagree, one inside
+    and one outside, is refused on every OS (with `data/l -> data/a/b`, `data/l/../../x` is refused on Linux too);
+    spell it without the `..`.
 - **`llm4s-agent`: `PIIMasker` masks international phone numbers and 15-digit card numbers, and `PIIPatterns.maskAll`
   no longer corrupts or fails on overlapping matches** ([#1517](https://github.com/llm4s/llm4s/issues/1517),
   [#1568](https://github.com/llm4s/llm4s/issues/1568)): the

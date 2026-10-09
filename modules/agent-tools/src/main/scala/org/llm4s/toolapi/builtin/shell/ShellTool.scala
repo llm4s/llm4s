@@ -58,9 +58,10 @@ object ShellResult {
  * A command receives a scrubbed environment (see [[ShellConfig]]): only the variables named in
  * `inheritedEnvironment`, plus `environment`. The files a command names are not checked unless
  * [[ShellConfig.pathPolicy]] is set; then every file-like argument must pass that `FileConfig`'s
- * `isPathAllowed`: the file tools' allowed and blocked entries and real-location rule, with the argument resolved
- * the way the program will resolve it (`..` after a link goes to the link target's parent, where the file tools,
- * which open the path themselves, remove `..` as text first).
+ * `isPathAllowed`: the file tools' allowed and blocked entries and real-location rule, with the argument judged as
+ * the program will hand it to the OS, `..` and all. A `..` after a link is read both ways: physically, as POSIX
+ * applies it (the link target's parent), and lexically, as Windows applies it (the directory holding the link), and
+ * both locations must be allowed. The file tools, which open the path themselves, remove `..` as text first.
  * `file -C`, `-m`, `-M` and `-f`, `date -f` and `-r`, and `wc --files0-from` (which write a file or read one the
  * command does not name) are refused whatever the policy, in any abbreviated long form too, and wherever they
  * appear, `--` or not before them.
@@ -204,7 +205,7 @@ object ShellTool {
     config: ShellConfig,
     policy: FileConfig
   ): Option[String] = {
-    // Not normalised: `..` is applied after links are resolved, as the OS does when it changes into the directory
+    // Not normalised: the policy reads a `..` after a link both as POSIX (physical) and as Windows (lexical) does
     val base = Try(config.workingDirectory.fold(Paths.get(""))(Paths.get(_)).toAbsolutePath).toOption
     base match {
       case None =>

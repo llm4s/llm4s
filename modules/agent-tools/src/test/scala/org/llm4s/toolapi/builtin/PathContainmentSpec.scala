@@ -17,6 +17,8 @@ import scala.util.{ Failure, Success, Try }
  */
 class PathContainmentSpec extends AnyFlatSpec with Matchers {
 
+  private val isWindows = System.getProperty("os.name", "").toLowerCase.contains("win")
+
   private def newRoot(): Path = Files.createTempDirectory("containment").toRealPath()
 
   private def file(path: Path, text: String): Path = {
@@ -307,7 +309,8 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---- .. after a link. The tools remove `..` as text and open the location they judged, so it cannot reach
-  // outside; isPathAllowed, whose caller may open the path as given, judges `..` where the OS applies it.
+  // outside; isPathAllowed, whose caller may open the path as given, reads `..` both the POSIX way (after the link)
+  // and the Windows way (as text, before it), and allows the path only when both locations are allowed.
 
   it should "never reach outside through .. after a link: the tools open the location they judged" in {
     val t = newRoot()
@@ -327,26 +330,58 @@ class PathContainmentSpec extends AnyFlatSpec with Matchers {
     Files.exists(t.resolve("outside/pwn.txt")) shouldBe false
   }
 
-  "FileConfig.isPathAllowed" should "judge .. after a link where the OS applies it, at the link target's parent" in {
+  "FileConfig.isPathAllowed" should "refuse .. after a link whenever either reading of it leaves the allowed area" in {
     val t = newRoot()
     file(t.resolve("outside/secret.txt"), "SECRET")
     Files.createDirectories(t.resolve("outside/sub"))
     file(t.resolve("data/secret.txt"), "inside")
+    link(t.resolve("data/linksub"), t.resolve("outside/sub"))
+    val config  = allowing(t.resolve("data"))
+    val spelled = t.resolve("data/linksub/../secret.txt")
+
+    // POSIX applies `..` after following the link (outside/secret.txt); Windows removes it as text first
+    // (data/secret.txt). The policy refuses the path on both, since one reading is outside.
+    Files.readString(spelled) shouldBe (if (isWindows) "inside" else "SECRET")
+    PathPolicy.realPath(spelled) shouldBe Right(t.resolve("outside/secret.txt"))
+    PathPolicy.lexicalRealPath(spelled) shouldBe Right(t.resolve("data/secret.txt"))
+    config.isPathAllowed(spelled) shouldBe false
+    FileConfig(allowedPaths = None, blockedPaths = Seq(t.resolve("outside").toString))
+      .isPathAllowed(spelled) shouldBe false
+    WriteConfig(allowedPaths = Seq(t.resolve("data").toString))
+      .isPathAllowed(t.resolve("data/linksub/../pwn.txt")) shouldBe false
+  }
+
+  it should "refuse .. after a link that stays inside physically but leaves the allowed area lexically, on every OS" in {
+    val t = newRoot()
+    file(t.resolve("secret.txt"), "OUTSIDE")
+    file(t.resolve("data/secret.txt"), "inside")
+    Files.createDirectories(t.resolve("data/inner/deep"))
+    link(t.resolve("data/l2"), t.resolve("data/inner/deep"))
+    val config  = allowing(t.resolve("data"))
+    val spelled = t.resolve("data/l2/../../secret.txt")
+
+    // POSIX reads data/secret.txt; Windows removes `..` as text and reads secret.txt beside data, outside it.
+    Files.readString(spelled) shouldBe (if (isWindows) "OUTSIDE" else "inside")
+    PathPolicy.realPath(spelled) shouldBe Right(t.resolve("data/secret.txt"))
+    PathPolicy.lexicalRealPath(spelled) shouldBe Right(t.resolve("secret.txt"))
+    config.isPathAllowed(spelled) shouldBe false
+    FileConfig(allowedPaths = None, blockedPaths = Seq(t.resolve("secret.txt").toString))
+      .isPathAllowed(spelled) shouldBe false
+    WriteConfig(allowedPaths = Seq(t.resolve("data").toString))
+      .isPathAllowed(t.resolve("data/l2/../../pwn.txt")) shouldBe false
+  }
+
+  it should "allow .. after a link when both readings stay inside" in {
+    val t = newRoot()
     file(t.resolve("data/inner/x.txt"), "x")
     Files.createDirectories(t.resolve("data/inner/deep"))
-    link(t.resolve("data/linksub"), t.resolve("outside/sub"))
     link(t.resolve("data/l2"), t.resolve("data/inner/deep"))
     val config = allowing(t.resolve("data"))
 
-    // Files.readString of this spelling reads outside/secret.txt
-    Files.readString(t.resolve("data/linksub/../secret.txt")) shouldBe "SECRET"
-    config.isPathAllowed(t.resolve("data/linksub/../secret.txt")) shouldBe false
-    FileConfig(allowedPaths = None, blockedPaths = Seq(t.resolve("outside").toString))
-      .isPathAllowed(t.resolve("data/linksub/../secret.txt")) shouldBe false
-    WriteConfig(allowedPaths = Seq(t.resolve("data").toString))
-      .isPathAllowed(t.resolve("data/linksub/../pwn.txt")) shouldBe false
+    // POSIX: data/inner/x.txt; Windows: data/x.txt. Both inside.
     config.isPathAllowed(t.resolve("data/l2/../x.txt")) shouldBe true
-    config.isPathAllowed(t.resolve("data/l2/../../secret.txt")) shouldBe true
+    WriteConfig(allowedPaths = Seq(t.resolve("data").toString)).isPathAllowed(t.resolve("data/l2/../new.txt")) shouldBe
+      true
   }
 
   it should "report the path it was given, not the resolved one" in {

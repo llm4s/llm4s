@@ -17,8 +17,9 @@ import scala.concurrent.duration.*
  * Without `pathPolicy` the tool does not look at the files a command names: `cat` reads any file the process can
  * read, whatever the file tools are configured to allow. Set `pathPolicy` to hold every file-like argument to the
  * file tools' allowed and blocked entries and real-location rule (`FileConfig.isPathAllowed`) (see [[org.llm4s.toolapi.builtin.filesystem.FileConfig]]): each
- * argument is resolved against the working directory the way the program will resolve it (`linksub/..` is the
- * parent of the link's target, not the working directory) and must be allowed, the working directory itself must
+ * argument is resolved against the working directory and judged as the program will hand it to the OS: a `..`
+ * after a link is read both as POSIX applies it (`linksub/..` is the parent of the link's target) and as Windows
+ * does (`linksub/..` is the working directory), and both locations must be allowed, the working directory itself must
  * be allowed, and a flag that carries a path (`-f/etc/passwd`) is refused. `--` is not taken as the end of the
  * options, since a program may read it as the argument of the option before it: every argument is checked as a
  * path, and also as a flag when it starts with `-`. The working directory is checked for every command. A hard
@@ -74,8 +75,9 @@ object ShellConfig {
 
   /**
    * Like [[readOnly]], with the file-like arguments of every command held to `policy` (its `isPathAllowed`, with
-   * `..` applied as the program applies it; see [[ShellConfig]]). This is the configuration to give a model that can read untrusted content: with plain
-   * [[readOnly]], `cat` reads any file the process can read.
+   * a `..` after a link read both as POSIX and as Windows applies it; see [[ShellConfig]]). This is the
+   * configuration to give a model that can read untrusted content: with plain [[readOnly]], `cat` reads any file the
+   * process can read.
    */
   def readOnlyWithin(policy: FileConfig, workingDirectory: Option[String] = None): ShellConfig =
     readOnly(workingDirectory).copy(pathPolicy = Some(policy))

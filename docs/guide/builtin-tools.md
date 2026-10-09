@@ -208,8 +208,13 @@ val tools = BuiltinTools.customSafe(
 
 A path is judged by where it really is: symbolic links are resolved, then that real location is compared with each
 allowed or blocked entry (resolved the same way), one path component at a time. The file tools remove `..` as text
-first and then open the location they judged; `FileConfig.isPathAllowed`, and the shell tool's path policy, apply `..`
-where the operating system does, so `link/..` is the parent of the link's target. `/srv/agent-data`
+first and then open the location they judged. `FileConfig.isPathAllowed`, and the shell tool's path policy, judge the
+path as given, and an operating system applies a `..` that comes after a link in one of two ways: POSIX (Linux, macOS)
+follows the link first, so `link/..` is the parent of the link's target, while Windows removes `..` as text first, so
+`link/..` is the directory holding the link. The check reads the path both ways, on every platform, and allows it
+only when both locations are allowed. So with `data/l -> data/a/b`, `data/l/../x.txt` is allowed (`data/a/x.txt` or
+`data/x.txt`), and `data/l/../../x.txt` is refused even on Linux, where it means `data/x.txt`, because on Windows it
+is `x.txt` beside `data`; spell such a path without the `..` after the link. `/srv/agent-data`
 covers `/srv/agent-data/notes.txt` but not `/srv/agent-data-secret`, and a link inside an allowed directory that leads
 outside it is refused, for reading, listing and writing alike. A link that cannot be resolved (a dangling link) is
 refused. `followSymlinks = false` (the default) additionally refuses a path that is itself a link when reading or
@@ -256,7 +261,8 @@ sandbox.
 
 `ShellConfig.readOnly()` allows `ls`, `cat`, `head`, `tail`, `pwd`, `echo`, `wc`, `date`, `whoami`, `which` and
 `file`. `ShellConfig.readOnlyWithin(policy)` is the same list with the working directory and every file-like argument
-held to a `FileConfig` by its `isPathAllowed` (the rule above, with `..` applied as the program applies it). `ShellConfig.development()` adds `git`, `sbt`, `make`, `npm`, `grep`, `find`, `cp`, `mv`, `rm` and more:
+held to a `FileConfig` by its `isPathAllowed` (the rule above, with a `..` after a link read both the POSIX and the
+Windows way). `ShellConfig.development()` adds `git`, `sbt`, `make`, `npm`, `grep`, `find`, `cp`, `mv`, `rm` and more:
 read the next section before you use it.
 
 ## 6. Safety: what each tool can do
@@ -298,8 +304,9 @@ What the controls do, and where they stop:
     `--`, which an option taking an argument can consume).
     `cat`, `head` and `tail` can read any file the process can read, **so the file settings above do not apply to the
     shell** unless you use `ShellConfig.readOnlyWithin(policy)`, which holds the working directory and each file-like
-    argument to that rule, resolved as the program will resolve it (`..` after a link goes to the link target's
-    parent). A hard link to a file outside passes, as it does for the file tools. A command that walks directories itself (`ls -R`, `grep -r`, `find`) is checked only at the
+    argument to that rule, judged as the program will hand it to the OS (a `..` after a link is read both as POSIX
+    applies it, at the link target's parent, and as Windows does, at the directory holding the link, and both must
+    be allowed). A hard link to a file outside passes, as it does for the file tools. A command that walks directories itself (`ls -R`, `grep -r`, `find`) is checked only at the
     path it starts from.
   - `development()` is not a sandbox: `sbt`, `make`, `npm`, `git`, `find` and `env` can run arbitrary programs, so a
     model given it can do anything the process can.

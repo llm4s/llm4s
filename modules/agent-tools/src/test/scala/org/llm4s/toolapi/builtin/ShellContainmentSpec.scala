@@ -217,6 +217,22 @@ class ShellContainmentSpec extends AnyFlatSpec with Matchers {
     run(withinRoot(root), "cat l2/../x.txt").map(_.stdout.trim) shouldBe Right("physical-parent")
   }
 
+  it should "refuse .. after a link that stays inside physically but leaves the allowed area as Windows reads it" in {
+    posixOnly()
+    val base = newRoot()
+    val root = base.resolve("root")
+    Files.createDirectories(root.resolve("inner/deep"))
+    Files.writeString(root.resolve("secret.txt"), "physical-target")
+    Files.writeString(base.resolve("secret.txt"), "OUTSIDE-SECRET")
+    Try(Files.createSymbolicLink(root.resolve("l2"), root.resolve("inner/deep"))) match {
+      case Success(_) => ()
+      case Failure(e) => cancel(s"symbolic links cannot be created here: ${e.getClass.getSimpleName}")
+    }
+
+    // POSIX `cat` would read root/secret.txt, but on Windows the same spelling is base/secret.txt
+    refused(run(withinRoot(root), "cat l2/../../secret.txt")) should include("outside the allowed paths")
+  }
+
   it should "refuse a command whose working directory is outside the allowed directory" in {
     posixOnly()
     val root    = newRoot()

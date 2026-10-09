@@ -6,13 +6,15 @@ import java.nio.file.Path
  * Configuration for file system tools.
  *
  * == How a path is judged ==
- * By where it really is, not by how it is spelled: the path is resolved component by component the way the
- * operating system resolves it - every symbolic link replaced by its real target, and `..` taken from the location
- * resolved so far - then the result is compared with each entry, resolved the same way, one path component at a
- * time. [[isPathAllowed]] judges the path as given, so `link/..` is the parent of the link's target, as it is when
- * the path is opened. The tools first remove `.` and `..` from the path they are given as text (`data/link/../x`
- * is `data/x` for them) and then judge and open that location, so what they open is what they checked. `/srv/data` allows `/srv/data/x` and does not allow
- * `/srv/data-secret/x`. A symbolic link that cannot be resolved (a dangling link) is refused. The tools open the
+ * By where it really is, not by how it is spelled: every symbolic link is replaced by its real target, then the
+ * result is compared with each entry, resolved the same way, one path component at a time. [[isPathAllowed]] judges
+ * the path as given, and a `..` after a link is read both ways an OS reads it: physically, as POSIX does (`link/..`
+ * is the parent of the link's target), and lexically, as Windows does (`..` removed as text before links are
+ * followed, so `link/..` is the directory holding the link). The path is allowed only when both locations are
+ * allowed, whatever platform the check runs on; a path whose readings disagree, one inside and one outside, is
+ * refused on every OS. The tools first remove `.` and `..` from the path they are given as text (`data/link/../x`
+ * is `data/x` for them), so the two readings agree, and then judge and open that location, so what they open is what
+ * they checked. `/srv/data` allows `/srv/data/x` and does not allow `/srv/data-secret/x`. A symbolic link that cannot be resolved (a dangling link) is refused. The tools open the
  * resolved path, so a link swapped in after the check does not redirect the open; a directory swapped for a link
  * between the resolution and the open is a race this narrows and does not close. A hard link is not contained: a
  * hard link inside an allowed directory to a file elsewhere is that file under an allowed name, and no path check
@@ -51,9 +53,9 @@ case class FileConfig(
 /**
  * Configuration for write operations.
  *
- * A path is judged by where it really is, as for [[FileConfig]]: `..` is removed and symbolic links are resolved
- * (for a file that does not exist yet, the nearest existing ancestor is), then compared with each allowed entry one
- * component at a time. A link inside an allowed directory that leads outside it is therefore refused, whether the
+ * A path is judged by where it really is, as for [[FileConfig]]: symbolic links are resolved (for a file that does
+ * not exist yet, the nearest existing ancestor is), with a `..` after a link read both the POSIX and the Windows way
+ * and both locations required to be allowed, then compared with each allowed entry one component at a time. A link inside an allowed directory that leads outside it is therefore refused, whether the
  * link is a directory on the way to the file or the file itself; a link that leads to another place inside the
  * allowed directory is written through. The tool writes to the resolved path.
  *
