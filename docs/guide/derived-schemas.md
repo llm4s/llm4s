@@ -2,7 +2,7 @@
 layout: page
 title: Derived Schemas
 parent: User Guide
-nav_order: 16
+nav_order: 24
 ---
 
 # Derived Schemas
