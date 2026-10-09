@@ -226,6 +226,15 @@ class PIIPatternsSpec extends AnyFlatSpec with Matchers {
     PIIType.Phone.findAll("555-12") shouldBe empty
   }
 
+  it should "keep a US number within one line" in {
+    for (separator <- Seq("\n", "\r", "\r\n", "\u0085", " ", " ")) {
+      val text = Seq("555", "123", "4567").mkString(separator)
+      PIIType.Phone.findAll(text) shouldBe empty
+      PIIType.Phone.findAll(s"+1${separator}555-123-4567").map(_.value) shouldBe Seq("555-123-4567")
+    }
+    PIIType.Phone.findAll("555\t123\t4567") should have size 1
+  }
+
   it should "reject phone embedded in longer digit sequence" in {
     PIIType.Phone.findAll("95551234567890") shouldBe empty
   }

@@ -2509,7 +2509,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace and knowledge-graph tools) fall back to their default for such a value instead of using the truncated
   one. No public signature changed.
 - **`llm4s-agent`: `PIIMasker` masks international phone numbers and 15-digit card numbers, and `PIIPatterns.maskAll`
-  no longer corrupts or fails on overlapping matches** ([#1517](https://github.com/llm4s/llm4s/issues/1517)): the
+  no longer corrupts or fails on overlapping matches** ([#1517](https://github.com/llm4s/llm4s/issues/1517),
+  [#1568](https://github.com/llm4s/llm4s/issues/1568)): the
   phone pattern only knew US numbers and the card pattern only the 16-digit layout, so `+44 20 7946 0958` and the
   American Express number `3782 822463 10005` were passed through unmasked. `PIIType.Phone` now also matches a `+`
   followed by 8 to 15 digits with spaces, dashes, dots or parentheses between them (a digit run without the `+` is
@@ -2520,7 +2521,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `PIIMasker.all` turned `123456789` into `[REDACTED_PASSPORT]_SSN]`. Overlapping matches are now merged into one
   stretch that is replaced once, under the type whose match starts first (the longest, then the type listed first,
   on a tie), so a plain 15- or 16-digit card number under those presets is `[REDACTED_CARD]`. No signature
-  changes. The guide's table named the card placeholder `[REDACTED_CC]`; it is `[REDACTED_CARD]`.
+  changes. The separators inside a phone or card number are now horizontal whitespace, dashes and (for phones) dots
+  and parentheses only, so a line break no longer joins digit groups on separate lines into one number: before,
+  `555`, `123` and `4567` on three lines were masked together, and the line breaks with them. The guide's table
+  named the card placeholder `[REDACTED_CC]`; it is `[REDACTED_CARD]`.
 - **Guardrail case folding no longer depends on the JVM default locale**: `ProfanityFilter`, `ToneValidator`
   and `PromptInjectionDetector` lower-cased text with the default locale, so under a Turkish locale `HI`,
   `INAPPROPRIATE` and `IGNORE PREVIOUS INSTRUCTIONS` folded to a dotless `ı` and went undetected. They (and the
