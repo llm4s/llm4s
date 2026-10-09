@@ -68,6 +68,8 @@ object PomDescriptions {
       "Test checks for authors of LLM4S provider modules: discovery, registration and the config-to-client round trip.",
     "llm4s-rag" ->
       "Retrieval-augmented generation for LLM4S: vector stores, chunking, reranking, evaluation and extraction.",
+    "llm4s-schema-derivation" ->
+      "JSON schemas for LLM4S structured output, derived from Scala 3 case classes and enums.",
     "llm4s-speech" ->
       "Speech-to-text and text-to-speech for LLM4S.",
     "llm4s-spring-boot-starter" ->

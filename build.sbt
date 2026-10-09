@@ -263,6 +263,7 @@ lazy val llm4s = (project in file("."))
     cohere,
     watsonx,
     providerTestkit,
+    schemaDerivation,
     llm4sEffect,
     llm4sZio,
     javaApi,
@@ -989,6 +990,24 @@ lazy val providerTestkit = (project in file("modules/provider-testkit"))
     )
   )
 
+// `llm4s-schema-derivation` (#1472): a JSON schema derived from a case class with Scala 3 `Mirror`, so
+// `completeStructured` needs no hand-written `ObjectSchema` that repeats the type. It layers on core's
+// public API (it builds an `ObjectSchema` and calls `completeStructured`) and adds no dependency.
+lazy val schemaDerivation = (project in file("modules/schema-derivation"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-schema-derivation",
+    commonSettings,
+    // Measured 88.63% statement and 80.00% branch coverage (`sbt coverage schemaDerivation/test
+    // schemaDerivation/coverageReport`). Floor is the measured value rounded down to the nearest 5. Never
+    // lower it. What is uncovered is `SchemaMacros`' error paths and annotation reading: macro code runs inside
+    // the compiler, where scoverage cannot see it; `CompileErrorsSpec` and the golden specs exercise it when
+    // they compile.
+    coverageFloor(85),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty
+  )
+
 // The OpenAI family carves fourth, split by shared client: OpenAI, Azure and Requesty all run
 // on `OpenAIClient`, so they move together and took the SDK out of core - after this core has
 // no vendor SDK at all. That SDK was Microsoft's `azure-ai-openai`, since deprecated; the
@@ -1132,6 +1151,7 @@ lazy val docSnippetsReport = taskKey[Unit](
 lazy val samples = (project in file("modules//samples"))
   .dependsOn(
     core,
+    schemaDerivation,
     rag,
     knowledgegraph,
     memory,
@@ -1501,6 +1521,7 @@ lazy val docs = (project in file("modules/docs"))
     cohere,
     watsonx,
     providerTestkit,
+    schemaDerivation,
     workspaceShared,
     workspaceClient,
     observability,
@@ -1543,6 +1564,7 @@ lazy val docs = (project in file("modules/docs"))
         (cohere / Compile / sources).value ++
         (watsonx / Compile / sources).value ++
         (providerTestkit / Compile / sources).value ++
+        (schemaDerivation / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (observability / Compile / sources).value ++

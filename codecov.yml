@@ -113,6 +113,10 @@ flags:
     paths:
       - modules/provider-testkit/src/main/scala
     carryforward: true
+  schema-derivation:
+    paths:
+      - modules/schema-derivation/src/main/scala
+    carryforward: true
   knowledgegraph-neo4j:
     paths:
       - modules/knowledgegraph-neo4j/src/main/scala
