@@ -573,7 +573,8 @@ tool API they implement (`ToolFunction`, `ToolRegistry`). Package names are unch
 libraryDependencies ++= Seq(
   "org.llm4s" %% "llm4s-observability"            % llm4sVersion, // TRACING_MODE=langfuse
   "org.llm4s" %% "llm4s-observability-otel"       % llm4sVersion, // TRACING_MODE=opentelemetry
-  "org.llm4s" %% "llm4s-observability-prometheus" % llm4sVersion  // llm4s.metrics.enabled = true
+  "org.llm4s" %% "llm4s-observability-prometheus" % llm4sVersion, // llm4s.metrics.enabled = true
+  "org.llm4s" %% "llm4s-observability-micrometer" % llm4sVersion   // MicrometerMetrics over your MeterRegistry
 )
 ```
 
@@ -588,6 +589,10 @@ and HTTP server; core keeps only the `MetricsCollector` interface every client a
 names are unchanged. See the migration notes for
 [Langfuse and the collector](../reference/migration#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core)
 and for [Prometheus](../reference/migration#slice-6-llm4s-observability-prometheus---prometheus-leaves-core).
+
+`llm4s-observability-micrometer` is the Micrometer counterpart: a `MetricsCollector` that records into a `MeterRegistry`
+you already have, with the same series names as the Prometheus module. It depends on `llm4s-core` and `micrometer-core`.
+See [Micrometer metrics](../guide/observability/micrometer).
 
 ### For Neo4j (knowledge graph store)
 

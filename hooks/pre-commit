@@ -101,6 +101,7 @@ map_file_to_project() {
     modules/llm4s-zio/*)                  echo "llm4sZio" ;;
     modules/java-api/*)                   echo "javaApi" ;;
     modules/observability-prometheus/*)   echo "observabilityPrometheus" ;;
+    modules/observability-micrometer/*)   echo "observabilityMicrometer" ;;
     modules/knowledgegraph-neo4j/*)       echo "knowledgegraphNeo4j" ;;
     modules/trace-opentelemetry/*)        echo "traceOpentelemetry" ;;
     modules/openai-compatible/*)          echo "openaiCompatible" ;;
@@ -232,6 +233,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE workspaceSamples
       set_add DOWNSTREAM_COMPILE observability
       set_add DOWNSTREAM_COMPILE observabilityPrometheus
+      set_add DOWNSTREAM_COMPILE observabilityMicrometer
       set_add DOWNSTREAM_COMPILE traceOpentelemetry
       set_add DOWNSTREAM_COMPILE agent
       set_add DOWNSTREAM_COMPILE agentTools
@@ -387,6 +389,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE benchmarks
       ;;
     observabilityPrometheus)
+      set_add DOWNSTREAM_COMPILE observabilityMicrometer
       set_add DOWNSTREAM_COMPILE image
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples

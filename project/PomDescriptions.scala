@@ -54,6 +54,8 @@ object PomDescriptions {
       "Postgres and pgvector store for LLM4S agent memory.",
     "llm4s-observability" ->
       "Tracing backends for LLM4S: Langfuse, a trace collector and store, and a cost tracker.",
+    "llm4s-observability-micrometer" ->
+      "Micrometer metrics for LLM4S: a MetricsCollector that records requests, tokens, cost, errors and retries in a MeterRegistry.",
     "llm4s-observability-otel" ->
       "OpenTelemetry tracing backend for LLM4S.",
     "llm4s-observability-prometheus" ->

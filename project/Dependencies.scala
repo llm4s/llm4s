@@ -59,6 +59,10 @@ object Versions {
   // Prometheus (1.x stable)
   val prometheus = "1.8.0"
 
+  // Micrometer (1.x). `micrometer-core` is class-file version 52 (Java 8) up to 1.17.1, so it does not
+  // raise the JDK floor. Used by `llm4s-observability-micrometer` only; a frozen module may not resolve it.
+  val micrometer = "1.17.1"
+
   // Neo4j
   // NOTE: neo4j-java-driver 6.x is available but is a major bump; held for separate
   // review alongside the existing neo4j-harness/Netty compatibility constraint.
@@ -129,6 +133,12 @@ object Deps {
   // Prometheus metrics
   val prometheusCore = "io.prometheus" % "prometheus-metrics-core"                % Versions.prometheus
   val prometheusHttp = "io.prometheus" % "prometheus-metrics-exporter-httpserver" % Versions.prometheus
+
+  // Micrometer metrics
+  val micrometerCore = "io.micrometer" % "micrometer-core" % Versions.micrometer
+  // Test only: renders a Micrometer registry as Prometheus text, to prove the series names match the ones
+  // `llm4s-observability-prometheus` exposes.
+  val micrometerPrometheus = "io.micrometer" % "micrometer-registry-prometheus" % Versions.micrometer
 
   // Neo4j
   val neo4jDriver = "org.neo4j.driver" % "neo4j-java-driver" % Versions.neo4j

@@ -125,6 +125,10 @@ flags:
     paths:
       - modules/observability-prometheus/src/main/scala
     carryforward: true
+  observability-micrometer:
+    paths:
+      - modules/observability-micrometer/src/main/scala
+    carryforward: true
   agent-tools:
     paths:
       - modules/agent-tools/src/main/scala

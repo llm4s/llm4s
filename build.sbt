@@ -275,6 +275,7 @@ lazy val llm4s = (project in file("."))
     workspaceSamples,
     observability,
     observabilityPrometheus,
+    observabilityMicrometer,
     traceOpentelemetry,
     agent,
     agentTools,
@@ -1288,6 +1289,33 @@ lazy val observabilityPrometheus = (project in file("modules/observability-prome
     )
   )
 
+// `llm4s-observability-micrometer` (#1466) is the Micrometer counterpart of `llm4s-observability-prometheus`: a
+// `MetricsCollector` that writes into a `MeterRegistry` the application already has, so a Spring Boot or
+// Quarkus service sees llm4s request, token, cost and error metrics next to its own with no second metrics
+// stack. It depends on core and `micrometer-core` only. Micrometer stays out of every frozen module
+// (`FrozenDependencies` bans `io.micrometer` there), and it is separate from the Prometheus module so
+// that neither client reaches users who do not use it. The series names match `llm4s-observability-prometheus`
+// (see docs/guide/observability/micrometer), so dashboards carry over.
+lazy val observabilityMicrometer = (project in file("modules/observability-micrometer"))
+  // `observabilityPrometheus % Test` is for `MicrometerPrometheusSeriesSpec`, which feeds the same calls to both
+  // collectors and compares the series they expose. It is not a dependency users get.
+  .dependsOn(core, observabilityPrometheus % Test)
+  .settings(
+    name := "llm4s-observability-micrometer",
+    commonSettings,
+    // Measured 99.41% statement and 97.50% branch coverage (`sbt coverage observabilityMicrometer/test
+    // observabilityMicrometer/coverageReport`). Floor is the measured value rounded down to the nearest 5.
+    // Never lower it.
+    coverageFloor(95),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.micrometerCore,
+      Deps.scalatest            % Test,
+      Deps.micrometerPrometheus % Test
+    )
+  )
+
 lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   // Test depends on core's tests for `ReferenceConfig`, which proves this module's
   // `reference.conf` binds `OTEL_*` under `llm4s.tracing.opentelemetry` (#1133).
@@ -1505,6 +1533,7 @@ lazy val docs = (project in file("modules/docs"))
     workspaceClient,
     observability,
     observabilityPrometheus,
+    observabilityMicrometer,
     traceOpentelemetry,
     agent,
     agentTools,
@@ -1547,6 +1576,7 @@ lazy val docs = (project in file("modules/docs"))
         (workspaceClient / Compile / sources).value ++
         (observability / Compile / sources).value ++
         (observabilityPrometheus / Compile / sources).value ++
+        (observabilityMicrometer / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++
         (agent / Compile / sources).value ++
         (agentTools / Compile / sources).value ++

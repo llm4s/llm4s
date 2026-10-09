@@ -283,6 +283,7 @@ jobs:
           providerTestkit/test providerTestkit/coverageReport
           observability/test observability/coverageReport
           observabilityPrometheus/test observabilityPrometheus/coverageReport
+          observabilityMicrometer/test observabilityMicrometer/coverageReport
           agentTools/test agentTools/coverageReport
           agent/test agent/coverageReport
           traceOpentelemetry/test traceOpentelemetry/coverageReport
@@ -501,6 +502,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/observability-prometheus/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: observability-prometheus
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload observability-micrometer coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/observability-micrometer/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: observability-micrometer
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
