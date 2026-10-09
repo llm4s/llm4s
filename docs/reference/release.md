@@ -136,7 +136,7 @@ it never overwrites. Write whatever the release deserves once it exists.
 ## Release readiness: a MiMa dry run
 
 `mimaBaselineVersion` in `build.sbt` is `None`, so `sbt mimaReportBinaryIssues` compiles the build and checks
-nothing ([The Baseline](api-stability.md#the-baseline)). 0.5.0 is the release that sets it
+nothing ([The Baseline](api-stability#the-baseline)). 0.5.0 is the release that sets it
 ([#1281](https://github.com/llm4s/llm4s/issues/1281)), and MiMa cannot run before a release exists to compare
 with. `scripts/mima-dry-run.sh` does those steps early, against a throwaway version, to show that they will work:
 
@@ -164,7 +164,7 @@ without sbt.
 
 At the cut: publish 0.5.0, confirm the frozen artifacts are on Central
 ([Verify Release](#5-verify-release)), then follow
-[Setting and bumping the baseline](api-stability.md#setting-and-bumping-the-baseline).
+[Setting and bumping the baseline](api-stability#setting-and-bumping-the-baseline).
 
 ## Troubleshooting
 

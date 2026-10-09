@@ -63,7 +63,7 @@ comparisons, and mark a Package Map row `tier-drift: ignore` to opt it out.
 MiMa skips a type annotated `@Experimental` inside a frozen module: `mimaFrozen` in `build.sbt` adds
 `mimaExcludeAnnotations += "org.llm4s.annotation.Experimental"`, so such a type needs no `ProblemFilters.exclude`
 entry (a `@Stable` type is still checked). `scripts/mima-dry-run.sh` proves both on every run; see
-[Release readiness](https://github.com/llm4s/llm4s/blob/main/docs/reference/release.md#release-readiness-a-mima-dry-run).
+[Release readiness](release#release-readiness-a-mima-dry-run).
 
 ---
 
@@ -180,4 +180,4 @@ baseline set, each module logs `mimaPreviousArtifacts not set` (or `is empty`) a
 With a baseline set, success means the frozen API is compatible, and failure lists each problem with
 the `ProblemFilters.exclude` line that would silence it. To check one module, run
 `sbt agent/mimaReportBinaryIssues`. Before 0.5.0 exists, `scripts/mima-dry-run.sh` checks that this wiring
-works (see [Release readiness](https://github.com/llm4s/llm4s/blob/main/docs/reference/release.md#release-readiness-a-mima-dry-run)).
+works (see [Release readiness](release#release-readiness-a-mima-dry-run)).
