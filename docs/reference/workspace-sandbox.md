@@ -84,6 +84,11 @@ example below). An unknown profile name makes `loadSandboxConfig` return a `Left
 | On Windows, a form listed under [On Windows](#on-windows) (a device name, a trailing `.` or space, `@`, `~`, glob syntax) | `ARGUMENT_NOT_ALLOWED` |
 | `cp` only: a name it would write leads outside, or a recursive copy's destination holds a link that does | `PATH_ESCAPE_ATTEMPT` |
 
+A command that passes every check runs with its standard input read from the null device (`/dev/null`, or `NUL`
+on Windows), as nothing can write to it: a program that reads standard input when given no file (`cat`, `cat -`,
+`sort`, `wc`, `grep x`, `findstr x`) sees an empty input and finishes at once instead of waiting until the command
+timeout ([#1728](https://github.com/llm4s/llm4s/issues/1728)).
+
 An allowlist names programs; these rules stop a listed program from writing, deleting, running another program or
 following links out of the workspace through its own options:
 

@@ -646,6 +646,14 @@ class WorkspaceAgentInterfaceImpl(
   private val WindowsBuiltins: Set[String] = CommandPolicy.WindowsBuiltins
 
   /**
+   * The null device every command reads its standard input from (#1728): `NUL` on Windows, `/dev/null` elsewhere.
+   * Chosen by the host the runner runs on, not by `isWindows`, which tests set to exercise the Windows checks on
+   * another host; on that host `NUL` would name a missing file and the command would fail to start.
+   */
+  private val nullDevice: java.io.File =
+    new java.io.File(if (System.getProperty("os.name", "").startsWith("Windows")) "NUL" else "/dev/null")
+
+  /**
    * Shell metacharacters that must be rejected in every argument token, even
    * after tokenization.  These characters can still trigger command chaining
    * or redirection when the final argv is handed to `cmd.exe /c` (Windows
@@ -872,6 +880,10 @@ class WorkspaceAgentInterfaceImpl(
     // introduced in #830 for reliable timeout handling.
     val builder = new java.lang.ProcessBuilder(finalArgv.asJava)
     builder.directory(workDir)
+    // Nothing ever writes to the command's standard input, so give it the null device: a program that reads stdin
+    // (`cat`, `sort`, `wc`, `grep x` with no file) gets end-of-file at once instead of waiting on an open pipe until
+    // the command timeout (#1728).
+    builder.redirectInput(java.lang.ProcessBuilder.Redirect.from(nullDevice))
     env.foreach { case (k, v) => builder.environment().put(k, v) }
     if (execLower == "git") CommandPolicy.confineGit(builder.environment(), realRoot)
 

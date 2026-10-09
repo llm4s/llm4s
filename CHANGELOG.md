@@ -2013,6 +2013,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Workspace runner: a command that reads standard input gets end-of-file at once instead of hanging until the
+  timeout** ([#1728](https://github.com/llm4s/llm4s/issues/1728)): `executeCommand` left the child's standard input an
+  open pipe that nothing wrote to or closed, so `cat` with no operands, `cat -`, `sort`, `uniq`, `wc`, `head`,
+  `tail` or `grep x` with no file (and `sort` or `findstr x` on Windows) blocked until the command timeout (10 s
+  under the locked profile, 30 s under permissive) and failed with `TIMEOUT`, holding a runner thread meanwhile.
+  The child's standard input is now the null device (`/dev/null`, or `NUL` on Windows, chosen by the host the runner
+  runs on), so such a command sees an empty input and returns its normal result.
 - **Security - workspace runner: allowlisted commands can no longer write, delete or run other programs through their
   arguments** ([#1715](https://github.com/llm4s/llm4s/issues/1715)): `executeCommand` checked only the executable
   name against `allowedCommands` and a set of shell metacharacters, so programs on `WorkspaceSandboxConfig.ReadOnlyCommands`
