@@ -100,11 +100,13 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 **Risk:** A command run inside the containerised workspace could read or change more than intended, or escape through an allowed program's own options.
 
 **Mitigation (implemented):**
-- `executeCommand` runs an argument vector directly, with no shell. Its first token must be a bare executable name in `WorkspaceSandboxConfig.allowedCommands` (`ReadOnlyCommands` by default, `ReadWriteCommands` for the permissive profile); a path to an executable is refused, and so is any argument containing `&`, `|`, `<`, `>`, `^`, `;`, `` ` ``, `$` or `%` (`WorkspaceAgentInterfaceImpl`).
+- `executeCommand` runs an argument vector directly, with no shell. Its first token must be a bare executable name in `WorkspaceSandboxConfig.allowedCommands`: `ReadWriteCommands` (which includes `rm`, `mv`, `cp`, `chmod`) under the permissive profile, which the runner and client use when no profile is set, and `ReadOnlyCommands` for a `WorkspaceSandboxConfig` constructed directly; a path to an executable is refused, and so is any argument containing `&`, `|`, `<`, `>`, `^`, `;`, `` ` ``, `$` or `%` (`WorkspaceAgentInterfaceImpl`).
 - `shellAllowed = false` (the locked profile) refuses every command.
 - The workspace module runs in a Docker container, providing an additional OS-level boundary.
 
-**Recommended practice:** Treat the allowlist as defence-in-depth only: an allowed program's own options can still read files anywhere in the container. Do not grant the workspace access to credentials or network resources that an escaped process could exploit.
+**Residual risk:** arguments are not checked against the workspace, so an allowed program's own options can still read, write or delete files anywhere in the container, or run programs that are not on the list. Even `ReadOnlyCommands` includes `find` (`-delete`, `-exec`), `git` (`clean`, `-c core.pager=…`), `sort -o` and `uniq <in> <out>` ([#1715](https://github.com/llm4s/llm4s/issues/1715)). On Windows, built-ins such as `echo`, `dir`, `type`, `copy` and `move` run through `cmd.exe /c`, after the forbidden-character check.
+
+**Recommended practice:** Use the locked profile (`shellAllowed = false`) for untrusted input, and treat the allowlist as defence-in-depth only. Do not grant the workspace access to credentials or network resources that an escaped process could exploit.
 
 ### 7. Dependency CVEs
 
@@ -115,7 +117,7 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 - Scala Steward (`.github/workflows/scala-steward.yml`, configured by `.scala-steward.conf`) opens weekly pull requests for outdated sbt dependencies, sbt plugins, sbt itself and the Scala version. Neither tool raises security alerts for sbt dependencies; they keep versions current, which is what keeps published fixes flowing in.
 - The `secret-scan.yml` workflow prevents committed secrets from reaching the repository.
 
-**Recommended practice:** Review the Scala Steward pull requests promptly, and check the National Vulnerability Database (NIST) for the libraries llm4s depends on.
+**Recommended practice:** Review the Scala Steward pull requests promptly, run `sbt dependencyUpdates` (from `sbt-dependency-updates`) to see what is behind, and check the National Vulnerability Database (NIST) for the libraries llm4s depends on.
 
 ## Security Checklist for PR Authors
 

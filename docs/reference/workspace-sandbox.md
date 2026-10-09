@@ -52,7 +52,7 @@ llm4s.workspace.sandbox {
 | `readOnlyPaths` | List[String] | Paths under workspace that are read-only (Phase 2) |
 | `allowedPaths` | List[String] | If non-empty, only these paths accessible (Phase 2) |
 | `networkAllowed` | Boolean | Documentation only; Phase 2: enforce network restrictions |
-| `allowedCommands` | Set[String] | Executable names `executeCommand` may run; defaults to `ReadOnlyCommands`, `ReadWriteCommands` adds write-capable ones (`cp`, `mv`, `rm`, `mkdir`, …) |
+| `allowedCommands` | Set[String] | Executable names `executeCommand` may run; field default `ReadOnlyCommands`; the permissive profile (the default profile) uses `ReadWriteCommands`, which adds write-capable ones (`cp`, `mv`, `rm`, `mkdir`, …). Arguments are not checked, so this is not a read-only guarantee ([#1715](https://github.com/llm4s/llm4s/issues/1715)) |
 
 ## Security Gaps Addressed
 
