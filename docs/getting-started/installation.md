@@ -615,6 +615,21 @@ explicit registration and the config-to-client round trip. It requires JDK 21: i
 and its local test server run on virtual threads. See
 [Writing a provider](../guide/writing-a-provider#testing).
 
+### For checkpoint store authors (testing a `Checkpointer`)
+
+{: .note }
+> Not yet published. `llm4s-agent-testkit` exists in the build as of
+> [#1700](https://github.com/llm4s/llm4s/issues/1700) but ships in the next release.
+
+```scala
+// same version as llm4s-agent; test scope only
+libraryDependencies += "org.llm4s" %% "llm4s-agent-testkit" % llm4sVersion % Test
+```
+
+`CheckpointerContract`, the suite every `Checkpointer` must pass: commits, event numbering, compaction, run-claim
+leases and fencing, and two runtimes contending over one store. It requires JDK 21, as `llm4s-agent` does. See
+[Durable Checkpointers](../guide/agents/durable-checkpointers#testing-it-with-the-contract-suite).
+
 ### For Workspace (Containerized Execution)
 
 ```scala

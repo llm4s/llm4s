@@ -285,6 +285,7 @@ jobs:
           observabilityPrometheus/test observabilityPrometheus/coverageReport
           agentTools/test agentTools/coverageReport
           agent/test agent/coverageReport
+          agentTestkit/test agentTestkit/coverageReport
           traceOpentelemetry/test traceOpentelemetry/coverageReport
           gradleDemo/test gradleDemo/coverageReport
           javaApi/test javaApi/coverageReport
@@ -511,6 +512,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/agent/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: agent
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload agent-testkit coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/agent-testkit/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: agent-testkit
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

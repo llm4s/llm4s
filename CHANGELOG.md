@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Run-claim leases and a store contract suite for `Checkpointer`s** ([#1700](https://github.com/llm4s/llm4s/issues/1700),
+  Stage 2 slice 1 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): runtimes in one process or many can share a
+  checkpoint store. Each run claims its thread in the store before it starts - a `RunClaim` with an expiry, by the
+  store's clock, and a `FencingToken` - renews it while it runs (`ClaimPolicy`, default `ttl` 30 s, renewed every
+  10 s, on a `llm4s-claim-<threadId>` virtual thread) and releases it as it ends. `start`, `recover`, `resume` and
+  `deleteThread` in any runtime are refused a thread whose claim is live with `ThreadBusy`, which now names the
+  holding run; once a claim has expired - its process died - another runtime's `recover` takes the thread over,
+  reusing the pending writes of the tasks that finished. Every commit carries the claim's token, and the store refuses
+  a stale one atomically (`GraphError.StaleClaim`), so a run that lost its claim records nothing after its successor
+  started and ends with `CheckpointWriteFailed`. `RunPosition.fencingToken` gives a node the token. The new
+  **`llm4s-agent-testkit`** publishes `CheckpointerContract`, the contract every store must pass as a ScalaTest
+  suite (atomic commits, conflicts, event numbering, compaction and `ReplayUnavailable`, `deleteThread`, claims and
+  fencing, and two or more `GraphRuntime`s contending over one store), with the `ManualClock` it drives expiry with;
+  `InMemoryCheckpointer` passes it. See [Durable Checkpointers](docs/guide/agents/durable-checkpointers.md) and the
+  [Stage 2 migration note](docs/reference/migration.md#stage-2-migration-durable-execution).
 - **Cookbook recipe: several agents in one graph** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   `MultiAgentGraphRecipe` runs two specialist agents in one superstep and an editor agent behind a static join,
   and its spec checks update order, the barrier, step boundaries and cancellation with no API key.
@@ -788,6 +803,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **The `Checkpointer` SPI is fenced by run claims** ([#1700](https://github.com/llm4s/llm4s/issues/1700), BREAKING,
+  `llm4s-agent`): `Checkpointer` gains `claim`, `renew` and `release`; `Commit` is `Commit(token, checkpoint,
+  pendingWrites, events)` with a private constructor and `with*` setters, and a store applies it only with the
+  thread's current claim's token; `Checkpoint` and `RunPosition` have private constructors and gain `fencingToken`;
+  `Checkpoint.CurrentFormat` is 5 (format 4 and earlier still read); `GraphError.ThreadBusy` gains `holder`;
+  `InMemoryCheckpointer` takes a `Clock` and `GraphRuntime` a `ClaimPolicy`, both optional; `GraphRuntime.deleteThread`
+  claims the thread first. No shims; see the
+  [Stage 2 migration note](docs/reference/migration.md#durable-checkpointer-contract-1700).
 - **An interrupted `Agent.run`, `continueConversation`, `recover` or `resume` cancels its turn, from Java too** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   the call returns `Left(CancelledError)` with the interrupt flag set, as before, and now also cancels the turn it
   was waiting on instead of leaving it running, returning once that turn has ended (waiting up to 5 seconds for the turn to end), so `recover`

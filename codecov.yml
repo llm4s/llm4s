@@ -133,6 +133,10 @@ flags:
     paths:
       - modules/agent/src/main/scala
     carryforward: true
+  agent-testkit:
+    paths:
+      - modules/agent-testkit/src/main/scala
+    carryforward: true
   java-api:
     paths:
       - modules/java-api/src/main/scala

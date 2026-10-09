@@ -263,6 +263,7 @@ lazy val llm4s = (project in file("."))
     cohere,
     watsonx,
     providerTestkit,
+    agentTestkit,
     llm4sEffect,
     llm4sZio,
     javaApi,
@@ -1329,9 +1330,9 @@ lazy val agent = (project in file("modules/agent"))
     commonSettings,
     mimaFrozen("llm4s-agent"),
     // Measured 80.80% statement coverage (`sbt coverage agent/test agent/coverageReport`) on the
-    // code as carved out of core. Floor is the measured value rounded down to the nearest 5.
-    // Never lower it.
-    coverageFloor(80),
+    // code as carved out of core; 92.81% with run-claim leases and fencing (#1700), when the floor
+    // was raised. Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(90),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -1340,6 +1341,31 @@ lazy val agent = (project in file("modules/agent"))
       Deps.fansi,
       Deps.ox,
       Deps.scalamock % Test
+    )
+  )
+
+// `llm4s-agent-testkit` (#1700) is what a `Checkpointer`'s spec is written with: `CheckpointerContract`,
+// the store contract as a ScalaTest suite - atomic commits, conflicts, event numbering, compaction,
+// `deleteThread`, run-claim leases and fencing, and two `GraphRuntime`s contending over one store -
+// plus the `ManualClock` it drives claim expiry with. It is published so that a store outside this
+// repository proves itself the way the in-repo ones do, as `llm4s-provider-testkit` is for providers.
+// A test library, so ScalaTest is a compile dependency. `llm4s-agent`'s own tests cannot use it - that
+// would be a project cycle - so `InMemoryCheckpointer` passes it here, in the testkit's own tests.
+lazy val agentTestkit = (project in file("modules/agent-testkit"))
+  .dependsOn(agent)
+  .settings(
+    name := "llm4s-agent-testkit",
+    commonSettings,
+    // Measured 98.26% statement coverage (`sbt coverage agentTestkit/test agentTestkit/coverageReport`)
+    // on its first version: the suite runs itself against `InMemoryCheckpointer`. Floor is the
+    // measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(95),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.scalatest,
+      Deps.ujson
     )
   )
 
@@ -1507,6 +1533,7 @@ lazy val docs = (project in file("modules/docs"))
     observabilityPrometheus,
     traceOpentelemetry,
     agent,
+    agentTestkit,
     agentTools,
     knowledgegraphNeo4j,
     llm4sEffect,
@@ -1549,6 +1576,7 @@ lazy val docs = (project in file("modules/docs"))
         (observabilityPrometheus / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++
         (agent / Compile / sources).value ++
+        (agentTestkit / Compile / sources).value ++
         (agentTools / Compile / sources).value ++
         (knowledgegraphNeo4j / Compile / sources).value ++
         (llm4sEffect / Compile / sources).value ++
