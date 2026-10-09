@@ -117,7 +117,7 @@ Notes:
 
 ## Scala and JDK support
 
-1.0 targets **Scala 3 only (3.7.1)**. Scala 2.13 support is deferred to post-1.0 and, if it happens, would target the frozen spine (`llm4s-core`, `llm4s-agent`, and the frozen provider modules) rather than the full tree. The tracing and metrics contracts are part of `llm4s-core`; the observability integration modules are not in the spine. JDK 21 is used in CI. `llm4s-provider-testkit` requires JDK 21: its interruption checks and `LocalProviderTestServer` run on virtual threads ([#1582](https://github.com/llm4s/llm4s/issues/1582)). The minimum JDK for the other artifacts is decided in [#1493](https://github.com/llm4s/llm4s/issues/1493).
+1.0 targets **Scala 3 only (3.7.1)**. Scala 2.13 support is deferred to post-1.0 and, if it happens, would target the frozen spine (`llm4s-core`, `llm4s-agent`, and the frozen provider modules) rather than the full tree. The tracing and metrics contracts are part of `llm4s-core`; the observability integration modules are not in the spine. JDK 21 is used in CI; the JDK each artifact needs is below.
 
 See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind the Scala-3-only decision.
 
@@ -125,9 +125,9 @@ See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind
 
 | Artifacts | Minimum JDK | Tested on | Why |
 |---|---|---|---|
-| `llm4s-agent`, and the modules that depend on it: `llm4s-java-api`, `llm4s-kotlin-api`, `llm4s-spring-boot-starter`, `llm4s-effect`, `llm4s-zio` | 21 | 21 | `llm4s-agent` depends on Ox, whose jars are compiled for JDK 21 (class-file version 65), and it starts virtual threads (`Thread.ofVirtual`) |
+| `llm4s-agent`, and the modules that depend on it: `llm4s-java-api`, `llm4s-kotlin-api`, `llm4s-spring-boot-starter`, `llm4s-effect`, `llm4s-zio` | 21 | 21 | `llm4s-agent` depends on Ox, whose jars are compiled for JDK 21 (class-file version 65), and it starts virtual threads (`Thread.ofVirtual`). The Java and Kotlin facades start their own as well: `AgentStream` in `llm4s-java-api`, and `AgentKt`'s stream completion in `llm4s-kotlin-api` ([#1678](https://github.com/llm4s/llm4s/pull/1678)) |
 | `llm4s-core` and every module that depends on it | 21 | 21 | `ToolRegistry` starts a virtual thread (`Thread.ofVirtual`), a JDK 21 API, so `llm4s-core` does not compile against an older JDK |
-| `llm4s-provider-testkit` | 21 | 21 | its main sources use virtual threads |
+| `llm4s-provider-testkit` | 21 | 21 | its interruption checks and `LocalProviderTestServer` run on virtual threads ([#1582](https://github.com/llm4s/llm4s/issues/1582)) |
 
 The class files llm4s itself emits have class-file version 52, which is far older than JDK 21, so the bytecode level alone does not tell you which JDK you need: the requirement comes from the APIs and the dependencies above.
 
