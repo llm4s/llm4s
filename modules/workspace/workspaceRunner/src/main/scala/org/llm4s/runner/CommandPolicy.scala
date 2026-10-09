@@ -1,9 +1,9 @@
 package org.llm4s.runner
 
-import java.nio.file.{ Files, Path, Paths }
+import java.nio.file.{ Files, LinkOption, Path, Paths }
 import scala.annotation.tailrec
 import scala.jdk.CollectionConverters._
-import scala.util.Try
+import scala.util.{ Try, Using }
 
 /**
  * What an allowlisted command may be given: its options, its path arguments and its environment (#1715).
@@ -61,12 +61,16 @@ private[runner] object CommandPolicy {
    * @param long        long options refused under any abbreviation of at least one letter, with or without `=value`
    * @param exact       arguments refused when they are exactly this (`find`'s single-dash primaries)
    * @param longAllowed long options that are themselves a prefix of a refused one (`--text` of `--textconv`)
+   * @param textShort   short options whose value is text, never opened as a path (`sort -t/`)
+   * @param textLong    long options whose value is text, never opened as a path (`sort --field-separator=/`)
    */
   final private case class Options(
     short: Set[Char] = Set.empty,
     long: Set[String] = Set.empty,
     exact: Set[String] = Set.empty,
-    longAllowed: Set[String] = Set.empty
+    longAllowed: Set[String] = Set.empty,
+    textShort: Set[Char] = Set.empty,
+    textLong: Set[String] = Set.empty
   )
 
   private val ProgramOptions: Map[String, Options] = Map(
@@ -88,12 +92,23 @@ private[runner] object CommandPolicy {
     ),
     // Follows every link while listing.
     "ls" -> Options(short = Set('L'), long = Set("--dereference")),
-    // Follows every link while recursing.
-    "grep" -> Options(short = Set('R'), long = Set("--dereference-recursive")),
+    // Follows every link while recursing (`-S` on BSD grep).
+    "grep" -> Options(short = Set('R', 'S'), long = Set("--dereference-recursive")),
     // Reads the names of the files to count from a file.
     "wc" -> Options(long = Set("--files0-from")),
     // Writes a file, runs a program, reads the names of the files to sort from a file.
-    "sort" -> Options(short = Set('o'), long = Set("--output", "--compress-program", "--files0-from")),
+    // `-t` / `--field-separator` take a separator character, not a path.
+    "sort" -> Options(
+      short = Set('o'),
+      long = Set("--output", "--compress-program", "--files0-from"),
+      textShort = Set('t'),
+      textLong = Set("--field-separator")
+    ),
+    // Follow links met inside the tree (`-L`, `--dereference`) or on the command line (`-H`) and copy what they
+    // point at, or make links (`-s`, `--symbolic-link`).
+    "cp" -> Options(short = Set('L', 'H', 's'), long = Set("--dereference", "--symbolic-link")),
+    // Follow links met inside the tree (`-L`) or on the command line (`-H`) and change what they point at.
+    "chmod" -> Options(short = Set('L', 'H'), long = Set("--dereference")),
     // Sets the host name.
     "hostname" -> Options(short = Set('F', 'b'), long = Set("--file", "--boot"))
   )
@@ -151,8 +166,13 @@ private[runner] object CommandPolicy {
     "--points-at",
     "--ignore-case",
     "--abbrev",
-    "--no-abbrev"
+    "--no-abbrev",
+    "--format"
   )
+
+  /** `git branch` options that take the next argument as their value (a commit, a sort key or a format). */
+  private val GitBranchValueLong: Set[String] =
+    Set("--contains", "--no-contains", "--merged", "--no-merged", "--points-at", "--sort", "--format")
 
   // ---- environment
 
@@ -246,7 +266,8 @@ private[runner] object CommandPolicy {
 
   /**
    * `uniq` writes its second operand, so it may have at most one. `-f`, `-s` and `-w` (and their long forms) take
-   * a value, which is not an operand; after `--`, and for `-` alone, every argument is one.
+   * a value, which is not an operand; after `--`, for `-` alone, and after the first operand (BSD uniq does not
+   * permute, so `uniq a.txt -s` writes a file named `-s`), every argument is one.
    */
   private def uniqRefusal(args: Seq[String]): Option[Refusal] = {
     val valueShort = Set('f', 's', 'w')
@@ -257,8 +278,10 @@ private[runner] object CommandPolicy {
       rest match {
         case Nil                        => found.reverse
         case arg :: tail if afterDashes => operands(tail, afterDashes, arg :: found)
-        case "--" :: tail               => operands(tail, afterDashes = true, found)
-        case "-" :: tail                => operands(tail, afterDashes, "-" :: found)
+        // BSD uniq does not permute: once it has an operand, every later argument is one (`uniq a.txt -s`).
+        case arg :: tail if found.nonEmpty => operands(tail, afterDashes = true, arg :: found)
+        case "--" :: tail                  => operands(tail, afterDashes = true, found)
+        case "-" :: tail                   => operands(tail, afterDashes, "-" :: found)
         case arg :: tail if arg.startsWith("--") =>
           val takesNext = !arg.contains('=') && valueLong.exists(_.startsWith(arg))
           operands(if (takesNext) tail.drop(1) else tail, afterDashes, found)
@@ -316,13 +339,24 @@ private[runner] object CommandPolicy {
    */
   private def gitBranchRefusal(args: Seq[String]): Option[Refusal] = {
     val listing = args.exists(a => a == "--list" || (a.startsWith("-") && !a.startsWith("--") && a.contains('l')))
-    args
-      .find { arg =>
-        if (arg == "--") false
-        else if (arg.startsWith("--")) !GitBranchLong.contains(arg.takeWhile(_ != '='))
-        else if (arg.startsWith("-") && arg.length > 1) !arg.drop(1).forall(GitBranchShort.contains)
-        else !listing
+
+    /** The first argument that is neither a listing option, an option's value, nor a `--list` pattern. */
+    @tailrec
+    def firstRefused(rest: List[String]): Option[String] =
+      rest match {
+        case Nil          => None
+        case "--" :: tail => firstRefused(tail)
+        case arg :: tail if arg.startsWith("--") =>
+          val name = arg.takeWhile(_ != '=')
+          if (!GitBranchLong.contains(name)) Some(arg)
+          else if (!arg.contains('=') && GitBranchValueLong.contains(name)) firstRefused(tail.drop(1))
+          else firstRefused(tail)
+        case arg :: tail if arg.startsWith("-") && arg.length > 1 =>
+          if (arg.drop(1).forall(GitBranchShort.contains)) firstRefused(tail) else Some(arg)
+        case arg :: tail => if (listing) firstRefused(tail) else Some(arg)
       }
+
+    firstRefused(args.toList)
       .map(
         notAllowed(
           "git branch",
@@ -335,6 +369,43 @@ private[runner] object CommandPolicy {
 
   // ---- paths
 
+  /** The longest argument the path rule resolves; a longer one is refused rather than walked (`PATH_MAX`). */
+  val MaxArgumentLength = 4096
+
+  /**
+   * The file-system lookups (path components, link hops, directory entries) the path rule may spend on one command.
+   * An argument costs about one per component, so ordinary commands use a few hundred; the cap stops a crafted
+   * argument (an option whose every tail is a long path) from holding the request thread for seconds.
+   */
+  val MaxPathSteps = 20000
+
+  /** What is left of [[MaxPathSteps]] for one command. */
+  final private class Budget(private var remaining: Int) {
+    def spend(): Boolean = { remaining -= 1; remaining >= 0 }
+    def left: Int        = math.max(remaining, 0)
+  }
+
+  /** Why a path is refused. */
+  sealed private trait Verdict
+  private case object Outside   extends Verdict // leads outside the workspace, or through a link that cannot be read
+  private case object TooCostly extends Verdict // could not be checked within the budget
+
+  private def escape(program: String, arg: String, candidate: String): Refusal =
+    Refusal(
+      PathEscapeAttempt,
+      s"Argument '$arg' of '$program' names a location outside the workspace" +
+        (if (candidate != arg) s" ('$candidate')" else "") +
+        ". Paths are resolved from the working directory, following symbolic links, and must stay inside " +
+        "the workspace root."
+    )
+
+  private def tooCostly(program: String): Refusal =
+    Refusal(
+      ArgumentNotAllowed,
+      s"The arguments of '$program' are too long or deep to check against the workspace " +
+        s"(at most $MaxArgumentLength characters an argument and $MaxPathSteps path lookups a command)."
+    )
+
   private def pathRefusal(
     program: String,
     args: Seq[String],
@@ -343,47 +414,95 @@ private[runner] object CommandPolicy {
     realRoot: Path
   ): Option[Refusal] =
     if (PrintOnly.contains(program)) None
+    else if (args.exists(_.length > MaxArgumentLength)) Some(tooCostly(program))
     else {
+      val budget   = new Budget(MaxPathSteps)
+      val options  = ProgramOptions.getOrElse(program, Options())
       val switches = isWindows && WindowsSwitchPrograms.contains(program)
-      args.iterator.flatMap(arg => candidates(arg, switches).map(arg -> _)).collectFirst {
-        case (arg, candidate) if !inside(workDir, candidate, realRoot) =>
-          Refusal(
-            PathEscapeAttempt,
-            s"Argument '$arg' of '$program' names a location outside the workspace" +
-              (if (candidate != arg) s" ('$candidate')" else "") +
-              ". Paths are resolved from the working directory, following symbolic links, and must stay inside " +
-              "the workspace root."
-          )
-      }
+      candidates(args, options, switches)
+        .map { case (arg, candidate) => (arg, candidate, verdict(workDir, candidate, realRoot, budget)) }
+        .collectFirst {
+          case (arg, candidate, Some(Outside)) => escape(program, arg, candidate)
+          case (_, _, Some(TooCostly))         => tooCostly(program)
+        }
+        .orElse(if (program == "cp") cpDestinationRefusal(args, workDir, realRoot, budget) else None)
     }
 
   /**
-   * The strings in `arg` that the program might open as a path: the whole argument, or for an option every tail
-   * after its leading dash (which covers `--file=/x`, `-f/x` and an attached value of any length).
+   * The strings in `args` that the program might open as a path, each with the argument it came from.
+   *
+   *  - A plain argument is itself a candidate (on Windows, a `/X` switch of [[WindowsSwitchPrograms]] contributes
+   *    the tails after its slash instead, so the value of `/G:file` is checked).
+   *  - A long option `--name=value` contributes itself and its value - not the tails of its name, so text such as
+   *    `--since=2024/01/01` or `--grep=feat/x` is not read as the absolute path `/01/01`. A value given as the
+   *    next argument is a plain argument.
+   *  - A short option contributes every tail after its dash, which covers an attached value at any position
+   *    (`-f/x`, `-rf/x`).
+   *  - A program's text options ([[Options.textShort]], [[Options.textLong]]) contribute no value: `sort -t/` and
+   *    `sort -t /` take a separator, not a path. In a cluster, the tails up to and including the text option are
+   *    still checked, so a value-taking option before it (`-Tt`) is still held to the workspace; the next argument
+   *    is exempt only after a bare `-t`.
+   *  - After a bare `--`, every argument contributes itself and all its tails, because an option may have consumed
+   *    the `--` as its value, and an operand that looks like an option is opened as a file.
    */
-  private def candidates(arg: String, windowsSwitches: Boolean): Iterator[String] = {
-    val isOption = arg.length > 1 && (arg.startsWith("-") || (windowsSwitches && arg.startsWith("/")))
-    if (isOption) Iterator.range(1, arg.length).map(arg.substring) else Iterator.single(arg)
+  private def candidates(args: Seq[String], options: Options, switches: Boolean): Iterator[(String, String)] = {
+    def tails(arg: String): Iterator[String] = Iterator.range(1, arg.length).map(arg.substring)
+    def plain(arg: String): Iterator[String] =
+      if (switches && arg.length > 1 && arg.startsWith("/")) tails(arg) else Iterator.single(arg)
+    def textLong(name: String): Boolean = name.length > 3 && options.textLong.exists(_.startsWith(name))
+
+    @tailrec
+    def loop(
+      rest: List[String],
+      afterDashes: Boolean,
+      skipNext: Boolean,
+      found: List[(String, () => Iterator[String])]
+    ): List[(String, () => Iterator[String])] =
+      rest match {
+        case Nil                   => found.reverse
+        case _ :: tail if skipNext => loop(tail, afterDashes, skipNext = false, found)
+        case "--" :: tail          => loop(tail, afterDashes = true, skipNext = false, found)
+        case arg :: tail if afterDashes =>
+          val all = () => plain(arg) ++ (if (arg.startsWith("-")) tails(arg) else Iterator.empty)
+          loop(tail, afterDashes, skipNext = false, (arg, all) :: found)
+        case arg :: tail if arg.startsWith("--") && arg.length > 2 =>
+          val name     = arg.takeWhile(_ != '=')
+          val hasValue = arg.length > name.length
+          val text     = textLong(name)
+          val value    = if (hasValue && !text) Iterator.single(arg.drop(name.length + 1)) else Iterator.empty
+          val all      = () => Iterator.single(arg) ++ value.filter(_.nonEmpty)
+          loop(tail, afterDashes, skipNext = text && !hasValue, (arg, all) :: found)
+        case arg :: tail if arg.length > 1 && arg.startsWith("-") =>
+          val cluster = arg.drop(1)
+          val textAt  = cluster.indexWhere(options.textShort.contains)
+          val all     = () => if (textAt < 0) tails(arg) else Iterator.range(1, textAt + 2).map(arg.substring)
+          loop(tail, afterDashes, skipNext = cluster.length == 1 && textAt == 0, (arg, all) :: found)
+        case arg :: tail => loop(tail, afterDashes, skipNext = false, (arg, () => plain(arg)) :: found)
+      }
+
+    loop(args.toList, afterDashes = false, skipNext = false, Nil).iterator.flatMap { case (arg, all) =>
+      all().map(arg -> _)
+    }
   }
 
-  /** True when `arg`, resolved from `workDir` as the kernel would, stays inside `realRoot`. */
-  private[runner] def inside(workDir: Path, arg: String, realRoot: Path): Boolean =
-    physicalPath(workDir, arg) match {
-      case None                 => true  // not a path on this platform (e.g. a ':' on Windows): nothing can be opened
-      case Some(None)           => false // a loop of symbolic links, or one that cannot be read
-      case Some(Some(resolved)) => canonical(resolved).startsWith(realRoot)
+  /** `None` when `arg`, resolved from `workDir` as the kernel would, stays inside `realRoot`. */
+  private def verdict(workDir: Path, arg: String, realRoot: Path, budget: Budget): Option[Verdict] =
+    physicalPath(workDir, arg, budget) match {
+      case None                  => None // not a path on this platform (e.g. a ':' on Windows): nothing can be opened
+      case Some(Left(refused))   => Some(refused)
+      case Some(Right(resolved)) => if (canonical(resolved).startsWith(realRoot)) None else Some(Outside)
     }
 
   /**
    * Resolves `arg` from `base` (a real path) one component at a time, following each symbolic link where it is met,
    * as the kernel does. A component that does not exist is taken as a directory that a command such as `mkdir -p`
    * would create, so a later `..` climbs back and a link met after it is still followed. `None` when `arg` is not a
-   * path here, `Some(None)` when a link cannot be resolved.
+   * path here; `Left(Outside)` when a link cannot be resolved, `Left(TooCostly)` when the budget runs out.
    */
-  private[runner] def physicalPath(base: Path, arg: String): Option[Option[Path]] =
+  private def physicalPath(base: Path, arg: String, budget: Budget): Option[Either[Verdict, Path]] =
     parse(arg).map { path =>
       val (start, names) = split(base, path)
-      walk(start, names, hops = 0)
+      walk(start, names, hops = 0, budget)
     }
 
   /**
@@ -405,23 +524,24 @@ private[runner] object CommandPolicy {
   private val MaxLinkHops = 40
 
   @tailrec
-  private def walk(current: Path, names: List[String], hops: Int): Option[Path] =
+  private def walk(current: Path, names: List[String], hops: Int, budget: Budget): Either[Verdict, Path] =
     names match {
-      case Nil                => Some(current)
-      case ("" | ".") :: rest => walk(current, rest, hops)
-      case ".." :: rest       => walk(Option(current.getParent).getOrElse(current), rest, hops)
+      case Nil                  => Right(current)
+      case _ if !budget.spend() => Left(TooCostly)
+      case ("" | ".") :: rest   => walk(current, rest, hops, budget)
+      case ".." :: rest         => walk(Option(current.getParent).getOrElse(current), rest, hops, budget)
       case name :: rest =>
         val next = current.resolve(name)
         if (Files.isSymbolicLink(next)) {
-          if (hops >= MaxLinkHops) None
+          if (hops >= MaxLinkHops) Left(Outside)
           else
             Try(Files.readSymbolicLink(next)).toOption match {
-              case None => None
+              case None => Left(Outside)
               case Some(target) =>
                 val (start, targetNames) = split(current, target)
-                walk(start, targetNames ++ rest, hops + 1)
+                walk(start, targetNames ++ rest, hops + 1, budget)
             }
-        } else walk(next, rest, hops)
+        } else walk(next, rest, hops, budget)
     }
 
   /**
@@ -437,5 +557,182 @@ private[runner] object CommandPolicy {
       .find(p => Files.exists(p))
       .flatMap(ancestor => Try(ancestor.toRealPath().resolve(ancestor.relativize(normalized))).toOption)
       .getOrElse(normalized)
+  }
+
+  // ---- cp: writing through a link at the destination
+
+  /** What `cp`'s options say about how it copies, and its operands (a `-t` / `--target-directory` value included). */
+  final private case class CpCommand(operands: List[String], recursive: Boolean, keepsLinks: Boolean, parents: Boolean)
+
+  private def cpCommand(args: Seq[String]): CpCommand = {
+    // Any abbreviation of at least one letter: `--t=dst` is `--target-directory=dst`.
+    def long(name: String, full: String): Boolean = name.length > 2 && full.startsWith(name)
+
+    @tailrec
+    def loop(rest: List[String], afterDashes: Boolean, command: CpCommand): CpCommand =
+      rest match {
+        case Nil                        => command.copy(operands = command.operands.reverse)
+        case arg :: tail if afterDashes => loop(tail, afterDashes, command.copy(operands = arg :: command.operands))
+        case "--" :: tail               => loop(tail, afterDashes = true, command)
+        case arg :: tail if arg.startsWith("--") && arg.length > 2 =>
+          val name = arg.takeWhile(_ != '=')
+          val target =
+            if (long(name, "--target-directory") && arg.length > name.length) List(arg.drop(name.length + 1)) else Nil
+          val recursive = long(name, "--recursive") || long(name, "--archive")
+          loop(
+            tail,
+            afterDashes,
+            command.copy(
+              operands = target ++ command.operands,
+              recursive = command.recursive || recursive,
+              keepsLinks = command.keepsLinks || recursive || long(name, "--no-dereference"),
+              parents = command.parents || long(name, "--parents")
+            )
+          )
+        case arg :: tail if arg.length > 1 && arg.startsWith("-") =>
+          val cluster   = arg.drop(1)
+          val targetAt  = cluster.indexOf('t')
+          val target    = if (targetAt >= 0 && targetAt < cluster.length - 1) List(cluster.drop(targetAt + 1)) else Nil
+          val recursive = cluster.exists(c => c == 'R' || c == 'r' || c == 'a')
+          loop(
+            tail,
+            afterDashes,
+            command.copy(
+              operands = target ++ command.operands,
+              recursive = command.recursive || recursive,
+              keepsLinks = command.keepsLinks || recursive || cluster.exists(c => c == 'P' || c == 'd')
+            )
+          )
+        case arg :: tail => loop(tail, afterDashes, command.copy(operands = arg :: command.operands))
+      }
+
+    loop(args.toList, afterDashes = false, CpCommand(Nil, recursive = false, keepsLinks = false, parents = false))
+  }
+
+  private def lastName(arg: String): Option[String] =
+    parse(arg).flatMap(p => Option(p.getFileName)).map(_.toString).filterNot(n => n == "." || n == "..")
+
+  /** `src/`, `src/.`: BSD `cp -R` copies the directory's contents into the target rather than the directory. */
+  private def copiesContents(arg: String): Boolean =
+    arg.endsWith("/") || arg.endsWith("\\") || lastName(arg).isEmpty
+
+  /**
+   * `cp` opens an existing destination file and writes through it, so a symbolic link already at the name it
+   * writes - `dst/secret.txt` -> a file outside - sends the copy outside although every argument lies inside
+   * (`cp src/secret.txt dst/`, `cp -R src/. dst`). The arguments themselves have been checked; this checks the
+   * names `cp` will write:
+   *
+   *  - Any operand may be the target (an option's separate value is counted as an operand, which only adds
+   *    checks), so for every pair of operands the name the source takes under the target is resolved, links
+   *    followed, and must stay inside the workspace. A source naming a directory's contents (`src/`, `src/.`) adds
+   *    the target itself; `--parents` adds the target joined with the whole source path.
+   *  - A recursive copy also writes below those names, so each that is an existing directory is searched, without
+   *    following links, for a link that leads outside.
+   *  - A copy that keeps links (`-R`, `-a`, `-P`, `-d`) of several sources could copy a link from one source and
+   *    then write a file of the same name from another through it, so such a copy may not have two sources with
+   *    the same name, nor several sources and one that names a directory's contents.
+   *
+   * These checks run before `cp` starts; a link made at a destination name while it runs (by another command) is
+   * not seen.
+   */
+  private def cpDestinationRefusal(
+    args: Seq[String],
+    workDir: Path,
+    realRoot: Path,
+    budget: Budget
+  ): Option[Refusal] = {
+    val command  = cpCommand(args)
+    val operands = command.operands.toVector
+
+    val names = operands.flatMap(lastName)
+    val clash =
+      command.keepsLinks && operands.size >= 3 && (names.distinct.size < names.size || operands.exists(copiesContents))
+
+    lazy val destinations: Vector[String] =
+      (for {
+        t <- operands.indices
+        s <- operands.indices if s != t
+        target = operands(t)
+        source = operands(s)
+        destination <-
+          lastName(source).map(n => s"$target/$n").toList ++
+            (if (copiesContents(source)) List(target) else Nil) ++
+            (if (command.parents) List(s"$target/$source") else Nil)
+      } yield destination).distinct.toVector
+
+    if (clash)
+      Some(
+        Refusal(
+          ArgumentNotAllowed,
+          "A cp that copies links (-R, -a, -P, -d) may not have two sources with the same name, or several sources " +
+            "and one that names a directory's contents: one source's link and another's file would land at one name, " +
+            "and cp would write the file through the link. Copy them one at a time."
+        )
+      )
+    else
+      destinations.iterator
+        .map(d => d -> physicalPath(workDir, d, budget))
+        .flatMap {
+          case (_, None)                  => None
+          case (_, Some(Left(TooCostly))) => Some(tooCostly("cp"))
+          case (d, Some(Left(Outside)))   => Some(destinationEscape(d, None))
+          case (d, Some(Right(resolved))) =>
+            if (!canonical(resolved).startsWith(realRoot)) Some(destinationEscape(d, None))
+            else if (command.recursive && Files.isDirectory(resolved))
+              outboundLinkUnder(resolved, realRoot, budget) match {
+                case Left(_)          => Some(tooCostly("cp"))
+                case Right(Some(out)) => Some(destinationEscape(d, Some(out)))
+                case Right(None)      => None
+              }
+            else None
+        }
+        .nextOption()
+  }
+
+  private def destinationEscape(destination: String, link: Option[Path]): Refusal =
+    Refusal(
+      PathEscapeAttempt,
+      link match {
+        case None =>
+          s"'cp' would write '$destination', which leads outside the workspace through a symbolic link; cp writes " +
+            "through a link it finds at the name it writes."
+        case Some(l) =>
+          s"'cp' would copy into '$destination', which holds the symbolic link '$l' leading outside the workspace; " +
+            "cp writes through a link it finds at the name it writes."
+      }
+    )
+
+  /**
+   * The first symbolic link below `dir` that leads outside `realRoot`, searching without following links. `Left`
+   * when the search runs out of budget or meets a directory it cannot list (where `cp` could still write).
+   */
+  private def outboundLinkUnder(dir: Path, realRoot: Path, budget: Budget): Either[Verdict, Option[Path]] = {
+    @tailrec
+    def loop(pending: List[Path]): Either[Verdict, Option[Path]] =
+      pending match {
+        case Nil => Right(None)
+        case current :: rest =>
+          val listed = Try(Using.resource(Files.newDirectoryStream(current)) { stream =>
+            stream.iterator().asScala.take(budget.left + 1).toList
+          }).toOption
+          listed match {
+            case None                                                  => Left(Outside)
+            case Some(entries) if !entries.forall(_ => budget.spend()) => Left(TooCostly)
+            case Some(entries) =>
+              val outbound = entries.find { entry =>
+                Files.isSymbolicLink(entry) &&
+                Try(Files.readSymbolicLink(entry)).toOption.forall { target =>
+                  verdict(entry.getParent, target.toString, realRoot, budget).nonEmpty
+                }
+              }
+              outbound match {
+                case Some(link) => Right(Some(link))
+                case None =>
+                  loop(entries.filter(e => Files.isDirectory(e, LinkOption.NOFOLLOW_LINKS)) ++ rest)
+              }
+          }
+      }
+
+    loop(List(dir))
   }
 }

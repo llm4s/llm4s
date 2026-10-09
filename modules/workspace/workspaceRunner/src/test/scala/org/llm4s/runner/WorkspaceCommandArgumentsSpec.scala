@@ -60,6 +60,14 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     response
   }
 
+  /** Not refused by the policy; the program itself may still fail (an option only one platform's version has). */
+  private def passesPolicy(ws: WorkspaceAgentInterfaceImpl, command: String): Unit = {
+    val outcome = Try(ws.executeCommand(command, None, Some(30.seconds), None)).failed.toOption
+    outcome.collect { case e: WorkspaceAgentException => e }.foreach { e =>
+      withClue(s"'$command' -> ${e.code}: ${e.error}\n")(PolicyCodes should not contain e.code)
+    }
+  }
+
   /** A real repository in the workspace, made directly rather than through the sandbox. */
   private def gitRepo(fx: Fixture): Unit = {
     assume(!isWindowsHost, "the git controls run on a Unix host")
@@ -207,6 +215,183 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     Files.exists(fx.outside.resolve("copied.txt")) shouldBe false
     Files.exists(fx.outside.resolve("secret.txt")) shouldBe true
     Files.exists(fx.root.resolve("victim.txt")) shouldBe true
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Links met inside a tree: options that follow them, and writes through a link already in the destination
+
+  /** `d/innerout` -> outside, the shape a recursive command meets inside the tree it walks. */
+  private def innerLinkOut(fx: Fixture): Unit = {
+    Files.createDirectory(fx.root.resolve("d"))
+    write(fx.root.resolve("d").resolve("in.txt"), "in\n")
+    link(fx, "d/innerout", fx.outside)
+    ()
+  }
+
+  it should "refuse cp options that follow links met inside the tree, so outside content is not copied in" in
+    inWorkspace { fx =>
+      innerLinkOut(fx)
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "cp -RL d copied",
+        "cp -R -L d copied",
+        "cp -RH d copied",
+        "cp -R --dereference d copied",
+        "cp -R --deref d copied",
+        "cp -s a.txt made-link",
+        "cp --symbolic-link a.txt made-link"
+      ).foreach(command => refuses(ws, command, ArgumentNotAllowed))
+      Files.exists(fx.root.resolve("copied")) shouldBe false
+      Files.exists(fx.root.resolve("made-link")) shouldBe false
+    }
+
+  it should "refuse chmod options that follow links met inside the tree, so outside permissions do not change" in
+    inWorkspace { fx =>
+      innerLinkOut(fx)
+      val before = Files.getPosixFilePermissions(fx.outside.resolve("secret.txt"))
+      val ws     = fx.interface(ReadWrite)
+      Seq("chmod -RL 700 d", "chmod -R -L 700 d", "chmod -RH 700 d", "chmod --dereference 700 a.txt")
+        .foreach(command => refuses(ws, command, ArgumentNotAllowed))
+      Files.getPosixFilePermissions(fx.outside.resolve("secret.txt")) shouldBe before
+    }
+
+  it should "refuse grep -S, which follows every link (BSD grep)" in inWorkspace { fx =>
+    innerLinkOut(fx)
+    val ws = fx.interface(ReadOnly)
+    refuses(ws, "grep -rS secret d", ArgumentNotAllowed)
+    refuses(ws, "grep -S -r secret .", ArgumentNotAllowed)
+  }
+
+  /** `dst/secret.txt` -> outside/secret.txt, and `src/secret.txt` a file that a copy into `dst` would write through it. */
+  private def destinationLinkOut(fx: Fixture): Unit = {
+    Files.createDirectory(fx.root.resolve("dst"))
+    link(fx, "dst/secret.txt", fx.outside.resolve("secret.txt"))
+    Files.createDirectory(fx.root.resolve("src"))
+    write(fx.root.resolve("src").resolve("secret.txt"), "OVERWRITTEN\n")
+  }
+
+  it should "refuse a cp whose destination holds a link out of the workspace that the copy would write through" in
+    inWorkspace { fx =>
+      destinationLinkOut(fx)
+      val ws = fx.interface(ReadWrite)
+      refuses(ws, "cp src/secret.txt dst/", PathEscape)
+      refuses(ws, "cp src/secret.txt dst", PathEscape)
+      refuses(ws, "cp -t dst src/secret.txt", PathEscape)
+      refuses(ws, "cp --target-directory=dst src/secret.txt", PathEscape)
+      refuses(ws, "cp --t=dst src/secret.txt", PathEscape)
+      refuses(ws, "cp src/secret.txt --target-directory dst", PathEscape)
+      refuses(ws, "cp -R src/. dst/", PathEscape)
+      refuses(ws, "cp -R src/ dst", PathEscape)
+      refuses(ws, "cp -r src/. dst", PathEscape)
+      Files.createDirectory(fx.root.resolve("dst2"))
+      link(fx, "dst2/src", fx.outside)
+      refuses(ws, "cp -R src dst2", PathEscape)
+      new String(Files.readAllBytes(fx.outside.resolve("secret.txt")), StandardCharsets.UTF_8) shouldBe "secret\n"
+    }
+
+  it should "refuse a link-preserving cp of several sources that could put a file and a link at one name" in
+    inWorkspace { fx =>
+      Files.createDirectories(fx.root.resolve("s1"))
+      Files.createDirectories(fx.root.resolve("s2"))
+      val ws = fx.interface(ReadWrite)
+      refuses(ws, "cp -R s1/. s2/. sub", ArgumentNotAllowed)
+      refuses(ws, "cp -R s1/ s2/ sub", ArgumentNotAllowed)
+      refuses(ws, "cp -R s1/x s2/x sub", ArgumentNotAllowed)
+      refuses(ws, "cp -P s1/x s2/x sub", ArgumentNotAllowed)
+      refuses(ws, "cp -a -t sub s1/x s2/x", ArgumentNotAllowed)
+    }
+
+  it should "still let cp and chmod work inside the workspace" in inWorkspace { fx =>
+    innerLinkOut(fx)
+    val ws = fx.interface(ReadWrite)
+    runs(ws, "cp a.txt b.txt sub/")
+    runs(ws, "cp -R sub sub2")
+    runs(ws, "cp -R sub/. sub3")
+    runs(ws, "chmod -R 755 sub")
+    Files.exists(fx.root.resolve("sub").resolve("a.txt")) shouldBe true
+    Files.exists(fx.root.resolve("sub2").resolve("Main.scala")) shouldBe true
+    Files.exists(fx.root.resolve("sub3").resolve("Main.scala")) shouldBe true
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // uniq: BSD uniq does not permute, so every argument after the first operand is an operand
+
+  it should "refuse uniq with an option after its operand, which BSD uniq takes as the output file" in
+    inWorkspace { fx =>
+      val ws = fx.interface(ReadOnly)
+      refuses(ws, "uniq a.txt -s", ArgumentNotAllowed)
+      refuses(ws, "uniq a.txt -c", ArgumentNotAllowed)
+      refuses(ws, "uniq a.txt -fzz", ArgumentNotAllowed)
+      Files.exists(fx.root.resolve("-s")) shouldBe false
+      Files.exists(fx.root.resolve("-fzz")) shouldBe false
+    }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Cost of the path check
+
+  it should "refuse an over-long argument instead of walking it" in inWorkspace { fx =>
+    val ws    = fx.interface(ReadOnly)
+    val start = System.nanoTime()
+    refuses(ws, "cat " + ("x/" * 3000) + ("../" * 3000) + "a.txt", ArgumentNotAllowed)
+    // 64 relative paths of 1000 components each: every one is inside, but walking them all costs too much
+    refuses(ws, ("ls" +: Seq.fill(64)("a/" * 1000)).mkString(" "), ArgumentNotAllowed)
+    // an option whose every tail is a path: the first absolute tail is refused without walking the rest
+    refuses(ws, "ls -x" + ("a/" * 2040), PathEscape)
+    (System.nanoTime() - start).nanos should be < 2.seconds
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Option values that are not paths
+
+  it should "check only the value of a --name=value option, so text values that look like paths run" in
+    inWorkspace { fx =>
+      gitRepo(fx)
+      val ws = fx.interface(ReadOnly)
+      runs(ws, "git log --since=2024/01/01 --oneline")
+      runs(ws, "git log --grep=feat/x --oneline")
+      runs(ws, "git ls-files --exclude=*/target/* -o")
+      runs(ws, "grep -rn --exclude=sub/*.txt object .").stdout should include("Main.scala")
+      passesPolicy(ws, "ls --hide=x/y") // GNU ls only; BSD ls rejects the option itself
+    }
+
+  it should "not take sort's field separator for a path" in inWorkspace { fx =>
+    val ws = fx.interface(ReadOnly)
+    runs(ws, "sort -t/ -k2 a.txt")
+    runs(ws, "sort -t / -k2 a.txt")
+    runs(ws, "sort -rt/ a.txt")
+    runs(ws, "sort --field-separator=/ a.txt")
+  }
+
+  it should "still check option values that name files outside the workspace" in inWorkspace { fx =>
+    link(fx, "escape", fx.outside)
+    val ws = fx.interface(ReadOnly)
+    Seq(
+      "sort --random-source='{out}/secret.txt' a.txt",
+      "sort --random-source=escape/secret.txt a.txt",
+      "sort --random-source=../outside/secret.txt a.txt",
+      "sort -t/ '{out}/secret.txt'",
+      "sort -t / '{out}/secret.txt'",
+      "sort -Tt '{out}/secret.txt'",
+      "sort --field-separator / '{out}/secret.txt'",
+      "grep --exclude-from='{out}/secret.txt' x a.txt",
+      "grep --exclude-from=escape/secret.txt x a.txt",
+      "git log --grep=escape/secret.txt",
+      "git branch --merged '{out}'",
+      "cat -- --x=/../../outside/secret.txt"
+    ).foreach(command => refuses(ws, fx.expand(command), PathEscape))
+  }
+
+  it should "parse git branch filter values as values, not as branch names" in inWorkspace { fx =>
+    gitRepo(fx)
+    val ws = fx.interface(ReadOnly)
+    runs(ws, "git branch --merged HEAD")
+    runs(ws, "git branch --no-merged HEAD")
+    runs(ws, "git branch --contains HEAD")
+    runs(ws, "git branch --points-at HEAD")
+    runs(ws, "git branch --sort -committerdate")
+    runs(ws, "git branch --format x").stdout should include("x")
+    refuses(ws, "git branch --merged HEAD evil", ArgumentNotAllowed)
+    refuses(ws, "git branch --format x evil", ArgumentNotAllowed)
   }
 
   // ---------------------------------------------------------------------------------------------------------------
