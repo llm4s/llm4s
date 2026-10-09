@@ -2018,6 +2018,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Anthropic accepts no temperature but 1 with thinking enabled, and the default `CompletionOptions` temperature of
   0.7 made every request with a thinking budget fail with HTTP 400. `AnthropicClient` now omits `temperature` when
   a thinking budget is set.
+- **`llm4s-rag`: `SentenceChunker` keeps every character of the input** ([#1718](https://github.com/llm4s/llm4s/issues/1718)):
+  it split with `Regex.split` on `([.!?])(\s+)([A-Z])`, which deleted the punctuation, the whitespace and the next
+  sentence's first letter at every boundary and glued the parts back together, so
+  `"Hello world. Next one. Third."` became the single sentence `"Hello worldext onehird."`. Boundaries are now
+  found with lookarounds, so only the whitespace between sentences is matched, and sentences are cut from the input
+  itself. Sentences in a chunk keep the whitespace that separated them (it used to be one space), so with no overlap
+  and no force-split sentence every chunk is a slice of the input. Abbreviations (`Dr.`, `e.g.`) only match as whole
+  words, so `summr.` or `first.` no longer hide a boundary, and a closing quote or bracket after the punctuation stays
+  with its sentence: `He said "Hi." Then` is `He said "Hi."` and `Then`. `ChunkerFactory.default`, `"sentence"` and
+  the semantic fallback all use this chunker. **Migration:** chunk text changes for any input with a sentence
+  boundary, and chunk sizes with it; indexes built with `SentenceChunker` hold corrupted text and should be
+  re-chunked and re-embedded.
 - **`llm4s-openai`: OpenAI embeddings reach `/v1/embeddings` with the default base URL**
   ([#1413](https://github.com/llm4s/llm4s/pull/1413)): the default `llm4s.embeddings.openai.baseUrl` is
   `https://api.openai.com/v1`, the versioned root the chat provider uses too, but `OpenAIEmbeddingProvider`
