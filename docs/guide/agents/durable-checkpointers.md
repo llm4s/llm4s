@@ -220,8 +220,10 @@ applied, so two stores cannot both pass the checks.
 
 SQLite cannot tell one connection that another has committed, so a subscription over a `SqliteCheckpointer` sees the
 commits of other stores on the file by reading the event log, once per `WatchPolicy.pollInterval`. Each read is a
-short indexed query, and in WAL mode it never waits for a writer. A process's own runtime still delivers its own
-commits at once. Each live subscription reads once per interval, so where many subscriptions watch one file, raise
+short indexed query, and in WAL mode it never waits for another connection's writer. It can wait for its own store,
+though: the calls on one `SqliteCheckpointer` share its one connection and are serialised behind its lock, so a
+watch's read waits while that store is committing - including a commit that is itself waiting, up to
+`busyTimeout`, for another connection's write. A process's own runtime still delivers its own commits at once. Each live subscription reads once per interval, so where many subscriptions watch one file, raise
 the interval. A subscription whose store is closed under it ends with `Disconnected(lastSeq, ReplayFailed(...))`,
 from which the next process resubscribes.
 
@@ -260,7 +262,13 @@ a default that polls `eventsAfter`. The Scaladoc of `Checkpointer` states the co
 - release only with the current token, and treat any other as a no-op;
 - return from `awaitEventsAfter` what `eventsAfter` would: at once if there is something, and otherwise within about
   its `timeout`. A store that can be told of commits, such as a database with a notification channel, overrides it
-  to return as soon as one lands. It must then wake for commits made through every store over the same storage.
+  to return as soon as one lands. It must then wake for commits made through every store over the same storage;
+- tolerate the reading thread being interrupted at any point. Cancelling a subscription interrupts its watch, which
+  may be in the middle of `eventsAfter` or `awaitEventsAfter`: that one call may fail (`CancelledError`), but the
+  store must stay usable by every other thread. A driver whose I/O goes through a
+  `java.nio.channels.InterruptibleChannel` (a `FileChannel` or `SocketChannel`) closes the channel when the thread is
+  interrupted mid-read, so a store sharing one such connection between threads must read on a connection of its own
+  for the watch, or replace a connection an interrupt closed.
 
 ### Testing it with the contract suite
 

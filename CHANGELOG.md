@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commits made through any runtime or process sharing the checkpointer, not only its own, in order, without gap or
   duplicate. Each live subscription watches the store through the new SPI method `Checkpointer.awaitEventsAfter`, a
   long poll whose default reads `eventsAfter` once per timeout. `InMemoryCheckpointer` overrides it to wake on its
-  commits; the SQLite store is polled. `WatchPolicy` (on `GraphRuntime`, default enabled, `pollInterval` 250 ms)
-  configures the watch, and `WatchPolicy.disabled` turns it off. Other runtimes' events are queued only as they fit,
+  commits; the SQLite store is polled. `WatchPolicy` (on `GraphRuntime`, default enabled, `pollInterval` 250 ms,
+  at least 1 ms) configures the watch, and `WatchPolicy.disabled` turns it off. Other runtimes' events are queued only as they fit,
   so they never make a subscriber lag. Durable events are queued strictly contiguously: a commit of the subscriber's
   own runtime first reads any events committed elsewhere that the watch has not read yet. Live events do not cross
   runtimes, because they are never stored. A commit the store wrote but reported as failed is now delivered too (the

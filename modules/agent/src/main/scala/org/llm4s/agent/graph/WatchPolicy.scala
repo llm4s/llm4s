@@ -20,18 +20,25 @@ import scala.concurrent.duration.*
  * runtime's commits only by subscribing again, which replays the log; a runtime that knows it is the
  * only one using its store can disable it to save the watching thread and its reads.
  *
- * `pollInterval` must be positive: `apply` and the `with*` setters throw `IllegalArgumentException`
- * otherwise, and [[WatchPolicy.of]] returns a `ValidationError`.
+ * `pollInterval` must be at least one millisecond - a shorter one would have every subscription
+ * read a polled store in a busy loop: `apply` and the `with*` setters throw
+ * `IllegalArgumentException` otherwise, and [[WatchPolicy.of]] returns a `ValidationError`.
  */
 final case class WatchPolicy private (enabled: Boolean, pollInterval: FiniteDuration):
   def withEnabled(e: Boolean): WatchPolicy             = WatchPolicy(e, pollInterval)
   def withPollInterval(i: FiniteDuration): WatchPolicy = WatchPolicy(enabled, i)
 
 object WatchPolicy:
-  private def problems(pollInterval: FiniteDuration): List[String] =
-    Option.when(pollInterval.length <= 0)(s"pollInterval must be positive, was $pollInterval").toList
+  /** The shortest `pollInterval` accepted. */
+  private val MinPollInterval: FiniteDuration = 1.millisecond
 
-  /** Throws `IllegalArgumentException` for a non-positive `pollInterval`; use [[of]] for untrusted input. */
+  private def problems(pollInterval: FiniteDuration): List[String] =
+    if pollInterval.length <= 0 then List(s"pollInterval must be positive, was $pollInterval")
+    else if pollInterval < MinPollInterval then
+      List(s"pollInterval must be at least $MinPollInterval, was $pollInterval")
+    else Nil
+
+  /** Throws `IllegalArgumentException` for a `pollInterval` under a millisecond; use [[of]] for untrusted input. */
   def apply(enabled: Boolean = true, pollInterval: FiniteDuration = 250.millis): WatchPolicy =
     val found = problems(pollInterval)
     require(found.isEmpty, found.mkString("; "))

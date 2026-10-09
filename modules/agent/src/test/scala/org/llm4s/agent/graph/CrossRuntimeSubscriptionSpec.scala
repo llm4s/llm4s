@@ -90,6 +90,16 @@ class CrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with Either
     an[IllegalArgumentException] should be thrownBy WatchPolicy.default.withPollInterval(-1.millis)
   }
 
+  it should "refuse a pollInterval under a millisecond, which would read a polled store in a busy loop" in {
+    WatchPolicy.of(pollInterval = 1.millisecond).value.pollInterval shouldBe 1.millisecond
+    WatchPolicy(pollInterval = 1000.micros).pollInterval shouldBe 1.millisecond
+    WatchPolicy.of(pollInterval = 999.micros).left.value shouldBe
+      ValidationError("watch", List("pollInterval must be at least 1 millisecond, was 999 microseconds"))
+    WatchPolicy.of(pollInterval = 1.nanosecond).left.value.message should include("at least 1 millisecond")
+    an[IllegalArgumentException] should be thrownBy WatchPolicy(pollInterval = 500.micros)
+    an[IllegalArgumentException] should be thrownBy WatchPolicy.default.withPollInterval(1.nanosecond)
+  }
+
   // ---- the SPI hook ----
 
   "Checkpointer.awaitEventsAfter's default" should "poll: return what is there at once, else wait the timeout and return nothing" in {
@@ -315,6 +325,75 @@ class CrossRuntimeSubscriptionSpec extends AnyFlatSpec with Matchers with Either
     val committed = logOf(inMemory, thread)
     committed.size should be > 1
     eventually(seen.seqs shouldBe committed)
+    sub.cancel()
+  }
+
+  it should "not take its own runtime's commit from the store before the hand-over, keeping a live event sent meanwhile before it (#1732)" in {
+    // A's commit is written to the store and then held, with the runtime still holding its commit lock, until
+    // `handOver`. The store wakes the watch the moment the commit lands; a watch that queued what it read without
+    // the commit lock would deliver A's event at once - ahead of the hand-over, and of B's live event sent after
+    // the commit landed but before it was handed over.
+    val landed   = new CountDownLatch(1)
+    val handOver = new CountDownLatch(1)
+    val bGo      = new CountDownLatch(1)
+    val heldSeqs = new ConcurrentLinkedQueue[Long]()
+    val store = new Polled(InMemoryCheckpointer()):
+      override def awaitEventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int, timeout: FiniteDuration) =
+        underlying.awaitEventsAfter(threadId, afterSeq, limit, timeout)
+      override def commit(threadId: ThreadId, commit: Commit): Result[Vector[EventRecord]] =
+        val written = super.commit(threadId, commit)
+        val isA = commit.events.exists(_.event match
+          case RunEvent.Custom("held.a", _, _) => true
+          case _                               => false
+        )
+        if isA then
+          written.foreach(_.foreach(r => heldSeqs.add(r.seq)))
+          landed.countDown()
+          handOver.await(10, TimeUnit.SECONDS): Unit
+        written
+    val results = StateKey.appending[String]("results")
+    val fanned: CompiledGraph[Vector[String], Vector[String]] =
+      val b = GraphBuilder("held-commit", "v1")
+      val work = b.node[String]("work", writes = Set(results)) { (item, _, context) =>
+        if item == "a" then context.emit("held.a", 1, ujson.Str(item))
+        else
+          bGo.await(10, TimeUnit.SECONDS): Unit
+          context.progress("held.b", 1, ujson.Str(item))
+        continue(Command.empty.update(results, item))
+      }
+      val done = b.node[Unit]("done")((_, _, _) => continue(Command.empty))
+      val join = b.dynamicJoin("works", done)
+      val plan = b.node[Vector[String]]("plan")((items, _, _) => continue(Command.empty.fanOut(join, work, items)))
+      b.compile(plan)(_.get(results)).value
+    val thread = newThread()
+    // an hour between polls: the watch wakes only through the store's notification of A's commit
+    val runtime = GraphRuntime(store, Clock.systemUTC(), ClaimPolicy.default, WatchPolicy(pollInterval = 1.hour))
+    val seen    = Seen()
+    val sub     = runtime.subscribe(thread)(seen).value
+    eventually(runtime.storeWatches(thread) shouldBe 1)
+    val handle = runtime.start(thread, fanned, Vector("a", "b")).value
+    landed.await(10, TimeUnit.SECONDS) shouldBe true
+    val held = heldSeqs.asScala.toVector
+    held should not be empty
+    def isB(event: StreamEvent) = event match
+      case l: StreamEvent.Live => l.name == "held.b"
+      case _                   => false
+    // B's live event is sent while A's commit is in the store but not yet handed over
+    bGo.countDown()
+    eventually(seen.all.exists(isB) shouldBe true)
+    // the watch was woken by A's commit; give a watch that ignored the commit lock ample time to deliver it
+    Thread.sleep(300)
+    seen.seqs.filter(held.contains) shouldBe empty
+    seen.seqs.forall(_ < held.min) shouldBe true
+    handOver.countDown()
+    await(handle) shouldBe a[RunResult.Completed[?]]
+    eventually(seen.seqs shouldBe logOf(store, thread))
+    seen.seqs shouldBe contiguous(seen.seqs.size)
+    val firstHeld = seen.all.indexWhere {
+      case StreamEvent.Durable(r) => held.contains(r.seq)
+      case _                      => false
+    }
+    seen.all.indexWhere(isB) should be < firstHeld
     sub.cancel()
   }
 

@@ -37,7 +37,11 @@ import scala.util.Try
  *    `ReadWriter`), so nothing executable survives a round trip;
  *  - return from [[awaitEventsAfter]] with what [[eventsAfter]] would, at once if the log already
  *    holds an event after `afterSeq`, and otherwise within about `timeout` - with the events of a
- *    commit made meanwhile through any store over the same storage, or empty.
+ *    commit made meanwhile through any store over the same storage, or empty;
+ *  - tolerate the thread calling [[eventsAfter]] or [[awaitEventsAfter]] being interrupted at any
+ *    point: cancelling a subscription interrupts its watch mid-read, so an interrupt must end that
+ *    one call - with `Left(CancelledError)` or a failed result - and leave the store usable by every
+ *    other thread and later call (see [[awaitEventsAfter]]).
  *
  * The holder of a claim may commit and [[renew]] it after `expiresAt` for as long as no other claim
  * has replaced it: expiry only lets another run take the thread over. `CheckpointerContract` in
@@ -94,6 +98,18 @@ trait Checkpointer:
    * Errors are [[eventsAfter]]'s - [[GraphError.ReplayUnavailable]] when `afterSeq` is behind the
    * replay floor. Interrupting the waiting thread ends the wait with `Left(CancelledError)`, the
    * thread's interrupt flag set again.
+   *
+   * '''The reading thread may be interrupted at any point.''' A subscription's watch calls this
+   * on a thread of its own, and [[Subscription.cancel]] - or the subscription's end - interrupts that
+   * thread whether it is waiting or in the middle of a read, so the interrupt can land inside the
+   * store's own I/O ([[eventsAfter]] included). A store must take that as the end of this one call,
+   * never as damage to itself: release what the call held (a pooled connection, a lock), and stay
+   * usable by other threads and later calls. Beware drivers whose I/O goes through a
+   * `java.nio.channels.InterruptibleChannel` (a `FileChannel` or `SocketChannel`): an interrupt
+   * during a read or write closes the channel, with `ClosedByInterruptException`, so a store that
+   * shares one channel - one connection - between threads would lose it for all of them. Such a
+   * store reads on a connection of its own for the waiting call, or discards and replaces a
+   * connection an interrupt has closed.
    */
   def awaitEventsAfter(
     threadId: ThreadId,
