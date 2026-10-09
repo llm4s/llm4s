@@ -88,7 +88,14 @@ val result = PlanRunner().execute(plan, Map("research" -> question), token)   //
 // after
 val b        = GraphBuilder("research", "v1")
 val findings = StateKey.replace[String]("findings", "")
-val summary  = b.node[Unit]("summary") { (_, state, _) => ??? /* read findings, run another agent */ }
+val digest   = StateKey.replace[String]("digest", "")
+val summary = b.node[Unit]("summary", writes = Set(digest)) { (_, state, _) =>
+  NodeResult.fromResult(for {
+    f    <- state.get(findings)
+    turn <- summariser.run(s"Summarise: $f")
+    text <- turn.answer.toRight(ValidationError("summary", "no answer"))
+  } yield Command.empty.update(digest, text))
+}
 val research = b.node[String]("research", writes = Set(findings)) { (q, _, _) =>
   NodeResult.fromResult(
     researcher.run(q)
@@ -96,11 +103,11 @@ val research = b.node[String]("research", writes = Set(findings)) { (q, _, _) =>
       .map(f => Command.empty.update(findings, f).goto(summary))
   )
 }
-val handle = b.compile(research)(_.get(findings)).flatMap(GraphRuntime.inMemory().start(ThreadId("t-1"), _, question))
+val handle = b.compile(research)(_.get(digest)).flatMap(GraphRuntime.inMemory().start(ThreadId("t-1"), _, question))
 handle.foreach(_.cancel())   // instead of token.cancel()
 ```
 
-`Agent.run`, `continueConversation`, `runMultiTurn`, `recover` and `resume` now cancel their turn when the calling thread is interrupted, and return once it has ended (within 5 seconds), so `recover` can follow at once; a caller already interrupted starts no turn. Cancelling a graph run therefore also cancels the agent turns its nodes are waiting on. Before, the turn kept running after `run` returned `Left(CancelledError)`. A caller that wants the turn to outlive an interrupt uses `start`, `startRecover` or `startResume`, and awaits the `AgentRun` itself.
+`Agent.run`, `continueConversation`, `runMultiTurn`, `recover` and `resume` now cancel their turn when the calling thread is interrupted, and return once it has ended (within 5 seconds), so `recover` can follow at once; a caller already interrupted starts no turn. Cancelling a graph run therefore also cancels the agent turns its nodes are waiting on. Before, the turn kept running after `run` returned `Left(CancelledError)`. A caller that wants the turn to outlive an interrupt uses `start`, `startRecover` or `startResume`, and awaits the `AgentRun` itself. With tracing, the cancelled turn's trace is complete when the call returns. A turn that had already begun committing its outcome when the interrupt came cannot be cancelled: the call returns that outcome (`Right`, `Completed` or `Suspended`), with the interrupt flag still set - test the flag, not only the result, if an interrupt must stop your own code. `run(query)`, whose random thread id a `Left` does not carry, forgets the thread of a turn that failed or was cancelled once it has ended; name the thread (`run(threadId, query)`) to recover such a turn. The Java facade's `JAgent.run`, `continueConversation`, `resume` and `recover` go through these calls, so an interrupted Java caller cancels its turn too; they used to stop only the wait.
 
 ## Agent middleware
 

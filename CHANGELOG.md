@@ -772,11 +772,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
-- **An interrupted `Agent.run`, `recover` or `resume` cancels its turn** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
+- **An interrupted `Agent.run`, `continueConversation`, `recover` or `resume` cancels its turn, from Java too** ([#1330](https://github.com/llm4s/llm4s/issues/1330)):
   the call returns `Left(CancelledError)` with the interrupt flag set, as before, and now also cancels the turn it
   was waiting on instead of leaving it running, returning once that turn has ended (within 5 seconds), so `recover`
   can follow at once; a caller already interrupted starts no turn. Cancelling a graph run therefore cancels the
   agent turns its nodes are waiting on. Use `start`/`startRecover`/`startResume` and await the `AgentRun` to keep a turn past an interrupt.
+  With tracing, the cancelled turn's trace is complete (its last events delivered, its subscription detached) when
+  the call returns. A turn that had already begun committing its outcome cannot be cancelled: the call then returns
+  that outcome, with the interrupt flag still set. `run(query)`, whose random thread id a `Left` does not carry,
+  forgets the thread of a turn that failed or was cancelled once it has ended.
   **Java-visible:** `llm4s-java-api`'s blocking `JAgent.run`, `continueConversation`, `resume` and `recover` go
   through these calls, so an interrupted Java caller now cancels its turn too (they used to stop only the wait and
   leave the turn running); Java and Kotlin now behave the same. `AgentStream.cancel()` still cancels a streamed turn

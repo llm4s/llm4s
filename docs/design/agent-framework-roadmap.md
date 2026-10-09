@@ -29,7 +29,7 @@
 
 **llm4s** provides a solid foundation for agent-based workflows with:
 - ✅ Single-agent execution with tool calling
-- ✅ Multi-agent orchestration via DAG-based plans
+- ✅ Multi-agent orchestration via DAG-based plans (Superseded by [#1330](https://github.com/llm4s/llm4s/issues/1330): DAG orchestration, `PlanRunner` and `TypedAgent` are removed; multi-agent workflows are graphs, see the [multi-agent graph recipe](../examples/cookbook.md#6-several-agents-in-one-graph).)
 - ✅ Type-safe agent composition
 - ✅ Parallel and sequential execution
 - ✅ Result-based error handling
@@ -131,7 +131,7 @@ To properly position llm4s, we compare it against three leading Python agent fra
 |---------|-------|------------|------------|--------|
 | **Core Features** |
 | Single-agent execution | ✅ | ✅ | ✅ | ✅ |
-| Multi-agent orchestration | ✅ DAG | ✅ Handoffs | ✅ Graphs | ✅ Crews |
+| Multi-agent orchestration | ✅ DAG (superseded by #1330: graphs) | ✅ Handoffs | ✅ Graphs | ✅ Crews |
 | Tool calling | ✅ | ✅ | ✅ | ✅ |
 | Streaming | ⚠️ Basic | ✅ Advanced | ✅ Validated | ⚠️ Limited |
 | **Type Safety** |
@@ -1927,7 +1927,7 @@ modules/core/src/main/scala/org/llm4s/
 │   │   ├── WorkflowEngine.scala
 │   │   ├── CamundaWorkflowEngine.scala
 │   │   └── HumanTask.scala
-│   └── orchestration/                 # Existing multi-agent
+│   └── orchestration/                 # Existing multi-agent (removed by #1330; use graphs)
 │       ├── Agent.scala
 │       ├── DAG.scala
 │       └── PlanRunner.scala
