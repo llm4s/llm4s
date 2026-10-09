@@ -1,7 +1,7 @@
 package org.llm4s.rag.evaluation
 
 import org.llm4s.rag.evaluation.metrics.Faithfulness
-import org.llm4s.testutil.MockLLMClients
+import org.llm4s.testutil.{ MockLLMClients, SmallStack }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -241,5 +241,26 @@ class FaithfulnessSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
     result.toOption.get.score shouldBe 0.0
     result.toOption.get.details.get("reason") shouldBe Some("No context provided to verify claims against")
+  }
+
+  it should "refuse a claims reply nested too deeply as a parse error, never an overflow" in {
+    // Balanced, so the parser accepts it; on `main` the overflow came from reading a claim with `.str`,
+    // whose `InvalidData` message renders the whole value. Run on a 1 MB stack so an overflow is a
+    // `Left(StackOverflowError)` here rather than an aborted suite (#1562).
+    val deep       = "[" * 100000 + "]" * 100000
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq(deep, "[]"))
+    val metric     = Faithfulness(mockClient)
+    val sample     = EvalSample(question = "q", answer = "Paris is the capital of France.", contexts = Seq("Paris."))
+
+    SmallStack.run(
+      metric.evaluate(sample).left.map(e => (e.getClass.getSimpleName, e.message)).map(_ => "a score")
+    ) match {
+      case Right(Left((kind, message))) =>
+        kind shouldBe "EvaluationError"
+        message should include("Failed to parse claims")
+        message should include("512")
+      case Right(Right(other)) => fail(s"expected a Left, got $other")
+      case Left(thrown)        => fail(s"expected a Left, but evaluate threw $thrown")
+    }
   }
 }

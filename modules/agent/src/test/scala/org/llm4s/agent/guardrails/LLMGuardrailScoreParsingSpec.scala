@@ -84,6 +84,14 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     "1 per mil",
     "1 per thousand",
     "1 per hundred",
+    // a scale named in words the parser has no list for: anything but the number and a score label is refused
+    "1 per ten thousand",
+    "1 basis point",
+    "100 basis points",
+    "100 bps",
+    "1 bp",
+    "1 out of 10",
+    "1 on a scale of 0 to 100",
     // out of range
     "1.5",
     "100",
@@ -93,6 +101,14 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     "1.00000000000000000000000000001",
     "-0.2",
     "-0.5",
+    // a sign apart from the number
+    "- 1",
+    "- 0.9",
+    "−1",
+    "− 1",
+    "negative 1",
+    "minus 1",
+    "-\n1",
     // not a plain decimal
     "NaN",
     "Infinity",
@@ -108,7 +124,16 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     "0.7 out of 1",
     "0.8-0.9",
     "gpt4 rates this 0.9",
-    "Score:0.9",
+    // prose around the number: the reply must be the number, optionally labelled `Score:`
+    "The score is 0.7",
+    "0.7, because it is fine",
+    "I would say 0.7",
+    "0.7 (high)",
+    "Score: 0.7 overall",
+    "Rating: 0.7",
+    // the grammar's edges: emphasis may wrap the whole label but not split it, and a fence must be bare
+    "**Score**: 0.7",
+    "```text\n0.7\n```",
     // nothing to read
     "",
     "   ",
@@ -116,20 +141,28 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
   )
 
   private val accepted: Seq[(String, Double)] = Seq(
-    "0.9"                     -> 0.9,
-    "0.7"                     -> 0.7,
-    "  0.7  "                 -> 0.7,
-    "0.7\n"                   -> 0.7,
-    "Score: 0.7"              -> 0.7,
-    "**0.7**"                 -> 0.7,
-    "The score is 0.7"        -> 0.7,
-    "0.7, because it is fine" -> 0.7,
-    "```\n0.7\n```"           -> 0.7,
-    ".5"                      -> 0.5,
-    "0"                       -> 0.0,
-    "0.0"                     -> 0.0,
-    "1"                       -> 1.0,
-    "1.0"                     -> 1.0
+    "0.9"            -> 0.9,
+    "0.7"            -> 0.7,
+    "  0.7  "        -> 0.7,
+    "0.7\n"          -> 0.7,
+    "Score: 0.7"     -> 0.7,
+    "score: 0.7"     -> 0.7,
+    "Score:0.7"      -> 0.7,
+    "**Score:** 0.7" -> 0.7,
+    "**0.7**"        -> 0.7,
+    "`0.7`"          -> 0.7,
+    "\"0.7\""        -> 0.7,
+    "(0.7)"          -> 0.7,
+    "```\n0.7\n```"  -> 0.7,
+    // wrapping before and after the number is read independently, so it need not balance
+    "((((0.7" -> 0.7,
+    "0.7 *"   -> 0.7,
+    "0000.5"  -> 0.5,
+    ".5"      -> 0.5,
+    "0"       -> 0.0,
+    "0.0"     -> 0.0,
+    "1"       -> 1.0,
+    "1.0"     -> 1.0
   )
 
   behavior.of("LLMGuardrail score parsing")
@@ -154,6 +187,25 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
       case error: ValidationError => error.field shouldBe "output"
       case other                  => fail(s"expected a ValidationError, got $other")
     }
+  }
+
+  it should "compare a decimal with the threshold before rounding it to a Double" in {
+    // 0.79999999999999999 and 0.8 are the same Double, but only one of them reaches a threshold of 0.8.
+    judge("0.79999999999999999", threshold = 0.8).swap.toOption.get match {
+      case error: ValidationError => error.field shouldBe "output"
+      case other                  => fail(s"expected a ValidationError, got $other")
+    }
+    judge("0.8", threshold = 0.8) shouldBe Right("content")
+    judge("0.80000000000000001", threshold = 0.8) shouldBe Right("content")
+    judge("0.69999999999999999", threshold = 0.7).isLeft shouldBe true
+  }
+
+  it should "compare against a NaN or infinite threshold without a pass slipping through (validate refuses them first)" in {
+    // validate refuses these thresholds on field `threshold` before the judge is called (#1520,
+    // LLMGuardrailThresholdSpec); the comparison itself still passes nothing at NaN or +Infinity.
+    LLMGuardrail.reaches(BigDecimal(1), Double.NaN) shouldBe false
+    LLMGuardrail.reaches(BigDecimal(0), Double.NegativeInfinity) shouldBe true
+    LLMGuardrail.reaches(BigDecimal(1), Double.PositiveInfinity) shouldBe false
   }
 
   accepted.foreach { case (reply, score) =>
@@ -192,10 +244,52 @@ class LLMGuardrailScoreParsingSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "refuse a number of a million digits quickly, before parsing it" in {
+    // Parsing a million-digit decimal takes tens of seconds; the length cap refuses it unparsed.
+    val reply   = "0." + "9" * 1000000
+    val started = System.nanoTime()
+    val result  = LLMGuardrail.readScore(reply)
+    val elapsed = (System.nanoTime() - started) / 1000000L
+
+    result shouldBe None
+    elapsed should be < 2000L
+    judge(reply, threshold = 0.0).swap.toOption.get match {
+      case error: ValidationError =>
+        error.field shouldBe "llm_response"
+        error.message should include("Could not parse LLM judge score")
+      case other => fail(s"expected a ValidationError, got $other")
+    }
+  }
+
+  it should "read a number of up to 64 characters and refuse a longer one" in {
+    val atCap   = "0." + "5" * 62
+    val overCap = "0." + "5" * 63
+
+    atCap.length shouldBe 64
+    LLMGuardrail.readScore(atCap) shouldBe Some(BigDecimal(atCap))
+    judge(atCap, threshold = 0.5) shouldBe Right("content")
+    judge(s"**Score:** $atCap", threshold = 0.5) shouldBe Right("content")
+
+    LLMGuardrail.readScore(overCap) shouldBe None
+    LLMGuardrail.readScore("0" * 60 + ".5") shouldBe Some(BigDecimal("0.5"))
+    LLMGuardrail.readScore("0" * 63 + ".5") shouldBe None
+  }
+
   it should "name the reply and what was expected when it refuses one" in {
     val message = judge("85", threshold = 0.0).swap.toOption.get.message
 
     message should include("'85'")
     message should include("0 to 1")
+  }
+
+  it should "quote a refused reply redacted and cut to 200 characters (#1674)" in {
+    val reply   = "I cannot score this.\n" + org.llm4s.testutil.EchoedCredentials.Text + "\n" + "x" * 1000
+    val message = judge(reply, threshold = 0.0).swap.toOption.get.message
+
+    message should include("Could not parse LLM judge score")
+    message should include("[REDACTED]")
+    org.llm4s.testutil.EchoedCredentials.leaked(message) shouldBe empty
+    message should include(s"(truncated, original length: ")
+    (message should not).include("x" * 201)
   }
 }

@@ -1,7 +1,7 @@
 package org.llm4s.javaapi
 
 import org.llm4s.core.safety.Safety
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation, UserMessage }
 import org.llm4s.types.Result
@@ -12,6 +12,20 @@ import org.llm4s.types.Result
  * The underlying Scala client returns `Result[Completion]`; this wrapper
  * unwraps the content string and surfaces it as [[LlmResult]] so Java
  * callers never import any Scala types.
+ *
+ * Every `complete` blocks the calling thread and never throws: a failure comes back inside the
+ * [[LlmResult]]. Interrupting the thread blocked in a call returns a failed result whose error is a
+ * [[org.llm4s.error.CancelledError CancelledError]], with the thread's interrupt flag still set;
+ * `InterruptedException` is never thrown. The methods therefore declare no checked exception, and
+ * `javac` rejects a `catch (InterruptedException e)` around them as "never thrown in body of
+ * corresponding try statement" - test the result instead:
+ *
+ * {{{
+ * LlmResult<String> result = client.complete("Long question");
+ * if (result.isFailure() && result.getError().error() instanceof CancelledError) {
+ *     // interrupted while blocked; Thread.currentThread().isInterrupted() is still true
+ * }
+ * }}}
  *
  * Obtain instances via [[Llm4s.createDefaultClient]] or
  * [[Llm4s.createClient]].
@@ -26,19 +40,28 @@ final class JLlmClient private[javaapi] (private[javaapi] val underlying: LLMCli
   /**
    * Sends a single user query and returns the assistant's text response. A `null` query yields a
    * failed [[LlmResult]], never an exception.
+   *
+   * Blocks the calling thread. If that thread is interrupted while it waits, the result is a failure
+   * whose error is a [[org.llm4s.error.CancelledError CancelledError]] and the thread's interrupt
+   * flag is left set; `InterruptedException` is never thrown, and the method declares none.
    */
   def complete(query: String): LlmResult[String] =
     if (query == null) nullArgument("query")
     else guarded(underlying.complete(Conversation(Seq(UserMessage(query)))))
 
-  /** Sends a pre-built conversation and returns the assistant's text response. */
+  /**
+   * Sends a pre-built conversation and returns the assistant's text response. Blocks and reports an
+   * interrupt as `complete(String)` does: a `CancelledError` result, the interrupt flag left set,
+   * never an `InterruptedException`.
+   */
   def complete(conversation: Conversation): LlmResult[String] =
     if (conversation == null) nullArgument("conversation")
     else guarded(underlying.complete(conversation))
 
   /**
    * Full access: send a conversation with explicit [[CompletionOptions]],
-   * returning the raw text content.
+   * returning the raw text content. Blocks and reports an interrupt as `complete(String)` does: a
+   * `CancelledError` result, the interrupt flag left set, never an `InterruptedException`.
    */
   def complete(conversation: Conversation, options: CompletionOptions): LlmResult[String] =
     if (conversation == null) nullArgument("conversation")
@@ -51,10 +74,15 @@ final class JLlmClient private[javaapi] (private[javaapi] val underlying: LLMCli
   /**
    * The wrapper's contract is that it never throws for a failed call: an exception escaping the
    * underlying client (a provider bug, a serialization error) becomes a failed result carrying it
-   * as the cause. `InterruptedException` is not captured, so thread interruption still propagates.
+   * as the cause. The built-in providers answer an interrupt with `Left(CancelledError)` themselves;
+   * an `InterruptedException` that a custom client lets escape becomes the same `CancelledError`,
+   * with the interrupt flag restored, so no caller meets a checked exception the method does not
+   * declare (#1591).
    */
   private def guarded(call: => Result[Completion]): LlmResult[String] =
-    LlmResult.from(Safety.safely(call).flatMap(identity).map(_.content))
+    LlmResult.from(
+      CancelledError.attempt("JLlmClient.complete")(Safety.safely(call).flatMap(identity)).map(_.content)
+    )
 
   override def close(): Unit = underlying.close()
 }

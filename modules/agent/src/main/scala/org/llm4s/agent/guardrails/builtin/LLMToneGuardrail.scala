@@ -16,7 +16,7 @@ import org.llm4s.llmconnect.LLMClient
  * detects them from keywords and sentence shapes without any LLM call and is free, instant and repeatable. This
  * guardrail judges meaning instead, at the cost of the points below.
  *
- * **Cost and side:** every validation makes one extra LLM call, and the content goes to the provider of
+ * **Cost and side:** every validation makes one extra `llmClient.complete` call, and the content goes to the provider of
  * `llmClient`. It is an output guardrail only. The scoring rules and the other limits are described on
  * [[org.llm4s.agent.guardrails.LLMGuardrail]].
  *
@@ -30,7 +30,8 @@ import org.llm4s.llmconnect.LLMClient
  *
  * @param llmClient the client that makes the judge call; it can be the agent's own or a separate model
  * @param allowedTones the acceptable tones, for example `Set("professional", "friendly")`
- * @param threshold the lowest score that passes (a score equal to it passes), between 0.0 and 1.0 or `validate` fails; default 0.7
+ * @param threshold the lowest score that passes (a score equal to it passes), between 0.0 and 1.0 or `validate`
+ *                  fails; default 0.7
  *
  * @example
  * {{{

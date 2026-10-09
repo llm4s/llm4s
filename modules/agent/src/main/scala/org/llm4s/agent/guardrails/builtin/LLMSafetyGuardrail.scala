@@ -16,7 +16,7 @@ import org.llm4s.llmconnect.LLMClient
  * `ProfanityFilter`, and for personal-data patterns use `PIIDetector`: they are free, instant and repeatable,
  * where this guardrail is none of those.
  *
- * **Cost and side:** every validation makes one extra LLM call, so it does not suit latency-sensitive paths, and
+ * **Cost and side:** every validation makes one extra `llmClient.complete` call, so it does not suit latency-sensitive paths, and
  * the content is sent to the provider of `llmClient`. It is an output guardrail only: it judges the agent's
  * final answer. The scoring rules (the judge must answer with one number from 0 to 1: a reply on any other scale,
  * such as `85` or `8/10`, is refused as unreadable and fails the guardrail) and the other limits are described on
@@ -27,7 +27,8 @@ import org.llm4s.llmconnect.LLMClient
  * An unreadable reply or a failing `llmClient` is a `Left` too, never a pass.
  *
  * @param llmClient the client that makes the judge call; it can be the agent's own or a separate model
- * @param threshold the lowest score that passes (a score equal to it passes), between 0.0 and 1.0 or `validate` fails; the default 0.8 is higher than the
+ * @param threshold the lowest score that passes (a score equal to it passes), between 0.0 and 1.0 or `validate`
+ *                  fails; the default 0.8 is higher than the
  *                  base default of 0.7, as the original comment put it, "higher for safety"
  * @param customCriteria extra criteria appended to the prompt verbatim under `Additional criteria:`; `None` keeps
  *                       the five built-in criteria only

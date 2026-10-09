@@ -91,6 +91,26 @@ jobs:
       - name: Check install snippets do not pin a literal version
         run: scripts/check-doc-versions.sh
 
+      # Fails when two docs pages under the same parent declare the same `nav_order`: the site then orders them by
+      # title instead, so the number stops meaning anything and nothing reports it (#1623).
+      - name: Check docs nav_order is unique within each parent
+        run: scripts/check-doc-nav-order.sh
+
+      # The release's docs deploy: release.yml dispatches pages.yml on `main` (the github-pages environment rejects a
+      # tag ref, #1152) and waits for it. This runs the dispatcher against a fake `gh`, with no network, and checks that
+      # pages.yml, release.yml and the script agree on the run's title and the tag pattern, and that no workflow input
+      # reaches a shell. It needs jq and ruby, both on the runner.
+      - name: Test the release docs-deploy dispatcher
+        run: scripts/test-dispatch-docs-deploy.sh
+
+      # Fails on a broken internal link in docs/ that scripts/docs-link-baseline.txt does not list, and on a
+      # listed link that no longer breaks (the baseline only shrinks). Links are resolved the way llm4s.org serves
+      # them; see the header of the script. The test runs the check against fixture trees, with no network.
+      - name: Check internal docs links
+        run: |
+          scripts/test-check-docs-site-links.sh
+          scripts/check-docs-site-links.sh
+
       # Fails when the docs state a Scala or JDK version, a module or an sbt command the build does not have.
       # The Scala 2.13 thread began with exactly that kind of claim (#874, #1134); this keeps it corrected.
       # The build's side is what sbt loaded (project/BuildModel.scala), not a reading of build.sbt's text.
@@ -102,9 +122,26 @@ jobs:
           scripts/test-check-doc-support.sh target/build-model.json
           scripts/check-doc-support.sh --model target/build-model.json
 
+      # The wrapper below re-runs a step only when its `[error]` output shows a transient download failure and
+      # never otherwise; this runs it against a fake command, with no network, to keep that true.
+      - name: Test the transient-network retry wrapper
+        run: scripts/test-retry-on-transient-network.sh
+
+      # The frozen set is written down in build.sbt (`mimaFrozen`), in three tier lists beside it, in
+      # docs/reference/v1-scope.md's Package Map and in two prose lists. This keeps them in step; it reads
+      # text only, so it needs no sbt.
+      - name: Check the documented stability tiers match the build
+        run: |
+          scripts/test-check-tier-drift.sh
+          scripts/check-tier-drift.sh
+
       # scalafmtCheckAll covers sources only; scalafmtSbtCheck covers build.sbt and project/*.scala.
+      # scalafmt downloads scalafmt-core at run time, and a network hiccup used to fail this step in about five
+      # seconds ("scalafmt: [v3.7.14] failed to download [.scalafmt.conf]", 2 of 267 runs in three days, both
+      # with a warm 450 MB sbt cache restored, so a cache would not have prevented them). The wrapper re-runs it,
+      # at most twice, on exactly that kind of error; a real formatting failure still fails on the first attempt.
       - name: Check formatting
-        run: sbt scalafmtCheckAll scalafmtSbtCheck
+        run: scripts/retry-on-transient-network.sh sbt scalafmtCheckAll scalafmtSbtCheck
 
       - name: Run Scalafix
         run: sbt scalafixAll
@@ -725,8 +762,11 @@ jobs:
 
       - uses: sbt/setup-sbt@v1
 
+      # Resolving the baseline and the build's artifacts from Maven Central can hit a connection reset (seen once,
+      # run 37316745524: "download error: Caught java.net.SocketException (Connection reset)"); the wrapper
+      # re-runs the step on that kind of error only. A binary-compatibility failure is never retried.
       - name: Check binary compatibility
-        run: sbt mimaReportBinaryIssues
+        run: scripts/retry-on-transient-network.sh sbt mimaReportBinaryIssues
 
   # Kotlin coroutine API and the Java sample (modules/samples/gradle-java): separate Gradle builds that consume
   # llm4s-java-api from local Maven, so they share one publish of the library.

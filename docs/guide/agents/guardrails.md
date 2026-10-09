@@ -60,6 +60,18 @@ Underneath, a block is the graph runtime's *Block*: the run ends as a finished f
 `recover` has nothing to continue and `start` accepts like a completed thread. A `Left` from another
 middleware's `beforeAgent` or `afterAgent` blocks the same way, but is returned as that `Left`.
 
+A list of guardrails runs completely: each guardrail, in order, on the value the previous one
+returned, **even after one has failed**. That is why the block carries every failure's error, and why a
+guardrail that costs a call - an LLM judge - runs on every turn that reaches its list. To stop at the first
+failure, use [`CompositeGuardrail.sequential`](#sequential-short-circuit); the block then names the composite
+as the guardrail.
+
+A block sends one durable `agent.guardrail_blocked` event, naming the first failing guardrail and its phase
+(`Input` or `Output`), and no event comes from a guardrail that passed or that ran after the first failure.
+The run then ends with the kernel's `RunFailed`; `RunCompleted` is never sent for a blocked turn. An input
+block comes before any model call. An output block comes after the turn's `ModelCallCompleted` events, since
+the answer it refuses has been produced. See [Streaming](streaming) for the event stream.
+
 Guardrails on the root agent guard its whole handoff family: they apply to every turn's query and
 every final answer, whichever agent is active after a handoff. See
 [Guardrails and Middleware Across Handoffs](handoffs#guardrails-and-middleware-across-handoffs).
@@ -276,6 +288,30 @@ val sequentialValidation = CompositeGuardrail.sequential(Seq(
 
 // Stops at first failure, more efficient
 ```
+
+### Using a composite in an agent
+
+A composite is a `Guardrail[String]`, while `GuardrailMiddleware` takes `InputGuardrail`s and
+`OutputGuardrail`s, so wrap it. A cast does not work: it throws a `ClassCastException`.
+
+```scala
+import org.llm4s.agent.graph.middleware.GuardrailMiddleware
+import org.llm4s.agent.guardrails.{ CompositeGuardrail, Guardrail, InputGuardrail }
+import org.llm4s.types.Result
+
+def asInput(guardrail: Guardrail[String]): InputGuardrail = new InputGuardrail {
+  val name: String                            = guardrail.name
+  def validate(value: String): Result[String] = guardrail.validate(value)
+}
+
+val agent = Agent
+  .builder("assistant", client)
+  .withMiddleware(GuardrailMiddleware(Seq(asInput(sequentialValidation)), Seq.empty))
+  .build()
+```
+
+`all` runs every guardrail and reports every failure; `any` stops at the first guardrail that passes, so
+those after it do not run; `sequential` stops at the first failure.
 
 ---
 

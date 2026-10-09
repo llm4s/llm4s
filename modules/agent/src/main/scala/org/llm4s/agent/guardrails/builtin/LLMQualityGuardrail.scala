@@ -16,7 +16,7 @@ import org.llm4s.llmconnect.LLMClient
  * `LengthCheck`, and for a required format use `RegexValidator` or `JSONValidator`: they are free, instant and
  * repeatable.
  *
- * **Cost and side:** every validation makes one extra LLM call, and the response goes to the provider of
+ * **Cost and side:** every validation makes one extra `llmClient.complete` call, and the response goes to the provider of
  * `llmClient`. It is an output guardrail only. The scoring rules and the other limits are described on
  * [[org.llm4s.agent.guardrails.LLMGuardrail]].
  *
@@ -31,7 +31,8 @@ import org.llm4s.llmconnect.LLMClient
  *
  * @param llmClient the client that makes the judge call; it can be the agent's own or a separate model
  * @param originalQuery the query the response is judged against
- * @param threshold the lowest score that passes (a score equal to it passes), between 0.0 and 1.0 or `validate` fails; default 0.7
+ * @param threshold the lowest score that passes (a score equal to it passes), between 0.0 and 1.0 or `validate`
+ *                  fails; default 0.7
  *
  * @example
  * {{{

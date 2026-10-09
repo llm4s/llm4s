@@ -7,7 +7,7 @@ nav_order: 2
 
 # RAG for Enterprise
 
-> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](https://github.com/llm4s/llm4s/tree/main/modules/samples).
 
 Learn production-ready strategies for building Retrieval-Augmented Generation (RAG) systems at scale. This guide covers document ingestion, hybrid search, cost optimization, and quality assurance.
 
