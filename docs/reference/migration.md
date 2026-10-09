@@ -13,9 +13,27 @@ Not in a release yet. Stage 2 ([#1699](https://github.com/llm4s/llm4s/issues/169
 
 - [#1700](https://github.com/llm4s/llm4s/issues/1700), the durable `Checkpointer` contract - run-claim leases, fencing tokens and a store contract suite: [below](#durable-checkpointer-contract-1700).
 - [#1701](https://github.com/llm4s/llm4s/issues/1701), the SQLite checkpointer - a new module, nothing to change: [below](#sqlite-checkpointer-1701).
-- [#1702](https://github.com/llm4s/llm4s/issues/1702) history, fork and `updateState`, [#1703](https://github.com/llm4s/llm4s/issues/1703) tool side-effect safety, [#1704](https://github.com/llm4s/llm4s/issues/1704) human-review interrupts and [#1705](https://github.com/llm4s/llm4s/issues/1705) live subscriptions across runtimes: not yet landed.
+- [#1705](https://github.com/llm4s/llm4s/issues/1705), live subscriptions across runtimes - `Checkpointer.awaitEventsAfter` and `WatchPolicy`: [below](#live-subscriptions-across-runtimes-1705).
+- [#1702](https://github.com/llm4s/llm4s/issues/1702) history, fork and `updateState`, [#1703](https://github.com/llm4s/llm4s/issues/1703) tool side-effect safety and [#1704](https://github.com/llm4s/llm4s/issues/1704) human-review interrupts: not yet landed.
 
 Design: `docs/design/typed-agent-runtime-design.md` §4.16 onwards. Guide: [Durable Checkpointers](../guide/agents/durable-checkpointers.html).
+
+### Live subscriptions across runtimes (#1705)
+
+A subscription now delivers the durable events of commits made through any runtime or process sharing its store, not only through its own runtime. Code that runs agents or graphs, or that implements `Checkpointer`, compiles and works unchanged. What changes:
+
+- **`Checkpointer` gains `awaitEventsAfter(threadId, afterSeq, limit, timeout)`**, with a default that polls `eventsAfter`, so existing stores need no change. A store that can be told of commits may override it to return as soon as one lands; `InMemoryCheckpointer` does. A wrapper that delegates to another store should forward it, so that the wrapped store's notification is used:
+
+  ```scala
+  override def awaitEventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int, timeout: FiniteDuration) =
+    underlying.awaitEventsAfter(threadId, afterSeq, limit, timeout)
+  ```
+
+- **`GraphRuntime` takes an optional `WatchPolicy`** after `ClaimPolicy` (default: enabled, `pollInterval` 250 ms). Java and Kotlin get `new GraphRuntime(store, clock, claims)`. `GraphRuntime(store, watch = WatchPolicy.disabled)` gives the old behaviour, where other runtimes' commits are seen only by subscribing again.
+- **A live subscription holds a second virtual thread**, `llm4s-watch-<threadId>`, which polls a store that has no change notification (SQLite) once per `pollInterval`. `cancel()` stops it, as before for the dispatcher.
+- **A subscription can now end with `Disconnected(lastSeq, ReplayFailed(error))` after its replay**, when a read of the store fails, for instance because the store was closed under it. Before, only a failed replay ended this way. Resubscribe with `afterSeq = lastSeq`.
+- **Other runtimes' durable events arrive; their live events do not.** A listener that assumed every durable event came from its own runtime's runs should check `record.runId`.
+- **`CheckpointerContract` gains change-notification cases and a `sibling(store, clock)` hook.** A durable store's spec overrides `sibling` to open another store over the same storage, so that the cases run between connections.
 
 ### SQLite checkpointer (#1701)
 

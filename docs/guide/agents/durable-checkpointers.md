@@ -118,6 +118,20 @@ on executing supersteps whose results would be refused.
   subscribers of its own runtime. Its durable events are refused with its commits.
 - A process that dies holds its threads for up to `ttl`; so does a store that fails to release a claim.
 
+## Subscriptions across runtimes
+
+A subscription sees every commit on its thread, made through any runtime or process that shares the store, not
+only through its own: in order, without gap or duplicate, as for its own runtime's commits. Each live subscription
+watches the store with `Checkpointer.awaitEventsAfter`. A store that is told of commits returns at once. A store that
+is not, such as SQLite, is polled every `WatchPolicy.pollInterval` (250 ms by default):
+
+```scala
+val runtime = GraphRuntime(store, watch = WatchPolicy(pollInterval = 100.millis))
+```
+
+Only durable events cross runtimes; live progress is never stored. See
+[Subscriptions across runtimes](streaming#subscriptions-across-runtimes) for the delivery and back-pressure rules.
+
 ## The SQLite store
 
 {: .note }
@@ -192,6 +206,15 @@ applied, so two stores cannot both pass the checks.
 - **Calls within one store are serialised.** A store is one connection; it is safe to share between threads, and
   a busy runtime gains from a store of its own rather than from sharing another runtime's.
 
+### Watching the file
+
+SQLite cannot tell one connection that another has committed, so a subscription over a `SqliteCheckpointer` sees the
+commits of other stores on the file by reading the event log, once per `WatchPolicy.pollInterval`. Each read is a
+short indexed query, and in WAL mode it never waits for a writer. A process's own runtime still delivers its own
+commits at once. Each live subscription reads once per interval, so where many subscriptions watch one file, raise
+the interval. A subscription whose store is closed under it ends with `Disconnected(lastSeq, ReplayFailed(...))`,
+from which the next process resubscribes.
+
 ### Clocks
 
 A claim's expiry is judged by the clock of the store that grants or renews it - `Clock.systemUTC()` unless you pass
@@ -216,14 +239,18 @@ too. Like every store today it keeps only each thread's latest checkpoint, and d
 ## Writing a store
 
 A store implements `Checkpointer`: `claim`, `renew` and `release` for claims; `commit`, `latest`, `eventsAfter`,
-`compactEvents` and `deleteThread` for the data. The Scaladoc of `Checkpointer` states the contract. In short:
+`compactEvents` and `deleteThread` for the data. `awaitEventsAfter`, which subscriptions use to watch the store, has
+a default that polls `eventsAfter`. The Scaladoc of `Checkpointer` states the contract. In short:
 
 - grant at most one live claim per thread, by the store's clock, and replace an expired one;
 - give every claim a token greater than every token issued for that thread before, also after `deleteThread`;
 - apply a `Commit` entirely or not at all, and only with the current claim's token (`StaleClaim`, checked first);
 - accept a new checkpoint only over the latest (`CheckpointConflict`), and pending writes only for it;
 - number events contiguously inside the commit, and never reuse a number;
-- release only with the current token, and treat any other as a no-op.
+- release only with the current token, and treat any other as a no-op;
+- return from `awaitEventsAfter` what `eventsAfter` would: at once if there is something, and otherwise within about
+  its `timeout`. A store that can be told of commits, such as a database with a notification channel, overrides it
+  to return as soon as one lands. It must then wake for commits made through every store over the same storage.
 
 ### Testing it with the contract suite
 
@@ -251,10 +278,11 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 It runs every case against your store: commits, conflicts, event numbering, compaction, `deleteThread`, round
 trips, claims and fencing (also from many threads at once), and two or more `GraphRuntime`s contending over one
 store - a live run refused elsewhere, renewal, takeover after expiry without re-running completed tasks, a stale
-run's commits refused, and only one of several runtimes admitted to recover a thread. `InMemoryCheckpointer`
-passes it.
+run's commits refused, and only one of several runtimes admitted to recover a thread. It also checks change
+notification: `awaitEventsAfter` itself, and subscriptions in one runtime that receive another runtime's commits in
+order, mid-run, across a restart, and only until they are cancelled. `InMemoryCheckpointer` passes it.
 
-Two hooks fit it to a durable store:
+Three hooks fit it to a durable store:
 
 ```scala
 class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
@@ -271,6 +299,9 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 
 - **`reopen`** runs the cases that check a live claim, its token and the fencing of a stale holder survive a
   restart. It defaults to the same instance.
+- **`sibling`** opens another store over the same storage, as another process would, while the first stays open:
+  `MyCheckpointer.open(mine.location, clock)`. The change-notification cases put each runtime on a store of its own
+  through it. It defaults to the same instance.
 - **`advanceStoreClock`** is how the suite expires claims. By default it moves the `ManualClock` it handed to
   `newCheckpointer`, so the store must judge expiry by that `clock`. A store that can only use a clock of its own,
   such as a database server's `now()`, overrides it to make claims expire as if that clock had moved - by moving
@@ -280,6 +311,7 @@ class MyCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContract:
 ## See also
 
 - [Streaming events](streaming): subscribing to a thread's events, which a store numbers and replays.
-- `docs/design/typed-agent-runtime-design.md` §4.16, the design of claims and fencing.
+- `docs/design/typed-agent-runtime-design.md` §4.16, the design of claims and fencing, and §4.18, subscriptions
+  across runtimes.
 - [Migration guide](../../reference/migration#stage-2-migration-durable-execution): what changed for code that
   implemented `Checkpointer` or built a `Commit`.

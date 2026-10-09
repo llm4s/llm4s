@@ -1,7 +1,7 @@
 package org.llm4s.agent.testkit
 
 import org.llm4s.agent.graph.*
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ CancelledError, ValidationError }
 import org.llm4s.types.Result
 import org.scalatest.{ Assertion, EitherValues, OptionValues }
 import org.scalatest.flatspec.AnyFlatSpecLike
@@ -10,8 +10,16 @@ import org.scalatest.matchers.should.Matchers
 import java.time.{ Clock, Instant }
 import scala.annotation.unused
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.{ ConcurrentHashMap, CountDownLatch, CyclicBarrier, LinkedBlockingQueue, TimeUnit }
+import java.util.concurrent.{
+  ConcurrentHashMap,
+  CopyOnWriteArrayList,
+  CountDownLatch,
+  CyclicBarrier,
+  LinkedBlockingQueue,
+  TimeUnit
+}
 import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
 
 /**
  * The contract every [[org.llm4s.agent.graph.Checkpointer]] must meet, as a ScalaTest suite. Mix it
@@ -23,7 +31,7 @@ import scala.concurrent.duration.*
  *     SqliteCheckpointer.open(freshDatabaseFile(), clock)
  * }}}
  *
- * The cases are the ones the `Checkpointer` Scaladoc states, in two groups:
+ * The cases are the ones the `Checkpointer` Scaladoc states, in three groups:
  *
  *  - '''The store''', called directly: commits applied atomically or not at all; a new checkpoint
  *    accepted only over the latest ([[GraphError.CheckpointConflict]]) and pending writes only for
@@ -33,13 +41,21 @@ import scala.concurrent.duration.*
  *    back as written; and claims and fencing - one live claim per thread, tokens strictly
  *    increasing, takeover once a claim has expired by the store's clock, renewal and release by the
  *    current token only, and every commit refused with [[GraphError.StaleClaim]] unless it carries
- *    the current token - including from many threads at once.
+ *    the current token - including from many threads at once - and change notification:
+ *    `awaitEventsAfter` returns what is there at once, returns a commit made meanwhile through
+ *    this store or another over the same storage within about its `timeout`, returns empty when
+ *    nothing lands, and ends its wait when interrupted.
  *  - '''Two runtimes over one store''': a second [[GraphRuntime]] is refused a thread whose run is
  *    live in the first ([[GraphError.ThreadBusy]] naming the holder); a run that keeps renewing is
  *    not taken over; once a claim expires, the second runtime recovers the thread without re-running
  *    the first run's completed tasks, and the first run's later commits are refused, so it fails
  *    with [[GraphError.CheckpointWriteFailed]] and leaves nothing in the thread; and of several
  *    runtimes recovering one thread at once, exactly one is admitted.
+ *  - '''Subscriptions across runtimes''', each runtime over a store of its own on the same storage
+ *    ([[sibling]]): a subscription in one runtime receives the durable events of runs another
+ *    runtime commits - in order, without gap or duplicate, when it joined before or mid-run - while
+ *    runs alternate between the runtimes; resumes from a sequence number after its runtime restarts;
+ *    never receives another runtime's live progress; and stops watching the store when cancelled.
  *
  * Claim expiry is judged by the store's clock. By default the store under test must use the `clock`
  * it is given for that (and may use it for nothing else), and the suite moves a [[ManualClock]]; it
@@ -50,7 +66,10 @@ import scala.concurrent.duration.*
  *
  * A durable store also overrides [[reopen]], so that the cases about claims and tokens surviving a
  * restart - a process that closes the store and opens the same storage again - run against storage
- * that was really closed. The default reopens nothing and hands the same instance back.
+ * that was really closed. The default reopens nothing and hands the same instance back. It overrides
+ * [[sibling]] too, so that the cases about subscriptions across runtimes put each runtime on a store
+ * of its own - another connection, as another process would open - and change notification is
+ * checked between stores, not within one.
  *
  * Each case gets a new store from [[newCheckpointer]] and uses its own thread ids; the store need
  * not be empty of other threads.
@@ -72,6 +91,14 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
    * is right for a store that keeps nothing beyond its instance, such as `InMemoryCheckpointer`.
    */
   protected def reopen(store: Checkpointer, @unused clock: ManualClock): Checkpointer = store
+
+  /**
+   * Another store over the same storage as `store`, as another runtime or process would open it,
+   * judging claims by the same `clock`; `store` stays open. The default hands `store` back, which is
+   * right for a store that keeps nothing beyond its instance, such as `InMemoryCheckpointer`: runtimes
+   * share such a store by sharing the instance.
+   */
+  protected def sibling(store: Checkpointer, @unused clock: ManualClock): Checkpointer = store
 
   /**
    * Makes the store's claims expire as if its clock had moved forward by `by`. The default moves
@@ -107,6 +134,9 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     def reopened(): Checkpointer =
       current = reopen(current, clock)
       current
+
+    /** Another store over the same storage; see [[CheckpointerContract.sibling]]. */
+    def other(): Checkpointer = sibling(current, clock)
 
     /** Moves the store's clock; see [[CheckpointerContract.advanceStoreClock]]. */
     def advance(by: FiniteDuration): Unit = advanceStoreClock(current, clock, by)
@@ -606,6 +636,94 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     s.store.eventsAfter(s.thread, 1L, 10).value.map(_.seq) shouldBe Vector(2L)
   }
 
+  // ---- change notification ----
+
+  /** `body` on a thread of its own, failing the case unless it returns within [[contractWait]]. */
+  private def within[A](what: String)(body: => A): A =
+    val done = new LinkedBlockingQueue[Either[Throwable, A]]()
+    Thread.ofVirtual().start(() => done.put(scala.util.Try(body).toEither)): Unit
+    Option(done.poll(contractWait.toMillis, TimeUnit.MILLISECONDS)) match
+      case Some(Right(value)) => value
+      case Some(Left(thrown)) => fail(s"$what threw: $thrown")
+      case None               => fail(s"$what did not return within $contractWait")
+
+  it should "return the events after a sequence from awaitEventsAfter at once, as eventsAfter would" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, events = Vector(s.event("a"), s.event("b"), s.event("c"))).value
+    // an hour's timeout: a store that waited although events were there would fail the case
+    within("awaitEventsAfter")(s.store.awaitEventsAfter(s.thread, 1L, 10, 1.hour)).value.map(_.seq) shouldBe
+      Vector(2L, 3L)
+    within("awaitEventsAfter")(s.store.awaitEventsAfter(s.thread, 0L, 2, 1.hour)).value.map(_.seq) shouldBe
+      Vector(1L, 2L)
+    same(
+      within("awaitEventsAfter")(s.store.awaitEventsAfter(s.thread, 0L, 10, 1.hour)).value,
+      s.store.eventsAfter(s.thread, 0L, 10).value
+    )
+  }
+
+  it should "return nothing from awaitEventsAfter once its timeout passes with nothing committed, and report a compacted floor" in {
+    val s     = Store()
+    val token = s.claim("run").value.token
+    s.commit(token, events = Vector(s.event("a"), s.event("b"))).value
+    within("awaitEventsAfter")(s.store.awaitEventsAfter(s.thread, 2L, 10, 50.millis)).value shouldBe empty
+    within("awaitEventsAfter")(s.store.awaitEventsAfter(newThread(), 0L, 10, 50.millis)).value shouldBe empty
+    s.store.compactEvents(s.thread, 2L).value shouldBe (())
+    within("awaitEventsAfter")(s.store.awaitEventsAfter(s.thread, 0L, 10, 50.millis)).refused shouldBe
+      GraphError.ReplayUnavailable(s.thread.value, 2L)
+  }
+
+  it should "return from awaitEventsAfter a commit made while it waits, through this store or another over the same storage" in {
+    val s     = Store()
+    val other = s.other()
+    val token = s.claim("run").value.token
+    s.commit(token, events = Vector(s.event("a"))).value
+
+    /** Waits as a subscription's watch does: one call after another, until one returns events. */
+    def watching(after: Long): LinkedBlockingQueue[Result[Vector[EventRecord]]] =
+      val found = new LinkedBlockingQueue[Result[Vector[EventRecord]]]()
+      Thread.ofVirtual().start { () =>
+        val deadline = System.nanoTime() + contractWait.toNanos
+        var result   = s.store.awaitEventsAfter(s.thread, after, 10, 100.millis)
+        while result.exists(_.isEmpty) && System.nanoTime() < deadline do
+          result = s.store.awaitEventsAfter(s.thread, after, 10, 100.millis)
+        found.put(result)
+      }: Unit
+      found
+
+    def await(found: LinkedBlockingQueue[Result[Vector[EventRecord]]]): Vector[Long] =
+      Option(found.poll(contractWait.toMillis + 1000, TimeUnit.MILLISECONDS))
+        .getOrElse(fail("awaitEventsAfter never returned"))
+        .value
+        .map(_.seq)
+
+    val first = watching(1L)
+    Thread.sleep(50)
+    other.commit(s.thread, Commit(token, None, Vector.empty, Vector(s.event("b"), s.event("c")))).value
+    await(first) shouldBe Vector(2L, 3L)
+
+    val second = watching(3L)
+    Thread.sleep(50)
+    s.commit(token, events = Vector(s.event("d"))).value
+    await(second) shouldBe Vector(4L)
+  }
+
+  it should "end an awaitEventsAfter wait when its thread is interrupted, with CancelledError and the flag set" in {
+    val s       = Store()
+    val outcome = new LinkedBlockingQueue[(Result[Vector[EventRecord]], Boolean)]()
+    val waiting = Thread.ofVirtual().start { () =>
+      val result = s.store.awaitEventsAfter(s.thread, 0L, 10, 1.hour)
+      // `offer`, not `put`, which an interrupted thread could not complete
+      outcome.offer(result -> Thread.currentThread().isInterrupted): Unit
+    }
+    Thread.sleep(50)
+    waiting.interrupt()
+    val (result, flagged) =
+      Option(outcome.poll(contractWait.toMillis, TimeUnit.MILLISECONDS)).getOrElse(fail("the wait did not end"))
+    result.refused shouldBe a[CancelledError]
+    flagged shouldBe true
+  }
+
   // ---- two runtimes over one store ----
 
   /**
@@ -796,4 +914,166 @@ trait CheckpointerContract extends AnyFlatSpecLike with Matchers with EitherValu
     admitted.collect { case Left(error) => error }.foreach(_ shouldBe a[GraphError.ThreadBusy])
     gate.countDown()
     completed(admitted.collectFirst { case Right(handle) => handle }.value) shouldBe Vector("x")
+  }
+
+  // ---- subscriptions across runtimes ----
+
+  /**
+   * A one-node graph: each run logs its input, emitting a durable custom event and a live progress
+   * event on the way; a run whose input has a gate waits for the gate after both.
+   */
+  final private class Steps:
+    val log     = StateKey.appending[String]("log")
+    val gates   = new ConcurrentHashMap[String, CountDownLatch]()
+    val entered = new ConcurrentHashMap[String, CountDownLatch]()
+
+    def gate(input: String): CountDownLatch =
+      val latch = new CountDownLatch(1)
+      gates.put(input, latch)
+      entered.put(input, new CountDownLatch(1))
+      latch
+
+    def awaitEntered(input: String): Assertion =
+      entered.get(input).await(contractWait.toMillis, TimeUnit.MILLISECONDS) shouldBe true
+
+    val graph: CompiledGraph[String, Vector[String]] =
+      val b = GraphBuilder("contract-steps", "v1")
+      val step = b.node[String]("step", writes = Set(log)) { (input, _, context) =>
+        context.emit("contract.step", 1, ujson.Str(input))
+        context.progress("contract.progress", 1, ujson.Str(input))
+        Option(entered.get(input)).foreach(_.countDown())
+        Option(gates.remove(input)).foreach(_.await(contractWait.toMillis, TimeUnit.MILLISECONDS))
+        NodeResult.Continue(Command.empty.update(log, input))
+      }
+      b.compile(step)(_.get(log)).value
+
+  /** What a subscription delivered, in order. */
+  final private class Seen extends (StreamEvent => Unit):
+    private val events                  = new CopyOnWriteArrayList[StreamEvent]()
+    def apply(event: StreamEvent): Unit = events.add(event): Unit
+    def all: Vector[StreamEvent]        = events.asScala.toVector
+    def durable: Vector[EventRecord]    = all.collect { case StreamEvent.Durable(record) => record }
+    def live: Vector[StreamEvent.Live]  = all.collect { case live: StreamEvent.Live => live }
+
+    /** Waits until the subscription has delivered `log`'s last event, then checks it delivered exactly `log`. */
+    def deliveredExactly(log: Vector[EventRecord]): Assertion =
+      eventually(durable.lastOption.map(_.seq) == log.lastOption.map(_.seq) || durable.size > log.size)
+      same(durable, log)
+
+  /** A watch quick enough that the cases need not wait long for a store that is polled. */
+  private val watching = WatchPolicy(pollInterval = 20.millis)
+
+  private def log(s: Store, after: Long = 0L): Vector[EventRecord] = s.store.eventsAfter(s.thread, after, 1000).value
+
+  private def runtime(store: Checkpointer): GraphRuntime =
+    GraphRuntime(store, Clock.systemUTC(), neverRenewed, watching)
+
+  behavior.of("A subscription to a Checkpointer shared by several runtimes")
+
+  it should "receive the durable events another runtime commits, in order, without gap or duplicate" in {
+    val s     = Store()
+    val st    = Steps()
+    val a     = runtime(s.store)
+    val b     = runtime(s.other())
+    val seenB = Seen()
+    val seenA = Seen()
+    val inB   = b.subscribe(s.thread)(seenB).value
+    val inA   = a.subscribe(s.thread)(seenA).value
+    // live, so the commits reach them as they land rather than through their replay
+    eventually(a.storeWatches(s.thread) == 1 && b.storeWatches(s.thread) == 1)
+    completed(a.start(s.thread, st.graph, "one", config("a1")).value) shouldBe Vector("one")
+    completed(a.start(s.thread, st.graph, "two", config("a2")).value) shouldBe Vector("one", "two")
+    val committed = log(s)
+    committed.map(_.runId).distinct shouldBe Vector("a1", "a2")
+    seenB.deliveredExactly(committed)
+    seenA.deliveredExactly(committed)
+    // live progress is never stored: it reaches the runtime whose run sent it, and no other
+    seenA.live.map(_.payload.str) shouldBe Vector("one", "two")
+    seenB.live shouldBe empty
+    inA.cancel()
+    inB.cancel()
+  }
+
+  it should "receive another runtime's run without gap or duplicate when it joins mid-run" in {
+    val s  = Store()
+    val st = Steps()
+    val a  = runtime(s.store)
+    val b  = runtime(s.other())
+    completed(a.start(s.thread, st.graph, "zero", config("a0")).value)
+    val gate    = st.gate("one")
+    val running = a.start(s.thread, st.graph, "one", config("a1")).value
+    st.awaitEntered("one")
+    val seen = Seen()
+    val sub  = b.subscribe(s.thread)(seen).value
+    gate.countDown()
+    completed(running)
+    completed(a.start(s.thread, st.graph, "two", config("a2")).value)
+    seen.deliveredExactly(log(s))
+    sub.cancel()
+  }
+
+  it should "receive every run in order while runs alternate between the runtimes, in each runtime" in {
+    val s     = Store()
+    val st    = Steps()
+    val a     = runtime(s.store)
+    val b     = runtime(s.other())
+    val seenA = Seen()
+    val seenB = Seen()
+    val inA   = a.subscribe(s.thread)(seenA).value
+    val inB   = b.subscribe(s.thread)(seenB).value
+    eventually(a.storeWatches(s.thread) == 1 && b.storeWatches(s.thread) == 1)
+    (1 to 6).foreach { i =>
+      val on = if i % 2 == 1 then a else b
+      completed(on.start(s.thread, st.graph, s"run-$i", config(s"run-$i")).value)
+    }
+    val committed = log(s)
+    committed.map(_.runId).distinct should have size 6
+    seenA.deliveredExactly(committed)
+    seenB.deliveredExactly(committed)
+    inA.cancel()
+    inB.cancel()
+  }
+
+  it should "resume from a sequence number after its runtime restarts, with what was committed meanwhile" in {
+    val s     = Store()
+    val st    = Steps()
+    val a     = runtime(s.store)
+    val first = Seen()
+    val b     = runtime(s.other())
+    val sub   = b.subscribe(s.thread)(first).value
+    eventually(b.storeWatches(s.thread) == 1)
+    completed(a.start(s.thread, st.graph, "one", config("a1")).value)
+    first.deliveredExactly(log(s))
+    sub.cancel()
+    val lastSeq = first.durable.last.seq
+
+    // committed while no subscriber's runtime is up
+    completed(a.start(s.thread, st.graph, "two", config("a2")).value)
+    // the restarted runtime: a new store over the same storage
+    val again     = Seen()
+    val restarted = runtime(s.other())
+    val resumed   = restarted.subscribe(s.thread, afterSeq = lastSeq)(again).value
+    eventually(restarted.storeWatches(s.thread) == 1)
+    completed(a.start(s.thread, st.graph, "three", config("a3")).value)
+    again.deliveredExactly(log(s, lastSeq))
+    resumed.cancel()
+  }
+
+  it should "stop watching the store, and deliver nothing more, once cancelled" in {
+    val s    = Store()
+    val st   = Steps()
+    val a    = runtime(s.store)
+    val b    = runtime(s.other())
+    val seen = Seen()
+    val sub  = b.subscribe(s.thread)(seen).value
+    eventually(b.storeWatches(s.thread) == 1)
+    completed(a.start(s.thread, st.graph, "one", config("a1")).value)
+    seen.deliveredExactly(log(s))
+    sub.cancel()
+    eventually(b.storeWatches(s.thread) == 0)
+    b.liveSubscriptions(s.thread) shouldBe 0
+    val delivered = seen.all
+    completed(a.start(s.thread, st.graph, "two", config("a2")).value)
+    Thread.sleep(watching.pollInterval.toMillis * 5)
+    same(seen.all, delivered)
   }

@@ -147,7 +147,11 @@ enum DisconnectReason:
   /** The listener threw `cause`; the event it threw on is not counted as delivered. */
   case ListenerFailed(cause: Throwable)
 
-  /** Reading the thread's event log failed while replaying. */
+  /**
+   * Reading the thread's event log failed: while replaying, or while reading the commits of another
+   * runtime or process sharing the store ([[WatchPolicy]]) - for instance because they were
+   * compacted away first ([[GraphError.ReplayUnavailable]]).
+   */
   case ReplayFailed(error: LLMError)
 
 /**
@@ -156,10 +160,10 @@ enum DisconnectReason:
  * dispatcher - a virtual thread, parked while there is nothing to deliver - lives until [[cancel]]
  * is called or the subscription is disconnected. Cancel every subscription you no longer need.
  *
- * Live delivery covers only commits made through the [[GraphRuntime]] it was made on. Commits by
- * another runtime or process sharing the same [[Checkpointer]] are not pushed to it; they become
- * visible by subscribing again, which replays the log. Store-level change notification arrives with
- * Stage 2's durable checkpointer backends.
+ * It delivers the durable events of every commit on the thread, made through the [[GraphRuntime]]
+ * it was made on or through any other runtime or process sharing the same [[Checkpointer]]: the
+ * latter it reads from the store as they land ([[WatchPolicy]]). Live progress events reach it only
+ * from runs of its own runtime, because they are never stored.
  */
 trait Subscription:
   /**

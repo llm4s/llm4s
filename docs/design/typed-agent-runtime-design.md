@@ -543,7 +543,7 @@ Limits (owners in §4.9):
 - `RunContext` has no dependency accessor, by decision (§9).
 - `RunPosition` has no fencing token; fencing is Stage 2, with run-claim leases. Closed by #1700 (§4.16).
 - A `Subscription` dropped without `cancel()` keeps its dispatcher's virtual thread parked for the life of the runtime.
-- A subscription is fed live only by commits made through its own `GraphRuntime`. Commits by another runtime or process sharing the `Checkpointer` are seen only by subscribing again, which replays the log.
+- A subscription is fed live only by commits made through its own `GraphRuntime`. Commits by another runtime or process sharing the `Checkpointer` are seen only by subscribing again, which replays the log. Closed by #1705 (§4.18).
 - `Subscription.cancel()` blocks while a listener ignores its interrupt, and two listeners that cancel each other's subscriptions deadlock.
 - The hub lock is runtime-wide, so a long catch-up during a replay-to-live switch briefly delays commits on other threads.
 - If the caller is interrupted after a slow store has saved the claim, admission returns `Left(CancelledError)` and the thread is left with a `Running` claim, which `recover` continues.
@@ -665,7 +665,7 @@ Work the Stage 0 prototypes deliberately left out, and where each item is owned:
 | ~~Durable checkpointer backends (SQLite first)~~ **SQLite closed by #1701** (§4.17: `llm4s-agent-checkpoint-sqlite`; PostgreSQL is Stage 5); a provider contract suite proving one result per call in OpenAI and Anthropic formats (today: `Message.validateConversation`) | #1268, #1269 | Stage 2 |
 | ~~Run-claim leases, so `recover` in another process refuses a live run, and fencing tokens on every commit and in `RunPosition`~~ **closed by #1700** (§4.16: `RunClaim`, `FencingToken`, `StaleClaim`, `llm4s-agent-testkit`) | #1268, #1269, #1277 | Stage 2 |
 | Cancelling a run cancels the child runs it started | #1277 | Stage 3 |
-| Store-level change notification (or polling), so a subscription sees live commits made by another `GraphRuntime` or process sharing the checkpointer (today: live delivery only for commits through the subscribing runtime; others by resubscribing and replaying) | #1277 | Stage 2 |
+| ~~Store-level change notification (or polling), so a subscription sees live commits made by another `GraphRuntime` or process sharing the checkpointer~~ **closed by #1705** (§4.18: `Checkpointer.awaitEventsAfter`, `WatchPolicy`) | #1277 | Stage 2 |
 | Checkpoint history, fork, `updateState`, retention by age or size (today: latest checkpoint only, explicit event compaction). History and fork must never keep or expose a snapshot whose turn a later guardrail `Block` removed (§9, "Guardrail Block outcome"), or the tool loop must guard the answer before its first commit | #1268 | Stage 2 |
 | Static `interruptBefore`/`interruptAfter` breakpoints | #1269 | Stage 2 |
 | Known limits, not planned: a `Subscription` dropped without `cancel()` keeps a parked virtual thread; `cancel()` blocks while a listener ignores its interrupt; the hub lock is runtime-wide; `RunContext` has no dependency accessor (by decision) | #1277 | - |
@@ -687,6 +687,8 @@ Closed by [#1328](https://github.com/llm4s/llm4s/issues/1328) (§4.13): `Agent.r
 Closed by [#1329](https://github.com/llm4s/llm4s/issues/1329) (§4.14): `ModelStep` token streaming through live progress and the replacement of `AgentEvent` by `AgentEvents` run events (left by #1269).
 
 Closed by [#1701](https://github.com/llm4s/llm4s/issues/1701) (§4.17): the first durable checkpointer backend, SQLite, in its own module (left by #1268).
+
+Closed by [#1705](https://github.com/llm4s/llm4s/issues/1705) (§4.18): live subscriptions across runtimes, through store-level change notification with a polling default (left by #1277).
 
 Closed by [#1700](https://github.com/llm4s/llm4s/issues/1700) (§4.16): run-claim leases with expiry and renewal, so `recover` in another runtime or process refuses a live run and takes over a dead one, and fencing tokens on every commit and in `RunPosition` (left by #1268, #1269 and #1277), with the store contract suite in `llm4s-agent-testkit`.
 
@@ -1071,7 +1073,7 @@ Limits:
 - A task of an expired holder that finishes after the takeover is run again by the successor: its pending write and its `TaskCompleted` are refused, so the event log records the task once, but its side effects happen in both runs. One that finished before the claim is carried over instead (see admission above). The same at-least-once boundary.
 - A run that lost its claim keeps delivering its tasks' live progress events (`StreamEvent.Live`, which are never stored) to its own runtime's subscribers until it ends. Its durable events are refused with its commits.
 - A process that stops renewing holds its threads for up to `ttl` after it dies; a store that fails to release does the same.
-- Subscriptions still see live only the commits made through their own runtime ([#1705](https://github.com/llm4s/llm4s/issues/1705)).
+- Subscriptions still see live only the commits made through their own runtime ([#1705](https://github.com/llm4s/llm4s/issues/1705)). Closed by #1705 (§4.18).
 - Renewal is timed by the runtime's wall time and expiry by the store's clock; a store whose clock runs much faster than the runtime's can expire a live run's claim between renewals. Keep `renewEvery` well inside `ttl`. An embedded store opened by several hosts has as many clocks as hosts, and their skew changes the effective `ttl` (see the first store decision).
 
 ### 4.17 Stage 2 slice 2: the SQLite checkpointer ([#1701](https://github.com/llm4s/llm4s/issues/1701))
@@ -1095,6 +1097,36 @@ Limits:
 - WAL needs the processes that share a file to share memory: one host, a local disk, not a network file system.
 - A store whose process is killed leaves its claims in the file until they expire (`ttl`), as §4.16 says for every store.
 - Latest checkpoint only, and events dropped only by `compactEvents`, as for every store until [#1702](https://github.com/llm4s/llm4s/issues/1702).
+
+### 4.18 Stage 2 slice 6: live subscriptions across runtimes ([#1705](https://github.com/llm4s/llm4s/issues/1705))
+
+Until this slice a subscription was fed live only by commits made through its own `GraphRuntime` (§4.6): a hub hands each commit to the subscriptions in its runtime under the commit lock, and another runtime or process sharing the store committed without any hub of this runtime knowing. A shared durable store (§4.17) makes such commits observable; this slice delivers them. The specs are `CrossRuntimeSubscriptionSpec` in `llm4s-agent`, the change-notification and cross-runtime cases of `CheckpointerContract` (§4.16), which `InMemoryCheckpointer` and the SQLite store over one and two connections pass, and `SqliteCrossRuntimeSubscriptionSpec` and the extended `SqliteCrossProcessSpec` in `llm4s-agent-checkpoint-sqlite`.
+
+Store decisions (the `Checkpointer` SPI):
+
+- **One SPI method: `awaitEventsAfter(threadId, afterSeq, limit, timeout)`.** It is `eventsAfter` that waits when there is nothing to return: events after `afterSeq` at once if the log holds any, otherwise those of a commit that lands within `timeout`, or an empty `Vector`. Errors are `eventsAfter`'s (`ReplayUnavailable` behind the floor), and an interrupt ends the wait with `CancelledError`, the flag set again. It is a long poll, not a callback or a stream: the caller keeps its own cursor, ordering, back-pressure and cancellation, a store needs no registration, connection or thread per subscriber, and the contract stays one call that a test can drive.
+- **Polling is the default.** The trait's implementation reads once and, finding nothing, sleeps `timeout` and returns empty: a commit is seen up to `timeout` after it lands, at one `eventsAfter` per `timeout` per subscription. It is how SQLite works, which has no way to tell another connection of a commit. A store that can be told overrides it to wake on a commit and must then wake for commits through every store over the same storage, not only its own. `InMemoryCheckpointer` waits on a condition its commits signal, so runtimes sharing one instance see each other's commits at once; a PostgreSQL store (Stage 5) would use `LISTEN`/`NOTIFY`.
+- **The contract gains cases** for both halves: `awaitEventsAfter` returns what is there at once (with an hour's timeout, so a store that waited fails), returns nothing after its timeout and reports the replay floor, returns a commit made meanwhile through this store or another over the same storage, and ends when interrupted. A new hook, `sibling(store, clock)`, opens another store over the same storage, as another process would (default: the same instance), so these cases and the runtime cases below run between connections for a durable store.
+
+Runtime decisions (`GraphRuntime`, the event hub):
+
+- **Each live subscription watches the store** on a virtual thread of its own, `llm4s-watch-<threadId>`, started when its replay has switched to live (an `Observer`'s, when its run's claim has been handed to it) and stopped by `cancel` and by the dispatcher's end. It calls `awaitEventsAfter` from the last event it has queued, with `WatchPolicy.pollInterval` as the timeout. `GraphRuntime(checkpointer, clock, claims, watch: WatchPolicy = WatchPolicy.default)`: `WatchPolicy(enabled = true, pollInterval = 250.millis)`, validated like `ClaimPolicy`; `WatchPolicy.disabled` restores the old behaviour for a runtime that knows it is the store's only user. Per subscription, not per thread: a watch is one cursor, so a subscriber that is behind, or newly live, is never served from another's position, and there is no shared state to clean up; the cost is one parked virtual thread and, for a polled store, one read per interval per subscription.
+- **What a watch reads is queued holding the commit lock, then the hub lock.** This runtime writes and hands over each commit under the commit lock, so by the time a watch holds it, every event of this runtime that it read has been handed over and is dropped by `seq`. Only other runtimes' events are queued by the watch, and this runtime's keep the place among its live events that #1732 gives them (a live event sent between a commit's write and its hand-over still precedes it). The lock order, commit lock before hub lock, is the commit path's.
+- **Durable events are queued strictly contiguously.** A subscription queues only the event after the last one it queued. A hand-over of this runtime's commit that finds events missing before it - committed elsewhere and not yet read by the watch, at most the events before this run's claim, since claims exclude other runs while it holds the thread - reads them from the store first, holding the same locks, and queues them ahead of it. Before this, a subscription that had missed another runtime's commits queued this runtime's next one after the gap.
+- **Another runtime's events never make a subscriber lag.** A watch queues them only while they fit beside what is queued; the rest stay in the store, and the watch reads them again after `pollInterval`. A subscriber far behind other runtimes is fed at the pace it drains, not disconnected. This runtime's own commits keep §4.6's rule: a hand-over whose missing events and itself do not fit makes the subscriber lag, with `Disconnected(lastSeq, Lagging)` resumable from `lastSeq` as before.
+- **A failed read ends the subscription after what it has queued**, with `Disconnected(lastSeq, ReplayFailed(error))` - a watch read or a hand-over's gap read, a closed store, events compacted away from under a slow subscriber. `ReplayFailed` covers both; no new reason is added. A watch read that is interrupted ends the watch silently.
+- **Live events do not cross runtimes.** `StreamEvent.Live` is never stored, so another runtime's progress (an agent's `TextDelta`s) is not delivered; only its durable events are. A run-scoped stream (`Agent.stream*`, `AgentRun.subscribe`, and the fs2, ZIO, Java and Kotlin streams built on them) follows a run its own runtime started, so it needs nothing new. A UI that follows a thread whose runs execute elsewhere subscribes with `GraphRuntime.subscribe` on a runtime over the same store.
+- **#1737's second corner case is closed by the same mechanism:** a commit the store wrote but reported as failed is never handed over, and the subscription's watch now finds and delivers it, in its place.
+
+Source breaks, with no shims (the CHANGELOG and the Stage 2 migration note list the same): `Checkpointer` gains `awaitEventsAfter`, with a default, so no store has to change; `GraphRuntime`'s primary constructor gains `watch` (Java and Kotlin get `GraphRuntime(checkpointer, clock, claims)`); `CheckpointerContract` gains `sibling` and cases. Behaviour: a subscription now delivers other runtimes' commits, holds a second virtual thread while live, queues durable events only contiguously, and can end with `ReplayFailed` after its replay.
+
+Limits:
+
+- Latency for a polled store is up to `pollInterval`, and each live subscription reads once per interval. Raise the interval, or give the store change notification, where many subscriptions watch one SQLite file.
+- A `Subscription` dropped without `cancel()` now keeps two virtual threads, and for a polled store its watch keeps reading; cancel every subscription you no longer need (§4.6).
+- While a local run holds the thread, a subscription that is still replaying stops at the first event this runtime has not handed over, as §4.6 describes; a successor's events in another runtime, after this runtime's run lost its claim, are then delivered by the watch once the subscription is live.
+- `deleteThread` in another runtime is not reported: a subscription's cursor stays where it was, and a new thread of the same id numbers from 1, so cancel subscriptions to a thread before deleting it, as before.
+- The watch takes the runtime-wide commit lock to queue what it read, briefly delaying commits on other threads, as the hub lock already does (§4.6).
 
 ## 5. Harness capabilities
 

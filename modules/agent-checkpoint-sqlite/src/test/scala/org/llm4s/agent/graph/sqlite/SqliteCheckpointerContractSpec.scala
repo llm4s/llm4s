@@ -35,6 +35,12 @@ class SqliteCheckpointerContractSpec extends AnyFlatSpec with CheckpointerContra
         SqliteFiles.opened(sqlite.path, clock)
       case other => fail(s"not a SqliteCheckpointer: $other")
     }
+
+  override protected def sibling(store: Checkpointer, clock: ManualClock): Checkpointer =
+    store match {
+      case sqlite: SqliteCheckpointer => SqliteFiles.opened(sqlite.path, clock)
+      case other                      => fail(s"not a SqliteCheckpointer: $other")
+    }
 }
 
 /**
@@ -53,6 +59,17 @@ class SqliteTwoConnectionsContractSpec extends AnyFlatSpec with CheckpointerCont
     store match {
       case alternating: Alternating =>
         alternating.stores.foreach(_.close())
+        Alternating(
+          alternating.path,
+          clock,
+          Vector(SqliteFiles.opened(alternating.path, clock), SqliteFiles.opened(alternating.path, clock))
+        )
+      case other => fail(s"not an alternating store: $other")
+    }
+
+  override protected def sibling(store: Checkpointer, clock: ManualClock): Checkpointer =
+    store match {
+      case alternating: Alternating =>
         Alternating(
           alternating.path,
           clock,
