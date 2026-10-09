@@ -63,6 +63,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   writing, `AudioIO.saveWav` / `saveRawPcm16` and the new `AudioPreprocessing.standardizeForSTT(audio, rate)`
   reject MP3 with a `ValidationError`; Tacotron2 refuses it. A caller with an exhaustive `match` on
   `AudioFormat` needs a case for `Mp3`. The `@Cloud` smoke suites check MP3 magic bytes.
+- **Scala CLI quick start: a first LLM call from one file** ([#1456](https://github.com/llm4s/llm4s/issues/1456)):
+  `modules/samples/scala-cli` holds `hello.scala`, `resources/application.conf` (an OpenAI section and a local
+  Ollama one) and `logback.xml`; `cd modules/samples/scala-cli && scala-cli run .` makes the call, and
+  `scala-cli run . --java-opt -Dllm4s.providers.provider=ollama-local` uses Ollama with no API key. The page
+  `docs/getting-started/scala-cli.md` (linked from Installation, the Getting Started index and the README)
+  explains it and what changes from 0.5.0, when the provider clients are separate modules. The script targets the
+  latest release, `llm4s-core` 0.4.1, and was run with `scala-cli` against a local fake provider.
+  `ScalaCliQuickstartSpec` checks the committed configuration against this branch's API, runs the script's calls
+  end to end against a fake Ollama, and fails if the page's code blocks stop matching the files.
+  `scripts/check-doc-versions.sh` now also rejects a literal version in a `//> using dep org.llm4s::...` line.
 - **`llm4s-java-api`: Java interop module** (Beta, `modules/java-api`, package `org.llm4s.javaapi`,
   [#934](https://github.com/llm4s/llm4s/issues/934)): a facade for Java callers over the client and agent API. `Llm4s.createDefaultClient()`
   and `createClient(config)` return an `LlmResult<JLlmClient>`; `JLlmClient` (`AutoCloseable`) offers
