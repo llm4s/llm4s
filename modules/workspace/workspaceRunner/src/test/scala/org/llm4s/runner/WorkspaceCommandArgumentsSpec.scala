@@ -828,12 +828,104 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     environment.put("GIT_DIR", "/elsewhere/.git")
     environment.put("git_work_tree", "/elsewhere")
     environment.put("GIT_CEILING_DIRECTORIES", "")
+    // Configuration, programs and object stores the runner's own environment could carry
+    Seq(
+      "GIT_CONFIG",
+      "GIT_CONFIG_GLOBAL",
+      "GIT_CONFIG_SYSTEM",
+      "GIT_CONFIG_NOSYSTEM",
+      "GIT_CONFIG_PARAMETERS",
+      "GIT_CONFIG_COUNT",
+      "GIT_CONFIG_KEY_0",
+      "GIT_CONFIG_VALUE_0",
+      "git_config_key_1",
+      "GIT_EXEC_PATH",
+      "GIT_EXTERNAL_DIFF",
+      "GIT_PAGER",
+      "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+      "GIT_OBJECT_DIRECTORY",
+      "GIT_INDEX_FILE",
+      "GIT_NAMESPACE",
+      "GIT_COMMON_DIR",
+      "GIT_DISCOVERY_ACROSS_FILESYSTEM"
+    ).foreach(environment.put(_, "/elsewhere"))
     environment.put("LANG", "C")
+    environment.put("PATH", "/usr/bin")
+    environment.put("MYGIT_X", "kept")
     val root = Files.createTempDirectory("ws-git").toRealPath()
     try {
       CommandPolicy.confineGit(environment, root)
-      environment.asScala.toMap shouldBe Map("LANG" -> "C", "GIT_CEILING_DIRECTORIES" -> root.getParent.toString)
+      environment.asScala.toMap shouldBe Map(
+        "LANG"                    -> "C",
+        "PATH"                    -> "/usr/bin",
+        "MYGIT_X"                 -> "kept",
+        "GIT_CEILING_DIRECTORIES" -> root.getParent.toString
+      )
     } finally Files.delete(root)
+  }
+
+  it should "refuse git when the workspace's parent path holds the path-list separator" in {
+    assume(!isWindowsHost, "the git checks run on a Unix host")
+    // GIT_CEILING_DIRECTORIES is a ':'-separated list with no escaping, so a parent named `x:y` would be read as the
+    // two entries `.../x` and `y`, the ceiling would be ignored, and git would climb into the repository above
+    def git(dir: Path, args: String*): Unit = {
+      val p = new ProcessBuilder(("git" +: args).asJava).directory(dir.toFile).redirectErrorStream(true).start()
+      p.getInputStream.readAllBytes()
+      p.waitFor() shouldBe 0
+    }
+    def layout(parentName: String)(check: WorkspaceAgentInterfaceImpl => Unit): Unit = {
+      val top = Files.createTempDirectory("ws-sep")
+      try {
+        val parent = Files.createDirectory(top.resolve(parentName))
+        write(parent.resolve("s"), "SECRET\n")
+        git(parent, "init", "-q")
+        git(parent, "-c", "user.name=t", "-c", "user.email=t@example.com", "add", ".")
+        git(parent, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
+        val root = Files.createDirectory(parent.resolve("ws"))
+        Files.createDirectory(root.resolve("sub"))
+        check(new WorkspaceAgentInterfaceImpl(root.toString, isWindowsHost, Some(ReadOnly)))
+      } finally {
+        def delete(p: Path): Unit = {
+          if (Files.isDirectory(p) && !Files.isSymbolicLink(p))
+            Using.resource(Files.list(p))(_.iterator().asScala.foreach(delete))
+          Files.deleteIfExists(p)
+        }
+        delete(top)
+      }
+    }
+    layout("x:y") { ws =>
+      val ex = refuses(ws, "git show HEAD:s", PathEscape, workingDirectory = Some("sub"))
+      (ex.error should not).include("SECRET")
+      refuses(ws, "git status", PathEscape)
+      // Other programs are unaffected
+      ws.executeCommand("ls", Some("sub"), Some(30.seconds), None).exitCode shouldBe 0
+    }
+    // Control: the same layout without the separator runs git, which stops at the workspace root
+    layout("xy") { ws =>
+      val response = ws.executeCommand("git show HEAD:s", Some("sub"), Some(30.seconds), None)
+      (response.stdout should not).include("SECRET")
+      response.stderr should include("not a git repository")
+    }
+  }
+
+  it should "refuse a .git directory that resolves outside the workspace" in inWorkspace { fx =>
+    // A link to a real repository's .git directory outside: git would read its objects and configuration
+    val outsideGit = Files.createDirectory(fx.outside.resolve(".git"))
+    link(fx, ".git", outsideGit)
+    refuses(fx.interface(ReadOnly), "git status", PathEscape)
+    refuses(fx.interface(ReadOnly), "git log", PathEscape, workingDirectory = Some("sub"))
+    // What Java reports as a directory without following links (a Windows junction) must also resolve inside the
+    // workspace: reached through a link `l` -> outside, `l/.git` is a directory whose real path is outside
+    Files.delete(fx.root.resolve(".git"))
+    val l        = link(fx, "l", fx.outside)
+    val realRoot = fx.root.toRealPath()
+    CommandPolicy
+      .refusal("git", Seq.empty, isWindows = false, realRoot.resolve("l"), realRoot, Map.empty)
+      .map(_.code) shouldBe Some(PathEscape)
+    // A .git directory of the workspace's own is accepted
+    Files.delete(l)
+    Files.createDirectory(fx.root.resolve(".git"))
+    CommandPolicy.refusal("git", Seq.empty, isWindows = false, realRoot, realRoot, Map.empty) shouldBe None
   }
 
   // ---------------------------------------------------------------------------------------------------------------

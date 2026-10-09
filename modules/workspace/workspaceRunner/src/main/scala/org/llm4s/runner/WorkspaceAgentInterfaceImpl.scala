@@ -851,7 +851,7 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
     CommandPolicy
-      .refusal(execLower, argv.tail, isWindows, realWorkDir, realRoot, env, Some(workDir.toPath))
+      .refusal(execLower, argv.tail, isWindows, realWorkDir, realRoot, env, Some(workDir.toPath), Some(rootPath))
       .foreach(refused => throw new WorkspaceAgentException(refused.message, refused.code, None))
 
     // On Windows, built-in commands (echo, dir, type, …) live inside cmd.exe

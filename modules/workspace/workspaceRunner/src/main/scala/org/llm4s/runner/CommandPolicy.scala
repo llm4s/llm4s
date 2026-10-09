@@ -1,5 +1,6 @@
 package org.llm4s.runner
 
+import java.io.File
 import java.nio.file.{ Files, LinkOption, Path, Paths }
 import scala.annotation.tailrec
 import scala.jdk.CollectionConverters._
@@ -62,8 +63,10 @@ import scala.util.{ Try, Using }
  * `-o`, `-T`. Over-blocking there is accepted.
  *
  * '''git.''' git searches upwards for its repository, so the runner confines it to the workspace
- * ([[confineGit]]), a `.git` that is not a directory is refused ([[gitRepositoryRefusal]]), and so is an argument
- * starting with `:` (pathspec magic, index paths), on every platform.
+ * ([[confineGit]]), a `.git` that is not a directory inside the workspace is refused ([[gitRepositoryRefusal]]), and so
+ * is an argument starting with `:` (pathspec magic, index paths), on every platform. git is refused outright when the
+ * workspace root's parent path holds the path-list separator, which `GIT_CEILING_DIRECTORIES` cannot escape
+ * ([[gitCeilingRefusal]]).
  *
  * '''Limits.''' The checks cover what a command is given, not what a program reads by itself. A recursive walk
  * (`ls -R`, `grep -r`, `find`, `diff -r`) is checked where it starts; `ls -L`, `grep -R`/`-S`, `find -L`,
@@ -72,7 +75,8 @@ import scala.util.{ Try, Using }
  * `.git/config` sets `core.fsmonitor`, `diff.external` or a filter or textconv driver, or whose `.git/hooks` has a
  * `post-index-change` hook, makes `git status` or `git diff` run that program; where the agent can write files (the
  * `writeFile` operation, or `cp`/`mv` in [[org.llm4s.shared.WorkspaceSandboxConfig.ReadWriteCommands]]) it can write
- * them (#1721). The checks run before the program starts and do not see a link a concurrent command makes.
+ * them (#1721), as it can a `.git/config` `core.worktree`, a `.git/commondir` or a `.git/objects/info/alternates` that
+ * points git at files outside. The checks run before the program starts and do not see a link a concurrent command makes.
  */
 private[runner] object CommandPolicy {
 
@@ -221,6 +225,8 @@ private[runner] object CommandPolicy {
    * @param environment the variables the caller asked to set
    * @param spelledWorkDir the working directory as the process is given it (absolute, links not resolved), from
    *                    which the lexical reading applies `..` as text; `workDir` when not given
+   * @param spelledRoot the workspace root as configured (absolute, links not resolved); only its parent's spelling is
+   *                    checked, for git (see [[gitCeilingRefusal]])
    */
   def refusal(
     program: String,
@@ -229,7 +235,8 @@ private[runner] object CommandPolicy {
     workDir: Path,
     realRoot: Path,
     environment: Map[String, String],
-    spelledWorkDir: Option[Path] = None
+    spelledWorkDir: Option[Path] = None,
+    spelledRoot: Option[Path] = None
   ): Option[Refusal] =
     // Fails closed: a file-system call that throws (a path the platform cannot resolve) refuses the command
     // rather than escaping `executeCommand` as a raw exception.
@@ -239,7 +246,11 @@ private[runner] object CommandPolicy {
         .orElse(if (isWindows) quoteRefusal(program, args) else None)
         .orElse(if (isWindows && WindowsBuiltins.contains(program)) cmdSyntaxRefusal(program, args) else None)
         .orElse(optionRefusal(program, args, isWindows))
-        .orElse(if (program == "git") gitRepositoryRefusal(workDir, realRoot) else None)
+        .orElse(
+          if (program == "git")
+            gitCeilingRefusal(realRoot +: spelledRoot.toSeq).orElse(gitRepositoryRefusal(workDir, realRoot))
+          else None
+        )
         .orElse(pathRefusal(program, args, isWindows, Bases(workDir, spelledWorkDir.getOrElse(workDir)), realRoot))
         .orElse(if (isWindows) windowsFormRefusal(program, args) else None)
     }.fold(
@@ -633,39 +644,57 @@ private[runner] object CommandPolicy {
   }
 
   /**
-   * The variables that tell git where its repository is. The caller may not set them (only locale variables are
-   * allowed), but the runner's own environment could carry them to the process.
-   */
-  private val GitRepositoryVariables: Seq[String] = Seq(
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_COMMON_DIR",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_NAMESPACE",
-    "GIT_DISCOVERY_ACROSS_FILESYSTEM"
-  )
-
-  /**
    * Confines a `git` process to a repository inside the workspace: `GIT_CEILING_DIRECTORIES` is the real workspace
-   * root's parent, so git stops looking for a repository at the root, and the variables that point git at a
-   * repository elsewhere are removed. Without it, a workspace that is a subdirectory of a larger repository runs git
-   * on that repository, and `git show HEAD:secret`, `git diff` and `git status` read files outside the workspace.
+   * root's parent, so git stops looking for a repository at the root, and every other `GIT_*` variable the runner's own
+   * environment carries is removed. Without it, a workspace that is a subdirectory of a larger repository runs git on
+   * that repository, and `git show HEAD:secret`, `git diff` and `git status` read files outside the workspace.
+   *
+   * The caller cannot set a `GIT_*` variable (only locale variables are allowed), but the runner's environment could
+   * carry one that points git at a repository elsewhere (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
+   * `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_INDEX_FILE`, `GIT_NAMESPACE`,
+   * `GIT_DISCOVERY_ACROSS_FILESYSTEM`), adds configuration (`GIT_CONFIG`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`,
+   * `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT` with `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`) or names a program to
+   * run (`GIT_EXEC_PATH`, `GIT_EXTERNAL_DIFF`, `GIT_PAGER`). None is needed by the read subcommands the policy allows,
+   * so all are removed rather than listed. `GIT_CONFIG_NOSYSTEM` is not set: the system and global configuration
+   * belong to whoever runs the runner, not to the agent, and a container image may need them (`safe.directory`).
+   * Names are matched ignoring case, as Windows does.
    */
   def confineGit(environment: java.util.Map[String, String], realRoot: Path): Unit = {
     val names = environment.keySet.asScala.toList
-    GitRepositoryVariables.foreach(v => names.filter(_.equalsIgnoreCase(v)).foreach(environment.remove))
-    names.filter(_.equalsIgnoreCase("GIT_CEILING_DIRECTORIES")).foreach(environment.remove)
+    names.filter(_.toUpperCase(java.util.Locale.ROOT).startsWith("GIT_")).foreach(environment.remove)
     Option(realRoot.getParent).foreach(parent => environment.put("GIT_CEILING_DIRECTORIES", parent.toString))
+  }
+
+  /**
+   * `GIT_CEILING_DIRECTORIES` is a list split on the platform's path-list separator (`:` on POSIX, `;` on Windows)
+   * with no way to escape one, so a workspace root whose parent's path holds the separator (`/tmp/x:y/ws`) would set
+   * the ceilings `/tmp/x` and `y/...`, neither of them the parent, and git would climb into a repository above the
+   * workspace. Rather than run git unconfined, such a workspace refuses it. The real parent (the ceiling [[confineGit]]
+   * sets) and the configured one are both checked, for the separator of the host git runs on.
+   */
+  private def gitCeilingRefusal(roots: Seq[Path]): Option[Refusal] = {
+    val separator = File.pathSeparatorChar
+    roots
+      .flatMap(root => Option(root.getParent))
+      .map(_.toString)
+      .find(_.contains(separator))
+      .map { parent =>
+        Refusal(
+          PathEscapeAttempt,
+          s"git cannot be confined to this workspace: its parent directory '$parent' holds the path-list separator " +
+            s"'$separator', which GIT_CEILING_DIRECTORIES cannot escape, so git could use a repository outside the " +
+            "workspace. Move the workspace to a path without it."
+        )
+      }
   }
 
   /**
    * git looks for its repository in the working directory and then each directory above it. The runner sets
    * `GIT_CEILING_DIRECTORIES` to the workspace root's parent, so git never uses a repository whose top level lies
    * above the workspace (where `git show HEAD:secret` and `git diff` read files outside it). Inside the workspace, the
-   * nearest `.git` between the working directory and the root must be a directory: a `.git` file (`gitdir: path`) or
-   * link points git at a repository elsewhere, whose content and configuration it would then read.
+   * nearest `.git` between the working directory and the root must be a directory, and its real path must lie inside
+   * the workspace: a `.git` file (`gitdir: path`), a link, or a Windows junction (which Java reports as a directory)
+   * points git at a repository elsewhere, whose content and configuration it would then read.
    */
   private def gitRepositoryRefusal(workDir: Path, realRoot: Path): Option[Refusal] =
     Iterator
@@ -673,12 +702,15 @@ private[runner] object CommandPolicy {
       .takeWhile(dir => dir != null && dir.startsWith(realRoot))
       .map(_.resolve(".git"))
       .find(Files.exists(_, LinkOption.NOFOLLOW_LINKS))
-      .filterNot(Files.isDirectory(_, LinkOption.NOFOLLOW_LINKS))
+      .filterNot { dotGit =>
+        Files.isDirectory(dotGit, LinkOption.NOFOLLOW_LINKS) &&
+        Try(dotGit.toRealPath()).toOption.exists(_.startsWith(realRoot))
+      }
       .map { dotGit =>
         Refusal(
           PathEscapeAttempt,
-          s"'$dotGit' is not a directory: a .git file or link points git at a repository that may lie outside the " +
-            "workspace."
+          s"'$dotGit' is not a directory inside the workspace: a .git file, link or junction points git at a " +
+            "repository that may lie outside the workspace."
         )
       }
 

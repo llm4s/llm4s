@@ -135,7 +135,8 @@ links out of the workspace, and any path argument can name a file outside it
 **Not covered:**
 - `git` reads the repository's own `.git/config` and runs its hooks. Where the agent can write files (the
   `writeFile` operation, or the read-write allowlist) it can set `core.fsmonitor`, `diff.external` or a filter driver,
-  or add a hook such as `.git/hooks/post-index-change`, which a later `git status` or `git diff` runs
+  or add a hook such as `.git/hooks/post-index-change`, which a later `git status` or `git diff` runs, or point git
+  at files outside through `core.worktree`, `.git/commondir` or `.git/objects/info/alternates`
   ([#1721](https://github.com/llm4s/llm4s/issues/1721)).
 - `diff -r` follows symbolic links it meets inside the tree it walks, and no portable option stops it.
 - A link that the read-write list moves or copies to another depth (`mv a/b/rel rel`) can come to point outside.

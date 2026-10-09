@@ -2065,17 +2065,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - *git's repository* (every platform): git looks for its repository in the directories above the working
     directory, so a workspace inside a larger repository ran `git show HEAD:secret`, `git diff` and `git status` on
     that repository and read files outside the workspace. The runner now starts `git` with
-    `GIT_CEILING_DIRECTORIES` set to the workspace root's parent and without inherited `GIT_DIR`-style variables;
-    refuses `git` (`PATH_ESCAPE_ATTEMPT`) when the nearest `.git` inside the workspace is a `gitdir:` file or a
-    link; and refuses a git argument starting with `:` (`:/`, `:(top)`, `:a.txt`), which git resolves from the
-    repository's top level.
+    `GIT_CEILING_DIRECTORIES` set to the workspace root's parent and without any inherited `GIT_*` variable
+    (`GIT_DIR`-style locations, `GIT_CONFIG_*` / `GIT_CONFIG_PARAMETERS` / `GIT_CONFIG_COUNT` configuration,
+    `GIT_EXEC_PATH`, object directories); refuses `git` (`PATH_ESCAPE_ATTEMPT`) when the workspace root's parent
+    path holds the path-list separator (`:` on POSIX, `;` on Windows), which `GIT_CEILING_DIRECTORIES` cannot
+    escape, and when the nearest `.git` inside the workspace is a `gitdir:` file, a link, or a directory whose real
+    path lies outside the workspace (a Windows junction); and refuses a git argument starting with `:` (`:/`,
+    `:(top)`, `:a.txt`), which git resolves from the repository's top level.
   - *Environment* (`ENVIRONMENT_NOT_ALLOWED`): `environment` may set only `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`,
     `COLUMNS`, `LINES` and `NO_COLOR`.
 
   The checks apply to every allowlist, `ReadWriteCommands` and custom ones included (a custom program gets the path
   and environment rules). Still open: `git` reads the repository's own `.git/config` and runs its hooks, so where
   the agent can write files it can set `core.fsmonitor`, `diff.external` or a filter, or add a hook such as
-  `.git/hooks/post-index-change`, that `git status` / `git diff` then runs
+  `.git/hooks/post-index-change`, that `git status` / `git diff` then runs, or point git at files outside through
+  `core.worktree`, `.git/commondir` or `.git/objects/info/alternates`
   ([#1721](https://github.com/llm4s/llm4s/issues/1721)); `diff -r` follows links inside the tree it walks; a relative
   link moved to another depth by the read-write list can come to point outside (paths through it are refused); and
   the checks do not see a link made by a concurrent command.
@@ -2088,7 +2092,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-P`, `-d`) of two sources with the same name, or of several sources one of which is `dir/` or `dir/.`;
   `git branch <name>` without `--list`;
   `git` subcommands other than the read ones; a `git` argument starting with `:`; `git` in a workspace that has no
-  repository of its own but lies inside one (it now reports `not a git repository`); on Windows, the forms listed
+  repository of its own but lies inside one (it now reports `not a git repository`); `git` in a workspace whose
+  parent path holds `:` (POSIX) or `;` (Windows); on Windows, the forms listed
   above; and `environment` variables outside the list. Run writes through the
   `writeFile` / `modifyFile` operations or the read-write allowlist's own programs instead.
 - **Security - `llm4s-core`, `llm4s-agent-tools`: the SSRF guard blocks IPv6 private ranges, redirect header

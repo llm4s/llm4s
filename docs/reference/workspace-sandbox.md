@@ -163,7 +163,8 @@ What these checks do not cover:
 
 - `git` reads the repository's own `.git/config` and runs its hooks, so where the agent can write files it can set
   `core.fsmonitor`, `diff.external` or a filter driver, or add a hook such as `.git/hooks/post-index-change`, that
-  `git status` or `git diff` then runs ([#1721](https://github.com/llm4s/llm4s/issues/1721)).
+  `git status` or `git diff` then runs, or point git at files outside through `core.worktree`, `.git/commondir` or
+  `.git/objects/info/alternates` ([#1721](https://github.com/llm4s/llm4s/issues/1721)).
 - `diff -r` follows symbolic links it meets inside the tree it walks; no portable option stops it.
 - A relative link moved or copied to another depth by the read-write list (`mv a/b/rel rel`) can come to point
   outside. Paths through it are refused, and so is a recursive `cp` into its directory, but the link is not removed.
@@ -214,16 +215,23 @@ are supported. Each rule runs after the path rule, so an argument that leads out
 git looks for its repository in the working directory and then in each directory above it, so a workspace that is a
 subdirectory of a larger repository ran git on that repository: `git show HEAD:secret`, `git diff`, `git log -p`
 and `git status` read files outside the workspace. The runner therefore starts `git` with `GIT_CEILING_DIRECTORIES`
-set to the workspace root's parent and without the `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`,
-`GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_NAMESPACE` and `GIT_DISCOVERY_ACROSS_FILESYSTEM`
-variables the runner's own environment may carry: a workspace without a repository of its own gets
-`not a git repository`. On every platform, `git` is also refused (`PATH_ESCAPE_ATTEMPT`) when the nearest `.git`
-between the working directory and the workspace root is not a directory (a `gitdir:` file or a link points git at a
-repository elsewhere), and an argument starting with `:` is refused (`ARGUMENT_NOT_ALLOWED`): pathspec magic
-(`:/`, `:(top)`, `:!x`) and index paths (`:a.txt`) are resolved from the repository's top level, not the working
-directory. A repository inside the workspace whose `.git` directory points elsewhere through files git reads
-(`commondir`, `objects/info/alternates`), or a bare repository written into the workspace, is the same class of
-gap as [#1721](https://github.com/llm4s/llm4s/issues/1721): it needs the agent to write files.
+set to the workspace root's parent and without any `GIT_*` variable the runner's own environment may carry - those
+that point git at another repository or object store (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
+`GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_NAMESPACE`,
+`GIT_DISCOVERY_ACROSS_FILESYSTEM`), add configuration (`GIT_CONFIG_*`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`
+with `GIT_CONFIG_KEY_n` / `GIT_CONFIG_VALUE_n`) or name a program (`GIT_EXEC_PATH`, `GIT_EXTERNAL_DIFF`): a workspace
+without a repository of its own gets `not a git repository`. `GIT_CONFIG_NOSYSTEM` is not set, so the system and
+global git configuration of whoever runs the runner still apply. `GIT_CEILING_DIRECTORIES` is a list split on the
+path-list separator (`:` on POSIX, `;` on Windows) with no escaping, so where the workspace root's parent path - as
+configured or with links resolved - holds that character, git is refused (`PATH_ESCAPE_ATTEMPT`) rather than run
+with a ceiling it would misread. On every platform, `git` is also refused (`PATH_ESCAPE_ATTEMPT`) when the nearest
+`.git` between the working directory and the workspace root is not a directory, or is one whose real path lies
+outside the workspace (a `gitdir:` file, a link or a Windows junction points git at a repository elsewhere), and an
+argument starting with `:` is refused (`ARGUMENT_NOT_ALLOWED`): pathspec magic (`:/`, `:(top)`, `:!x`) and index
+paths (`:a.txt`) are resolved from the repository's top level, not the working directory. A repository inside the
+workspace whose `.git` directory points git at files elsewhere through what git reads from it (`core.worktree` in
+`.git/config`, `.git/commondir`, `.git/objects/info/alternates`), or a bare repository written into the workspace,
+is the same class of gap as [#1721](https://github.com/llm4s/llm4s/issues/1721): it needs the agent to write files.
 
 ## Security Gaps Addressed
 
