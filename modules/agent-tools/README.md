@@ -39,6 +39,7 @@ val result = for {
 | `org.llm4s.toolapi.builtin.http` | `HTTPTool`, with `HttpConfig` for domain/method restrictions |
 | `org.llm4s.toolapi.builtin.shell` | `ShellTool`, with `ShellConfig` (e.g. `ShellConfig.readOnly()`) for an allowlist of commands |
 | `org.llm4s.toolapi.builtin.search` | `DuckDuckGoSearchTool`, `BraveSearchTool`, `ExaSearchTool` |
+| `org.llm4s.toolapi.tools` | `WeatherTool` - an example tool, used in the [`llm4s-agent`](../agent/README.md) quick start |
 | `org.llm4s.config` | `ToolsConfigLoader`, `ToolsConfigKeys` - reads the search tools' API keys |
 
 ## Configuration
@@ -51,9 +52,15 @@ The search tools read their settings from `llm4s.tools.*` (see
 | `llm4s.tools.brave.apiKey` | `BRAVE_SEARCH_API_KEY` | `BraveSearchTool` |
 | `llm4s.tools.exa.apiKey` | `EXA_API_KEY` | `ExaSearchTool` |
 
+`DuckDuckGoSearchTool` needs no API key. Each search tool has further settings with defaults:
+`apiUrl` for all three, `count` and `safeSearch` for Brave, and `numResults`, `searchType` and
+`maxCharacters` for Exa, each overridable through an environment variable - see
+[`src/main/resources/reference.conf`](src/main/resources/reference.conf).
+
 Load them with, for example, `ToolsConfigLoader.loadBraveSearchTool()`.
 
 ## Learn more
 
-See the [agents guide](../../docs/guide/agents/index.md#built-in-tools) for the full list of
-available tools and how they combine with `Agent`.
+See the [built-in tools guide](../../docs/guide/builtin-tools.md) for the full list of available
+tools and their configuration, and the [agents guide](../../docs/guide/agents/index.md#built-in-tools)
+for how they combine with `Agent`.
