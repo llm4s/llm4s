@@ -78,6 +78,7 @@ example below). An unknown profile name makes `loadSandboxConfig` return a `Left
 | An option the program refuses (below) | `ARGUMENT_NOT_ALLOWED` |
 | An argument longer than 4096 characters, or paths that need more than 20000 lookups to check | `ARGUMENT_NOT_ALLOWED` |
 | An argument holding a NUL character, on Windows one holding `"`, or one whose check fails with an error | `ARGUMENT_NOT_ALLOWED` |
+| On Windows, a cmd.exe built-in's argument holding a character cmd.exe splits or parses (`,` `=` `(` `)` `@` `!`, a control character, a non-ASCII space) | `ARGUMENT_NOT_ALLOWED` |
 | An argument that names a location outside the workspace | `PATH_ESCAPE_ATTEMPT` |
 | `cp` only: a name it would write leads outside, or a recursive copy's destination holds a link that does | `PATH_ESCAPE_ATTEMPT` |
 
@@ -131,7 +132,14 @@ Windows) is refused. Only a `..` after a symbolic link makes the two differ. Tha
 - on Windows, an argument holding `"` is refused (`ARGUMENT_NOT_ALLOWED`) before any path or option check: the C
   runtime's argument parser and cmd.exe delete `"` as a quote, so `"..\outside\f` opens `..\outside\f` and
   `"C:\outside\f` an absolute path, and a Windows file name cannot hold one. Quote an argument in the command string
-  instead (`findstr "/C:two words" a.txt`): that quoting is removed before the checks. A wildcard in the last
+  instead (`findstr "/C:two words" a.txt`): that quoting is removed before the checks;
+- on Windows, the built-ins the runner starts through `cmd.exe /c` (`dir`, `type`, `copy`, `move`, `echo`, ...)
+  refuse (`ARGUMENT_NOT_ALLOWED`) an argument holding `,`, `=`, `(`, `)`, `@`, `!`, a control character (VT, FF, a
+  line feed) or a space other than U+0020 (NBSP, U+00FF): `ProcessBuilder` quotes an argument only for a space, a
+  tab, `"`, `<` or `>`, and cmd.exe splits a built-in's arguments on `,`, `;`, `=`, VT, FF and 0xFF as well, so
+  `type a.txt,..\outside\f` typed `a.txt` and then `..\outside\f` although the argument checked was one name
+  inside. `echo` may still print `,`, `=` and parentheses. Programs that are not built-ins (`findstr`) get their
+  arguments from the C runtime, which splits on space and tab only, so `findstr x a,b.txt` runs. A wildcard in the last
   component (`dir .*`) can match the `..` entry, but `dir` only lists it and `type` and `findstr` cannot read a
   directory, so it is not refused.
 

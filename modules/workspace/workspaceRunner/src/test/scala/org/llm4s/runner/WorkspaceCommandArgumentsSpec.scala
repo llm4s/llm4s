@@ -509,6 +509,71 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
       passesPolicy(fx.interface(ReadOnly, windows = false), "cat 'q\"x.txt'")
   }
 
+  it should "refuse a cmd.exe delimiter in a built-in's argument, which cmd.exe splits the argument at" in inWorkspace {
+    fx =>
+      // ProcessBuilder quotes an argument only for a space, tab, `"`, `<` or `>`, so `,` and `=` reach cmd.exe bare
+      // and `type a.txt,..\outside\secret.txt` types `a.txt` and then `..\outside\secret.txt`.
+      val ro = fx.interface(ReadOnly, windows = true)
+      val rw = fx.interface(ReadWrite, windows = true)
+      cmdDelimiterEscapes.foreach(command => refuses(ro, command, ArgumentNotAllowed))
+      refuses(rw, "copy a.txt 'b.txt,..\\outside\\x'", ArgumentNotAllowed)
+      refuses(rw, "move a.txt 'b.txt=..\\outside\\x'", ArgumentNotAllowed)
+      refuses(ro, "type 'a.txt;..\\outside\\secret.txt'", "FORBIDDEN_CHARACTERS")
+      cmdDelimiterControls.foreach(command => passesPolicy(ro, command))
+      passesPolicy(rw, "copy a.txt c.txt")
+      // Not a built-in: findstr is its own program and gets its arguments from the C runtime, which splits on
+      // space and tab only, so `a,b.txt` is one name there
+      passesPolicy(ro, "findstr x 'a,b.txt'")
+      // Off Windows nothing goes through cmd.exe
+      passesPolicy(fx.interface(ReadOnly, windows = false), "cat 'a,b.txt'")
+  }
+
+  it should "refuse those built-in arguments through the policy itself" in inWorkspace { fx =>
+    val root = fx.root.toRealPath()
+    def refusal(program: String, args: String*) =
+      CommandPolicy.refusal(program, args, isWindows = true, root, root, Map.empty).map(_.code)
+    Seq(
+      "type" -> "a.txt,..\\outside\\secret.txt",
+      "type" -> "a.txt=..\\outside\\secret.txt",
+      "type" -> "a.txt=C:\\outside\\secret.txt",
+      "type" -> ",C:\\outside\\secret.txt",
+      "dir"  -> "a,..\\..",
+      "type" -> "a.txt\u000B..\\outside\\secret.txt",
+      "type" -> "a.txt\u000C..\\outside\\secret.txt",
+      "type" -> "a.txt\u00A0..\\outside\\secret.txt",
+      "type" -> "a.txt\u00FF..\\outside\\secret.txt",
+      "type" -> "a.txt\n..\\outside\\secret.txt",
+      "type" -> "a.txt\r..\\outside\\secret.txt",
+      "type" -> "a.txt\u3000..\\outside\\secret.txt",
+      "type" -> "(a.txt)",
+      "type" -> "@a.txt",
+      "type" -> "!PATH!",
+      "echo" -> "!PATH!",
+      "echo" -> "x\ny"
+    ).foreach { case (program, arg) =>
+      withClue(s"$program ${arg.map(c => if (Character.isISOControl(c)) '?' else c)}: ") {
+        refusal(program, arg) shouldBe Some(ArgumentNotAllowed)
+      }
+    }
+    refusal("copy", "a.txt", "b.txt,..\\outside\\x") shouldBe Some(ArgumentNotAllowed)
+    refusal("type", "a.txt") shouldBe None
+    refusal("type", "my file.txt") shouldBe None // a space: ProcessBuilder quotes it
+    refusal("dir", "*.txt") shouldBe None
+    refusal("echo", "Hello,", "world", "(a=b)") shouldBe None
+    refusal("findstr", "x", "a,b.txt") shouldBe None
+  }
+
+  it should "type only the checked file when a delimiter is refused on a Windows host" in inWorkspace { fx =>
+    assume(isWindowsHost, "cmd.exe runs the built-ins only on Windows")
+    val ws = fx.interface(ReadOnly, windows = true)
+    cmdDelimiterEscapes.foreach(command => refuses(ws, command, ArgumentNotAllowed))
+    refuses(ws, s"type 'a.txt,${fx.outside}\\secret.txt'", ArgumentNotAllowed)
+    val typed = ws.executeCommand("type a.txt", None, Some(30.seconds), None)
+    typed.exitCode shouldBe 0
+    typed.stdout should include("b")
+    (typed.stdout should not).include("secret")
+  }
+
   it should "refuse those arguments where the platform itself cannot parse them" in inWorkspace { fx =>
     assume(isWindowsHost, "these strings are unparseable paths only on Windows")
     val ws = fx.interface(ReadOnly, windows = true)
@@ -781,6 +846,30 @@ object WorkspaceCommandArgumentsSpec {
     "type 'a\"\"{out}/secret.txt'",
     "type '\"\\\\?\\C:\\outside\\secret.txt'",
     "dir '\"..'"
+  )
+
+  /**
+   * A routed built-in's argument holding a cmd.exe delimiter that `ProcessBuilder` does not quote: cmd.exe splits the
+   * argument there, so the part after it, unchecked, is a second name.
+   */
+  val cmdDelimiterEscapes: Seq[String] = Seq(
+    "type 'a.txt,..\\outside\\secret.txt'",
+    "type 'a.txt=..\\outside\\secret.txt'",
+    "type 'a.txt=C:\\outside\\secret.txt'",
+    "type ',C:\\outside\\secret.txt'",
+    "dir 'a,..\\..'",
+    "dir '=..\\outside'",
+    "TYPE 'a.txt,..\\outside\\secret.txt'"
+  )
+
+  /** Ordinary built-in uses, and text for `echo`: not refused. */
+  val cmdDelimiterControls: Seq[String] = Seq(
+    "dir *.txt",
+    "dir /S /B",
+    "type a.txt",
+    "type 'my file.txt'",
+    "echo Hello, world",
+    "echo a=b (c)"
   )
 
   /** Wildcards, switches and `:` values that stay inside: not refused. */

@@ -44,7 +44,9 @@ import scala.util.{ Try, Using }
  *     path on another drive (`D:x`). Because Win32 removes `..` as text before it opens a name or matches a wildcard,
  *     such an argument is also refused when it has a `..` component after that character (`x*\..\..\f`), or when,
  *     with each such character replaced by `_`, it leads outside. An argument holding a NUL character, or on Windows a
- *     `"` (which the argv parser and cmd.exe delete, so `"..\x` opens `..\x`), is refused (`ARGUMENT_NOT_ALLOWED`), and
+ *     `"` (which the argv parser and cmd.exe delete, so `"..\x` opens `..\x`), or, for a built-in run through
+ *     `cmd.exe /c`, a character cmd.exe splits the argument at (`a.txt,..\x`, see [[cmdSyntaxRefusal]]), is refused
+ *     (`ARGUMENT_NOT_ALLOWED`), and
  *     a check that fails with an exception refuses the command rather than throwing it. A wildcard in the last
  *     component (`.*`, `.?`) can match the `..` entry, but `dir` only lists that entry and `type` / `findstr` cannot
  *     read a directory, so it is not refused; a wildcard is not allowed in an earlier component.
@@ -225,6 +227,7 @@ private[runner] object CommandPolicy {
       environmentRefusal(environment, isWindows)
         .orElse(nulRefusal(program, args))
         .orElse(if (isWindows) quoteRefusal(program, args) else None)
+        .orElse(if (isWindows && WindowsBuiltins.contains(program)) cmdSyntaxRefusal(program, args) else None)
         .orElse(optionRefusal(program, args, isWindows))
         .orElse(pathRefusal(program, args, isWindows, Bases(workDir, spelledWorkDir.getOrElse(workDir)), realRoot))
     }.fold(
@@ -256,6 +259,66 @@ private[runner] object CommandPolicy {
     args
       .find(_.contains('"'))
       .map(notAllowed(program, _, "on Windows the program removes '\"' as a quote and would open a different name."))
+
+  /**
+   * cmd.exe built-ins that have no program of their own, so the runner starts them as `cmd.exe /c <builtin> args`.
+   * Lower-case, as the executable is matched on Windows.
+   */
+  val WindowsBuiltins: Set[String] = Set(
+    "echo",
+    "dir",
+    "type",
+    "copy",
+    "move",
+    "del",
+    "ren",
+    "md",
+    "rd",
+    "set",
+    "cls",
+    "ver",
+    "vol",
+    "date",
+    "time",
+    "pause",
+    "call"
+  )
+
+  /**
+   * Characters cmd.exe treats as delimiters or syntax inside an argument that `ProcessBuilder` leaves unquoted: it
+   * quotes an argument for `cmd.exe` only when it holds a space, a tab, `"`, `<` or `>`. cmd.exe splits a built-in's
+   * arguments on `,`, `;`, `=`, VT, FF and 0xFF (NBSP in the OEM code pages) as well as on space and tab, so
+   * `type a.txt,..\x` types `a.txt` and then `..\x`, while the path rule judged `a.txt,..\x` as one name inside the
+   * workspace. A control character (a line feed ends the command line), any other Unicode space, `(` and `)`
+   * (command blocks), `@` (echo suppression) and `!` (delayed expansion, where the registry enables it) are refused
+   * too, rather than reasoning about each cmd.exe context.
+   */
+  private def isCmdSyntax(c: Char): Boolean =
+    c == ',' || c == ';' || c == '=' || c == '(' || c == ')' || c == '@' || c == '!' || c == 'ÿ' ||
+      Character.isISOControl(c) || (c != ' ' && Character.isSpaceChar(c))
+
+  /** `echo` only prints its line, so its text may hold the pure delimiters and parentheses (`Hello, world`). */
+  private val EchoText: Set[Char] = Set(',', '=', '(', ')')
+
+  /**
+   * A routed built-in's argument holding a character cmd.exe would split it at or parse (see [[isCmdSyntax]]): the
+   * built-in would act on names other than the one the path rule checked (`type a.txt,..\outside\f`).
+   */
+  private def cmdSyntaxRefusal(program: String, args: Seq[String]): Option[Refusal] = {
+    val refused: Char => Boolean =
+      if (program == "echo") c => isCmdSyntax(c) && !EchoText.contains(c) else isCmdSyntax
+    args.iterator
+      .flatMap(arg => arg.find(refused).map(arg -> _))
+      .nextOption()
+      .map { case (arg, c) =>
+        notAllowed(
+          program,
+          arg.map(ch => if (Character.isISOControl(ch)) '?' else ch),
+          f"cmd.exe runs '$program' and splits or parses its arguments at U+${c.toInt}%04X, so the command would " +
+            "act on names other than the one checked."
+        )
+      }
+  }
 
   private def environmentRefusal(environment: Map[String, String], isWindows: Boolean): Option[Refusal] =
     environment.keys.toSeq.sorted

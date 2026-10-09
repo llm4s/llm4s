@@ -2046,7 +2046,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `..` as text before it opens a name, so `type x*\..\..\outside\f` opened `..\outside\f` although the part
     before the `*` is inside. An argument holding `"` is refused on Windows (`ARGUMENT_NOT_ALLOWED`): the C runtime's
     argument parser and cmd.exe delete it as a quote, so `"..\outside\f` opened `..\outside\f` and a leading `"`
-    hid an absolute path. A path must also stay inside under that lexical reading (`..` removed as text, then
+    hid an absolute path. On Windows, the built-ins started through `cmd.exe /c` (`dir`, `type`, `copy`, `move`,
+    `echo`, ...) also refuse an argument holding `,`, `=`, `(`, `)`, `@`, `!`, a control character or a non-ASCII
+    space (`ARGUMENT_NOT_ALLOWED`; `echo` may print `,`, `=` and parentheses): `ProcessBuilder` quotes an argument
+    only for a space, tab, `"`, `<` or `>`, and cmd.exe splits on `,`, `;`, `=`, VT, FF and 0xFF too, so
+    `type a.txt,..\outside\f` typed `..\outside\f` after `a.txt`. A path must also stay inside under that lexical reading (`..` removed as text, then
     links resolved) as well as the kernel's, so `l/../../x` with `l` -> `a/b` is refused on every platform.
   - *Environment* (`ENVIRONMENT_NOT_ALLOWED`): `environment` may set only `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`,
     `COLUMNS`, `LINES` and `NO_COLOR`.

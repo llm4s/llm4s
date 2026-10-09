@@ -636,33 +636,14 @@ class WorkspaceAgentInterfaceImpl(
   /**
    * Windows `cmd.exe` built-in commands that have no standalone `.exe` on PATH.
    * When [[isWindows]] is `true` and the first argv token is one of these, we
-   * prepend `Seq("cmd.exe", "/c")` so the OS can locate the command.  The rest
-   * of the argument vector remains tokenized (not a raw string), so injection
-   * via `;` is harmless (cmd.exe does not treat `;` as a separator), though we
-   * note that `&&`, `||`, `|`, and `&` are still interpreted by cmd.exe when
-   * present as unquoted tokens.
+   * prepend `Seq("cmd.exe", "/c")` so the OS can locate the command.
+   * `ProcessBuilder` joins the vector into one command line that cmd.exe
+   * parses again, quoting an argument only for a space, tab, `"`, `<` or `>`:
+   * cmd.exe still splits on `,`, `;` and `=`, and interprets `&`, `|`, `<`,
+   * `>`, `^` and `%`. [[ForbiddenArgChars]] and [[CommandPolicy]] refuse those
+   * characters in a built-in's arguments (#1715).
    */
-  // All entries are explicitly lowercased so that future contributors cannot
-  // accidentally add mixed-case entries that would break execLower comparisons.
-  private val WindowsBuiltins: Set[String] = Set(
-    "echo",
-    "dir",
-    "type",
-    "copy",
-    "move",
-    "del",
-    "ren",
-    "md",
-    "rd",
-    "set",
-    "cls",
-    "ver",
-    "vol",
-    "date",
-    "time",
-    "pause",
-    "call"
-  ).map(_.toLowerCase)
+  private val WindowsBuiltins: Set[String] = CommandPolicy.WindowsBuiltins
 
   /**
    * Shell metacharacters that must be rejected in every argument token, even
@@ -876,11 +857,9 @@ class WorkspaceAgentInterfaceImpl(
     // On Windows, built-in commands (echo, dir, type, …) live inside cmd.exe
     // and cannot be launched as standalone processes.  We prepend "cmd.exe /c"
     // to the *already-tokenized* vector so each argument is still a separate
-    // string – cmd.exe receives them as distinct argv entries rather than as a
-    // raw command string, which means metacharacters like ';' are inert.
-    // Note: cmd.exe does still interpret '&&', '||', '|', and '&' as operators
-    // when they appear as unquoted tokens; callers should avoid passing these
-    // in arguments to built-in commands.
+    // string. ProcessBuilder still joins them into one command line that
+    // cmd.exe re-parses, so the characters it would split or interpret were
+    // refused above (ForbiddenArgChars and CommandPolicy, #1715).
     val finalArgv: Seq[String] =
       if (isWindows && WindowsBuiltins.contains(execLower))
         Seq("cmd.exe", "/c") ++ argv
