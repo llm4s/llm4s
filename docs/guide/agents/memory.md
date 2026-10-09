@@ -30,6 +30,12 @@ The LLM4S Memory System provides:
 - **Entity tracking** - Remember information about people, places, things
 - **Multiple backends** - In-memory, SQLite, vector stores
 
+The snippets in this guide are kept in `MemoryGuideSpec`
+(`modules/memory/src/test/scala/org/llm4s/agent/memory/MemoryGuideSpec.scala`), which compiles
+them and checks what the text around them says. Snippets that need a live provider (an embedding
+client, an agent) take it as a parameter, so they are compiled but not run against one. The
+Postgres store lives in another module and is not covered there.
+
 ---
 
 ## Dependency
@@ -54,13 +60,10 @@ either way, so `org.llm4s.agent.memory.*` imports keep working.
 ```scala
 import org.llm4s.agent.memory._
 
-// Create a memory manager
 val result = for {
-  manager <- SimpleMemoryManager.empty
-
-  // Record user facts
-  m1 <- manager.recordUserFact(
-    content = "Prefers Scala over Java",
+  // Record a user fact
+  m1 <- SimpleMemoryManager.empty.recordUserFact(
+    fact = "Prefers Scala over Java",
     userId = Some("user-123"),
     importance = Some(0.9)
   )
@@ -68,7 +71,8 @@ val result = for {
   // Record entity knowledge
   m2 <- m1.recordEntityFact(
     entityId = EntityId("anthropic"),
-    content = "AI company that created Claude",
+    entityName = "Anthropic",
+    fact = "AI company that created Claude",
     importance = Some(0.8)
   )
 
@@ -78,9 +82,27 @@ val result = for {
 
 result match {
   case Right(ctx) => println(s"Context: $ctx")
-  case Left(err) => println(s"Error: $err")
+  case Left(err)  => println(s"Error: $err")
 }
 ```
+
+Every write returns a `Result` holding the *updated* manager, so chain the calls and keep using
+the manager you get back. This prints:
+
+```
+# Retrieved Context
+## User Preferences
+- Prefers Scala over Java
+```
+
+The in-memory store searches by **keyword**: it splits the query on whitespace and returns a memory
+whose text contains one of the resulting terms as a substring. "Prefers Scala over Java" contains the
+term "scala" from the query, so it is returned; the Anthropic fact contains none of the terms, so it is
+not. A question such as "What does the user prefer?" would have returned nothing here, because its terms
+are `what`, `does`, `the`, `user` and `prefer?`, and the question mark stays attached to the last one, so
+`prefer?` is not found in "Prefers Scala over Java" (see
+[#1594](https://github.com/llm4s/llm4s/issues/1594)). To retrieve by meaning, use a vector store (see
+[Vector Store](#vector-store)).
 
 ---
 
@@ -93,53 +115,59 @@ result match {
 | `Entity` | Knowledge about entities | "Paris is capital of France" |
 | `Knowledge` | External knowledge | "Scala 3 released in 2021" |
 | `Task` | Task outcomes | "Generated report successfully" |
-| `Custom` | Application-specific | Any custom memory type |
+| `Custom(name)` | Application-specific | Any custom memory type |
 
 ---
 
 ## Memory Manager
 
-The `MemoryManager` is the main interface for working with memory:
+The `MemoryManager` is the main interface for working with memory. `SimpleMemoryManager` is the
+standard implementation; `LLMMemoryManager` adds LLM-powered consolidation and entity extraction
+(see [Memory Consolidation](#memory-consolidation) and [Entity Extraction](#entity-extraction)).
 
 ```scala
 import org.llm4s.agent.memory._
 
-// Create with default in-memory store
+// In-memory store, default configuration
 val manager = SimpleMemoryManager.empty
 
-// Create with configuration
-val configuredManager = SimpleMemoryManager(
-  config = MemoryConfig(
-    autoRecordMessages = true,
-    autoExtractEntities = false,
-    defaultImportance = 0.5,
-    contextTokenBudget = 2000,
-    consolidationEnabled = true
-  ),
-  store = new InMemoryStore()
+// A store and a configuration of your own
+val configured = SimpleMemoryManager.withStore(
+  store = InMemoryStore.empty,
+  config = MemoryManagerConfig(defaultImportance = 0.7)
 )
 ```
 
 ### Configuration Options
 
+`MemoryManagerConfig` is built in code (this module reads no configuration file or environment
+variable):
+
 | Option | Default | Description |
 |--------|---------|-------------|
-| `autoRecordMessages` | `true` | Automatically record conversation turns |
-| `autoExtractEntities` | `false` | Extract entities from messages via LLM |
-| `defaultImportance` | `0.5` | Default importance score (0-1) |
-| `contextTokenBudget` | `2000` | Max tokens for context retrieval |
-| `consolidationEnabled` | `true` | Enable memory consolidation |
+| `defaultImportance` | `0.5` | Importance given to a memory when you do not pass one |
+| `autoRecordMessages` | `true` | Not read by the managers yet (see below) |
+| `autoExtractEntities` | `false` | Not read by the managers yet (see below) |
+| `contextTokenBudget` | `2000` | Not read by the managers yet: pass `maxTokens` to `getRelevantContext` |
+| `consolidationEnabled` | `false` | Not read by the managers yet: call `consolidateMemories` yourself |
+
+`defaultImportance` is the only option a manager consults today. The other four are accepted and
+stored, but neither `SimpleMemoryManager` nor `LLMMemoryManager` reads them, so setting them
+changes nothing: record messages with `recordMessage`, bound the context with `maxTokens`, and
+call `consolidateMemories` and `extractEntities` yourself.
 
 ---
 
 ## Recording Memory
+
+Every `record*` method returns `Result[MemoryManager]`: the manager with the memory added.
 
 ### User Facts
 
 ```scala
 // Record a user preference
 val result = manager.recordUserFact(
-  content = "Prefers functional programming",
+  fact = "Prefers functional programming",
   userId = Some("user-123"),
   importance = Some(0.9)
 )
@@ -151,7 +179,9 @@ val result = manager.recordUserFact(
 // Record knowledge about an entity
 val result = manager.recordEntityFact(
   entityId = EntityId("scala-lang"),
-  content = "Scala is a JVM language combining OOP and FP",
+  entityName = "Scala",
+  fact = "Scala is a JVM language combining OOP and FP",
+  entityType = "language",
   importance = Some(0.8)
 )
 ```
@@ -159,21 +189,25 @@ val result = manager.recordEntityFact(
 ### External Knowledge
 
 ```scala
-// Record external knowledge
+// Record external knowledge: `source` says where it came from
 val result = manager.recordKnowledge(
   content = "The latest LLM4S version is 0.5.0",
-  source = Some("release-notes"),
-  importance = Some(0.7)
+  source = "release-notes",
+  metadata = Map("channel" -> "stable")
 )
 ```
+
+`recordKnowledge` takes no `importance`, and the memory it stores has none (the metadata you pass
+is kept on it). Use `recordEntityFact` or `recordUserFact` when importance matters.
 
 ### Task Outcomes
 
 ```scala
 // Record a task result
 val result = manager.recordTask(
-  content = "Successfully generated quarterly report",
-  taskId = Some("task-456"),
+  description = "Generate the quarterly report",
+  outcome = "Report generated",
+  success = true,
   importance = Some(0.6)
 )
 ```
@@ -186,58 +220,71 @@ import org.llm4s.llmconnect.model._
 // Record a conversation turn
 val result = manager.recordMessage(
   message = UserMessage("What's the weather in Paris?"),
-  conversationId = Some(ConversationId("conv-789"))
+  conversationId = "conv-789"
 )
 
-// Record entire conversation
+// Record several messages at once
 val result = manager.recordConversation(
-  conversation = conversation,
-  conversationId = ConversationId("conv-789")
+  messages = Seq(UserMessage("And in Rome?"), AssistantMessage("Sunny, 24 degrees.")),
+  conversationId = "conv-789"
 )
 ```
+
+The conversation id is a plain `String`. Each message is stored with its role (`user`,
+`assistant`, `system` or `tool`).
 
 ---
 
 ## Retrieving Memory
 
+Each retrieval method returns a `Result[String]`, ready to put in a prompt. When there is nothing
+to report the string is empty.
+
 ### Relevant Context
 
-Get context relevant to a query using semantic search:
+Get the memories relevant to a query. With the in-memory store this is keyword matching; with a
+vector store it is similarity of meaning:
 
 ```scala
 val context = manager.getRelevantContext(
   query = "Tell me about Scala programming",
-  maxTokens = Some(1000),
-  memoryTypes = Some(Set(MemoryType.UserFact, MemoryType.Knowledge))
+  maxTokens = 1000,
+  filter = MemoryFilter.ByTypes(Set(MemoryType.UserFact, MemoryType.Knowledge))
 )
 ```
+
+The context starts with `# Retrieved Context` and groups the memories under `## Relevant
+Knowledge`, `## Entity Information`, `## User Preferences`, `## Previous Context` and `## Past
+Tasks`. `maxTokens` limits the length at about four characters per token (see
+[Manage Context Token Budget](#3-manage-context-token-budget)).
 
 ### Conversation History
 
 ```scala
 val history = manager.getConversationContext(
-  conversationId = ConversationId("conv-789"),
-  limit = Some(10)
+  conversationId = "conv-789",
+  maxMessages = 10
 )
 ```
+
+The result starts with `Previous conversation:` and has one `[role]: text` line per message.
 
 ### Entity Context
 
 ```scala
-val entityInfo = manager.getEntityContext(
-  entityId = EntityId("anthropic"),
-  limit = Some(5)
-)
+val entityInfo = manager.getEntityContext(EntityId("anthropic"))
 ```
+
+The result is `Known facts about <entity name>:` followed by one `- fact` line per memory.
 
 ### User Context
 
 ```scala
-val userInfo = manager.getUserContext(
-  userId = "user-123",
-  limit = Some(10)
-)
+val userInfo = manager.getUserContext(Some("user-123"))
 ```
+
+The result is `Known facts about the user:` followed by one `- fact` line per fact recorded for
+that user. Pass `None` to include the facts of every user.
 
 ---
 
@@ -245,47 +292,57 @@ val userInfo = manager.getUserContext(
 
 ### In-Memory Store
 
-Fast but volatile - loses data on restart:
+Fast but volatile - loses data on restart. Each store is an immutable value: a write returns a
+new store, and `SimpleMemoryManager` keeps track of it for you.
 
 ```scala
 import org.llm4s.agent.memory.InMemoryStore
 
-val store = new InMemoryStore()
-val manager = SimpleMemoryManager(store = store)
+val store = InMemoryStore.empty
+val manager = SimpleMemoryManager.withStore(store)
 ```
 
 ### SQLite Store
 
-Persistent local storage:
+Persistent local storage. Opening a store returns a `Result`, and a SQLite store holds one JDBC
+connection, so close it when you are done:
 
 ```scala
 import org.llm4s.agent.memory.SQLiteMemoryStore
 
-// File-based (persistent)
-val store = SQLiteMemoryStore.file("/tmp/memory.db")
+for {
+  // File-based (persistent)
+  file <- SQLiteMemoryStore("memory.db")
 
-// In-memory SQLite (fast, volatile)
-val store = SQLiteMemoryStore.inMemory()
-
-val manager = SimpleMemoryManager(store = store)
+  // In-memory SQLite (fast, volatile)
+  volatile <- SQLiteMemoryStore.inMemory()
+} yield (file, volatile)
 ```
+
+A SQLite store is not safe for concurrent use: give each thread its own instance, or synchronise
+access yourself.
 
 ### Vector Store
 
 Semantic search with embeddings:
 
 ```scala
-import org.llm4s.agent.memory.VectorMemoryStore
-import org.llm4s.agent.memory.EmbeddingService
+import org.llm4s.agent.memory._
+import org.llm4s.llmconnect.EmbeddingClient
+import org.llm4s.llmconnect.config.EmbeddingModelConfig
+import org.llm4s.types.Result
 
-// Create embedding service
-val embeddingService = new EmbeddingService(embeddingClient)
+// Wrap an embedding client
+def embeddingServiceFor(embeddingClient: EmbeddingClient, modelConfig: EmbeddingModelConfig): EmbeddingService =
+  LLMEmbeddingService(embeddingClient, modelConfig)
 
-// Create vector store
-val store = new VectorMemoryStore(embeddingService)
-
-val manager = SimpleMemoryManager(store = store)
+// A vector store in a SQLite file (VectorMemoryStore.inMemory(embeddingService) keeps it in memory)
+def vectorManager(embeddingService: EmbeddingService, path: String): Result[SimpleMemoryManager] =
+  VectorMemoryStore(path, embeddingService).map(store => SimpleMemoryManager.withStore(store))
 ```
+
+For tests, `MockEmbeddingService(dimensions = 8)` produces deterministic vectors from a hash of
+the text; its scores say nothing about meaning.
 
 The store embeds what it keeps as a *document* and the text you search with as a *query*
 (`EmbeddingService.embedQuery`). Models that embed the two differently (Voyage, Cohere, Jina) are
@@ -298,46 +355,41 @@ custom `EmbeddingService` written before it existed keeps working unchanged.
 
 ### Injecting Context
 
-```scala
-val result = for {
-  providerConfig <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(providerConfig)
-  // Get memory manager with existing data
-  manager <- loadMemoryManager()
-
-  // Get relevant context for the query
-  context <- manager.getRelevantContext(userQuery)
-
-  // Build an agent whose system prompt carries the context
-  systemPrompt = s"""You are a helpful assistant.
-    |
-    |Relevant context from memory:
-    |$context""".stripMargin
-
-  agent <- Agent.builder("assistant", client)
-    .withSystemPrompt(systemPrompt)
-    .withTools(tools)
-    .build()
-
-  // Run the agent
-  result <- agent.run(userQuery)
-
-  // Record the conversation
-  _ <- manager.recordConversation(result.messages, conversationId)
-} yield result
-```
-
-### Automatic Recording
+Put the relevant memory in the system prompt, run the agent, then record the turn. The memory half
+of this is runnable as is; `runAgent` stands for however you build and call your agent (see the
+[Agents guide](index)), taking the system prompt and returning the messages of the turn:
 
 ```scala
-val manager = SimpleMemoryManager(
-  config = MemoryConfig(
-    autoRecordMessages = true  // Automatically record all messages
-  )
-)
+import org.llm4s.agent.memory._
+import org.llm4s.llmconnect.model.Message
+import org.llm4s.types.Result
 
-// Messages are recorded automatically when using this manager
+def answerWithMemory(
+  manager: MemoryManager,
+  userQuery: String,
+  conversationId: String
+)(runAgent: String => Result[Seq[Message]]): Result[MemoryManager] =
+  for {
+    // Get relevant context for the query
+    context <- manager.getRelevantContext(userQuery)
+
+    // Build a system prompt that carries the context
+    systemPrompt = s"""You are a helpful assistant.
+      |
+      |Relevant context from memory:
+      |$context""".stripMargin
+
+    // Run your agent with that prompt and keep what was said
+    messages <- runAgent(systemPrompt)
+    updated  <- manager.recordConversation(messages, conversationId)
+  } yield updated
 ```
+
+### Recording the Conversation
+
+Managers record only what you pass to the `record*` methods. `MemoryManagerConfig.autoRecordMessages`
+is accepted but no manager reads it yet, so record each turn yourself, as above, with
+`recordMessage` or `recordConversation`.
 
 ---
 
@@ -348,108 +400,121 @@ val manager = SimpleMemoryManager(
 ```scala
 import org.llm4s.agent.memory._
 
-// Setup embedding service
-val embeddingService = new EmbeddingService(embeddingClient)
-val store = new VectorMemoryStore(embeddingService)
-val manager = SimpleMemoryManager(store = store)
+import scala.util.Using
 
-// Record knowledge
-for {
-  m1 <- manager.recordKnowledge("Paris is the capital of France")
-  m2 <- m1.recordKnowledge("Berlin is the capital of Germany")
-  m3 <- m2.recordKnowledge("Rome is the capital of Italy")
-
-  // Semantic search finds relevant memories
-  results <- m3.store.search("European capitals", topK = 2)
-} yield results
+def semanticSearch(embeddingService: EmbeddingService): Result[Seq[ScoredMemory]] =
+  VectorMemoryStore.inMemory(embeddingService).flatMap { store =>
+    Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
+      for {
+        m1 <- SimpleMemoryManager.withStore(store).recordKnowledge("Paris is the capital of France", "geography")
+        m2 <- m1.recordKnowledge("Berlin is the capital of Germany", "geography")
+        m3 <- m2.recordKnowledge("Rome is the capital of Italy", "geography")
+        results <- m3.store.search("European capitals", topK = 2)
+      } yield results
+    }
+  }
 ```
+
+The results are `ScoredMemory` values, best first. With a real embedding model they are the
+memories closest in meaning to the query.
 
 ### Search with Filters
 
+Filters are built from the `MemoryFilter` cases and combined with `&&`, `||` and `!`:
+
 ```scala
-val filter = MemoryFilter(
-  memoryTypes = Some(Set(MemoryType.Knowledge)),
-  minImportance = Some(0.7),
-  userId = Some("user-123"),
-  entityId = None,
-  afterTimestamp = None,
-  beforeTimestamp = None
-)
+val filter = MemoryFilter.ByType(MemoryType.Knowledge) &&
+  MemoryFilter.MinImportance(0.7) &&
+  MemoryFilter.ByMetadata("user_id", "user-123")
 
 val results = store.search(
   query = "programming languages",
   topK = 5,
-  filter = Some(filter)
+  filter = filter
 )
 ```
+
+The other cases are `ByTypes`, `HasMetadata`, `MetadataContains`, `ByEntity`, `ByConversation`,
+`ByTimeRange`, `ContentContains`, `Custom` (any `Memory => Boolean`), `All` and `None`.
 
 ---
 
 ## Memory Consolidation
 
-Automatically summarize and consolidate old memories:
+Consolidation summarises old memories into fewer, shorter ones. Only `LLMMemoryManager` does it:
+`SimpleMemoryManager.consolidateMemories` returns the manager unchanged.
 
 ```scala
-val manager = SimpleMemoryManager(
-  config = MemoryConfig(
-    consolidationEnabled = true
-  )
-)
+import org.llm4s.agent.memory._
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.types.Result
 
-// Manually trigger consolidation
-val result = manager.consolidateMemories(
-  olderThan = java.time.Duration.ofDays(7),
-  maxToConsolidate = 100
-)
+import java.time.Instant
+import java.time.temporal.ChronoUnit
+
+// An LLM client is needed to write the summaries
+def llmManager(client: LLMClient): LLMMemoryManager =
+  LLMMemoryManager(
+    config = MemoryManagerConfig.default,
+    store = InMemoryStore.empty,
+    client = client
+  )
+
+// Consolidate memories older than a week, in groups of at least ten
+def consolidate(manager: MemoryManager): Result[MemoryManager] =
+  manager.consolidateMemories(
+    olderThan = Instant.now().minus(7, ChronoUnit.DAYS),
+    minCount = 10
+  )
 ```
+
+`minCount` applies to each group of old memories (same type and context) separately, not to their
+total. Nothing consolidates on its own: `consolidationEnabled` is not read, so call
+`consolidateMemories` when you want it (for example from a scheduled job).
 
 ---
 
 ## Entity Extraction
 
-Extract entities from messages using LLM:
+Extract entities from text using an LLM. Only `LLMMemoryManager` does it: on
+`SimpleMemoryManager`, `extractEntities` returns the manager unchanged.
 
 ```scala
-val result = for {
-  providerConfig <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(providerConfig)
+import org.llm4s.agent.memory._
+import org.llm4s.types.Result
 
-  manager = SimpleMemoryManager(
-    config = MemoryConfig(
-      autoExtractEntities = true
-    ),
-    llmClient = Some(client)  // Required for entity extraction
-  )
-
-  // Record message - entities extracted automatically
-  m1 <- manager.recordMessage(
-    UserMessage("I work at Anthropic in San Francisco")
-  )
-  // Entities "Anthropic" and "San Francisco" are automatically extracted
-} yield m1
+def extractEntities(manager: MemoryManager): Result[String] =
+  for {
+    m1 <- manager.extractEntities(
+      text = "Anthropic is an AI company that created Claude",
+      conversationId = Some("conv-789")
+    )
+    // The extracted entities are ordinary entity memories
+    info <- m1.getEntityContext(EntityId.fromName("Anthropic"))
+  } yield info
 ```
 
-### Manual Extraction
-
-```scala
-val entities = manager.extractEntities(
-  content = "Claude is an AI assistant created by Anthropic"
-)
-// Returns: Seq(EntityId("claude"), EntityId("anthropic"))
-```
+`extractEntities` returns the manager holding the new entity memories, not a list of ids. Read
+them back with `getEntityContext`; `EntityId.fromName` turns a name into the id used for it
+(lower case, spaces replaced by `_`). Nothing extracts on its own: `autoExtractEntities` is not
+read, so call `extractEntities` for the text you want mined.
 
 ---
 
 ## Memory Statistics
 
 ```scala
-val stats = manager.stats()
-
-println(s"Total memories: ${stats.totalCount}")
-println(s"By type: ${stats.countByType}")
-println(s"Oldest: ${stats.oldestTimestamp}")
-println(s"Newest: ${stats.newestTimestamp}")
+val result = manager.stats.map { stats =>
+  s"""Total memories: ${stats.totalMemories}
+     |By type: ${stats.byType}
+     |Oldest: ${stats.oldestMemory}
+     |Newest: ${stats.newestMemory}""".stripMargin
+}
 ```
+
+`stats` is a `Result[MemoryStats]`. It also has `entityCount`, `conversationCount` (the number of
+distinct conversations) and `embeddedCount`. `byType` leaves out types with no memories, and
+`oldestMemory` and `newestMemory` are `None` when there are none.
 
 ---
 
@@ -458,45 +523,47 @@ println(s"Newest: ${stats.newestTimestamp}")
 ### Save and Load
 
 ```scala
-// Using SQLite for persistence
-val result = for {
-  // Create persistent store
-  store <- SQLiteMemoryStore.file("/path/to/memory.db")
-  manager = SimpleMemoryManager(store = store)
+import scala.util.Using
 
-  // Record memories (automatically persisted)
-  m1 <- manager.recordUserFact("User preference", Some("user-1"))
-
-  // On next session, create manager with same store path
-  // All memories are automatically loaded
-} yield m1
+// Both opened stores close even when a Result is Left.
+val result = SQLiteMemoryStore("memory.db").flatMap { store =>
+  Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
+    SimpleMemoryManager.withStore(store).recordUserFact("Likes Scala", Some("user-1")).map(_ => ())
+  }
+}.flatMap { _ =>
+  SQLiteMemoryStore("memory.db").flatMap { reopened =>
+    Using.resource(new AutoCloseable { override def close(): Unit = reopened.close() }) { _ =>
+      SimpleMemoryManager.withStore(reopened).getUserContext(Some("user-1"))
+    }
+  }
+}
+// Right("Known facts about the user:\n- Likes Scala")
 ```
 
 ### Cross-Session Memory
 
 ```scala
-object PersistentMemory {
-  private val dbPath = "/path/to/memory.db"
+import scala.util.Using
 
-  def getManager(): Result[SimpleMemoryManager] = {
-    for {
-      store <- SQLiteMemoryStore.file(dbPath)
-    } yield SimpleMemoryManager(store = store)
-  }
+class PersistentMemory(dbPath: String) {
+
+  // Open the store, run something against a manager on it, and close the store again
+  def withManager[A](use: MemoryManager => Result[A]): Result[A] =
+    SQLiteMemoryStore(dbPath).flatMap { store =>
+      Using.resource(new AutoCloseable { override def close(): Unit = store.close() }) { _ =>
+        use(SimpleMemoryManager.withStore(store))
+      }
+    }
 }
 
+val memory = new PersistentMemory("memory.db")
+
 // Session 1
-val result1 = for {
-  manager <- PersistentMemory.getManager()
-  m <- manager.recordUserFact("Likes Scala", Some("user-1"))
-} yield m
+val result1 = memory.withManager(_.recordUserFact("Likes Scala", Some("user-1")))
 
 // Session 2 (later)
-val result2 = for {
-  manager <- PersistentMemory.getManager()
-  context <- manager.getUserContext("user-1")
-  // context includes "Likes Scala" from session 1
-} yield context
+val result2 = memory.withManager(_.getUserContext(Some("user-1")))
+// context includes "Likes Scala" from session 1
 ```
 
 ---
@@ -506,63 +573,54 @@ val result2 = for {
 ### 1. Set Appropriate Importance
 
 ```scala
-// High importance - core user preferences
-manager.recordUserFact("Primary programming language is Scala", importance = Some(0.9))
+for {
+  // High importance - core user preferences
+  m1 <- manager.recordUserFact("Primary programming language is Scala", importance = Some(0.9))
 
-// Medium importance - useful but not critical
-manager.recordKnowledge("Attended ScalaDays 2024", importance = Some(0.6))
+  // Medium importance - useful but not critical
+  m2 <- m1.recordEntityFact(EntityId("scaladays"), "ScalaDays", "Attended in 2024", importance = Some(0.6))
 
-// Low importance - ephemeral information
-manager.recordTask("Ran tests at 10am", importance = Some(0.3))
+  // Low importance - ephemeral information
+  m3 <- m2.recordTask("Run the tests", "Passed", success = true, importance = Some(0.3))
+} yield m3
 ```
 
 ### 2. Use Specific Memory Types
 
-```scala
-// Don't use generic Knowledge for everything
-// Use specific types for better retrieval
+Don't use generic `Knowledge` for everything: specific types are grouped under their own
+heading in the retrieved context and can be filtered with `MemoryFilter.ByType`.
 
-// For user preferences
-manager.recordUserFact(...)
-
-// For entity-specific information
-manager.recordEntityFact(...)
-
-// For external knowledge
-manager.recordKnowledge(...)
-```
+- `recordUserFact(...)` for user preferences
+- `recordEntityFact(...)` for entity-specific information
+- `recordKnowledge(...)` for external knowledge
+- `recordTask(...)` for task outcomes
 
 ### 3. Manage Context Token Budget
 
 ```scala
-val manager = SimpleMemoryManager(
-  config = MemoryConfig(
-    contextTokenBudget = 2000  // Limit context size
-  )
-)
-
-// Context retrieval respects the budget
-val context = manager.getRelevantContext(query)
-// Returns <= 2000 tokens of context
+// About four characters per token: the context is cut to fit
+val context = manager.getRelevantContext(query, maxTokens = 500)
 ```
+
+`getRelevantContext` stops adding memories once the next one would take the text past
+`maxTokens * 4` characters; the section headings count towards that, the `# Retrieved Context` line
+does not. A very small `maxTokens` can therefore leave a heading with nothing under it. The default
+is 2000 tokens, and `MemoryManagerConfig.contextTokenBudget` is not consulted.
 
 ### 4. Clean Up Old Memories
 
 ```scala
-// Consolidate old memories periodically
-manager.consolidateMemories(
-  olderThan = java.time.Duration.ofDays(30),
-  maxToConsolidate = 500
-)
+// Consolidate old memories periodically (LLMMemoryManager only)
+consolidate(manager)
 
-// Or delete old, low-importance memories
-store.deleteMemories(
-  filter = MemoryFilter(
-    maxImportance = Some(0.3),
-    beforeTimestamp = Some(thirtyDaysAgo)
-  )
+// Delete old, low-importance memories (there is no "maximum importance" filter: use `Custom`)
+store.deleteMatching(
+  MemoryFilter.Custom(_.importance.exists(_ <= 0.3)) &&
+    MemoryFilter.ByTimeRange(before = Some(thirtyDaysAgo))
 )
 ```
+
+`deleteMatching` returns the store without the matching memories.
 
 ---
 

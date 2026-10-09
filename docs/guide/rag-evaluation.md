@@ -2,7 +2,7 @@
 layout: page
 title: RAG Evaluation
 parent: User Guide
-nav_order: 4
+nav_order: 18
 ---
 
 # RAG Evaluation & Benchmarking

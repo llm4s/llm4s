@@ -37,7 +37,7 @@ Note: the GitHub connector failed to start during the original review pass, so G
    - The project leans into Scala's real advantage: type safety, functional state, and explicit composition.
 
 3. Serious agent/RAG surface
-   - Agents include tool calling, state, usage summaries, streaming events, handoffs, guardrails, memory stores, and DAG orchestration.
+   - Agents include tool calling, state, usage summaries, streaming events, handoffs, guardrails, memory stores, and DAG orchestration. (Superseded by #1330: DAG orchestration is removed; multi-agent workflows are graphs.)
    - RAG support includes document loaders, chunking, vector stores, keyword indexes, hybrid search, reranking, RAGAS-style evaluation, permission-aware RAG, and benchmarking.
 
 4. Production-oriented primitives already exist

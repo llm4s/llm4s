@@ -526,7 +526,7 @@ only if you name these types in your own signatures. It replaces three overlappi
 types that used to ship in `llm4s-core`, which is a source break — see the
 [migration note](../reference/migration.md#slice-3-llm4s-media).
 
-### For agents (`Agent`, guardrails, handoffs, orchestration)
+### For agents (`Agent`, guardrails, handoffs, graphs)
 
 {: .note }
 > Not yet published. `llm4s-agent` exists in the build as of
@@ -538,7 +538,7 @@ libraryDependencies += "org.llm4s" %% "llm4s-agent" % llm4sVersion // same versi
 ```
 
 The agent runtime - `org.llm4s.agent` (`Agent`, `AgentResult`, guardrails, handoffs,
-orchestration) and the console assistant, `org.llm4s.assistant` - lives here.
+the graph runtime) and the console assistant, `org.llm4s.assistant` - lives here.
 Agent memory is the separate `llm4s-memory`; the ready-made tools are `llm4s-agent-tools`.
 `llm4s-core` keeps what the agent is built on: `LLMClient`, the tool API and the tracing
 contract. Package names are unchanged. See the
@@ -611,7 +611,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-provider-testkit" % llm4sVersion % 
 ```
 
 The checks a provider module's own `Llm4s<Name>ModuleSpec` makes: discovery, sole ownership of its ids,
-explicit registration and the config-to-client round trip. See
+explicit registration and the config-to-client round trip. It requires JDK 21: its interruption checks
+and its local test server run on virtual threads. See
 [Writing a provider](../guide/writing-a-provider#testing).
 
 ### For Workspace (Containerized Execution)
