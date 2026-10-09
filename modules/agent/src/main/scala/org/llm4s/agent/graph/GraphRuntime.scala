@@ -114,21 +114,37 @@ object GraphRuntime:
  * `start` returns can miss the run's first live events; an [[Observer]] passed to `start`, `recover`
  * or `resume` is subscribed during admission, before the claim commits, and so sees every event of
  * the run ([[RunHandle.observation]]).
+ *
+ * A subscription also sees the durable events of commits made through another runtime or process
+ * sharing the checkpointer, in the same order and with the same guarantees: each live subscription
+ * watches the store ([[WatchPolicy]], [[Checkpointer.awaitEventsAfter]]), so they arrive as soon as
+ * the store reports them - at once from a store that is told of commits, within `pollInterval` from
+ * one that is polled. Live progress events are never stored, so another runtime's do not arrive.
  */
 final class GraphRuntime(
   checkpointer: Checkpointer,
   clock: Clock = Clock.systemUTC(),
-  claims: ClaimPolicy = ClaimPolicy.default
+  claims: ClaimPolicy = ClaimPolicy.default,
+  watch: WatchPolicy = WatchPolicy.default
 ):
 
-  /** For callers that cannot use default arguments (Java, Kotlin): [[ClaimPolicy.default]]. */
-  def this(checkpointer: Checkpointer, clock: Clock) = this(checkpointer, clock, ClaimPolicy.default)
+  /** For callers that cannot use default arguments (Java, Kotlin): [[WatchPolicy.default]]. */
+  def this(checkpointer: Checkpointer, clock: Clock, claims: ClaimPolicy) =
+    this(checkpointer, clock, claims, WatchPolicy.default)
 
-  /** For callers that cannot use default arguments (Java, Kotlin): the system clock and [[ClaimPolicy.default]]. */
-  def this(checkpointer: Checkpointer) = this(checkpointer, Clock.systemUTC(), ClaimPolicy.default)
+  /** For callers that cannot use default arguments (Java, Kotlin): [[ClaimPolicy.default]] and [[WatchPolicy.default]]. */
+  def this(checkpointer: Checkpointer, clock: Clock) =
+    this(checkpointer, clock, ClaimPolicy.default, WatchPolicy.default)
 
-  private val hub        = EventHub(checkpointer)
+  /**
+   * For callers that cannot use default arguments (Java, Kotlin): the system clock, [[ClaimPolicy.default]]
+   * and [[WatchPolicy.default]].
+   */
+  def this(checkpointer: Checkpointer) = this(checkpointer, Clock.systemUTC(), ClaimPolicy.default, WatchPolicy.default)
+
+  /** Every commit is written and handed to the event hub under it; the hub's store watches take it too. */
   private val commitLock = new java.util.concurrent.locks.ReentrantLock()
+  private val hub        = EventHub(checkpointer, commitLock, watch)
 
   /**
    * Threads with a run admitting or executing in this runtime, each with that run's tenant, so a
@@ -142,9 +158,14 @@ final class GraphRuntime(
    * Replays events with `seq > afterSeq`, then delivers new events until cancelled or
    * disconnected. The subscription is scoped to the thread, so it delivers every later run on it,
    * and its dispatcher (a virtual thread, parked while idle) lives until [[Subscription.cancel]];
-   * see there for how cancel waits on a running listener. Only commits made through this runtime are
-   * delivered live; another runtime or process sharing the checkpointer is seen only by subscribing
-   * again, which replays the log (store-level change notification is Stage 2). Returns without
+   * see there for how cancel waits on a running listener. Commits made through this runtime are
+   * handed over as they land; those of another runtime or process sharing the checkpointer are read
+   * from the store by the subscription's watch ([[WatchPolicy]]: a second virtual thread, which
+   * `cancel` stops too), in the same order and with the same guarantees, and are queued only as they
+   * fit, so they never make it lag. Live progress of another runtime's runs is not delivered: it is
+   * never stored. With [[WatchPolicy.disabled]], another runtime's commits are seen only by
+   * subscribing again, which replays the log. A failed read of the store ends the subscription,
+   * after what is queued, with [[DisconnectReason.ReplayFailed]]. Returns without
    * replaying: replay runs on the subscription's dispatcher thread, the only thread `listener` is
    * called on, and a failed replay ends it with [[DisconnectReason.ReplayFailed]]. Joining the event
    * hub takes its lock, which another subscription to any thread holds for its final catch-up read
@@ -175,6 +196,9 @@ final class GraphRuntime(
 
   /** How many subscriptions to `threadId` are in the event hub's live set; for tests. */
   private[llm4s] def liveSubscriptions(threadId: ThreadId): Int = hub.liveCount(threadId)
+
+  /** How many subscriptions to `threadId` are watching the store; for tests. */
+  private[llm4s] def storeWatches(threadId: ThreadId): Int = hub.watchCount(threadId)
 
   /** Starts a run on `threadId` with `input`; see the class description. */
   def start[I, O](

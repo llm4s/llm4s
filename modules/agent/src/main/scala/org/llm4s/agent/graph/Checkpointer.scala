@@ -1,8 +1,11 @@
 package org.llm4s.agent.graph
 
+import org.llm4s.error.CancelledError
 import org.llm4s.types.{ Result, TryOps }
 
 import java.time.{ Clock, Instant }
+import java.util.concurrent.TimeUnit
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Try
@@ -31,7 +34,14 @@ import scala.util.Try
  *  - keep events until [[compactEvents]] removes them, and report the earliest sequence still
  *    available when asked to replay from before it ([[GraphError.ReplayUnavailable]]);
  *  - store checkpoints and pending writes as data ([[Checkpoint.toJson]], `PendingWrite`'s
- *    `ReadWriter`), so nothing executable survives a round trip.
+ *    `ReadWriter`), so nothing executable survives a round trip;
+ *  - return from [[awaitEventsAfter]] with what [[eventsAfter]] would, at once if the log already
+ *    holds an event after `afterSeq`, and otherwise within about `timeout` - with the events of a
+ *    commit made meanwhile through any store over the same storage, or empty;
+ *  - tolerate the thread calling [[eventsAfter]] or [[awaitEventsAfter]] being interrupted at any
+ *    point: cancelling a subscription interrupts its watch mid-read, so an interrupt must end that
+ *    one call - with `Left(CancelledError)` or a failed result - and leave the store usable by every
+ *    other thread and later call (see [[awaitEventsAfter]]).
  *
  * The holder of a claim may commit and [[renew]] it after `expiresAt` for as long as no other claim
  * has replaced it: expiry only lets another run take the thread over. `CheckpointerContract` in
@@ -70,6 +80,51 @@ trait Checkpointer:
   /** Up to `limit` events with `seq > afterSeq`, ascending. */
   def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]]
 
+  /**
+   * [[eventsAfter]], waiting for a commit when there is nothing to return yet: up to `limit` events
+   * with `seq > afterSeq`, ascending, at once if the log holds any; otherwise those of a commit that
+   * lands within `timeout`, or an empty `Vector` once it has passed. It is how a subscription learns
+   * of commits made through another [[GraphRuntime]] or process sharing the store (see
+   * [[WatchPolicy]]): each subscription calls it in a loop, from the last event it has queued.
+   *
+   * The default polls. It reads once and, finding nothing, waits `timeout` and returns empty, so the
+   * caller's next call reads again: a commit is seen up to `timeout` after it lands, at the cost of
+   * one [[eventsAfter]] per `timeout` per subscription. A store that can be told of commits overrides
+   * it to return as soon as one lands, without reading meanwhile - [[InMemoryCheckpointer]] wakes on
+   * its own commits, and a database store can use its notification channel (PostgreSQL's
+   * `LISTEN`/`NOTIFY`). Such a store must wake for commits made through every store over the same
+   * storage, not only its own, and still return within about `timeout` when none lands.
+   *
+   * Errors are [[eventsAfter]]'s - [[GraphError.ReplayUnavailable]] when `afterSeq` is behind the
+   * replay floor. Interrupting the waiting thread ends the wait with `Left(CancelledError)`, the
+   * thread's interrupt flag set again.
+   *
+   * '''The reading thread may be interrupted at any point.''' A subscription's watch calls this
+   * on a thread of its own, and [[Subscription.cancel]] - or the subscription's end - interrupts that
+   * thread whether it is waiting or in the middle of a read, so the interrupt can land inside the
+   * store's own I/O ([[eventsAfter]] included). A store must take that as the end of this one call,
+   * never as damage to itself: release what the call held (a pooled connection, a lock), and stay
+   * usable by other threads and later calls. Beware drivers whose I/O goes through a
+   * `java.nio.channels.InterruptibleChannel` (a `FileChannel` or `SocketChannel`): an interrupt
+   * during a read or write closes the channel, with `ClosedByInterruptException`, so a store that
+   * shares one channel - one connection - between threads would lose it for all of them. Such a
+   * store reads on a connection of its own for the waiting call, or discards and replaces a
+   * connection an interrupt has closed.
+   */
+  def awaitEventsAfter(
+    threadId: ThreadId,
+    afterSeq: Long,
+    limit: Int,
+    timeout: FiniteDuration
+  ): Result[Vector[EventRecord]] =
+    eventsAfter(threadId, afterSeq, limit).flatMap { found =>
+      if found.nonEmpty then Right(found)
+      else
+        CancelledError.catchInterrupt(TimeUnit.NANOSECONDS.sleep(timeout.toNanos)) match
+          case Right(_)          => Right(Vector.empty)
+          case Left(interrupted) => Checkpointer.waitCancelled(threadId, interrupted)
+    }
+
   /** Drops events with `seq < beforeSeq`; replay can then start no earlier than `beforeSeq`. */
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit]
 
@@ -83,11 +138,19 @@ trait Checkpointer:
    */
   def deleteThread(threadId: ThreadId): Result[Unit]
 
+object Checkpointer:
+
+  /** An interrupted [[Checkpointer.awaitEventsAfter]]: the flag set again, and `CancelledError`. */
+  private[graph] def waitCancelled(threadId: ThreadId, interrupted: InterruptedException): Result[Nothing] =
+    Thread.currentThread().interrupt()
+    Left(CancelledError(s"waiting for events on thread ${threadId.value}", Some(interrupted)))
+
 /**
  * A [[Checkpointer]] in memory. Checkpoints and pending writes are stored as JSON and decoded on
  * read, exactly as a database-backed store would, so nothing executable survives a round trip.
  * Claims expire by `clock`. Fencing tokens come from one counter for the whole store, so they never
- * repeat for a thread, even after it is deleted.
+ * repeat for a thread, even after it is deleted. [[awaitEventsAfter]] wakes on the store's own
+ * commits, so every runtime sharing the instance sees a commit as soon as it lands, without polling.
  */
 final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Checkpointer:
 
@@ -110,6 +173,9 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
   private val threads   = mutable.Map.empty[String, ThreadRecord]
   private var lastToken = 0L
   private val lock      = new java.util.concurrent.locks.ReentrantLock()
+
+  /** Signalled, under `lock`, whenever a commit appends events. */
+  private val appended = lock.newCondition()
 
   private def record(threadId: ThreadId): ThreadRecord =
     threads.getOrElse(threadId.value, ThreadRecord(None, Vector.empty, Vector.empty, 1L, 1L, None))
@@ -184,6 +250,7 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
           nextSeq = current.nextSeq + stored.size
         )
       )
+      if stored.nonEmpty then appended.signalAll()
       records
     }
   }
@@ -203,10 +270,30 @@ final class InMemoryCheckpointer(clock: Clock = Clock.systemUTC()) extends Check
     val current = record(threadId)
     if afterSeq + 1 < current.earliestSeq then Left(GraphError.ReplayUnavailable(threadId.value, current.earliestSeq))
     else
+      // events are held in ascending `seq`, so the first one after `afterSeq` is found by bisection
+      val first: (Long, ujson.Value) = (afterSeq + 1) -> ujson.Null
+      val from = current.events.search(first)(using Ordering.by[(Long, ujson.Value), Long](_._1)).insertionPoint
       Try(
-        current.events.filter(_._1 > afterSeq).take(limit).map((_, json) => upickle.default.read[EventRecord](json))
+        current.events.slice(from, from + limit).map((_, json) => upickle.default.read[EventRecord](json))
       ).toResult
   }
+
+  /** Waits on the store's own commits rather than polling; see [[Checkpointer.awaitEventsAfter]]. */
+  override def awaitEventsAfter(
+    threadId: ThreadId,
+    afterSeq: Long,
+    limit: Int,
+    timeout: FiniteDuration
+  ): Result[Vector[EventRecord]] =
+    CancelledError.catchInterrupt(withLock(lock) {
+      @tailrec def await(remaining: Long): Result[Vector[EventRecord]] =
+        eventsAfter(threadId, afterSeq, limit) match
+          case Right(found) if found.isEmpty && remaining > 0 => await(appended.awaitNanos(remaining))
+          case other                                          => other
+      await(timeout.toNanos)
+    }) match
+      case Right(result)     => result
+      case Left(interrupted) => Checkpointer.waitCancelled(threadId, interrupted)
 
   def compactEvents(threadId: ThreadId, beforeSeq: Long): Result[Unit] = withLock(lock) {
     val current = record(threadId)

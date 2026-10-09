@@ -31,6 +31,9 @@ import scala.util.{ Try, Using }
  *    restarts and [[deleteThread]], and are never issued twice.
  *  - '''Data only.''' Checkpoints, pending writes and events are stored as JSON - the checkpoint through
  *    `Checkpoint.toJson`, which records its format version - and decoded on read, so nothing executable is stored.
+ *  - '''Change notification by polling.''' SQLite cannot tell a connection that another has committed, so this
+ *    store keeps `Checkpointer.awaitEventsAfter`'s default: a subscription watching it reads the event log once per
+ *    `WatchPolicy.pollInterval`, and sees commits made through other stores on the file that long after they land.
  *
  * The database runs in WAL mode with `synchronous = FULL`: readers never block the writer, and a commit that
  * returned survives a crash or a power loss. SQLite admits one writer at a time per file; a write that finds

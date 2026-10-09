@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Live subscriptions across runtimes** ([#1705](https://github.com/llm4s/llm4s/issues/1705), Stage 2 slice 6 of
+  [#1699](https://github.com/llm4s/llm4s/issues/1699)): a `GraphRuntime.subscribe` now delivers the durable events of
+  commits made through any runtime or process sharing the checkpointer, not only its own, in order, without gap or
+  duplicate. Each live subscription watches the store through the new SPI method `Checkpointer.awaitEventsAfter`, a
+  long poll whose default reads `eventsAfter` once per timeout. `InMemoryCheckpointer` overrides it to wake on its
+  commits; the SQLite store is polled. `WatchPolicy` (on `GraphRuntime`, default enabled, `pollInterval` 250 ms,
+  at least 1 ms) configures the watch, and `WatchPolicy.disabled` turns it off. Other runtimes' events are queued only as they fit,
+  so they never make a subscriber lag. Durable events are queued strictly contiguously: a commit of the subscriber's
+  own runtime first reads any events committed elsewhere that the watch has not read yet. Live events do not cross
+  runtimes, because they are never stored. A commit the store wrote but reported as failed is now delivered too (the
+  second corner case of [#1737](https://github.com/llm4s/llm4s/issues/1737)). `CheckpointerContract` gains
+  change-notification and cross-runtime subscription cases and a `sibling` hook, and the SQLite store passes them over
+  one and two connections, as well as with a subscriber in another process. See
+  [Streaming events](docs/guide/agents/streaming.md#subscriptions-across-runtimes).
 - **`llm4s-agent-checkpoint-sqlite`: the first durable checkpointer** ([#1701](https://github.com/llm4s/llm4s/issues/1701),
   Stage 2 slice 2 of [#1699](https://github.com/llm4s/llm4s/issues/1699)): `SqliteCheckpointer`
   (`org.llm4s.agent.graph.sqlite`) keeps threads - latest checkpoint, pending writes, event log and run claim - in one
@@ -818,6 +832,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now be rejected. Reworked from #923 by @Shubha9807.
 
 ### Changed
+- **Subscriptions watch the checkpoint store** ([#1705](https://github.com/llm4s/llm4s/issues/1705), BREAKING,
+  `llm4s-agent`): `Checkpointer` gains `awaitEventsAfter`, with a polling default, so existing stores compile
+  unchanged. A delegating store should forward it. `GraphRuntime`'s constructor gains an optional `WatchPolicy`, and
+  Java and Kotlin get `new GraphRuntime(store, clock, claims)`. A live subscription holds a second virtual thread
+  (`llm4s-watch-<threadId>`) until it is cancelled, delivers other runtimes' durable events, and ends with
+  `Disconnected(lastSeq, ReplayFailed(error))` when a read of the store fails after its replay, for instance because
+  the store was closed. `CheckpointerContract` gains cases and a `sibling` hook. No shims; see the
+  [Stage 2 migration note](docs/reference/migration.md#live-subscriptions-across-runtimes-1705).
 - **The `Checkpointer` SPI is fenced by run claims** ([#1700](https://github.com/llm4s/llm4s/issues/1700), BREAKING,
   `llm4s-agent`): `Checkpointer` gains `claim`, `renew` and `release`; `Commit` is `Commit(token, checkpoint,
   pendingWrites, events)` with a private constructor and `with*` setters, and a store applies it only with the
