@@ -116,6 +116,7 @@ map_file_to_project() {
     modules/config-policy/*)              echo "configPolicy" ;;
     modules/observability/*)              echo "observability" ;;
     modules/agent-tools/*)                echo "agentTools" ;;
+    modules/agent-testkit/*)              echo "agentTestkit" ;;
     modules/benchmarks/*)                 echo "benchmarks" ;;
     modules/anthropic/*)                  echo "anthropic" ;;
     modules/samples/*)                    echo "samples" ;;
@@ -234,6 +235,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE observabilityPrometheus
       set_add DOWNSTREAM_COMPILE traceOpentelemetry
       set_add DOWNSTREAM_COMPILE agent
+      set_add DOWNSTREAM_COMPILE agentTestkit
       set_add DOWNSTREAM_COMPILE agentTools
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
       set_add DOWNSTREAM_COMPILE gradleDemo
@@ -396,6 +398,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE it
       ;;
     agent)
+      set_add DOWNSTREAM_COMPILE agentTestkit
       set_add DOWNSTREAM_COMPILE rag
       set_add DOWNSTREAM_COMPILE workspaceClient
       set_add DOWNSTREAM_COMPILE samples

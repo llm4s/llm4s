@@ -57,10 +57,18 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
    * handed to the dispatcher's queue rather than replayed.
    */
   final private class Watched(val underlying: InMemoryCheckpointer = InMemoryCheckpointer()) extends Checkpointer {
-    private val reads                              = new AtomicInteger()
-    val switching                                  = new CountDownLatch(1)
-    def commit(threadId: ThreadId, commit: Commit) = underlying.commit(threadId, commit)
-    def latest(threadId: ThreadId)                 = underlying.latest(threadId)
+    private val reads                                                          = new AtomicInteger()
+    val switching                                                              = new CountDownLatch(1)
+    def commit(threadId: ThreadId, commit: Commit)                             = underlying.commit(threadId, commit)
+    def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = underlying.claim(threadId, request)
+    def renew(
+      threadId: ThreadId,
+      token: org.llm4s.agent.graph.FencingToken,
+      ttl: scala.concurrent.duration.FiniteDuration
+    ) =
+      underlying.renew(threadId, token, ttl)
+    def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = underlying.release(threadId, token)
+    def latest(threadId: ThreadId)                                             = underlying.latest(threadId)
     def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = {
       if reads.incrementAndGet() == 2 then switching.countDown()
       underlying.eventsAfter(threadId, afterSeq, limit)
@@ -421,9 +429,17 @@ class EventDispatchSpec extends AnyFlatSpec with Matchers with EitherValues {
   it should "end with ReplayFailed when the store cannot replay" in {
     val error = ValidationError("store", "unreadable")
     val failing = new Checkpointer {
-      private val store                              = InMemoryCheckpointer()
-      def commit(threadId: ThreadId, commit: Commit) = store.commit(threadId, commit)
-      def latest(threadId: ThreadId)                 = store.latest(threadId)
+      private val store                                                          = InMemoryCheckpointer()
+      def commit(threadId: ThreadId, commit: Commit)                             = store.commit(threadId, commit)
+      def claim(threadId: ThreadId, request: org.llm4s.agent.graph.ClaimRequest) = store.claim(threadId, request)
+      def renew(
+        threadId: ThreadId,
+        token: org.llm4s.agent.graph.FencingToken,
+        ttl: scala.concurrent.duration.FiniteDuration
+      ) =
+        store.renew(threadId, token, ttl)
+      def release(threadId: ThreadId, token: org.llm4s.agent.graph.FencingToken) = store.release(threadId, token)
+      def latest(threadId: ThreadId)                                             = store.latest(threadId)
       def eventsAfter(threadId: ThreadId, afterSeq: Long, limit: Int): Result[Vector[EventRecord]] = Left(error)
       def compactEvents(threadId: ThreadId, beforeSeq: Long) = store.compactEvents(threadId, beforeSeq)
       def deleteThread(threadId: ThreadId)                   = store.deleteThread(threadId)

@@ -72,15 +72,40 @@ object RunConfig:
     metadata: Map[String, String] = Map.empty
   ): RunConfig = new RunConfig(runId, tenantId, principal, budgets, metadata)
 
-/** Where a task runs. `checkpointId` is the checkpoint whose frontier it belongs to; `""` outside a [[GraphRuntime]]. */
-final case class RunPosition(
+/**
+ * Where a task runs. `checkpointId` is the checkpoint whose frontier it belongs to; `""` outside a
+ * [[GraphRuntime]]. `fencingToken` is the token of the run's claim on the thread ([[RunClaim]]),
+ * `None` outside a runtime: a node that writes to an external system able to fence can pass it on,
+ * so that system too refuses a run that has lost its claim.
+ */
+final case class RunPosition private (
   threadId: ThreadId,
   runId: RunId,
   checkpointId: String,
   taskId: TaskId,
   nodeId: NodeId,
-  superstep: Int
-)
+  superstep: Int,
+  fencingToken: Option[FencingToken]
+):
+  def withThreadId(t: ThreadId): RunPosition                 = copy(threadId = t)
+  def withRunId(r: RunId): RunPosition                       = copy(runId = r)
+  def withCheckpointId(c: String): RunPosition               = copy(checkpointId = c)
+  def withTaskId(t: TaskId): RunPosition                     = copy(taskId = t)
+  def withNodeId(n: NodeId): RunPosition                     = copy(nodeId = n)
+  def withSuperstep(s: Int): RunPosition                     = copy(superstep = s)
+  def withFencingToken(t: FencingToken): RunPosition         = copy(fencingToken = Some(t))
+  def withFencingToken(t: Option[FencingToken]): RunPosition = copy(fencingToken = t)
+
+object RunPosition:
+  def apply(
+    threadId: ThreadId,
+    runId: RunId,
+    checkpointId: String,
+    taskId: TaskId,
+    nodeId: NodeId,
+    superstep: Int,
+    fencingToken: Option[FencingToken] = None
+  ): RunPosition = new RunPosition(threadId, runId, checkpointId, taskId, nodeId, superstep, fencingToken)
 
 /**
  * What a running task knows: the run's [[RunConfig]], its own [[RunPosition]], and its event channels.
