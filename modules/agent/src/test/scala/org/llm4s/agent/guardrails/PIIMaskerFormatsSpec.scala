@@ -62,10 +62,9 @@ class PIIMaskerFormatsSpec extends AnyFlatSpec with Matchers {
       "Office [REDACTED_PHONE], mobile [REDACTED_PHONE]."
   }
 
-  it should "mask a phone number written in an international format" in
-    pendingUntilFixed {
-      phones.transform("Call +44 20 7946 0958 now") shouldBe "Call [REDACTED_PHONE] now"
-    }
+  it should "mask a phone number written in an international format" in {
+    phones.transform("Call +44 20 7946 0958 now") shouldBe "Call [REDACTED_PHONE] now"
+  }
 
   // ==========================================================================
   // Card numbers: the formats the detector documents
@@ -97,10 +96,9 @@ class PIIMaskerFormatsSpec extends AnyFlatSpec with Matchers {
     cards.transform("Ref 1234 5678 9012 3456 end") shouldBe "Ref 1234 5678 9012 3456 end"
   }
 
-  it should "mask a 15-digit card number" in
-    pendingUntilFixed {
-      cards.transform("Pay with 3782 822463 10005 ok") shouldBe "Pay with [REDACTED_CARD] ok"
-    }
+  it should "mask a 15-digit card number" in {
+    cards.transform("Pay with 3782 822463 10005 ok") shouldBe "Pay with [REDACTED_CARD] ok"
+  }
 
   // ==========================================================================
   // Position: the start, the end and the whole of the input, and what is next to a match
