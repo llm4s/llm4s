@@ -41,7 +41,7 @@ Comprehensive guides for LLM4S features.
   - **Reranking**: Cohere cross-encoder for result refinement
   - **Document Chunking**: Sentence-aware + simple chunking strategies
 
-- **[Query Transformers](query-transformer)** - Rewrite the user's query before retrieval: `LLMQueryRewriter`, `IdentityTransformer`, chaining, error behaviour and custom transformers
+- **[Query Transformers](rag-query-transformers)** - Rewrite the user's query before retrieval: `LLMQueryRewriter`, `IdentityTransformer`, chaining, error behaviour and custom transformers
 
 - **[RAG Evaluation](rag-evaluation)** - Measure and improve RAG quality
   - **RAGAS Metrics**: Faithfulness, answer relevancy, context precision/recall

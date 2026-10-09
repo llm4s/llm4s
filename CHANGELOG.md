@@ -516,6 +516,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   testing. Its snippets after the first section are compiled and run by `ErrorHandlingGuideSpec`. The Basic Usage
   guide listed error types that do not exist (`ProviderConnectionError`, `InvalidApiKeyError`, ...) and
   called `LLMError` sealed; it now shows the real ones and links to the guide.
+- **RAG query transformer guide** ([#1545](https://github.com/llm4s/llm4s/issues/1545)):
+  `docs/guide/rag-query-transformers.md` explains how a RAG pipeline rewrites the query before it is embedded:
+  the built-in `LLMQueryRewriter` (temperature 0, default or custom system prompt, a `ProcessingError` on
+  `query-rewrite` when the LLM call fails) and `IdentityTransformer`, adding them with `withQueryTransformer`
+  (appends) or `withQueryTransformers` (replaces the chain), how `QueryTransformer.applyChain` runs the chain in
+  order and stops at the first error, and how to write a custom transformer. Contributed by @wanjinhao1.
 - **Caching guide** ([#1297](https://github.com/llm4s/llm4s/issues/1297)): `docs/guide/caching.md` explains the embedding
   cache (`CachedEmbeddingClient`, `InMemoryEmbeddingCache`, custom keys and backends) and the semantic completion cache
   (`CachingLLMClient`, `CacheConfig`): what a hit needs, what the key and the prompt contain, TTL, eviction, the cases
