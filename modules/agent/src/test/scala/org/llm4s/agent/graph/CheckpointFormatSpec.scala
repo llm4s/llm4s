@@ -155,8 +155,31 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
       graph.snapshot(graph.start(())).value
     )
     val migrated = Checkpoint.fromJson(Checkpoint.toJson(current)).value
-    migrated shouldBe current.copy(formatVersion = 4)
-    Checkpoint.CurrentFormat shouldBe 4
+    migrated shouldBe current.copy(formatVersion = Checkpoint.CurrentFormat)
+  }
+
+  it should "migrate a format-4 checkpoint, written before static breakpoints existed" in {
+    val b     = GraphBuilder("g", "v1")
+    val start = b.node[Unit]("start")((_, _, _) => continue(Command.empty))
+    val graph = b.compile(start)(_ => Right(())).value
+    val current = Checkpoint(
+      4,
+      "run-1/1",
+      None,
+      "thread",
+      "run-1",
+      CheckpointStatus.Running,
+      Instant.parse("2026-10-02T12:00:00Z"),
+      graph.snapshot(graph.start(())).value
+    )
+    // a format-4 pending task has none of the breakpoint fields: they read as not passed and not replayed
+    val written = Checkpoint.toJson(current)
+    written("snapshot")("frontier")(0).obj.keySet should contain noneOf ("passedBefore", "replay")
+    val migrated = Checkpoint.fromJson(written).value
+    migrated shouldBe current.copy(formatVersion = Checkpoint.CurrentFormat)
+    migrated.snapshot.frontier.head.passedBefore shouldBe false
+    migrated.snapshot.frontier.head.replay shouldBe None
+    Checkpoint.CurrentFormat shouldBe 5
   }
 
   it should "round-trip the terminal Failed status" in {
@@ -178,8 +201,8 @@ class CheckpointFormatSpec extends AnyFlatSpec with Matchers with EitherValues {
   }
 
   it should "refuse a format it does not know" in {
-    val newer = ujson.Obj("formatVersion" -> 5, "id" -> "x")
-    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(5, Checkpoint.CurrentFormat)
+    val newer = ujson.Obj("formatVersion" -> 6, "id" -> "x")
+    Checkpoint.fromJson(newer).left.value shouldBe GraphError.UnsupportedCheckpointFormat(6, Checkpoint.CurrentFormat)
     Checkpoint.fromJson(ujson.Obj("id" -> "x")).left.value shouldBe
       GraphError.UnsupportedCheckpointFormat(0, Checkpoint.CurrentFormat)
   }

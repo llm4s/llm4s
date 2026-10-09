@@ -23,7 +23,7 @@ import org.slf4j.LoggerFactory
  *
  * Every run is a turn on a thread. A run that reaches the graph's end is `Right` with status
  * `Completed` or `StepLimitReached`; one a guardrail blocks is `Right` with `Blocked`, the blocked
- * turn absent from the thread; one that parks on approvals or questions is `Right` with
+ * turn absent from the thread; one that parks on approvals, questions or breakpoints is `Right` with
  * `Suspended`, and continues with [[resume]]. Anything else is `Left`: a blank query and the
  * runtime's refusals (`ThreadBusy`, `TenantMismatch`, `IncompleteRun`, `PendingInterrupts`, ...)
  * leave the thread unchanged, as does another middleware's `beforeAgent` or `afterAgent` failure
@@ -35,8 +35,19 @@ final class Agent private[agent] (
   val id: AgentId,
   val loop: ToolLoop,
   runtime: GraphRuntime,
-  tracing: Option[Tracing]
+  tracing: Option[Tracing],
+  interruptBefore: Set[NodeId] = Set.empty,
+  interruptAfter: Set[NodeId] = Set.empty
 ):
+
+  /**
+   * `config` with the agent's static breakpoints ([[AgentBuilder.withInterruptBefore]],
+   * [[AgentBuilder.withInterruptAfter]]) added to its own.
+   */
+  private def configured(config: RunConfig): RunConfig =
+    config
+      .withInterruptBefore(config.interruptBefore ++ interruptBefore)
+      .withInterruptAfter(config.interruptAfter ++ interruptAfter)
 
   /**
    * One turn on a new thread with a random id. The thread stays in the agent's runtime - on the
@@ -143,13 +154,13 @@ final class Agent private[agent] (
 
   /** [[recover]], returning at once with the running turn - to cancel it, or to await its result. */
   def startRecover(threadId: ThreadId, config: RunConfig = RunConfig()): Result[AgentRun] =
-    runtime.recover(threadId, loop.graph, config).map(agentRun(_, None, drain = false))
+    runtime.recover(threadId, loop.graph, configured(config)).map(agentRun(_, None, drain = false))
 
   /**
-   * Answers some of `threadId`'s pending approvals and questions - built with
-   * [[AgentResult.approve]], [[AgentResult.reject]], [[AgentResult.edit]] and [[AgentResult.reply]]
-   * - and continues. Unanswered ones stay pending. Interrupting the calling thread cancels the turn,
-   * as for [[run]].
+   * Answers some of `threadId`'s pending approvals, questions and breakpoints - built with
+   * [[AgentResult.approve]], [[AgentResult.reject]], [[AgentResult.edit]], [[AgentResult.reply]] and
+   * [[AgentResult.proceed]] - and continues. Unanswered ones stay pending. Interrupting the calling
+   * thread cancels the turn, as for [[run]].
    */
   def resume(
     threadId: ThreadId,
@@ -164,7 +175,7 @@ final class Agent private[agent] (
     answers: Map[InterruptId, ujson.Value],
     config: RunConfig = RunConfig()
   ): Result[AgentRun] =
-    runtime.resume(threadId, loop.graph, answers, config).map(agentRun(_, None, drain = false))
+    runtime.resume(threadId, loop.graph, answers, configured(config)).map(agentRun(_, None, drain = false))
 
   /**
    * Starts a turn on `threadId` as [[run]] does, returning at once with the running turn - to
@@ -249,7 +260,7 @@ final class Agent private[agent] (
   ): Result[AgentRun] =
     val (observer, scope) = observed(config, listening)
     runtime
-      .resume(threadId, loop.graph, answers, config, observer = Some(observer))
+      .resume(threadId, loop.graph, answers, configured(config), observer = Some(observer))
       .map(agentRun(_, Some(scope), listening.drain))
 
   /**
@@ -280,7 +291,7 @@ final class Agent private[agent] (
   private def recoverWith(threadId: ThreadId, config: RunConfig, listening: Listening): Result[AgentRun] =
     val (observer, scope) = observed(config, listening)
     runtime
-      .recover(threadId, loop.graph, config, observer = Some(observer))
+      .recover(threadId, loop.graph, configured(config), observer = Some(observer))
       .map(agentRun(_, Some(scope), listening.drain))
 
   private def startWith(
@@ -296,14 +307,14 @@ final class Agent private[agent] (
     val started =
       // refused before any thread is claimed: stored, a blank query would fail every model call after it
       if query.trim.isEmpty then Left(ValidationError("query", "the query is blank"))
-      else if history.isEmpty then runtime.start(threadId, loop.graph, input, config, observer = observer)
+      else if history.isEmpty then runtime.start(threadId, loop.graph, input, configured(config), observer = observer)
       else
         importable(history).flatMap(_ =>
           runtime.startNew(
             threadId,
             loop.graph,
             input,
-            config,
+            configured(config),
             ValidationError("history", "history is imported only into a new thread"),
             observer
           )

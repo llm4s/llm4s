@@ -43,12 +43,20 @@ final private[graph] case class JoinSlot(join: JoinId, fanOutTask: TaskId)
 /** The suspended task a continuation stands in for: its join arrivals are made in this name. */
 final private[graph] case class Origin(task: TaskId, node: NodeId)
 
+/**
+ * A scheduled task. `passedBefore` is set on the continuation of a task an `interruptBefore` breakpoint
+ * held, so the same breakpoint does not hold it again. `replay` is set on the continuation of a task an
+ * `interruptAfter` breakpoint held: the task already ran and its update is committed, so the
+ * continuation runs nothing and completes with these routes, making the held task's arrivals.
+ */
 final private[graph] case class Task(
   id: TaskId,
   node: NodeId,
   input: Any,
   slot: Option[JoinSlot],
-  origin: Option[Origin] = None
+  origin: Option[Origin] = None,
+  passedBefore: Boolean = false,
+  replay: Option[List[Route]] = None
 ):
   /** The task id a dynamic join counts this task's completion as. */
   def arrivalId: TaskId = origin.fold(id)(_.task)
@@ -56,14 +64,30 @@ final private[graph] case class Task(
   /** The node a static join counts this task's completion as. */
   def arrivalNode: NodeId = origin.fold(node)(_.node)
 
-/** A suspended task's continuation, waiting for an answer. */
+/**
+ * A suspended task's continuation, waiting for an answer. For a task a static breakpoint holds,
+ * `hold` says what continues it, `resumeNode` is the held task's own node and `question` is unused.
+ */
 final private[graph] case class Parked(
   interrupt: InterruptId,
   resumeNode: NodeId,
   question: Any,
   origin: Origin,
-  slot: Option[JoinSlot]
+  slot: Option[JoinSlot],
+  hold: Option[Hold] = None
 )
+
+/** What a static breakpoint holds: a task before it runs, or a task's routes after it ran. */
+private[graph] enum Hold:
+  /** The task's input: the continuation runs the node with it, past the breakpoint. */
+  case Before(input: Any)
+
+  /** The routes the task returned: the continuation schedules them, making the task's arrivals. */
+  case After(routes: List[Route])
+
+  def phase: BreakpointPhase = this match
+    case Before(_) => BreakpointPhase.Before
+    case After(_)  => BreakpointPhase.After
 
 final private[graph] case class DynamicActivation(
   join: JoinId,
@@ -115,6 +139,11 @@ final case class GraphSnapshot(
 ) derives ReadWriter
 
 object GraphSnapshot:
+  /**
+   * A ready task. `passedBefore` marks the continuation of a task an `interruptBefore` breakpoint held;
+   * `replay` holds the routes of a task an `interruptAfter` breakpoint held, whose continuation runs
+   * nothing (its `input` is then JSON `null`).
+   */
   final case class PendingTask(
     taskId: String,
     nodeId: String,
@@ -122,7 +151,9 @@ object GraphSnapshot:
     joinId: Option[String],
     fanOutTask: Option[String],
     originTask: Option[String],
-    originNode: Option[String]
+    originNode: Option[String],
+    passedBefore: Boolean = false,
+    replay: Option[Vector[EncodedRoute]] = None
   ) derives ReadWriter
 
   final case class StaticArrivals(joinId: String, arrived: Vector[String]) derives ReadWriter
@@ -130,6 +161,11 @@ object GraphSnapshot:
   final case class Activation(joinId: String, fanOutTask: String, expected: Vector[String], arrived: Vector[String])
       derives ReadWriter
 
+  /**
+   * A parked continuation. For a task a static breakpoint holds, `breakpoint` is its phase and
+   * `resumeNode` the held task's node: before it runs, `question` is the task's input; after it ran,
+   * `question` is JSON `null` and `heldRoutes` are the routes it returned.
+   */
   final case class ParkedContinuation(
     interruptId: String,
     resumeNode: String,
@@ -137,5 +173,7 @@ object GraphSnapshot:
     originTask: String,
     originNode: String,
     joinId: Option[String],
-    fanOutTask: Option[String]
+    fanOutTask: Option[String],
+    breakpoint: Option[BreakpointPhase] = None,
+    heldRoutes: Vector[EncodedRoute] = Vector.empty
   ) derives ReadWriter

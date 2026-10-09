@@ -35,8 +35,8 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     first.status.kind shouldBe AgentStatusKind.SUSPENDED
     val List(p) = pendingOf(first): @unchecked
     p.kind shouldBe InterruptKind.APPROVAL
-    p.toolName shouldBe "deploy"
-    p.argumentsJson shouldBe """{"text":"prod"}"""
+    p.toolName() shouldBe Optional.of("deploy")
+    p.argumentsJson() shouldBe Optional.of("""{"text":"prod"}""")
     p.reason() shouldBe java.util.Optional.of("deploying prod")
     p.questionJson() shouldBe java.util.Optional.empty()
     // the id is the turn's own
@@ -54,8 +54,8 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     val first   = agent.run("ask me").get()
     val List(p) = pendingOf(first): @unchecked
     p.kind shouldBe InterruptKind.QUESTION
-    p.toolName shouldBe "confirm"
-    p.argumentsJson shouldBe """{"text":"go"}"""
+    p.toolName() shouldBe Optional.of("confirm")
+    p.argumentsJson() shouldBe Optional.of("""{"text":"go"}""")
     p.questionJson() shouldBe java.util.Optional.of("""{"prompt":"really go?"}""")
     p.reason() shouldBe java.util.Optional.empty()
 
@@ -77,7 +77,7 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
     val first   = agent.run("everything").get()
     val pending = pendingOf(first)
     pending.map(_.kind) shouldBe List(InterruptKind.APPROVAL, InterruptKind.APPROVAL, InterruptKind.QUESTION)
-    pending.map(_.argumentsJson) shouldBe List("""{"text":"one"}""", """{"text":"two"}""", """{"text":"go"}""")
+    pending.map(_.argumentsJson().get) shouldBe List("""{"text":"one"}""", """{"text":"two"}""", """{"text":"go"}""")
     pending.map(_.id).distinct should have size 3
 
     // answer one approval only: the other approval and the question stay pending
@@ -136,7 +136,8 @@ class JAgentPendingSpec extends AnyFlatSpec with Matchers {
   "InterruptKind" should "be a Java enum" in {
     classOf[InterruptKind].isEnum shouldBe true
     InterruptKind.valueOf("QUESTION") shouldBe InterruptKind.QUESTION
-    InterruptKind.values.toList shouldBe List(InterruptKind.APPROVAL, InterruptKind.QUESTION)
+    InterruptKind.values.toList shouldBe
+      List(InterruptKind.APPROVAL, InterruptKind.QUESTION, InterruptKind.MIDDLEWARE_QUESTION, InterruptKind.BREAKPOINT)
   }
 
   "JAgent.resume" should "fail for a thread that is not suspended, an unknown thread, or an id the thread does not wait for" in {

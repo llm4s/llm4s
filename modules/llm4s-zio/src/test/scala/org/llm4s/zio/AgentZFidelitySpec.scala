@@ -193,8 +193,8 @@ object AgentZFidelitySpec extends ZIOSpecDefault {
         for {
           parked <- agent.run("go")
           ids = parked.status match {
-            case AgentStatus.Suspended(approvals, _) => approvals.map(_._1)
-            case _                                   => Vector.empty
+            case AgentStatus.Suspended(approvals, _, _, _) => approvals.map(_._1)
+            case _                                         => Vector.empty
           }
           done <- agent.resume(parked.threadId, Map(parked.approve(ids.head)))
         } yield assertTrue(ids.size == 1) && assertTrue(done.status == AgentStatus.Completed("shipped"))

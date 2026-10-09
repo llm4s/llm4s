@@ -206,8 +206,8 @@ class AgentKtPendingTest {
         assertEquals(1, pending.size)
         val p = pending.single()
         assertEquals(InterruptKind.APPROVAL, p.kind())
-        assertEquals("deploy", p.toolName())
-        assertEquals("""{"text":"prod"}""", p.argumentsJson())
+        assertEquals(Optional.of("deploy"), p.toolName())
+        assertEquals(Optional.of("""{"text":"prod"}"""), p.argumentsJson())
         assertEquals("deploying", p.reason().get())
         assertTrue(p.questionJson().isEmpty)
         assertTrue(ran.isEmpty())
@@ -226,7 +226,7 @@ class AgentKtPendingTest {
             AgentStatusKind.COMPLETED -> "completed:" + result.answer().get()
             AgentStatusKind.BLOCKED -> "blocked:" + result.status().guardrail().get()
             AgentStatusKind.STEP_LIMIT_REACHED -> "step-limit"
-            AgentStatusKind.SUSPENDED -> "suspended:" + result.status().pending().joinToString { it.toolName() }
+            AgentStatusKind.SUSPENDED -> "suspended:" + result.status().pending().joinToString { it.toolName().get() }
         }
         assertEquals("suspended:deploy", describe(first))
         assertEquals(AgentKt.pending(first), first.status().pending())
@@ -279,7 +279,8 @@ class AgentKtPendingTest {
             val answers = AgentKt.pending(turn).map { p ->
                 when (p.kind()) {
                     InterruptKind.APPROVAL -> Answer.reject(p.id(), "no")
-                    InterruptKind.QUESTION -> Answer.reply(p.id(), """{"ok":false}""")
+                    InterruptKind.QUESTION, InterruptKind.MIDDLEWARE_QUESTION -> Answer.reply(p.id(), """{"ok":false}""")
+                    InterruptKind.BREAKPOINT -> Answer.proceed(p.id())
                 }
             }
             turn = agent.resume(turn.threadId(), answers)
