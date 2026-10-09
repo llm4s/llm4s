@@ -163,7 +163,7 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
     meta.after().toSeq should contain(classOf[Llm4sAutoConfiguration])
   }
 
-  "configuration metadata" should "document exactly the bound properties plus llm4s.enabled, with defaults that match" in {
+  "configuration metadata" should "document exactly the bound properties, llm4s.enabled and the keys read from the environment" in {
     // The Scala sources get no annotation-processor-generated metadata, so IDE completion depends
     // on this hand-written file staying in sync with Llm4sProperties.
     val stream = getClass.getClassLoader.getResourceAsStream("META-INF/additional-spring-configuration-metadata.json")
@@ -185,7 +185,13 @@ class StarterContractSpec extends AnyFlatSpec with Matchers {
         }
     val bound = leaves(classOf[Llm4sProperties], "llm4s")
 
-    documented.keySet shouldBe bound + "llm4s.enabled"
+    // Read from the Spring Environment by SpringProviderSource rather than bound to Llm4sProperties (#1467).
+    val environmentRead = Set(
+      SpringProviderSource.ProvidersPrefix,
+      s"${SpringProviderSource.ProvidersPrefix}.provider",
+      SpringProviderSource.CredentialsPrefix
+    )
+    documented.keySet shouldBe bound + "llm4s.enabled" ++ environmentRead
     documented.values.foreach(p => p("description").str should not be empty)
 
     val defaults = new Llm4sProperties

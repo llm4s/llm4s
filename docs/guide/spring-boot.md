@@ -88,7 +88,8 @@ llm4s:
   api-key: ${OPENAI_API_KEY}
 ```
 
-`llm4s.provider` and `llm4s.model` are required, and so is `llm4s.api-key` for OpenAI and Anthropic. A missing one stops
+`llm4s.provider` and `llm4s.model` are required, and so is `llm4s.api-key` for OpenAI and Anthropic. (These flat keys serve
+OpenAI, Anthropic and Ollama; every other provider is configured under `llm4s.providers`, see [Any provider](#any-provider).) A missing one stops
 the application context from starting, with a message that names the property. Put the key in an environment variable or a
 secrets store and refer to it with a placeholder, as above; do not commit it.
 
@@ -97,7 +98,7 @@ secrets store and refer to it with a placeholder, as above; do not commit it.
 | Property | Default | Meaning |
 |---|---|---|
 | `llm4s.enabled` | `true` | `false` registers none of the beans |
-| `llm4s.provider` | empty | required: `openai`, `anthropic` or `ollama` |
+| `llm4s.provider` | empty | required without `llm4s.providers.*`: `openai`, `anthropic` or `ollama` |
 | `llm4s.model` | empty | required: the model name as the provider spells it |
 | `llm4s.api-key` | empty | required for `openai` and `anthropic`; not used by `ollama` |
 | `llm4s.base-url` | empty | overrides the provider's default URL (below) |
@@ -112,7 +113,7 @@ secrets store and refer to it with a placeholder, as above; do not commit it.
 
 ### Which providers
 
-The starter supports three providers:
+The flat `llm4s.provider` key supports three providers:
 
 | `llm4s.provider` | API key | Default `llm4s.base-url` |
 |---|---|---|
@@ -120,11 +121,58 @@ The starter supports three providers:
 | `anthropic` | required | `https://api.anthropic.com` |
 | `ollama` | not used | `http://localhost:11434` |
 
-Any other value stops the context with `Unknown provider: '<name>'. Supported: openai, anthropic, ollama`. Supporting every
-provider is proposed in [#1467](https://github.com/llm4s/llm4s/issues/1467). Until then, for another provider (Gemini,
-Azure, an OpenAI-compatible endpoint and so on) define your own `JLlmClient` bean from an `application.conf`, as the Java guide
-describes. The starter's client backs off, and the template and the health indicator use yours; `llm4s.provider` and the other
-properties are then not needed:
+Any other value stops the context with `Unknown provider: '<name>'. The flat llm4s.provider key supports openai, anthropic
+and ollama; configure any other provider under llm4s.providers.<name>`, followed by the providers on the classpath.
+
+### Any provider
+
+Every other provider (Gemini, Azure OpenAI, Mistral, OpenRouter, a self-hosted OpenAI-compatible server, or a provider
+module you add) is configured under `llm4s.providers`. These properties mirror the `llm4s.providers` block of llm4s's own
+HOCON configuration, so any provider on the classpath works, with the extra keys it declares. `llm4s.providers.provider`
+names the section the starter uses:
+
+```properties
+llm4s.providers.provider=gemini-main
+llm4s.providers.gemini-main.provider=gemini
+llm4s.providers.gemini-main.model=gemini-2.0-flash
+llm4s.providers.gemini-main.api-key=${GOOGLE_API_KEY}
+```
+
+Azure OpenAI takes its resource endpoint and API version as keys of the section:
+
+```properties
+llm4s.providers.provider=azure-main
+llm4s.providers.azure-main.provider=azure
+llm4s.providers.azure-main.model=my-deployment
+llm4s.providers.azure-main.api-key=${AZURE_OPENAI_API_KEY}
+llm4s.providers.azure-main.endpoint=https://my-resource.openai.azure.com
+llm4s.providers.azure-main.api-version=2024-02-01
+```
+
+A server that speaks the OpenAI chat-completions format needs only its URL and model; the generic `openai-compatible`
+provider also reads `context-window`, `reserve-completion` and `headers.*`:
+
+```properties
+llm4s.providers.provider=local
+llm4s.providers.local.provider=openai-compatible
+llm4s.providers.local.model=my-model
+llm4s.providers.local.base-url=http://localhost:8000/v1
+llm4s.providers.local.context-window=32000
+llm4s.providers.local.headers.X-Team-Id=team-7
+```
+
+- `kebab-case` and `snake_case` names in a section are read as the `camelCase` names of the HOCON block (`api-key` is
+  `apiKey`, `api-version` is `apiVersion`); section and header names are kept as written.
+- A section with no `api-key` uses the vendor's shared `llm4s.credentials.<provider>.api-key`, then the vendor's
+  conventional environment variable (`GOOGLE_API_KEY`, `MISTRAL_API_KEY`, ...).
+- As soon as any `llm4s.providers.*` property is set, the block is used and the flat `llm4s.model`, `llm4s.api-key`, ...
+  are ignored. With none, the flat keys are read exactly as before.
+- An unknown provider id in a section stops the context with llm4s's own message, which names the registered providers
+  and the dependency to add.
+
+You can also define your own `JLlmClient` bean, for example from an `application.conf` as the Java guide describes. The
+starter's client backs off, and the template and the health indicator use yours; `llm4s.provider` and the other properties
+are then not needed:
 
 ```java
 import org.llm4s.javaapi.JLlmClient;

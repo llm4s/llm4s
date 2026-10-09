@@ -162,9 +162,11 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
       runner.withPropertyValues(pairs: _*).run(assertGuideConfigurationApplied)
     }
 
-    "be the only properties block and keep no comment on a value line, which a .properties file would read as part of the value" in {
-      blocksIn("properties").size shouldBe 1
-      blocksIn("properties").head.linesIterator.filterNot(_.trim.startsWith("#")).foreach(_ should not include "#")
+    "be the only flat properties block, and no block keeps a comment on a value line, which a .properties file would read as part of the value" in {
+      blocksIn("properties").filterNot(_.contains("llm4s.providers.")).size shouldBe 1
+      blocksIn("properties").foreach(
+        _.linesIterator.filterNot(_.trim.startsWith("#")).foreach(_ should not include "#")
+      )
     }
   }
 
@@ -256,16 +258,55 @@ class SpringBootGuideSpec extends AnyWordSpec with Matchers {
       }
     }
 
-    "stop the context for any other provider with the message the guide quotes" in {
-      guide should include("Unknown provider: '<name>'. Supported: openai, anthropic, ollama")
+    "stop the context for any other flat provider with the message the guide quotes" in {
+      val quoted =
+        "Unknown provider: '<name>'. The flat llm4s.provider key supports openai, anthropic and ollama; " +
+          "configure any other provider under llm4s.providers.<name>"
+      squash(guide) should include(squash(quoted))
       runner.withPropertyValues("llm4s.provider=gemini", "llm4s.model=gemini-2.0-flash", "llm4s.api-key=k").run { ctx =>
         ctx.getStartupFailure should not be null
-        Iterator
+        val messages = Iterator
           .iterate[Throwable](ctx.getStartupFailure)(_.getCause)
           .takeWhile(_ != null)
           .map(_.getMessage)
-          .mkString(" | ") should
-          include("Unknown provider: 'gemini'. Supported: openai, anthropic, ollama")
+          .mkString(" | ")
+        messages should include(quoted.replace("<name>'", "gemini'"))
+        messages should include("Providers on the classpath:")
+      }
+    }
+  }
+
+  "The llm4s.providers blocks of the guide" should {
+
+    val blocks = blocksIn("properties").filter(_.contains("llm4s.providers."))
+
+    "show Gemini, Azure OpenAI and an OpenAI-compatible server" in {
+      blocks
+        .map(block => propertyPairs(block).find(_.matches("llm4s\\.providers\\.[^.]+\\.provider=.*")))
+        .flatten
+        .map(
+          _.split('=')(1)
+        ) shouldBe List("gemini", "azure", "openai-compatible")
+    }
+
+    "each start a context whose client and health indicator are the provider and model the block names" in {
+      val placeholders = List("GOOGLE_API_KEY=gk-from-env", "AZURE_OPENAI_API_KEY=az-from-env")
+      blocks.foreach { block =>
+        val pairs   = propertyPairs(block)
+        val section = pairs.collectFirst { case p if p.startsWith("llm4s.providers.provider=") => p.split('=')(1) }.get
+        def value(key: String): String =
+          pairs.collectFirst { case p if p.startsWith(s"llm4s.providers.$section.$key=") => p.split("=", 2)(1) }.get
+        withClue(s"section $section: ") {
+          runner.withPropertyValues(pairs ++ placeholders: _*).run { ctx =>
+            ctx.getStartupFailure shouldBe null
+            ctx.getBeansOfType(classOf[JLlmClient]).size() shouldBe 1
+            ctx.getBeansOfType(classOf[LLM4STemplate]).size() shouldBe 1
+            val health = ctx.getBean(classOf[LlmHealthIndicator]).health()
+            health.getDetails.get("provider") shouldBe value("provider")
+            health.getDetails.get("model") shouldBe value("model")
+            (health.toString should not).include("from-env")
+          }
+        }
       }
     }
 
