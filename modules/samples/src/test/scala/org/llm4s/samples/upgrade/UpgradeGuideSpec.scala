@@ -1,6 +1,6 @@
 package org.llm4s.samples.upgrade
 
-import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentId, AgentStatus }
 import org.llm4s.config.PgSearchIndexConfigLoader
 import org.llm4s.error.{ CancelledError, LLMError, RateLimitError }
 import org.llm4s.extract.TikaDocumentExtractor
@@ -14,7 +14,10 @@ import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.util.concurrent.{ ArrayBlockingQueue, TimeUnit }
+import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration._
+import scala.util.Try
 
 /**
  * Compiles and runs the snippets of `docs/migrations/0-4-1-to-0-5-0.md`, and checks the facts its tables state
@@ -81,7 +84,10 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
   // ---- agent users ----
 
   private class ScriptedClient(answer: String) extends LLMClient {
+    val calls = new AtomicInteger(0)
+
     private def reply: Completion = {
+      calls.incrementAndGet(): Unit
       val message = AssistantMessage(answer)
       Completion(id = "script", created = 0L, content = message.content, model = "script", message = message)
     }
@@ -115,6 +121,42 @@ class UpgradeGuideSpec extends AnyFlatSpec with Matchers with EitherValues {
     // `result.usage` replaces `state.usageSummary`: one request, made against the scripted model.
     run.usage.requestCount shouldBe 1L
     run.usage.byModel.keySet shouldBe Set("script")
+  }
+
+  "An interrupted run" should "return CancelledError with the interrupt flag set, and start no turn" in {
+    val client = new ScriptedClient("never asked")
+    val agent  = Agent.builder("assistant", client).build().value
+
+    // Run on a thread of its own, so the interrupt flag never leaks into the test runner's thread.
+    val outcome = new ArrayBlockingQueue[(Result[?], Boolean)](1)
+    val caller = Thread.ofVirtual().start { () =>
+      Thread.currentThread().interrupt()
+      val result = agent.run("Say hello")
+      // `offer`, not `put`: `put` would throw on the interrupt flag the run leaves set.
+      outcome.offer(result -> Thread.currentThread().isInterrupted): Unit
+    }
+    val (result, flagSet) = Option(outcome.poll(30, TimeUnit.SECONDS)).getOrElse(fail("the run did not return"))
+    caller.join()
+
+    result.left.value shouldBe a[CancelledError]
+    flagSet shouldBe true
+    client.calls.get shouldBe 0
+  }
+
+  "Orchestration" should "be gone, with the agent id in org.llm4s.agent" in {
+    val removed = Seq(
+      "org.llm4s.agent.orchestration.PlanRunner",
+      "org.llm4s.agent.orchestration.TypedAgent",
+      "org.llm4s.agent.orchestration.CancellationToken",
+      "org.llm4s.agent.orchestration.OrchestrationError",
+      "org.llm4s.types.package$AgentId",
+      "org.llm4s.types.package$PlanId"
+    )
+    removed.filter(name => Try(Class.forName(name)).isSuccess) shouldBe empty
+    // The newtypes that stayed resolve under the same naming, so the check above is not vacuous.
+    Try(Class.forName("org.llm4s.types.package$SessionId")).isSuccess shouldBe true
+
+    AgentId.of("assistant").isRight shouldBe true
   }
 
   // ---- RAG, memory, extraction ----
