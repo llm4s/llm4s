@@ -2035,7 +2035,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `hostname` are not checked. `cp`, which writes through a link it finds at the name it writes, also has the
     names it will write checked, and a recursive `cp` refuses a destination directory holding a link that leads
     outside. An argument over 4096 characters, or paths needing more than 20000 lookups, is refused
-    (`ARGUMENT_NOT_ALLOWED`) rather than walked.
+    (`ARGUMENT_NOT_ALLOWED`) rather than walked. A string that is not a valid path is refused, not thrown: an
+    argument with a NUL character, or whose check fails, gets `ARGUMENT_NOT_ALLOWED`, and a working directory or file
+    operation path the platform cannot parse gets `PATH_ESCAPE_ATTEMPT` (before, `InvalidPathException`, or on
+    Windows an `IOError` for a drive-relative path on a drive that does not exist, such as the `G:` of
+    `findstr /G:file`, escaped `executeCommand`).
+    On Windows, a device or NT-namespace path (`\\?\C:\x`, `\??\C:\x`), a drive-relative path on another drive
+    (`D:x`) and a wildcard argument leading outside (`..\*`) are refused.
   - *Environment* (`ENVIRONMENT_NOT_ALLOWED`): `environment` may set only `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`,
     `COLUMNS`, `LINES` and `NO_COLOR`.
 

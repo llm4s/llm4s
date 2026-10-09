@@ -35,7 +35,11 @@ import scala.util.{ Try, Using }
  *     print their arguments (`echo`, `pwd`, `whoami`, `hostname`) are not checked. For `cp`, which writes through
  *     a link it finds at the name it writes, the names it will write are checked too (see [[cpDestinationRefusal]]).
  *     An argument over [[MaxArgumentLength]] characters, or paths costing more than [[MaxPathSteps]] lookups, are
- *     refused with `ARGUMENT_NOT_ALLOWED` rather than walked.
+ *     refused with `ARGUMENT_NOT_ALLOWED` rather than walked. Where the platform cannot parse an argument as a path
+ *     (Windows: `HEAD:src/x`, `..\*`), the part before the first character a path cannot hold is judged; one that
+ *     starts with a separator but has no such part (`\\?\C:\x`) is refused, as is, on Windows, a drive-relative
+ *     path on another drive (`D:x`). An argument holding a NUL character is refused (`ARGUMENT_NOT_ALLOWED`), and a
+ *     check that fails with an exception refuses the command rather than throwing it.
  *
  * The path rule cannot tell a path from text that looks like one: a `grep` pattern or an option value that starts
  * with `/` or has a `..` component is refused too (write `[/]api` for `/api`). A relative value without `..` can only
@@ -127,6 +131,9 @@ private[runner] object CommandPolicy {
   /** cmd.exe built-ins and Windows programs whose options are `/X` switches rather than paths. */
   private val WindowsSwitchPrograms: Set[String] = Set("dir", "findstr", "copy", "move", "sort")
 
+  /** A switch's letter and its value (`G:file`), which would otherwise parse as a path relative to drive G:. */
+  private val SwitchWithValue = "(?s)[A-Za-z]:([^\\\\/].*)?".r
+
   // ---- git
 
   /** Global options git may be given before the subcommand; everything else (`-c`, `-C`, `--git-dir`, ...) is refused. */
@@ -201,9 +208,30 @@ private[runner] object CommandPolicy {
     realRoot: Path,
     environment: Map[String, String]
   ): Option[Refusal] =
-    environmentRefusal(environment, isWindows)
-      .orElse(optionRefusal(program, args, isWindows))
-      .orElse(pathRefusal(program, args, isWindows, workDir, realRoot))
+    // Fails closed: a file-system call that throws (a path the platform cannot resolve) refuses the command
+    // rather than escaping `executeCommand` as a raw exception.
+    Try {
+      environmentRefusal(environment, isWindows)
+        .orElse(nulRefusal(program, args))
+        .orElse(optionRefusal(program, args, isWindows))
+        .orElse(pathRefusal(program, args, isWindows, workDir, realRoot))
+    }.fold(
+      e =>
+        Some(
+          Refusal(
+            ArgumentNotAllowed,
+            s"The arguments of '$program' could not be checked against the workspace " +
+              s"(${e.getClass.getSimpleName}: ${e.getMessage})."
+          )
+        ),
+      identity
+    )
+
+  /** A NUL character ends a C string, so the program would open a different name from the one checked. */
+  private def nulRefusal(program: String, args: Seq[String]): Option[Refusal] =
+    args
+      .find(_.contains('\u0000'))
+      .map(arg => notAllowed(program, arg.replace("\u0000", "\\0"), "it contains a NUL character."))
 
   private def environmentRefusal(environment: Map[String, String], isWindows: Boolean): Option[Refusal] =
     environment.keys.toSeq.sorted
@@ -452,8 +480,12 @@ private[runner] object CommandPolicy {
    */
   private def candidates(args: Seq[String], options: Options, switches: Boolean): Iterator[(String, String)] = {
     def tails(arg: String): Iterator[String] = Iterator.range(1, arg.length).map(arg.substring)
+    // In `/G:file` the `G:` names the switch, so the first tail `G:file` is not a path on drive G: (`file`, the
+    // next-but-one tail, is checked; so is `D:file` in `/G:D:file`).
     def plain(arg: String): Iterator[String] =
-      if (switches && arg.length > 1 && arg.startsWith("/")) tails(arg) else Iterator.single(arg)
+      if (switches && arg.length > 1 && arg.startsWith("/"))
+        tails(arg).filterNot(tail => tail.length == arg.length - 1 && SwitchWithValue.matches(tail))
+      else Iterator.single(arg)
     def textLong(name: String): Boolean = name.length > 3 && options.textLong.exists(_.startsWith(name))
 
     @tailrec
@@ -513,26 +545,47 @@ private[runner] object CommandPolicy {
    * path here; `Left(Outside)` when a link cannot be resolved, `Left(TooCostly)` when the budget runs out.
    */
   private def physicalPath(base: Path, arg: String, budget: Budget): Option[Either[Verdict, Path]] =
-    parse(arg).map { path =>
-      val (start, names) = split(base, path)
-      walk(start, names, hops = 0, missing = false, budget)
+    parse(arg) match {
+      case Some(path) =>
+        Some(split(base, path).flatMap { case (start, names) => walk(start, names, hops = 0, missing = false, budget) })
+      // Starts like an absolute path, but the platform cannot parse even its leading part: a Windows device or
+      // NT-namespace name (`\\?\C:\x`, `\??\C:\x`) that a program would still open.
+      case None if arg.startsWith("/") || arg.startsWith("\\") => Some(Left(Outside))
+      case None                                                => None
     }
 
   /**
-   * `arg` as a path. Where the platform rejects it (a `:` past the drive letter on Windows, as in `HEAD:src/x` or
-   * an alternate data stream `C:\x\f:s`), the part before that `:` is what a program could open.
+   * Characters a Windows path cannot hold (a `:` past the drive letter, wildcards, redirection characters). A
+   * Windows program may still open the part before one: the file behind `HEAD:src/x` or an alternate data stream
+   * `C:\x\f:s`, or the directory a wildcard such as `..\*` lists.
+   */
+  private def notInPath(c: Char, at: Int): Boolean =
+    (c == ':' && at != 1) || c == '*' || c == '?' || c == '<' || c == '>' || c == '|' || c == '"' || c == '\u0000'
+
+  /**
+   * `arg` as a path. Where the platform rejects it, the part before the first character a path cannot hold is what
+   * a program could open; `None` when there is no such part.
    */
   private def parse(arg: String): Option[Path] =
     Try(Paths.get(arg)).toOption.orElse {
-      val colon = arg.indexOf(':', 2)
-      if (colon < 0) None else Try(Paths.get(arg.substring(0, colon))).toOption
+      val cut = arg.indices.find(i => notInPath(arg.charAt(i), i)).getOrElse(arg.length)
+      if (cut == 0 || cut == arg.length) None else Try(Paths.get(arg.substring(0, cut))).toOption
     }
 
-  private def split(base: Path, path: Path): (Path, List[String]) =
-    if (path.getRoot != null) {
-      val absolute = path.toAbsolutePath
-      (absolute.getRoot, absolute.iterator.asScala.map(_.toString).toList)
-    } else (base, path.iterator.asScala.map(_.toString).toList)
+  /**
+   * The walk's start and the names to walk. A relative path starts at `base`. A rooted one is made absolute against
+   * `base`, as the program, whose working directory `base` is, would: on Windows a root-relative `\x` takes `base`'s
+   * drive and a drive-relative `C:x` on `base`'s drive starts at `base`. A drive-relative path on another drive
+   * starts at that drive's own working directory, which the runner does not know (and `toAbsolutePath` throws
+   * `IOError` for a drive that does not exist), so it is refused.
+   */
+  private def split(base: Path, path: Path): Either[Verdict, (Path, List[String])] =
+    if (path.getRoot == null) Right((base, path.iterator.asScala.map(_.toString).toList))
+    else
+      Try(base.resolve(path)).toOption.filter(_.isAbsolute) match {
+        case Some(absolute) => Right((absolute.getRoot, absolute.iterator.asScala.map(_.toString).toList))
+        case None           => Left(Outside)
+      }
 
   private val MaxLinkHops = 40
 
@@ -563,8 +616,11 @@ private[runner] object CommandPolicy {
             Try(Files.readSymbolicLink(next)).toOption match {
               case None => Left(Outside)
               case Some(target) =>
-                val (start, targetNames) = split(current, target)
-                walk(start, targetNames ++ rest, hops + 1, missing = false, budget)
+                split(current, target) match {
+                  case Left(refused) => Left(refused)
+                  case Right((start, targetNames)) =>
+                    walk(start, targetNames ++ rest, hops + 1, missing = false, budget)
+                }
             }
         } else walk(next, rest, hops, missing = !Files.exists(next, LinkOption.NOFOLLOW_LINKS), budget)
     }

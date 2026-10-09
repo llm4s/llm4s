@@ -36,14 +36,30 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     code: String,
     workingDirectory: Option[String] = None,
     environment: Option[Map[String, String]] = None
+  ): WorkspaceAgentException = refusesWithAny(ws, command, Set(code), workingDirectory, environment)
+
+  private def refusesWithAny(
+    ws: WorkspaceAgentInterfaceImpl,
+    command: String,
+    codes: Set[String],
+    workingDirectory: Option[String] = None,
+    environment: Option[Map[String, String]] = None
   ): WorkspaceAgentException = {
     val ex = the[WorkspaceAgentException] thrownBy
       ws.executeCommand(command, workingDirectory, Some(5.seconds), environment)
     withClue(s"'$command' -> ${ex.code}: ${ex.error}\n") {
-      ex.code shouldBe code
+      codes should contain(ex.code)
     }
     ex
   }
+
+  /** Refused by the policy or failing to start, but never an exception other than [[WorkspaceAgentException]]. */
+  private def neverThrowsRaw(ws: WorkspaceAgentInterfaceImpl, command: String, workingDirectory: Option[String]): Unit =
+    Try(ws.executeCommand(command, workingDirectory, Some(5.seconds), None)).failed.toOption.foreach { e =>
+      withClue(s"'${command.replace("\u0000", "\\0")}' in ${workingDirectory.map(_.replace("\u0000", "\\0"))}: ") {
+        e shouldBe a[WorkspaceAgentException]
+      }
+    }
 
   /** Runs on a Unix host (the programs are not on a Windows runner's PATH) and must succeed. */
   private def runs(
@@ -178,7 +194,10 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
 
   refusedPaths.foreach { command =>
     it should s"refuse `$command` (PATH_ESCAPE_ATTEMPT)" in inWorkspace { fx =>
-      refuses(fx.interface(ReadOnly), fx.expand(command), PathEscape)
+      // A path attached to a short option (`-f'{out}'`) is scanned as an option cluster first, so a refused letter
+      // in the temporary directory's name (the `R` of Windows' `RUNNER~1`) refuses it as an option instead.
+      val codes = if (command.contains(" -f'{out}")) Set(PathEscape, ArgumentNotAllowed) else Set(PathEscape)
+      refusesWithAny(fx.interface(ReadOnly), fx.expand(command), codes)
     }
   }
 
@@ -248,11 +267,13 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
   it should "refuse chmod options that follow links met inside the tree, so outside permissions do not change" in
     inWorkspace { fx =>
       innerLinkOut(fx)
-      val before = Files.getPosixFilePermissions(fx.outside.resolve("secret.txt"))
-      val ws     = fx.interface(ReadWrite)
+      // Windows has no POSIX permissions to compare; the refusals are still checked there.
+      def permissions = Try(Files.getPosixFilePermissions(fx.outside.resolve("secret.txt"))).toOption
+      val before      = permissions
+      val ws          = fx.interface(ReadWrite)
       Seq("chmod -RL 700 d", "chmod -R -L 700 d", "chmod -RH 700 d", "chmod --dereference 700 a.txt")
         .foreach(command => refuses(ws, command, ArgumentNotAllowed))
-      Files.getPosixFilePermissions(fx.outside.resolve("secret.txt")) shouldBe before
+      permissions shouldBe before
     }
 
   it should "refuse grep -S, which follows every link (BSD grep)" in inWorkspace { fx =>
@@ -422,6 +443,25 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     refuses(fx.interface(ReadWrite, windows = true), "move a.txt ../outside/m.txt", PathEscape)
   }
 
+  it should "refuse a built-in's path given as a device, NT-namespace or other-drive path" in inWorkspace { fx =>
+    assume(isWindowsHost, "these are paths only on Windows")
+    val ws    = fx.interface(ReadOnly, windows = true)
+    val out   = fx.outside.toString
+    val drive = fx.root.getRoot.toString.take(2) // `C:`
+    val other = if (drive.equalsIgnoreCase("Z:")) "Y:" else "Z:"
+    refuses(ws, s"type '\\\\?\\$out\\secret.txt'", PathEscape)
+    refuses(ws, s"type '\\??\\$out\\secret.txt'", PathEscape)
+    refuses(ws, s"type '\\\\.\\$out\\secret.txt'", PathEscape)
+    refuses(ws, s"type ${other}secret.txt", PathEscape)
+    refuses(ws, s"type '\\${out.drop(3)}\\secret.txt'", PathEscape) // root-relative: the workspace's drive
+    refuses(ws, s"dir '$out\\*'", PathEscape)
+    refuses(ws, "dir '..\\*'", PathEscape)
+    refuses(ws, s"findstr /G:'$out\\secret.txt' a.txt", PathEscape)
+    passesPolicy(ws, s"type ${drive}a.txt")    // drive-relative on the workspace's drive: the working directory
+    passesPolicy(ws, "findstr /G:a.txt b.txt") // `G:` names the switch, not a drive
+    refuses(ws, s"findstr /G:${other}secret.txt a.txt", PathEscape)
+  }
+
   it should "match variable names without regard to case" in inWorkspace { fx =>
     val ws = fx.interface(ReadOnly, windows = true)
     refuses(ws, "dir", EnvironmentNotAllowed, environment = Some(Map("git_external_diff" -> "x")))
@@ -435,6 +475,53 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
       val outcome = Try(ws.executeCommand(command, None, Some(5.seconds), Some(Map("lang" -> "C")))).failed.toOption
       outcome.collect { case e: WorkspaceAgentException => e.code }.foreach { code =>
         withClue(command)(PolicyCodes should not contain code)
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Strings that are not paths: refused or run, never a raw exception
+
+  "Path checks" should "refuse an argument or working directory holding a NUL character" in inWorkspace { fx =>
+    Seq(false, true).foreach { windows =>
+      val ws = fx.interface(ReadOnly, windows)
+      refuses(ws, "cat a.txt\u0000../../outside/secret.txt", ArgumentNotAllowed)
+      refuses(ws, "grep -f\u0000x a.txt", ArgumentNotAllowed)
+      refuses(ws, "ls", PathEscape, workingDirectory = Some("sub\u0000x"))
+    }
+  }
+
+  it should "never throw anything but a WorkspaceAgentException for a string that is not a path" in inWorkspace { fx =>
+    val inputs = Seq(
+      "C:foo",
+      "Z:foo",
+      "C:",
+      "\\\\?\\C:\\x",
+      "\\\\?\\",
+      "\\??\\C:\\x",
+      "\\\\.\\C:\\x",
+      "\\\\server",
+      "\\\\",
+      "nul.txt",
+      "x:y:z",
+      "a<b>c|d",
+      "*",
+      "x" * 255,
+      ("y" * 250 + "/") * 15
+    )
+    Seq(false, true).foreach { windows =>
+      val ws = fx.interface(ReadOnly, windows)
+      inputs.foreach { arg =>
+        Seq("cat", "type", "dir", "grep -f", "findstr /G:").foreach { program =>
+          val attached = program.endsWith(":") || program.endsWith("-f")
+          neverThrowsRaw(ws, if (attached) s"$program'$arg' a.txt" else s"$program '$arg'", None)
+        }
+        neverThrowsRaw(ws, "ls", Some(arg))
+      }
+      // Windows device names: `type con` would wait on the console, so only as a working directory and to `dir`
+      Seq("con", "aux:", "CON.txt").foreach { device =>
+        neverThrowsRaw(ws, s"dir '$device'", None)
+        neverThrowsRaw(ws, "ls", Some(device))
       }
     }
   }

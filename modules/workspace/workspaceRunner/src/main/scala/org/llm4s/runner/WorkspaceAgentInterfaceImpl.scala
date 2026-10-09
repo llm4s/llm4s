@@ -63,7 +63,15 @@ class WorkspaceAgentInterfaceImpl(
    * @throws IllegalArgumentException if the path attempts to escape the workspace
    */
   private def resolvePath(relativePath: String): Path = {
-    val normalized = rootPath.resolve(relativePath).normalize()
+    // A string the platform cannot parse as a path (a NUL character; on Windows `C:\x\f:s`, `x*`) is refused with
+    // the same code rather than escaping as InvalidPathException.
+    val normalized = Try(rootPath.resolve(relativePath).normalize()).getOrElse {
+      throw new WorkspaceAgentException(
+        s"Path '${relativePath.replace("\u0000", "\\0")}' is not a valid path in the workspace",
+        "PATH_ESCAPE_ATTEMPT",
+        None
+      )
+    }
 
     if (!normalized.startsWith(rootPath)) {
       throw new WorkspaceAgentException(

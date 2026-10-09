@@ -77,6 +77,7 @@ example below). An unknown profile name makes `loadSandboxConfig` return a `Left
 | `environment` sets a variable other than `LANG`, `LANGUAGE`, `LC_*`, `TZ`, `TERM`, `COLUMNS`, `LINES`, `NO_COLOR` | `ENVIRONMENT_NOT_ALLOWED` |
 | An option the program refuses (below) | `ARGUMENT_NOT_ALLOWED` |
 | An argument longer than 4096 characters, or paths that need more than 20000 lookups to check | `ARGUMENT_NOT_ALLOWED` |
+| An argument holding a NUL character, or one whose check fails with an error | `ARGUMENT_NOT_ALLOWED` |
 | An argument that names a location outside the workspace | `PATH_ESCAPE_ATTEMPT` |
 | `cp` only: a name it would write leads outside, or a recursive copy's destination holds a link that does | `PATH_ESCAPE_ATTEMPT` |
 
@@ -115,7 +116,14 @@ the real workspace root. That applies to programs added to a custom allowlist to
 - a short option: every tail after its dash, so an attached value at any position (`-f/x`, `-rf/x`) is checked;
 - `sort -t` and `--field-separator` take a separator, not a path: `sort -t/ -k2` and `sort -t / -k2` run;
 - on Windows, the `/X` switches of `dir`, `findstr`, `copy`, `move` and `sort` are switches, not paths, but a value
-  after `:` (`findstr /G:file`) is checked.
+  after `:` (`findstr /G:file`) is checked;
+- on Windows, a string the platform cannot parse as a path is judged by the part before the first character a path
+  cannot hold (`HEAD:src/x` by `HEAD`, `..\*` by `..\`); one that starts with `\` or `/` and has no such part
+  (`\\?\C:\x`, `\??\C:\x`) is refused, and so is a drive-relative path on a drive other than the workspace's
+  (`D:x`, which the program would resolve from that drive's own working directory).
+
+A working directory, or a file operation's path, that is not a valid path (a NUL character, or on Windows a `:` or
+wildcard in it) is refused with `PATH_ESCAPE_ATTEMPT` rather than failing with an exception.
 
 A relative value with no `..` component can only leave the workspace through a link, so the over-blocking is limited
 to text that is absolute or climbs out with `..`: a `grep` pattern `/api` or `../x`, or an option value such as
