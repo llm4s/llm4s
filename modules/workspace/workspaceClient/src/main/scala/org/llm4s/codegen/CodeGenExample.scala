@@ -10,16 +10,30 @@ import scala.util.Using
 
 /**
  * Example demonstrating how to use the CodeWorker to perform code tasks.
+ *
+ * The workspace runner runs each command without a shell, and only programs on its allowlist (#1756). `sbt` is not
+ * on the default list, so this example adds it with [[CodeWorker]]'s `extraAllowedCommands`, which the container
+ * receives as `WORKSPACE_EXTRA_COMMANDS=sbt`. An added program has no option rules of its own: `sbt run` runs the
+ * project's code, so add a build tool only for a workspace you are prepared to let the agent build and run.
  */
 object CodeGenExample {
   private val logger = LoggerFactory.getLogger(getClass)
 
+  /** The programs this example needs besides the runner's default allowlist. */
+  val ExtraAllowedCommands: Set[String] = Set("sbt")
+
+  /** The task given to the agent. Each command it names is one program and its arguments, as the runner requires. */
+  val Task: String =
+    """Create a simple sbt project containing a hello world example that prints the current date and time.
+      |Write the files with the file tools; create directories with 'mkdir -p'.
+      |Test the generated code by running 'sbt compile' and then 'sbt run', each as its own command.
+      |Commands run without a shell: give one program and its arguments, with no pipes, redirection, ';' or '&&',
+      |and no 'cd' (use the working directory instead).
+      |You can assume you have sbt and java already installed.
+      |Run the program and show the result.""".stripMargin
+
   def main(args: Array[String]): Unit = {
-    val task =
-      """Create a simple sbt project containing a hello world example that prints the current date and time.
-        |Use 'sbt compile' and 'sbt run' to test the generated code.
-        |You can assume you have sbt and java already installed.
-        |Run the program and show the result.""".stripMargin
+    val task = Task
 
     val result = for {
       // Uses the standard loader
@@ -35,7 +49,7 @@ object CodeGenExample {
       client <- LLMConnect.getClient(providerCfg)
 
       finalState <- Using.resource(
-        new CodeWorker(ws.workspaceDir, ws.imageName, ws.hostPort, client)
+        new CodeWorker(ws.workspaceDir, ws.imageName, ws.hostPort, client, ExtraAllowedCommands)
       ) { codeWorker =>
         for {
           _          <- Either.cond(codeWorker.initialize(), (), SimpleError("Failed to initialize CodeWorker"))

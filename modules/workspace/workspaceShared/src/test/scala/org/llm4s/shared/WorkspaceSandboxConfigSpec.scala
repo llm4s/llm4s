@@ -56,4 +56,35 @@ class WorkspaceSandboxConfigSpec extends AnyFlatSpec with Matchers {
       "Unknown sandbox profile: 'unknown-profile'"
     )
   }
+
+  "WorkspaceSandboxConfig.withExtraCommands" should "add bare program names, separated by commas or whitespace" in {
+    val widened = WorkspaceSandboxConfig.Permissive.withExtraCommands(" sbt, java\tscala-cli ")
+    widened.map(_.allowedCommands) shouldBe Right(
+      WorkspaceSandboxConfig.ReadWriteCommands ++ Set("sbt", "java", "scala-cli")
+    )
+    widened.map(_.copy(allowedCommands = Set.empty)) shouldBe
+      Right(WorkspaceSandboxConfig.Permissive.copy(allowedCommands = Set.empty))
+  }
+
+  it should "leave the config unchanged for an empty list" in {
+    WorkspaceSandboxConfig.LockedDown.withExtraCommands(" , ") shouldBe Right(WorkspaceSandboxConfig.LockedDown)
+  }
+
+  it should "refuse a path, an option or a name with shell characters" in {
+    WorkspaceSandboxConfig.Permissive.withExtraCommands("/bin/sbt") shouldBe Left(
+      "'/bin/sbt' is not a bare program name"
+    )
+    WorkspaceSandboxConfig.Permissive.withExtraCommands("..") shouldBe Left("'..' is not a bare program name")
+    WorkspaceSandboxConfig.Permissive.withExtraCommands("-x") shouldBe Left("'-x' is not a bare program name")
+    WorkspaceSandboxConfig.Permissive.withExtraCommands("sbt;id") shouldBe Left("'sbt;id' is not a bare program name")
+    WorkspaceSandboxConfig.Permissive.withExtraCommands("C:\\sbt.bat").isLeft shouldBe true
+  }
+
+  it should "refuse a shell or a program launcher, in any case" in {
+    for (name <- Seq("sh", "bash", "Bash", "env", "xargs", "cmd.exe", "pwsh", "sudo"))
+      withClue(name) {
+        WorkspaceSandboxConfig.Permissive.withExtraCommands(s"sbt,$name") shouldBe
+          Left(s"'$name' runs other programs, so it cannot be added to the allowlist")
+      }
+  }
 }

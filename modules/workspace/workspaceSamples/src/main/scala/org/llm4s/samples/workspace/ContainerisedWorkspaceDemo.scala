@@ -97,10 +97,10 @@ object ContainerisedWorkspaceDemo {
         val touchResult = workspace.executeCommand("touch /workspace/test_file.txt")
         logger.info(s"Touch command exit code: ${touchResult.exitCode}")
 
-        // Create a new file
-        val sbtVersionResult = workspace.executeCommand("sbt --version")
-        logger.info(s"SBT Version Result exit code: ${sbtVersionResult.exitCode}")
-        logger.info(s"SBT Version Result exit code: ${sbtVersionResult.stdout}")
+        // A program and its arguments, not shell text: `;`, pipes and redirection are refused (#1756)
+        val lsResult = workspace.executeCommand("ls -la")
+        logger.info(s"ls exit code: ${lsResult.exitCode}")
+        logger.info(s"ls output: ${lsResult.stdout}")
 
         // List the directory again to see the new file
         val updatedContents = workspace.exploreFiles("/workspace")
