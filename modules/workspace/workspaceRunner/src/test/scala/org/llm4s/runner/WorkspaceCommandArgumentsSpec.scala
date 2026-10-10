@@ -886,7 +886,7 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     val ws = fx.interface(ReadOnly)
     // (command, refused as an option on Windows): a Windows runner refuses sort's `-t` and `-T` before any path is
     // checked, since it cannot tell sort.exe from a GNU sort (see `windowsSortRefusal`), so there those commands are
-    // refused with ARGUMENT_NOT_ALLOWED instead.
+    // refused with ARGUMENT_NOT_ALLOWED instead; so is an argument `/` that is not a native sort.exe switch (#1738).
     Seq(
       "sort --random-source='{out}/secret.txt' a.txt"    -> false,
       "sort --random-source=escape/secret.txt a.txt"     -> false,
@@ -894,7 +894,7 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
       "sort -t/ '{out}/secret.txt'"                      -> true,
       "sort -t / '{out}/secret.txt'"                     -> true,
       "sort -Tt '{out}/secret.txt'"                      -> true,
-      "sort --field-separator / '{out}/secret.txt'"      -> false,
+      "sort --field-separator / '{out}/secret.txt'"      -> true,
       "grep --exclude-from='{out}/secret.txt' x a.txt"   -> false,
       "grep --exclude-from=escape/secret.txt x a.txt"    -> false,
       "git log --grep=escape/secret.txt"                 -> false,
@@ -1262,6 +1262,141 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     posix("git", "log", "HEAD..") shouldBe None
     // git's ':' arguments are refused everywhere
     posix("git", "ls-files", ":/") shouldBe Some(ArgumentNotAllowed)
+  }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // #1738: an MSYS2 / Cygwin `sort` or `findstr` reads `/c/...` as `C:\...`, so a `/` argument must be a native switch
+
+  "On Windows, sort and findstr" should "refuse a '/' argument that is not a switch of the native tool (#1738)" in
+    inWorkspace { fx =>
+      def windows(command: String*) = policy(fx, true, command: _*)
+      // The form from the issue, with the outside directory spelled as MSYS2 spells a drive path
+      val msysOutside = "/c" + fx.outside.toString.replace('\\', '/').dropWhile(_ != '/') + "/secret.txt"
+      Seq(
+        Seq("sort", msysOutside),
+        Seq("sort", "/c/Users/someone/outside/secret.txt"),
+        Seq("sort", "/R", msysOutside),
+        Seq("sort", "/secret.txt"),   // a runtime's own root: `<msys root>\secret.txt`
+        Seq("sort", "/d"),            // `D:\`
+        Seq("sort", "/"),             // the runtime's root
+        Seq("sort", "/RX", "a.txt"),  // not a native switch
+        Seq("sort", "/+3x", "a.txt"), // `/+n` takes digits only
+        Seq("sort", "/+", "a.txt"),
+        Seq("sort", "/L", "/c/x/secret"), // a switch's value is judged as any argument
+        Seq("sort", "/M:100", "a.txt"),   // sort.exe takes its values as the next argument
+        Seq("findstr", "/c:foo", msysOutside),
+        Seq("findstr", "/c:foo", "/c/x/secret"),
+        Seq("findstr", "x", "/secret.txt"),
+        Seq("findstr", "/c", "a.txt"), // `/C` needs `:string`
+        Seq("findstr", "/Q", "x", "a.txt"),
+        Seq("findstr", "/SQ", "x", "a.txt"),
+        Seq("findstr", "/A:zz", "x", "a.txt"),
+        Seq("findstr", "/", "x", "a.txt"),
+        Seq("findstr", "x/", "/etc")
+      ).foreach { command =>
+        withClue(s"${command.mkString(" ")}: ") {
+          windows(command: _*) shouldBe Some(ArgumentNotAllowed)
+        }
+      }
+    }
+
+  it should "still hold a native switch's file or directory value to the workspace" in inWorkspace { fx =>
+    def windows(command: String*) = policy(fx, true, command: _*)
+    windows("findstr", "/F:..\\x", "a.txt") shouldBe Some(ArgumentNotAllowed) // /F is refused outright
+    windows("findstr", "/D:..;C:\\", "x", "*.txt") shouldBe Some(ArgumentNotAllowed)
+    windows("findstr", "/D:..", "x", "*.txt") shouldBe Some(PathEscape)
+    windows("findstr", "/G:../outside/secret.txt", "a.txt") shouldBe Some(PathEscape)
+    windows("findstr", "/IG:../outside/secret.txt", "a.txt") shouldBe Some(PathEscape)
+    windows("findstr", s"/G:${fx.outside}/secret.txt", "a.txt") shouldBe Some(PathEscape)
+  }
+
+  it should "hold a drive path in a native switch's value to the workspace on a Windows host" in inWorkspace { fx =>
+    assume(isWindowsHost, "a drive path is a path only on Windows")
+    def windows(command: String*) = policy(fx, true, command: _*)
+    val out                       = fx.outside.toString
+    windows("findstr", s"/G:$out\\secret.txt", "a.txt") shouldBe Some(PathEscape)
+    windows("findstr", "/G:C:\\x", "a.txt") shouldBe Some(PathEscape)
+    windows("findstr", s"/D:$out", "x", "*.txt") shouldBe Some(PathEscape)
+  }
+
+  it should "allow the native tools' own switches" in inWorkspace { fx =>
+    def windows(command: String*) = policy(fx, true, command: _*)
+    Seq(
+      Seq("sort", "/R", "a.txt"),
+      Seq("sort", "/r", "a.txt"),
+      Seq("sort", "/REVERSE", "a.txt"),
+      Seq("sort", "/+3", "a.txt"),
+      Seq("sort", "/+12", "/R", "a.txt"),
+      Seq("sort", "/L", "C", "a.txt"),
+      Seq("sort", "/LOCALE", "C", "a.txt"),
+      Seq("sort", "/M", "1024", "a.txt"),
+      Seq("sort", "/REC", "8192", "a.txt"),
+      Seq("sort", "/record_maximum", "8192", "a.txt"),
+      Seq("sort", "/C", "a.txt"),
+      Seq("sort", "/CASE_SENSITIVE", "a.txt"),
+      Seq("sort", "/UNIQUE", "a.txt"),
+      Seq("findstr", "/I", "/C:foo", "a.txt"),
+      Seq("findstr", "/i", "/c:foo", "a.txt"),
+      Seq("findstr", "/IC:foo", "a.txt"),
+      Seq("findstr", "/B", "/E", "/L", "/R", "/S", "/I", "/X", "/V", "/N", "/M", "/O", "/P", "x", "a.txt"),
+      Seq("findstr", "/BELRSIXVNMOP", "x", "a.txt"),
+      Seq("findstr", "/OFF", "x", "a.txt"),
+      Seq("findstr", "/A:1F", "x", "a.txt"),
+      Seq("findstr", "/D:sub", "x", "*.scala"),
+      Seq("findstr", "/G:a.txt", "b.txt")
+    ).foreach { command =>
+      withClue(s"${command.mkString(" ")}: ") {
+        windows(command: _*) shouldBe None
+      }
+    }
+  }
+
+  it should "refuse the issue's command through executeCommand" in inWorkspace { fx =>
+    val ro = fx.interface(ReadOnly, windows = true)
+    refuses(ro, "sort /c/Users/someone/outside/secret.txt", ArgumentNotAllowed)
+    refuses(ro, "sort /secret.txt", ArgumentNotAllowed)
+    refuses(ro, "findstr /c:foo /c/x/secret", ArgumentNotAllowed)
+    passesPolicy(ro, "sort /R a.txt")
+    passesPolicy(ro, "findstr /I /C:foo a.txt")
+  }
+
+  it should "be read as paths, not switches, by a POSIX runner" in inWorkspace { fx =>
+    def posix(command: String*) = policy(fx, false, command: _*)
+    posix("sort", "/R") shouldBe Some(PathEscape) // an absolute path off Windows
+    posix("sort", "-r", "a.txt") shouldBe None
+  }
+
+  "CommandPolicy.msysDrivePath" should "read '/x' and '/x/...' as drive x's paths, as MSYS2 does" in {
+    CommandPolicy.msysDrivePath("/c/Users/x/secret.txt") shouldBe Some("c:/Users/x/secret.txt")
+    CommandPolicy.msysDrivePath("/D") shouldBe Some("D:/")
+    CommandPolicy.msysDrivePath("/c/") shouldBe Some("c:/")
+    CommandPolicy.msysDrivePath("/cd/x") shouldBe None
+    CommandPolicy.msysDrivePath("c/x") shouldBe None
+    CommandPolicy.msysDrivePath("/1/x") shouldBe None
+    CommandPolicy.msysDrivePath("/") shouldBe None
+  }
+
+  "CommandPolicy.shadowedToolRefusal" should "refuse sort or findstr when CreateProcess would find another build first" in
+    inWorkspace { fx =>
+      val before = fx.outside // a directory CreateProcess searches before the system directory
+      CommandPolicy.shadowedToolRefusal("sort", Seq(before)) shouldBe None
+      CommandPolicy.shadowedToolRefusal("findstr", Seq(before)) shouldBe None
+      Seq("sort.exe", "findstr.exe", "cat.exe").foreach(name => write(before.resolve(name), ""))
+      CommandPolicy.shadowedToolRefusal("sort", Seq(fx.root.resolve("missing"), before)).map(_.code) shouldBe
+        Some("EXECUTABLE_NOT_ALLOWED")
+      CommandPolicy.shadowedToolRefusal("findstr", Seq(before)).map(_.code) shouldBe Some("EXECUTABLE_NOT_ALLOWED")
+      CommandPolicy.shadowedToolRefusal("cat", Seq(before)) shouldBe None // its arguments are not read as switches
+    }
+
+  it should "find nothing in front of the system directory on a Windows host's runner" in inWorkspace { fx =>
+    assume(isWindowsHost, "only a Windows host searches its own directories")
+    val ro = fx.interface(ReadOnly, windows = true)
+    Seq("sort /R a.txt", "findstr /I x a.txt").foreach { command =>
+      val refused = Try(ro.executeCommand(command, None, Some(30.seconds), None)).failed.toOption.collect {
+        case e: WorkspaceAgentException => e.code
+      }
+      withClue(command)(refused.filter(PolicyCodes + "EXECUTABLE_NOT_ALLOWED") shouldBe None)
+    }
   }
 
   // ---------------------------------------------------------------------------------------------------------------
