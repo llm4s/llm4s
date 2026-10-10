@@ -319,7 +319,10 @@ private[llm4s] object Redaction {
    * over an escaped `&`, into the key of the field after it. So there every pass also reads the input as it was given,
    * and what any pass replaces, in sequence or alone, is replaced: the edits are merged where they overlap or meet
    * and made once, and no pass can take the key or the quote of a field from the pass that reads it. An input that
-   * holds no such escape is redacted by the passes in sequence alone, exactly as before.
+   * holds no such escape is redacted by the passes in sequence, and where it holds a `'` the passes that read fields
+   * under a single-quoted key (`'apiKey': ...`) also read the input as it was given (#1697): a double-quoted value
+   * before such a field (`'see "password": " here', 'apiKey': [...]`) may run over its key, and what they replace
+   * there is added where the passes in sequence replaced nothing, so every replacement those make is still made.
    *
    * Redacting the output a second time usually changes nothing, but that is not guaranteed: where quotes are
    * unbalanced or stray, the text a first pass replaced can change how a second pass pairs the quotes, and the
@@ -331,29 +334,70 @@ private[llm4s] object Redaction {
    * @return The input with sensitive data redacted
    */
   def redact(input: String, placeholder: String = RedactionPlaceholder): String =
-    if (input == null || input.isEmpty) {
-      input
-    } else {
-      val escaped = holdsSeparatorOrQuoteEscape(input)
-      val passes  = redactionPasses(placeholder, input.count(_ == '\''), escaped)
-      if (escaped) {
-        // Every pass also reads the input as it was given, and what any of them replaces is merged with what the
-        // passes in sequence replace, and written once: no pass can take the key or the quote of a field from
-        // another pass's reading (#1676). Each pass runs twice and the edits are sorted once.
-        val alone = passes.flatMap(pass => pass(input).edits)
-        applyEdits(input, mergeEdits(sequenceEdits(input, passes) ++ alone, placeholder))
-      } else {
-        passes.foldLeft(input)((text, pass) => pass(text).result)
-      }
-    }
+    if (input == null || input.isEmpty) input else redaction(input, placeholder, singleQuotedFromInput = true)._1
 
   /**
-   * What the passes replace when each reads the text the one before left, as edits of the input. Each character of
-   * a text is traced to the character of the input it was copied from, or to none where a pass wrote it (a
-   * placeholder, or a quote around one); the edits are the runs of the input that no character of the last text is
-   * traced to, with the text written in their place.
+   * What [[redact]] makes of a non-empty `input`, and the ranges of the input it replaces; with
+   * `singleQuotedFromInput = false`, without the single-quoted field passes' reading of the input as it was given
+   * (#1697), so that a test can check that reading only adds to what is replaced.
    */
-  private def sequenceEdits(input: String, passes: Vector[String => Rewrite]): Vector[Edit] = {
+  private[util] def redactedWithRanges(input: String, singleQuotedFromInput: Boolean): (String, Vector[(Int, Int)]) = {
+    val (text, edits) = redaction(input, RedactionPlaceholder, singleQuotedFromInput)
+    (text, edits.map(edit => (edit.start, edit.end)))
+  }
+
+  /** The redacted text of a non-empty `input`, and the edits that make it of the input. */
+  private def redaction(input: String, placeholder: String, singleQuotedFromInput: Boolean): (String, Vector[Edit]) = {
+    val escaped = holdsSeparatorOrQuoteEscape(input)
+    val quotes  = input.count(_ == '\'')
+    val passes  = redactionPasses(placeholder, quotes, escaped)
+    if (escaped) {
+      // Every pass also reads the input as it was given, and what any of them replaces is merged with what the
+      // passes in sequence replace, and written once: no pass can take the key or the quote of a field from
+      // another pass's reading (#1676). Each pass runs twice and the edits are sorted once. The single-quoted
+      // field passes are among them, so the reading #1697 adds below is made here already.
+      val alone = passes.flatMap(pass => pass(input).edits)
+      val edits = mergeEdits(sequenceEdits(input, passes)._2 ++ alone, placeholder)
+      (applyEdits(input, edits), edits)
+    } else {
+      // A pass that reads a double-quoted value can run it over the key of a single-quoted field after it - a
+      // `"password": "` that a Python string only mentions takes the rest of that string and `'apiKey': [` up to
+      // the next `"` - and the passes after it then never see that field (#1697). So the single-quoted field passes
+      // also read the input as it was given, and what they replace there is added where no pass in sequence
+      // replaced anything: every edit of the passes in sequence is made as before, so the output masks all it did.
+      val (text, sequenced) = sequenceEdits(input, passes)
+      val added =
+        if (!singleQuotedFromInput || quotes == 0) Vector.empty
+        else disjointFrom(sequenced, sequenceEdits(input, singleQuotedFieldPasses(placeholder, quotes))._2)
+      if (added.isEmpty) (text, sequenced)
+      else {
+        val edits = (sequenced ++ added).sortBy(_.start)
+        (applyEdits(input, edits), edits)
+      }
+    }
+  }
+
+  /**
+   * The edits of `extra` that neither overlap nor touch any edit of `kept`, both sorted and each free of overlaps:
+   * made together, every edit of `kept` is made as it would be alone. One sweep of both.
+   */
+  private def disjointFrom(kept: Vector[Edit], extra: Vector[Edit]): Vector[Edit] = {
+    val out = Vector.newBuilder[Edit]
+    var k   = 0
+    extra.foreach { e =>
+      while (k < kept.length && kept(k).end < e.start) k += 1
+      if (k >= kept.length || kept(k).start > e.end) out += e
+    }
+    out.result()
+  }
+
+  /**
+   * The text the passes leave when each reads the text the one before left, and what they replace, as edits of the
+   * input. Each character of a text is traced to the character of the input it was copied from, or to none where a
+   * pass wrote it (a placeholder, or a quote around one); the edits are the runs of the input that no character of
+   * the last text is traced to, with the text written in their place.
+   */
+  private def sequenceEdits(input: String, passes: Vector[String => Rewrite]): (String, Vector[Edit]) = {
     var text   = input
     var origin = Array.range(0, input.length)
     passes.foreach { pass =>
@@ -391,7 +435,7 @@ private[llm4s] object Redaction {
       i += 1
     }
     record(input.length, text.length)
-    found.result()
+    (text, found.result())
   }
 
   /** What a character of a text is traced to when a pass wrote it: a placeholder, or the text around one. */
@@ -613,14 +657,16 @@ private[llm4s] object Redaction {
   // ============================================================
 
   /**
-   * `"Authorization": "`, in any case, up to the opening quote of the value, with the key as group 2. The value is
-   * read by `redactQuoted`, as the body of a JSON string: a backslash escapes the character after it, so an escaped
-   * quote (`\"`) is part of the value and a quote after an escaped backslash (`\\"`) ends it. Stopping at the first
-   * `"` instead redacted only the text before an escaped quote and left the rest readable (#1672). A value that is
-   * not closed runs to the end of the input, so a payload cut off in the middle of a credential still has it
-   * redacted; one whose key a single-quoted string holds ends where that string does too (#1697).
+   * `"Authorization": "value"`, the value as group 2 and its closing quote, if any, as group 3. The value is the body
+   * of a JSON string: any character but a quote or a backslash, or a backslash and the character it escapes, so an
+   * escaped quote (`\"`) is part of the value and a quote after an escaped backslash (`\\"`) ends it. Stopping at the
+   * first `"` instead redacted only the text before an escaped quote and left the rest readable (#1672). A value that
+   * is not closed runs to the end of the input, as `scanQuotedValue` has it, so a payload cut off in the middle of a
+   * credential still has it redacted; `(?s)` lets the escaped character be a line break. The repetition is possessive:
+   * java.util.regex runs a possessive group in a loop, so neither the cost nor the stack grows with the length of the
+   * value.
    */
-  private val JsonAuthorizationStart: Regex = """(?i)("(Authorization)"\s*:\s*")""".r
+  private val JsonAuthorization: Regex = """(?is)("Authorization"\s*:\s*")((?:[^"\\]|\\.?)++)("|\z)""".r
 
   /**
    * `Authorization: ...` (`Proxy-Authorization: ...` too) in a header, anywhere in a line, the value running to the
@@ -678,8 +724,7 @@ private[llm4s] object Redaction {
    */
   private def authHeaderPasses(placeholder: String): Vector[String => Rewrite] =
     Vector(
-      (text: String) =>
-        redactQuoted(JsonAuthorizationStart, text, placeholder, ValueEnd.Quote('"'), endsWithSingleQuoted = true),
+      (text: String) => regexPass(JsonAuthorization, text, placeholder, group = 2),
       (text: String) => regexPass(HeaderAuthorization, text, placeholder, group = 2),
       (text: String) => regexPass(BearerToken, text, placeholder),
       (text: String) => regexPass(EscapedBearerToken, text, placeholder),
@@ -1172,27 +1217,17 @@ private[llm4s] object Redaction {
     // they have replaced no `'` of the input - one inside a value they redacted, or the closing quote of a credential
     // that a pattern ran over - and the placeholder writes none of its own. Where every pass reads the input itself,
     // the text is the input, and its quotes are all there.
-    def quotesKept(text: String): Boolean = !placeholder.contains('\'') && text.count(_ == '\'') >= inputQuotes
+    def quotesKept(text: String): Boolean = quotesAllKept(text, placeholder, inputQuotes)
     val pairs                             = pairStarts(escaped)
     Vector(
       (text: String) =>
         redactContainers(EscapedJsonContainerStart, text, placeholder, ValueEnd.EscapedQuote, leaves = false),
       (text: String) => redactContainers(JsonContainerStart, text, placeholder, ValueEnd.Quote('"'), leaves = false),
-      (text: String) =>
-        redactQuoted(EscapedJsonStringStart, text, placeholder, ValueEnd.EscapedQuote, endsWithSingleQuoted = true),
-      (text: String) =>
-        redactQuoted(JsonStringStart, text, placeholder, ValueEnd.Quote('"'), endsWithSingleQuoted = true),
+      (text: String) => redactQuoted(EscapedJsonStringStart, text, placeholder, ValueEnd.EscapedQuote),
+      (text: String) => redactQuoted(JsonStringStart, text, placeholder, ValueEnd.Quote('"')),
       (text: String) =>
         redactQuoted(SingleQuotedStart, text, placeholder, ValueEnd.Quote('\''), endsWithString = quotesKept(text)),
-      (text: String) =>
-        redactQuoted(
-          pairs.doubleQuoted,
-          text,
-          placeholder,
-          ValueEnd.Quote('"'),
-          endsWithSingleQuoted = true,
-          pair = true
-        ),
+      (text: String) => redactQuoted(pairs.doubleQuoted, text, placeholder, ValueEnd.Quote('"'), pair = true),
       (text: String) =>
         redactQuoted(
           pairs.singleQuoted,
@@ -1222,6 +1257,35 @@ private[llm4s] object Redaction {
         redactEscapedQuoted(pairs.escapedQuote, text, placeholder, key = 1, slashes = 2, hex = 3, pair = true)
     )
   }
+
+  /** Whether `text` holds every `'` of an input that held `inputQuotes`, and the placeholder writes none of its own. */
+  private def quotesAllKept(text: String, placeholder: String, inputQuotes: Int): Boolean =
+    !placeholder.contains('\'') && text.count(_ == '\'') >= inputQuotes
+
+  /**
+   * The passes that read a field under a single-quoted key - a string in either quote, a number, a container and its
+   * leaves - in the order [[redact]] runs them, which also run over the input as it was given (#1697). A pass before
+   * them that reads a double-quoted value can run it over such a key, `'see "password": " here', 'apiKey': [`, and
+   * they would not find it in the text it leaves.
+   */
+  private def singleQuotedFieldPasses(placeholder: String, inputQuotes: Int): Vector[String => Rewrite] =
+    Vector(
+      (text: String) =>
+        redactQuoted(
+          SingleQuotedStart,
+          text,
+          placeholder,
+          ValueEnd.Quote('\''),
+          endsWithString = quotesAllKept(text, placeholder, inputQuotes)
+        ),
+      (text: String) =>
+        redactQuoted(SingleQuotedKeyEscapedStringStart, text, placeholder, ValueEnd.EscapedQuote, asValue = true),
+      (text: String) =>
+        redactQuoted(SingleQuotedKeyStringStart, text, placeholder, ValueEnd.Quote('"'), asValue = true),
+      (text: String) => redactPairs(SingleQuotedNumberField, text, placeholder, wrap = "'"),
+      (text: String) =>
+        redactContainers(SingleQuotedContainerStart, text, placeholder, ValueEnd.Quote('\''), leaves = true)
+    )
 
   /**
    * A quoted key, `:` and the opening quote of a string value, where each quote is a JSON escape - backslashes, `u00`
@@ -1347,266 +1411,32 @@ private[llm4s] object Redaction {
    * string, the backslash of the closing `\"` or a bare quote (which ends the enclosing string). A value that is not
    * closed runs to the end of the input, so a payload cut off in the middle of a credential still has it redacted. A
    * loop, not a pattern, so the cost is linear and the stack does not grow with the length of the value.
-   *
-   * With a `singleQuoteDepth` (see `EnclosingQuotes.singleQuoteDepth`), the value's key sits inside a single-quoted
-   * string, and a `'` that ends that string (`PythonLines.endsString`) and is not escaped (`escapesQuote`) ends the
-   * value too (#1697). A doubled `''`, a quote escaped as SQL escapes it, ends nothing, nor does an apostrophe
-   * between two letters or digits, or a `'` past a line break: a single-quoted string does not run over one. The
-   * first other `'` decides: where it does not end the string, no later one does, and the value is read as it is
-   * outside a string - a later `'` would sit in another string, or in no Python string at all.
    */
   @tailrec
-  private def scanQuotedValue(
-    input: String,
-    from: Int,
-    end: ValueEnd,
-    singleQuoteDepth: Int = 0,
-    lines: Option[PythonLines] = None
-  ): Int =
+  private def scanQuotedValue(input: String, from: Int, end: ValueEnd): Int =
     if (from >= input.length) {
       input.length
     } else {
       val c = input.charAt(from)
-      if (singleQuoteDepth > 0 && (c == '\n' || c == '\r')) scanQuotedValue(input, from, end, 0, lines)
-      else if (singleQuoteDepth > 0 && c == '\'') {
-        if (from + 1 < input.length && input.charAt(from + 1) == '\'')
-          scanQuotedValue(input, from + 2, end, singleQuoteDepth, lines)
-        else if (isApostrophe(input, from)) scanQuotedValue(input, from + 1, end, singleQuoteDepth, lines)
-        else if (lines.exists(_.endsString(from, singleQuoteDepth))) from
-        // The first quote that could end the string does not: the key is in no string that ends the value, which is
-        // read as it is outside one.
-        else scanQuotedValue(input, from, end, 0, lines)
-      } else
-        end match {
-          case ValueEnd.Quote(quote) =>
-            if (c == quote) from
-            else scanQuotedValue(input, if (c == '\\') from + 2 else from + 1, end, singleQuoteDepth, lines)
-          case ValueEnd.QuoteInString(quote) =>
-            if (c == quote || c == '"') from
-            else scanQuotedValue(input, if (c == '\\') from + 2 else from + 1, end, singleQuoteDepth, lines)
-          case ValueEnd.EscapedQuote =>
-            if (c == '"') from
-            else if (c == '\\') {
-              var next = from
-              while (next < input.length && input.charAt(next) == '\\') next += 1
-              val slashes = next - from
-              if (next < input.length && input.charAt(next) == '"' && slashes % 4 == 1) next - 1
-              else if (next < input.length && input.charAt(next) == '"' && slashes % 2 == 0) next
-              else if (
-                singleQuoteDepth > 0 && next < input.length && input.charAt(next) == '\'' &&
-                !escapesQuote(slashes, singleQuoteDepth)
-              ) scanQuotedValue(input, next, end, singleQuoteDepth, lines) // a `'` after an escaped backslash
-              else scanQuotedValue(input, next + 1, end, singleQuoteDepth, lines)
-            } else scanQuotedValue(input, from + 1, end, singleQuoteDepth, lines)
-        }
-    }
-
-  /**
-   * Whether a `'` ends the single-quoted string a double-quoted value sits in (#1697), for one input. What it reads of
-   * a line is kept, so that the many values of a long line ask in time linear in the input.
-   */
-  final private class PythonLines(input: String) {
-    private val n = input.length
-    // The part of a line last searched for its last quote (`lastQuote`): where the search began, where the line ends,
-    // at which depth, and the quote it found, or -1.
-    private var searchedFrom  = -1
-    private var searchedEnd   = -1
-    private var searchedDepth = 0
-    private var searchedQuote = -1
-    // Whether the Python text from a position, at a depth, reaches the last quote of its line (`reachesLastQuote`).
-    private val reaches = scala.collection.mutable.HashMap.empty[Long, Boolean]
-
-    private def blank(from: Int): Int = {
-      var i = from
-      while (i < n && (input.charAt(i) == ' ' || input.charAt(i) == '\t')) i += 1
-      i
-    }
-
-    // The end of the line, or, inside a JSON string, a bare `"` that ends it.
-    private def endsLine(i: Int, depth: Int): Boolean =
-      i == n || input.charAt(i) == '\n' || input.charAt(i) == '\r' ||
-        (depth > 1 && input.charAt(i) == '"' && input.charAt(i - 1) != '\\')
-
-    // The end of the input, or, inside a JSON string, a bare `"` that ends it. A line break alone is not: a quote
-    // before it may as well open a string that a later line closes, as `'t="'` does for the pairs after it.
-    private def endsInput(i: Int, depth: Int): Boolean =
-      !(i < n && (input.charAt(i) == '\n' || input.charAt(i) == '\r')) && endsLine(i, depth)
-
-    private def pastClosers(from: Int): Int = {
-      var i = blank(from)
-      while (i < n && "}])".indexOf(input.charAt(i).toInt) >= 0) i = blank(i + 1)
-      i
-    }
-
-    // The index after the quoted item opening at `from`, `'...'`, `"..."` or, inside a JSON string, `\"...\"`, if it
-    // closes on its line, or -1.
-    private def afterItem(from: Int, depth: Int): Int = {
-      val quote =
-        if (from >= n) EnclosingQuotes.NoQuote
-        else if (input.charAt(from) == '\'' || (depth == 1 && input.charAt(from) == '"')) input.charAt(from)
-        else if (depth > 1 && input.startsWith("\\\"", from)) '"'
-        else EnclosingQuotes.NoQuote
-      var i      = if (quote == '"' && depth > 1) from + 2 else from + 1
-      var result = if (quote == EnclosingQuotes.NoQuote) n + 1 else -1
-      while (result < 0 && i < n) {
-        val c = input.charAt(i)
-        if (c == '\\') {
-          var next = i
-          while (next < n && input.charAt(next) == '\\') next += 1
-          val slashes = next - i
-          if (next < n) {
-            val q = input.charAt(next)
-            if (q == '"' && depth > 1) {
-              // `\"` closes a `\"`-quoted item, `\\\"` is its text, and an even run leaves a bare `"`, which ends the
-              // JSON string first.
-              if (quote == '"' && (slashes & 3) == 1) result = next + 1
-              else if ((slashes & 1) == 0) result = n + 1
-            } else if (q == quote && quote == '\'' && !escapesQuote(slashes, depth)) result = next + 1
-            else if (q == quote && quote == '"' && (slashes & 1) == 0) result = next + 1
-            else if (q == '\n' || q == '\r') result = n + 1
-          }
-          i = next + 1
-        } else if (c == '\n' || c == '\r' || (depth > 1 && c == '"')) result = n + 1
-        else if (c == quote) result = i + 1
-        else i += 1
-      }
-      if (result < 0 || result > n) -1 else result
-    }
-
-    // The index after a number, `None`, `True` or `False` at `from`, or -1.
-    private def afterLiteral(from: Int): Int = {
-      val word = Seq("None", "True", "False").find(input.startsWith(_, from)).fold(0)(_.length)
-      var i    = from + word
-      if (word == 0) {
-        if (i < n && input.charAt(i) == '-') i += 1
-        val digits = i
-        while (i < n && (input.charAt(i).isDigit || input.charAt(i) == '.')) i += 1
-        if (i == digits) i = -1
-      }
-      if (i < 0 || (i < n && (input.charAt(i).isLetterOrDigit || input.charAt(i) == '_'))) -1 else i
-    }
-
-    /**
-     * Whether the `'` at `quote` ends a single-quoted string `depth` deep (see `EnclosingQuotes.singleQuoteDepth`)
-     * that a double-quoted value sits in (#1697): what follows it is what follows a value in a Python dict, list or
-     * tuple. Past spaces and any `}`, `]` or `)`, that is the end of the input - or, inside a JSON string, of that
-     * string - or a `,` and then the end of the line or an item - past any `{`, `[` or `(`, a quoted string that
-     * closes on its line, a number, `None`, `True` or `False` - followed the same way, or by `:`. Python escapes a `'`
-     * inside a single-quoted string, so a credential in one holds no other; but a credential in a JSON field that a
-     * stray quote only seems to enclose may (`'Ab3'),9xQ"`, `'x'] y"`), and is read whole, as it is outside any
-     * string, unless such a Python container goes on after it.
-     *
-     * A `'` after it on the line, the last of them, closes either a string that comes after this one or the string
-     * the value seems to sit in, with the credential's quote in the middle: `data: '{"password": "Ab3', 'x"}'`. So
-     * where one follows, the text up to it must be Python too - punctuation, quoted strings and literals, all the way
-     * to and past that last quote (`reachesLastQuote`) - and the string that last quote closes must not hold the end
-     * of the double-quoted value: a `"` followed, past spaces and any `}` or `]`, by that quote or by a `,` (`'x"}'`,
-     * `'G","user":"bob"}'`). A credential's tail reads as neither, so its value is read whole.
-     *
-     * A value asks this of one quote at most (the first decides). The check reads up to the end of the item after
-     * the comma, and the line is read once more at most, with what it found kept, so the cost stays linear.
-     */
-    def endsString(quote: Int, depth: Int): Boolean = {
-      val afterQuote = pastClosers(quote + 1)
-      if (endsInput(afterQuote, depth)) true
-      else if (input.charAt(afterQuote) != ',') false
-      else {
-        var item = blank(afterQuote + 1)
-        if (endsLine(item, depth)) true
-        else {
-          while (item < n && "{[(".indexOf(input.charAt(item).toInt) >= 0) item = blank(item + 1)
-          val itemEnd =
-            if (item < n && "}])".indexOf(input.charAt(item).toInt) >= 0) item // an empty container
-            else if (
-              item < n && (input.charAt(item) == '\'' || input.charAt(item) == '"' || input.charAt(item) == '\\')
-            )
-              afterItem(item, depth)
-            else afterLiteral(item)
-          itemEnd >= 0 && {
-            val after = pastClosers(itemEnd)
-            endsInput(after, depth) || ",:".indexOf(input.charAt(after).toInt) >= 0
-          } && {
-            val last = lastQuote(quote + 1, depth)
-            last < 0 || reachesLastQuote(quote + 1, depth, last)
-          }
-        }
+      end match {
+        case ValueEnd.Quote(quote) =>
+          if (c == quote) from
+          else scanQuotedValue(input, if (c == '\\') from + 2 else from + 1, end)
+        case ValueEnd.QuoteInString(quote) =>
+          if (c == quote || c == '"') from
+          else scanQuotedValue(input, if (c == '\\') from + 2 else from + 1, end)
+        case ValueEnd.EscapedQuote =>
+          if (c == '"') from
+          else if (c == '\\') {
+            var next = from
+            while (next < input.length && input.charAt(next) == '\\') next += 1
+            val slashes = next - from
+            if (next < input.length && input.charAt(next) == '"' && slashes % 4 == 1) next - 1
+            else if (next < input.length && input.charAt(next) == '"' && slashes % 2 == 0) next
+            else scanQuotedValue(input, next + 1, end)
+          } else scanQuotedValue(input, from + 1, end)
       }
     }
-
-    // The last `'` from `from` to the end of its line that is neither escaped (`escapesQuote`) nor an apostrophe, or
-    // -1. A later ask from within the part already read gets the same quote without reading it again.
-    private def lastQuote(from: Int, depth: Int): Int =
-      if (searchedFrom >= 0 && depth == searchedDepth && from >= searchedFrom && from <= searchedEnd) {
-        if (searchedQuote >= from) searchedQuote else -1
-      } else {
-        var i    = from
-        var last = -1
-        while (!endsLine(i, depth)) {
-          val c = input.charAt(i)
-          if (c == '\\') {
-            var next = i
-            while (next < n && input.charAt(next) == '\\') next += 1
-            i = if (next < n && input.charAt(next) == '\'' && escapesQuote(next - i, depth)) next + 1 else next
-          } else {
-            if (c == '\'' && !isApostrophe(input, i)) last = i
-            i += 1
-          }
-        }
-        searchedFrom = from
-        searchedEnd = i
-        searchedDepth = depth
-        searchedQuote = last
-        last
-      }
-
-    // Whether the text from `from` reads as Python - spaces, punctuation, quoted strings closed on the line and
-    // literals - up to and past the quote at `last`, and the string that quote closes, if any, holds no `"` that ends a
-    // JSON value (`holdsValueEnd`). The answer from each position passed is kept: a later ask that reaches one stops.
-    private def reachesLastQuote(from: Int, depth: Int, last: Int): Boolean = {
-      val passed = scala.collection.mutable.ArrayBuffer.empty[Long]
-      var i      = from
-      var result = 0 // 1 reaches, 2 does not
-      while (result == 0) {
-        i = blank(i)
-        val key = (i.toLong << 6) | (depth & 63).toLong
-        reaches.get(key) match {
-          case Some(known) => result = if (known) 1 else 2
-          case None =>
-            passed += key
-            if (endsLine(i, depth)) result = 2
-            else {
-              val c = input.charAt(i)
-              val end =
-                if (",:{[(}])".indexOf(c.toInt) >= 0) i + 1
-                else if (c == '\'' || c == '"' || c == '\\') afterItem(i, depth)
-                else afterLiteral(i)
-              if (end < 0) result = 2
-              else if (end > last) result = if (c == '\'' && end == last + 1 && holdsValueEnd(i + 1, last)) 2 else 1
-              else i = end
-            }
-        }
-      }
-      passed.foreach(reaches.update(_, result == 1))
-      result == 1
-    }
-
-    // Whether the text from `from` to `last` holds a `"` followed, past spaces and any `}` or `]`, by `last` or `,`.
-    private def holdsValueEnd(from: Int, last: Int): Boolean =
-      (from until last).exists { j =>
-        input.charAt(j) == '"' && {
-          var k = j + 1
-          while (k < last && " \t}]".indexOf(input.charAt(k).toInt) >= 0) k += 1
-          k == last || input.charAt(k) == ','
-        }
-      }
-  }
-
-  /**
-   * Whether a run of `slashes` backslashes escapes the `'` after it in a single-quoted string `depth` deep (see
-   * `EnclosingQuotes.singleQuoteDepth`): Python's `\'` is an odd run in the string itself, and in a JSON string,
-   * which doubles each backslash, a run whose half is odd (`\\'`).
-   */
-  private def escapesQuote(slashes: Int, depth: Int): Boolean = ((slashes >> (depth - 1)) & 1) == 1
 
   /**
    * The index of the character that ends a single-quoted value starting at `from` inside a double-quoted string: its
@@ -1690,11 +1520,6 @@ private[llm4s] object Redaction {
    * (`scanSingleQuotedInString`): a message that mentions `'password': '` without closing it then does not take the
    * rest of the document. Where such a `'` follows, the value runs to the next `'`, as it does outside a string.
    *
-   * With `endsWithSingleQuoted`, the other way round: a double-quoted value whose key sits inside a single-quoted
-   * string - or, for an escaped key, a single-quoted string inside the double-quoted string that encloses it - ends at
-   * its own quote or at a `'` that ends that string (`PythonLines.endsString`), so that a Python dict whose message
-   * mentions `"password": "` keeps the key of its next field for the passes after (#1697).
-   *
    * With `asValue`, a match is a value only where it can be one of a dict: closed before `,` and the next key or
    * before `}`, or not closed at all, so that a quote that opens a later key (`'password': "token": [`) or sits
    * inside a later value does not close it, and the key it would run over is left to the passes after; and, for the
@@ -1709,17 +1534,14 @@ private[llm4s] object Redaction {
     placeholder: String,
     end: ValueEnd,
     endsWithString: Boolean = false,
-    endsWithSingleQuoted: Boolean = false,
     asValue: Boolean = false,
     pair: Boolean = false
   ): Rewrite = {
-    val matcher        = start.pattern.matcher(input)
-    val out            = new Rewrite(input, placeholder)
-    val outsideStrings = asValue && end == ValueEnd.Quote('"')
-    val enclosing =
-      if (endsWithString || endsWithSingleQuoted || outsideStrings) Some(new EnclosingQuotes(input)) else None
+    val matcher              = start.pattern.matcher(input)
+    val out                  = new Rewrite(input, placeholder)
+    val outsideStrings       = asValue && end == ValueEnd.Quote('"')
+    val enclosing            = if (endsWithString || outsideStrings) Some(new EnclosingQuotes(input)) else None
     lazy val lastSingleQuote = lastClosingSingleQuote(input)
-    lazy val pythonLines     = new PythonLines(input)
 
     // Inside a double-quoted string, a value that is the placeholder followed by a `"` that ends the string - one
     // this pass ended there on an earlier `redact`, with no `'` after it - ends there again, whatever the quotes the
@@ -1733,8 +1555,8 @@ private[llm4s] object Redaction {
       input.charAt(after) == '"' && lastSingleQuote < after && endsString(input, after + 1)
     }
 
-    def valueEndOf(enclosingQuote: Char, valueStart: Int): Int =
-      if (endsWithString && enclosingQuote == '"') {
+    def valueEndOf(inString: Boolean, valueStart: Int): Int =
+      if (endsWithString && inString) {
         if (alreadyEnded(valueStart)) valueStart + placeholder.length
         else {
           // A value the end of the string would leave empty (`'password': '", ...`) is no value: the quote after the
@@ -1744,17 +1566,7 @@ private[llm4s] object Redaction {
             scanQuotedValue(input, valueStart, end)
           else stringEnd
         }
-      } else if (endsWithSingleQuoted && singleQuoteDepth > 0) {
-        // A double-quoted value inside a single-quoted string, which a Python dict whose message mentions
-        // `"password": "` holds, ends where that string does (#1697). Python escapes a `'` in such a string, so a
-        // value the end of the string leaves empty is empty: read on, it would take the key of the next field.
-        scanQuotedValue(input, valueStart, end, singleQuoteDepth, Some(pythonLines))
       } else scanQuotedValue(input, valueStart, end)
-
-    // The single-quoted string the key of the match sits in, if any, read within its line: one that encloses it, or,
-    // for an escaped key, one inside the double-quoted string that encloses it - a Python dict inside a JSON string. A
-    // bare `"` that the enclosing double-quoted string holds ends it, so a bare key there is in no single-quoted string.
-    def singleQuoteDepth: Int = enclosing.fold(0)(_.singleQuoteDepth(escapedKey = end == ValueEnd.EscapedQuote))
 
     def skipSpace(from: Int): Int = {
       var i = from
@@ -1796,8 +1608,7 @@ private[llm4s] object Redaction {
         loop(afterEscapedEquals(input, matcher.end(2)), copiedTo)
       } else {
         val valueStart = matcher.end
-        val valueEnd =
-          valueEndOf(enclosing.fold(EnclosingQuotes.NoQuote)(_.enclosingAt(matcher.start(1))), valueStart)
+        val valueEnd   = valueEndOf(enclosing.exists(_.enclosingAt(matcher.start(1)) == '"'), valueStart)
         if (asValue && !endsAsValue(valueEnd)) {
           loop(matcher.end, copiedTo)
         } else if (isSensitiveKey(matcher.group(2)) && valueEnd > valueStart) {
@@ -1829,40 +1640,25 @@ private[llm4s] object Redaction {
     private var openedAt: Int      = -1 // where the open string opened
     private var lineStart: Int     = 0  // the index after the last line break passed
 
-    // The same scan within the line only, for `singleQuoteDepth`: a string open at a line break ends there, so a stray
-    // quote on an earlier line (`the users' settings`, `'tis`) changes nothing on a later one (#1697).
-    private var lineOpen: Char      = EnclosingQuotes.NoQuote
-    private var lineOpenedAt: Int   = -1
-    private var inSingle: Boolean   = false // inside a single-quoted string within the double-quoted one open
-    private var singleAtValue       = false // that single-quoted string, or the one open, opened where a value does
-    private var inPyDouble: Boolean = false // inside a `\"`-quoted Python string within the double-quoted one open
-
     /** The quote of the string that is open just before `index`, or `NoQuote`. */
     def enclosingAt(index: Int): Char = {
       while (pos < index) {
         val c = input.charAt(pos)
         if (c == '\\') {
           if (open == '"' && pos + 1 < input.length && input.charAt(pos + 1) == '"') inEscaped = !inEscaped
-          lineBackslash(pos)
-          if (pos + 1 < input.length && (input.charAt(pos + 1) == '\n' || input.charAt(pos + 1) == '\r')) {
+          if (pos + 1 < input.length && (input.charAt(pos + 1) == '\n' || input.charAt(pos + 1) == '\r'))
             lineStart = pos + 2
-            endLine()
-          }
           pos += 1
         } else if (c == '\n' || c == '\r') {
           lineStart = pos + 1
-          endLine()
-        } else {
-          lineChar(pos, c)
-          if (open != EnclosingQuotes.NoQuote) {
-            if (c == open && !isApostrophe(pos)) {
-              open = EnclosingQuotes.NoQuote
-              inEscaped = false
-            }
-          } else if ((c == '"' || c == '\'') && !isApostrophe(pos)) {
-            open = c
-            openedAt = pos
+        } else if (open != EnclosingQuotes.NoQuote) {
+          if (c == open && !isApostrophe(pos)) {
+            open = EnclosingQuotes.NoQuote
+            inEscaped = false
           }
+        } else if ((c == '"' || c == '\'') && !isApostrophe(pos)) {
+          open = c
+          openedAt = pos
         }
         pos += 1
       }
@@ -1882,75 +1678,10 @@ private[llm4s] object Redaction {
      */
     def inEscapedString: Boolean = inEscaped
 
-    /**
-     * How deep the single-quoted string open at the position `enclosingAt` was last asked about sits, read within its
-     * line: 1 where it is open there itself, 2 where it sits inside the double-quoted string open there - as a Python
-     * dict inside a JSON string has its strings - whose escapes double its backslashes, and 0 where there is none or
-     * where it did not open where a value does (`opensValue`), and so may be a stray quote (#1697). With
-     * `escapedKey` false, a double-quoted key there is bare, and its quote ends the double-quoted string: 0.
-     */
-    def singleQuoteDepth(escapedKey: Boolean): Int =
-      if (!singleAtValue) 0
-      else if (lineOpen == '\'') 1
-      else if (lineOpen == '"' && inSingle && escapedKey) 2
-      else 0
-
-    private def endLine(): Unit = {
-      lineOpen = EnclosingQuotes.NoQuote
-      inSingle = false
-      inPyDouble = false
-    }
-
-    // A backslash at `i`, which escapes the character after it: a `\"` that Python reads as a quote (one backslash, or
-    // five...) inside a double-quoted string opens or closes a double-quoted Python string within it, whose `'` are
-    // its text, outside a single-quoted one, whose text it is.
-    private def lineBackslash(i: Int): Unit =
-      if (lineOpen == '"' && i + 1 < input.length && input.charAt(i + 1) == '"' && !inSingle) {
-        if ((backslashesBefore(i) & 3) == 0) {
-          if (inPyDouble) inPyDouble = false
-          else if (opensValue(i)) inPyDouble = true
-        }
-      }
-
-    private def lineChar(i: Int, c: Char): Unit =
-      if (lineOpen != EnclosingQuotes.NoQuote) {
-        if (c == lineOpen && !isApostrophe(i)) endLine()
-        else if (
-          lineOpen == '"' && c == '\'' && !inPyDouble && !isApostrophe(i) && !escapesQuote(backslashesBefore(i), 2)
-        ) {
-          inSingle = !inSingle
-          if (inSingle) singleAtValue = opensValue(i)
-        }
-      } else if ((c == '"' || c == '\'') && !isApostrophe(i)) {
-        lineOpen = c
-        lineOpenedAt = i
-        if (c == '\'') singleAtValue = opensValue(i)
-      }
-
-    // Whether the `'` at `i` opens a string where a Python dict, list or tuple has a value or a key: after `{`, `[`,
-    // `(`, `,` or `:`, after `=` (`cfg='...'`), at the start of the line or of the double-quoted string open there,
-    // spaces aside. A `'` in a word or after other punctuation (`QC(A7'<H`, a stray quote in a credential) opens no
-    // string a field's value could end at. Reads the spaces before the quote once.
-    private def opensValue(i: Int): Boolean = {
-      var j = i - 1
-      while (j >= lineStart && Character.isWhitespace(input.charAt(j))) j -= 1
-      j < lineStart || "{[(,:=".indexOf(input.charAt(j).toInt) >= 0 || (lineOpen == '"' && j == lineOpenedAt)
-    }
-
-    // The backslashes right before `i`. Asked once for each quote, and a run of backslashes ends at one character only.
-    private def backslashesBefore(i: Int): Int = {
-      var j = i
-      while (j > 0 && input.charAt(j - 1) == '\\') j -= 1
-      i - j
-    }
-
-    private def isApostrophe(i: Int): Boolean = Redaction.isApostrophe(input, i)
+    private def isApostrophe(i: Int): Boolean =
+      input.charAt(i) == '\'' && i > 0 && i + 1 < input.length &&
+        input.charAt(i - 1).isLetterOrDigit && input.charAt(i + 1).isLetterOrDigit
   }
-
-  /** Whether the character at `i` is a `'` between two letters or digits: an apostrophe, never a quote. */
-  private def isApostrophe(input: String, i: Int): Boolean =
-    input.charAt(i) == '\'' && i > 0 && i + 1 < input.length &&
-      input.charAt(i - 1).isLetterOrDigit && input.charAt(i + 1).isLetterOrDigit
 
   private object EnclosingQuotes {
     val NoQuote: Char = '\u0000'
@@ -2412,10 +2143,8 @@ private[llm4s] object Redaction {
    * quote and the content after it was written in the clear.
    */
   private def redactEqualsPairs(input: String, placeholder: String, escaped: Boolean): Rewrite = {
-    val matcher          = pairStarts(escaped).equals.pattern.matcher(input)
-    val out              = new Rewrite(input, placeholder)
-    val enclosing        = new EnclosingQuotes(input)
-    lazy val pythonLines = new PythonLines(input)
+    val matcher = pairStarts(escaped).equals.pattern.matcher(input)
+    val out     = new Rewrite(input, placeholder)
 
     @tailrec def loop(searchFrom: Int, copiedTo: Int): Int =
       if (searchFrom >= input.length || !matcher.find(searchFrom)) {
@@ -2428,15 +2157,12 @@ private[llm4s] object Redaction {
         // A value in quotes escaped with backslashes (`password=\"hunter2\"`, a logfmt line inside a JSON string):
         // its content is replaced, and the escaped quotes around it are kept (#1684).
         val contentStart = afterBackslashes(input, matcher.end) + 1
-        enclosing.enclosingAt(matcher.start(2))
         val (contentEnd, next) =
           backslashQuotedValueEnd(
             input,
             contentStart,
             input.charAt(contentStart - 1),
-            backslashQuoteDepth(input, matcher.end),
-            enclosing.singleQuoteDepth(escapedKey = true),
-            pythonLines
+            backslashQuoteDepth(input, matcher.end)
           )
         if (contentEnd > contentStart) {
           out.copy(copiedTo, contentStart)
@@ -2510,22 +2236,11 @@ private[llm4s] object Redaction {
    * escaped less deep, or bare, ends the string the pair sits in, and a line break ends the line: the value is not
    * closed and ends there, and so does an input that ends first. The backslashes that escape the quote it ends at
    * are not content (`quoteEscape`), so they are kept, and the document still parses at every depth. The other quote
-   * is content at any depth, but with a `singleQuoteDepth`, where the key sits in a single-quoted string (a Python
-   * dict, bare or inside a JSON string, see `EnclosingQuotes.singleQuoteDepth`), a `'` that ends that string
-   * (`PythonLines.endsString`) and is neither escaped (`escapesQuote`) nor doubled (`''`) ends the value too (#1697).
-   * A loop that reads each character a bounded number of times.
+   * is content at any depth. A loop that reads each character once.
    */
-  private def backslashQuotedValueEnd(
-    input: String,
-    from: Int,
-    quote: Char,
-    depth: Int,
-    keyQuoteDepth: Int,
-    lines: PythonLines
-  ): (Int, Int) = {
-    var singleQuoteDepth = keyQuoteDepth
-    var i                = from
-    var result           = (-1, -1)
+  private def backslashQuotedValueEnd(input: String, from: Int, quote: Char, depth: Int): (Int, Int) = {
+    var i      = from
+    var result = (-1, -1)
     while (result._1 < 0 && i < input.length) {
       val c = input.charAt(i)
       if (c == '\\') {
@@ -2535,18 +2250,9 @@ private[llm4s] object Redaction {
           if (d == depth) result = (run - quoteEscape(input, from, run).length, run + 1)
           else if (d < depth) result = (run - quoteEscape(input, from, run).length, run)
           else i = run + 1
-        } else if (
-          singleQuoteDepth > 0 && run < input.length && input.charAt(run) == '\'' &&
-          escapesQuote(run - i, singleQuoteDepth)
-        ) i = run + 1
-        else i = run
+        } else i = run
       } else if (c == quote || c == '\n' || c == '\r') result = (i, i)
-      else if (singleQuoteDepth > 0 && c == '\'') {
-        if (i + 1 < input.length && input.charAt(i + 1) == '\'') i += 2
-        else if (isApostrophe(input, i)) i += 1
-        else if (lines.endsString(i, singleQuoteDepth)) result = (i, i)
-        else { singleQuoteDepth = 0; i += 1 } // the first quote decides, as in `scanQuotedValue`
-      } else i += 1
+      else i += 1
     }
     if (result._1 < 0) (input.length, input.length) else result
   }

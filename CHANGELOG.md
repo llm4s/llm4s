@@ -2084,26 +2084,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Security - redaction: a `"password": "` that a single-quoted string mentions no longer hides the next field's
   key** ([#1697](https://github.com/llm4s/llm4s/issues/1697)): `Redaction` (used by the provider exchange logger,
   `LLMError` messages and error mapping) read a JSON-style field that a Python dict's string merely mentions as a
-  real one and ran its value to the next `"`, over the key of the next field, so the credential under that key stayed
-  readable: `{'note': 'see "password": " here', 'apiKey': ["7YJ1VSFPX'}", -9935758]}` kept `7YJ1VSFPX` and
-  `-9935758`. A double-quoted value whose key sits inside a single-quoted string now ends at its own quote or at the
-  `'` that ends that string: the first `'` in the value that is not escaped (`\'`, `\\'` inside a JSON string),
-  doubled as SQL does (`''`) or an apostrophe, where a Python dict, list or tuple goes on after it - past any `}`, `]`
-  or `)`, the end of the input (or of the JSON string the dict is in), or a `,` and then the end of the line or an item
-  (a quoted string that closes on the line, a number, `None`, `True` or `False`, after any `{`, `[` or `(`) followed the
-  same way or by `:` - and where that string opened as a Python value does (after `{`, `[`, `(`, `,`, `:` or `=`, or
-  at the start of the line) on the same line as the key. Where another `'` follows on the line, the text up to the last
-  one must read as Python too - punctuation, quoted strings and literals, through that last quote - and the string that
-  quote closes must not hold a `"` followed by it or by a `,`: otherwise the last quote is the closing quote of a
-  wrapper around a JSON document (`data: '{"password": "Ab3',5:xyz"}'`, `['curl', '-d', '{"password": "p4ss','w0rd"}']`)
-  and the `'` a credential's own. Where that first `'` is followed by anything else, the value is read as it is
-  outside a string. The output is
-  `{'note': 'see "password": "[REDACTED]', 'apiKey': ["[REDACTED]", '[REDACTED]']}`. A real field that a stray quote
-  only seems to enclose - an SQL literal (`('{"api_key": "ab''),cd"}')`), a log prefix (`body='{"password":
-  "Ab3'),9xQ"}'`), a quote on an earlier line (`'tis the season`) - is redacted whole, as before. The same holds for
-  `password="`, `"Authorization": "`, and for `\"password\": \"` and `password=\"` in a Python dict inside a JSON
-  string. A value the string's end leaves empty (`'see "password": "', 'token': ...`) is empty. A double-quoted field
-  closed inside the string (`'{"password": "..."}'`) and any field outside a single-quoted string read as before.
+  real one and ran its value to the next `"`, over the key of the next field, so no later pass found that field and
+  its credential stayed readable: `{'note': 'see "password": " here', 'apiKey': ["7YJ1VSFPX'}", -9935758]}` kept
+  `7YJ1VSFPX` and `-9935758`. The passes that read a field under a single-quoted key (a string in either quote, a
+  number, a list or dict and its leaves) now also read the input as it was given, and what they replace there is
+  added wherever the other passes replaced nothing. Every value is still read as before, so everything redacted
+  before is redacted exactly as before, and only more is replaced: the example becomes
+  `{'note': 'see "password": "[REDACTED]"[REDACTED]", '[REDACTED]']}`. The same holds when the value that runs over
+  the key is `password="`, `"Authorization": "` or `\"password\": \"`, and for such a dict inside a JSON string.
+  The extra reading is made only where the input holds a `'`, and takes time linear in the input.
 - **Security - workspace runner: on Windows, `sort` and `findstr` accept only their native switches**
   ([#1738](https://github.com/llm4s/llm4s/issues/1738)): the command policy read every argument starting with `/`
   to `sort` or `findstr` as a switch, path-checked only the text after the slash, and exempted both programs from the

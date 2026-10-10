@@ -878,359 +878,175 @@ class RedactionShapesSpec extends AnyFlatSpec with Matchers {
   }
 
   // ---------------------------------------------------------------------------------------------
-  // A double-quoted field that a single-quoted string mentions ends with that string (#1697)
+  // A single-quoted field whose key a double-quoted value runs over is still read (#1697)
   // ---------------------------------------------------------------------------------------------
 
-  it should "end a \"password\": \" that a single-quoted string mentions where that string ends (#1697)" in {
-    // Was `... "password": "[REDACTED]"7YJ1VSFPX'}", -9935758]}`: the mention's value ran to the next `"`, over the
-    // key of the next field, and the credential under it was left readable.
+  it should "redact the field whose key a mentioned \"password\": \" runs over (#1697)" in {
+    // Was `... "password": "[REDACTED]"7YJ1VSFPX'}", -9935758]}`: the mention's value runs to the next `"`, over the
+    // key of the next field, and the passes after it never saw `'apiKey': [`. The single-quoted field passes also read
+    // the input as it was given, and add what they replace there.
     val input = """{'note': 'see "password": " here', 'apiKey': ["7YJ1VSFPX'}", -9935758]}"""
     val out   = redactedOnceAndTwice(input)
-    out shouldBe s"""{'note': 'see "password": "$R', 'apiKey': ["$R", '$R']}"""
+    out shouldBe s"""{'note': 'see "password": "$R"$R", '$R']}"""
     (out should not).include("7YJ1VSFPX")
     (out should not).include("9935758")
   }
 
-  it should "keep the next field's key after a mention wherever the mention and the field sit (#1697)" in {
+  it should "redact the field after a mention whatever the mention and the field (#1697)" in {
     Seq(
-      // the next field's value single-quoted, double-quoted, a list, a nested dict
-      """{'note': 'see "password": " here', 'apiKey': 'SEKone'}""" ->
-        s"""{'note': 'see "password": "$R', 'apiKey': '$R'}""",
-      """{'note': 'see "password": " here', 'apiKey': "SEKone'"}""" ->
-        s"""{'note': 'see "password": "$R', 'apiKey': "$R"}""",
-      """{'note': 'see "password": " here', 'apiKey': ["SEKone'}"]}""" ->
-        s"""{'note': 'see "password": "$R', 'apiKey': ["$R"]}""",
-      """{'note': 'see "password": " here', 'creds': {'token': 'SEKone'}}""" ->
-        s"""{'note': 'see "password": "$R', 'creds': {'token': '$R'}}""",
-      // the mention at the start, at the end, alone in its string, after a field
-      """{'note': '"password": " see', 'token': 'SEKone'}""" -> s"""{'note': '"password": "$R', 'token': '$R'}""",
-      """{'note': 'see "password": "', 'token': 'SEKone'}""" -> s"""{'note': 'see "password": "', 'token': '$R'}""",
-      """{'apiKey': 'SEKone', 'note': 'see "password": " here', 'token': 'SEKtwo'}""" ->
-        s"""{'apiKey': '$R', 'note': 'see "password": "$R', 'token': '$R'}""",
-      // the mention in the last field, and a cut-off dict
-      """{'token': 'SEKone', 'note': 'see "password": " here'}""" -> s"""{'token': '$R', 'note': 'see "password": "$R'}""",
-      """{'note': 'see "password": " here'""" -> s"""{'note': 'see "password": "$R'"""
+      // the field's value double-quoted, a list, nested in a list of dicts, followed by another field
+      """{'note': 'see "password": " here', 'apiKey': "SEKone'"}"""       -> s"""{'note': 'see "password": "$R"$R"}""",
+      """{'note': 'see "password": " here', 'apiKey': ["SEKone'}"]}"""    -> s"""{'note': 'see "password": "$R"$R"]}""",
+      """{'a': {'note': '"token": " x'}, 'b': [{'secret': "SEKone'"}]}""" -> s"""{'a': {'note': '"token": "$R"$R"}]}""",
+      """{'note': 'see "password": " here', 'apiKey': "SEKone'", 'n': "x"}""" ->
+        s"""{'note': 'see "password": "$R"$R", 'n': "x"}""",
+      // an escaped quote before the mention, and two mentions
+      """{'note': 'it\'s "password": " here', 'apiKey': "SEKone'"}""" -> s"""{'note': 'it\\'s "password": "$R"$R"}""",
+      """{'note': '"password": " a', 'n2': '"token": " b', 'apiKey': "SEKone'"}""" ->
+        s"""{'note': '"password": "$R"token": "$R"$R"}""",
+      // the other double-quoted shapes: `key="`, `"Authorization": "` (its own pass), `\"key\": \"`
+      """{'note': 'see password=" here', 'apiKey': ["SEKone'}", 1]}""" -> s"""{'note': 'see password="$R"$R", '$R']}""",
+      """{'msg': 'it\'s "Authorization" : " a: b', 'PASSWORD': "SEKone'}"}""" ->
+        s"""{'msg': 'it\\'s "Authorization" : "$R"$R"}""",
+      """{'note': 'see \"password\": \" here', 'apiKey': ["SEKone'}"]}""" ->
+        s"""{'note': 'see \\"password\\": \\"$R"$R"]}""",
+      """{'level': '{token="', 'api_key': "SEKone'"}""" -> s"""{'level': '{token="$R"$R"}"""
     ).foreach { case (input, expected) =>
       withClue(s"input $input: ")(redactedOnceAndTwice(input) shouldBe expected)
     }
   }
 
-  it should "keep the next field's key after a mention in nested dicts and lists (#1697)" in {
-    redactedOnceAndTwice("""{'a': {'note': '"token": " x'}, 'b': [{'secret': "SEKone'"}]}""") shouldBe
-      s"""{'a': {'note': '"token": "$R'}, 'b': [{'secret': "$R"}]}"""
-    redactedOnceAndTwice("""['see "password": " here', 'token', {'secret': 'SEKone'}]""") shouldBe
-      s"""['see "password": "$R', 'token', {'secret': '$R'}]"""
-    redactedOnceAndTwice("""[{'msg': ('see "token": " x', 'y')}, {'password': 'SEKone'}]""") shouldBe
-      s"""[{'msg': ('see "token": "$R', 'y')}, {'password': '$R'}]"""
-  }
-
-  it should "read an escaped quote inside the single-quoted string as the string's, not its end (#1697)" in {
-    // Python escapes a `'` in a single-quoted string: `\'` is content, before the mention and inside its value.
-    redactedOnceAndTwice("""{'note': 'it\'s "password": " here', 'apiKey': 'SEKone'}""") shouldBe
-      s"""{'note': 'it\\'s "password": "$R', 'apiKey': '$R'}"""
-    redactedOnceAndTwice("""{'a': 'see "password": "SEKone\', y" ok', 'b': 'keep'}""") shouldBe
-      s"""{'a': 'see "password": "$R" ok', 'b': 'keep'}"""
-    // An apostrophe between two letters ends nothing either.
-    redactedOnceAndTwice("""{'note': 'see "password": "it's here', 'apiKey': 'SEKone'}""") shouldBe
-      s"""{'note': 'see "password": "$R', 'apiKey': '$R'}"""
-  }
-
-  it should "end each of several mentions where its own string ends (#1697)" in {
-    redactedOnceAndTwice("""{'note': '"password": " a', 'n2': '"token": " b', 'apiKey': 'SEKone'}""") shouldBe
-      s"""{'note': '"password": "$R', 'n2': '"token": "$R', 'apiKey': '$R'}"""
-    // Two in one string: the first ends at its own quote, the second where the string does.
-    redactedOnceAndTwice("""{'note': 'see "password": " and "token": " too', 'apiKey': 'SEKone'}""") shouldBe
-      s"""{'note': 'see "password": "$R"token": "$R', 'apiKey': '$R'}"""
-  }
-
-  it should "end the other double-quoted shapes a single-quoted string mentions where it ends (#1697)" in {
-    // `key="`, `"Authorization": "` (read by its own pass) and an escaped `\"key\": \"`
-    redactedOnceAndTwice("""{'note': 'see password=" here', 'apiKey': ["SEKone'}", 1]}""") shouldBe
-      s"""{'note': 'see password="$R', 'apiKey': ["$R", '$R']}"""
-    redactedOnceAndTwice("""{'msg': 'it\'s "Authorization" : " a: b', 'PASSWORD': "SEKone'}"}""") shouldBe
-      s"""{'msg': 'it\\'s "Authorization" : "$R', 'PASSWORD': "$R"}"""
-    redactedOnceAndTwice("""{'note': 'see \"password\": \" here', 'apiKey': ["SEKone'}"]}""") shouldBe
-      s"""{'note': 'see \\"password\\": \\"$R', 'apiKey': ["$R"]}"""
-  }
-
-  it should "end a mention in a Python dict inside a JSON string where its single-quoted string ends (#1697)" in {
-    // The repr of the issue's dict, logged as a JSON string: the same mention, its quotes escaped once.
+  it should "redact the field after a mention in a Python dict inside a JSON string (#1697)" in {
     val dict  = """{'note': 'see "password": " here', 'apiKey': "7YJ1VSFPX'}", 'n': 1}"""
     val input = ujson.Obj("msg" -> dict, "n" -> 1).render()
     val out   = redactedOnceAndTwice(input)
     (out should not).include("7YJ1VSFPX")
-    ujson.read(out)("msg").str shouldBe s"""{'note': 'see "password": "$R', 'apiKey': "$R", 'n': 1}"""
+    ujson.read(out)("msg").str shouldBe s"""{'note': 'see "password": "$R"$R", 'n': 1}"""
     ujson.read(out)("n").num shouldBe 1
-    // `\\'` there is Python's escaped `'`, and `\\\\'` an escaped backslash before the closing quote.
+    val other = ujson.Obj("m" -> """{'msg': 'O\'Brien "token": " x', 'api_key': "SEKone'"}""").render()
+    ujson.read(redactedOnceAndTwice(other))("m").str shouldBe s"""{'msg': 'O\\'Brien "token": "$R"$R"}"""
+  }
+
+  it should "read every double-quoted value as it reads it with no single-quoted field near (#1697)" in {
+    // The value of a double-quoted field is read as before, to its own quote, whatever single quotes are around it:
+    // a field closed inside a single-quoted string, a stray quote in the credential or before it, a wrapper.
     Seq(
-      """{'msg': 'say \'hi\' "password": " x\\', 'access_token': 'SEKone"x'}""" ->
-        s"""{'msg': 'say \\'hi\\' "password": "$R', 'access_token': '$R'}""",
-      """{'msg': 'O\'Brien "token": " x', 'api_key': "SEKone'"}""" ->
-        s"""{'msg': 'O\\'Brien "token": "$R', 'api_key': "$R"}""",
-      """{'msg': 'it\'s token=" now', 'secret': 'SEKone'}""" -> s"""{'msg': 'it\\'s token="$R', 'secret': '$R'}"""
-    ).foreach { case (dict, expected) =>
-      withClue(s"dict $dict: ") {
-        val out = redactedOnceAndTwice(ujson.Obj("msg" -> dict).render())
-        ujson.read(out)("msg").str shouldBe expected
-      }
+      """{'body': '{"password": "SEKone", "user": "u"}', 'apiKey': 'SEKtwo'}""" ->
+        s"""{'body': '{"password": "$R", "user": "u"}', 'apiKey': '$R'}""",
+      """{'note': 'see "password": "SEKone" ok', 'apiKey': 'SEKtwo'}""" ->
+        s"""{'note': 'see "password": "$R" ok', 'apiKey': '$R'}""",
+      """{"password": "ab', 'c", "n": 1}"""                 -> s"""{"password": "$R", "n": 1}""",
+      """password="ab', 'c" ok"""                           -> s"""password="$R" ok""",
+      """INFO request body='{"password":"Ab3'),9xQ"}'"""    -> s"""INFO request body='{"password":"$R"}'""",
+      """data: '{"password": "Ab3',5:xyz"}'"""              -> s"""data: '{"password": "$R"}'""",
+      """data: '{"password": "ab', 1, 'cQQZ"} sent'"""      -> s"""data: '{"password": "$R"} sent'""",
+      """run: ['curl', '-d', '{"password": "Ab3', 'x"}']""" -> s"""run: ['curl', '-d', '{"password": "$R"}']""",
+      """statement: INSERT INTO cfg VALUES ('{"api_key": "ab''),cd"}')""" ->
+        s"""statement: INSERT INTO cfg VALUES ('{"api_key": "$R"}')""",
+      "'tis the season\n{\"password\": \"hunter2'),xyz\"}" -> s"'tis the season\n{\"password\": \"$R\"}"
+    ).foreach { case (input, expected) =>
+      withClue(s"input $input: ")(redactedOnceAndTwice(input) shouldBe expected)
     }
   }
 
-  it should "still redact a double-quoted field closed inside a single-quoted string up to its own quote (#1697)" in {
-    redactedOnceAndTwice("""{'body': '{"password": "SEKone", "user": "u"}', 'apiKey': 'SEKtwo'}""") shouldBe
-      s"""{'body': '{"password": "$R", "user": "u"}', 'apiKey': '$R'}"""
-    redactedOnceAndTwice("""{'note': 'see "password": "SEKone" ok', 'apiKey': 'SEKtwo'}""") shouldBe
-      s"""{'note': 'see "password": "$R" ok', 'apiKey': '$R'}"""
-    // A `'` followed by anything but what follows a value in a dict, a list or a tuple ends nothing.
-    redactedOnceAndTwice("""{'note': 'see "password": "abc' + 'def"', 'apiKey': 'SEKtwo'}""") shouldBe
-      s"""{'note': 'see "password": "$R"', 'apiKey': '$R'}"""
-    // A `'` that does not stand where a Python value opens - in a word, after other punctuation - opens no string the
-    // value could end at: a credential with a stray quote before it, and one holding `')`, is redacted whole.
-    redactedOnceAndTwice("""{"body":"QC(A7'<H \"passwd\":\"QDAzq')s5-EAse4p8\"","status":500}""") shouldBe
-      s"""{"body":"QC(A7'<H \\"passwd\\":\\"$R\\"","status":500}"""
-    redactedOnceAndTwice("""x 7'<a "password": "ab'), c" ok""") shouldBe s"""x 7'<a "password": "$R" ok"""
-    // Outside any single-quoted string a value still runs to its own quote.
-    redactedOnceAndTwice("""{"password": "ab', 'c", "n": 1}""") shouldBe s"""{"password": "$R", "n": 1}"""
-    redactedOnceAndTwice("""password="ab', 'c" ok""") shouldBe s"""password="$R" ok"""
-  }
-
-  it should "leave redacted every secret that is redacted when no field is mentioned (#1697)" in {
-    // Python dicts and lists whose single-quoted strings mention a double-quoted field, raw and in JSON strings,
-    // followed by credentials under sensitive keys. Mentioning a field in a string must not expose what is redacted
-    // when the string mentions none: each mention is swapped for prose of the same quotes. Deterministic.
-    val rnd                    = new scala.util.Random(1697)
-    var id                     = 0
-    def secret(): String       = { id += 1; f"Zq$id%05dWx" }
-    def pick[A](xs: Seq[A]): A = xs(rnd.nextInt(xs.length))
+  /** Python dicts whose single-quoted strings mention double-quoted fields, each followed by a credential field. */
+  final private class MentionDocs(seed: Long) {
+    private val rnd                    = new scala.util.Random(seed)
+    private var id                     = 0
+    private def pick[A](xs: Seq[A]): A = xs(rnd.nextInt(xs.length))
+    def secret(): String               = { id += 1; f"Zq$id%05dWx" }
     def repr(s: String): String = {
       val q = if (s.contains('\'') && !s.contains('"')) '"' else '\''
       q.toString + s.flatMap(c => if (c == q || c == '\\') "\\" + c else c.toString) + q
     }
-    val keys     = Seq("password", "token", "apiKey", "client_secret", "Authorization", "access_token")
-    val mentions = Seq("\"%s\": \"", "\"%s\":\"", "\"%s\" : \"", "%s=\"", "\\\"%s\\\": \\\"")
-    val around   = Seq("" -> "", "see " -> " here", "it's " -> "", "O'Brien says " -> " now", "" -> ", 'x'")
-    val values: Seq[String => String] = Seq(
+    private val keys     = Seq("password", "token", "apiKey", "client_secret", "Authorization", "access_token")
+    private val mentions = Seq("\"%s\": \"", "\"%s\":\"", "\"%s\" : \"", "%s=\"", "\\\"%s\\\": \\\"")
+    private val around   = Seq("" -> "", "see " -> " here", "it's " -> "", "O'Brien says " -> " now", "" -> ", 'x'")
+    private val values: Seq[String => String] = Seq(
       s => repr(s),
       s => repr(s + "'}"),
-      s => s"[${repr(s + "'")}, -9${id}1]", // in a JSON string, left to the leaf walk: see the note below
+      s => s"[${repr(s + "'")}, -9${id}1]",
       s => s"{'k': ${repr(s)}}",
-      s => s"[${repr(s)}]"
+      s => s"[${repr(s)}]",
+      s => s"-9$id${s.length}"
     )
-    (1 to 400).foreach { _ =>
+
+    /** A dict of fields, each a note and a credential: the notes mentioning a field, the same with prose, the credentials. */
+    def dicts(): (String, String, Seq[String]) = {
       val fields = Vector.fill(1 + rnd.nextInt(3)) {
         val (before, after) = pick(around)
         val mention         = before + pick(mentions).format(pick(keys)) + after
-        (repr(mention), repr(before + "plain" + after), s"${repr(pick(keys))}: ${pick(values)(secret())}")
+        val s               = secret()
+        val field           = s"${repr(pick(keys))}: ${pick(values)(s)}"
+        (s"'note': ${repr(mention)}, $field", s"'note': ${repr(before + "plain" + after)}, $field", s)
       }
-      val secrets = "Zq\\d{5}Wx".r.findAllIn(fields.map(_._3).mkString).toSeq
-      def dict(mentioned: Boolean) =
-        fields.map { case (m, p, f) => s"'note': ${if (mentioned) m else p}, $f" }.mkString("{", ", ", "}")
-      // In a JSON string a list of `\"`-quoted leaves after a mention with an odd number of `"` is left to the
-      // container walk, which reads the mention's quotes as opening a string escaped within the string and keeps the
-      // leaves, as main does whatever key the mention names: a separate gap, not this one, so it is carried raw only.
-      val hasEscapedLeafList = fields.exists(_._3.contains(": [\""))
+      (fields.map(_._1).mkString("{", ", ", "}"), fields.map(_._2).mkString("{", ", ", "}"), fields.map(_._3))
+    }
+
+    /** The dict carried raw, in a log line, as a `key=` value, or in a JSON string. */
+    def carried(dict: String): String =
+      pick(
+        Seq[String => String](
+          identity,
+          d => s"INFO payload: $d",
+          d => s"context=$d level=info",
+          d => ujson.Obj("msg" -> d, "n" -> 1).render()
+        )
+      )(dict)
+  }
+
+  it should "replace all it replaces without reading single-quoted fields from the input, and more (#1697)" in {
+    // The single-quoted field passes' reading of the input only adds edits where the passes in sequence made none:
+    // every range those replace is replaced as before, so nothing redacted without that reading is written out, and
+    // JSON that parses redacted without it still parses. Deterministic.
+    val docs   = new MentionDocs(16973)
+    var closed = 0
+    (1 to 1500).foreach { _ =>
+      val (dict, _, secrets) = docs.dicts()
+      val input              = docs.carried(dict)
+      val (out, ranges)      = Redaction.redactedWithRanges(input, singleQuotedFromInput = true)
+      val (base, kept)       = Redaction.redactedWithRanges(input, singleQuotedFromInput = false)
+      withClue(s"input $input, output $out, without $base: ") {
+        kept.filterNot(ranges.contains) shouldBe empty
+        secrets.filterNot(base.contains).filter(out.contains) shouldBe empty
+        if (Try(ujson.read(base)).isSuccess) noException should be thrownBy ujson.read(out)
+      }
+      closed += secrets.count(s => base.contains(s) && !out.contains(s))
+    }
+    // and it is the reading that redacts the credentials after a mention
+    closed should be > 100
+  }
+
+  it should "leave redacted every secret that is redacted when no field is mentioned (#1697)" in {
+    // Mentioning a field in a string must not expose what is redacted when the string mentions none: each mention
+    // is swapped for prose of the same quotes. Deterministic.
+    val docs = new MentionDocs(1697)
+    (1 to 1000).foreach { _ =>
+      val (mentioned, plain, secrets) = docs.dicts()
+      // In a JSON string a list of `\"`-quoted leaves after a mention with an odd number of `"` is kept by the container
+      // walk, which reads the mention's quotes as opening a string escaped within the string, whatever key the mention
+      // names: a separate gap, not this one, so such a dict is carried raw only.
       val carriers =
-        if (hasEscapedLeafList) Seq[String => String](identity)
+        if (mentioned.contains(": [\"")) Seq[String => String](identity)
         else Seq[String => String](identity, d => ujson.Obj("msg" -> d).render())
       carriers.foreach { carry =>
-        val withMention = Redaction.redact(carry(dict(mentioned = true)))
-        val without     = Redaction.redact(carry(dict(mentioned = false)))
+        val withMention = Redaction.redact(carry(mentioned))
+        val without     = Redaction.redact(carry(plain))
         secrets.filterNot(without.contains).foreach { s =>
-          withClue(s"input ${carry(dict(mentioned = true))}, output $withMention: ")(
-            (withMention should not).include(s)
-          )
-        }
-        if (Try(ujson.read(without)).isSuccess) noException should be thrownBy ujson.read(withMention)
-      }
-    }
-  }
-
-  it should "end mentions inside single-quoted strings in time linear in the input (#1697)" in {
-    val shapes = Seq(
-      ("{", "'n': 'see \"password\": \" here', ", "'k': 1}"),
-      ("{'n': 'see \"password\": \"", "a' b ", ""),
-      ("{'n': '\"token\": \"", "'                    x", ""),
-      ("{", "'n': '\"password\": \"', ", "}"),
-      ("[", "'password=\" x', ", "]"),
-      ("{\"m\": \"{", "'n': 'see \\\"password\\\": \\\" here', ", "}\"}"),
-      ("{\"m\": \"", "'a' \\\"token\\\": \\\"x', ", "\"}"),
-      ("{\"m\": \"", "'it\\\\'s token=\\\" now', ", "\"}")
-    )
-    shapes.foreach { case (prefix, unit, suffix) =>
-      def input(repeats: Int): String = prefix + (unit * repeats) + suffix
-      LinearTime.assertLinear(s"unit $unit", input(5000), input(20000))(
-        Redaction.redact(_)
-      )
-    }
-  }
-
-  it should "read a credential in a JSON field whole however a stray quote before it reads (#1697)" in {
-    // A `'` that seems to open a string around a real field - an SQL literal, a shell argument, a log prefix - ends
-    // the field's value only where a Python container goes on after it. A credential holding `'),` or `']` was cut
-    // there, and the rest written out in the clear.
-    Seq(
-      """body: '{"password":"Ab3')9xQ","user":"bob"}'"""    -> s"""body: '{"password":"$R","user":"bob"}'""",
-      """INFO request body='{"password":"Ab3'),9xQ"}'"""    -> s"""INFO request body='{"password":"$R"}'""",
-      """'{"password": "SEKone'), x"}"""                    -> s"""'{"password": "$R"}""",
-      """[1, '{"token": "x'] y"}']"""                       -> s"""[1, '{"token": "$R"}']""",
-      """[ '{"password": "SEKone', 'rest'"} ]"""            -> s"""[ '{"password": "$R"} ]""",
-      """{'h': '{"password": "ab\\'), cd"}'}"""             -> s"""{'h': '{"password": "$R"}'}""",
-      """{"m": "it's: 'see \"password\": \"ab', cd\" x"}""" -> s"""{"m": "it's: 'see \\"password\\": \\"$R\\" x"}""",
-      """{"m": "user said: 'see \"password\": \"SEKone', ok\" end"}""" ->
-        s"""{"m": "user said: 'see \\"password\\": \\"$R\\" end"}"""
-    ).foreach { case (input, expected) =>
-      withClue(s"input $input: ")(redactedOnceAndTwice(input) shouldBe expected)
-    }
-  }
-
-  it should "read a credential whole in a JSON document that a single-quoted string on its line wraps (#1697)" in {
-    // The wrapper's own closing quote closes a string too, so a credential holding `','`, `',5:` or `', None, '` read
-    // as the end of the wrapper and a Python item after it, and the rest was written out in the clear.
-    Seq(
-      """INFO payload: '{"secret":"[K/T6nHA`O;e1b_S%W]','G","user":"bob"}'""" ->
-        s"""INFO payload: '{"secret":"$R","user":"bob"}'""",
-      """data: '{"password": "Ab3',5:xyz"}'"""       -> s"""data: '{"password": "$R"}'""",
-      """{'body': '{"secret":"',1:r$jaz?4ZBkG"}'}""" -> s"""{'body': '{"secret":"$R"}'}""",
-      """json=['{"api_key": "k1', True, 'z"}']"""    -> s"""json=['{"api_key": "$R"}']""",
-      """args=('{"secret": "s3', None, 'q"}',)"""    -> s"""args=('{"secret": "$R"}',)""",
-      """msg='{"token": "t0k', ('x"}'"""             -> s"""msg='{"token": "$R"}'""",
-      """{"m": "x='{\"secret\":\"Zz9'], 'y\"}'"}"""  -> s"""{"m": "x='{\\"secret\\":\\"$R\\"}'"}""",
-      // curl, its body single-quoted where a value opens: in an argv list or tuple, after `=`, in a JSON string
-      """run: ['curl', '-d', '{"password": "Ab3', 'x"}']""" -> s"""run: ['curl', '-d', '{"password": "$R"}']""",
-      """cmd=('curl', '-X', 'POST', '-d', '{"user":"bob","password":"p4ss','w0rd"}')""" ->
-        s"""cmd=('curl', '-X', 'POST', '-d', '{"user":"bob","password":"$R"}')""",
-      """curl --data='{"client_secret":"a1',2,'b2","grant_type":"x"}'""" ->
-        s"""curl --data='{"client_secret":"$R","grant_type":"x"}'""",
-      """exec curl -d='{"api_key": "k9', None, 'z"}'""" -> s"""exec curl -d='{"api_key": "$R"}'""",
-      """{"argv": "['curl', '-d', '{\"password\": \"Ab3', 'x\"}']"}""" ->
-        s"""{"argv": "['curl', '-d', '{\\"password\\": \\"$R\\"}']"}""",
-      // and after `-d `, where no value opens, as it was
-      """curl -d '{"password": "Ab3', 'x"}'""" -> s"""curl -d '{"password": "$R"}'"""
-    ).foreach { case (input, expected) =>
-      withClue(s"input $input: ")(redactedOnceAndTwice(input) shouldBe expected)
-    }
-  }
-
-  it should "read whole any credential in a JSON document that a single-quoted string wraps (#1697)" in {
-    // Random printable credentials, some holding what follows the end of a Python string, in JSON wrapped by an
-    // unescaped single-quoted string on the same line: each is replaced whole. Deterministic.
-    val rnd       = new scala.util.Random(16972)
-    val printable = (33 to 126).map(_.toChar).filter(c => c != '"' && c != '\\')
-    val keys      = Vector("password", "api_key", "token", "secret", "client_secret", "access_token")
-    val wraps =
-      Vector(
-        "data: '%s'",
-        "msg='%s'",
-        "{'body': '%s'}",
-        "json=['%s']",
-        "INFO payload: '%s'",
-        "args=('%s',)",
-        "run: ['curl', '-d', '%s']"
-      )
-    val inserts = Vector("',", "', ", "',1", "', 'a", "'],", "'},", "', None", "',True,", "',(", "':", "',5:", "','")
-    (1 to 3000).foreach { _ =>
-      val chars  = Vector.fill(8 + rnd.nextInt(17))(printable(rnd.nextInt(printable.length))).mkString
-      val at     = rnd.nextInt(chars.length)
-      val secret = chars.take(at) + inserts(rnd.nextInt(inserts.length)) + chars.drop(at)
-      val key    = keys(rnd.nextInt(keys.length))
-      val user   = rnd.nextBoolean()
-      val wrap   = wraps(rnd.nextInt(wraps.length))
-      def doc(value: String): String = {
-        val o = ujson.Obj(key -> value)
-        if (user) o("user") = "bob"
-        wrap.format(ujson.write(o))
-      }
-      val input = doc(secret)
-      withClue(s"input $input: ")(Redaction.redact(input) shouldBe doc(R))
-    }
-  }
-
-  it should "read a quote doubled as SQL escapes it as part of the value (#1697)" in {
-    redactedOnceAndTwice("""statement: INSERT INTO cfg VALUES ('{"api_key": "ab''),cd"}')""") shouldBe
-      s"""statement: INSERT INTO cfg VALUES ('{"api_key": "$R"}')"""
-    redactedOnceAndTwice("""statement: INSERT INTO cfg VALUES ('{"api_key": "ab''cd"}', 'x')""") shouldBe
-      s"""statement: INSERT INTO cfg VALUES ('{"api_key": "$R"}', 'x')"""
-  }
-
-  it should "take no quote on an earlier line for a string a field sits in (#1697)" in {
-    // A Python string does not run over a line break: a quote that opens a line of prose ends nothing on the next.
-    Seq(
-      "'tis the season\n{\"password\": \"hunter2'),xyz\"}" -> s"'tis the season\n{\"password\": \"$R\"}",
-      "note: 'draft\n{\"password\": \"hunter2'),xyz\"}"    -> s"note: 'draft\n{\"password\": \"$R\"}",
-      "'90s music\n{\"api_key\": \"k9'}Qz\"}"              -> s"'90s music\n{\"api_key\": \"$R\"}",
-      "', weird\n{\"msg\":\"it's fine\",\"password\":\"Zq1{Kd4}5Zg'}Zq2\",\"note\":\"'tis the season\"}" ->
-        s"', weird\n{\"msg\":\"it's fine\",\"password\":\"$R\",\"note\":\"'tis the season\"}",
-      "[' bracket\n{\"msg\":\"it's fine\",\"api_key\":\"Zq1i=hM}`D7')?LPPZq2\"}" ->
-        s"[' bracket\n{\"msg\":\"it's fine\",\"api_key\":\"$R\"}",
-      // a quote left open on an earlier line that a later one closes
-      "the users' settings\n{\"msg\":\"the users'\",\"token\":\"ab!'}Bq\"}\n{\"msg\":\"a: 'b\",\"password\":\"c'}, ]KQk\"}" ->
-        s"the users' settings\n{\"msg\":\"the users'\",\"token\":\"$R\"}\n{\"msg\":\"a: 'b\",\"password\":\"$R\"}",
-      // and a mention on a line of its own still ends where its string does
-      "a: b\n{'note': 'see \"password\": \" here', 'apiKey': 'SEKone'}" ->
-        s"a: b\n{'note': 'see \"password\": \"$R', 'apiKey': '$R'}"
-    ).foreach { case (input, expected) =>
-      withClue(s"input $input: ")(redactedOnceAndTwice(input) shouldBe expected)
-    }
-  }
-
-  it should "redact JSON lines among prose with apostrophes whole, as if no quote were near (#1697)" in {
-    // Lines of JSON and lines of English with apostrophes - contractions, possessives, a quote that opens or ends a
-    // line - and no single-quoted string on a JSON line: every credential, whatever quotes and brackets it holds, is
-    // replaced whole and the rest of the line is kept, as it is with no apostrophe anywhere. Deterministic.
-    val rnd       = new scala.util.Random(16971)
-    val printable = (33 to 126).map(_.toChar).filter(c => c != '"' && c != '\\')
-    val prose = Vector(
-      "it's fine",
-      "the users' settings were reset",
-      "O'Brien logged in",
-      "'tis the season",
-      "'90s music",
-      "a: 'b",
-      "note: 'draft",
-      "', weird",
-      "[' bracket",
-      "trailing quote '",
-      "ends with the users'",
-      "don't retry (we'll see)",
-      "values ['a', 'b']",
-      "Charles' book, Mark's pen"
-    )
-    val inWords = Vector("It's a test:", "O'Brien said", "don't log", "Mark's request")
-    val keys    = Vector("password", "api_key", "token", "secret", "apiKey", "client_secret", "Authorization")
-    val quoted  = Vector("'", "')", "'),", "', ", "']", "'}", "''", "', '", "'}, ", "') ")
-    def secret(): String = {
-      val chars = Vector.fill(16)(printable(rnd.nextInt(printable.length))).mkString
-      val at    = rnd.nextInt(chars.length)
-      chars.take(at) + quoted(rnd.nextInt(quoted.length)) + chars.drop(at)
-    }
-    (1 to 1500).foreach { _ =>
-      val lines = Vector.fill(1 + rnd.nextInt(4)) {
-        if (rnd.nextInt(3) == 0) {
-          val text = prose(rnd.nextInt(prose.length))
-          (text, text)
-        } else {
-          val key    = keys(rnd.nextInt(keys.length))
-          val sec    = secret()
-          val msg    = prose(rnd.nextInt(prose.length))
-          val prefix = if (rnd.nextBoolean()) inWords(rnd.nextInt(inWords.length)) + " " else ""
-          val line   = prefix + ujson.Obj("msg" -> msg, key -> sec, "n" -> 1).render()
-          (line, prefix + ujson.Obj("msg" -> msg, key -> R, "n" -> 1).render())
+          withClue(s"input ${carry(mentioned)}, output $withMention: ")((withMention should not).include(s))
         }
       }
-      val input = lines.map(_._1).mkString("\n")
-      withClue(s"input $input: ")(Redaction.redact(input) shouldBe lines.map(_._2).mkString("\n"))
     }
   }
 
-  it should "end values at a doubled or followed quote in time linear in the input (#1697)" in {
+  it should "read single-quoted fields from the input as well in time linear in the input (#1697)" in {
     val shapes = Seq(
-      ("{'n': '\"password\": \"", "x', 'yyyyyyyy' z ", ""),
-      ("{'n': '\"password\": \"", "x', \"yyyyyyyy\" z ", ""),
-      ("{\"m\": \"{'n': '\\\"password\\\": \\\"", "x', \\\"yyyyyyy\\\" z ", "\"}"),
-      ("('{\"api_key\": \"", "ab''), ", "\"}')"),
-      ("'tis\n", "{\"password\": \"a'), b\"}\n", ""),
-      ("data: '{", "\"password\": \"a', 'x\", ", "\"n\": 1}'"),
-      ("{\"m\": \"x='{", "\\\"password\\\": \\\"a', 'x\\\", ", "\\\"n\\\": 1}'\"}")
+      ("{", "'\"password\": \"a', 'x', \"s\": \"{'\"token\": \"b', 'y'}\", ", "}"),
+      ("{", "'note': 'see \"password\": \" here', 'apiKey': [\"7YJ1VSFPX'}\", -9935758], ", "}"),
+      ("{", "'apiKey': 'abc', 'token': [1, 'x', {'secret': \"y\"}], ", "}"),
+      ("", "'token': [", ""),
+      ("", "'token': '", ""),
+      ("{\"m\": \"{", "'n': 'see \\\"password\\\": \\\" here', 'k': [\\\"v'\\\"], ", "}\"}")
     )
     shapes.foreach { case (prefix, unit, suffix) =>
       def input(repeats: Int): String = prefix + (unit * repeats) + suffix
