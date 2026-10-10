@@ -70,9 +70,10 @@ import scala.util.{ Try, Using }
  * programs that are not built-ins, a leading `@` or `~`, the characters `{ } [ ] ' ( )`, a leading `/`, and wildcards
  * anywhere but in a last component with a literal character; `findstr /F` and a `/D:` list; `sort` `/O`, `/T`,
  * `-o`, `-T`; and an argument to `sort` or `findstr` starting with `/` that is not exactly a switch of the native
- * tool (#1738). A path candidate of the form `/x/...` is also judged as drive `x:`'s path, as MSYS2 reads it, and
- * on a Windows host `sort` and `findstr` are refused when a build outside the system directory would run (see
- * [[shadowedToolRefusal]]). Over-blocking there is accepted.
+ * tool (#1738). A path candidate of the form `/x/...` is also judged as drive `x:`'s path, as MSYS2 reads it. The
+ * runner starts the system directory's `sort.exe` and `findstr.exe` by their absolute paths whenever the system
+ * directory has them, never a build in its own working or Java directory ([[ProgramResolver]], #1790).
+ * Over-blocking there is accepted.
  *
  * '''git.''' git searches upwards for its repository, so the runner confines it to the workspace
  * ([[confineGit]]), a `.git` that is not a directory inside the workspace is refused ([[gitRepositoryRefusal]]), and so
@@ -628,38 +629,6 @@ private[runner] object CommandPolicy {
 
   private val FindstrSwitchList: Seq[String] =
     "/B /E /L /R /S /I /X /V /N /M /O /P /OFF[LINE] /C:string /G:file /D:dir /A:color".split(' ').toSeq
-
-  /**
-   * The programs whose native Windows build is in the system directory and whose `/` arguments the policy reads as
-   * that build's switches (#1738), with the executable file `CreateProcess` looks for (it appends `.exe` to a name
-   * with no extension and does not consult `PATHEXT`).
-   */
-  val NativeSwitchTools: Map[String, String] = Map("sort" -> "sort.exe", "findstr" -> "findstr.exe")
-
-  /**
-   * On a Windows host, a refusal when `program` would not run the system directory's build (#1738). `ProcessBuilder`
-   * hands a bare name to `CreateProcess` with no application name, which searches, in order, the directory the
-   * runner's own executable (`java.exe`) was loaded from, the runner's current directory, the system directory, the
-   * 16-bit system directory, the Windows directory and then `PATH`
-   * (https://learn.microsoft.com/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw). So a build
-   * earlier on `PATH` (MSYS2, Cygwin) does not run while the system directory has the tool, but one in either of the
-   * first two directories (`searchedBefore`) does, and its `/c/...` arguments would be paths. A host whose system
-   * directory lacks the tool (some minimal images) reaches `PATH`; the switch checks still hold there, since every
-   * `/` argument must be a native switch.
-   */
-  def shadowedToolRefusal(program: String, searchedBefore: Seq[Path]): Option[Refusal] =
-    NativeSwitchTools.get(program).flatMap { file =>
-      searchedBefore
-        .map(_.resolve(file))
-        .find(candidate => Try(Files.exists(candidate)).getOrElse(true))
-        .map(found =>
-          Refusal(
-            "EXECUTABLE_NOT_ALLOWED",
-            s"'$program' would run '$found' rather than the Windows system directory's build, whose switches the " +
-              "workspace policy checks; remove it from the runner's Java or working directory."
-          )
-        )
-    }
 
   private def hostnameRefusal(args: Seq[String]): Option[Refusal] =
     args.find(arg => !arg.startsWith("-")).map(notAllowed("hostname", _, "with an operand it sets the host name."))

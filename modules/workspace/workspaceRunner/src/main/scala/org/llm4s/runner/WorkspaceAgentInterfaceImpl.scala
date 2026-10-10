@@ -16,7 +16,6 @@ import java.util.regex.Pattern
 import scala.collection.mutable.ListBuffer
 import scala.io.Source
 import scala.jdk.CollectionConverters._
-import scala.jdk.OptionConverters._
 import scala.util.{ Failure, Success, Try, Using }
 
 /**
@@ -27,11 +26,13 @@ import scala.util.{ Failure, Success, Try, Using }
  *                      (e.g. `echo`, `dir`) through `cmd.exe /c` because those names have
  *                      no standalone `.exe` on Windows.
  * @param sandboxConfig Optional sandbox config; if None, uses [[WorkspaceSandboxConfig.Permissive]]
+ * @param programSearch where the programs a command names are looked for (#1790); the host's, bar in tests
  */
 class WorkspaceAgentInterfaceImpl(
   workspaceRoot: String,
   isWindows: Boolean,
-  sandboxConfig: Option[WorkspaceSandboxConfig] = None
+  sandboxConfig: Option[WorkspaceSandboxConfig] = None,
+  programSearch: ProgramSearch = ProgramSearch.host()
 ) extends WorkspaceAgentInterface {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -44,12 +45,11 @@ class WorkspaceAgentInterfaceImpl(
     if (config.excludePatterns.nonEmpty) config.excludePatterns
     else WorkspaceSandboxConfig.DefaultExclusions
 
-  // Computed once at construction: allowlist entries are lowercased on Windows so
-  // that execLower (which is also lowercased on Windows) matches correctly even
-  // when a caller-supplied config contains mixed-case entries like Set("GIT").
+  // Computed once at construction: allowlist entries are matched by their program key, as the command's first word
+  // is - on Windows lower-cased and without a `.exe` / `.com` extension, so `GIT` and `sort.exe` entries are `git` and
+  // `sort` and get those programs' rules (#1790, #1761).
   private val allowedCommandsNormalized: Set[String] =
-    if (isWindows) config.allowedCommands.map(_.toLowerCase)
-    else config.allowedCommands
+    config.allowedCommands.map(ProgramResolver.programKey(_, isWindows))
 
   // Pre-formatted for use in EXECUTABLE_NOT_ALLOWED error messages; computed
   // once so we don't sort and join the set on every rejected command.
@@ -658,21 +658,6 @@ class WorkspaceAgentInterfaceImpl(
     new java.io.File(if (windowsHost) "NUL" else "/dev/null")
 
   /**
-   * The directories `CreateProcess` searches for a bare executable name before the system directory (#1738): the
-   * one the runner's own executable (`java.exe`) was loaded from, and the runner's current directory. See
-   * [[CommandPolicy.shadowedToolRefusal]].
-   */
-  private def executableSearchedBeforeSystem: Seq[Path] =
-    ProcessHandle
-      .current()
-      .info()
-      .command()
-      .toScala
-      .flatMap(command => Try(Paths.get(command).getParent).toOption.flatMap(Option(_)))
-      .orElse(Option(System.getProperty("java.home")).map(home => Paths.get(home, "bin")))
-      .toSeq ++ Option(System.getProperty("user.dir")).map(Paths.get(_)).toSeq
-
-  /**
    * Shell metacharacters that must be rejected in every argument token, even
    * after tokenization.  These characters can still trigger command chaining
    * or redirection when the final argv is handed to `cmd.exe /c` (Windows
@@ -747,8 +732,8 @@ class WorkspaceAgentInterfaceImpl(
    * Check a command and build the process that runs it, using direct argument-vector
    * execution (no shell interpolation).  The first token of the command must appear in
    * `config.allowedCommands` (see [[WorkspaceSandboxConfig.allowedCommands]]);
-   * absolute/relative paths to executables are rejected so the lookup always
-   * goes through PATH.
+   * absolute/relative paths to executables are rejected, and the runner looks
+   * the program up itself in trusted directories only (see layer 10).
    *
    * Validation layers (applied in order):
    *  1. `SHELL_DISABLED`              – sandbox config prohibits execution
@@ -777,15 +762,24 @@ class WorkspaceAgentInterfaceImpl(
    *                                      source's operation changes, is refused
    *                                      with `ARGUMENT_NOT_ALLOWED` (#1776)
    *
-   * Layers 7-9 are [[CommandPolicy]], which documents each program's rules (#1715). On a Windows host, `sort` and
-   * `findstr` are then refused with `EXECUTABLE_NOT_ALLOWED` when `CreateProcess` would run a build other than the
-   * system directory's (#1738, [[CommandPolicy.shadowedToolRefusal]]).
+   * 10. `EXECUTABLE_NOT_ALLOWED` / `EXECUTABLE_NOT_FOUND` – the program is found
+   *                                      only where the runner never starts one
+   *                                      from (the workspace, the runner's own
+   *                                      working directory, a relative `PATH`
+   *                                      entry), or nowhere (#1790)
+   *
+   * Layers 7-9 are [[CommandPolicy]], which documents each program's rules (#1715). Layer 10 is [[ProgramResolver]]:
+   * the program is started by the absolute path it resolves, never by its bare name, so neither `CreateProcess` (which
+   * searches the runner's current directory before the system directory) nor the JDK's `PATH` search (which reads a
+   * relative entry from the command's working directory) picks a file an agent wrote. On Windows the first word is
+   * matched by its program key: case-insensitively and without a `.exe` / `.com` extension.
    *
    * On Windows, if the first token is a [[WindowsBuiltins]] built-in that has
-   * no standalone `.exe`, `cmd.exe /c` is prepended to the already-tokenized
-   * vector so each argument is still passed as a distinct string (not a raw
-   * command string).  The forbidden-character check runs before this routing
-   * step, so no dangerous token ever reaches cmd.exe.
+   * no standalone `.exe`, the system directory's `cmd.exe` (by its absolute path)
+   * and `/c` are prepended to the already-tokenized vector so each argument is
+   * still passed as a distinct string (not a raw command string).  The
+   * forbidden-character check runs before this routing step, so no dangerous
+   * token ever reaches cmd.exe.
    *
    * The command's standard input is the null device (#1728), so a program that reads it ends at once.
    *
@@ -863,8 +857,8 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
-    // On Windows, command names are case-insensitive (e.g. GIT == git).
-    val execLower = if (isWindows) executable.toLowerCase else executable
+    // On Windows, command names are case-insensitive (GIT == git) and may carry `.exe` / `.com` (git.exe == git).
+    val execLower = ProgramResolver.programKey(executable, isWindows)
 
     if (!allowedCommandsNormalized.contains(execLower)) {
       throw new WorkspaceAgentException(
@@ -913,25 +907,27 @@ class WorkspaceAgentInterfaceImpl(
     CommandPolicy
       .refusal(execLower, argv.tail, isWindows, realWorkDir, realRoot, env, Some(workDir.toPath), Some(rootPath))
       .foreach(refused => throw new WorkspaceAgentException(refused.message, refused.code, None))
-    // #1738: the policy reads `sort` / `findstr` arguments as the system directory's builds read them, so on a
-    // Windows host refuse them when CreateProcess would find another build first. Only the real host's directories
-    // can be searched, so a runner told it is on Windows on another host (tests) skips this.
-    if (isWindows && windowsHost)
-      CommandPolicy
-        .shadowedToolRefusal(execLower, executableSearchedBeforeSystem)
-        .foreach(refused => throw new WorkspaceAgentException(refused.message, refused.code, None))
+    // Layer 10 (#1790): start the program by an absolute path found only in trusted directories. A bare name would
+    // let CreateProcess run `<name>.exe` from the runner's current directory before the system directory, and the
+    // JDK's PATH search read a relative entry from the working directory, inside the workspace.
+    val untrustedRoots = Seq(rootPath, realRoot, workDir.toPath)
+    def resolved(found: Either[CommandPolicy.Refusal, Path]): String =
+      found.fold(refused => throw new WorkspaceAgentException(refused.message, refused.code, None), _.toString)
 
     // On Windows, built-in commands (echo, dir, type, …) live inside cmd.exe
-    // and cannot be launched as standalone processes.  We prepend "cmd.exe /c"
-    // to the *already-tokenized* vector so each argument is still a separate
-    // string. ProcessBuilder still joins them into one command line that
-    // cmd.exe re-parses, so the characters it would split or interpret were
-    // refused above (ForbiddenArgChars and CommandPolicy, #1715).
+    // and cannot be launched as standalone processes.  We prepend the system
+    // directory's cmd.exe and "/c" to the *already-tokenized* vector so each
+    // argument is still a separate string, and name the built-in by its key
+    // (`echo`, never `echo.exe`, which cmd.exe would look for as a program).
+    // ProcessBuilder still joins them into one command line that cmd.exe
+    // re-parses, so the characters it would split or interpret were refused
+    // above (ForbiddenArgChars and CommandPolicy, #1715).
+    val routedThroughCmd = isWindows && WindowsBuiltins.contains(execLower)
     val finalArgv: Seq[String] =
-      if (isWindows && WindowsBuiltins.contains(execLower))
-        Seq("cmd.exe", "/c") ++ argv
+      if (routedThroughCmd)
+        Seq(resolved(ProgramResolver.resolveSystem("cmd", programSearch, untrustedRoots)), "/c", execLower) ++ argv.tail
       else
-        argv
+        resolved(ProgramResolver.resolve(execLower, programSearch, untrustedRoots)) +: argv.tail
     // --------------------------------------------------------------------------
 
     // Use java.lang.ProcessBuilder with the tokenized argv directly – no shell
@@ -944,6 +940,9 @@ class WorkspaceAgentInterfaceImpl(
     // the command timeout (#1728).
     builder.redirectInput(java.lang.ProcessBuilder.Redirect.from(nullDevice))
     env.foreach { case (k, v) => builder.environment().put(k, v) }
+    // cmd.exe searches its current directory - the workspace - for a program a built-in starts (`call x`); this
+    // stops it (#1790)
+    if (routedThroughCmd) builder.environment().put("NoDefaultCurrentDirectoryInExePath", "1")
     if (execLower == "git") CommandPolicy.confineGit(builder.environment(), realRoot)
 
     PreparedCommand(builder, timeout.getOrElse(config.defaultCommandTimeout))
