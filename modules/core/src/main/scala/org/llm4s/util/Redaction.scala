@@ -2062,6 +2062,12 @@ private[llm4s] object Redaction {
    * every depth as it was, and the document parses at every depth as it did. Only backslashes are kept, never a
    * character of the value that is not one. A run before anything but a quote, and an even run, which escapes
    * nothing, are replaced whole, as they were. A value cut at an escaped `&` keeps nothing: no quote follows it.
+   *
+   * A sensitive key's value that opens with a quote escaped by backslashes (`\"` or `\'`, at any depth: a logfmt
+   * line inside a JSON string, `password=\"hunter2\"`) is a quoted value, as `password="..."` is for the pass for
+   * quoted values: its content, up to the same quote escaped as deep (`backslashQuotedValueEnd`), is replaced, and the
+   * escaped quotes around it are kept, so the document still parses (#1684). Before, the value stopped at the escaped
+   * quote and the content after it was written in the clear.
    */
   private def redactEqualsPairs(input: String, placeholder: String, escaped: Boolean): Rewrite = {
     val matcher = pairStarts(escaped).equals.pattern.matcher(input)
@@ -2074,6 +2080,22 @@ private[llm4s] object Redaction {
         // A key that is not sensitive and whose `=` is an escape: the text after the escape is read for pairs, as the
         // text the escape stands for would be (see `afterEscapedEquals`).
         loop(matcher.end, copiedTo)
+      } else if (isSensitiveKey(matcher.group(2)) && backslashQuoteDepth(input, matcher.end) > 0) {
+        // A value in quotes escaped with backslashes (`password=\"hunter2\"`, a logfmt line inside a JSON string):
+        // its content is replaced, and the escaped quotes around it are kept (#1684).
+        val contentStart = afterBackslashes(input, matcher.end) + 1
+        val (contentEnd, next) =
+          backslashQuotedValueEnd(
+            input,
+            contentStart,
+            input.charAt(contentStart - 1),
+            backslashQuoteDepth(input, matcher.end)
+          )
+        if (contentEnd > contentStart) {
+          out.copy(copiedTo, contentStart)
+          out.mask()
+          loop(next, contentEnd)
+        } else loop(next, copiedTo)
       } else {
         val valueStart = matcher.end
         val sensitive  = isSensitiveKey(matcher.group(2))
@@ -2117,6 +2139,49 @@ private[llm4s] object Redaction {
 
     val copiedTo = loop(0, 0)
     out.finish(copiedTo)
+  }
+
+  /** The number of trailing one bits of `n`: the depth of the escape a run of `n` backslashes before a quote writes. */
+  private def escapeDepth(n: Int): Int = Integer.numberOfTrailingZeros(~n)
+
+  /**
+   * Where a run of backslashes at `at` escapes the `"` or `'` right after it, the depth of that escape (see
+   * `escapeDepth`: 1 for `\"`, 2 for `\\\"`, the quote of a string inside a string inside a string), or 0 where no
+   * backslash or no quote is there, or the run is even and so escapes nothing.
+   */
+  private def backslashQuoteDepth(input: String, at: Int): Int = {
+    val run = afterBackslashes(input, at)
+    if (run == at || run >= input.length || (input.charAt(run) != '"' && input.charAt(run) != '\'')) 0
+    else escapeDepth(run - at)
+  }
+
+  /**
+   * The end of the content of a `key=` value that opens with `quote` escaped `depth` deep, which starts at `from`,
+   * and the index to read on from (#1684). The value closes at the same quote escaped as deep: a run of backslashes
+   * whose `escapeDepth` is `depth`, so that a backslash of the value escaped before it (`\"ab\\\\\"`, the value
+   * `ab\`) is the value's, and a quote escaped deeper (`\"ab\\\"cd\"`, the value `ab"cd`) is too. The same quote
+   * escaped less deep, or bare, ends the string the pair sits in, and a line break ends the line: the value is not
+   * closed and ends there, and so does an input that ends first. The backslashes that escape the quote it ends at
+   * are not content (`quoteEscape`), so they are kept, and the document still parses at every depth. The other quote
+   * is content at any depth. A loop that reads each character once.
+   */
+  private def backslashQuotedValueEnd(input: String, from: Int, quote: Char, depth: Int): (Int, Int) = {
+    var i      = from
+    var result = (-1, -1)
+    while (result._1 < 0 && i < input.length) {
+      val c = input.charAt(i)
+      if (c == '\\') {
+        val run = afterBackslashes(input, i)
+        if (run < input.length && input.charAt(run) == quote) {
+          val d = escapeDepth(run - i)
+          if (d == depth) result = (run - quoteEscape(input, from, run).length, run + 1)
+          else if (d < depth) result = (run - quoteEscape(input, from, run).length, run)
+          else i = run + 1
+        } else i = run
+      } else if (c == quote || c == '\n' || c == '\r') result = (i, i)
+      else i += 1
+    }
+    if (result._1 < 0) (input.length, input.length) else result
   }
 
   /**

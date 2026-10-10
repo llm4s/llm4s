@@ -2042,6 +2042,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - redaction: a `key=value` whose value is in backslash-escaped quotes is redacted**
+  ([#1684](https://github.com/llm4s/llm4s/issues/1684)): `Redaction` (used by the provider exchange logger, `LLMError`
+  messages and error mapping) stopped the value of a `key=value` pair at an escaped quote, so a logfmt line inside a
+  JSON string, `{"message": "login user=bob password=\"hunter2\" ok"}`, became
+  `password=[REDACTED]\"hunter2\" ok` and the password stayed readable. A sensitive key's value that opens with a quote
+  escaped by backslashes - `\"` or `\'`, at any depth of nesting (`\\\"` in JSON inside JSON) - is now read as a quoted
+  value, as `password="..."` is: it runs to the same quote escaped as deep, and its content is replaced while the
+  escaped quotes around it are kept, so the output is `password=\"[REDACTED]\" ok` and the JSON still parses. A
+  backslash or a quote escaped inside the value (`\"ab\\\\\"`, the value `ab\`; `\"ab\\\"cd\"`, the value `ab"cd`) is
+  the value's. A value whose escaped quote is never closed runs to the quote that ends the enclosing string (the same
+  quote, escaped less deep or bare), to the end of the line or to the end of the input; the escape of that quote is
+  kept. The same shape in plain text (`token=\"abc def\"`, item 2 of
+  [#1765](https://github.com/llm4s/llm4s/issues/1765)) is redacted too. Values under keys that are not sensitive, an
+  empty value (`password=\"\"`) and a value after an even run of backslashes, which escapes no quote, read as before.
 - **Security - redaction: `Proxy-Authorization`, `Cookie`, `Set-Cookie` and `X-Amz-Security-Token` are treated as
   sensitive** ([#1686](https://github.com/llm4s/llm4s/issues/1686)): `Redaction` (used by the provider exchange
   logger, `LLMError` messages and error mapping) matched `authorization` as a whole key only, so a JSON field or header

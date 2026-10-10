@@ -187,7 +187,10 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   under a single-quoted key inside a string ends the container, since it may be the end of a string
   inside it), `key=value` pairs and quoted
   `KEY="value"` / `KEY='value'` assignments outside a query string (for example `password=...`,
-  `spring.datasource.password=...`, `PASSWORD="..."`), `key: value` header lines (for example
+  `spring.datasource.password=...`, `PASSWORD="..."`), also with the quotes escaped by backslashes, as a
+  logfmt line inside a JSON string writes them (`{"message": "login password=\"...\" ok"}`, `\'...\'`, and
+  `\\\"...\\\"` one string deeper: the content is replaced and the escaped quotes kept, so the JSON still
+  parses; an escaped quote never closed ends where the enclosing string or the line does), `key: value` header lines (for example
   `x-api-key: ...`), and strings shaped like known provider API keys (for example `sk-` keys). A quoted
   value is redacted whole, escaped quotes included. A key is sensitive when its whole name, lower-cased
   with `_` and `-` dropped, is `token`, `authorization`, `proxyauthorization`, `credential(s)`,
