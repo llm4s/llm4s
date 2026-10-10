@@ -2034,9 +2034,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replaced - every name and value of it, from after `Cookie:` or `Set-Cookie:` and the whitespace after it (escaped
   `\n`, `\r` and `\t` included) to the end of its line. Where the header sits inside a string that opened on the same
   line - a JSON string, a header in a JSON array, a log line inside JSON, a Python repr - the value ends earlier: at
-  the escape of a line break (`\r`, `\n`, `\u000a`, `\u000d`; `\\r\\n` in JSON inside JSON) or, in a double-quoted
-  string, at the unescaped `"` that ends the string, so the headers and fields after it are kept and the JSON still
-  parses. An escaped quote (`sid=\"abc\"`) is part of the value; outside a string, quotes, apostrophes and backslashes
+  the escape of a line break (`\r`, `\n`, `\u000a`, `\u000d`; `\\r\\n` before the next header in JSON inside JSON)
+  or, in a double-quoted string, at the unescaped `"` that ends the string, so the headers and fields after it are
+  kept and the JSON still parses. An escaped quote (`sid=\"abc\"`) is part of the value. Ending at the quote is a
+  heuristic for well-formed JSON strings: where the first unescaped `"` in the value is not followed by what follows
+  the end of a JSON string, the line is malformed (a stray quote earlier on it, quoted cookie values in a log line)
+  and the value runs to the end of the line. Outside a string, quotes, apostrophes and backslashes
   are part of the value, so a raw `Cookie: sid="abc"; x=y` is replaced to the end of the line. `Authorization` and
   `Proxy-Authorization` header values run to the end of the line in every context, as before: a Digest credential
   holds quoted strings and commas, so a quote is no sure end of it. `X-Amz-Security-Token` (suffix `securitytoken`)

@@ -607,13 +607,14 @@ private[llm4s] object Redaction {
   /**
    * `Cookie:` or `Set-Cookie:` in a header, anywhere in a line, and the whitespace after it, written or escaped
    * (`\n`, `\r`, `\t`): the value follows, read by `cookieValueEnd`. `Cookie` starts a word, so that a longer name
-   * ending in it (`MyCookie`, `my_cookie`) is left to the field passes; it starts one after the JSON escape of a line
-   * break, a tab or a quote too (`\r\nCookie:`, `\u000aCookie:`, `\u0022Cookie:`, as HTML-safe serialisers write
-   * a quote), whose last character is a letter or a digit but which stands for whitespace or a quote. Possessive, so
-   * the whitespace is read once.
+   * ending in it (`MyCookie`, `my_cookie`) is left to the field passes; it starts one after any JSON escape too - of a
+   * line break, a tab, a form feed, a quote or a `>` (`\r\nCookie:`, `\fCookie:`, `\u000aCookie:`,
+   * `\u0022Cookie:`, `\u003eCookie:`, as HTML-safe serialisers write them) - whose last character is a letter or a
+   * digit but which mostly stands for whitespace or punctuation; the rare escaped letter before `Cookie:` costs only a
+   * value redacted that need not be. Possessive, so the whitespace is read once.
    */
   private val CookieHeaderStart: Regex =
-    """(?i)(?:(?<![A-Za-z0-9_])|(?<=\\(?-i:[nrt]))|(?<=\\(?-i:u)00(?:0[aAdD]|2[27])))Cookie:(?:\s|\\++(?-i:[nrt]))*+""".r
+    """(?i)(?:(?<![A-Za-z0-9_])|(?<=\\[a-z])|(?<=\\(?-i:u)[0-9a-f]{4}))Cookie:(?:\s|\\++(?-i:[nrt]))*+""".r
 
   /** A standalone Bearer token. */
   private val BearerToken: Regex = """(?i)\bBearer\s+([a-zA-Z0-9\-_\.]+)""".r
@@ -743,18 +744,25 @@ private[llm4s] object Redaction {
    * are kept and JSON stays JSON. Plain header text - a request dump, `Cookie: sid="abc"; x=y` - is read to the end
    * of its line, quotes, backslashes and all, as it always was.
    *
-   *  - The escape of a line break is a run of backslashes and `n`, `r`, `u000a` or `u000d`: in a string (or a
-   *    single-quoted string), a run of odd length, since an even run is escaped backslashes and the letter after them
-   *    is text; in a string escaped within a string, any run whose length is not a multiple of four, so also a run of
-   *    two, the escaped escape (`\\n`), but not a run of four, an escaped backslash of the inner string followed by a
-   *    letter. A cookie value holds no backslash (RFC 6265), so reading one as
-   *    the end of the value can only end it early where a non-standard cookie holds `\n` itself.
-   *  - The end of a double-quoted string is a `"` after an even run of backslashes (none, or escaped backslashes),
-   *    followed by what follows the end of a JSON string (`endsJsonStringAt`): an escaped quote (`\"`) is part of the
-   *    value, so a quoted cookie value in JSON (`sid=\"abc\"`) is replaced whole. Inside a string escaped within a
-   *    string, the inner string's own `\"` is not taken for its end: only the outer string's `"` ends the value, which
-   *    keeps the outer JSON whole. A `'` never ends a value: it is a legal cookie character, and outside a JSON string
-   *    a value running on to the end of its line can only hide more, never break the JSON around it.
+   *  - The escape of a line break is a run of backslashes and `n`, `r`, `u000a` or `u000d` of odd length, since an
+   *    even run is escaped backslashes and the letter after them is text. In a string escaped within a string, a run
+   *    of two (or six), the inner string's escaped escape (`\\n`), ends the value too, but only where a header name
+   *    and `:` follow it (`headerNameAfter`): an odd count of `\"` before the header does not prove the string is
+   *    JSON inside JSON (`he said \"Cookie: ...`), and where it is not, the run is a backslash and a letter of the
+   *    value, so a value ends there only where the text after it reads as the next header. A cookie value holds no
+   *    backslash (RFC 6265), so reading one as the end of the value can only end it early where a non-standard cookie
+   *    holds `\n` itself.
+   *  - Inside a double-quoted string, the first `"` after an even run of backslashes (none, or escaped backslashes)
+   *    is where the string ends in well-formed JSON, so the value ends there when what follows it is what follows the
+   *    end of a JSON string (`endsJsonStringAt`). An escaped quote (`\"`) is part of the value, so a quoted cookie
+   *    value in JSON (`sid=\"abc\"`) is replaced whole; inside a string escaped within a string, only the outer
+   *    string's `"` ends the value, which keeps the outer JSON whole. This is a heuristic for well-formed JSON
+   *    strings: where that first `"` is followed by anything else, the text is not well-formed JSON (a stray quote
+   *    earlier on the line, `size 5" Cookie: a="b"; c=d`, or a quoted cookie value in a log line,
+   *    `msg="Cookie: a="x", sid=...`), and the value runs on to the end of its line, as plain header text does; no
+   *    later quote is searched for, since a quote in a value that is not JSON ends nothing. A `'` never ends a value:
+   *    it is a legal cookie character, and outside a JSON string a value running on to the end of its line can only
+   *    hide more, never break the JSON around it.
    *
    * A loop that reads each character a bounded number of times.
    */
@@ -763,11 +771,21 @@ private[llm4s] object Redaction {
     val inDoubleQuotes =
       context == HeaderContext.InString || context == HeaderContext.InEscapedString
     def isLineBreak(c: Char): Boolean = c == '\n' || c == '\r'
-    def escapesLineBreak(at: Int): Boolean =
-      at < length && (input.charAt(at) == 'n' || input.charAt(at) == 'r' ||
-        (at + 4 < length && input.startsWith("u000", at) && "aAdD".indexOf(input.charAt(at + 4).toInt) >= 0))
-    def endsLine(slashes: Int): Boolean =
-      if (context == HeaderContext.InEscapedString) slashes % 4 != 0 else slashes % 2 == 1
+    def lineEnd(at: Int): Int = {
+      var i = at
+      while (i < length && !isLineBreak(input.charAt(i))) i += 1
+      i
+    }
+    // The index after the line break `n`, `r`, `u000a` or `u000d` that an escape starting at `at` stands for, or -1.
+    def afterLineBreakEscape(at: Int): Int =
+      if (at >= length) -1
+      else if (input.charAt(at) == 'n' || input.charAt(at) == 'r') at + 1
+      else if (at + 4 < length && input.startsWith("u000", at) && "aAdD".indexOf(input.charAt(at + 4).toInt) >= 0)
+        at + 5
+      else -1
+    def endsLine(slashes: Int, after: Int): Boolean =
+      slashes                                                % 2 == 1 ||
+        (context == HeaderContext.InEscapedString && slashes % 4 == 2 && headerNameAfter(input, after))
     var i   = from
     var end = -1
     while (end < 0 && i < length) {
@@ -776,22 +794,42 @@ private[llm4s] object Redaction {
       else if (c == '\\' && context != HeaderContext.Raw) {
         val next    = afterBackslashes(input, i)
         val slashes = next - i
-        if (escapesLineBreak(next) && endsLine(slashes)) end = i
+        val after   = afterLineBreakEscape(next)
+        if (after >= 0 && endsLine(slashes, after)) end = i
         else if (slashes % 2 == 1 && next < length && !isLineBreak(input.charAt(next))) i = next + 1
         else i = next
-      } else if (c == '"' && inDoubleQuotes && endsJsonStringAt(input, i + 1)) end = i
+      } else if (c == '"' && inDoubleQuotes) end = if (endsJsonStringAt(input, i + 1)) i else lineEnd(i)
       else i += 1
     }
     if (end < 0) length else end
   }
 
   /**
+   * Whether the text at `from`, right after the escape of a line break in a string escaped within a string, starts
+   * the next header line: a header name - letters, digits and `-`, at most 64 - and a `:`, after at most one more
+   * escaped escape of a line break (`\\r\\n`). At most 70 characters are read.
+   */
+  private def headerNameAfter(input: String, from: Int): Boolean = {
+    val length = input.length
+    def isEscapedBreak(at: Int): Boolean =
+      at + 2 < length && input.charAt(at) == '\\' && input.charAt(at + 1) == '\\' &&
+        (input.charAt(at + 2) == 'n' || input.charAt(at + 2) == 'r') && (at + 3 == length || input.charAt(
+          at + 3
+        ) != '\\')
+    val start = if (isEscapedBreak(from)) from + 3 else from
+    var i     = start
+    while (i < length && i - start < 64 && (input.charAt(i).isLetterOrDigit || input.charAt(i) == '-')) i += 1
+    i > start && i < length && input.charAt(i) == ':'
+  }
+
+  /**
    * Whether the text from `from` on is what follows the end of a JSON string: past whitespace, the end of the input, a
-   * `}` or `]`, or a `,` before the next value - a string, an object, an array, a number, `true`, `false` or `null`.
-   * Looser than `endsString`, which wants a key after the `,`, since a header is as often an element of an array
-   * (`["Cookie: ...", "Accept: ..."]`, `["Cookie: ...", 1]`); a `,` before any other word (`a="x", b="y"`, a
-   * Set-Cookie header folded onto one line) is not taken for one. Only whitespace and at most six characters after
-   * the `,` are read.
+   * `,` before the next value - a string, an object, an array, a number, `true`, `false` or `null` - or a run of `}`
+   * and `]` (and spaces) that is itself followed by the end of the input, a line break or such a `,`, as the end of a
+   * JSON container is. Looser than `endsString`, which wants a key after the `,`, since a header is as often an element
+   * of an array (`["Cookie: ...", "Accept: ..."]`, `["Cookie: ...", 1]`); a `,` before any other word (`a="x", b="y"`,
+   * a Set-Cookie header folded onto one line) is not taken for one, nor a `}` before a word (`x="}SID`), which is a
+   * quote and a brace in a cookie value. Whitespace, closing brackets and at most six characters after a `,` are read.
    */
   private def endsJsonStringAt(input: String, from: Int): Boolean = {
     val length = input.length
@@ -800,16 +838,23 @@ private[llm4s] object Redaction {
       while (i < length && Character.isWhitespace(input.charAt(i))) i += 1
       i
     }
+    def valueAfterComma(comma: Int): Boolean = {
+      val j = skipSpace(comma + 1)
+      def literalAt(word: String): Boolean =
+        input.startsWith(word, j) && (j + word.length == length || !input.charAt(j + word.length).isLetterOrDigit)
+      j < length && ("\"{[-0123456789".indexOf(input.charAt(j).toInt) >= 0 ||
+        literalAt("true") || literalAt("false") || literalAt("null"))
+    }
     val i = skipSpace(from)
     i == length || (input.charAt(i) match {
-      case '}' | ']' => true
-      case ',' =>
-        val j = skipSpace(i + 1)
-        def literalAt(word: String): Boolean =
-          input.startsWith(word, j) && (j + word.length == length || !input.charAt(j + word.length).isLetterOrDigit)
-        j < length && ("\"{[-0123456789".indexOf(input.charAt(j).toInt) >= 0 ||
-          literalAt("true") || literalAt("false") || literalAt("null"))
-      case _ => false
+      case '}' | ']' =>
+        var j = i
+        while (j < length && "}] \t".indexOf(input.charAt(j).toInt) >= 0) j += 1
+        j == length || input.charAt(j) == '\n' || input.charAt(j) == '\r' || (input.charAt(j) == ',' && valueAfterComma(
+          j
+        ))
+      case ',' => valueAfterComma(i)
+      case _   => false
     })
   }
 

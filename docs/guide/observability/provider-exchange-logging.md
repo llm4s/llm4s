@@ -204,12 +204,16 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   of its line, quotes, apostrophes and backslashes included: `Cookie: sid="abc"; x=y` becomes
   `Cookie: [REDACTED]`. Inside a string that opened on the same line - a JSON string, a header in a JSON
   array, an HTTP exchange logged inside JSON, a Python repr - earlier: at the escape of a line break
-  (`\r`, `\n`, `\u000a`, `\u000d`, and `\\r`, `\\n` in JSON inside a JSON string) or, in a
-  double-quoted string, at the unescaped `"` that ends the string. So
+  (`\r`, `\n`, `\u000a`, `\u000d`, and `\\r`, `\\n` before the next header in JSON inside a JSON
+  string) or, in a double-quoted string, at the unescaped `"` that ends the string. So
   `{"log":"GET / HTTP/1.1\r\nCookie: sid=...\r\nAccept: */*"}` becomes
   `{"log":"GET / HTTP/1.1\r\nCookie: [REDACTED]\r\nAccept: */*"}`, and
   `["Cookie: sid=...", "Accept: */*"]` keeps its second element; the JSON still parses. An escaped quote
-  (`sid=\"abc\"`) is part of the value. An `Authorization` or `Proxy-Authorization` header's value
+  (`sid=\"abc\"`) is part of the value. Ending at the quote is a heuristic for well-formed JSON
+  strings, where the first unescaped `"` ends the string: when that quote is not followed by what follows
+  the end of a JSON string (`}`, `]`, or `,` and a value, then the end of the line), the line is not
+  well-formed JSON - a stray quote earlier on it, `size 5" Cookie: sid="abc"; x=y`, or quoted cookie
+  values in a log line - and the value runs to the end of the line, as outside a string. An `Authorization` or `Proxy-Authorization` header's value
   always runs to the end of its line, inside a string too, taking the rest of that string and the fields
   after it on the same line: a Digest credential holds quoted strings and commas, so a quote is no sure
   end of it.
