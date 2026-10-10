@@ -211,13 +211,14 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `["Cookie: sid=...", "Accept: */*"]` keeps its second element; the JSON still parses. An escaped quote
   (`sid=\"abc\"`) is part of the value. Ending at the quote is a heuristic for well-formed JSON
   strings, where the first unescaped `"` ends the string: when that quote is not followed by what follows
-  the end of a JSON string (`}`, `]`, or `,` and a value, then the end of the line), the line is not
-  well-formed JSON - a stray quote earlier on it, `size 5" Cookie: sid="abc"; x=y`, or quoted cookie
-  values in a log line - and the value runs to the end of the line, as outside a string. Where a `"` opened
-  before the header on its line (or is still open from an earlier one), a `"` is left after the
-  placeholder to close it - the value's own last quote where it ends the line, else one written there -
-  so `msg="Cookie: theme="dark" sid=abc"` becomes `msg="Cookie: [REDACTED]"` and a `key="value"` field
-  on the next line is still read as one. An `Authorization` or `Proxy-Authorization` header's value
+  the end of a JSON string (`}`, `]`, or `,` and a value, then the end of the line; or `:` and a value,
+  where the header is an object's key), the line is not well-formed JSON - a stray quote earlier on it,
+  `size 5" Cookie: sid="abc"; x=y`, or quoted cookie values in a log line - and the value runs to the
+  end of the line, quotes and all, as outside a string: `msg="Cookie: theme="dark" sid=abc"` becomes
+  `msg="Cookie: [REDACTED]`. Cookie headers are redacted last, after every other pattern, so they only
+  add to what is redacted: a cookie value that takes a quote of a malformed line cannot change how the
+  field patterns read the quotes around it, and a `password="..."` or `{'password': "..."}` field later
+  on that line or the next is still redacted. An `Authorization` or `Proxy-Authorization` header's value
   always runs to the end of its line, inside a string too, taking the rest of that string and the fields
   after it on the same line: a Digest credential holds quoted strings and commas, so a quote is no sure
   end of it.

@@ -98,11 +98,13 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
     Redaction.redact(nested) shouldBe s"""{"outer":"{\\"log\\":\\"Cookie: $R","k":"keep"}"""
     val last = s"""{"headers":["Accept: */*","Set-Cookie: sid=$session"]}"""
     Redaction.redact(last) shouldBe s"""{"headers":["Accept: */*","Set-Cookie: $R"]}"""
+    val key = s"""{"Cookie: sid=$session": 1, "k": "keep"}"""
+    Redaction.redact(key) shouldBe s"""{"Cookie: $R": 1, "k": "keep"}"""
     val beforeNumber = s"""["Cookie: sid=$session", 1, "Cookie: sid=$session", null]"""
     Redaction.redact(beforeNumber) shouldBe s"""["Cookie: $R", 1, "Cookie: $R", null]"""
     val inArrayString = s"""["[\\"debug Cookie: sid=$session; lang=en\\",1]",1]"""
     Redaction.redact(inArrayString) shouldBe s"""["[\\"debug Cookie: $R",1]"""
-    Seq(array, multiline, curl, nested, last, beforeNumber, inArrayString).foreach(in =>
+    Seq(array, multiline, curl, nested, last, key, beforeNumber, inArrayString).foreach(in =>
       assertJson(Redaction.redact(in))
     )
   }
@@ -126,8 +128,8 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
     Redaction.redact(s"""Cookie: sid="$session"; x=y""") shouldBe s"Cookie: $R"
     Redaction.redact(s"""Set-Cookie: a="x", b="$session"\nX: keep""") shouldBe s"Set-Cookie: $R\nX: keep"
     // A quote that opened on the line, around the header, unescaped: its quoted values do not end it.
-    Redaction.redact(s"""msg="Set-Cookie: a="x", b="$session"; Path=/" user=ann""") shouldBe s"""msg="Set-Cookie: $R""""
-    Redaction.redact(s"""log "Cookie: sid="$session"; x=y" done""") shouldBe s"""log "Cookie: $R""""
+    Redaction.redact(s"""msg="Set-Cookie: a="x", b="$session"; Path=/" user=ann""") shouldBe s"""msg="Set-Cookie: $R"""
+    Redaction.redact(s"""log "Cookie: sid="$session"; x=y" done""") shouldBe s"""log "Cookie: $R"""
     // A quote left open on an earlier line is not a string around the header.
     Redaction.redact(s"""say "hi\nCookie: a="x", b="$session"""") shouldBe s"""say "hi\nCookie: $R"""
     // Backslashes outside a string are part of the value.
@@ -136,18 +138,17 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
 
   it should "read a cookie value to the end of its line where the first quote in it does not end a JSON string" in {
     // A quote opened earlier on the line, unescaped quotes in the value: not well-formed JSON, so no later quote is
-    // searched for and every cookie after the first quote is replaced too. After a quote opened before the header,
-    // a quote is kept or written back after the placeholder to close it, as the value's first quote did.
-    Redaction.redact(s"""x="a Cookie: p={"t":"d"}; sid=$session"""") shouldBe s"""x="a Cookie: $R""""
-    Redaction.redact(s"""5" disk Cookie: sid="abc", "$session"""") shouldBe s"""5" disk Cookie: $R""""
-    Redaction.redact(s"""msg="Set-Cookie: a="x", 2fa=$session; Path=/""") shouldBe s"""msg="Set-Cookie: $R""""
-    Redaction.redact(s"""log ["Cookie: a="b"] sid=$session""") shouldBe s"""log ["Cookie: $R""""
-    Redaction.redact(s"""size 5" Cookie: prefs="{"}" sid=$session""") shouldBe s"""size 5" Cookie: $R""""
-    Redaction.redact(s"""msg="Cookie: a="x", "$session"""") shouldBe s"""msg="Cookie: $R""""
+    // searched for and every cookie after the first quote is replaced too, the quotes with it.
+    Redaction.redact(s"""x="a Cookie: p={"t":"d"}; sid=$session"""") shouldBe s"""x="a Cookie: $R"""
+    Redaction.redact(s"""5" disk Cookie: sid="abc", "$session"""") shouldBe s"""5" disk Cookie: $R"""
+    Redaction.redact(s"""msg="Set-Cookie: a="x", 2fa=$session; Path=/""") shouldBe s"""msg="Set-Cookie: $R"""
+    Redaction.redact(s"""log ["Cookie: a="b"] sid=$session""") shouldBe s"""log ["Cookie: $R"""
+    Redaction.redact(s"""size 5" Cookie: prefs="{"}" sid=$session""") shouldBe s"""size 5" Cookie: $R"""
+    Redaction.redact(s"""msg="Cookie: a="x", "$session"""") shouldBe s"""msg="Cookie: $R"""
     // A quote and a closing bracket before a word end no JSON string, wherever the quote is in the value.
-    Redaction.redact(s"""msg="req Cookie: x="}$session; y=z""") shouldBe s"""msg="req Cookie: $R""""
-    Redaction.redact(s"""msg="req Cookie: "}$session""") shouldBe s"""msg="req Cookie: $R""""
-    Redaction.redact(s"""msg="req Cookie: "} $session\nX: keep""") shouldBe s"""msg="req Cookie: $R"\nX: keep"""
+    Redaction.redact(s"""msg="req Cookie: x="}$session; y=z""") shouldBe s"""msg="req Cookie: $R"""
+    Redaction.redact(s"""msg="req Cookie: "}$session""") shouldBe s"""msg="req Cookie: $R"""
+    Redaction.redact(s"""msg="req Cookie: "} $session\nX: keep""") shouldBe s"""msg="req Cookie: $R\nX: keep"""
     // Well-formed JSON still ends the value at its string's end, an empty value is still left as it is.
     val empty = """{"h":"Cookie: "}"""
     Redaction.redact(empty) shouldBe empty
@@ -158,24 +159,128 @@ class RedactionAuthHeadersSpec extends AnyFlatSpec with Matchers {
     Seq(empty, pretty).foreach(in => assertJson(Redaction.redact(in)))
   }
 
-  it should "leave a quote to close the string around a cookie value that runs to the end of its line" in {
-    // The value takes the quote that closed the `key="` value around the header; without one put back, the
-    // `key="value"` pass would read that value on into the next lines, over the key of a field there.
+  it should "still redact the fields after a cookie value that takes the quotes of its line" in {
+    // The cookie pass runs after every other pass, so a value that takes the quote closing the `key="` value around
+    // the header changes no text a field pass reads: the `key="value"` pass and the dict passes pair the quotes as
+    // they would were cookies not redacted, and a field on a later line keeps its value redacted. Each case is one a
+    // review found leaking when the cookie pass ran first.
     Redaction.redact(s"""level=info msg="Cookie: theme="dark" sid=$session"\npassword="SEKH1"""") shouldBe
-      s"""level=info msg="Cookie: $R"\npassword="$R""""
+      s"""level=info msg="Cookie: $R\npassword="$R""""
     val threeLines = s"""a=1\nmsg="req Cookie: t="d"; sid=$session" ok=1\nb=2 secret="SEKH9" c=3"""
-    Redaction.redact(threeLines) shouldBe s"""a=1\nmsg="req Cookie: $R"\nb=2 secret="$R" c=3"""
-    // The last quote is not at the end of the line: one is written after the placeholder.
+    Redaction.redact(threeLines) shouldBe s"""a=1\nmsg="req Cookie: $R\nb=2 secret="$R" c=3"""
     Redaction.redact(s"""msg="Cookie: a="b$session\nconfig password="SEKD5" x""") shouldBe
-      s"""msg="Cookie: $R"\nconfig password="$R" x"""
-    // A quote opened earlier on the line, closed before the header, still has one written back.
-    Redaction.redact(s"""a" msg="Cookie: x=" y\npassword="SEKH2"""") shouldBe s"""a" msg="Cookie: $R"\npassword="$R""""
-    // A quote left open on an earlier line: the quote it closed on is still left to it.
-    Redaction.redact(
-      s"""x="hi\nCookie: a="b$session\npassword="SEKH3""""
-    ) shouldBe s"""x="hi\nCookie: $R\npassword="$R""""
-    // Outside any string, the quotes of the value are replaced with it.
+      s"""msg="Cookie: $R\nconfig password="$R" x"""
+    Redaction.redact(s"""a" msg="Cookie: x=" y\npassword="SEKH2"""") shouldBe s"""a" msg="Cookie: $R\npassword="$R""""
+    Redaction.redact(s"""x="hi\nCookie: a="b$session\npassword="SEKH3"""") shouldBe s"""x="hi\nCookie: $R\npassword="$R""""
     Redaction.redact(s"""Cookie: sid="$session"\npassword="SEKH8"""") shouldBe s"""Cookie: $R\npassword="$R""""
+    // A string closed before the header, quoted cookie values after it, a Python repr on the next line.
+    val closedBefore =
+      s"""ts=1 level=info msg="GET /account" Cookie: theme="dark"; sid=$session\nts=2 cfg={'password': "hunter2", 'user': 'bob'}"""
+    Redaction.redact(closedBefore) shouldBe
+      s"""ts=1 level=info msg="GET /account" Cookie: $R\nts=2 cfg={'password': "$R", 'user': 'bob'}"""
+    val dictAfter = Seq(
+      s"""a="x" Cookie: b="c" d\n{'password': "SEKA1"}""",
+      s"""a="x" Cookie: b="c" d\ntoken="SEKA2" z""",
+      s"""a="x" Cookie: b="c" d\n{'token': ['SEKA4', 'SEKA5']}""",
+      s"""msg="Cookie: b="c" e="f\n{'password': "SEKB1"}""",
+      s"""a="x" Cookie: b="c" d\na="x" Cookie: b="c" d\n{'password': "SEKB4"}""",
+      s"""req="GET /" Cookie: theme="dark"; lang=en\n{'api_key': "SEKE2"}""",
+      s"""upstream="1" Set-Cookie: sid="abc"; Path=/\nheaders={'Authorization': "Bearer SEKE3x", 'X-Api-Key': "SEKE4"}""",
+      s"""{"msg":"Set-Cookie: session=\\"abc\\"; lang=x","n":1}  cookie: session="dark" csrftoken=y csrftoken="\r\n  "auth_token": "SEKE5","""
+    )
+    dictAfter.foreach(in => assertGone(Redaction.redact(in), "SEK"))
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // The cookie pass only adds: what is redacted without it stays redacted
+  // ---------------------------------------------------------------------------------------------
+
+  /** The input with every `Cookie:` read as no header: one letter changed, so no quote, key or line moves. */
+  private def withoutCookieHeaders(in: String): String =
+    "(?i)(cooki)(e:)".r.replaceAllIn(in, m => java.util.regex.Matcher.quoteReplacement(m.group(1) + "x:"))
+
+  it should "leave redacted every secret that is redacted when no cookie header is read" in {
+    // Log lines with cookie headers in every quote context - a string open or closed before the header, quoted and
+    // unbalanced cookie values, escaped quotes - followed by fields under main's keys in logfmt, JSON and Python repr
+    // shapes. Reading the cookie headers must only add to what is redacted (#1686): every secret the passes redact
+    // when no cookie header is read stays redacted. Deterministic.
+    val rnd       = new scala.util.Random(1686)
+    var id        = 0
+    def secret(): String = { id += 1; f"Zq$id%05dWx" }
+    def pick[A](xs: Seq[A]): A = xs(rnd.nextInt(xs.length))
+    val prefixes = Seq(
+      "",
+      "msg=\"",
+      "a=\"x\" ",
+      "ts=1 level=info msg=\"GET /account\" ",
+      "level=info msg=\"",
+      "log \"",
+      "{\"msg\":\"",
+      "\"",
+      "'",
+      "size 5\" ",
+      "x=\\\"y ",
+      "<34>Oct 10 13:00:00 host app[42]: ",
+      "10.0.0.1 - - [10/Oct/2026:13:00:00 +0000] \"GET / HTTP/1.1\" 200 5 \"-\" \"",
+      "it's "
+    )
+    val headers = Seq("Cookie: ", "Set-Cookie: ", "cookie:", "COOKIE:\t", "Set-Cookie:  ")
+    val atoms = Seq(
+      "theme=\"dark\"",
+      "sid=abc",
+      "a=\"b",
+      "\"",
+      "\\\"",
+      "\\\\\"",
+      "; ",
+      ", ",
+      " ",
+      "x y",
+      "'",
+      "\"}",
+      "]",
+      "p={\"a\":1}",
+      "\" ok=1"
+    )
+    val secretFields: Seq[String => String] = Seq(
+      s => s"""password="$s"""",
+      s => s"""token="$s" z""",
+      s => s"""{'password': "$s"}""",
+      s => s"""{'password': '$s', 'n': 1}""",
+      s => s"""{'token': ['$s', 2]}""",
+      s => s"""{"token": ["$s"]}""",
+      s => s"""{"password": "$s"}""",
+      s => s"""access_token=$s""",
+      s => s"""cfg={'api_key': "$s", 'a': 'b'}""",
+      s => s"""secret = "$s"""",
+      s => s"""  "auth_token": "$s",""",
+      s => s"""x-api-key: $s"""
+    )
+    val noise     = Seq("k=\"v\"", "\"", "it's", "\\\"", "ok", "{'a': 'b'}")
+    val breaks    = Seq("\n", "\r\n", "\n\n", " ")
+    var redacted  = 0
+    var leaks     = Vector.empty[String]
+    (1 to 2000).foreach { _ =>
+      val lines = Vector.fill(2 + rnd.nextInt(4)) {
+        rnd.nextInt(3) match {
+          case 0 =>
+            pick(prefixes) + pick(headers) + Vector.fill(1 + rnd.nextInt(5))(pick(atoms)).mkString +
+              pick(Seq("", "\"", "\" ok=1", "'", "\"}"))
+          case 1 => pick(secretFields)(secret())
+          case _ => pick(noise)
+        }
+      }
+      val in      = lines.reduce((a, b) => a + pick(breaks) + b)
+      val secrets = "Zq[0-9]{5}Wx".r.findAllIn(in).toVector
+      val without = Redaction.redact(withoutCookieHeaders(in))
+      val out     = Redaction.redact(in)
+      secrets.filterNot(without.contains).foreach { s =>
+        redacted += 1
+        if (out.contains(s)) leaks :+= s"$s in: $in\nout: $out"
+      }
+    }
+    withClue(leaks.take(5).mkString("\n\n"))(leaks shouldBe empty)
+    redacted should be > 1000
   }
 
   it should "end a cookie value at an escaped escape of a line break only where the next header follows it" in {

@@ -2039,11 +2039,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kept and the JSON still parses. An escaped quote (`sid=\"abc\"`) is part of the value. Ending at the quote is a
   heuristic for well-formed JSON strings: where the first unescaped `"` in the value is not followed by what follows
   the end of a JSON string, the line is malformed (a stray quote earlier on it, quoted cookie values in a log line)
-  and the value runs to the end of the line; where a `"` opened before the header (on its line, or still
-  open from an earlier one), a `"` is left after the placeholder to close it - the value's last quote where it ends
-  the line, else one written there - so `msg="Cookie: theme="dark" sid=abc"` becomes `msg="Cookie: [REDACTED]"` and
-  a `password="..."` on the next line is still redacted. Outside a string, quotes, apostrophes and backslashes
-  are part of the value, so a raw `Cookie: sid="abc"; x=y` is replaced to the end of the line. `Authorization` and
+  and the value runs to the end of the line, its quotes with it (`msg="Cookie: theme="dark" sid=abc"` becomes
+  `msg="Cookie: [REDACTED]`). Outside a string, quotes, apostrophes and backslashes are part of the value, so a raw
+  `Cookie: sid="abc"; x=y` is replaced to the end of the line. The cookie pass runs after every other pass, so it
+  only adds to what they redact: the field, pair and dict passes read the text exactly as they would were cookie
+  headers not read (the header-line pass leaves `Cookie:` and `Set-Cookie:` lines to it), and a value that takes a
+  quote of a malformed line can no longer change how a later pass pairs quotes and leave a `password="..."` or
+  `{'password': "..."}` field on that or a later line readable. `Authorization` and
   `Proxy-Authorization` header values run to the end of the line in every context, as before: a Digest credential
   holds quoted strings and commas, so a quote is no sure end of it. `X-Amz-Security-Token` (suffix `securitytoken`)
   joins `X-Api-Key`, `Api-Key`, `X-Goog-Api-Key` and `X-Auth-Token`, already covered. `cookie` is a whole word, not a
