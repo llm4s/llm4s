@@ -410,6 +410,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"org.llm4s" %% "llm4s-cohere"`; nothing else changes. HTTP 429 is a `RateLimitError` carrying
   `Retry-After` when Cohere sends it in seconds; other failures are `EmbeddingError` with the status as
   its code.
+- **MCP test: a server that does not answer within the timeout**
+  ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `MCPEmbeddedServerTimeoutSpec` in `llm4s-mcp` runs a tool
+  on an in-process `MCPServer` that does not answer within `MCPServerConfig.timeout`: the call fails as a timed-out
+  tool (not cancelled, not unknown) and the client and registry stay usable. The tool blocks on a latch, so the test
+  uses no fixed sleep.
 - **Cloud speech smoke and integration tests** ([#1011](https://github.com/llm4s/llm4s/issues/1011)):
   `@Cloud` suites in `modules/it` (`org.llm4s.speech`: OpenAI TTS, OpenAI STT, ElevenLabs, Azure
   TTS/STT with a synthesise-then-transcribe round trip), run by `sbt testSmoke` and gated by
@@ -2089,6 +2094,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `password="`, `"Authorization": "`, and for `\"password\": \"` and `password=\"` in a Python dict inside a JSON
   string. A value the string's end leaves empty (`'see "password": "', 'token': ...`) is empty. A double-quoted field
   closed inside the string (`'{"password": "..."}'`) and any field outside a single-quoted string read as before.
+- **MCP: Streamable HTTP notifications carry the `Accept` header the transport requires**
+  ([#1006](https://github.com/llm4s/llm4s/issues/1006)): `StreamableHTTPTransportImpl.sendNotification` posted
+  without `Accept: application/json, text/event-stream`, which the specification requires on every POST to the MCP
+  endpoint, so servers built on the MCP SDKs refused every notification, `notifications/initialized` included, with
+  `406 Not Acceptable`; `initialize()` logged that as a warning and carried on. Found by running the client against
+  the MCP reference server.
 - **Security - redaction: a `key=value` whose value is in backslash-escaped quotes is redacted**
   ([#1684](https://github.com/llm4s/llm4s/issues/1684)): `Redaction` (used by the provider exchange logger, `LLMError`
   messages and error mapping) stopped the value of a `key=value` pair at an escaped quote, so a logfmt line inside a
