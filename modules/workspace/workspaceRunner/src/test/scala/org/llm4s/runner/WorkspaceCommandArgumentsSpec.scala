@@ -886,7 +886,7 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
     val ws = fx.interface(ReadOnly)
     // (command, refused as an option on Windows): a Windows runner refuses sort's `-t` and `-T` before any path is
     // checked, since it cannot tell sort.exe from a GNU sort (see `windowsSortRefusal`), so there those commands are
-    // refused with ARGUMENT_NOT_ALLOWED instead.
+    // refused with ARGUMENT_NOT_ALLOWED instead; so is an argument `/` that is not a native sort.exe switch (#1738).
     Seq(
       "sort --random-source='{out}/secret.txt' a.txt"    -> false,
       "sort --random-source=escape/secret.txt a.txt"     -> false,
@@ -894,7 +894,7 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
       "sort -t/ '{out}/secret.txt'"                      -> true,
       "sort -t / '{out}/secret.txt'"                     -> true,
       "sort -Tt '{out}/secret.txt'"                      -> true,
-      "sort --field-separator / '{out}/secret.txt'"      -> false,
+      "sort --field-separator / '{out}/secret.txt'"      -> true,
       "grep --exclude-from='{out}/secret.txt' x a.txt"   -> false,
       "grep --exclude-from=escape/secret.txt x a.txt"    -> false,
       "git log --grep=escape/secret.txt"                 -> false,
