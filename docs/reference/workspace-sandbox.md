@@ -122,7 +122,7 @@ and run a second command as a second request.
 | `mv` or `cp` of several sources: a path goes through a name another source's operation creates, replaces or removes, or `mv` moves the working directory (see [Several sources in one command](#several-sources-in-one-command)) | `ARGUMENT_NOT_ALLOWED` |
 | The program is found only where the runner never starts one from: the workspace, the runner's own working or Java directory, or an empty or relative `PATH` entry (see [Program resolution](#program-resolution)) | `EXECUTABLE_NOT_ALLOWED` |
 | The program is found nowhere the runner looks | `EXECUTABLE_NOT_FOUND` |
-| `git` only: the repository's configuration has an `include.path` / `includeIf`, a `hook.*` key, or a driver name a `-c` override cannot express (see [git's own files](#gits-own-files)) | `GIT_CONFIG_NOT_ALLOWED` |
+| `git` only: the repository's configuration has an `include.path` / `includeIf`, a `hook.*` key, or a driver name that is not printable ASCII (see [git's own files](#gits-own-files)) | `GIT_CONFIG_NOT_ALLOWED` |
 
 `writeFile` and `modifyFile` refuse a path naming `.git` or a path inside one with `PATH_NOT_ALLOWED`.
 
@@ -483,6 +483,8 @@ files, or a repository cloned into the workspace already hostile, made an allowe
 | `.git/hooks/post-index-change`, `core.hooksPath` | `status`, `diff` (index refresh) | `-c core.hooksPath=<empty dir>`, `GIT_OPTIONAL_LOCKS=0` | not run a hook |
 | `diff.external`, `diff.<driver>.command` | `diff` | `--no-ext-diff`, `-c diff.external=`, driver blanked | not run diff.external |
 | `diff.<driver>.textconv` | `diff`, `log -p`, `show`, `blame` | `--no-textconv`, driver blanked | not run a textconv driver |
+| `diff.<driver>.textconv` on the staged diff | `status -v` / `-vv` / `--verbose` (no `--no-textconv`) | `-v` / `--verbose` refused for `status` (`ARGUMENT_NOT_ALLOWED`) | refuse git status -v |
+| A driver whose name is not printable ASCII (`[filter "\xE9vil"]`, `[diff "é"]`), which a `-c` override could miss | `status`, `diff`, `ls-files -m`, `blame`, `status -v` | refused (`GIT_CONFIG_NOT_ALLOWED`) | refuse a filter or textconv driver whose name is not printable ASCII |
 | `filter.<driver>.clean` / `smudge` / `process` via `.gitattributes` or `.git/info/attributes` | `status`, `diff`, `ls-files -m`, `blame`, `log -p`, `show` | driver blanked (`required=false`) | clean/smudge filter; process filter |
 | `gpg.program` (`log.showSignature`) | `log`, `show` | `-c log.showSignature=false`, `gpg.*.program` a directory | not run gpg.program |
 | Partial clone lazy fetch (`remote.<n>.url` `ext::`, `core.sshCommand`, a remote helper) | `show`, `log -p`, `blame` | `GIT_ALLOW_PROTOCOL` naming none, `GIT_NO_LAZY_FETCH=1` | not fetch a missing object |
@@ -511,15 +513,20 @@ So every `git` the runner starts has:
   `-c safe.bareRepository=explicit`, `-c protocol.allow=never`. Command-line configuration wins over every file.
 - **After the subcommand**: `--no-ext-diff --no-textconv --ignore-submodules=all` for `diff`, `log` and `show`;
   `--ignore-submodules=all` for `status`; `--no-textconv` for `blame` and `grep`. The agent cannot undo them:
-  `--ext-diff`, `--textconv` and `--ignore-submodules` are refused.
+  `--ext-diff`, `--textconv` and `--ignore-submodules` are refused. `git status -v` (`-vv`, `--verbose`, `-sv`) is
+  refused too: its staged diff runs textconv drivers and `status` takes no `--no-textconv`, while a blanked
+  `textconv=` would make it fail rather than skip the conversion.
 - **Drivers**: a filter or diff driver is named by an attribute, which can be anywhere in the tree, and defined in
   the configuration. Just before the command the runner lists that configuration (`git config --list --no-includes
   --show-scope -z`, same directory and environment) and, for every driver it defines, adds
   `-c filter.<name>.clean= -c filter.<name>.smudge= -c filter.<name>.process= -c filter.<name>.required=false`
   (git then passes content through) or `-c diff.<name>.textconv= -c diff.<name>.command=`. An `include.path` or
-  `includeIf` (an included file may sit in the work tree and change after the listing), a `hook.*` key, or a driver
-  name holding `=`, `"` or a control character refuses the command (`GIT_CONFIG_NOT_ALLOWED`); so does a listing
-  that fails, takes more than ten seconds or is over 1 MB (`EXECUTION_FAILED`).
+  `includeIf` (an included file may sit in the work tree and change after the listing), a `hook.*` key, or a
+  `filter`, `diff` or `merge` driver name with any byte other than printable ASCII (0x21-0x7E) or with `=` or `"`
+  refuses the command (`GIT_CONFIG_NOT_ALLOWED`). The listing is read as bytes, so a name that is not UTF-8
+  (`\xE9vil`) is not decoded into U+FFFD and blanked under a name git does not use, and a non-ASCII name is never
+  re-encoded for the command line in the JVM's `sun.jnu.encoding`; only a name that reaches git byte for byte is
+  blanked. A listing that fails, takes more than ten seconds or is over 1 MB refuses it too (`EXECUTION_FAILED`).
 
 Writes into `.git` are refused as well, which keeps an agent from planting any of this in a repository that is not
 hostile to begin with: `writeFile` and `modifyFile` refuse (`PATH_NOT_ALLOWED`), and every program but the read-only

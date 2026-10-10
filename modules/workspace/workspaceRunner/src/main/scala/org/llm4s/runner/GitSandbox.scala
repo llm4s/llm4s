@@ -33,14 +33,20 @@ import scala.util.{ Try, Using }
  *     every `gpg.*.program` the empty directory (which cannot be run), `diff.ignoreSubmodules=all` (no `git` started
  *     in a submodule), `safe.bareRepository=explicit` (a bare repository written into the workspace is not used), and
  *     `--no-pager`; and after the subcommand ([[SubcommandOptions]]) `--no-ext-diff`, `--no-textconv` and
- *     `--ignore-submodules=all` where it takes them. The policy refuses the options that would undo them.
+ *     `--ignore-submodules=all` where it takes them. The policy refuses the options that would undo them, and
+ *     `git status -v` / `--verbose`, whose staged diff runs textconv drivers and which takes no `--no-textconv`.
  *  3. '''Drivers''' ([[driverOverrides]]): a filter or diff driver is named by an attribute and defined in the
  *     configuration, so it cannot be listed in advance. Before the command, the runner lists the configuration the
  *     command will read (`git config --list --no-includes`, with layers 1 and 2) and blanks every driver it defines:
  *     `filter.<name>.clean`, `smudge` and `process` empty and `required=false` (git then passes content through), and
  *     `diff.<name>.textconv` and `command` empty. Configuration it cannot account for refuses the command
  *     ([[GitConfigNotAllowed]]): an `include.path` or `includeIf` (an included file may lie in the work tree and change
- *     after the listing), a `hook.*` key (configuration-defined hooks), or a driver name that `-c` cannot express.
+ *     after the listing), a `hook.*` key (configuration-defined hooks), or a driver name that `-c` cannot express
+ *     exactly. The listing is read as bytes, and a `filter`, `diff` or `merge` subsection is blanked only when every
+ *     byte is printable ASCII other than `=` and `"` (0x21-0x7E): a name with any other byte - one that is not UTF-8
+ *     (`[filter "\xE9vil"]`), any non-ASCII character, a space or a control character - could reach git as a different
+ *     name once decoded and re-encoded for the command line (as U+FFFD, or in the JVM's `sun.jnu.encoding`), leaving the
+ *     driver `.gitattributes` names untouched, so it refuses the command instead.
  *
  * '''Limits.''' The listing runs just before the command, from the same directory: a concurrent command that replaces
  * the repository between the two (an `mv` of whole repositories, the read-write list) is not seen. What git reads but
@@ -145,11 +151,14 @@ private[runner] object GitSandbox {
    * The `-c` overrides that blank every filter and diff driver a configuration listing defines, or the refusal when the
    * listing holds what they cannot cover.
    *
-   * @param listing the output of `git config --list --no-includes --show-scope -z`: a scope, NUL, the key, then a
-   *                newline and the value when it has one, NUL
+   * @param bytes the output of `git config --list --no-includes --show-scope -z`, as git wrote it: a scope, NUL, the
+   *              key, then a newline and the value when it has one, NUL. It is decoded one byte to one character
+   *              (ISO-8859-1), so a name git holds as bytes is never replaced or merged with another; only a driver name
+   *              of [[isExpressible]] bytes is turned into an override.
    */
-  def driverOverrides(listing: String): Either[CommandPolicy.Refusal, Seq[(String, String)]] = {
-    val tokens = listing.split("\u0000", -1).toList.dropRight(if (listing.endsWith("\u0000")) 1 else 0)
+  def driverOverrides(bytes: Array[Byte]): Either[CommandPolicy.Refusal, Seq[(String, String)]] = {
+    val listing = new String(bytes, StandardCharsets.ISO_8859_1)
+    val tokens  = listing.split("\u0000", -1).toList.dropRight(if (listing.endsWith("\u0000")) 1 else 0)
     val keys = tokens
       .grouped(2)
       .collect { case List(scope, entry) if scope != "command" => entry.takeWhile(_ != '\n') }
@@ -185,12 +194,11 @@ private[runner] object GitSandbox {
         refuse(key, "an included file is not listed with the rest, and may lie in the work tree and change.")
       case (key, (section, _, _)) if section == "hook" =>
         refuse(key, "it defines a hook in the configuration, which core.hooksPath does not switch off.")
-      case (key, (section, Some(name), _))
-          if (section == "filter" || section == "diff") && !name
-            .forall(c => c >= ' ' && c != '=' && c != '"' && c != 0x7f) =>
+      case (key, (section, Some(name), _)) if DriverSections.contains(section) && !isExpressible(name) =>
         refuse(
-          key,
-          "its driver name holds a character ('=', '\"' or a control character) a -c override cannot express."
+          key.map(c => if (c >= 0x20 && c < 0x7f) c else '?'),
+          "its driver name holds a byte other than printable ASCII (a space, '=', '\"', a control character, a " +
+            "non-ASCII character, or a byte that is not UTF-8), which a -c override may not reach git as exactly."
         )
     } match {
       case Some(refused) => refused
@@ -215,12 +223,23 @@ private[runner] object GitSandbox {
     }
   }
 
+  /** The sections whose subsection names a driver an attribute selects. */
+  private val DriverSections: Set[String] = Set("filter", "diff", "merge")
+
+  /**
+   * Whether a driver name, decoded one byte to one character, goes through a `-c` argument to git unchanged: every
+   * byte printable ASCII (0x21-0x7E) other than `=` (which ends the key) and `"`. ASCII is encoded the same in every
+   * charset the JVM may use for a command line, so the bytes git receives are the bytes the listing held.
+   */
+  private[runner] def isExpressible(name: String): Boolean =
+    name.nonEmpty && name.forall(c => c >= 0x21 && c <= 0x7e && c != '=' && c != '"')
+
   /**
    * Lists the configuration a `git` command started by `builder` would read: the same program, working directory and
    * environment, the fixed overrides, and `config --list --no-includes --show-scope -z`. `Left` with the reason when
    * it cannot be listed, which refuses the command.
    */
-  def listConfiguration(builder: java.lang.ProcessBuilder, git: String, empty: Path): Either[String, String] = {
+  def listConfiguration(builder: java.lang.ProcessBuilder, git: String, empty: Path): Either[String, Array[Byte]] = {
     val lister = new java.lang.ProcessBuilder(
       (Seq(git) ++ arguments(
         Seq("config", "--list", "--no-includes", "--show-scope", "-z"),
@@ -254,7 +273,7 @@ private[runner] object GitSandbox {
           reader.join(2000)
           if (process.exitValue() != 0) Left(s"git could not list its configuration (exit code ${process.exitValue()})")
           else if (out.size() > MaxListing) Left(s"git's configuration is larger than $MaxListing bytes")
-          else Right(new String(out.toByteArray, StandardCharsets.UTF_8))
+          else Right(out.toByteArray)
         }
       }
   }

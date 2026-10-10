@@ -160,8 +160,9 @@ links out of the workspace, and any path argument can name a file outside it
   `gpg.*.program`, submodule recursion and implicit bare repositories, plus `--no-ext-diff`, `--no-textconv` and
   `--ignore-submodules=all` where the subcommand takes them. Filter and diff drivers are named by attributes, so the
   runner lists the repository's configuration just before the command and blanks every driver it defines; a
-  configuration it cannot account for (an include, a configured hook) refuses the command
-  (`GIT_CONFIG_NOT_ALLOWED`). Writes into `.git` - in any spelling a file system may take for it, and through a
+  configuration it cannot account for (an include, a configured hook, a driver name that is not printable ASCII)
+  refuses the command (`GIT_CONFIG_NOT_ALLOWED`), and `git status -v`, whose staged diff runs textconv drivers, is
+  refused (`ARGUMENT_NOT_ALLOWED`). Writes into `.git` - in any spelling a file system may take for it, and through a
   link - are refused: `writeFile` / `modifyFile` with `PATH_NOT_ALLOWED`, any program other than the read-only ones
   with `ARGUMENT_NOT_ALLOWED`.
 - The runner normally runs in a Docker container, an additional OS-level boundary.

@@ -71,6 +71,7 @@ class GitConfigRoutesSpec extends AnyFlatSpec with Matchers {
   private val reads = Seq(
     "git status",
     "git status --short",
+    "git status -v",
     "git diff",
     "git diff HEAD",
     "git diff --stat",
@@ -165,6 +166,75 @@ class GitConfigRoutesSpec extends AnyFlatSpec with Matchers {
     controlRuns(repo, repo.root, "status")
     touchA(repo, "z\nb\nb\nc\n")
     neverRuns(repo, reads: _*)
+  }
+
+  it should "refuse git status -v, whose staged diff runs a textconv driver and takes no --no-textconv" in inRepo {
+    repo =>
+      write(repo.root.resolve(".gitattributes"), "* diff=evil\n")
+      setup(repo, "config", "diff.evil.textconv", s"${repo.marker} textconv")
+      write(repo.root.resolve("a.txt"), "staged\n")
+      setup(repo, "add", "a.txt")
+      controlRuns(repo, repo.root, "status", "-v")
+      neverRuns(repo, reads ++ Seq("git diff --cached", "git status --no-verbose"): _*)
+      Seq("git status -v", "git status -vv", "git status -sv", "git status --verbose", "git status --verb").foreach {
+        command =>
+          val ex = the[WorkspaceAgentException] thrownBy repo.ws.executeCommand(command, None, Some(30.seconds), None)
+          withClue(command)(ex.code shouldBe CommandPolicy.ArgumentNotAllowed)
+      }
+      repo.ws.executeCommand("git status --short", None, Some(30.seconds), None).exitCode shouldBe 0
+  }
+
+  it should "refuse a filter or textconv driver whose name is not printable ASCII (not UTF-8, or not ASCII)" in inRepo {
+    repo =>
+      // Written as raw bytes: `\xE9` alone is not UTF-8, and would reach a -c override as U+FFFD, a different name
+      def plant(section: String, name: Array[Byte], body: String): Unit = {
+        Files.write(
+          repo.root.resolve(".git/config"),
+          s"[$section \"".getBytes(StandardCharsets.US_ASCII) ++ name ++ s"\"]\n$body".getBytes(StandardCharsets.UTF_8),
+          java.nio.file.StandardOpenOption.APPEND
+        )
+        Files.write(
+          repo.root.resolve(".gitattributes"),
+          s"* $section=".getBytes(StandardCharsets.US_ASCII) ++ name ++ "\n".getBytes(StandardCharsets.US_ASCII)
+        )
+        ()
+      }
+      def refusedEverywhere(commands: Seq[String]): Unit = {
+        commands.foreach { command =>
+          repo.clearMarks()
+          val outcome = Try(repo.ws.executeCommand(command, None, Some(30.seconds), None))
+          withClue(s"'$command' (${outcome.fold(_.getMessage, r => s"exit ${r.exitCode}: ${r.stderr}")}): ") {
+            repo.marks shouldBe empty
+            outcome.failed.toOption.collect { case e: WorkspaceAgentException => e.code } should not be empty
+          }
+        }
+        (the[WorkspaceAgentException] thrownBy repo.ws.executeCommand("git status", None, None, None)).code shouldBe
+          GitSandbox.GitConfigNotAllowed
+      }
+      val original = Files.readAllBytes(repo.root.resolve(".git/config"))
+      val routes   = Seq("git status", "git diff", "git ls-files -m", "git blame a.txt", "git status -v")
+      Seq(
+        Array[Byte](0xe9.toByte, 'v', 'i', 'l'),
+        "\u00e9vil".getBytes(StandardCharsets.UTF_8)
+      ).foreach { name =>
+        Files.write(repo.root.resolve(".git/config"), original)
+        plant("filter", name, s"\tclean = ${repo.marker} clean\n\tsmudge = ${repo.marker} smudge\n")
+        touchA(repo)
+        controlRuns(repo, repo.root, "status")
+        controlRuns(repo, repo.root, "diff")
+        controlRuns(repo, repo.root, "ls-files", "-m")
+        controlRuns(repo, repo.root, "blame", "a.txt")
+        touchA(repo, "y\nb\nb\nc\n")
+        refusedEverywhere(routes ++ reads)
+      }
+      Files.write(repo.root.resolve(".git/config"), original)
+      plant("diff", Array[Byte](0xe9.toByte), s"\ttextconv = ${repo.marker} textconv\n")
+      write(repo.root.resolve("a.txt"), "staged\n")
+      setup(repo, "add", "a.txt")
+      controlRuns(repo, repo.root, "status", "-v")
+      touchA(repo)
+      controlRuns(repo, repo.root, "diff")
+      refusedEverywhere(routes ++ reads ++ Seq("git diff --cached", "git log -p"))
   }
 
   it should "not run a long-running process filter, even one marked required" in inRepo { repo =>
@@ -285,7 +355,7 @@ class GitConfigRoutesSpec extends AnyFlatSpec with Matchers {
     setup(repo, "config", "include.path", included.toString)
     touchA(repo)
     controlRuns(repo, repo.root, "status")
-    reads.foreach { command =>
+    reads.filterNot(_ == "git status -v").foreach { command =>
       val ex = the[WorkspaceAgentException] thrownBy repo.ws.executeCommand(command, None, Some(30.seconds), None)
       withClue(command)(ex.code shouldBe GitSandbox.GitConfigNotAllowed)
     }
@@ -492,8 +562,8 @@ class GitSandboxUnitSpec extends AnyFlatSpec with Matchers {
     keys("safe.bareRepository") shouldBe "explicit"
   }
 
-  private def listing(entries: (String, String)*): String =
-    entries.map { case (scope, entry) => s"$scope\u0000$entry\u0000" }.mkString
+  private def listing(entries: (String, String)*): Array[Byte] =
+    entries.map { case (scope, entry) => s"$scope\u0000$entry\u0000" }.mkString.getBytes(StandardCharsets.UTF_8)
 
   "GitSandbox.driverOverrides" should "blank every filter and diff driver the configuration defines" in {
     val out = GitSandbox.driverOverrides(
@@ -530,7 +600,7 @@ class GitSandboxUnitSpec extends AnyFlatSpec with Matchers {
         "diff.other.command"   -> ""
       )
     )
-    GitSandbox.driverOverrides("") shouldBe Right(Nil)
+    GitSandbox.driverOverrides(Array.emptyByteArray) shouldBe Right(Nil)
   }
 
   it should "refuse what the overrides cannot cover" in {
@@ -540,13 +610,35 @@ class GitSandboxUnitSpec extends AnyFlatSpec with Matchers {
       "hook.evil.command\n/x",
       "filter.a=b.clean\n/x",
       "diff.a\"b.textconv\n/x",
-      "filter.a\tb.clean\n/x"
+      "filter.a\tb.clean\n/x",
+      "filter.a b.clean\n/x",
+      "filter..clean\n/x",
+      "diff.\u00e9vil.textconv\n/x",
+      "filter.\u00e9vil.clean\n/x",
+      "merge.\u00e9vil.driver\n/x",
+      "diff.\ufffd.textconv\n/x"
     ).foreach { entry =>
       withClue(entry)(
         GitSandbox.driverOverrides(listing("local" -> entry)).left.map(_.code) shouldBe
           Left(GitSandbox.GitConfigNotAllowed)
       )
     }
+  }
+
+  it should "read the listing as bytes, refusing a driver name that is not UTF-8 rather than blanking U+FFFD" in {
+    // `[filter "\xE9vil"]`: decoded as UTF-8 this was `filter.\uFFFDvil.clean`, and the override missed the driver
+    Seq("filter", "diff").foreach { section =>
+      val bytes =
+        "local\u0000".getBytes(StandardCharsets.US_ASCII) ++ s"$section.".getBytes(StandardCharsets.US_ASCII) ++
+          Array[Byte](0xe9.toByte, 'v', 'i', 'l') ++ ".clean\n/x\u0000".getBytes(StandardCharsets.US_ASCII)
+      val out = GitSandbox.driverOverrides(bytes)
+      withClue(section)(out.left.map(_.code) shouldBe Left(GitSandbox.GitConfigNotAllowed))
+      out.left.foreach(_.message should not include "\ufffd")
+    }
+    GitSandbox.isExpressible("a-b_c.d~!") shouldBe true
+    Seq("", "a b", "a=b", "a\"b", "\u00e9", "\u007f", "a\u0001").foreach(n =>
+      withClue(n)(GitSandbox.isExpressible(n)) shouldBe false
+    )
   }
 
   "Writes into .git" should "be refused on every host, by the file operations and Windows' copy and move" in {

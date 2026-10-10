@@ -188,10 +188,11 @@ private[runner] object CommandPolicy {
   )
 
   private val GitSubcommandOptions: Map[String, Options] = Map(
-    "log"    -> GitDiffOptions,
-    "show"   -> GitDiffOptions,
-    "diff"   -> GitDiffOptions,
-    "status" -> Options(long = Set("--ignore-submodules")),
+    "log"  -> GitDiffOptions,
+    "show" -> GitDiffOptions,
+    "diff" -> GitDiffOptions,
+    // `-v` / `--verbose` shows the staged diff, which runs textconv drivers and has no `--no-textconv` (#1721).
+    "status" -> Options(short = Set('v'), long = Set("--ignore-submodules", "--verbose")),
     // `-O` / `--open-files-in-pager` runs a pager program.
     "grep" -> Options(short = Set('O'), long = Set("--open-files-in-pager", "--textconv"), longAllowed = Set("--text")),
     "blame" -> Options(long = Set("--textconv"))

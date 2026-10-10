@@ -2097,9 +2097,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gpg.*.program` a directory, `diff.ignoreSubmodules=all`, `safe.bareRepository=explicit`; `--no-ext-diff`,
   `--no-textconv` and `--ignore-submodules=all` after `diff` / `log` / `show` (and the two that apply to `status`,
   `blame`, `grep`); and, from a `git config --list` of the repository taken just before the command, every filter
-  and diff driver it defines blanked. A configuration with an `include.path` / `includeIf`, a `hook.*` key, or a
-  driver name `-c` cannot express is refused (`GIT_CONFIG_NOT_ALLOWED`), as is `--ignore-submodules` from the agent
-  (`ARGUMENT_NOT_ALLOWED`). Writes into `.git` are refused too, in any spelling (`.GIT`, `.git.`, `GIT~1`) and
+  and diff driver it defines blanked. The listing is read as bytes, and a configuration with an `include.path` /
+  `includeIf`, a `hook.*` key, or a `filter` / `diff` / `merge` driver name holding any byte but printable ASCII
+  (0x21-0x7E, not `=` or `"`) is refused (`GIT_CONFIG_NOT_ALLOWED`): a name that is not UTF-8 (`[filter "\xE9vil"]`)
+  would otherwise be blanked as U+FFFD while git ran the real driver, and a non-ASCII one could be re-encoded in the
+  JVM's `sun.jnu.encoding`. `--ignore-submodules` from the agent is refused (`ARGUMENT_NOT_ALLOWED`), as is
+  `git status -v` / `-vv` / `--verbose`, whose staged diff runs textconv drivers and which takes no `--no-textconv`. Writes into `.git` are refused too, in any spelling (`.GIT`, `.git.`, `GIT~1`) and
   through a link: `writeFile` / `modifyFile` with `PATH_NOT_ALLOWED`, and any program other than the read-only ones
   (`cp`, `mv`, `rm`, `mkdir`, `touch`, `chmod`, `copy`, `move`, an added program) naming it with
   `ARGUMENT_NOT_ALLOWED`. The system and global git configuration of whoever runs the runner no longer apply,
