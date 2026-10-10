@@ -305,15 +305,34 @@ What the controls do, and where they stop:
   program does:
   - `readOnly()` is an allowlist of program names, not read-only execution. Its programs only read in ordinary use,
     but most options are passed through unchecked: `date -s` sets the clock when the process is allowed to. The
-    options that write a file or read one the command does not name are refused (`file -C`, `-m`, `-M` and `-f`,
-    `date -f` and `-r`, and `wc --files0-from`, including abbreviated long forms such as `date --fil`, and after a
-    `--`, which an option taking an argument can consume).
+    options that write a file, run a program or read one the command does not name are refused (`file -C`, `-m`,
+    `-M` and `-f`, `date -f` and `-r`, `wc --files0-from`, and, for an allowlist that adds `sort`, `sort -o`,
+    `--output`, `-T`, `--temporary-directory`, `--compress-program` and `--files0-from`, plus on Windows, where
+    `sort` may be `sort.exe`, `sort -t` and the `/O` and `/T` switches) in every spelling: anywhere in a cluster of
+    short options, with the value attached or not (`-bC`, `-Mmagic`, `-roout`), but not inside the value of
+    `sort -t` (`sort -to` sets the separator to `o`), under any abbreviation of the long form
+    (`date --fil`), with or without `=value`, after a `--`, which an option taking an argument can consume, and
+    whatever the case of the program's name or a Windows `.exe` (`FILE -C`, `file.exe -C`)
+    ([#1723](https://github.com/llm4s/llm4s/issues/1723)).
     `cat`, `head` and `tail` can read any file the process can read, **so the file settings above do not apply to the
     shell** unless you use `ShellConfig.readOnlyWithin(policy)`, which holds the working directory and each file-like
     argument to that rule, judged as the program will hand it to the OS (a `..` after a link is read both as POSIX
     applies it, at the link target's parent, and as Windows does, at the directory holding the link, and both must
-    be allowed). A hard link to a file outside passes, as it does for the file tools. A command that walks directories itself (`ls -R`, `grep -r`, `find`) is checked only at the
-    path it starts from.
+    be allowed). A value attached to a flag is checked the same way, since the program may open it: the value after
+    `=` of a long option (`grep --file=x`) and every tail of a short-option cluster (`grep -fx`, `grep -ifx`), so a
+    link out of the allowed directory, a blocked file or `..` cannot be passed that way
+    ([#1723](https://github.com/llm4s/llm4s/issues/1723)). Which options take a value is not modelled, so text that
+    happens to name such a file (`grep -e..`) is refused too. A value that is one plain path component (no `/` or
+    `\`, not `.` or `..`, nothing Windows reads specially such as `:`, a trailing `.` or space, or a device name)
+    costs one lookup, whether anything is in the working directory under that name: if nothing is, it cannot be a
+    link, and the policy is applied to its spelling with no further lookup, which is exactly the full check's verdict;
+    if something is, it is resolved in full. No limit on the length of a file name is assumed. The cost of the checks
+    is bounded per command: an argument longer than 4096 characters is refused, each distinct path is checked once,
+    and a command whose checks would take more than 20000 file-system lookups (one per plain component, two per
+    component of a path resolved in full) is refused as too costly to check, rather than holding the agent for
+    minutes before the command starts (the shell `timeout` covers only the command's run). A hard
+    link to a file outside passes, as it does for the file tools. A command that walks directories itself (`ls -R`,
+    `grep -r`, `find`) is checked only at the path it starts from.
   - `development()` is not a sandbox: `sbt`, `make`, `npm`, `git`, `find` and `env` can run arbitrary programs, so a
     model given it can do anything the process can.
   - The started program receives a scrubbed environment: only `PATH`, `LANG`, `LC_ALL`, `TERM` and `SystemRoot`

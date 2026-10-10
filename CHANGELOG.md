@@ -2047,6 +2047,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   substring: `cookie_policy`, `cookie_consent` and `max_cookie_age` are left alone. `SensitiveKeyWords` and
   `SensitiveKeySuffixes` in `Redaction` are core's one list of sensitive key names for fields, header lines and
   `key=value` pairs; URL query parameters are also matched, by substring, against `SensitiveQueryParams`.
+- **Security - `llm4s-agent-tools`: the shell tool checks option values attached to their flag**
+  ([#1723](https://github.com/llm4s/llm4s/issues/1723)): under `ShellConfig.pathPolicy`, a value given as its own
+  argument (`grep -f lout`) was held to the policy, but one attached to its flag (`grep -flout`, `grep -iflout`,
+  `grep --file=lout`, `grep --fil=lout`, `sort --random-source=lout`) was refused only if it held a `/` or `\`, so a
+  link out of the allowed directory, a blocked file in the working directory, or `..` passed. Every attached value is
+  now resolved and checked as a path, like the workspace runner's command policy does (#1720): the value after `=` of
+  a long option, and every tail of a short-option cluster, since any letter in it may take the rest as its value. A
+  text value that happens to name such a file (`grep -e..`) is refused too. The checks run before the command
+  starts, outside `ShellConfig.timeout`, so their cost is bounded per command, as the workspace runner's is: an
+  argument over 4096 characters is refused, a value that is one plain path component costs one lookup (whether
+  anything is in the working directory under that name; if nothing is, it cannot be a link, and the policy is
+  applied to its spelling with no further lookup, which is exactly the full check's verdict, with no assumption about
+  how long a file name can be; if something is, it is resolved in full), each distinct path is checked once, and a
+  command whose checks would take more than 20000 file-system lookups is refused as too costly to check. A command of
+  200 flags of 4096 letters is checked in well under a second, where it took over three minutes on macOS before these
+  bounds, and one of 200 distinct such flags is refused as too costly just as fast. The value of `sort -t`
+  is a separator, not options or a path (`sort -to`, `sort -t/` run). The refused options (`file -C`/`-m`/`-M`/`-f`,
+  `date -f`/`-r`, `wc --files0-from`) are now also matched whatever the case of the program name or a Windows executable suffix (`FILE -C`, `file.exe -C`, which run `file -C` on Windows
+  and on macOS's default file system), and `sort -o`, `--output`, `-T`, `--temporary-directory`,
+  `--compress-program` and `--files0-from` (which write a file or temporary files, run a program, or read the names
+  of the files to sort from a file the command does not name) join them, for allowlists that add `sort`, in every
+  spelling (`-roout`, `--out=x`, `--files0=x`, after a consumed `--`), with or without a path policy; on Windows,
+  where `sort` may be `sort.exe`, so do `sort -t` and the `/O` and `/T` switches.
 - **`InMemoryStore` keyword search matches whole words, not substrings**
   ([#1594](https://github.com/llm4s/llm4s/issues/1594)): the store split the query on whitespace and tested each piece
   with `String.contains`, so short words matched inside longer ones - `i` in "Berlin", `or` in "works", `do` in
