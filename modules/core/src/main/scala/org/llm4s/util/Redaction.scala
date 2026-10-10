@@ -344,7 +344,10 @@ private[llm4s] object Redaction {
    * Last, three more readings of the input as it was given (#1695) add their replacements where nothing touches them
    * (`addedReadingEdits`): the passes again, with a query value that ends before JSON and a `Bearer` or `Basic` word
    * that leaves the pair after it alone; the pairs after the JSON escape of a line break; and the rest of a value
-   * after a literal `&`.
+   * after a literal `&`. A fourth (#1707) adds, wherever no edit is, the content of a value in quotes written behind
+   * backslashes (`password=\\'p&ss=QZXJ\\'`) up to the same quote written the same way. Where the input is a JSON
+   * document, an edit that replaces nothing but its punctuation (the `,` after an empty `token=` that ends a string)
+   * is left out, so that the document still parses.
    *
    * Redacting the output a second time usually changes nothing, but that is not guaranteed: where quotes are
    * unbalanced or stray, the text a first pass replaced can change how a second pass pairs the quotes, and the
@@ -362,34 +365,135 @@ private[llm4s] object Redaction {
   /**
    * What [[redact]] makes of a non-empty `input`, and the ranges of the input it replaces; with
    * `singleQuotedFromInput = false`, without the single-quoted field passes' reading of the input as it was given
-   * (#1697), and with `addedReadings = false`, without the readings of #1695 (`addedReadingEdits`), so that a test can
-   * check that each only adds to what is replaced.
+   * (#1697), with `addedReadings = false`, without the readings of #1695 and #1707 (`addedReadingEdits`), and with
+   * `keepJsonStructure = false`, with the edits that replace only a JSON document's punctuation
+   * (`withoutJsonPunctuationEdits`), so that a test can check that each reading only adds to what is replaced.
    */
   private[util] def redactedWithRanges(
     input: String,
     singleQuotedFromInput: Boolean,
-    addedReadings: Boolean = true
+    addedReadings: Boolean = true,
+    keepJsonStructure: Boolean = true
   ): (String, Vector[(Int, Int)]) = {
-    val (text, edits) = redaction(input, RedactionPlaceholder, singleQuotedFromInput, addedReadings)
+    val (text, edits) = redaction(input, RedactionPlaceholder, singleQuotedFromInput, addedReadings, keepJsonStructure)
     (text, edits.map(edit => (edit.start, edit.end)))
   }
 
   /**
    * The redacted text of a non-empty `input`, and the edits that make it of the input: those of the passes
-   * (`passRedaction`), and, with `addedReadings`, those of the readings of #1695 that neither overlap nor touch them.
+   * (`passRedaction`), and, with `addedReadings`, those of the readings of #1695 and #1707 that overlap none of them,
+   * less, with `keepJsonStructure` too, the edits that replace only the punctuation of a JSON document
+   * (`withoutJsonPunctuationEdits`).
    */
   private def redaction(
     input: String,
     placeholder: String,
     singleQuotedFromInput: Boolean,
-    addedReadings: Boolean
+    addedReadings: Boolean,
+    keepJsonStructure: Boolean = true
   ): (String, Vector[Edit]) = {
     val (text, edits) = passRedaction(input, placeholder, singleQuotedFromInput)
     if (!addedReadings) (text, edits)
     else {
-      val all = addedReadingEdits(input, placeholder, edits)
-      if (all.length == edits.length) (text, edits) else (applyEdits(input, all), all)
+      val added = addedReadingEdits(input, placeholder, edits)
+      val all   = if (keepJsonStructure) withoutJsonPunctuationEdits(input, added) else added
+      if (all == edits) (text, edits) else (applyEdits(input, all), all)
     }
+  }
+
+  /**
+   * `edits` without those that replace nothing but the punctuation of a JSON document (#1707): where the input is a
+   * JSON document, or a string in it holds one, at any depth, an edit whose every character replaced is a `,`, `:`,
+   * a bracket, a brace or whitespace between the tokens of that document. A query value that is empty because the
+   * string the URL sits in ends right after its `=` (`{"q":"a=1&token=","n":"x"}`) was read by the pass for
+   * `key="` as a value in quotes, the `,` between the two strings, and replaced, so the output no longer parsed. Such
+   * characters are no value's: in a JSON document they only separate and delimit the values, so leaving them as they
+   * were shows nothing of any value, and every other edit is made as before. Linear in the input, and made only where
+   * an edit replaces nothing but such characters.
+   */
+  private def withoutJsonPunctuationEdits(input: String, edits: Vector[Edit]): Vector[Edit] = {
+    def punctuationOnly(edit: Edit): Boolean =
+      edit.end > edit.start && (edit.start until edit.end).forall(i => isJsonPunctuation(input.charAt(i)))
+    if (!edits.exists(punctuationOnly)) edits
+    else
+      jsonPunctuation(input) match {
+        case None => edits
+        case Some(structural) =>
+          edits.filterNot(edit => punctuationOnly(edit) && (edit.start until edit.end).forall(structural.get))
+      }
+  }
+
+  private def isJsonPunctuation(c: Char): Boolean = ",:[]{} \t\n\r".indexOf(c.toInt) >= 0
+
+  /**
+   * Where `text` is a JSON document, the characters of it that are punctuation between its tokens (`isJsonPunctuation`
+   * outside every string), and those of the documents its strings hold, at any depth, traced back to the characters of
+   * `text` they were decoded from; `None` where `text` is not a JSON document. A string is read for a document only
+   * where its content starts with `{` or `[`.
+   */
+  private def jsonPunctuation(text: String): Option[java.util.BitSet] = {
+    val trimmed = text.trim
+    val document =
+      (trimmed.startsWith("{") || trimmed.startsWith("[")) && scala.util
+        .Try(ujson.transform(ujson.Readable.fromString(text), upickle.core.NoOpVisitor))
+        .isSuccess
+    if (!document) None
+    else {
+      val marks = new java.util.BitSet(text.length)
+      var i     = 0
+      while (i < text.length) {
+        val c = text.charAt(i)
+        if (c == '"') i = markString(text, i + 1, marks)
+        else {
+          if (isJsonPunctuation(c)) marks.set(i)
+          i += 1
+        }
+      }
+      Some(marks)
+    }
+  }
+
+  /**
+   * Reads the JSON string whose content starts at `from` in the valid document `text`, marks in `marks` the
+   * punctuation of the document it holds, if it holds one (`jsonPunctuation`), and returns the index after its
+   * closing quote.
+   */
+  private def markString(text: String, from: Int, marks: java.util.BitSet): Int = {
+    val decoded = new java.lang.StringBuilder
+    val origin  = Array.newBuilder[Int] // where in `text` each decoded character starts; one more for the end
+    var i       = from
+    while (text.charAt(i) != '"') {
+      origin += i
+      if (text.charAt(i) != '\\') {
+        decoded.append(text.charAt(i))
+        i += 1
+      } else
+        text.charAt(i + 1) match {
+          case 'u' =>
+            decoded.append(Integer.parseInt(text.substring(i + 2, i + 6), 16).toChar)
+            i += 6
+          case 'b' => decoded.append('\b'); i += 2
+          case 'f' => decoded.append('\f'); i += 2
+          case 'n' => decoded.append('\n'); i += 2
+          case 'r' => decoded.append('\r'); i += 2
+          case 't' => decoded.append('\t'); i += 2
+          case c   => decoded.append(c); i += 2
+        }
+    }
+    origin += i
+    val content = decoded.toString
+    val first   = content.indexWhere(c => !Character.isWhitespace(c))
+    if (first >= 0 && (content.charAt(first) == '{' || content.charAt(first) == '[')) {
+      val starts = origin.result()
+      jsonPunctuation(content).foreach { inner =>
+        var k = inner.nextSetBit(0)
+        while (k >= 0) {
+          marks.set(starts(k), starts(k + 1))
+          k = inner.nextSetBit(k + 1)
+        }
+      }
+    }
+    i + 1
   }
 
   /** What the passes make of a non-empty `input`: the text, and the edits that make it of the input. */
@@ -456,6 +560,12 @@ private[llm4s] object Redaction {
    *  - The `key=value` pairs whose key follows the JSON escape of a line break or a tab (`AfterEscapeKeyStart`).
    *  - The rest of the value of a sensitive key after a raw `&` that no other pair follows (`ampTailEdits`).
    *
+   * Last, the content of a sensitive key's value in quotes written behind backslashes, up to the same quote written
+   * the same way (`escapedQuotedValues`, #1707): where an edit is there already, only the parts no edit covers are
+   * added (`uncoveredEdits`), since the passes replace the start of such a value and stop at its `&`, and a reading
+   * added only where nothing touches it would add nothing. No part overlaps an edit, so here too every edit is made as
+   * it is without the reading.
+   *
    * Each reading is a fixed number of passes over the input, so the cost stays linear.
    */
   private def addedReadingEdits(input: String, placeholder: String, edits: Vector[Edit]): Vector[Edit] = {
@@ -470,7 +580,116 @@ private[llm4s] object Redaction {
       add(sequenceEdits(input, redactionPasses(placeholder, quotes, escaped, variant = true))._2)
     if (input.indexOf('\\') >= 0) add(sequenceEdits(input, afterEscapePairPasses(escaped, placeholder))._2)
     if (input.indexOf('&') >= 0) add(ampTailEdits(input, placeholder))
+    if (input.indexOf('\\') >= 0) {
+      val added = uncoveredEdits(input, kept, escapedQuotedValues(input), placeholder)
+      if (added.nonEmpty) kept = (kept ++ added).sortBy(_.start)
+    }
     kept
+  }
+
+  /**
+   * The parts of `spans` (sorted, each free of overlaps) that no edit of `kept` (sorted, free of overlaps) covers,
+   * each written as the placeholder (#1707). A part that starts where an edit of `kept` ends, or ends where one starts,
+   * leaves out the one `&`, `;`, `,` or space it would begin or end with there, so that the separator a pass stopped
+   * at stays readable (`password=[REDACTED]&[REDACTED]`). No part overlaps an edit of `kept`, so every edit of `kept`
+   * is made as it would be alone. One sweep of both.
+   */
+  private def uncoveredEdits(
+    input: String,
+    kept: Vector[Edit],
+    spans: Vector[(Int, Int)],
+    placeholder: String
+  ): Vector[Edit] = {
+    val out                        = Vector.newBuilder[Edit]
+    def separator(i: Int): Boolean = "&;, ".indexOf(input.charAt(i).toInt) >= 0
+    def part(from: Int, to: Int, afterEdit: Boolean, beforeEdit: Boolean): Unit = {
+      val start = if (afterEdit && from < to && separator(from)) from + 1 else from
+      val end   = if (beforeEdit && start < to && separator(to - 1)) to - 1 else to
+      if (end > start) out += Edit(start, end, placeholder, 0, placeholder.length)
+    }
+    var k = 0
+    spans.foreach { case (start, end) =>
+      while (k < kept.length && kept(k).end <= start) k += 1
+      var from      = start
+      var afterEdit = k > 0 && kept(k - 1).end == start
+      var j         = k
+      while (j < kept.length && kept(j).start < end) {
+        if (kept(j).start > from) part(from, kept(j).start, afterEdit, beforeEdit = true)
+        from = math.max(from, kept(j).end)
+        afterEdit = true
+        j += 1
+      }
+      if (from < end) part(from, end, afterEdit, beforeEdit = j < kept.length && kept(j).start == end)
+    }
+    out.result()
+  }
+
+  /**
+   * The content of every value of a sensitive key that opens with a quote written behind backslashes - `\'`, `\\'`,
+   * `\\\"`, or the JSON escape of a quote (`\u0027`, `\\u0022`) - and closes with the same quote written the same
+   * way, as `(start, end)` spans of the input (#1707). Inside a JSON string, a logfmt or shell line that quotes a
+   * credential escapes its quotes, and a credential may hold `&` and `=` (`password=\\'p&ss=QZXJ\\'`, which stands
+   * for `password=\'p&ss=QZXJ\'`): the passes read such a value as a query or `key=value` value that ends at the `&`,
+   * or read a quote behind an even run of backslashes as no quote at all, and the rest of the credential was written in
+   * the clear. Here the value is read to its closing quote, written with exactly as many backslashes. It is not read
+   * where it does not close before a line break, a `"` behind an even run of backslashes (none included) - the
+   * end of the string that the value sits in, or the start of the next - or the end of the input: such a value may
+   * not be a value at all, and the passes' reading of it stands. The key is one `AmpTailPairStart` finds, sensitive
+   * by `isSensitiveKey`, or by `isSensitiveQueryKey` after `?`, `&` or the escape of either. A loop that reads each
+   * character once: the search goes on where a value closes or is given up.
+   */
+  private def escapedQuotedValues(input: String): Vector[(Int, Int)] = {
+    val length  = input.length
+    val matcher = AmpTailPairStart.pattern.matcher(input)
+    val found   = Vector.newBuilder[(Int, Int)]
+
+    // After `?`, `&`, or the JSON escape of either: where a query parameter's key starts.
+    def afterQuerySeparator(keyStart: Int): Boolean =
+      keyStart > 0 && (input.charAt(keyStart - 1) == '?' || input.charAt(keyStart - 1) == '&' ||
+        (keyStart >= 6 && input.charAt(keyStart - 6) == '\\' && input.startsWith("u00", keyStart - 5) &&
+          escapedSeparator(input, keyStart) != '=' && escapedSeparator(input, keyStart) != NotASeparator))
+
+    // From `from`, the content of a value that opened with `quote` (a quote, or `u0027` or `u0022`) behind `run`
+    // backslashes: (where it ends, where to search on), with -1 for the end where it does not close.
+    def close(from: Int, run: Int, quote: String): (Int, Int) = {
+      var i      = from
+      var result = (-1, -1)
+      while (result._2 < 0 && i < length) {
+        val c = input.charAt(i)
+        if (c == '\n' || c == '\r' || c == '"') result = (-1, i)
+        else if (c == '\\') {
+          val after = afterBackslashes(input, i)
+          if (after - i == run && input.startsWith(quote, after)) result = (i, after + quote.length)
+          else if (after < length && input.charAt(after) == '"' && (after - i) % 2 == 0) result = (-1, i)
+          else if (after < length && (input.charAt(after) == '"' || input.charAt(after) == '\'')) i = after + 1
+          else i = after
+        } else i += 1
+      }
+      if (result._2 < 0) (-1, length) else result
+    }
+
+    var searchFrom = 0
+    while (searchFrom < length && matcher.find(searchFrom)) {
+      val key   = matcher.group(1)
+      val at    = matcher.end
+      val after = afterBackslashes(input, at)
+      searchFrom = at
+      if (
+        after > at && after < length && (isSensitiveKey(key) || (afterQuerySeparator(matcher.start(1)) &&
+          isSensitiveQueryKey(key)))
+      ) {
+        val quote =
+          if (input.charAt(after) == '\'' || input.charAt(after) == '"') input.substring(after, after + 1)
+          else if (quoteEscapeEnd(input, at) >= 0) input.substring(after, after + 5)
+          else ""
+        if (quote.nonEmpty) {
+          val (end, next) = close(after + quote.length, after - at, quote)
+          if (end > after + quote.length) found += (after + quote.length -> end)
+          searchFrom = math.max(next, at)
+        }
+      }
+    }
+    found.result()
   }
 
   /** Whether the input holds a `,` right before `{`, `[`, a quote or a backslash: where a query value may run on. */

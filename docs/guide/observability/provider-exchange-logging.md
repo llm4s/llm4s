@@ -194,7 +194,9 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `spring.datasource.password=...`, `PASSWORD="..."`), also with the quotes escaped by backslashes, as a
   logfmt line inside a JSON string writes them (`{"message": "login password=\"...\" ok"}`, `\'...\'`, and
   `\\\"...\\\"` one string deeper: the content is replaced and the escaped quotes kept, so the JSON still
-  parses; an escaped quote never closed ends where the enclosing string or the line does), also with `=` and `&`
+  parses; an escaped quote never closed ends where the enclosing string or the line does; a value in quotes behind
+  an even run of backslashes, `password=\\'p&ss=...\\'` inside a JSON string, is redacted up to the same quote
+  written the same way, `&word=` included), also with `=` and `&`
   written as the JSON escapes Gson's default HTML-safe output uses (`password\u003d...\u0026user\u003d...`) and in
   a log written into a JSON string, where the key follows the escape of a line break or a tab
   (`...\ntoken\u003d...`, `\r\nAuthorization=...`, also one string deeper); a value that holds a literal `&` with no
@@ -214,7 +216,10 @@ The file sink changes `request_body`, `response_body` and `error_message` before
   `cookie_consent` are not, because the match is never on a substring. URL query parameters are also
   matched against a second, substring list (`key`, `token`, `secret`, `password`, `auth` and similar), so
   `?x_api_key_id=` is redacted too. A query value written right before JSON
-  (`?token=...,{"api_key": "..."}`, also with the quotes escaped) does not hide the field after it.
+  (`?token=...,{"api_key": "..."}`, also with the quotes escaped) does not hide the field after it. An empty
+  query value at the end of a JSON string (`{"q":"a=1&token=","n":"x"}`) leaves the document as it is: where the
+  input is a JSON document, or a string in it holds one, a replacement that would cover only its punctuation is not
+  made, so it still parses.
 - **Where a cookie header's value ends.** Outside any string (a raw request dump, a log line), at the end
   of its line, quotes, apostrophes and backslashes included: `Cookie: sid="abc"; x=y` becomes
   `Cookie: [REDACTED]`. Inside a string that opened on the same line - a JSON string, a header in a JSON
