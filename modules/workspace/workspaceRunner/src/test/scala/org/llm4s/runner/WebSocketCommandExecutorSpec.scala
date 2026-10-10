@@ -206,6 +206,38 @@ class WebSocketCommandExecutorSpec extends AnyFlatSpec with Matchers with Before
     }
   }
 
+  it should "refuse an mv of several sources whose later path goes through a link an earlier one moves (#1776)" in {
+    assume(!isWindowsHost, "POSIX mv and links")
+    val outside = Files.createTempDirectory(root.getParent, "ws-command-executor-out")
+    val sub     = root.resolve("ws-seq")
+    try {
+      Files.write(outside.resolve("secret.txt"), "secret\n".getBytes(StandardCharsets.UTF_8))
+      Files.createDirectory(sub)
+      // In ws-seq the link names the workspace's own (missing) entry; moved to the root, the real outside directory
+      val made = Try(Files.createSymbolicLink(sub.resolve("l"), Path.of("..", outside.getFileName.toString)))
+      assume(made.isSuccess, "cannot create a symbolic link here")
+
+      assertRefused(command("mv ws-seq/l l/secret.txt ."), "ARGUMENT_NOT_ALLOWED")
+      assertRefused(command("cp -P ws-seq/l l/secret.txt ."), "ARGUMENT_NOT_ALLOWED")
+      Files.isSymbolicLink(sub.resolve("l")) shouldBe true
+      Files.exists(root.resolve("l"), java.nio.file.LinkOption.NOFOLLOW_LINKS) shouldBe false
+      Files.exists(root.resolve("secret.txt")) shouldBe false
+      Files.exists(outside.resolve("secret.txt")) shouldBe true
+
+      // The control: two sources that do not reach through each other
+      Files.write(sub.resolve("x.txt"), "x\n".getBytes(StandardCharsets.UTF_8))
+      Files.write(sub.resolve("y.txt"), "y\n".getBytes(StandardCharsets.UTF_8))
+      Files.createDirectory(sub.resolve("into"))
+      val (moved, movedDone) = run(command("mv ws-seq/x.txt ws-seq/y.txt ws-seq/into"))
+      assertRan(moved, movedDone, 0)
+      Files.exists(sub.resolve("into").resolve("y.txt")) shouldBe true
+    } finally {
+      Try(Files.walk(sub).sorted(Comparator.reverseOrder[Path]()).forEach(p => Files.deleteIfExists(p)))
+      Files.deleteIfExists(outside.resolve("secret.txt"))
+      Files.deleteIfExists(outside)
+    }
+  }
+
   it should "refuse a sort input file that follows a -t an earlier option took as its value (#1763)" in {
     assume(!isWindowsHost, "a POSIX absolute path; a Windows runner refuses sort -T and -t as options")
     val outside = Files.createTempFile("ws-command-executor-secret", ".txt")

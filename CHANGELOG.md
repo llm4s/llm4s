@@ -2048,6 +2048,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Security - workspace runner: an `mv` or `cp` of several sources cannot reach outside through a name an earlier
+  source's operation makes** ([#1776](https://github.com/llm4s/llm4s/issues/1776)): the command policy checked every
+  path against the file system as it was before the command ran, but `mv` and `cp` handle their sources one at a time.
+  With `sub/l` -> `../outside` (inside the workspace while in `sub`), `mv sub/l l/secret.txt .` moved the link to
+  `./l`, where it points out, and then moved `outside/secret.txt` into the workspace; GNU `cp -P` / `-d` / `-R` / `-a`
+  could copy such a link and read a later source through the copy. Now, for an `mv` or `cp` of two sources or more,
+  each source is taken to change its name in the destination directory (and any name starting with it, for
+  `--backup`) and, for `mv`, its own entry; every other path argument is walked, links followed, and the command is
+  refused (`ARGUMENT_NOT_ALLOWED`) when it looks up one of those entries, comparing names case- and
+  normalisation-insensitively and directories by identity. An `mv` that moves a source holding the working directory
+  is refused too. Run one command per source instead. `rm`, `mkdir`, `touch` and `chmod` create no link and are
+  unchanged. See [Several sources in one command](docs/reference/workspace-sandbox.md#several-sources-in-one-command).
 - **Workspace runner: an agent can remove or rename a symbolic link that points out of the workspace**
   ([#1730](https://github.com/llm4s/llm4s/issues/1730)): the command policy resolved every argument through its
   links, so `rm outlink` and `mv outlink x` were refused (`PATH_ESCAPE_ATTEMPT`) although removing or renaming a link
@@ -2059,8 +2071,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not recursive; for `mv`, it is not the destination, which still follows links (`mv a.txt outlink`,
   `mv -t outlink a.txt` stay refused); and GNU's and macOS / FreeBSD's option tables both parse the arguments exactly
   and agree on the operands, so a GNU-only form (`rm --force outlink`, `mv -T`, `mv -t dir outlink`) keeps the link
-  refused. A dangling link and the first link of a chain can be removed too. Windows is unchanged: there a link or
-  junction keeps the path rule. `cp` is unchanged. See
+  refused. A dangling link and the first link of a chain can be removed too. A link moved by an `mv` of several
+  sources cannot be reached through by a later source of the same command (`mv evil d/evil/secret.txt d` is refused,
+  see #1776 below). Windows is unchanged: there a link or junction keeps the path rule. `cp` is unchanged. See
   [Removing a link](docs/reference/workspace-sandbox.md#removing-a-link). The same issue's follow-ups to #1720: the
   inline comments in `WorkspaceAgentInterfaceImpl.prepareCommand` now number the working-directory check layer 6 and
   `CommandPolicy` layers 7-9, as its Scaladoc does; and `WorkspaceConfigSupport.loadSandboxConfig`, which nothing

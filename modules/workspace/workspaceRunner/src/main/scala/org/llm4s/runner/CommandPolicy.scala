@@ -1,6 +1,8 @@
 package org.llm4s.runner
 
 import java.io.File
+import java.text.Normalizer
+import java.util.Locale
 import java.nio.file.{ Files, LinkOption, Path, Paths }
 import scala.annotation.tailrec
 import scala.jdk.CollectionConverters._
@@ -42,6 +44,9 @@ import scala.util.{ Try, Using }
  *     [[linkOperands]] and [[namesLinkItself]]). Programs that only
  *     print their arguments (`echo`, `pwd`, `whoami`, `hostname`) are not checked. For `cp`, which writes through
  *     a link it finds at the name it writes, the names it will write are checked too (see [[cpDestinationRefusal]]).
+ *     An `mv` or `cp` of several sources, which runs one operation after another while every path is checked before
+ *     the first, is refused (`ARGUMENT_NOT_ALLOWED`) when one path goes through a name another source's operation
+ *     creates, replaces or removes, or when `mv` moves the working directory (see [[sequenceRefusal]], #1776).
  *     An argument over [[MaxArgumentLength]] characters, or paths costing more than [[MaxPathSteps]] lookups, are
  *     refused with `ARGUMENT_NOT_ALLOWED` rather than walked. Where the platform cannot parse an argument as a path
  *     (Windows: `HEAD:src/x`, `..\*`), the part before the first character a path cannot hold is judged; one that
@@ -827,6 +832,7 @@ private[runner] object CommandPolicy {
           case (_, _, Some(TooCostly))         => tooCostly(program)
         }
         .orElse(if (program == "cp") cpDestinationRefusal(args, workDir, realRoot, budget) else None)
+        .orElse(sequenceRefusal(program, args, isWindows, workDir, budget))
     }
 
   /**
@@ -1162,10 +1168,17 @@ private[runner] object CommandPolicy {
    * would create, so a later `..` climbs back and a link met after it is still followed. `None` when `arg` is not a
    * path here; `Left(Outside)` when a link cannot be resolved, `Left(TooCostly)` when the budget runs out.
    */
-  private def physicalPath(base: Path, arg: String, budget: Budget): Option[Either[Verdict, Path]] =
+  private def physicalPath(
+    base: Path,
+    arg: String,
+    budget: Budget,
+    visit: (Path, String) => Unit = NoVisit
+  ): Option[Either[Verdict, Path]] =
     parse(arg) match {
       case Some(path) =>
-        Some(split(base, path).flatMap { case (start, names) => walk(start, names, hops = 0, missing = false, budget) })
+        Some(split(base, path).flatMap { case (start, names) =>
+          walk(start, names, hops = 0, missing = false, budget, visit)
+        })
       // Starts like an absolute path, but the platform cannot parse even its leading part: a Windows device or
       // NT-namespace name (`\\?\C:\x`, `\??\C:\x`) that a program would still open.
       case None if arg.startsWith("/") || arg.startsWith("\\") => Some(Left(Outside))
@@ -1222,9 +1235,13 @@ private[runner] object CommandPolicy {
 
   private val MaxLinkHops = 40
 
+  /** A [[walk]] that records nothing. */
+  private val NoVisit: (Path, String) => Unit = (_, _) => ()
+
   /**
    * `missing` is true once the walk is below a component that does not exist: nothing below it can be a link, so no
-   * file-system call is made until a `..` climbs back.
+   * file-system call is made until a `..` climbs back. `visit` is told of every name looked up in a directory that
+   * exists, as `(directory, name)`, links' targets included (see [[sequenceRefusal]]).
    */
   @tailrec
   private def walk(
@@ -1232,16 +1249,18 @@ private[runner] object CommandPolicy {
     names: List[String],
     hops: Int,
     missing: Boolean,
-    budget: Budget
+    budget: Budget,
+    visit: (Path, String) => Unit
   ): Either[Verdict, Path] =
     names match {
       case Nil                  => Right(current)
       case _ if !budget.spend() => Left(TooCostly)
-      case ("" | ".") :: rest   => walk(current, rest, hops, missing, budget)
+      case ("" | ".") :: rest   => walk(current, rest, hops, missing, budget, visit)
       case ".." :: rest =>
-        walk(Option(current.getParent).getOrElse(current), rest, hops, missing = false, budget)
-      case name :: rest if missing => walk(current.resolve(name), rest, hops, missing, budget)
+        walk(Option(current.getParent).getOrElse(current), rest, hops, missing = false, budget, visit)
+      case name :: rest if missing => walk(current.resolve(name), rest, hops, missing, budget, visit)
       case name :: rest =>
+        visit(current, name)
         val next = current.resolve(name)
         if (Files.isSymbolicLink(next)) {
           if (hops >= MaxLinkHops) Left(Outside)
@@ -1252,10 +1271,10 @@ private[runner] object CommandPolicy {
                 split(current, target) match {
                   case Left(refused) => Left(refused)
                   case Right((start, targetNames)) =>
-                    walk(start, targetNames ++ rest, hops + 1, missing = false, budget)
+                    walk(start, targetNames ++ rest, hops + 1, missing = false, budget, visit)
                 }
             }
-        } else walk(next, rest, hops, missing = !Files.exists(next, LinkOption.NOFOLLOW_LINKS), budget)
+        } else walk(next, rest, hops, missing = !Files.exists(next, LinkOption.NOFOLLOW_LINKS), budget, visit)
     }
 
   /**
@@ -1623,6 +1642,207 @@ private[runner] object CommandPolicy {
       val physical = real(physicalPath(workDir.physical, parent, budget))
       physical.nonEmpty && physical == real(lexicalPath(workDir.lexical, parent)) &&
       physical.exists(dir => dir.startsWith(realRoot) && Files.isSymbolicLink(dir.resolve(name)))
+    }
+  }
+
+  // ---- mv, cp of several sources: one operation changing the names a later one resolves (#1776)
+
+  /**
+   * One operation of an `mv` or `cp` of several sources: the source, by its index in the arguments, and the
+   * destination directory it goes into.
+   */
+  final private case class Transfer(source: Int, sourceArg: String, destination: String)
+
+  /**
+   * A directory entry an operation creates, replaces or removes: `name` in the real directory `dir`. `None` is any
+   * name; with `prefix`, any name that starts with `name` (a backup such as `name~` or `name.~1~`).
+   */
+  final private case class Changed(dir: Path, name: Option[String], prefix: Boolean)
+
+  /**
+   * Every operation of `mv` or `cp` that has two sources or more, under any parse of its arguments (GNU's table, with
+   * and without `POSIXLY_CORRECT`, and macOS / FreeBSD's), and every argument any parse reads as a path - each operand
+   * and each `-t` / `--target-directory` value - with its index. The parses are joined rather than intersected: an
+   * argument that is a source in one parse and the destination in another counts as both, which only adds checks.
+   */
+  private def transfers(program: String, args: Seq[String]): (Seq[Transfer], Seq[(Int, String)]) = {
+    val specs = program match {
+      case "mv" => Seq(GnuMv, BsdMv)
+      case "cp" => Seq(GnuCp, BsdCp)
+      case _    => Seq.empty
+    }
+    val argv = args.toVector
+    val shapes = for {
+      spec    <- specs
+      permute <- if (spec.permute) Seq(true, false) else Seq(false)
+    } yield {
+      val parse    = parseOptions(argv, spec.copy(permute = permute))
+      val operands = argv.indices.filter(i => parse.roles(i) == Operand).map(i => i -> argv(i))
+      val targets = argv.indices.flatMap { i =>
+        val arg = argv(i)
+        parse.roles(i) match {
+          case OptionValue("-t" | "--target-directory") => Some(i -> arg)
+          case ShortOptions(Some(at)) if arg.charAt(at) == 't' && at < arg.length - 1 =>
+            Some(i -> arg.substring(at + 1))
+          case LongOption(Some("target-directory"), Some(dir)) => Some(i -> dir)
+          case _                                               => None
+        }
+      }
+      val (sources, destinations) =
+        if (targets.nonEmpty) (operands, targets) else (operands.dropRight(1), operands.takeRight(1))
+      (sources, destinations, operands ++ targets)
+    }
+    val moves = shapes.filter(_._1.size >= 2).flatMap { case (sources, destinations, _) =>
+      for {
+        (i, source) <- sources
+        (_, dest)   <- destinations
+      } yield Transfer(i, source, dest)
+    }
+    (moves.distinct, shapes.flatMap(_._3).distinct)
+  }
+
+  /**
+   * An argument split into the directory holding its last component and that component's name, a trailing separator
+   * removed; `None` for the name when it is `.` or `..`, which a program would not create.
+   */
+  private def directoryAndName(arg: String, isWindows: Boolean): (String, Option[String]) = {
+    def separator(c: Char): Boolean = c == '/' || (isWindows && c == '\\')
+    val trimmed                     = arg.reverse.dropWhile(separator).reverse
+    val cut                         = trimmed.lastIndexWhere(separator)
+    val name                        = trimmed.substring(cut + 1)
+    val directory = if (cut < 0) "." else if (cut == 0) trimmed.substring(0, 1) else trimmed.substring(0, cut)
+    (directory, Option.when(name.nonEmpty && name != "." && name != "..")(name))
+  }
+
+  /** A name as a case- and normalisation-insensitive file system may compare it, erring towards matching. */
+  private def folded(name: String): String =
+    Normalizer.normalize(name, Normalizer.Form.NFKC).toUpperCase(Locale.ROOT).toLowerCase(Locale.ROOT)
+
+  /**
+   * `mv` and `cp` handle several sources one at a time, so each operation changes the file system the next one
+   * resolves its paths in, while every path is checked before the command starts (#1776). With `sub/l` -> `../outside`
+   * (inside the workspace while in `sub`), `mv sub/l l/secret.txt .` first moves the link to `./l`, where it points
+   * out, and then moves `outside/secret.txt` in through it; with `evil` -> outside (a link the agent may move, #1730)
+   * and an empty directory `d`, `mv evil d/evil/secret.txt d` does the same. `cp -P`, `-d`, `-R` and `-a` copy a link
+   * as a link and GNU cp then reads a later source through the copy.
+   *
+   * So for an `mv` or `cp` of two sources or more, under any parse of its arguments ([[transfers]]), each source's
+   * operation is taken to change these directory entries:
+   *
+   *  - in the destination directory (both readings of its path, links followed), the source's last name, and any name
+   *    starting with it (`--backup` keeps the entry it replaces as `name~` or `name.~1~`); any name at all when that
+   *    name is not known (`.`, `..`, a `cp -R src/.` that copies a directory's contents, or `cp --parents`);
+   *  - for `mv`, the source's own entry in the directory holding it, which the move removes.
+   *
+   * Every other path argument - each other source, the destination, a `-t` value - is then walked as the path rule
+   * walks it, under both readings, and the command is refused (`ARGUMENT_NOT_ALLOWED`) when that walk looks up, in the
+   * same directory, a name one of those entries matches - including through a link's target, and comparing names
+   * case-insensitively and after Unicode normalisation, as macOS and Windows file systems do (on Windows, a name with
+   * a `~`, which may be a short name, matches any). An `mv` is also refused when the working directory lies inside a
+   * source it moves, since a relative path's `..` would then climb from the source's new place. Order is ignored:
+   * an argument before the source is checked too, which only adds refusals. A command whose destination is not an
+   * existing directory is left to the program, which then refuses to run any operation.
+   *
+   * A path changes meaning between two operations only when one of them changes an entry that path looks up (or moves
+   * the working directory), so this covers the reordering whatever each entry becomes. `rm` only removes entries, so a
+   * later operand through one fails rather than leading elsewhere; `mkdir` and `touch` create directories and files,
+   * never links, and the path rule already treats a missing component as a directory to be made; `chmod` changes no
+   * name. Their operands are checked as before.
+   */
+  private def sequenceRefusal(
+    program: String,
+    args: Seq[String],
+    isWindows: Boolean,
+    workDir: Bases,
+    budget: Budget
+  ): Option[Refusal] = {
+    val (moves, paths) = transfers(program, args)
+    if (moves.isEmpty) None
+    else {
+      def readings(arg: String): Seq[Path] =
+        Seq(physicalPath(workDir.physical, arg, budget), lexicalPath(workDir.lexical, arg))
+          .flatMap(_.flatMap(_.toOption))
+          .flatMap(canonical(_, budget))
+          .distinct
+
+      // `cp --parents` creates the source's whole path under the destination, so its first name is not the last one
+      val parents = program == "cp" && cpCommand(args).parents
+
+      val changed: Seq[(Int, Changed)] = moves.flatMap { move =>
+        val (directory, name) = directoryAndName(move.sourceArg, isWindows)
+        val created = {
+          val unknown = parents || (program == "cp" && copiesContents(move.sourceArg))
+          readings(move.destination)
+            .filter(Files.isDirectory(_))
+            .map(dir => Changed(dir, if (unknown) None else name, prefix = true))
+        }
+        val removed =
+          if (program != "mv") Nil
+          else readings(directory).filter(Files.isDirectory(_)).map(dir => Changed(dir, name, prefix = false))
+        (created ++ removed).map(move.source -> _)
+      }
+
+      def matches(change: Changed, dir: Path, name: String): Boolean = {
+        val looked = folded(name)
+        val named = change.name.forall { n =>
+          if (change.prefix) looked.startsWith(folded(n)) else looked == folded(n)
+        } || (isWindows && (name.contains('~') || change.name.exists(_.contains('~'))))
+        named && Try(Files.isSameFile(dir, change.dir)).getOrElse(false)
+      }
+
+      /** The entries the program looks up to reach `arg`, under both readings; `Left` when out of budget. */
+      def lookups(arg: String): Either[Verdict, Seq[(Path, String)]] = {
+        val seen     = scala.collection.mutable.ListBuffer.empty[(Path, String)]
+        val visit    = (dir: Path, name: String) => { seen += (dir -> name); () }
+        val physical = physicalPath(workDir.physical, arg, budget, visit)
+        val lexical = lexicalPath(workDir.lexical, arg).flatMap(_.toOption).map { absolute =>
+          split(absolute, absolute).flatMap { case (start, names) =>
+            walk(start, names, hops = 0, missing = false, budget, visit)
+          }
+        }
+        if (Seq(physical, lexical).flatten.contains(Left(TooCostly))) Left(TooCostly) else Right(seen.toList)
+      }
+
+      val movedAround: Option[Refusal] =
+        if (program != "mv") None
+        else
+          moves.iterator.collectFirst {
+            case move
+                if readings(move.sourceArg).exists(moved => workDir.physical.startsWith(moved)) ||
+                  lexicalPath(workDir.lexical, move.sourceArg)
+                    .flatMap(_.toOption)
+                    .exists(moved => workDir.lexical.normalize().startsWith(moved)) =>
+              Refusal(
+                ArgumentNotAllowed,
+                s"'mv' would move '${move.sourceArg}', which holds the working directory, and then resolve its other " +
+                  "paths from the working directory's new place; the paths are checked before the command runs. " +
+                  "Run the command from another working directory, or move one source at a time."
+              )
+          }
+
+      movedAround.orElse {
+        paths.iterator
+          .map { case (j, arg) => (j, arg, lookups(arg)) }
+          .flatMap {
+            case (_, _, Left(_)) => Some(tooCostly(program))
+            case (j, arg, Right(entries)) =>
+              entries.iterator
+                .flatMap { case (dir, name) =>
+                  changed.collectFirst {
+                    case (i, change) if i != j && matches(change, dir, name) =>
+                      Refusal(
+                        ArgumentNotAllowed,
+                        s"'$program' with several sources would reach '$arg' through '${dir.resolve(name)}', a name " +
+                          s"its operation on '${args(i)}' creates, replaces or removes first; the paths are checked " +
+                          s"before the command runs, so the later path could then lead elsewhere. " +
+                          s"Run one '$program' per source."
+                      )
+                  }
+                }
+                .nextOption()
+          }
+          .nextOption()
+      }
     }
   }
 }

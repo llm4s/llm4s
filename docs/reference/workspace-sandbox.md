@@ -46,7 +46,11 @@ new ContainerisedWorkspace(workspaceDir, imageName, hostPort, extraAllowedComman
 
 An added program is held to every check below (no shell, forbidden characters, path arguments inside the workspace,
 the environment allowlist), but it has no per-program option rules, so it can do anything its own arguments allow:
-`sbt run` runs the project's code. Add only what the agent needs. Shells (`sh`, `bash`, `cmd`, `pwsh`, ...) and
+`sbt run` runs the project's code. Add only what the agent needs. In particular, the policy does not model a program
+that makes links or unpacks an archive (`ln`, `tar`, `unzip`, `rsync`, `install`): each of its arguments is checked
+against the file system as it is before the command runs, but not the link text it writes, the names in an archive,
+or a later argument that goes through a name an earlier one of its operations made (see
+[Several sources in one command](#several-sources-in-one-command)). Shells (`sh`, `bash`, `cmd`, `pwsh`, ...) and
 launchers that run a program named in their arguments (`env`, `xargs`, `sudo`, `nohup`, `timeout`, ...) are refused
 (`WorkspaceSandboxConfig.NeverAllowedCommands`), as either would bring back the shell
 [#1756](https://github.com/llm4s/llm4s/issues/1756) removed.
@@ -114,6 +118,7 @@ and run a second command as a second request.
 | An argument that names a location outside the workspace (an `rm` / `unlink` operand or `mv` source naming a link itself: its directory, see [Removing a link](#removing-a-link)) | `PATH_ESCAPE_ATTEMPT` |
 | On Windows, a form listed under [On Windows](#on-windows) (a device name, a trailing `.` or space, `@`, `~`, glob syntax) | `ARGUMENT_NOT_ALLOWED` |
 | `cp` only: a name it would write leads outside, or a recursive copy's destination holds a link that does | `PATH_ESCAPE_ATTEMPT` |
+| `mv` or `cp` of several sources: a path goes through a name another source's operation creates, replaces or removes, or `mv` moves the working directory (see [Several sources in one command](#several-sources-in-one-command)) | `ARGUMENT_NOT_ALLOWED` |
 
 Over the WebSocket protocol a refused command gets a `WorkspaceAgentErrorResponse` carrying the code above, then a
 `CommandCompletedMessage` with exit code 1, and no `CommandStartedMessage` or output; `ContainerisedWorkspace`
@@ -211,7 +216,8 @@ What these checks do not cover:
   `.git/objects/info/alternates` ([#1721](https://github.com/llm4s/llm4s/issues/1721)).
 - `diff -r` follows symbolic links it meets inside the tree it walks; no portable option stops it.
 - A relative link moved or copied to another depth by the read-write list (`mv a/b/rel rel`) can come to point
-  outside. Paths through it are refused, and so is a recursive `cp` into its directory; the agent can remove it
+  outside. Paths through it in a later command are refused, and so is a recursive `cp` into its directory; within
+  the same command, see [Several sources in one command](#several-sources-in-one-command). The agent can remove it
   (`rm rel`, see [Removing a link](#removing-a-link)), but the runner does not.
 - The checks run before the program starts, so a link made at a checked name by a concurrent command is not seen.
   Windows `copy` gets the path rule but not `cp`'s destination checks.
@@ -257,6 +263,53 @@ refuses it:
 On Windows a link or junction is not exempted: the policy does not model how `del`, `rd`, `move` or an MSYS `rm`
 treat them, so such an operand keeps the path rule and is refused when it leads outside. `cp` is unchanged: it
 copies what a link points to unless told otherwise, so its sources keep the path rule.
+
+A link moved by an `mv` of several sources cannot be used by a later source of the same command:
+`mv evil d/evil/secret.txt d`, with `evil` a link out of the workspace and `d` empty, is refused, since once `evil`
+is in `d`, `d/evil/secret.txt` names the file outside ([#1776](https://github.com/llm4s/llm4s/issues/1776)). Move
+the link on its own: `mv evil d`.
+
+### Several sources in one command
+
+`mv` and `cp` handle several sources one at a time, so each operation changes the file system the next resolves its
+paths in, but every path is checked before the command starts. With `sub/l` -> `../outside`, which names a missing
+entry of the workspace while the link sits in `sub`, `mv sub/l l/secret.txt .` first moves the link to `./l`, where
+it names the real directory outside, and then moves `outside/secret.txt` into the workspace
+([#1776](https://github.com/llm4s/llm4s/issues/1776)). GNU `cp -P`, `-d`, `-R` and `-a` likewise copy a link as a link
+and then read a later source through the copy.
+
+So for an `mv` or `cp` of two sources or more (under any of the GNU and macOS / FreeBSD parses of its options), each
+source's operation is taken to change:
+
+- in the destination directory, the source's last name and any name starting with it (`--backup` keeps a replaced
+  entry as `name~` or `name.~1~`), or any name at all when that is not known (`src/.`, `cp --parents`);
+- for `mv`, the source's own entry in the directory holding it.
+
+Every other path argument (the other sources, the destination, a `-t` value) is walked as the path rule walks it,
+under both readings, links' targets included, and the command is refused (`ARGUMENT_NOT_ALLOWED`) when the walk looks
+up one of those entries. Names are compared without regard to letter case or Unicode normalisation, as on macOS and
+Windows file systems, and directories by identity, so another spelling of the destination (`alias/evil/...` with
+`alias` -> `d`) is caught. An `mv` is also refused when the working directory lies inside a source it moves, since a
+relative path's `..` then climbs from the source's new place. Argument order is not modelled: a path through a name a
+later source creates is refused too. Run one command per source instead; each is then checked against the file
+system the previous one left.
+
+```text
+mv sub/l l/secret.txt .           # refused: l/secret.txt goes through the ./l the first move makes
+mv evil d/evil/secret.txt d       # refused, also through another name for d, or d/EVIL, or d/evil~
+mv sub sub/Main.scala d           # refused: sub/Main.scala goes through the sub the first move removes
+cp -P sub/l l/secret.txt .        # refused: GNU cp reads l/secret.txt through the copied link
+mv a.txt b.txt d                  # runs
+mv outlink dangling d/            # runs: several links moved, nothing reached through them
+```
+
+The other programs of the lists need no such rule: `rm` (and `unlink`) only remove entries, so a later operand
+through one fails rather than leading elsewhere; `mkdir` and `touch` make directories and files, never links, and the
+path rule already takes a missing component as a directory to be made; `chmod` changes no name; the read-only programs
+and the read subcommands of `git` change nothing; Windows `copy` and `move` take one source argument (a wildcard's
+matches go into the destination, which no other argument goes through, and `copy a+b dest` concatenates into one
+file; the `,` of `move a,b dest` is refused). A program added with `WORKSPACE_EXTRA_COMMANDS` is not modelled (see
+[Adding programs to the allowlist](#adding-programs-to-the-allowlist)).
 
 ### Option values
 

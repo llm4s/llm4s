@@ -5,7 +5,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
-import java.nio.file.{ Files, Path }
+import java.nio.file.{ Files, LinkOption, Path, Paths }
 import scala.concurrent.duration._
 import scala.jdk.CollectionConverters._
 import scala.util.{ Try, Using }
@@ -421,6 +421,118 @@ class WorkspaceCommandArgumentsSpec extends AnyFlatSpec with Matchers {
       .foreach(refuses(ws, _, PathEscape))
     outsideIntact(fx)
   }
+
+  // ---------------------------------------------------------------------------------------------------------------
+  // Several sources in one mv or cp: an earlier operation changes what a later path names (#1776)
+
+  /** Nothing outside was moved, removed or changed, and none of `names` appeared in the workspace. */
+  private def nothingPulledIn(fx: Fixture, names: String*): Unit = {
+    outsideIntact(fx)
+    names.foreach { name =>
+      withClue(s"$name: ")(Files.exists(fx.root.resolve(name), LinkOption.NOFOLLOW_LINKS) shouldBe false)
+    }
+  }
+
+  "mv and cp of several sources" should "refuse a path through a relative link an earlier source moves (#1776)" in
+    inWorkspace { fx =>
+      // While `sub/l` -> ../outside sits in `sub` it names the workspace's own (missing) `outside`; moved to the root
+      // it names the real outside directory, so `mv sub/l l/secret.txt .` would move outside/secret.txt in.
+      link(fx, "sub/l", Paths.get("../outside"))
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "mv sub/l l/secret.txt .",
+        "mv -f sub/l l/secret.txt ./",
+        "mv -t . sub/l l/secret.txt",
+        "mv sub/l l/../l/secret.txt .",
+        "mv sub/l L/secret.txt ." // a case-insensitive file system
+      ).foreach(refuses(ws, _, ArgumentNotAllowed))
+      refuses(ws, "mv l ../l/secret.txt ..", ArgumentNotAllowed, workingDirectory = Some("sub"))
+      isLink(fx.root.resolve("sub").resolve("l")) shouldBe true
+      nothingPulledIn(fx, "l", "secret.txt")
+    }
+
+  it should "refuse a path through a link out of the workspace that an earlier source moves (#1730's exemption)" in
+    inWorkspace { fx =>
+      // `evil` may be moved itself (#1730); moved into the empty `d`, `d/evil/secret.txt` is outside/secret.txt
+      link(fx, "evil", fx.outside)
+      val d = Files.createDirectory(fx.root.resolve("d"))
+      link(fx, "alias", d)
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "mv evil d/evil/secret.txt d",
+        "mv evil alias/evil/secret.txt d", // the destination under another name
+        "mv evil d/evil/secret.txt alias",
+        "mv evil d/EVIL/secret.txt d",
+        "mv evil d/evil~/secret.txt d", // the name --backup would keep a replaced entry under
+        "mv evil d/evil.~1~/secret.txt d",
+        "mv d/evil/secret.txt evil d" // order is not modelled
+      ).foreach(refuses(ws, _, ArgumentNotAllowed))
+      // On a case-insensitive file system (macOS, Windows), `D` is `d`: the same directory under another spelling
+      if (Files.isDirectory(fx.root.resolve("D"))) refuses(ws, "mv evil D/evil/secret.txt d", ArgumentNotAllowed)
+      isLink(fx.root.resolve("evil")) shouldBe true
+      Using.resource(Files.list(d))(_.count()) shouldBe 0L
+      nothingPulledIn(fx, "secret.txt")
+    }
+
+  it should "refuse a path through a source the same mv moves away, and an mv of the working directory's tree" in
+    inWorkspace { fx =>
+      Files.createDirectories(fx.root.resolve("a").resolve("b").resolve("w"))
+      Files.createDirectory(fx.root.resolve("d"))
+      val ws = fx.interface(ReadWrite)
+      refuses(ws, "mv sub sub/Main.scala d", ArgumentNotAllowed)
+      // From a/b/w, ../../outside is the workspace's own a/outside; once w is moved to the root, the working
+      // directory moves with it and ../../outside is the real outside directory.
+      refuses(
+        ws,
+        s"mv ../w ../../outside/secret.txt '${fx.root}'",
+        ArgumentNotAllowed,
+        workingDirectory = Some("a/b/w")
+      )
+      Files.isDirectory(fx.root.resolve("a").resolve("b").resolve("w")) shouldBe true
+      Files.isDirectory(fx.root.resolve("sub")) shouldBe true
+      nothingPulledIn(fx, "w", "secret.txt", "d/sub")
+    }
+
+  it should "refuse a cp whose later source is read through a link an earlier source copies as a link" in
+    inWorkspace { fx =>
+      link(fx, "sub/l", Paths.get("../outside"))
+      Files.createDirectory(fx.root.resolve("d"))
+      val ws = fx.interface(ReadWrite)
+      Seq(
+        "cp -P sub/l l/secret.txt .",
+        "cp -R sub/l l/secret.txt .",
+        "cp -a sub/l l/secret.txt .",
+        "cp -P sub/l d/l/secret.txt d",
+        "cp -R sub/l d/l/secret.txt d",
+        "cp -a sub/l d/l/secret.txt d/",
+        "cp -d sub/l d/l/secret.txt d", // GNU's -d
+        "cp -P -t d sub/l d/l/secret.txt",
+        "cp -R sub d/sub/l/secret.txt d" // a directory copied, then read through what it holds
+      ).foreach(refuses(ws, _, ArgumentNotAllowed))
+      nothingPulledIn(fx, "l", "secret.txt", "d/l", "d/secret.txt", "d/sub")
+    }
+
+  it should "still move and copy several sources that do not reach through each other, links included" in
+    inWorkspace { fx =>
+      linksOut(fx)
+      val d  = Files.createDirectory(fx.root.resolve("d"))
+      val ws = fx.interface(ReadWrite)
+      runs(ws, "mv a.txt b.txt d")
+      Files.exists(d.resolve("a.txt")) shouldBe true
+      Files.exists(d.resolve("b.txt")) shouldBe true
+      runs(ws, "mv d/a.txt d/b.txt .")
+      runs(ws, "cp a.txt b.txt d/")
+      Files.exists(d.resolve("b.txt")) shouldBe true
+      // several links moved at once, each the link itself (#1730)
+      runs(ws, "mv outdir dangling d/")
+      Files.readSymbolicLink(d.resolve("outdir")) shouldBe fx.outside
+      isLink(d.resolve("dangling")) shouldBe true
+      runs(ws, "mv outfile sub")
+      isLink(fx.root.resolve("sub").resolve("outfile")) shouldBe true
+      runs(ws, "rm sub/outfile d/outdir")
+      Files.exists(d.resolve("outdir"), LinkOption.NOFOLLOW_LINKS) shouldBe false
+      outsideIntact(fx)
+    }
 
   // ---------------------------------------------------------------------------------------------------------------
   // Links met inside a tree: options that follow them, and writes through a link already in the destination

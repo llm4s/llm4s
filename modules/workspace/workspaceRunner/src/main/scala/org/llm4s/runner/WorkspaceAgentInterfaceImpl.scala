@@ -752,7 +752,11 @@ class WorkspaceAgentInterfaceImpl(
    *                                      workspace, links followed (on POSIX, an
    *                                      `rm` / `unlink` operand or `mv` source
    *                                      naming a link itself is judged by the
-   *                                      directory holding it, #1730)
+   *                                      directory holding it, #1730); and an `mv`
+   *                                      or `cp` of several sources, one of whose
+   *                                      paths goes through a name another
+   *                                      source's operation changes, is refused
+   *                                      with `ARGUMENT_NOT_ALLOWED` (#1776)
    *
    * Layers 7-9 are [[CommandPolicy]], which documents each program's rules (#1715).
    *
